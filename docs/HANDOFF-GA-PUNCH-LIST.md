@@ -1,0 +1,1165 @@
+# HANDOFF — GA punch list for the cabinet install
+
+**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. The owner has read §7, closed `D23` / `D24` / `D9`, and
+authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
+**`D25` remains unruled** and is the one item that must be escalated rather than defaulted.
+Original state: planner-phase draft, nothing queued.
+**Date:** 2026-08-19
+**Author:** Planner, consolidating six research scouts and one Designer pass.
+**Consumers:** Owner (§7 decisions, §8 quick wins) → Architect (three escalations) → Planner (spec + plan per
+approved item) → Builder (queue rows, one PR per cycle).
+
+> **⚠ RECONCILED AGAINST DESIGNER REV 2 (2026-08-19), `HANDOFF-rotary-encoder-mapping.md`, now 1,033 lines.**
+> Four things changed that invalidate anything written against Rev 1:
+>
+> 1. **Tone is out in full** — the owner ruled no new audio DSP for GA. Knob 2's slot is filled by
+>    **PRESETS** (the saved-station bank, on a knob), and Designer **withdrew its own Browse fallback**
+>    rather than defaulting to it. **Decision D6 is CLOSED**, and the Architect tone-DSP ADR dependency
+>    goes with it.
+> 2. **The physical order changed:** `VOLUME · TONE · SOURCE · TUNING` → **`VOLUME · SOURCE · PRESETS ·
+>    TUNING`**, with ≈90 mm outer gaps and ≈70 mm between the inner pair. **This is the irreversible one —
+>    D2 is restated below, and any older copy of the order is now actively dangerous.**
+> 3. **Startup config push is new, owner-directed, runtime work** (Designer §7): push per-encoder config on
+>    every detect and reconnect, verify by read-back, tier the fault by which field disagreed. That is
+>    `ENC-11` … `ENC-14` — four new items, one of them P0.
+> 4. **The button model is named and uniform: ACTION on all four knobs.** No button ever changes what
+>    turning its knob does.
+>
+> The `sbyte` retraction this document made independently is now **also formally recorded by Designer**
+> (Rev 2 §0 and §5.6). The two documents agree. Section references below point at Rev 2's numbering.
+
+---
+
+## 0. What this is and how to use it
+
+This is the punch list for putting Grandpa Anderson's console radio **into the cabinet**. It is not a
+backlog dump and it is not a list of everything technically outstanding. Every item was triaged against one
+question and one question only:
+
+> **What must be true before this ships into a piece of furniture in a family home, where it will be used
+> by the owner and by guests who walk up to it expecting a radio?**
+
+That framing does a lot of work. It promotes things that would normally be low priority — a settings field
+that lies, a log file with no retention cap, a knob that acts silently — because in a living room those are
+not cosmetic. It demotes things that would normally be high priority — refactors, coverage gaps, hygiene —
+because a cabinet does not care about them. Several items in here are *worse* than their engineering
+severity suggests, and several are *better*. Where that is true it is argued, not asserted.
+
+### The deployment reality this is priced against
+
+- An Intel N100 Ubuntu box **inside a sealed cabinet**, on WiFi, with a 1920×720 touchscreen in kiosk Chrome.
+- **Recoverable only by SSH from a laptop.** Physical access is awkward once the cabinet is closed up.
+- Heavy `journalctl` reads and DB churn on this box **correlate with audio distortion** (`CLAUDE.md` §
+  "What the box actually is"). That single fact re-ranks half of the logging workstream.
+- It will run for **weeks between restarts**. Every long-uptime bug is an exposure case, not a curiosity.
+
+### How a future session uses this document
+
+1. Read §1 (tier criteria) and §2 (ordering constraints). §2 is the part that will bite you if you skip it.
+2. Pick **one workstream** and run it end to end. They are cut so they do not interleave: Encoders, Audio
+   Reliability, Logging & Distortion, Phone & TTS, UI Surface, Test & Ops Hygiene, Cross-Repo.
+3. For each item you intend to ship: confirm the tier still holds (several are conditional on §7 answers),
+   then run the normal Planner cycle — spec, plan, **then** a queue row.
+4. **Do not add rows to `docs/BUILDER_QUEUE.md` from this document wholesale.** This is a review artifact.
+   The queue is the dispatch artifact. A row goes in when the owner has approved the item *and* a plan
+   exists that Builder can execute without re-planning.
+
+### Relationship to `docs/BUILDER_QUEUE.md`
+
+The queue currently holds **17 open `📋` rows and 0 in flight**. Every one of them appears in this document
+with its existing ID, its tier argued explicitly, and a note that it is **already queued**. New work gets a
+new ID with a clear prefix (`ENC-`, `LOG-`, `PHN-`, `TTS-`, `UI-`, `XR-`, `SEC-`, `HW-`) and is marked **not
+queued**. Nothing here re-orders the existing queue — the owner sets priority; Planner appends. Where this
+document disagrees with the queue's current order it says so in §2 and asks rather than shuffles.
+
+**Scale: 74 tracked items across 7 workstreams, plus 22 explicitly parked.** Tier counts and the full
+index are in §9.
+
+> **✅ STATUS AS OF 2026-08-19: THE OWNER HAS ANSWERED ALMOST EVERY OPEN DECISION.** §7 is no longer a list
+> of questions — it is a record of answers. The headline is **D1: the knobs ship live at install**, which
+> collapses the conditional tiering and makes **22 items P0**, of which **11 are the encoder arc** at ≈3–4
+> working weeks. **✅ Designer Rev 3 has since landed (1,126 lines) and unblocks everything that was marked
+> pending** — `ENC-6` (the D8 wake collision) and `ENC-8` (the D21 settings surface) are both fully specced,
+> `ENC-13`'s safe-baseline idea was withdrawn by Designer and folded into `ENC-8`, and one new P0 gate
+> (`ENC-15`) and one new decoder hazard (the re-baseline rule, in `ENC-1`) came out of it. **A short startup
+> handoff for the next session lives at [`docs/HANDOFF-NEXT-SESSION.md`](HANDOFF-NEXT-SESSION.md).**
+
+---
+
+## 1. Tier criteria
+
+The tiers are defined by *consequence in the cabinet*, not by engineering severity. A tier assignment that
+cannot be argued from one of these tests is a bug in this document.
+
+### P0 — Blocks installation
+
+An item is P0 if **at least one** of these is true:
+
+- **(a) Wrong or dangerous on day one.** A guest's first interaction produces the wrong result, or a
+  physically unsafe one — volume slam being the only real safety hazard this machine has.
+- **(b) Embarrassing in front of people.** The machine reports success and does nothing; a control does
+  nothing; two sounds play over each other at full level; the screen is dark.
+- **(c) Unrecoverable without a laptop.** The disk fills, a service wedges, or the only in-app diagnostic
+  surface is itself unsafe to open. On a sealed cabinet on WiFi this is the tier's sharpest test.
+- **(d) It is the substrate every other item's verification rests on.** If you cannot trust the test suite
+  or the deploy, you cannot claim anything else is fixed.
+- **(e) It becomes permanent at install.** Anything that gets drilled, engraved, or mounted.
+
+### P1 — Blocks calling it finished
+
+A real defect a user will hit, that a person who knows the workaround can survive for a few weeks. The test:
+*would you be comfortable saying "yes, it's done" with this outstanding?* If the honest answer is "it's done
+except…", it is P1.
+
+### P2 — Post-GA
+
+Genuine work with real value and no schedule pressure. Refactors, coverage, hygiene, second-order polish,
+and features that are nice rather than expected.
+
+### P3 / Won't do
+
+Explicitly parked, with the reason recorded so a future session does not re-litigate it. §6.
+
+### Conditional tiers — **there are none left**
+
+An earlier revision of this document tiered the entire encoder arc conditionally: *P0 if the knobs ship
+live, P1 if the owner accepts blank, inert knobs at install.*
+
+> **✅ D1 ANSWERED 2026-08-19: THE KNOBS SHIP LIVE AT INSTALL.**
+
+**The hedge is gone and every tier below is unconditional.** The consequence is the single largest change
+this document has taken: **11 encoder items are now P0**, and the P0 encoder bundle alone is **3–4 working
+weeks**. Nothing in the encoder arc is optional any more, and nothing is waiting on a decision — only on
+Designer Rev 3 for the detail of four items, marked in place.
+
+---
+
+## 2. Ordering constraints — read this before claiming anything
+
+These are not preferences. Each has a mechanism behind it, and at least one has already cost this project
+real time.
+
+| # | Constraint | Why, mechanically |
+|---|---|---|
+| **O1** | **`TEST-1` before anything it verifies.** | The suite produces false CI signals because unit tests can reach an ambient `localhost:5000`. A green run on the self-hosted runner currently means "…and `radio-api` happened not to be running." Every other row in this document is verified by that suite. Shipping fixes against a suite that lies is how you get a second `03a6fea`. |
+| **O2** | **`AUD-6` before `AUD-7`.** | `AUD-7` makes startup *act* on the persisted output preference. Acting on an unstable key is strictly worse than ignoring it — shipping `AUD-7` first converts today's **mis-report** into tomorrow's **mis-route**, sending audio to USB because `playback-1` now resolves there. |
+| **O3** | **`AUD-2` before `AUD-4`.** | `AUD-2` establishes whether the source-key mismatch (`sdr-radio-<guid>` vs `Radio-<guid>`) is real. `AUD-4` unifies the source-removal layers on the assumption that it is. Unifying layers on an unverified premise is exactly the failure mode `AUD-4` exists to clean up. |
+| **O4** | **`LOG-6` before `LOG-10`. Never negotiable.** | `LOG-10` promotes the capture thread to `SCHED_FIFO`-50. `LOG-6` removes logging and a managed lock from that thread's hot path. Bumping a thread that logs and takes a lock to real-time priority converts a latency problem into a **potential priority-inversion hang** — on a box you can only reach by SSH. This is the one constraint here that can brick the appliance if violated. |
+| **O5** | **`ENC-1` before every other encoder item.** | The shipped decoder speaks an 8-byte protocol the device does not send. Every UX behaviour in the Designer handoff — HUD, overlays, acceleration, long-press — is built on delta values that are currently garbage. Building UX on a broken parser means debugging the UX for a parser bug. **Rev 2 §12.2 states it as a gate in its own words: the shipped service "has no concept of the device's config or diagnostics reports at all — §7 cannot be built until this lands."** |
+| **O10** | **`ENC-1` → `ENC-2` → `ENC-11` → `ENC-8` / `ENC-12` / `ENC-14`.** | The §7 startup-config arc is a chain, not a set. `ENC-2` supplies the report plumbing and the config model; `ENC-11` is the runtime push/verify loop built on it; the fault surfacing, the flash baseline and the diagnostics card all read state that only exists once `ENC-11` runs. Starting at any of the three tail items means inventing the state they display. |
+| **O6** | **`PHN-1` (the ADR-029 seam) before or with `PHN-2` / `PHN-3`.** | ADR-029's whole argument is that voicemail-through-the-engine and speak-a-text are **one mechanism, not two features**. Shipping either first means building the seam twice, and the second build inherits whatever shortcuts the first took. |
+| **O7** | **`LOG-1` before `LOG-2`, and `LOG-2` behind `LOG-5`.** | `LOG-2` silences `Radio.Infrastructure.Audio` and `...Platform.Bluetooth` — but `scripts/research/bt_drift_analyze.py` and `bt_stall_detect.py` **parse those exact Information lines**. Gate it behind the runtime level switch so the capability is *toggled*, not deleted. |
+| **O8** | **`OPS-1` before the first post-install deploy.** | Today a stale `radio-web` binary passes deploy verification silently. The first time you deploy a fix into the cabinet and it does not take effect, you will debug the fix instead of the deploy. |
+| **O9** | **Owner decision D2 (physical layout) before the escutcheon is drilled.** | Permanent. Nothing else in this document is irreversible; this is. |
+
+---
+
+## 3. P0 — Blocks installation
+
+### 3.0 Workstream: Encoders
+
+> **✅ D1 ANSWERED 2026-08-19: THE KNOBS SHIP LIVE AT INSTALL. Everything in §3.0 is unconditionally P0.**
+> The earlier hedge — *P0 if live, P1 if the owner accepts four inert knobs* — is gone. **Eleven items,
+> ≈3–4 working weeks, none of it optional — and **12 items, not 11**, since Rev 3 added the `ENC-15`
+> touch-wake gate.** Nothing in the arc is pending a design decision any more: **Designer Rev 3 closed the
+> last two** (`ENC-6`, `ENC-8`).
+>
+> The encoder service is `Enabled: false` by default today, which is the only reason the headline defect has
+> never bitten anyone — and under the new auto-detect direction (`ENC-0`) that flag stops being the thing
+> that decides whether the subsystem runs.
+>
+> **This is the largest untested hardware path in the project.** Structurally everything exists — interface,
+> action router, hosted service, DI registration, status endpoint, settings UI at
+> `SystemConfigPage.razor:1433-1545`. It is written against a protocol the device does not speak.
+
+---
+
+**`ENC-0` — Auto-detect the encoders and degrade gracefully when they are absent.** ⭐ **RESCOPED BY THE
+OWNER 2026-08-19.** *Not queued. Effort: 1 day.*
+
+> The owner's words: *"I'd like to auto-detect whether the encoders are available and have the system
+> respond appropriately."*
+
+**This replaces the row's previous posture entirely.** It used to be "keep `RotaryEncoder:Enabled` false
+behind a flag until `ENC-1` ships" — a 15-minute guard. With the knobs shipping live, a config flag the
+owner has to remember to flip is the wrong shape: the app should look for the device and behave correctly
+whether or not it finds one. Three cases, and all three are real on this hardware:
+
+| Case | Required behaviour |
+|---|---|
+| **Absent at boot** | Start clean, no error spam, no reconnect thrash. The status card reads not-connected; nothing on Home. |
+| **Appears mid-session** (USB plugged in, or the Pico re-enumerates after a re-flash) | Detect, configure via `ENC-11`, and go live without a restart. |
+| **Disappears mid-session** | Stop cleanly. ⚠ **Reports are change-only — idle silence is NOT a disconnect**, so detection must key on enumeration, not on quiet. This is the trap `ENC-1` also has to respect. |
+
+- **The flag does not simply vanish.** A manual override still has value for bench work; what changes is
+  that *presence*, not configuration, decides whether the subsystem runs.
+- ✅ **Rev 3 §7.3 answers "does the touchscreen change when the knobs are absent?" — NO, with exactly one
+  behavioural exception.** Every knob function has a touch equivalent by construction (volume slider, source
+  strip, preset bank, tuner panel), so **absent knobs cost convenience, not capability**: there is no
+  degraded mode to design and no "the knobs are missing" chrome to add. Adding hints like *"or turn the
+  SOURCE knob"* would clutter the UI when knobs are present and lie when they are absent.
+  **The one exception is not chrome, it is safety: panel blanking requires present knobs** (`ENC-6`,
+  `ENC-15`).
+- **`RotaryEncoderOptions.Enabled` flips to default `true` and changes meaning** — no longer a gate that
+  must be opened, now an **escape hatch** for disabling a misbehaving encoder without crawling behind the
+  furniture. When it is `false`, presence detection is **silent about everything**: the owner turned the
+  knobs off on purpose and must not be nagged.
+- **Notification policy per event, and it is asymmetric on purpose.** Boot-absent: **badge, no toast** — the
+  owner is most likely standing at the cabinet having just installed or unplugged something. Appears
+  mid-session: a toast **only if absence had been reported** — *announce a recovery only for a fault you
+  announced*. Disappears mid-session: **a toast**, because it is genuinely surprising and may land
+  mid-interaction — plus tear down in-flight knob state: **dismiss any open overlay without committing**
+  (an overlay you can no longer navigate is a trap), cancel any long-press ring, dismiss the HUD.
+- **Why the cabinet cares:** the encoder USB dropping is a known event on this box — the reconnect loop
+  exists precisely because it happens. Combined with D8's re-enabled screen blanking, a drop that is handled
+  badly is now the difference between "the knobs stopped working" and "the screen will not come back on"
+  (§10, carried risks).
+- **Evidence:** `src/Radio.Infrastructure/Platform/Input/HidRotaryEncoderService.cs:9-13`, `:154`, `:170`,
+  `:184-215`. All verified in tree.
+- **Depends on:** `ENC-1` for the report handling; the detection half is independent.
+
+---
+
+**`ENC-1` — Rewrite the HID decoder for the protocol the device actually speaks.** ⚠ **THE HEADLINE DEFECT.**
+*Not queued. Effort: 2–3 days.*
+
+`HidRotaryEncoderService` decodes an **8-byte report: bytes 1–4 as `sbyte` deltas, byte 5 as a button
+bitmask**. The device (`github.com/mmackelprang/RotaryUsb`, Pi Pico, 4 detented encoders each with a shaft
+button, no LEDs or display) sends Input Report `0x01` at **37 bytes**: 4× `int32` absolute positions at
+buffer offsets 1–16, the button bitmask at index **17**, and 4× `int32` free-running movement accumulators
+at 21–36.
+
+Consequences on first plug-in, in the order they appear:
+
+1. The 8-byte read buffer against a 37-byte report **likely faults or truncates first**, before any parsing
+   happens.
+2. If it does not, `bytesRead < 6 → continue` **spins silently** — no log, no error, no disconnect signal.
+3. If parsing runs, turning **one** knob fires spurious events on **all four**, because bytes 1–4 of a
+   37-byte position block are the low bytes of encoder 0's `int32`, not four deltas.
+4. Buttons chatter constantly — byte 5 sits inside encoder 1's position, not the bitmask at index 17.
+
+Scope:
+
+- Correct report length, offsets and `int32` decoding; drive events from the **accumulators** (21–36), per
+  Designer §5.1 — all four encoders accumulator-driven, host-clamped.
+- Handle Report `0x04` (diagnostics, every 100 ms: edge / invalid / detent counts). This is the
+  wiring-sanity and steps-per-detent calibration instrument — see `ENC-2`.
+- **Reports are change-only. Idle silence is normal and must NOT be treated as a disconnect.** The reconnect
+  loop must not be re-tuned to fire on quiet.
+- ⭐ **THE RE-BASELINE RULE — new in Rev 3, and it is the highest-weighted test in Designer's §15.** The
+  movement accumulator is **free-running: it keeps counting whether or not anything is listening.** If the
+  app restarts, or a USB lead is knocked loose inside the cabinet and re-seats, and the host resumes by
+  **diffing the new sample against its last remembered value**, then **every detent turned during the
+  outage arrives as one delta — on the volume knob.**
+
+  > **On every connect, the first sample from each encoder is a BASELINE, not an input. It is recorded and
+  > discarded. No delta is ever computed across a disconnect.**
+
+  ⚠ **Diff-against-last-remembered-value is the obvious way to write this decoder, and it is wrong.** This
+  is a decoder/transport requirement, not a UX one — it belongs here and in `ENC-2`, not in any HUD work.
+  Designer's acceptance test, verbatim: *"Turn a knob ~50 detents while unplugged, then replug: volume does
+  not jump."*
+- The udev rule covers `cafe:4005` only. The device has **two firmware identities** — C++ `0xCAFE:0x4005`
+  and CircuitPython `0x239A:0x80F4`, usage page `0xFF00`. Cover both, or the knobs are dead after a re-flash.
+- Test coverage today is **one smoke test**. Add report-parsing unit tests against captured byte arrays —
+  the shape `PipeWireNodeParsingTests.cs` already established for the pw-cli parser.
+
+- **Why the cabinet cares:** four holes are being drilled in restored furniture. If the knobs do not work,
+  the most visible part of the machine is broken, and broken in a way a guest reads as "this is a prop."
+- **Evidence:** `HidRotaryEncoderService.cs:9-13`, `:154`, `:170`, `:184-215`. Protocol per the RotaryUsb
+  repo (public).
+- **Depends on:** nothing. **Blocks:** `ENC-2` … `ENC-9`, and the DPMS screen-blanking decision (`ENC-6`).
+- **Plan/spec:** none exists. Designer §12.2 lists the host-side work and names this row as the gate on all
+  of it — but does **not** specify the parser itself.
+
+> **⚠ CORRECTION TO THE DESIGNER HANDOFF — apply this; do not carry the old reasoning forward.**
+> `HANDOFF-rotary-encoder-mapping.md` §2.2 defect 5 and §5.6 argue against the factory acceleration tiers
+> partly on the grounds that *"the HID report is `sbyte` per encoder (±127), so a hard spin at ×50 wraps the
+> sign."* **That is an artifact of the current broken parser, not a property of the device.** The device
+> sends `int32`. There is no sign-wrap ceiling. §5.6 should be struck.
+>
+> **Designer's other argument against the factory tiers stands on its own and is load-bearing:** with
+> `step_size = 2` and T3 at ×50, **one detent takes volume from silence to full** — in a living room, from a
+> knob a guest may be touching for the first time. That is why the factory tiers must not be left on the
+> volume encoder. The `sbyte` argument was never needed.
+
+---
+
+**`ENC-2` — The per-encoder config model and the `0x02` / `0x03` / `0x04` report plumbing.**
+*Not queued. Effort: 2–3 days.* ⚠ **Rescoped by Designer Rev 2** — this is now the transport and the data
+model only. The runtime push/verify loop built on it is `ENC-11`; the calibration flow is `ENC-14`.
+
+**There is no host→device config path at all today.** `RotaryEncoderOptions` has 8 flat fields and cannot
+express per-encoder bounds or acceleration tiers.
+
+- Output Report `0x02` is a **106-byte** config: per encoder `min` / `max` / `step_size` / `wrap` /
+  `reverse`, plus three acceleration tiers (`threshold_ms`, `multiplier`).
+- Output Report `0x03` is commands: save-to-flash, factory reset, **reset positions to min**, read-back,
+  zero counters. ⚠ **D4 confirms there is NO set-position command** — `reset positions to min` is the only
+  host-side position control that exists, which is why accumulator semantics are **forced by the protocol
+  rather than merely preferred**, and why it is also the documented recovery for a knob whose reported
+  values look wrong.
+- ⭐ **The startup handshake issues `0x03 reset positions` as belt-and-braces**, then baselines the first
+  sample per `ENC-1`'s re-baseline rule. Cheap, since positions are unused under accumulator semantics, and
+  it means a knob that has drifted for any reason starts from a known state. **Order: `0x03/0x03` reset
+  positions → `0x02` config push → `0x03/0x04` read-back verify → baseline the first sample.**
+- ⚠ **Bad config is silently rejected. The host MUST read back and verify.** A write that appears to succeed
+  and did not is how the volume knob ends up on factory tiers.
+- Replace the 8 flat option fields with a per-encoder shape matching Designer §5.2.
+
+**A one-minute calibration check belongs on this row** (the full flow is `ENC-14`). Designer §15's first
+test settles the assumption every number in §5 rests on:
+
+> Turn the volume knob **exactly 10 detents** slowly (>200 ms between clicks). Volume must move **exactly 20
+> points**. If it moves 80, the detent divisor is wrong and every figure in §5 is off by 4×.
+
+Report `0x04`'s detent counter answers the same question in about a minute without touching audio at all.
+
+**⚠ The Rev 1 fork is CLOSED.** Rev 1 asked whether the host writes the config or the owner flashes it with
+RotaryUsb's tooling. **The owner has directed that the app pushes it** — on every detect and every
+reconnect, verified by read-back. Designer §7 is new and is a *runtime* requirement, not a table in a
+document. ✅ **Rev 3 update: the flash channel holds exactly the OPERATING configuration** — Designer
+withdrew its own "safe baseline" idea (§6), and the flash write is now the `Save to device` action inside
+`ENC-8`. Owner-initiated only, never automatic. **`ENC-3`'s host clamps stay regardless** — device config lives in flash and can be lost,
+factory-reset, or absent on a replacement Pico.
+
+- **Why the cabinet cares:** the difference between "a firm sweep crosses the FM band in ≈2.5 revolutions"
+  and "two detents cross the entire FM band" lives entirely in this config. One is a tuning dial; the other
+  is a random station generator.
+- **Evidence:** RotaryUsb protocol; `RotaryEncoderOptions.cs`; Designer §5.2, §13 Q2, §13 Q3, §15.
+- **Depends on:** `ENC-1`. **Blocks:** `ENC-11`, and the "Feel" acceptance criteria in Designer §15.
+
+---
+
+**`ENC-3` — Host-side safety clamps, acceleration policy, and broadcast throttling.**
+*Not queued. Effort: 1–2 days.*
+
+Four independent guards against the only genuine safety hazard this machine has, plus the throttle that
+keeps the knobs from becoming a new distortion source.
+
+- **Per-event host clamp, applied unconditionally regardless of what arrives on the wire:** volume `±6`,
+  tone `±4`, source `±1`, tuning `±8` (radio) / `±1` (track). This is what makes a factory-reset or
+  replacement Pico *sluggish* rather than *dangerous*.
+- **Volume must not wrap.** One detent past zero being full scale, at 2 a.m., pointed at a sofa, has no
+  interaction design that makes it acceptable.
+- **Acceleration disabled entirely on SOURCE** — one detent is always exactly one entry in a seven-item list.
+- **Volume ramp 60–80 ms per applied step**, to avoid zipper noise on a fast spin.
+- **Coalesce encoder-driven state broadcasts to ≥50 ms (20 Hz), trailing-edge, always emitting the final
+  value.** The audio action itself is *not* throttled — the ear leads, the screen catches up.
+
+> **The throttle is a P0 requirement, not an optimization.** `PollIntervalMs = 10` with no rate limiting
+> means a fast spin can drive up to **100 state changes per second**, each fanning out over SignalR to a
+> Blazor Server circuit that re-renders a component tree. On an Intel N100 where audio distortion already
+> correlates with incidental CPU load, that is a plausible new distortion trigger — **and a miserable one to
+> diagnose, because it would only reproduce while someone was touching the radio.**
+
+- **Why the cabinet cares:** criterion (a). Minimum time from silence to full must be ≥1.33 s of deliberate
+  spinning. The rest of the row is about not making the distortion problem worse.
+- **Evidence:** `RotaryEncoderActionRouter.cs:128-136` (today's clamp is on the *value*, not the delta);
+  Designer §5.2 host-clamp row, §5.4, §6.8, §10.2. **Rev 2 §7.3 gives the clamps the concrete justification
+  they previously had only in the abstract: between USB detect and a verified config the device runs
+  whatever is in its flash — on a fresh or reset Pico, factory defaults, including volume acceleration at
+  ×50. That window opens on every boot and every reconnect, and the knobs stay live throughout it.**
+- **Depends on:** `ENC-1`. Deliberately independent of `ENC-2` and `ENC-11`.
+
+---
+
+**`ENC-4` — `EncoderHud` + the persistent mute indicator: every knob visible within 100 ms, on every route.**
+*Not queued. Effort: 3–4 days.*
+
+> **This is the actual defect the Designer handoff exists to fix.** Two of the four knobs currently produce
+> **no visible evidence that anything happened**, and one of them changes the machine's entire behaviour
+> from an invisible internal counter. A knob that acts silently is worse than a knob that does nothing,
+> because **the user's response to silence is to turn it further.**
+
+- One component, two hosts: `EncoderHud.razor` in `MainLayout` for normal routes, again inside `Sleep.razor`
+  with `Variant="Sleep"` (the sleep screen is a separate route on `EmptyLayout`, so `MainLayout` is not in
+  that tree).
+- **Geometry is the whole trick:** the HUD divides 1920 px into quarters — centres at 240 / 720 / 1200 /
+  1680 px — and renders the active knob's card in its own quarter. Turn the second knob from the left,
+  something lights up above the second knob from the left. Nobody has to be told this.
+- Built entirely from three existing pieces: the **unused** `.snackbar-enter` / `.snackbar-exit` primitives
+  (`design-system.css:1218-1219`), the `GainPopoverService` overlay-hosting pattern, and `SourceBubble`.
+  **No new design tokens** (Designer §6.9 — Builder must not add `--hud-*` anything).
+- **Long-press synthesis** (600 ms, reusing `RadioControlPanel.LongPressThresholdMs`) plus the progress ring
+  that starts at 300 ms and completes at 600 ms. **Two consumers, and Rev 2 moved one of them:
+  volume→standby and PRESETS→save.** Save-station sat on the TUNING long-press in Rev 1; it now lives on
+  PRESETS, where recall and store belong together, and **TUNING has no long-press at all**. There is no third
+  long-press anywhere in the spec, deliberately. The protocol has no long-press gesture; this is host-side
+  synthesis.
+- **`ENC-4a` — the persistent topbar `MUTED` chip.** Mute currently shows as a single icon glyph inside
+  `NowPlayingPanel`, which exists **only in Home's left rail**. On `/queue`, `/metrics`, `/devices`,
+  `/history` and `/phone` there is **no mute indication at all**. *A muted console with no visible reason is
+  indistinguishable from a broken one.* Independently shippable — see §8.
+- **`ENC-4b` — turning the volume knob while muted unmutes.** Designer calls this "the most important small
+  rule in this document" and is right. Today it moves a number nobody can hear; every car radio built in the
+  last thirty years unmutes on a volume turn.
+
+- **Why the cabinet cares:** criterion (b), squarely. Three separate "is it broken?" silences disappear.
+- **Evidence:** Designer §6 in full; `RotaryEncoderActionRouter.cs:200-207` (the source knob logs at Debug
+  and does nothing else), `:231-234`; `AudioStateUpdateService.cs:463-473`, `:969-978`.
+- **Depends on:** `ENC-1`, `ENC-3`.
+
+---
+
+**`ENC-5` — The SOURCE overlay, with the radio bands folded in.**
+*Not queued. Effort: **5–6 days** (2–3 originally; D7 added the bands, and Rev 3 specified what that actually costs).* ⚠ **Rev 2 note: SOURCE is now encoder 1, not encoder 2** — and this overlay
+and `ENC-7`'s PRESETS overlay are **one component with two lists** (Designer §6.6, "the two selector
+overlays"). Same interaction grammar on purpose: *learn one, you have learned both.* Build them together or
+back to back; building them apart is how they drift.
+
+Keep the preview-then-commit mechanism — **it is correct and only ever lacked a screen.** Do not "simplify"
+it to live-commit-per-detent: spinning through five sources would tear down and stand up an audio source at
+every detent, straight into the long-running capture-lifecycle bug and the `autoSwitchOnConnect` bug
+(`AUD-8` / `AUD-9`). Cheap-looking source cycling is not cheap on this box.
+
+Five states, and **D and E are not optional polish** — a Bluetooth switch here can take seconds or fail
+outright:
+
+| State | Behaviour |
+|---|---|
+| A | Open, previewing. Highlight moves one entry per detent. **Nothing switches.** |
+| B | Unavailable entry renders dimmed **with a reason**, reusing `SourceBubble`'s `" · offline"` idiom |
+| C | Pressing a dimmed entry flashes it amber for 1.5 s and **leaves the picker open** — never a silent no-op |
+| D | Committed, switch in flight — spinner, card stays up |
+| E | Switch failed — `"Bluetooth unavailable / Staying on FM 98.5"`, 4 s, then dismiss |
+
+A picker that dismisses on press and leaves the user in silence with the old source still playing is how a
+person concludes the knob is broken and starts pressing it repeatedly — **which is precisely the input
+pattern that provokes the capture-lifecycle bug.**
+
+**Auto-commit on dwell was considered and rejected**: it converts every accidental brush of the knob into a
+real source change 1.2 s later, from across the room, with nobody touching anything.
+
+**Press is one rule, not two** (Rev 2 §4.4): *press commits the highlight.* With the overlay closed the
+highlight is the current source, so a press commits what is already playing — which changes nothing and
+opens the overlay showing you where you are. The "open" behaviour falls out of the rule rather than being a
+second meaning for the button. **This is what makes a mis-grab in the middle of the panel free**, and it is
+the interaction design paying for the new physical layout (D2).
+
+> **✅ D7 ANSWERED YES — the bands are in, and this row absorbs the scope increase.** `FM` / `AM` / (`SW` /
+> `WB` where the tuner reports them) / `BLUETOOTH` / `PHONO` / `USB` / `FILES`, at **fixed positions that
+> never move** — no recency ordering, no hiding unavailable entries, because *a physical selector whose
+> detent 3 is Bluetooth on Tuesday and Phono on Wednesday is not a physical selector*. Unavailable entries
+> render dimmed **with a reason**.
+>
+> **Rev 3 specified what D7 actually costs, and it is more than adding rows to a list. Estimate moves again:
+> 4–5 days → 5–6 days.** Four requirements do the damage:
+>
+> 1. **Committing a band while the radio source is already active is a BAND CHANGE, not a source switch.**
+>    `SetBandAsync(band)` — no engine teardown, no spinner, no 150 ms fade. *It should feel instant, because
+>    it is.* Restore that band's **last-tuned frequency**, falling back to the band default.
+> 2. **Committing a band from another source does both** — activate radio, set band, restore frequency.
+>    That one *is* a real source switch: fade, State D spinner, State E on failure.
+> 3. **The current-marker tracks the active *band*, not "Radio".** On AM, row 2 is marked — not row 1.
+>    *"Getting this wrong makes the knob feel like it lost its place."*
+> 4. ⚠ **The knob and the on-screen band pills must be ONE state, not two copies.** `RadioControlPanel`'s
+>    band pills and this overlay both read and write the active band; **neither may hold its own copy.**
+>    This is what pushes the row outside the overlay's own files — and it is the same defect class as
+>    `VisualizerPanel` holding a local `_currentMode` (`ENC-9`).
+>
+> Plus: **list composition resolves once per tuner at startup**, so a set that never reports SW does not
+> render a permanently dead row — and a set that does gets it at position 3, always. Composition does not
+> change during a session, which is the only sense in which "positions never move" is achievable.
+
+- **Why the cabinet cares:** the source knob is the one control that changes what the machine is *doing*,
+  and today it does so from an invisible counter. Criterion (b), arguably (a).
+- **Evidence:** Designer §4.4, §6.6; `RotaryEncoderActionRouter.cs:200-227`.
+- **Depends on:** `ENC-1`, `ENC-4` (shares the HUD host). **Pair with:** `ENC-7`.
+
+---
+
+**`ENC-7` — The PRESETS knob: recall and save on the existing preset bank.** ⭐ **NEW SHAPE IN REV 2.**
+*Not queued. Effort: 2–3 days.*
+
+⚠ **This item replaces Rev 1's "Tone DSP or Browse fallback" entirely, and it changes tier: P1 → P0.** Rev 1's
+knob 2 was P1 because Tone was blocked on an Architect ADR that might never land and had a weak fallback.
+PRESETS is fully specified, needs **no new DSP and no new data model in v1**, and is one of the four knobs —
+so under D1 it is P0 exactly as SOURCE is.
+
+- **Turn** moves a highlight through the saved-station bank. **Nothing plays.** Acceleration disabled, same
+  as SOURCE.
+- **Press — Recall.** Commit the highlight: **switch source if needed**, tune, and play. Recall is *not*
+  scoped to the active source, which is what makes the knob alive from Bluetooth or Phono — turn it from
+  anywhere and your stations are there.
+- **Long-press 600 ms — Save** what is playing to the **next free slot**. **Never overwrites**: if every slot
+  is full the HUD says `PRESETS FULL — replace a slot on screen` for 2 s and writes nothing. Replacement
+  stays on the touchscreen, behind the existing kebab, where it has a confirmation and an undo.
+- **v1 saves radio stations only.** On a non-radio source the hold reports `Only radio stations can be
+  saved` for 1.5 s — a clearly-messaged v1 boundary, not a silent failure. Cross-source favourites are v2
+  and need a data model that does not exist (Architect, Designer §12.1 item 2).
+- **The empty state is instructional, not empty:** `NO STATIONS SAVED` / `hold this knob to save what's
+  playing`. The knob teaches its own use, which matters more here than anywhere else on the panel.
+- ⭐ **D10 KNOCK-ON — the on-screen bank is renamed too, and this is a DELIBERATE, DECLARED deviation.**
+  `RadioControlPanel`'s bank is titled `MEMORY · n saved` today. The cabinet is engraved **PRESETS**, so
+  the bank becomes **`PRESETS · n saved`** — a one-word deviation from `HANDOFF-saved-station-display.md`,
+  **declared in Rev 3's own header so Polisher does not flag it as drift.** Designer's reasoning:
+  *"A panel that says PRESETS over a screen that says MEMORY is the same mismatch class I flagged in the
+  settings table; fixing one and not the other would have been worse than either."* ⚠ **Do not "fix" this
+  back to `MEMORY` on a later consistency pass** — it is recorded in §6 for exactly that reason.
+
+- **Why the cabinet cares:** *"put on my station"* is the single most common thing anyone does to a radio,
+  and on this console it currently costs a source switch plus twenty-five detents of tuning. One turn and
+  one press replaces that. Designer's judgement, and it is right: **if a guest touches exactly one knob
+  after volume, this is the one that should reward them.**
+- **Evidence:** Designer §4.3 (and its three recorded rejections — Browse, Balance, Output/Cast), §4.4,
+  §6.6. Drives the shipped bank: `HANDOFF-saved-station-display.md`, `PresetCard.razor`, 7 slots,
+  save/rename/delete already shipped.
+- **Depends on:** `ENC-1`, `ENC-4`. **Pair with:** `ENC-5` — one overlay component, two lists.
+
+---
+
+**`ENC-11` — Startup config push + read-back verification.** ⭐ **NEW IN REV 2 §7, owner-directed.**
+*Not queued. Effort: 2–3 days.*
+
+> **The governing rule, and it is the whole item:** *the app owns the configuration; the device holds a
+> cache of it, and a cache is never trusted.* **No write counts as applied until read-back matches it field
+> for field.** The device silently rejects values it does not like — a write without a verified read-back is
+> not a write, it is a hope.
+
+- **Push on:** first detect, every USB reconnect, and any change to the app's own config. Never assume a
+  device configured five minutes ago is still configured — it may have been replaced by an identical one.
+- **Verify by read-back, field for field.** Retry ladder **250 ms / 1 s / 3 s**, silent for attempts 1–3 (a
+  USB peripheral missing a report on the first try is ordinary).
+- **The safety-tier response lives here, not in the UI item:** a mismatch on a *safety* field — `wrap` on
+  VOLUME, or `reverse` on any knob — **drops the host clamp to ±2 per event on volume and holds it there
+  until a verified push succeeds.** A mismatch on a *feel* field (any acceleration tier, `step_size`) leaves
+  the knobs live on host clamps and treats acceleration as **absent** rather than assumed.
+- **Normal boot is completely silent** — no toast, no splash, no banner. Designer §7.2 follows the
+  convention `HANDOFF-kiosk-desktop-launcher.md` §5.1 already set: the repair path speaks only when
+  something needed repairing. The happy path is **one row on the existing status card**
+  (`SystemConfigPage.razor:1440-1478`): `Configuration: [ Configured ]  verified 2026-08-19 07:14:02`.
+- **Target: verified within 2 s of detect.** Past that the status card reads `Configuring…` — and still
+  nothing appears on Home.
+- **Never silently retry forever, and never silently accept.** Designer names the worst outcome precisely:
+  *a knob configured with stale bounds that reports itself fine* — the same failure class as `TuningStepKHz`,
+  a thing that claims to be set and is not.
+
+- **Why the cabinet cares:** criterion (a). Without this the device runs whatever survived in its flash, and
+  on a fresh, reset or replacement Pico that means **volume acceleration at ×50 — one detent from silence to
+  full**. `ENC-3`'s clamps make that window survivable; `ENC-11` is what closes it.
+- **Evidence:** Designer §7.1–§7.4; RotaryUsb Output Report `0x02` (106-byte config), `0x03` (commands),
+  `0x04` (read-back / diagnostics).
+- **Depends on:** `ENC-1`, `ENC-2` (O10). **Blocks:** `ENC-8`, `ENC-12`, `ENC-14`.
+- **Architect note:** where this lives — inside `IRotaryEncoderService` or a separate provisioning service —
+  and how its health reaches the API is an architecture question (Designer §12.1 item 3). **The UX contract
+  is already fixed and is not Architect's to revisit:** silent when healthy, tiered when not, never trusted
+  without read-back.
+
+---
+
+### 3.1 Workstream: Audio Reliability
+
+**`AUD-6` — Output device identity is an enumeration ordinal.** ⚠ **Claim BEFORE `AUD-7` (O2).**
+*Already queued 📋. Effort: 1–2 days including a store migration.*
+
+`SoundFlowDeviceManager.cs:517` mints `Id = $"playback-{i}"` straight off the enumeration index, and that
+string is what reaches storage. Resolution back to hardware is **pure string parsing, not a lookup** —
+`SoundFlowAudioEngine.GetDeviceIndexById:1030-1043` is an `int.TryParse` and nothing else. Measured across
+one deploy restart: on Aug 10 `playback-1` meant the soundbar; on Aug 11 it meant USB Audio Out. **Nothing
+in the store changed — the meaning did.**
+
+- **Why the cabinet cares:** criteria (a) and (c). "No sound from the speakers" after a routine restart, in
+  a sealed cabinet, is a laptop-and-SSH recovery for a problem that presents as dead hardware.
+- **Fix shape:** a stable key **plus a migration** — every existing store holds ordinals.
+- **Depends on:** `TEST-1`. **Blocks:** `AUD-7`, hard.
+
+---
+
+**`AUD-7` — The reported active output diverges from where audio physically goes.**
+*Already queued 📋. Effort: ~1 day.*
+
+The native device switch is reachable **only from the interactive HTTP path**.
+`SoundFlowAudioEngine.SwitchPlaybackDevice:838` — the only code anywhere that stops, disposes and
+re-initializes `_playbackDevice` — has exactly one caller, `DevicesController.SetOutputDevice:250-254`. The
+startup path never calls it, and `SoundFlowDeviceManager.SetOutputDeviceAsync:213-244`, which the gate's own
+comment nominates as the thing that performs the swap, **does not touch the native device at all** — it
+validates an id against a cache, assigns a string field, and persists.
+
+**This is deterministic, not intermittent.** It fires on **every** restart where the persisted preference is
+not the system default, with or without any enumeration reordering.
+
+- **Why the cabinet cares:** the output selector cannot be trusted. In furniture with a Cast device and a
+  soundbar in play, "the UI says one thing and the audio comes out somewhere else" is the most confusing
+  failure mode available.
+- **Evidence:** `SoundFlowAudioEngine.cs:838`, `:222-224` (a comment assigning a responsibility the method
+  does not discharge — the fourth instance of the pattern `CLAUDE.md` § Pre-Merge Review warns about);
+  `DevicesController.cs:250-254`; `SoundFlowDeviceManager.cs:213-244`.
+- **Depends on:** `AUD-6` (hard), `TEST-1`.
+- **⚠ Evidence-handling note carried from the queue:** a later truthful `/api/devices/output` is **not**
+  evidence this is fixed. It only fires after a restart.
+
+---
+
+**`AUD-8` — BT capture watchdog for long-uptime quiescence.**
+*Not queued — a plan exists, unqueued since 2026-05-22. Effort: 2–3 days.*
+
+After days of uptime plus source switches, SoundFlow capture stops delivering audio: the generator is in the
+mixer, output is 0. Affects **all** capture sources. Only a restart fixes it.
+
+- **Why the cabinet cares:** this is *the* exposure case. An appliance in furniture runs for weeks.
+  Everything else in this document is a bug you hit while using the machine; this is a bug you hit by **not**
+  using it, and its only current remedy is SSH into a sealed cabinet. Criterion (c).
+- **Evidence:** `design/plans/` — `bt-capture-watchdog` (2026-05-22); project memory
+  `project_long_running_capture_bug.md`, marked HIGH PRIORITY for production stability.
+- **Plan:** exists, unqueued. Needs a staleness pass against current `main` before a queue row.
+- **Depends on:** `TEST-1`. **Recommended:** land with or after `AUD-9`.
+
+---
+
+**`AUD-9` — `autoSwitchOnConnect` gate.**
+*Not queued — a plan exists, unqueued since 2026-05-22. Effort: 1–2 days.*
+
+The app switches to the BT source even when **no PipeWire capture node exists**, producing hours of failed
+retries — and project memory records that this **triggers capture-lifecycle degradation**, i.e. it feeds
+`AUD-8`.
+
+- **Why the cabinet cares:** it is a self-inflicted load generator on a resource-constrained box where
+  incidental load correlates with audio distortion, and it degrades the very subsystem `AUD-8` is trying to
+  keep alive. Fixing `AUD-8` without this treats the symptom.
+- **Evidence:** `design/plans/` — `bt-autoswitch-gate`; project memory `project_autoswitch_bt_bug.md`
+  ("Fix next").
+- **Depends on:** `TEST-1`.
+
+---
+
+### 3.2 Workstream: Logging & Distortion
+
+> **The framing that reorders this whole workstream:** on this box, logging is not an observability concern,
+> it is an **audio** concern. `CLAUDE.md` records that heavy journald reads correlate with audio distortion;
+> `scripts/research/heavy_load_harness.sh` uses log and DB churn as a deliberate load source **to reproduce
+> the distortion**. Two of the P0 items below are logging items for that reason alone.
+
+**`LOG-1` — `radio-web` logs at Debug in production and its logging config is dead.**
+*Not queued. Effort: 30 min. **Largest single volume reduction available anywhere in the project.***
+
+`src/Radio.Web/Program.cs:14` hardcodes `.MinimumLevel.Debug()` and **never calls `ReadFrom.Configuration`**,
+so the `Logging:LogLevel` block in its appsettings is read by nothing (verified in tree). All **106 Debug +
+56 Information** sites are live. The file sink has **no retention limit and no size cap**. Measured: **65 MB
+for one day** on a dev machine. `radio-web.service` also lacks `SyslogLevelPrefix=true`, so everything lands
+in journald at info priority and cannot be filtered by level.
+
+- **Why the cabinet cares:** criterion (c). An uncapped log sink on an appliance that runs for weeks fills a
+  disk, and the disk is inside the cabinet. The journald half is a continuous, self-inflicted contribution
+  to the distortion problem.
+- **Fix:** honour configuration; Information in production; `rollingInterval` + `retainedFileCountLimit` +
+  `fileSizeLimitBytes` on both services' file sinks; `SyslogLevelPrefix=true` on the unit.
+- **Depends on:** nothing. **Blocks:** `LOG-2` (O7).
+
+---
+
+**`LOG-3` — The log-read allocation bomb.** ⚠ **RE-TIERED P0 → P1 by D12, and re-scoped. It does not
+disappear with the page.** *Not queued. Effort: 1–2 h (down from 2–3).*
+
+*(This block stays printed under §3 because its evidence is prose rather than a table row. The index in §9
+is authoritative: it is **P1**.)*
+
+The shape: `sr.ReadToEnd().Split(...)` on a file permitted to be **50 MB** — roughly **100 MB of LOH string
++ array** — inside a process running under `MemoryHigh=350M` and `DOTNET_GCHeapHardLimit=0x30000000`
+(768 MiB, both verified at `deploy/common/radio-api.service:73,:78`), triggering a Gen2/LOH collection **on
+cores 2/3, underneath the audio callbacks** (see `LOG-2m`).
+
+**There are two call sites and D12 only removes one of them.**
+
+| Call site | Fate under D12 |
+|---|---|
+| `SystemController.cs:226-231` — the viewer endpoint | Dies with the Logs tab (`UI-3`). **Delete the endpoint too**, or it is an orphan with a live allocation bomb in it. |
+| `SystemLogsController.cs:98-127` — the zip download | **Survives, and is still reachable from `DevTray.razor:253`.** Same read-everything-into-memory shape, same cores, same GC. |
+
+- **Why it drops to P1:** the P0 argument was that *the only in-app error surface was itself unsafe to
+  open* — the recovery tool damaging the thing you are recovering. D12 removes that surface, so that
+  argument goes with it. What remains is a real allocation bomb on a less-travelled path.
+- **⚠ Why two other things get MORE important, not less.** With no in-app log reader: **(1) `LOG-1`'s
+  retention and size caps are now the only thing bounding that file** — nothing in the UI will ever show
+  you it has grown, and an unbounded log inside a sealed cabinet is a disk-full waiting to happen.
+  **(2) The download path's correctness is now load-bearing**, because it is the only non-SSH way to get
+  logs off the box at all. Fixing it is no longer optional polish.
+- **Fix:** streaming read with a bounded tail buffer on the zip path; delete the orphaned viewer endpoint.
+
+---
+
+> **`LOG-2m` — THE MECHANISM. Not a work item; read it before touching anything in this workstream.**
+>
+> **`CPUAffinity=2 3` in `deploy/common/radio-api.service:42` applies to the whole process** (verified in
+> tree). Both `Serilog.Sinks.Async` worker threads — the ones doing the journald socket write and the file
+> write — are pinned to **the same two cores as the PipeWire `OnProcess` callback and the miniaudio render
+> callback.**
+>
+> Plan D isolated `radio-api` from journald *the daemon*. **It never isolated the audio threads from
+> `radio-api`'s own log-emission threads.** `docs/plans/2026-05-22-audio-thread-isolation.md:405` already
+> says *"if Plan D's verification shows residual gap, Plan #10 is the next move."* **That point has arrived.**
+>
+> This is why `LOG-1`, `LOG-3`, `LOG-6` and `LOG-7` are audio work wearing logging costumes — and why
+> `LOG-9` (per-thread affinity) is P2 rather than P0: the cheap fixes target the same mechanism and may make
+> it unnecessary.
+
+---
+
+### 3.3 Workstream: Phone & TTS
+
+**`TTS-1` — Google TTS produces no audio at all, and the app reports success.** ⚠ **ROOT CAUSE FOUND.**
+*Not queued. Effort: **5 minutes** for the config fix; 2–3 h for the validation that stops it recurring.*
+
+The live config store reads `tts:defaultEngine = Google` with a valid `tts:googleAPIKey` present — and
+**`tts:defaultVoice = "en"`, which is an eSpeak voice ID.** The failure chain, end to end:
+
+1. `TTSFactory.cs:398` sends Google `{languageCode:"en-US", name:"en"}` → **400**.
+2. `TTSFactory.cs:430-435` logs and throws.
+3. `AnnouncementService.cs:69-72` is a **bare catch that swallows it**.
+4. `NotificationsController.cs:53` returns **200 OK**.
+5. The UI shows **"Success — Announcement sent."**
+
+**The notification produces no audio whatsoever and the app reports success.** `appsettings.json:178` had
+the correct `en-US-Standard-A`; the store value written 2026-02-11 by the TTS config tab clobbered it. **The
+UI field's own hint text (`SystemConfigPage.razor:684`) recommends `"en"`** — the UI is actively teaching
+the wrong value. Nothing validates that the voice belongs to the selected engine.
+
+- **Why the cabinet cares:** criterion (b) in its purest form. A console that announces "the front door is
+  open" by saying nothing, while telling you it worked, is worse than one with no announcements at all —
+  because you will believe it and stop checking.
+- **Fix, in three separable pieces:** (i) set `tts:defaultVoice` to a valid Google voice in the store —
+  ✅ **DONE ON THE BOX 2026-08-19**, see below; (ii) correct the hint text; (iii) validate engine/voice
+  compatibility on write and refuse the save. (ii) is P0 and takes minutes; (iii) is P1.
+
+> **✅ (i) RESOLVED — live on `radio`, 2026-08-19.** `tts:defaultVoice` was set to **`en-US-News-K`**
+> (Google's female broadcaster voice, owner's choice from the 69 available en-US voices) via
+> `POST /api/configuration/tts`, which fires `ConfigStoreChangeNotifier` so no restart was needed. The
+> write handler (`ConfigurationController.cs:306`) upserts only the keys posted rather than replacing the
+> section, so a single-key POST left `tts:googleAPIKey` intact — **verify this before any future
+> section-level write.** Confirmed working end to end from the Serilog file sink: engine `Google`, no
+> `Google TTS API error`, ducking engaged at 20% `FadeSmooth` and released to 100%, source removed cleanly.
+> **Ducking was never broken on the notifications path** — it simply was never reached, because TTS threw
+> on the invalid voice first. That closes the owner's ducking complaint as a duplicate of this row.
+>
+> **Two things this fix surfaced that remain open.** (1) **`espeak-ng` is not installed on the box at all**
+> — `/api/sources/events/tts/engines` reports ESpeak `isAvailable: false`. Anything routed to ESpeak
+> produces nothing, which includes the **Event Sources → TTS preview button** that hardcodes it
+> (`SourcesController.cs:636`, `SystemConfigPage.razor:1834`). That is a second, independent failure and is
+> almost certainly the button the owner was testing. Tracked as **`TTS-7`**. (2) **The fix is box-only.**
+> `appsettings.json:178` still ships `en-US-Standard-A`, and the store value overrides it — durable across
+> restarts and deploys (`data/config/` is not wiped), but a fresh install elsewhere still gets the robotic
+> Standard voice. Tracked as **`TTS-8`**.
+
+---
+
+### 3.4 Workstream: Test & Ops Hygiene
+
+**`TEST-1` — The suite produces false CI signals.** ⚠ **First, by a wide margin (O1).**
+*Already queued 📋, owner-ranked first. Effort: 1–2 days.*
+
+Four tests fail under timing/load pressure and pass on retry. The bUnit one
+(`VisualizerPanelTests.cs:184-193`) races a real `await` and wants `WaitForAssertion` — five files in that
+project already use the idiom. The three `Radio.API.Tests` timeouts are a **different** failure mode (30–46 s
+under full-suite load, 22/22 in ~5 s in isolation). **Underneath both sits the actual defect: unit tests can
+reach an ambient `localhost:5000`.** A unit test whose result depends on whether `radio-api` happens to be
+running on the self-hosted runner is the root problem.
+
+- **Why the cabinet cares:** criterion (d). This is not quality-of-life. **Everything else in this document
+  is verified by this suite**, and a false green already cost one session a wrong diagnosis. The most recent
+  Builder cycle (`KIOSK-2`, PR #480) shipped with 5 test failures that reproduce identically on `main`, on a
+  branch that **changes no C# at all** — the problem in miniature.
+- **Depends on:** nothing. **Blocks:** honest verification of every other row.
+
+---
+
+**`OPS-1` — Build stamp on `radio-web` + real deploy verification for both services.**
+*Already queued 📋. Effort: 0.5–1 day.*
+
+~80% already built: the SHA is stamped by `Directory.Build.props`, `Deploy-ToLinux.ps1` already passes
+`-p:SourceRevisionId` to both publishes and already `exit 1`s on an API mismatch, and `Radio.API` already
+serves `/api/health/version`. The gap is narrow: **`Radio.Web` has no version endpoint** — its assembly
+already carries the SHA, it is just unreadable — and the deploy checks only `systemctl is-active` for
+`radio-web`. **A stale web binary passes verification silently.**
+
+Already folded in (queue, 2026-07-31): `Deploy-ToLinux.ps1:51` defaults to `-Runtime linux-arm64` while the
+box is `x86_64`, so **the literally documented invocation ships ARM binaries to this x64 host**, and
+`$TargetHost` still defaults to the stale `piradio`.
+
+- **Why the cabinet cares:** criteria (c) and (d). Once the cabinet is closed, every fix arrives by deploy. A
+  deploy that reports success without proving what it did means the first failed fix gets debugged as a code
+  bug. Today's interim gate is `grep -ac <branch-only-symbol> /opt/radio-console/web/Radio.Web`, which is a
+  workaround, not a gate.
+- **Should land before the first post-install deploy** (O8).
+
+---
+
+
+### 3.5 P0 items promoted by the 2026-08-19 owner decisions
+
+> Six items moved up out of P1 on the day the owner answered the open questions. They are collected here
+> rather than scattered so the delta is auditable: **three because the knobs now ship live (D1), two because
+> GV read demonstrably works (D17), one because the keyring question got an answer (D15).**
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`ENC-6`** | **Sleep, wake and the dark panel — the three-state model.** ✅ **UNBLOCKED: Designer Rev 3 §8 resolves the D8 collision.** Rev 2 said *volume acts in place*; D8 said *any input is a wake signal*. They disagreed because they were written about **different states** — Rev 2's rule assumed a lit panel showing a clock; D8's instruction is about a **physically dark** one, which did not exist when Rev 2 was written. Resolved on one criterion the user can always perceive — **the panel's own light**: <br><br>**Rule 1 (dark):** the first input does exactly one thing — **light it.** Consumed. Changes no audio, no station, and never resumes from Standby. <br>**Rule 2 (lit):** VOLUME **acts in place** and does not change screens; everything else wakes to the full UI and is consumed. <br><br>**Three refinements that carry most of the value:** **(a) waking from dark lands on the dim Ambient screen, never the full bright UI** — a 2 a.m. nudge produces a dim clock and a readout, not a 1920×720 wall of Home; **(b) a consumed input still renders that knob's current value** — *the first detent tells you where you are, the second one moves it*, which converts the consumed input from a loss into an answer; **(c) re-blank after 60 s from Ambient, 30 s from Standby.** Five states total: Awake / Ambient / Ambient-Dark / Standby / Standby-Dark. <br><br>**Also in scope:** re-enable DPMS blanking with its **two coupling rules** — never blank when the encoder device is absent, and **if it disappears while blanked, unblank immediately and stop blanking until it returns** (fail toward light: *a screen left on is a nuisance, a screen that cannot be turned on is a service call*). ✅ **D22 is settled scope on this row, not an open question: a turn from Standby lights the panel and does NOT resume audio; a press (any button) or a screen tap does.** The owner approved Designer's narrowing verbatim — *"that D8 narrowing is fine, keep it."* It is one branch in the router, and Designer's acceptance test pins it: *"Standby: a turn lights the panel and does not resume audio; a press resumes and restores the pre-sleep mute state."* <br><br>Plus the **wake latch** — `TryWakeFromSleep` calls `WakeAsync` fire-and-forget (`:121`) and returns true, so with a 10 ms poll several more events arrive before `IsSleeping` flips and each is silently discarded. **Blanking makes this more important, not less: a fast spin in the dark must lose one detent, not twelve.** | The overnight failure mode, and it is current behaviour: idle-at-30-min navigates to `/sleep` **without calling `SleepService`**, so `IsSleeping` is `false`, audio keeps playing, and every knob acts silently on a screen showing a clock. ⚠ **The cost the owner is accepting knowingly is one detent** — at 2 a.m. the first volume nudge lights the panel and shows where you are; the second moves it. | 3–4 d | `ENC-1`, `ENC-4`; ⚠ **`ENC-15` is a HARD predecessor of the blanking half** | No |
+| **`ENC-8`** | **The encoder Settings surface, plus the stale docs.** ✅ **UNBLOCKED: Designer Rev 3 §7.7–§7.8 reconciles D21 with Rev 2's "delete the editors".** Four cards under System Config → Integrations → Rotary Encoders: **(1) Status** — connection, config tier, last verified, last saved-to-device with a staleness comparison. **(2) Configuration — read-only, complete, comparison always on:** all 24 fields × 4 encoders, labelled by **cabinet name** (`VOLUME · SOURCE · PRESETS · TUNING`), never by index, each row showing whether the device agrees. *This* is what "configuration in the app" needs to mean — full visibility, not 24 numeric footguns. **(3) Four `Reverse direction` toggles — the one editable thing.** Toggling pushes immediately (`0x02` + verify) and marks the flashed copy stale. **(4) Actions:** `Save to device` (config + verify + flash), `Re-apply settings` (push + verify, no flash), `Reset counters`. ⚠ **Factory reset is deliberately NOT on this page** — it would put the device on defaults where one volume detent spans the full range. <br><br>⚠ **`ENC-13` is folded in here and its safe-baseline idea is withdrawn** — see the P1 table note and §6. Flash now holds **exactly the operating configuration**, i.e. exactly what the screen shows. <br><br>**The two numeric fields, settled:** **`TuningStepKHz` — delete outright** (nothing reads it, nothing should; the tuner owns its own step). **`VolumeStepPercent` — RELOCATED, not deleted**: it is a genuine device field (VOLUME `step_size`), so it appears read-only in card 2. What goes away is the **duplicate editable numeric** on the Integrations tab, which was a second source of truth for a value the device also holds. **One value, one place, visible.** <br><br>Plus the doc fixes: the UI mapping table at `SystemConfigPage.razor:1492-1493` contradicts the router (serve it **from** the router so it cannot drift again); `INTEGRATIONS.md:19-24` documents the **wrong 8-byte report format**; and its troubleshooting still says to swap A/B pins on the Pico — superseded by `reverse`. | ⚠ **The `Save to device` copy is load-bearing and a reviewer should treat a mismatch as a defect.** Designer's own words on why the baseline died: *"A Save button that writes something other than what the screen shows is exactly the class of lie this project keeps shipping."* That is this repo's pre-merge comment-accuracy rule applied to a button. | 1–2 d | `ENC-1`, `ENC-2`, `ENC-11` | No |
+| **`ENC-12`** | **Tiered config-fault surfacing.** ⭐ **New in Rev 2 §7.4.** Three surfaces, in the order the owner will actually meet them: **(1)** a **cross-route fault badge on the topbar nav pill** — amber for Degraded, `--signal-red` for hard fault — reusing the pattern `HANDOFF-bell-failure-surfacing.md` §3.7 already established for a persistent hardware degradation that must be legible from any page. **(2)** **One** Radzen notification, **once per session, on the first transition** into degraded or fault — *"Knob settings couldn't be applied. The knobs still work, but they may feel wrong."* / *"Knob safety settings couldn't be applied. Volume is limited until this is fixed."* Never repeated on retry churn: **a fault that flaps must not become a notification storm.** **(3)** The status card carries the field-level `Sent` vs `Read back` table plus `Retry now` / `Restore designed defaults`. | The safety *behaviour* is in `ENC-11`; this is the legibility layer on top of it, which is why it separates cleanly. Its value is that it is the one thing standing between the owner and a knob that quietly feels wrong forever. It also reconciles Designer §7.2's silent-boot rule with this document's `UI-3` argument — **silent when healthy, legible from any page when not**, without a new diagnostic surface. Promoted to P0 with D1: with the knobs live at install on a sealed cabinet, an undiagnosable degradation is the difference between "the knob feels wrong" and "the knob feels wrong and nobody can find out why without a laptop". | 1–2 d | `ENC-11` (O10) | No |
+| **`PHN-1`** | **The ADR-029 seam.** A new `IEventPlaybackService` **beside (not inside)** `IAnnouncementService`; `POST /api/audio/events`; a new `GvMediaClient` with Radio.API fetching the media **itself, server-side**, into a bounded LRU cache at `./data/gvmedia/`; a **closed discriminated request set with asymmetric arms** — speech carries literal text, voicemail carries a `(kind,id,duration)` **reference**, never a caller-supplied URL, **which would be an SSRF primitive**; and `IEventAudioSource` gaining `Position` / `IsSeekable` / `Seek` / `Pause` / `Resume` copied from `IPrimaryAudioSource`. ⚠ **ADR-029 warns: do NOT use `POST /api/sources/events/{tts,file}` as the template** — `SourcesController.cs:601` injects `IDuckingService` and never uses it (those events don't duck), `:651` adds a mixer source that is **never removed or disposed** (leaks per play), and `PlayFileEvent` **double-plays**. | Once it is an event source on the mixer, **mute, volume, balance, ducking and output routing all apply for free**. The cache is **blackout mitigation, not optimization** — GV auth is dead ~9 min in every 20, so a replay has ~45% odds of 502ing. ⚠ **Promoted to P0 as the hard enabler of `PHN-2`, which D17 established is a live defect today.** ⚠ **D19 also widened the arc: canned replies (ADR-029 Feature C) are explicitly wanted** — *"A few simple/canned responses will suffice"* — **and the owner does not want an on-screen keyboard**, which makes C easier, not harder. The phone arc is **A + B + C**, not A + B. | 1.5–2 wk for the seam + A; C adds ~2–3 d | — | **No** |
+| **`PHN-2`** | **Voicemail through the audio engine (ADR-029 Feature A).** Today `VoicemailPlayer.razor:8` is an HTML5 `<audio>` element pointed straight at `http://radio:5004/api/gvbridge/voicemail/{id}/audio`; **the browser fetches and decodes it itself.** Mute is enforced only at `SoundFlowAudioEngine.cs:1136-1146`, as a gain on the API's SoundFlow playback device. **No shared node exists between the two paths** — this is architectural, not a wiring bug. | **Volume level, balance, ducking and Cast routing are ALL bypassed too.** With Cast active the voicemail still comes out of the **local speakers**. The radio does not duck under a playing voicemail — **they mix in the room's air at full level each.** The most viscerally wrong thing this machine currently does. ⚠ **D17 SETTLES THIS AND IT CHANGES THE TIER.** The owner states plainly: *"I can see voicemail and text messages in the Radio Console UI today. I can listen to the voicemail and read the texts on the screen."* **GV read works.** So this is **not latent — it is what the cabinet does right now**: press play on a voicemail while the radio is on and two sounds run in the room at full level each, with mute, master volume, balance, ducking and Cast routing all bypassed. Criterion (b), live. **P1 → P0.** | 3–4 d | `PHN-1` (O6) | No |
+| **`SEC-1`** | **Resolve `design/plans/SECRET-KEYRING-INVESTIGATION.md`'s outstanding owner action, and land or close the branch `fix/dataprotection-keyring-persist-path`,** recorded as awaiting review. ✅ **D15 ANSWERED and it resolves to P0:** *"We need to ensure the keys are retained."* No longer confirm-or-close. if DataProtection keys do not persist across restarts, encrypted secrets (`${secret:identifier}`) break on every restart, which in a sealed cabinet is criterion (c). **First task is to read the investigation, then land or close the branch.** | If DataProtection keys do not survive a restart, encrypted secrets (`${secret:identifier}`) break on **every** restart inside a sealed cabinet — criterion (c), and the recovery is a laptop. The branch `fix/dataprotection-keyring-persist-path` is **awaiting review**, so most of the work may already exist. | 0.5 d triage + land the branch | Owner has decided; needs review | No |
+| **`ENC-15`** | ⭐ **NEW — THE TOUCH-WAKE GATE. Verify on the box that touch can independently wake a blanked panel, BEFORE any blanking ships.** `SleepService.cs:84-87` disabled DPMS in the first place because **touch-to-wake does not work when the compositor blanks input.** If that is still true, then after blanking there is **exactly one wake path — the encoders** — and losing the USB while dark leaves a panel that cannot be woken without a keyboard, inside a piece of furniture. Designer Rev 3 §8.5: *"This is a gate, not a caveat."* **Deliverable: a recorded result, one way or the other.** If touch cannot wake it, blanking does not ship until it has two wake paths. Fold in the recovery line so it is findable at 2 a.m. — `INTEGRATIONS.md`, beside the encoder section: `ssh mmack@radio` → `gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.SetActive false`. | **The single cheapest item in this document with the largest downside if skipped.** One hour of verification stands between the approved blanking feature and a console that cannot be turned back on from the room it lives in. It is P0 not because it is hard but because **it is a precondition that will look skippable right up until it isn't.** | 1–2 h on the box | ⚠ **Hard predecessor of `ENC-6`'s blanking half** | No |
+
+---
+
+## 4. P1 — Blocks calling it finished
+
+### 4.1 Encoders
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`ENC-9`** | **Visualization capability preservation.** Visualization loses its knob outright (to PRESETS); the capability moves to the touchscreen — tap the visualizer canvas to advance, long-press for the list, System Config dropdown unchanged. **Fold in the real defect:** `VisualizerPanel.razor` holds its own local `_currentMode` and **never subscribes to `VisualizationModeChanged`** (`AudioStateUpdateService.cs:969-978`), so any out-of-band change leaves the on-screen picker showing the wrong segment. | Removing a knob must not remove a capability. The subscription bug is independently real today. | 1 d (the subscription fix alone ≈30 min — §8) | — | No |
+| **`ENC-14`** | **Diagnostics card + the `Calibrate a knob` flow.** ⚠ **D5 removed this card's original headline job — Rev 3 §7.9 re-argues it honestly and it survives smaller.** It was justified primarily as the tool that resolves *"does one detent report one count or four?"*; the firmware now answers that. Three merits remain: **(1) wiring sanity, which nothing else can see** — the invalid-transition rate is the only signal separating "this encoder is noisy" from "this encoder is fine" *before* it becomes an intermittent fault someone chases for a week; **(2) confirming D3's index-order guarantee after any hardware work** — turn the leftmost knob, see which row moves; **(3) measuring detents per revolution**, the last mechanical unknown (D23). **Edges-per-detent changes job, not value:** it was a calibration input, it is now a **wiring health signal** — it should read exactly `4.00`, and anything else means edges are being dropped or invented, which is a hardware problem and **not** a reason to re-derive §5. **Invalid transitions are shown as a *rate*, never a total** (`per 1,000 edges`; <1 OK / 1–10 Marginal / >10 Faulty) — *"400 invalid transitions is fine after a year and alarming after a minute."* The card **says what the pattern means**: one encoder high → that encoder's wiring or shielding; all four high → a shared ground or supply problem, look at the Pico's power and the cable run. **`Calibrate a knob`** zeroes the counters, prompts *"Turn the VOLUME knob exactly one full revolution, slowly"*, and reports **detents per revolution**, edges-per-detent, and which encoder index moved. | Fifteen seconds, and it settles D23, **confirms D3 after any hardware work** — which matters because D3 is an owner-owned wiring guarantee that *must be re-established, not assumed, if the Pico is ever replaced or the harness re-terminated* — and works the same way on a replacement Pico years from now. ⚠ **Polls at 2 Hz and only while the card is open**, explicitly for the `UI-2` reason: a background diagnostic poll on this box is exactly the incidental load that correlates with audio distortion. This is the pattern `UI-2` should adopt, not an exception to it. | 1–2 d | `ENC-11` (O10) | No |
+
+### 4.2 Audio Reliability
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`AUD-2`** | **Confirm-or-close: is SDR gain/ducking silently dead?** An **unverified code-read inference** that `SDRRadioAudioSource.cs:908` mints `sdr-radio-<guid>` while `AudioManager` addresses `Radio-<guid>` (`AudioSourceBase.cs:28`). If it holds, **TTS and event audio never duck the radio** — silently: none of the gain/duck setters check membership, and `SetGainOffset` still logs *"Applied gain offset …"* on a key that matched nothing. **The first task is an investigation that may legitimately end in no code change.** | Ducking is a documented core pattern. If confirmed, the doorbell announcement plays *over* the radio at full level instead of under it. | 0.5 d confirm + 1 d fix | `TEST-1` | Yes 📋 |
+| **`AUD-5`** | **A superseded Cast connection can persist its volume as the system master volume.** `SyncInitialVolumeAsync` is a *read* whose success path fires `CastVolumeChanged`, whose sole subscriber unconditionally sets **and persists** `AudioManager.MasterVolume` — with **no `_connectionGeneration` re-check between the status response and the event fire**. `IsInitialSync` exists on the event and is **never branched on**. ⚠ Widening `_lifecycleLock` will NOT close this (it would hold a lock across a network call and recreate the `AUD-3` hang); the correct shape is a **generation re-check immediately before the fire**. It **predates #468** — do not "fix" it by unpicking the Cast work. | The room's volume changes because a Chromecast nobody is using reported its own level. Unexplained volume changes read as a haunted machine. | 1 d | `TEST-1` | Yes 📋 |
+| **`AUD-10`** | **Confirm-or-close: BT disconnect-reason surfacing.** Plan `design/plans/2026-03-11-bt-disconnect-reason.md` exists. **The first task is confirming BlueZ actually supplies a usable reason on this stack** — it may not, in which case this closes with no code. | "The phone disconnected and I don't know why" is a support call the owner makes to himself. Cheap if the data exists; not worth synthesising if it does not. | 0.5 d confirm | — | No |
+| **`AUD-11`** | **BT codec observability.** Plan exists (2026-05-22), unqueued. | Diagnostic depth on the path a guest's phone uses. Not user-visible. | 1–2 d | — | No |
+| **`AUD-12`** | **PipeWire event subscription in place of polling.** Plan `pw-event-subscription` exists (2026-05-22), unqueued. | Removes polling load on the box where incidental load correlates with distortion. | 2–3 d | — | No |
+
+### 4.3 Logging & Distortion
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`LOG-5`** | **Runtime `LoggingLevelSwitch` + endpoint + DevTray toggle.** **No runtime log-level control exists anywhere today** — no switch, no endpoint, no config key. Changing any level requires a restart. The Logs page's level dropdown is a **read filter**, not an emission control. | **Highest diagnostic value per hour in this entire document.** It turns A/B testing the distortion hypothesis from a deploy-and-restart cycle into a **2-second operation**, on a box reachable only by SSH. Also the gate that makes `LOG-2` safe. | 1 d | — | No |
+| **`LOG-6`** | **Move logging off `OnProcess` entirely, onto the existing 2 s watchdog timer.** `PipeWireNativeStream.cs:484-500` calls `LogInformation` **inside the audio callback**, every 10 s, **enabled in production**, allocating on the audio thread. | ⚠ **Hard prerequisite for `LOG-10` (O4).** Independently, it removes allocation from the audio callback on a box with a distortion problem. | 0.5 d | — | No |
+| **`LOG-7`** | **Same treatment for `BufferedSoundGenerator.GenerateAudio`.** The best-behaved of the three — deliberate 1 s / 5 s / 10 s throttles — but during a bad BT stretch its 1 Hz underrun warning fires **forever**, it does `DateTime.UtcNow` per callback **plus a `lock` every 10 s from inside the render callback**, and it allocates 9- and 11-arg `params object[]` at call sites whose messages are discarded. | The `lock` inside the render callback is the same hazard shape `LOG-6` removes. A bad BT stretch is exactly when you least want extra work on the audio thread. | 0.5 d | — | No |
+| **`LOG-4`** | **journald rate-limit + `SystemMaxUse`; consider `Storage=volatile`.** | Bounds the journald half of the mechanism at the daemon rather than per-service, and bounds disk growth inside a sealed cabinet. | 2–3 h | — | No |
+| **`LOG-2`** | **`Serilog:MinimumLevel:Override` for `Radio.Infrastructure.Audio` and `...Platform.Bluetooth`** in `deploy/debian-x64/appsettings.Production.json`, **which currently has no Serilog section at all.** ⚠ `scripts/research/bt_drift_analyze.py` and `bt_stall_detect.py` **parse those exact Information lines** — gate behind `LOG-5` so the capability is toggled, not deleted (O7). | Second-largest volume reduction, on the two noisiest namespaces, on a box where log volume is an audio problem. | 1 h | `LOG-1`, `LOG-5` | No |
+| **`LOG-11`** | **Drop or level-restrict the API's duplicate console sink.** | Every line is currently written twice. Free reduction. | 30 min | — | No |
+| **`LOG-8`** | **Serilog rate-limiting filter.** The backstop for `SrcVariableResampler.cs:146-153` — an **unthrottled `LogWarning` inside per-buffer `Process()`**. If libsamplerate enters a persistently-failing state this becomes **~94–350 warnings/sec on the audio thread**, plus a P/Invoke marshal per call. | Defence in depth for a failure mode that would otherwise be indistinguishable from "the radio broke." Arguably P0; kept P1 only because the failing state has not been observed. | 0.5 d | — | No |
+
+### 4.4 Phone & TTS
+
+> **Finding D is one dropped work item, not two.** `docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`
+> (2026-08-01, "Draft for owner review") and **ADR-029** (`design/decisions/2026-08-03-gv-audio-through-engine.md`,
+> status **"Proposed — Ready for Planner"**) both specify it. **Zero queue rows reference any of it.**
+> Designed twice over, both marked ready for Planner, dropped between Designer and Planner; the next queue
+> activity was 2026-08-18. That is a process failure, not a scoping gap, and it is the reason this document
+> exists.
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`PHN-3`** | **The SMS speak button (Feature B) — fully specified at handoff `:297-430`, never queued.** Gutter placement, inbound-only, always visible, no seek or pause, 1000-char cap, URLs → "a link", emoji dropped, never speak the timestamp, strip the MMS `+1XXXXXXXXXX - ` prefix, **keep digit runs verbatim** ("verification codes are the single most valuable thing this feature reads"), one voice at a time. `MessageBubble.razor` is **56 lines and has no speak button, not even a disabled placeholder.** | A console you can ask to read you a text from across the room is the feature that makes the phone surface make sense *in furniture*. Spec-complete; nearly all its cost is `PHN-1`. | 2–3 d | `PHN-1` (O6) | No |
+| **`TTS-2`** | **Stop returning 200 for a swallowed announcement failure** (`NotificationsController.cs:53`). This is *why* the owner believes Google TTS works. | Criterion (b). `TTS-1` removes today's symptom; this removes the class. Without it the next misconfiguration is equally invisible. | 3–4 h | — | No |
+| **`TTS-3`** | **The TTS preview path hardcodes eSpeak in two independent places** (`SourcesController.cs:636`, `SystemConfigPage.razor:1834`) **and does not duck.** **There is NO eSpeak fallback anywhere** — the real failure mode is silence, so *"it sounds like eSpeak"* means eSpeak is genuinely being selected, and the likely reason is that the owner tested via **Event Sources → TTS preview**. Also `ParseEngine` (`TTSFactory.cs:223-228`) silently falls back to ESpeak on any typo **with zero diagnostics**. | The preview is the surface the owner uses to judge whether TTS works. It currently answers a different question than the one being asked. | 3–4 h | — | No |
+| **`TTS-6`** | **Ducking is cleared only for the *current* active source, then logs "volume restored"** (`AudioManager.cs:505-513`). Switch sources mid-announcement and **source A stays permanently attenuated** until restart. | Criteria (b) and (c). "The radio is quiet now and I don't know why," with no in-UI remedy, is a restart-the-appliance problem. | 3–4 h | — | No |
+| **`TTS-5`** | **`AudioSourceBase.cs:95-96` assigns `State = Playing` AFTER `PlayCoreAsync` returns** — but `TTSEventSource.PlayCoreAsync` returns immediately while a background task may already have set `Error` / `Stopped`. **The terminal state is overwritten and the source reports Playing forever.** **Structurally identical to the `BluetoothAudioSource` `State = Ready` bug fixed in #469.** | This repo has now shipped this exact defect shape three times; two caused real bugs. Fixing the instance is cheap — the value is fixing it before it silently disables something else. | 0.5 d | `TEST-1` | No |
+| **`TTS-4`** | **The ducking priority model is inert.** `GetPriority` / `GetActiveEventsByPriority` have **zero production callers**; `StartDuckingAsync` uses only the flat `DuckingPercentage=20`. **Setting priority 1–10 on the Notifications page has no audible effect whatsoever.** A second, higher-priority event arriving while ducked only logs. | Another control that lies. ✅ **D14 ANSWERED: WIRE IT.** The "remove the control" option is off the table and its quick win is withdrawn. Scope: give `GetPriority` / `GetActiveEventsByPriority` real callers, and make `StartDuckingAsync` honour priority instead of the flat `DuckingPercentage=20` — including the case it currently only logs, a higher-priority event arriving while already ducked. **Note the UAT tool actively confirms a capability that does not exist:** `tools/Radio.Tools.AudioUAT/Phases/Phase5/DuckingPriorityTests.cs:96-118` prints *"All priority assignments stored correctly"* and passes **without ever calling `SetPriority`** — fix that in the same PR or the wiring will look verified when it is not. | 1–2 d | — | No |
+| **`TTS-7`** | **`espeak-ng` is not installed on the box at all.** `/api/sources/events/tts/engines` reports ESpeak `isAvailable: false` (verified live 2026-08-19). Every path routed to ESpeak produces **nothing** — including the Event Sources → TTS preview button, which hardcodes it. | Compounds `TTS-3`: the preview button is broken for **two** independent reasons, and neither is visible. Decide deliberately — either install `espeak-ng` so there is a working offline fallback when the network or Google is down, **or** remove ESpeak from the engine list so it stops being selectable. A console that cannot speak when the WiFi drops is a real cabinet failure mode. | Install: 15 min. Remove from UI: 1–2 h | — | No |
+| **`TTS-8`** | **The `en-US-News-K` fix is box-only.** `appsettings.json:178` still ships `en-US-Standard-A`; the config-store value overrides it. Durable on `radio` across restarts and deploys (`data/config/` is not wiped), but a **fresh install elsewhere gets the robotic Standard voice**, which is the voice most likely to be mistaken for eSpeak. | Low urgency for this cabinet, real for reproducibility — and it ties to `design/plans/IAC-PRISTINE-INSTALL-AUDIT.md`, which already found a pristine rebuild only 55–60% reproducible. | 15 min | — | No |
+| **`GV-5`** | **SMS send omits the required `ToNumber` → every send returns `400 invalid_number`.** Send has **never** been functional, only silent. Nine-code taxonomy (not eight); we also **never subscribe to `SmsSent`**, the only channel outbound messages arrive on, so GV-3's optimistic de-dupe is unreachable dead code. | Ships as a **user-visible no-op** (`SendEnabled` stays `false`), so it does not block install — but it is the row that unblocks ever turning send on. ADR-028 + a refreshed plan already exist. | 2–3 d | `GV-3` ✅ | Yes 📋 |
+
+### 4.5 UI Surface
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`UI-2`** | ✅ **D11 ANSWERED, and the owner's direction is structural rather than a delete/keep vote.** His words: *"having Diagnostics available (perhaps on the config page menu) makes more sense than having this be at the top level."* **The call, made and recorded as decided: remove Metrics from top-level navigation and fold a trimmed diagnostics surface in under Settings (`UI-4`). Kill the 40-parallel-query fan-out as part of the move, not afterwards.** | `MetricsDashboardPage.razor` (668 LOC of ~1,870 across 6 files, ~43 tests) **polls 6 endpoints every 10 s and fans out up to 40 parallel history queries per refresh** (`:277-290`). `scripts/research/heavy_load_harness.sh:14-17` names **"sqlite3 busy-loop against the metrics DB"** as one of three deliberate load sources used **to reproduce the audio distortion**. **Having this page open is an instance of the problem under investigation.** One live break if deleted: `DevTray.razor:272` navigates to `/metrics`. | Whether the page survives is decision **D8**; the fan-out should stop either way. ⚠ The owner's stated premise — maintenance cost — **is not supported by git history** (last touched 2026-05-18, 15 commits lifetime). The load argument is the real one, and it is stronger. What would be lost: the only GUI for descriptor-registered `audio.buffer.*` / `audio.callback.*` / `api.request_duration_ms` bands. Note `bluetooth.capture_stall_detected_total` has **no descriptor and no threshold**, so the page was never a good surface for the known capture bug anyway. | Delete 0.5 d · fix in place 1 d · fold into `/diagnostics` 2–3 d | D8 | No |
+| **`UI-3`** | **REMOVE the Settings → Logs tab.** ✅ **D12 answered — and it overrides this document's own recommendation.** This document argued *keep*, on the grounds that it is the only in-app legible error surface and that the SSH alternative aggravates the distortion. **The owner overruled it, and gave the reason:** *"if needed, it's easy to ssh into the box. The UX of looking through the logs in the UI is not good."* That is a legitimate call on a surface the owner is the only user of — recorded plainly rather than quietly absorbed, because a future session will otherwise find this document recommending the opposite. Scope: delete the tab (~136 LOC, 2 trivial assertions, zero churn) **and the now-orphaned viewer endpoint** (`LOG-3`). | Fewer surfaces, and it removes one of the two log allocation bombs outright. **The consequence to hold onto:** the box's only remaining non-SSH log route is the zip download, which makes `LOG-1` and `LOG-3`'s surviving half matter more than they did. | 2–3 h | Land with `LOG-3` | No |
+| **`UX-1`** | **Skeleton shimmer amplitude.** ⚠ The shimmer is **not broken** and must not be re-filed as if it were — `Animation.currentTime` advances and 14.5% of pixels change between frames against a 0% static control. What is marginal is the *amplitude*: `--surface-raised #141416` → `--surface-overlay #1A1A1D` is **6/255** stop-to-stop, measured peak frame-to-frame change 3/255. It is the primitive behind **every** skeleton in the app (27 `<Skeleton>` call sites across 6 pages + 38 raw nodes). **Design-gated; may close as no-change.** | A design-token decision needing a Designer answer first. At 1920×720 across a room, a 6/255 delta may simply be invisible. | 0.5 d after a Designer call | Designer | Yes 📋 |
+
+### 4.6 Test & Ops Hygiene
+
+| ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
+|---|---|---|---|---|---|
+| **`OPS-3`** | **`BindsTo=` for `radio-web` — make joint failure actually joint.** ⚠ **The one row in the queue exempt from the auto-merge policy** — it changes production service coupling and the owner reviews it personally. The reasoning is already written into `deploy/common/radio-web.service:12-22` by #467 and needs no re-deriving. | Correct coupling is what lets a wedged service recover itself instead of needing SSH into the cabinet — but a *wrong* coupling change is exactly the kind of thing that makes the box unreachable. Hence owner review. | 2–3 h | Owner review | Yes 📋 |
+
+| **`HW-2`** | **The RotaryPhone hub contract is assumed, not verified** (`FUTURE-WORK` §11). | The phone surface's live updates rest on an unverified contract. Cheap to verify against the running service; expensive to discover wrong in front of people. | 0.5 d | — | No |
+
+### 4.7 Cross-Repo (RotaryPhone owns — gates what a guest sees)
+
+> **None of these are claimable in this repo.** They route via the boundary-doc protocol into
+> `D:\prj\RotaryPhone\docs\prompts\`. They are P1 here because they gate whether the phone surface shows
+> anything true, and one of them feeds the audio-distortion problem.
+
+| ID | Item | Why it matters in the cabinet | Queue ref |
+|---|---|---|---|
+| **`XR-1`** | ✅ **RESOLVED BY D17 — the contradiction is settled and there is no cross-repo defect left here.** The owner: *"I can see voicemail and text messages in the Radio Console UI today. I can listen to the voicemail and read the texts on the screen."* **GV read works.** The queue's § Cross-repo item **#3 is STALE** — it still says read has never worked, which the 2026-07-31 banner (upstream fix `627b928`, 20 SMS threads, 20 voicemails with real transcripts) already contradicted. **What remains is a 15-minute record correction, not engineering** (§8). | **The consequence is the significant part:** with read confirmed working, `PHN-2` — voicemail through a browser `<audio>` element, bypassing mute, master volume, balance, ducking and Cast routing — is **what the cabinet does today**, not a latent risk. That is why `PHN-1`/`PHN-2` moved to P0 (§3.5). | #3 — correct, do not file |
+| **`XR-2`** | **Thread ids containing `/` are never decoded.** We send `Uri.EscapeDataString`; Kestrel deliberately leaves `%2F` encoded in the path; their exact string compare fails → **HTTP 200 with `messages: []`**. **Every group/MMS conversation is permanently unreadable.** Reproduced deterministically in a healthy window. **Not fixable client-side** — both escaping workarounds were tested and fail. | A guest's group text is silently invisible. Framing correction worth carrying: the predicate is *"the thread id contains `/`"*, **not** "the thread is MMS". | #5 |
+| **`XR-3`** | **PSIDTS staleness → a deterministic ~9-minute auth blackout every 20 minutes.** Their PSIDTS is good ~11 min; their CDP refresh fires every ~20; no reactive refresh on 401. Their `/api/gvbridge/status` reports `available:true, degraded:false` **during** a blackout, so our reconnect banner never fires in the exact window it exists for. | ~45% of the time the phone surface is dead and says it is healthy. It also sets the cache requirement in `PHN-1`. | #6 |
+| **`XR-4`** | **`CdpCookieExtractor` log spam every ~20 min with a ~20-line stack trace.** Non-fatal, but **journald churn on this box correlates with audio distortion** — a performance issue wearing a log-noise costume. Concrete root cause to hand them: `GVBridgeConfig.ChromeCdpPort` defaults to **9224** and nothing listens there. | The cross-repo half of the distortion story. Our `LOG-*` workstream cannot close it. | #1 |
+| **`XR-5`** | **Bell-failure surfacing** (`FUTURE-WORK` §13): **`BellHealth.Failed` has no producer**, blocked on four RotaryPhone contract items — **and the request file has never been filed.** | The bell is the most physical thing on this machine after the knobs. A failure state with no producer means it fails silently. **The first action is filing the request, which has never happened.** | not filed |
+
+---
+
+## 5. P2 — Post-GA
+
+| ID | Item | Why P2 | Effort | Queued? |
+|---|---|---|---|---|
+| **`AUD-1`** | **Split `UseShazamForAllSources` into the two independent decisions it conflates** — *always fingerprint BT* (**necessary**: BlueZ 5.72 ships **no BIP/cover-art implementation**; 7 days of data show **0 AVRCP-sourced art vs 2,560 SongRec-sourced**) and *let SongRec overwrite AVRCP title/artist/album* (**not** necessary — it rewrites `Enter Sandman (Remastered)` → `Enter Sandman`). ⚠ **Do NOT "fix" it by setting the flag `false` — that kills BT album art entirely.** The wanted behaviour already exists at `BluetoothAudioSource.cs:893-905`, on the branch the flag never takes. | The visible symptom is a slightly wrong track title. Real, annoying, not a GA blocker. The danger note is what makes the row worth its size. | 1–2 d | Yes 📋 |
+| **`AUD-4`** | **Unify the source-removal layers and rename `SoundFlowMasterMixer`** — it is a `List<IAudioSource>`, **not** a mixer, and its false log line *"Removed audio source … from mixer"* is **precisely why commit `03a6fea` landed one layer too high and silently did nothing for months.** ⚠ There are now **three** layers, not two: #468 rewrote `AudioSourceBase.StopAsync` (`:100-124`) and its new doc comment asserts `StopCoreAsync` is *"the only code that detaches the component."* Both claims cannot be true — reconcile before unifying. **Sweep `_activeComponents`, not `oldSource.Id`.** | A correctness-flavoured refactor with no current user-visible symptom — but the single best example in this repo of a wrong comment outliving the code it described. | 2–3 d | Yes 📋 (after `AUD-2`, O3) |
+| **`LOG-9`** | **Per-thread CPU affinity instead of whole-process.** Moderate-to-high risk. **Do `LOG-1`, `LOG-3`, `LOG-6`, `LOG-7` first — they may prove this unnecessary.** Plan: `docs/plans/2026-05-22-audio-thread-isolation.md`. | The correct structural fix for `LOG-2m`, but the expensive one, and the cheap fixes target the same mechanism. | 1–2 d | No |
+| **`LOG-10`** | **Enable `UseRealtimeCaptureThread`** — already plumbed, `LimitRTPRIO=99` already set, defaults false. ⚠ **HARD-BLOCKED on `LOG-6` (O4).** | Real latency benefit, but the ordering constraint is absolute and the prerequisite is not done. | 2–3 h after `LOG-6` | No |
+| **`UI-1`** | **Delete `/diagnostic`** (`Components/Pages/Diagnostic.razor`, 97 LOC) — a Blazor render-mode smoke test: "Click Me", a click counter, one API ping. **Unlinked from all navigation, zero tests, squatting on the best route name in the app.** A **stronger deletion candidate than either page the owner asked about.** | Free, and it frees `/diagnostics` for the consolidation below. | 30 min | No |
+
+| **`UI-5`** | **Two stale UI/doc mismatches in DevTray:** `DevTray.razor:253` calls `/api/system/logs/download` "a planned follow-up" when `SystemLogsController` implements it; `DevTray.razor:272` navigates to `/metrics` and is the one live break if `UI-2` deletes that page. | Trivial, but it is the same comment-accuracy failure class `CLAUDE.md` § Pre-Merge Review exists for. | 15 min | No |
+| **`OPS-2`** | **Pin the six floating package versions.** ⚠ Hygiene, not a bug fix — a floating-version theory was investigated and **DISPROVED** as the cause of a CI failure. **Pin to what currently resolves; upgrade nothing.** | Build reproducibility. No user-facing consequence. | 2–3 h | Yes 📋 |
+| **`TEST-2`** | **Confirm-or-close: the deferred-capture branch-dispatch coverage gap left by PR #469.** The test reaches the acquisition through an **internal seam**, never the `capture is …` branch dispatch, because constructing either type needs a native SoundFlow `AudioEngine`. **May legitimately close as "still infeasible."** Folded in: closing the `AUD-3` gap cost **two** new `internal` test seams — the second time this codebase has bought coverage with a seam, now tracked as a pattern rather than an incident. | Coverage, and it may be impossible. | 0.5 d confirm | Yes 📋 |
+| **`GV-6`** | **Distinguish `409 markread_disabled` from a genuine mark-read failure.** Rollout order matters: flip theirs first, confirm the 409 stops, then flip ours. | Diagnostic clarity on a feature dark by config on both sides. | 0.5 d | Yes 📋 |
+| **`GV-7`** | **Render non-dialable SMS senders** — numeric short codes and opaque 36-char sender IDs, **~a third of inbound SMS**. Compose is gated **before** the POST so an un-repliable thread shows a disabled composer **with a reason**, rather than their `400 invalid_number` rendered as "That number doesn't look right." **G-4 measured a 36-char ID as safe at 1920×720** — no truncation needed. **G-3: zero opaque sender IDs are currently reachable from this surface**, so that case is *untested against real data, not proven absent.* | Real polish on a surface itself gated by `XR-1` / `XR-2`. | 1–2 d | Yes 📋 |
+| **`GV-9`** | **Texts-surface polish: overflow hardening + unread-row alignment + the missing `Error && <collection> == null` guard** at `PhoneTextsPanel.razor:162`. ⚠ **No existing test sets `Error` in thread-list mode**, so the behaviour is unasserted in *both* directions — the fix must **add** an assertion, not preserve one. | Cosmetic plus one latent guard. | 0.5 d | Yes 📋 |
+| **`GV-10`** | **Confirm-or-close: do conversation bubbles render the list snippet instead of the full message body?** The mechanism is **plausible but unproven**. **May close with no code.** | Unknown until someone looks. | 0.5 d confirm | Yes 📋 |
+
+| **`HW-1`** | **The real phone-ring WAV** at `media/sounds/phone-ring.wav` (`FUTURE-WORK` §11). ✅ **D16 answered — deprioritised.** The owner has a **physical rotary phone with a working ringer**, so the software ring is not the thing that announces a call in that room. | Dropped from P1 and from the quick-win list. It stays on the board only because a placeholder that logs a file-not-found is still untidy. | Owner, ~20 min | No |
+| **`ENC-10`** | **A roadmap row for physical input.** Designer §12.2: *"There is no roadmap row for physical input at all. This arc needs one, and §7 makes it at least two PRs (protocol + config/diagnostics, then mapping + HUD)."* | Bookkeeping — but the encoder arc is the largest body of work in this document and it is currently invisible in `docs/ROADMAP.md`. | 30 min | No |
+| **`OPS-4`** | **CI runner migration** (`docs/ROADMAP.md` § "CI infrastructure — RTest appserver runner migration"). | Infrastructure. Related to `TEST-1` in spirit — the self-hosted runner is where the ambient-`localhost:5000` problem lives — but independent of it. | Unscoped | No |
+
+---
+
+## 6. Deliberately parked (P3 / Won't do)
+
+Recorded with reasons so future sessions do not re-litigate them.
+
+| Item | Decision | Reason |
+|---|---|---|
+| ~~**"Delete the Settings → Logs tab"**~~ | ⚠ **SUPERSEDED — this document argued *keep* and the owner overruled it (D12).** | The *arguments* are kept for the record: the maintenance-cost premise was not supported by git history (near-zero churn), and it was the only in-app legible error surface on a box where the SSH alternative aggravates the distortion. **The owner's counter is also sound, and it is his surface to judge:** *"if needed, it's easy to ssh into the box. The UX of looking through the logs in the UI is not good."* **The tab is being removed** (`UI-3`); what survives is `LOG-3`'s zip-download half. |
+| **"Delete the Metrics page for maintenance cost"** | **Reason rejected; a different reason stands.** | Last touched 2026-05-18, 15 commits lifetime — **it is not costing time.** The real argument is the 40-query fan-out (`UI-2`). Decide on **that** basis, not the original one. |
+| **Removing the `Radio.Metrics` package** | **Won't do — and it is not the same decision.** | Deleting the *page* touches **zero lines** of `Radio.Metrics` or any collector. The package is consumed by ~30 files across API / Infrastructure / Fingerprinting plus 3 background services; collection, rollup and `metrics.db` all survive a page deletion. |
+| **SignalR / visualization broadcast paths, BlueZ D-Bus handlers, `TappedOutputStream`, `VisualizationTapModifier`, `BufferedTapModifier`, log-to-SQLite, Logs-page polling** | **Won't investigate — already cleared.** | All explicitly checked and clean. The highest-frequency BlueZ signal (`Position`) logs nothing; the three tap classes have **zero** log calls; nothing writes logs to SQLite; the Logs page does not poll. **Do not spend time here.** |
+| **`AUD-6`'s unstable device id as the cause of the 2026-08-10 soundbar silence** | **Settled — do not reopen.** | Raised as a hypothesis and **correctly falsified**. The app had opened the right device; the real cause was the Cast startup mute, shipped in #468. What is new is that the *fragility itself* has since been observed firing — a different claim from the one that was tested and rejected. |
+| **Designer's `sbyte` argument against the factory acceleration tiers** (handoff §2.2 defect 5, §5.6) | **Struck.** | An artifact of the broken parser, not a device constraint — the device sends `int32`. **The volume-slam argument stands on its own and is the one to keep.** |
+| **`docs/BUILDER_PROMPT.md` does not exist** — nor the "Handoff Protocol at the top of `BUILDER_QUEUE.md`" the Builder role points at | **Deliberately not a queue row** — but worth 20 minutes from the owner. | Already decided in the queue's § Dependency / ordering notes. Recorded here because every Builder dispatched at this project is being pointed at two documents that are not there. |
+| **Playwright MCP being unusable in WSL** | **Not a queue row.** | Environment / tooling, not product. The fix is installing Chrome (needs root) or repointing the plugin at `--browser chromium` (the user's own config). Neither is a PR against this repo. |
+| **The in-app Blazor favicon** (`App.razor:9`) | **Parked; the owner reversed on evidence.** | `--kiosk` hides the tab strip, address bar and title bar — that favicon is **never visible on the appliance**. |
+| **A configurable maximum volume ceiling** (Designer §13 Q8) | **Recommend no** (owner may overrule — D9). | Trivial to add, easy to forget about, and then confusing when the knob stops moving. The four guards in `ENC-3` already bound the hazard. |
+| **Pointer or "chicken-head" knobs** | **Won't do.** | These are endless encoders with no absolute position and no end stops. A pointer sitting at 3 o'clock while volume is at 20% is a knob that **lies about the machine's state every time you look at it.** |
+| **Any knob gesture that powers off or reboots the box** | **Never.** | Long-press volume is *Standby*, reversible by a second long-press. A physical control that can terminate the machine, in furniture, reachable by anyone including a child, is not worth the convenience. Likewise: no knob may delete anything, and no destructive action may be reachable by turning alone. |
+| **Auto-commit on dwell for the selector knobs** | **Considered and rejected** (Designer §6.6). | It converts every accidental brush of the knob into a real source change 1.2 s later, from across the room, with nobody touching anything. On this hardware that is both startling and expensive. |
+| **Live-commit-per-detent for the source knob** | **Rejected.** | It would tear down and stand up an audio source at every detent, straight into `AUD-8` and `AUD-9` territory. |
+| **The flash "safe baseline"** (Rev 2 §7.5, the old `ENC-13`) | ⭐ **WITHDRAWN BY DESIGNER in Rev 3 §7.7, on its own initiative — and the reasoning is worth keeping.** | Rev 2 wanted flash to hold a deliberately *duller* config than the operating one, so a stale flash could only ever make the knobs quieter. Two problems. **(1) It was solving a solved problem:** the boot window is already made safe by the **host clamp**, which lives in the app and bounds volume regardless of what the device believes — and the *operating* config is itself the safe one (T3 disabled on volume, ceiling ×3). The dangerous configuration was never the operating one; it was only ever the **factory** default. **(2) It would have made `Save to device` write something other than what the screen shows** — *"exactly the class of lie this project keeps shipping."* **Flash now holds the operating config, and staleness is surfaced (`differs from current design ⚠`) instead of prevented by dulling.** Strictly better: honest *and* diagnosable. |
+| **Renaming the on-screen bank back to `MEMORY`** | **Do NOT "fix" this on a later consistency pass.** | `RadioControlPanel`'s bank moves from `MEMORY · n saved` to **`PRESETS · n saved`** to match the engraved knob (D10). It is a **deliberate, declared one-word deviation** from `HANDOFF-saved-station-display.md`, recorded in Rev 3's own header precisely so Polisher does not flag it as drift. A panel that says PRESETS over a screen that says MEMORY is worse than either name alone. |
+| **The mode / shift button model** ("does the button change what turning the knob does?") | **Rejected outright in Rev 2 §4.1. The Action model applies to all four knobs.** | **You cannot see the mode.** No LEDs, no display, and the only feedback surface may be asleep, showing a clock, on another page, or out of the line of sight of the person with a hand on the knob. *A mode you cannot see is a mode you cannot trust* — and the way a person resolves "which mode is this in?" is **to turn it and find out**, which on a volume knob costs the room. Modes are also sticky across users and time: a knob left in its secondary mode at 11 p.m. behaves wrongly at 8 a.m. for someone who did not set it. **The hybrid is worse than either pure model** — if three knobs are press-to-act and one is press-to-shift, checking which means pressing it, converting a safe gesture into a test. ⚠ **Context is not mode, and the distinction is load-bearing:** TUNING's press does seek on radio and play/pause otherwise, selected by *what is playing* — something the user already knows and can see — not by a hidden toggle. |
+| **Browse on knob 2** (Rev 1's own fallback) | **Withdrawn by Designer in Rev 2 §4.3, rather than defaulted to.** | **Dead or near-dead on half the sources:** Bluetooth is a phone-driven stream with no queue the console owns; Phono and USB are line inputs with no list at all — so on three of six entries the knob does nothing, **which is precisely the failure used to demote Visualization.** And browsing is a look-at-the-screen activity, which is the wrong ergonomics for a knob. *"[PRESETS] is what Browse was reaching for, with the browsing removed."* (Designer wrote MEMORY; the knob was renamed by D10.) |
+| **Balance on knob 2** | **Rejected** (Rev 2 §4.3). | Tempting — `BalanceModifier` already exists, so it needs literally nothing new, and it is meaningful on every source. But it is a **set-once installation control**: two speakers, one cabinet, one room; nobody touches balance twice a year. It fails *reached for often* completely, and **its failure mode is silent** — a knob knocked off centre leaves the console quietly lopsided with no reason a user would ever look for. |
+| **Output / Cast destination on knob 2** | **Rejected on safety** (Rev 2 §4.3). | **A mis-grab sends the audio to another room** — the most startling failure this hardware can produce. The console goes silent, the sound appears somewhere else, and the person holding the knob has no model for what happened or how to undo it. |
+| **A third long-press anywhere on the panel** | **Deliberately not added** (Rev 2 §4.4). | Rev 1 put save-station on the TUNING long-press; Rev 2 moved it to PRESETS, where recall and store belong together. The result is that **the two continuous knobs have at most one long-press between them** and the two selector knobs have a clean press-to-commit. In track mode the TUNING button always resolves as play/pause on release regardless of hold duration — **no hidden gesture, no dead hold.** |
+| **Cross-source favourites (PRESETS v2)** | **Out of scope for GA**, escalated to Architect (Rev 2 §12.1 item 2). | Making a memory slot point at a playlist, a Bluetooth device, or "the record player" needs a favourites data model that does not exist. `ENC-7` v1 ships against the shipped radio preset bank and does not block on it. The v1 boundary is **clearly messaged, not silent**: on a non-radio source the hold reports `Only radio stations can be saved`. |
+
+---
+
+## 7. Decisions — answered 2026-08-19
+
+**The owner cleared almost the whole board in one pass.** This section used to be a list of questions; it is
+now a record of answers, kept so nobody reopens them. Where an answer creates new work or changes a tier,
+the affected item says so in place.
+
+### The two that gated the most
+
+| ID | Decision | Answer | Consequence |
+|---|---|---|---|
+| **D1** | Do the knobs ship live at install, or inert? | ✅ **SHIP LIVE.** | **The single largest change to this document.** The conditional tiering collapses — **11 encoder items are now unconditionally P0**, ≈3–4 working weeks, and §1's "conditional tiers" subsection now says there are none. |
+| **D2** | Approve the physical layout. | ✅ **`VOLUME · SOURCE · PRESETS · TUNING` is FINAL.** ≈90 mm outer→inner, ≈70 mm inner pair; VOLUME/TUNING 40–45 mm knurled and deep-fluted, SOURCE/PRESETS 25–30 mm smooth with a groove on PRESETS. | **Closed. The escutcheon can be cut.** ⚠ Note the engraving is **`PRESETS`, not `MEMORY`** (D10) — this document has been swept for the old word. Detail refinements land in Designer Rev 3. |
+
+### Encoder decisions
+
+| ID | Question | Answer |
+|---|---|---|
+| **D3** | Is encoder index order the same as physical left-to-right order? | ✅ **The owner guarantees it.** Recorded as an **owner-owned constraint**, not an app assumption — the wiring is his and he is standing behind it. `0 = VOLUME, 1 = SOURCE, 2 = PRESETS, 3 = TUNING`. |
+| **D4** | Does RotaryUsb support a host→device *set position* command? | ✅ **No. Reset-position exists; set-position does not.** Confirms the existing research: `0x03` carries save-to-flash, factory reset, reset-positions-to-min, read-config-back and zero-counters — and nothing that writes an arbitrary position. **Accumulator semantics are now forced rather than preferred**, which removes the only argument that was ever made against them. |
+| **D5** | Detents per revolution, and does one detent report one count or four? | ✅ **Handled by firmware.** The host sees **monotonic counts governed by the pushed config**. ⚠ **This retires what this document called the single riskiest assumption in the spec** — the possible 4× error running through every acceleration figure in Designer §5. It is gone, not mitigated: the divisor is not the host's problem. `ENC-14`'s `Calibrate a knob` loses its headline justification and keeps only its wiring-health one. |
+| **D7** | Fold the radio bands into the SOURCE list? | ✅ **YES.** `ENC-5` absorbs it and is **re-estimated 2–3 d → 4–5 d** — the source knob now changes *bands*, so `RadioBandService` joins the commit path. |
+| **D8** | Re-enable hardware screen blanking? | ✅ **YES — and ANY press or knob movement wakes.** Two consequences, both real: **(a)** it collides with Designer §8.1's *"sound controls act in place and do not wake"* rule — **Designer is resolving it in Rev 3; `ENC-6` is marked pending and must not be specced until it lands**. **(b)** the risk this document already carried — blanked panel plus an encoder USB drop leaving the screen unwakeable — **is now live rather than hypothetical**, and is promoted in §10. |
+| **D22** | ⭐ **Literal D8, or Designer's narrowing?** Taken literally at the *audio* layer, *"any knob movement is a wake signal"* means a sleeve brushing a knob at 3 a.m. **resumes a console deliberately left in Standby** — the radio starts playing in a dark house. | ✅ **THE NARROWING IS APPROVED.** Owner: *"that D8 narrowing is fine, keep it."* **A turn from Standby lights the panel only; resuming audio requires a press (any button) or a screen tap.** The display still honours D8 in full — every input wakes the screen. The narrowing applies **only to restarting audio, only from Standby, only for turns.** Designer's framing: *"a turn is what a passing sleeve does; a press is what a person does."* Settled scope on `ENC-6`. |
+| **D10** | Cabinet wording. | ✅ **`SOURCE` and `PRESETS`.** `PRESETS` over `MEMORY`: marginally clearer to a stranger, and a stranger is exactly who this knob is for. |
+| **D21** | Confirm the flash policy. | ✅ **One-time flash approved** — **and the owner additionally wants device configuration plus an explicit Save action exposed in the Settings UI.** ⚠ **That partially reversed Rev 2 §7.6's "delete the editors" direction — and ✅ Rev 3 §7.7–§7.8 has since reconciled it.** The answer: **full read-only visibility of all 24 fields with sent-vs-read-back comparison, four `Reverse` toggles, and Save / Re-apply / Reset-counters actions.** ⭐ **Designer also withdrew its own "safe baseline" idea on the record, and the reasoning is worth keeping:** the baseline would have made Save write something *duller than the screen showed*, defending a boot window **the host clamp already defends**, at the cost of a button that lies. **Flash now holds exactly the operating config; staleness is *surfaced* (`differs from current design ⚠`) rather than prevented by dulling.** `ENC-13` is folded into `ENC-8`. |
+| **NEW** | Encoder auto-detect. | ✅ **Owner: *"I'd like to auto-detect whether the encoders are available and have the system respond appropriately."*** Replaces `ENC-0`'s keep-it-behind-a-flag posture entirely — now presence detection plus graceful degradation across absent-at-boot / appears-mid-session / disappears-mid-session. UX detail pending Rev 3. |
+
+### UI surface
+
+| ID | Question | Answer |
+|---|---|---|
+| **D11** | Metrics page — delete, fix, or fold? | ✅ **The owner's direction was structural, not a delete/keep vote:** *"having Diagnostics available (perhaps on the config page menu) makes more sense than having this be at the top level."* **Call made and recorded as decided: remove Metrics from top-level nav; fold a trimmed diagnostics surface in under Settings; kill the 40-parallel-query fan-out as part of the move.** That fan-out is the load pattern implicated in the distortion — it does not survive the move in any form. |
+| **D12** | Settings → Logs tab — keep or remove? | ✅ **REMOVE.** ⚠ **This overrides this document's own recommendation**, which argued keep. The owner's reason: *"if needed, it's easy to ssh into the box. The UX of looking through the logs in the UI is not good."* Recorded plainly rather than absorbed quietly, because a future session will otherwise find this document recommending the opposite. **`LOG-3` does not vanish with it** — see that item. |
+| **D13** | Delete `/diagnostic`? | ✅ **YES.** And it **frees the route name for D11's consolidated diagnostics**, which is the tidiest available outcome. |
+
+### Audio, phone and ops
+
+| ID | Question | Answer |
+|---|---|---|
+| **D14** | Wire the ducking priority model, or remove the control? | ✅ **WIRE IT.** `TTS-4` becomes a 1–2 day job; the "remove the control" quick win is **withdrawn**. |
+| **D15** | Resolve the DataProtection keyring question. | ✅ ***"We need to ensure the keys are retained."*** Decided, and it resolves to **P0** — keys that do not survive a restart break encrypted secrets on every restart inside a sealed cabinet. The branch `fix/dataprotection-keyring-persist-path` is **awaiting review**, so much of the work may already exist. |
+| **D16** | Supply the real ring WAV? | ✅ **Deprioritised.** The owner has a **physical rotary phone with a working ringer** — the software ring is not what announces a call in that room. `HW-1` → P2, and out of the quick wins. |
+| **D17** | What is the current truth about GV read? | ✅ ***"I can see voicemail and text messages in the Radio Console UI today. I can listen to the voicemail and read the texts on the screen."*** **GV read works.** The queue's § Cross-repo item **#3 is stale and should be corrected.** ⚠ **The consequence is the significant part:** `PHN-2` — voicemail through a browser `<audio>` element at full level, bypassing mute, master volume, balance, ducking and Cast routing — **is what the cabinet does today.** `PHN-1` and `PHN-2` are now P0 (§3.5). |
+| **D19** | Does SMS send / composing matter for GA? | ✅ **Canned responses ARE wanted, explicitly without a keyboard:** *"A few simple/canned responses will suffice."* That is **ADR-029 Feature C**, already specced. **The phone arc is A + B + C, not A + B** — and no on-screen keyboard makes C cheaper, not harder. |
+
+### Still open
+
+**Owner answered D23, D24 and D9 on 2026-09-01.** One decision is left — `D25` — and it is the fork this
+document flagged as the one that must not default silently.
+
+| ID | Question | Notes / recommendation |
+|---|---|---|
+| **D25** | **Do you want the `PHN-2` stopgap, or the full ADR-029 arc only?** Voicemail currently plays through a browser `<audio>` element at full level, bypassing mute, master volume, balance, ducking and Cast routing. The full fix (`PHN-1` + `PHN-2`) is **1.5–2 weeks**. A **half-day JS-interop stopgap** could route that element's volume and mute through master volume. | ⚠ **Still unruled. A real fork.** The stopgap **fixes mute and level** and **does not fix ducking or Cast routing**: the radio still will not duck under a voicemail, and with Cast active the voicemail still comes out of the local speakers. It is a partial patch on a bypass, not a fix. **Worth taking only if 1.5–2 weeks does not fit before install** — in which case it is the difference between *"voicemail ignores the mute button"* and *"voicemail ignores everything."* |
+
+### Closed 2026-09-01 by the owner
+
+| ID | Question | Answer |
+|---|---|---|
+| **D23** | Detents per revolution (Rev 3 §5.2, §13 Q2). | ✅ **CLOSED — the question was mis-framed, and the correction lands on `ENC-1`, not on the feel figures.** The owner: *"the encoder firmware already manages detents per revolution — you just need to manage configuring the device and reading direction and velocity from the device."* So detent density is **the device's business, already handled in firmware**. The host's job is (a) push configuration to the device and (b) read **direction and velocity** off it. ⚠ **This is an input to `ENC-1`, and it must be reconciled against Rev 3 §5 before the decoder is written** — Rev 3 describes a 37-byte report carrying `int32` positions and free-running accumulators, and §10's re-baseline rule exists because *diffing accumulators across a disconnect* replays the whole outage as one delta. If the device reports direction and velocity **per report**, that hazard is designed out rather than defended against, and `ENC-1` gets simpler. **Confirm which the firmware actually sends before relying on either reading.** The *"≈2.5 revolutions to cross the FM band"* figures are unaffected either way, and `ENC-14`'s Calibrate flow is no longer needed to answer this. |
+| **D24** | Hand-edit the 24 config fields? (Rev 3 §7.8, §13 Q3) | ✅ **CLOSED — no.** Owner agrees with Designer and this document. Read-only visibility, four `Reverse` toggles, Save. No direct numeric editing. *"A field that can be set to ×50 will eventually be set to ×50."* A number that needs changing comes back through the handoff so the reasoning moves with it. |
+| **D9** | A configurable maximum volume ceiling? (Rev 3 §13 Q4) | ✅ **CLOSED — no.** Owner agrees. The four guards in `ENC-3` already bound the hazard; a ceiling is easy to forget about and then be confused by. |
+
+**Not decisions, just unfiled actions:** **D18** (file the bell-failure contract request to RotaryPhone —
+never filed) and **D20** (write `docs/BUILDER_PROMPT.md` — every Builder is pointed at a document that has
+never existed). Nobody is blocked on a ruling for either.
+
+**Also still open, unrelated to the encoders:** `UX-1` needs a Designer answer on skeleton shimmer amplitude
+and may close as no-change; `TTS-7` needs a call on whether `espeak-ng` gets installed as an offline
+fallback or removed from the engine list.
+
+---
+
+## 8. Quick wins — under an hour each, independently shippable
+
+The owner should be able to knock several of these out in one sitting. None of them depend on anything else
+in this document. **The top three are marked.**
+
+| # | Item | Effort | Why it is a win |
+|---|---|---|---|
+| ~~**1 ★**~~ | ~~**`TTS-1(i)` — set `tts:defaultVoice` in the config store.**~~ ✅ **DONE 2026-08-19 — set to `en-US-News-K`, verified working on the box.** | ~~5 min~~ | **Closed.** This also closed the owner's separate ducking complaint: ducking was never broken, it was never reached. See `TTS-1` for the full record and the two follow-ons it surfaced (`TTS-7` espeak-ng absent, `TTS-8` repo default still wrong). |
+| **2 ★** | **`LOG-1` — honour `ReadFrom.Configuration` in `src/Radio.Web/Program.cs:14`, set Information in production, add retention + size caps to both file sinks.** | **30 min** | **Largest single log-volume reduction available.** 65 MB/day measured, 106 Debug sites live, no retention cap at all on an appliance that runs for weeks inside a cabinet. |
+| **3 ★** | **`ENC-4a` — the persistent topbar `MUTED` chip.** | **45 min** | Independently valuable even if the whole encoder arc slips. Today, on `/queue`, `/metrics`, `/devices`, `/history` and `/phone` there is **no mute indication at all** — a muted console with no visible reason is indistinguishable from a broken one. |
+| 4 | **`TTS-1(ii)` — fix the hint text at `SystemConfigPage.razor:684`, which recommends `"en"`.** | 5 min | The UI is actively teaching the value that breaks Google TTS. Fixing #1 without this invites the same mistake again. |
+| 5 | **`ENC-8a` — delete `TuningStepKHz`, the field that is read by nothing.** ✅ **SETTLED by Rev 3 §7.8 — and the two fields have different fates.** `TuningStepKHz` is **deleted outright**: nothing reads it and nothing should, the tuner owns its own step, and D21 does not change that because *it is not device configuration, it is a field that never did anything.* ⚠ **`VolumeStepPercent` is RELOCATED, not deleted** — it is a genuine device field (VOLUME `step_size`), so it moves to the read-only configuration card in `ENC-8`. What goes away is the **duplicate editable numeric**, a second source of truth for a value the device also holds. **Do not delete it here.** | 20 min | `TuningStepKHz` is declared, set in appsettings, documented, **editable by the owner at `SystemConfigPage.razor:1535`, and read by nothing.** A settings field that does nothing is a lie the owner will discover by testing. `VolumeStepPercent` is worse than useless — it is an app-owned safety constant sitting in an editable box. Deleting both is the free half of `ENC-8`; the four `Reverse direction` toggles that replace them need `ENC-2`. |
+| 6 | **`ENC-8b` — correct the Encoder Mapping table at `SystemConfigPage.razor:1492-1493`.** | 20 min | It claims encoder 1 press = "Seek Next Station" and encoder 2 press = "Play/Pause"; the code does scan-toggle and source-commit. Hand-typed HTML — it will drift again, so the real fix is serving it from the router (`ENC-8`). |
+| 7 | **`ENC-9a` — subscribe `VisualizerPanel` to `VisualizationModeChanged`.** | 30 min | The broadcast already exists (`AudioStateUpdateService.cs:969-978`); **no Razor component consumes it.** Any out-of-band mode change leaves the picker showing the wrong segment. |
+| 8 | **`UI-1` — delete `/diagnostic`.** ✅ **Decided by D13**, and it frees the route name for the consolidated Settings → Diagnostics surface. | 30 min | 97 LOC, unlinked from navigation, zero tests, a "Click Me" button, and it occupies the best route name in the app. |
+| 9 | **`UI-5` — fix the two stale DevTray comments/links** (`:253` calls an implemented download "a planned follow-up"; `:272` points at `/metrics`). | 15 min | Same comment-accuracy class `CLAUDE.md` § Pre-Merge Review exists for. |
+| 10 | **`LOG-11` — drop or level-restrict the API's duplicate console sink.** | 30 min | Every line is currently written twice, on a box where log volume is an audio problem. |
+| 11 | ✅ **`XR-1a` — correct the queue's § Cross-repo item #3.** It still records that GV read has never worked; **D17 confirms it does.** | 15 min | A stale record that says a working feature is broken will send the next session chasing a cross-repo defect that does not exist. **Do not file a request file for it.** |
+
+
+---
+
+## 9. Index and tier counts
+
+| Tier | Count | Notes |
+|---|---|---|
+| **P0** | **23** | **Non-encoder (11):** `TEST-1`, `OPS-1`, `LOG-1`, `TTS-1` (part (i) ✅ done), `AUD-6`, `AUD-7`, `AUD-8`, `AUD-9`, `SEC-1`, `PHN-1`, `PHN-2`. **Encoder (12):** `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-11`, `ENC-12`, `ENC-15`. ⚠ **The encoder bundle went 6 → 8 (Rev 2) → 11 (D1) → 12 (Rev 3's `ENC-15` touch-wake gate), and it is no longer conditional on anything.** Departures and arrivals since the last revision: **LOG-3 left** this tier under D12; **SEC-1** (D15) and **PHN-1** / **PHN-2** (D17) joined it. |
+| **P1** | **36** | `ENC-9`, `ENC-14`, `AUD-2`, `AUD-5`, `AUD-10`, `AUD-11`, `AUD-12`, `LOG-2`, `LOG-3`, `LOG-4`, `LOG-5`, `LOG-6`, `LOG-7`, `LOG-8`, `LOG-11`, `PHN-3`, `PHN-4`, `TTS-2`, `TTS-3`, `TTS-4`, `TTS-5`, `TTS-6`, `TTS-7`, `TTS-8`, `GV-5`, `UI-2`, `UI-3`, `UI-4`, `UX-1`, `OPS-3`, `HW-2`, plus 5 cross-repo (`XR-1`…`XR-5`). |
+| **P2** | **15** | `AUD-1`, `AUD-4`, `LOG-9`, `LOG-10`, `UI-1`, `UI-5`, `OPS-2`, `OPS-4`, `TEST-2`, `GV-6`, `GV-7`, `GV-9`, `GV-10`, `ENC-10`, `HW-1`. |
+| **P3 / parked** | **22** | §6 — six added in the Rev 2 reconciliation, two more from Rev 3 (Designer's withdrawn flash baseline; the on-screen bank rename, recorded so nobody reverts it). |
+
+### Where Designer Rev 2 and this document's tiering interact — stated plainly
+
+Four places where reconciling Rev 2 changed something material rather than just re-wording it. None is an
+unresolved disagreement; all four are things a reader of the Rev 1-era text would get wrong.
+
+1. **`ENC-7` moved P1 → P0, and that is a real schedule delta, not bookkeeping.** Rev 1's knob 2 was P1
+   because Tone was blocked on an Architect ADR that might never land, behind a fallback Designer has since
+   withdrawn. Rev 2's PRESETS is fully specified, needs no new DSP and no new data model, and is simply one
+   of the four knobs — so it inherits the same tier as SOURCE. **Combined with the new `ENC-11`, the P0
+   encoder bundle went from 6 items to 8 and from roughly 3 working weeks to 3–4.** D1's stakes rose
+   accordingly — and **D1 has since been answered "ship live", so this is no longer a hypothetical price:
+   it is the schedule.** The bundle is now 11 items, not 8, because D1 also pulled in `ENC-6`, `ENC-8` and
+   `ENC-12`.
+
+2. **§7 is new P0 scope that did not exist when the tiers were first set.** The startup config push is not
+   polish and does not defer cleanly: without it the device runs whatever survived in its flash, which on a
+   fresh, reset or replacement Pico is factory defaults — **volume acceleration at ×50, one detent from
+   silence to full.** `ENC-3`'s host clamps make that window survivable, which is why they are stated as
+   unconditional; `ENC-11` is what closes it. Splitting the arc so that only the push/verify loop is P0 and
+   the fault surfacing, flash baseline and diagnostics card are P1 is a judgement call, and the line drawn
+   is: **the behaviour that keeps the room safe is P0; the layer that explains it to the owner is P1.**
+
+3. **⚠ SUPERSEDED BY D12, and the supersession is worth reading.** This item used to reconcile Designer
+   §7.2's silent-boot rule with `UI-3`'s argument for *keeping* the Logs tab. **The owner has since removed
+   the Logs tab entirely** — so the tension no longer exists, and the in-app diagnostic surface this
+   document was defending is gone by choice. **What survives, and now carries more weight than it did:**
+   `ENC-12`'s cross-route nav-pill badge is the *only* remaining in-app channel for a persistent hardware
+   degradation. Silent when healthy, legible from any page when not. With no log reader behind it, that
+   badge is not a convenience — it is the whole diagnostic surface.
+
+4. **`ENC-14` polls at 2 Hz while `UI-2` exists to stop a polling surface.** Not a contradiction: Designer
+   pre-empted it explicitly — the diagnostics card polls **only while it is open**, for exactly the reason
+   `UI-2` is filed. **Treat `ENC-14` as the pattern `UI-2` should adopt, not as an exception to it:** poll
+   while visible, stop when not, and never fan out.
+
+**One thing Rev 2 makes easier, worth saying because it is rare:** Rev 1's advice to leave knob 2 unlabelled
+until the DSP question resolved is **obsolete**. Designer §9.5: *"All four assignments are now settled, so
+unlike Rev 1 there is no reason to defer engraving."* The escutcheon can be cut and engraved as soon as D2
+and D10 are answered — the only remaining gate on the permanent, irreversible step.
+
+---
+
+**Confirm-or-close items — the first task is an investigation that may end in no code change:** `AUD-2`,
+`AUD-10`, `GV-10`, `TEST-2`, `UX-1`. **Down from seven to five on 2026-08-19:** `SEC-1` is decided by D15
+(and is now P0), and `XR-1` is resolved by D17 — GV read works, so what was a cross-repo investigation is
+now a 15-minute record correction. Do not budget the remaining five as guaranteed shipped work.
+
+**Already queued (17 open rows, all accounted for):** `GV-5`, `GV-6`, `GV-7`, `GV-9`, `GV-10`, `OPS-1`,
+`OPS-2`, `OPS-3`, `UX-1`, `TEST-1`, `TEST-2`, `AUD-1`, `AUD-2`, `AUD-4`, `AUD-5`, `AUD-6`, `AUD-7`.
+
+**Existing plans that have never been queued — a standing source of dropped work:**
+
+| Plan | Item |
+|---|---|
+| `design/plans/` `bt-capture-watchdog` (2026-05-22) | `AUD-8` |
+| `design/plans/` `bt-autoswitch-gate` (2026-05-22) | `AUD-9` |
+| `design/plans/` `bt-codec-observability` (2026-05-22) | `AUD-11` |
+| `design/plans/` `pw-event-subscription` (2026-05-22) | `AUD-12` |
+| `docs/plans/2026-05-22-audio-thread-isolation.md` | `LOG-9`, `LOG-10` |
+| `design/plans/2026-03-11-bt-disconnect-reason.md` | `AUD-10` |
+| `docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md` (2026-08-01) + **ADR-029** (2026-08-03) | `PHN-1`, `PHN-2`, `PHN-3`, `PHN-4` |
+| `docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md` (**Rev 3**, 2026-08-19, draft, 1,126 lines) | `ENC-0` … `ENC-15` (`ENC-13` folded into `ENC-8`) |
+| `design/plans/SECRET-KEYRING-INVESTIGATION.md` + branch `fix/dataprotection-keyring-persist-path` | `SEC-1` |
+
+> **Worth noticing as a pattern rather than a list:** nine plan or handoff documents exist for work that has
+> **no queue row**, two of them explicitly marked *"Ready for Planner."* The gap in this project is not
+> planning capacity — it is the handoff from Designer/Architect into the queue. If one process change comes
+> out of this document, it should be that a document marked *ready for Planner* gets a queue row or an
+> explicit written decline within one Planner cycle.
+
+---
+
+## 10. Carried risks worth restating
+
+- ⭐ **NEW, and it is the highest-weighted safety test in the encoder spec: the accumulator is free-running,
+  so a naive decoder delivers an entire outage as one volume delta.** The device keeps counting whether or
+  not anything is listening. If the app restarts, or a USB lead is knocked loose inside the cabinet and
+  re-seats, and the host resumes by **diffing the new sample against its last remembered value**, then
+  **every detent turned while nobody was listening arrives as a single delta — on the volume knob.**
+  The rule: **on every connect, the first sample from each encoder is a baseline, not an input — recorded
+  and discarded. No delta is ever computed across a disconnect.** ⚠ **Diff-against-last-value is the obvious
+  way to write this decoder and it is wrong**; the hazard is in `ENC-1` / `ENC-2` scope, not in any UX work.
+  Designer's test, verbatim: *"Turn a knob ~50 detents while unplugged, then replug: volume does not jump."*
+- ⚠ **PROMOTED 2026-08-19 — this one is now live rather than hypothetical. A blanked panel plus an encoder
+  USB drop can leave the screen unwakeable.** D8 answered **yes** to re-enabling hardware screen blanking,
+  with any press or knob movement waking. That makes the black panel the normal overnight state — and the
+  encoder USB **does** drop on this box; the reconnect loop exists precisely because it happens. If the
+  panel is blanked and the encoders are gone, the wake path is gone with it, **inside a sealed cabinet,
+  recoverable only by SSH or by plugging in a keyboard.** Three mitigations, and they are not optional:
+  **(1)** touch must independently and reliably wake — verify it on the box before blanking ships;
+  **(2)** `ENC-0`'s disappears-mid-session handling has to be correct, and must not mistake change-only
+  idle silence for a disconnect; **(3)** ship blanking **after** `ENC-0` and `ENC-6`, never before.
+  ✅ **Rev 3 §8.5 hardened all three into requirements rather than advice, and mitigation (1) is now its own
+  P0 item, `ENC-15`** — *"This is a gate, not a caveat."* The other two became **coupling rules**: the app
+  must **never blank when the encoder device is absent**, and if it **disappears while blanked, unblank
+  immediately and stop blanking** until it returns. Designer's framing for the direction to fail in:
+  *"a screen left on is a nuisance, a screen that cannot be turned on is a service call."* The 2 a.m.
+  recovery line belongs in `INTEGRATIONS.md` beside the encoder section, where someone will actually find
+  it: `ssh mmack@radio` → `gdbus call --session --dest org.gnome.ScreenSaver --object-path
+  /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.SetActive false`.
+- **The voicemail audio endpoint must stay unauthenticated (or token-in-query) when `X-RotaryPhone-Auth`
+  ships, because a native `<audio>` element cannot send a header.** ⚠ **This risk dissolves entirely if
+  ADR-029 lands** — Radio.API fetching the media server-side can send any header it likes. **`PHN-1` is
+  therefore also the fix for a security-shaped constraint that is currently recorded as permanent.**
+- **`AUD-7` verification is restart-only.** A truthful `/api/devices/output` in a running session proves
+  nothing.
+- **Any future UAT of the phone surface must record wall-clock time against the 20-minute blackout cycle**
+  (`XR-3`), or the results look random — that is precisely how one pass came to hypothesise GV throttling,
+  which was subsequently falsified three ways.
+- **`OPS-3` does not auto-merge.** It is the single row in the queue exempt from the auto-merge policy.
+- **Cross-repo work is never a Radio Console queue row.** It routes via the boundary-doc protocol into
+  `D:\prj\RotaryPhone\docs\prompts\`. Note that **two boundary-doc Change Log entries are themselves sitting
+  uncommitted in that repo — including the one that established the rule they are both breaking.**
+
+---
+
+**Approved 2026-09-01. Executing in §2 order.** `D23` / `D24` / `D9` closed by the owner; **`D25` is still
+open and must be escalated, not defaulted.** The §2 ordering constraints still bind — `O4` (`LOG-6` before
+`LOG-10`) can brick the appliance and `O9` (knob order before drilling) is irreversible.
