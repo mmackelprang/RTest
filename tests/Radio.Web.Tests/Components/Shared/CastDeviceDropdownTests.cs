@@ -6,6 +6,7 @@ using Radzen;
 using Radio.Web.Components.Shared;
 using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Components.Shared;
 
@@ -32,6 +33,11 @@ public class CastDeviceDropdownTests : TestContext
 {
   public CastDeviceDropdownTests()
   {
+    // Hermetic rig: fails every outbound HTTP request and every SignalR
+    // negotiate without touching the network, so this fixture's result never
+    // depends on whether radio-api happens to be running locally.
+    Services.AddHermeticTestRig();
+
     Services.AddRadzenComponents();
     JSInterop.Mode = JSRuntimeMode.Loose;
   }
@@ -156,7 +162,7 @@ public class CastDeviceDropdownTests : TestContext
   {
     var client = new HttpClient(handler)
     {
-      BaseAddress = new Uri("http://localhost:5000")
+      BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl)
     };
     return new DevicesApiService(client, NullLogger<DevicesApiService>.Instance);
   }

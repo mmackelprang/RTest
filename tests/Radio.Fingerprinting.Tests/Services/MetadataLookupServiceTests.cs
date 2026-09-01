@@ -31,10 +31,27 @@ public class MetadataLookupServiceTests
     _optionsMock = new Mock<IOptions<FingerprintingOptions>>();
     _optionsMock.Setup(o => o.Value).Returns(_options);
 
+    // A bare `new HttpClient()` here would be hermetic only by accident: every test below
+    // exercises a guard clause that returns before the service issues a request, so nothing
+    // reaches MusicBrainz *today*. The next test that passes a valid title and artist would
+    // silently make a live third-party call from CI. Stub the transport so that stays
+    // impossible by construction rather than by coincidence. (TEST-1(c))
     _service = new MetadataLookupService(
       _loggerMock.Object,
       _optionsMock.Object,
-      new HttpClient());
+      new HttpClient(new NoNetworkHandler()));
+  }
+
+  /// <summary>Fails any outbound request without touching the network, naming the URI so an
+  /// accidental live call is identifiable in test output.</summary>
+  private sealed class NoNetworkHandler : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(
+      HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+      throw new HttpRequestException(
+        $"Blocked by the test rig: this unit test tried to reach '{request.RequestUri}'.");
+    }
   }
 
   [Fact]

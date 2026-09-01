@@ -23,7 +23,7 @@ public class ContactResolutionServiceTests
 
   private static ContactResolutionService Create(HttpMessageHandler handler)
   {
-    var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+    var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
     var pbap = new PbapApiService(http, NullLogger<PbapApiService>.Instance);
     return new ContactResolutionService(pbap, NullLogger<ContactResolutionService>.Instance);
   }

@@ -26,9 +26,14 @@ public class PhoneMessagesFeedRowTests : TestContext
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
 
+    // Hermetic rig: fails every outbound HTTP request and every SignalR
+    // negotiate without touching the network, so this fixture's result never
+    // depends on whether radio-api happens to be running locally.
+    Services.AddHermeticTestRig();
+
     // Lookup handler defaults to 404 so unmatched numbers stay unresolved (no name).
     var handler = new MockHttpHandler(statusCode: lookupStatus);
-    var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+    var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
     var pbap = new PbapApiService(http, NullLogger<PbapApiService>.Instance);
     Services.AddSingleton(new ContactResolutionService(
       pbap, NullLogger<ContactResolutionService>.Instance));
