@@ -36,10 +36,16 @@ public class PhoneHubService : IAsyncDisposable
 
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
 
-  public PhoneHubService(ILogger<PhoneHubService> logger, IConfiguration configuration)
+  private readonly IHubConnectionTransport? _transport;
+
+  public PhoneHubService(
+    ILogger<PhoneHubService> logger,
+    IConfiguration configuration,
+    IHubConnectionTransport? transport = null)
   {
     _logger = logger;
     _configuration = configuration;
+    _transport = transport;
   }
 
   public async Task StartAsync()
@@ -60,7 +66,7 @@ public class PhoneHubService : IAsyncDisposable
       var hubUrl = _configuration.GetValue<string>("RotaryPhone:HubUrl") ?? "http://radio:5004/hub";
 
       _hubConnection = new HubConnectionBuilder()
-        .WithUrl(hubUrl)
+        .WithUrl(hubUrl, options => _transport?.Configure(options))
         .WithAutomaticReconnect(new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5),
           TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30) })
         .Build();

@@ -21,10 +21,16 @@ public class GvTrunkHubService : IAsyncDisposable
 
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
 
-  public GvTrunkHubService(ILogger<GvTrunkHubService> logger, IConfiguration configuration)
+  private readonly IHubConnectionTransport? _transport;
+
+  public GvTrunkHubService(
+    ILogger<GvTrunkHubService> logger,
+    IConfiguration configuration,
+    IHubConnectionTransport? transport = null)
   {
     _logger = logger;
     _configuration = configuration;
+    _transport = transport;
   }
 
   public async Task StartAsync()
@@ -46,7 +52,7 @@ public class GvTrunkHubService : IAsyncDisposable
       var hubUrl = $"{baseUrl.TrimEnd('/')}/hubs/gvtrunk";
 
       _hubConnection = new HubConnectionBuilder()
-        .WithUrl(hubUrl)
+        .WithUrl(hubUrl, options => _transport?.Configure(options))
         .WithAutomaticReconnect(new[] { TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(5),
           TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30) })
         .Build();
