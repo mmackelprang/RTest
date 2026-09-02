@@ -402,9 +402,28 @@ public static class AudioServiceExtensions
     services.Configure<RotaryEncoderOptions>(
       configuration.GetSection(RotaryEncoderOptions.SectionName));
 
-    // Register HID encoder service
-    services.AddSingleton<HidRotaryEncoderService>();
+    // ENC-8. The designed configuration, with the owner's direction overrides layered on. Singleton
+    // because it caches the overrides it read from the store; IConfigurationManager is optional
+    // because tests and trimmed hosts run without a store, and the designed directions are the safe
+    // fallback.
+    services.AddSingleton<RotaryEncoderDesignedConfig>(sp => new RotaryEncoderDesignedConfig(
+      sp.GetRequiredService<ILogger<RotaryEncoderDesignedConfig>>(),
+      sp.GetService<Radio.Configuration.Abstractions.IConfigurationManager>()));
+
+    // Register HID encoder service. Built by an explicit factory rather than by the container's
+    // constructor selection, because TimeProvider is deliberately unregistered in production and
+    // the constructor default (TimeProvider.System) is what should apply there.
+    services.AddSingleton<HidRotaryEncoderService>(sp => new HidRotaryEncoderService(
+      sp.GetRequiredService<ILogger<HidRotaryEncoderService>>(),
+      sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
+      sp.GetRequiredService<RotaryEncoderDesignedConfig>(),
+      sp.GetService<TimeProvider>()));
     services.AddSingleton<IRotaryEncoderService>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
+
+    // Second facet of the SAME instance, not a second service: provisioning needs the live HidStream
+    // that only the reader owns. Registered separately so the input interface is not widened with
+    // owner-initiated concerns.
+    services.AddSingleton<IRotaryEncoderProvisioning>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
 
     // Register visualization mode service (tracks current viz mode for encoder + SignalR)
     services.AddSingleton<VisualizationModeService>();
