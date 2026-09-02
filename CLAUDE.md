@@ -264,6 +264,22 @@ button work"* rather than *"what does it look like"*. It needs the graphical ses
 **`--window-position` is a no-op under Wayland.** Windows described elsewhere as "off-screen" are not;
 what makes one visible is stacking order, i.e. whichever browser restarted most recently.
 
+**⚠ Since `LOG-11` (2026-09-02), `journalctl` only carries WARNING and above.** The API's console sink
+is level-restricted, and under systemd the console *is* the journal — so `Information` lines no longer
+appear there. They go to the file sink instead. This changes how the box gets triaged: a startup sequence
+you expect to see in `journalctl -u radio-api` will look like it never happened.
+
+```bash
+# Warnings and errors — journald
+ssh mmack@radio "journalctl -u radio-api --since '-30min' --no-pager | tail -50"
+
+# Information detail — the file sink, which is where startup/device/source lines now live
+ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); tail -100 $F'
+```
+
+The split is deliberate: every line used to be stored twice, once in the journal and once in the file, on
+a box where log volume correlates with audible audio distortion.
+
 **Verifying a deploy actually landed.** ✅ **Closed by `OPS-1` (2026-09-01) — both services are now
 verified by SHA.** `Radio.Web` serves `/api/health/version` on **port 5002**, the twin of the API's on
 5000, and `Deploy-ToLinux.ps1` polls both and `exit 1`s on a mismatch. The SHA parsing behind both is
