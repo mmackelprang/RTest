@@ -67,6 +67,28 @@ public static class RotaryEncoderConfigDefaults
   public const int VolumeClamp = 6;
 
   /// <summary>
+  /// Host per-event clamp for the selector knobs — SOURCE and PRESETS.
+  ///
+  /// <para>
+  /// One detent, one entry, always. A seven-entry list has no long traversal to make bearable, so
+  /// acceleration on it only means a quick flick lands somewhere the user did not aim.
+  /// </para>
+  /// </summary>
+  public const int SelectorClamp = 1;
+
+  /// <summary>
+  /// Host per-event clamp for tuning against a radio source.
+  ///
+  /// <para>
+  /// This one is not only about feel. The tuner is stepped by <b>awaiting one hardware call per
+  /// step</b>, so an unclamped delta of 50 from a factory acceleration tier becomes fifty sequential
+  /// tuner calls from a single detent — a load spike on a box where incidental load correlates with
+  /// audible distortion.
+  /// </para>
+  /// </summary>
+  public const int TuningClamp = 8;
+
+  /// <summary>
   /// Tightened volume clamp used while a safety field is unverified.
   ///
   /// <para>
