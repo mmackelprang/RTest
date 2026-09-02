@@ -18,6 +18,7 @@ public class TTSEventSource : EventAudioSourceBase
   private readonly SoundFlowPlaybackService? _playbackService;
   private CancellationTokenSource? _playbackCts;
   private Task? _playbackMonitorTask;
+  private volatile bool _isPaused;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="TTSEventSource"/> class.
@@ -165,9 +166,25 @@ public class TTSEventSource : EventAudioSourceBase
 
       while (!cancellationToken.IsCancellationRequested)
       {
+        if (_isPaused)
+        {
+          // A paused player reports IsPlaying == false and accrues no audio. Neither the
+          // completion check nor the duration safety net applies while paused.
+          await Task.Delay(checkInterval, cancellationToken);
+          continue;
+        }
+
         // Check if playback is still active
         if (!_playbackService.IsPlaying(Id))
         {
+          if (_isPaused)
+          {
+            // A pause landed between the branch above and this check, so a false IsPlaying is
+            // not evidence of completion here. Re-read rather than trust the branch above.
+            await Task.Delay(checkInterval, cancellationToken);
+            continue;
+          }
+
           // Playback finished naturally
           Logger.LogDebug("TTS playback completed naturally after {Elapsed}", elapsed);
           State = AudioSourceState.Stopped;
@@ -219,10 +236,48 @@ public class TTSEventSource : EventAudioSourceBase
     }
   }
 
+  // Seek is deliberately not overridden. IsSeekable stays false from the base, so SeekAsync
+  // throws NotSupportedException: seeking inside a spoken message has no user value
+  // (ADR-029 §8.3), and a no-op that reported success would be a lie.
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// The _isPaused flag is not decoration. StartPlaybackWithMonitoringAsync treats
+  /// !IsPlaying(Id) as natural completion, and SoundFlowPlaybackService.IsPlaying is
+  /// player.State == PlaybackState.Playing - which a PAUSED player fails. Without this flag a
+  /// pause would raise PlaybackCompleted(EndOfContent) and drive the source to Stopped.
+  /// </remarks>
+  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+  {
+    _isPaused = true;
+    _playbackService?.Pause(Id);
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// The order is the mirror of PauseCoreAsync's and is load-bearing for the same reason.
+  /// Clearing _isPaused first would let the monitor fall out of its pause branch, call
+  /// IsPlaying(Id) on a player that has not been resumed yet, read false, and raise
+  /// PlaybackCompleted(EndOfContent) - the exact failure the flag exists to prevent, and one
+  /// the re-read added inside that branch does NOT catch, because the flag really is false by
+  /// then. Resuming first means the flag only drops after Play() has been issued to the player.
+  /// </remarks>
+  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+  {
+    _playbackService?.Resume(Id);
+    _isPaused = false;
+    return Task.CompletedTask;
+  }
+
   /// <inheritdoc/>
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Stopping TTS playback");
+
+    // A stopped source must not inherit a stale pause: PlayAsync can be called again on this
+    // instance, and a leftover true would park the next monitor loop in its pause branch.
+    _isPaused = false;
 
     // Cancel the playback monitoring
     _playbackCts?.Cancel();

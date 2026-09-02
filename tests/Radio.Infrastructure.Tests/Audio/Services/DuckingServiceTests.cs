@@ -9,6 +9,10 @@ namespace Radio.Infrastructure.Tests.Audio.Services;
 
 public class DuckingServiceTests
 {
+  // Construction lives in DuckingServiceFixture, shared with
+  // DuckingServiceCharacterizationTests so the two cannot drift apart about what today's
+  // ducking behaviour is.
+  private readonly DuckingServiceFixture _fixture;
   private readonly Mock<ILogger<DuckingService>> _loggerMock;
   private readonly Mock<IOptionsMonitor<AudioOptions>> _optionsMock;
   private readonly Mock<IMasterMixer> _mixerMock;
@@ -16,44 +20,20 @@ public class DuckingServiceTests
 
   public DuckingServiceTests()
   {
-    _loggerMock = new Mock<ILogger<DuckingService>>();
-    _optionsMock = new Mock<IOptionsMonitor<AudioOptions>>();
-    _mixerMock = new Mock<IMasterMixer>();
-
-    _defaultOptions = new AudioOptions
-    {
-      DuckingPercentage = 20,
-      DuckingPolicy = DuckingPolicy.FadeSmooth,
-      DuckingAttackMs = 100,
-      DuckingReleaseMs = 500
-    };
-
-    _optionsMock.Setup(x => x.CurrentValue).Returns(_defaultOptions);
+    _fixture = new DuckingServiceFixture();
+    _loggerMock = _fixture.LoggerMock;
+    _optionsMock = _fixture.OptionsMock;
+    _mixerMock = _fixture.MixerMock;
+    _defaultOptions = _fixture.Options;
   }
 
-  private DuckingService CreateService()
-  {
-    return new DuckingService(_loggerMock.Object, _optionsMock.Object, _mixerMock.Object);
-  }
+  private DuckingService CreateService() => _fixture.CreateService();
 
-  private Mock<IEventAudioSource> CreateMockEventSource(string? id = null)
-  {
-    var mock = new Mock<IEventAudioSource>();
-    mock.Setup(x => x.Id).Returns(id ?? Guid.NewGuid().ToString("N"));
-    mock.Setup(x => x.Category).Returns(AudioSourceCategory.Event);
-    mock.Setup(x => x.Type).Returns(AudioSourceType.TTS);
-    mock.Setup(x => x.Duration).Returns(TimeSpan.FromSeconds(2));
-    return mock;
-  }
+  private Mock<IEventAudioSource> CreateMockEventSource(string? id = null) =>
+    _fixture.CreateMockEventSource(id);
 
-  private Mock<IAudioSource> CreateMockPrimarySource(string? id = null)
-  {
-    var mock = new Mock<IAudioSource>();
-    mock.Setup(x => x.Id).Returns(id ?? Guid.NewGuid().ToString("N"));
-    mock.Setup(x => x.Category).Returns(AudioSourceCategory.Primary);
-    mock.Setup(x => x.Type).Returns(AudioSourceType.Radio);
-    return mock;
-  }
+  private Mock<IAudioSource> CreateMockPrimarySource(string? id = null) =>
+    _fixture.CreateMockPrimarySource(id);
 
   [Fact]
   public void Constructor_ThrowsOnNullLogger()

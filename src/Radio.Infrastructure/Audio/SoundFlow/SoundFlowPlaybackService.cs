@@ -597,6 +597,42 @@ public class SoundFlowPlaybackService : IDisposable
   }
 
   /// <summary>
+  /// Seeks a source to an absolute position from the start of its content.
+  /// </summary>
+  /// <param name="sourceId">The source identifier.</param>
+  /// <param name="position">The position to seek to, from the beginning of the content.</param>
+  /// <returns>
+  /// True when the player repositioned. False in exactly three cases: the position is negative,
+  /// no player is registered under this id, OR the player's data provider refused the seek —
+  /// SoundPlayerBase.Seek returns a bool and this method propagates it rather than reporting an
+  /// unconditional success. A caller's IsSeekable contract depends on that difference being
+  /// visible.
+  /// </returns>
+  public bool Seek(string sourceId, TimeSpan position)
+  {
+    ThrowIfDisposed();
+
+    if (position < TimeSpan.Zero)
+    {
+      return false;
+    }
+
+    lock (_playersLock)
+    {
+      if (!_activePlayers.TryGetValue(sourceId, out var player))
+      {
+        return false;
+      }
+
+      // SoundPlayerBase.Seek(TimeSpan, SeekOrigin = Begin).
+      var moved = player.Seek(position);
+      _logger.LogDebug(
+        "Seek for source {SourceId} to {Position} returned {Moved}", sourceId, position, moved);
+      return moved;
+    }
+  }
+
+  /// <summary>
   /// Sets the volume for a specific source. The effective volume is base volume * gain offset.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
@@ -710,15 +746,15 @@ public class SoundFlowPlaybackService : IDisposable
   /// Gets the current playback position for a source.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
-  /// <returns>The current position, or null if not playing.</returns>
+  /// <returns>The current position, or null when no player is registered under this id.</returns>
   public TimeSpan? GetPosition(string sourceId)
   {
     lock (_playersLock)
     {
       if (_activePlayers.TryGetValue(sourceId, out var player))
       {
-        // Try to get position from data provider if available
-        return TimeSpan.Zero; // Position tracking not available in current SoundFlow API
+        // SoundPlayerBase.Time is a float, in SECONDS.
+        return TimeSpan.FromSeconds(player.Time);
       }
     }
     return null;
