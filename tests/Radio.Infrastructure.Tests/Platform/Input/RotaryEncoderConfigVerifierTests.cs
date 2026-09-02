@@ -1,0 +1,196 @@
+using Radio.Core.Configuration;
+using Radio.Infrastructure.Platform.Input;
+
+namespace Radio.Infrastructure.Tests.Platform.Input;
+
+/// <summary>
+/// Tests for the ENC-11 configuration verification and its tiered fault model (handoff §7.6).
+///
+/// <para>
+/// The classification is the part worth testing exhaustively. It decides whether the owner sees
+/// nothing, an amber badge or a red one, and whether the host tightens its volume clamp — and the
+/// distinction it draws is the whole point: a wrong acceleration tier is a knob that feels off, a
+/// wrong <c>wrap</c> on volume is a knob that can blast the room.
+/// </para>
+/// </summary>
+public class RotaryEncoderConfigVerifierTests
+{
+  private static RotaryEncoderDeviceConfig Desired() => RotaryEncoderConfigDefaults.Create();
+
+  private static RotaryEncoderDeviceConfig Clone(RotaryEncoderDeviceConfig c)
+  {
+    byte[] wire = RotaryEncoderConfigCodec.Encode(c);
+    RotaryEncoderConfigCodec.TryDecode(wire, wire.Length, out var copy);
+    return copy;
+  }
+
+  [Fact]
+  public void Compare_IdenticalConfigs_ReportsNoMismatches()
+  {
+    Assert.Empty(RotaryEncoderConfigVerifier.Compare(Desired(), Clone(Desired())));
+  }
+
+  [Fact]
+  public void Defaults_TameTheFactoryVolumeAcceleration()
+  {
+    // The measured factory state on this hardware was step_size 1 with tiers x5 / x15 / x50. At the
+    // host's 2% per unit that is 100 volume points in one detent. These defaults exist to replace
+    // exactly that, so the values are worth pinning rather than trusting.
+    RotaryEncoderChannelConfig volume = Desired().Encoders[RotaryEncoderConfigDefaults.VolumeEncoderIndex];
+
+    Assert.Equal(2, volume.StepSize);
+    Assert.Equal(2, volume.Tiers[0].Multiplier);
+    Assert.Equal(3, volume.Tiers[1].Multiplier);
+    Assert.Equal(0, volume.Tiers[2].ThresholdMs);   // third tier disabled outright
+    Assert.Equal(0, volume.Tiers[2].Multiplier);
+
+    int worstCasePoints = volume.StepSize * volume.Tiers[1].Multiplier;
+    Assert.Equal(6, worstCasePoints);
+    Assert.True(worstCasePoints * 2 < 100, "one detent must not be able to cross the volume range");
+  }
+
+  [Fact]
+  public void Defaults_DisableAccelerationOnTheSelectorKnobs()
+  {
+    // A seven-entry list with a multiplier means one quick flick lands somewhere the user did not
+    // aim. One detent, one entry, always — on SOURCE and PRESETS alike.
+    RotaryEncoderDeviceConfig c = Desired();
+
+    foreach (int i in new[] { 1, 2 })
+    {
+      Assert.All(c.Encoders[i].Tiers, t => Assert.Equal(0, t.ThresholdMs));
+      Assert.All(c.Encoders[i].Tiers, t => Assert.Equal(0, t.Multiplier));
+    }
+  }
+
+  [Fact]
+  public void Defaults_NeverWrapAndNeverReverse()
+  {
+    // wrap = false on volume is the single most safety-critical value in the table: one detent past
+    // zero would be full scale.
+    RotaryEncoderDeviceConfig c = Desired();
+
+    Assert.All(c.Encoders, e => Assert.False(e.Wrap));
+    Assert.All(c.Encoders, e => Assert.False(e.Reverse));
+  }
+
+  [Fact]
+  public void Compare_WrapMismatchOnVolume_IsASafetyField()
+  {
+    RotaryEncoderDeviceConfig readBack = Clone(Desired());
+    readBack.Encoders[RotaryEncoderConfigDefaults.VolumeEncoderIndex].Wrap = true;
+
+    var mismatches = RotaryEncoderConfigVerifier.Compare(Desired(), readBack);
+
+    Assert.Contains(mismatches, m => m.Field == "wrap" && m.IsSafetyField);
+  }
+
+  [Fact]
+  public void Compare_ReverseMismatch_IsASafetyFieldOnEveryKnob()
+  {
+    // A knob that moves the wrong way is the same hazard wearing a different hat.
+    for (int i = 0; i < RotaryEncoderDeviceConfig.EncoderCount; i++)
+    {
+      RotaryEncoderDeviceConfig readBack = Clone(Desired());
+      readBack.Encoders[i].Reverse = true;
+
+      var mismatches = RotaryEncoderConfigVerifier.Compare(Desired(), readBack);
+
+      Assert.Contains(mismatches, m => m.EncoderIndex == i && m.Field == "reverse" && m.IsSafetyField);
+    }
+  }
+
+  [Fact]
+  public void Compare_AccelerationMismatch_IsNotASafetyField()
+  {
+    RotaryEncoderDeviceConfig readBack = Clone(Desired());
+    readBack.Encoders[0].Tiers[0].Multiplier = 50;
+
+    var mismatches = RotaryEncoderConfigVerifier.Compare(Desired(), readBack);
+
+    Assert.NotEmpty(mismatches);
+    Assert.All(mismatches, m => Assert.False(m.IsSafetyField));
+  }
+
+  [Fact]
+  public void Classify_MatchingReadBack_IsConfigured()
+  {
+    Assert.Equal(
+      RotaryEncoderConfigStatus.Configured,
+      RotaryEncoderConfigVerifier.Classify(Array.Empty<RotaryEncoderConfigMismatch>(), attempt: 1));
+  }
+
+  [Theory]
+  [InlineData(1)]
+  [InlineData(2)]
+  public void Classify_FeelFieldMismatchInsideTheRetryBudget_IsTransientAndSilent(int attempt)
+  {
+    var mismatches = new[] { new RotaryEncoderConfigMismatch(0, "tier1_multiplier", IsSafetyField: false) };
+
+    Assert.Equal(
+      RotaryEncoderConfigStatus.Transient,
+      RotaryEncoderConfigVerifier.Classify(mismatches, attempt));
+  }
+
+  [Fact]
+  public void Classify_FeelFieldStillWrongAfterTheBudget_IsDegraded()
+  {
+    var mismatches = new[] { new RotaryEncoderConfigMismatch(0, "step_size", IsSafetyField: false) };
+
+    Assert.Equal(
+      RotaryEncoderConfigStatus.Degraded,
+      RotaryEncoderConfigVerifier.Classify(mismatches, RotaryEncoderConfigVerifier.TransientAttempts));
+  }
+
+  [Fact]
+  public void Classify_SafetyFieldMismatch_IsAHardFaultImmediately()
+  {
+    // Deliberately not held back until the retry budget is spent. Retrying is still worth doing, but
+    // the knob is live the whole time, so the host must tighten its clamp now rather than three
+    // seconds from now.
+    var mismatches = new[] { new RotaryEncoderConfigMismatch(0, "wrap", IsSafetyField: true) };
+
+    Assert.Equal(
+      RotaryEncoderConfigStatus.HardFault,
+      RotaryEncoderConfigVerifier.Classify(mismatches, attempt: 1));
+  }
+
+  [Fact]
+  public void Classify_NoResponse_IsTreatedAsAMismatchNotAnError()
+  {
+    // "The device did not confirm" and "the device confirmed something wrong" carry the same
+    // consequence: the configuration is not trustworthy.
+    Assert.Equal(RotaryEncoderConfigStatus.Transient, RotaryEncoderConfigVerifier.Classify(null, 1));
+    Assert.Equal(
+      RotaryEncoderConfigStatus.Degraded,
+      RotaryEncoderConfigVerifier.Classify(null, RotaryEncoderConfigVerifier.TransientAttempts));
+  }
+
+  [Theory]
+  [InlineData(RotaryEncoderConfigStatus.Unknown)]
+  [InlineData(RotaryEncoderConfigStatus.Transient)]
+  [InlineData(RotaryEncoderConfigStatus.Degraded)]
+  [InlineData(RotaryEncoderConfigStatus.HardFault)]
+  public void VolumeClamp_IsTightenedForEveryUnverifiedStatus(RotaryEncoderConfigStatus status)
+  {
+    // The window between connect and a verified push is real, and during it the device may still be
+    // on factory tiers. Anything short of Configured must clamp hard.
+    Assert.Equal(
+      RotaryEncoderConfigDefaults.VolumeClampUnverified,
+      RotaryEncoderConfigVerifier.VolumeClampFor(status));
+  }
+
+  [Fact]
+  public void VolumeClamp_RelaxesOnlyWhenVerified()
+  {
+    Assert.Equal(
+      RotaryEncoderConfigDefaults.VolumeClamp,
+      RotaryEncoderConfigVerifier.VolumeClampFor(RotaryEncoderConfigStatus.Configured));
+  }
+
+  [Fact]
+  public void RetryBackoff_MatchesTheSpecifiedSchedule()
+  {
+    Assert.Equal(new[] { 250, 1000, 3000 }, RotaryEncoderConfigVerifier.RetryBackoffMs);
+  }
+}
