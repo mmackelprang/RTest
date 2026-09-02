@@ -8,8 +8,8 @@ authorised autonomous execution against this list in the §2 order, merging on g
 **`design/hardware/front-panel-layout_4.svg`**. **D2's order held; D2's dimensions did not.** The knobs are
 **one vertical column left of the screen at a uniform 29.63 mm pitch, all 15 mm** — not a horizontal row at
 90/70/90 mm with two sizes. `O9`, the `D2` and `D3` rows, and the `ENC-4` entry are corrected in place.
-**`ENC-4` shipped its HUD on the wrong axis** and needs a 90° rotation (Designer Rev 4 §6.2 specifies it;
-that is a separate PR). Designer Rev 4 also **re-derived §10.1's mis-grab safety conclusion**, whose stated
+~~**`ENC-4` shipped its HUD on the wrong axis** and needs a 90° rotation (Designer Rev 4 §6.2 specifies it;
+that is a separate PR).~~ ✅ **Rotated and shipped 2026-09-02 as `ENC-4c`** — see the `ENC-4` entry. Designer Rev 4 also **re-derived §10.1's mis-grab safety conclusion**, whose stated
 premise was the 90 mm spacing.
 **Designer Rev 5 then closed the rotation's open questions** — left-edge collisions resolved (accept
 transient occlusion; four alternatives rejected with reasons), the phase contract settled (§6.10), and two
@@ -386,8 +386,10 @@ keeps the knobs from becoming a new distortion source.
 ✅ **SHIPPED 2026-09-02** — implementation in `507b0d3`/`eb4005e`/`bd762d1`/`29acc01`, pre-merge review and its
 three HIGH fixes in #519. Plan: [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md), 17 tasks.
 Dependencies were `ENC-1` #498 and `ENC-3` #511. **`ENC-4a` shipped separately as #493.**
-Verified on the box at 1920×720: quarter centres exact at **240 / 720 / 1200 / 1680**, 1500 ms dismissal with re-arm,
-and coalescing measured at 11 broadcasts for 100 publishes over 1.1 s (the §6.8 ≥ 50 ms rule).
+Verified on the box at 1920×720: 1500 ms dismissal with re-arm, and coalescing measured at 11 broadcasts for 100
+publishes over 1.1 s (the §6.8 ≥ 50 ms rule). ~~quarter centres exact at **240 / 720 / 1200 / 1680**~~ — that
+verification confirmed the card sat where the *then-current* spec put it, and the spec was wrong about the axis.
+✅ **Rotated and re-verified on the box 2026-09-02** — see the geometry bullet below.
 ⛔ **The router index→handler remap was deliberately NOT done** — it still reads `0=Volume 1=Tuning 2=Source
 3=Visualization` against a cabinet engraved VOLUME / SOURCE / PRESETS / TUNING, and belongs to `ENC-5`/`ENC-7`, which
 introduce the handlers it would point at. A test pins the current mapping. Cards on knobs 2–4 therefore say the wrong
@@ -430,8 +432,20 @@ words today; the card is in the right *place*, which is what this row owns.
   values **and gives the reason**, so that nobody converts one into the other later. **Rev 4 also flags two
   mechanics the rotation breaks** (no vertical twin for `margin-left: -180px` when card height varies; the
   `snackbarSlideIn` entrance now points the wrong way) **and a full left-edge collision list — the VOLUME
-  band lands on the fixed topbar and covers `ENC-4a`'s own `MUTED` chip.** *(The correction is a separate
-  reviewed PR. Rev 4 specifies it; it does not build it.)*
+  band lands on the fixed topbar and covers `ENC-4a`'s own `MUTED` chip.** *(The correction was a separate
+  reviewed PR. Rev 4 specified it; it did not build it.)*
+  ✅ **SHIPPED 2026-09-02 as `ENC-4c`.** The rotation is done, reviewed and on the box. Cards anchor at
+  `left: 24px` on bands **90 / 270 / 450 / 630**, and the four bands, the engraved names and the index→knob
+  mapping now have **one definition** — `Radio.Core.Configuration.FrontPanelGeometry`, citing the drawing —
+  because §6.2 names four surfaces that need them and this repo has already paid once for a value defined in
+  three places. Vertical centring is clamped to ≥ 8 px inside the viewport and expressed on the independent
+  `translate` property, so the entrance animation cannot drop it and no wrapper element was needed. The
+  mirrored keyframe pair is §6.1's **declared** exception, scoped to the Normal variant — **do not "correct"
+  `.encoder-hud-enter` back to `.snackbar-enter`**; the Sleep variant, placed by the drift wrapper rather
+  than by an edge, still uses the original. No new tokens; §6.9 stands. Occlusion is accepted on every band
+  per §6.2, with §6.7's mute invariant as the reason band 90 is safe. **§6.10's phase contract shipped in the
+  same PR:** an unrecognised HUD phase is now *not holding* (it could otherwise strand a card by suspending
+  the dismissal timer), with `Value` given its own arm so a turn mid-hold still preserves the ring.
   ✅ **Rev 5 closed every open question the rotation had, so it is implementable as specced.**
   **Decision: accept transient occlusion on all bands** — inset, a narrower card, per-route
   suppression, z-order yielding and a permanent left gutter were each considered and rejected with

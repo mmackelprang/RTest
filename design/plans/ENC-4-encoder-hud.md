@@ -10,6 +10,28 @@
 
 ---
 
+> ## ⚠ SUPERSEDED IN ONE RESPECT — the HUD geometry. Read this before trusting any coordinate below.
+>
+> **This plan was written against handoff Rev 3, which read the knobs as a horizontal row beneath the
+> screen.** The owner's as-built drawing (`design/hardware/front-panel-layout_4.svg`) puts them in a
+> **vertical column to the LEFT of the LCD**, so every geometry instruction in this document is on the
+> wrong axis: the quarter centres **240 / 720 / 1200 / 1680**, the `QuarterCentre(i) => 240 + (i * 480)`
+> recipe, `bottom: 24px`, `margin-left: -180px`, the `Geometry_PlacesEachEncoderInItsOwnQuarter` test and
+> UAT steps **A1–A5**.
+>
+> **Corrected in handoff Rev 4 §6.2 and closed in Rev 5; shipped as `ENC-4c`.** Cards anchor to
+> `left: 24px` on bands **90 / 270 / 450 / 630** down the 720 px axis, vertically centred on the band and
+> clamped ≥ 8 px inside the viewport, entering on §6.1's declared mirrored keyframe pair. The four bands
+> now have **one definition**, `Radio.Core.Configuration.FrontPanelGeometry`.
+>
+> **Also superseded: §2.5's phase contract.** Rev 5 §6.10 makes an unrecognised phase *not holding* — it
+> renders nothing either way, and a true `IsHolding` on one only suspends the dismissal timer and strands
+> the card — with `Value` given its own explicit arm so a turn mid-hold still preserves the ring.
+>
+> **Everything else in this plan shipped as written and still describes the component**: the two hosts,
+> the payload, the long-press synthesis, the timings, the throttling, `ENC-4b`, and the deliberate
+> non-remap of the router's index→handler table.
+
 ## 0. Read this before Task 1
 
 ### 0.1 What this row is, in one paragraph
