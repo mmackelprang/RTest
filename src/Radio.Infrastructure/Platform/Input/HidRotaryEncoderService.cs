@@ -7,9 +7,59 @@ using Radio.Core.Interfaces.Input;
 namespace Radio.Infrastructure.Platform.Input;
 
 /// <summary>
-/// Reads rotary encoder events from a Raspberry Pi Pico via USB HID.
-/// The Pico sends 8-byte reports: bytes 1-4 are signed encoder deltas,
-/// byte 5 is a button bitmask (bit N = encoder N button state).
+/// Reads rotary encoder events from a RotaryUsb device (VID 0xCAFE / PID 0x4005) over USB HID.
+///
+/// <para>
+/// <b>Wire protocol (Input Report 0x01, 36-byte payload).</b> Verified against the live device's HID
+/// report descriptor on 2026-09-02 and against <c>RotaryUsb/docs/INTEGRATION.md</c> §4. All values
+/// little-endian; offsets are <i>payload</i> offsets, so the buffer index is offset + 1 because the
+/// report ID occupies byte 0.
+/// </para>
+///
+/// <list type="table">
+///   <item><term>0–15</term><description>int32 × 4 — clamped positions</description></item>
+///   <item><term>16</term><description>uint8 — button bitmask, bit <i>n</i> = encoder <i>n</i></description></item>
+///   <item><term>17</term><description>uint8 — active acceleration tiers, 2 bits per encoder</description></item>
+///   <item><term>18–19</term><description>reserved</description></item>
+///   <item><term>20–35</term><description>int32 × 4 — free-running movement accumulators</description></item>
+/// </list>
+///
+/// <para>
+/// <b>What the previous implementation got wrong, so it is not reintroduced.</b> It read an 8-byte
+/// report and took bytes 1–4 as <c>sbyte</c> deltas and byte 5 as the button mask. The device sends
+/// none of that: the report is 37 bytes including the ID, deltas do not appear on the wire at all,
+/// and the button mask is at payload 16. Every UX behaviour built on those values was being built on
+/// garbage.
+/// </para>
+///
+/// <para>
+/// <b>Movement is an odometer, not a delta — and this is the dangerous part.</b> It is a running
+/// total since power-on that keeps accruing while nothing is listening. Differencing it against the
+/// last value seen <i>before</i> a disconnect would deliver an entire outage as one delta, on the
+/// volume knob. So the first report after every connect is a <b>baseline, not an input</b>: recorded
+/// and discarded. Designer's test for it, verbatim: <i>"Turn a knob ~50 detents while unplugged,
+/// then replug: volume does not jump."</i>
+/// </para>
+///
+/// <para>
+/// The accumulator <b>wraps</b> at 32 bits rather than saturating, so the subtraction is
+/// <c>unchecked</c> — two's-complement gives the correct signed delta straight across the boundary.
+/// A saturating design would have frozen the control after ~119 hours of continuous fast spinning.
+/// </para>
+///
+/// <para>
+/// <b>Silence is the idle state, not a fault.</b> The device transmits only when the report contents
+/// change, so the read blocks until the next report rather than polling. An idle device is expected
+/// to produce nothing for long stretches and must never be treated as a disconnect.
+/// </para>
+///
+/// <para>
+/// Movement already includes acceleration (<c>step_size × tier_multiplier</c>) and respects the
+/// per-encoder <c>reverse</c> flag, so the host does not reimplement tier logic or direction. Detent
+/// density is firmware-owned. ⚠ For a <i>bounded</i> control the device's own clamped
+/// <c>position</c> is the better input — see <see cref="GetPosition"/> and the note on
+/// <see cref="EncoderTurnedEventArgs"/> consumers in ENC-3/ENC-7.
+/// </para>
 /// </summary>
 public class HidRotaryEncoderService : IRotaryEncoderService
 {
@@ -20,8 +70,9 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   private bool _isConnected;
   private bool _disposed;
 
-  // Track previous button states for edge detection
-  private readonly bool[] _previousButtonStates = new bool[4];
+  // The wire protocol lives in RotaryEncoderDecoder so it can be tested without hardware.
+  private readonly RotaryEncoderDecoder _decoder = new();
+
 
   public HidRotaryEncoderService(
     ILogger<HidRotaryEncoderService> logger,
@@ -106,6 +157,16 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         }
 
         stream = device.Open();
+        // Infinite is correct for an event-driven device that is silent at rest: the read simply
+        // waits for the next report rather than waking to discover nothing happened.
+        //
+        // ⚠ The consequence, recorded rather than papered over: cancellation cannot interrupt an
+        // in-flight read, so StopAsync falls back to its 5 s abandon path on a quiet device. A
+        // finite timeout would fix that, but only if HidSharp surfaces the expiry as
+        // TimeoutException — and if it surfaces it as IOException instead, the handler below would
+        // read it as a disconnect and tear the connection down once per timeout, forever. That is
+        // not verifiable from here, and it is ENC-0's territory (disappears-mid-session handling),
+        // so this keeps the behaviour that is known to work.
         stream.ReadTimeout = Timeout.Infinite;
 
         if (!_isConnected)
@@ -115,7 +176,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService
           ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs { IsConnected = true });
         }
 
-        await ReadFromDeviceAsync(stream, cancellationToken);
+        await ReadFromDeviceAsync(device, stream, cancellationToken);
       }
       catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
       {
@@ -149,10 +210,26 @@ public class HidRotaryEncoderService : IRotaryEncoderService
     }
   }
 
-  private async Task ReadFromDeviceAsync(HidStream stream, CancellationToken cancellationToken)
+  private async Task ReadFromDeviceAsync(HidDevice device, HidStream stream, CancellationToken cancellationToken)
   {
-    var buffer = new byte[8];
-    var pollInterval = _options.CurrentValue.PollIntervalMs;
+    // Size the buffer from the device rather than a constant: report 0x04 (diagnostics) is 56 bytes
+    // and larger than the 37-byte positions report, so a 37-byte buffer would truncate it and, on
+    // some backends, error rather than skip.
+    // Two different lengths, and conflating them defeats the feature detection. The DEVICE's
+    // reported length is what says whether this firmware sends movement accumulators; the BUFFER is
+    // floored to the positions-report size so a short-report device cannot cause an undersized
+    // buffer. Passing the floored value to BeginConnection would make `>= 37` true by construction
+    // and report movement support for firmware that has none.
+    int deviceReportLength = device.GetMaxInputReportLength();
+    var buffer = new byte[Math.Max(deviceReportLength, RotaryEncoderDecoder.PositionPayloadSize + 1)];
+
+    // Re-baseline lives here, not at the call site, so a reconnect inside the read loop cannot skip
+    // it. See RotaryEncoderDecoder.BeginConnection for why that matters.
+    _decoder.BeginConnection(deviceReportLength);
+
+    _logger.LogInformation(
+      "Encoder report length {Length} bytes (movement accumulators: {HasMovement})",
+      deviceReportLength, _decoder.HasMovement);
 
     while (!cancellationToken.IsCancellationRequested)
     {
@@ -163,30 +240,37 @@ public class HidRotaryEncoderService : IRotaryEncoderService
       }
       catch (IOException)
       {
-        // Device disconnected
+        // Device disconnected.
         return;
       }
 
-      if (bytesRead < 6)
-      {
-        continue;
-      }
-
-      ParseReport(buffer);
-
-      if (pollInterval > 0)
-      {
-        await Task.Delay(pollInterval, cancellationToken);
-      }
+      ParseReport(buffer, bytesRead);
     }
   }
 
-  private void ParseReport(byte[] data)
+  private void ParseReport(byte[] data, int bytesRead)
   {
-    // Bytes 1-4: signed encoder deltas (sbyte per encoder)
-    for (int i = 0; i < 4; i++)
+    if (!_decoder.Decode(data, bytesRead))
     {
-      var delta = (sbyte)data[i + 1];
+      return;
+    }
+
+    for (int i = 0; i < RotaryEncoderDecoder.EncoderCount; i++)
+    {
+      bool? pressed = _decoder.ButtonChanges[i];
+      if (pressed.HasValue)
+      {
+        ButtonPressed?.Invoke(this, new EncoderButtonEventArgs
+        {
+          EncoderIndex = i,
+          IsPressed = pressed.Value
+        });
+      }
+    }
+
+    for (int i = 0; i < RotaryEncoderDecoder.EncoderCount; i++)
+    {
+      int delta = _decoder.Deltas[i];
       if (delta != 0)
       {
         EncoderTurned?.Invoke(this, new EncoderTurnedEventArgs
@@ -196,22 +280,25 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         });
       }
     }
+  }
 
-    // Byte 5: button bitmask (bit N = encoder N button)
-    byte buttonByte = data[5];
-    for (int i = 0; i < 4; i++)
+  /// <summary>
+  /// Latest clamped position for an encoder, in device units.
+  ///
+  /// <para>
+  /// Prefer this over accumulating <see cref="EncoderTurned"/> deltas for a <b>bounded</b> control
+  /// such as volume: the device owns the range and clamping at the ends is the wanted behaviour.
+  /// Deltas are the right input where the host owns the range, such as tuning.
+  /// </para>
+  /// </summary>
+  public int GetPosition(int encoderIndex)
+  {
+    if (encoderIndex < 0 || encoderIndex >= RotaryEncoderDecoder.EncoderCount)
     {
-      bool isPressed = (buttonByte & (1 << i)) != 0;
-      if (isPressed != _previousButtonStates[i])
-      {
-        _previousButtonStates[i] = isPressed;
-        ButtonPressed?.Invoke(this, new EncoderButtonEventArgs
-        {
-          EncoderIndex = i,
-          IsPressed = isPressed
-        });
-      }
+      throw new ArgumentOutOfRangeException(nameof(encoderIndex));
     }
+
+    return _decoder.GetPosition(encoderIndex);
   }
 
   private HidDevice? FindDevice(RotaryEncoderOptions opts)
