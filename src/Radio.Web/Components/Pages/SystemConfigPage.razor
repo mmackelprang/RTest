@@ -17,7 +17,7 @@
 <PageTitle>System Configuration</PageTitle>
 
 <div style="height: 100%; display: flex; overflow: hidden;">
-  <RadzenTabs TabPosition="TabPosition.Left" SelectedIndex="@_activeTab" Change="@(args => _activeTab = args)"
+  <RadzenTabs TabPosition="TabPosition.Left" SelectedIndex="@_activeTab" Change="@OnTopLevelTabChanged"
               Style="height: 100%; width: 100%;" class="system-config-tabs">
     <Tabs>
 
@@ -1464,7 +1464,7 @@
 
     <!-- Tab 8: Integrations -->
     <RadzenTabsItem Text="Integrations" Icon="extension">
-      <RadzenTabs>
+      <RadzenTabs SelectedIndex="@_integrationsSubTab" Change="@OnIntegrationsSubTabChanged">
         <Tabs>
 
         <!-- Sub-tab 1: Rotary Encoders -->
@@ -1505,12 +1505,165 @@
                       </RadzenColumn>
                     }
                   }
+                  @if (_encoderProvisioning != null && _encoderProvisioning.Enabled)
+                  {
+                    <RadzenColumn Size="12" SizeMD="6">
+                      <div style="display:flex; flex-direction:row; gap:8px; align-items:center">
+                        <span><strong>Configuration:</strong></span>
+                        <RadzenBadge Text="@EncoderTierText(_encoderProvisioning.Status)"
+                                     BadgeStyle="@EncoderTierBadge(_encoderProvisioning.Status)" />
+                        @if (_encoderProvisioning.LastVerifiedUtc is { } verified)
+                        {
+                          @* "verified" means a read-back MATCHED at this time. LastVerifiedUtc is set
+                             nowhere else — see the ENC-8 plan §0.5. *@
+                          <span style="font-size:0.75rem; color:var(--text-low)">
+                            verified @verified.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+                          </span>
+                        }
+                        else
+                        {
+                          <span style="font-size:0.75rem; color:var(--text-low)">never verified</span>
+                        }
+                      </div>
+                    </RadzenColumn>
+                    <RadzenColumn Size="12">
+                      <div style="display:flex; flex-direction:row; gap:8px; align-items:center">
+                        <span><strong>Saved to device:</strong></span>
+                        @if (_encoderProvisioning.LastSavedToDeviceUtc is { } saved)
+                        {
+                          <span>@saved.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</span>
+                        }
+                        <span style="color:@EncoderFlashColor(_encoderProvisioning.Flash)">
+                          @EncoderFlashText(_encoderProvisioning.Flash)
+                        </span>
+                      </div>
+                    </RadzenColumn>
+                  }
                 </RadzenRow>
               }
               else
               {
                 <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" />
               }
+            </RadzenCard>
+
+            <!-- Device configuration — read-only by design (handoff §7.8 card 2). These numbers are a
+                 designed feel derived against the FM channel grid (§5.5) and a volume-safety budget
+                 (§5.4), not preferences. The one editable field is Reverse, in its own card below. -->
+            <RadzenCard>
+              <h6 style="margin-bottom:12px">Device configuration</h6>
+              @if (_encoderProvisioning == null)
+              {
+                <RadzenProgressBarCircular Size="ProgressBarCircularSize.Small" Mode="ProgressBarMode.Indeterminate" />
+              }
+              else if (_encoderProvisioning.Fields.Count == 0)
+              {
+                <span style="color:var(--text-low)">
+                  No configuration has been pushed on this connection yet.
+                </span>
+              }
+              else
+              {
+                <table class="rz-datatable encoder-config-table" style="width:100%; max-width:900px">
+                  <thead>
+                    <tr>
+                      <th>Knob</th><th>Step</th><th>Wrap</th><th>Direction</th>
+                      <th>Tier 1</th><th>Tier 2</th><th>Tier 3</th><th>Device</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (int i = 0; i < 4; i++)
+                    {
+                      var idx = i;
+                      <tr>
+                        <td><strong>@EncoderCabinetName(idx)</strong> <span style="color:var(--text-low)">· knob @(idx + 1)</span></td>
+                        <td>@FieldValue(idx, "step_size")</td>
+                        <td>@FieldValue(idx, "wrap")</td>
+                        <td>@(FieldValue(idx, "reverse") == "True" ? "Reversed" : "Normal")</td>
+                        <td>@TierText(idx, 1)</td>
+                        <td>@TierText(idx, 2)</td>
+                        <td>@TierText(idx, 3)</td>
+                        <td>@RowAgreementText(idx)</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+
+                @* Fields the six columns above do not show — min_value, max_value, steps_per_detent —
+                   are still compared by the verifier. A mismatch on one of them must not be invisible
+                   just because the table has no column for it. *@
+                @if (OffTableMismatches().Any())
+                {
+                  <div style="margin-top:8px; font-size:0.75rem; color:var(--signal-amber)">
+                    Also disagreeing: @string.Join(", ", OffTableMismatches())
+                  </div>
+                }
+              }
+            </RadzenCard>
+
+            <!-- Direction -->
+            <RadzenCard>
+              <h6 style="margin-bottom:4px">Direction</h6>
+              <small style="color:var(--text-low); display:block; margin-bottom:12px">
+                Turn a knob clockwise and the value should go up. If one goes the wrong way, reverse it
+                here — this depends on how that knob was wired, not on preference. Changing one sends it
+                to the knobs straight away.
+              </small>
+              @if (_encoderProvisioning is { Enabled: true })
+              {
+                <RadzenRow>
+                  @for (int i = 0; i < 4; i++)
+                  {
+                    var idx = i;
+                    <RadzenColumn Size="6" SizeMD="3">
+                      <div style="display:flex; align-items:center; gap:8px">
+                        <RadzenSwitch Value="@(FieldValue(idx, "reverse") == "True")"
+                                      Disabled="@(_encoderBusy || !_encoderProvisioning.IsConnected)"
+                                      Change="@(async (bool v) => await SetEncoderReverseAsync(idx, v))" />
+                        <span>@EncoderCabinetName(idx)</span>
+                      </div>
+                    </RadzenColumn>
+                  }
+                </RadzenRow>
+              }
+            </RadzenCard>
+
+            <!-- Actions -->
+            <RadzenCard>
+              <h6 style="margin-bottom:12px">Actions</h6>
+              <div style="display:flex; flex-direction:row; gap:12px; flex-wrap:wrap; align-items:flex-start">
+                <div style="display:flex; flex-direction:column; gap:4px; max-width:320px">
+                  <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Icon="save"
+                                Text="Save to device"
+                                Disabled="@(_encoderBusy || _encoderProvisioning?.IsConnected != true)"
+                                Click="SaveEncoderToDeviceAsync" />
+                  @* Handoff §7.8, verbatim. It says what it writes, and because Rev 3 dropped the
+                     "safe baseline" what it writes is what is on screen. If a future revision
+                     reintroduces any divergence, this copy has to change with it and the reviewer
+                     should treat a mismatch as a defect. *@
+                  <small style="color:var(--text-low)">
+                    Saves the settings above to the knobs so they work the same way even if the app is restarting.
+                  </small>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px; max-width:320px">
+                  <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Primary" Icon="refresh"
+                                Text="Re-apply settings"
+                                Disabled="@(_encoderBusy || _encoderProvisioning?.IsConnected != true)"
+                                Click="ReapplyEncoderAsync" />
+                  <small style="color:var(--text-low)">
+                    Sends the settings to the knobs again and checks they took. Does not change what is saved on the device.
+                  </small>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:4px; max-width:320px">
+                  <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light" Icon="restart_alt"
+                                Text="Reset counters"
+                                Disabled="@(_encoderBusy || _encoderProvisioning?.IsConnected != true)"
+                                Click="ResetEncoderCountersAsync" />
+                  <small style="color:var(--text-low)">
+                    Zeroes the movement counters the knobs keep. Nothing on this page shows them yet.
+                  </small>
+                </div>
+              </div>
             </RadzenCard>
 
             <!-- Encoder Mapping Reference -->
@@ -1525,22 +1678,38 @@
                   </tr>
                 </thead>
                 <tbody>
-                  <tr><td>0 - Volume</td><td>Volume Up/Down</td><td>Mute Toggle</td></tr>
-                  <tr><td>1 - Tuning</td><td>Frequency Up/Down</td><td>Start/Stop Scan</td></tr>
-                  <tr><td>2 - Source</td><td>Preview Sources</td><td>Switch To Previewed Source</td></tr>
-                  <tr><td>3 - Visualizer</td><td>Cycle Viz Modes</td><td>Viz On/Off</td></tr>
+                  @foreach (var m in _encoderMapping ?? [])
+                  {
+                    <tr>
+                      <td>@(m.EncoderIndex) — @m.CabinetName</td>
+                      <td>@m.TurnDescription</td>
+                      <td>@m.PressDescription</td>
+                    </tr>
+                  }
                 </tbody>
               </table>
+              @* The engraved order and the software mapping genuinely disagree right now. Rendering
+                 only one of them would assert something false, so the page states it. Computed from
+                 the two orders rather than written down, so it vanishes by itself when ENC-5 / ENC-7
+                 remap the router and never becomes a stale warning about a fixed problem. *@
+              @if (MappingDisagreesWithCabinet())
+              {
+                <div style="margin-top:8px; font-size:0.75rem; color:var(--signal-amber)">
+                  These are what the software does today. They do not all match the labels on the
+                  cabinet yet — the SOURCE, PRESETS and TUNING knobs are still wired to the older
+                  order in software. VOLUME is correct.
+                </div>
+              }
             </RadzenCard>
 
-            <!-- Configuration -->
+            <!-- Connection settings -->
             <RadzenCard>
               <div style="display:flex; flex-direction:row; align-items:center; margin-bottom:12px">
-                <h6 style="margin:0">Configuration</h6>
+                <h6 style="margin:0">Connection settings</h6>
                 <div style="flex:1"></div>
                 <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary"
                               Click="SaveEncoderConfigAsync" Icon="save"
-                              Disabled="@(_isSaving || _encoderConfig == null)" Text="Save" />
+                              Disabled="@(_isSaving || _encoderConfig == null)" Text="Save connection settings" />
               </div>
               @if (_encoderConfig != null)
               {
@@ -1565,9 +1734,6 @@
                   </RadzenColumn>
                   <RadzenColumn Size="6" SizeMD="3">
                     <RadzenNumeric TValue="int" @bind-Value="_encoderConfig.PollIntervalMs" Min="1" Max="1000" Placeholder="Poll Interval (ms)" Style="width:100%" />
-                  </RadzenColumn>
-                  <RadzenColumn Size="6" SizeMD="3">
-                    <RadzenNumeric TValue="int" @bind-Value="_encoderConfig.VolumeStepPercent" Min="1" Max="20" Placeholder="Volume Step (%)" Style="width:100%" />
                   </RadzenColumn>
                   <RadzenColumn Size="6" SizeMD="3">
                     <RadzenNumeric TValue="int" @bind-Value="_encoderConfig.ReconnectDelayMs" Min="500" Max="30000" Placeholder="Reconnect Delay (ms)" Style="width:100%" />
@@ -1759,6 +1925,13 @@
 
 @code {
   private int _activeTab = 0;
+
+  // Where the Rotary Encoders panel lives, as a pair of tab indices. RadzenTabs identifies a tab by
+  // its position, so inserting a tab above either of these moves the panel and both constants have to
+  // move with it. They exist because the encoder poll is only allowed to run while that panel shows.
+  private const int IntegrationsTabIndex = 7;
+  private const int RotaryEncoderSubTabIndex = 0;
+  private int _integrationsSubTab = 0;
   private System.Threading.Timer? _statsTimer;
 
   // System Stats
@@ -1841,6 +2014,10 @@
   private EncoderStatusDto? _encoderStatus;
   private PhoneIntegrationStatusDto? _phoneStatus;
   private RotaryEncoderConfigDto? _encoderConfig;
+  private EncoderProvisioningDto? _encoderProvisioning;
+  private List<EncoderMappingDto>? _encoderMapping;
+  private System.Threading.Timer? _encoderPollTimer;
+  private bool _encoderBusy;
   private PhoneIntegrationConfigDto? _phoneConfig;
   private PbapConfigDto? _pbapConfig;
   private string _testMessage = "";
@@ -3573,6 +3750,7 @@
     try
     {
       _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
+      _encoderMapping = await IntegrationsApi.GetEncoderMappingAsync();
       _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
       _encoderConfig = await ConfigApi.GetConfigurationAsync<RotaryEncoderConfigDto>("rotaryencoder") ?? new();
       _phoneConfig = await ConfigApi.GetConfigurationAsync<PhoneIntegrationConfigDto>("phoneintegration") ?? new();
@@ -3609,6 +3787,258 @@
     {
       _isSaving = false;
     }
+  }
+
+  // The four tiers of encoder handoff §7.6, rendered once. ENC-12's badge reads the same tier from
+  // the same DTO; keeping this mapping in one place is what stops the page and the badge disagreeing
+  // about what "Degraded" looks like.
+  private static string EncoderTierText(string status) => status switch
+  {
+    "Configured" => "Configured",
+    "Transient" => "Configuring…",
+    "Degraded" => "Degraded",
+    "HardFault" => "Safety fault",
+    _ => "Unknown",
+  };
+
+  private static BadgeStyle EncoderTierBadge(string status) => status switch
+  {
+    "Configured" => BadgeStyle.Success,
+    "Transient" => BadgeStyle.Light,
+    "Degraded" => BadgeStyle.Warning,
+    "HardFault" => BadgeStyle.Danger,
+    _ => BadgeStyle.Light,
+  };
+
+  // Three states, all of them checkable. "never saved" is deliberately not a warning: on a fresh
+  // install nothing is wrong, the flash simply has not been written by this app. See §2.4.
+  private static string EncoderFlashText(EncoderFlashStateDto flash) => flash switch
+  {
+    EncoderFlashStateDto.MatchesCurrentDesign => "matches current design ✓",
+    EncoderFlashStateDto.DiffersFromCurrentDesign => "differs from current design ⚠",
+    _ => "never saved",
+  };
+
+  private static string EncoderFlashColor(EncoderFlashStateDto flash) => flash switch
+  {
+    EncoderFlashStateDto.MatchesCurrentDesign => "var(--signal-green)",
+    EncoderFlashStateDto.DiffersFromCurrentDesign => "var(--signal-amber)",
+    _ => "var(--text-low)",
+  };
+
+  private static string EncoderCabinetName(int index) =>
+    index switch { 0 => "VOLUME", 1 => "SOURCE", 2 => "PRESETS", 3 => "TUNING", _ => $"KNOB {index}" };
+
+  private EncoderFieldStateDto? Field(int encoderIndex, string field) =>
+    _encoderProvisioning?.Fields.FirstOrDefault(f => f.EncoderIndex == encoderIndex && f.Field == field);
+
+  private string FieldValue(int encoderIndex, string field) => Field(encoderIndex, field)?.DesignedValue ?? "—";
+
+  /// <summary>Renders one acceleration tier as the handoff writes it: <c>150×2</c>, or <c>off</c> when disabled.</summary>
+  private string TierText(int encoderIndex, int tier)
+  {
+    string? ms = Field(encoderIndex, $"tier{tier}_threshold_ms")?.DesignedValue;
+    string? mult = Field(encoderIndex, $"tier{tier}_multiplier")?.DesignedValue;
+    return ms is null or "0" ? "off" : $"{ms}×{mult}";
+  }
+
+  /// <summary>
+  /// Whether the device agreed with every field on this encoder.
+  ///
+  /// <para>
+  /// ⚠ Three states, not two. <c>NotReadBack</c> must never render as agreement — "the device has not
+  /// told us" and "the device agrees" are the distinction ENC-11 exists to preserve.
+  /// </para>
+  /// </summary>
+  private string RowAgreementText(int encoderIndex)
+  {
+    var rows = _encoderProvisioning?.Fields.Where(f => f.EncoderIndex == encoderIndex).ToList() ?? [];
+    if (rows.Count == 0 || rows.All(r => r.Agreement == EncoderFieldAgreementDto.NotReadBack))
+    {
+      return "— not read back";
+    }
+
+    var differing = rows.Where(r => r.Agreement == EncoderFieldAgreementDto.Differs).ToList();
+    if (differing.Count == 0)
+    {
+      return "✓ agrees";
+    }
+
+    // Name the field and the value the device reported, not just "differs" — the whole point of
+    // retaining the read-back is that "T3 reads 0" is actionable and "mismatch" is not.
+    return "⚠ " + string.Join(", ", differing.Select(d => $"{d.Field} reads {d.ReadBackValue}"));
+  }
+
+  private IEnumerable<string> OffTableMismatches() =>
+    (_encoderProvisioning?.Fields ?? [])
+      .Where(f => f.Agreement == EncoderFieldAgreementDto.Differs)
+      .Where(f => f.Field is "min_value" or "max_value" or "steps_per_detent")
+      .Select(f => f.EncoderIndex < 0
+        ? $"{f.Field} (reads {f.ReadBackValue})"
+        : $"{EncoderCabinetName(f.EncoderIndex)} {f.Field} (reads {f.ReadBackValue})");
+
+  /// <summary>
+  /// True while the router's index → action order differs from the cabinet's engraved order.
+  ///
+  /// <para>
+  /// Detected by looking for the knob whose engraved name is TUNING being described as something
+  /// other than tuning, rather than by a hard-coded flag — a flag would still be there, and still be
+  /// shown, after ENC-5 / ENC-7 fix the underlying mismatch.
+  /// </para>
+  /// </summary>
+  private bool MappingDisagreesWithCabinet() =>
+    (_encoderMapping ?? []).Any(m =>
+      string.Equals(m.CabinetName, "TUNING", StringComparison.Ordinal) &&
+      !m.TurnDescription.Contains("Tune", StringComparison.OrdinalIgnoreCase));
+
+  private async Task SetEncoderReverseAsync(int encoderIndex, bool reverse)
+  {
+    _encoderBusy = true;
+    try
+    {
+      EncoderProvisioningDto? result = await IntegrationsApi.SetEncoderReverseAsync(encoderIndex, reverse);
+      if (result == null)
+      {
+        // Deliberately not "failed to save": the request may have been rejected because the knobs are
+        // unplugged, and the page cannot tell those apart from here. Say what is known.
+        NotificationService.Notify(NotificationSeverity.Error, "Not applied",
+          $"The {EncoderCabinetName(encoderIndex)} direction could not be sent to the knobs.");
+        _encoderProvisioning = await IntegrationsApi.GetEncoderProvisioningAsync();
+        return;
+      }
+
+      _encoderProvisioning = result;
+      NotificationService.Notify(NotificationSeverity.Success, "Direction changed",
+        $"{EncoderCabinetName(encoderIndex)} now turns {(reverse ? "the other way" : "the normal way")}.");
+    }
+    finally
+    {
+      _encoderBusy = false;
+    }
+  }
+
+  private async Task SaveEncoderToDeviceAsync()
+  {
+    _encoderBusy = true;
+    try
+    {
+      EncoderProvisioningDto? result = await IntegrationsApi.SaveEncoderConfigToDeviceAsync();
+      _encoderProvisioning = result ?? await IntegrationsApi.GetEncoderProvisioningAsync();
+
+      if (_encoderProvisioning?.Flash == EncoderFlashStateDto.MatchesCurrentDesign)
+      {
+        NotificationService.Notify(NotificationSeverity.Success, "Saved to the knobs",
+          "The knobs will keep these settings even while the app restarts.");
+      }
+      else
+      {
+        // The API leaves flash untouched when the push does not verify. Saying "saved" here would be
+        // exactly the overclaim this row exists to stop.
+        NotificationService.Notify(NotificationSeverity.Warning, "Not saved",
+          "The knobs did not confirm the settings, so nothing was written to them. Try Re-apply settings first.");
+      }
+    }
+    finally
+    {
+      _encoderBusy = false;
+    }
+  }
+
+  private async Task ReapplyEncoderAsync()
+  {
+    _encoderBusy = true;
+    try
+    {
+      EncoderProvisioningDto? result = await IntegrationsApi.ReapplyEncoderConfigAsync();
+      _encoderProvisioning = result ?? await IntegrationsApi.GetEncoderProvisioningAsync();
+
+      bool ok = _encoderProvisioning?.Status == "Configured";
+      NotificationService.Notify(
+        ok ? NotificationSeverity.Success : NotificationSeverity.Warning,
+        ok ? "Settings applied" : "Not fully applied",
+        ok
+          ? "The knobs confirmed the settings."
+          : "The knobs did not confirm every setting. The configuration table shows which.");
+    }
+    finally
+    {
+      _encoderBusy = false;
+    }
+  }
+
+  private async Task ResetEncoderCountersAsync()
+  {
+    _encoderBusy = true;
+    try
+    {
+      bool sent = await IntegrationsApi.ResetEncoderCountersAsync();
+      // "sent", not "zeroed" — the protocol offers no acknowledgement for 0x03/0x05 and this build
+      // has no diagnostics decoder to read the counters back. See §0.4 C-6.
+      NotificationService.Notify(
+        sent ? NotificationSeverity.Info : NotificationSeverity.Error,
+        sent ? "Counter reset sent" : "Not sent",
+        sent
+          ? "Movement counters zeroed on the device."
+          : "The knobs are not connected.");
+    }
+    finally
+    {
+      _encoderBusy = false;
+    }
+  }
+
+  /// <summary>
+  /// Starts the 2 Hz provisioning poll. <b>Only while the Rotary Encoders tab is showing</b> — encoder
+  /// handoff §7.9, and the UI-2 load rule: incidental polling on this box correlates with audible
+  /// audio distortion, so a background poll that runs whether or not anyone is looking is not
+  /// acceptable here.
+  /// </summary>
+  private void StartEncoderPolling()
+  {
+    _encoderPollTimer?.Dispose();
+    _encoderPollTimer = new System.Threading.Timer(_ =>
+    {
+      InvokeAsync(async () =>
+      {
+        _encoderProvisioning = await IntegrationsApi.GetEncoderProvisioningAsync();
+        StateHasChanged();
+      });
+    }, null, TimeSpan.Zero, TimeSpan.FromMilliseconds(500));
+  }
+
+  private void StopEncoderPolling()
+  {
+    _encoderPollTimer?.Dispose();
+    _encoderPollTimer = null;
+  }
+
+  /// <summary>
+  /// Runs the encoder poll while the Rotary Encoders sub-tab of the Integrations tab is the showing
+  /// panel, and stops it whenever any other panel is. Called from both tab strips' <c>Change</c>,
+  /// because either of them can take that panel off screen.
+  /// </summary>
+  private void UpdateEncoderPolling()
+  {
+    if (_activeTab == IntegrationsTabIndex && _integrationsSubTab == RotaryEncoderSubTabIndex)
+    {
+      StartEncoderPolling();
+    }
+    else
+    {
+      StopEncoderPolling();
+    }
+  }
+
+  private void OnTopLevelTabChanged(int index)
+  {
+    _activeTab = index;
+    UpdateEncoderPolling();
+  }
+
+  private void OnIntegrationsSubTabChanged(int index)
+  {
+    _integrationsSubTab = index;
+    UpdateEncoderPolling();
   }
 
   private async Task SavePhoneConfigAsync()
@@ -3702,6 +4132,7 @@
   {
     _statsTimer?.Dispose();
     _sourceGainDebounceTimer?.Dispose();
+    StopEncoderPolling();
   }
 }
 
