@@ -515,37 +515,64 @@ The HID report format is **assumed** based on typical KY-040 Pico implementation
 
 ## 7. Sleep Mode — Rotary Encoder Wake/Sleep Button
 
-**Status:** Display DPMS control implemented via GNOME ScreenSaver D-Bus in `SleepService`. UI power button works. Rotary encoder integration pending.
+**Status:** ⚠ **CORRECTED 2026-09-02 by the `ENC-15` gate result — the previous status overclaimed in two
+ways.** (1) It said *"Display DPMS control implemented … in `SleepService`"*; the display-power calls at
+`SleepService.cs:84-87` and `:114-115` are **commented out**, so nothing in the running service turns the
+panel off today. (2) It named `org.gnome.ScreenSaver SetActive` as the DPMS control; that route **does not
+reach DPMS-off** — see the recovery section in `design/INTEGRATIONS.md` §1 and the full write-up at
+[`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
+Sleep/wake as a *UI state* works; **panel blanking does not ship** and this section is the record of why.
 **Added:** 2026-03-16
-**Priority:** Medium — integrate when rotary encoders are wired up
+**Priority:** Medium for the encoder wake integration. ⛔ **Blanking itself: do not implement** — see the
+blocker below.
+
+### ⛔ Blocker — the panel has no usable wake path, measured on the box
+
+`ENC-15` set out to confirm that touch could wake a blanked panel. It cannot, and the reason is
+structural rather than a configuration problem:
+
+- **The touchscreen is powered by the panel.** When the panel powers down the touch controller leaves the
+  USB bus (`usb 3-1: USB disconnect` about a second after the blank, re-enumerating about a second after
+  the unblank). There is no input device left to generate a touch event, at any layer.
+- **The rotary encoder is not a compositor input device.** `cafe:4005` exposes `/dev/hidraw3` and **zero
+  evdev nodes**, so it cannot reset the GNOME idle timer or wake a blank by itself. A knob wake works only
+  if `radio-api` reads hidraw and *itself* issues the unblank — **making that service a single point of
+  failure in the only remaining wake path**, which is precisely the condition under which somebody most
+  wants the screen back.
+
+That is one application-mediated wake path, not the two the design assumed. Blanking therefore stays off.
+**What has not been tested is panel-firmware wake-on-touch** — a panel that watches its own digitizer while
+powered down. If that exists on this hardware the conclusion changes; a confirmatory script was staged at
+`/tmp/enc15-touchtest.sh` (note `/tmp` does not survive a reboot).
 
 ### What's Implemented
 
-- `SleepService` (Radio.API) pauses audio, mutes, turns off display via GNOME ScreenSaver D-Bus, broadcasts via SignalR
+- `SleepService` (Radio.API) pauses audio, mutes, and broadcasts via SignalR. ⚠ **The display-power half is
+  commented out** — the service does not blank the panel.
 - Web UI power button (`power_settings_new` icon in MainLayout topbar) triggers sleep
-- Wake via API call (`POST /api/system/sleep { sleep: false }`) or touch screen (via JS idle-dimmer)
-- Display DPMS on/off via `gdbus call --session --dest org.gnome.ScreenSaver ... SetActive true/false`
+- Wake via API call (`POST /api/system/sleep { sleep: false }`), or by touching the screen while it is still
+  **lit** (the JS idle-dimmer dims in-page; it does not blank the panel). Touch on a *blanked* panel is a
+  different case and does not work — see the blocker.
 
 ### What's Needed — Rotary Encoder
 
 When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 1. **Sleep trigger:** Long-press (or dedicated button press) on a rotary encoder should call `ISleepService.EnterSleepAsync()`
-2. **Wake trigger:** Any rotary encoder event (press or turn) while sleeping should call `ISleepService.WakeAsync("rotary-encoder")` BEFORE processing the encoder action
+2. **Wake trigger:** Any rotary encoder event (press or turn) while sleeping should call `ISleepService.WakeAsync("rotary-encoder")` BEFORE processing the encoder action. ⚠ This is an **application-mediated** wake, not a hardware one — it only functions while `radio-api` is running and reading hidraw.
 3. **Implementation:** In `RotaryEncoderActionRouter`, check `ISleepService.IsSleeping` at the top of each event handler. If sleeping, call `WakeAsync` and consume the event (don't pass it through as a source change or volume adjustment)
+4. ⚠ **The wake latch is a real defect here:** `TryWakeFromSleep` calls `WakeAsync` fire-and-forget (`:121`) and returns true, so with a 10 ms poll several more events arrive and are silently discarded before `IsSleeping` flips. Tracked on `ENC-6`.
 
 ### Code Pointers
 
-- `src/Radio.API/Services/SleepService.cs` — sleep/wake logic + DPMS control
+- `src/Radio.API/Services/SleepService.cs` — sleep/wake logic; display-power calls present but commented out
 - `src/Radio.Infrastructure/Platform/Input/RotaryEncoderActionRouter.cs` — encoder event routing
 - `src/Radio.Core/Interfaces/ISleepService.cs` — interface
 
 ### Gotchas
 
 - GNOME ScreenSaver D-Bus requires the desktop session user (`mmack`) and session bus address — Radio.API runs `sudo -u mmack DBUS_SESSION_BUS_ADDRESS=... gdbus call`
-- The `SetActive(true)` call may not reliably wake the display on all hardware — test with the actual touchscreen. If unreliable, fall back to `gnome-monitor-config` or `xdg-screensaver reset`
-- On wake, turn on display FIRST (before unmuting/resuming) so the user sees the UI immediately
-
----
+- ⚠ **`org.gnome.ScreenSaver SetActive false` is a no-op when the panel is held down by DPMS rather than by the screensaver** — a state observed on this box, with `GetActive=(false,)` while `dpms=Off`. The control that works in both states is `org.gnome.Mutter.DisplayConfig PowerSaveMode`, set to `0`. The recovery commands, in the order to try them, are in `design/INTEGRATIONS.md` §1.
+- An earlier revision of this section warned that *"`SetActive(true)` may not reliably wake the display"*. `SetActive(true)` **blanks**; `SetActive(false)` wakes. The real unreliability is the DPMS/screensaver split above.
 
 ## 12. GV (Google Voice) Messages — Durable Read-State, Send & Auth Seams
 
