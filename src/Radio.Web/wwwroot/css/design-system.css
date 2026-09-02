@@ -5907,7 +5907,7 @@ body {
  * same height. The knobs are a vertical column to the LEFT of the LCD
  * (handoff §9), so cards anchor to the left edge and are banded down the
  * 720px axis. The Normal variant enters on the mirrored horizontal keyframes
- * declared below; the Sleep variant keeps .snackbar-enter (:1218), which this
+ * declared below; the Sleep variant keeps .snackbar-enter (:1220), which this
  * file had carried unconsumed since the design-system pass.
  *
  * No --hud-* custom properties, per the encoder handoff §6.9. The two custom
@@ -5926,7 +5926,7 @@ body {
    its own "use the existing primitives, do not write new keyframes" rule.
    DO NOT "correct" this back to .snackbar-enter.
 
-   snackbarSlideIn/Out (:1030, :1035) slide on translateY(100%), which is right
+   snackbarSlideIn/Out (:1032, :1037) slide on translateY(100%), which is right
    for the bottom-anchored card ENC-4 originally shipped and wrong for the
    left-anchored one the corrected panel geometry produces: a card attached to
    the left edge would enter from an edge it is not attached to. The rule the

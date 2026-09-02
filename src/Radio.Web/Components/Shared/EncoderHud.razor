@@ -36,7 +36,7 @@
      alone. *@
   <div class="@RootClass(card)"
        style="@GeometryStyle(card)"
-       data-encoder-index="@ClampIndex(card.EncoderIndex)"
+       data-encoder-index="@FrontPanelGeometry.ForIndex(card.EncoderIndex).Index"
        role="status"
        aria-live="polite"
        aria-atomic="true">
@@ -132,9 +132,6 @@
   /// a newer API build relies on (handoff §6.10).
   /// </summary>
   private static bool IsKnownPhase(string? phase) => EncoderHudService.IsKnownPhase(phase);
-
-  private static int ClampIndex(int encoderIndex)
-    => Math.Clamp(encoderIndex, 0, FrontPanelGeometry.EncoderCount - 1);
 
   private static int ClampPercent(int percent) => Math.Clamp(percent, 0, 100);
 
