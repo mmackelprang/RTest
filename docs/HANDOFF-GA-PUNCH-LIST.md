@@ -96,7 +96,7 @@ index are in §9.
 > **✅ STATUS AS OF 2026-08-19: THE OWNER HAS ANSWERED ALMOST EVERY OPEN DECISION.** §7 is no longer a list
 > of questions — it is a record of answers. The headline is **D1: the knobs ship live at install**, which
 > collapses the conditional tiering and makes **22 items P0**, of which **11 are the encoder arc** at ≈3–4
-> working weeks. **✅ Designer Rev 3 has since landed (1,126 lines) and unblocks everything that was marked
+> working weeks. **✅ Designer Rev 3 landed (1,126 lines) — since amended to Rev 4 (as-built panel) and Rev 5 (HUD collisions, `ENC-15` absorbed) — and unblocks everything that was marked
 > pending** — `ENC-6` (the D8 wake collision) and `ENC-8` (the D21 settings surface) are both fully specced,
 > `ENC-13`'s safe-baseline idea was withdrawn by Designer and folded into `ENC-8`, and one new P0 gate
 > (`ENC-15`) and one new decoder hazard (the re-baseline rule, in `ENC-1`) came out of it. **A short startup
@@ -1238,7 +1238,7 @@ now a 15-minute record correction. Do not budget the remaining five as guarantee
 | `docs/plans/2026-05-22-audio-thread-isolation.md` | `LOG-9`, `LOG-10` |
 | `design/plans/2026-03-11-bt-disconnect-reason.md` | `AUD-10` |
 | `docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md` (2026-08-01) + **ADR-029** (2026-08-03) | `PHN-1`, `PHN-2`, `PHN-3`, `PHN-4` |
-| `docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md` (**Rev 3**, 2026-08-19, draft, 1,126 lines) | `ENC-0` … `ENC-15` (`ENC-13` folded into `ENC-8`) |
+| `docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md` (**Rev 5**, 2026-09-02, 1,573 lines) | `ENC-0` … `ENC-15` (`ENC-13` folded into `ENC-8`) |
 | `design/plans/SECRET-KEYRING-INVESTIGATION.md` + branch `fix/dataprotection-keyring-persist-path` | `SEC-1` |
 
 > **Worth noticing as a pattern rather than a list:** nine plan or handoff documents exist for work that has
