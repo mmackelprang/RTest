@@ -8,26 +8,62 @@ namespace Radio.Core.Interfaces.Audio;
 public interface IEventAudioSource : IAudioSource
 {
   /// <summary>
-  /// Gets the duration of the event audio content.
+  /// Gets the duration of the event audio.
+  /// Non-nullable, unlike IPrimaryAudioSource.Duration: an event always has a length, and the
+  /// "unknown duration" case lives on EventPlaybackSnapshot.Duration instead (ADR-029 §4.1).
   /// </summary>
   TimeSpan Duration { get; }
 
   /// <summary>
-  /// Plays the event audio (one-shot playback).
+  /// Gets the current playback position.
+  /// </summary>
+  TimeSpan Position { get; }
+
+  /// <summary>
+  /// Gets whether seeking is supported for this source.
+  /// </summary>
+  bool IsSeekable { get; }
+
+  /// <summary>
+  /// Starts playback of the event audio.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
   Task PlayAsync(CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Stops playback immediately.
+  /// Pauses playback while maintaining the current position.
+  /// </summary>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  Task PauseAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Resumes playback from the paused position.
+  /// </summary>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  Task ResumeAsync(CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Stops playback of the event audio.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
   Task StopAsync(CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Event raised when playback completes.
+  /// Seeks to a specific position in the audio content.
+  /// Only valid if <see cref="IsSeekable"/> is true.
+  /// </summary>
+  /// <param name="position">The position to seek to.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  /// <exception cref="NotSupportedException">Thrown if seeking is not supported.</exception>
+  Task SeekAsync(TimeSpan position, CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Raised when playback completes.
   /// </summary>
   event EventHandler<AudioSourceCompletedEventArgs>? PlaybackCompleted;
 }
