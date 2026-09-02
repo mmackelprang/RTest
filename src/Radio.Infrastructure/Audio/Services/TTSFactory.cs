@@ -16,6 +16,12 @@ namespace Radio.Infrastructure.Audio.Services;
 /// </summary>
 public class TTSFactory : ITTSFactory, IDisposable
 {
+  /// <summary>Audio format requested from Azure synthesis, matching <see cref="EstimateWavDuration24kHz"/>.</summary>
+  internal const string AzureOutputFormat = "riff-24khz-16bit-mono-pcm";
+
+  /// <summary>Value sent as the <c>User-Agent</c> Azure requires on synthesis requests.</summary>
+  internal const string AzureUserAgent = "RadioConsole";
+
   private readonly ILogger<TTSFactory> _logger;
   private readonly ILogger<TTSEventSource> _ttsSourceLogger;
   private readonly IOptionsMonitor<TTSOptions> _options;
@@ -429,8 +435,8 @@ public class TTSFactory : ITTSFactory, IDisposable
 
     if (!response.IsSuccessStatusCode)
     {
-      var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-      _logger.LogError("Google TTS API error: {StatusCode} - {Error}", response.StatusCode, errorContent);
+      var details = await DescribeHttpFailureAsync(response, cancellationToken);
+      _logger.LogError("Google TTS API error: {StatusCode} - {Details}", response.StatusCode, details);
       throw new InvalidOperationException($"Google TTS API error: {response.StatusCode}");
     }
 
@@ -477,36 +483,15 @@ public class TTSFactory : ITTSFactory, IDisposable
 
     using var httpClient = new HttpClient();
 
-    // Azure Cognitive Services Speech REST API
-    var endpoint = $"https://{secrets.AzureRegion}.tts.speech.microsoft.com/cognitiveservices/v1";
+    using var request = CreateAzureSynthesisRequest(
+      secrets.AzureRegion, secrets.AzureAPIKey, voice, text, speed, pitch);
 
-    // Add required headers
-    httpClient.DefaultRequestHeaders.Add("Ocp-Apim-Subscription-Key", secrets.AzureAPIKey);
-    httpClient.DefaultRequestHeaders.Add("X-Microsoft-OutputFormat", "riff-24khz-16bit-mono-pcm");
-
-    // Create SSML payload for Azure TTS
-    // Rate: Percentage of default rate (e.g., "+50%" = 1.5x, "-50%" = 0.5x, "0%" = normal)
-    // Pitch: Percentage adjustment (e.g., "+20%" = higher pitch, "-20%" = lower pitch)
-    // Both use percentage format for consistency
-    var ratePercent = (int)((speed - 1.0) * 100);
-    var pitchPercent = (int)((pitch - 1.0) * 100);
-
-    var ssml = $@"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-  <voice name='{voice}'>
-    <prosody rate='{ratePercent:+#;-#;0}%' pitch='{pitchPercent:+#;-#;0}%'>
-      {System.Security.SecurityElement.Escape(text)}
-    </prosody>
-  </voice>
-</speak>";
-
-    var content = new StringContent(ssml, System.Text.Encoding.UTF8, "application/ssml+xml");
-
-    var response = await httpClient.PostAsync(endpoint, content, cancellationToken);
+    var response = await httpClient.SendAsync(request, cancellationToken);
 
     if (!response.IsSuccessStatusCode)
     {
-      var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-      _logger.LogError("Azure TTS API error: {StatusCode} - {Error}", response.StatusCode, errorContent);
+      var details = await DescribeHttpFailureAsync(response, cancellationToken);
+      _logger.LogError("Azure TTS API error: {StatusCode} - {Details}", response.StatusCode, details);
       throw new InvalidOperationException($"Azure TTS API error: {response.StatusCode}");
     }
 
@@ -520,6 +505,93 @@ public class TTSFactory : ITTSFactory, IDisposable
       audioBytes.Length, estimatedDuration);
 
     return (memoryStream, estimatedDuration);
+  }
+
+  /// <summary>
+  /// Builds the Azure speech synthesis request. <c>internal</c> for unit testing via
+  /// <c>InternalsVisibleTo</c> so the wire format can be pinned without a network call.
+  /// </summary>
+  /// <remarks>
+  /// Microsoft documents <c>Authorization</c>/<c>Ocp-Apim-Subscription-Key</c>,
+  /// <c>Content-Type</c>, <c>X-Microsoft-OutputFormat</c> and <c>User-Agent</c> as required
+  /// headers for the <c>/cognitiveservices/v1</c> endpoint. <see cref="HttpClient"/> sends no
+  /// <c>User-Agent</c> of its own, so it is set explicitly here. The <c>voices/list</c>
+  /// endpoint documents only the authorization header, which is why a key that lists voices
+  /// successfully can still be rejected here.
+  /// </remarks>
+  internal static HttpRequestMessage CreateAzureSynthesisRequest(
+    string region,
+    string apiKey,
+    string voice,
+    string text,
+    float speed,
+    float pitch)
+  {
+    var endpoint = $"https://{region}.tts.speech.microsoft.com/cognitiveservices/v1";
+    var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+
+    request.Headers.Add("Ocp-Apim-Subscription-Key", apiKey);
+    request.Headers.Add("X-Microsoft-OutputFormat", AzureOutputFormat);
+    request.Headers.Add("User-Agent", AzureUserAgent);
+
+    request.Content = new StringContent(
+      BuildAzureSsml(voice, text, speed, pitch),
+      System.Text.Encoding.UTF8,
+      "application/ssml+xml");
+
+    return request;
+  }
+
+  /// <summary>
+  /// Builds the SSML document for an Azure synthesis request. <c>internal</c> for unit testing
+  /// via <c>InternalsVisibleTo</c>.
+  /// </summary>
+  /// <remarks>
+  /// Azure accepts <c>rate</c> and <c>pitch</c> as a percentage where the leading "+" is
+  /// optional, so a speed or pitch of 1.0 renders as <c>0%</c>. The percentages are rounded
+  /// rather than truncated: 0.8f is 0.80000001 as a double, and truncating that yields -19%.
+  /// </remarks>
+  internal static string BuildAzureSsml(string voice, string text, float speed, float pitch)
+  {
+    var ratePercent = (int)Math.Round((speed - 1.0) * 100);
+    var pitchPercent = (int)Math.Round((pitch - 1.0) * 100);
+
+    return $@"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
+  <voice name='{voice}'>
+    <prosody rate='{ratePercent:+#;-#;0}%' pitch='{pitchPercent:+#;-#;0}%'>
+      {System.Security.SecurityElement.Escape(text)}
+    </prosody>
+  </voice>
+</speak>";
+  }
+
+  /// <summary>
+  /// Renders an HTTP failure for logging as the response body plus the response headers.
+  /// </summary>
+  /// <remarks>
+  /// Azure's speech endpoints answer some rejections with an empty body, which leaves the
+  /// status code as the only detail unless the headers are logged too. Only response headers
+  /// are included — request headers would carry the subscription key.
+  /// </remarks>
+  private static async Task<string> DescribeHttpFailureAsync(
+    HttpResponseMessage response,
+    CancellationToken cancellationToken)
+  {
+    string body;
+    try
+    {
+      body = await response.Content.ReadAsStringAsync(cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      body = $"(could not read body: {ex.GetType().Name})";
+    }
+
+    var headers = response.Headers
+      .Concat(response.Content.Headers)
+      .Select(h => $"{h.Key}: {string.Join(", ", h.Value)}");
+
+    return $"body: {(string.IsNullOrWhiteSpace(body) ? "(empty)" : body)} | headers: {string.Join("; ", headers)}";
   }
 
   private async Task<IReadOnlyList<TTSVoiceInfo>> GetESpeakVoicesAsync(CancellationToken cancellationToken)
@@ -604,8 +676,8 @@ public class TTSFactory : ITTSFactory, IDisposable
 
     if (!response.IsSuccessStatusCode)
     {
-      var error = await response.Content.ReadAsStringAsync(cancellationToken);
-      _logger.LogError("Google TTS voices API error: {Status} - {Error}", response.StatusCode, error);
+      var details = await DescribeHttpFailureAsync(response, cancellationToken);
+      _logger.LogError("Google TTS voices API error: {Status} - {Details}", response.StatusCode, details);
       throw new InvalidOperationException($"Google TTS voices API error: {response.StatusCode}");
     }
 
@@ -734,8 +806,8 @@ public class TTSFactory : ITTSFactory, IDisposable
 
     if (!response.IsSuccessStatusCode)
     {
-      var error = await response.Content.ReadAsStringAsync(cancellationToken);
-      _logger.LogError("Azure TTS voices API error: {Status} - {Error}", response.StatusCode, error);
+      var details = await DescribeHttpFailureAsync(response, cancellationToken);
+      _logger.LogError("Azure TTS voices API error: {Status} - {Details}", response.StatusCode, details);
       throw new InvalidOperationException($"Azure TTS voices API error: {response.StatusCode}");
     }
 

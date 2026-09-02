@@ -78,6 +78,7 @@ public class SecretsController : ControllerBase
     }
 
     var storedCount = 0;
+    var unchangedCount = 0;
     foreach (var (property, value) in data)
     {
       if (!tagMap.TryGetValue(property, out var tag))
@@ -92,6 +93,18 @@ public class SecretsController : ControllerBase
         await _secrets.DeleteSecretAsync(tag);
         _logger.LogInformation("Secret '{Tag}' cleared for section '{Section}'", tag, section);
       }
+      else if (await IsMaskOfStoredSecretAsync(tag, value))
+      {
+        // GetSectionSecrets returns masked values and the config UI binds them straight into
+        // its inputs, so a field the user did not edit posts its own mask back. Storing that
+        // would replace the real secret with its display form — an unrecoverable overwrite,
+        // because the plaintext is not kept anywhere else.
+        unchangedCount++;
+        _logger.LogInformation(
+          "Secret '{Tag}' for section '{Section}' was posted unchanged (masked); leaving the stored value intact",
+          tag,
+          section);
+      }
       else
       {
         await _secrets.SetSecretAsync(tag, value);
@@ -99,8 +112,12 @@ public class SecretsController : ControllerBase
       }
     }
 
-    _logger.LogInformation("Section '{Section}': stored {Count} secrets", section, storedCount);
-    return Ok(new { message = "Secrets saved successfully", section, storedCount });
+    _logger.LogInformation(
+      "Section '{Section}': stored {Count} secrets, left {Unchanged} unchanged",
+      section,
+      storedCount,
+      unchangedCount);
+    return Ok(new { message = "Secrets saved successfully", section, storedCount, unchangedCount });
   }
 
   /// <summary>
@@ -141,6 +158,20 @@ public class SecretsController : ControllerBase
     return Ok(tags);
   }
 
+  /// <summary>
+  /// Determines whether a submitted value is just the mask of the secret already stored under
+  /// <paramref name="tag"/>, i.e. the caller echoed back what <see cref="GetSectionSecrets"/> showed.
+  /// </summary>
+  private async Task<bool> IsMaskOfStoredSecretAsync(string tag, string submitted)
+  {
+    var existing = await _secrets.GetSecretAsync(tag);
+    return existing != null && submitted == MaskValue(existing);
+  }
+
+  /// <summary>
+  /// Renders a secret for display. The result is never accepted back as a new value — see
+  /// <see cref="IsMaskOfStoredSecretAsync"/>.
+  /// </summary>
   private static string MaskValue(string? value)
   {
     if (string.IsNullOrEmpty(value))
