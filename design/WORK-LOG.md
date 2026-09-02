@@ -4,6 +4,67 @@ Running log of development sessions, organized chronologically. Each entry captu
 
 ---
 
+## 2026-09-02 — PHN-1a: the event-playback contracts (ADR-029 PR 1 of 7)
+
+**PR:** [#528](https://github.com/mmackelprang/RTest/pull/528)
+
+The type surface for the phone arc, and nothing else: `IEventPlaybackService`, the closed discriminated
+`EventPlaybackRequest`, the `EventPlaybackSnapshot` anchor, and the five transport members `IEventAudioSource` was
+missing. No controller, no route, no DI registration, no ducking change — **nothing plays a sound differently than
+it did before.** The point is that PRs 2-5 build against one settled contract instead of inventing three.
+
+- `IEventPlaybackService` sits **beside** `IAnnouncementService`, not inside it. The announcement service is
+  fire-and-forget *by signature* — bare `Task`, no identity, one global `StopAsync` — and both its callers depend on
+  exactly that. The split is attended vs unattended, which is what PRs 4 and 5 branch on.
+- The request set has **asymmetric arms**: speech carries literal text, voicemail carries a `(kind, id, duration)`
+  reference. There is deliberately **no URL field and never may be one** — an endpoint that fetches a caller-supplied
+  URL is an SSRF primitive. Pinned by a reflection test on the type and by `Validate` rejecting a URL-bearing id.
+
+**The ADR claim that scoped this row was false, and it changed the work.** ADR-029 §8.3 calls D4 "a lift rather than
+an invention" because `FilePlayerAudioSource` "already implements seeking through `SoundFlowPlaybackService`". Both
+halves are false: `SoundFlowPlaybackService` had **no seek method of any kind** across its whole public surface, and
+`FilePlayerAudioSource.SeekCoreAsync` assigns `_position = position` — the field `Position` reads back — under an
+`IsSeekable => true`. A seek reported success, moved the readout, and changed nothing audible. So this PR **built**
+the primitive rather than lifting one. `GetPosition`, which returned `TimeSpan.Zero` behind the false comment
+*"Position tracking not available in current SoundFlow API"*, now reads `SoundPlayerBase.Time`; it had **zero callers
+repo-wide**, so the correction had no blast radius.
+
+`FilePlayerAudioSource` was deliberately **not** fixed — it is a live primary path whose persisted resume position
+hangs off that same field, so it needs its own UAT. Logged to `design/FUTURE-WORK.md` §14a.
+
+**Two completion traps, one of which no document had ever named.** `AudioFileEventSource` decided "finished" from a
+single wall-clock `Task.Delay(_duration)`, so a seek or a **pause** made it fire at the wrong time (ADR §14 Q4 caught
+only the seek half). And pausing a `TTSEventSource` would have made its monitor loop read `!IsPlaying(Id)` as
+*natural completion*, because `IsPlaying` is `player.State == PlaybackState.Playing` and a paused player fails it.
+Both fixed by re-arming on transport events — no poll and no timer added.
+
+**Process note, and the useful part of this entry.** Pre-merge review found 2 HIGH and 4 MEDIUM, and **7 of the 14
+findings were defects in the plan, not in the implementation** — the implementer had followed the plan's literal code
+faithfully. Both HIGHs were in that literal code: a `CancellationTokenSource` disposed outside the lock a waiter was
+about to read `.Token` from, and `SignalTransportChange()` firing *before* the base class assigns `State`, so the
+re-armed wait read the pre-transport state and would have raised `EndOfContent` **while paused** — precisely the
+defect the mechanism existed to prevent. A MEDIUM found the plan's `ValidateMediaId` deny-list defeated by a
+scheme-bearing id (`http:evil.example`), which RFC 3986 resolves as *absolute*, so PR 2's `new Uri(base, id)` would
+have escaped the base — an SSRF hole inside the validator written to stop one. An allow-list backstop was added after
+the named checks, so every pinned rejection reason is unchanged.
+
+Both HIGHs were **unreachable in this PR** (nothing calls `PauseAsync`/`SeekAsync` on an event source until PR 3) and
+were fixed anyway, because the code carried comments asserting behaviour it did not have — the `CLAUDE.md` §
+Pre-Merge Review class this repo has now shipped five times. The comment-accuracy pass then caught three more
+would-be instances **in the fixes themselves**, one of them written by the fixer and corrected in its own commit
+rather than quietly amended.
+
+**Left for later, deliberately:** `Label` has no length cap (belongs with PR 3's controller); a paused TTS source
+keeps its 100 ms monitor poll (inherent to the existing loop); `IEventAudioSource.SeekAsync` stays `Task` rather than
+`Task<bool>`, so a player-refused seek is not distinguishable at the seam — widening it breaks ADR D4's verbatim-lift
+rule and is a Planner call for PR 3.
+
+**No browser UAT, and none was owed** — PR 1 ships no user-visible surface. Three device-only checks are carried to
+PR 6: that `Seek` repositions a real MP3, that `Time` advances, and that pausing a TTS source no longer reports
+completion. All three degrade benignly if they fail.
+
+---
+
 ## 2026-09-02 — ENC-4c: rotating the EncoderHud onto the right axis
 
 **PR:** #526 · **Branch:** `fix/hud-vertical-geometry`
