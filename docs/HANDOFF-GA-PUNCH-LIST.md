@@ -2,7 +2,7 @@
 
 **Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `TEST-3`, `LOG-1`, `LOG-11`, `ENC-1`, and `OPS-1` / `AUD-6` / `AUD-7` — the last three deployed and verified on the box.** The owner has read §7, closed `D23` / `D24` / `D9`, and
 authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
-**`D25` remains unruled** and is the one item that must be escalated rather than defaulted.
+**Every decision is now closed** — `D25` was answered 2026-09-02 (full ADR-029 arc, no stopgap).
 Original state: planner-phase draft, nothing queued.
 **Date:** 2026-08-19
 **Author:** Planner, consolidating six research scouts and one Designer pass.
@@ -1013,12 +1013,13 @@ the affected item says so in place.
 
 ### Still open
 
-**Owner answered D23, D24 and D9 on 2026-09-01.** One decision is left — `D25` — and it is the fork this
-document flagged as the one that must not default silently.
+**None.** `D25` was the last one, answered 2026-09-02.
 
-| ID | Question | Notes / recommendation |
+### Closed 2026-09-02 by the owner
+
+| ID | Question | Answer |
 |---|---|---|
-| **D25** | **Do you want the `PHN-2` stopgap, or the full ADR-029 arc only?** Voicemail currently plays through a browser `<audio>` element at full level, bypassing mute, master volume, balance, ducking and Cast routing. The full fix (`PHN-1` + `PHN-2`) is **1.5–2 weeks**. A **half-day JS-interop stopgap** could route that element's volume and mute through master volume. | ⚠ **Still unruled. A real fork.** The stopgap **fixes mute and level** and **does not fix ducking or Cast routing**: the radio still will not duck under a voicemail, and with Cast active the voicemail still comes out of the local speakers. It is a partial patch on a bypass, not a fix. **Worth taking only if 1.5–2 weeks does not fit before install** — in which case it is the difference between *"voicemail ignores the mute button"* and *"voicemail ignores everything."* |
+| **D25** | The `PHN-2` stopgap, or the full ADR-029 arc only? | ✅ **CLOSED — the full arc (option A).** No stopgap. The half-day JS-interop patch is not taken, and should not be revived as a "quick win" later: it fixes mute and level only, leaves ducking and Cast routing bypassed, and every line of it is thrown away when the `<audio>` element disappears. **This makes `PHN-1` the next major body of work** — the seam is a hard enabler for `PHN-2`, and ADR-029's argument is that voicemail-through-the-engine and speak-a-text are one mechanism rather than two features. D19 already added canned replies (Feature C) to the same arc, so the scope is **A + B + C**, not A + B. |
 
 ### Closed 2026-09-01 by the owner
 
@@ -1184,6 +1185,5 @@ now a 15-minute record correction. Do not budget the remaining five as guarantee
 
 ---
 
-**Approved 2026-09-01. Executing in §2 order.** `D23` / `D24` / `D9` closed by the owner; **`D25` is still
-open and must be escalated, not defaulted.** The §2 ordering constraints still bind — `O4` (`LOG-6` before
+**Approved 2026-09-01. Executing in §2 order.** `D23` / `D24` / `D9` / `D25` all closed by the owner. **No open decisions remain.** The §2 ordering constraints still bind — `O4` (`LOG-6` before
 `LOG-10`) can brick the appliance and `O9` (knob order before drilling) is irreversible.
