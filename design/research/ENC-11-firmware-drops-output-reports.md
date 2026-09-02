@@ -1,7 +1,41 @@
 # ENC-11 is blocked: the encoder firmware drops every host-to-device report
 
-**Status:** `[DIAGNOSED 2026-09-02 - needs a fix in the RotaryUsb firmware repo, not here]`
-**Severity:** blocks `ENC-11`, and through O10 also `ENC-8`, `ENC-12` and `ENC-14`.
+**Status:** ✅ `[FIXED AND FLASHED 2026-09-02 — RotaryUsb #11. Kept as the record of what it was.]`
+**Was:** blocked `ENC-11`, and through O10 also `ENC-8`, `ENC-12` and `ENC-14`.
+
+## Resolution
+
+Fixed in [RotaryUsb #11](https://github.com/mmackelprang/RotaryUsb/pull/11) by normalising the two
+delivery paths at the top of `tud_hid_set_report_cb`, flashed, and verified on the device:
+
+```
+write 03 04 00        (Read config)
+-> report ids seen: {2: 1, 4: 51}
+-> CONFIG REPORT RECEIVED 107 bytes
+```
+
+One Input Report `0x02` where previously there were none. Decoded through the `ENC-2` codec's
+layout, which validates both sides at once:
+
+```
+version 1 | steps/detent 4
+enc1..4:  min=0 max=100 step=1 wrap=0 reverse=0
+          tiers = (150ms -> x5), (80ms -> x15), (40ms -> x50)
+```
+
+⚠ **That x50 is the factory default this project has been warning about, now measured rather than
+inferred.** With `max=100` and `step=1`, tier 3 means two fast detents cross the entire range — "one
+detent from silence to full" is real, and all four encoders are currently in that state. It is
+exactly what `ENC-11` exists to overwrite.
+
+A note on what the verification does and does not prove. Command `0x05` (Reset diagnostics) was also
+attempted and came back **inconclusive** — the flash power-cycled the device, so the counters were
+already zero and there was nothing to reset. That is not a gap: `0x04` and `0x05` are arms of the
+same `report_id == 0x03` branch, so reaching the branch is what was in doubt and that is proven.
+
+The original diagnosis follows, kept because the failure mode is worth recognising again: a device
+that accepts every write and silently ignores it looks identical, from the host, to one that is
+working.
 **Affected firmware:** the **C++** build (`firmware-cpp/main_generic_hid.cpp`), which is what the
 appliance runs. The CircuitPython build is very likely unaffected - see below.
 
