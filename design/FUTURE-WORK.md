@@ -853,3 +853,49 @@ over-claimed guard. The fourth is 14a above, found in the same `PHN-1a` planning
 here rather than there. A wrong comment survives the code it described, and the next
 engineer debugs the description instead of the behaviour: in this case it kept a working API
 looking unavailable for as long as anyone read the comment instead of the package.
+
+---
+
+## 15. `PhoneContactLookupService` logs raw phone numbers on four lines, and the contact's full name on the masked one
+
+**Status:** Found while planning `PHN-1b` (ADR-029 PR 2); deliberately not fixed there
+**Added:** 2026-09-02
+**Priority:** Medium — not a live leak today, but it becomes one the moment `PhoneIntegration:Enabled` flips
+
+### What Exists
+
+ADR-029 §5.1 points at this file as the **example** of "log-masking discipline (it masks numbers to
+`***1234`)". Re-verified against the current tree, it masks on one line and logs raw on four:
+
+| `src/Radio.Infrastructure/External/PhoneContactLookupService.cs` | What it logs |
+|---|---|
+| `:62` | `LogInformation("PBAP contact found: {Number} → {Name}", phoneNumber, contact.DisplayName)` — **raw number *and* the contact's real name** |
+| `:78` | `LogDebug("Looking up contact for {PhoneNumber}", phoneNumber)` — raw |
+| `:87-90` | the one masked line — but it still logs `contact.Name` **in full**, and ADR-029 §5.1 asks for voicemail ids **and caller identity** to be masked |
+| `:96-97` | `LogDebug("Contact lookup returned {StatusCode} for {PhoneNumber}", ..., phoneNumber)` — raw |
+| `:102` | `LogWarning(ex, "Contact lookup failed for {PhoneNumber}", phoneNumber)` — raw, **and at Warning**, so since `LOG-11` this is one of the few that still reaches `journalctl` |
+
+A fifth leak the "mask every line" rule does not by itself cover: `:102` logs `ex`, so any exception
+whose `Message` carries a raw identifier leaks through **every** caller's catch block.
+
+### What's Needed
+
+Compute the masked form **once at method entry** and use only it thereafter; mask `contact.Name` the
+same way; make sure no raw identifier can reach an exception message either. Roughly fifteen lines.
+`GvMediaClient` is the worked example of the stronger rule — a raw id reaches no log message, no log
+argument and no exception message — and `GvMediaClientTests.TheRawMediaIdNeverReachesALogLineOrAnExceptionMessage`
+is the shape of test that pins it.
+
+### Gotchas
+
+- **The mask shape is not one-size-fits-all.** `***1234` is right for a phone number because a human
+  recognises one by its last four digits. It is wrong for an opaque identifier, where a suffix leaks
+  four characters for zero operator benefit — `GvMediaCache.MaskFor` uses a SHA-256 hash prefix
+  (`gvm:1a2b3c4d`) instead, which still correlates log lines with each other and with the file on
+  disk.
+- **ADR-029 §5.1 cites this file as the example to follow, so the defect is actively propagating.**
+  Any new code told to "follow `PhoneContactLookupService`'s masking" will copy the wrong half.
+- `PHN-1b` deliberately did **not** fix it: it is a live path with its own callers and its own arm of
+  the phone integration, and `PhoneIntegration:Enabled` is `false` and has never been true — so this
+  is not leaking today, and widening a voicemail-cache PR into a phone-integration one is how a
+  Medium change becomes a risky one.

@@ -472,4 +472,23 @@ The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw pre
 
 ---
 
+## ADR-029 arc: two decisions the `PHN-1b` plan closed for every PR in the arc
+
+**Date:** 2026-09-02
+**Status:** Accepted — binds ADR-029 PRs 3-7
+**Amends:** [ADR-029](decisions/2026-08-03-gv-audio-through-engine.md) §4.2 and §10.2 (the first item overrides them)
+**Context:** `PHN-1a` (PR 1) shipped behaviour that contradicted the ADR in one place and left an "open question for PR 3" in a doc comment in another. Both were arc-level questions rather than PR-local ones, so `PHN-1b` (PR 2) settled them for the whole arc rather than letting each PR re-decide.
+
+**Decision 1 — `MaxSpeechChars` is a REJECTION, not a truncation. ADR-029 §4.2 is overridden.**
+§4.2 says over-length speech is *"truncated with a spoken tail"* and §10.2's config table repeats it; PR 1 shipped `EventPlaybackRejection.TextTooLong` instead, and that is what stands. Three reasons, in order of weight: (1) §4.2's own governing rule is that **utterance composition belongs to `Radio.Web`**, and truncating with a spoken tail *is* composition — it changes what is said and adds words the caller did not write, so doing it in Radio.API contradicts the section it is written in. (2) A truncating server that returns `200` is the same untruth PR 1 already refused when it made a non-seekable `SeekAsync` **throw** rather than no-op per the ADR: a caller that posts 8 000 characters, gets `200`, and hears 1 000 has been misled in exactly the same way. (3) `EventPlaybackRequest.Validate` is a pure method on a `sealed record` and would have to become a mutator; truncation cannot be expressed as a rejection reason.
+**Consequences:** PR 3 maps `TextTooLong` → `400` with the named reason, like every other rejection. **`PHN-3` owns truncation** — client-side and visible, before the post, in `GvSpeechText.ForMessage`, which is also the only place a spoken tail can be composed in the same voice as the rest of the utterance. The word "truncation" does not appear in this arc's server code. ⚠ A reviewer citing ADR §4.2 to re-add it should be pointed here.
+
+**Decision 2 — `IEventAudioSource.SeekAsync` stays `Task`. Closed as "no", not deferred again.**
+PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `Task<bool>` as *"an open question for PR 3"*. It is closed. Widening breaks D4's only justification — that the five signatures are copied **verbatim** from `IPrimaryAudioSource` — leaving either two seek shapes in the codebase or a change to `IPrimaryAudioSource`, which drags in `FilePlayerAudioSource`: a live primary-source path with a persisted resume position hanging off the same field, out of scope, and logged with its own UAT requirement in `design/FUTURE-WORK.md` §14a. The information is not lost, it arrives by a different route: `Position` reads through to the player, so a refused seek shows up as **an anchor that did not move** in the next snapshot and the scrubber snaps back — the correct user-visible behaviour, delivered over the broadcast mechanism that already exists.
+**Consequences:** `PHN-1b` corrected that comment in the same PR (doc-only, no behaviour) rather than leaving `main` carrying a statement this decision already knew to be untrue — the `CLAUDE.md` § Pre-Merge Review failure class this repo has now shipped five times.
+
+**Plan of record:** [`design/plans/PHN-1b-gvmedia-client-cache-and-auth.md`](plans/PHN-1b-gvmedia-client-cache-and-auth.md) §0.3
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
