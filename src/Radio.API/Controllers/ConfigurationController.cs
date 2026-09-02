@@ -265,7 +265,12 @@ public class ConfigurationController : ControllerBase
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
       
-      var entries = await store.GetAllEntriesAsync();
+      // Raw, so that a "${secret:...}" tag is returned as the tag and not as the secret it points
+      // at. The default (Resolved) sent the real Google and Azure TTS keys to any caller of
+      // GET /api/configuration/tts, and ConfigurationApiService.SetConfigurationValueAsync reads a
+      // whole section and posts it back, which would have written those resolved values into the
+      // store as plaintext and destroyed the tag indirection.
+      var entries = await store.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
 
       // Filter entries that match the section prefix
       var sectionPrefix = $"{section.ToLowerInvariant()}:";
@@ -653,8 +658,9 @@ public class ConfigurationController : ControllerBase
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
       
-      // Get all entries to count them
-      var entries = await store.GetAllEntriesAsync();
+      // Get all entries to count them. Raw: only the count is used, so there is no reason to
+      // decrypt every secret in the store on each store-info poll.
+      var entries = await store.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
       
       // Build the file path based on configuration
       var basePath = Path.GetFullPath("./config"); // From appsettings
