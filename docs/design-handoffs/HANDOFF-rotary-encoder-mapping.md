@@ -1072,11 +1072,34 @@ Under this model they get: the panel lights dim, showing `VOLUME 62`, and **the 
 
 Rule 1 already honors D8 for the panel — *every* input wakes the display. The narrowing is only about restarting audio, and only from Standby, and only for turns. A turn is what a passing sleeve does; a press is what a person does. If the owner would rather have the literal version, it is one line in the router.
 
-### 8.5 Blanking — the precondition and the brick risk
+### 8.5 Blanking — the precondition was tested, and it FAILED. Blanking does not ship.
+
+> ⛔ **`ENC-15` was executed on the box on 2026-09-02 and the gate FAILED. Blanking is withdrawn from
+> `ENC-6`.** Full result: [`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
+> This section is kept as the record of *why*, not as a plan still being executed. The mitigations below
+> were written when blanking was expected to ship; mitigation 1 is the gate that failed, and 2 is moot.
+> **Mitigation 3 was done anyway and is still correct** — with one correction, recorded below.
+>
+> **The failure is more complete than this section anticipated, and it is mechanical rather than a
+> configuration problem:**
+>
+> - **The touchscreen is powered by the panel and leaves the USB bus when the panel blanks**
+>   (`usb 3-1: USB disconnect` on blank; re-enumerates on unblank). There is no device left to ignore a
+>   touch — **touch cannot be a wake path by construction**, not by policy.
+> - **The encoder is not a compositor input device either.** `cafe:4005` has **zero evdev nodes**, only
+>   `/dev/hidraw3`. A knob generates no input the compositor can see, cannot reset an idle timer, and
+>   cannot wake a blank by itself. A knob wake would work only if `radio-api` read hidraw and itself
+>   called D-Bus — which makes **`radio-api` a single point of failure in the only remaining wake path.**
+>   This section assumed the encoders *were* the hardware wake source. They are not.
+> - **The brick was reproduced** — a ~13 s on/off oscillation the recovery command below could not break.
+> - ⚠ **The recovery line in mitigation 3 is insufficient as written.** `org.gnome.ScreenSaver
+>   SetActive false` is a **no-op** when the panel is dark but the screensaver reports inactive. The line
+>   that actually works is `org.gnome.Mutter.DisplayConfig PowerSaveMode "<0>"`. `INTEGRATIONS.md` carries
+>   the Mutter line as primary and the ScreenSaver line as secondary.
 
 Rev 2 flagged this and D8 approved blanking anyway, so the risk now needs a mitigation rather than a warning.
 
-`SleepService.cs:84-87` disabled DPMS because **touch-to-wake does not work when the compositor blanks input.** If that is still true, then after blanking there is exactly one wake path — the encoders — and losing the USB while dark leaves a panel that cannot be woken without a keyboard, inside a piece of furniture.
+`SleepService.cs:89-92` disabled DPMS because **touch-to-wake does not work when the compositor blanks input.** That is still true, and `ENC-15` established it is not fixable from the app: after blanking there is exactly one wake path — the encoders — and losing the USB while dark leaves a panel that cannot be woken without a keyboard, inside a piece of furniture.
 
 **Three mitigations, in order of importance:**
 
@@ -1086,7 +1109,7 @@ Rev 2 flagged this and D8 approved blanking anyway, so the risk now needs a miti
    `ssh mmack@radio` → `gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.SetActive false`
 
 **Two implementation notes for Planner, carried from Rev 2:**
-- **The wake must consume exactly one event, not a window.** `TryWakeFromSleep` currently calls `WakeAsync` fire-and-forget (`:121`) and returns true; with a 10 ms poll several more events arrive before `IsSleeping` flips, and each is silently discarded. Latch it synchronously so precisely one input is spent waking. **Rule 1 makes this more important, not less** — under blanking, a fast spin in the dark must lose one detent, not twelve.
+- **The wake must consume exactly one event, not a window.** `TryWakeFromSleep` currently calls `WakeAsync` fire-and-forget (**`RotaryEncoderActionRouter.cs:289`** — it was `:121` before `ENC-4`; line 121 is now an event subscription) and returns true; with a 10 ms poll several more events arrive before `IsSleeping` flips, and each is silently discarded. Latch it synchronously so precisely one input is spent waking. **Rule 1 makes this more important, not less** — under blanking, a fast spin in the dark must lose one detent, not twelve.
 - No knob input should restart the idle countdown while on `/sleep` — `idle-dimmer.js:46-50` already declines to run timers on that route, and that is correct.
 
 ### 8.6 The Ambient readout
@@ -1501,16 +1524,23 @@ The one thing I held back on is the numeric editor (§13 Q3). Not because it is 
 - [ ] Change a `Reverse` toggle: it pushes immediately, and the saved-to-device line goes stale until Save is pressed.
 - [ ] With the device unconfigured (factory defaults live), a fast volume spin still cannot exceed the host clamp.
 
-**Sleep, wake, blanking (§8)**
-- [ ] **Touch wakes a blanked panel.** *(If this fails, blanking must not ship — §8.5.)*
-- [ ] Panel dark + music playing: the first volume detent **lights the panel to Ambient, shows the current volume, and does not change it.** The second detent changes it.
-- [ ] Panel dark: waking never lands on the full bright UI — always Ambient.
+**Sleep and wake (§8)** — ⛔ **five criteria withdrawn with blanking; see §8.5.**
+
+~~- [ ] **Touch wakes a blanked panel.**~~ ⛔ **TESTED 2026-09-02 — FAILED, and it is not achievable.**
+The touchscreen leaves the USB bus when the panel powers down, so no touch event can be generated. **Do
+not re-attempt this as an acceptance test.** Result: `docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`.
+
+~~- [ ] Panel dark: first volume detent lights the panel to Ambient…~~ ⛔ withdrawn — no dark state ships.
+~~- [ ] Panel dark: waking never lands on the full bright UI.~~ ⛔ withdrawn — no dark state ships.
+~~- [ ] Ambient re-blanks after 60 s; Standby after 30 s.~~ ⛔ withdrawn — nothing blanks.
+~~- [ ] Unplug the encoders while the panel is blanked.~~ ⛔ withdrawn — the panel is never blanked.
+
+**Still in scope, and these are the ones to verify:**
 - [ ] Ambient (lit) + music playing: volume **acts in place** and does not navigate home.
 - [ ] Ambient (lit): SOURCE / PRESETS / TUNING wake to the full UI and change nothing.
-- [ ] Standby: a **turn** lights the panel and does **not** resume audio; a **press** resumes and restores the pre-sleep mute state.
-- [ ] Ambient re-blanks after 60 s of no input; Standby after 30 s.
-- [ ] Exactly **one** encoder event is consumed by a wake — a fast spin in the dark loses one detent, not twelve.
-- [ ] Unplug the encoders while the panel is blanked: the panel unblanks and stays lit.
+- [ ] Standby: a **turn** is consumed and renders that knob's current value, and does **not** resume audio; a **press** resumes and restores the pre-sleep mute state.
+- [ ] Exactly **one** encoder event is consumed by a wake — a fast spin loses one detent, not twelve.
+- [ ] ⚠ **Both `/sleep` entry paths, separately.** Idle-at-30-minutes and the Sleep pill produce different server-side states today (`idle-dimmer.js` navigates without calling `SetSleepAsync(true)`), so verifying one proves nothing about the other.
 
 **Safety**
 - [ ] From volume 0, spin as fast as physically possible: reaching 100 takes **≥ 1.3 s**, and no single detent moves volume more than 6 points.
