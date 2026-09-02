@@ -312,6 +312,33 @@ public class RotaryEncoderRouterMappingTests
   }
 
   [Fact]
+  public void VolumeShortPress_PublishesTheMuteStateItJustProduced()
+  {
+    // Regression guard. The card published on a mute toggle must carry the state AFTER the toggle.
+    // It previously carried the state before it, because the HoldCancelled event that publishes the
+    // card was raised ahead of the short action that changes it - so the HUD asserted the opposite
+    // of the truth for the card's full lifetime, on the one knob with a safety hazard behind it.
+    using var h = new Harness();
+    Assert.False(h.Audio.IsMuted);
+
+    h.Encoders.RaiseButton(0, true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, false);
+
+    Assert.True(h.Audio.IsMuted);
+    EncoderHudEventArgs last = h.Hud.Published[^1];
+    Assert.True(last.IsMuted);
+
+    // ...and back again, so the assertion is about tracking the state rather than a fixed value.
+    h.Encoders.RaiseButton(0, true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, false);
+
+    Assert.False(h.Audio.IsMuted);
+    Assert.False(h.Hud.Published[^1].IsMuted);
+  }
+
+  [Fact]
   public void VolumeShortPress_DoesNotFireOnThePressEdge()
   {
     using var h = new Harness();

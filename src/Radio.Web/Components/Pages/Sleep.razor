@@ -67,7 +67,7 @@
        clock/weather composition for its lifetime, and the composition is restored afterward.
        Rendering it alongside the clock would put two large emissive elements inside the same
        anti-burn-in wrapper. *@
-    @if (EncoderHud.Current is not null)
+    @if (EncoderHud.HasRenderableCard)
     {
       <EncoderHud Variant="EncoderHudVariant.Sleep" />
     }

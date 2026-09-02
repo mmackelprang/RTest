@@ -41,6 +41,27 @@ public class EncoderLongPressGestureTests
   }
 
   [Fact]
+  public void ShortPress_IsRaisedBeforeHoldCancelled()
+  {
+    // Regression guard for a shipped defect, and the ordering is behaviour rather than style. The
+    // router publishes the HUD card from its HoldCancelled handler, reading the console's mute
+    // state as it does so, while the short action on the volume knob is what toggles that state.
+    // With the old order the card asserted the pre-toggle value and nothing corrected it, so the
+    // HUD showed the opposite of the truth for the card's whole lifetime.
+    var time = new FakeTimeProvider();
+    var order = new List<string>();
+    using var gesture = new EncoderLongPressGesture(4, NullLogger.Instance, time);
+    gesture.ShortPress += _ => order.Add("short");
+    gesture.HoldCancelled += _ => order.Add("cancel");
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(200));
+    gesture.OnButtonEdge(0, false);
+
+    Assert.Equal(new[] { "short", "cancel" }, order);
+  }
+
+  [Fact]
   public void PressThenQuickRelease_FiresShortPressOnly()
   {
     var time = new FakeTimeProvider();
