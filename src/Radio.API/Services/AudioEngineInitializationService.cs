@@ -284,11 +284,51 @@ public class AudioEngineInitializationService : IHostedService
           try
           {
             await _deviceManager.SetOutputDeviceAsync(outputToUse, cancellationToken);
-            _logger.LogInformation("Output device set successfully");
+            _logger.LogInformation("Output device preference recorded: {DeviceId}", outputToUse);
           }
           catch (Exception ex)
           {
-            _logger.LogWarning(ex, "Failed to set output device");
+            _logger.LogWarning(ex, "Failed to record output device preference");
+          }
+
+          // AUD-7. Recording the preference is not the same as acting on it, and until now startup
+          // did only the former: SetOutputDeviceAsync validates an id against a cache, assigns a
+          // string and persists. SwitchPlaybackDevice is the only code anywhere that stops,
+          // disposes and re-initialises the native playback device, and its single caller was the
+          // interactive HTTP path. So on every restart where the persisted preference was not the
+          // device the engine happened to initialise, the UI reported one output while audio came
+          // out of another — deterministically, not intermittently.
+          //
+          // Synchronous here, unlike the controller's fire-and-forget: the controller defers it to
+          // avoid disrupting the HTTP socket mid-response, and startup has no response to protect.
+          // Doing it inline also means nothing can start playing before the device is right.
+          try
+          {
+            int deviceIndex = _audioEngine.GetDeviceIndexById(outputToUse);
+            if (deviceIndex < 0)
+            {
+              // Includes the pre-AUD-6 ordinal case, which resolves to -1 by design so the box
+              // falls back to the system default rather than trusting a key whose meaning is lost.
+              _logger.LogInformation(
+                "Output preference {DeviceId} did not resolve to a local playback device; " +
+                "leaving the engine on its initialised device.", outputToUse);
+            }
+            else if (_audioEngine.SwitchPlaybackDevice(deviceIndex))
+            {
+              _logger.LogInformation(
+                "Native playback device now matches the preference: {DeviceName} (index {Index})",
+                preferredDeviceName ?? outputToUse, deviceIndex);
+            }
+            else
+            {
+              _logger.LogWarning(
+                "Native switch to {DeviceId} (index {Index}) failed; audio may not be on the " +
+                "reported output.", outputToUse, deviceIndex);
+            }
+          }
+          catch (Exception ex)
+          {
+            _logger.LogWarning(ex, "Failed to switch the native playback device to {DeviceId}", outputToUse);
           }
 
           // Verify the output device actually connected to the correct PipeWire node.

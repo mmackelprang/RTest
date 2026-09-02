@@ -220,9 +220,15 @@ public class SoundFlowAudioEngine : IAudioEngine
       if (isLocal)
       {
         // Going to local: stop Cast + HTTP, then unmute local.
-        // The local-device switch (native MiniAudio swap) is the caller's
-        // responsibility via IAudioDeviceManager.SetOutputDeviceAsync — this
-        // gate only owns mute state, virtual-output lifecycle, and persistence.
+        // The local-device switch (native MiniAudio swap) is the caller's responsibility via
+        // SwitchPlaybackDevice — this gate only owns mute state, virtual-output lifecycle and
+        // persistence.
+        //
+        // ⚠ This comment used to name IAudioDeviceManager.SetOutputDeviceAsync as the thing that
+        // performs the swap. It does not and never did: it validates an id against a cache, assigns
+        // a string field and persists. Startup called only that method and then logged "Output
+        // device set successfully", so the preference was restored in name while audio kept coming
+        // out of wherever the engine had initialised (AUD-7).
         if (leavingCast)
         {
           await TearDownCastOutputAsync(cancellationToken).ConfigureAwait(false);
@@ -850,6 +856,16 @@ public class SoundFlowAudioEngine : IAudioEngine
       _logger.LogWarning("Invalid device index {Index}, available devices: {Count}",
         deviceIndex, playbackDevices.Length);
       return false;
+    }
+
+    if (deviceIndex == _currentDeviceIndex && _playbackDevice != null)
+    {
+      // Already on this device. Stop/Dispose/Init/Start is a real disruption to the audio backend,
+      // so re-running it to arrive where we already are would be an audible glitch for nothing —
+      // and startup now calls this unconditionally when a preference resolves, which is usually
+      // the device the engine just initialised.
+      _logger.LogDebug("Playback device {Index} is already active, no switch needed", deviceIndex);
+      return true;
     }
 
     var newDevice = playbackDevices[deviceIndex];
