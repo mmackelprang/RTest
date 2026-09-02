@@ -1,6 +1,6 @@
 # HANDOFF — GA punch list for the cabinet install
 
-**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `OPS-1` (deployed and verified on the box) and `TEST-3`.** The owner has read §7, closed `D23` / `D24` / `D9`, and
+**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `TEST-3`, `LOG-1`, `LOG-11`, `ENC-1`, and `OPS-1` / `AUD-6` / `AUD-7` — the last three deployed and verified on the box.** The owner has read §7, closed `D23` / `D24` / `D9`, and
 authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
 **`D25` remains unruled** and is the one item that must be escalated rather than defaulted.
 Original state: planner-phase draft, nothing queued.
@@ -550,7 +550,7 @@ so under D1 it is P0 exactly as SOURCE is.
 
 ### 3.1 Workstream: Audio Reliability
 
-**`AUD-6` — Output device identity is an enumeration ordinal.** ⚠ **Claim BEFORE `AUD-7` (O2).**
+**`AUD-6` — Output device identity is an enumeration ordinal.** ✅ **SHIPPED 2026-09-02 as [#499](https://github.com/mmackelprang/RTest/pull/499) and deployed.** Keyed on the raw platform name (owner chose option B). ⚠ **Option A — the device's own `DeviceInfo.Id` — was ruled out by measurement, not opinion: it is an `nint` heap pointer that changes every process** (`design/research/AUD-6-stable-device-key-options.md`). **Correction to that document's own migration note: legacy values do NOT generally cost a re-selection.** Verified live — the box held `playback-0`, the fallback-to-default path re-persisted it as `out:Built-in Audio Analog Stereo`, and the store self-healed on first boot with no user action. A re-selection is only needed when the stored preference was *not* the system default. ⚠ **Claim BEFORE `AUD-7` (O2).**
 *Already queued 📋. Effort: 1–2 days including a store migration.*
 
 `SoundFlowDeviceManager.cs:517` mints `Id = $"playback-{i}"` straight off the enumeration index, and that
@@ -566,7 +566,7 @@ in the store changed — the meaning did.**
 
 ---
 
-**`AUD-7` — The reported active output diverges from where audio physically goes.**
+**`AUD-7` — The reported active output diverges from where audio physically goes.** ✅ **SHIPPED 2026-09-02 as [#500](https://github.com/mmackelprang/RTest/pull/500) and deployed.** Startup now resolves the preference and performs the native switch; `GetDeviceIndexById` and `SwitchPlaybackDevice` moved onto `IAudioEngine` so it could, and so a test could assert it did. Verified on the box: *"Native playback device now matches the preference: Soundbar (index 0)"*.
 *Already queued 📋. Effort: ~1 day.*
 
 The native device switch is reachable **only from the interactive HTTP path**.
