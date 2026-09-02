@@ -25,9 +25,16 @@ public sealed record AssemblyBuildInfo
   public required string AssemblyName { get; init; }
 
   /// <summary>
-  /// Reads build identity from <paramref name="assembly"/>. Never throws: a binary published
-  /// without <c>SourceRevisionId</c> reports a SHA of <c>"unknown"</c>, which callers compare
-  /// against and treat as "cannot verify" rather than as a mismatch.
+  /// Reads build identity from <paramref name="assembly"/>.
+  ///
+  /// <para>
+  /// Throws <see cref="ArgumentNullException"/> for a null assembly, and nothing else: a binary
+  /// published without <c>SourceRevisionId</c> reports a SHA of <c>"unknown"</c> rather than
+  /// failing, which callers compare against and treat as "cannot verify" rather than as a
+  /// mismatch. An unreadable file timestamp degrades to <see cref="DateTime.MinValue"/>. Both
+  /// matter because this runs inside a health endpoint, where throwing would turn "I cannot tell
+  /// you my version" into "I am down".
+  /// </para>
   /// </summary>
   public static AssemblyBuildInfo For(Assembly assembly)
   {

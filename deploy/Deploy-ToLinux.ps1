@@ -475,7 +475,7 @@ if (-not $NoRestart) {
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green
     Write-Host "API: http://${TargetHost}:${ApiPort}"
-    Write-Host "Web: http://${TargetHost}:5002"
+    Write-Host "Web: http://${TargetHost}:${WebPort}"
   } else {
     Write-Host ""
     Write-Host "=== WARNING: One or more services may have failed ===" -ForegroundColor Red
