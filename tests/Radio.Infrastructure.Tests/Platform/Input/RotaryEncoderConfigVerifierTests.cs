@@ -194,3 +194,67 @@ public class RotaryEncoderConfigVerifierTests
     Assert.Equal(new[] { 250, 1000, 3000 }, RotaryEncoderConfigVerifier.RetryBackoffMs);
   }
 }
+
+/// <summary>
+/// Guards the defaults against the device's own validation rules (ENC-11a).
+///
+/// <para>
+/// These exist because a push that violates any of them is rejected <b>entirely</b> — the firmware's
+/// <c>validate_config</c> returns false on the first bad encoder, so one wrong field on the tuning
+/// knob silently discards the volume tiers too. That happened: <c>max_value = 0</c> on TUNING, taken
+/// from a handoff table that marks the field "inert", made every encoder read back as factory.
+/// Inert to the host is not ignored by the device.
+/// </para>
+/// </summary>
+public class RotaryEncoderConfigDefaultsValidityTests
+{
+  [Fact]
+  public void EveryEncoder_HasMinStrictlyBelowMax()
+  {
+    // Firmware: if (enc.min_value >= enc.max_value) return false;
+    foreach (var (enc, i) in RotaryEncoderConfigDefaults.Create().Encoders.Select((e, i) => (e, i)))
+    {
+      Assert.True(enc.MinValue < enc.MaxValue,
+        $"encoder {i} has min={enc.MinValue} max={enc.MaxValue}; the device rejects the whole config for this");
+    }
+  }
+
+  [Fact]
+  public void EveryEncoder_HasPositiveStepSize()
+  {
+    // Firmware: if (enc.step_size <= 0) return false;
+    Assert.All(RotaryEncoderConfigDefaults.Create().Encoders, e => Assert.True(e.StepSize > 0));
+  }
+
+  [Fact]
+  public void EnabledTiers_DescendInThresholdAndAscendInMultiplier()
+  {
+    // Firmware rejects a tier whose threshold is not strictly lower, or whose multiplier is not
+    // strictly higher, than the previous enabled tier. A disabled tier (threshold 0) is skipped.
+    foreach (var (enc, i) in RotaryEncoderConfigDefaults.Create().Encoders.Select((e, i) => (e, i)))
+    {
+      int prevThreshold = 0, prevMultiplier = 0;
+      bool hasPrev = false;
+
+      foreach (var tier in enc.Tiers)
+      {
+        if (tier.ThresholdMs == 0)
+        {
+          continue;
+        }
+
+        Assert.True(tier.Multiplier > 0, $"encoder {i}: an enabled tier must have a non-zero multiplier");
+
+        if (hasPrev)
+        {
+          Assert.True(tier.ThresholdMs < prevThreshold, $"encoder {i}: tier thresholds must descend");
+          Assert.True(tier.Multiplier > prevMultiplier, $"encoder {i}: tier multipliers must ascend");
+        }
+
+        prevThreshold = tier.ThresholdMs;
+        prevMultiplier = tier.Multiplier;
+        hasPrev = true;
+      }
+    }
+  }
+}

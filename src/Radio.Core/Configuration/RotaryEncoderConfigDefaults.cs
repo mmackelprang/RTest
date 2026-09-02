@@ -110,8 +110,17 @@ public static class RotaryEncoderConfigDefaults
     config.Encoders[2] = Channel(max: 6, step: 1,
       t1: (0, 0), t2: (0, 0), t3: (0, 0));
 
-    // Enc 3 — TUNING. Acceleration earns its place here: 99 steps end to end across the FM grid.
-    config.Encoders[3] = Channel(max: 0, step: 1,
+    // Enc 3 — TUNING. Acceleration earns its place here: 99 steps end to end across the FM grid,
+    // which is also why max_value is 99 rather than the handoff table's 0.
+    //
+    // ⚠ The table marks max_value "inert", and it is — under accumulator semantics the host
+    // differences movement and owns the range. But INERT TO THE HOST IS NOT IGNORED BY THE DEVICE:
+    // the firmware validates `min_value >= max_value` and rejects the config, and validation is
+    // all-or-nothing across all four encoders. A 0 here silently discarded the entire push,
+    // including the volume tiers that are the whole point of this row. Any positive value would
+    // satisfy the device; 99 is used because it is the real span of the FM channel grid, so the
+    // number means something to the next reader instead of being an arbitrary placeholder.
+    config.Encoders[3] = Channel(max: 99, step: 1,
       t1: (150, 2), t2: (80, 4), t3: (40, 8));
 
     return config;
