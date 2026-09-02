@@ -295,6 +295,23 @@ curl -s http://radio:5002/api/health/version   # Web  — gitSha, assemblyName "
 stale binary as a fresh one, and the interim gate was grepping the deployed binary for a branch-only
 symbol (`grep -ac <symbol> /opt/radio-console/web/Radio.Web`). That workaround is no longer needed.
 
+**That SHA guarantee covered the binaries and, until `OPS-5` (2026-09-02), nothing else.** It reports
+which assembly is running, which is a true statement that says nothing about the bytes a browser is
+painting. `Radio.Web` sent `ETag` and `Last-Modified` on every static asset but **no `Cache-Control`
+at all**, so browsers applied heuristic freshness and reused `css/`, `js/`, fonts and the Radzen theme
+without revalidating. A CSS-only change could land, pass the SHA check on both services, and still not
+be on the panel — measured on 2026-09-02, when the kiosk painted a `design-system.css` that predated a
+deploy earlier the same day. Restarting the browser does not help: Chrome's HTTP cache lives in the
+profile directory and outlives the process, so the deploy's kiosk relaunch re-reads the same entries.
+`OPS-5` set `Cache-Control: no-cache` on everything `UseStaticFiles` serves — revalidate before reuse,
+which the existing `ETag` answers with a `304` and no body. **Deployed and displayed are now the same
+thing**, and a styling change that looks like it "didn't work" is once again a reason to suspect the
+CSS rather than the cache. `Radio.API` serves no static files, so it needed no equivalent.
+
+```bash
+curl -sI http://radio:5002/css/design-system.css | grep -i cache-control   # cache-control: no-cache
+```
+
 **The deploy now also verifies the kiosk itself, and it checks liveness rather than existence.**
 After relaunching, `Deploy-ToLinux.ps1` polls for up to 20s and prints either
 `Kiosk is live (N established connections to :5002)` in green, or
