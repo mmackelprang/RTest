@@ -19,6 +19,8 @@ public class AudioFileEventSource : EventAudioSourceBase
   private Task? _playbackTask;
   private string? _playbackId;
   private bool _isPlaybackActive;
+  private CancellationTokenSource _transportCts = new();
+  private readonly object _transportLock = new();
 
   /// <summary>
   /// Initializes a new instance of the <see cref="AudioFileEventSource"/> class.
@@ -72,6 +74,28 @@ public class AudioFileEventSource : EventAudioSourceBase
 
   /// <inheritdoc/>
   public override TimeSpan Duration => _duration;
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Read from the player rather than tracked here, so it stays correct across a seek. Falls back
+  /// to zero when there is no player — which is also the state before playback starts.
+  /// </remarks>
+  public override TimeSpan Position =>
+    _playbackService is not null && _playbackId is not null
+      ? _playbackService.GetPosition(_playbackId) ?? TimeSpan.Zero
+      : TimeSpan.Zero;
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// True only on the file-path arm with a live playback service. The stream constructor is
+  /// excluded deliberately: SoundFlow's StreamDataProvider is built over whatever stream it is
+  /// handed, and a non-seekable stream would make Seek report false at runtime. Claiming
+  /// IsSeekable and then failing is worse than reporting false.
+  /// </remarks>
+  public override bool IsSeekable =>
+    _playbackService is not null
+    && _playbackId is not null
+    && !string.IsNullOrEmpty(_filePath);
 
   /// <summary>
   /// Gets the path to the audio file.
@@ -200,9 +224,9 @@ public class AudioFileEventSource : EventAudioSourceBase
 
       _isPlaybackActive = true;
 
-      // Wait for playback to complete (based on duration)
-      // In a full implementation, we would listen for playback end events from SoundFlow
-      await Task.Delay(_duration, cancellationToken);
+      // Wait for the content to finish. Position-driven and re-armed by transport, so a seek or
+      // a pause does not make completion fire at the wrong time (ADR-029 §14 Q4).
+      await AwaitCompletionAsync(cancellationToken);
 
       if (!cancellationToken.IsCancellationRequested)
       {
@@ -238,6 +262,122 @@ public class AudioFileEventSource : EventAudioSourceBase
     catch (OperationCanceledException)
     {
       // Playback was stopped
+    }
+  }
+
+  /// <inheritdoc/>
+  protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
+  {
+    if (position < TimeSpan.Zero || position > _duration)
+    {
+      throw new ArgumentOutOfRangeException(nameof(position), "Seek position out of range");
+    }
+
+    var moved = _playbackService!.Seek(_playbackId!, position);
+    if (!moved)
+    {
+      Logger.LogWarning(
+        "Seek to {Position} was refused by the player for {Name}", position, _name);
+    }
+
+    // Re-arm the completion wait either way: on a refusal nothing moved, so recomputing simply
+    // restores the same deadline.
+    SignalTransportChange();
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+  {
+    if (_playbackService is not null && _playbackId is not null)
+    {
+      _playbackService.Pause(_playbackId);
+    }
+
+    // The completion wait must stop counting: a paused source consumes no audio, so it has no
+    // deadline. Without this, a pause longer than the remaining audio fires EndOfContent on a
+    // source that is silent and unfinished.
+    SignalTransportChange();
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+  {
+    if (_playbackService is not null && _playbackId is not null)
+    {
+      _playbackService.Resume(_playbackId);
+    }
+
+    SignalTransportChange();
+    return Task.CompletedTask;
+  }
+
+  /// <summary>
+  /// Cancels the current completion wait so it recomputes its deadline from the player's real
+  /// position. Called by every transport override. Not a timer and not a poll - it fires only
+  /// on a user action.
+  /// </summary>
+  private void SignalTransportChange()
+  {
+    CancellationTokenSource previous;
+    lock (_transportLock)
+    {
+      previous = _transportCts;
+      _transportCts = new CancellationTokenSource();
+    }
+
+    previous.Cancel();
+    previous.Dispose();
+  }
+
+  /// <summary>
+  /// Waits until the content is finished, re-arming whenever transport moves.
+  ///
+  /// Replaces a single wall-clock Task.Delay(_duration): that delay was correct only for a
+  /// playback that is never sought and never paused, which is exactly what ADR-029 stops being
+  /// true. If GetPosition yields nothing, remaining falls back to the full duration and the
+  /// behaviour is identical to the delay it replaces.
+  /// </summary>
+  /// <param name="cancellationToken">Cancels the wait outright, e.g. on stop or dispose.</param>
+  /// <returns>A task that completes when the content is finished.</returns>
+  private async Task AwaitCompletionAsync(CancellationToken cancellationToken)
+  {
+    while (!cancellationToken.IsCancellationRequested)
+    {
+      CancellationTokenSource transport;
+      lock (_transportLock)
+      {
+        transport = _transportCts;
+      }
+
+      TimeSpan remaining;
+      if (State == AudioSourceState.Paused)
+      {
+        // No deadline while paused - wait for the next transport event instead.
+        remaining = Timeout.InfiniteTimeSpan;
+      }
+      else
+      {
+        var position = _playbackService?.GetPosition(_playbackId!) ?? TimeSpan.Zero;
+        remaining = _duration - position;
+        if (remaining <= TimeSpan.Zero)
+        {
+          return;
+        }
+      }
+
+      using var linked =
+        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transport.Token);
+      try
+      {
+        await Task.Delay(remaining, linked.Token);
+        return;
+      }
+      catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+      {
+        // A transport event landed. Recompute and wait again.
+      }
     }
   }
 

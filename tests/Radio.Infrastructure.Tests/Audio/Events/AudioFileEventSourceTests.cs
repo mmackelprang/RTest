@@ -256,4 +256,65 @@ public class AudioFileEventSourceTests
 
     Assert.Empty(stateChanges);
   }
+
+  // ── ADR-029 D4 transport surface ────────────────────────────────────────
+  // What these cannot cover, stated rather than faked: the seeking arm needs a registered
+  // SoundPlayer, which needs a real device. IsSeekable == true, a successful SeekCoreAsync and
+  // the re-armed completion wait are UAT items on PR 6. A fake SoundFlowPlaybackService would
+  // only test the fake - it is a concrete class, not an interface.
+
+  [Fact]
+  public void Position_IsZero_WhenThereIsNoPlaybackService()
+  {
+    var source = CreateSource();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public void IsSeekable_IsFalse_WhenThereIsNoPlaybackService()
+  {
+    var source = CreateSource();
+
+    Assert.False(source.IsSeekable);
+  }
+
+  [Fact]
+  public void IsSeekable_IsFalse_ForTheStreamConstructor()
+  {
+    // The stream arm is excluded deliberately - SoundFlow's StreamDataProvider is built over
+    // whatever stream it is given, and a non-seekable stream would make Seek fail at runtime.
+    var source = CreateSourceFromStream();
+
+    Assert.False(source.IsSeekable);
+  }
+
+  [Fact]
+  public async Task SeekAsync_Throws_WhenTheSourceIsNotSeekable()
+  {
+    var source = CreateSource();
+
+    await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.SeekAsync(TimeSpan.FromSeconds(1)));
+  }
+
+  [Fact]
+  public async Task PauseAsync_IsANoOp_WhenTheSourceIsNotPlaying()
+  {
+    var source = CreateSource();
+
+    await source.PauseAsync();
+
+    Assert.NotEqual(AudioSourceState.Paused, source.State);
+  }
+
+  [Fact]
+  public async Task ResumeAsync_IsANoOp_WhenTheSourceIsNotPaused()
+  {
+    var source = CreateSource();
+
+    await source.ResumeAsync();
+
+    Assert.NotEqual(AudioSourceState.Playing, source.State);
+  }
 }
