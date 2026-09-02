@@ -21,7 +21,7 @@ public class VoicemailPlayerTests : TestContext
 
   private void Register()
   {
-    JSInterop.Mode = JSRuntimeMode.Loose;  // MudBlazor/JS-interop components
+    JSInterop.Mode = JSRuntimeMode.Loose;  // Radzen/JS-interop components
     Services.AddRadzenComponents();
     var client = new HttpClient(new MockHttpHandler("{}"))
     { BaseAddress = new Uri("http://radio:5004") };
