@@ -177,6 +177,14 @@ public class TTSEventSource : EventAudioSourceBase
         // Check if playback is still active
         if (!_playbackService.IsPlaying(Id))
         {
+          if (_isPaused)
+          {
+            // A pause landed between the branch above and this check, so a false IsPlaying is
+            // not evidence of completion here. Re-read rather than trust the branch above.
+            await Task.Delay(checkInterval, cancellationToken);
+            continue;
+          }
+
           // Playback finished naturally
           Logger.LogDebug("TTS playback completed naturally after {Elapsed}", elapsed);
           State = AudioSourceState.Stopped;
@@ -247,10 +255,18 @@ public class TTSEventSource : EventAudioSourceBase
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// The order is the mirror of PauseCoreAsync's and is load-bearing for the same reason.
+  /// Clearing _isPaused first would let the monitor fall out of its pause branch, call
+  /// IsPlaying(Id) on a player that has not been resumed yet, read false, and raise
+  /// PlaybackCompleted(EndOfContent) - the exact failure the flag exists to prevent, and one
+  /// the re-read added inside that branch does NOT catch, because the flag really is false by
+  /// then. Resuming first means the flag only drops after Play() has been issued to the player.
+  /// </remarks>
   protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
-    _isPaused = false;
     _playbackService?.Resume(Id);
+    _isPaused = false;
     return Task.CompletedTask;
   }
 
@@ -258,6 +274,10 @@ public class TTSEventSource : EventAudioSourceBase
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
   {
     Logger.LogDebug("Stopping TTS playback");
+
+    // A stopped source must not inherit a stale pause: PlayAsync can be called again on this
+    // instance, and a leftover true would park the next monitor loop in its pause branch.
+    _isPaused = false;
 
     // Cancel the playback monitoring
     _playbackCts?.Cancel();
