@@ -947,7 +947,6 @@ public class RotaryEncoderConfigDto
   public string DevicePath { get; set; } = "";
   public int PollIntervalMs { get; set; }
   public int VolumeStepPercent { get; set; }
-  public int TuningStepKHz { get; set; }
   public int ReconnectDelayMs { get; set; }
 }
 
