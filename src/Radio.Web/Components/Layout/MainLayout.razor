@@ -16,6 +16,9 @@
 @inject Radio.Web.Services.GainPopoverService GainPopover
 @inject Radio.Web.Services.PhoneUnreadState PhoneUnread
 @inject Radio.Web.Services.BellHealthService BellHealth
+@inject AudioStateStore AudioState
+@inject NotificationService NotificationService
+@inject Radio.Web.Services.EncoderFaultAnnouncer EncoderAnnouncer
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
@@ -149,9 +152,28 @@
           <RadzenIcon Icon="history" />
           <span class="nav-pill-label">History</span>
         </a>
-        <a href="/system" class="nav-pill @(IsCurrentPage("/system") ? "nav-active" : "")" title="Settings" aria-label="Settings">
+        @* ENC-12 — encoder fault badge (encoder handoff §7.6 surface 1), reusing the pattern the
+           bell fault badge established at §3.7 of HANDOFF-bell-failure-surfacing.md. It sits on the
+           SETTINGS pill because that is where the explanation is, exactly as the bell badge sits on
+           /phone for the same reason. Bottom-right, so it would clear a count badge if this pill ever
+           gained one.
+           Three states get three GLYPHS, not one glyph in two colours: Designer separates Degraded
+           from a hard fault by colour alone, and colour alone fails WCAG 1.4.1 and this project's own
+           §8.3 rule. EncoderNavLabel carries the state in text regardless.
+           title stays the short static "Settings", matching every other pill: mirroring the dynamic
+           aria-label would give the element an identical accessible name and description, which
+           several screen readers announce twice. *@
+        <a href="/system" class="nav-pill @(IsCurrentPage("/system") ? "nav-active" : "")"
+           title="Settings"
+           aria-label="@EncoderNavLabel">
           <RadzenIcon Icon="settings" />
           <span class="nav-pill-label">Settings</span>
+          @if (EncoderBadgeIcon.Length > 0)
+          {
+            <span class="@EncoderBadgeClass">
+              <RadzenIcon Icon="@EncoderBadgeIcon" aria-hidden="true" />
+            </span>
+          }
         </a>
         @* Bell-failure handoff §3.7 — the fault badge is what makes a dead bell
            findable without being on /phone, which matters because the phone page is
@@ -354,6 +376,16 @@
       // not require the user to have already visited the page it points at.
       _bellHealth = BellHealth.Health;
       BellHealth.HealthChanged += OnBellHealthChanged;
+
+      // ENC-12 — seed the encoder fault badge from the store's cache before subscribing, for the
+      // same reason the mute chip is seeded above: these events fire on CHANGE only, so a circuit
+      // that starts after the fault would otherwise render a blank pill while the fault was still
+      // live. The kiosk reloads (a deploy relaunches Chrome), which is exactly that case.
+      _encoderStatus = AudioState.EncoderConfigStatus?.Status;
+      _encoderConnected = AudioState.EncoderConnection?.IsConnected;
+      _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? false;
+      AudioState.EncoderConfigStatusChanged += OnEncoderConfigStatusChangedAsync;
+      AudioState.EncoderConnectionChanged += OnEncoderConnectionChangedAsync;
 
       // Dock visibility is route-dependent (handoff §P1·1: dock only on
       // non-Home routes). Seed from the current URI and update on every nav.
@@ -1152,6 +1184,77 @@
     InvokeAsync(StateHasChanged);
   }
 
+  // --- ENC-12: encoder fault badge + notification ---
+  //
+  // Every decision is in EncoderFaultRules / EncoderFaultAnnouncer rather than here, because
+  // MainLayoutTests renders nothing (Radzen + JSInterop) and logic written in this file would ship
+  // with no automated coverage. Same reason BellHealthRules exists.
+
+  private string? _encoderStatus;
+  private bool? _encoderConnected;
+  private bool _encoderWasEverConnected;
+
+  private string EncoderBadgeIcon => EncoderFaultRules.BadgeIcon(_encoderStatus, _encoderConnected);
+  private string EncoderBadgeClass => EncoderFaultRules.BadgeClass(_encoderStatus, _encoderConnected);
+  private string EncoderNavLabel => EncoderFaultRules.NavPillAriaLabel(_encoderStatus, _encoderConnected);
+
+  private async Task OnEncoderConfigStatusChangedAsync()
+  {
+    _encoderStatus = AudioState.EncoderConfigStatus?.Status;
+    await InvokeAsync(() =>
+    {
+      AnnounceEncoderStateIfNeeded();
+      StateHasChanged();
+    });
+  }
+
+  // ENC-12 Task 8b. This is the branch that finally consumes WasEverConnected — the flag ENC-0 added
+  // specifically to tell absent-at-boot from dropped-mid-session, and which nothing has used since.
+  private async Task OnEncoderConnectionChangedAsync()
+  {
+    _encoderConnected = AudioState.EncoderConnection?.IsConnected;
+    _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? _encoderWasEverConnected;
+    await InvokeAsync(() =>
+    {
+      AnnounceEncoderStateIfNeeded();
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>
+  /// Raises at most one notification per escalation, per browser session. The latch is in
+  /// EncoderFaultAnnouncer; this method only renders what it decides.
+  /// </summary>
+  private void AnnounceEncoderStateIfNeeded()
+  {
+    var announcement = EncoderAnnouncer.Evaluate(_encoderStatus, _encoderConnected, _encoderWasEverConnected);
+    if (announcement is not { } a)
+    {
+      return;
+    }
+
+    NotificationService.Notify(new NotificationMessage
+    {
+      Severity = a.Level switch
+      {
+        EncoderFaultLevel.Critical => NotificationSeverity.Error,
+        EncoderFaultLevel.Warning => NotificationSeverity.Warning,
+        _ => NotificationSeverity.Success,
+      },
+      Summary = a.Summary,
+      Detail = a.Detail,
+      // Longer than the 5 s preset-undo toast: that one races a user who is already looking at the
+      // control they just used, while this one may land while nobody is at the cabinet.
+      Duration = 10000,
+      // Handoff §7.6 gives each of these an action: "-> Open encoder settings". Clicking the toast
+      // body is how this codebase already does toast actions (RadioControlPanel.razor:1372).
+      // It lands on /system, not on the Integrations sub-tab: SystemConfigPage's RadzenTabs has no
+      // route parameter, so this is one tap short of the card. Recorded in design/FUTURE-WORK.md;
+      // the copy does not promise more than it delivers.
+      Click = _ => NavigationManager.NavigateTo("/system"),
+    });
+  }
+
   // --- ENC-4a: persistent mute indicator ---
 
   private bool _isMuted;
@@ -1214,6 +1317,10 @@
     GainPopover.StateChanged -= OnGainPopoverStateChanged;
     PhoneUnread.Changed -= OnPhoneUnreadChanged;
     BellHealth.HealthChanged -= OnBellHealthChanged;
+    // ENC-12. AudioStateStore is a singleton, so a missed unsubscribe here would keep every circuit
+    // that has ever rendered this layout alive for the life of the process.
+    AudioState.EncoderConfigStatusChanged -= OnEncoderConfigStatusChangedAsync;
+    AudioState.EncoderConnectionChanged -= OnEncoderConnectionChangedAsync;
     NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();

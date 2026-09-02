@@ -5333,6 +5333,35 @@ body {
   height: 12px;
 }
 
+/* ENC-12 — encoder configuration fault badge on the Settings nav pill.
+   Geometry is deliberately identical to .phone-nav-fault above: same corner, same 12px glyph, so the
+   two read as one pattern rather than two. It is a separate class because that one is named for the
+   phone and hard-codes --signal-red, while this has an amber tier as well.
+
+   No box-shadow / glow. The obvious flourish would be `0 0 6px var(--signal-red-glow)` to match
+   .nav-badge — that token is CONSUMED further down this file but never DECLARED in :root, so it
+   would render as nothing while looking correct in the source, and declaring it here would silently
+   change an unrelated shipped component. */
+.encoder-nav-fault {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: inline-flex;
+  pointer-events: none;
+}
+
+.encoder-nav-fault-warning { color: var(--signal-amber); }
+.encoder-nav-fault-critical { color: var(--signal-red); }
+
+/* .nav-pill .rzi sets font-size: 22px !important, so the badge glyph has to override it the same way
+   .phone-nav-fault does — and with the same .nav-pill prefix, because between two !important
+   declarations specificity decides. */
+.nav-pill .encoder-nav-fault .rzi {
+  font-size: 12px !important;
+  width: 12px;
+  height: 12px;
+}
+
 /* -- Phone Action Buttons ---------------------------------------------------- */
 .phone-btn {
   height: 56px;
