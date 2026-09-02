@@ -793,3 +793,62 @@ following the convention set by `radioconsole-gv-markread-readstate-request.md`.
 - Remaining CSS for those states is specified verbatim in handoff §10:
   `.phone-hero-alert.is-warn` and `.phone-hero-state-label-fault`. Both were deliberately left
   out of the first PR rather than shipped unused.
+
+---
+
+## 14. Event-Playback Seam — Two Defects `PHN-1a` Deliberately Did Not Fix
+
+**Status:** Both found while planning `PHN-1a` (ADR-029 PR 1); one fixed there, one logged here
+**Added:** 2026-09-02
+**Priority:** Medium — a capability the UI advertises does not work, but nothing that worked is broken
+
+### 14a. `FilePlayerAudioSource.IsSeekable` claims a seek that does not move any audio
+
+#### What Exists
+
+`FilePlayerAudioSource.cs:119` declares `public override bool IsSeekable => true;`.
+`SeekCoreAsync` (`:909-921`) range-checks its argument and then executes `_position = position;`.
+**It assigns a field.** No audio is repositioned — and `_position` is the very field `Position`
+(`:116`) reads back, so a seek reports success, moves the readout, and changes nothing audible.
+`/api/audio` and the UI therefore report a new position while the audio keeps playing from where
+it was.
+
+Found while planning `PHN-1a`. **ADR-029 §8.3 asserts the opposite** — that this source "already
+implements seeking over a local file through `SoundFlowPlaybackService`" — and is wrong on both
+halves: the seek does not work, and `SoundFlowPlaybackService` had no seek method at all until
+`PHN-1a` Task 4 added one.
+
+#### What's Needed
+
+`SoundFlowPlaybackService.Seek(sourceId, position)` — **added by `PHN-1a` Task 4** — called from
+`SeekCoreAsync`, with `_position` becoming a read-through to `SoundFlowPlaybackService.GetPosition`
+rather than an independently tracked field. Roughly ten lines.
+
+#### Gotchas
+
+- This is a **live primary-source path**, not a dormant one. The `/queue` scrubber and the
+  persisted resume position both read that field — `StopCoreAsync` writes
+  `_preferences.CurrentValue.SongPositionMs` from `_position` at `:903`, and `:987` does the same
+  on the track-change path. Turning `_position` into a read-through changes what gets persisted.
+- It therefore needs **its own UAT on the box** — play a file, scrub, stop, restart, confirm the
+  resume position is still right — rather than riding along with an unrelated change. That is why
+  `PHN-1a` logged it instead of smuggling it in.
+- `SoundPlayerBase.Seek` returns `bool`. Propagate it; do not report an unconditional success,
+  which is the same failure this entry is about.
+
+### 14b. `SoundFlowPlaybackService.GetPosition` was a stub behind a false comment (fixed in `PHN-1a`)
+
+`GetPosition` returned `TimeSpan.Zero` behind the comment
+*"Position tracking not available in current SoundFlow API"*. The comment was **false** for the
+referenced package: `SoundPlayerBase.Time` exists in SoundFlow 1.4.x (`<PackageReference
+Include="SoundFlow" Version="1.*" />`, restored 1.4.1) and reports the current playback time in
+seconds. `PHN-1a` Task 4 corrected the method and deleted the comment; the method had zero callers
+repo-wide, so the correction had no behavioural blast radius.
+
+Recorded here because the **pattern** is the point, not the fix: this is the fifth instance of the
+`CLAUDE.md` § Pre-Merge Review failure class — a comment asserting more than the code does — beside
+the four already catalogued there (`SoundFlowMasterMixer`'s "Removed audio source" log,
+`BluetoothAudioSource`'s unreachable `Playing` branch, `GoogleCastOutput._lifecycleLock`'s
+over-claimed guard, and 14a above). A wrong comment survives the code it described, and the next
+engineer debugs the description instead of the behaviour: in this case it kept a working API
+looking unavailable for as long as anyone read the comment instead of the package.
