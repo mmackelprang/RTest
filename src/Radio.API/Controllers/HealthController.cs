@@ -1,6 +1,6 @@
-using System.Reflection;
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
+using Radio.Core.Utilities;
 
 namespace Radio.API.Controllers;
 
@@ -28,48 +28,18 @@ public class HealthController : ControllerBase
 
   private static VersionInfoDto BuildVersionInfo()
   {
-    var assembly = typeof(HealthController).Assembly;
-    var name = assembly.GetName();
-
-    var informational = assembly
-      .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-      .InformationalVersion ?? string.Empty;
-
-    // .NET SDK formats InformationalVersion as "<version>+<SourceRevisionId>"
-    // when SourceRevisionId is set. Anything after the first '+' is the SHA.
-    var plusIndex = informational.IndexOf('+');
-    var sha = plusIndex >= 0 && plusIndex < informational.Length - 1
-      ? informational[(plusIndex + 1)..]
-      : "unknown";
-
-    // Assembly.Location is empty for PublishSingleFile builds, which is how the
-    // deploy scripts ship Radio.API. Fall back to the host process path.
-    var location = assembly.Location;
-    if (string.IsNullOrEmpty(location))
-    {
-      location = Environment.ProcessPath ?? string.Empty;
-    }
-
-    DateTime buildTimestamp;
-    try
-    {
-      buildTimestamp = string.IsNullOrEmpty(location)
-        ? DateTime.MinValue
-        : System.IO.File.GetLastWriteTimeUtc(location);
-    }
-    catch
-    {
-      buildTimestamp = DateTime.MinValue;
-    }
+    // Parsing lives in Radio.Core so this service and Radio.Web answer the version question
+    // identically — a deploy check that compares two differently-derived answers is not a check.
+    AssemblyBuildInfo info = AssemblyBuildInfo.For(typeof(HealthController).Assembly);
 
     return new VersionInfoDto
     {
-      GitSha = sha,
-      GitShaShort = sha.Length >= 7 ? sha[..7] : sha,
-      InformationalVersion = informational,
-      AssemblyVersion = name.Version?.ToString() ?? string.Empty,
-      BuildTimestampUtc = buildTimestamp,
-      AssemblyName = name.Name ?? string.Empty,
+      GitSha = info.GitSha,
+      GitShaShort = info.GitShaShort,
+      InformationalVersion = info.InformationalVersion,
+      AssemblyVersion = info.AssemblyVersion,
+      BuildTimestampUtc = info.BuildTimestampUtc,
+      AssemblyName = info.AssemblyName,
     };
   }
 }
