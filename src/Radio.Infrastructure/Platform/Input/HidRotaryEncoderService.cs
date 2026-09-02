@@ -382,28 +382,26 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     // Published before the push so maintenance commands arriving on request threads can reach the
     // device from the moment it is open (ENC-8 §2.2). The read loop stays the only reader.
     _liveStream = stream;
+
+    // ⚠ The configuration push runs CONCURRENTLY with the read loop below, and it has to.
+    //
+    // Since ENC-8 the read loop is the only reader, and the push's read-back is completed by
+    // ParseReport from inside that loop. Awaiting the push here — which is what ENC-11 did, when the
+    // push still owned an inline read of its own — means nothing can ever complete it: the loop
+    // cannot start until the push returns, and the push cannot return until the loop answers it. It
+    // does not hang, which is what makes it easy to miss; it times out on all four attempts and
+    // settles in Degraded, and Degraded tightens the host's volume clamp from 6 units per event to
+    // 2. Every boot would leave the volume knob sluggish inside sealed furniture with nobody to
+    // press Re-apply.
+    //
+    // Measured on the appliance 2026-09-02: awaited, the boot push reports Degraded with every field
+    // "not read back"; started concurrently, it reports Configured with real read-back values. The
+    // three writes still land before the loop's first read, and the device's reply waits in the HID
+    // queue until the loop picks it up.
+    Task bootPush = RunBootConfigurationPushAsync(stream, cancellationToken);
+
     try
     {
-      // ENC-11. Push before reading, because until this succeeds the device may be on factory
-      // defaults — measured on the live hardware as tiers (150ms x5), (80ms x15), (40ms x50), which
-      // at the host's 2% per unit is one detent from silence to full.
-      //
-      // Under the maintenance lock because _liveStream is already published: a Re-apply arriving in
-      // this window would otherwise put two pushes on one stream and two waiters on one read-back.
-      await _maintenanceLock.WaitAsync(cancellationToken);
-      try
-      {
-        await ApplyConfigurationAsync(stream, cancellationToken);
-      }
-      finally
-      {
-        _maintenanceLock.Release();
-      }
-
-      // The flash comparison needs the bytes this connection would push, so it is recomputed here
-      // rather than only at start-up: a reverse override set while the device was away changes it.
-      await RefreshFlashStateAsync(cancellationToken);
-
       while (!cancellationToken.IsCancellationRequested)
       {
         int bytesRead;
@@ -428,7 +426,56 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
       // timeout: the honest answer is "the device went away", not "the device did not confirm".
       FailPendingConfigRead(
         new IOException("Encoder disconnected while a configuration read was outstanding."));
+
+      // The read loop does not wait for the boot push, but somebody has to observe it: an unawaited
+      // faulted Task would swallow the reason the knobs are unconfigured.
+      try
+      {
+        await bootPush;
+      }
+      catch (OperationCanceledException)
+      {
+        // Shutdown or disconnect during the push. Not a fault.
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Encoder boot configuration push did not complete");
+      }
     }
+  }
+
+  /// <summary>
+  /// Pushes the configuration once for a freshly opened connection, then refreshes the flash
+  /// comparison.
+  ///
+  /// <para>
+  /// ENC-11: pushed before the knobs are trusted, because until it succeeds the device may be on
+  /// factory defaults — measured on this hardware as tiers (150ms x5), (80ms x15), (40ms x50), which
+  /// at the host's 2% per unit is one detent from silence to full.
+  /// </para>
+  ///
+  /// <para>
+  /// Held under the maintenance lock because <c>_liveStream</c> is published before this runs: a
+  /// Re-apply arriving in the window would otherwise put two pushes on one stream and two waiters on
+  /// one read-back slot.
+  /// </para>
+  /// </summary>
+  private async Task RunBootConfigurationPushAsync(HidStream stream, CancellationToken cancellationToken)
+  {
+    await _maintenanceLock.WaitAsync(cancellationToken);
+    try
+    {
+      await ApplyConfigurationAsync(stream, cancellationToken);
+    }
+    finally
+    {
+      _maintenanceLock.Release();
+    }
+
+    // The flash comparison needs the bytes this connection would push, so it is recomputed per
+    // connection rather than only at start-up: a reverse override set while the device was away
+    // changes it.
+    await RefreshFlashStateAsync(cancellationToken);
   }
 
   /// <summary>
