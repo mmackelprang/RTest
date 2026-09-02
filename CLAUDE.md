@@ -301,8 +301,11 @@ painting. `Radio.Web` sent `ETag` and `Last-Modified` on every static asset but 
 at all**, so browsers applied heuristic freshness and reused `css/`, `js/`, fonts and the Radzen theme
 without revalidating. A CSS-only change could land, pass the SHA check on both services, and still not
 be on the panel — measured on 2026-09-02, when the kiosk painted a `design-system.css` that predated a
-deploy earlier the same day. Restarting the browser does not help: Chrome's HTTP cache lives in the
-profile directory and outlives the process, so the deploy's kiosk relaunch re-reads the same entries.
+deploy earlier the same day. Restarting the browser is not itself a fix: Chrome's HTTP cache lives in
+the profile directory and outlives the process. The deploy separately deletes that directory for the
+kiosk profile (since 2026-08-18) — which is one profile on one box, does nothing for a laptop or tablet
+on the LAN, and nothing at all under `-NoRestart`. It is still there; it is just no longer the thing
+correctness depends on.
 `OPS-5` set `Cache-Control: no-cache` on everything `UseStaticFiles` serves — revalidate before reuse,
 which the existing `ETag` answers with a `304` and no body. **Deployed and displayed are now the same
 thing**, and a styling change that looks like it "didn't work" is once again a reason to suspect the
