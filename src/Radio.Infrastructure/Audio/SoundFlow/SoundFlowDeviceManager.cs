@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Utilities;
 using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Configuration.Abstractions;
@@ -514,7 +515,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
 
           outputDevices.Add(new AudioDeviceInfo
           {
-            Id = $"playback-{i}",
+            Id = StableAudioDeviceKey.ForOutput(rawName),
             Name = displayName,
             RawName = rawName,
             Type = AudioDeviceType.Output,
@@ -692,7 +693,7 @@ public class SoundFlowDeviceManager : IAudioDeviceManager, IDisposable
 
           result.Add(new DeviceDisplayInfo
           {
-            DeviceId = $"playback-{i}",
+            DeviceId = StableAudioDeviceKey.ForOutput(rawName),
             RawName = rawName,
             DisplayName = displayName,
             IsHidden = isHidden,

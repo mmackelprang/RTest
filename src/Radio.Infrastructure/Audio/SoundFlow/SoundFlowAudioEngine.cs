@@ -2,6 +2,7 @@ using System.Runtime;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
+using Radio.Core.Utilities;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Metrics;
@@ -1023,23 +1024,68 @@ public class SoundFlowAudioEngine : IAudioEngine
   }
 
   /// <summary>
-  /// Gets the index of a playback device by its ID.
+  /// Resolves a persisted output-device key to its current index in <c>PlaybackDevices</c>.
+  ///
+  /// <para>
+  /// AUD-6: this is a <b>lookup</b> now, not string parsing. It previously did an
+  /// <c>int.TryParse</c> on <c>playback-{n}</c>, which meant a saved preference named a position in
+  /// a list rather than a device — and the list reorders across restarts.
+  /// </para>
   /// </summary>
-  /// <param name="deviceId">The device ID (e.g., "playback-0").</param>
-  /// <returns>The device index, or -1 if not found.</returns>
+  /// <param name="deviceId">A key from <see cref="StableAudioDeviceKey.ForOutput"/>.</param>
+  /// <returns>The device index, or -1 when the key does not resolve to exactly one device.</returns>
   public int GetDeviceIndexById(string deviceId)
   {
-    if (string.IsNullOrEmpty(deviceId) || !deviceId.StartsWith("playback-"))
+    if (string.IsNullOrEmpty(deviceId))
     {
       return -1;
     }
 
-    if (int.TryParse(deviceId.AsSpan("playback-".Length), out var index))
+    if (StableAudioDeviceKey.IsLegacyOrdinal(deviceId))
     {
-      return index;
+      // A pre-AUD-6 ordinal. Deliberately NOT resolved: its meaning is already lost, and mapping it
+      // onto today's enumeration would bake in an ordering the defect says is untrustworthy.
+      // Unresolved sends the caller to the system default and costs one re-selection.
+      _logger.LogInformation(
+        "Output preference {DeviceId} is a pre-AUD-6 enumeration ordinal and cannot be resolved to " +
+        "a device; falling back to the system default. Re-select the output once to store a stable key.",
+        deviceId);
+      return -1;
     }
 
-    return -1;
+    var rawName = StableAudioDeviceKey.RawNameFrom(deviceId);
+    if (rawName is null || _engine is null)
+    {
+      return -1;
+    }
+
+    var playbackDevices = _engine.PlaybackDevices;
+    int found = -1;
+
+    for (int i = 0; i < playbackDevices.Length; i++)
+    {
+      if (!string.Equals(playbackDevices[i].Name, rawName, StringComparison.Ordinal))
+      {
+        continue;
+      }
+
+      if (found >= 0)
+      {
+        // Two devices share this name. Selecting the first match would put audio out of an
+        // arbitrary one of them with nothing in the log to explain it, so refuse and say why.
+        // This is the known weakness of a name-based key; it does not occur on this appliance
+        // today, which has a single playback sink.
+        _logger.LogWarning(
+          "Output key {DeviceId} matches more than one playback device ({First} and {Second}); " +
+          "refusing to guess. Disambiguation is ENC-8/AUD-6 follow-up work.",
+          deviceId, found, i);
+        return -1;
+      }
+
+      found = i;
+    }
+
+    return found;
   }
 
   /// <summary>
