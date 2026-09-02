@@ -95,6 +95,16 @@ public class SleepTests : TestContext
       )
     );
 
+    // ENC-4 — Sleep.razor hosts the encoder HUD inside its anti-burn-in drift wrapper, so the
+    // singleton has to be resolvable for the page to activate. The fixture's hub transport is
+    // offline, so nothing arrives over SignalR and the page renders the clock/forecast
+    // composition these tests assert on unless a test publishes a card itself. The fake clock
+    // keeps the 1500 ms dismissal off the real thread pool.
+    Services.AddSingleton(sp =>
+      new Radio.Web.Services.EncoderHudService(
+        sp.GetRequiredService<AudioStateHubService>(),
+        new Microsoft.Extensions.Time.Testing.FakeTimeProvider()));
+
     _navigationManager = (FakeNavigationManager)Services.GetRequiredService<NavigationManager>();
   }
 
@@ -121,6 +131,49 @@ public class SleepTests : TestContext
     cut.FindAll(".sleep-screen-glow").Count.Should().Be(1);
     cut.FindAll(".sleep-screen-clock").Count.Should().Be(1);
     cut.FindAll(".sleep-screen-hint").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void Sleep_WithAnEncoderHudCard_ReplacesTheClockComposition()
+  {
+    // ENC-4 / handoff §8.6: the knob readout takes over the drift wrapper rather than sitting
+    // beside the clock, because two large emissive elements in the same anti-burn-in wrapper is
+    // what that wrapper exists to avoid. The hint line is outside the wrapper and stays put.
+    var hud = Services.GetRequiredService<Radio.Web.Services.EncoderHudService>();
+    hud.Publish(new EncoderHudDto
+    {
+      EncoderIndex = 0,
+      Label = "VOLUME",
+      Phase = "Value",
+      VolumePercent = 62,
+    });
+
+    var cut = RenderComponent<Sleep>();
+
+    cut.FindAll(".encoder-hud--sleep").Count.Should().Be(1);
+    cut.Find(".encoder-hud-value").TextContent.Trim().Should().Be("62");
+    cut.FindAll(".sleep-screen-clock").Should().BeEmpty();
+    cut.Find(".sleep-screen-hint").TextContent.Trim().Should().Be("tap anywhere to wake");
+  }
+
+  [Fact]
+  public void Sleep_WhenTheEncoderHudCardIsDismissed_RestoresTheClock()
+  {
+    var hud = Services.GetRequiredService<Radio.Web.Services.EncoderHudService>();
+    hud.Publish(new EncoderHudDto { EncoderIndex = 0, Label = "VOLUME", VolumePercent = 62 });
+
+    var cut = RenderComponent<Sleep>();
+    cut.FindAll(".encoder-hud--sleep").Count.Should().Be(1);
+
+    // The page carries its own StateChanged subscription because the child component only
+    // re-renders itself — the swap back to the clock is the page's decision.
+    hud.Dismiss();
+
+    cut.WaitForAssertion(() =>
+    {
+      cut.FindAll(".encoder-hud--sleep").Should().BeEmpty();
+      cut.FindAll(".sleep-screen-clock").Count.Should().Be(1);
+    });
   }
 
   [Fact]

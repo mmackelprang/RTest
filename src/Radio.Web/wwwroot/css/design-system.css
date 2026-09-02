@@ -5897,3 +5897,233 @@ body {
   outline: 2px solid var(--signal-red);
   outline-offset: 2px;
 }
+
+
+/* ─── ENC-4  Encoder HUD ────────────────────────────────────────────────────
+ *
+ * A transient readout that appears in the screen quarter above the knob that
+ * produced it. Enter reuses .snackbar-enter (:1218), which this file had
+ * carried unconsumed since the design-system pass.
+ *
+ * No --hud-* custom properties, per the encoder handoff §6.9. The one custom
+ * property declared here, --ring-turn, is not a design token: it is the
+ * animated angle the progress ring is drawn from, and it has to be registered
+ * with @property because an unregistered custom property does not interpolate.
+ *
+ * The 10px radius is a literal because this project has no --radius-* scale;
+ * it matches .nav-pill, and the 12px blur matches the .surface-overlay family.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.encoder-hud {
+  position: fixed;
+  bottom: 24px;
+  width: 360px;
+  /* Centred on its quarter with a negative margin rather than
+     transform: translateX(-50%), because .snackbar-enter animates `transform`
+     and would drop the centering for the length of the animation. The card is
+     a fixed 360px, so -180px is exactly half. */
+  margin-left: -180px;
+  z-index: 10000;                 /* one tier above the gain-popover backdrop (9999) */
+  /* A readout, not a control. Without this the card is a 360px transparent
+     shield over the bottom of whatever route is underneath it. */
+  pointer-events: none;
+  background: color-mix(in srgb, var(--surface-overlay) 92%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--surface-separator);
+  border-radius: 10px;
+  padding: var(--sp-4);
+}
+
+/* Label row — the treatment .sleep-screen-hint already uses. (.rcp-presets-hint
+   is a denser inline hint at 9px/0.10em and is deliberately NOT the model here.) */
+.encoder-hud-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.20em;
+  color: var(--text-low);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Numerals + fill bar share a row on the normal card (handoff §6.3) and stack
+   on the sleep card (§8.6). */
+.encoder-hud-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  margin-top: var(--sp-2);
+}
+
+/* Fixed box around the numerals so the ring is drawn on a square (a circle,
+   not an oval) and so the card does not resize when a hold starts. Wide enough
+   for three digits at 64px Orbitron, which is what "100" needs. */
+.encoder-hud-value-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 160px;
+  height: 120px;
+  flex: none;
+}
+
+.encoder-hud-value {
+  font-family: var(--font-led);
+  font-size: 64px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-high);
+  line-height: 1;
+}
+
+.encoder-hud-bar {
+  height: 6px;
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-separator);
+  border-radius: 3px;
+}
+
+.encoder-hud-bar-fill {
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 3px;
+}
+
+/* Generic card (§6.4 track mode) — a title line and a subtitle line. */
+.encoder-hud-primary {
+  margin-top: var(--sp-2);
+  font-size: 20px;
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.encoder-hud-secondary {
+  margin-top: var(--sp-1);
+  font-size: 14px;
+  color: var(--text-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Muted variant. The word MUTED carries the state; the colour only reinforces
+   it — the handoff requires every state to be readable without colour. */
+.encoder-hud.is-muted .encoder-hud-value { color: var(--text-low); }
+.encoder-hud.is-muted .encoder-hud-bar-fill { background: transparent; }
+.encoder-hud.is-muted .encoder-hud-bar { border: 1px solid var(--signal-red); background: transparent; }
+.encoder-hud-muted-chip { color: var(--signal-red); }
+
+/* Progress ring: 300ms -> 600ms, matching the host-side long-press threshold
+   (Radio.Core EncoderInteractionTimings). The first 300ms of a press is
+   indistinguishable from a click, so the ring is delayed rather than started
+   at zero.
+
+   --ring-turn is registered so it animates: a bare custom property is an
+   un-typed token to the animation engine and steps rather than interpolates.
+   The conic-gradient reads it as the sweep angle; the radial mask keeps only
+   the outer 4px, which is what turns the filled pie into a ring. */
+@property --ring-turn {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0turn;
+}
+
+@keyframes encoderHudRing {
+  from { --ring-turn: 0turn; opacity: 1; }
+  to   { --ring-turn: 1turn; opacity: 1; }
+}
+
+.encoder-hud-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 152px;
+  height: 152px;
+  margin: -76px 0 0 -76px;
+  border-radius: 50%;
+  /* Hidden until the animation's 300ms delay elapses. The fill-mode is `forwards`
+     only, so the base opacity (0) — not the `from` frame — is what applies during
+     the delay; without this the empty track would be on screen from the instant
+     the button went down, which is the ordinary-click case the delay exists for. */
+  opacity: 0;
+  background: conic-gradient(var(--accent-primary) var(--ring-turn), var(--surface-separator) 0);
+  -webkit-mask: radial-gradient(closest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  mask: radial-gradient(closest-side, transparent calc(100% - 4px), #000 calc(100% - 4px));
+  animation: encoderHudRing 300ms linear 300ms 1 forwards;
+}
+
+.encoder-hud--sleep {
+  position: static;
+  width: auto;
+  margin-left: 0;
+  /* No card chrome. This replaces the clock composition inside the drift
+     wrapper rather than floating above it, and that wrapper's one emissive
+     colour is the load-bearing rule of the sleep-screen handoff. */
+  background: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: none;
+  padding: 0;
+  text-align: center;
+}
+
+.encoder-hud--sleep .encoder-hud-label { justify-content: center; }
+
+.encoder-hud--sleep .encoder-hud-volume {
+  flex-direction: column;
+  gap: var(--sp-3);
+  align-items: center;
+}
+
+.encoder-hud--sleep .encoder-hud-value-wrap {
+  width: 240px;
+  height: 140px;
+}
+
+/* Byte-identical to .sleep-screen-clock — the volume number IS the clock's
+   typography, wearing a different label. */
+.encoder-hud--sleep .encoder-hud-value {
+  font-size: 96px;
+  color: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+  text-shadow: 0 0 12px color-mix(in srgb, var(--signal-amber) 15%, transparent);
+  letter-spacing: 0.02em;
+}
+
+.encoder-hud--sleep .encoder-hud-bar {
+  width: 320px;
+  flex: none;
+}
+
+.encoder-hud--sleep .encoder-hud-bar-fill {
+  background: color-mix(in srgb, var(--signal-amber) 35%, #050507);
+}
+
+.encoder-hud--sleep .encoder-hud-ring {
+  width: 224px;
+  height: 224px;
+  margin: -112px 0 0 -112px;
+  background: conic-gradient(
+    color-mix(in srgb, var(--signal-amber) 35%, #050507) var(--ring-turn),
+    var(--surface-separator) 0);
+}
+
+/* No cyan and no red on the sleep screen, not even for mute. */
+.encoder-hud--sleep.is-muted .encoder-hud-bar { border-color: var(--text-low); }
+.encoder-hud--sleep .encoder-hud-muted-chip { color: var(--text-low); }
+
+@media (prefers-reduced-motion: reduce) {
+  /* The slide-in (and the slide-out, for whichever variant adopts it) becomes
+     instant. The ring is deliberately left animating: it is the only on-screen
+     indication that a 600 ms hold is arming standby, and freezing it would put
+     the machine back in the state this row exists to fix — an input that acts
+     with no visible evidence. */
+  .encoder-hud.snackbar-enter,
+  .encoder-hud.snackbar-exit { animation: none; }
+}

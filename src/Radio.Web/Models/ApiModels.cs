@@ -1320,3 +1320,30 @@ public class EncoderConnectionDto
   public bool WasEverConnected { get; set; }
 }
 
+
+/// <summary>
+/// Payload of the SignalR <c>EncoderHudChanged</c> broadcast (ENC-4).
+///
+/// <para>
+/// <see cref="EncoderIndex"/> is the geometry: the HUD divides the 1920 px viewport into quarters
+/// and renders this card in this encoder's quarter, so the readout appears above the knob that was
+/// turned. Everything else is the content.
+/// </para>
+///
+/// <para>
+/// <see cref="Phase"/> is a string rather than an enum on purpose. A newer API build may send a
+/// phase this kiosk does not know; an unknown phase renders nothing, which is the correct degraded
+/// behaviour on a screen inside sealed furniture. Deserializing into a closed enum would throw.
+/// </para>
+/// </summary>
+public class EncoderHudDto
+{
+  public int EncoderIndex { get; set; }
+  public string Label { get; set; } = string.Empty;
+  public string Phase { get; set; } = "Value";
+  public int? VolumePercent { get; set; }
+  public bool IsMuted { get; set; }
+  public string? PrimaryText { get; set; }
+  public string? SecondaryText { get; set; }
+  public bool PrimaryIsFrequency { get; set; }
+}
