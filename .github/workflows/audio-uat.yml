@@ -1,10 +1,24 @@
 name: AudioUAT Smoke
 
+# MANUAL ONLY. Removed from push/pull_request on 2026-09-02.
+#
+# This ran on every PR for ~7.5 minutes and could not fail one. The step that
+# actually invoked the tool carried `continue-on-error: true`, so the job
+# reported success whatever the tool did - and it requested the .NET 8 SDK on a
+# solution that moved to .NET 10 in PR #308, so what it exercised is not what
+# ships. It was a 7.5-minute check with no gating power, and at least one PR was
+# recorded as "awaiting AudioUAT gate clearance" for something that could never
+# have blocked it.
+#
+# Coverage now rests on `build.yml`, which restores 10.0.x, builds Release with
+# warnings-as-errors and runs the full corpus (~1,763 tests). Real audio UAT
+# needs hardware and belongs on the box, not on a GitHub runner.
+#
+# Both defects are fixed here rather than left in place, so that a deliberate
+# manual run is worth something: the SDK matches the solution, and a failure now
+# fails the job.
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
 
 jobs:
   audio-uat:
@@ -18,7 +32,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore
         run: dotnet restore
@@ -27,7 +41,6 @@ jobs:
         run: |
           dotnet run --project tools/Radio.Tools.AudioUAT -- --all --output uat-results.json
         shell: pwsh
-        continue-on-error: true
 
       - name: Upload UAT results artifact
         if: always()
