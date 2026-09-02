@@ -6,7 +6,7 @@ Running log of development sessions, organized chronologically. Each entry captu
 
 ## 2026-09-02 — ENC-4: the EncoderHud
 
-**PRs:** implementation `507b0d3`/`eb4005e`/`bd762d1`/`29acc01` (landed on `main` without a PR — see below), review + fixes #516
+**PRs:** implementation `507b0d3`/`eb4005e`/`bd762d1`/`29acc01` (landed on `main` without a PR — see below), review + fixes #519
 
 - Built `EncoderHud.razor` — one component, two hosts (`MainLayout`, and `Sleep.razor` with `Variant="Sleep"`).
   The card renders in the screen quarter above the knob that produced it (centres 240 / 720 / 1200 / 1680).
@@ -24,7 +24,7 @@ mid-cycle, and the branch was not re-verified before committing. The same thing 
 cycle, putting a fix commit onto an unrelated branch another session had just created. The owed review was then run
 after the fact and found **three HIGH defects**, all live on `main` and on the appliance — a wrong mute state on
 every volume-knob tap, a HUD card that could stay up indefinitely after a mid-hold disconnect, and an unguarded
-event raise on a timer thread that could end the web process. All three fixed in #516.
+event raise on a timer thread that could end the web process. All three fixed in #519.
 
 **Durable lesson:** when subagents share the working tree, `git branch --show-current` must be re-checked
 immediately before every commit and every push. A `git push` that prints `main -> main` is the last line of defence,
