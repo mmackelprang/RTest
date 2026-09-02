@@ -913,7 +913,7 @@
   // dialog instead of switching bands. A shorter press falls through to the
   // band-change handler. Tracks the pointer-down timestamp on the active
   // pill only so non-active pills still switch bands on a normal click.
-  private const int LongPressThresholdMs = 600;
+  private const int LongPressThresholdMs = Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs;
   private DateTime _bandPointerDownAt;
   private string? _bandPointerDownBand;
   private bool _suppressNextBandClick;
