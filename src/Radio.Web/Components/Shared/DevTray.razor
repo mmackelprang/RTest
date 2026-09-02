@@ -250,9 +250,10 @@
     RecordInteraction();
     try
     {
-      // The /api/system/logs/download endpoint is a planned follow-up. The UI
-      // contract ships now; clicking before the endpoint exists shows a 404
-      // in the new tab — non-destructive.
+      // Served by SystemLogsController.DownloadLogs ([Route("api/system/logs")] +
+      // [HttpGet("download")]). This comment previously described the endpoint as "a planned
+      // follow-up" that would 404 — it has been implemented since, and a comment claiming a
+      // working feature is broken sends the next reader chasing a defect that does not exist.
       var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
       var url = $"{apiBase}/api/system/logs/download?period=1h";
       await JS.InvokeVoidAsync("open", url, "_blank");
