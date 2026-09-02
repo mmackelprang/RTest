@@ -308,6 +308,15 @@ fi
 
 # Disable Intel AX201 onboard BT if USB BT adapter is present
 if lsusb 2>/dev/null | grep -qi "realtek.*bluetooth\|bluetooth.*realtek\|0bda:"; then
+  if [ -f "$SCRIPT_DIR_COMMON/99-rotaryusb-encoder.rules" ]; then
+    # ENC-0a. Without this the encoder is present, enumerable, and unopenable: hidraw nodes are
+    # created root-owned 0600 and radio-api runs unprivileged.
+    cp "$SCRIPT_DIR_COMMON/99-rotaryusb-encoder.rules" /etc/udev/rules.d/
+    udevadm control --reload-rules
+    # Re-trigger so an already-attached encoder picks the rule up without a replug.
+    udevadm trigger --subsystem-match=hidraw
+  fi
+
   if [ -f "$SCRIPT_DIR_COMMON/99-disable-intel-bt.rules" ]; then
     cp "$SCRIPT_DIR_COMMON/99-disable-intel-bt.rules" /etc/udev/rules.d/
     udevadm control --reload-rules

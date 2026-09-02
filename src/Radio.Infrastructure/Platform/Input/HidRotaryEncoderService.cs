@@ -83,6 +83,10 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   // Guards the absent-device log so it fires once per absence rather than once per rescan.
   private bool _announcedAbsence;
 
+  // Same, for the permissions case — which is permanent until someone changes the system, so it
+  // would otherwise log a warning and a stack trace every couple of seconds indefinitely.
+  private bool _announcedUnauthorized;
+
   /// <summary>
   /// Upper bound on the absent-device rescan interval. Presence is discovered by enumerating HID
   /// devices, and doing that every <c>ReconnectDelayMs</c> forever against a device that may simply
@@ -189,6 +193,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         // Found one: reset the backoff so a device that drops and returns is picked up promptly.
         absentRescanMs = opts.ReconnectDelayMs;
         _announcedAbsence = false;
+        _announcedUnauthorized = false;
 
         stream = device.Open();
         // Infinite is correct for an event-driven device that is silent at rest: the read simply
@@ -217,6 +222,37 @@ public class HidRotaryEncoderService : IRotaryEncoderService
       {
         break;
       }
+      catch (Exception ex) when (IsPermissionDenied(ex))
+      {
+        // ENC-0a. This is a PERMANENT condition, not a transient one, and treating it as transient
+        // is what made it expensive: hidraw nodes are created root-owned 0600, radio-api runs
+        // unprivileged, and the device is present and enumerable — so the reader found it, failed to
+        // open it, and retried every couple of seconds forever, each attempt logging a warning and a
+        // stack trace. On a box where log volume correlates with audible distortion that is not a
+        // cosmetic problem.
+        //
+        // Announced once with the remedy, then rescanned at the slowest interval. Retrying at all
+        // still matters: a udev rule applied while the service is running fixes this without a
+        // restart, and the operator should not have to know to restart it.
+        if (!_announcedUnauthorized)
+        {
+          _announcedUnauthorized = true;
+          _logger.LogError(ex,
+            "Encoder found but not permitted to open it. This is a permissions problem, not a " +
+            "hardware one — install deploy/common/99-rotaryusb-encoder.rules into " +
+            "/etc/udev/rules.d/, then 'udevadm control --reload-rules && udevadm trigger " +
+            "--subsystem-match=hidraw'. Rechecking every {Seconds}s until it is fixed.",
+            MaxAbsentRescanMs / 1000);
+        }
+
+        if (_isConnected)
+        {
+          _isConnected = false;
+          RaiseConnectionChanged(false);
+        }
+
+        absentRescanMs = MaxAbsentRescanMs;
+      }
       catch (Exception ex)
       {
         _logger.LogWarning(ex, "Encoder device error, will reconnect");
@@ -234,7 +270,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService
 
       if (!cancellationToken.IsCancellationRequested)
       {
-        await Task.Delay(opts.ReconnectDelayMs, cancellationToken);
+        await Task.Delay(absentRescanMs, cancellationToken);
       }
     }
 
@@ -244,6 +280,20 @@ public class HidRotaryEncoderService : IRotaryEncoderService
       RaiseConnectionChanged(false);
     }
   }
+
+  /// <summary>
+  /// True when the device was found but could not be opened for permissions reasons.
+  ///
+  /// <para>
+  /// ⚠ Matched partly by type <i>name</i>, which is deliberate rather than lazy: HidSharp 2.1.0
+  /// declares <c>DeviceUnauthorizedAccessException</c> as <b>internal</b>, so it cannot be caught by
+  /// type from outside the assembly. The BCL check is tried first and the name check is the fallback,
+  /// so this keeps working if a later HidSharp makes the type public or changes its hierarchy.
+  /// </para>
+  /// </summary>
+  private static bool IsPermissionDenied(Exception ex) =>
+    ex is UnauthorizedAccessException ||
+    ex.GetType().Name == "DeviceUnauthorizedAccessException";
 
   private void RaiseConnectionChanged(bool isConnected)
   {
