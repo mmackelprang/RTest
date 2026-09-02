@@ -144,8 +144,32 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   // would otherwise log a warning and a stack trace every couple of seconds indefinitely.
   private bool _announcedUnauthorized;
 
+  private RotaryEncoderConfigStatus _configStatus = RotaryEncoderConfigStatus.Unknown;
+
   /// <inheritdoc />
-  public RotaryEncoderConfigStatus ConfigStatus { get; private set; } = RotaryEncoderConfigStatus.Unknown;
+  public RotaryEncoderConfigStatus ConfigStatus
+  {
+    get => _configStatus;
+    // internal rather than private only so the change-detection below and the disconnect reset in
+    // RaiseConnectionChanged are testable without a device; nothing outside this assembly can write it.
+    internal set
+    {
+      // The change check lives here rather than at the assignment sites, so a site added later cannot
+      // introduce a duplicate broadcast by omission.
+      if (_configStatus == value)
+      {
+        return;
+      }
+
+      RotaryEncoderConfigStatus previous = _configStatus;
+      _configStatus = value;
+      ConfigStatusChanged?.Invoke(this, new EncoderConfigStatusEventArgs
+      {
+        Status = value,
+        PreviousStatus = previous,
+      });
+    }
+  }
 
   /// <summary>
   /// Upper bound on the absent-device rescan interval. Presence is discovered by enumerating HID
@@ -179,6 +203,9 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
 
   /// <inheritdoc />
   public event EventHandler<EncoderConnectionEventArgs>? ConnectionChanged;
+
+  /// <inheritdoc />
+  public event EventHandler<EncoderConfigStatusEventArgs>? ConfigStatusChanged;
 
   /// <inheritdoc />
   public Task StartAsync(CancellationToken cancellationToken = default)
@@ -364,8 +391,19 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     ex is UnauthorizedAccessException ||
     ex.GetType().Name == "DeviceUnauthorizedAccessException";
 
-  private void RaiseConnectionChanged(bool isConnected)
+  internal void RaiseConnectionChanged(bool isConnected)
   {
+    if (!isConnected)
+    {
+      // ENC-12. The app cannot know what an absent device is running, so a device that was
+      // Configured and is then unplugged must not keep claiming it — the badge would report a
+      // healthy configuration for hardware that is not there. The reset lives here rather than at
+      // the five call sites so a sixth added later cannot reintroduce the stale tier by omission.
+      // Note the same value drives the host's volume clamp, and VolumeClampFor(Unknown) is the
+      // TIGHT one, which is the correct direction for a device nobody can verify.
+      ConfigStatus = RotaryEncoderConfigStatus.Unknown;
+    }
+
     ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs
     {
       IsConnected = isConnected,

@@ -35,6 +35,9 @@ public class RotaryEncoderRouterMappingTests
     public event EventHandler<EncoderTurnedEventArgs>? EncoderTurned;
     public event EventHandler<EncoderButtonEventArgs>? ButtonPressed;
     public event EventHandler<EncoderConnectionEventArgs>? ConnectionChanged;
+#pragma warning disable CS0067 // Nothing in these tests raises a config-tier change.
+    public event EventHandler<EncoderConfigStatusEventArgs>? ConfigStatusChanged;
+#pragma warning restore CS0067
 
     public Task StartAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task StopAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

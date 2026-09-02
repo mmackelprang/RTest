@@ -35,6 +35,18 @@ public interface IRotaryEncoderService : IDisposable
 
   /// <summary>Fired when the HID device connects or disconnects.</summary>
   event EventHandler<EncoderConnectionEventArgs>? ConnectionChanged;
+
+  /// <summary>
+  /// Fired when <see cref="ConfigStatus"/> changes value (ENC-12).
+  ///
+  /// <para>
+  /// <b>On change only.</b> The push loop assigns this property once per attempt and may assign the
+  /// same value repeatedly — <c>Transient</c> on attempts 1 and 2 is the ordinary case. Broadcasting
+  /// every assignment would put SignalR traffic on the wire for a state that did not change, on a box
+  /// where incidental load correlates with audible audio distortion.
+  /// </para>
+  /// </summary>
+  event EventHandler<EncoderConfigStatusEventArgs>? ConfigStatusChanged;
 }
 
 /// <summary>
@@ -81,4 +93,16 @@ public class EncoderConnectionEventArgs : EventArgs
   /// </para>
   /// </summary>
   public bool WasEverConnected { get; init; }
+}
+
+/// <summary>
+/// Event args for a configuration-tier change (ENC-12).
+/// </summary>
+public class EncoderConfigStatusEventArgs : EventArgs
+{
+  /// <summary>The tier the device is now in.</summary>
+  public RotaryEncoderConfigStatus Status { get; init; }
+
+  /// <summary>The tier it was in immediately before. Never equal to <see cref="Status"/>.</summary>
+  public RotaryEncoderConfigStatus PreviousStatus { get; init; }
 }
