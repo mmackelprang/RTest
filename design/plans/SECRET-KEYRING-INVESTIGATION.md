@@ -2,7 +2,15 @@
 
 **Date:** 2026-07-17
 **Box:** `radio` (Ubuntu N100, x64) — `radio-api.service`
-**Status:** Root cause confirmed. Code/config fix implemented on branch
+**Status:** ✅ **RESOLVED — verified on the box 2026-09-02.** Both the code fix and the owner
+re-entry are done: the key rings persist (`data/keys` from Jul 17, `data/keys-web` from Aug 18, both
+surviving every deploy since), there are zero decrypt failures in the log, and a live announcement
+produced *"Creating TTS audio ... with engine Google"* with ducking and a clean teardown. The branch
+referenced below merged as `fix/web-dataprotection-keyring`. ⚠ One residual, filed as `SEC-2`: the
+Azure key slot appears to hold a Google key (`AIza...` prefix, identical to the Google slot) — latent
+while `tts:defaultEngine` is `Google`.
+
+*Original status:* Root cause confirmed. Code/config fix implemented on branch
 `fix/dataprotection-keyring-persist-path` (awaiting review). Owner action required to
 re-enter secrets.
 
