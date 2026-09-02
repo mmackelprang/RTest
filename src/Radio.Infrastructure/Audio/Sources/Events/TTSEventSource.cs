@@ -18,6 +18,7 @@ public class TTSEventSource : EventAudioSourceBase
   private readonly SoundFlowPlaybackService? _playbackService;
   private CancellationTokenSource? _playbackCts;
   private Task? _playbackMonitorTask;
+  private volatile bool _isPaused;
 
   /// <summary>
   /// Initializes a new instance of the <see cref="TTSEventSource"/> class.
@@ -165,6 +166,14 @@ public class TTSEventSource : EventAudioSourceBase
 
       while (!cancellationToken.IsCancellationRequested)
       {
+        if (_isPaused)
+        {
+          // A paused player reports IsPlaying == false and accrues no audio. Neither the
+          // completion check nor the duration safety net applies while paused.
+          await Task.Delay(checkInterval, cancellationToken);
+          continue;
+        }
+
         // Check if playback is still active
         if (!_playbackService.IsPlaying(Id))
         {
@@ -217,6 +226,32 @@ public class TTSEventSource : EventAudioSourceBase
     {
       // Playback was stopped
     }
+  }
+
+  // Seek is deliberately not overridden. IsSeekable stays false from the base, so SeekAsync
+  // throws NotSupportedException: seeking inside a spoken message has no user value
+  // (ADR-029 §8.3), and a no-op that reported success would be a lie.
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// The _isPaused flag is not decoration. StartPlaybackWithMonitoringAsync treats
+  /// !IsPlaying(Id) as natural completion, and SoundFlowPlaybackService.IsPlaying is
+  /// player.State == PlaybackState.Playing - which a PAUSED player fails. Without this flag a
+  /// pause would raise PlaybackCompleted(EndOfContent) and drive the source to Stopped.
+  /// </remarks>
+  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+  {
+    _isPaused = true;
+    _playbackService?.Pause(Id);
+    return Task.CompletedTask;
+  }
+
+  /// <inheritdoc/>
+  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+  {
+    _isPaused = false;
+    _playbackService?.Resume(Id);
+    return Task.CompletedTask;
   }
 
   /// <inheritdoc/>

@@ -243,4 +243,45 @@ public class TTSEventSourceTests
 
     Assert.Empty(stateChanges);
   }
+
+  // ── ADR-029 D4 transport surface ────────────────────────────────────────
+  // The C-6 defect itself - that a pause would otherwise be read as completion - needs a live
+  // player, so it is not provable here. It is a PR 6 UAT step on the box.
+
+  [Fact]
+  public void IsSeekable_IsFalse()
+  {
+    // Seeking inside a spoken message has no user value (ADR-029 §8.3). False here is the
+    // honest answer, and it is what makes SeekAsync throw rather than silently no-op.
+    var source = CreateSource();
+
+    Assert.False(source.IsSeekable);
+  }
+
+  [Fact]
+  public async Task SeekAsync_Throws()
+  {
+    var source = CreateSource();
+
+    await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.SeekAsync(TimeSpan.FromSeconds(1)));
+  }
+
+  [Fact]
+  public void Position_IsZero()
+  {
+    var source = CreateSource();
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task PauseAsync_IsANoOp_WhenTheSourceIsNotPlaying()
+  {
+    var source = CreateSource();
+
+    await source.PauseAsync();
+
+    Assert.NotEqual(AudioSourceState.Paused, source.State);
+  }
 }
