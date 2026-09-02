@@ -1,3 +1,4 @@
+using System.Reflection;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -8,6 +9,7 @@ using Radzen;
 using Radio.Web.Components.Shared;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Models;
 using Radio.Web.Services.Hub;
 using Radio.Web.Tests.TestHelpers;
 
@@ -39,6 +41,7 @@ namespace Radio.Web.Tests.Components.Shared;
 public class VisualizerPanelTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
+  private readonly AudioStateHubService _stateHub;
 
   public VisualizerPanelTests()
   {
@@ -78,6 +81,15 @@ public class VisualizerPanelTests : TestContext
       )
     );
 
+    // ENC-9a: the panel now also subscribes to AudioStateHubService for out-of-band mode
+    // changes. Kept as a field so a test can raise the event the server would have sent.
+    _stateHub = new AudioStateHubService(
+      NullLogger<AudioStateHubService>.Instance,
+      configuration,
+      transport: new OfflineHubTransport()
+    );
+    Services.AddSingleton(_stateHub);
+
     Services.AddSingleton<VisualizerTelemetryService>();
   }
 
@@ -86,6 +98,7 @@ public class VisualizerPanelTests : TestContext
     if (disposing)
     {
       _loggerFactory?.Dispose();
+      _stateHub?.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
     base.Dispose(disposing);
   }
@@ -210,6 +223,57 @@ public class VisualizerPanelTests : TestContext
       (phaseAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
       phaseAfter.GetAttribute("aria-selected").Should().Be("true");
     }, timeout: TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void ModePicker_RemoteModeChange_MovesTheActiveSegment()
+  {
+    // ENC-9a. The mode can change without this picker being what changed it — the encoder's
+    // visualizer knob, another browser, an API call. The server has always broadcast
+    // VisualizationModeChanged; before this, nothing consumed it, so the picker kept showing the
+    // old segment until a page reload.
+    var cut = RenderComponent<VisualizerPanel>();
+
+    var vuBefore = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
+    (vuBefore.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+
+    RaiseRemoteModeChange("Spectrum");
+
+    cut.WaitForAssertion(() =>
+    {
+      var spectrum = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "SPECTRUM"
+        || b.TextContent.Trim() == "Spectrum");
+      (spectrum.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+      spectrum.GetAttribute("aria-selected").Should().Be("true");
+
+      var vuAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
+      (vuAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
+    }, timeout: TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void ModePicker_RemoteModeChange_WithUnrecognisedMode_LeavesSelectionAlone()
+  {
+    // The API models modes as strings; this component declares its own enum. If those drift, the
+    // safe failure is to keep showing the mode that is actually running rather than to guess.
+    var cut = RenderComponent<VisualizerPanel>();
+
+    RaiseRemoteModeChange("NotARealMode");
+
+    var vu = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
+    (vu.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+  }
+
+  /// <summary>Raises the event the server's VisualizationModeChanged broadcast would raise.</summary>
+  private void RaiseRemoteModeChange(string mode)
+  {
+    var handler = typeof(AudioStateHubService)
+      .GetField("VisualizationModeChanged", BindingFlags.Instance | BindingFlags.NonPublic)?
+      .GetValue(_stateHub) as Func<VisualizationModeDto, Task>;
+
+    handler.Should().NotBeNull("the panel should have subscribed to VisualizationModeChanged");
+    handler!.Invoke(new VisualizationModeDto { Mode = mode, IsEnabled = true })
+      .GetAwaiter().GetResult();
   }
 
   [Fact]

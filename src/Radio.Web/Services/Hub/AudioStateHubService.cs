@@ -47,7 +47,10 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? SourceChanged;
   public event Func<Task>? FingerprintStatusChanged;
   public event Func<Task>? PhoneCallStateChanged;
-  public event Func<Task>? VisualizationModeChanged;
+  /// <summary>Raised when the server broadcasts a visualization-mode change, carrying the
+  /// new mode. Typed because a parameterless event tells a subscriber that something changed
+  /// without telling it what to change to (ENC-9a).</summary>
+  public event Func<VisualizationModeDto, Task>? VisualizationModeChanged;
   public event Func<Task>? EncoderConnectionChanged;
   public event Func<bool, Task>? SleepStateChanged;
   // Fired after a cross-process ConfigChanged push has reloaded this process's
@@ -201,12 +204,12 @@ public class AudioStateHubService : IAsyncDisposable
       });
 
       // Server sends VisualizationModeChanged with mode payload
-      _hubConnection.On<object>("VisualizationModeChanged", async (_) =>
+      _hubConnection.On<VisualizationModeDto>("VisualizationModeChanged", async (dto) =>
       {
-        _logger.LogDebug("Received VisualizationModeChanged event");
-        if (VisualizationModeChanged != null)
+        _logger.LogDebug("Received VisualizationModeChanged event: {Mode}", dto?.Mode);
+        if (VisualizationModeChanged != null && dto != null)
         {
-          await VisualizationModeChanged.Invoke();
+          await VisualizationModeChanged.Invoke(dto);
         }
       });
 
