@@ -120,8 +120,17 @@ public class SecretsControllerMaskRoundTripTests
   }
 
   [Fact]
-  public async Task PostingAnEmptyValue_StillClearsTheSecret()
+  public async Task PostingAnEmptyValue_LeavesTheSecretIntact()
   {
+    // This test asserted the opposite until the write contract changed: a blank value used to
+    // mean "delete". It no longer does. The Secrets UI now presents a configured secret as an
+    // empty field with a hint rather than as editable text, so under the old rule an ordinary
+    // Save would have deleted every secret the user did not retype - the same unrecoverable
+    // overwrite this class exists to prevent, arriving through a different door.
+    //
+    // Deletion is now explicit: DeleteSectionSecret for one property, DeleteSectionSecrets for a
+    // section. Both are covered in SecretsControllerTests; this test pins that the POST route no
+    // longer destroys anything.
     var provider = new InMemorySecretsProvider();
     await provider.SetSecretAsync("tts_azure_region", ShortSecret);
     var controller = CreateController(provider);
@@ -129,7 +138,7 @@ public class SecretsControllerMaskRoundTripTests
     await controller.SetSectionSecrets(
       "tts", new Dictionary<string, string> { ["AzureRegion"] = "" });
 
-    Assert.Null(await provider.GetSecretAsync("tts_azure_region"));
+    Assert.Equal(ShortSecret, await provider.GetSecretAsync("tts_azure_region"));
   }
 
   private sealed class InMemorySecretsProvider : ISecretsProvider

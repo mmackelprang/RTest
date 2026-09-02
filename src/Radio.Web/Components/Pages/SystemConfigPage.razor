@@ -1209,8 +1209,9 @@
     <RadzenTabsItem Text="Secrets" Icon="lock">
       <div style="max-width: 720px;">
       <RadzenAlert AlertStyle="AlertStyle.Warning" Size="AlertSize.Small" AllowClose="false" Style="margin-bottom:12px">
-        <strong>Security Notice:</strong> Secrets are sensitive credentials. Values are masked by default and encrypted server-side. Only enter secrets in secure environments.
-        Secrets must be explicitly saved using the "Save Secrets" button (not auto-saved).
+        <strong>Security Notice:</strong> Secrets are sensitive credentials, encrypted server-side. A stored secret is never
+        sent back to this page - reads return a mask only - so what you see here is a status, not the value.
+        Secrets must be explicitly saved using the "Save Secrets" button (not auto-saved). Only enter secrets in secure environments.
       </RadzenAlert>
 
       <RadzenTabs>
@@ -1218,49 +1219,85 @@
 
         <!-- TTS Secrets -->
         <RadzenTabsItem Text="TTS Services">
-          @if (_ttsSecrets != null)
+          @if (_ttsSecretStatus != null)
           {
             <RadzenRow Gap="0.5rem">
               <RadzenColumn Size="12">
                 <RadzenAlert AlertStyle="AlertStyle.Info" Size="AlertSize.Small" AllowClose="false">
                   API keys for cloud-based Text-to-Speech services. Optional - only needed if using Google or Azure TTS.
+                  A stored key is never sent back to this page, so every box below starts empty. Type in a box only to
+                  <strong>replace</strong> what is stored; leave it empty to keep the stored value, and use
+                  <strong>Clear</strong> to remove one.
                 </RadzenAlert>
               </RadzenColumn>
+
               <RadzenColumn Size="12">
-                <div class="@(string.IsNullOrWhiteSpace(_ttsSecrets.GoogleAPIKey) ? "secret-empty" : "secret-filled")" style="display:flex; align-items:center; gap:4px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                  <strong>Google API Key</strong>
+                  <RadzenBadge BadgeStyle="@SecretBadgeStyle(_ttsSecretStatus.GoogleAPIKey)" IsPill="true"
+                               Text="@SecretBadgeText(_ttsSecretStatus.GoogleAPIKey)" />
+                </div>
+                <div class="secret-field secret-field-google @SecretFieldClass(_ttsSecretStatus.GoogleAPIKey)" style="display:flex; align-items:center; gap:4px;">
                   @if (_showGoogleApiKey)
                   {
-                    <RadzenTextBox @bind-Value="_ttsSecrets.GoogleAPIKey" Placeholder="Google API Key - ${secret:tts_google_api_key}" Style="flex:1" />
+                    <RadzenTextBox @bind-Value="_googleApiKeyInput" Placeholder="@GoogleApiKeyPlaceholder" Style="flex:1" />
                   }
                   else
                   {
-                    <RadzenPassword @bind-Value="_ttsSecrets.GoogleAPIKey" Placeholder="Google API Key - ${secret:tts_google_api_key}" Style="flex:1" />
+                    <RadzenPassword @bind-Value="_googleApiKeyInput" Placeholder="@GoogleApiKeyPlaceholder" Style="flex:1" />
                   }
+                  @* Not disabled on an empty box: Radzen inputs write their bound value on change,
+                     i.e. on blur, so a disabled-when-empty button would swallow the first click -
+                     the blur that fills the field is the same interaction that would enable it. *@
                   <RadzenButton Icon="@(_showGoogleApiKey ? "visibility_off" : "visibility")" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light"
                                 Click="@(() => _showGoogleApiKey = !_showGoogleApiKey)" />
+                  <RadzenButton Icon="backspace" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                                Disabled="@(_isSaving || !IsSecretStored(_ttsSecretStatus.GoogleAPIKey))"
+                                Click="ClearGoogleApiKeyAsync" Text="Clear" />
                 </div>
-                <small>Google Cloud Text-to-Speech API key</small>
+                <small>Google Cloud Text-to-Speech API key. The eye button shows what you have typed here - it cannot show the stored key.</small>
               </RadzenColumn>
+
               <RadzenColumn Size="12">
-                <div class="@(string.IsNullOrWhiteSpace(_ttsSecrets.AzureAPIKey) ? "secret-empty" : "secret-filled")" style="display:flex; align-items:center; gap:4px;">
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                  <strong>Azure API Key</strong>
+                  <RadzenBadge BadgeStyle="@SecretBadgeStyle(_ttsSecretStatus.AzureAPIKey)" IsPill="true"
+                               Text="@SecretBadgeText(_ttsSecretStatus.AzureAPIKey)" />
+                </div>
+                <div class="secret-field secret-field-azure-key @SecretFieldClass(_ttsSecretStatus.AzureAPIKey)" style="display:flex; align-items:center; gap:4px;">
                   @if (_showAzureApiKey)
                   {
-                    <RadzenTextBox @bind-Value="_ttsSecrets.AzureAPIKey" Placeholder="Azure API Key - ${secret:tts_azure_api_key}" Style="flex:1" />
+                    <RadzenTextBox @bind-Value="_azureApiKeyInput" Placeholder="@AzureApiKeyPlaceholder" Style="flex:1" />
                   }
                   else
                   {
-                    <RadzenPassword @bind-Value="_ttsSecrets.AzureAPIKey" Placeholder="Azure API Key - ${secret:tts_azure_api_key}" Style="flex:1" />
+                    <RadzenPassword @bind-Value="_azureApiKeyInput" Placeholder="@AzureApiKeyPlaceholder" Style="flex:1" />
                   }
+                  @* See the note on the Google toggle: not disabled when the box is empty. *@
                   <RadzenButton Icon="@(_showAzureApiKey ? "visibility_off" : "visibility")" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light"
                                 Click="@(() => _showAzureApiKey = !_showAzureApiKey)" />
+                  <RadzenButton Icon="backspace" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                                Disabled="@(_isSaving || !IsSecretStored(_ttsSecretStatus.AzureAPIKey))"
+                                Click="ClearAzureApiKeyAsync" Text="Clear" />
                 </div>
-                <small>Azure Cognitive Services Speech API key</small>
+                <small>Azure Cognitive Services Speech API key. The eye button shows what you have typed here - it cannot show the stored key.</small>
               </RadzenColumn>
+
               <RadzenColumn Size="12">
-                <RadzenTextBox @bind-Value="_ttsSecrets.AzureRegion" Placeholder="Azure Region - ${secret:tts_azure_region}" Style="width:100%"
-                               class="@(string.IsNullOrWhiteSpace(_ttsSecrets.AzureRegion) ? "secret-empty" : "secret-filled")" />
-                <small>Azure region (e.g., eastus, westus2)</small>
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:2px;">
+                  <strong>Azure Region</strong>
+                  <RadzenBadge BadgeStyle="@SecretBadgeStyle(_ttsSecretStatus.AzureRegion)" IsPill="true"
+                               Text="@SecretBadgeText(_ttsSecretStatus.AzureRegion)" />
+                </div>
+                <div class="secret-field secret-field-azure-region @SecretFieldClass(_ttsSecretStatus.AzureRegion)" style="display:flex; align-items:center; gap:4px;">
+                  <RadzenTextBox @bind-Value="_azureRegionInput" Placeholder="@AzureRegionPlaceholder" Style="flex:1" />
+                  <RadzenButton Icon="backspace" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
+                                Disabled="@(_isSaving || !IsSecretStored(_ttsSecretStatus.AzureRegion))"
+                                Click="ClearAzureRegionAsync" Text="Clear" />
+                </div>
+                <small>Azure region (e.g., eastus, westus2). Stored alongside the keys, so it is masked on read like they are.</small>
               </RadzenColumn>
+
               <RadzenColumn Size="12">
                 <div style="display:flex; gap:8px">
                   <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Click="SaveTTSSecretsAsync"
@@ -1775,9 +1812,22 @@
     ["GenericUSB"] = "USB Audio",
   };
 
-  // Secrets
-  private TTSSecretsDto? _ttsSecrets;
-  // Secrets visibility toggles
+  // Secrets.
+  // _ttsSecretStatus holds what the API returns, which is only ever masked - "" for a secret that
+  // is not set, and a placeholder such as "abcd...wxyz" or "********" for one that is. It drives
+  // the badges and the hint text and is never bound to an input, because a value bound to an input
+  // is a value the next Save would send back, and sending a mask back is what overwrote the real
+  // Google key on 2026-09-02.
+  private TTSSecretsDto? _ttsSecretStatus;
+
+  // What the user has typed this visit. Empty means "leave the stored secret alone"; only
+  // non-blank entries are sent, and the API applies the same rule on its side.
+  private string _googleApiKeyInput = "";
+  private string _azureApiKeyInput = "";
+  private string _azureRegionInput = "";
+
+  // Reveal toggles for the two password boxes. They reveal the text in the box - i.e. what the
+  // user just typed - and nothing else; the stored secret never reaches the browser.
   private bool _showGoogleApiKey = false;
   private bool _showAzureApiKey = false;
 
@@ -3039,13 +3089,19 @@
   }
 
   // ========== Secrets Management ==========
+  //
+  // The contract this page implements, matching SecretsController:
+  //   * a read returns masks only, so a mask is display material and never input material;
+  //   * a save sends only the boxes the user filled in, so an untouched secret is not transmitted;
+  //   * a blank box means "unchanged" here and on the server;
+  //   * clearing is an explicit action - per field, or for the whole section.
 
   private async Task LoadSecretsAsync()
   {
     try
     {
-      // Load or create secrets with default values (empty)
-      _ttsSecrets = await LoadOrCreateSecretAsync<TTSSecretsDto>("tts");
+      // Masked status only - see the comment on _ttsSecretStatus.
+      _ttsSecretStatus = await LoadOrCreateSecretAsync<TTSSecretsDto>("tts");
     }
     catch (Exception ex)
     {
@@ -3069,114 +3125,215 @@
   }
 
   /// <summary>
-  /// Generic method to save secrets and hide visibility toggles after successful save
+  /// True when the API reported that a value is stored for this property.
   /// </summary>
-  private async Task SaveSecretsAsync<T>(string section, T? secrets, string displayName, params Action[] hideVisibilityToggles) where T : class
+  /// <remarks>
+  /// The API returns "" for a secret that is not set and a mask for one that is, so a non-blank
+  /// value here means "something is stored" - it never means the caller is holding the secret.
+  /// </remarks>
+  private static bool IsSecretStored(string? maskedValue) => !string.IsNullOrWhiteSpace(maskedValue);
+
+  private static BadgeStyle SecretBadgeStyle(string? maskedValue) =>
+    IsSecretStored(maskedValue) ? BadgeStyle.Success : BadgeStyle.Warning;
+
+  private static string SecretBadgeText(string? maskedValue) =>
+    IsSecretStored(maskedValue) ? "Stored" : "Not set";
+
+  private static string SecretFieldClass(string? maskedValue) =>
+    IsSecretStored(maskedValue) ? "secret-filled" : "secret-empty";
+
+  /// <summary>
+  /// Hint text for an empty secret box: what is stored, and what typing into it will do. The mask
+  /// appears here as a placeholder rather than as a value, so it stays visible - it is what made
+  /// the two TTS slots reading alike noticeable at all - but cannot be submitted. Note what it
+  /// cannot tell you: a mask is a fixed point of the masking function, so a secret overwritten with
+  /// its own mask reads back exactly like an intact one.
+  /// </summary>
+  private static string SecretPlaceholder(string? maskedValue, string label)
   {
+    if (!IsSecretStored(maskedValue))
+    {
+      return $"Not set - enter the {label}";
+    }
+
+    // The short-value mask ("********") carries nothing worth showing.
+    return maskedValue!.Contains("...", StringComparison.Ordinal)
+      ? $"Stored ({maskedValue}) - type to replace"
+      : "Stored - type to replace";
+  }
+
+  private string GoogleApiKeyPlaceholder => SecretPlaceholder(_ttsSecretStatus?.GoogleAPIKey, "Google API key");
+  private string AzureApiKeyPlaceholder => SecretPlaceholder(_ttsSecretStatus?.AzureAPIKey, "Azure API key");
+  private string AzureRegionPlaceholder => SecretPlaceholder(_ttsSecretStatus?.AzureRegion, "Azure region");
+
+  private void ResetSecretInputs()
+  {
+    _googleApiKeyInput = "";
+    _azureApiKeyInput = "";
+    _azureRegionInput = "";
+    _showGoogleApiKey = false;
+    _showAzureApiKey = false;
+  }
+
+  /// <summary>
+  /// Sends only the boxes the user filled in. A blank box is omitted from the request entirely, so
+  /// an untouched secret is never transmitted and cannot be overwritten by this save.
+  /// </summary>
+  private async Task SaveTTSSecretsAsync()
+  {
+    var payload = SecretsApiService.OnlyProvided(new Dictionary<string, string?>
+    {
+      ["GoogleAPIKey"] = _googleApiKeyInput,
+      ["AzureAPIKey"] = _azureApiKeyInput,
+      ["AzureRegion"] = _azureRegionInput
+    });
+
+    if (payload.Count == 0)
+    {
+      NotificationService.Notify(NotificationSeverity.Info, "Nothing to save",
+        "No box was filled in, so nothing was changed. Use Clear to remove a stored secret.");
+      return;
+    }
+
     _isSaving = true;
     try
     {
-      if (secrets == null) return;
-
-      var success = await SecretsApi.SaveSecretsAsync(section, secrets);
-      if (success)
+      var result = await SecretsApi.SaveSecretsAsync("tts", payload);
+      if (result.Success)
       {
-        Logger.LogInformation("{DisplayName} secrets updated successfully", displayName);
-        NotificationService.Notify(NotificationSeverity.Success, "Success", $"{displayName} secrets saved and encrypted successfully");
-        // Hide all visibility toggles
-        foreach (var hideToggle in hideVisibilityToggles)
+        Logger.LogInformation(
+          "TTS secrets: submitted {Submitted} value(s); the API stored {Stored} and left {Unchanged} unchanged",
+          payload.Count, result.StoredCount, result.UnchangedCount);
+
+        // Report the API's counts, not the request's. They differ when a submitted value turns out
+        // to be the mask of the secret already stored, and saying "saved" for one of those would be
+        // the same false reassurance that hid this bug.
+        if (result.StoredCount == 0)
         {
-          hideToggle?.Invoke();
+          NotificationService.Notify(NotificationSeverity.Warning, "Nothing was stored",
+            "What you entered matched the placeholder for the secret already stored, so it was left as it was.");
         }
-        StateHasChanged();
+        else
+        {
+          var message = result.UnchangedCount > 0
+            ? $"Stored and encrypted {result.StoredCount} secret(s); {result.UnchangedCount} left unchanged."
+            : $"Stored and encrypted {result.StoredCount} secret(s). Boxes left blank were not changed.";
+          NotificationService.Notify(NotificationSeverity.Success, "Success", message);
+        }
+
+        ResetSecretInputs();
+        await LoadSecretsAsync();
       }
       else
       {
-        NotificationService.Notify(NotificationSeverity.Error, "Error", $"Failed to save {displayName} secrets");
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to save TTS secrets");
       }
     }
     catch (Exception ex)
     {
-      Logger.LogError(ex, "Error saving {DisplayName} secrets", displayName);
-      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving {displayName} secrets: {ex.Message}");
+      Logger.LogError(ex, "Error saving TTS secrets");
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error saving TTS secrets: {ex.Message}");
     }
     finally
     {
       _isSaving = false;
+      StateHasChanged();
     }
   }
+
+  private Task ClearGoogleApiKeyAsync() =>
+    ClearSecretFieldAsync("GoogleAPIKey", "Google API key", () => { _googleApiKeyInput = ""; _showGoogleApiKey = false; });
+
+  private Task ClearAzureApiKeyAsync() =>
+    ClearSecretFieldAsync("AzureAPIKey", "Azure API key", () => { _azureApiKeyInput = ""; _showAzureApiKey = false; });
+
+  private Task ClearAzureRegionAsync() =>
+    ClearSecretFieldAsync("AzureRegion", "Azure region", () => _azureRegionInput = "");
 
   /// <summary>
-  /// Generic method to clear secrets with confirmation dialog
+  /// Removes one stored secret. Clearing needs its own request because a blank box means
+  /// "unchanged", so a single secret cannot be removed by saving the form.
   /// </summary>
-  private async Task ClearSecretsAsync<T>(string section, T? secrets, string displayName, Action clearFields) where T : class
+  /// <param name="property">The section property name, e.g. "AzureAPIKey".</param>
+  /// <param name="displayName">How the field is named to the user in dialogs and notifications.</param>
+  /// <param name="resetInput">
+  /// Empties that field's own box, and only that one. Text left in it after a clear would be sent
+  /// by the next Save, quietly re-setting the secret the user had just asked to remove.
+  /// </param>
+  private async Task ClearSecretFieldAsync(string property, string displayName, Action resetInput)
   {
-    var result = await DialogService.Confirm(
-      $"Are you sure you want to clear all {displayName} secrets? This action cannot be undone.",
-      "Confirm Clear Secrets",
+    var confirmed = await DialogService.Confirm(
+      $"Remove the stored {displayName}? This action cannot be undone.",
+      "Confirm Clear",
       new Radzen.ConfirmOptions { OkButtonText = "Clear", CancelButtonText = "Cancel" });
 
-    if (result == true)
-    {
-      _isSaving = true;
-      try
-      {
-        if (secrets != null)
-        {
-          clearFields?.Invoke();
+    if (confirmed != true) return;
 
-          var success = await SecretsApi.ClearSecretsAsync(section);
-          if (success)
-          {
-            Logger.LogInformation("{DisplayName} secrets cleared successfully", displayName);
-            NotificationService.Notify(NotificationSeverity.Success, "Success", $"{displayName} secrets cleared successfully");
-            StateHasChanged();
-          }
-          else
-          {
-            NotificationService.Notify(NotificationSeverity.Error, "Error", $"Failed to clear {displayName} secrets");
-          }
-        }
-      }
-      catch (Exception ex)
+    _isSaving = true;
+    try
+    {
+      var success = await SecretsApi.ClearSecretAsync("tts", property);
+      if (success)
       {
-        Logger.LogError(ex, "Error clearing {DisplayName} secrets", displayName);
-        NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error clearing {displayName} secrets: {ex.Message}");
+        Logger.LogInformation("TTS secret {Property}: clear requested", property);
+        // "no longer set" rather than "cleared": the API returns 200 whether or not there was
+        // anything stored to remove, and this does not read the flag that would tell them apart.
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"{displayName} is no longer set");
+        resetInput();
+        await LoadSecretsAsync();
       }
-      finally
+      else
       {
-        _isSaving = false;
+        NotificationService.Notify(NotificationSeverity.Error, "Error", $"Failed to clear {displayName}");
       }
     }
-  }
-
-  private async Task SaveTTSSecretsAsync()
-  {
-    await SaveSecretsAsync(
-      "tts",
-      _ttsSecrets,
-      "TTS",
-      () => _showGoogleApiKey = false,
-      () => _showAzureApiKey = false
-    );
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error clearing TTS secret {Property}", property);
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error clearing {displayName}: {ex.Message}");
+    }
+    finally
+    {
+      _isSaving = false;
+      StateHasChanged();
+    }
   }
 
   private async Task ClearTTSSecretsAsync()
   {
-    await ClearSecretsAsync(
-      "tts",
-      _ttsSecrets,
-      "TTS",
-      () =>
+    var confirmed = await DialogService.Confirm(
+      "Are you sure you want to clear all TTS secrets? This action cannot be undone.",
+      "Confirm Clear Secrets",
+      new Radzen.ConfirmOptions { OkButtonText = "Clear", CancelButtonText = "Cancel" });
+
+    if (confirmed != true) return;
+
+    _isSaving = true;
+    try
+    {
+      var success = await SecretsApi.ClearSecretsAsync("tts");
+      if (success)
       {
-        if (_ttsSecrets != null)
-        {
-          _ttsSecrets.GoogleAPIKey = "";
-          _ttsSecrets.AzureAPIKey = "";
-          _ttsSecrets.AzureRegion = "";
-        }
+        Logger.LogInformation("TTS secrets cleared");
+        NotificationService.Notify(NotificationSeverity.Success, "Success", "TTS secrets cleared successfully");
+        ResetSecretInputs();
+        await LoadSecretsAsync();
       }
-    );
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to clear TTS secrets");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Error clearing TTS secrets");
+      NotificationService.Notify(NotificationSeverity.Error, "Error", $"Error clearing TTS secrets: {ex.Message}");
+    }
+    finally
+    {
+      _isSaving = false;
+      StateHasChanged();
+    }
   }
 
   // ========== Phase 5: Store Management Methods ==========

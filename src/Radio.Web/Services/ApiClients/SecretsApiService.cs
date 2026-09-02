@@ -7,6 +7,11 @@ namespace Radio.Web.Services.ApiClients;
 /// <summary>
 /// API client for the dedicated secrets endpoints.
 /// </summary>
+/// <remarks>
+/// Every value this client reads back is masked - the API has no plaintext read - so nothing it
+/// receives is safe to submit again. <see cref="OnlyProvided"/> is the client half of that
+/// contract: callers build a payload from what the user actually typed, and omit the rest.
+/// </remarks>
 public class SecretsApiService
 {
   private readonly HttpClient _httpClient;
@@ -24,13 +29,16 @@ public class SecretsApiService
   }
 
   /// <summary>
-  /// Gets secrets for a section, returning raw values.
+  /// Gets the status of a section's secrets. Every value is masked by the API: an empty string
+  /// means "not set", anything else is a placeholder such as <c>abcd...wxyz</c> or <c>********</c>
+  /// and is never the secret itself. Display it as a hint; never put it in an editable field, and
+  /// never send it back.
   /// </summary>
   public async Task<T?> GetSecretsAsync<T>(string section, CancellationToken ct = default) where T : class, new()
   {
     try
     {
-      var response = await _httpClient.GetAsync($"/api/secrets/{section}?raw=true", ct);
+      var response = await _httpClient.GetAsync($"/api/secrets/{section}", ct);
       if (!response.IsSuccessStatusCode)
       {
         _logger.LogWarning("Failed to get secrets for section {Section}: {Status}", section, response.StatusCode);
@@ -48,19 +56,34 @@ public class SecretsApiService
   }
 
   /// <summary>
-  /// Saves secrets for a section.
+  /// Saves secrets for a section. Only the properties present and non-blank in
+  /// <paramref name="secrets"/> are written; the API leaves every other property of the section
+  /// alone. Build the payload with <see cref="OnlyProvided"/>.
   /// </summary>
-  public async Task<bool> SaveSecretsAsync<T>(string section, T secrets, CancellationToken ct = default) where T : class
+  /// <returns>
+  /// The counts the API actually applied. These are reported rather than inferred from the request
+  /// because they can differ from it: the API also declines to write a value that is the mask of
+  /// the secret already stored, so a caller must not tell the user that everything it sent was
+  /// saved.
+  /// </returns>
+  public async Task<SecretsSaveResult> SaveSecretsAsync<T>(string section, T secrets, CancellationToken ct = default) where T : class
   {
     try
     {
       var response = await _httpClient.PostAsJsonAsync($"/api/secrets/{section}", secrets, ct);
-      return response.IsSuccessStatusCode;
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogWarning("Failed to save secrets for section {Section}: {Status}", section, response.StatusCode);
+        return new SecretsSaveResult(false, 0, 0);
+      }
+
+      var body = await response.Content.ReadFromJsonAsync<SecretsSaveResponse>(JsonOptions, ct);
+      return new SecretsSaveResult(true, body?.StoredCount ?? 0, body?.UnchangedCount ?? 0);
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error saving secrets for section {Section}", section);
-      return false;
+      return new SecretsSaveResult(false, 0, 0);
     }
   }
 
@@ -80,4 +103,55 @@ public class SecretsApiService
       return false;
     }
   }
+
+  /// <summary>
+  /// Clears one secret in a section. Clearing is a distinct request because submitting a blank
+  /// value through <see cref="SaveSecretsAsync"/> means "leave it as it is".
+  /// </summary>
+  public async Task<bool> ClearSecretAsync(string section, string property, CancellationToken ct = default)
+  {
+    try
+    {
+      var response = await _httpClient.DeleteAsync($"/api/secrets/{section}/{property}", ct);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error clearing secret {Property} in section {Section}", property, section);
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Builds a save payload from the values a user actually entered, dropping every field left
+  /// blank so that an untouched field is never transmitted at all.
+  /// </summary>
+  /// <remarks>
+  /// This is the first of two defences against the mask round-trip, and the weaker one: it stops
+  /// the UI from sending a placeholder, while the API's own guard stops any client from storing
+  /// one. Whitespace-only input is treated as blank, since it cannot be a deliberate secret and is
+  /// far more likely to be a stray keystroke.
+  /// </remarks>
+  public static Dictionary<string, string> OnlyProvided(IReadOnlyDictionary<string, string?> fields)
+  {
+    var payload = new Dictionary<string, string>();
+    foreach (var (property, value) in fields)
+    {
+      if (!string.IsNullOrWhiteSpace(value))
+      {
+        payload[property] = value;
+      }
+    }
+
+    return payload;
+  }
+
+  /// <summary>The API's own account of what a save did.</summary>
+  private sealed record SecretsSaveResponse(int StoredCount, int UnchangedCount);
 }
+
+/// <summary>
+/// Outcome of a save: whether the request succeeded, and how many secrets the API reports it
+/// actually wrote as against left alone.
+/// </summary>
+public sealed record SecretsSaveResult(bool Success, int StoredCount, int UnchangedCount);

@@ -265,7 +265,14 @@ public class ConfigurationController : ControllerBase
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
       
-      var entries = await store.GetAllEntriesAsync();
+      // Raw, so that a "${secret:...}" tag is returned as the tag and not as the secret it points
+      // at. Under the default (Resolved) every secret-bearing entry in this store was serialised
+      // into the response in plaintext. The write side makes that worse than a disclosure: the
+      // three-argument ConfigurationApiService.UpdateConfigurationAsync(section, key, value) reads
+      // a whole section through this endpoint, edits one key, and posts all of it back - so a
+      // resolved secret would be written into the store as plaintext, destroying the tag
+      // indirection for good. That helper is pointed only at "ui.*" sections today.
+      var entries = await store.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
 
       // Filter entries that match the section prefix
       var sectionPrefix = $"{section.ToLowerInvariant()}:";
@@ -653,8 +660,9 @@ public class ConfigurationController : ControllerBase
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
       
-      // Get all entries to count them
-      var entries = await store.GetAllEntriesAsync();
+      // Get all entries to count them. Raw: only the count is used, so there is no reason to
+      // decrypt every secret in the store on each store-info poll.
+      var entries = await store.GetAllEntriesAsync(Radio.Configuration.Models.ConfigurationReadMode.Raw);
       
       // Build the file path based on configuration
       var basePath = Path.GetFullPath("./config"); // From appsettings
