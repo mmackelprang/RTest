@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.External;
 using Radio.Core.Interfaces.Input;
+using Radio.Infrastructure.Platform.Input;
 
 namespace Radio.API.Controllers;
 
@@ -66,6 +67,125 @@ public class IntegrationsController : ControllerBase
   }
 
   /// <summary>
+  /// Everything the encoder Settings surface renders: tier, timestamps, flash staleness, and the
+  /// designed-vs-read-back value of every configurable field (ENC-8).
+  /// </summary>
+  [HttpGet("encoder/provisioning")]
+  [ProducesResponseType(typeof(RotaryEncoderProvisioningSnapshot), StatusCodes.Status200OK)]
+  public IActionResult GetEncoderProvisioning()
+  {
+    var provisioning = _serviceProvider.GetService<IRotaryEncoderProvisioning>();
+    if (provisioning == null)
+    {
+      // The encoder subsystem is not registered in this host at all. Distinct from "disabled" and
+      // from "not connected", and the page says so rather than showing an empty table.
+      return Ok(new RotaryEncoderProvisioningSnapshot());
+    }
+
+    return Ok(provisioning.GetSnapshot());
+  }
+
+  /// <summary>Pushes the configuration and verifies it by read-back. Does not write flash.</summary>
+  [HttpPost("encoder/reapply")]
+  [ProducesResponseType(typeof(RotaryEncoderProvisioningSnapshot), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  public Task<IActionResult> ReapplyEncoderConfig(CancellationToken ct) =>
+    RunProvisioningAsync(p => p.ReapplyAsync(ct));
+
+  /// <summary>Pushes, verifies, then writes the verified bytes to the device's flash.</summary>
+  [HttpPost("encoder/save")]
+  [ProducesResponseType(typeof(RotaryEncoderProvisioningSnapshot), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  public Task<IActionResult> SaveEncoderConfigToDevice(CancellationToken ct) =>
+    RunProvisioningAsync(p => p.SaveToDeviceAsync(ct));
+
+  /// <summary>Sets one knob's direction override and pushes it immediately.</summary>
+  [HttpPut("encoder/reverse/{index:int}")]
+  [ProducesResponseType(typeof(RotaryEncoderProvisioningSnapshot), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  public Task<IActionResult> SetEncoderReverse(int index, [FromBody] SetEncoderReverseRequest request, CancellationToken ct)
+  {
+    if (index < 0 || index >= RotaryEncoderDeviceConfig.EncoderCount)
+    {
+      return Task.FromResult<IActionResult>(BadRequest(new { error = "Encoder index out of range" }));
+    }
+
+    return RunProvisioningAsync(p => p.SetReverseAsync(index, request.Reverse, ct));
+  }
+
+  /// <summary>Sends the device's counter-reset command.</summary>
+  [HttpPost("encoder/reset-counters")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  public async Task<IActionResult> ResetEncoderCounters(CancellationToken ct)
+  {
+    var provisioning = _serviceProvider.GetService<IRotaryEncoderProvisioning>();
+    if (provisioning == null)
+    {
+      return Conflict(new { error = "The encoder subsystem is not available." });
+    }
+
+    // "sent", not "zeroed": the protocol has no acknowledgement for this command.
+    bool sent = await provisioning.ResetCountersAsync(ct);
+    return sent ? Ok(new { sent = true }) : Conflict(new { error = "The encoder is not connected." });
+  }
+
+  /// <summary>
+  /// What each knob currently does, read from the router's own dispatch table (ENC-8).
+  ///
+  /// <para>
+  /// ⚠ This is the <b>software</b> mapping, and it is not the cabinet's engraved order. The two
+  /// currently disagree on indices 1-3 — ENC-5 / ENC-7 own the remap. The Settings page renders both
+  /// and states the disagreement; it does not pick one.
+  /// </para>
+  /// </summary>
+  [HttpGet("encoder/mapping")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  public IActionResult GetEncoderMapping()
+  {
+    var router = _serviceProvider.GetService<RotaryEncoderActionRouter>();
+    if (router == null)
+    {
+      return Ok(Array.Empty<object>());
+    }
+
+    return Ok(router.Mapping.Select(m => new
+    {
+      m.EncoderIndex,
+      CabinetName = RotaryEncoderCabinetNames.For(m.EncoderIndex),
+      m.TurnDescription,
+      m.PressDescription,
+    }));
+  }
+
+  private async Task<IActionResult> RunProvisioningAsync(
+    Func<IRotaryEncoderProvisioning, Task<RotaryEncoderProvisioningSnapshot>> operation)
+  {
+    var provisioning = _serviceProvider.GetService<IRotaryEncoderProvisioning>();
+    if (provisioning == null)
+    {
+      return Conflict(new { error = "The encoder subsystem is not available." });
+    }
+
+    try
+    {
+      return Ok(await operation(provisioning));
+    }
+    catch (InvalidOperationException ex)
+    {
+      // Thrown when the device is not connected. 409 rather than 500: nothing failed, the hardware
+      // is simply not there, and the page renders that differently.
+      return Conflict(new { error = ex.Message });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Encoder provisioning operation failed");
+      return StatusCode(500, new { error = "The encoder did not accept the request." });
+    }
+  }
+
+  /// <summary>
   /// Get phone integration runtime status.
   /// </summary>
   [HttpGet("phone/status")]
@@ -108,3 +228,6 @@ public class IntegrationsController : ControllerBase
     }
   }
 }
+
+/// <summary>Body of <c>PUT api/integrations/encoder/reverse/{index}</c>.</summary>
+public sealed record SetEncoderReverseRequest(bool Reverse);
