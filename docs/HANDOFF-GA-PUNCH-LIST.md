@@ -591,8 +591,7 @@ not the system default, with or without any enumeration reordering.
 
 ---
 
-**`AUD-8` — BT capture watchdog for long-uptime quiescence.**
-*Not queued — a plan exists, unqueued since 2026-05-22. Effort: 2–3 days.*
+**`AUD-8` — BT capture watchdog for long-uptime quiescence.** ✅ **ALREADY SHIPPED — CLOSED 2026-09-02 WITHOUT CODE.** `BluetoothCaptureWatchdog.cs` exists in tree, shipped as [#390](https://github.com/mmackelprang/RTest/pull/390) / `f82660a` (2026-05-22). ⚠ **The underlying capture-quiescence bug is NOT thereby proven fixed** — what is proven is that the watchdog this row asked for was built and merged. Whether it actually recovers the long-uptime case wants an observation over weeks of real uptime, which is the only way that bug presents. Re-file as a *confirm-in-service* row if it recurs.
 
 After days of uptime plus source switches, SoundFlow capture stops delivering audio: the generator is in the
 mixer, output is 0. Affects **all** capture sources. Only a restart fixes it.
@@ -600,15 +599,15 @@ mixer, output is 0. Affects **all** capture sources. Only a restart fixes it.
 - **Why the cabinet cares:** this is *the* exposure case. An appliance in furniture runs for weeks.
   Everything else in this document is a bug you hit while using the machine; this is a bug you hit by **not**
   using it, and its only current remedy is SSH into a sealed cabinet. Criterion (c).
-- **Evidence:** `design/plans/` — `bt-capture-watchdog` (2026-05-22); project memory
+- **Evidence:** `docs/plans/` (⚠ **not** `design/plans/` — this row had the path wrong) — `2026-05-22-bt-capture-watchdog`; project memory
   `project_long_running_capture_bug.md`, marked HIGH PRIORITY for production stability.
 - **Plan:** exists, unqueued. Needs a staleness pass against current `main` before a queue row.
 - **Depends on:** `TEST-1`. **Recommended:** land with or after `AUD-9`.
 
 ---
 
-**`AUD-9` — `autoSwitchOnConnect` gate.**
-*Not queued — a plan exists, unqueued since 2026-05-22. Effort: 1–2 days.*
+**`AUD-9` — `autoSwitchOnConnect` gate.** ✅ **ALREADY SHIPPED — CLOSED 2026-09-02 WITHOUT CODE.**
+*This row was never open.* It shipped **the same day the plan was written**, as [#391](https://github.com/mmackelprang/RTest/pull/391) / `85b14b1` *"feat(bt): gate autoSwitchOnConnect on PW capture-node availability"* (2026-05-22), verified as an ancestor of `main`. `BluetoothAutoSwitchService` probes for a PipeWire capture node, switches only on success, defers to a `CaptureNodeAvailable` subscription when the probe window expires, and **abandons the switch** on timeout rather than switching to a source with no audio behind it — the exact shape this row asked for, with 10 unit tests. The probe reuses `ParsePwCliOutputForBtNode`, the same static parser the acquisition path uses.
 
 The app switches to the BT source even when **no PipeWire capture node exists**, producing hours of failed
 retries — and project memory records that this **triggers capture-lifecycle degradation**, i.e. it feeds
@@ -617,8 +616,7 @@ retries — and project memory records that this **triggers capture-lifecycle de
 - **Why the cabinet cares:** it is a self-inflicted load generator on a resource-constrained box where
   incidental load correlates with audio distortion, and it degrades the very subsystem `AUD-8` is trying to
   keep alive. Fixing `AUD-8` without this treats the symptom.
-- **Evidence:** `design/plans/` — `bt-autoswitch-gate`; project memory `project_autoswitch_bt_bug.md`
-  ("Fix next").
+- **Evidence:** `docs/plans/2026-05-22-bt-autoswitch-gate.md` (⚠ **not** `design/plans/` — this row had the path wrong). ⚠ **Project memory `project_autoswitch_bt_bug.md` asserts a defect that does not exist:** it describes "hours of failed retries" from an unbounded loop. Both retry loops are bounded and were **before** the gate landed — 12 attempts × 10 s outer (`BluetoothAudioSource.cs:631`), 20 × 1 s inner (`LinuxBluetoothService.cs:1289`), ~140 s worst case. The 13-hour log spam came from repeated re-entry, which the gate removes. That memory should be retired rather than cited.
 - **Depends on:** `TEST-1`.
 
 ---
@@ -931,6 +929,7 @@ box is `x86_64`, so **the literally documented invocation ships ARM binaries to 
 
 | **`HW-1`** | **The real phone-ring WAV** at `media/sounds/phone-ring.wav` (`FUTURE-WORK` §11). ✅ **D16 answered — deprioritised.** The owner has a **physical rotary phone with a working ringer**, so the software ring is not the thing that announces a call in that room. | Dropped from P1 and from the quick-win list. It stays on the board only because a placeholder that logs a file-not-found is still untidy. | Owner, ~20 min | No |
 | **`ENC-10`** | **A roadmap row for physical input.** Designer §12.2: *"There is no roadmap row for physical input at all. This arc needs one, and §7 makes it at least two PRs (protocol + config/diagnostics, then mapping + HUD)."* | Bookkeeping — but the encoder arc is the largest body of work in this document and it is currently invisible in `docs/ROADMAP.md`. | 30 min | No |
+| **`AUD-11a`** | ⭐ **NEW 2026-09-02 — the capture-node probe forks `pw-cli` even when the event listener is healthy.** Found while confirming `AUD-9` had shipped. `LinuxBluetoothService.IsCaptureNodeAvailableAsync:1489` always shells out to `pw-cli list-objects` (`:1450`), and the 500 ms poll across a 5 s probe window means **~10 process forks per BT device connect**. Plan E's `PipeWireRegistryListener` already tracks node arrival from real registry events, but it is consulted only to skip the *rescan* loop (`:1607`) — never the probe, because it exposes `IsHealthy` / `NodeAppeared` / `NodeDisappeared` and **no "is node X present now" query**. Fix shape: have the listener keep a live set of present BT node addresses and let the probe consult it when `IsHealthy`, falling back to the scrape otherwise. | Self-inflicted load on a box where incidental load correlates with audible distortion — the same argument `AUD-9` itself was justified on. Small and well-bounded, with an obvious static test seam. | 0.5 d | No |
 | **`SEC-2`** | ⭐ **NEW 2026-09-02 — the Azure TTS key slot appears to hold a Google key.** Found while verifying `SEC-1`. `/api/secrets/tts` returns `GoogleAPIKey` and `AzureAPIKey` as **byte-identical masked values**, both `AIza...0hbM` — and `AIza` is Google's API-key prefix, not Azure's format. So the Google key looks to have been pasted into both fields. ⚠ Inferred from the mask (first four and last four characters), not from the plaintext, which this deliberately did not read. **Latent today**: `tts:defaultEngine` is `Google`, so Azure is never invoked. It surfaces the moment anyone selects Azure, as an authentication failure that will read like a broken integration rather than a wrong value. Fix is owner re-entry of the real Azure key, or clearing the slot so the engine reports "not configured" instead of failing on a bad credential. | Cosmetic until someone picks Azure, then actively misleading. `TTSFactory` gates Azure on both key and region, so a wrong key fails at the API rather than at the gate. | 10 min (owner) | No |
 | **`TEST-3`** | ⚠ **CORRECTED 2026-09-01 (second pass) — this is NOT benign, and the first correction had the mechanism wrong.** It **failed CI** on PR #485 and blocked a merge. Two tests went red: `PlaylistsControllerTests.Load_WithNonExistentId_ReturnsNotFound` (expected `NotFound`, got **`InternalServerError`**) and `PlayHistoryControllerTests.GetBySource_WithValidSource_ReturnsOk` (*"Expected success, got InternalServerError"*). **They are assertion failures, not timeouts** — the `[48 s]` / `[30 s]` in the log is duration, which is what made the original record read them as timing out. **Mechanism, corrected:** CPU oversubscription is only the *trigger*. The *cause* is that `CustomWebApplicationFactory` does not isolate storage — `Database.RootPath` is the relative `"./data"` and there is no `appsettings.Testing.json` override — so **all 17 hosts open the same SQLite files concurrently**, and under contention lock/busy errors surface as unhandled 500s. That is why only the **first-executed test of each class** fails, and only under full-suite load. **Proof it is intermittent rather than caused by any change:** two runs of the same branch one minute apart, whose only delta was a `CLAUDE.md` edit, went pass then fail; re-running the identical failed commit went green. **Fix: isolate per-host storage** (a temp `RootPath` per factory) — capping parallelism is a mitigation of the trigger, not the cause. | ⬆ **Promoted P2 → P1.** It fails CI intermittently, so it silently re-creates the exact condition `TEST-1` was ranked first to remove: a suite whose result does not depend on the code. Every row after this one is verified by that suite. | 0.5–1 d | No |
 | **`OPS-4`** | **CI runner migration** (`docs/ROADMAP.md` § "CI infrastructure — RTest appserver runner migration"). | Infrastructure. Related to `TEST-1` in spirit — the self-hosted runner is where the ambient-`localhost:5000` problem lives — but independent of it. | Unscoped | No |
@@ -1066,9 +1065,9 @@ fallback or removed from the engine list.
 
 | Tier | Count | Notes |
 |---|---|---|
-| **P0** | **23** | **Non-encoder (11):** `TEST-1`, `OPS-1`, `LOG-1`, `TTS-1` (part (i) ✅ done), `AUD-6`, `AUD-7`, `AUD-8`, `AUD-9`, `SEC-1`, `PHN-1`, `PHN-2`. **Encoder (12):** `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-11`, `ENC-12`, `ENC-15`. ⚠ **The encoder bundle went 6 → 8 (Rev 2) → 11 (D1) → 12 (Rev 3's `ENC-15` touch-wake gate), and it is no longer conditional on anything.** Departures and arrivals since the last revision: **LOG-3 left** this tier under D12; **SEC-1** (D15) and **PHN-1** / **PHN-2** (D17) joined it. |
+| **P0** | **21** | **Non-encoder (11):** `TEST-1`, `OPS-1`, `LOG-1`, `TTS-1` (part (i) ✅ done), `AUD-6`, `AUD-7`, ~~`AUD-8`~~, ~~`AUD-9`~~ (**both already shipped 2026-05-22 — closed without code**), ~~`SEC-1`~~ (**closed by verification**), `PHN-1`, `PHN-2`. **Encoder (12):** `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-11`, `ENC-12`, `ENC-15`. ⚠ **The encoder bundle went 6 → 8 (Rev 2) → 11 (D1) → 12 (Rev 3's `ENC-15` touch-wake gate), and it is no longer conditional on anything.** Departures and arrivals since the last revision: **LOG-3 left** this tier under D12; **SEC-1** (D15) and **PHN-1** / **PHN-2** (D17) joined it. |
 | **P1** | **37** | **`TEST-3`** (promoted from P2 2026-09-01 — it failed CI and blocked a merge), `ENC-9`, `ENC-14`, `AUD-2`, `AUD-5`, `AUD-10`, `AUD-11`, `AUD-12`, `LOG-2`, `LOG-3`, `LOG-4`, `LOG-5`, `LOG-6`, `LOG-7`, `LOG-8`, `LOG-11`, `PHN-3`, `PHN-4`, `TTS-2`, `TTS-3`, `TTS-4`, `TTS-5`, `TTS-6`, `TTS-7`, `TTS-8`, `GV-5`, `UI-2`, `UI-3`, `UI-4`, `UX-1`, `OPS-3`, `HW-2`, plus 5 cross-repo (`XR-1`…`XR-5`). |
-| **P2** | **16** | `AUD-1`, `AUD-4`, `LOG-9`, `LOG-10`, `UI-1`, `UI-5`, `OPS-2`, `OPS-4`, `TEST-2`, `GV-6`, `GV-7`, `GV-9`, `GV-10`, `ENC-10`, `HW-1`. |
+| **P2** | **17** | `AUD-1`, `AUD-4`, `LOG-9`, `LOG-10`, `UI-1`, `UI-5`, `OPS-2`, `OPS-4`, `TEST-2`, `GV-6`, `GV-7`, `GV-9`, `GV-10`, `ENC-10`, `HW-1`. |
 | **P3 / parked** | **22** | §6 — six added in the Rev 2 reconciliation, two more from Rev 3 (Designer's withdrawn flash baseline; the on-screen bank rename, recorded so nobody reverts it). |
 
 ### Where Designer Rev 2 and this document's tiering interact — stated plainly
