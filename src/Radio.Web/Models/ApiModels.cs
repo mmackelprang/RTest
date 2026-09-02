@@ -1302,3 +1302,21 @@ public class VisualizationModeDto
   public string? Mode { get; set; }
   public bool IsEnabled { get; set; }
 }
+
+/// <summary>
+/// Payload of the SignalR <c>EncoderConnectionChanged</c> broadcast (ENC-0).
+///
+/// <para>
+/// <c>IsConnected</c> alone is not enough to drive the notification policy, which is deliberately
+/// asymmetric: absent at boot gets a badge and no toast, while disappearing mid-session gets a toast
+/// because it is surprising and may land mid-interaction. Those are the same <c>IsConnected</c> value.
+/// </para>
+/// </summary>
+public class EncoderConnectionDto
+{
+  public bool IsConnected { get; set; }
+
+  /// <summary>True when the encoder has connected at least once since the API started.</summary>
+  public bool WasEverConnected { get; set; }
+}
+

@@ -957,8 +957,18 @@ public class AudioStateUpdateService : BackgroundService
   {
     try
     {
-      await _hubContext.Clients.All.SendAsync("EncoderConnectionChanged");
-      _logger.LogDebug("Broadcast EncoderConnectionChanged: IsConnected={IsConnected}", e.IsConnected);
+      // ENC-0: the payload is the point. This used to broadcast the bare event name, so a client
+      // learned that the encoder's connection state had changed but not what it changed TO — and the
+      // notification policy is asymmetric, so absent-at-boot and dropped-mid-session must be
+      // distinguishable. They share IsConnected=false.
+      await _hubContext.Clients.All.SendAsync("EncoderConnectionChanged", new
+      {
+        e.IsConnected,
+        e.WasEverConnected,
+      });
+      _logger.LogDebug(
+        "Broadcast EncoderConnectionChanged: IsConnected={IsConnected}, WasEverConnected={WasEver}",
+        e.IsConnected, e.WasEverConnected);
     }
     catch (Exception ex)
     {

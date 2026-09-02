@@ -7,7 +7,13 @@ namespace Radio.API.Services;
 
 /// <summary>
 /// Background service that starts the rotary encoder HID reader and action router.
-/// Gated by RotaryEncoderOptions.Enabled — does nothing if encoders are disabled.
+///
+/// <para>
+/// ENC-0: <c>RotaryEncoderOptions.Enabled</c> is an <b>escape hatch</b>, not a gate. It defaults to
+/// true and exists so a misbehaving encoder can be switched off without crawling behind the
+/// furniture. Whether the subsystem does anything is decided by <b>presence</b> — the reader watches
+/// for the device and degrades quietly when it is absent.
+/// </para>
 /// </summary>
 public class RotaryEncoderHostedService : BackgroundService
 {
@@ -32,7 +38,10 @@ public class RotaryEncoderHostedService : BackgroundService
   {
     if (!_options.Value.Enabled)
     {
-      _logger.LogInformation("Rotary encoder service is disabled");
+      // Silent about everything from here: the owner turned the knobs off deliberately and
+      // must not be nagged about the consequence.
+      _logger.LogInformation(
+        "Rotary encoder input is switched off by configuration (RotaryEncoder:Enabled=false)");
       return;
     }
 

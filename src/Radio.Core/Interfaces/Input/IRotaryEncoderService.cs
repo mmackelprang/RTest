@@ -56,4 +56,17 @@ public class EncoderConnectionEventArgs : EventArgs
 {
   /// <summary>True if device connected, false if disconnected.</summary>
   public bool IsConnected { get; init; }
+
+  /// <summary>
+  /// True when the device has connected at least once during this process's lifetime.
+  ///
+  /// <para>
+  /// ENC-0. The notification policy is asymmetric and cannot be applied without this. Absent at boot
+  /// gets a badge and no toast — the owner is most likely standing at the cabinet having just
+  /// installed or unplugged something. Disappearing mid-session gets a toast, because it is genuinely
+  /// surprising and may land mid-interaction. Those are the same <see cref="IsConnected"/> value and
+  /// they are not the same event.
+  /// </para>
+  /// </summary>
+  public bool WasEverConnected { get; init; }
 }

@@ -211,10 +211,18 @@ public class AudioStateStore : IAsyncDisposable
     }
   }
 
-  private async Task OnHubEncoderConnectionChanged()
+  private async Task OnHubEncoderConnectionChanged(EncoderConnectionDto dto)
   {
+    // Cached so a component that mounts after the transition can still tell absent-at-boot from
+    // dropped-mid-session — the two call for different notifications and share IsConnected=false.
+    EncoderConnection = dto;
     await NotifyAsync(EncoderConnectionChanged);
   }
+
+  /// <summary>
+  /// Latest encoder presence transition, or null if none has been observed this circuit.
+  /// </summary>
+  public EncoderConnectionDto? EncoderConnection { get; private set; }
 
   private async Task NotifyAsync(Func<Task>? handler)
   {

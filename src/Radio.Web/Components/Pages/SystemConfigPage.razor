@@ -1995,7 +1995,7 @@
       };
 
       // Subscribe to encoder connection changes
-      HubService.EncoderConnectionChanged += async () =>
+      HubService.EncoderConnectionChanged += async (_) =>
       {
         await InvokeAsync(async () =>
         {

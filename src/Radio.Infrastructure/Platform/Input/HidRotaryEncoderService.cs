@@ -73,6 +73,24 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   // The wire protocol lives in RotaryEncoderDecoder so it can be tested without hardware.
   private readonly RotaryEncoderDecoder _decoder = new();
 
+  /// <summary>
+  /// True once the device has been opened at least once in this process. ENC-0's notification policy
+  /// is asymmetric — absent-at-boot and dropped-mid-session are the same <c>IsConnected=false</c> and
+  /// are not the same event — so the transition has to carry this.
+  /// </summary>
+  private bool _everConnected;
+
+  // Guards the absent-device log so it fires once per absence rather than once per rescan.
+  private bool _announcedAbsence;
+
+  /// <summary>
+  /// Upper bound on the absent-device rescan interval. Presence is discovered by enumerating HID
+  /// devices, and doing that every <c>ReconnectDelayMs</c> forever against a device that may simply
+  /// not be installed is the "reconnect thrash" ENC-0 rules out. Backing off to this cap keeps a
+  /// permanently-absent encoder cheap while still noticing a plug-in within a few seconds.
+  /// </summary>
+  private const int MaxAbsentRescanMs = 15000;
+
 
   public HidRotaryEncoderService(
     ILogger<HidRotaryEncoderService> logger,
@@ -135,6 +153,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   private async Task ReadLoopAsync(CancellationToken cancellationToken)
   {
     var opts = _options.CurrentValue;
+    int absentRescanMs = Math.Max(opts.ReconnectDelayMs, 250);
 
     while (!cancellationToken.IsCancellationRequested)
     {
@@ -149,12 +168,27 @@ public class HidRotaryEncoderService : IRotaryEncoderService
           if (_isConnected)
           {
             _isConnected = false;
-            ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs { IsConnected = false });
+            RaiseConnectionChanged(false);
+          }
+          else if (!_announcedAbsence)
+          {
+            // Announce absence exactly once per absence, not once per rescan. A device that is
+            // simply not installed must not produce a log line every couple of seconds forever.
+            _announcedAbsence = true;
+            _logger.LogInformation(
+              "No rotary encoder found (VID=0x{VID:X4}, PID=0x{PID:X4}); will keep watching",
+              opts.VendorId, opts.ProductId);
+            RaiseConnectionChanged(false);
           }
 
-          await Task.Delay(opts.ReconnectDelayMs, cancellationToken);
+          await Task.Delay(absentRescanMs, cancellationToken);
+          absentRescanMs = Math.Min(absentRescanMs * 2, MaxAbsentRescanMs);
           continue;
         }
+
+        // Found one: reset the backoff so a device that drops and returns is picked up promptly.
+        absentRescanMs = opts.ReconnectDelayMs;
+        _announcedAbsence = false;
 
         stream = device.Open();
         // Infinite is correct for an event-driven device that is silent at rest: the read simply
@@ -172,8 +206,9 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         if (!_isConnected)
         {
           _isConnected = true;
+          _everConnected = true;
           _logger.LogInformation("Encoder device connected: {Device}", device.GetProductName());
-          ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs { IsConnected = true });
+          RaiseConnectionChanged(true);
         }
 
         await ReadFromDeviceAsync(device, stream, cancellationToken);
@@ -189,7 +224,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         if (_isConnected)
         {
           _isConnected = false;
-          ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs { IsConnected = false });
+          RaiseConnectionChanged(false);
         }
       }
       finally
@@ -206,8 +241,17 @@ public class HidRotaryEncoderService : IRotaryEncoderService
     if (_isConnected)
     {
       _isConnected = false;
-      ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs { IsConnected = false });
+      RaiseConnectionChanged(false);
     }
+  }
+
+  private void RaiseConnectionChanged(bool isConnected)
+  {
+    ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs
+    {
+      IsConnected = isConnected,
+      WasEverConnected = _everConnected,
+    });
   }
 
   private async Task ReadFromDeviceAsync(HidDevice device, HidStream stream, CancellationToken cancellationToken)
