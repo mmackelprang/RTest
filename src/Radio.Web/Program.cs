@@ -462,6 +462,10 @@ builder.Services.AddScoped<Radio.Web.Services.ContactResolutionService>();
 // escapes the sub-tree stacking context that previously trapped it.
 builder.Services.AddScoped<Radio.Web.Services.GainPopoverService>();
 
+// ENC-12. Scoped, like GainPopoverService and unlike AudioStateStore: this tracks what THIS browser
+// session has already been told about the knobs, not the state of the knobs themselves.
+builder.Services.AddScoped<Radio.Web.Services.EncoderFaultAnnouncer>();
+
 // Visualizer "updates/sec" telemetry. Singleton because the value is shared
 // across all visualizer panels and consumed by the dev tray (PR 6).
 builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();
@@ -554,6 +558,14 @@ builder.Services.Configure<Radio.Core.Configuration.WeatherDisplayOptions>(
   builder.Configuration.GetSection(Radio.Core.Configuration.WeatherDisplayOptions.SectionName));
 
 var app = builder.Build();
+
+// ENC-12. AudioStateStore subscribes to the hub in its constructor, and a singleton nobody injects
+// is never constructed — the same trap Program.cs already documents for EncoderHudService. Until
+// this row the store had no consumers at all, so its cache had never run. The encoder fault badge
+// seeds from that cache on every circuit start, including one that begins minutes after the fault
+// and including the kiosk booting straight onto /sleep, so the cache has to be alive before the
+// first circuit rather than because of it.
+_ = app.Services.GetRequiredService<AudioStateStore>();
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
