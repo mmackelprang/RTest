@@ -8,9 +8,10 @@ namespace Radio.Web.Services.Hub;
 
 /// <summary>
 /// SignalR hub service for real-time audio state updates
-/// Handles 10 event types: PlaybackStateChanged, NowPlayingChanged, QueueChanged,
+/// Handles: PlaybackStateChanged, NowPlayingChanged, QueueChanged,
 /// RadioStateChanged, VolumeChanged, SourceChanged, FingerprintStatusChanged,
-/// PhoneCallStateChanged, VisualizationModeChanged, EncoderConnectionChanged
+/// PhoneCallStateChanged, VisualizationModeChanged, EncoderConnectionChanged,
+/// EncoderHudChanged, SleepStateChanged, ConfigChanged
 /// </summary>
 public class AudioStateHubService : IAsyncDisposable
 {
@@ -55,6 +56,10 @@ public class AudioStateHubService : IAsyncDisposable
   /// Typed because absent-at-boot and dropped-mid-session share <c>IsConnected=false</c> and call for
   /// different notifications (ENC-0).</summary>
   public event Func<EncoderConnectionDto, Task>? EncoderConnectionChanged;
+  /// <summary>Raised when an encoder produced on-screen feedback, carrying which knob acted and what
+  /// to show (ENC-4). The API coalesces value updates to >= 50 ms before broadcasting, so a knob
+  /// being turned reaches this at up to 20 Hz rather than at the poll rate.</summary>
+  public event Func<EncoderHudDto, Task>? EncoderHudChanged;
   public event Func<bool, Task>? SleepStateChanged;
   // Fired after a cross-process ConfigChanged push has reloaded this process's
   // config snapshot. Optional for subscribers that want an immediate re-render;
@@ -225,6 +230,16 @@ public class AudioStateHubService : IAsyncDisposable
         if (EncoderConnectionChanged != null && dto != null)
         {
           await EncoderConnectionChanged.Invoke(dto);
+        }
+      });
+
+      // Server sends EncoderHudChanged when a knob acts (ENC-4).
+      _hubConnection.On<EncoderHudDto>("EncoderHudChanged", async (dto) =>
+      {
+        // No log line per message. This arrives at up to 20 Hz while a knob is moving.
+        if (EncoderHudChanged != null && dto != null)
+        {
+          await EncoderHudChanged.Invoke(dto);
         }
       });
 

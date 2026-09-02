@@ -257,6 +257,14 @@
          style="position: fixed; inset: 0; z-index: 9999;"
          @onclick="@(() => GainPopover.HandleBackdropClick())"></div>
   }
+
+  @* ENC-4 — encoder HUD host for every normal route.
+       Mounted at the layout root (outside .page-transition) for the same reason the gain backdrop
+       is: .page-transition declares transform + will-change, which creates a stacking context that
+       traps a descendant's z-index no matter how large it is. The HUD sits one tier above that
+       backdrop (10000 vs 9999).
+       The /sleep route is on EmptyLayout and is not in this tree, so it hosts its own copy. *@
+  <EncoderHud />
 </div>
 
 @code {

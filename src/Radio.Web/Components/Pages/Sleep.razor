@@ -14,6 +14,7 @@
 @inject WeatherApiService WeatherApi
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
 @inject IOptionsMonitor<WeatherDisplayOptions> WeatherOptionsMonitor
+@inject Radio.Web.Services.EncoderHudService EncoderHud
 @inject ILogger<Sleep> Logger
 @implements IAsyncDisposable
 
@@ -62,7 +63,15 @@
     get if the swap happened mid-translate.
   *@
   <div class="sleep-screen-drift" style="@_shiftStyle">
-    @if (_isShowingForecast && _forecast is not null && _forecast.Days.Count > 0)
+    @* ENC-4 / handoff §8.6 — while a knob readout is up it replaces the alternating
+       clock/weather composition for its lifetime, and the composition is restored afterward.
+       Rendering it alongside the clock would put two large emissive elements inside the same
+       anti-burn-in wrapper. *@
+    @if (EncoderHud.Current is not null)
+    {
+      <EncoderHud Variant="EncoderHudVariant.Sleep" />
+    }
+    else if (_isShowingForecast && _forecast is not null && _forecast.Days.Count > 0)
     {
       @* Forecast composition. Album art + track metadata are intentionally
          suppressed in this state — the forecast pane is dense enough that
@@ -101,6 +110,9 @@
     }
   </div>
 
+  @* TODO(ENC-6): handoff §8.6 asks for a Standby-specific hint — `hold VOLUME or press any knob
+     to turn on` — which needs the Ambient-vs-Standby distinction ENC-6 introduces. Until that
+     state model exists there is nothing here to branch on, so the line stays as it is. *@
   <div class="sleep-screen-hint">tap anywhere to wake</div>
 </div>
 
@@ -187,6 +199,11 @@
 
     AudioState.NowPlayingChanged += OnNowPlayingChanged;
     AudioState.SleepStateChanged += OnSleepStateChanged;
+
+    // The <EncoderHud> child re-renders itself on this same event, but only itself. The swap
+    // between the HUD and the clock/forecast composition above is this page's decision, so the
+    // page has to learn about the change too.
+    EncoderHud.StateChanged += OnEncoderHudChanged;
 
     // Hydrate the track block from the current playback state. Best-effort —
     // if the API is unreachable we just render the clock alone.
@@ -392,6 +409,20 @@
     return Task.CompletedTask;
   }
 
+  // ENC-4. EncoderHudService raises this from whichever thread published — the 1500 ms dismissal
+  // fires on a thread-pool thread — so the re-render is marshalled onto the circuit. The
+  // _disposed check mirrors the timer callbacks above: DisposeAsync unsubscribes, but the service
+  // is a process-wide singleton and can raise concurrently with that unsubscribe.
+  private void OnEncoderHudChanged()
+  {
+    if (_disposed) return;
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+      StateHasChanged();
+    });
+  }
+
   private async Task HandleWakeAsync()
   {
     try
@@ -417,6 +448,7 @@
     _disposed = true;
     AudioState.NowPlayingChanged -= OnNowPlayingChanged;
     AudioState.SleepStateChanged -= OnSleepStateChanged;
+    EncoderHud.StateChanged -= OnEncoderHudChanged;
 
     if (_clockTimer != null)
     {

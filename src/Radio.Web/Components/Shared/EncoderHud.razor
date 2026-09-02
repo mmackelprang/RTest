@@ -1,0 +1,163 @@
+@inject Radio.Web.Services.EncoderHudService Hud
+@implements IDisposable
+
+@*
+  ENC-4 — the encoder HUD.
+
+  A transient readout that appears in the screen quarter above the knob that produced it. One
+  component, two hosts: MainLayout renders it for every normal route (Variant=Normal, quartered and
+  bottom-anchored), and Sleep.razor renders it inside the anti-burn-in drift wrapper
+  (Variant=Sleep, centered by that wrapper's flex layout).
+
+  Geometry keys off the encoder index; content keys off the payload. The two are independent on
+  purpose — the router's index-to-handler table is still the pre-ENC-5 one, so today a card can be
+  in the right place and say the wrong word. Remapping the handlers later changes what it says
+  without touching this component.
+
+  Phase is an open string, not an enum. A phase this build does not know renders nothing rather
+  than throwing, which is the correct degraded behaviour on a kiosk nobody is watching.
+*@
+
+@{
+  var card = Hud.Current;
+}
+
+@if (card is not null && IsKnownPhase(card.Phase))
+{
+  @* role/aria-live make this a polite live region. Everything that carries meaning here is text —
+     the fill bar and the ring are decoration and are aria-hidden — so what a screen reader (and
+     AT-SPI, which is how this kiosk gets inspected remotely) announces is the label plus whatever
+     the card is reading out. The muted state says the word MUTED; it is not signalled by colour
+     alone. *@
+  <div class="@RootClass(card)"
+       style="@GeometryStyle(card)"
+       data-encoder-index="@ClampIndex(card.EncoderIndex)"
+       role="status"
+       aria-live="polite"
+       aria-atomic="true">
+
+    <div class="encoder-hud-label">
+      <span class="encoder-hud-label-text">@card.Label</span>
+      @if (card.IsMuted)
+      {
+        <span class="encoder-hud-muted-chip">MUTED</span>
+      }
+      else if (card.PrimaryIsFrequency && !string.IsNullOrWhiteSpace(card.SecondaryText))
+      {
+        @* Frequency cards put their secondary line on the label row's right (handoff §6.4). *@
+        <span class="encoder-hud-label-aside">@card.SecondaryText</span>
+      }
+    </div>
+
+    @if (card.VolumePercent is int percent)
+    {
+      @* Volume card. Chosen off the payload rather than off the label so a relabelled card
+         (for example the HOLD FOR STANDBY hold card) still renders as volume. *@
+      <div class="encoder-hud-volume">
+        <div class="encoder-hud-value-wrap">
+          @if (Hud.IsHolding)
+          {
+            @* The ring is CSS-driven from 300 ms to 600 ms; the server sends only the two discrete
+               hold edges. It is inside the volume branch, so only a card that carries a volume
+               percentage can draw one. *@
+            <div class="encoder-hud-ring" aria-hidden="true"></div>
+          }
+          <div class="encoder-hud-value">@percent</div>
+        </div>
+        <div class="encoder-hud-bar" aria-hidden="true">
+          <div class="encoder-hud-bar-fill" style="width: @(ClampPercent(percent))%;"></div>
+        </div>
+      </div>
+    }
+    else if (card.PrimaryIsFrequency)
+    {
+      @* .display-frequency is applied verbatim, with no font-size override. The handoff quotes
+         43px; the class is 42px after the PR #371 hot-fix, and reusing the class as-is is what
+         keeps this readout and the tuner's frequency well from drifting apart. *@
+      <div class="display-frequency">@card.PrimaryText</div>
+    }
+    else
+    {
+      @if (!string.IsNullOrWhiteSpace(card.PrimaryText))
+      {
+        <div class="encoder-hud-primary">@card.PrimaryText</div>
+      }
+      @if (!string.IsNullOrWhiteSpace(card.SecondaryText))
+      {
+        <div class="encoder-hud-secondary">@card.SecondaryText</div>
+      }
+    }
+  </div>
+}
+
+@code {
+  /// <summary>Which host this instance is rendering into. Decides geometry and chrome.</summary>
+  [Parameter]
+  public EncoderHudVariant Variant { get; set; } = EncoderHudVariant.Normal;
+
+  // The cabinet has four knobs, so the viewport is divided into four.
+  private const int EncoderCount = 4;
+
+  private bool _disposed;
+
+  protected override void OnInitialized()
+  {
+    Hud.StateChanged += OnHudStateChanged;
+  }
+
+  public void Dispose()
+  {
+    _disposed = true;
+    Hud.StateChanged -= OnHudStateChanged;
+  }
+
+  // EncoderHudService raises StateChanged from whichever thread published — for the 1500 ms
+  // dismissal that is a thread-pool thread — so the re-render is marshalled onto the circuit.
+  // The service is a process-wide singleton and can raise concurrently with Dispose's
+  // unsubscribe, so the flag is checked as well.
+  private void OnHudStateChanged()
+  {
+    if (_disposed) return;
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed) return;
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>
+  /// Phases this build renders. Anything else renders nothing — the forward-compatibility contract
+  /// a newer API build relies on (plan §2.5).
+  /// </summary>
+  private static bool IsKnownPhase(string? phase)
+    => phase is "Value" or "HoldStart" or "HoldCancel" or "HoldCommit";
+
+  private static int ClampIndex(int encoderIndex) => Math.Clamp(encoderIndex, 0, EncoderCount - 1);
+
+  private static int ClampPercent(int percent) => Math.Clamp(percent, 0, 100);
+
+  /// <summary>
+  /// Horizontal centre of the quarter this encoder owns, in CSS pixels of the 1920 px kiosk
+  /// viewport. 1920 / 4 = 480 wide per quarter, first centre at half of that.
+  /// </summary>
+  private static int QuarterCentre(int encoderIndex) => 240 + (ClampIndex(encoderIndex) * 480);
+
+  private string RootClass(EncoderHudDto card)
+  {
+    var classes = new List<string> { "encoder-hud", "snackbar-enter" };
+    if (Variant == EncoderHudVariant.Sleep)
+    {
+      classes.Add("encoder-hud--sleep");
+    }
+    if (card.IsMuted)
+    {
+      classes.Add("is-muted");
+    }
+    return string.Join(' ', classes);
+  }
+
+  // Normal: pinned to the encoder's own quarter. Sleep: no inline position at all — the drift
+  // wrapper in Sleep.razor centers it, and a fixed-position card could not ride that wrapper.
+  private string? GeometryStyle(EncoderHudDto card)
+    => Variant == EncoderHudVariant.Sleep ? null : $"left: {QuarterCentre(card.EncoderIndex)}px;";
+}

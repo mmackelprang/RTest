@@ -404,6 +404,17 @@ builder.Services.AddSingleton<AudioVisualizationHubService>();
 builder.Services.AddSingleton<PhoneHubService>();
 builder.Services.AddSingleton<GvTrunkHubService>();
 
+// ENC-4 — encoder HUD state. Sits with the hub services because it takes AudioStateHubService in
+// its constructor and subscribes to EncoderHudChanged there. Singleton rather than scoped (unlike
+// GainPopoverService): it tracks four physical knobs on one cabinet, so both hosts — MainLayout
+// and the /sleep route, which is on a different layout — must see the same card, and it has to
+// survive the route change between them.
+//
+// A singleton nobody injects is never constructed, and an unconstructed one never subscribes to
+// the hub. Both hosts inject it: MainLayout renders <EncoderHud> unconditionally, and Sleep.razor
+// injects it directly, which covers a kiosk that boots straight onto /sleep.
+builder.Services.AddSingleton<Radio.Web.Services.EncoderHudService>();
+
 // GV Messages — UI-local unread count shared with the topbar /phone pill, and
 // the single app-wide GV status poll (ADR-022 §6.2). The status service resolves
 // GvBridgeApiService through a scope per poll (a singleton can't inject a
