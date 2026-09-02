@@ -27,9 +27,6 @@ public class RotaryEncoderOptions
   /// <summary>Volume change per encoder step (percentage, 0-100).</summary>
   public int VolumeStepPercent { get; set; } = 2;
 
-  /// <summary>Radio tuning step per encoder click in kHz.</summary>
-  public int TuningStepKHz { get; set; } = 10;
-
   /// <summary>Delay before attempting device reconnection in milliseconds.</summary>
   public int ReconnectDelayMs { get; set; } = 2000;
 }
