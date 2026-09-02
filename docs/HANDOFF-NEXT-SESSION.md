@@ -178,15 +178,32 @@ ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the patt
 
 ---
 
-## Known mismatch, deliberate
+## Known mismatch, deliberate — now down to ONE index
 
-ENC-11 pushes device config in the handoff physical order **VOLUME / SOURCE / PRESETS / TUNING**,
-while `RotaryEncoderActionRouter` still maps the old **Volume / Tuning / Source / Visualizer**.
+**`ENC-5` did two thirds of the remap.** `RotaryEncoderActionRouter` now dispatches
+**`0 = Volume · 1 = SOURCE · 2 = Visualization · 3 = Tuning`** against a cabinet reading
+**VOLUME / SOURCE / PRESETS / TUNING**. Three of the four match the engraving.
 
-Index 0 is VOLUME in both, so **the dangerous knob is correct today**. Indices 1-3 will feel wrong
-until the router is remapped, which belongs with ENC-5 (SOURCE overlay) and ENC-7 (PRESETS) — those
-rows introduce the behaviour the remap points at. Remapping earlier would leave encoder 2 driving a
-PRESETS handler that does not exist yet.
+**Index 2 is the only one left, and `ENC-7` closes it.** It holds the visualiser as a deliberate
+seat-warmer. Leaving the *old source cycler* there was rejected: index 1 now opens the SOURCE
+overlay, so a cycler beside it would have given two adjacent knobs two divergent copies of the source
+selection — the defect handoff §4.4 forbids. The visualiser is shipped, harmless and visible, and
+moving it cost no new code.
+
+**Three consequences worth knowing before the next row:**
+
+1. **Tuning acceleration went live for the first time in `ENC-5`.** `RotaryEncoderConfigDefaults`
+   always pushed the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` to encoder 3; before the remap they
+   landed on the wrong handler. `TuningClamp = 8` stopped being theoretical, and a hard spin can now
+   issue up to 8 sequential tuner calls per detent.
+2. **Handlers no longer hard-code their HUD index.** `ENC-4` wrote `PublishHud(1, "TUNING", …)` and
+   friends as literals matching the *old* table; after a remap those put each card beside the wrong
+   knob. `_turnHandlers` / `_pressHandlers` are now `Action<int,int>` / `Action<int>` and the router
+   passes the index the event arrived on. **A future remap must not reintroduce a literal.**
+3. **The Settings page's "does not match the cabinet" warning is computed per knob.** `ENC-8` tested
+   the TUNING knob alone, which would have gone silent after `ENC-5` while PRESETS still disagreed —
+   asserting a full agreement the cabinet does not have. It now names whichever knobs actually
+   disagree and empties itself when `ENC-7` lands. **`ENC-7` should not need to touch it.**
 
 ---
 

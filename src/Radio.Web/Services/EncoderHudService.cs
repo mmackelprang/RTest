@@ -74,9 +74,18 @@ public sealed class EncoderHudService : IDisposable
   /// <summary>
   /// The phases this build knows how to draw. An unrecognised phase renders nothing rather than
   /// throwing, so a newer API build degrades to silence on an older kiosk (plan §2.5).
+  ///
+  /// <para>
+  /// ENC-5 adds the five selector phases. This list gates <c>EncoderHud.razor</c>'s entire render
+  /// and, through <see cref="HasRenderableCard"/>, whether <c>Sleep.razor</c> swaps its clock out
+  /// for the HUD at all — so a selector phase missing from here is an overlay that never draws,
+  /// not an overlay that draws wrongly.
+  /// </para>
   /// </summary>
   public static bool IsKnownPhase(string? phase)
-    => phase is "Value" or "HoldStart" or "HoldCancel" or "HoldCommit";
+    => phase is "Value" or "HoldStart" or "HoldCancel" or "HoldCommit"
+      or "SelectorPreview" or "SelectorBlocked" or "SelectorCommitting"
+      or "SelectorFailed" or "SelectorNotice";
 
   /// <summary>
   /// True when <see cref="Current"/> holds a card this build can actually render.
@@ -217,10 +226,19 @@ public sealed class EncoderHudService : IDisposable
   private void ArmDismissLocked()
   {
     CancelTimerLocked();
+
+    // ENC-5. The payload carries how long to hold, because the handoff specifies four different
+    // durations across the value card, the blocked flash, the save notice and the selector's idle
+    // dismiss. Null keeps ENC-4's default.
+    //
+    // This reads the card being published, not the one it replaced: Publish assigns Current before
+    // it calls here.
+    int holdMs = Current?.DurationMs ?? EncoderInteractionTimings.HudHoldMs;
+
     _dismissTimer = _timeProvider.CreateTimer(
       _ => Dismiss(),
       null,
-      TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs),
+      TimeSpan.FromMilliseconds(holdMs),
       Timeout.InfiniteTimeSpan);
   }
 

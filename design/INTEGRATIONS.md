@@ -12,7 +12,7 @@ for turning a working device off, not as a switch you must find before the knobs
 
 ## 1. Rotary Encoders (USB HID)
 
-Physical rotary encoders connected via a Raspberry Pi Pico running custom firmware, exposed as a USB HID device. Four encoders control Volume, Tuning, Source selection, and Visualization mode.
+Physical rotary encoders connected via a Raspberry Pi Pico running custom firmware, exposed as a USB HID device. The cabinet engraves the four knobs, top to bottom, **VOLUME / SOURCE / PRESETS / TUNING**. Three of the four are wired to that engraving; PRESETS lands with `ENC-7`, and until it does index 2 holds the visualiser as a seat-warmer.
 
 ### Hardware Requirements
 
@@ -51,16 +51,31 @@ The Pico firmware must present itself as a USB HID device with:
 > snapshot and is the one that can go stale — prefer the UI. There is deliberately only one source of
 > truth in code: `RotaryEncoderActionRouter.Mapping`, which is the same array dispatch runs through.
 
-| Encoder | Turn Action | Button Press |
-|---------|------------|--------------|
-| 0 — Volume | Volume up/down (configurable step %) | Mute toggle |
-| 1 — Tuning | Frequency step up/down (when Radio source active) | Start/stop frequency scan |
-| 2 — Source | Cycle through source selection | Switch to selected source |
-| 3 — Visualizer | Cycle visualization modes | Toggle visualization on/off |
+The knobs are a vertical column to the **left of the LCD**, so index 0 is the **topmost** and index 3 the
+**bottommost**.
 
-⚠ **The index→handler table above does not match the cabinet engraving, and that is deliberate.** The physical
-order is VOLUME / SOURCE / PRESETS / TUNING. Index 0 is VOLUME under both, so the dangerous knob is correct; indices
-1–3 are remapped by `ENC-5`/`ENC-7`, which introduce the handlers the remap points at.
+| Encoder | Engraved | Turn Action | Button Press | Long-press (600 ms) |
+|---------|----------|-------------|--------------|---------------------|
+| 0 | **VOLUME** | Volume up/down (configurable step %); a turn while muted **unmutes and applies the delta in the same frame** | Mute toggle | Enter standby |
+| 1 | **SOURCE** | Opens the SOURCE overlay and moves the highlight one entry per detent. **Nothing switches** — preview only | Commits the highlighted entry. With the overlay closed it opens on the current entry, so a press commits what is already playing | *none* |
+| 2 | **PRESETS** | ⚠ **Currently cycles visualization modes** — a seat-warmer until `ENC-7` | Toggle visualization on/off | *none until `ENC-7`* |
+| 3 | **TUNING** | Frequency step up/down when Radio is active (accelerated ×2/×4/×8, host-clamped to 8 steps per event); publishes a "no track control on this source" card otherwise | Start/stop frequency scan | *none* |
+
+⚠ **Index 2 is the one remaining mismatch with the engraving, and it is deliberate.** `ENC-5` remapped indices 1
+and 3 onto SOURCE and TUNING and parked the visualiser on 2. Leaving the *old source cycler* there was rejected:
+index 1 now opens the SOURCE overlay, so a cycler beside it would have given two adjacent knobs two divergent
+copies of the source selection — the defect the encoder handoff §4.4 spends a paragraph forbidding. `ENC-7`
+replaces index 2 with PRESETS and ends the remap. **The Settings page computes this warning per knob**, so it
+names whichever knobs actually disagree and disappears on its own when the last one is fixed.
+
+**The device-side configuration table has always been in cabinet order** (`RotaryEncoderConfigDefaults.Create()`),
+so acceleration-disabled lands on the two selector knobs and the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` land on
+TUNING. Before `ENC-5` those settings were applied to the wrong knobs; they are correct now — which is why tuning
+acceleration became reachable for the first time in that row.
+
+**A card always renders beside the knob that produced it**, because the HUD's geometry keys off the encoder index
+the event arrived on rather than off this table, and handlers take that index as a parameter instead of
+hard-coding it. A future remap moves the word without moving the card.
 
 ### On-screen feedback — the `EncoderHud` (ENC-4)
 

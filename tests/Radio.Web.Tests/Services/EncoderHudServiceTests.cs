@@ -38,6 +38,21 @@ public class EncoderHudServiceTests
   private static EncoderHudService NewService(FakeTimeProvider clock)
     => new(hub: null, timeProvider: clock);
 
+  /// <summary>
+  /// A selector card carrying its own hold duration (ENC-5). <paramref name="durationMs"/> of null
+  /// is the case that must fall back to <see cref="EncoderInteractionTimings.HudHoldMs"/>.
+  /// </summary>
+  private static EncoderHudDto SelectorCard(int? durationMs) => new()
+  {
+    EncoderIndex = 1,
+    Label = "SOURCE",
+    Phase = "SelectorPreview",
+    Title = "SOURCE",
+    HighlightIndex = 0,
+    DurationMs = durationMs,
+    Rows = [new EncoderSelectorRowDto { Id = "band:FM", Primary = "FM", IsCurrent = true }],
+  };
+
   [Fact]
   public void Publish_SetsCurrentAndRaisesStateChanged()
   {
@@ -282,6 +297,60 @@ public class EncoderHudServiceTests
     svc.Publish(Card(phase: "SomeFuturePhaseFromANewerApi"));
     svc.Current.Should().NotBeNull("the card is retained");
     svc.HasRenderableCard.Should().BeFalse("this build cannot draw that phase");
+  }
+
+  [Fact]
+  public void SelectorPreview_HoldsForItsOwnDuration_NotTheDefault()
+  {
+    // ENC-5 / handoff §6.5: a selector overlay is up for 4000 ms because a list has to be READ,
+    // where a value card is glanced at in 1500 ms. The duration rides on the payload rather than
+    // being looked up from the phase, so ENC-7's notices need no change here.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(SelectorCard(EncoderInteractionTimings.SelectorIdleDismissMs));
+
+    clock.Advance(TimeSpan.FromMilliseconds(1600));
+    svc.Current.Should().NotBeNull("1600 ms is past the default hold but well inside 4000 ms");
+
+    clock.Advance(TimeSpan.FromMilliseconds(2500));
+    svc.Current.Should().BeNull("4100 ms is past the duration the payload asked for");
+  }
+
+  [Fact]
+  public void NullDuration_FallsBackToTheDefaultHold()
+  {
+    // Every ENC-4 card sends null here, so this is the arm that keeps the shipped behaviour.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(SelectorCard(durationMs: null));
+
+    clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs - 1));
+    svc.Current.Should().NotBeNull();
+
+    clock.Advance(TimeSpan.FromMilliseconds(1));
+    svc.Current.Should().BeNull();
+  }
+
+  [Fact]
+  public void ANewPublishReArmsWithTheNewDuration()
+  {
+    // The ordering this depends on: Publish assigns Current before it arms the timer, so the arm
+    // reads the duration of the card being published rather than of the one it replaced. A
+    // 4000 ms overlay followed by a 1500 ms value card must dismiss at 1500.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(SelectorCard(EncoderInteractionTimings.SelectorIdleDismissMs));
+    clock.Advance(TimeSpan.FromMilliseconds(500));
+
+    svc.Publish(Card());
+    clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs - 1));
+    svc.Current.Should().NotBeNull();
+
+    clock.Advance(TimeSpan.FromMilliseconds(2));
+    svc.Current.Should().BeNull("the value card re-armed at its own 1500 ms, not the overlay's 4000");
   }
 
   [Fact]

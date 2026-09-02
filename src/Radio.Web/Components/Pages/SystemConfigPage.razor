@@ -1700,9 +1700,11 @@
               @if (MappingDisagreesWithCabinet())
               {
                 <div style="margin-top:8px; font-size:0.75rem; color:var(--signal-amber)">
-                  These are what the software does today. They do not all match the labels on the
-                  cabinet yet — the SOURCE, PRESETS and TUNING knobs are still wired to the older
-                  order in software. VOLUME is correct.
+                  These are what the software does today.
+                  @(MismatchedCabinetNames().Count() == 1 ? "One knob does" : "Some knobs do")
+                  not match the label on the cabinet yet:
+                  <strong>@string.Join(", ", MismatchedCabinetNames())</strong>.
+                  Every other knob is correct.
                 </div>
               }
             </RadzenCard>
@@ -3902,15 +3904,48 @@
   /// True while the router's index → action order differs from the cabinet's engraved order.
   ///
   /// <para>
-  /// Detected by looking for the knob whose engraved name is TUNING being described as something
-  /// other than tuning, rather than by a hard-coded flag — a flag would still be there, and still be
-  /// shown, after ENC-5 / ENC-7 fix the underlying mismatch.
+  /// Detected by comparing each knob's engraved name against what the router says that knob does,
+  /// rather than by a hard-coded flag — a flag would still be there, and still be shown, after
+  /// ENC-7 fixes the last remaining mismatch.
   /// </para>
   /// </summary>
-  private bool MappingDisagreesWithCabinet() =>
-    (_encoderMapping ?? []).Any(m =>
-      string.Equals(m.CabinetName, "TUNING", StringComparison.Ordinal) &&
-      !m.TurnDescription.Contains("Tune", StringComparison.OrdinalIgnoreCase));
+  private bool MappingDisagreesWithCabinet() => MismatchedCabinetNames().Any();
+
+  /// <summary>
+  /// The engraved names whose knob does not currently do what the engraving says, in index order.
+  ///
+  /// <para>
+  /// ⚠ <b>Every knob is checked, not just one.</b> This previously tested TUNING alone, which was
+  /// true while all three of SOURCE / PRESETS / TUNING were wrong together. ENC-5 fixed SOURCE and
+  /// TUNING and left PRESETS holding the visualiser, so a TUNING-only test would have gone quiet
+  /// while a knob still disagreed — the page would have asserted full agreement with the cabinet
+  /// that it does not have. Checking each knob against its own engraving is what lets the warning
+  /// empty itself when ENC-7 lands without ever overstating in between.
+  /// </para>
+  /// </summary>
+  private IEnumerable<string> MismatchedCabinetNames() =>
+    (_encoderMapping ?? [])
+      .Where(m => !DescribesItsCabinetRole(m))
+      .Select(m => m.CabinetName);
+
+  /// <summary>
+  /// Whether one row's turn description is consistent with its engraved name.
+  ///
+  /// <para>
+  /// A keyword match on the description rather than an index comparison, because the router's
+  /// descriptions are the only machine-readable statement of what a handler does — there is no
+  /// handler identity on the wire. An unrecognised engraving is treated as agreeing, so a future
+  /// name cannot make the page cry mismatch about a knob this method knows nothing about.
+  /// </para>
+  /// </summary>
+  private static bool DescribesItsCabinetRole(EncoderMappingDto m) => m.CabinetName switch
+  {
+    "VOLUME" => m.TurnDescription.Contains("Volume", StringComparison.OrdinalIgnoreCase),
+    "SOURCE" => m.TurnDescription.Contains("source", StringComparison.OrdinalIgnoreCase),
+    "PRESETS" => m.TurnDescription.Contains("preset", StringComparison.OrdinalIgnoreCase),
+    "TUNING" => m.TurnDescription.Contains("Tune", StringComparison.OrdinalIgnoreCase),
+    _ => true,
+  };
 
   private async Task SetEncoderReverseAsync(int encoderIndex, bool reverse)
   {

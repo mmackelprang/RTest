@@ -88,6 +88,33 @@ wrapper now would touch a dozen files across two rows for no behavioural gain.
 
 ---
 
+## Two `RadioApiService` client/server contract bugs (found by `ENC-5`, deliberately not fixed there)
+
+Both were found while mapping the radio surface for the SOURCE overlay. Neither is in `ENC-5`'s path, and
+folding unrelated fixes into a P0 encoder row is how a reviewable PR stops being one. Both were confirmed
+against **both halves** of the call, not inferred from one side.
+
+**1. `GetPowerStateAsync` deserializes a DTO against an endpoint that returns a bare `bool`.**
+`src/Radio.Web/Services/ApiClients/RadioApiService.cs:215` calls
+`GetFromJsonAsync<RadioPowerStateDto>("/api/radio/power")`. The server
+(`src/Radio.API/Controllers/RadioController.cs:449`) is `Task<ActionResult<bool>>` returning
+`Ok(powerState)` — the body is the JSON scalar `true`/`false`, not an object. Deserializing a scalar into
+`RadioPowerStateDto` throws, the method's `catch` swallows it and returns `null`, so **the call never
+yields a power state and never reports why**. Fix is a one-line decision: return the DTO server-side, or
+read a `bool` client-side. Pick one and delete the other shape.
+
+**2. `SetEqualizerAsync` posts `{ preset }` against a server binding `Mode`.**
+`RadioApiService.cs:187` posts `new { preset }`. The server (`RadioController.cs:310-318`) binds
+`SetEqualizerModeRequest` and reads `request.Mode`, so the bound value is null, `Enum.TryParse` fails, and
+the endpoint returns **400 with a "valid values are…" message the client discards** — `SetEqualizerAsync`
+reads only `IsSuccessStatusCode` and returns `false`. The radio equalizer cannot be set from the Web client
+at all, and the failure is silent to the user. Fix: rename the anonymous property to `Mode` (or add a
+`[JsonPropertyName]`), plus a test that posts the client's real payload shape.
+
+**Why they are grouped:** both are the same defect class — a hand-written payload on one side of an HTTP
+boundary that nothing checks against the other side. A contract test over `RadioApiService`'s payloads
+would have caught both.
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed
