@@ -39,11 +39,24 @@ punch list never recorded it; SEC-1 closed by verification.
 
 ---
 
-## Start here: ENC-4
+## Start here: ENC-5 / ENC-7 (and read the ENC-4 note first)
 
-**#511 is merged.** ENC-4 is **planned and queued 📋** — the EncoderHud, every knob visible within 100 ms
-on every route. Plan: [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md), 17 tasks.
-Builder can claim it without re-planning.
+**ENC-4 is shipped** — the EncoderHud renders in the quarter above the knob that moved, on every route. The next
+rows are **`ENC-5` (SOURCE overlay) and `ENC-7` (PRESETS)**, which the design handoff says to build together or back
+to back: one component, two lists. **They also own the router's index→handler remap**, which ENC-4 deliberately left
+alone and pinned with a test.
+
+⚠ **Two things from the ENC-4 cycle that will cost you if you skip them.**
+
+1. **ENC-4's implementation reached `main` without a PR and was never reviewed pre-merge.** The cause was a subagent
+   switching the shared working tree off the feature branch mid-cycle; it happened **twice** in one cycle. If you
+   dispatch subagents that touch the tree, re-check `git branch --show-current` immediately before every commit and
+   every push. The review, run late, found three HEAD-level defects that were already live in the cabinet.
+2. **The short button press now fires on RELEASE, and a >600 ms hold on knobs 2–4 does nothing at all.** That is the
+   correct pre-ENC-5 behaviour, not a fault — only encoder 0 has a long action wired.
+
+🔵 **One ENC-4 question is still open for the owner:** under `prefers-reduced-motion` the progress ring keeps
+sweeping instead of becoming handoff §6.5's "filling bar". See `design/FUTURE-WORK.md`.
 
 It is the right next row for a reason beyond its own value: **ENC-11 currently has no way to tell the
 owner anything.** Its tiered fault model (Configured / Transient / Degraded / Hard fault) works and is

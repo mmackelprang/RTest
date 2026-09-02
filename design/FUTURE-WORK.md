@@ -6,6 +6,31 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
+## Encoder HUD (ENC-4) — three seams left open on purpose
+
+**1. The PRESETS long-press consumer is not wired.** The design names two long-press actions: VOLUME → Standby and
+PRESETS → Save. Only the first exists. `RotaryEncoderActionRouter.OnLongPress` returns early for every index except
+0, and `PublishHold` refuses to publish a hold phase for indices 1–3 — deliberately, because a progress ring that
+fills and then does nothing is a promise the code does not keep. Wiring the second one belongs to `ENC-7`, which
+introduces the PRESETS handler; it also needs the router's index→handler remap, which `ENC-5`/`ENC-7` own.
+
+**2. There is no exit animation.** The card enters with `.snackbar-enter` and then simply unmounts. A 200 ms exit
+needs a two-phase teardown (keep the element alive while it animates out), which changes `EncoderHudService`'s
+contract and would be inherited by the `ENC-5`/`ENC-7` overlays. Judged not worth a state machine: the enter is the
+perceptually load-bearing half.
+
+**3. `prefers-reduced-motion` keeps the ring sweeping — an open question for the owner.** Handoff §6.5 asks that the
+ring "become a filling bar" under reduced motion. It currently keeps sweeping, because freezing it hides the only
+indication that a 600 ms hold is arming standby. Note the plan's own draft CSS (`animation-name: none`) would not
+have produced a filling bar either — it freezes `--ring-turn` at `0turn`, i.e. an empty ring. Needs an explicit
+decision, then either ratifying or implementing a genuine filling-bar treatment.
+
+**Also unverified rather than stubbed:** the encoder-disconnect → `Dismiss()` wiring is confirmed by inspection
+only. `AudioStateHubService.EncoderConnectionChanged` is a field-like event, so a unit test cannot raise it, and
+unplugging USB is not reachable remotely.
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed
