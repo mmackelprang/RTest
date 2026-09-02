@@ -366,7 +366,24 @@ keeps the knobs from becoming a new distortion source.
 ---
 
 **`ENC-4` — `EncoderHud` + the persistent mute indicator: every knob visible within 100 ms, on every route.**
-*Not queued. Effort: 3–4 days.*
+✅ **QUEUED 📋 2026-09-02** — plan at [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md),
+17 tasks. Both dependencies met (`ENC-1` #498, `ENC-3` #511). **`ENC-4a` shipped separately as #493.**
+*Effort: 3–4 days.*
+
+> **⚠ Three findings from planning that this row's text does not anticipate.**
+> 1. **The existing `VolumeChanged` broadcast cannot carry the HUD.** Its only call site is a **500 ms**
+>    change-detecting poller (`AudioStateUpdateService.CheckVolumeAsync:453-476`) — 2 Hz against a 100 ms
+>    requirement — and it reports *what the volume now is*, not *which knob moved*, which is the whole trick.
+>    The plan adds a dedicated push channel carrying the encoder index, with its own ≥50 ms coalescer.
+>    This does **not** contradict `HANDOFF-NEXT-SESSION.md`'s "do not add a second throttle" — that note is
+>    about `VolumeChanged`, which this row leaves alone.
+> 2. **The Sleep host is reachable today, but only on the idle path.** `idle-dimmer.js:73-81` navigates to
+>    `/sleep` *without* calling `SetSleepAsync(true)`, so `IsSleeping` is false there and a knob turn acts and
+>    renders in place. Reached via the **Sleep pill** it is true, the input is consumed by the wake, and the
+>    browser leaves the route — so UAT via the pill produces a false failure.
+> 3. **Designer §12.2's "reuse `RadioControlPanel.LongPressThresholdMs`" is not literally possible.** It is a
+>    `private const` in a Razor component in `Radio.Web`; the synthesis has to run in `Radio.API`. The plan
+>    promotes the value into `Radio.Core` and repoints the component at it, so there is one definition.
 
 > **This is the actual defect the Designer handoff exists to fix.** Two of the four knobs currently produce
 > **no visible evidence that anything happened**, and one of them changes the machine's entire behaviour

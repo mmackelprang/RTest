@@ -22,8 +22,8 @@ design is [`HANDOFF-rotary-encoder-mapping.md`](design-handoffs/HANDOFF-rotary-e
 
 | | |
 |---|---|
-| **Open PR** | **#511 `ENC-3`** — host clamps. Gates were green at hand-off; merge it first. |
-| **Working tree** | clean, branch `feat/enc-3-host-clamps` |
+| **Open PR** | none. **`ENC-3` merged as [#511](https://github.com/mmackelprang/RTest/pull/511)** (`d358d5f`). |
+| **Working tree** | clean, on `main` |
 | **Box** | deployed and healthy at `739a859`, encoder connected |
 | **P0 count** | **21 listed, 18 effective** |
 
@@ -41,8 +41,9 @@ punch list never recorded it; SEC-1 closed by verification.
 
 ## Start here: ENC-4
 
-**Merge #511 first**, then take ENC-4 — the EncoderHud, every knob visible within 100 ms on every
-route.
+**#511 is merged.** ENC-4 is **planned and queued 📋** — the EncoderHud, every knob visible within 100 ms
+on every route. Plan: [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md), 17 tasks.
+Builder can claim it without re-planning.
 
 It is the right next row for a reason beyond its own value: **ENC-11 currently has no way to tell the
 owner anything.** Its tiered fault model (Configured / Transient / Degraded / Hard fault) works and is
@@ -86,6 +87,17 @@ ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the patt
    Embedded shell one-liners containing quotes break it too. Use a quoted heredoc as the only command
    in the call, keep quoted shell snippets out of the content, and assert on every string replacement
    rather than trusting it.
+
+8. **`VolumeChanged` is the wrong channel for anything that must be on screen fast.** Its one call
+   site is a 500 ms change-detecting poller, so it is 2 Hz, and it carries the volume rather than
+   which knob moved. ENC-4's plan adds a separate push channel for HUD updates. The "do not add a
+   second throttle" finding below is about `VolumeChanged` and still stands.
+
+9. **`/sleep` reached by idle and `/sleep` reached by the Sleep pill are different states.**
+   `idle-dimmer.js:73-81` navigates without calling `SetSleepAsync(true)`, so
+   `SleepService.IsSleeping` is **false** on the idle path and knobs act normally there; the pill
+   sets it **true** and any encoder input is consumed by the wake. Testing sleep-screen encoder
+   behaviour via the pill will look like a failure when it is the documented pre-ENC-6 behaviour.
 
 ---
 
