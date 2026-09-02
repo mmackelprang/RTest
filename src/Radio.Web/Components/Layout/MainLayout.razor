@@ -6,6 +6,7 @@
 @inject SourcesApiService SourcesApi
 @inject DevicesApiService DevicesApi
 @inject AudioStateHubService HubService
+@inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
@@ -68,6 +69,19 @@
           }
         </span>
       </div>
+
+      @* ENC-4a — persistent mute indicator (handoff §6.7).
+         Mute previously showed only as a glyph inside NowPlayingPanel, which lives in Home's
+         left rail, so /queue, /metrics, /devices, /history and /phone had NO mute indication at
+         all. A muted console with no visible reason is indistinguishable from a broken one. *@
+      @if (_isMuted)
+      {
+        <button type="button" class="topbar-mute-chip" @onclick="UnmuteAsync"
+                title="Muted — tap to unmute" aria-label="Audio is muted. Tap to unmute.">
+          <RadzenIcon Icon="volume_off" />
+          <span>Muted</span>
+        </button>
+      }
 
       @if (_availableOutputs.Any(o => o.Id.Equals("google-cast", StringComparison.OrdinalIgnoreCase)))
       {
@@ -307,7 +321,13 @@
       HubService.QueueChanged += OnQueueChanged;
       HubService.SourceChanged += OnSourceChanged;
       HubService.SleepStateChanged += OnSleepStateChanged;
+      HubService.VolumeChanged += OnVolumeChanged;
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
+
+      // ENC-4a: seed the mute chip. VolumeChanged only fires on a CHANGE, so without this the
+      // chip would stay hidden on a page that loads while already muted — which is precisely the
+      // case it exists for (walk up to a quiet console and ask why).
+      await LoadMuteStateAsync();
 
       // Task #15 PR E item #47 — re-render when the gain popover service
       // toggles so the layout-mounted backdrop mounts/unmounts in lock-step
@@ -1124,6 +1144,55 @@
     InvokeAsync(StateHasChanged);
   }
 
+  // --- ENC-4a: persistent mute indicator ---
+
+  private bool _isMuted;
+
+  private async Task LoadMuteStateAsync()
+  {
+    try
+    {
+      var volume = await AudioApi.GetVolumeAsync();
+      if (volume is not null)
+      {
+        _isMuted = volume.IsMuted;
+      }
+    }
+    catch (Exception ex)
+    {
+      // A layout that cannot reach the API still has to render. Failing closed (chip hidden) is
+      // the right direction: a spurious MUTED on a console that is playing would be worse than a
+      // missing one, because it invites someone to "fix" audio that is not broken.
+      Logger.LogDebug(ex, "Could not load initial mute state for the topbar chip");
+    }
+  }
+
+  private async Task OnVolumeChanged(VolumeDto? dto)
+  {
+    if (dto is null || dto.IsMuted == _isMuted)
+    {
+      return;
+    }
+
+    _isMuted = dto.IsMuted;
+    await InvokeAsync(StateHasChanged);
+  }
+
+  private async Task UnmuteAsync()
+  {
+    try
+    {
+      await AudioApi.ToggleMuteAsync(false);
+      // Do not set _isMuted here — the VolumeChanged broadcast is what confirms the console
+      // actually unmuted. Optimistically clearing the chip would hide the one indicator the user
+      // has if the call silently failed.
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Unmute from the topbar chip failed");
+    }
+  }
+
   public void Dispose()
   {
     // Unsubscribe from events to prevent memory leaks
@@ -1132,6 +1201,7 @@
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
     HubService.SleepStateChanged -= OnSleepStateChanged;
+    HubService.VolumeChanged -= OnVolumeChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;
     GainPopover.StateChanged -= OnGainPopoverStateChanged;
     PhoneUnread.Changed -= OnPhoneUnreadChanged;
