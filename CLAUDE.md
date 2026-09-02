@@ -159,9 +159,13 @@ The in-app service URLs (`http://radio:5004`, etc.) resolve *on* the box and sho
 session 1, seat0). Not a Raspberry Pi — the project *targets* Pi/ARM64 as well, but the deployed
 appliance is x64, and several traps below follow from that.
 
-⚠ **`Deploy-ToLinux.ps1` defaults to `-Runtime linux-arm64`**, so the literal documented invocation
-ships **ARM binaries to this x64 host**. Always pass `-Runtime linux-x64`. (Its `$TargetHost` default
-of `piradio` is stale for the same reason.) Tracked as **OPS-1 (c)**.
+✅ **Fixed by `OPS-1` (2026-09-01).** `Deploy-ToLinux.ps1` now defaults to `-Runtime linux-x64` and
+`-TargetHost radio`, so the documented invocation targets this box correctly and no longer needs the
+flags spelled out. **`Deploy-ToPi.ps1` now passes `-TargetHost piradio` explicitly** — it always passed
+`-Runtime linux-arm64` but never a host, so flipping the shared default without fixing the wrapper
+would have started shipping ARM64 binaries to this x64 box, which is worse than the bug it replaced.
+*Previously:* the default was `linux-arm64` against an x86_64 appliance, so the literal documented
+invocation shipped ARM binaries here.
 
 ⚠ **The box is resource-constrained and on WiFi.** Heavy `journalctl` reads correlate with audio
 distortion — always bound queries (`--since '-30min'`) and never tail. `enp1s0` is unavailable, so
@@ -260,14 +264,20 @@ button work"* rather than *"what does it look like"*. It needs the graphical ses
 **`--window-position` is a no-op under Wayland.** Windows described elsewhere as "off-screen" are not;
 what makes one visible is stacking order, i.e. whichever browser restarted most recently.
 
-**Verifying a deploy actually landed.** `Deploy-ToLinux.ps1` verifies `radio-api` by SHA against
-`/api/health/version`, but for `radio-web` it only checks `systemctl is-active` — so a **stale web
-binary passes verification silently** (this is the gap OPS-1 closes). Interim check: grep the deployed
-binary for a symbol that exists only on the branch under test.
+**Verifying a deploy actually landed.** ✅ **Closed by `OPS-1` (2026-09-01) — both services are now
+verified by SHA.** `Radio.Web` serves `/api/health/version` on **port 5002**, the twin of the API's on
+5000, and `Deploy-ToLinux.ps1` polls both and `exit 1`s on a mismatch. The SHA parsing behind both is
+one implementation, `Radio.Core.Utilities.AssemblyBuildInfo` — two copies would be two chances for the
+services to derive a version differently and quietly pass a check that should fail.
 
 ```bash
-grep -ac RetryOpenThreadAsync /opt/radio-console/web/Radio.Web   # non-zero → the new binary is live
+curl -s http://radio:5000/api/health/version   # API  — gitSha, assemblyName "Radio.API"
+curl -s http://radio:5002/api/health/version   # Web  — gitSha, assemblyName "Radio.Web"
 ```
+
+*Previously:* `radio-web` was checked only with `systemctl is-active`, which is exactly as true of a
+stale binary as a fresh one, and the interim gate was grepping the deployed binary for a branch-only
+symbol (`grep -ac <symbol> /opt/radio-console/web/Radio.Web`). That workaround is no longer needed.
 
 **The deploy now also verifies the kiosk itself, and it checks liveness rather than existence.**
 After relaunching, `Deploy-ToLinux.ps1` polls for up to 20s and prints either
