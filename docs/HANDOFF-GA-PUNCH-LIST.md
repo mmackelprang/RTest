@@ -434,18 +434,6 @@ words today; the card is in the right *place*, which is what this row owns.
   `snackbarSlideIn` entrance now points the wrong way) **and a full left-edge collision list — the VOLUME
   band lands on the fixed topbar and covers `ENC-4a`'s own `MUTED` chip.** *(The correction was a separate
   reviewed PR. Rev 4 specified it; it did not build it.)*
-  ✅ **SHIPPED 2026-09-02 as `ENC-4c`.** The rotation is done, reviewed and on the box. Cards anchor at
-  `left: 24px` on bands **90 / 270 / 450 / 630**, and the four bands, the engraved names and the index→knob
-  mapping now have **one definition** — `Radio.Core.Configuration.FrontPanelGeometry`, citing the drawing —
-  because §6.2 names four surfaces that need them and this repo has already paid once for a value defined in
-  three places. Vertical centring is clamped to ≥ 8 px inside the viewport and expressed on the independent
-  `translate` property, so the entrance animation cannot drop it and no wrapper element was needed. The
-  mirrored keyframe pair is §6.1's **declared** exception, scoped to the Normal variant — **do not "correct"
-  `.encoder-hud-enter` back to `.snackbar-enter`**; the Sleep variant, placed by the drift wrapper rather
-  than by an edge, still uses the original. No new tokens; §6.9 stands. Occlusion is accepted on every band
-  per §6.2, with §6.7's mute invariant as the reason band 90 is safe. **§6.10's phase contract shipped in the
-  same PR:** an unrecognised HUD phase is now *not holding* (it could otherwise strand a card by suspending
-  the dismissal timer), with `Value` given its own arm so a turn mid-hold still preserves the ring.
   ✅ **Rev 5 closed every open question the rotation had, so it is implementable as specced.**
   **Decision: accept transient occlusion on all bands** — inset, a narrower card, per-route
   suppression, z-order yielding and a permanent left gutter were each considered and rejected with
@@ -457,9 +445,31 @@ words today; the card is in the right *place*, which is what this row owns.
   **transitional**, present only while the router runs the pre-`ENC-5` index table. Vertical centring
   must be **clamped to the viewport** (a ~173 px volume card on band 90 sits 3.5 px from the top),
   and §6.10 adds the phase contract below.
-- ⚠ **Phase contract — a spec change, not a tidy-up (Designer Rev 5 §6.10).** An unrecognised HUD
-  phase currently **preserves `IsHolding`**, and a true `IsHolding` cancels the 1500 ms dismissal
-  timer — so `HoldStart` → *unknown* → `Value` strands a card on screen with nothing to remove it.
+  ✅ **SHIPPED 2026-09-02 as `ENC-4c`, PR [#526](https://github.com/mmackelprang/RTest/pull/526).** The
+  rotation is done, reviewed and on the box. Cards anchor at `left: 24px` on bands **90 / 270 / 450 / 630**,
+  and the four bands, the engraved names and the index→knob mapping now have **one definition** —
+  `Radio.Core.Configuration.FrontPanelGeometry`, citing the drawing — because §6.2 names four surfaces that
+  need them and this repo has already paid once for a value defined in three places. Vertical centring is
+  clamped to ≥ 8 px inside the viewport and expressed on the independent `translate` property, so the
+  entrance animation cannot drop it and no wrapper element was needed. ⚠ **The clamp matters more than the
+  spec expected:** the volume card measures **178.5 px** on the box, not the ~173 px Rev 5 estimated, so
+  centred on band 90 it would sit *off the top of the viewport* rather than 3.5 px inside it. The mirrored
+  keyframe pair is §6.1's **declared** exception, scoped to the Normal variant — **do not "correct"
+  `.encoder-hud-enter` back to `.snackbar-enter`**; the Sleep variant, placed by the drift wrapper rather
+  than by an edge, still uses the original. No new tokens; §6.9 stands. Occlusion accepted on every band per
+  §6.2, with §6.7's mute invariant as the reason band 90 is safe.
+  **UAT was measured, not eyeballed** — driven through the kiosk's own CDP at 1920×720, three card variants
+  × four bands, 12/12: left anchor exact at 24.00 px, the clamp engaging on exactly bands 90 and 630 and
+  nowhere else, and the mid-animation rect identical to the resting one. ⚠ **One operator finding came out
+  of it and is NOT fixed here** — the kiosk was serving a **stale cached `design-system.css`**, because
+  `radio-web` sends it with no `Cache-Control` header and the kiosk profile's HTTP cache survives the
+  deploy's relaunch. **A CSS-only change can land, verify by SHA, and still not be on the panel.** Candidate
+  row for Planner.
+- ✅ **Phase contract — a spec change, not a tidy-up (Designer Rev 5 §6.10). SHIPPED in `ENC-4c`,
+  PR [#526](https://github.com/mmackelprang/RTest/pull/526), with all four arms explicit and the test
+  updated rather than deleted.** *The diagnosis is kept below as the record of what was wrong.* An
+  unrecognised HUD phase **preserved `IsHolding`**, and a true `IsHolding` cancels the
+  1500 ms dismissal timer — so `HoldStart` → *unknown* → `Value` strands a card on screen with nothing to remove it.
   Unreachable today (both builds know the same four names), but **`ENC-5` and `ENC-7` add phases** and
   an API-ahead-of-Web deploy is ordinary. **Decision: an unrecognised phase is *not holding*** — it
   renders nothing, so it can never draw a ring, and suppressing the timer is its only reachable
