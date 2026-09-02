@@ -60,6 +60,11 @@ public sealed class EncoderHudService : IDisposable
 
   /// <summary>
   /// True between a HoldStart and its HoldCancel / HoldCommit. Drives the progress ring.
+  ///
+  /// <para>
+  /// A <c>Value</c> phase leaves this alone, so turning the knob mid-hold does not collapse the
+  /// ring. Every other unrecognised phase clears it - see <see cref="Publish"/>.
+  /// </para>
   /// </summary>
   public bool IsHolding { get; private set; }
 
@@ -109,13 +114,26 @@ public sealed class EncoderHudService : IDisposable
 
       Current = dto;
 
-      // An unrecognised phase leaves IsHolding where it was rather than guessing. The renderer
-      // draws nothing for a phase it does not know, so a newer API build degrades to silence.
+      // Handoff 6.10 - four explicit arms, and the fourth one is the point.
+      //
+      // "Value" PRESERVES IsHolding: turning the knob while the button is held publishes a Value
+      // card, and the ring has to keep drawing through it.
+      //
+      // An unrecognised phase is NOT HOLDING. The renderer draws nothing for a phase it does not
+      // know, so a true IsHolding on one can never draw a ring - its only reachable effect is to
+      // suspend the dismissal timer below and strand a card on a kiosk nobody is watching.
+      // Unreachable while both builds know the same four names, but ENC-5 and ENC-7 add phases and
+      // an API-ahead-of-Web deploy is ordinary.
+      //
+      // Value and the unknown case therefore need separate arms even though the obvious edit -
+      // flipping the shared default to false - would fix the stranding and silently break the
+      // hold-and-turn ring.
       IsHolding = dto.Phase switch
       {
         "HoldStart" => true,
         "HoldCancel" or "HoldCommit" => false,
-        _ => IsHolding,
+        "Value" => IsHolding,
+        _ => false,
       };
 
       // While a button is held the card must not time out from under the ring, so the dismissal

@@ -21,8 +21,9 @@ namespace Radio.Web.Tests.Services;
 ///     input, and any new input re-arms that timer instead of stacking a second one.
 ///   - A hold suspends the dismissal entirely, so the progress ring cannot be orphaned by a
 ///     timeout firing underneath it.
-///   - An unrecognised phase leaves IsHolding where it was — the forward-compatibility rule that
-///     lets a newer API build reach an older kiosk without throwing.
+///   - The four-arm phase contract (handoff §6.10): Value preserves IsHolding so a turn mid-hold
+///     does not collapse the ring, and every unrecognised phase clears it so a card cannot be
+///     stranded on a kiosk by a phase a newer API build invented.
 /// </summary>
 public class EncoderHudServiceTests
 {
@@ -129,18 +130,71 @@ public class EncoderHudServiceTests
   }
 
   [Fact]
-  public void UnknownPhase_LeavesIsHoldingAlone()
+  public void UnknownPhase_IsNotHolding_SoTheCardCannotBeStranded()
   {
+    // ⚠ This test was inverted by handoff §6.10, deliberately and with the reasoning recorded
+    // there. It previously asserted that an unknown phase LEAVES IsHolding alone, because "the
+    // service must not invent a transition out of it". That was sound about the CARD and wrong
+    // about the TIMER: a true IsHolding suspends the 1500 ms dismissal, so HoldStart → unknown →
+    // Value left a card on screen with nothing left to remove it. The renderer still draws
+    // nothing for a phase it does not know, which is all the original rule was defending, so the
+    // forward-compatibility question this test guards still matters — it just has a different
+    // correct answer.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(Card("HoldStart"));
+    svc.IsHolding.Should().BeTrue();
+
+    svc.Publish(Card("SomethingENC5WillAdd"));
+
+    svc.IsHolding.Should().BeFalse();
+    svc.Current!.Phase.Should().Be("SomethingENC5WillAdd");
+  }
+
+  [Fact]
+  public void UnknownPhaseMidHold_StillDismissesOnTime()
+  {
+    // The behaviour the arm above exists for, rather than the flag that produces it: a card
+    // published under a phase this build does not know must still go away by itself.
     var clock = new FakeTimeProvider();
     using var svc = NewService(clock);
 
     svc.Publish(Card("HoldStart"));
     svc.Publish(Card("SomethingENC5WillAdd"));
 
-    // The renderer draws nothing for an unknown phase; the service must not invent a transition
-    // out of it either.
+    clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs + 1));
+
+    svc.Current.Should().BeNull("an unrecognised phase must not suspend the dismissal timer");
+  }
+
+  [Fact]
+  public void ValuePhaseMidHold_PreservesIsHolding()
+  {
+    // The trap §6.10 calls out: "Value" used to reach the same default arm as an unknown phase, so
+    // the obvious fix — flipping that default to false — would have stopped the stranding AND
+    // silently broken the hold-and-turn ring. Turning the knob while the button is held publishes
+    // a Value card, and the ring has to keep drawing through it.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(Card("HoldStart"));
+    svc.Publish(Card("Value", percent: 63));
+
     svc.IsHolding.Should().BeTrue();
-    svc.Current!.Phase.Should().Be("SomethingENC5WillAdd");
+    svc.Current!.VolumePercent.Should().Be(63);
+  }
+
+  [Fact]
+  public void ValuePhaseOutsideAHold_LeavesIsHoldingFalse()
+  {
+    // The other half of "preserved": Value must not manufacture a hold either.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(Card("Value"));
+
+    svc.IsHolding.Should().BeFalse();
   }
 
   [Fact]

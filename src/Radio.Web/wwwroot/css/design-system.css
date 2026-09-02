@@ -1026,7 +1026,9 @@ html, body {
   100% { opacity: 1; transform: translateY(0); }
 }
 
-/* Snackbar slide */
+/* Snackbar slide. A mirrored horizontal pair for the left-anchored encoder HUD
+   lives in the ENC-4 block below (encoderHudSlideInLeft / -OutLeft); if the
+   duration or easing here changes, change it there too. */
 @keyframes snackbarSlideIn {
   from { opacity: 0; transform: translateY(100%); }
   to   { opacity: 1; transform: translateY(0); }
@@ -5901,31 +5903,92 @@ body {
 
 /* ─── ENC-4  Encoder HUD ────────────────────────────────────────────────────
  *
- * A transient readout that appears in the screen quarter above the knob that
- * produced it. Enter reuses .snackbar-enter (:1218), which this file had
- * carried unconsumed since the design-system pass.
+ * A transient readout that appears beside the knob that produced it, at the
+ * same height. The knobs are a vertical column to the LEFT of the LCD
+ * (handoff §9), so cards anchor to the left edge and are banded down the
+ * 720px axis. The Normal variant enters on the mirrored horizontal keyframes
+ * declared below; the Sleep variant keeps .snackbar-enter (:1218), which this
+ * file had carried unconsumed since the design-system pass.
  *
- * No --hud-* custom properties, per the encoder handoff §6.9. The one custom
- * property declared here, --ring-turn, is not a design token: it is the
- * animated angle the progress ring is drawn from, and it has to be registered
- * with @property because an unregistered custom property does not interpolate.
+ * No --hud-* custom properties, per the encoder handoff §6.9. The two custom
+ * properties declared here are not design tokens. --ring-turn is the animated
+ * angle the progress ring is drawn from, and it has to be registered with
+ * @property because an unregistered custom property does not interpolate.
+ * --encoder-band-y is the one per-encoder number this stylesheet cannot know:
+ * the component sets it from Radio.Core's FrontPanelGeometry, which is the
+ * single definition of the panel and cites the drawing every band derives from.
  *
  * The 10px radius is a literal because this project has no --radius-* scale;
  * it matches .nav-pill, and the 12px blur matches the .surface-overlay family.
  * ─────────────────────────────────────────────────────────────────────────── */
 
+/* The mirrored horizontal entrance - handoff §6.1's ONE DECLARED EXCEPTION to
+   its own "use the existing primitives, do not write new keyframes" rule.
+   DO NOT "correct" this back to .snackbar-enter.
+
+   snackbarSlideIn/Out (:1030, :1035) slide on translateY(100%), which is right
+   for the bottom-anchored card ENC-4 originally shipped and wrong for the
+   left-anchored one the corrected panel geometry produces: a card attached to
+   the left edge would enter from an edge it is not attached to. The rule the
+   exception exists to protect is against a PARALLEL MOTION VOCABULARY being
+   invented, and a mirror of an existing pair is not that - each half keeps its
+   own twin's duration and easing, which is what makes it a mirror rather than a
+   new pair. It adds two keyframe blocks and no token, so §6.9 is untouched.
+
+   Scoped to .encoder-hud in the Normal variant. The Sleep variant is placed by
+   the anti-burn-in drift wrapper rather than by an edge, and keeps the original
+   .snackbar-enter. */
+@keyframes encoderHudSlideInLeft {
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes encoderHudSlideOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-100%); }
+}
+
+.encoder-hud-enter { animation: encoderHudSlideInLeft var(--anim-duration-normal) var(--anim-ease-emphasized); }
+/* Applied by nothing today, exactly as .snackbar-exit was before it - the card
+   is removed from the DOM when the service clears it rather than animated out.
+   It is here so the pair stays a pair: a mirror with one half missing is what
+   drifts. */
+.encoder-hud-exit  { animation: encoderHudSlideOutLeft var(--anim-duration-normal) var(--anim-ease-standard); }
+
 .encoder-hud {
   position: fixed;
-  bottom: 24px;
+  /* Left-anchored: the knob column sits 44.13mm to the left of the LCD's active
+     area, so the screen's left edge is the nearest the glass gets to a knob. */
+  left: 24px;
+  top: var(--encoder-band-y);
   width: 360px;
-  /* Centred on its quarter with a negative margin rather than
-     transform: translateX(-50%), because .snackbar-enter animates `transform`
-     and would drop the centering for the length of the animation. The card is
-     a fixed 360px, so -180px is exactly half. */
-  margin-left: -180px;
+  /* Vertically centred on the band, clamped to stay at least 8px inside the
+     viewport.
+
+     Card height is NOT fixed - the volume card is ~173px against ~90-110px for
+     the others - so there is no constant half-height to offset by, the way the
+     old horizontal geometry could offset by a constant -180px against a fixed
+     360px width. The percentages below resolve against the card's own height,
+     which is what centres it without anything having to know that height.
+
+     The clamp is load-bearing rather than defensive padding: centred on band 90
+     a 173px card spans y 3.5-176.5, and on band 630 y 543.5-716.5, so both end
+     bands already sit within 4px of a viewport edge. If it engages routinely
+     the card has grown too tall and the card is what should change, not the
+     band.
+
+     This is the `translate` property, not `transform`. The entrance keyframes
+     animate `transform`, and a transform declared here would be overridden for
+     the length of that animation - the same hazard the old `margin-left:-180px`
+     existed to dodge. The two properties compose (translate is applied before
+     transform), so the centring survives the slide. */
+  translate: 0 clamp(
+    calc(8px - var(--encoder-band-y)),
+    -50%,
+    calc(712px - var(--encoder-band-y) - 100%));
   z-index: 10000;                 /* one tier above the gain-popover backdrop (9999) */
   /* A readout, not a control. Without this the card is a 360px transparent
-     shield over the bottom of whatever route is underneath it. */
+     shield over whatever route is underneath it. */
   pointer-events: none;
   background: color-mix(in srgb, var(--surface-overlay) 92%, transparent);
   backdrop-filter: blur(12px);
@@ -6062,7 +6125,10 @@ body {
 .encoder-hud--sleep {
   position: static;
   width: auto;
-  margin-left: 0;
+  /* The band centring is a `translate`, which applies to a statically positioned
+     element too - so it is switched off here rather than left to be ignored the
+     way `top` and `left` are. */
+  translate: none;
   /* No card chrome. This replaces the clock composition inside the drift
      wrapper rather than floating above it, and that wrapper's one emissive
      colour is the load-bearing rule of the sleep-screen handoff. */
@@ -6125,5 +6191,7 @@ body {
      the machine back in the state this row exists to fix — an input that acts
      with no visible evidence. */
   .encoder-hud.snackbar-enter,
-  .encoder-hud.snackbar-exit { animation: none; }
+  .encoder-hud.snackbar-exit,
+  .encoder-hud.encoder-hud-enter,
+  .encoder-hud.encoder-hud-exit { animation: none; }
 }
