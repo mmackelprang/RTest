@@ -11,6 +11,10 @@ authorised autonomous execution against this list in the §2 order, merging on g
 **`ENC-4` shipped its HUD on the wrong axis** and needs a 90° rotation (Designer Rev 4 §6.2 specifies it;
 that is a separate PR). Designer Rev 4 also **re-derived §10.1's mis-grab safety conclusion**, whose stated
 premise was the 90 mm spacing.
+**Designer Rev 5 then closed the rotation's open questions** — left-edge collisions resolved (accept
+transient occlusion; four alternatives rejected with reasons), the phase contract settled (§6.10), and two
+owner decisions recorded: **D26** the knobs are straight-sided so the engraving clearance holds (§9.5), and
+**D27** `prefers-reduced-motion` keeps the shipped sweeping ring (§6.5, and §6 below).
 Original state: planner-phase draft, nothing queued.
 **Date:** 2026-08-19
 **Author:** Planner, consolidating six research scouts and one Designer pass.
@@ -428,6 +432,28 @@ words today; the card is in the right *place*, which is what this row owns.
   `snackbarSlideIn` entrance now points the wrong way) **and a full left-edge collision list — the VOLUME
   band lands on the fixed topbar and covers `ENC-4a`'s own `MUTED` chip.** *(The correction is a separate
   reviewed PR. Rev 4 specifies it; it does not build it.)*
+  ✅ **Rev 5 closed every open question the rotation had, so it is implementable as specced.**
+  **Decision: accept transient occlusion on all bands** — inset, a narrower card, per-route
+  suppression, z-order yielding and a permanent left gutter were each considered and rejected with
+  reasons (§6.2). The VOLUME/topbar overlap is safe because **every VOLUME card carries and displays
+  the console's mute state**, verified in the router and the gesture's documented
+  `ShortPress`-before-`HoldCancelled` ordering, and now an invariant in §6.7. Rev 5 also **corrects
+  Rev 4's own over-report**: only **two** bands carry left-edge cards in the target mapping — SOURCE
+  and PRESETS are selector knobs whose feedback centres (§6.6), so bands 270 and 450 are
+  **transitional**, present only while the router runs the pre-`ENC-5` index table. Vertical centring
+  must be **clamped to the viewport** (a ~173 px volume card on band 90 sits 3.5 px from the top),
+  and §6.10 adds the phase contract below.
+- ⚠ **Phase contract — a spec change, not a tidy-up (Designer Rev 5 §6.10).** An unrecognised HUD
+  phase currently **preserves `IsHolding`**, and a true `IsHolding` cancels the 1500 ms dismissal
+  timer — so `HoldStart` → *unknown* → `Value` strands a card on screen with nothing to remove it.
+  Unreachable today (both builds know the same four names), but **`ENC-5` and `ENC-7` add phases** and
+  an API-ahead-of-Web deploy is ordinary. **Decision: an unrecognised phase is *not holding*** — it
+  renders nothing, so it can never draw a ring, and suppressing the timer is its only reachable
+  effect. ⚠ **The obvious edit is wrong:** `"Value"` shares the same default arm and **must keep
+  preserving `IsHolding`**, or turning the knob mid-hold collapses the ring. Four explicit arms, not
+  three. This supersedes the plan's §2.5 contract; **update
+  `EncoderHudServiceTests.UnknownPhase_LeavesIsHoldingAlone` to the new contract rather than deleting
+  it.**
 - Built entirely from three existing pieces: the **unused** `.snackbar-enter` / `.snackbar-exit` primitives
   (`design-system.css:1218-1219`), the `GainPopoverService` overlay-hosting pattern, and `SourceBubble`.
   **No new design tokens** (Designer §6.9 — Builder must not add `--hud-*` anything).
@@ -992,6 +1018,7 @@ Recorded with reasons so future sessions do not re-litigate them.
 
 | Item | Decision | Reason |
 |---|---|---|
+| **`prefers-reduced-motion` turning the hold ring into a filling bar** (Designer §6.5 as originally written) | ⭐ **WON'T DO — owner-accepted deviation, D27, 2026-09-02. `ENC-4`'s shipped sweeping ring stands.** | **Do NOT "restore" this on a later consistency pass** — it is a *declared* deviation from an accessibility line item, not drift, and §6.5 has been amended to describe what actually ships. The ring is **the only on-screen indication that a 600 ms hold is arming standby**; freezing it puts the machine back in the state that row exists to fix — an input that acts with no visible evidence. ⚠ **The original spec was also never implementable as drafted:** the plan's literal `animation-name: none` freezes `--ring-turn` at `0turn`, producing an **empty** ring rather than a filling bar. Same class of declared deviation as the `MEMORY` → `PRESETS` rename, and recorded here for the same reason: **findable by whoever would otherwise revert it.** |
 | ~~**"Delete the Settings → Logs tab"**~~ | ⚠ **SUPERSEDED — this document argued *keep* and the owner overruled it (D12).** | The *arguments* are kept for the record: the maintenance-cost premise was not supported by git history (near-zero churn), and it was the only in-app legible error surface on a box where the SSH alternative aggravates the distortion. **The owner's counter is also sound, and it is his surface to judge:** *"if needed, it's easy to ssh into the box. The UX of looking through the logs in the UI is not good."* **The tab is being removed** (`UI-3`); what survives is `LOG-3`'s zip-download half. |
 | **"Delete the Metrics page for maintenance cost"** | **Reason rejected; a different reason stands.** | Last touched 2026-05-18, 15 commits lifetime — **it is not costing time.** The real argument is the 40-query fan-out (`UI-2`). Decide on **that** basis, not the original one. |
 | **Removing the `Radio.Metrics` package** | **Won't do — and it is not the same decision.** | Deleting the *page* touches **zero lines** of `Radio.Metrics` or any collector. The package is consumed by ~30 files across API / Infrastructure / Fingerprinting plus 3 background services; collection, rollup and `metrics.db` all survive a page deletion. |
