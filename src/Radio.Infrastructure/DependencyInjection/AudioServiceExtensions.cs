@@ -409,6 +409,11 @@ public static class AudioServiceExtensions
     // Register visualization mode service (tracks current viz mode for encoder + SignalR)
     services.AddSingleton<VisualizationModeService>();
 
+    // HUD feedback channel. Singleton because the coalescer is per-encoder state that must outlive
+    // any single event, and because AudioStateUpdateService subscribes to it once for the process.
+    services.AddSingleton<EncoderFeedbackService>();
+    services.AddSingleton<IEncoderFeedbackSink>(sp => sp.GetRequiredService<EncoderFeedbackService>());
+
     // Register action router (Func<> defers IAudioManager resolution)
     // ISleepService is registered in Radio.API — optional here via GetService
     services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
@@ -417,7 +422,11 @@ public static class AudioServiceExtensions
       () => sp.GetRequiredService<IAudioManager>(),
       sp.GetRequiredService<VisualizationModeService>(),
       sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
-      sleepService: sp.GetService<ISleepService>()));
+      sleepService: sp.GetService<ISleepService>(),
+      hud: sp.GetRequiredService<IEncoderFeedbackSink>(),
+      // GetService, not GetRequiredService: nothing registers TimeProvider in production, and the
+      // constructor default is TimeProvider.System. Tests inject a fake clock directly instead.
+      timeProvider: sp.GetService<TimeProvider>()));
 
     return services;
   }
