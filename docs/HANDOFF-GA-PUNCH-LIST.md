@@ -1,6 +1,6 @@
 # HANDOFF — GA punch list for the cabinet install
 
-**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. The owner has read §7, closed `D23` / `D24` / `D9`, and
+**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `OPS-1` (deployed and verified on the box) and `TEST-3`.** The owner has read §7, closed `D23` / `D24` / `D9`, and
 authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
 **`D25` remains unruled** and is the one item that must be escalated rather than defaulted.
 Original state: planner-phase draft, nothing queued.
@@ -744,7 +744,7 @@ the wrong value. Nothing validates that the voice belongs to the selected engine
 
 ### 3.4 Workstream: Test & Ops Hygiene
 
-**`TEST-1` — The suite produces false CI signals.** ⚠ **First, by a wide margin (O1).**
+**`TEST-1` — The suite produces false CI signals.** ✅ **SHIPPED 2026-09-01 as [#483](https://github.com/mmackelprang/RTest/pull/483).** Measured proof rather than a passing suite: with a listener bound to the port during full runs, `Radio.Web.Tests` went from **74 TCP connections to `127.0.0.1:5000` to 0** (and 0 on :5004). Part (b) turned out not to belong to this row at all — see `TEST-3`. ⚠ **First, by a wide margin (O1).**
 *Already queued 📋, owner-ranked first. Effort: 1–2 days.*
 
 Four tests fail under timing/load pressure and pass on retry. The bUnit one
@@ -786,7 +786,7 @@ only what makes the collision likely.
 
 ---
 
-**`OPS-1` — Build stamp on `radio-web` + real deploy verification for both services.**
+**`OPS-1` — Build stamp on `radio-web` + real deploy verification for both services.** ✅ **SHIPPED 2026-09-01 as [#485](https://github.com/mmackelprang/RTest/pull/485) and deployed.** Both services now answer `/api/health/version` and the deploy `exit 1`s on either mismatch. The box was found running `d9d5477` from Aug 18 — a commit **not in main's history** — with nothing flagging it. Also fixed the two defaults, which had to move together: flipping `$TargetHost` alone would have made `Deploy-ToPi.ps1` ship ARM64 to the x64 box.
 *Already queued 📋. Effort: 0.5–1 day.*
 
 ~80% already built: the SHA is stamped by `Directory.Build.props`, `Deploy-ToLinux.ps1` already passes
@@ -1040,22 +1040,21 @@ fallback or removed from the engine list.
 
 ## 8. Quick wins — under an hour each, independently shippable
 
-The owner should be able to knock several of these out in one sitting. None of them depend on anything else
-in this document. **The top three are marked.**
+~~The owner should be able to knock several of these out in one sitting.~~ ✅ **ALL ELEVEN SHIPPED 2026-09-01** — PRs #488 - #495. Kept in full rather than deleted, because several carried conclusions worth not re-deriving (the `VolumeStepPercent` fate in #5, the two-transports trap in #4, and #6's deliberate refusal to renumber the encoder table before the hardware exists).
 
 | # | Item | Effort | Why it is a win |
 |---|---|---|---|
 | ~~**1 ★**~~ | ~~**`TTS-1(i)` — set `tts:defaultVoice` in the config store.**~~ ✅ **DONE 2026-08-19 — set to `en-US-News-K`, verified working on the box.** | ~~5 min~~ | **Closed.** This also closed the owner's separate ducking complaint: ducking was never broken, it was never reached. See `TTS-1` for the full record and the two follow-ons it surfaced (`TTS-7` espeak-ng absent, `TTS-8` repo default still wrong). |
-| **2 ★** | **`LOG-1` — honour `ReadFrom.Configuration` in `src/Radio.Web/Program.cs:14`, set Information in production, add retention + size caps to both file sinks.** | **30 min** | **Largest single log-volume reduction available.** 65 MB/day measured, 106 Debug sites live, no retention cap at all on an appliance that runs for weeks inside a cabinet. |
-| **3 ★** | **`ENC-4a` — the persistent topbar `MUTED` chip.** | **45 min** | Independently valuable even if the whole encoder arc slips. Today, on `/queue`, `/metrics`, `/devices`, `/history` and `/phone` there is **no mute indication at all** — a muted console with no visible reason is indistinguishable from a broken one. |
-| 4 | **`TTS-1(ii)` — fix the hint text at `SystemConfigPage.razor:684`, which recommends `"en"`.** | 5 min | The UI is actively teaching the value that breaks Google TTS. Fixing #1 without this invites the same mistake again. |
-| 5 | **`ENC-8a` — delete `TuningStepKHz`, the field that is read by nothing.** ✅ **SETTLED by Rev 3 §7.8 — and the two fields have different fates.** `TuningStepKHz` is **deleted outright**: nothing reads it and nothing should, the tuner owns its own step, and D21 does not change that because *it is not device configuration, it is a field that never did anything.* ⚠ **`VolumeStepPercent` is RELOCATED, not deleted** — it is a genuine device field (VOLUME `step_size`), so it moves to the read-only configuration card in `ENC-8`. What goes away is the **duplicate editable numeric**, a second source of truth for a value the device also holds. **Do not delete it here.** | 20 min | `TuningStepKHz` is declared, set in appsettings, documented, **editable by the owner at `SystemConfigPage.razor:1535`, and read by nothing.** A settings field that does nothing is a lie the owner will discover by testing. `VolumeStepPercent` is worse than useless — it is an app-owned safety constant sitting in an editable box. Deleting both is the free half of `ENC-8`; the four `Reverse direction` toggles that replace them need `ENC-2`. |
-| 6 | **`ENC-8b` — correct the Encoder Mapping table at `SystemConfigPage.razor:1492-1493`.** | 20 min | It claims encoder 1 press = "Seek Next Station" and encoder 2 press = "Play/Pause"; the code does scan-toggle and source-commit. Hand-typed HTML — it will drift again, so the real fix is serving it from the router (`ENC-8`). |
-| 7 | **`ENC-9a` — subscribe `VisualizerPanel` to `VisualizationModeChanged`.** | 30 min | The broadcast already exists (`AudioStateUpdateService.cs:969-978`); **no Razor component consumes it.** Any out-of-band mode change leaves the picker showing the wrong segment. |
-| 8 | **`UI-1` — delete `/diagnostic`.** ✅ **Decided by D13**, and it frees the route name for the consolidated Settings → Diagnostics surface. | 30 min | 97 LOC, unlinked from navigation, zero tests, a "Click Me" button, and it occupies the best route name in the app. |
-| 9 | **`UI-5` — fix the two stale DevTray comments/links** (`:253` calls an implemented download "a planned follow-up"; `:272` points at `/metrics`). | 15 min | Same comment-accuracy class `CLAUDE.md` § Pre-Merge Review exists for. |
-| 10 | **`LOG-11` — drop or level-restrict the API's duplicate console sink.** | 30 min | Every line is currently written twice, on a box where log volume is an audio problem. |
-| 11 | ✅ **`XR-1a` — correct the queue's § Cross-repo item #3.** It still records that GV read has never worked; **D17 confirms it does.** | 15 min | A stale record that says a working feature is broken will send the next session chasing a cross-repo defect that does not exist. **Do not file a request file for it.** |
+| **2 ★** | ✅ **#488.** Web never called `ReadFrom.Configuration`; both file sinks also gained size caps. Verified by falsification, not by reading the diff. **`LOG-1` — honour `ReadFrom.Configuration` in `src/Radio.Web/Program.cs:14`, set Information in production, add retention + size caps to both file sinks.** | **30 min** | **Largest single log-volume reduction available.** 65 MB/day measured, 106 Debug sites live, no retention cap at all on an appliance that runs for weeks inside a cabinet. |
+| **3 ★** | ✅ **#493.** Built to handoff §6.7. Seeds initial state and does *not* optimistically clear — the broadcast confirms the unmute. UAT'd on a live stack. **`ENC-4a` — the persistent topbar `MUTED` chip.** | **45 min** | Independently valuable even if the whole encoder arc slips. Today, on `/queue`, `/metrics`, `/devices`, `/history` and `/phone` there is **no mute indication at all** — a muted console with no visible reason is indistinguishable from a broken one. |
+| 4 | ✅ **#489.** **`TTS-1(ii)` — fix the hint text at `SystemConfigPage.razor:684`, which recommends `"en"`.** | 5 min | The UI is actively teaching the value that breaks Google TTS. Fixing #1 without this invites the same mistake again. |
+| 5 | ✅ **#490.** `TuningStepKHz` deleted; **`VolumeStepPercent` deliberately kept** — it is a real device field awaiting relocation in `ENC-8`. **`ENC-8a` — delete `TuningStepKHz`, the field that is read by nothing.** ✅ **SETTLED by Rev 3 §7.8 — and the two fields have different fates.** `TuningStepKHz` is **deleted outright**: nothing reads it and nothing should, the tuner owns its own step, and D21 does not change that because *it is not device configuration, it is a field that never did anything.* ⚠ **`VolumeStepPercent` is RELOCATED, not deleted** — it is a genuine device field (VOLUME `step_size`), so it moves to the read-only configuration card in `ENC-8`. What goes away is the **duplicate editable numeric**, a second source of truth for a value the device also holds. **Do not delete it here.** | 20 min | `TuningStepKHz` is declared, set in appsettings, documented, **editable by the owner at `SystemConfigPage.razor:1535`, and read by nothing.** A settings field that does nothing is a lie the owner will discover by testing. `VolumeStepPercent` is worse than useless — it is an app-owned safety constant sitting in an editable box. Deleting both is the free half of `ENC-8`; the four `Reverse direction` toggles that replace them need `ENC-2`. |
+| 6 | ✅ **#489.** Press actions corrected against the router. Encoder *order* deliberately left stale — see the row. **`ENC-8b` — correct the Encoder Mapping table at `SystemConfigPage.razor:1492-1493`.** | 20 min | It claims encoder 1 press = "Seek Next Station" and encoder 2 press = "Play/Pause"; the code does scan-toggle and source-commit. Hand-typed HTML — it will drift again, so the real fix is serving it from the router (`ENC-8`). |
+| 7 | ✅ **#491.** Also had to type the event: parameterless, it said *something changed* without saying *to what*. **`ENC-9a` — subscribe `VisualizerPanel` to `VisualizationModeChanged`.** | 30 min | The broadcast already exists (`AudioStateUpdateService.cs:969-978`); **no Razor component consumes it.** Any out-of-band mode change leaves the picker showing the wrong segment. |
+| 8 | ✅ **#492.** **`UI-1` — delete `/diagnostic`.** ✅ **Decided by D13**, and it frees the route name for the consolidated Settings → Diagnostics surface. | 30 min | 97 LOC, unlinked from navigation, zero tests, a "Click Me" button, and it occupies the best route name in the app. |
+| 9 | ✅ **#489.** Only `:253` — `:272` is currently accurate and belongs to `UI-2`. **`UI-5` — fix the two stale DevTray comments/links** (`:253` calls an implemented download "a planned follow-up"; `:272` points at `/metrics`). | 15 min | Same comment-accuracy class `CLAUDE.md` § Pre-Merge Review exists for. |
+| 10 | ✅ **#494.** Level-restricted, not dropped: dropping would take the `journalctl -p` triage path with it. **`LOG-11` — drop or level-restrict the API's duplicate console sink.** | 30 min | Every line is currently written twice, on a box where log volume is an audio problem. |
+| 11 | ✅ **#495.** ✅ **`XR-1a` — correct the queue's § Cross-repo item #3.** It still records that GV read has never worked; **D17 confirms it does.** | 15 min | A stale record that says a working feature is broken will send the next session chasing a cross-repo defect that does not exist. **Do not file a request file for it.** |
 
 
 ---
