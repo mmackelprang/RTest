@@ -30,6 +30,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly BackgroundIdentificationService? _fingerprintService;
   private readonly VisualizationModeService? _vizModeService;
   private readonly IRotaryEncoderService? _encoderService;
+  private readonly IEncoderFeedbackSink? _encoderFeedback;
   private string? _apiBaseUrl;
 
   /// <summary>
@@ -88,6 +89,9 @@ public class AudioStateUpdateService : BackgroundService
     _fingerprintService = serviceProvider.GetService<BackgroundIdentificationService>();
     _vizModeService = serviceProvider.GetService<VisualizationModeService>();
     _encoderService = serviceProvider.GetService<IRotaryEncoderService>();
+    // GetService, not GetRequiredService: the encoder subsystem may not be registered at all, which
+    // is the same reason _encoderService is nullable.
+    _encoderFeedback = serviceProvider.GetService<IEncoderFeedbackSink>();
 
     // Resolve API base URL for making relative album art URLs absolute (needed by Cast devices)
     ResolveApiBaseUrl(configuration);
@@ -138,6 +142,14 @@ public class AudioStateUpdateService : BackgroundService
     {
       _encoderService.ConnectionChanged += OnEncoderConnectionChanged;
       _logger.LogInformation("Subscribed to encoder connection changes");
+    }
+
+    // ENC-4: the encoder HUD push path. Separate from the 500ms volume poller below because a
+    // 2 Hz poller cannot meet the 100ms feedback requirement and does not carry which knob moved.
+    if (_encoderFeedback != null)
+    {
+      _encoderFeedback.Feedback += OnEncoderHudChanged;
+      _logger.LogInformation("Subscribed to encoder HUD feedback");
     }
   }
 
@@ -950,6 +962,11 @@ public class AudioStateUpdateService : BackgroundService
       _encoderService.ConnectionChanged -= OnEncoderConnectionChanged;
     }
 
+    if (_encoderFeedback != null)
+    {
+      _encoderFeedback.Feedback -= OnEncoderHudChanged;
+    }
+
     base.Dispose();
   }
 
@@ -973,6 +990,29 @@ public class AudioStateUpdateService : BackgroundService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error broadcasting encoder connection change");
+    }
+  }
+
+  private async void OnEncoderHudChanged(object? sender, EncoderHudEventArgs e)
+  {
+    try
+    {
+      // Already coalesced to >= 50 ms by EncoderFeedbackService - this method does not throttle.
+      await _hubContext.Clients.All.SendAsync("EncoderHudChanged", new
+      {
+        e.EncoderIndex,
+        e.Label,
+        Phase = e.Phase.ToString(),
+        e.VolumePercent,
+        e.IsMuted,
+        e.PrimaryText,
+        e.SecondaryText,
+        e.PrimaryIsFrequency,
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting encoder HUD update");
     }
   }
 
