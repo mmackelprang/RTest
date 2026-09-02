@@ -681,7 +681,7 @@
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
                 <RadzenTextBox @bind-Value="_ttsConfig.DefaultVoice" Placeholder="Default Voice" Style="width:100%" />
-                <small>Voice ID (e.g., 'en' for ESpeak)</small>
+                <small>Voice ID — engine-specific (e.g. 'en-US-News-K' for Google, 'en' for ESpeak)</small>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
                 <RadzenTextBox @bind-Value="_ttsConfig.ESpeakPath" Placeholder="ESpeak Path" Style="width:100%" />
@@ -1489,8 +1489,8 @@
                 </thead>
                 <tbody>
                   <tr><td>0 - Volume</td><td>Volume Up/Down</td><td>Mute Toggle</td></tr>
-                  <tr><td>1 - Tuning</td><td>Frequency Up/Down</td><td>Seek Next Station</td></tr>
-                  <tr><td>2 - Source</td><td>Cycle Sources</td><td>Play/Pause</td></tr>
+                  <tr><td>1 - Tuning</td><td>Frequency Up/Down</td><td>Start/Stop Scan</td></tr>
+                  <tr><td>2 - Source</td><td>Preview Sources</td><td>Switch To Previewed Source</td></tr>
                   <tr><td>3 - Visualizer</td><td>Cycle Viz Modes</td><td>Viz On/Off</td></tr>
                 </tbody>
               </table>
