@@ -169,8 +169,10 @@ public class SecretsController : ControllerBase
   }
 
   /// <summary>
-  /// Renders a secret for display. The result is never accepted back as a new value — see
-  /// <see cref="IsMaskOfStoredSecretAsync"/>.
+  /// Renders a secret for display. A submitted value is rejected as an echo only when it equals
+  /// the mask of the secret currently stored under the same tag — see
+  /// <see cref="IsMaskOfStoredSecretAsync"/>. A mask-shaped string submitted for a tag that holds
+  /// nothing is stored like any other value.
   /// </summary>
   private static string MaskValue(string? value)
   {

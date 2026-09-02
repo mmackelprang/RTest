@@ -514,10 +514,9 @@ public class TTSFactory : ITTSFactory, IDisposable
   /// <remarks>
   /// Microsoft documents <c>Authorization</c>/<c>Ocp-Apim-Subscription-Key</c>,
   /// <c>Content-Type</c>, <c>X-Microsoft-OutputFormat</c> and <c>User-Agent</c> as required
-  /// headers for the <c>/cognitiveservices/v1</c> endpoint. <see cref="HttpClient"/> sends no
-  /// <c>User-Agent</c> of its own, so it is set explicitly here. The <c>voices/list</c>
-  /// endpoint documents only the authorization header, which is why a key that lists voices
-  /// successfully can still be rejected here.
+  /// headers for the <c>/cognitiveservices/v1</c> endpoint, while <c>voices/list</c> documents
+  /// only the authorization header. <see cref="HttpClient"/> sends no <c>User-Agent</c> of its
+  /// own, so it is set explicitly here.
   /// </remarks>
   internal static HttpRequestMessage CreateAzureSynthesisRequest(
     string region,
