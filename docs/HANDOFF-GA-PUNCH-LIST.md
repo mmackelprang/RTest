@@ -4,6 +4,13 @@
 > **P0 remaining as of 2026-09-02: 9 rows.** `ENC-4` (next), `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-12`, `PHN-1`, `PHN-2` — **8 open**, since `ENC-15` closed 2026-09-02 with a **FAILED** gate, which removes `ENC-6`'s blanking half from scope entirely. `TTS-1`'s two P0 parts are both closed; part (iii) is P1. The owner has read §7, closed `D23` / `D24` / `D9`, and
 authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
 **Every decision is now closed** — `D25` was answered 2026-09-02 (full ADR-029 arc, no stopgap).
+⚠ **AMENDED 2026-09-02 — the as-built front panel.** The owner supplied the real drawing, now committed at
+**`design/hardware/front-panel-layout_4.svg`**. **D2's order held; D2's dimensions did not.** The knobs are
+**one vertical column left of the screen at a uniform 29.63 mm pitch, all 15 mm** — not a horizontal row at
+90/70/90 mm with two sizes. `O9`, the `D2` and `D3` rows, and the `ENC-4` entry are corrected in place.
+**`ENC-4` shipped its HUD on the wrong axis** and needs a 90° rotation (Designer Rev 4 §6.2 specifies it;
+that is a separate PR). Designer Rev 4 also **re-derived §10.1's mis-grab safety conclusion**, whose stated
+premise was the 90 mm spacing.
 Original state: planner-phase draft, nothing queued.
 **Date:** 2026-08-19
 **Author:** Planner, consolidating six research scouts and one Designer pass.
@@ -18,8 +25,14 @@ approved item) → Builder (queue rows, one PR per cycle).
 >    rather than defaulting to it. **Decision D6 is CLOSED**, and the Architect tone-DSP ADR dependency
 >    goes with it.
 > 2. **The physical order changed:** `VOLUME · TONE · SOURCE · TUNING` → **`VOLUME · SOURCE · PRESETS ·
->    TUNING`**, with ≈90 mm outer gaps and ≈70 mm between the inner pair. **This is the irreversible one —
+>    TUNING`**, ~~with ≈90 mm outer gaps and ≈70 mm between the inner pair~~. **This is the irreversible one —
 >    D2 is restated below, and any older copy of the order is now actively dangerous.**
+>    ⚠ **AMENDED 2026-09-02 — the owner's drawing arrived and the pitches are gone.** The **order is
+>    unchanged and still final**; the **geometry is not what D2 recorded**. The panel puts all four knobs in
+>    **one vertical column at a uniform 29.63 mm pitch, all 15 mm**, left of the screen. `90 + 70 + 90 =
+>    250 mm` cannot fit a 152.4 mm panel — **the orientation forces the pitch, and this is a consequence,
+>    not a drafting error.** Drawing committed at `design/hardware/front-panel-layout_4.svg`; Designer
+>    Rev 4 §9 is the build document and §10.1 re-derives the safety conclusion that lost its premise.
 > 3. **Startup config push is new, owner-directed, runtime work** (Designer §7): push per-encoder config on
 >    every detect and reconnect, verify by read-back, tier the fault by which field disagreed. That is
 >    `ENC-11` … `ENC-14` — four new items, one of them P0.
@@ -151,7 +164,7 @@ real time.
 | **O6** | **`PHN-1` (the ADR-029 seam) before or with `PHN-2` / `PHN-3`.** | ADR-029's whole argument is that voicemail-through-the-engine and speak-a-text are **one mechanism, not two features**. Shipping either first means building the seam twice, and the second build inherits whatever shortcuts the first took. |
 | **O7** | **`LOG-1` before `LOG-2`, and `LOG-2` behind `LOG-5`.** | `LOG-2` silences `Radio.Infrastructure.Audio` and `...Platform.Bluetooth` — but `scripts/research/bt_drift_analyze.py` and `bt_stall_detect.py` **parse those exact Information lines**. Gate it behind the runtime level switch so the capability is *toggled*, not deleted. |
 | **O8** | **`OPS-1` before the first post-install deploy.** | Today a stale `radio-web` binary passes deploy verification silently. The first time you deploy a fix into the cabinet and it does not take effect, you will debug the fix instead of the deploy. |
-| **O9** | **Owner decision D2 (physical layout) before the escutcheon is drilled.** | Permanent. Nothing else in this document is irreversible; this is. |
+| **O9** | **Owner decision D2 (physical layout) before the escutcheon is drilled.** ✅ **SATISFIED — the panel is drawn** (`design/hardware/front-panel-layout_4.svg`, 2026-09-01, owner-confirmed). | Permanent. Nothing else in this document is irreversible; this is. ⚠ **The drawing kept D2's order and superseded D2's dimensions** — one vertical column, uniform 29.63 mm, all knobs 15 mm. **The drawing now outranks every dimension in either handoff** (Designer Rev 4 §9.6); if it is ever recut, that file changes first. |
 
 ---
 
@@ -401,9 +414,20 @@ words today; the card is in the right *place*, which is what this row owns.
 - One component, two hosts: `EncoderHud.razor` in `MainLayout` for normal routes, again inside `Sleep.razor`
   with `Variant="Sleep"` (the sleep screen is a separate route on `EmptyLayout`, so `MainLayout` is not in
   that tree).
-- **Geometry is the whole trick:** the HUD divides 1920 px into quarters — centres at 240 / 720 / 1200 /
+- **Geometry is the whole trick:** ~~the HUD divides 1920 px into quarters — centres at 240 / 720 / 1200 /
   1680 px — and renders the active knob's card in its own quarter. Turn the second knob from the left,
-  something lights up above the second knob from the left. Nobody has to be told this.
+  something lights up above the second knob from the left.~~ Nobody has to be told this.
+  ⚠ **WRONG AXIS — corrected in Designer Rev 4 §6.2 on 2026-09-02, after `ENC-4` had already shipped it.**
+  The knobs are a **vertical column left of the screen**, not a row beneath it. **The principle is
+  untouched and the fix is a 90° rotation, not a redesign:** cards anchor to the **left edge**, stacked
+  vertically at **90 / 270 / 450 / 630 px**, beside the knob at the same height — *turn the second knob
+  from the top, something lights up beside it at the same height.* Those clean quarters sit within
+  **3.05 px (0.5 mm)** of the measured knob positions; Rev 4 §6.2 says to use them rather than the measured
+  values **and gives the reason**, so that nobody converts one into the other later. **Rev 4 also flags two
+  mechanics the rotation breaks** (no vertical twin for `margin-left: -180px` when card height varies; the
+  `snackbarSlideIn` entrance now points the wrong way) **and a full left-edge collision list — the VOLUME
+  band lands on the fixed topbar and covers `ENC-4a`'s own `MUTED` chip.** *(The correction is a separate
+  reviewed PR. Rev 4 specifies it; it does not build it.)*
 - Built entirely from three existing pieces: the **unused** `.snackbar-enter` / `.snackbar-exit` primitives
   (`design-system.css:1218-1219`), the `GainPopoverService` overlay-hosting pattern, and `SourceBubble`.
   **No new design tokens** (Designer §6.9 — Builder must not add `--hud-*` anything).
@@ -858,7 +882,7 @@ box is `x86_64`, so **the literally documented invocation ships ARM binaries to 
 | ID | Item | Why it matters in the cabinet | Effort | Deps | Queued? |
 |---|---|---|---|---|---|
 | **`ENC-9`** | **Visualization capability preservation.** Visualization loses its knob outright (to PRESETS); the capability moves to the touchscreen — tap the visualizer canvas to advance, long-press for the list, System Config dropdown unchanged. **Fold in the real defect:** `VisualizerPanel.razor` holds its own local `_currentMode` and **never subscribes to `VisualizationModeChanged`** (`AudioStateUpdateService.cs:969-978`), so any out-of-band change leaves the on-screen picker showing the wrong segment. | Removing a knob must not remove a capability. The subscription bug is independently real today. | 1 d (the subscription fix alone ≈30 min — §8) | — | No |
-| **`ENC-14`** | **Diagnostics card + the `Calibrate a knob` flow.** ⚠ **D5 removed this card's original headline job — Rev 3 §7.9 re-argues it honestly and it survives smaller.** It was justified primarily as the tool that resolves *"does one detent report one count or four?"*; the firmware now answers that. Three merits remain: **(1) wiring sanity, which nothing else can see** — the invalid-transition rate is the only signal separating "this encoder is noisy" from "this encoder is fine" *before* it becomes an intermittent fault someone chases for a week; **(2) confirming D3's index-order guarantee after any hardware work** — turn the leftmost knob, see which row moves; **(3) measuring detents per revolution**, the last mechanical unknown (D23). **Edges-per-detent changes job, not value:** it was a calibration input, it is now a **wiring health signal** — it should read exactly `4.00`, and anything else means edges are being dropped or invented, which is a hardware problem and **not** a reason to re-derive §5. **Invalid transitions are shown as a *rate*, never a total** (`per 1,000 edges`; <1 OK / 1–10 Marginal / >10 Faulty) — *"400 invalid transitions is fine after a year and alarming after a minute."* The card **says what the pattern means**: one encoder high → that encoder's wiring or shielding; all four high → a shared ground or supply problem, look at the Pico's power and the cable run. **`Calibrate a knob`** zeroes the counters, prompts *"Turn the VOLUME knob exactly one full revolution, slowly"*, and reports **detents per revolution**, edges-per-detent, and which encoder index moved. | Fifteen seconds, and it settles D23, **confirms D3 after any hardware work** — which matters because D3 is an owner-owned wiring guarantee that *must be re-established, not assumed, if the Pico is ever replaced or the harness re-terminated* — and works the same way on a replacement Pico years from now. ⚠ **Polls at 2 Hz and only while the card is open**, explicitly for the `UI-2` reason: a background diagnostic poll on this box is exactly the incidental load that correlates with audio distortion. This is the pattern `UI-2` should adopt, not an exception to it. | 1–2 d | `ENC-11` (O10) | No |
+| **`ENC-14`** | **Diagnostics card + the `Calibrate a knob` flow.** ⚠ **D5 removed this card's original headline job — Rev 3 §7.9 re-argues it honestly and it survives smaller.** It was justified primarily as the tool that resolves *"does one detent report one count or four?"*; the firmware now answers that. Three merits remain: **(1) wiring sanity, which nothing else can see** — the invalid-transition rate is the only signal separating "this encoder is noisy" from "this encoder is fine" *before* it becomes an intermittent fault someone chases for a week; **(2) confirming D3's index-order guarantee after any hardware work** — turn the **topmost** knob, see which row moves *(Rev 3 said "leftmost"; the as-built panel is a vertical column)*; **(3) measuring detents per revolution**, the last mechanical unknown (D23). **Edges-per-detent changes job, not value:** it was a calibration input, it is now a **wiring health signal** — it should read exactly `4.00`, and anything else means edges are being dropped or invented, which is a hardware problem and **not** a reason to re-derive §5. **Invalid transitions are shown as a *rate*, never a total** (`per 1,000 edges`; <1 OK / 1–10 Marginal / >10 Faulty) — *"400 invalid transitions is fine after a year and alarming after a minute."* The card **says what the pattern means**: one encoder high → that encoder's wiring or shielding; all four high → a shared ground or supply problem, look at the Pico's power and the cable run. **`Calibrate a knob`** zeroes the counters, prompts *"Turn the VOLUME knob exactly one full revolution, slowly"*, and reports **detents per revolution**, edges-per-detent, and which encoder index moved. | Fifteen seconds, and it settles D23, **confirms D3 after any hardware work** — which matters because D3 is an owner-owned wiring guarantee that *must be re-established, not assumed, if the Pico is ever replaced or the harness re-terminated* — and works the same way on a replacement Pico years from now. ⚠ **Polls at 2 Hz and only while the card is open**, explicitly for the `UI-2` reason: a background diagnostic poll on this box is exactly the incidental load that correlates with audio distortion. This is the pattern `UI-2` should adopt, not an exception to it. | 1–2 d | `ENC-11` (O10) | No |
 
 ### 4.2 Audio Reliability
 
@@ -1004,13 +1028,13 @@ the affected item says so in place.
 | ID | Decision | Answer | Consequence |
 |---|---|---|---|
 | **D1** | Do the knobs ship live at install, or inert? | ✅ **SHIP LIVE.** | **The single largest change to this document.** The conditional tiering collapses — **11 encoder items are now unconditionally P0**, ≈3–4 working weeks, and §1's "conditional tiers" subsection now says there are none. |
-| **D2** | Approve the physical layout. | ✅ **`VOLUME · SOURCE · PRESETS · TUNING` is FINAL.** ≈90 mm outer→inner, ≈70 mm inner pair; VOLUME/TUNING 40–45 mm knurled and deep-fluted, SOURCE/PRESETS 25–30 mm smooth with a groove on PRESETS. | **Closed. The escutcheon can be cut.** ⚠ Note the engraving is **`PRESETS`, not `MEMORY`** (D10) — this document has been swept for the old word. Detail refinements land in Designer Rev 3. |
+| **D2** | Approve the physical layout. | ✅ **`VOLUME · SOURCE · PRESETS · TUNING` is FINAL** — **and the order is the part that held.** ~~≈90 mm outer→inner, ≈70 mm inner pair; VOLUME/TUNING 40–45 mm knurled and deep-fluted, SOURCE/PRESETS 25–30 mm smooth~~ — **superseded 2026-09-02 by the owner's drawing**: one **vertical column** at x 25.4 mm, **uniform 29.63 mm pitch**, **all four knobs 15 mm**, groove still on PRESETS. | **Closed. The escutcheon is drawn.** ⚠ Note the engraving is **`PRESETS`, not `MEMORY`** (D10) — this document has been swept for the old word. Detail refinements landed in Designer Rev 3; **the as-built geometry landed in Rev 4**, which also records what the change cost: **size differentiation and grouping-by-spacing are both gone**, tactile identification now rests on **surface alone**, and **§10.1's mis-grab conclusion was re-derived because its stated premise was the 90 mm spacing.** The owner accepted the first two; the third was re-argued rather than re-worded. |
 
 ### Encoder decisions
 
 | ID | Question | Answer |
 |---|---|---|
-| **D3** | Is encoder index order the same as physical left-to-right order? | ✅ **The owner guarantees it.** Recorded as an **owner-owned constraint**, not an app assumption — the wiring is his and he is standing behind it. `0 = VOLUME, 1 = SOURCE, 2 = PRESETS, 3 = TUNING`. |
+| **D3** | Is encoder index order the same as physical panel order? *(asked as "left-to-right"; the as-built panel is a **vertical column**, so it reads **top-to-bottom**)* | ✅ **The owner guarantees it.** Recorded as an **owner-owned constraint**, not an app assumption — the wiring is his and he is standing behind it. `0 = VOLUME` **(top)**`, 1 = SOURCE, 2 = PRESETS, 3 = TUNING` **(bottom)**. The guarantee is unchanged; only the axis it is stated on rotated. |
 | **D4** | Does RotaryUsb support a host→device *set position* command? | ✅ **No. Reset-position exists; set-position does not.** Confirms the existing research: `0x03` carries save-to-flash, factory reset, reset-positions-to-min, read-config-back and zero-counters — and nothing that writes an arbitrary position. **Accumulator semantics are now forced rather than preferred**, which removes the only argument that was ever made against them. |
 | **D5** | Detents per revolution, and does one detent report one count or four? | ✅ **Handled by firmware.** The host sees **monotonic counts governed by the pushed config**. ⚠ **This retires what this document called the single riskiest assumption in the spec** — the possible 4× error running through every acceleration figure in Designer §5. It is gone, not mitigated: the divisor is not the host's problem. `ENC-14`'s `Calibrate a knob` loses its headline justification and keeps only its wiring-health one. |
 | **D7** | Fold the radio bands into the SOURCE list? | ✅ **YES.** `ENC-5` absorbs it and is **re-estimated 2–3 d → 4–5 d** — the source knob now changes *bands*, so `RadioBandService` joins the commit path. |
@@ -1135,6 +1159,11 @@ unresolved disagreement; all four are things a reader of the Rev 1-era text woul
 until the DSP question resolved is **obsolete**. Designer §9.5: *"All four assignments are now settled, so
 unlike Rev 1 there is no reason to defer engraving."* The escutcheon can be cut and engraved as soon as D2
 and D10 are answered — the only remaining gate on the permanent, irreversible step.
+✅ **Both answered, and as of 2026-09-01 the panel is drawn** — `design/hardware/front-panel-layout_4.svg`,
+with the four names on the drawing's `labels` layer as outlined paths. ⚠ **One tolerance to check before
+cutting:** each engraved label clears the knob above it by about **0.8 mm**, which assumes knob bodies stay
+15 mm down to the panel face. **A flared skirt or wide base will cover its own engraving** (Designer Rev 4
+§9.5).
 
 ---
 

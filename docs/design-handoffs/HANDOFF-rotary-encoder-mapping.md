@@ -1,7 +1,7 @@
 # HANDOFF — Rotary encoder control mapping (four knobs on the cabinet face)
 
 **Surface:** Physical — 4× rotary encoder + integrated shaft button (`github.com/mmackelprang/RotaryUsb`, Pi Pico, USB HID) mounted permanently in the restored console cabinet — **plus** the on-screen feedback those knobs drive across Home, the always-present topbar, and the sleep screen — **plus** the presence, configuration and blanking behavior the app owns on their behalf (§7, §8).
-**Status:** **`[DESIGNER-PHASE DRAFT — REV 3 — FOR OWNER REVIEW]`**. §13 is down to four open questions. **The escutcheon is final (D2) — §9 is now a build document, not a proposal.**
+**Status:** **`[DESIGNER-PHASE DRAFT — REV 4 — AMENDED TO THE AS-BUILT PANEL]`**. §13 is down to four open questions. **The escutcheon is final (D2) — §9 is now a build document, not a proposal.** ⚠ **Rev 4 amends §6.2, §9 and §10.1 to the owner's actual front-panel drawing** (`design/hardware/front-panel-layout_4.svg`), which keeps D2's *order* and supersedes D2's *dimensions*. **The knobs are one vertical column left of the screen, not a horizontal row below it.** §10.1's mis-grab conclusion lost its premise and has been re-derived rather than re-worded.
 **Status vs. existing handoffs:**
 - **Extends** `design_handoff_radio_console` and `design_handoff_radio_controller` into a surface neither covers: there is no existing handoff for physical input. Every visual element is composed from tokens and components those handoffs already established; **no new design tokens are introduced** (§6.9).
 - **Deviates (small, deliberate) from `HANDOFF-saved-station-display.md`** — that handoff's bank is titled `MEMORY · n saved`. The cabinet is engraved **PRESETS** (D10), so the on-screen bank is retitled to match. Rationale in §4.4; this is a one-word change and nothing else in that handoff moves.
@@ -9,12 +9,72 @@
 - **Follows** `HANDOFF-bell-failure-surfacing.md` §3.7 for cross-route surfacing of a persistent hardware fault (§7.6).
 - **Extends** `HANDOFF-sleep-weather-visual-redesign.md` with a sleep-screen readout in that handoff's own dim-amber, single-emissive-color palette (§8.6). Its "one emissive color" rule is honored, not broken.
 **Author:** Designer
-**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3)
+**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel)**
 **Consumers:** Owner (§13) → Architect (§12.1) → Planner
 
 ---
 
 ## 0. Revision history
+
+### Rev 4 — amended to the as-built panel drawing (2026-09-02)
+
+**The owner supplied the real front-panel drawing, and it contradicts D2's *geometry* while keeping D2's
+*order*.** The drawing is now committed at **`design/hardware/front-panel-layout_4.svg`** (dated
+2026-09-01) — a build document that exists only in someone's downloads folder is a single point of
+failure, and every number in §9 derives from it.
+
+**Scale, so these numbers can be audited rather than trusted.** The file is 1152 × 432 user units at
+72 px/inch. The VESA-75 reference square measures `742.5992 − 530.0008 = 212.5984 px`, which is
+**75.000 mm exactly** — so **px ÷ 2.8346 = mm**, and the panel is **406.4 × 152.4 mm** (16 × 6 in).
+Colour in the file is layer separation for the cutter (reference / cut-engrave / drill / labels), not
+finish; the panel is inscribed black acrylic.
+
+**This is not a drafting error, and it must not be "corrected" back.** The knobs are in **one vertical
+column**, and a vertical column of four physically cannot carry §9.4's pitches: **90 + 70 + 90 = 250 mm
+against a panel 152.4 mm tall.** The orientation forces the pitch. Record it as a **consequence, not a
+mistake.** The owner has confirmed the drawing, including the **15 mm knob diameter** and that the LCD
+rectangle is the **active area, not the bezel**.
+
+| What Rev 3 specified | What the panel actually is | Affected |
+|---|---|---|
+| Four knobs in a **horizontal row below** the screen | **One vertical column at x = 25.4 mm, to the left** of the screen | §6.2, §9.1, §9.3 |
+| Pitches **90 / 70 / 90 mm**; *"70 mm is the floor anywhere on the panel"* | **Uniform 29.63 mm.** All three gaps equal. Total span 88.90 mm — **less than Rev 3's single outer pitch** | §9.4, §10.1 |
+| VOLUME/TUNING **40–45 mm**, SOURCE/PRESETS **25–30 mm** | **All four 15 mm.** Edge-to-edge clearance 14.63 mm | §9.2, §9.4, §10.5 |
+| Knobs centred on the display's four **horizontal** quarters | Knobs land on the display's four **vertical** quarters, within 3.05 px | §6.2, §9.4 |
+
+**Three things this costs. Stated plainly, because a silently corrected number teaches nothing.**
+
+1. **Size differentiation is gone.** §9.2's *"Big knobs act. Small knobs choose"* and §9.4's *"the size
+   difference **is** the 'this one only chooses' cue, in the dark"* are **struck — they are simply not true
+   of this panel.** What replaces them is **surface alone**: VOLUME knurled, TUNING deep-fluted, SOURCE
+   smooth, PRESETS smooth + ring groove. Four knobs remain distinguishable by fingertip, but on **one axis
+   instead of two**. §9.2's *"the panel tells you which knobs are consequential by feel"* is now false: the
+   panel tells you **which knob is which**, not **which class it belongs to**.
+2. **Grouping by spacing is gone.** §9.4 called it *"the cheapest legibility win on a panel with no labels
+   visible in the dark."* At a uniform pitch there is no grouping left to read. **Struck.**
+3. **§10.1's mis-grab conclusion lost its premise.** Its argument was entirely spacing. It has been
+   **re-derived from scratch in §10.1**, not re-worded, and the re-derivation splits it into the part that
+   survives and the part that does not.
+
+**The owner has accepted 1 and 2 and they are not re-litigated here — but they are not deleted either.**
+§9.2 called fingertip identification in the dark *"the most important accessibility feature on this
+device"*; that claim is still in the document, and a reader is entitled to know it now rests on half the
+evidence it used to.
+
+**3 is a different kind of thing.** It is the only genuine safety conclusion in this document, and **a
+conclusion whose stated reasoning has evaporated is worse than an open question** — the next reader
+inherits the confidence without the basis. This repo's own pre-merge rule is that *when a comment gives a
+reason a thing is safe, **the reason is the claim to check***. That standard does not stop at code.
+
+**One software consequence, specified but deliberately not built here.** `ENC-4` shipped anchoring HUD
+cards to horizontal quarters of the 1920 px width. **Wrong axis.** §6.2 carries the corrected geometry, the
+constant to use, the reason, and the left-edge collisions it walks into. **The implementation is a separate
+reviewed PR** — this amendment does not write it.
+
+**What did not move:** the order (`VOLUME · SOURCE · PRESETS · TUNING`), the Action button model (§4.1),
+the whole mapping (§4.2–§4.4), every configuration number in §5, the six volume-slam guards in §10.2, and
+the preview-then-commit rule that is what actually makes two adjacent selector knobs safe. **D2's order is
+intact; only D2's dimensions are superseded.**
 
 ### Rev 3 — owner decisions D1–D21
 
@@ -23,8 +83,8 @@
 | # | Decision | Effect |
 |---|---|---|
 | **D1** | **The knobs ship LIVE at install. The whole arc is P0.** | No inert-knob fallback path anywhere. `RotaryEncoderOptions.Enabled` flips to default `true` and becomes an escape hatch, not an opt-in gate (§7.3). |
-| **D2** | **Layout approved. Escutcheon final:** `VOLUME · SOURCE · PRESETS · TUNING`, 90/70/90 mm pitches, ring groove on PRESETS. | §9 is now a build document. Its rationale is retained as the record of *why*, not as an argument still being made. |
-| **D3** | **Owner guarantees encoder index order == physical left-to-right.** | The HUD spatial mapping (§6.2) is safe. Recorded in §5.0 as an **owner-owned constraint**, not an assumption I defend — with the one maintenance note it implies. |
+| **D2** | **Layout approved. Escutcheon final:** `VOLUME · SOURCE · PRESETS · TUNING`, ~~90/70/90 mm pitches~~, ring groove on PRESETS. | §9 is now a build document. Its rationale is retained as the record of *why*, not as an argument still being made. ⚠ **Rev 4: the order held, the dimensions did not.** The as-built drawing puts the four knobs in **one vertical column at a uniform 29.63 mm pitch, all 15 mm**, so every dimension D2 carried is superseded. The engraved order, the ring groove and the whole mapping are untouched. See Rev 4 above and §9. |
+| **D3** | **Owner guarantees encoder index order == physical panel order.** *(Rev 3 wrote "left-to-right"; the as-built panel is a vertical column, so it reads **top-to-bottom** — `0 = VOLUME` at the top. The guarantee is unchanged; only the axis it is stated on moved.)* | The HUD spatial mapping (§6.2) is safe — **after Rev 4 rotates it onto the correct axis.** Recorded in §5.0 as an **owner-owned constraint**, not an assumption I defend — with the one maintenance note it implies. |
 | **D7** | **Fold the radio bands into the source list.** The source knob changes *bands*, not just source type. | Approved scope increase, now specced properly in §4.4 — including what commit does for a band vs. a source, and how it stays in sync with the on-screen band pills. |
 
 **Decisions that changed the spec.**
@@ -131,14 +191,14 @@ So the current behavior is not "any input wakes." It is *"any input wakes, excep
 
 ### 4.2 Summary table — the deliverable
 
-Physical order is left → right as the owner faces the cabinet, and **matches encoder index 0..3 by owner guarantee (D3)**.
+Physical order is **top → bottom** as the owner faces the cabinet — the knobs are one vertical column to the left of the screen (§9) — and **matches encoder index 0..3 by owner guarantee (D3)**. *(Rev 3 read "left → right" against a horizontal row; the panel as drawn is a column. The sequence is identical, so nothing in this table moves.)*
 
 | Pos | Enc | Engraved | **Turn** (never changes) | **Press** (< 600 ms, on release) | **Long-press** (≥ 600 ms) | Kind |
 |---|---|---|---|---|---|---|
-| 1 (far left) | 0 | **VOLUME** | Master volume | **Mute / unmute** | **Standby** — and wake from Standby | Continuous |
+| 1 (top) | 0 | **VOLUME** | Master volume | **Mute / unmute** | **Standby** — and wake from Standby | Continuous |
 | 2 | 1 | **SOURCE** | Move the highlight in the source list (**preview only — changes nothing**) | **Select** — commit the highlight | — | Selector |
 | 3 | 2 | **PRESETS** | Move the highlight in the preset list (**preview only — changes nothing**) | **Recall** — commit the highlight, switching source and band if needed | **Save** what is playing to the next free slot | Selector |
-| 4 (far right) | 3 | **TUNING** | Radio: step frequency · Everything else: previous / next track | Radio: **Seek** up (press again = stop) · Everything else: **Play / Pause** | — | Continuous |
+| 4 (bottom) | 3 | **TUNING** | Radio: step frequency · Everything else: previous / next track | Radio: **Seek** up (press again = stop) · Everything else: **Play / Pause** | — | Continuous |
 
 ### 4.3 Why PRESETS takes the free knob — and the three candidates I rejected
 
@@ -255,9 +315,9 @@ Internally the **Dial**: *move through the content of whatever is playing.* One 
 
 ### 5.0 One constraint the owner owns
 
-**Encoder index order equals physical left-to-right order (D3).** This is a wiring guarantee from the owner, not an inference from the protocol, and everything in §5.2 and §6.2 rests on it — in particular the HUD's spatial mapping, which is only learnable if it is *always* true.
+**Encoder index order equals physical panel order — top-to-bottom down the as-built column (D3).** This is a wiring guarantee from the owner, not an inference from the protocol, and everything in §5.2 and §6.2 rests on it — in particular the HUD's spatial mapping, which is only learnable if it is *always* true.
 
-One maintenance note follows, and it is the sort of thing that gets rediscovered expensively: **if the Pico is ever replaced or the harness re-terminated, this guarantee must be re-established, not assumed.** The `Calibrate a knob` flow (§7.9) is the fastest way to confirm it — turn the leftmost knob, see which row moves.
+One maintenance note follows, and it is the sort of thing that gets rediscovered expensively: **if the Pico is ever replaced or the harness re-terminated, this guarantee must be re-established, not assumed.** The `Calibrate a knob` flow (§7.9) is the fastest way to confirm it — turn the **topmost** knob (VOLUME), see which row moves. *(Rev 3 said "leftmost", against a horizontal row.)*
 
 ### 5.1 Semantics: accumulator-driven, and now forced
 
@@ -365,30 +425,112 @@ There is **no HUD, toast convention, or transient-overlay component in this proj
 
 ### 6.2 Geometry — the readout follows the knob
 
-**Transient readouts appear above the knob that produced them. Selection overlays center.**
+**Transient readouts appear beside the knob that produced them, at the same height. Selection overlays
+center.**
 
-The four knobs sit in a row across the cabinet face (§9), so the HUD divides the 1920 px width into quarters — centers at **240 / 720 / 1200 / 1680 px** — and renders the active knob's card in its own quarter, bottom-anchored at `bottom: 24px`. Turn the second knob from the left, and something lights up above the second knob from the left. Nobody has to be told this; they see it once and they know which knob is which forever. **D3's index-order guarantee is what makes this dependable.**
+> ⚠ **Corrected in Rev 4, and `ENC-4` shipped the old axis.** Rev 3 read *"The four knobs sit in a row
+> across the cabinet face"* and divided the **1920 px width** into quarters — centres at
+> **240 / 720 / 1200 / 1680 px**, bottom-anchored at `bottom: 24px`. **The knobs are a vertical column to
+> the left of the screen** (§9), so the axis is wrong and all four constants with it. The shipped
+> expression of the old axis is `EncoderHud.razor`'s `QuarterCentre()` (`240 + index * 480`) and the
+> `left:` inline style it feeds, plus `.encoder-hud`'s `bottom: 24px` / `margin-left: -180px`.
+
+**The principle is unchanged and survives the rotation completely intact.** The card appears where the
+knob is, so nobody has to be told which knob is which; they see it once and they know. **Only the sentence
+changes:** *turn the second knob from the top, and something lights up beside it at the same height.* This
+is a **90° rotation, not a redesign** — no new component, no new copy, no new token, and §6.3–§6.5 are
+untouched.
+
+**Cards anchor to the left edge and stack vertically**, each vertically centred on its own knob's height.
+`left: 24px` becomes the fixed offset; the per-encoder value moves to the vertical axis.
+
+**The measured mapping.** The LCD active area is 119.89 mm tall and vertically centred on the panel
+(§9.4, §9.6), so each knob's panel height maps straight onto the 720 px viewport:
+
+| Knob | Enc | Panel y | Fraction down the active area | Screen y (measured) | Vertical quarter |
+|---|---|---|---|---|---|
+| VOLUME | 0 | 31.75 mm | 12.92 % | 93.05 px | **90 px** |
+| SOURCE | 1 | 61.38 mm | 37.64 % | 271.02 px | **270 px** |
+| PRESETS | 2 | 91.02 mm | 62.36 % | 448.98 px | **450 px** |
+| TUNING | 3 | 120.65 mm | 87.08 % | 626.95 px | **630 px** |
+
+#### Use the clean quarters — 90 / 270 / 450 / 630 — and here is why, so nobody "simplifies" it either way
+
+Maximum deviation is **3.05 px** (VOLUME), which at this screen's 6.006 px/mm is **0.508 mm on the physical
+panel**. Half a millimetre of parallax between a 15 mm knob and a 360 px card, read from across a room, is
+not perceptible — and it is not what the cue is doing anyway. The alignment a person reads is *"beside
+**this** knob, not **that** one"*, and the nearest wrong answer is **178 px away**. The measured values buy
+nothing against that.
+
+They also cost something real. **`93.05` in a source file is self-evidently a measurement, and a
+measurement invites the next reader to re-measure it** — or to round it off without knowing it was ever
+deliberate. **`90` is self-evidently a layout decision.** Four magic constants that *look* derived are the
+worse failure mode here, because they look like they encode a tolerance that matters, and they do not.
+
+**But express them as data derived from the drawing, in exactly one place.** The four positions, the four
+engraved names and the index→knob mapping are all facts about
+`design/hardware/front-panel-layout_4.svg`, and they are **already needed by four surfaces** — this HUD, the
+diagnostics card (§7.9), the Settings config table (§7.8) and the two selector overlays (§6.6). **One
+panel-geometry definition, citing the drawing and the px→mm scale factor, so a recut moves one line
+instead of five.** This project has already paid for the alternative: *"three callers carrying three
+different flag sets is how the box drifted in the first place"* (`CLAUDE.md`, on the kiosk command line).
+Today the correction is a rotation; the next one will be a number, and it should be **one** number.
 
 ```
- 1920 × 720 kiosk viewport
-┌───────────────────────────────────────────────────────────────────────────────┐
-│  topbar (120px: 64 primary + 56 source bubbles)            [MUTED]  ← §6.7    │
-├───────────────────────────────────────────────────────────────────────────────┤
-│                          │                       │                            │
-│   NowPlayingPanel        │  RadioControlPanel    │     VisualizerPanel        │
-│   (520px)                │  / QueueHistoryPanel  │     (710px)                │
-│                          │  (flex ≈688px)        │                            │
-│    ┌─────────┐    ┌─────────────────────┐        │    ┌─────────┐             │
-│    │ VOLUME  │    │  SOURCE / PRESETS   │        │    │ TUNING  │  ← HUD      │
-│    │   62    │    │  overlays center    │        │    │ 98.5MHz │    bottom:24│
-│    └─────────┘    └─────────────────────┘        │    └─────────┘             │
-└───────────────────────────────────────────────────────────────────────────────┘
-     ▲ 240px          ▲ 720px         ▲ 1200px        ▲ 1680px
-     │                │               │               │
-    ╭─╮              ╭─╮             ╭─╮             ╭─╮
-    │◉│ VOLUME       │◉│ SOURCE      │◉│ PRESETS     │◉│ TUNING   ← cabinet face
-    ╰─╯              ╰─╯             ╰─╯             ╰─╯
+                                1920 x 720 kiosk viewport
+          +--------------------------------------------------------------------+
+  (o) ----|- - topbar (120px) - - - - - - - - - - - - - - - - - - - - - - - - - |  90px
+  VOL     | +----------------+                                                  |
+          | | VOLUME     62  |   left: 24px, centred on its knob's height       |
+          | +----------------+                                                  |
+  (o) ----|- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -| 270px
+  SRC     |                    +----------------------+                         |
+          |                    |  SOURCE / PRESETS    |  overlays still centre   |
+  (o) ----|- - - - - - - - - - |  in the content area | - - - - - - - - - - - - | 450px
+  PRE     |                    +----------------------+                         |
+          | +----------------+                                                  |
+  (o) ----|-| TUNING         |- - - - - - - - - - - - - - - - - - - - - - - - - | 630px
+  TUN     | | 98.5 MHz       |                                                  |
+          | +----------------+                                                  |
+          +--------------------------------------------------------------------+
+ cabinet     the knob column sits 44.13 mm to the left of the LCD active area,
+  face       so a card on the left edge is as near its knob as the bezel permits
 ```
+
+#### Two mechanics the rotation breaks, flagged for Planner rather than solved here
+
+1. **`margin-left: -180px` has no vertical twin.** It works because the card is a fixed 360 px wide.
+   **Card height is content-dependent** — the volume variant is ~173 px, the generic and track variants
+   ~90–110 px — so there is no constant half-height to subtract, and the existing comment's own reason
+   (*`.snackbar-enter` animates `transform`, so `translateY(-50%)` would be dropped for the length of the
+   animation*) still stands and now bites on the axis that matters. **Requirement: the card is vertically
+   centred on its knob at every content height.** The mechanism is Planner's call; separating the
+   positioned element from the animated one satisfies it without touching the keyframes.
+2. **The entrance animation now points the wrong way.** `snackbarSlideIn` is `translateY(100%) → 0`
+   (`design-system.css:1030`) — it rises from the bottom edge, which is exactly right for a
+   bottom-anchored card and arbitrary for one pinned to the left edge at mid-screen. **A card should enter
+   from the edge it is anchored to**, so this wants a horizontal counterpart. ⚠ **This is a deliberate,
+   narrow amendment to §6.1's *"do not write new keyframes"*** — that instruction existed to stop a
+   parallel motion vocabulary being invented, and one mirrored pair at the same duration and easing is not
+   that. **§6.9 is untouched: this adds no token.**
+
+#### Left-edge collisions — flagged, not fixed
+
+The bottom of this screen was largely empty. **The left edge is not**, and the card is `z-index: 10000`, so
+it **occludes** nearly everything beneath rather than being occluded. Every one of the four bands
+(± half a card around each centre) hits something on at least one route:
+
+| Band | What it lands on |
+|---|---|
+| **90 px — VOLUME** | ⚠ **The worst one. The fixed `.topbar`** (`design-system.css:189-197`, y 0–120, full width, `z-index: 1100`). A VOLUME card covers the TIME cluster and LED clock (x 16–146), the IN/OUT clusters, and the first two or three `.source-bubble`s. **And it covers the `ENC-4a` `topbar-mute-chip`** (`MainLayout.razor:77-84`, y ≈ 21–43) — so the volume readout would hide the one persistent element that explains why turning volume produces no sound. **§6.7's mute chip and §6.3's muted volume card would collide with each other**, on the most-used knob. |
+| **270 px — SOURCE** | Home's `NowPlayingPanel` 520 px rail and its album art; the `.np-gain-popover` (340 px, x ≈ 164–504) when open; `/history`'s **360 px** filter panel — an exact width match, total overlap; `/phone`'s 156 px tab rail; the Radzen left tab strips on `/system` and `/devices`. |
+| **450 px — PRESETS** | The same full-height left rails on every route that has one. |
+| **630 px — TUNING** | The `.now-playing-dock` (y 656–720) on every route except Home; on Home, `NowPlayingPanel`'s transport bar including its 44 × 44 mute button and volume slider. **This band is also where the current bottom-anchored HUD already sits** (y ≈ 523–696), so it is the one position that is barely a change. `.virtual-keyboard-container` (`z-index: 10001`) is the only layer in the project that paints *over* the HUD, and it lands here when active. |
+
+**No band is clean on every route.** Resolving this is a design question in its own right — whether cards
+inset past the rails, whether the topbar yields, or whether the VOLUME card alone is treated as a special
+case — and it is **not** settled by this amendment. It is recorded here so that whoever implements the
+rotation meets it in the spec rather than on the glass.
 
 Card chrome, shared: 360 px wide, `--surface-overlay` at ~92% opacity with `backdrop-filter: blur(12px)`, `1px solid var(--surface-separator)`, 10 px radius, `padding: var(--sp-4)`. (This project has no `--radius-*` or `--shadow-*` tokens — radii are per-component literals — so a literal `10px` matching `.nav-pill` is the consistent choice.)
 
@@ -710,7 +852,7 @@ The owner asked for the device's configuration and an explicit Save in the app. 
 **D5 removed this card's original headline job.** Rev 2 justified it primarily as the tool that resolves *"does one detent report one count or four?"* — and the firmware now answers that. So the honest question is whether it still earns a card. **It does, on three remaining merits**, and it is smaller than Rev 2's version:
 
 1. **Wiring sanity, which nothing else can see.** The invalid-transition rate is the only signal that distinguishes "this encoder is noisy" from "this encoder is fine" before it becomes an intermittent fault someone chases for a week.
-2. **Confirming D3's index-order guarantee** after any hardware work — turn the leftmost knob, see which row moves (§5.0).
+2. **Confirming D3's index-order guarantee** after any hardware work — turn the **topmost** knob, see which row moves (§5.0).
 3. **Measuring detents per revolution**, the one open mechanical unknown left in §5.2 — a single full turn answers it and pins the feel figures.
 
 **Where:** a Diagnostics card in the same Settings tab. Not on Home, not in the topbar. **Polling: 2 Hz, only while the card is open** (§6.8) — a background diagnostic poll is exactly the incidental load that correlates with audio distortion on this box.
@@ -831,9 +973,13 @@ Rendered inside `Sleep.razor`, within the anti-burn-in drift wrapper, replacing 
 
 ---
 
-## 9. Physical layout — approved, final (D2)
+## 9. Physical layout — as built (D2, amended Rev 4)
 
-**This section is now a build document.** The rationale is retained as the record of why, not as an argument still being made.
+**This section is a build document, and as of Rev 4 it describes a panel that has been drawn rather than a
+layout being proposed.** The single source of truth is **`design/hardware/front-panel-layout_4.svg`**
+(§9.6). Where Rev 3's rationale is still true it is retained as the record of *why*; where the drawing
+falsified it, **the claim is struck in place and what replaced it is stated** — a silently corrected number
+teaches nothing.
 
 ### 9.1 The order
 
@@ -843,70 +989,225 @@ Rendered inside `Sleep.razor`, within the anti-burn-in drift wrapper, replacing 
 
 ### 9.2 Why this order
 
-> **The outer two knobs *act*. The inner two knobs *choose*.**
+> **The two knobs at the ends *act*. The two in the middle *choose*.**
 
-1. **The two knobs that take effect the instant you turn them are at opposite ends.** VOLUME and TUNING are the most-used, the most consequential, and the only two whose turn changes something immediately. Three knob-widths of cabinet between them makes the one genuinely costly mis-grab — blasting the room versus losing the station — nearly impossible.
-2. **The two knobs in the middle are both preview-only**, so every mis-grab in the middle of the panel is *free*. Grab SOURCE when you meant PRESETS and an overlay opens showing where you are; nothing changes; it dismisses itself in four seconds. This is the interaction design paying for the layout, and it is why two similar-feeling knobs can safely sit adjacent.
-3. **The size difference encodes behavior, not just identity.** Big knobs act. Small knobs choose. The panel tells you which knobs are consequential by feel.
-4. **Left-to-right reads coarse → fine on the content side.** SOURCE picks the band or input, PRESETS picks a saved point, TUNING moves continuously from there.
-5. **It remains period-plausible.** Volume far left and tuning far right is the dominant American console arrangement; one middle knob is still a selector, and the other is the preset bank — which is what the tone slot became when radios got memories.
+*(Rev 3 wrote "outer" and "inner", which on a horizontal row also implied a spacing difference. On the
+as-built column the words mean **ordinal position only** — first/last versus second/third. That ordinal
+claim is the one this section actually needs, and it survived the change of orientation unaltered.)*
 
-| Meant → grabbed | What happens | Cost |
-|---|---|---|
-| Volume → Source | An overlay opens; **nothing changes** | **Free** |
-| Source → Volume | Level changes; instantly audible and self-correcting | Trivial |
-| Source ↔ Presets | The other overlay opens; **nothing changes** | **Free** |
-| Presets → Tuning | Station drifts | Recoverable — visible, and turning back the same number of detents lands on the same channel exactly |
-| Tuning → Presets | An overlay opens; **nothing changes** | **Free** |
-| Volume ↔ Tuning | *Requires reaching across the whole panel* | Effectively prevented by geometry |
+1. **The two knobs that take effect the instant you turn them are at opposite ends.** VOLUME and TUNING are the most-used, the most consequential, and the only two whose turn changes something immediately. ~~Three knob-widths of cabinet between them makes the one genuinely costly mis-grab — blasting the room versus losing the station — nearly impossible.~~ ⚠ **Struck in Rev 4.** As built they are **88.90 mm apart — less than Rev 3's single 90 mm outer pitch** — and the whole column is narrower than the distance Rev 3 put between VOLUME and PRESETS alone. **Geometry no longer prevents that mis-grab.** What survives is the *ordinal* half of the claim, and it is not nothing: **the ends of a column are the two positions a hand can find without counting**, which is why the two acting knobs belong there. See §10.1, where this is re-derived rather than patched.
+2. **The two knobs in the middle are both preview-only**, so every mis-grab in the middle of the panel is *free*. Grab SOURCE when you meant PRESETS and an overlay opens showing where you are; nothing changes; it dismisses itself in four seconds. This is the interaction design paying for the layout, and it is why two similar-feeling knobs can safely sit adjacent. ⭐ **Rev 4: this point did not merely survive — it is now carrying the section.** Rev 3 offered it as the interaction design *supplementing* the spacing; with the spacing gone it is **the whole account** of why the interior of the panel is safe.
+3. ~~**The size difference encodes behavior, not just identity.** Big knobs act. Small knobs choose. The panel tells you which knobs are consequential by feel.~~ ⚠ **Struck in Rev 4 — all four knobs are 15 mm.** There is no size difference left to encode anything. **Replaced by: the panel tells you *which knob* it is by feel, but no longer which *class* it belongs to.** Identity survives on surface alone (knurl / flute / smooth / ring groove); the behavioural grouping does not survive at all. The owner has accepted this.
+4. **Top-to-bottom reads coarse → fine on the content side.** SOURCE picks the band or input, PRESETS picks a saved point, TUNING moves continuously from there. *(Rev 3 wrote "left-to-right"; the reading order rotated with the panel and the argument is unaffected.)*
+5. **It remains period-plausible.** Volume at one end of the run and tuning at the other is the dominant American console arrangement — *(Rev 3 wrote "far left" and "far right"; on the as-built column it is top and bottom, and the ordinal claim is what the argument actually used)* — one middle knob is still a selector, and the other is the preset bank — which is what the tone slot became when radios got memories.
+
+**The cost table, re-tabulated against the as-built column.** Every pitch is now 29.63 mm, so the
+*adjacency* column below is new information: on the Rev 3 row, three of these pairs were 90 mm apart.
+
+| Meant → grabbed | As built | What happens | Cost |
+|---|---|---|---|
+| Volume → Source | adjacent (29.63 mm) | An overlay opens; **nothing changes** | **Free** |
+| Source → Volume | adjacent — *was 90 mm* | Level changes; instantly audible and self-correcting, bounded by `ENC-3`'s ±6 clamp | Trivial |
+| Source ↔ Presets | adjacent (unchanged in kind) | The other overlay opens; **nothing changes** | **Free** |
+| Presets → Tuning | adjacent — *was 90 mm* | Radio: station drifts. Other sources: **one track skip** (delta collapsed to ±1, 300 ms debounce, §4.4) | Recoverable, but see §10.1 — a frequency step is exactly reversible and a track skip is not |
+| Tuning → Presets | adjacent — *was 90 mm* | An overlay opens; **nothing changes** | **Free** |
+| Volume ↔ Tuning | **88.90 mm**, opposite ends of the column | Level change, or station/track change | ⚠ ~~Effectively prevented by geometry~~ — **struck.** Two positions apart on a column of equal gaps, at a span shorter than Rev 3's single outer pitch. Now defended by ordinal position and by the two most distinct surfaces on the panel (knurl vs. deep flute), **not by distance** |
 
 ### 9.3 The face
 
+**As drawn.** The knob column is at x = 25.4 mm; the LCD active area begins 44.13 mm to its right. Panel
+outline 406.4 x 152.4 mm. Not to scale below — the numbers, not the picture, are the build data.
+
 ```
-        ╔═══════════════════════════════════════════════════════════════════╗
-        ║          1920 × 720 display  (behind glass / in the dial bezel)   ║
-        ╚═══════════════════════════════════════════════════════════════════╝
+  +--------------------------------------------------------------------------------+
+  |  o                                                                          o   |  <- panel mounting
+  |        +--------------------------------------------------------------+        |     holes, r 3.18 mm
+  |  (@)   |                                                              |        |
+  | VOLUME |                                                              |        |   VOLUME   y  31.75
+  |        |                                                              |        |            |
+  |  (@)   |                LCD ACTIVE AREA                               |        |   SOURCE   y  61.38
+  | SOURCE |                309.88 x 119.89 mm                            |        |            | 29.63
+  | [USB]  |                VESA 75 x 75                                  |        |            | uniform
+  |  (@)   |                                                              |        |   PRESETS  y  91.02
+  | PRESETS|                                                              |        |            |
+  |        |                                                              |        |   TUNING   y 120.65
+  |  (@)   |                                                              |        |
+  | TUNING |                                                              |        |
+  |  o     +--------------------------------------------------------------+     o   |
+  +--------------------------------------------------------------------------------+
+     ^25.4                ^69.53 mm                                     ^379.4
+      mm
 
-              ╭───╮          ╭──╮      ╭──╮           ╭───╮
-             ╱ ▓▓▓ ╲        │▒▒│      │▒▒│           ╱ ▓▓▓ ╲
-            │  ▓▓▓  │       │▒▒│      │▒▒│          │  ▓▓▓  │
-             ╲ ▓▓▓ ╱        │▒▒│      │▒▒│           ╲ ▓▓▓ ╱
-              ╰───╯          ╰──╯      ╰──╯           ╰───╯
-             VOLUME         SOURCE   PRESETS          TUNING
-              42mm           28mm      28mm            42mm
-            knurled         smooth   smooth +        deep-fluted
-                                     ring groove
-             ── acts ──    ── choose ──── choose ──   ── acts ──
-                │             │          │              │
-                └──── 90mm ───┴── 70mm ──┴──── 90mm ────┘
+  All four knobs 15 mm diameter. Shaft holes 6.35 mm. Edge-to-edge clearance 14.63 mm.
+  VOLUME knurled | SOURCE smooth | PRESETS smooth + ring groove | TUNING deep-fluted.
+  Column span 88.90 mm, centred on the panel's vertical centre (y = 76.2 mm).
 ```
 
-### 9.4 Dimensions
+⚠ **Rev 3's face diagram is gone, not amended.** It drew a horizontal row below the screen at
+`90mm / 70mm / 90mm` with 42 mm and 28 mm knobs. **None of those five numbers describes this panel**, and
+leaving a corrected version of the wrong picture beside the right one is how the two get confused on a shop
+floor. The reason it changed is in Rev 4 and in §9.4 below.
 
-| Spec | Value | Why |
+### 9.4 Dimensions — as built
+
+**Every value here is measured from `design/hardware/front-panel-layout_4.svg` at px ÷ 2.8346 = mm
+(§9.6).** Rev 3's table proposed dimensions; this one records them.
+
+| Spec | As built | Note |
 |---|---|---|
-| Pitch, outer → inner | **90 mm** | Physically separates the knobs that take effect on turn from the two that only preview. Grouping by spacing is the cheapest legibility win on a panel with no labels visible in the dark. |
-| Pitch, inner pair | **70 mm** | Tight enough to read as a pair; still clears an adult hand around a 28 mm knob. **70 mm is the floor anywhere on the panel.** |
-| Volume / Tuning diameter | **40–45 mm** | Most-used, most precise, and the two that act |
-| Source / Presets diameter | **25–30 mm** | The size difference *is* the "this one only chooses" cue, in the dark |
-| Knurling | Volume lightly knurled · Tuning **deeply fluted** · Source and Presets smooth | Four knobs identifiable by fingertip with the lights off — the most important accessibility feature on this device |
-| Distinguishing the two smooth knobs | **PRESETS carries a ring groove** | Same size, same finish; one tactile difference keeps them apart without breaking the pair reading |
-| Horizontal placement | Centered on the display's four quarters (240 / 720 / 1200 / 1680 px equivalents) | Makes §6.2's HUD mapping literal rather than learned |
-| Height | Same row, comfortable standing reach | The knobs are the standing surface; the touchscreen is the leaning-in surface |
+| Panel | **406.4 x 152.4 mm** (16 x 6 in) | 1152 x 432 px in the file |
+| Orientation | **One vertical column**, all four knobs at **x = 25.4 mm** | ~~A horizontal row below the screen~~ — struck |
+| Pitch | **29.63 mm, uniform** across all three gaps | ~~90 mm outer → inner / 70 mm inner pair~~ — struck. **Not a drafting error:** 90 + 70 + 90 = 250 mm cannot fit a 152.4 mm panel. **The orientation forces the pitch** |
+| ~~"70 mm is the floor anywhere on the panel"~~ | **Withdrawn.** The floor as built is 29.63 mm | The claim was written for a row with room to spare. A column of four on a 6-inch panel has no such room, and the owner has accepted the result |
+| Knob centres, top → bottom | VOLUME **31.75** · SOURCE **61.38** · PRESETS **91.02** · TUNING **120.65** mm | Order unchanged from D2 |
+| Column span | **88.90 mm**, centred on the panel's vertical centre (y = 76.2 mm) | Shorter than Rev 3's single outer pitch |
+| Knob diameter | **15 mm, all four** — confirmed by the owner | ~~40–45 mm VOLUME/TUNING, 25–30 mm SOURCE/PRESETS~~ — struck. **The size difference that Rev 3 made a legibility cue does not exist** |
+| Edge-to-edge clearance | **14.63 mm** between adjacent knob bodies | Comfortable for a fingertip on a 15 mm knob; too tight to grip two at once, which is the property that matters |
+| Shaft holes | **6.35 mm diameter** (r = 9 px) | Drill layer, with crosshairs |
+| Tactile differentiation | VOLUME lightly knurled · TUNING **deeply fluted** · SOURCE smooth · PRESETS smooth + **ring groove** | ⚠ **Now the *only* differentiation.** Rev 3 called fingertip identification in the dark *"the most important accessibility feature on this device"* (§9.2, §10.5) and backed it with **size and surface**. **Size is gone; this is what is left**, and the §15 dark-room acceptance test is correspondingly harder to pass |
+| LCD | **Active area 309.88 x 119.89 mm**, left edge at **69.53 mm**, vertically centred, VESA 75 x 75 | ⭐ **The owner has confirmed this rectangle is the ACTIVE AREA, not the bezel** — which is what makes §6.2's screen-y mapping exact rather than approximate |
+| Knob column to LCD | **44.13 mm** to the left of the active area | Why §6.2 anchors cards to the **left** edge: it is the nearest the glass can get to the knobs |
+| USB cable opening | **8.89 x 12.7 mm**, rounded corners, at x 58.1 mm / y 69.85 mm | Between the knob column and the LCD, level with SOURCE |
+| Panel mounting | Four holes, r 3.18 mm, at the corners (36 px inset) | |
+| Finish | Inscribed **black acrylic** | Colour in the SVG is **layer separation for the cutter** — reference / cut-engrave / drill / labels — and carries no finish meaning |
 
-**Do not use pointer or "chicken-head" knobs.** A pointer promises an absolute position and end stops. These are endless encoders with neither — a pointer at 3 o'clock while the volume is at 20% lies about the machine's state every time you look at it. Radially symmetric knobs, knurl and groove patterns, no indexing mark.
+**Do not use pointer or "chicken-head" knobs.** A pointer promises an absolute position and end stops.
+These are endless encoders with neither — a pointer at 3 o'clock while the volume is at 20% lies about the
+machine's state every time you look at it. Radially symmetric knobs, knurl and groove patterns, no indexing
+mark. **(Unchanged by Rev 4, and now load-bearing rather than merely tidy: with size differentiation gone,
+the knob's *surface* is the entire tactile vocabulary, and a pointer would spend part of it on a lie.)**
 
 ### 9.5 Engraving
 
 **VOLUME · SOURCE · PRESETS · TUNING**, in the cabinet's own period typography (D10). `TUNING` not `DIAL` — the word on the original and the word a guest reads. `PRESETS` per the owner's choice, **and the on-screen bank is retitled to match** (§4.4) — a panel engraved PRESETS above a screen that says MEMORY is a mismatch nobody can edit away later.
 
+**As drawn.** The four names are on the `labels` layer as **outlined paths** — already converted to curves,
+so the engraver does not depend on a font being installed. Each label sits **immediately beneath its own
+knob**, inside the 25.4 mm column, roughly x 15.3–35.4 mm and about 4 mm tall.
+
+⚠ **One build tolerance worth knowing before anything is cut, because the column is tight.** A label's top
+edge clears the knob above it by about **0.8 mm** — VOLUME's label occupies y 40.03–43.99 mm while a 15 mm
+VOLUME knob ends at y 39.25 mm; TUNING is the same to within a tenth. **That clearance assumes the knob
+bodies are 15 mm all the way down to the panel.** Any knob whose skirt or base flares wider than 15 mm
+**will cover its own engraving**, and it is the label of the knob *above* that goes first. This is an
+observation from the drawing handed to whoever sources the knobs — **not** a proposed change to the
+drawing.
+
+### 9.6 The drawing is the source of truth
+
+**`design/hardware/front-panel-layout_4.svg`** (dated 2026-09-01), committed to this repo in the same
+change that wrote Rev 4. Everything in §9 and §6.2 derives from it, and **it wins over any number in this
+document** — including any that this amendment missed.
+
+| | |
+|---|---|
+| Units | px at **72 px/inch**; file is 1152 x 432 |
+| **Scale** | **px ÷ 2.8346 = mm.** Established from the VESA-75 reference square: `742.5992 − 530.0008 = 212.5984 px` = **75.000 mm exactly** |
+| Layers, by colour | `#0000ff` reference guides · `#000000` cut/engrave outlines · `#ff0000` drill crosshairs · `#008000` labels. **Colour is layer separation for the cutter, not finish** — the panel is inscribed black acrylic |
+| Element ids | `Volume-knob-hole-3`, `Source-knob-hole-4`, `Presets-knob-hole-5`, `Tuning-knob-hole-6`, `USB-cable-opening-7`, `lcd-reference`, `VESA-75-2-guide` — the drill order matches the engraved order |
+
+**Why it is committed rather than referenced.** It arrived as a file in a downloads folder. Every dimension
+in §9, every screen coordinate in §6.2, and the entire re-derivation in §10.1 are downstream of it; a build
+document that lives on one machine is a single point of failure, and this project has an explicit rule
+about exactly that class of drift (`CLAUDE.md`, on the kiosk command line having *"one definition"*).
+
+**If the panel is ever recut, this file changes first**, and §9.4, §6.2 and §10.1 are re-derived from it —
+in that order, because §10.1's conclusion depends on the pitches and §6.2's constants depend on the LCD
+rectangle.
+
 ---
 
 ## 10. Accessibility and safety
 
-### 10.1 Mis-grab
+### 10.1 Mis-grab — re-derived in Rev 4
 
-Covered structurally in §9.2 — the two acting knobs at opposite ends behind 90 mm gaps, the two previewing knobs paired in the middle where mis-grabs cost nothing, tactile differentiation by size, knurl and ring groove, 70 mm floor. **Under this layout there is no mis-grab that changes an audible state without also putting something on screen that says so.**
+> ⚠ **Rev 3's version of this section was:** *"Covered structurally in §9.2 — the two acting knobs at
+> opposite ends behind 90 mm gaps, the two previewing knobs paired in the middle where mis-grabs cost
+> nothing, tactile differentiation by size, knurl and ring groove, 70 mm floor. **Under this layout there
+> is no mis-grab that changes an audible state without also putting something on screen that says so.**"*
+>
+> **Three of its five supports no longer exist:** the **90 mm gaps**, the **70 mm floor**, and **tactile
+> differentiation by size**. Two survive untouched — the previewing knobs in the middle where mis-grabs
+> cost nothing, and knurl + ring groove. *(Counted precisely rather than roundly, because overstating the
+> damage would be the same error as understating it.)* This is the only genuine safety conclusion in the
+> document, so it is **re-derived from scratch below rather than re-worded** — and the first finding is
+> that the conclusion and its stated reason were never actually connected.
+
+#### The conclusion still holds — but not for the reason Rev 3 gave
+
+**Rev 3's sentence is a claim about *feedback*, and it was supported with an argument about *spacing*.**
+Those are different things, and the drawing is what exposed it. Distance never determined whether something
+appeared on screen. Test it directly instead:
+
+| Input | Changes an audible state? | Puts something on screen? |
+|---|---|---|
+| **VOLUME turn** | Yes | **Yes** — volume card, every route including `/sleep` (§6.3, `ENC-4` shipped) |
+| **VOLUME press** (mute) | Yes — the room goes quiet | **Yes** — card, plus the **persistent** topbar chip (§6.7, `ENC-4a` shipped) |
+| **VOLUME long-press** (standby) | Yes | **Yes** — progress ring from 300 ms, then the standby screen |
+| **SOURCE turn** | **No** — preview only | Yes (overlay) |
+| **PRESETS turn** | **No** — preview only | Yes (overlay) |
+| **SOURCE / PRESETS press** | **No** on a closed overlay — commits the status quo (§4.5) | — |
+| **TUNING turn, radio** | Yes | **Yes** — tuning card, or the live frequency well when `RadioControlPanel` is the visible centre panel, which is the only reason the card is suppressed (§6.4) |
+| **TUNING turn, other** | Yes — one track skip | **Yes** — track card, *always* shown (§6.4) |
+| **TUNING press** | Yes — seek / play-pause | **Yes** |
+
+**Every row that changes an audible state also renders. The sentence survives verbatim.** What changed is
+what holds it up:
+
+1. **`ENC-4`'s HUD (shipped)** — principle 2's *"visible surface, on every route, within 100 ms"*. This is
+   what makes the on-screen half literally true, and it is software.
+2. **Preview-then-commit (§4.1, §4.4)** — turning SOURCE or PRESETS changes nothing. **Half the panel
+   cannot produce an audible mis-grab at all**, by construction rather than by distance.
+3. **`ENC-3`'s host clamp (shipped)** and the other five guards in §10.2 — none of which ever depended on
+   geometry. Silence to full still takes ≥ 1.33 s of deliberate spinning.
+4. **Ordinal position** — the one geometric property that survived. VOLUME and TUNING are at the two
+   **ends** of the column, and the ends are the two positions a hand finds without counting. Rev 3's point 1
+   was half metric and half ordinal; **the ordinal half was the load-bearing one and it is intact.**
+5. **Surface differentiation** — knurl vs. deep flute, and the ring groove separating the two smooth knobs.
+
+**Items 1–3 are software and are shipped. Item 4 is the panel. Item 5 is the knobs, and is now doing the
+work that size used to share.**
+
+#### Where it does *not* fully hold — two things, stated rather than absorbed
+
+**(a) The VOLUME ↔ TUNING mis-grab is no longer prevented, and Rev 3 said it was.** Rev 3 named it *"the one
+genuinely costly mis-grab — blasting the room versus losing the station"* and marked it **"effectively
+prevented by geometry."** As built the two are **88.90 mm apart** — *less than Rev 3's single outer pitch* —
+two positions apart on a column of equal gaps. **That row is struck.** It is now an ordinary two-position
+slip, defended by ordinal position and by the two most distinct surfaces on the panel, and by nothing else.
+
+*Why this is still acceptable, and it is a claim about **cost**, not about **likelihood**:* probability went
+up and there is no software substitute for that. But both outcomes stay bounded. In the volume direction —
+the dangerous one — `ENC-3` clamps every event to ±6 regardless of what the device sends, so the worst
+single gesture is small and the worst sustained one takes over a second. In the tuning direction the result
+is a frequency step, which is **exactly reversible** by turning back, and PRESETS recalls the station in one
+press. **The mis-grab got more likely; it did not get more expensive.**
+
+**(b) One recovery claim is narrower than Rev 3's table said, and it is on a pair that just became
+adjacent.** Rev 3 wrote that PRESETS → TUNING is *"recoverable — visible, and turning back the same number
+of detents lands on the same channel exactly."* **That is true of a frequency and false of a track.** On a
+non-radio source TUNING skips tracks, and turning back one detent lands at the **start of the previous
+track**, not at the playback position you were at. Rev 3 could afford the imprecision at 90 mm; at 29.63 mm
+it is **the panel's most likely costly slip** — where Rev 3's most likely costly slip was the one it had
+declared prevented.
+
+*It is bounded, and it was bounded before Rev 4 noticed it:* §4.4 already collapses the delta to ±1 and
+debounces at 300 ms, so a hard spin advances **one** track, not eight. It is audible, it renders (the track
+card is always shown), it is not destructive, and it costs a few seconds. **Recorded as the residual, not
+resolved** — it needs no change to ship, and it is the first thing to look at if the panel ever feels
+error-prone in use.
+
+#### The verdict
+
+**The conclusion stands, and its support is now entirely software plus ordinal position and knob surface.**
+No part of it rests on distance any more, and the document should not be read as though it does.
+
+**One thing is genuinely better, and it is worth a sentence because it is the only compensation on offer.**
+With every gap identical there is no longer any pair of knobs that is *safe by distance*, so the design
+cannot lean on distance anywhere — which means **the safety argument is now uniform across the panel
+instead of varying by position.** A uniform argument is one you can actually test. §15's dark-room
+acceptance test should therefore be read as covering **VOLUME vs. TUNING confusion specifically**, and not
+only SOURCE vs. PRESETS: those two are now separated by surface alone, and they are the two that act.
 
 ### 10.2 Volume slam
 
@@ -939,7 +1240,7 @@ The five silences this design removes:
 
 ### 10.5 Low vision, dark rooms, and screen readers
 
-- The knobs are themselves the accessible path: they work from across the room, in the dark, without reading a 1920×720 panel. Tactile differentiation (§9.4) is what makes that true for four knobs instead of one.
+- The knobs are themselves the accessible path: they work from across the room, in the dark, without reading a 1920×720 panel. Tactile differentiation (§9.4) is what makes that true for four knobs instead of one. ⚠ **Rev 4: that differentiation is now surface only.** All four knobs are 15 mm, so knurl, flute, smooth and ring groove carry the whole load where Rev 3 had **size and surface**. §9.2 called this *"the most important accessibility feature on this device"* — **the claim is not withdrawn, and it is deliberately not softened, but a reader is owed the fact that it now rests on one axis instead of two.** The owner has accepted the trade.
 - HUD numerals are large — volume at 64 px on the main UI, 96 px on the sleep screen — because the reading distance is *the whole room*.
 - `role="status"` `aria-live="polite"` with a text mirror (`"Volume 62 percent"`, `"Preset 2, Classic Vinyl Rock, 105.1"`, `"Bluetooth, no device paired"`), matching `RdsScrollMarquee`'s existing screen-reader mirror. **AT-SPI works on this box**, so this is testable rather than aspirational.
 - Never color alone: mute is a glyph plus the word; overlay highlights are a left bar plus a background shift; unavailable entries carry a reason string; config states carry a word (`Configured`, `Degraded`, `Absent`) and not just a badge color.
@@ -1111,7 +1412,7 @@ The one thing I held back on is the numeric editor (§13 Q3). Not because it is 
 **Accessibility**
 - [ ] AT-SPI reports the HUD's live-region text for each knob.
 - [ ] Every state — including the five config tiers — is distinguishable without color.
-- [ ] With the lights off, a first-time user identifies all four knobs by touch alone, and can tell SOURCE from PRESETS by the ring groove.
+- [ ] With the lights off, a first-time user identifies all four knobs by touch alone, and can tell SOURCE from PRESETS by the ring groove — **and VOLUME from TUNING by knurl vs. deep flute.** ⚠ **Rev 4 made this test materially harder and it is now the panel's primary accessibility gate.** All four knobs are 15 mm at a uniform 29.63 mm pitch, so neither size nor spacing helps: **surface is the only cue.** VOLUME/TUNING is added explicitly because those two *act*, and §10.1's re-derivation now leans on their being distinguishable.
 
 ---
 
