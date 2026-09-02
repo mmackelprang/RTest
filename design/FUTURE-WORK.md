@@ -29,6 +29,17 @@ decision, then either ratifying or implementing a genuine filling-bar treatment.
 only. `AudioStateHubService.EncoderConnectionChanged` is a field-like event, so a unit test cannot raise it, and
 unplugging USB is not reachable remotely.
 
+**⚠ `ENC-5`/`ENC-7` must deal with this before they add a phase.** `EncoderHudService.Publish` maps an unrecognised
+phase to `_ => IsHolding`, i.e. it *preserves* the current hold state, and a true `IsHolding` cancels the dismissal
+timer. So the sequence `HoldStart` → unknown phase → `Value` leaves the card up with a ring and **no timer to take it
+down**. That is unreachable today because the API and the Web build know exactly the same four phase names — but
+`ENC-5` and `ENC-7` introduce new phases, which makes API-ahead-of-Web skew a real deploy-window state rather than a
+hypothetical one. The plan's §2.5 contract deliberately specified "leave `IsHolding` alone" and a test pins it
+(`UnknownPhase_LeavesIsHoldingAlone`), so changing it is a decision, not a tidy-up. Recommended resolution when those
+rows land: treat an unknown phase as **non-holding**, since it renders nothing anyway, and update that test with the
+reason. Raised by the automated reviewer on #519 and deliberately not changed there, to keep an already-late review
+scoped to the defects it found.
+
 ---
 
 ## 1. Bluetooth AVRCP Volume Sync — Windows
