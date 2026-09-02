@@ -653,7 +653,12 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// safety fields.
   /// </para>
   /// </summary>
-  private static IReadOnlyList<RotaryEncoderFieldState> ProjectFields(
+  /// <remarks>
+  /// <c>internal</c> rather than <c>private</c> so the safety-field parity test can compare this
+  /// projection's notion of a safety field against <see cref="RotaryEncoderConfigVerifier.Compare"/>'s
+  /// own, instead of trusting that the two hand-written lists stayed in step.
+  /// </remarks>
+  internal static IReadOnlyList<RotaryEncoderFieldState> ProjectFields(
     RotaryEncoderDeviceConfig? pushed, RotaryEncoderDeviceConfig? readBack)
   {
     if (pushed is null)

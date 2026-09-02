@@ -3831,8 +3831,24 @@
     _ => "var(--text-low)",
   };
 
+  /// <summary>
+  /// The engraved name for an encoder index, read from the single definition in Radio.Core.
+  ///
+  /// <para>
+  /// ⚠ Deliberately NOT a local copy of the four names. The ENC-8 plan proposed duplicating them
+  /// here on the grounds that "the Web process cannot resolve the Core static at runtime any more
+  /// than it can resolve the router" — but that is not so: Radio.Web.csproj references Radio.Core
+  /// directly, and this is an ordinary compile-time reference to a static, not a service that has to
+  /// be resolved out of the API process's container. The router genuinely cannot cross that boundary
+  /// because it is a stateful singleton living in the other process, which is why its mapping is
+  /// fetched over HTTP; a table of four constant strings has no such problem. The engraving is
+  /// irreversible (punch list O9), so the one thing worth guaranteeing is that the page and the
+  /// domain can never disagree about it — and delegating guarantees that at compile time, which is
+  /// stronger than pinning it with a test.
+  /// </para>
+  /// </summary>
   private static string EncoderCabinetName(int index) =>
-    index switch { 0 => "VOLUME", 1 => "SOURCE", 2 => "PRESETS", 3 => "TUNING", _ => $"KNOB {index}" };
+    Radio.Core.Configuration.RotaryEncoderCabinetNames.For(index);
 
   private EncoderFieldStateDto? Field(int encoderIndex, string field) =>
     _encoderProvisioning?.Fields.FirstOrDefault(f => f.EncoderIndex == encoderIndex && f.Field == field);
