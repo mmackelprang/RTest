@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Input;
 using Radio.Infrastructure.DependencyInjection;
 using Radio.Infrastructure.Platform.Input;
@@ -58,5 +59,27 @@ public class RotaryEncoderRegistrationTests
     var concrete = provider.GetRequiredService<EncoderFeedbackService>();
 
     Assert.Same(concrete, sink);
+  }
+
+  [Fact]
+  public void ProvisioningAndInputResolveToTheSameEncoderInstance()
+  {
+    // Two interfaces, one device. A second instance would open a second HID stream and both would
+    // fight over the same endpoint.
+    using ServiceProvider provider = BuildProvider();
+
+    Assert.Same(
+      provider.GetRequiredService<IRotaryEncoderService>(),
+      provider.GetRequiredService<IRotaryEncoderProvisioning>());
+  }
+
+  [Fact]
+  public void AddRotaryEncoders_ResolvesTheDesignedConfiguration_WithoutAConfigurationStore()
+  {
+    // IConfigurationManager is optional here on purpose: tests and trimmed hosts run without a
+    // store, and the designed directions are the safe fallback.
+    using var provider = BuildProvider();
+
+    Assert.NotNull(provider.GetRequiredService<RotaryEncoderDesignedConfig>());
   }
 }

@@ -2572,3 +2572,56 @@ Task 3 is shaped so that lands as an edit to one array (§2.5).
    `design/FUTURE-WORK.md` instead.
 6. **Fixing `--signal-red-glow`.** §0.4 C-11 — pre-existing, and declaring it would silently change an
    unrelated shipped component's appearance.
+
+---
+
+## 7. Task 4 result — 2026-09-02 — **PASS**, and it caught a HIGH regression
+
+**Gate question:** does a `stream.Write` from an ASP.NET request thread reach the device while
+`ReadFromDeviceAsync` is parked in an infinite `ReadAsync`, and does the device's reply arrive on the
+read loop?
+
+**Answer: yes, both halves.** Run on the appliance at `122bf0b`, encoder connected, **no knob being
+touched**, `POST /api/integrations/encoder/reapply`:
+
+```
+"status":"Configured", "lastVerifiedUtc":"2026-09-02T21:31:28.812933+00:00",
+fields ... "readBackValue":"4" ... "agreement":"Agrees"
+```
+
+Real read-back values, not a timeout treated as agreement. The maintenance channel of §2.2 works as
+designed: the write is what makes the device speak, the reply wakes the blocked `ReadAsync`, and
+`ParseReport` hands it back through the `TaskCompletionSource`. **No change to `ReadTimeout` was
+needed and none was made.**
+
+### What the gate caught, which is why it is a gate
+
+The **same deploy** showed the **boot** push failing:
+
+```
+boot:          "status":"Degraded", "lastVerifiedUtc":null, every field "agreement":"NotReadBack"
+POST reapply:  "status":"Configured", all 45 fields "agreement":"Agrees"
+```
+
+Identical code, differing only in whether a reader was running. Task 5 moved
+`ApplyConfigurationAsync`'s read-back onto the maintenance channel to get *one* read-back path — but
+the boot push runs **before** the read loop starts, so the waiter had no completer. The loop cannot
+start until the push returns; the push cannot return until the loop answers it. `ENC-11` survived the
+same ordering only because its push owned an inline `stream.ReadAsync`, which Task 5 deletes.
+
+It does not hang, which is what makes it easy to miss — it times out on all four attempts (~8 s) and
+settles in **`Degraded`**, the tier that drops `VolumeClampFor` from 6 units per event to 2. **Every
+boot would have left the volume knob sluggish inside sealed furniture, with nobody there to press
+Re-apply** — the row built to make that failure diagnosable would have been shipping it.
+
+**Fixed** in `1486fdb`: the push now runs concurrently with the read loop
+(`RunBootConfigurationPushAsync`), still under `_maintenanceLock`, and is awaited in the loop's
+`finally` so a fault cannot be swallowed. Re-verified on the appliance at `1486fdb`:
+
+```
+status : Configured    verifiedUtc : 2026-09-02T21:34:22    agreements : {'Agrees': 45}
+```
+
+**Lesson for the plan, not just the code:** §2.2's "one read-back path, not a boot path and a
+maintenance path that can drift" is a good instinct with one unstated precondition — *there must be a
+reader*. Unifying the two paths is only safe once the boot push is inside the reader's lifetime.

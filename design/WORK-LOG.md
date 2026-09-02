@@ -52,6 +52,40 @@ panel.** Left for Planner as a candidate row rather than fixed as a drive-by on 
 
 ---
 
+## 2026-09-02 — ENC-8: the encoder Settings surface
+
+**PR:** #527
+
+- Built the encoder Settings surface: five cards under System Config → Integrations → Rotary Encoders — Status,
+  Device configuration (read-only, 24 fields × 4 encoders keyed to the cabinet engraving), Direction, Actions, and the
+  pre-existing connection settings renamed so two different buttons are no longer both called "Save".
+- Added `IRotaryEncoderProvisioning` as a second facet of the same `HidRotaryEncoderService` instance, retained
+  sent/read-back state and timestamps, and the first code in this repo that sends `SaveConfig` (0x01).
+- Flash staleness is decided by comparing a stored SHA-256 of the flashed bytes against the bytes the app would push
+  now — a real byte comparison, because "differs from current design" is a claim about bytes that a timestamp cannot
+  support.
+- The mapping table is served from the router's own dispatch array, so `ENC-5`/`ENC-7`'s remap is a one-line edit.
+- Deliberately absent: factory reset, pinned absent by a test. Factory tiers put one detent between silence and full.
+
+**Task 4's hardware gate passed, and caught a HIGH regression — which is the argument for gates.** Unifying the boot
+and maintenance read-back paths left the boot push awaiting a reply only the read loop could deliver, while the loop
+could not start until the push returned. It does not hang; it times out on every attempt and settles in `Degraded`,
+the tier that drops the volume clamp from 6 units per event to 2. Every boot would have left the volume knob sluggish
+inside sealed furniture. Measured both ways on the appliance before and after the fix.
+
+**Two defects were invisible to every automated gate in the repo.** The page could not deserialize its own API
+response (`Radio.API` serializes enums as strings; the Web DTO enums had no converter), and the bUnit fixture uses a
+hermetic rig that fails every HTTP call — so a null result is the *expected* test state and a green suite is
+indistinguishable from a dead page. Separately, Radzen renders only the selected tab's body, so three markup-absence
+assertions would have passed on markup that never contained the panel. Both were found by UAT and by deliberately
+falsifying the new guards rather than trusting them.
+
+**Durable lesson:** a negative assertion needs a positive one beside it, keyed to something that is not the copy under
+test; and "one code path instead of two" is only safe once you have checked that the surviving path has all the
+collaborators the deleted one had.
+
+---
+
 ## 2026-09-02 — ENC-4: the EncoderHud
 
 **PRs:** implementation `507b0d3`/`eb4005e`/`bd762d1`/`29acc01` (landed on `main` without a PR — see below), review + fixes #519

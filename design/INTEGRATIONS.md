@@ -2,7 +2,11 @@
 
 This guide covers step-by-step setup for the three external integration systems: **Rotary Encoders**, **Phone Call Notifications**, and the **Announcement API**.
 
-All integrations are **disabled by default** and opt-in via configuration. The Radio Console operates fully without them.
+The Radio Console operates fully without any of these. **They do not all default the same way, and the
+difference matters:** the **phone notification** and **announcement** integrations are opt-in and stay off until
+configured, but the **rotary encoders default to on and are decided by presence** — `ENC-0` replaced the old gate
+with detection, so plugging the device in is what enables it. `RotaryEncoder:Enabled` remains as an escape hatch
+for turning a working device off, not as a switch you must find before the knobs will work.
 
 ---
 
@@ -19,13 +23,33 @@ Physical rotary encoders connected via a Raspberry Pi Pico running custom firmwa
 The Pico firmware must present itself as a USB HID device with:
 - **Vendor ID:** `0xCAFE` (51966)
 - **Product ID:** `0x4005` (16389)
-- **Report format:** 8-byte reports
-  - Byte 0: Report ID
-  - Bytes 1-4: Signed encoder deltas (sbyte per encoder, positive = clockwise)
-  - Byte 5: Button bitmask (bit N = encoder N button state, 1 = pressed)
-  - Bytes 6-7: Reserved
+**Report format** (rewritten by `ENC-1` against the live device's HID report descriptor; the source of truth is
+`RotaryEncoderDecoder.cs` and `RotaryEncoderConfigCodec.cs`). All values are little-endian. Offsets below are
+**payload** offsets — the buffer index is offset + 1, because byte 0 is the report ID.
+
+- **Report `0x01` — positions, device to host.** 36-byte payload (37 bytes on the wire).
+  - Payload 0-15: four `int32` clamped positions, one per encoder.
+  - Payload 16: button bitmask, bit N = encoder N (1 = pressed).
+  - Payload 17-19: reserved.
+  - Payload 20-35: four `int32` **free-running movement accumulators**. The host takes the difference
+    between consecutive reports; the accumulator wraps at 32 bits by design and two's-complement
+    subtraction reads straight across the wrap.
+  - Pre-accumulator firmware sends a 21-byte payload instead. Positions and buttons parse identically;
+    movement is simply absent, and the host detects which form it has from the report length.
+  - ⚠ **The first `0x01` report after every connect is a baseline and is discarded.** Accumulators are
+    free-running, so without this a replug would deliver every detent turned since power-on to the
+    volume knob at once.
+- **Report `0x02` — configuration, both directions.** 106-byte payload: a 2-byte global header (format
+  version, then a flags byte whose bit 0 selects 4 steps/detent when clear and 2 when set), followed by
+  four 26-byte encoder blocks. The host pushes this on connect and reads it back to verify (`ENC-11`).
+- **Report `0x03` — commands, host to device.** 2-byte payload.
 
 ### Encoder Mapping
+
+> **The app serves this table from the router itself** (`ENC-8`), so the live version is always correct:
+> **System Config → Integrations → Rotary Encoders → Encoder Mapping**. The copy below is a convenience
+> snapshot and is the one that can go stale — prefer the UI. There is deliberately only one source of
+> truth in code: `RotaryEncoderActionRouter.Mapping`, which is the same array dispatch runs through.
 
 | Encoder | Turn Action | Button Press |
 |---------|------------|--------------|
@@ -136,7 +160,6 @@ Edit `appsettings.json` (or `appsettings.Production.json` for per-machine overri
     "DevicePath": "",
     "PollIntervalMs": 10,
     "VolumeStepPercent": 2,
-    "TuningStepKHz": 10,
     "ReconnectDelayMs": 2000
   }
 }
@@ -145,13 +168,12 @@ Edit `appsettings.json` (or `appsettings.Production.json` for per-machine overri
 Configuration fields:
 | Field | Description | Default |
 |-------|-------------|---------|
-| `Enabled` | Master switch for the encoder service | `false` |
+| `Enabled` | Escape hatch to force the encoder service off. Presence decides normally (`ENC-0`) | `true` |
 | `VendorId` | USB HID Vendor ID (decimal) | `51966` (0xCAFE) |
 | `ProductId` | USB HID Product ID (decimal) | `16389` (0x4005) |
 | `DevicePath` | Explicit `/dev/hidrawN` path (empty = auto-detect by VID/PID) | `""` |
 | `PollIntervalMs` | Delay between HID report reads in ms | `10` |
-| `VolumeStepPercent` | Volume change per encoder click (0-100) | `2` |
-| `TuningStepKHz` | Radio frequency step per click in kHz | `10` |
+| `VolumeStepPercent` | Volume change per encoder click (0-100). Shown **read-only** on the Settings page as VOLUME's step size; the editable duplicate was removed by `ENC-8` | `2` |
 | `ReconnectDelayMs` | Delay before retrying after device disconnect | `2000` |
 
 You can also configure these from the Web UI: **System Config → Integrations → Rotary Encoders**.
@@ -181,8 +203,8 @@ Or open **System Config → Integrations → Rotary Encoders** in the Web UI and
 ### Troubleshooting
 
 - **"Disconnected" in UI but Pico is plugged in:** Check udev permissions, verify VID/PID match with `lsusb | grep -i cafe`
-- **Encoder turns in wrong direction:** The delta sign depends on wiring. If clockwise decreases volume, swap the A/B encoder pins on the Pico, or negate the delta in firmware
-- **No response on button press:** Verify byte 5 bitmask in the Pico firmware. The service uses bit N for encoder N (bit 0 = encoder 0)
+- **Encoder turns in wrong direction:** open **System Config → Integrations → Rotary Encoders** and toggle **Direction** for that knob. It is sent to the device immediately and verified. ⛔ **Do not swap the A/B pins on the Pico or negate the delta in firmware** — that was the pre-`ENC-2` remedy, and doing it as well as setting `reverse` reverses the knob twice, leaving it exactly as wrong as before
+- **No response on button press:** check the button bitmask at **payload offset 16** of report `0x01` (buffer index 17) in the Pico firmware. The service uses bit N for encoder N (bit 0 = encoder 0)
 - **Service starts but can't find device:** Try setting `DevicePath` explicitly to `/dev/hidraw0` (or whichever device the Pico is)
 
 ### ⚠ The screen is dark and will not come back — recovery

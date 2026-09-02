@@ -39,6 +39,20 @@ punch list never recorded it; SEC-1 closed by verification.
 
 ---
 
+> **Added by the `ENC-8` cycle (2026-09-02, [#527](https://github.com/mmackelprang/RTest/pull/527)).** `ENC-8` has shipped, so
+> **`ENC-12` is now unblocked** and is the other claimable row — both its dependencies (`ENC-8`, `ENC-4`) are done. It was
+> sequenced deliberately after `ENC-8`: its toast copy ends *"Open encoder settings"*, and that page now exists. Take
+> `ENC-5`/`ENC-7` or `ENC-12`; the queue banner has the detail. **This start-here pointer was left as the previous session
+> wrote it rather than repointed**, because two Builders were running concurrently when `ENC-8` merged.
+>
+> ⚠ **One thing from the `ENC-8` cycle that will cost you directly:** `ENC-5`/`ENC-7` own the router remap, and the router
+> no longer has a `switch` to edit. `RotaryEncoderActionRouter` now dispatches through `_mapping` / `_turnHandlers` /
+> `_pressHandlers`, and the Settings page renders whatever that array says over an API projection. **The remap is an edit to
+> those three arrays and nothing else — do not reintroduce a `switch` beside them**, and do not hand-edit the page's mapping
+> table, which no longer exists as HTML. `RotaryEncoderMappingTableTests` pins the order so the change has to be deliberate,
+> and the page's "these do not match the cabinet labels yet" note is computed from the two orders, so it disappears by
+> itself the day you land the remap.
+
 ## Start here: ENC-5 / ENC-7 (and read the ENC-4 note first)
 
 **ENC-4 is shipped** — the EncoderHud renders in the quarter above the knob that moved, on every route. The next

@@ -76,6 +76,13 @@ Architectural and engineering decisions made during development, with context, r
 
 **Decision:** Blazor Server with MudBlazor Material 3 component library.
 
+> ⚠ **Superseded on the component library only — the Blazor Server half of this ADR still stands.**
+> **There is no MudBlazor in this repository.** `Radio.Web.csproj` references `Radzen.Blazor` and
+> nothing else UI-wise, and a search for `MudBlazor` across `src/` returns zero files. When the swap
+> happened was not recorded, which is why the claim outlived it. `CLAUDE.md` carried the same error
+> until PR #518; this note exists so the second copy does not send another session to the wrong
+> component library. Noted while shipping `ENC-8` (2026-09-02).
+
 **Alternatives considered:**
 - **React/Vue SPA** — Separate frontend codebase, additional build tooling, need API serialization
 - **Blazor WASM** — Heavy download, poor ARM performance
