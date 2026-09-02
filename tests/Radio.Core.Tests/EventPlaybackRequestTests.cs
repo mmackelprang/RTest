@@ -75,6 +75,35 @@ public class EventPlaybackRequestTests
     Assert.Equal(EventPlaybackRejection.MediaIdHasControlCharacter, Voicemail(mediaId).Validate());
   }
 
+  // ── SSRF pin 1b: the allow-list backstop ────────────────────────────────
+  // The deny rules above are named for precision, not for coverage. These inputs pass every one
+  // of them: no "://", no leading "//", no separator, no control or whitespace character. The
+  // first three carry a SCHEME, which RFC 3986 §4.2 makes an absolute URI rather than a relative
+  // reference — so resolving one against the server's base would not stay under that base. The
+  // last three are the near-miss encodings a deny-list invites. All of them must land on the
+  // allow-list, not on an earlier rule.
+  [Theory]
+  [InlineData("http:evil.example")]
+  [InlineData("mailto:x@y")]
+  [InlineData("C:foo")]
+  [InlineData("vm+abc")]
+  [InlineData("vm%2fabc")]
+  [InlineData("vm\u200Babc")]  // zero-width space: neither IsControl nor IsWhiteSpace
+  [InlineData("vm\uFF0Fabc")]  // fullwidth solidus: not '/' to an ordinal comparison
+  public void Validate_RejectsAMediaIdOutsideTheAllowList(string mediaId)
+  {
+    Assert.Equal(EventPlaybackRejection.MediaIdHasIllegalCharacter, Voicemail(mediaId).Validate());
+  }
+
+  [Fact]
+  public void Validate_AcceptsTheWholeUnreservedSet()
+  {
+    // The other half of the pin: the allow-list must not have narrowed what a real id may hold.
+    Assert.Equal(
+      EventPlaybackRejection.None,
+      Voicemail("vm-Abc_123.4~5").Validate());
+  }
+
   [Fact]
   public void Validate_RejectsAnOverlongMediaId()
   {
@@ -85,6 +114,12 @@ public class EventPlaybackRequestTests
   // ── SSRF pin 2: the type cannot carry a URL at all ──────────────────────
   // This is the structural property. If someone later adds AudioUrl to the request because
   // VoicemailItemDto has one, this test fails and says why.
+  //
+  // ⚠ It is a NAME heuristic, not a proof, and must not be read as one. It matches on "Url" or
+  // "Uri" in the property name, or the exact type Uri. It would NOT catch Href, Endpoint,
+  // Address, AudioAddress, Source, or a List<Uri>/Uri[] — the collection cases fail the type
+  // equality just as the alternative names fail the substring test. It is a tripwire against
+  // the obvious copy-paste from VoicemailItemDto, and review is still the real defence.
   [Fact]
   public void EventPlaybackRequest_DeclaresNoUrlShapedProperty()
   {

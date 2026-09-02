@@ -33,13 +33,27 @@ public interface IEventPlaybackService
   Task<bool> StopAsync(string playbackId, CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Seeks the playback with this id. False when there is no such playback, or when the
-  /// underlying source is not seekable.
+  /// Seeks the playback with this id. False when there is no such playback in flight, or when
+  /// the source reports it cannot seek.
   /// </summary>
+  /// <remarks>
+  /// ⚠ The return is narrower than "the audio moved", and deliberately says so. The transport
+  /// primitive underneath is <see cref="IEventAudioSource.SeekAsync"/>, which returns a bare
+  /// Task and carries no outcome — so an implementation can pre-check
+  /// <see cref="IEventAudioSource.IsSeekable"/> and answer false from that, but a seek the
+  /// PLAYER refused is not distinguishable from one it honoured at this seam.
+  ///
+  /// Widening IEventAudioSource.SeekAsync to Task&lt;bool&gt; would close the gap and is an open
+  /// question for PR 3, not something to settle here: ADR-029 D4 copies those signatures
+  /// verbatim from IPrimaryAudioSource, so changing one changes both.
+  /// </remarks>
   /// <param name="playbackId">The server-minted playback identifier.</param>
   /// <param name="position">The position to seek to, from the beginning of the content.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>True when the playback repositioned.</returns>
+  /// <returns>
+  /// True when a seek was dispatched to a playback that exists and reports itself seekable.
+  /// Not a confirmation that the audio repositioned — see the remarks.
+  /// </returns>
   Task<bool> SeekAsync(
     string playbackId,
     TimeSpan position,
@@ -48,13 +62,21 @@ public interface IEventPlaybackService
   /// <summary>Pauses the playback with this id. False when no such playback is in flight.</summary>
   /// <param name="playbackId">The server-minted playback identifier.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>True when a playback was paused.</returns>
+  /// <returns>
+  /// True when a pause was dispatched to a playback in flight; false when there is no such
+  /// playback. <see cref="IEventAudioSource.PauseAsync"/> returns a bare Task, so this reports
+  /// that the request was addressed to something, not that the audio actually stopped.
+  /// </returns>
   Task<bool> PauseAsync(string playbackId, CancellationToken cancellationToken = default);
 
   /// <summary>Resumes the playback with this id. False when no such playback is paused.</summary>
   /// <param name="playbackId">The server-minted playback identifier.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>True when a playback was resumed.</returns>
+  /// <returns>
+  /// True when a resume was dispatched to a paused playback; false when there is no such
+  /// playback. <see cref="IEventAudioSource.ResumeAsync"/> returns a bare Task, so this reports
+  /// that the request was addressed to something, not that the audio actually resumed.
+  /// </returns>
   Task<bool> ResumeAsync(string playbackId, CancellationToken cancellationToken = default);
 
   /// <summary>
@@ -240,9 +262,23 @@ public sealed record EventPlaybackRequest
   /// no URL field, and the server builds the URL from its own configuration — but the id still
   /// becomes a URL path segment and a cache key downstream, so it is constrained here too.
   ///
-  /// ⚠ Declared assumption: a Google Voice voicemail id contains no '/' or '\'. If one ever
-  /// does, this rejects it as MediaIdHasPathSeparator — a loud, named 400 rather than a silent
-  /// misbehaviour — and the fix is one line here.
+  /// The rule is an ALLOW-LIST: <c>[A-Za-z0-9._~-]</c>, the RFC 3986 unreserved set. The named
+  /// checks above it are kept only so a recognisable id gets a precise reason — a pasted URL is
+  /// told it looks like a URL rather than that some character is illegal — and everything they
+  /// do not name falls through to the allow-list.
+  ///
+  /// ⚠ A deny-list alone is NOT sufficient, and this is the reason. Under RFC 3986 §4.2 a
+  /// relative reference that begins with a scheme is not a relative reference at all: it is an
+  /// absolute URI, and reference resolution returns it rather than confining it to the base.
+  /// "http:evil.example", "mailto:x@y" and "data:audio;base64,..." all carry a scheme while
+  /// carrying neither "//" nor a path separator, so every deny rule above passes them — inside
+  /// a validator whose whole purpose is to stop a caller choosing the host that gets fetched.
+  /// The allow-list refuses ':' outright, which is the entire class rather than the examples.
+  ///
+  /// ⚠ Declared assumption, now tighter than it was: a Google Voice voicemail id contains only
+  /// unreserved characters. If one ever does not, this rejects it — as MediaIdHasPathSeparator
+  /// for a '/' or '\', otherwise as MediaIdHasIllegalCharacter — a loud, named 400 rather than
+  /// a silent misbehaviour, and the fix is one line here.
   /// </summary>
   private static EventPlaybackRejection ValidateMediaId(string? mediaId)
   {
@@ -268,11 +304,18 @@ public sealed record EventPlaybackRequest
     {
       return EventPlaybackRejection.MediaIdHasPathSeparator;
     }
+    // The control/whitespace test stays first inside the loop so a space keeps reporting
+    // MediaIdHasControlCharacter; the allow-list below it is the backstop that catches
+    // everything the named rules above do not, ':' included.
     foreach (var c in mediaId)
     {
       if (char.IsControl(c) || char.IsWhiteSpace(c))
       {
         return EventPlaybackRejection.MediaIdHasControlCharacter;
+      }
+      if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_' or '.' or '~'))
+      {
+        return EventPlaybackRejection.MediaIdHasIllegalCharacter;
       }
     }
     return EventPlaybackRejection.None;
@@ -325,7 +368,14 @@ public enum EventPlaybackRejection
   MediaIdHasControlCharacter,
 
   /// <summary>The reported duration is negative. Zero is valid and means unknown.</summary>
-  NegativeDuration
+  NegativeDuration,
+
+  /// <summary>
+  /// The media identifier carries a character outside the allow-list <c>[A-Za-z0-9._~-]</c>.
+  /// Appended deliberately at the end: the numeric values of the members above it are what the
+  /// existing tests and any future wire mapping pin.
+  /// </summary>
+  MediaIdHasIllegalCharacter
 }
 
 /// <summary>
