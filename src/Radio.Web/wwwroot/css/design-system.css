@@ -6205,3 +6205,9 @@ body {
   .encoder-hud.encoder-hud-enter,
   .encoder-hud.encoder-hud-exit { animation: none; }
 }
+
+/* ENC-8 — the device configuration table. Eight columns inside a nested RadzenTabs panel at
+   1920x720; the knob-name column carries two words plus an index and must not wrap, and the
+   agreement column carries a sentence and must be allowed to. */
+.encoder-config-table td:first-child { white-space: nowrap; }
+.encoder-config-table td:last-child { font-family: var(--font-mono); font-size: 11px; }
