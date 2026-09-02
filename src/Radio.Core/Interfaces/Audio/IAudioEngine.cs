@@ -104,6 +104,25 @@ public interface IAudioEngine : IAsyncDisposable
   /// callbacks — the gate holds a SemaphoreSlim and will deadlock under reentrancy.
   /// </remarks>
   Task SetActiveOutputAsync(string outputId, CancellationToken cancellationToken = default);
+
+  /// <summary>
+  /// Resolves a persisted output-device key to its current index in the engine's playback-device
+  /// list, or -1 when it does not resolve to exactly one device.
+  /// </summary>
+  int GetDeviceIndexById(string deviceId);
+
+  /// <summary>
+  /// Performs the native playback-device swap: stop, dispose, re-initialize, start.
+  ///
+  /// <para>
+  /// AUD-7: this is the ONLY code that actually moves audio to a different physical device. It was
+  /// reachable only from the interactive HTTP path, so a persisted preference was restored in name
+  /// (validated, assigned, persisted) while the audio kept coming out of wherever the engine had
+  /// initialised. On the interface so startup can call it, and so a test can assert that it did.
+  /// </para>
+  /// </summary>
+  /// <returns>True if the device was switched, or was already active.</returns>
+  bool SwitchPlaybackDevice(int deviceIndex);
 }
 
 /// <summary>

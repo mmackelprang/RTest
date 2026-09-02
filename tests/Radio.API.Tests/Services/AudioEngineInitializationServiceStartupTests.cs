@@ -99,6 +99,67 @@ public class AudioEngineInitializationServiceStartupTests
       Times.Once);
   }
 
+  // --- AUD-7: startup must ACT on the persisted output, not just record it ---
+  //
+  // SetOutputDeviceAsync validates an id against a cache, assigns a string field and persists.
+  // SwitchPlaybackDevice is the only code anywhere that stops, disposes and re-initialises the
+  // native playback device, and its single caller was the interactive HTTP path. So every restart
+  // where the preference was not the device the engine happened to initialise reported one output
+  // while audio came out of another — deterministically. These pin that startup closes that gap.
+
+  [Fact]
+  public async Task StartAsync_LocalOutputPreference_PerformsTheNativeDeviceSwitch()
+  {
+    var soundbar = LocalDevice("out:SN6140 Analog", "Soundbar", isDefault: true);
+    var usb = LocalDevice("out:USB Audio Out", "USB Audio Out", isDefault: false);
+    var (engineMock, service) = BuildService(
+      persistedOutput: "out:USB Audio Out",
+      outputDevices: new[] { soundbar, usb });
+
+    engineMock.Setup(e => e.GetDeviceIndexById("out:USB Audio Out")).Returns(1);
+    engineMock.Setup(e => e.SwitchPlaybackDevice(1)).Returns(true);
+
+    await service.StartAsync(CancellationToken.None);
+
+    engineMock.Verify(e => e.SwitchPlaybackDevice(1), Times.Once);
+  }
+
+  [Fact]
+  public async Task StartAsync_UnresolvableOutputPreference_DoesNotSwitchToAnArbitraryDevice()
+  {
+    // Covers the pre-AUD-6 ordinal case: those resolve to -1 by design, because the ordinal's
+    // meaning is lost. Switching to whatever index happened to come back would be exactly the
+    // mis-route AUD-6 and AUD-7 exist to remove.
+    var soundbar = LocalDevice("out:SN6140 Analog", "Soundbar", isDefault: true);
+    var (engineMock, service) = BuildService(
+      persistedOutput: "playback-1",
+      outputDevices: new[] { soundbar });
+
+    engineMock.Setup(e => e.GetDeviceIndexById(It.IsAny<string>())).Returns(-1);
+
+    await service.StartAsync(CancellationToken.None);
+
+    engineMock.Verify(e => e.SwitchPlaybackDevice(It.IsAny<int>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task StartAsync_NativeSwitchThrows_DoesNotAbortStartup()
+  {
+    // The engine is allowed to fail here; a box that cannot switch outputs must still finish
+    // starting, because the alternative is no audio service at all rather than wrong-output audio.
+    var soundbar = LocalDevice("out:SN6140 Analog", "Soundbar", isDefault: true);
+    var (engineMock, service) = BuildService(
+      persistedOutput: "out:SN6140 Analog",
+      outputDevices: new[] { soundbar });
+
+    engineMock.Setup(e => e.GetDeviceIndexById(It.IsAny<string>())).Returns(0);
+    engineMock.Setup(e => e.SwitchPlaybackDevice(0)).Throws(new InvalidOperationException("boom"));
+
+    await service.StartAsync(CancellationToken.None);
+
+    engineMock.Verify(e => e.SwitchPlaybackDevice(0), Times.Once);
+  }
+
   // --- Cast-confirmation regression tests ---
   //
   // Selecting "Google Cast" in the output picker without connecting a device
