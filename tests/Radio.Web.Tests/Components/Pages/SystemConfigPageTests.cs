@@ -385,4 +385,90 @@ public class SystemConfigPageTests : TestContext
     Assert.NotNull(cut);
     Assert.DoesNotContain("NullReferenceException", cut.Markup);
   }
+
+  // ========== ENC-8: the Rotary Encoders sub-tab ==========
+
+  /// <summary>
+  /// Renders the page and selects Integrations, whose first sub-tab is Rotary Encoders.
+  ///
+  /// <para>
+  /// ⚠ RadzenTabs renders only the selected tab's body — measured, not assumed: without this click
+  /// the page's markup is about 8.7 KB and contains none of the encoder panel. Every assertion below
+  /// that an affordance is <b>absent</b> is therefore preceded by a positive assertion that the panel
+  /// really is in the markup. Without one, a negative assertion would pass because nothing rendered
+  /// at all, which is the class of uncheckable claim this whole row exists to remove.
+  /// </para>
+  /// </summary>
+  private IRenderedComponent<SystemConfigPage> RenderWithEncoderTabSelected()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+    var integrations = cut.FindAll("a[role='tab']").First(a => a.TextContent.Contains("Integrations"));
+    integrations.Click();
+    return cut;
+  }
+
+  [Fact]
+  public void EncoderTab_WithNoProvisioningData_DoesNotClaimTheDeviceAgrees()
+  {
+    var cut = RenderWithEncoderTabSelected();
+
+    // The panel is really here, so the absence assertions below mean something.
+    Assert.Contains("Device configuration", cut.Markup);
+
+    // Under the hermetic rig every API call fails, so the page has no read-back at all — the same
+    // state a kiosk hits whenever radio-api is down. It must not render agreement it was never told
+    // about: three states, never two.
+    Assert.DoesNotContain("✓", cut.Markup);
+    Assert.DoesNotContain("agrees", cut.Markup);
+  }
+
+  [Fact]
+  public void EncoderTab_HasNoFactoryResetAffordance()
+  {
+    var cut = RenderWithEncoderTabSelected();
+
+    Assert.Contains("Encoder Mapping", cut.Markup);
+
+    // The device's factory tiers were read off this hardware as step=1 with (150 ms x5), (80 ms x15),
+    // (40 ms x50), which at the host's 2 % per unit is one detent from silence to full.
+    // RotaryEncoderCommand.ResetDefaults exists in the enum; no affordance on this page may reach it,
+    // and none may be added behind a disclosure or a confirm either.
+    Assert.DoesNotContain("factory", cut.Markup, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("Reset to defaults", cut.Markup, StringComparison.OrdinalIgnoreCase);
+    Assert.DoesNotContain("Restore", cut.Markup, StringComparison.OrdinalIgnoreCase);
+  }
+
+  [Fact]
+  public void EncoderTab_HasExactlyOneSaveToDeviceButton_AndItsCopyIsTheHandoffCopy()
+  {
+    var cut = RenderWithEncoderTabSelected();
+
+    Assert.Contains("Device configuration", cut.Markup);
+
+    var saveToDeviceButtons = cut.FindAll("button")
+      .Where(b => b.TextContent.Contains("Save to device"))
+      .ToList();
+    Assert.Single(saveToDeviceButtons);
+
+    // ENC-8 §0.5 pinned as a string. The button says what it writes, and what it writes is what card
+    // 2 displays; if a later revision reintroduces any divergence between them, this copy has to
+    // change with it, and this assertion is what forces that rather than leaving it to care.
+    Assert.Contains(
+      "Saves the settings above to the knobs so they work the same way even if the app is restarting.",
+      cut.Markup);
+  }
+
+  [Fact]
+  public void EncoderTab_NoLongerOffersAnEditableVolumeStepPercent()
+  {
+    var cut = RenderWithEncoderTabSelected();
+
+    Assert.Contains("Connection settings", cut.Markup);
+
+    // Only the editor is gone. RotaryEncoderActionRouter still reads VolumeStepPercent on every
+    // detent, and the value now appears read-only in the device configuration card as VOLUME's step
+    // size — one value, one place. The duplicate box was a second source of truth for a number the
+    // device also holds.
+    Assert.DoesNotContain("Volume Step (%)", cut.Markup);
+  }
 }
