@@ -11,7 +11,7 @@ namespace Radio.Web.Services.Hub;
 /// Handles: PlaybackStateChanged, NowPlayingChanged, QueueChanged,
 /// RadioStateChanged, VolumeChanged, SourceChanged, FingerprintStatusChanged,
 /// PhoneCallStateChanged, VisualizationModeChanged, EncoderConnectionChanged,
-/// EncoderHudChanged, SleepStateChanged, ConfigChanged
+/// EncoderConfigStatusChanged, EncoderHudChanged, SleepStateChanged, ConfigChanged
 /// </summary>
 public class AudioStateHubService : IAsyncDisposable
 {
@@ -56,6 +56,9 @@ public class AudioStateHubService : IAsyncDisposable
   /// Typed because absent-at-boot and dropped-mid-session share <c>IsConnected=false</c> and call for
   /// different notifications (ENC-0).</summary>
   public event Func<EncoderConnectionDto, Task>? EncoderConnectionChanged;
+  /// <summary>Raised when the encoder's configuration tier changes (ENC-12). Fires on change only, so
+  /// this is a handful of events per connection rather than a stream.</summary>
+  public event Func<EncoderConfigStatusDto, Task>? EncoderConfigStatusChanged;
   /// <summary>Raised when an encoder produced on-screen feedback, carrying which knob acted and what
   /// to show (ENC-4). The API coalesces value updates to >= 50 ms before broadcasting, so a knob
   /// being turned reaches this at up to 20 Hz rather than at the poll rate.</summary>
@@ -230,6 +233,16 @@ public class AudioStateHubService : IAsyncDisposable
         if (EncoderConnectionChanged != null && dto != null)
         {
           await EncoderConnectionChanged.Invoke(dto);
+        }
+      });
+
+      // Server sends EncoderConfigStatusChanged when the configuration tier changes (ENC-12).
+      _hubConnection.On<EncoderConfigStatusDto>("EncoderConfigStatusChanged", async (dto) =>
+      {
+        _logger.LogDebug("Received EncoderConfigStatusChanged: {Status}", dto?.Status);
+        if (EncoderConfigStatusChanged != null && dto != null)
+        {
+          await EncoderConfigStatusChanged.Invoke(dto);
         }
       });
 

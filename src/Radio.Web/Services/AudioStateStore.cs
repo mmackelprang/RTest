@@ -57,6 +57,9 @@ public class AudioStateStore : IAsyncDisposable
   /// <summary>Raised when encoder connection state changes.</summary>
   public event Func<Task>? EncoderConnectionChanged;
 
+  /// <summary>Raised when the encoder configuration tier changes.</summary>
+  public event Func<Task>? EncoderConfigStatusChanged;
+
   public AudioStateStore(
     ILogger<AudioStateStore> logger,
     AudioStateHubService hubService)
@@ -74,6 +77,7 @@ public class AudioStateStore : IAsyncDisposable
     _hubService.RadioStateChanged += OnHubRadioStateChanged;
     _hubService.SleepStateChanged += OnHubSleepStateChanged;
     _hubService.EncoderConnectionChanged += OnHubEncoderConnectionChanged;
+    _hubService.EncoderConfigStatusChanged += OnHubEncoderConfigStatusChanged;
   }
 
   /// <summary>
@@ -220,9 +224,30 @@ public class AudioStateStore : IAsyncDisposable
   }
 
   /// <summary>
-  /// Latest encoder presence transition, or null if none has been observed this circuit.
+  /// Latest encoder presence transition, or null if none has been observed since this process
+  /// started.
   /// </summary>
+  /// <remarks>
+  /// This said "this circuit" until ENC-12. It is not per circuit: AudioStateStore is registered
+  /// AddSingleton in Program.cs, so the field is process-wide and outlives every circuit that reads
+  /// it. Singleton is the right lifetime for a cache of one cabinet's hardware state — the comment
+  /// was what was wrong, not the registration.
+  /// </remarks>
   public EncoderConnectionDto? EncoderConnection { get; private set; }
+
+  private async Task OnHubEncoderConfigStatusChanged(EncoderConfigStatusDto dto)
+  {
+    // Cached so a circuit that connects after the transition still knows the current tier — the badge
+    // has to be right on a page loaded ten minutes after the fault, not only on the one that was open
+    // when it happened.
+    EncoderConfigStatus = dto;
+    await NotifyAsync(EncoderConfigStatusChanged);
+  }
+
+  /// <summary>
+  /// Latest encoder configuration tier, or null if none has been observed since this process started.
+  /// </summary>
+  public EncoderConfigStatusDto? EncoderConfigStatus { get; private set; }
 
   private async Task NotifyAsync(Func<Task>? handler)
   {
@@ -250,6 +275,7 @@ public class AudioStateStore : IAsyncDisposable
     _hubService.RadioStateChanged -= OnHubRadioStateChanged;
     _hubService.SleepStateChanged -= OnHubSleepStateChanged;
     _hubService.EncoderConnectionChanged -= OnHubEncoderConnectionChanged;
+    _hubService.EncoderConfigStatusChanged -= OnHubEncoderConfigStatusChanged;
 
     await Task.CompletedTask;
     GC.SuppressFinalize(this);
