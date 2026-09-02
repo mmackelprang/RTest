@@ -22,6 +22,16 @@ public class AudioFileEventSource : EventAudioSourceBase
   private CancellationTokenSource _transportCts = new();
   private readonly object _transportLock = new();
 
+  // Transport-owned pause flag, deliberately NOT derived from State. EventAudioSourceBase
+  // assigns State only AFTER PauseCoreAsync / ResumeCoreAsync return, and SignalTransportChange
+  // is called from inside those hooks; CancellationTokenSource.Cancel runs its registered
+  // continuations inline, so AwaitCompletionAsync can wake and re-read State while State still
+  // holds its PRE-transport value. Each hook writes this flag to its post-transport value
+  // BEFORE it signals, so a waiter woken by the signal observes the transition that woke it.
+  // Same job as TTSEventSource._isPaused - keeping a paused source from being read as finished
+  // - though that one guards a poll and this one guards a deadline.
+  private volatile bool _transportPaused;
+
   /// <summary>
   /// Initializes a new instance of the <see cref="AudioFileEventSource"/> class.
   /// </summary>
@@ -292,6 +302,10 @@ public class AudioFileEventSource : EventAudioSourceBase
   /// <inheritdoc/>
   protected override Task PauseCoreAsync(CancellationToken cancellationToken)
   {
+    // Written before the signal below, not after: the waiter woken by SignalTransportChange
+    // reads this flag, and State is still Playing at this point (see the field comment).
+    _transportPaused = true;
+
     if (_playbackService is not null && _playbackId is not null)
     {
       _playbackService.Pause(_playbackId);
@@ -312,6 +326,11 @@ public class AudioFileEventSource : EventAudioSourceBase
       _playbackService.Resume(_playbackId);
     }
 
+    // Cleared after the resume has been issued to the player and before the signal, so the
+    // woken waiter recomputes a real deadline instead of re-arming the infinite one. State is
+    // still Paused at this point (see the field comment).
+    _transportPaused = false;
+
     SignalTransportChange();
     return Task.CompletedTask;
   }
@@ -320,6 +339,20 @@ public class AudioFileEventSource : EventAudioSourceBase
   /// Cancels the current completion wait so it recomputes its deadline from the player's real
   /// position. Called by every transport override. Not a timer and not a poll - it fires only
   /// on a user action.
+  ///
+  /// The previous source is cancelled and disposed OUTSIDE the lock, deliberately, and both
+  /// halves of that need a reason.
+  ///
+  /// Cancel is outside because it runs its registered continuations inline: cancelling under
+  /// _transportLock would execute the waiter's next loop iteration - which itself takes
+  /// _transportLock - from inside the critical section, on the cancelling thread.
+  ///
+  /// Dispose is safe outside for a narrower reason than it looks. AwaitCompletionAsync copies
+  /// the token VALUE out under the lock rather than keeping the source, so
+  /// CancellationTokenSource.Token - the getter documented to throw once the source is disposed
+  /// - has already run while the source was live. And Cancel strictly precedes Dispose here, so
+  /// any copy still in flight is an ALREADY-CANCELLED token; CreateLinkedTokenSource completes
+  /// a link built from one immediately rather than parking the waiter on a source that is gone.
   /// </summary>
   private void SignalTransportChange()
   {
@@ -348,16 +381,23 @@ public class AudioFileEventSource : EventAudioSourceBase
   {
     while (!cancellationToken.IsCancellationRequested)
     {
-      CancellationTokenSource transport;
+      // The token, not the source. SignalTransportChange disposes the previous source outside
+      // the lock, and CancellationTokenSource.Token throws ObjectDisposedException once that
+      // has happened - which would surface here as an Error state. A copied token stays usable,
+      // and Cancel precedes Dispose there, so a copy taken from a source that is about to go
+      // away is an already-cancelled token.
+      CancellationToken transportToken;
       lock (_transportLock)
       {
-        transport = _transportCts;
+        transportToken = _transportCts.Token;
       }
 
       TimeSpan remaining;
-      if (State == AudioSourceState.Paused)
+      if (_transportPaused)
       {
-        // No deadline while paused - wait for the next transport event instead.
+        // No deadline while paused - wait for the next transport event instead. Read from the
+        // transport flag rather than State: the base class assigns State after the transport
+        // hook returns, so State is not yet current when the signal wakes this loop.
         remaining = Timeout.InfiniteTimeSpan;
       }
       else
@@ -371,7 +411,7 @@ public class AudioFileEventSource : EventAudioSourceBase
       }
 
       using var linked =
-        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transport.Token);
+        CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, transportToken);
       try
       {
         await Task.Delay(remaining, linked.Token);
@@ -389,6 +429,10 @@ public class AudioFileEventSource : EventAudioSourceBase
   {
     Logger.LogDebug("Stopping audio file event playback");
     _playbackCts?.Cancel();
+
+    // A stopped source must not inherit a stale pause: PlayAsync can be called again on this
+    // instance, and a leftover true would arm an infinite wait on the next playback.
+    _transportPaused = false;
 
     // Stop SoundFlow playback if active
     if (_playbackService != null && _playbackId != null && _isPlaybackActive)
@@ -423,6 +467,20 @@ public class AudioFileEventSource : EventAudioSourceBase
     Logger.LogDebug("Disposing audio file event source");
     _playbackCts?.Cancel();
     _playbackCts?.Dispose();
+
+    // The live transport source is owned here too - SignalTransportChange only ever disposes
+    // the one it REPLACES, so without this the last one leaks per instance. Read it under the
+    // lock because SignalTransportChange swaps the field there, and cancel before disposing to
+    // keep the invariant AwaitCompletionAsync relies on: a token copy is never left waiting on
+    // a source that was disposed without being cancelled first.
+    CancellationTokenSource transport;
+    lock (_transportLock)
+    {
+      transport = _transportCts;
+    }
+
+    transport.Cancel();
+    transport.Dispose();
 
     // Stop SoundFlow playback if active
     if (_playbackService != null && _playbackId != null && _isPlaybackActive)
