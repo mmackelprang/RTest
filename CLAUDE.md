@@ -356,6 +356,37 @@ Exception: WinRT BT APIs and NAudio WASAPI are Windows-only behind conditional c
 - Comment internal logic, edge cases, protocol details
 - Explicit type annotations preferred
 
+## Test Timing — never race a wall clock against a wall clock
+
+**A test must not depend on production code's own timer firing inside a `Task.Delay` the test
+performs.** There is no rendezvous between those two clocks, so the assertion holds only while the
+machine is fast enough — which is why this shape passes locally and fails on CI, where the runner is
+`[self-hosted, linux, x64, appserver]` and shared.
+
+**The rule:** if an assertion depends on the component under test having *observed* something,
+synchronize on the observation, not on elapsed time. Count events; don't time them.
+
+`BluetoothCaptureWatchdogTests` is the worked example (`TEST-4`). It set a value, slept 60 ms, and
+assumed the watchdog's 20 ms poll loop had seen it. Under load one tick stretched past the entire
+window, the value was never observed, and the test failed — **13/200 under CPU saturation**, and once
+on `main` at `2a81f56`. The fix was **test-only**: the fake source now parks the watchdog on entry to
+every poll until the test grants it, so polls are counted rather than timed and every assertion runs
+while the component is frozen. That took the same 200 iterations at the same load to **200/200**. Read
+that file's class-level `<remarks>` before writing a similar test.
+
+**Prefer determinism over patience.** Raising a timeout or adding a sleep converts a flaky test into a
+*slow* flaky test; the failure rate drops but never reaches zero, and the suite gets slower for it.
+Where production code has no seam to drive it deterministically, the house idiom is an injectable
+`TimeProvider` defaulting to `TimeProvider.System` (see `EncoderHudService`, and the note in
+`AudioServiceExtensions.cs`) with `FakeTimeProvider` in the test. Note that advancing a fake clock is
+only half the job when the callback is `async` — you still need a completion rendezvous before
+asserting on what it wrote.
+
+**Know which direction a timing dependency fails in.** It is dangerous only when starvation can flip
+the assertion to *fail*. A bounded negative check that starvation can merely weaken — "no event
+arrived within 200 ms" — is safe, and sometimes unavoidable. Say which one a test is, as
+`DisabledByZeroThreshold_DoesNotRaise` does, rather than implying a determinism it does not have.
+
 ## Pre-Merge Review
 
 Checks the reviewer runs on every PR, on top of the generic pass. Short list — these are the
