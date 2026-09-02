@@ -51,7 +51,10 @@ public class AudioStateHubService : IAsyncDisposable
   /// new mode. Typed because a parameterless event tells a subscriber that something changed
   /// without telling it what to change to (ENC-9a).</summary>
   public event Func<VisualizationModeDto, Task>? VisualizationModeChanged;
-  public event Func<Task>? EncoderConnectionChanged;
+  /// <summary>Raised when the encoder's presence changes, carrying which transition occurred.
+  /// Typed because absent-at-boot and dropped-mid-session share <c>IsConnected=false</c> and call for
+  /// different notifications (ENC-0).</summary>
+  public event Func<EncoderConnectionDto, Task>? EncoderConnectionChanged;
   public event Func<bool, Task>? SleepStateChanged;
   // Fired after a cross-process ConfigChanged push has reloaded this process's
   // config snapshot. Optional for subscribers that want an immediate re-render;
@@ -214,12 +217,14 @@ public class AudioStateHubService : IAsyncDisposable
       });
 
       // Server sends EncoderConnectionChanged when encoder device connects/disconnects
-      _hubConnection.On("EncoderConnectionChanged", async () =>
+      _hubConnection.On<EncoderConnectionDto>("EncoderConnectionChanged", async (dto) =>
       {
-        _logger.LogDebug("Received EncoderConnectionChanged event");
-        if (EncoderConnectionChanged != null)
+        _logger.LogDebug(
+          "Received EncoderConnectionChanged: IsConnected={IsConnected}, WasEverConnected={WasEver}",
+          dto?.IsConnected, dto?.WasEverConnected);
+        if (EncoderConnectionChanged != null && dto != null)
         {
-          await EncoderConnectionChanged.Invoke();
+          await EncoderConnectionChanged.Invoke(dto);
         }
       });
 
