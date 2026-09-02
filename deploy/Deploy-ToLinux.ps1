@@ -42,13 +42,13 @@ param(
   [switch]$Logs,
   [switch]$Quick,
   [Alias("PiHost")]
-  [string]$TargetHost = $(if ($env:PI_HOST) { $env:PI_HOST } else { "piradio" }),
+  [string]$TargetHost = $(if ($env:PI_HOST) { $env:PI_HOST } else { "radio" }),
   [Alias("PiUser")]
   [string]$TargetUser = $(if ($env:PI_USER) { $env:PI_USER } else { "mmack" }),
   [Alias("PiPath")]
   [string]$TargetPath = $(if ($env:PI_PATH) { $env:PI_PATH } else { "/opt/radio-console" }),
   [ValidateSet("linux-arm64", "linux-x64")]
-  [string]$Runtime = "linux-arm64"
+  [string]$Runtime = "linux-x64"
 )
 
 $ErrorActionPreference = "Stop"
@@ -58,6 +58,7 @@ $ApiPublishDir = Join-Path $RepoRoot "publish\$Runtime\api"
 $WebPublishDir = Join-Path $RepoRoot "publish\$Runtime\web"
 $SshTarget = "${TargetUser}@${TargetHost}"
 $ApiPort = if ($env:RADIO_API_PORT) { $env:RADIO_API_PORT } else { "5000" }
+$WebPort = if ($env:RADIO_WEB_PORT) { $env:RADIO_WEB_PORT } else { "5002" }
 
 # Determine which config directory to use based on runtime
 $configDir = switch ($Runtime) {
@@ -370,6 +371,43 @@ if (-not $NoRestart) {
       } else {
         Write-Host "  Verified: API is running commit $($deployedSha.Substring(0, 7))" -ForegroundColor Green
       }
+
+      # Same check for radio-web. Until this existed the web half of a deploy was verified only
+      # by `systemctl is-active`, which is true of a STALE binary just as much as a fresh one —
+      # so a web fix that silently failed to land would be debugged as a code bug. OPS-1.
+      Write-Host "  Verifying deployed commit via web /api/health/version..." -ForegroundColor DarkGray
+      $webVerifyUrl = "http://${TargetHost}:${WebPort}/api/health/version"
+      $deployedWebSha = $null
+      for ($attempt = 1; $attempt -le 10; $attempt++) {
+        try {
+          $webResp = Invoke-RestMethod -Uri $webVerifyUrl -TimeoutSec 3 -ErrorAction Stop
+          if ($webResp -and $webResp.gitSha) {
+            $deployedWebSha = $webResp.gitSha
+            break
+          }
+        } catch {
+          # Service not ready yet; retry
+        }
+        Start-Sleep -Seconds 2
+      }
+
+      if (-not $deployedWebSha) {
+        Write-Host ""
+        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
+        Write-Host "  Could not reach $webVerifyUrl after 10 attempts."
+        Write-Host "  Check: ssh $SshTarget 'journalctl -u radio-web -n 50'"
+        exit 1
+      } elseif ($deployedWebSha -ne $ExpectedSha) {
+        Write-Host ""
+        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
+        Write-Host "  Expected commit: $ExpectedSha"
+        Write-Host "  Running commit:  $deployedWebSha  (radio-web)"
+        Write-Host "  The deployed web binary does not match the local HEAD."
+        Write-Host '  This is the exact failure that systemctl is-active could not see.'
+        exit 1
+      } else {
+        Write-Host "  Verified: Web is running commit $($deployedWebSha.Substring(0, 7))" -ForegroundColor Green
+      }
     }
 
     # Relaunch the kiosk browser.
@@ -437,7 +475,7 @@ if (-not $NoRestart) {
     Write-Host ""
     Write-Host "=== Deploy successful ===" -ForegroundColor Green
     Write-Host "API: http://${TargetHost}:${ApiPort}"
-    Write-Host "Web: http://${TargetHost}:5002"
+    Write-Host "Web: http://${TargetHost}:${WebPort}"
   } else {
     Write-Host ""
     Write-Host "=== WARNING: One or more services may have failed ===" -ForegroundColor Red

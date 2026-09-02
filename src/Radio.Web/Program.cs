@@ -553,6 +553,16 @@ app.UseHttpsRedirection();
 app.UseStaticFiles();
 app.UseAntiforgery();
 
+// Build identity for deploy verification. Radio.Web's assembly has always carried the git SHA
+// (Directory.Build.props stamps it, and Deploy-ToLinux.ps1 already passes -p:SourceRevisionId to
+// both publishes) — it was simply unreadable from outside the process, so the deploy could only
+// check `systemctl is-active` for this service. That check passes for a *stale* binary, which
+// means the first fix that silently fails to land gets debugged as a code bug instead of a
+// deploy bug. This endpoint is what closes that gap; it is the Web-side twin of the API's
+// /api/health/version and answers on Radio.Web's own port.
+app.MapGet("/api/health/version", () =>
+  Results.Ok(Radio.Core.Utilities.AssemblyBuildInfo.For(typeof(Program).Assembly)));
+
 // Proxy album art requests to the API server.
 // Album art URLs from SignalR are relative (/api/albumart/{file}) and resolve against
 // the Web server origin. The API server owns the file cache, so we proxy to it.
