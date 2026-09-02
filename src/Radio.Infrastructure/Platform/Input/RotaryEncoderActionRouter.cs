@@ -123,6 +123,19 @@ public class RotaryEncoderActionRouter : IDisposable
     return true;
   }
 
+  /// <summary>
+  /// Bounds one event's movement, regardless of what arrived on the wire.
+  ///
+  /// <para>
+  /// ENC-3. This is applied <b>unconditionally</b>, not as a fallback, and that is the point: there
+  /// is a real window on every boot and after every reconnect during which the device runs whatever
+  /// is in its flash — on a fresh or reset Pico, factory defaults including volume acceleration at
+  /// x50 — and the knobs are live throughout it. The clamp is what makes that window sluggish
+  /// rather than dangerous.
+  /// </para>
+  /// </summary>
+  private static int Clamp(int delta, int limit) => Math.Clamp(delta, -limit, limit);
+
   // --- Encoder 0: Volume ---
 
   private void HandleVolumeTurn(int delta)
@@ -144,7 +157,7 @@ public class RotaryEncoderActionRouter : IDisposable
     // until a configuration push has been verified, because until then "the device is on factory
     // tiers" is a live possibility rather than a hypothetical.
     int clamp = RotaryEncoderConfigVerifier.VolumeClampFor(_encoderService.ConfigStatus);
-    int clamped = Math.Clamp(delta, -clamp, clamp);
+    int clamped = Clamp(delta, clamp);
 
     if (clamped != delta)
     {
@@ -172,8 +185,12 @@ public class RotaryEncoderActionRouter : IDisposable
     var mgr = _audioManagerFactory();
     if (mgr.ActiveSource is IRadioControl radio)
     {
-      // Step frequency based on delta direction (may be multiple steps for fast turning)
-      _ = StepRadioFrequencyAsync(radio, delta);
+      // ENC-3 clamp. StepRadioFrequencyAsync awaits ONE hardware call per step, so an unclamped
+      // delta is not merely a big jump — it is that many sequential tuner calls from a single
+      // detent. At a factory x50 tier that is fifty, on a box where incidental load correlates with
+      // audible distortion.
+      int clamped = Clamp(delta, RotaryEncoderConfigDefaults.TuningClamp);
+      _ = StepRadioFrequencyAsync(radio, clamped);
     }
   }
 
@@ -222,7 +239,11 @@ public class RotaryEncoderActionRouter : IDisposable
 
   private void HandleSourceTurn(int delta)
   {
-    _currentSourceIndex = ((_currentSourceIndex + delta) % PrimarySourceTypes.Length
+    // ENC-3 clamp: one detent, one entry, always. Without it a fast spin walks the list by the
+    // acceleration multiplier and lands somewhere nobody aimed.
+    int clamped = Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp);
+
+    _currentSourceIndex = ((_currentSourceIndex + clamped) % PrimarySourceTypes.Length
       + PrimarySourceTypes.Length) % PrimarySourceTypes.Length;
 
     var sourceType = PrimarySourceTypes[_currentSourceIndex];
@@ -253,7 +274,8 @@ public class RotaryEncoderActionRouter : IDisposable
 
   private void HandleVizTurn(int delta)
   {
-    _vizModeService.CycleMode(delta);
+    // ENC-3 clamp: the visualiser list is a selector like any other.
+    _vizModeService.CycleMode(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
   }
 
   private void HandleVizPress()
