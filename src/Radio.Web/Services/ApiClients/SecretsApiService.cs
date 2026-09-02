@@ -60,17 +60,30 @@ public class SecretsApiService
   /// <paramref name="secrets"/> are written; the API leaves every other property of the section
   /// alone. Build the payload with <see cref="OnlyProvided"/>.
   /// </summary>
-  public async Task<bool> SaveSecretsAsync<T>(string section, T secrets, CancellationToken ct = default) where T : class
+  /// <returns>
+  /// The counts the API actually applied. These are reported rather than inferred from the request
+  /// because they can differ from it: the API also declines to write a value that is the mask of
+  /// the secret already stored, so a caller must not tell the user that everything it sent was
+  /// saved.
+  /// </returns>
+  public async Task<SecretsSaveResult> SaveSecretsAsync<T>(string section, T secrets, CancellationToken ct = default) where T : class
   {
     try
     {
       var response = await _httpClient.PostAsJsonAsync($"/api/secrets/{section}", secrets, ct);
-      return response.IsSuccessStatusCode;
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogWarning("Failed to save secrets for section {Section}: {Status}", section, response.StatusCode);
+        return new SecretsSaveResult(false, 0, 0);
+      }
+
+      var body = await response.Content.ReadFromJsonAsync<SecretsSaveResponse>(JsonOptions, ct);
+      return new SecretsSaveResult(true, body?.StoredCount ?? 0, body?.UnchangedCount ?? 0);
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error saving secrets for section {Section}", section);
-      return false;
+      return new SecretsSaveResult(false, 0, 0);
     }
   }
 
@@ -132,4 +145,13 @@ public class SecretsApiService
 
     return payload;
   }
+
+  /// <summary>The API's own account of what a save did.</summary>
+  private sealed record SecretsSaveResponse(int StoredCount, int UnchangedCount);
 }
+
+/// <summary>
+/// Outcome of a save: whether the request succeeded, and how many secrets the API reports it
+/// actually wrote as against left alone.
+/// </summary>
+public sealed record SecretsSaveResult(bool Success, int StoredCount, int UnchangedCount);

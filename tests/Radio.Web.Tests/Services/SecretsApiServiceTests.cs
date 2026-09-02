@@ -134,7 +134,7 @@ public class SecretsApiServiceTests
   [Fact]
   public async Task SaveSecretsAsync_SendsOnlyTheSuppliedProperties()
   {
-    var (service, handler) = Make();
+    var (service, handler) = Make("""{"storedCount":1,"unchangedCount":0}""");
 
     var payload = SecretsApiService.OnlyProvided(new Dictionary<string, string?>
     {
@@ -142,12 +142,44 @@ public class SecretsApiServiceTests
       ["AzureAPIKey"] = "a-new-azure-key",
       ["AzureRegion"] = ""
     });
-    var ok = await service.SaveSecretsAsync("tts", payload);
+    var result = await service.SaveSecretsAsync("tts", payload);
 
-    ok.Should().BeTrue();
+    result.Success.Should().BeTrue();
     handler.Bodies[0].Should().Contain("AzureAPIKey");
     handler.Bodies[0].Should().NotContain("GoogleAPIKey");
     handler.Bodies[0].Should().NotContain("AzureRegion");
+  }
+
+  [Fact]
+  public async Task SaveSecretsAsync_ReportsTheApiCounts_NotTheRequestCount()
+  {
+    // The page tells the user what happened from these numbers. They are not the same as "how many
+    // did I send": the API declines to write a value that is the mask of the secret already stored,
+    // and calling that "saved" would be exactly the false reassurance that hid the original bug.
+    var (service, _) = Make("""{"message":"No secret was changed","storedCount":0,"unchangedCount":2}""");
+
+    var result = await service.SaveSecretsAsync("tts", new Dictionary<string, string>
+    {
+      ["GoogleAPIKey"] = "abcd...wxyz",
+      ["AzureAPIKey"] = "wxyz...abcd"
+    });
+
+    result.Success.Should().BeTrue();
+    result.StoredCount.Should().Be(0);
+    result.UnchangedCount.Should().Be(2);
+  }
+
+  [Fact]
+  public async Task SaveSecretsAsync_ReportsFailure_WhenTheApiRejectsTheRequest()
+  {
+    var handler = new RecordingHandler("""{"error":"No secret data provided"}""", HttpStatusCode.BadRequest);
+    var http = new HttpClient(handler) { BaseAddress = new Uri("http://radio-api.test.invalid") };
+    var service = new SecretsApiService(http, NullLogger<SecretsApiService>.Instance);
+
+    var result = await service.SaveSecretsAsync("tts", new Dictionary<string, string>());
+
+    result.Success.Should().BeFalse();
+    result.StoredCount.Should().Be(0);
   }
 
   [Fact]

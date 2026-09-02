@@ -3144,8 +3144,10 @@
 
   /// <summary>
   /// Hint text for an empty secret box: what is stored, and what typing into it will do. The mask
-  /// appears here as a placeholder rather than as a value, so it stays visible for diagnosis
-  /// (which is how the duplicated Google/Azure key was spotted) but cannot be submitted.
+  /// appears here as a placeholder rather than as a value, so it stays visible - it is what made
+  /// the two TTS slots reading alike noticeable at all - but cannot be submitted. Note what it
+  /// cannot tell you: a mask is a fixed point of the masking function, so a secret overwritten with
+  /// its own mask reads back exactly like an intact one.
   /// </summary>
   private static string SecretPlaceholder(string? maskedValue, string label)
   {
@@ -3196,12 +3198,29 @@
     _isSaving = true;
     try
     {
-      var success = await SecretsApi.SaveSecretsAsync("tts", payload);
-      if (success)
+      var result = await SecretsApi.SaveSecretsAsync("tts", payload);
+      if (result.Success)
       {
-        Logger.LogInformation("TTS secrets: submitted {Count} value(s) for storage", payload.Count);
-        NotificationService.Notify(NotificationSeverity.Success, "Success",
-          "TTS secrets saved and encrypted. Boxes left blank were not changed.");
+        Logger.LogInformation(
+          "TTS secrets: submitted {Submitted} value(s); the API stored {Stored} and left {Unchanged} unchanged",
+          payload.Count, result.StoredCount, result.UnchangedCount);
+
+        // Report the API's counts, not the request's. They differ when a submitted value turns out
+        // to be the mask of the secret already stored, and saying "saved" for one of those would be
+        // the same false reassurance that hid this bug.
+        if (result.StoredCount == 0)
+        {
+          NotificationService.Notify(NotificationSeverity.Warning, "Nothing was stored",
+            "What you entered matched the placeholder for the secret already stored, so it was left as it was.");
+        }
+        else
+        {
+          var message = result.UnchangedCount > 0
+            ? $"Stored and encrypted {result.StoredCount} secret(s); {result.UnchangedCount} left unchanged."
+            : $"Stored and encrypted {result.StoredCount} secret(s). Boxes left blank were not changed.";
+          NotificationService.Notify(NotificationSeverity.Success, "Success", message);
+        }
+
         ResetSecretInputs();
         await LoadSecretsAsync();
       }
@@ -3248,7 +3267,9 @@
       if (success)
       {
         Logger.LogInformation("TTS secret {Property}: clear requested", property);
-        NotificationService.Notify(NotificationSeverity.Success, "Success", $"{displayName} cleared");
+        // "no longer set" rather than "cleared": the API returns 200 whether or not there was
+        // anything stored to remove, and this does not read the flag that would tell them apart.
+        NotificationService.Notify(NotificationSeverity.Success, "Success", $"{displayName} is no longer set");
         await LoadSecretsAsync();
       }
       else
