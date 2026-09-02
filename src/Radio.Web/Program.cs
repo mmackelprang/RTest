@@ -9,12 +9,23 @@ using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 using Serilog;
 
-// Configure Serilog for Web app
+var builder = WebApplication.CreateBuilder(args);
+
+// Configure Serilog for the Web app.
+//
+// LOG-1: levels and sinks now come from the `Serilog` section of appsettings.json via
+// ReadFrom.Configuration. Previously this hardcoded `.MinimumLevel.Debug()` and never called
+// ReadFrom.Configuration at all, so the appsettings logging block was read by nothing — 106 Debug
+// sites stayed live in production and the file sink had NO retention cap, measured at 65 MB/day on
+// a box that runs for weeks inside a sealed cabinet. Log volume there is not cosmetic: heavy disk
+// and journald activity on this hardware correlates with audible audio distortion.
+//
+// Development still gets Debug, from appsettings.Development.json.
+//
+// The filter below stays in code because it inspects an exception chain, which the configuration
+// syntax cannot express.
 Log.Logger = new LoggerConfiguration()
-  .MinimumLevel.Debug()
-  .MinimumLevel.Override("Microsoft", Serilog.Events.LogEventLevel.Information)
-  .MinimumLevel.Override("Microsoft.AspNetCore", Serilog.Events.LogEventLevel.Warning)
-  .MinimumLevel.Override("System.Net.Http.HttpClient", Serilog.Events.LogEventLevel.Warning)
+  .ReadFrom.Configuration(builder.Configuration)
   // Suppress individual "Connection refused" stack traces from API service catch blocks.
   // The ApiConnectionLoggingHandler provides a single throttled WARNING instead.
   .Filter.ByExcluding(logEvent =>
@@ -36,15 +47,7 @@ Log.Logger = new LoggerConfiguration()
     }
     return false;
   })
-  .Enrich.FromLogContext()
-  .WriteTo.Async(a => a.Console(outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"))
-  .WriteTo.Async(a => a.File(
-    "logs/web-.txt",
-    rollingInterval: RollingInterval.Day,
-    outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] [{SourceContext}] {Message:lj}{NewLine}{Exception}"))
   .CreateLogger();
-
-var builder = WebApplication.CreateBuilder(args);
 
 builder.Host.UseSerilog();
 
