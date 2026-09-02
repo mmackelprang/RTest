@@ -1469,7 +1469,12 @@
 
         <!-- Sub-tab 1: Rotary Encoders -->
         <RadzenTabsItem Text="Rotary Encoders" Icon="tune">
-          <div style="display:flex; flex-direction:column; gap:12px">
+          @* encoder-settings-panel is a structural hook for the bUnit fixture, not a style: Radzen
+             renders only the selected tab's body, so every test asserting that an affordance is
+             ABSENT from this panel needs to first prove the panel rendered at all. Keyed to this
+             class rather than to a card heading because the headings are copy, and renaming one
+             would silently turn those assertions back into vacuous ones. No CSS rule targets it. *@
+          <div class="encoder-settings-panel" style="display:flex; flex-direction:column; gap:12px">
             <!-- Status -->
             <RadzenCard>
               <h6 style="margin-bottom:12px">Encoder Status</h6>

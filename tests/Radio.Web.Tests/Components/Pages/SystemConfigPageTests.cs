@@ -393,10 +393,11 @@ public class SystemConfigPageTests : TestContext
   ///
   /// <para>
   /// ⚠ RadzenTabs renders only the selected tab's body — measured, not assumed: without this click
-  /// the page's markup is about 8.7 KB and contains none of the encoder panel. Every assertion below
-  /// that an affordance is <b>absent</b> is therefore preceded by a positive assertion that the panel
-  /// really is in the markup. Without one, a negative assertion would pass because nothing rendered
-  /// at all, which is the class of uncheckable claim this whole row exists to remove.
+  /// the page's markup is about 8.7 KB and contains none of the encoder panel. So this method
+  /// <b>asserts the panel rendered before returning</b>, which is what lets every caller assert that
+  /// an affordance is <b>absent</b> and mean it. Without that guard a negative assertion would pass
+  /// because nothing rendered at all, which is the class of uncheckable claim this row exists to
+  /// remove.
   /// </para>
   /// </summary>
   private IRenderedComponent<SystemConfigPage> RenderWithEncoderTabSelected()
@@ -404,6 +405,11 @@ public class SystemConfigPageTests : TestContext
     var cut = RenderComponent<SystemConfigPage>();
     var integrations = cut.FindAll("a[role='tab']").First(a => a.TextContent.Contains("Integrations"));
     integrations.Click();
+
+    // The guard lives here rather than in each test, so no future test can forget it, and it is
+    // keyed to a structural hook rather than to a card heading: the headings are copy this PR owns,
+    // and renaming one would silently disarm every absence assertion that leaned on it.
+    Assert.NotEmpty(cut.FindAll(".encoder-settings-panel"));
     return cut;
   }
 
@@ -412,7 +418,8 @@ public class SystemConfigPageTests : TestContext
   {
     var cut = RenderWithEncoderTabSelected();
 
-    // The panel is really here, so the absence assertions below mean something.
+    // Card 2's presence is part of this test's subject, not scaffolding: the claim is about what
+    // that card says when there is no read-back. (The panel-level guard is in the helper.)
     Assert.Contains("Device configuration", cut.Markup);
 
     // Under the hermetic rig every API call fails, so the page has no read-back at all — the same
@@ -426,8 +433,6 @@ public class SystemConfigPageTests : TestContext
   public void EncoderTab_HasNoFactoryResetAffordance()
   {
     var cut = RenderWithEncoderTabSelected();
-
-    Assert.Contains("Encoder Mapping", cut.Markup);
 
     // The device's factory tiers were read off this hardware as step=1 with (150 ms x5), (80 ms x15),
     // (40 ms x50), which at the host's 2 % per unit is one detent from silence to full.
@@ -462,8 +467,6 @@ public class SystemConfigPageTests : TestContext
   public void EncoderTab_NoLongerOffersAnEditableVolumeStepPercent()
   {
     var cut = RenderWithEncoderTabSelected();
-
-    Assert.Contains("Connection settings", cut.Markup);
 
     // Only the editor is gone. RotaryEncoderActionRouter still reads VolumeStepPercent on every
     // detent, and the value now appears read-only in the device configuration card as VOLUME's step
