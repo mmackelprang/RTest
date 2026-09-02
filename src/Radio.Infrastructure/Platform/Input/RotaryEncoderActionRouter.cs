@@ -10,6 +10,21 @@ using Radio.Infrastructure.Audio.Services;
 namespace Radio.Infrastructure.Platform.Input;
 
 /// <summary>
+/// One knob's behaviour, as the router actually dispatches it.
+///
+/// <para>
+/// ⚠ <b>Descriptions are for display and must describe what the delegates do.</b> This type exists
+/// because a hand-typed table on the Settings page drifted from the code (§2.2 defect 2 of the
+/// encoder handoff, corrected by hand in PR #489 and structurally here). Changing a handler without
+/// changing its description recreates the defect this replaced.
+/// </para>
+/// </summary>
+/// <param name="EncoderIndex">Encoder index this entry dispatches.</param>
+/// <param name="TurnDescription">What a detent does, in the owner's language.</param>
+/// <param name="PressDescription">What a short press does, in the owner's language.</param>
+public sealed record RotaryEncoderMapping(int EncoderIndex, string TurnDescription, string PressDescription);
+
+/// <summary>
 /// Maps rotary encoder events to audio actions.
 ///
 /// <para>
@@ -50,6 +65,23 @@ public class RotaryEncoderActionRouter : IDisposable
   ];
   private int _currentSourceIndex;
 
+  private readonly RotaryEncoderMapping[] _mapping;
+  private readonly Action<int>[] _turnHandlers;
+  private readonly Action[] _pressHandlers;
+
+  /// <summary>
+  /// What each knob currently does. <b>This is the table the router dispatches through</b>, not a
+  /// description kept alongside it, so the Settings page cannot disagree with the code.
+  ///
+  /// <para>
+  /// ⚠ Indices 1-3 do not match the cabinet engraving (VOLUME / SOURCE / PRESETS / TUNING) yet. That
+  /// is deliberate and tracked: ENC-5 and ENC-7 own the remap because they introduce the handlers it
+  /// would point at. Editing this array is how that remap is made — there is no second place to
+  /// change.
+  /// </para>
+  /// </summary>
+  public IReadOnlyList<RotaryEncoderMapping> Mapping => _mapping;
+
   public RotaryEncoderActionRouter(
     ILogger<RotaryEncoderActionRouter> logger,
     IRotaryEncoderService encoderService,
@@ -67,6 +99,18 @@ public class RotaryEncoderActionRouter : IDisposable
     _options = options;
     _hud = hud;
     _sleepService = sleepService;
+
+    // Index-ordered and index-addressed: entry n dispatches encoder n. Kept as three parallel arrays
+    // rather than delegates on the record so the record stays a plain data type the API can project.
+    _mapping =
+    [
+      new RotaryEncoderMapping(0, "Volume up / down", "Mute on / off"),
+      new RotaryEncoderMapping(1, "Tune up / down (radio sources)", "Start / stop station scan"),
+      new RotaryEncoderMapping(2, "Preview the next / previous source", "Switch to the previewed source"),
+      new RotaryEncoderMapping(3, "Cycle visualization mode", "Visualization on / off"),
+    ];
+    _turnHandlers = [HandleVolumeTurn, HandleTuningTurn, HandleSourceTurn, HandleVizTurn];
+    _pressHandlers = [HandleVolumePress, HandleTuningPress, HandleSourcePress, HandleVizPress];
 
     // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
     // EncoderButtonEventArgs document.
@@ -90,12 +134,12 @@ public class RotaryEncoderActionRouter : IDisposable
         return;
       }
 
-      switch (e.EncoderIndex)
+      // Dispatch through the same table the Settings page renders (ENC-8 §2.5). A parallel switch
+      // beside it would be a second source of truth wearing one name, and it would drift on the
+      // first remap.
+      if (e.EncoderIndex >= 0 && e.EncoderIndex < _turnHandlers.Length)
       {
-        case 0: HandleVolumeTurn(e.Delta); break;
-        case 1: HandleTuningTurn(e.Delta); break;
-        case 2: HandleSourceTurn(e.Delta); break;
-        case 3: HandleVizTurn(e.Delta); break;
+        _turnHandlers[e.EncoderIndex](e.Delta);
       }
     }
     catch (Exception ex)
@@ -132,12 +176,10 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
-      switch (index)
+      // Same table, same reason as OnEncoderTurned.
+      if (index >= 0 && index < _pressHandlers.Length)
       {
-        case 0: HandleVolumePress(); break;
-        case 1: HandleTuningPress(); break;
-        case 2: HandleSourcePress(); break;
-        case 3: HandleVizPress(); break;
+        _pressHandlers[index]();
       }
     }
     catch (Exception ex)
