@@ -126,6 +126,49 @@ Or open **System Config → Integrations → Rotary Encoders** in the Web UI and
 - **No response on button press:** Verify byte 5 bitmask in the Pico firmware. The service uses bit N for encoder N (bit 0 = encoder 0)
 - **Service starts but can't find device:** Try setting `DevicePath` explicitly to `/dev/hidraw0` (or whichever device the Pico is)
 
+### ⚠ The screen is dark and will not come back — recovery
+
+Read this first if you are at the cabinet and the panel is black. **You need SSH; the panel itself cannot
+help you.** `ssh mmack@radio` (never the bare IP — the SSH identity is hostname-bound).
+
+**Primary — set the display power mode directly.** This is the one that works in both dark states and
+holds:
+
+```bash
+gdbus call --session --dest org.gnome.Mutter.DisplayConfig \
+  --object-path /org/gnome/Mutter/DisplayConfig \
+  --method org.freedesktop.DBus.Properties.Set \
+  org.gnome.Mutter.DisplayConfig PowerSaveMode "<0>"
+```
+
+**Secondary — deactivate the screensaver.** Only use this if the primary is unavailable:
+
+```bash
+gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver \
+  --method org.gnome.ScreenSaver.SetActive false
+```
+
+**The order matters, and it was measured.** The screensaver route does **not** reach DPMS-off. On
+2026-09-02 the panel was found dark with `dpms=Off` while the screensaver reported `GetActive=(false,)` —
+`SetActive false` is a no-op there, because the screensaver is already inactive. `PowerSaveMode` read `3`
+(DRM DPMS Off) at the same moment, and setting it to `0` is what actually restored the panel. Where the
+screensaver cycle did work it bought about 13 seconds before the panel went down again.
+
+Both commands need the graphical session environment. From a plain SSH shell, import it first or every
+call fails in a way that looks like the interface is missing — the incantation is in `CLAUDE.md` under
+"Remote UI driving".
+
+Check state with `cat /sys/class/drm/card1-DP-1/dpms` and the `PowerSaveMode` property — `status`, `dpms`
+and `enabled` are reported independently and do not always agree.
+
+> **Why screen blanking is switched off, and must stay off.** `ENC-15` established on the box that **the
+> touchscreen is powered by the panel and leaves the USB bus when the panel blanks** — so touch cannot wake
+> it, because no input device exists to generate the event. The rotary encoder cannot wake it either: it
+> exposes `/dev/hidraw3` and **no evdev node at all**, so it is invisible to the compositor and cannot even
+> reset the idle timer. A knob wake would work only through `radio-api` reading hidraw and calling the
+> unblank itself, which makes that service a single point of failure in the only remaining wake path.
+> Full write-up: [`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
+
 ---
 
 ## 2. Phone Call Integration (RotaryPhone)
