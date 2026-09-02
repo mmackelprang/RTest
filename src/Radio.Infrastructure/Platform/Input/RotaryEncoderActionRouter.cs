@@ -11,7 +11,20 @@ namespace Radio.Infrastructure.Platform.Input;
 
 /// <summary>
 /// Maps rotary encoder events to audio actions.
-/// Encoder 0 = Volume, Encoder 1 = Tuning, Encoder 2 = Source, Encoder 3 = Visualization.
+///
+/// <para>
+/// <b>Index mapping: 0 = Volume, 1 = Tuning, 2 = Source, 3 = Visualization.</b> The cabinet's
+/// physical order is VOLUME / SOURCE / PRESETS / TUNING, so indices 1-3 do not yet match the
+/// engraving. That is deliberate and tracked: the remap lands with ENC-5 (the SOURCE overlay) and
+/// ENC-7 (PRESETS), because those rows introduce the handlers the remap would point at. Index 0 is
+/// VOLUME under both orders, so the knob with a safety hazard on it is already correct.
+/// </para>
+///
+/// <para>
+/// The HUD's geometry keys off the encoder index, not off this table, so a card already appears
+/// above the knob that was turned. Remapping later changes what the card says, not where it is.
+/// </para>
+///
 /// Uses Func&lt;IAudioManager&gt; for deferred resolution to break circular DI.
 /// </summary>
 public class RotaryEncoderActionRouter : IDisposable
@@ -22,6 +35,8 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly ISleepService? _sleepService;
   private readonly VisualizationModeService _vizModeService;
   private readonly IOptionsMonitor<RotaryEncoderOptions> _options;
+  private readonly IEncoderFeedbackSink _hud;
+  private readonly EncoderLongPressGesture _gesture;
   private bool _disposed;
 
   // Primary source types for cycling (Encoder 2)
@@ -41,14 +56,25 @@ public class RotaryEncoderActionRouter : IDisposable
     Func<IAudioManager> audioManagerFactory,
     VisualizationModeService vizModeService,
     IOptionsMonitor<RotaryEncoderOptions> options,
-    ISleepService? sleepService = null)
+    IEncoderFeedbackSink hud,
+    ISleepService? sleepService = null,
+    TimeProvider? timeProvider = null)
   {
     _logger = logger;
     _encoderService = encoderService;
     _audioManagerFactory = audioManagerFactory;
     _vizModeService = vizModeService;
     _options = options;
+    _hud = hud;
     _sleepService = sleepService;
+
+    // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
+    // EncoderButtonEventArgs document.
+    _gesture = new EncoderLongPressGesture(4, logger, timeProvider);
+    _gesture.ShortPress += OnShortPress;
+    _gesture.LongPress += OnLongPress;
+    _gesture.HoldStarted += i => PublishHold(i, EncoderHudPhase.HoldStart);
+    _gesture.HoldCancelled += i => PublishHold(i, EncoderHudPhase.HoldCancel);
 
     _encoderService.EncoderTurned += OnEncoderTurned;
     _encoderService.ButtonPressed += OnButtonPressed;
@@ -80,21 +106,33 @@ public class RotaryEncoderActionRouter : IDisposable
 
   private void OnButtonPressed(object? sender, EncoderButtonEventArgs e)
   {
-    // Only act on press (not release)
-    if (!e.IsPressed)
-    {
-      return;
-    }
-
     try
     {
-      // If sleeping, wake on any encoder input and consume the event
-      if (TryWakeFromSleep("encoder-button"))
+      // Both edges matter now. The short action fires on release and the long action fires at the
+      // threshold while still held, so this handler routes the edge and leaves the choice of action
+      // to the gesture.
+      //
+      // The sleep-wake consumption stays on the PRESS edge: waking is what the input is spent on,
+      // and letting the release through would fire a short action into a UI that has just changed
+      // underneath the user.
+      if (e.IsPressed && TryWakeFromSleep("encoder-button"))
       {
         return;
       }
 
-      switch (e.EncoderIndex)
+      _gesture.OnButtonEdge(e.EncoderIndex, e.IsPressed);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error handling encoder {Index} button edge", e.EncoderIndex);
+    }
+  }
+
+  private void OnShortPress(int index)
+  {
+    try
+    {
+      switch (index)
       {
         case 0: HandleVolumePress(); break;
         case 1: HandleTuningPress(); break;
@@ -104,8 +142,96 @@ public class RotaryEncoderActionRouter : IDisposable
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error handling encoder {Index} button press", e.EncoderIndex);
+      _logger.LogError(ex, "Error handling encoder {Index} short press", index);
     }
+  }
+
+  private void OnLongPress(int index)
+  {
+    // Two long-press consumers exist in the spec: VOLUME -> Standby and PRESETS -> Save. Only the
+    // first is wired here. PRESETS is ENC-7's action, and encoder 2 still drives the source handler
+    // under the pre-ENC-5 index mapping - registering a save on it now would put a preset write
+    // behind a knob the cabinet does not label PRESETS yet.
+    if (index != 0)
+    {
+      return;
+    }
+
+    if (_sleepService is null)
+    {
+      _logger.LogDebug("Volume long-press ignored: no sleep service is registered");
+      return;
+    }
+
+    _ = EnterStandbyAsync();
+  }
+
+  private async Task EnterStandbyAsync()
+  {
+    try
+    {
+      await _sleepService!.EnterSleepAsync();
+      PublishHold(0, EncoderHudPhase.HoldCommit);
+      _logger.LogInformation("Standby entered by a volume knob long-press");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error entering standby from the volume knob");
+    }
+  }
+
+  /// <summary>
+  /// Publishes one hold-phase card, so the client can draw, collapse or complete the progress ring.
+  /// </summary>
+  private void PublishHold(int index, EncoderHudPhase phase)
+  {
+    // Encoder 0 is the only index OnLongPress acts on, so it is the only index that publishes hold
+    // phases. A ring drawing on the other three would promise an action nothing performs.
+    if (index != 0)
+    {
+      return;
+    }
+
+    var mgr = _audioManagerFactory();
+    _hud.Publish(new EncoderHudEventArgs
+    {
+      EncoderIndex = index,
+      // The label is what the card reads while the ring draws. Completing the hold enters standby,
+      // so that is what the ring is labelled with.
+      Label = phase == EncoderHudPhase.HoldStart ? "HOLD FOR STANDBY" : "VOLUME",
+      Phase = phase,
+      VolumePercent = (int)Math.Round(mgr.MasterVolume * 100f),
+      IsMuted = mgr.IsMuted,
+    });
+  }
+
+  /// <summary>
+  /// Publishes what this handler just did, so the HUD can put it above the knob that produced it.
+  /// </summary>
+  private void PublishHud(int index, string label, Action<HudBuilder> configure)
+  {
+    var b = new HudBuilder();
+    configure(b);
+    _hud.Publish(new EncoderHudEventArgs
+    {
+      EncoderIndex = index,
+      Label = label,
+      Phase = EncoderHudPhase.Value,
+      VolumePercent = b.VolumePercent,
+      IsMuted = b.IsMuted,
+      PrimaryText = b.PrimaryText,
+      SecondaryText = b.SecondaryText,
+      PrimaryIsFrequency = b.PrimaryIsFrequency,
+    });
+  }
+
+  private sealed class HudBuilder
+  {
+    public int? VolumePercent;
+    public bool IsMuted;
+    public string? PrimaryText;
+    public string? SecondaryText;
+    public bool PrimaryIsFrequency;
   }
 
   /// <summary>
@@ -147,7 +273,7 @@ public class RotaryEncoderActionRouter : IDisposable
     // ENC-11 host clamp, and it is not defensive boilerplate.
     //
     // The device's movement already includes its own acceleration, so the host is handed
-    // `step_size x tier_multiplier` per detent and multiplies it by 2% again. On factory defaults —
+    // step_size x tier_multiplier per detent and multiplies it by 2% again. On factory defaults —
     // measured on this hardware as step_size 1 with a x50 tier — that is 50 x 2% = 100 points, a
     // single click from silence to full, in a living room, from a knob a guest may be touching for
     // the first time.
@@ -166,9 +292,27 @@ public class RotaryEncoderActionRouter : IDisposable
         delta, clamped, _encoderService.ConfigStatus);
     }
 
+    // ENC-4b. The first detent clears mute and applies the delta in the same frame.
+    //
+    // Without this the knob moves a value nobody can hear, and the user's response to that silence
+    // is to turn it further - which is the input pattern the host clamp above exists to survive.
+    // Unmuting first also means the delta lands on an audible volume rather than on a number that
+    // will be revealed at some later, surprising moment.
+    if (mgr.IsMuted)
+    {
+      mgr.IsMuted = false;
+      _logger.LogInformation("Unmuted by a volume knob turn");
+    }
+
     var newVolume = Math.Clamp(mgr.MasterVolume + clamped * step, 0f, 1f);
     mgr.MasterVolume = newVolume;
     _logger.LogDebug("Volume: {Volume:P0}", newVolume);
+
+    PublishHud(0, "VOLUME", b =>
+    {
+      b.VolumePercent = (int)Math.Round(newVolume * 100f);
+      b.IsMuted = mgr.IsMuted;
+    });
   }
 
   private void HandleVolumePress()
@@ -192,6 +336,16 @@ public class RotaryEncoderActionRouter : IDisposable
       int clamped = Clamp(delta, RotaryEncoderConfigDefaults.TuningClamp);
       _ = StepRadioFrequencyAsync(radio, clamped);
     }
+    else
+    {
+      // The knob takes no action on a non-radio source - track skip is not wired to it. It still
+      // publishes a card, because a knob that moves and shows nothing reads as broken hardware.
+      PublishHud(1, "TRACK", b =>
+      {
+        b.PrimaryText = mgr.ActiveSource?.Name;
+        b.SecondaryText = "no track control on this source";
+      });
+    }
   }
 
   private async Task StepRadioFrequencyAsync(IRadioControl radio, int delta)
@@ -210,6 +364,15 @@ public class RotaryEncoderActionRouter : IDisposable
           await radio.StepFrequencyDownAsync();
         }
       }
+
+      // Published after the stepping finishes, so the card reads where the tuner actually landed
+      // rather than where the detent aimed it.
+      PublishHud(1, "TUNING", b =>
+      {
+        b.PrimaryText = radio.CurrentFrequency.ToDisplayString();
+        b.SecondaryText = radio.CurrentBand.ToString().ToUpperInvariant();
+        b.PrimaryIsFrequency = true;
+      });
     }
     catch (Exception ex)
     {
@@ -248,6 +411,12 @@ public class RotaryEncoderActionRouter : IDisposable
 
     var sourceType = PrimarySourceTypes[_currentSourceIndex];
     _logger.LogDebug("Source selection: {Source}", sourceType);
+
+    PublishHud(2, "SOURCE", b =>
+    {
+      b.PrimaryText = sourceType.ToString().ToUpperInvariant();
+      b.SecondaryText = "press to switch";
+    });
   }
 
   private void HandleSourcePress()
@@ -276,6 +445,8 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     // ENC-3 clamp: the visualiser list is a selector like any other.
     _vizModeService.CycleMode(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
+
+    PublishHud(3, "VISUALIZER", b => b.PrimaryText = _vizModeService.CurrentMode.ToUpperInvariant());
   }
 
   private void HandleVizPress()
@@ -291,6 +462,7 @@ public class RotaryEncoderActionRouter : IDisposable
     }
     _disposed = true;
 
+    _gesture.Dispose();
     _encoderService.EncoderTurned -= OnEncoderTurned;
     _encoderService.ButtonPressed -= OnButtonPressed;
     GC.SuppressFinalize(this);
