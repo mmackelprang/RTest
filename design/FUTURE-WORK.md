@@ -42,6 +42,42 @@ scoped to the defects it found.
 
 ---
 
+## Encoder Settings surface (ENC-8) — three things deliberately not built
+
+**1. `--signal-red-glow` is consumed and never declared.** `design-system.css:5364` reads
+`var(--signal-red-glow)`; `:root` declares `--signal-amber-glow` but no red sibling, so that rule
+silently renders no glow. **Pre-existing and untouched by `ENC-8`**, which was forbidden from adding
+design tokens. It cannot be fixed by simply declaring the variable: doing so would change the
+appearance of an already-shipped component as a side effect, so whoever fixes it must look at what
+that rule is for and decide whether the glow was ever wanted. `ENC-8` and `ENC-12` both avoid
+referencing it.
+
+**2. `Restore designed defaults` is not on the Settings page, and the reason is not oversight.** The
+punch list's `ENC-12` row listed it; handoff Rev 3's action table does not. In Rev 2 the page held 24
+editable numerics and the button meant *discard my edits*. Rev 3 made everything read-only except the
+four `reverse` toggles — and the undo for a toggle is the toggle. If the owner still wants it, it is a
+fifth action that clears the four persisted `RotaryEncoder:Reverse:{n}` overrides and re-pushes: about
+half a day. ⚠ **It needs a label that does not contain the word "defaults".** A button reading
+"defaults" on this page is one misread away from the device factory reset
+(`RotaryEncoderCommand.ResetDefaults`), which is deliberately absent because factory tiers were
+measured on this hardware as one volume detent from silence to full. A test pins that command unsent.
+
+**3. `Reset counters` has no visible effect until `ENC-14`.** Handoff §7.8 puts the button in
+`ENC-8`'s action card, but the movement counters it zeroes are rendered on the Diagnostics card, which
+is `ENC-14` and does not exist. The button works and the command reaches the device; its confirmation
+copy is deliberately limited to *"Movement counters zeroed on the device."* and its hint says nothing
+is shown for them yet. ⚠ **There is no acknowledgement for `0x03/0x05` in the protocol and no
+diagnostics decoder in this build**, so the API returns *"the command was sent"*, not *"the counters
+are zero"* — `ENC-14` should not upgrade that claim without a report `0x04` decoder to check it
+against.
+
+**Also not extracted: a shared `NotificationService` wrapper.** `ENC-8` adds several toasts and
+`ENC-12` adds one more, which makes a helper tempting. `RadioControlPanel.razor:1366` is the only
+`new NotificationMessage` in the tree; every other site uses the three-argument overload. Extracting a
+wrapper now would touch a dozen files across two rows for no behavioural gain.
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed
