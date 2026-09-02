@@ -132,6 +132,48 @@ processes, so the value is promoted to Core rather than referenced across the bo
 HUD broadcasts are coalesced to ≥ 50 ms (20 Hz), trailing-edge, always emitting the final value. **The audio action
 is not throttled** — volume applies per event at full rate. The ear leads; the screen catches up.
 
+### When something is wrong — what the owner sees (ENC-12)
+
+The console pushes the encoder configuration to the device at every connection and verifies it by
+read-back. When that does not fully succeed the response is **silent by design** in the audio path but
+**visible** in the UI, and this is what to look for.
+
+**A badge on the Settings pill, from any route.** Bottom-right of the topbar **Settings** pill, so it is
+findable without already being on the page that explains it. Three states, three distinct glyphs — the
+shape carries the state, not just the colour, so it survives for someone who cannot distinguish amber
+from red:
+
+| Glyph | Colour | Means | Accessible name |
+|---|---|---|---|
+| `warning` | amber | **Degraded** — a non-safety field did not read back | *"Settings — knob settings not applied"* |
+| `error` | red | **Hard fault** — a safety field did not read back | *"Settings — knob safety settings not applied, volume limited"* |
+| `link_off` | amber | the knobs are **not connected** | *"Settings — knobs not connected"* |
+
+Nothing at all is shown when the configuration verified, when the device is merely retrying
+(`Transient` — attempts 1-3 are silent on purpose), or when `RotaryEncoder:Enabled` is false. A healthy
+boot is completely silent: no toast, no banner, no badge.
+
+**⚠ A hard fault limits how far the volume knob moves, and that is the most surprising shipped
+behaviour in the encoder arc.** When a *safety* field fails to read back, the host drops the volume
+knob's per-event clamp from **6 units to 2** and holds it there until a push verifies. The knob is not
+broken and the console is not faulty — it is refusing to trust movement from a device that may still be
+on factory tiers, where one detent can be worth 100 volume points. Turning the knob will feel sluggish
+until the configuration is re-applied from **System Config → Integrations → Rotary Encoders**. Touch
+volume is unaffected.
+
+**One notification, once.** A fault also raises a single Radzen toast that navigates to `/system` when
+clicked. It fires **once per browser session, and only on escalation** — a fault that flaps between
+Degraded and Configured fifty times produces exactly one toast, and a Degraded that later becomes a
+hard fault produces one more because the volume clamp has just tightened. It **never repeats**: nothing
+de-escalating, recovering or recurring speaks again. So if you dismissed the toast and want it back,
+**reload the page** — a reload is a new session. The badge does not need reloading; it tracks the live
+state for as long as the fault exists, which is the half of the pair meant to still be there when you
+come back.
+
+Unplugging the knobs mid-session raises one *"Knobs disconnected"* toast and one *"Knobs connected"* on
+return, also at most once each per session. Booting with the knobs **already** unplugged raises no
+toast at all — just the badge — on the assumption that whoever unplugged them knows.
+
 ### Setup Steps
 
 **Step 1: Connect the Pico**

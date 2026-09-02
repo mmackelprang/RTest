@@ -153,6 +153,43 @@ at all, and the failure is silent to the user. Fix: rename the anonymous propert
 boundary that nothing checks against the other side. A contract test over `RadioApiService`'s payloads
 would have caught both.
 
+---
+
+## Encoder fault surfacing (ENC-12) — two things left open
+
+**1. `SystemConfigPage` has no tab deep-linking, so the fault toast lands one tap short.** The
+notification's `Click` navigates to `/system`, but the encoder card lives under **Integrations →
+Rotary Encoders** and the page's tabs are `RadzenTabs` with no route parameter — so the owner arrives
+on the page and still has to pick the tab. Fixing it means giving `SystemConfigPage` a route parameter
+or query string (`/system?tab=integrations`) and seeding `SelectedIndex` from it, which is a change to
+a page `ENC-8` had just rewritten and which nothing else needed, so it was left out rather than
+smuggled in. The toast copy deliberately does not promise more than it delivers. Roughly an hour,
+including the two other places that would then want to link straight to a tab.
+
+**2. `MainLayout` has no bUnit coverage at all, and that is now load-bearing for three indicators.**
+`tests/Radio.Web.Tests/Components/Layout/MainLayoutTests.cs` is a documented stub that renders nothing
+— its own XML doc says Radzen plus JSInterop make the layout impractical to render — so **nothing under
+`tests/` asserts `.topbar-mute-chip` (ENC-4a), `.phone-nav-fault` (bell surfacing) or
+`.encoder-nav-fault` (ENC-12) in rendered markup.** Each of those is a fault indicator whose whole job
+is to be correct when nobody is looking at it.
+
+The workaround so far has been to push every decision into a pure, unit-testable class
+(`BellHealthRules`, now `EncoderFaultRules`) and leave the layout with branches that contain no logic.
+That is worth keeping regardless, but it does not cover the wiring: a badge bound to the wrong property,
+a missing `@if`, or a subscription that is never made would pass every test in the suite.
+
+Making the layout renderable needs: a bUnit `TestContext` with `Services.AddRadzenComponents()`,
+`JSInterop.Mode = JSRuntimeMode.Loose` (the pattern `EncoderHudTests` already uses), and test doubles
+for the ~15 injected services — `SystemApiService`, `SourcesApiService`, `DevicesApiService`,
+`AudioApiService`, `QueueApiService`, `AudioStateHubService`, `AudioStateStore`, `BellHealthService`,
+`PhoneUnreadState`, `GainPopoverService`, `EncoderHudService`, `EncoderFaultAnnouncer`,
+`DeviceDisplayStateService`, `RadioPanelToggleService`, and two `IOptionsMonitor<>`s. Most are concrete
+classes rather than interfaces, so this needs either extracted interfaces or a real
+`IServiceCollection` wired to stubs. Realistically a day, and it pays for itself the first time one of
+the three indicators regresses silently.
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed
