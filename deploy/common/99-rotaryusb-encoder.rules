@@ -1,0 +1,11 @@
+# RotaryUsb rotary encoder (VID 0xCAFE / PID 0x4005) — ENC-0a.
+#
+# Why this exists: /dev/hidraw* is created root-owned mode 0600, and radio-api runs as the
+# unprivileged login user. Without this rule HidSharp fails every open with
+# "Not permitted to open HID class device at /dev/hidraw4", and because the device IS present
+# the reader retries forever — the encoder silently never works and the log fills.
+#
+# plugdev is used rather than a new group because the service user is already in it, so this
+# needs no group management or re-login. uaccess additionally grants the seat-local desktop
+# session access, which is what makes bench debugging from the box itself work.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="cafe", ATTRS{idProduct}=="4005", MODE="0660", GROUP="plugdev", TAG+="uaccess"
