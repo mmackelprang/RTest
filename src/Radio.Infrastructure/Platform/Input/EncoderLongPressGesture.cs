@@ -130,8 +130,15 @@ public sealed class EncoderLongPressGesture : IDisposable
     }
 
     if (raiseHoldStarted) { Raise(HoldStarted, index, nameof(HoldStarted)); }
-    if (raiseHoldCancelled) { Raise(HoldCancelled, index, nameof(HoldCancelled)); }
+
+    // ShortPress is raised BEFORE HoldCancelled, and that order is load-bearing rather than
+    // incidental. The router's HoldCancelled handler publishes a HUD card carrying the console's
+    // mute state, and the short action on the volume knob is what toggles that state. Raising the
+    // card first published the value from before the toggle and nothing re-published it, so the HUD
+    // asserted the opposite of the truth for the card's full lifetime. This order also makes
+    // EncoderHudPhase.HoldCancel's "the short action fired" true of the event it names.
     if (raiseShort) { Raise(ShortPress, index, nameof(ShortPress)); }
+    if (raiseHoldCancelled) { Raise(HoldCancelled, index, nameof(HoldCancelled)); }
   }
 
   private void OnThreshold(int index)

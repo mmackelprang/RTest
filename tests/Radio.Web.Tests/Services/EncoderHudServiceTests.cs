@@ -172,6 +172,65 @@ public class EncoderHudServiceTests
   }
 
   [Fact]
+  public void Dismiss_ClearsACardThatIsMidHold()
+  {
+    // The functional half of the ENC-0 disconnect teardown. A hold suspends the dismissal timer,
+    // and a device that vanishes mid-hold sends no HoldCancel or HoldCommit - so without something
+    // able to clear it, the card stays on a kiosk screen indefinitely. The disconnect subscription
+    // that calls this is verified by inspection: AudioStateHubService.EncoderConnectionChanged is a
+    // field-like event, so a test cannot raise it.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(Card(phase: "HoldStart"));
+    clock.Advance(TimeSpan.FromSeconds(10));
+    svc.Current.Should().NotBeNull("a hold suspends the dismissal timer");
+    svc.IsHolding.Should().BeTrue();
+
+    svc.Dismiss();
+
+    svc.Current.Should().BeNull();
+    svc.IsHolding.Should().BeFalse();
+  }
+
+  [Fact]
+  public void AThrowingSubscriber_DoesNotPropagate_OnEitherPath()
+  {
+    // The dismissal timer callback runs with no Blazor or hosting exception boundary above it, so
+    // an unhandled throw there would end the process and every circuit in it - not just this card.
+    // Mirrors the guard EncoderFeedbackService.Raise already has on the API side.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+    svc.StateChanged += () => throw new InvalidOperationException("subscriber blew up");
+
+    Record.Exception(() => svc.Publish(Card())).Should().BeNull("the publish path swallows it");
+
+    // Advancing the fake clock runs the timer callback on this thread, so an unguarded throw in
+    // Dismiss would surface right here.
+    Record.Exception(() => clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs + 50)))
+      .Should().BeNull("the dismissal-timer path swallows it too");
+  }
+
+  [Fact]
+  public void HasRenderableCard_IsFalseForNoCardAndForAPhaseThisBuildCannotDraw()
+  {
+    // Sleep.razor swaps its clock composition out for the HUD on this flag. Branching on the card's
+    // mere presence would hide the clock and then draw nothing in its place, because an
+    // unrecognised phase renders nothing - a blank panel rather than a clock.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.HasRenderableCard.Should().BeFalse("nothing has been published yet");
+
+    svc.Publish(Card());
+    svc.HasRenderableCard.Should().BeTrue();
+
+    svc.Publish(Card(phase: "SomeFuturePhaseFromANewerApi"));
+    svc.Current.Should().NotBeNull("the card is retained");
+    svc.HasRenderableCard.Should().BeFalse("this build cannot draw that phase");
+  }
+
+  [Fact]
   public async Task DependencyInjection_ResolvesOneInstanceWithTheHubInjected()
   {
     // Program.cs registers this with a bare AddSingleton<EncoderHudService>(), which only works

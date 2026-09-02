@@ -4,6 +4,34 @@ Running log of development sessions, organized chronologically. Each entry captu
 
 ---
 
+## 2026-09-02 — ENC-4: the EncoderHud
+
+**PRs:** implementation `507b0d3`/`eb4005e`/`bd762d1`/`29acc01` (landed on `main` without a PR — see below), review + fixes #519
+
+- Built `EncoderHud.razor` — one component, two hosts (`MainLayout`, and `Sleep.razor` with `Variant="Sleep"`).
+  The card renders in the screen quarter above the knob that produced it (centres 240 / 720 / 1200 / 1680).
+- Added a dedicated push channel for HUD updates. The existing `VolumeChanged` broadcast could not carry it: its one
+  call site is a 500 ms change-detecting poller (2 Hz against a 100 ms requirement) and it reports what the volume
+  now is, not which knob moved. The new channel coalesces to >= 50 ms, trailing-edge, final-value.
+- Synthesised the long press host-side (the protocol reports raw press/release only): short fires on **release**,
+  long fires **at** the 600 ms threshold while still held, and the release afterwards is inert.
+- `ENC-4b`: turning the volume knob while muted unmutes and applies the delta in the same frame.
+- Deliberately did **not** remap the router's index→handler table; that belongs to `ENC-5`/`ENC-7`. A test pins it.
+
+**Process failure, recorded because it recurred.** The four implementation commits reached `main` **without a pull
+request** and so were never reviewed pre-merge: a subagent switched the shared working tree off the feature branch
+mid-cycle, and the branch was not re-verified before committing. The same thing happened a second time later in the
+cycle, putting a fix commit onto an unrelated branch another session had just created. The owed review was then run
+after the fact and found **three HIGH defects**, all live on `main` and on the appliance — a wrong mute state on
+every volume-knob tap, a HUD card that could stay up indefinitely after a mid-hold disconnect, and an unguarded
+event raise on a timer thread that could end the web process. All three fixed in #519.
+
+**Durable lesson:** when subagents share the working tree, `git branch --show-current` must be re-checked
+immediately before every commit and every push. A `git push` that prints `main -> main` is the last line of defence,
+not the first.
+
+---
+
 ## 2025-11-25 — Project Setup (Phases 0-1)
 
 **PRs:** #2, #4, #13, #14, #16

@@ -366,8 +366,16 @@ keeps the knobs from becoming a new distortion source.
 ---
 
 **`ENC-4` — `EncoderHud` + the persistent mute indicator: every knob visible within 100 ms, on every route.**
-✅ **QUEUED 📋 2026-09-02** — plan at [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md),
-17 tasks. Both dependencies met (`ENC-1` #498, `ENC-3` #511). **`ENC-4a` shipped separately as #493.**
+✅ **SHIPPED 2026-09-02** — implementation in `507b0d3`/`eb4005e`/`bd762d1`/`29acc01`, pre-merge review and its
+three HIGH fixes in #519. Plan: [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md), 17 tasks.
+Dependencies were `ENC-1` #498 and `ENC-3` #511. **`ENC-4a` shipped separately as #493.**
+Verified on the box at 1920×720: quarter centres exact at **240 / 720 / 1200 / 1680**, 1500 ms dismissal with re-arm,
+and coalescing measured at 11 broadcasts for 100 publishes over 1.1 s (the §6.8 ≥ 50 ms rule).
+⛔ **The router index→handler remap was deliberately NOT done** — it still reads `0=Volume 1=Tuning 2=Source
+3=Visualization` against a cabinet engraved VOLUME / SOURCE / PRESETS / TUNING, and belongs to `ENC-5`/`ENC-7`, which
+introduce the handlers it would point at. A test pins the current mapping. Cards on knobs 2–4 therefore say the wrong
+words today; the card is in the right *place*, which is what this row owns.
+⚠ **The implementation reached `main` without a PR and was never reviewed pre-merge**; #519 carries that review.
 *Effort: 3–4 days.*
 
 > **⚠ Three findings from planning that this row's text does not anticipate.**

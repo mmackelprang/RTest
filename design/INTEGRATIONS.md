@@ -34,6 +34,37 @@ The Pico firmware must present itself as a USB HID device with:
 | 2 — Source | Cycle through source selection | Switch to selected source |
 | 3 — Visualizer | Cycle visualization modes | Toggle visualization on/off |
 
+⚠ **The index→handler table above does not match the cabinet engraving, and that is deliberate.** The physical
+order is VOLUME / SOURCE / PRESETS / TUNING. Index 0 is VOLUME under both, so the dangerous knob is correct; indices
+1–3 are remapped by `ENC-5`/`ENC-7`, which introduce the handlers the remap points at.
+
+### On-screen feedback — the `EncoderHud` (ENC-4)
+
+Every knob movement puts a transient card on screen **in the screen quarter above the knob that produced it** —
+centres 240 / 720 / 1200 / 1680 on the 1920 px panel. Geometry keys off the encoder index; the words key off whatever
+the router's handler produced, so the card is in the right place before it says the right word.
+
+One component, two hosts: `EncoderHud.razor` mounts in `MainLayout` for every normal route, and again inside
+`Sleep.razor` with `Variant="Sleep"` (centred, dim amber, inside the anti-burn-in drift wrapper), because `/sleep` is
+on `EmptyLayout` and `MainLayout` is not in that tree.
+
+**Two behaviour changes worth knowing at the cabinet:**
+
+- **The short button press now fires on RELEASE, not on press.** Firing on press would fire it on the way into every
+  long-press hold.
+- **A long press (600 ms) fires AT the threshold while the button is still held**, and the release afterwards does
+  nothing. Only encoder 0 has a long action wired (→ Standby); a >600 ms hold on encoders 1–3 now performs **no
+  action at all**, where it previously acted on press.
+
+**Turning the volume knob while muted unmutes and applies the delta in the same frame** (`ENC-4b`).
+
+The 600 ms threshold has **one definition**, `Radio.Core.Configuration.EncoderInteractionTimings`, shared by the
+host-side synthesis in `Radio.Infrastructure` and by `RadioControlPanel` in `Radio.Web` — the two run in different
+processes, so the value is promoted to Core rather than referenced across the boundary.
+
+HUD broadcasts are coalesced to ≥ 50 ms (20 Hz), trailing-edge, always emitting the final value. **The audio action
+is not throttled** — volume applies per event at full rate. The ear leads; the screen catches up.
+
 ### Setup Steps
 
 **Step 1: Connect the Pico**

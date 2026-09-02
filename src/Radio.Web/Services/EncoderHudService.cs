@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Radio.Core.Configuration;
 using Radio.Web.Models;
 using Radio.Web.Services.Hub;
@@ -30,6 +31,7 @@ public sealed class EncoderHudService : IDisposable
 {
   private readonly TimeProvider _timeProvider;
   private readonly AudioStateHubService? _hub;
+  private readonly ILogger<EncoderHudService>? _logger;
   private readonly object _gate = new();
   private ITimer? _dismissTimer;
   private bool _disposed;
@@ -38,13 +40,18 @@ public sealed class EncoderHudService : IDisposable
   /// The <paramref name="hub"/> argument is optional so component tests can construct the service
   /// without a SignalR connection; production resolves the registered singleton.
   /// </summary>
-  public EncoderHudService(AudioStateHubService? hub = null, TimeProvider? timeProvider = null)
+  public EncoderHudService(
+    AudioStateHubService? hub = null,
+    TimeProvider? timeProvider = null,
+    ILogger<EncoderHudService>? logger = null)
   {
     _timeProvider = timeProvider ?? TimeProvider.System;
     _hub = hub;
+    _logger = logger;
     if (_hub is not null)
     {
       _hub.EncoderHudChanged += OnHubEvent;
+      _hub.EncoderConnectionChanged += OnHubConnectionEvent;
     }
   }
 
@@ -58,6 +65,32 @@ public sealed class EncoderHudService : IDisposable
 
   /// <summary>Fired whenever <see cref="Current"/> or <see cref="IsHolding"/> changes.</summary>
   public event Action? StateChanged;
+
+  /// <summary>
+  /// The phases this build knows how to draw. An unrecognised phase renders nothing rather than
+  /// throwing, so a newer API build degrades to silence on an older kiosk (plan §2.5).
+  /// </summary>
+  public static bool IsKnownPhase(string? phase)
+    => phase is "Value" or "HoldStart" or "HoldCancel" or "HoldCommit";
+
+  /// <summary>
+  /// True when <see cref="Current"/> holds a card this build can actually render.
+  ///
+  /// <para>
+  /// A host that swaps its own composition out for the HUD must branch on this rather than on
+  /// <see cref="Current"/> alone. Branching on the card's mere presence would hide that host's
+  /// content and then draw nothing in its place, because an unrecognised phase renders nothing —
+  /// on the sleep screen that is a blank panel rather than a clock.
+  /// </para>
+  /// </summary>
+  public bool HasRenderableCard
+  {
+    get
+    {
+      EncoderHudDto? card = Current;
+      return card is not null && IsKnownPhase(card.Phase);
+    }
+  }
 
   /// <summary>
   /// Shows (or updates) the card. Public so tests and the future selector overlays (ENC-5, ENC-7)
@@ -97,10 +130,19 @@ public sealed class EncoderHudService : IDisposable
       }
     }
 
-    StateChanged?.Invoke();
+    RaiseStateChanged();
   }
 
-  /// <summary>Clears the card immediately. Used by ENC-0's disconnect teardown and by tests.</summary>
+  /// <summary>
+  /// Clears the card immediately.
+  ///
+  /// <para>
+  /// Called when the encoder device disconnects (ENC-0's <c>EncoderConnectionChanged</c>
+  /// broadcast), by the dismissal timer, and by tests. The disconnect path is not decoration: the
+  /// dismissal timer is suspended while a button is held, and a device that vanishes mid-hold sends
+  /// no HoldCancel or HoldCommit, so without this the card would stay on screen indefinitely.
+  /// </para>
+  /// </summary>
   public void Dismiss()
   {
     lock (_gate)
@@ -110,13 +152,48 @@ public sealed class EncoderHudService : IDisposable
       IsHolding = false;
     }
 
-    StateChanged?.Invoke();
+    RaiseStateChanged();
   }
 
   private Task OnHubEvent(EncoderHudDto dto)
   {
     Publish(dto);
     return Task.CompletedTask;
+  }
+
+  private Task OnHubConnectionEvent(EncoderConnectionDto dto)
+  {
+    // Only a disconnect clears the card. A connect must not, or plugging the device in would wipe
+    // a readout the user is in the middle of reading.
+    if (dto is { IsConnected: false })
+    {
+      Dismiss();
+    }
+
+    return Task.CompletedTask;
+  }
+
+  /// <summary>
+  /// Raises <see cref="StateChanged"/>, absorbing anything a subscriber throws.
+  ///
+  /// <para>
+  /// This mirrors <c>EncoderFeedbackService.Raise</c> on the API side, for the same reason and one
+  /// more. A HUD update is cosmetic, so a throwing subscriber must not escalate — and the dismissal
+  /// timer calls this from a thread-pool thread with no Blazor or hosting exception boundary above
+  /// it, where an unhandled exception would end the process and every circuit in it, not just this
+  /// card.
+  /// </para>
+  /// </summary>
+  private void RaiseStateChanged()
+  {
+    try
+    {
+      StateChanged?.Invoke();
+    }
+    catch (Exception ex)
+    {
+      _logger?.LogError(ex, "Encoder HUD subscriber threw while handling a state change");
+    }
   }
 
   private void ArmDismissLocked()
@@ -150,6 +227,7 @@ public sealed class EncoderHudService : IDisposable
     if (_hub is not null)
     {
       _hub.EncoderHudChanged -= OnHubEvent;
+      _hub.EncoderConnectionChanged -= OnHubConnectionEvent;
     }
   }
 }
