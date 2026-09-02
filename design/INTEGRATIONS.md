@@ -40,9 +40,37 @@ order is VOLUME / SOURCE / PRESETS / TUNING. Index 0 is VOLUME under both, so th
 
 ### On-screen feedback — the `EncoderHud` (ENC-4)
 
-Every knob movement puts a transient card on screen **in the screen quarter above the knob that produced it** —
-centres 240 / 720 / 1200 / 1680 on the 1920 px panel. Geometry keys off the encoder index; the words key off whatever
-the router's handler produced, so the card is in the right place before it says the right word.
+Every knob movement puts a transient card on screen **beside the knob that produced it, at the same height** —
+anchored to the screen's left edge at `left: 24px`, banded down the 720 px axis at **90 / 270 / 450 / 630**.
+Geometry keys off the encoder index; the words key off whatever the router's handler produced, so the card is in the
+right place before it says the right word.
+
+⚠ **`ENC-4` originally shipped this on the horizontal axis** — quarters of the 1920 px width, centres
+240 / 720 / 1200 / 1680, bottom-anchored — which was correct for the knob row Rev 3 of the handoff described. The
+as-built drawing puts the four knobs in a **vertical column to the LEFT of the LCD** on a uniform 29.63 mm pitch, so
+the axis was wrong and all four constants with it. Rotated 90° in `ENC-4c`; the principle (the readout appears where
+the knob is, so nobody has to be told which knob is which) is unchanged.
+
+**The bands are facts about the panel, and they have one definition:** `Radio.Core.Configuration.FrontPanelGeometry`,
+which also carries the engraved names, the index→knob mapping and the drawing's px→mm scale, citing
+`design/hardware/front-panel-layout_4.svg`. Four surfaces need them — this HUD, the diagnostics card, the encoder
+Settings table and the two selector overlays — so **a recut moves one line, not five.** The component's inline style
+carries only `--encoder-band-y`; the left offset, the vertical centring on the band and the ≥ 8 px viewport clamp
+are all in the `.encoder-hud` rule. `90 / 270 / 450 / 630` are the measured projections (93.05 / 271.02 / 448.98 /
+626.95) **deliberately rounded** — 3.05 px of worst-case deviation is 0.508 mm on the panel, against a nearest wrong
+band 178 px away; do not "restore" the measured values.
+
+**Transient occlusion is accepted on every band** and nothing about position, width or z-order changes for it. The
+card is up 1500 ms after the last detent, carries `pointer-events: none`, and appears only while a hand is on a knob.
+The VOLUME band lands on the fixed topbar and covers `ENC-4a`'s `MUTED` chip; that is safe **only because every card
+in the VOLUME band carries the console's mute state**, which is an invariant rather than a coincidence — a future
+card at index 0 that omitted `IsMuted` would hide the reason the room is silent while saying nothing about it.
+
+**One entrance animation is a declared exception, not drift.** A left-anchored card cannot enter on
+`snackbarSlideIn`'s `translateY(100%)`, so handoff §6.1 authorises a mirrored horizontal pair — same duration, same
+easing, no new token — scoped to `.encoder-hud` in the Normal variant. **Do not "correct" `.encoder-hud-enter` back
+to `.snackbar-enter`.** The Sleep variant is placed by the anti-burn-in drift wrapper rather than by an edge and
+deliberately still uses the original.
 
 One component, two hosts: `EncoderHud.razor` mounts in `MainLayout` for every normal route, and again inside
 `Sleep.razor` with `Variant="Sleep"` (centred, dim amber, inside the anti-burn-in drift wrapper), because `/sleep` is

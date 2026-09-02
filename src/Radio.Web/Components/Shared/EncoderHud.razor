@@ -1,13 +1,18 @@
+@using Radio.Core.Configuration
 @inject Radio.Web.Services.EncoderHudService Hud
 @implements IDisposable
 
 @*
   ENC-4 — the encoder HUD.
 
-  A transient readout that appears in the screen quarter above the knob that produced it. One
-  component, two hosts: MainLayout renders it for every normal route (Variant=Normal, quartered and
-  bottom-anchored), and Sleep.razor renders it inside the anti-burn-in drift wrapper
-  (Variant=Sleep, centered by that wrapper's flex layout).
+  A transient readout that appears beside the knob that produced it, at the same height. One
+  component, two hosts: MainLayout renders it for every normal route (Variant=Normal, anchored to
+  the left edge on the knob's own band), and Sleep.razor renders it inside the anti-burn-in drift
+  wrapper (Variant=Sleep, centered by that wrapper's flex layout).
+
+  The knobs are a vertical column to the LEFT of the LCD (handoff §9), so the bands run down the
+  720px axis rather than across the 1920px one. ENC-4 originally shipped the horizontal reading of
+  a since-corrected drawing; this is the 90° rotation of that, not a redesign.
 
   Geometry keys off the encoder index; content keys off the payload. The two are independent on
   purpose — the router's index-to-handler table is still the pre-ENC-5 one, so today a card can be
@@ -31,7 +36,7 @@
      alone. *@
   <div class="@RootClass(card)"
        style="@GeometryStyle(card)"
-       data-encoder-index="@ClampIndex(card.EncoderIndex)"
+       data-encoder-index="@FrontPanelGeometry.ForIndex(card.EncoderIndex).Index"
        role="status"
        aria-live="polite"
        aria-atomic="true">
@@ -95,9 +100,6 @@
   [Parameter]
   public EncoderHudVariant Variant { get; set; } = EncoderHudVariant.Normal;
 
-  // The cabinet has four knobs, so the viewport is divided into four.
-  private const int EncoderCount = 4;
-
   private bool _disposed;
 
   protected override void OnInitialized()
@@ -127,26 +129,42 @@
 
   /// <summary>
   /// Phases this build renders. Anything else renders nothing — the forward-compatibility contract
-  /// a newer API build relies on (plan §2.5).
+  /// a newer API build relies on (handoff §6.10).
   /// </summary>
   private static bool IsKnownPhase(string? phase) => EncoderHudService.IsKnownPhase(phase);
 
-  private static int ClampIndex(int encoderIndex) => Math.Clamp(encoderIndex, 0, EncoderCount - 1);
-
   private static int ClampPercent(int percent) => Math.Clamp(percent, 0, 100);
 
-  /// <summary>
-  /// Horizontal centre of the quarter this encoder owns, in CSS pixels of the 1920 px kiosk
-  /// viewport. 1920 / 4 = 480 wide per quarter, first centre at half of that.
-  /// </summary>
-  private static int QuarterCentre(int encoderIndex) => 240 + (ClampIndex(encoderIndex) * 480);
+  // Normal: the card is pinned to its knob's band. The inline style carries only the band centre;
+  // the left offset, the vertical centring on that centre and the viewport clamp are all in the
+  // .encoder-hud rule, which reads this one value. --encoder-band-y is not a design token (handoff
+  // §6.9 forbids adding any) — it is the one per-encoder number the stylesheet cannot know, the
+  // same standing --ring-turn has in that file.
+  //
+  // Sleep: no inline position at all — the drift wrapper in Sleep.razor centers it, and a
+  // fixed-position card could not ride that wrapper.
+  private string? GeometryStyle(EncoderHudDto card)
+    => Variant == EncoderHudVariant.Sleep
+      ? null
+      : $"--encoder-band-y: {FrontPanelGeometry.ForIndex(card.EncoderIndex).HudBandYPx}px;";
 
   private string RootClass(EncoderHudDto card)
   {
-    var classes = new List<string> { "encoder-hud", "snackbar-enter" };
+    var classes = new List<string> { "encoder-hud" };
     if (Variant == EncoderHudVariant.Sleep)
     {
+      // The sleep card is centred by the drift wrapper, not anchored to an edge, so it keeps the
+      // original bottom-anchored .snackbar-enter. Handoff §6.1 scopes the mirrored pair to the
+      // Normal variant only, and this is the half it deliberately leaves alone.
       classes.Add("encoder-hud--sleep");
+      classes.Add("snackbar-enter");
+    }
+    else
+    {
+      // The mirrored, left-anchored entrance — handoff §6.1's declared exception to its own
+      // "no new keyframes" rule, because a left-anchored card entering on translateY(100%) slides
+      // in from an edge it is not attached to.
+      classes.Add("encoder-hud-enter");
     }
     if (card.IsMuted)
     {
@@ -154,9 +172,4 @@
     }
     return string.Join(' ', classes);
   }
-
-  // Normal: pinned to the encoder's own quarter. Sleep: no inline position at all — the drift
-  // wrapper in Sleep.razor centers it, and a fixed-position card could not ride that wrapper.
-  private string? GeometryStyle(EncoderHudDto card)
-    => Variant == EncoderHudVariant.Sleep ? null : $"left: {QuarterCentre(card.EncoderIndex)}px;";
 }

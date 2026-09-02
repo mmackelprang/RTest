@@ -28,16 +28,18 @@ public enum EncoderHudPhase
 /// Event args for one HUD card update.
 /// </summary>
 /// <remarks>
-/// <see cref="EncoderIndex"/> decides <b>where</b> the card renders — the HUD divides the 1920 px
-/// viewport into quarters and puts the card in this encoder's own quarter, so the readout appears
-/// above the knob that produced it. The remaining fields decide <b>what</b> it says. The two are
+/// <see cref="EncoderIndex"/> decides <b>where</b> the card renders — the knobs are a vertical
+/// column to the left of the LCD, so the HUD anchors the card to the left edge of the viewport on
+/// this encoder's own band and the readout appears beside the knob that produced it, at the same
+/// height. The bands are <see cref="Radio.Core.Configuration.FrontPanelGeometry"/>, which is the
+/// single definition of the panel. The remaining fields decide <b>what</b> it says. The two are
 /// deliberately independent: the router's index-to-handler mapping is still the pre-ENC-5 one, so
 /// the card is in the right place before it says the right word, and it will say the right word
 /// without the HUD changing.
 /// </remarks>
 public class EncoderHudEventArgs : EventArgs
 {
-  /// <summary>Encoder index (0-3). Selects the screen quarter.</summary>
+  /// <summary>Encoder index (0-3), top of the knob column downwards. Selects the screen band.</summary>
   public int EncoderIndex { get; init; }
 
   /// <summary>Label row text, uppercased by CSS — e.g. "VOLUME", "TUNING", "SOURCE".</summary>

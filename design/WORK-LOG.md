@@ -4,6 +4,54 @@ Running log of development sessions, organized chronologically. Each entry captu
 
 ---
 
+## 2026-09-02 — ENC-4c: rotating the EncoderHud onto the right axis
+
+**PR:** #526 · **Branch:** `fix/hud-vertical-geometry`
+
+- `ENC-4` (below) shipped the HUD in horizontal quarters of the 1920 px width — correct for the knob
+  **row** handoff Rev 3 described, and wrong for the panel that was actually built. The owner's drawing
+  (`design/hardware/front-panel-layout_4.svg`) has four knobs in a **vertical column to the LEFT of the
+  LCD** on a uniform 29.63 mm pitch. Rev 4 corrected the geometry, Rev 5 closed every question the
+  rotation opened, and this is the 90° rotation of what shipped — no new component, copy or token.
+- Cards anchor to `left: 24px` and band down the 720 px axis at **90 / 270 / 450 / 630**: the measured
+  projections (93.05 / 271.02 / 448.98 / 626.95) deliberately rounded, because 3.05 px of worst-case
+  deviation is 0.508 mm on the panel while the nearest wrong band is 178 px away, and a number like
+  93.05 in a source file invites the next reader to re-measure it.
+- **One definition of the panel:** `Radio.Core.Configuration.FrontPanelGeometry` — the four bands, the
+  engraved names, the index→knob mapping and the drawing's px→mm scale, citing the drawing. §6.2 names
+  four surfaces that need those facts, so a recut should move one line rather than five.
+- **Vertical centring is clamped** to ≥ 8 px inside the viewport, and expressed on the independent
+  `translate` property rather than `transform` so the entrance animation cannot drop it. `margin-left:
+  -180px` had no vertical twin because card height varies — measured on the box, 178.5 / 92.5 / 113.5 px
+  for the volume, frequency and track cards. At 178.5 px the volume card centred on band 90 would leave
+  the top of the viewport, so the clamp is load-bearing rather than defensive.
+- **One mirrored keyframe pair** (`encoderHudSlideInLeft` / `-OutLeft`), which is handoff §6.1's declared
+  exception to its own "no new keyframes" rule, scoped to the Normal variant. The Sleep variant is placed
+  by the drift wrapper rather than by an edge and keeps `.snackbar-enter`. **Do not "correct" this back**
+  — it is declared, not drift. No new tokens; §6.9 is untouched.
+- **§6.10, the phase contract:** an unrecognised HUD phase is now *not holding*. It renders nothing
+  either way, so its only reachable effect was to suspend the 1500 ms dismissal timer and strand a card.
+  `"Value"` needed its own arm to keep preserving `IsHolding`, or a turn mid-hold would collapse the
+  progress ring — the obvious one-line edit would have fixed the stranding and broken the ring.
+  `EncoderHudServiceTests.UnknownPhase_LeavesIsHoldingAlone` was **updated, not deleted**.
+- Occlusion unchanged and accepted on every band (§6.2), with §6.7's mute invariant as the reason band 90
+  is safe. The router's index→handler table is still un-remapped; that is `ENC-5` / `ENC-7`.
+- **UAT** was driven through the kiosk's own CDP on `:9223` — the real Chrome on the real 1920×720 panel
+  — measuring `getBoundingClientRect()` for three card variants × four bands. 12/12 pass: left anchor
+  exact at 24.00 px, the clamp engaging on exactly bands 90 and 630 and nowhere else, and the
+  mid-animation rect identical to the resting rect, which is the `translate`-survives-`transform` claim
+  verified rather than asserted. 0 console errors.
+
+**⚠ Found during UAT, not introduced here, and it affects every CSS change on this appliance.** The
+kiosk was serving a **stale cached `design-system.css`** — 775 rules, missing the entire `ENC-4` block,
+i.e. a copy predating a deploy earlier the same day. `radio-web` serves the stylesheet with `ETag` and
+`Last-Modified` but **no `Cache-Control` header at all**, so Chrome applies heuristic freshness and can
+serve it stale without revalidating; the deploy's kiosk relaunch does not help, because the profile's
+HTTP cache survives the restart. **A CSS-only change can land, verify by SHA, and still not be on the
+panel.** Left for Planner as a candidate row rather than fixed as a drive-by on the deploy path.
+
+---
+
 ## 2026-09-02 — ENC-4: the EncoderHud
 
 **PRs:** implementation `507b0d3`/`eb4005e`/`bd762d1`/`29acc01` (landed on `main` without a PR — see below), review + fixes #519
