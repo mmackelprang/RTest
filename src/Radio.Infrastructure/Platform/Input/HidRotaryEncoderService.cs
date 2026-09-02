@@ -49,8 +49,8 @@ namespace Radio.Infrastructure.Platform.Input;
 ///
 /// <para>
 /// <b>Silence is the idle state, not a fault.</b> The device transmits only when the report contents
-/// change. A read that returns nothing means nobody is turning a knob; it must never be treated as a
-/// disconnect.
+/// change, so the read blocks until the next report rather than polling. An idle device is expected
+/// to produce nothing for long stretches and must never be treated as a disconnect.
 /// </para>
 ///
 /// <para>
@@ -72,6 +72,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService
 
   // The wire protocol lives in RotaryEncoderDecoder so it can be tested without hardware.
   private readonly RotaryEncoderDecoder _decoder = new();
+
 
   public HidRotaryEncoderService(
     ILogger<HidRotaryEncoderService> logger,
@@ -156,6 +157,16 @@ public class HidRotaryEncoderService : IRotaryEncoderService
         }
 
         stream = device.Open();
+        // Infinite is correct for an event-driven device that is silent at rest: the read simply
+        // waits for the next report rather than waking to discover nothing happened.
+        //
+        // ⚠ The consequence, recorded rather than papered over: cancellation cannot interrupt an
+        // in-flight read, so StopAsync falls back to its 5 s abandon path on a quiet device. A
+        // finite timeout would fix that, but only if HidSharp surfaces the expiry as
+        // TimeoutException — and if it surfaces it as IOException instead, the handler below would
+        // read it as a disconnect and tear the connection down once per timeout, forever. That is
+        // not verifiable from here, and it is ENC-0's territory (disappears-mid-session handling),
+        // so this keeps the behaviour that is known to work.
         stream.ReadTimeout = Timeout.Infinite;
 
         if (!_isConnected)
@@ -204,18 +215,21 @@ public class HidRotaryEncoderService : IRotaryEncoderService
     // Size the buffer from the device rather than a constant: report 0x04 (diagnostics) is 56 bytes
     // and larger than the 37-byte positions report, so a 37-byte buffer would truncate it and, on
     // some backends, error rather than skip.
-    int reportLength = Math.Max(
-      device.GetMaxInputReportLength(),
-      RotaryEncoderDecoder.PositionPayloadSize + 1);
-    var buffer = new byte[reportLength];
+    // Two different lengths, and conflating them defeats the feature detection. The DEVICE's
+    // reported length is what says whether this firmware sends movement accumulators; the BUFFER is
+    // floored to the positions-report size so a short-report device cannot cause an undersized
+    // buffer. Passing the floored value to BeginConnection would make `>= 37` true by construction
+    // and report movement support for firmware that has none.
+    int deviceReportLength = device.GetMaxInputReportLength();
+    var buffer = new byte[Math.Max(deviceReportLength, RotaryEncoderDecoder.PositionPayloadSize + 1)];
 
     // Re-baseline lives here, not at the call site, so a reconnect inside the read loop cannot skip
     // it. See RotaryEncoderDecoder.BeginConnection for why that matters.
-    _decoder.BeginConnection(reportLength);
+    _decoder.BeginConnection(deviceReportLength);
 
     _logger.LogInformation(
       "Encoder report length {Length} bytes (movement accumulators: {HasMovement})",
-      reportLength, _decoder.HasMovement);
+      deviceReportLength, _decoder.HasMovement);
 
     while (!cancellationToken.IsCancellationRequested)
     {
@@ -228,12 +242,6 @@ public class HidRotaryEncoderService : IRotaryEncoderService
       {
         // Device disconnected.
         return;
-      }
-      catch (TimeoutException)
-      {
-        // An idle device is silent by design — it transmits only when a report's contents change.
-        // A timeout is the normal resting state, not a fault, and must not drop the connection.
-        continue;
       }
 
       ParseReport(buffer, bytesRead);

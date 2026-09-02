@@ -30,6 +30,7 @@ internal sealed class RotaryEncoderDecoder
   private readonly int[] _movementLast = new int[EncoderCount];
   private readonly bool[] _buttonStates = new bool[EncoderCount];
   private readonly int[] _positions = new int[EncoderCount];
+  private readonly object _positionLock = new();
 
   /// <summary>
   /// Per-encoder movement since the previous report. Valid only when <see cref="Decode"/> returned
@@ -71,12 +72,26 @@ internal sealed class RotaryEncoderDecoder
     HasMovement = reportLength >= PositionPayloadSize + 1;
     IsBaselined = false;
     Array.Clear(_movementLast);
-    Array.Clear(_positions);
+    lock (_positionLock)
+    {
+      Array.Clear(_positions);
+    }
     Array.Clear(_buttonStates);
   }
 
-  /// <summary>Latest clamped position for an encoder, in device units.</summary>
-  public int GetPosition(int encoderIndex) => _positions[encoderIndex];
+  /// <summary>
+  /// Latest clamped position for an encoder, in device units. Locked to match the vendor reference
+  /// implementation: the read loop writes these while arbitrary threads read them. `int` access is
+  /// atomic so there is no torn-read risk, but the lock also gives a caller a consistent view
+  /// across encoders rather than a mix of two reports.
+  /// </summary>
+  public int GetPosition(int encoderIndex)
+  {
+    lock (_positionLock)
+    {
+      return _positions[encoderIndex];
+    }
+  }
 
   /// <summary>
   /// Decodes one report. Returns false for anything that is not a positions report — reports 0x02
@@ -93,9 +108,12 @@ internal sealed class RotaryEncoderDecoder
     }
 
     // Payload 0-15: clamped positions.
-    for (int i = 0; i < EncoderCount; i++)
+    lock (_positionLock)
     {
-      _positions[i] = BitConverter.ToInt32(data, 1 + (i * 4));
+      for (int i = 0; i < EncoderCount; i++)
+      {
+        _positions[i] = BitConverter.ToInt32(data, 1 + (i * 4));
+      }
     }
 
     // Payload 16: button bitmask, bit n = encoder n.
