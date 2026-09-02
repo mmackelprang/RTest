@@ -37,9 +37,19 @@ builder.Services.AddSingleton(configStoreNotifier);
 // in the systemd service file, journald assigns proper priority levels.
 // ALSA/JACK C library noise (written directly to stdout without a prefix)
 // gets the default priority, allowing filtering with `journalctl -p info`.
+//
+// LOG-11: the console sink is restricted to Warning. Under systemd, stdout is captured by
+// journald, so an unrestricted console sink meant every Information line was written twice — once
+// to the journal and once to the file sink — on a box where log volume is an audio problem, not a
+// disk problem. Dropping the sink outright was the other option in the row and is the wrong half:
+// it would take the journald priority path with it, and `journalctl -p` is how this box gets
+// triaged remotely. Warnings and errors still reach the journal; the file keeps full Information
+// detail.
 Log.Logger = new LoggerConfiguration()
   .ReadFrom.Configuration(builder.Configuration)
-  .WriteTo.Async(a => a.Console(new SystemdConsoleFormatter()))
+  .WriteTo.Async(a => a.Console(
+    new SystemdConsoleFormatter(),
+    restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning))
   .CreateLogger();
 
 builder.Host.UseSerilog();
@@ -169,7 +179,12 @@ app.MapHealthChecks("/health");
 try
 {
   // Get log file path from configuration
-  var logPath = builder.Configuration["Serilog:WriteTo:1:Args:path"] ?? "./logs/radio-.txt";
+  // The file sink is nested inside the Async wrapper, so its path lives at
+  // WriteTo:0:Args:configure:0:Args:path. This previously read WriteTo:1:Args:path — an index
+  // that does not exist and a shape that never matched — so it always fell through to the
+  // default. The default happened to be correct, which is why nothing noticed.
+  var logPath = builder.Configuration["Serilog:WriteTo:0:Args:configure:0:Args:path"]
+    ?? "./logs/radio-.txt";
   var logDirectory = Path.GetDirectoryName(Path.GetFullPath(logPath.Replace(".txt", DateTime.Now.ToString("yyyyMMdd") + ".txt")));
 
   // Print startup header to console
