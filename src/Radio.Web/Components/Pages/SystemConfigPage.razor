@@ -1246,8 +1246,10 @@
                   {
                     <RadzenPassword @bind-Value="_googleApiKeyInput" Placeholder="@GoogleApiKeyPlaceholder" Style="flex:1" />
                   }
+                  @* Not disabled on an empty box: Radzen inputs write their bound value on change,
+                     i.e. on blur, so a disabled-when-empty button would swallow the first click -
+                     the blur that fills the field is the same interaction that would enable it. *@
                   <RadzenButton Icon="@(_showGoogleApiKey ? "visibility_off" : "visibility")" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light"
-                                Disabled="@(string.IsNullOrEmpty(_googleApiKeyInput))"
                                 Click="@(() => _showGoogleApiKey = !_showGoogleApiKey)" />
                   <RadzenButton Icon="backspace" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
                                 Disabled="@(_isSaving || !IsSecretStored(_ttsSecretStatus.GoogleAPIKey))"
@@ -1271,8 +1273,8 @@
                   {
                     <RadzenPassword @bind-Value="_azureApiKeyInput" Placeholder="@AzureApiKeyPlaceholder" Style="flex:1" />
                   }
+                  @* See the note on the Google toggle: not disabled when the box is empty. *@
                   <RadzenButton Icon="@(_showAzureApiKey ? "visibility_off" : "visibility")" Variant="Variant.Text" ButtonStyle="ButtonStyle.Light"
-                                Disabled="@(string.IsNullOrEmpty(_azureApiKeyInput))"
                                 Click="@(() => _showAzureApiKey = !_showAzureApiKey)" />
                   <RadzenButton Icon="backspace" Variant="Variant.Text" ButtonStyle="ButtonStyle.Danger" Size="ButtonSize.Small"
                                 Disabled="@(_isSaving || !IsSecretStored(_ttsSecretStatus.AzureAPIKey))"
