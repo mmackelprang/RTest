@@ -67,7 +67,7 @@ RadioConsole.sln
 ├── src/Radio.AudioAnalysis     # Standalone NuGet: waveform comparison, THD, silence detection
 ├── src/RTLSDRCore              # Standalone NuGet: RTL-SDR software-defined radio library
 ├── src/Radio.API               # REST controllers, SignalR hubs, middleware
-├── src/Radio.Web               # Blazor Server UI (MudBlazor Material 3)
+├── src/Radio.Web               # Blazor Server UI (Radzen.Blazor)
 ├── tests/                      # 10 xUnit test projects (~1,416 tests)
 │   ├── Radio.Metrics.Tests         # Metrics package tests
 │   ├── Radio.Configuration.Tests   # Configuration package tests

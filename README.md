@@ -19,7 +19,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
 | 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, Swagger |
-| 9 - UI | ✅ Completed | 12-page Blazor Server UI, MudBlazor Material 3, shared components |
+| 9 - UI | ✅ Completed | 12-page Blazor Server UI, Radzen.Blazor, shared components |
 | 10 - Testing | ✅ Substantially Complete | ~1,416 tests across 10 projects (unit, integration, E2E) |
 | 11 - Documentation | 🔄 In Progress | Design docs, decision log, work log (user manual pending) |
 | 12 - Deployment | ✅ Substantially Complete | Dual-service systemd, Pi deploy scripts, tested on hardware |
@@ -90,7 +90,7 @@ RadioConsole/
 │   │   ├── Configuration/       # DeviceOptionsResolver, PreferencesPersistence
 │   │   └── DependencyInjection/ # Service registration extensions
 │   ├── Radio.API/               # 16 REST controllers, 2 SignalR hubs, middleware
-│   └── Radio.Web/               # 12-page Blazor Server UI (MudBlazor Material 3)
+│   └── Radio.Web/               # 12-page Blazor Server UI (Radzen.Blazor)
 ├── tests/
 │   ├── Radio.Metrics.Tests/        # ★ 17 tests (metrics package)
 │   ├── Radio.Configuration.Tests/  # ★ 115 tests (configuration package)
