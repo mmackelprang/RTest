@@ -372,8 +372,10 @@ public enum EventPlaybackRejection
 
   /// <summary>
   /// The media identifier carries a character outside the allow-list <c>[A-Za-z0-9._~-]</c>.
-  /// Appended deliberately at the end: the numeric values of the members above it are what the
-  /// existing tests and any future wire mapping pin.
+  /// Appended deliberately at the END so that no member above it is renumbered. Nothing today
+  /// depends on the numeric values — every reference in this repo is by name — but a rejection
+  /// reason is the kind of thing that ends up in a log line or on the wire, and inserting into
+  /// the middle of the list is how that quietly stops meaning what it used to.
   /// </summary>
   MediaIdHasIllegalCharacter
 }
