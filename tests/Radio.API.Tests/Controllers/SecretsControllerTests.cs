@@ -245,26 +245,27 @@ public class SecretsControllerTests : IClassFixture<CustomWebApplicationFactory<
   }
 
   [Fact]
-  public async Task PostSectionSecrets_StoresValue_ThatMerelyLooksLikeAMask()
+  public async Task PostSectionSecrets_DeclinesAMaskShapedValue_EvenWhenItIsNotThisSecretsOwnMask()
   {
-    // The guard compares against the mask of the stored value, not against a pattern. A value
-    // containing an ellipsis, or one made only of asterisks, is a legitimate secret unless it is
-    // this secret's own current mask - rejecting it by shape would be the same silent data
-    // problem from the other direction.
-    await PostSectionAsync(new Dictionary<string, string> { ["AzureAPIKey"] = "fake-azure-key-for-tests-0006" });
+    // The guard tests the submitted string's shape, so it declines a mask that does not correspond
+    // to the value stored now. That is the point: a form loaded before the secret changed
+    // elsewhere posts a stale mask, and a guard that compared the two would let it through and
+    // destroy the newer secret. The cost - a genuine secret shaped exactly like a mask cannot be
+    // saved here - is the safe direction, and is pinned by this test rather than left implicit.
+    const string original = "fake-azure-key-for-tests-0006";
+    await PostSectionAsync(new Dictionary<string, string> { ["AzureAPIKey"] = original });
 
-    const string looksLikeAMask = "wxyz...abcd";
-    var result = await PostSectionAsync(new Dictionary<string, string> { ["AzureAPIKey"] = looksLikeAMask });
+    var stale = await PostSectionAsync(new Dictionary<string, string> { ["AzureAPIKey"] = "wxyz...abcd" });
 
-    Assert.Equal(1, result.StoredCount);
-    Assert.Equal(looksLikeAMask, await _secrets.GetSecretAsync(AzureKeyTag));
+    Assert.Equal(0, stale.StoredCount);
+    Assert.Equal(1, stale.UnchangedCount);
+    Assert.Equal(original, await _secrets.GetSecretAsync(AzureKeyTag));
 
-    // Same again for the short-form lookalike, against a secret whose own mask is the ellipsis form.
-    await PostSectionAsync(new Dictionary<string, string> { ["AzureAPIKey"] = "fake-azure-key-for-tests-0007" });
+    // Same for the short form, against a secret whose own mask is the ellipsis form.
     var asterisks = await PostSectionAsync(new Dictionary<string, string> { ["AzureAPIKey"] = "********" });
 
-    Assert.Equal(1, asterisks.StoredCount);
-    Assert.Equal("********", await _secrets.GetSecretAsync(AzureKeyTag));
+    Assert.Equal(0, asterisks.StoredCount);
+    Assert.Equal(original, await _secrets.GetSecretAsync(AzureKeyTag));
   }
 
   // ================= Blank means unchanged, deletion is explicit =================
@@ -279,6 +280,25 @@ public class SecretsControllerTests : IClassFixture<CustomWebApplicationFactory<
     await PostSectionAsync(new Dictionary<string, string> { ["GoogleAPIKey"] = original });
 
     var result = await PostSectionAsync(new Dictionary<string, string> { ["GoogleAPIKey"] = "" });
+
+    Assert.Equal(0, result.StoredCount);
+    Assert.Equal(1, result.UnchangedCount);
+    Assert.Equal(original, await _secrets.GetSecretAsync(GoogleTag));
+  }
+
+  [Theory]
+  [InlineData(" ")]
+  [InlineData("   ")]
+  [InlineData("\t")]
+  public async Task PostSectionSecrets_LeavesSecretUnchanged_WhenValueIsWhitespaceOnly(string whitespace)
+  {
+    // Whitespace is not blank to string.IsNullOrEmpty and is not mask-shaped, so before the blank
+    // check was widened it fell through to the write and replaced a live credential with a space -
+    // the same silent overwrite, reachable from Swagger or curl rather than from the Blazor page.
+    const string original = "fake-google-key-for-tests-0011";
+    await PostSectionAsync(new Dictionary<string, string> { ["GoogleAPIKey"] = original });
+
+    var result = await PostSectionAsync(new Dictionary<string, string> { ["GoogleAPIKey"] = whitespace });
 
     Assert.Equal(0, result.StoredCount);
     Assert.Equal(1, result.UnchangedCount);

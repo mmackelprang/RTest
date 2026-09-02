@@ -16,8 +16,10 @@ namespace Radio.API.Controllers;
 /// <para>
 /// The write contract is therefore "send only what changed":
 /// <list type="bullet">
-///   <item>a value equal to the mask of the value already stored is treated as unchanged, and not written;</item>
-///   <item>an absent or blank property is treated as unchanged, and not written;</item>
+///   <item>a value shaped like a mask is treated as unchanged, and not written.
+///         <see cref="LooksLikeMask"/> is the authority on that rule and on why it tests shape
+///         rather than comparing against what is stored; this list does not restate it.</item>
+///   <item>an absent, blank or whitespace-only property is treated as unchanged, and not written;</item>
 ///   <item>deletion is explicit - <see cref="DeleteSectionSecret"/> for one property,
 ///         <see cref="DeleteSectionSecrets"/> for a whole section.</item>
 /// </list>
@@ -33,6 +35,18 @@ namespace Radio.API.Controllers;
 [Produces("application/json")]
 public class SecretsController : ControllerBase
 {
+  /// <summary>Mask shown for a secret short enough that partial disclosure would reveal much of it.</summary>
+  private const string FullMask = "********";
+
+  /// <summary>Longest secret rendered as <see cref="FullMask"/> rather than partially.</summary>
+  private const int MaskShortValueLength = 8;
+
+  /// <summary>Clear-text characters kept at each end of a partially masked secret.</summary>
+  private const int MaskEdgeLength = 4;
+
+  /// <summary>Separator between the two clear-text runs of a partially masked secret.</summary>
+  private const string MaskSeparator = "...";
+
   private readonly ISecretsProvider _secrets;
   private readonly ILogger<SecretsController> _logger;
 
@@ -81,8 +95,8 @@ public class SecretsController : ControllerBase
 
   /// <summary>
   /// Stores secrets for a section. Each property is mapped to a well-known tag. Properties that are
-  /// blank, or that carry the mask of the secret already stored, are left untouched; see the class
-  /// remarks for the full write contract.
+  /// blank, or that carry a masked value, are left untouched; see the class remarks for the full
+  /// write contract.
   /// </summary>
   /// <param name="section">The section name.</param>
   /// <param name="data">Key-value pairs matching section property names.</param>
@@ -113,28 +127,32 @@ public class SecretsController : ControllerBase
         continue;
       }
 
-      if (string.IsNullOrEmpty(value))
+      if (string.IsNullOrWhiteSpace(value))
       {
         // Blank means "keep what is stored". Deleting is an explicit request against one of the
         // DELETE routes, so that a client cannot erase a secret merely by submitting a form.
+        //
+        // Whitespace counts as blank deliberately. No secret here is a run of spaces, and a client
+        // that does not trim - Swagger, curl, anything not the Blazor page - would otherwise fall
+        // through to the write below and replace a live credential with " ": the same silent,
+        // unrecoverable overwrite this controller exists to prevent, through a different door.
         _logger.LogInformation(
           "Secret '{Tag}' in section '{Section}' was submitted blank; left unchanged", tag, section);
         unchangedCount++;
         continue;
       }
 
-      var stored = await _secrets.GetSecretAsync(tag);
-
-      // The only value a client can echo back from GET is the mask, so a submitted value that is
-      // byte-identical to the mask of what is already stored is a round-trip, not an edit. The
-      // comparison is against MaskValue(stored) specifically - never a loose pattern such as
-      // "contains an ellipsis" - so a genuine secret that happens to contain "..." or a run of
-      // asterisks is still stored normally.
-      if (!string.IsNullOrEmpty(stored) && string.Equals(value, MaskValue(stored), StringComparison.Ordinal))
+      if (LooksLikeMask(value))
       {
-        _logger.LogInformation(
-          "Secret '{Tag}' in section '{Section}' was submitted as its own mask; left unchanged", tag, section);
+        // GetSectionSecrets returns masked values and the config UI binds them straight into
+        // its inputs, so a field the user did not edit posts its own mask back. Storing that
+        // would replace the real secret with its display form — an unrecoverable overwrite,
+        // because the plaintext is not kept anywhere else.
         unchangedCount++;
+        _logger.LogInformation(
+          "Secret '{Tag}' for section '{Section}' was posted unchanged (masked); leaving the stored value intact",
+          tag,
+          section);
         continue;
       }
 
@@ -232,10 +250,28 @@ public class SecretsController : ControllerBase
   }
 
   /// <summary>
-  /// Produces the masked form of a secret. Both the read path and the round-trip guard in
-  /// <see cref="SetSectionSecrets"/> call this one method deliberately: the guard only works while
-  /// it compares against exactly the string a client could have received from
-  /// <see cref="GetSectionSecrets"/>, so the two must not drift into separate implementations.
+  /// Determines whether a submitted value has the shape of a <see cref="MaskValue"/> result, and
+  /// is therefore a display form echoed back rather than a secret to store.
+  /// </summary>
+  /// <remarks>
+  /// The test deliberately looks at the submitted string alone rather than comparing it against
+  /// the secret currently stored. A comparison would only recognise a mask built from the value
+  /// stored *now*, so a form loaded before the secret changed elsewhere would post a mask that no
+  /// longer matches — and that stale mask would be written over the newer secret, which is the
+  /// same unrecoverable overwrite this guard exists to prevent.
+  ///
+  /// The cost is that a genuine secret shaped like a mask cannot be saved through this endpoint.
+  /// Declining to store is the safe direction, and the response reports it in
+  /// <c>unchangedCount</c>.
+  /// </remarks>
+  private static bool LooksLikeMask(string value) =>
+    value == FullMask ||
+    (value.Length == (MaskEdgeLength * 2) + MaskSeparator.Length &&
+     value.AsSpan(MaskEdgeLength, MaskSeparator.Length).SequenceEqual(MaskSeparator));
+
+  /// <summary>
+  /// Renders a secret for display. Every non-empty result satisfies <see cref="LooksLikeMask"/>,
+  /// so a value this method produced is never stored back as a secret.
   /// </summary>
   private static string MaskValue(string? value)
   {
@@ -244,11 +280,11 @@ public class SecretsController : ControllerBase
       return "";
     }
 
-    if (value.Length <= 8)
+    if (value.Length <= MaskShortValueLength)
     {
-      return "********";
+      return FullMask;
     }
 
-    return $"{value[..4]}...{value[^4..]}";
+    return $"{value[..MaskEdgeLength]}{MaskSeparator}{value[^MaskEdgeLength..]}";
   }
 }

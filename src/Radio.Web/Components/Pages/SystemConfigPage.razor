@@ -3241,17 +3241,26 @@
     }
   }
 
-  private Task ClearGoogleApiKeyAsync() => ClearSecretFieldAsync("GoogleAPIKey", "Google API key");
+  private Task ClearGoogleApiKeyAsync() =>
+    ClearSecretFieldAsync("GoogleAPIKey", "Google API key", () => { _googleApiKeyInput = ""; _showGoogleApiKey = false; });
 
-  private Task ClearAzureApiKeyAsync() => ClearSecretFieldAsync("AzureAPIKey", "Azure API key");
+  private Task ClearAzureApiKeyAsync() =>
+    ClearSecretFieldAsync("AzureAPIKey", "Azure API key", () => { _azureApiKeyInput = ""; _showAzureApiKey = false; });
 
-  private Task ClearAzureRegionAsync() => ClearSecretFieldAsync("AzureRegion", "Azure region");
+  private Task ClearAzureRegionAsync() =>
+    ClearSecretFieldAsync("AzureRegion", "Azure region", () => _azureRegionInput = "");
 
   /// <summary>
   /// Removes one stored secret. Clearing needs its own request because a blank box means
   /// "unchanged", so a single secret cannot be removed by saving the form.
   /// </summary>
-  private async Task ClearSecretFieldAsync(string property, string displayName)
+  /// <param name="property">The section property name, e.g. "AzureAPIKey".</param>
+  /// <param name="displayName">How the field is named to the user in dialogs and notifications.</param>
+  /// <param name="resetInput">
+  /// Empties that field's own box, and only that one. Text left in it after a clear would be sent
+  /// by the next Save, quietly re-setting the secret the user had just asked to remove.
+  /// </param>
+  private async Task ClearSecretFieldAsync(string property, string displayName, Action resetInput)
   {
     var confirmed = await DialogService.Confirm(
       $"Remove the stored {displayName}? This action cannot be undone.",
@@ -3270,6 +3279,7 @@
         // "no longer set" rather than "cleared": the API returns 200 whether or not there was
         // anything stored to remove, and this does not read the flag that would tell them apart.
         NotificationService.Notify(NotificationSeverity.Success, "Success", $"{displayName} is no longer set");
+        resetInput();
         await LoadSecretsAsync();
       }
       else
