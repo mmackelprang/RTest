@@ -45,4 +45,34 @@ public static class EncoderInteractionTimings
   /// </para>
   /// </summary>
   public const int HudCoalesceMs = 50;
+
+  /// <summary>
+  /// How long a selector overlay stays up with nothing committed, in milliseconds (handoff §6.5).
+  ///
+  /// <para>
+  /// Longer than a value card's 1500 ms because a list has to be read, and because dismissing it
+  /// costs nothing: nothing has been committed, so a timeout is not a lost action.
+  /// </para>
+  /// </summary>
+  public const int SelectorIdleDismissMs = 4000;
+
+  /// <summary>
+  /// How long a commit on an unavailable row flashes that row before the overlay returns to
+  /// previewing, in milliseconds (handoff §6.6 State C).
+  /// </summary>
+  public const int SelectorBlockedFlashMs = 1500;
+
+  /// <summary>
+  /// How long a failed switch stays on screen before dismissing, in milliseconds (§6.6 State E).
+  /// It has to outlast a glance across a room, because the whole point is that the user learns the
+  /// old source is still playing rather than concluding the knob is broken.
+  /// </summary>
+  public const int SelectorFailedMs = 4000;
+
+  /// <summary>
+  /// How many rows the selector overlay shows at once. Seven rows plus chrome is what fits the
+  /// 600 px content area (handoff §6.6); a longer list scrolls a window of this size around the
+  /// highlight.
+  /// </summary>
+  public const int SelectorVisibleRows = 7;
 }

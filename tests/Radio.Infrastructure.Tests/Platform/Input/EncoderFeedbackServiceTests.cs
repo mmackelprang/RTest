@@ -201,4 +201,86 @@ public class EncoderFeedbackServiceTests
     // 20 Hz. Pinned because the whole shape of this service follows from it.
     Assert.Equal(50, EncoderInteractionTimings.HudCoalesceMs);
   }
+
+  // --- ENC-5: the selector phases ------------------------------------------------------------
+
+  private static EncoderHudEventArgs Selector(
+    int index, EncoderHudPhase phase, int highlight = 0, bool withRows = true) => new()
+  {
+    EncoderIndex = index,
+    Label = "SOURCE",
+    Phase = phase,
+    HighlightIndex = highlight,
+    Rows = withRows
+      ? [new EncoderSelectorRow { Id = "band:FM", Primary = "FM" }]
+      : null,
+  };
+
+  [Fact]
+  public void SelectorPreview_IsCoalescedLikeAValue()
+  {
+    // A moving highlight is a sampled value, not an edge: the knob polls at 10 ms and every sample
+    // that reached SignalR would re-render a component tree on the Blazor circuit.
+    var time = new FakeTimeProvider();
+    using var svc = Create(time);
+    var seen = new List<EncoderHudEventArgs>();
+    svc.Feedback += (_, e) => seen.Add(e);
+
+    svc.Publish(Selector(1, EncoderHudPhase.SelectorPreview, highlight: 0));
+    for (int i = 1; i <= 9; i++)
+    {
+      time.Advance(TimeSpan.FromMilliseconds(5));
+      svc.Publish(Selector(1, EncoderHudPhase.SelectorPreview, highlight: i));
+    }
+
+    time.Advance(TimeSpan.FromMilliseconds(60));
+
+    Assert.Equal(2, seen.Count);
+    Assert.Equal(0, seen[0].HighlightIndex);
+    // The pending slot is replaced rather than queued, so the highlight that lands is the last one.
+    Assert.Equal(9, seen[1].HighlightIndex);
+  }
+
+  [Fact]
+  public void SelectorCommitting_FlushesImmediately_AndClearsAPendingPreview()
+  {
+    // State D has no timeout on the client, so losing this edge would leave a spinner up forever.
+    var time = new FakeTimeProvider();
+    using var svc = Create(time);
+    var seen = new List<EncoderHudEventArgs>();
+    svc.Feedback += (_, e) => seen.Add(e);
+
+    svc.Publish(Selector(1, EncoderHudPhase.SelectorPreview, highlight: 0));
+    time.Advance(TimeSpan.FromMilliseconds(10));
+    svc.Publish(Selector(1, EncoderHudPhase.SelectorPreview, highlight: 3));
+    svc.Publish(Selector(1, EncoderHudPhase.SelectorCommitting, highlight: 3));
+
+    time.Advance(TimeSpan.FromMilliseconds(200));
+
+    Assert.Equal(2, seen.Count);
+    Assert.Equal(EncoderHudPhase.SelectorPreview, seen[0].Phase);
+    Assert.Equal(EncoderHudPhase.SelectorCommitting, seen[1].Phase);
+    // The preview that was pending when the commit arrived is dropped, not emitted afterwards.
+    Assert.DoesNotContain(seen.Skip(1), c => c.Phase == EncoderHudPhase.SelectorPreview);
+  }
+
+  [Fact]
+  public void SelectorPreview_AlwaysCarriesRows()
+  {
+    // Regression pin for the plan's §1.5: coalescing must pass the payload through untouched, so
+    // both the leading emit and the trailing flush still carry the full list. An overlay that
+    // received a highlight with no rows would render empty, and only while somebody was spinning.
+    var time = new FakeTimeProvider();
+    using var svc = Create(time);
+    var seen = new List<EncoderHudEventArgs>();
+    svc.Feedback += (_, e) => seen.Add(e);
+
+    svc.Publish(Selector(1, EncoderHudPhase.SelectorPreview, highlight: 0));
+    time.Advance(TimeSpan.FromMilliseconds(10));
+    svc.Publish(Selector(1, EncoderHudPhase.SelectorPreview, highlight: 1));
+    time.Advance(TimeSpan.FromMilliseconds(60));
+
+    Assert.Equal(2, seen.Count);
+    Assert.All(seen, c => Assert.NotNull(c.Rows));
+  }
 }

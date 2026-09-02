@@ -28,16 +28,16 @@ public sealed record RotaryEncoderMapping(int EncoderIndex, string TurnDescripti
 /// Maps rotary encoder events to audio actions.
 ///
 /// <para>
-/// <b>Index mapping: 0 = Volume, 1 = Tuning, 2 = Source, 3 = Visualization.</b> The cabinet's
-/// physical order is VOLUME / SOURCE / PRESETS / TUNING, so indices 1-3 do not yet match the
-/// engraving. That is deliberate and tracked: the remap lands with ENC-5 (the SOURCE overlay) and
-/// ENC-7 (PRESETS), because those rows introduce the handlers the remap would point at. Index 0 is
-/// VOLUME under both orders, so the knob with a safety hazard on it is already correct.
+/// <b>Index mapping: 0 = Volume, 1 = Source, 2 = Visualization, 3 = Tuning.</b> The cabinet reads
+/// VOLUME / SOURCE / PRESETS / TUNING, so three of the four now match the engraving. Index 2 does
+/// not: it holds the visualiser as a seat-warmer until ENC-7 puts PRESETS there. Leaving the old
+/// source cycler on index 2 instead would have given two adjacent knobs two divergent copies of the
+/// source selection, which is worse than a knob that does something harmless and unlabelled.
 /// </para>
 ///
 /// <para>
-/// The HUD's geometry keys off the encoder index, not off this table, so a card already appears
-/// above the knob that was turned. Remapping later changes what the card says, not where it is.
+/// The HUD's geometry keys off the encoder index the event arrived on, not off this table, so a
+/// card always appears beside the knob that was turned.
 /// </para>
 ///
 /// Uses Func&lt;IAudioManager&gt; for deferred resolution to break circular DI.
@@ -51,33 +51,26 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly VisualizationModeService _vizModeService;
   private readonly IOptionsMonitor<RotaryEncoderOptions> _options;
   private readonly IEncoderFeedbackSink _hud;
+  private readonly SourceSelectorService _sourceSelector;
   private readonly EncoderLongPressGesture _gesture;
   private bool _disposed;
 
-  // Primary source types for cycling (Encoder 2)
-  private static readonly AudioSourceType[] PrimarySourceTypes =
-  [
-    AudioSourceType.Radio,
-    AudioSourceType.FilePlayer,
-    AudioSourceType.Bluetooth,
-    AudioSourceType.Vinyl,
-    AudioSourceType.GenericUSB
-  ];
-  private int _currentSourceIndex;
-
   private readonly RotaryEncoderMapping[] _mapping;
-  private readonly Action<int>[] _turnHandlers;
-  private readonly Action[] _pressHandlers;
+  // (index, delta) rather than ENC-8's (delta): ENC-5 threads the encoder index the event actually
+  // arrived on into every handler, so a HUD card cannot be published against a hard-coded index and
+  // land beside the wrong knob after a remap.
+  private readonly Action<int, int>[] _turnHandlers;
+  private readonly Action<int>[] _pressHandlers;
 
   /// <summary>
   /// What each knob currently does. <b>This is the table the router dispatches through</b>, not a
   /// description kept alongside it, so the Settings page cannot disagree with the code.
   ///
   /// <para>
-  /// ⚠ Indices 1-3 do not match the cabinet engraving (VOLUME / SOURCE / PRESETS / TUNING) yet. That
-  /// is deliberate and tracked: ENC-5 and ENC-7 own the remap because they introduce the handlers it
-  /// would point at. Editing this array is how that remap is made — there is no second place to
-  /// change.
+  /// ⚠ <b>Index 2 is the one entry that does not match the cabinet engraving</b>
+  /// (VOLUME / SOURCE / PRESETS / TUNING). ENC-5 remapped indices 1 and 3 onto SOURCE and TUNING and
+  /// parked the visualiser on 2; ENC-7 replaces it with PRESETS. Editing this array is how that
+  /// remap is made — there is no second place to change.
   /// </para>
   /// </summary>
   public IReadOnlyList<RotaryEncoderMapping> Mapping => _mapping;
@@ -89,6 +82,7 @@ public class RotaryEncoderActionRouter : IDisposable
     VisualizationModeService vizModeService,
     IOptionsMonitor<RotaryEncoderOptions> options,
     IEncoderFeedbackSink hud,
+    SourceSelectorService sourceSelector,
     ISleepService? sleepService = null,
     TimeProvider? timeProvider = null)
   {
@@ -98,6 +92,7 @@ public class RotaryEncoderActionRouter : IDisposable
     _vizModeService = vizModeService;
     _options = options;
     _hud = hud;
+    _sourceSelector = sourceSelector;
     _sleepService = sleepService;
 
     // Index-ordered and index-addressed: entry n dispatches encoder n. Kept as three parallel arrays
@@ -105,12 +100,12 @@ public class RotaryEncoderActionRouter : IDisposable
     _mapping =
     [
       new RotaryEncoderMapping(0, "Volume up / down", "Mute on / off"),
-      new RotaryEncoderMapping(1, "Tune up / down (radio sources)", "Start / stop station scan"),
-      new RotaryEncoderMapping(2, "Preview the next / previous source", "Switch to the previewed source"),
-      new RotaryEncoderMapping(3, "Cycle visualization mode", "Visualization on / off"),
+      new RotaryEncoderMapping(1, "Preview a source or radio band", "Switch to the highlighted entry"),
+      new RotaryEncoderMapping(2, "Cycle visualization mode", "Visualization on / off"),
+      new RotaryEncoderMapping(3, "Tune up / down (radio sources)", "Start / stop station scan"),
     ];
-    _turnHandlers = [HandleVolumeTurn, HandleTuningTurn, HandleSourceTurn, HandleVizTurn];
-    _pressHandlers = [HandleVolumePress, HandleTuningPress, HandleSourcePress, HandleVizPress];
+    _turnHandlers = [HandleVolumeTurn, HandleSourceTurn, HandleVizTurn, HandleTuningTurn];
+    _pressHandlers = [HandleVolumePress, HandleSourcePress, HandleVizPress, HandleTuningPress];
 
     // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
     // EncoderButtonEventArgs document.
@@ -122,6 +117,25 @@ public class RotaryEncoderActionRouter : IDisposable
 
     _encoderService.EncoderTurned += OnEncoderTurned;
     _encoderService.ButtonPressed += OnButtonPressed;
+    _encoderService.ConnectionChanged += OnConnectionChanged;
+  }
+
+  /// <summary>
+  /// Tears down an open selector overlay when the encoder disappears mid-session.
+  ///
+  /// <para>
+  /// ENC-0's notification policy: an overlay left on screen after the knob that drives it has gone
+  /// is a list nobody can navigate or commit. Dismissing it commits nothing.
+  /// </para>
+  /// </summary>
+  private void OnConnectionChanged(object? sender, EncoderConnectionEventArgs e)
+  {
+    if (e.IsConnected)
+    {
+      return;
+    }
+
+    _sourceSelector.Dismiss();
   }
 
   private void OnEncoderTurned(object? sender, EncoderTurnedEventArgs e)
@@ -137,9 +151,13 @@ public class RotaryEncoderActionRouter : IDisposable
       // Dispatch through the same table the Settings page renders (ENC-8 §2.5). A parallel switch
       // beside it would be a second source of truth wearing one name, and it would drift on the
       // first remap.
+      //
+      // The index the event arrived on is passed to the handler rather than baked into it, so a card
+      // cannot end up beside a knob other than the one that was turned the next time this table is
+      // reassigned.
       if (e.EncoderIndex >= 0 && e.EncoderIndex < _turnHandlers.Length)
       {
-        _turnHandlers[e.EncoderIndex](e.Delta);
+        _turnHandlers[e.EncoderIndex](e.EncoderIndex, e.Delta);
       }
     }
     catch (Exception ex)
@@ -179,7 +197,7 @@ public class RotaryEncoderActionRouter : IDisposable
       // Same table, same reason as OnEncoderTurned.
       if (index >= 0 && index < _pressHandlers.Length)
       {
-        _pressHandlers[index]();
+        _pressHandlers[index](index);
       }
     }
     catch (Exception ex)
@@ -191,9 +209,9 @@ public class RotaryEncoderActionRouter : IDisposable
   private void OnLongPress(int index)
   {
     // Two long-press consumers exist in the spec: VOLUME -> Standby and PRESETS -> Save. Only the
-    // first is wired here. PRESETS is ENC-7's action, and encoder 2 still drives the source handler
-    // under the pre-ENC-5 index mapping - registering a save on it now would put a preset write
-    // behind a knob the cabinet does not label PRESETS yet.
+    // first is wired here. PRESETS is ENC-7's action, and encoder 2 currently drives the visualiser
+    // - registering a save on it now would put a preset write behind a knob that still cycles
+    // visualisation modes.
     if (index != 0)
     {
       return;
@@ -306,7 +324,7 @@ public class RotaryEncoderActionRouter : IDisposable
 
   // --- Encoder 0: Volume ---
 
-  private void HandleVolumeTurn(int delta)
+  private void HandleVolumeTurn(int index, int delta)
   {
     var mgr = _audioManagerFactory();
     var opts = _options.CurrentValue;
@@ -350,23 +368,23 @@ public class RotaryEncoderActionRouter : IDisposable
     mgr.MasterVolume = newVolume;
     _logger.LogDebug("Volume: {Volume:P0}", newVolume);
 
-    PublishHud(0, "VOLUME", b =>
+    PublishHud(index, "VOLUME", b =>
     {
       b.VolumePercent = (int)Math.Round(newVolume * 100f);
       b.IsMuted = mgr.IsMuted;
     });
   }
 
-  private void HandleVolumePress()
+  private void HandleVolumePress(int index)
   {
     var mgr = _audioManagerFactory();
     mgr.IsMuted = !mgr.IsMuted;
     _logger.LogInformation("Mute toggled: {IsMuted}", mgr.IsMuted);
   }
 
-  // --- Encoder 1: Tuning ---
+  // --- Encoder 3: TUNING ---
 
-  private void HandleTuningTurn(int delta)
+  private void HandleTuningTurn(int index, int delta)
   {
     var mgr = _audioManagerFactory();
     if (mgr.ActiveSource is IRadioControl radio)
@@ -376,13 +394,13 @@ public class RotaryEncoderActionRouter : IDisposable
       // detent. At a factory x50 tier that is fifty, on a box where incidental load correlates with
       // audible distortion.
       int clamped = Clamp(delta, RotaryEncoderConfigDefaults.TuningClamp);
-      _ = StepRadioFrequencyAsync(radio, clamped);
+      _ = StepRadioFrequencyAsync(index, radio, clamped);
     }
     else
     {
       // The knob takes no action on a non-radio source - track skip is not wired to it. It still
       // publishes a card, because a knob that moves and shows nothing reads as broken hardware.
-      PublishHud(1, "TRACK", b =>
+      PublishHud(index, "TRACK", b =>
       {
         b.PrimaryText = mgr.ActiveSource?.Name;
         b.SecondaryText = "no track control on this source";
@@ -390,7 +408,7 @@ public class RotaryEncoderActionRouter : IDisposable
     }
   }
 
-  private async Task StepRadioFrequencyAsync(IRadioControl radio, int delta)
+  private async Task StepRadioFrequencyAsync(int index, IRadioControl radio, int delta)
   {
     try
     {
@@ -409,7 +427,7 @@ public class RotaryEncoderActionRouter : IDisposable
 
       // Published after the stepping finishes, so the card reads where the tuner actually landed
       // rather than where the detent aimed it.
-      PublishHud(1, "TUNING", b =>
+      PublishHud(index, "TUNING", b =>
       {
         b.PrimaryText = radio.CurrentFrequency.ToDisplayString();
         b.SecondaryText = radio.CurrentBand.ToString().ToUpperInvariant();
@@ -422,7 +440,7 @@ public class RotaryEncoderActionRouter : IDisposable
     }
   }
 
-  private void HandleTuningPress()
+  private void HandleTuningPress(int index)
   {
     var mgr = _audioManagerFactory();
     if (mgr.ActiveSource is IRadioControl radio)
@@ -440,58 +458,37 @@ public class RotaryEncoderActionRouter : IDisposable
     }
   }
 
-  // --- Encoder 2: Source ---
+  // --- Encoder 1: SOURCE ---
 
-  private void HandleSourceTurn(int delta)
+  private void HandleSourceTurn(int index, int delta)
   {
-    // ENC-3 clamp: one detent, one entry, always. Without it a fast spin walks the list by the
-    // acceleration multiplier and lands somewhere nobody aimed.
-    int clamped = Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp);
-
-    _currentSourceIndex = ((_currentSourceIndex + clamped) % PrimarySourceTypes.Length
-      + PrimarySourceTypes.Length) % PrimarySourceTypes.Length;
-
-    var sourceType = PrimarySourceTypes[_currentSourceIndex];
-    _logger.LogDebug("Source selection: {Source}", sourceType);
-
-    PublishHud(2, "SOURCE", b =>
-    {
-      b.PrimaryText = sourceType.ToString().ToUpperInvariant();
-      b.SecondaryText = "press to switch";
-    });
+    // ENC-3 clamp: one detent, one entry, always. Acceleration is disabled on this encoder in the
+    // device configuration too, so this bounds the window before a configuration push is verified
+    // rather than a value the device would normally send.
+    _sourceSelector.EncoderIndex = index;
+    _sourceSelector.Turn(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
   }
 
-  private void HandleSourcePress()
+  private void HandleSourcePress(int index)
   {
-    var sourceType = PrimarySourceTypes[_currentSourceIndex];
-    _logger.LogInformation("Switching to source: {Source}", sourceType);
-    _ = SwitchSourceAsync(sourceType);
+    // Set here as well as on turn: a press is the other way the overlay opens, and if only the turn
+    // path set it, a press-first interaction would render the overlay against whatever index was
+    // last turned.
+    _sourceSelector.EncoderIndex = index;
+    _sourceSelector.Press();
   }
 
-  private async Task SwitchSourceAsync(AudioSourceType sourceType)
-  {
-    try
-    {
-      var mgr = _audioManagerFactory();
-      await mgr.GetOrCreateSourceAsync(sourceType, switchToSource: true);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Error switching to source {Source}", sourceType);
-    }
-  }
+  // --- Encoder 2: PRESETS on the cabinet, the visualiser until ENC-7 puts PRESETS here ---
 
-  // --- Encoder 3: Visualization ---
-
-  private void HandleVizTurn(int delta)
+  private void HandleVizTurn(int index, int delta)
   {
     // ENC-3 clamp: the visualiser list is a selector like any other.
     _vizModeService.CycleMode(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
 
-    PublishHud(3, "VISUALIZER", b => b.PrimaryText = _vizModeService.CurrentMode.ToUpperInvariant());
+    PublishHud(index, "VISUALIZER", b => b.PrimaryText = _vizModeService.CurrentMode.ToUpperInvariant());
   }
 
-  private void HandleVizPress()
+  private void HandleVizPress(int index)
   {
     _vizModeService.ToggleEnabled();
   }
@@ -507,6 +504,7 @@ public class RotaryEncoderActionRouter : IDisposable
     _gesture.Dispose();
     _encoderService.EncoderTurned -= OnEncoderTurned;
     _encoderService.ButtonPressed -= OnButtonPressed;
+    _encoderService.ConnectionChanged -= OnConnectionChanged;
     GC.SuppressFinalize(this);
   }
 }

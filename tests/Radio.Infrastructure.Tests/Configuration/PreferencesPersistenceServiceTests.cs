@@ -24,6 +24,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
   private readonly Mock<IOptionsMonitor<GenericSourcePreferences>> _genericPrefsMock;
   private readonly Mock<IConfigurationManager> _configManagerMock;
   private readonly Mock<IAudioManager> _audioManagerMock;
+  private readonly Mock<IRadioBandMemory> _bandMemoryMock;
   private readonly Mock<IHostApplicationLifetime> _lifetimeMock;
   private readonly Mock<IConfigurationStore> _storeMock;
   private readonly CancellationTokenSource _cts;
@@ -38,6 +39,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
     _genericPrefsMock = new Mock<IOptionsMonitor<GenericSourcePreferences>>();
     _configManagerMock = new Mock<IConfigurationManager>();
     _audioManagerMock = new Mock<IAudioManager>();
+    _bandMemoryMock = new Mock<IRadioBandMemory>();
     _lifetimeMock = new Mock<IHostApplicationLifetime>();
     _storeMock = new Mock<IConfigurationStore>();
     _cts = new CancellationTokenSource();
@@ -83,6 +85,7 @@ public class PreferencesPersistenceServiceTests : IDisposable
       _genericPrefsMock.Object,
       _configManagerMock.Object,
       _audioManagerMock.Object,
+      _bandMemoryMock.Object,
       _lifetimeMock.Object);
   }
 

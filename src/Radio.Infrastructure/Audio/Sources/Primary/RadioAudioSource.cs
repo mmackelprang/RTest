@@ -172,6 +172,14 @@ public class RadioAudioSource : USBAudioSourceBase, Radio.Core.Interfaces.Audio.
   /// <remarks>RF320 defaults to FM band. Band cannot be changed programmatically.</remarks>
   public RadioBand CurrentBand => RadioBand.FM;
 
+  /// <summary>
+  /// FM only. Not a conservative guess — <see cref="SetBandAsync"/> on this device logs a warning
+  /// and returns without doing anything, because the RF320's band selector is a physical switch.
+  /// Reporting anything else here would put rows in the SOURCE overlay whose commit silently does
+  /// nothing.
+  /// </summary>
+  public IReadOnlyList<RadioBand> SupportedBands { get; } = [RadioBand.FM];
+
   /// <inheritdoc/>
   /// <remarks>RF320 does not support software band switching. Use physical controls.</remarks>
   public Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default)

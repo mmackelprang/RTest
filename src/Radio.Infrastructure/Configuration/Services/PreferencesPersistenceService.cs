@@ -25,6 +25,7 @@ public class PreferencesPersistenceService : BackgroundService
   private readonly IOptionsMonitor<GenericSourcePreferences> _genericSourcePreferences;
   private readonly IConfigurationManager _configurationManager;
   private readonly IAudioManager _audioManager;
+  private readonly IRadioBandMemory _bandMemory;
   private readonly IHostApplicationLifetime _lifetime;
   private readonly TimeSpan _savePeriod = TimeSpan.FromSeconds(30); // Save every 30 seconds
   private static readonly JsonSerializerOptions _serializerOptions = new()
@@ -41,6 +42,7 @@ public class PreferencesPersistenceService : BackgroundService
     IOptionsMonitor<GenericSourcePreferences> genericSourcePreferences,
     IConfigurationManager configurationManager,
     IAudioManager audioManager,
+    IRadioBandMemory bandMemory,
     IHostApplicationLifetime lifetime)
   {
     _logger = logger;
@@ -51,6 +53,7 @@ public class PreferencesPersistenceService : BackgroundService
     _genericSourcePreferences = genericSourcePreferences;
     _configurationManager = configurationManager;
     _audioManager = audioManager;
+    _bandMemory = bandMemory;
     _lifetime = lifetime;
   }
 
@@ -133,6 +136,11 @@ public class PreferencesPersistenceService : BackgroundService
         };
 
         await SavePreferenceSectionAsync(RadioPreferences.SectionName, livePrefs, cancellationToken);
+
+        // ENC-5. The flat LastFrequency above is one slot for every band; this records the same
+        // reading against the band it was taken on, so a band switch can return here.
+        await _bandMemory.SetAsync(radioControl.CurrentBand, radioControl.CurrentFrequency, cancellationToken);
+
         _logger.LogDebug(
           "Saved live radio preferences: Band={Band}, Frequency={Frequency}Hz, Step={Step}Hz",
           livePrefs.LastBand, livePrefs.LastFrequency, livePrefs.LastFrequencyStep);

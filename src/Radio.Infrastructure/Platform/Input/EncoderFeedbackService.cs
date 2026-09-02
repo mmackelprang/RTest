@@ -18,9 +18,10 @@ namespace Radio.Infrastructure.Platform.Input;
 /// </para>
 ///
 /// <para>
-/// <b>Only <see cref="EncoderHudPhase.Value"/> is coalesced.</b> The hold phases are discrete edges,
-/// not samples of a moving value, and dropping one would strand a progress ring on screen. They
-/// flush immediately and clear any pending value for that encoder.
+/// <b>Only sampled phases are coalesced</b> — a turning knob's value and a moving selector
+/// highlight (see <see cref="EncoderHudPhases.IsCoalescable"/>). The hold phases and the selector's
+/// commit phases are discrete edges, not samples, and dropping one would strand a progress ring or
+/// a spinner on screen. They flush immediately and clear any pending value for that encoder.
 /// </para>
 /// </summary>
 public sealed class EncoderFeedbackService : IEncoderFeedbackSink, IDisposable
@@ -69,7 +70,7 @@ public sealed class EncoderFeedbackService : IEncoderFeedbackSink, IDisposable
 
       int i = update.EncoderIndex;
 
-      if (update.Phase != EncoderHudPhase.Value)
+      if (!EncoderHudPhases.IsCoalescable(update.Phase))
       {
         // Discrete edge. Cancel anything pending for this encoder and let it through unchanged.
         CancelTimerLocked(i);

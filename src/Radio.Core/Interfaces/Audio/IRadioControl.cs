@@ -108,6 +108,26 @@ public interface IRadioControl
   RadioBand CurrentBand { get; }
 
   /// <summary>
+  /// The bands this tuner can actually be switched to.
+  ///
+  /// <para>
+  /// A <b>default implementation</b> rather than an abstract member, deliberately: adding an
+  /// abstract member here breaks every existing implementer and test double, and the honest default
+  /// for "a tuner we know nothing else about" is the two broadcast bands every consumer already
+  /// assumes. Implementations that know better override it, and <c>RadioAudioSource</c> (the RF320)
+  /// overrides it downward.
+  /// </para>
+  ///
+  /// <para>
+  /// This is a <i>capability</i> list, not an availability one. A band appearing here means the
+  /// tuner can tune it; whether it can right now — whether the hardware is present at all — is a
+  /// separate question the caller answers from <see cref="IsRunning"/> and from whether a radio
+  /// source exists.
+  /// </para>
+  /// </summary>
+  IReadOnlyList<RadioBand> SupportedBands => [RadioBand.FM, RadioBand.AM];
+
+  /// <summary>
   /// Sets the radio band (AM, FM, WB, VHF, SW).
   /// </summary>
   /// <param name="band">The band to switch to.</param>

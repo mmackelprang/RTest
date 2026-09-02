@@ -40,6 +40,20 @@ public class RotaryEncoderRegistrationTests
   }
 
   [Fact]
+  public void AddRotaryEncoders_ResolvesTheSourceSelector()
+  {
+    // ENC-5. The selector takes Func<IAudioManager> and Func<IRadioBandMemory>, so it resolves out
+    // of this deliberately minimal provider without the audio graph or the configuration store.
+    // If this needs extra registrations, the deferral was dropped and the failure would reappear at
+    // service start on the appliance.
+    using var provider = BuildProvider();
+
+    using var selector = provider.GetRequiredService<SourceSelectorService>();
+
+    Assert.NotNull(selector);
+  }
+
+  [Fact]
   public void AddRotaryEncoders_ResolvesTheFeedbackSink()
   {
     using var provider = BuildProvider();
