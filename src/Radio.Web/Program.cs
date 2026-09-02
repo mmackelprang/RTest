@@ -564,7 +564,11 @@ if (!app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-app.UseStaticFiles();
+// OPS-5 - static assets revalidate on every request. Bare UseStaticFiles() sent ETag and
+// Last-Modified but no Cache-Control, which lets a browser invent its own freshness lifetime
+// and reuse a stale asset without asking. See StaticAssetCaching for the measured incident,
+// why this is deliberately uniform across every asset class, and why it is not a max-age.
+app.UseStaticFiles(StaticAssetCaching.CreateOptions());
 app.UseAntiforgery();
 
 // Build identity for deploy verification. Radio.Web's assembly has always carried the git SHA
