@@ -148,10 +148,11 @@ ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the patt
 
 ## Needs the owner
 
-1. **SEC-2** (P2) — the Azure TTS key slot appears to hold a **Google** key. The secrets endpoint
-   returns GoogleAPIKey and AzureAPIKey as byte-identical masked values, both beginning `AIza`, which
-   is Google prefix. Latent while `tts:defaultEngine` is Google; it will surface as an auth failure
-   that reads like a broken integration. Ten minutes of re-entry, or clear the slot.
+1. ~~**SEC-2** (P2) — the Azure TTS key slot appears to hold a **Google** key.~~ ✅ **CLOSED by
+   PR #523, and the diagnosis was wrong.** The two slots returned byte-identical masks because the
+   Secrets form was **saving the mask over the real secret** — a P0 in the write path, not a
+   mis-paste, and not an owner-side ten-minute fix. It destroyed the live Google TTS key on
+   2026-09-02. Guarded server-side now; the UI no longer puts a mask in an editable field.
 
 2. **ENC-15** (P0) — the touch-wake gate needs a human touching a blanked panel. It is a hard
    predecessor of the ENC-6 blanking half, and the punch list is blunt that it "will look skippable
