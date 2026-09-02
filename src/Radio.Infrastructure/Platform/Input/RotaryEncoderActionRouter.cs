@@ -130,7 +130,30 @@ public class RotaryEncoderActionRouter : IDisposable
     var mgr = _audioManagerFactory();
     var opts = _options.CurrentValue;
     var step = opts.VolumeStepPercent / 100f;
-    var newVolume = Math.Clamp(mgr.MasterVolume + delta * step, 0f, 1f);
+
+    // ENC-11 host clamp, and it is not defensive boilerplate.
+    //
+    // The device's movement already includes its own acceleration, so the host is handed
+    // `step_size x tier_multiplier` per detent and multiplies it by 2% again. On factory defaults —
+    // measured on this hardware as step_size 1 with a x50 tier — that is 50 x 2% = 100 points, a
+    // single click from silence to full, in a living room, from a knob a guest may be touching for
+    // the first time.
+    //
+    // There is a real window on every boot and after every reconnect during which the device runs
+    // whatever is in its flash, and this clamp is what makes that window safe. It tightens further
+    // until a configuration push has been verified, because until then "the device is on factory
+    // tiers" is a live possibility rather than a hypothetical.
+    int clamp = RotaryEncoderConfigVerifier.VolumeClampFor(_encoderService.ConfigStatus);
+    int clamped = Math.Clamp(delta, -clamp, clamp);
+
+    if (clamped != delta)
+    {
+      _logger.LogDebug(
+        "Volume movement {Delta} clamped to {Clamped} (config status {Status})",
+        delta, clamped, _encoderService.ConfigStatus);
+    }
+
+    var newVolume = Math.Clamp(mgr.MasterVolume + clamped * step, 0f, 1f);
     mgr.MasterVolume = newVolume;
     _logger.LogDebug("Volume: {Volume:P0}", newVolume);
   }

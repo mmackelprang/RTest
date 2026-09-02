@@ -87,6 +87,9 @@ public class HidRotaryEncoderService : IRotaryEncoderService
   // would otherwise log a warning and a stack trace every couple of seconds indefinitely.
   private bool _announcedUnauthorized;
 
+  /// <inheritdoc />
+  public RotaryEncoderConfigStatus ConfigStatus { get; private set; } = RotaryEncoderConfigStatus.Unknown;
+
   /// <summary>
   /// Upper bound on the absent-device rescan interval. Presence is discovered by enumerating HID
   /// devices, and doing that every <c>ReconnectDelayMs</c> forever against a device that may simply
@@ -325,6 +328,11 @@ public class HidRotaryEncoderService : IRotaryEncoderService
       "Encoder report length {Length} bytes (movement accumulators: {HasMovement})",
       deviceReportLength, _decoder.HasMovement);
 
+    // ENC-11. Push before reading, because until this succeeds the device may be on factory
+    // defaults — measured on the live hardware as tiers (150ms x5), (80ms x15), (40ms x50), which
+    // at the host's 2% per unit is one detent from silence to full.
+    await ApplyConfigurationAsync(stream, buffer, cancellationToken);
+
     while (!cancellationToken.IsCancellationRequested)
     {
       int bytesRead;
@@ -339,6 +347,138 @@ public class HidRotaryEncoderService : IRotaryEncoderService
       }
 
       ParseReport(buffer, bytesRead);
+    }
+  }
+
+  /// <summary>
+  /// Pushes the host's configuration and verifies it by read-back (ENC-11, handoff §7.5-§7.6).
+  ///
+  /// <para>
+  /// Order matters and is prescribed: reset positions, push config, ask for a read-back, then
+  /// compare. The reset is belt-and-braces — positions are unused under accumulator semantics, so it
+  /// is cheap, and it means a knob that has drifted for any reason starts from a known state.
+  /// </para>
+  ///
+  /// <para>
+  /// <b>The read-back is not politeness.</b> The device silently rejects configuration it does not
+  /// like, so a write that appears to succeed and did not is indistinguishable from one that worked
+  /// until the volume knob behaves as though it is on factory tiers.
+  /// </para>
+  /// </summary>
+  private async Task ApplyConfigurationAsync(HidStream stream, byte[] buffer, CancellationToken cancellationToken)
+  {
+    RotaryEncoderDeviceConfig desired = RotaryEncoderConfigDefaults.Create();
+    byte[] configReport = RotaryEncoderConfigCodec.Encode(desired);
+    byte[] resetPositions = RotaryEncoderConfigCodec.EncodeCommand(RotaryEncoderCommand.ResetPositions);
+    byte[] readConfig = RotaryEncoderConfigCodec.EncodeCommand(RotaryEncoderCommand.ReadConfig);
+
+    for (int attempt = 1; attempt <= RotaryEncoderConfigVerifier.TransientAttempts; attempt++)
+    {
+      IReadOnlyList<RotaryEncoderConfigMismatch>? mismatches = null;
+
+      try
+      {
+        stream.Write(resetPositions, 0, resetPositions.Length);
+        stream.Write(configReport, 0, configReport.Length);
+        stream.Write(readConfig, 0, readConfig.Length);
+
+        RotaryEncoderDeviceConfig? readBack =
+          await ReadConfigReportAsync(stream, buffer, cancellationToken);
+
+        if (readBack is not null)
+        {
+          mismatches = RotaryEncoderConfigVerifier.Compare(desired, readBack);
+        }
+      }
+      catch (IOException ex)
+      {
+        // The device went away mid-push. The read loop's reconnect path owns this; leaving the
+        // status un-Configured is what keeps the host's volume clamp tight in the meantime.
+        _logger.LogDebug(ex, "Encoder configuration push failed on attempt {Attempt}", attempt);
+        ConfigStatus = RotaryEncoderConfigStatus.Transient;
+        return;
+      }
+
+      ConfigStatus = RotaryEncoderConfigVerifier.Classify(mismatches, attempt);
+
+      if (ConfigStatus == RotaryEncoderConfigStatus.Configured)
+      {
+        _logger.LogInformation("Encoder configuration applied and verified on attempt {Attempt}", attempt);
+        return;
+      }
+
+      // Log only once the retry budget is spent. Attempts 1-3 are silent by design: a USB
+      // peripheral missing a report on the first try is ordinary, and reporting it teaches the
+      // owner to ignore the badge that matters.
+      if (attempt == RotaryEncoderConfigVerifier.TransientAttempts)
+      {
+        LogConfigurationFailure(mismatches);
+        return;
+      }
+
+      await Task.Delay(RotaryEncoderConfigVerifier.RetryBackoffMs[attempt - 1], cancellationToken);
+    }
+  }
+
+  /// <summary>
+  /// Waits for the device's configuration read-back, ignoring the position and diagnostics reports
+  /// that share the endpoint.
+  /// </summary>
+  private static async Task<RotaryEncoderDeviceConfig?> ReadConfigReportAsync(
+    HidStream stream, byte[] buffer, CancellationToken cancellationToken)
+  {
+    using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    timeout.CancelAfter(TimeSpan.FromSeconds(2));
+
+    try
+    {
+      while (!timeout.Token.IsCancellationRequested)
+      {
+        int read = await stream.ReadAsync(buffer, 0, buffer.Length, timeout.Token);
+        if (RotaryEncoderConfigCodec.TryDecode(buffer, read, out var config))
+        {
+          return config;
+        }
+      }
+    }
+    catch (OperationCanceledException)
+    {
+      // Timed out waiting. Treated as a mismatch rather than an error: from the host's point of
+      // view "the device did not confirm" and "the device confirmed something wrong" carry the same
+      // consequence, which is that the configuration is not trustworthy.
+    }
+
+    return null;
+  }
+
+  private void LogConfigurationFailure(IReadOnlyList<RotaryEncoderConfigMismatch>? mismatches)
+  {
+    if (mismatches is null)
+    {
+      _logger.LogWarning(
+        "Encoder did not confirm its configuration after {Attempts} attempts. Treating acceleration " +
+        "as absent and clamping volume movement to {Clamp} per event.",
+        RotaryEncoderConfigVerifier.TransientAttempts,
+        RotaryEncoderConfigVerifier.VolumeClampFor(ConfigStatus));
+      return;
+    }
+
+    string detail = string.Join(", ", mismatches.Select(m =>
+      m.EncoderIndex < 0 ? m.Field : $"enc{m.EncoderIndex}.{m.Field}"));
+
+    if (ConfigStatus == RotaryEncoderConfigStatus.HardFault)
+    {
+      _logger.LogError(
+        "Encoder rejected a SAFETY field: {Detail}. Volume movement is clamped to {Clamp} per event " +
+        "until a push verifies.",
+        detail, RotaryEncoderConfigVerifier.VolumeClampFor(ConfigStatus));
+    }
+    else
+    {
+      _logger.LogWarning(
+        "Encoder configuration not fully applied: {Detail}. Knobs stay live on host clamps and " +
+        "acceleration is treated as absent.",
+        detail);
     }
   }
 

@@ -1,3 +1,4 @@
+using Radio.Core.Configuration;
 namespace Radio.Core.Interfaces.Input;
 
 /// <summary>
@@ -8,6 +9,17 @@ public interface IRotaryEncoderService : IDisposable
 {
   /// <summary>Whether the encoder device is currently connected.</summary>
   bool IsConnected { get; }
+
+  /// <summary>
+  /// How far the last configuration push got on the current connection (ENC-11).
+  ///
+  /// <para>
+  /// Consumers must treat anything other than <see cref="RotaryEncoderConfigStatus.Configured"/> as
+  /// "the device may still be on factory defaults" — where one detent is worth 100 volume points —
+  /// and clamp accordingly rather than trusting the movement they are handed.
+  /// </para>
+  /// </summary>
+  RotaryEncoderConfigStatus ConfigStatus { get; }
 
   /// <summary>Start reading from the HID device.</summary>
   Task StartAsync(CancellationToken cancellationToken = default);
