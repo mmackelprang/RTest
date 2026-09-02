@@ -807,7 +807,7 @@ following the convention set by `radioconsole-gv-markread-readstate-request.md`.
 #### What Exists
 
 `FilePlayerAudioSource.cs:119` declares `public override bool IsSeekable => true;`.
-`SeekCoreAsync` (`:909-921`) range-checks its argument and then executes `_position = position;`.
+`SeekCoreAsync` (`:910-922`) range-checks its argument and then executes `_position = position;`.
 **It assigns a field.** No audio is repositioned — and `_position` is the very field `Position`
 (`:116`) reads back, so a seek reports success, moves the readout, and changes nothing audible.
 `/api/audio` and the UI therefore report a new position while the audio keeps playing from where
@@ -845,10 +845,11 @@ Include="SoundFlow" Version="1.*" />`, restored 1.4.1) and reports the current p
 seconds. `PHN-1a` Task 4 corrected the method and deleted the comment; the method had zero callers
 repo-wide, so the correction had no behavioural blast radius.
 
-Recorded here because the **pattern** is the point, not the fix: this is the fifth instance of the
-`CLAUDE.md` § Pre-Merge Review failure class — a comment asserting more than the code does — beside
-the four already catalogued there (`SoundFlowMasterMixer`'s "Removed audio source" log,
-`BluetoothAudioSource`'s unreachable `Playing` branch, `GoogleCastOutput._lifecycleLock`'s
-over-claimed guard, and 14a above). A wrong comment survives the code it described, and the next
+Recorded here because the **pattern** is the point, not the fix: this is the fifth known instance of
+the `CLAUDE.md` § Pre-Merge Review failure class — a comment asserting more than the code does.
+**Three** are catalogued in `CLAUDE.md` itself: `SoundFlowMasterMixer`'s "Removed audio source" log,
+`BluetoothAudioSource`'s unreachable `Playing` branch, and `GoogleCastOutput._lifecycleLock`'s
+over-claimed guard. The fourth is 14a above, found in the same `PHN-1a` planning pass and recorded
+here rather than there. A wrong comment survives the code it described, and the next
 engineer debugs the description instead of the behaviour: in this case it kept a working API
 looking unavailable for as long as anyone read the comment instead of the package.
