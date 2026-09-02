@@ -100,6 +100,21 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// Armed by <see cref="ArmConfigReadBack"/> immediately before a <c>0x03/0x04</c> read-config
   /// request, and completed by <see cref="TryClaimConfigReadBack"/> — which the read loop calls for
   /// every report — when the device answers. Null when no read-back is outstanding.
+  ///
+  /// <para>
+  /// <b>One slot, and the wire carries no correlation id</b>, so a reply is matched to whoever is
+  /// waiting rather than to the request that produced it. The bound on that is narrow and worth
+  /// stating rather than assuming: <see cref="_maintenanceLock"/> serialises whole operations, and
+  /// within one <see cref="ApplyConfigurationAsync"/> retry loop every attempt re-sends the same
+  /// <c>desired</c> bytes, so even a late reply is a reply about the configuration being verified.
+  /// The residual window is a reply arriving after its own timeout has expired <i>and</i> after a
+  /// different operation has armed a new waiter — it would then be compared against the wrong
+  /// <c>desired</c>. On a directly attached USB HID device whose round-trip is single-digit
+  /// milliseconds against a 2 s timeout that is not reachable in practice, and it self-corrects on
+  /// the next operation, so it is recorded rather than fixed: closing it properly needs a nonce in
+  /// the request echoed back in report <c>0x02</c>, which is a firmware protocol change. Logged in
+  /// <c>design/FUTURE-WORK.md</c>.
+  /// </para>
   /// </summary>
   private TaskCompletionSource<RotaryEncoderDeviceConfig>? _pendingConfigRead;
 
@@ -831,7 +846,11 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
       }
 
       await RecordFlashWriteAsync(flashed, ct);
-      _logger.LogInformation("Encoder configuration written to device flash");
+      // Says what happened and no more: the command went out. The protocol has no acknowledgement
+      // for SaveConfig (0x01), and ReadConfig (0x04) reads live RAM rather than flash, so nothing
+      // available here can confirm the device stored it.
+      _logger.LogInformation(
+        "Sent save-to-flash command (0x01) to the encoder; the device does not acknowledge it, so the write is not independently confirmed");
       return GetSnapshot();
     }
     finally

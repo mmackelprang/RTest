@@ -16,21 +16,22 @@ public class IntegrationsApiService
   /// Deserialization options for every call in this client.
   ///
   /// <para>
-  /// ⚠ <b>The enum converter is required, not defensive.</b> Radio.API registers a
-  /// <see cref="System.Text.Json.Serialization.JsonStringEnumConverter"/> in its MVC options
-  /// (<c>Program.cs</c>), so every enum crosses the wire as a <b>string</b> — <c>"NeverSaved"</c>,
-  /// not <c>0</c>. Without the matching converter here, <c>System.Text.Json</c> throws on the first
-  /// enum property, the call returns null, and the page renders a loading spinner for ever with the
-  /// only evidence in the Web service's log. That is exactly how ENC-8 shipped to the appliance
-  /// before UAT caught it: "The JSON value could not be converted to EncoderFlashStateDto. Path:
-  /// $.flash". The hermetic test rig fails every request, so null is the expected result there and
-  /// no unit test could see the difference.
+  /// There is deliberately <b>no enum converter here</b>. Radio.API serializes every enum as a
+  /// string, so a DTO enum arriving without <c>[JsonConverter(typeof(JsonStringEnumConverter))]</c>
+  /// on its own declaration throws and is swallowed by the caller's catch. That is fixed on the DTOs
+  /// instead, following the <c>ConfidenceBucket</c> precedent in <c>ApiModels.cs</c>, so the
+  /// attribute travels with the type and protects it however it is deserialized rather than being a
+  /// property of this one call site.
+  /// </para>
+  ///
+  /// <para>
+  /// <c>internal</c> so <c>EncoderProvisioningDeserializationTests</c> can run a real captured
+  /// response through these exact options rather than through a copy of them.
   /// </para>
   /// </summary>
   internal static readonly JsonSerializerOptions JsonOptions = new()
   {
-    PropertyNameCaseInsensitive = true,
-    Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+    PropertyNameCaseInsensitive = true
   };
 
   public IntegrationsApiService(HttpClient httpClient, ILogger<IntegrationsApiService> logger)

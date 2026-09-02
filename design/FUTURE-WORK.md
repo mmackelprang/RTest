@@ -71,6 +71,16 @@ diagnostics decoder in this build**, so the API returns *"the command was sent"*
 are zero"* — `ENC-14` should not upgrade that claim without a report `0x04` decoder to check it
 against.
 
+**4. The configuration read-back channel has no correlation id.** `_pendingConfigRead` in
+`HidRotaryEncoderService` is a single slot and the `0x03/0x04` request carries no nonce, so a reply is
+matched to whoever is waiting rather than to the request that produced it. `_maintenanceLock` serialises
+whole operations and every retry inside one push re-sends the same bytes, so the only residual window is
+a reply arriving after its own 2 s timeout **and** after a different operation has armed a new waiter,
+which would then compare it against the wrong `desired`. Not reachable in practice on a directly
+attached USB HID device with single-digit-millisecond round-trips, and self-correcting on the next
+operation. Closing it properly means adding a nonce to the request and echoing it in report `0x02` —
+a firmware protocol change, so it belongs in a future protocol revision rather than on its own.
+
 **Also not extracted: a shared `NotificationService` wrapper.** `ENC-8` adds several toasts and
 `ENC-12` adds one more, which makes a helper tempting. `RadioControlPanel.razor:1366` is the only
 `new NotificationMessage` in the tree; every other site uses the three-argument overload. Extracting a

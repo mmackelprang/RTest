@@ -3948,8 +3948,14 @@
 
       if (_encoderProvisioning?.Flash == EncoderFlashStateDto.MatchesCurrentDesign)
       {
-        NotificationService.Notify(NotificationSeverity.Success, "Saved to the knobs",
-          "The knobs will keep these settings even while the app restarts.");
+        // "Sent", not "stored": SaveConfig (0x01) has no acknowledgement either, and ReadConfig
+        // (0x04) reads live RAM rather than flash, so no read-back can confirm a flash write. What
+        // IS checkable is that the bytes sent are the verified bytes shown on screen, and that is
+        // all this claims. The staleness row above compares recorded bytes, which is a separate and
+        // genuinely checkable claim.
+        NotificationService.Notify(NotificationSeverity.Success, "Sent to the knobs",
+          "The settings above were verified and then sent to the knobs' memory. The device does not "
+          + "acknowledge flash writes, so this cannot be confirmed.");
       }
       else
       {
@@ -3999,7 +4005,7 @@
         sent ? NotificationSeverity.Info : NotificationSeverity.Error,
         sent ? "Counter reset sent" : "Not sent",
         sent
-          ? "Movement counters zeroed on the device."
+          ? "Sent to the knobs. The device does not acknowledge this command, so it cannot be confirmed."
           : "The knobs are not connected.");
     }
     finally

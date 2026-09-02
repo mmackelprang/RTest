@@ -1349,9 +1349,21 @@ public class EncoderHudDto
 }
 
 /// <summary>Whether the device agreed with one configured field (ENC-8). Mirrors <c>RotaryEncoderFieldAgreement</c>.</summary>
+/// <remarks>
+/// The converter attribute is required, not defensive - the same reason <see cref="ConfidenceBucket"/>
+/// carries one, and ENC-8 shipped this bug to the appliance before UAT caught it. Radio.API registers
+/// a global <c>JsonStringEnumConverter</c> (<c>Radio.API/Program.cs</c>), so this arrives as
+/// <c>"Agrees"</c>, not <c>1</c>. Without the attribute, deserialization of the whole snapshot throws,
+/// the client's catch returns null, and every card on the encoder Settings page renders a loading
+/// spinner for ever with the only evidence in the Web service's log.
+/// </remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum EncoderFieldAgreementDto { NotReadBack = 0, Agrees = 1, Differs = 2 }
 
 /// <summary>How the device's flash compares to what the app would push now (ENC-8). Mirrors <c>RotaryEncoderFlashState</c>.</summary>
+/// <remarks>See <see cref="EncoderFieldAgreementDto"/> - this is the property that actually threw:
+/// <c>The JSON value could not be converted to EncoderFlashStateDto. Path: $.flash</c>.</remarks>
+[JsonConverter(typeof(JsonStringEnumConverter))]
 public enum EncoderFlashStateDto { NeverSaved = 0, MatchesCurrentDesign = 1, DiffersFromCurrentDesign = 2 }
 
 /// <summary>One configured field, as designed and as the device reports it (ENC-8).</summary>

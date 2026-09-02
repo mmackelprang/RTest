@@ -108,7 +108,15 @@ public interface IRotaryEncoderProvisioning
   /// </summary>
   Task<RotaryEncoderProvisioningSnapshot> SaveToDeviceAsync(CancellationToken ct = default);
 
-  /// <summary>Zeroes the device's movement/diagnostic counters (<c>0x03/0x05</c>). No read-back exists for this.</summary>
+  /// <summary>
+  /// Requests that the device zero its movement/diagnostic counters (<c>0x03/0x05</c>).
+  ///
+  /// <para>
+  /// The protocol has <b>no acknowledgement</b> for this command and this build has no diagnostics
+  /// decoder, so the returned value reports only that the command was <b>sent</b> - never that the
+  /// counters are zero. Callers must not upgrade that claim in their own copy.
+  /// </para>
+  /// </summary>
   Task<bool> ResetCountersAsync(CancellationToken ct = default);
 
   /// <summary>
