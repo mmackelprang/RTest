@@ -1,6 +1,7 @@
 # HANDOFF — GA punch list for the cabinet install
 
-**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `TEST-3`, `LOG-1`, `LOG-11`, `ENC-1`, and `OPS-1` / `AUD-6` / `AUD-7` — the last three deployed and verified on the box.** The owner has read §7, closed `D23` / `D24` / `D9`, and
+**Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `TEST-3`, `LOG-1`, `LOG-11`, `OPS-1`, `AUD-6`, `AUD-7`, `SEC-1`, and the first half of the encoder arc — `ENC-0`/`ENC-0a`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-11`/`ENC-11a` — all deployed and verified on the box.**
+> **P0 remaining as of 2026-09-02: 9 rows.** `ENC-4` (next), `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-12`, `ENC-15` (owner-gated), `PHN-1`, `PHN-2`. `TTS-1`'s two P0 parts are both closed; part (iii) is P1. The owner has read §7, closed `D23` / `D24` / `D9`, and
 authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
 **Every decision is now closed** — `D25` was answered 2026-09-02 (full ADR-029 arc, no stopgap).
 Original state: planner-phase draft, nothing queued.
@@ -174,8 +175,8 @@ real time.
 
 ---
 
-**`ENC-0` — Auto-detect the encoders and degrade gracefully when they are absent.** ⭐ **RESCOPED BY THE
-OWNER 2026-08-19.** *Not queued. Effort: 1 day.*
+**`ENC-0` — Auto-detect the encoders and degrade gracefully when they are absent.** ✅ **SHIPPED 2026-09-02 as [#506](https://github.com/mmackelprang/RTest/pull/506), with the udev/permission half as [#507](https://github.com/mmackelprang/RTest/pull/507) (`ENC-0a`).** ⭐ **RESCOPED BY THE
+OWNER 2026-08-19.** *Effort was: 1 day.*
 
 > The owner's words: *"I'd like to auto-detect whether the encoders are available and have the system
 > respond appropriately."*
@@ -220,8 +221,8 @@ whether or not it finds one. Three cases, and all three are real on this hardwar
 
 ---
 
-**`ENC-1` — Rewrite the HID decoder for the protocol the device actually speaks.** ⚠ **THE HEADLINE DEFECT.**
-*Not queued. Effort: 2–3 days.*
+**`ENC-1` — Rewrite the HID decoder for the protocol the device actually speaks.** ✅ **SHIPPED 2026-09-02 as [#498](https://github.com/mmackelprang/RTest/pull/498).** ⚠ **WAS THE HEADLINE DEFECT.**
+*Effort was: 2–3 days.* The 37-byte report, the accumulator semantics and the re-baseline rule are all live; the rest of the arc now rests on a decoder that speaks the device's actual protocol.
 
 `HidRotaryEncoderService` decodes an **8-byte report: bytes 1–4 as `sbyte` deltas, byte 5 as a button
 bitmask**. The device (`github.com/mmackelprang/RotaryUsb`, Pi Pico, 4 detented encoders each with a shaft
@@ -285,8 +286,8 @@ Scope:
 
 ---
 
-**`ENC-2` — The per-encoder config model and the `0x02` / `0x03` / `0x04` report plumbing.**
-*Not queued. Effort: 2–3 days.* ⚠ **Rescoped by Designer Rev 2** — this is now the transport and the data
+**`ENC-2` — The per-encoder config model and the `0x02` / `0x03` / `0x04` report plumbing.** ✅ **SHIPPED 2026-09-02 as [#504](https://github.com/mmackelprang/RTest/pull/504).**
+*Effort was: 2–3 days.* ⚠ **Rescoped by Designer Rev 2** — this is now the transport and the data
 model only. The runtime push/verify loop built on it is `ENC-11`; the calibration flow is `ENC-14`.
 
 **There is no host→device config path at all today.** `RotaryEncoderOptions` has 8 flat fields and cannot
@@ -331,8 +332,8 @@ factory-reset, or absent on a replacement Pico.
 
 ---
 
-**`ENC-3` — Host-side safety clamps, acceleration policy, and broadcast throttling.**
-*Not queued. Effort: 1–2 days.*
+**`ENC-3` — Host-side safety clamps, acceleration policy, and broadcast throttling.** ✅ **SHIPPED 2026-09-02 as [#511](https://github.com/mmackelprang/RTest/pull/511).**
+*Effort was: 1–2 days.* ⚠ **Two deviations from this row's text, both deliberate and both recorded in the PR.** (1) **The broadcast throttle was NOT added** — the row's justification is wrong. `VolumeChanged` has exactly one call site, inside a 500 ms change-detecting poller: 2 Hz, trailing-edge, final-value already. A second throttle would have been dead code guarding a path that cannot reach 100 Hz. (2) **The volume ramp was deliberately deferred** — it changes gain application in the audio callback path, where the long-running capture bug and the distortion reports live, and its acceptance criterion is whether it *sounds* right on a fast spin. It wants someone in the room. The clamps themselves — the actual safety content — all shipped.
 
 Four independent guards against the only genuine safety hazard this machine has, plus the throttle that
 keeps the knobs from becoming a new distortion source.
@@ -509,8 +510,8 @@ so under D1 it is P0 exactly as SOURCE is.
 
 ---
 
-**`ENC-11` — Startup config push + read-back verification.** ⭐ **NEW IN REV 2 §7, owner-directed.**
-*Not queued. Effort: 2–3 days.*
+**`ENC-11` — Startup config push + read-back verification.** ✅ **SHIPPED 2026-09-02 as [#509](https://github.com/mmackelprang/RTest/pull/509), preceded by the firmware fix in [#508](https://github.com/mmackelprang/RTest/pull/508) and corrected by [#510](https://github.com/mmackelprang/RTest/pull/510) (`ENC-11a`).** ⭐ **NEW IN REV 2 §7, owner-directed.**
+*Effort was: 2–3 days.* ⚠ **The tiered fault model is live and verified on hardware, but it currently has no way to tell the owner anything** — a Degraded or Hard-fault outcome is visible only in the log and the API. `ENC-4` hosts the badge; `ENC-12` is the notification. Until both land the safety response is real but silent.
 
 > **The governing rule, and it is the whole item:** *the app owns the configuration; the device holds a
 > cache of it, and a cache is never trusted.* **No write counts as applied until read-back matches it field
@@ -628,8 +629,8 @@ retries — and project memory records that this **triggers capture-lifecycle de
 > `scripts/research/heavy_load_harness.sh` uses log and DB churn as a deliberate load source **to reproduce
 > the distortion**. Two of the P0 items below are logging items for that reason alone.
 
-**`LOG-1` — `radio-web` logs at Debug in production and its logging config is dead.**
-*Not queued. Effort: 30 min. **Largest single volume reduction available anywhere in the project.***
+**`LOG-1` — `radio-web` logs at Debug in production and its logging config is dead.** ✅ **SHIPPED 2026-09-01 as [#488](https://github.com/mmackelprang/RTest/pull/488).** Both file sinks also gained size caps. Verified by falsification rather than by reading the config back.
+*Effort was: 30 min. **Largest single volume reduction available anywhere in the project.***
 
 `src/Radio.Web/Program.cs:14` hardcodes `.MinimumLevel.Debug()` and **never calls `ReadFrom.Configuration`**,
 so the `Logging:LogLevel` block in its appsettings is read by nothing (verified in tree). All **106 Debug +
@@ -1065,7 +1066,7 @@ fallback or removed from the engine list.
 
 | Tier | Count | Notes |
 |---|---|---|
-| **P0** | **21** | **Non-encoder (11):** `TEST-1`, `OPS-1`, `LOG-1`, `TTS-1` (part (i) ✅ done), `AUD-6`, `AUD-7`, ~~`AUD-8`~~, ~~`AUD-9`~~ (**both already shipped 2026-05-22 — closed without code**), ~~`SEC-1`~~ (**closed by verification**), `PHN-1`, `PHN-2`. **Encoder (12):** `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-11`, `ENC-12`, `ENC-15`. ⚠ **The encoder bundle went 6 → 8 (Rev 2) → 11 (D1) → 12 (Rev 3's `ENC-15` touch-wake gate), and it is no longer conditional on anything.** Departures and arrivals since the last revision: **LOG-3 left** this tier under D12; **SEC-1** (D15) and **PHN-1** / **PHN-2** (D17) joined it. |
+| **P0** | **21 listed, 9 open** | **Non-encoder (11):** `TEST-1`, `OPS-1`, `LOG-1`, `TTS-1` (part (i) ✅ done), `AUD-6`, `AUD-7`, ~~`AUD-8`~~, ~~`AUD-9`~~ (**both already shipped 2026-05-22 — closed without code**), ~~`SEC-1`~~ (**closed by verification**), `PHN-1`, `PHN-2`. **Encoder (12):** `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-11`, `ENC-12`, `ENC-15`. ⚠ **The encoder bundle went 6 → 8 (Rev 2) → 11 (D1) → 12 (Rev 3's `ENC-15` touch-wake gate), and it is no longer conditional on anything.** ✅ **Five of the twelve encoder rows shipped 2026-09-02** — `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-11` — leaving `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-12` and `ENC-15`. Departures and arrivals since the last revision: **LOG-3 left** this tier under D12; **SEC-1** (D15) and **PHN-1** / **PHN-2** (D17) joined it. |
 | **P1** | **37** | **`TEST-3`** (promoted from P2 2026-09-01 — it failed CI and blocked a merge), `ENC-9`, `ENC-14`, `AUD-2`, `AUD-5`, `AUD-10`, `AUD-11`, `AUD-12`, `LOG-2`, `LOG-3`, `LOG-4`, `LOG-5`, `LOG-6`, `LOG-7`, `LOG-8`, `LOG-11`, `PHN-3`, `PHN-4`, `TTS-2`, `TTS-3`, `TTS-4`, `TTS-5`, `TTS-6`, `TTS-7`, `TTS-8`, `GV-5`, `UI-2`, `UI-3`, `UI-4`, `UX-1`, `OPS-3`, `HW-2`, plus 5 cross-repo (`XR-1`…`XR-5`). |
 | **P2** | **17** | `AUD-1`, `AUD-4`, `LOG-9`, `LOG-10`, `UI-1`, `UI-5`, `OPS-2`, `OPS-4`, `TEST-2`, `GV-6`, `GV-7`, `GV-9`, `GV-10`, `ENC-10`, `HW-1`. |
 | **P3 / parked** | **22** | §6 — six added in the Rev 2 reconciliation, two more from Rev 3 (Designer's withdrawn flash baseline; the on-screen bank rename, recorded so nobody reverts it). |
