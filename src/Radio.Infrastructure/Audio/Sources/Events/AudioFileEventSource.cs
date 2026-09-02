@@ -273,6 +273,9 @@ public class AudioFileEventSource : EventAudioSourceBase
       throw new ArgumentOutOfRangeException(nameof(position), "Seek position out of range");
     }
 
+    // Both null-forgiving operators are justified by the guard in SeekAsync, not by hope:
+    // EventAudioSourceBase.SeekAsync reaches this only when IsSeekable is true, and IsSeekable
+    // above requires _playbackService and _playbackId to both be non-null.
     var moved = _playbackService!.Seek(_playbackId!, position);
     if (!moved)
     {

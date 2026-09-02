@@ -602,10 +602,11 @@ public class SoundFlowPlaybackService : IDisposable
   /// <param name="sourceId">The source identifier.</param>
   /// <param name="position">The position to seek to, from the beginning of the content.</param>
   /// <returns>
-  /// True when the player repositioned. False when no player is registered under this id, OR
-  /// when the player's data provider refused the seek — SoundPlayerBase.Seek returns a bool and
-  /// this method propagates it rather than reporting an unconditional success. A caller's
-  /// IsSeekable contract depends on that difference being visible.
+  /// True when the player repositioned. False in exactly three cases: the position is negative,
+  /// no player is registered under this id, OR the player's data provider refused the seek —
+  /// SoundPlayerBase.Seek returns a bool and this method propagates it rather than reporting an
+  /// unconditional success. A caller's IsSeekable contract depends on that difference being
+  /// visible.
   /// </returns>
   public bool Seek(string sourceId, TimeSpan position)
   {
