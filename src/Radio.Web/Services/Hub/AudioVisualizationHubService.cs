@@ -40,10 +40,16 @@ public class AudioVisualizationHubService : IAsyncDisposable
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
   public HubConnectionState ConnectionState => _hubConnection?.State ?? HubConnectionState.Disconnected;
 
-  public AudioVisualizationHubService(ILogger<AudioVisualizationHubService> logger, IConfiguration configuration)
+  private readonly IHubConnectionTransport? _transport;
+
+  public AudioVisualizationHubService(
+    ILogger<AudioVisualizationHubService> logger,
+    IConfiguration configuration,
+    IHubConnectionTransport? transport = null)
   {
     _logger = logger;
     _configuration = configuration;
+    _transport = transport;
   }
 
   public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -75,7 +81,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
       _logger.LogInformation("Initializing SignalR connection to {HubUrl}", hubUrl);
 
       _hubConnection = new HubConnectionBuilder()
-        .WithUrl(hubUrl)
+        .WithUrl(hubUrl, options => _transport?.Configure(options))
         .WithAutomaticReconnect(new RetryPolicy())
         .ConfigureLogging(logging =>
         {

@@ -9,6 +9,7 @@ using Radio.Web.Components.Shared;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Components.Shared;
 
@@ -41,13 +42,18 @@ public class VisualizerPanelTests : TestContext
 
   public VisualizerPanelTests()
   {
+    // Hermetic rig: fails every outbound HTTP request and every SignalR
+    // negotiate without touching the network, so this fixture's result never
+    // depends on whether radio-api happens to be running locally.
+    Services.AddHermeticTestRig();
+
     _loggerFactory = new NullLoggerFactory();
     JSInterop.Mode = JSRuntimeMode.Loose;
 
     var configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        { "ApiBaseUrl", "http://localhost:5000" }
+        { "ApiBaseUrl", HermeticTestRig.ApiBaseUrl }
       })
       .Build();
 
@@ -67,7 +73,8 @@ public class VisualizerPanelTests : TestContext
     Services.AddSingleton(sp =>
       new AudioVisualizationHubService(
         NullLogger<AudioVisualizationHubService>.Instance,
-        sp.GetRequiredService<IConfiguration>()
+        sp.GetRequiredService<IConfiguration>(),
+        transport: new OfflineHubTransport()
       )
     );
 
@@ -159,13 +166,20 @@ public class VisualizerPanelTests : TestContext
     var fall = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Fall");
     fall.Click();
 
-    var fallAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Fall");
-    (fallAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-    fallAfter.GetAttribute("aria-selected").Should().Be("true");
+    // SelectMode assigns _currentMode only after `await UnsubscribeFromCurrentMode()`,
+    // so the re-render is not guaranteed to have happened when Click() returns. See
+    // the class remarks for why that await's timing varies. Same assertions, waited
+    // for rather than raced.
+    cut.WaitForAssertion(() =>
+    {
+      var fallAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Fall");
+      (fallAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+      fallAfter.GetAttribute("aria-selected").Should().Be("true");
 
-    var vuAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
-    (vuAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
-    vuAfter.GetAttribute("aria-selected").Should().Be("false");
+      var vuAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
+      (vuAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
+      vuAfter.GetAttribute("aria-selected").Should().Be("false");
+    }, timeout: TimeSpan.FromSeconds(2));
   }
 
   [Fact]
@@ -175,9 +189,12 @@ public class VisualizerPanelTests : TestContext
     var ring = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Ring");
     ring.Click();
 
-    var ringAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Ring");
-    (ringAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-    ringAfter.GetAttribute("aria-selected").Should().Be("true");
+    cut.WaitForAssertion(() =>
+    {
+      var ringAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Ring");
+      (ringAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+      ringAfter.GetAttribute("aria-selected").Should().Be("true");
+    }, timeout: TimeSpan.FromSeconds(2));
   }
 
   [Fact]
@@ -187,9 +204,12 @@ public class VisualizerPanelTests : TestContext
     var phase = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Phase");
     phase.Click();
 
-    var phaseAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Phase");
-    (phaseAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-    phaseAfter.GetAttribute("aria-selected").Should().Be("true");
+    cut.WaitForAssertion(() =>
+    {
+      var phaseAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Phase");
+      (phaseAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+      phaseAfter.GetAttribute("aria-selected").Should().Be("true");
+    }, timeout: TimeSpan.FromSeconds(2));
   }
 
   [Fact]

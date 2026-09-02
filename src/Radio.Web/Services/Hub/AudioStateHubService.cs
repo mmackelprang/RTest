@@ -22,6 +22,7 @@ public class AudioStateHubService : IAsyncDisposable
   // Optional so the ~9 test fixtures that new this service up directly keep
   // compiling; production always injects the registered singleton.
   private readonly ConfigStoreChangeNotifier? _configStoreNotifier;
+  private readonly IHubConnectionTransport? _transport;
   private HubConnection? _hubConnection;
   private bool _isDisposed;
   private readonly SemaphoreSlim _connectionLock = new(1, 1);
@@ -64,11 +65,13 @@ public class AudioStateHubService : IAsyncDisposable
   public AudioStateHubService(
     ILogger<AudioStateHubService> logger,
     IConfiguration configuration,
-    ConfigStoreChangeNotifier? configStoreNotifier = null)
+    ConfigStoreChangeNotifier? configStoreNotifier = null,
+    IHubConnectionTransport? transport = null)
   {
     _logger = logger;
     _configuration = configuration;
     _configStoreNotifier = configStoreNotifier;
+    _transport = transport;
   }
 
   public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -100,7 +103,7 @@ public class AudioStateHubService : IAsyncDisposable
       _logger.LogInformation("Initializing SignalR connection to {HubUrl}", hubUrl);
 
       _hubConnection = new HubConnectionBuilder()
-        .WithUrl(hubUrl)
+        .WithUrl(hubUrl, options => _transport?.Configure(options))
         .WithAutomaticReconnect(new RetryPolicy())
         .ConfigureLogging(logging =>
         {

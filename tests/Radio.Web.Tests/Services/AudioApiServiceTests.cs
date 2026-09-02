@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Services;
 
@@ -21,7 +22,7 @@ public class AudioApiServiceTests
     var handler = new ImmediateFailureHandler();
     _httpClient = new HttpClient(handler)
     {
-      BaseAddress = new Uri("http://localhost:5000")
+      BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl)
     };
     _service = new AudioApiService(_httpClient, NullLogger<AudioApiService>.Instance);
   }

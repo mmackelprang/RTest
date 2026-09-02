@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Services.Hub;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Services;
 
@@ -8,8 +9,18 @@ namespace Radio.Web.Tests.Services;
 /// Tests for AudioVisualizationHubService
 /// Tests SignalR connection, subscription management, and event handling
 /// </summary>
-public class AudioVisualizationHubServiceTests
+///
+/// <remarks>
+/// Every service this fixture builds goes through <see cref="CreateService"/> so it can be
+/// disposed in <see cref="DisposeAsync"/>. That is not tidiness: a failed
+/// <c>StartAsync</c> leaves a detached <c>StartRetryLoop</c> task behind, and an undisposed
+/// service leaks one of those for the lifetime of the test process. The
+/// <see cref="OfflineHubTransport"/> passed to each instance keeps those attempts off the
+/// network in the first place.
+/// </remarks>
+public class AudioVisualizationHubServiceTests : IAsyncLifetime
 {
+  private readonly List<AudioVisualizationHubService> _created = [];
   private readonly IConfiguration _configuration;
 
   public AudioVisualizationHubServiceTests()
@@ -18,19 +29,40 @@ public class AudioVisualizationHubServiceTests
     _configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        { "ApiBaseUrl", "http://localhost:5000" }
+        { "ApiBaseUrl", HermeticTestRig.ApiBaseUrl }
       })
       .Build();
+  }
+
+  /// <summary>Builds a tracked service wired to the offline transport.</summary>
+  private AudioVisualizationHubService CreateService(IConfiguration? configuration = null)
+  {
+    var service = new AudioVisualizationHubService(
+      NullLogger<AudioVisualizationHubService>.Instance,
+      configuration ?? _configuration,
+      transport: new OfflineHubTransport()
+    );
+    _created.Add(service);
+    return service;
+  }
+
+  public Task InitializeAsync() => Task.CompletedTask;
+
+  public async Task DisposeAsync()
+  {
+    // Disposing twice is safe (Multiple_DisposeAsync_Calls_Are_Safe pins that), so services
+    // a test already disposed need no special handling here.
+    foreach (AudioVisualizationHubService service in _created)
+    {
+      await service.DisposeAsync();
+    }
   }
 
   [Fact]
   public void Constructor_Creates_Service_Successfully()
   {
     // Arrange & Act
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Assert
     Assert.NotNull(service);
@@ -41,10 +73,7 @@ public class AudioVisualizationHubServiceTests
   public void IsConnected_Returns_False_When_Not_Started()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Act & Assert
     Assert.False(service.IsConnected);
@@ -54,10 +83,7 @@ public class AudioVisualizationHubServiceTests
   public void ConnectionState_Is_Disconnected_Initially()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Act
     var state = service.ConnectionState;
@@ -70,10 +96,7 @@ public class AudioVisualizationHubServiceTests
   public async Task DisposeAsync_Does_Not_Throw()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Act & Assert - Should not throw
     await service.DisposeAsync();
@@ -83,10 +106,7 @@ public class AudioVisualizationHubServiceTests
   public async Task Multiple_DisposeAsync_Calls_Are_Safe()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Act & Assert - Multiple dispose calls should be safe
     await service.DisposeAsync();
@@ -98,10 +118,7 @@ public class AudioVisualizationHubServiceTests
   public void Service_Allows_Event_Subscription_Without_Throwing()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     var subscribedCount = 0;
 
@@ -120,10 +137,7 @@ public class AudioVisualizationHubServiceTests
   public async Task Get_Methods_Return_Null_When_Not_Connected()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Act
     var spectrum = await service.GetSpectrumAsync();
@@ -142,10 +156,7 @@ public class AudioVisualizationHubServiceTests
   public async Task Service_Can_Be_Created_And_Disposed_Without_Starting()
   {
     // Arrange
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      _configuration
-    );
+    AudioVisualizationHubService service = CreateService();
 
     // Act & Assert - Should not throw
     await service.DisposeAsync();
@@ -163,10 +174,7 @@ public class AudioVisualizationHubServiceTests
       .Build();
 
     // Act
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      customConfig
-    );
+    AudioVisualizationHubService service = CreateService(customConfig);
 
     // Assert - Service created successfully with custom configuration
     Assert.NotNull(service);
@@ -181,10 +189,7 @@ public class AudioVisualizationHubServiceTests
       .Build();
 
     // Act
-    var service = new AudioVisualizationHubService(
-      NullLogger<AudioVisualizationHubService>.Instance,
-      emptyConfig
-    );
+    AudioVisualizationHubService service = CreateService(emptyConfig);
 
     // Assert - Service created successfully with default configuration
     Assert.NotNull(service);

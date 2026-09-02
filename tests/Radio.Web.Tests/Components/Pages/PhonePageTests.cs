@@ -8,6 +8,7 @@ using Radio.Web.Models;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Components.Pages;
 
@@ -23,52 +24,57 @@ public class PhonePageTests : TestContext
 
   public PhonePageTests()
   {
+    // Hermetic rig: fails every outbound HTTP request and every SignalR
+    // negotiate without touching the network, so this fixture's result never
+    // depends on whether radio-api happens to be running locally.
+    Services.AddHermeticTestRig();
+
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
 
     // Register PhoneApiService with mock handler that returns empty/default data
     Services.AddHttpClient<PhoneApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler(() => _ht801Reachable));
 
     // Register PbapApiService with mock handler
     Services.AddHttpClient<PbapApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5000");
+      client.BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     // Register BluetoothApiService with mock handler
     Services.AddHttpClient<BluetoothApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5000");
+      client.BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     // Register GvBridgeApiService with mock handler
     Services.AddHttpClient<GvBridgeApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     // Register GvTrunkApiService with mock handler
     Services.AddHttpClient<GvTrunkApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     // Register hub services
     var config = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        ["RotaryPhone:HubUrl"] = "http://localhost:5004/hub",
-        ["RotaryPhone:ApiBaseUrl"] = "http://localhost:5004"
+        ["RotaryPhone:HubUrl"] = $"{HermeticTestRig.PhoneApiBaseUrl}/hub",
+        ["RotaryPhone:ApiBaseUrl"] = HermeticTestRig.PhoneApiBaseUrl
       })
       .Build();
     Services.AddSingleton<IConfiguration>(config);
     Services.AddSingleton(new PhoneHubService(
-      NullLogger<PhoneHubService>.Instance, config));
+      NullLogger<PhoneHubService>.Instance, config, new OfflineHubTransport()));
     Services.AddSingleton(new GvTrunkHubService(
-      NullLogger<GvTrunkHubService>.Instance, config));
+      NullLogger<GvTrunkHubService>.Instance, config, new OfflineHubTransport()));
 
     // GV Messages singletons the page now injects. The status service is built
     // via a factory (so resolving IServiceScopeFactory doesn't freeze the bUnit
@@ -92,7 +98,7 @@ public class PhonePageTests : TestContext
     // send service. Register it (send disabled by default) so the panel renders.
     Services.AddHttpClient<GvBridgeSendService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     // Task #6: PhoneMessagesPanel injects the contact-name resolution service.

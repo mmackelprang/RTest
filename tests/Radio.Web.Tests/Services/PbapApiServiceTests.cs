@@ -28,7 +28,7 @@ public class PbapApiServiceTests
   {
     var handler = new MockHttpHandler(
       JsonSerializer.Serialize(new { DisplayName = "Jane Doe", PhoneNumber = "9193718044" }, JsonOptions));
-    var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+    var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
     var (outcome, name) = await Create(http).LookupNumberAsync("9193718044");
 
@@ -40,7 +40,7 @@ public class PbapApiServiceTests
   public async Task LookupNumberAsync_ReturnsNotFound_On404()
   {
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.NotFound);
-    var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+    var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
     var (outcome, name) = await Create(http).LookupNumberAsync("9995551212");
 
@@ -54,7 +54,7 @@ public class PbapApiServiceTests
     // A 5xx is a transient failure, NOT a definitive "no contact" — the caller must
     // be able to tell them apart so it doesn't cache a hiccup as a permanent miss.
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.InternalServerError);
-    var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+    var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
     var (outcome, name) = await Create(http).LookupNumberAsync("9193718044");
 
@@ -66,7 +66,7 @@ public class PbapApiServiceTests
   public async Task LookupNumberAsync_ReturnsNotFound_ForBlankNumber_WithoutHittingNetwork()
   {
     var handler = new MockHttpHandler("{}");
-    var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5000") };
+    var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
     var (outcome, name) = await Create(http).LookupNumberAsync("   ");
 

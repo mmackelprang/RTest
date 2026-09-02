@@ -18,6 +18,7 @@ public sealed class MetadataLookupService : IMetadataLookupService
   private readonly FingerprintingOptions _options;
   private readonly HttpClient _httpClient;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly HttpMessageHandler? _coverArtHandler;
 
   // Rate limiter: MusicBrainz enforces 1 request/second for anonymous clients
   private static readonly SemaphoreSlim _musicBrainzThrottle = new(1, 1);
@@ -32,16 +33,27 @@ public sealed class MetadataLookupService : IMetadataLookupService
   /// <param name="options">The fingerprinting options.</param>
   /// <param name="httpClient">HTTP client for MusicBrainz and Cover Art Archive API calls.</param>
   /// <param name="metricsCollector">Optional metrics collector for cover art metrics.</param>
+  /// <param name="coverArtHandler">
+  /// Optional transport for the Cover Art Archive client. Production passes nothing and the
+  /// dedicated client is built exactly as before. It exists because
+  /// <see cref="GetCoverArtUrlAsync"/> deliberately does <b>not</b> use
+  /// <paramref name="httpClient"/> (see that method for why), so stubbing
+  /// <paramref name="httpClient"/> alone leaves the Cover Art Archive path able to reach the
+  /// network — which made a test rig that stubbed only the injected client hermetic by
+  /// guard-clause coincidence rather than by construction.
+  /// </param>
   public MetadataLookupService(
     ILogger<MetadataLookupService> logger,
     IOptions<FingerprintingOptions> options,
     HttpClient httpClient,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    HttpMessageHandler? coverArtHandler = null)
   {
     _logger = logger;
     _options = options.Value;
     _httpClient = httpClient;
     _metricsCollector = metricsCollector;
+    _coverArtHandler = coverArtHandler;
   }
 
   /// <summary>
@@ -255,11 +267,12 @@ public sealed class MetadataLookupService : IMetadataLookupService
       _logger.LogDebug("Querying Cover Art Archive for release {ReleaseId}", releaseId);
 
       // Use a dedicated HttpClient for Cover Art Archive requests since the redirect
-      // goes to archive.org which may not accept the MusicBrainz User-Agent
-      using var coverArtClient = new HttpClient(new HttpClientHandler
-      {
-        AllowAutoRedirect = true
-      });
+      // goes to archive.org which may not accept the MusicBrainz User-Agent.
+      // When a handler is injected it is NOT disposed with the client — the caller owns it and
+      // this method may run many times.
+      using var coverArtClient = _coverArtHandler is null
+        ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = true })
+        : new HttpClient(_coverArtHandler, disposeHandler: false);
       coverArtClient.DefaultRequestHeaders.UserAgent.ParseAdd("RadioConsole/1.0");
       coverArtClient.Timeout = TimeSpan.FromSeconds(10);
 

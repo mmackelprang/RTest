@@ -30,7 +30,7 @@ public class PhoneApiServiceTests
       Ht801Reachable = true
     };
     var handler = new MockHttpHandler(JsonSerializer.Serialize(expected, JsonOptions));
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.GetSystemStatusAsync();
@@ -44,7 +44,7 @@ public class PhoneApiServiceTests
   public async Task GetSystemStatusAsync_ReturnsNull_WhenApiUnavailable()
   {
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.InternalServerError);
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.GetSystemStatusAsync();
@@ -57,7 +57,7 @@ public class PhoneApiServiceTests
   {
     var expected = new PhoneCallStateDto { CallState = "Ringing", IncomingNumber = "+15551234567" };
     var handler = new MockHttpHandler(JsonSerializer.Serialize(expected, JsonOptions));
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.GetCallStateAsync();
@@ -75,7 +75,7 @@ public class PhoneApiServiceTests
       new() { Id = "1", Name = "Alice", PhoneNumber = "555-1234" }
     };
     var handler = new MockHttpHandler(JsonSerializer.Serialize(expected, JsonOptions));
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.GetContactsAsync();
@@ -100,7 +100,7 @@ public class PhoneApiServiceTests
       ]
       """;
     var handler = new MockHttpHandler(liveJson);
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.GetCallHistoryAsync();
@@ -124,7 +124,7 @@ public class PhoneApiServiceTests
   {
     var handler = new MockHttpHandler(JsonSerializer.Serialize(
       new PhoneSystemStatusDto { Platform = "Linux" }, JsonOptions));
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.IsAvailableAsync();
@@ -136,7 +136,7 @@ public class PhoneApiServiceTests
   public async Task IsAvailableAsync_ReturnsFalse_WhenApiUnreachable()
   {
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.InternalServerError);
-    var httpClient = new HttpClient(handler) { BaseAddress = new Uri("http://localhost:5004") };
+    var httpClient = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) };
     var service = CreateService(httpClient);
 
     var result = await service.IsAvailableAsync();

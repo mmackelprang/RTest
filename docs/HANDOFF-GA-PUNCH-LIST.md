@@ -749,10 +749,27 @@ the wrong value. Nothing validates that the voice belongs to the selected engine
 
 Four tests fail under timing/load pressure and pass on retry. The bUnit one
 (`VisualizerPanelTests.cs:184-193`) races a real `await` and wants `WaitForAssertion` — five files in that
-project already use the idiom. The three `Radio.API.Tests` timeouts are a **different** failure mode (30–46 s
-under full-suite load, 22/22 in ~5 s in isolation). **Underneath both sits the actual defect: unit tests can
-reach an ambient `localhost:5000`.** A unit test whose result depends on whether `radio-api` happens to be
-running on the self-hosted runner is the root problem.
+project already use the idiom. **Underneath it sits the actual defect: unit tests can reach an ambient
+`localhost:5000`.** A unit test whose result depends on whether `radio-api` happens to be running on the
+self-hosted runner is the root problem.
+
+⚠ **CORRECTED 2026-09-01 — the `Radio.API.Tests` half of this row was misdiagnosed, and the correction
+matters because it splits one row into two unrelated defects.** The record described *three* tests timing out
+at *30–46 s*, and treated them as a second symptom of the non-hermetic rig. Measured: **16–18 tests inflate,
+none times out** (325 passed / 0 failed both under load and in isolation), and the worst case is **14.2 s,
+not 46 s**. Every inflated test is **the first-executed test of a class taking
+`IClassFixture<CustomWebApplicationFactory<Program>>`** — 17 such classes, 17 inflated entries — so what is
+being measured is `WebApplicationFactory` host boot, which xUnit bills to the first test in the collection.
+**`Radio.API.Tests` cannot reach the network at all**: every `HttpClient` comes from `_factory.CreateClient()`
+over an in-memory `TestServer`. A control run of the project alone against 40 CPU-burner processes, with
+`:5000` closed, reproduced the inflation exactly (1.05 s → 3.43 s per first-of-class, wall 5 s → 20 s). The
+cause is **CPU oversubscription** — 11 test assemblies running as concurrent processes, each defaulting
+xUnit's `maxParallelThreads` to all 32 logical cores, with only `Radio.Web.Tests` carrying an
+`xunit.runner.json` and that one setting no limit. The record's *"22/22 in ~5 s in isolation"* also does not
+survive checking: **no class in `Radio.API.Tests` has 22 tests**, and ~5 s is the whole project's isolation
+wall time — a class count appears to have been conflated with a project-level timing. **This is a benign
+performance artifact, not a correctness defect, and it is not part of `TEST-1`.** Re-filed as `TEST-3`
+(bound test parallelism), P2.
 
 - **Why the cabinet cares:** criterion (d). This is not quality-of-life. **Everything else in this document
   is verified by this suite**, and a false green already cost one session a wrong diagnosis. The most recent
@@ -906,6 +923,7 @@ box is `x86_64`, so **the literally documented invocation ships ARM binaries to 
 
 | **`HW-1`** | **The real phone-ring WAV** at `media/sounds/phone-ring.wav` (`FUTURE-WORK` §11). ✅ **D16 answered — deprioritised.** The owner has a **physical rotary phone with a working ringer**, so the software ring is not the thing that announces a call in that room. | Dropped from P1 and from the quick-win list. It stays on the board only because a placeholder that logs a file-not-found is still untidy. | Owner, ~20 min | No |
 | **`ENC-10`** | **A roadmap row for physical input.** Designer §12.2: *"There is no roadmap row for physical input at all. This arc needs one, and §7 makes it at least two PRs (protocol + config/diagnostics, then mapping + HUD)."* | Bookkeeping — but the encoder arc is the largest body of work in this document and it is currently invisible in `docs/ROADMAP.md`. | 30 min | No |
+| **`TEST-3`** | ⭐ **NEW 2026-09-01 — bound test parallelism.** Split out of `TEST-1` when that row's `Radio.API.Tests` half was measured and found to be a different defect entirely. `dotnet test` on the solution runs **11 test assemblies as concurrent processes**, each defaulting xUnit's `maxParallelThreads` to all **32 logical cores**; only `Radio.Web.Tests` has an `xunit.runner.json` and it sets no limit. The result is CPU oversubscription that inflates `WebApplicationFactory` host boot from ~1.05 s to 6–14 s, billed by xUnit to the first test of each of the 17 classes holding `IClassFixture<CustomWebApplicationFactory<Program>>`. **Nothing times out and nothing fails** — 325 pass either way. Fix: a solution-level `xunit.runner.json` (or `-m:1` / `maxParallelThreads`) capping concurrency. | Pure wall-clock and diagnostic noise. It makes slow tests *look* like hanging tests, which is how it got misread as three 30–46 s timeouts in the first place — but it has never failed a run. | 2–3 h | No |
 | **`OPS-4`** | **CI runner migration** (`docs/ROADMAP.md` § "CI infrastructure — RTest appserver runner migration"). | Infrastructure. Related to `TEST-1` in spirit — the self-hosted runner is where the ambient-`localhost:5000` problem lives — but independent of it. | Unscoped | No |
 
 ---
@@ -1041,7 +1059,7 @@ in this document. **The top three are marked.**
 |---|---|---|
 | **P0** | **23** | **Non-encoder (11):** `TEST-1`, `OPS-1`, `LOG-1`, `TTS-1` (part (i) ✅ done), `AUD-6`, `AUD-7`, `AUD-8`, `AUD-9`, `SEC-1`, `PHN-1`, `PHN-2`. **Encoder (12):** `ENC-0`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-4`, `ENC-5`, `ENC-6`, `ENC-7`, `ENC-8`, `ENC-11`, `ENC-12`, `ENC-15`. ⚠ **The encoder bundle went 6 → 8 (Rev 2) → 11 (D1) → 12 (Rev 3's `ENC-15` touch-wake gate), and it is no longer conditional on anything.** Departures and arrivals since the last revision: **LOG-3 left** this tier under D12; **SEC-1** (D15) and **PHN-1** / **PHN-2** (D17) joined it. |
 | **P1** | **36** | `ENC-9`, `ENC-14`, `AUD-2`, `AUD-5`, `AUD-10`, `AUD-11`, `AUD-12`, `LOG-2`, `LOG-3`, `LOG-4`, `LOG-5`, `LOG-6`, `LOG-7`, `LOG-8`, `LOG-11`, `PHN-3`, `PHN-4`, `TTS-2`, `TTS-3`, `TTS-4`, `TTS-5`, `TTS-6`, `TTS-7`, `TTS-8`, `GV-5`, `UI-2`, `UI-3`, `UI-4`, `UX-1`, `OPS-3`, `HW-2`, plus 5 cross-repo (`XR-1`…`XR-5`). |
-| **P2** | **15** | `AUD-1`, `AUD-4`, `LOG-9`, `LOG-10`, `UI-1`, `UI-5`, `OPS-2`, `OPS-4`, `TEST-2`, `GV-6`, `GV-7`, `GV-9`, `GV-10`, `ENC-10`, `HW-1`. |
+| **P2** | **16** | `AUD-1`, `AUD-4`, `LOG-9`, `LOG-10`, `UI-1`, `UI-5`, `OPS-2`, `OPS-4`, `TEST-2`, **`TEST-3`** (new 2026-09-01, split out of `TEST-1` when its `Radio.API.Tests` half was measured), `GV-6`, `GV-7`, `GV-9`, `GV-10`, `ENC-10`, `HW-1`. |
 | **P3 / parked** | **22** | §6 — six added in the Rev 2 reconciliation, two more from Rev 3 (Designer's withdrawn flash baseline; the on-screen bank rename, recorded so nobody reverts it). |
 
 ### Where Designer Rev 2 and this document's tiering interact — stated plainly

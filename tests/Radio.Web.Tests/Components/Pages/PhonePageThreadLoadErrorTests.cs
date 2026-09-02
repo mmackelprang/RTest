@@ -9,6 +9,7 @@ using Radio.Web.Components.Pages;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Components.Pages;
 
@@ -33,6 +34,11 @@ public class PhonePageThreadLoadErrorTests : TestContext
 
   public PhonePageThreadLoadErrorTests()
   {
+    // Hermetic rig: fails every outbound HTTP request and every SignalR
+    // negotiate without touching the network, so this fixture's result never
+    // depends on whether radio-api happens to be running locally.
+    Services.AddHermeticTestRig();
+
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
 
@@ -40,43 +46,43 @@ public class PhonePageThreadLoadErrorTests : TestContext
     // state is not under test here).
     Services.AddHttpClient<PhoneApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     Services.AddHttpClient<PbapApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5000");
+      client.BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     Services.AddHttpClient<BluetoothApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5000");
+      client.BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     // The handler under test: one unread thread on the list route, HTTP 502 on that
     // thread's bodies route — GV-8 / UAT F-1's exact failure shape.
     Services.AddHttpClient<GvBridgeApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new ThreadLoadErrorHandler());
 
     Services.AddHttpClient<GvTrunkApiService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     var config = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        ["RotaryPhone:HubUrl"] = "http://localhost:5004/hub",
-        ["RotaryPhone:ApiBaseUrl"] = "http://localhost:5004"
+        ["RotaryPhone:HubUrl"] = $"{HermeticTestRig.PhoneApiBaseUrl}/hub",
+        ["RotaryPhone:ApiBaseUrl"] = HermeticTestRig.PhoneApiBaseUrl
       })
       .Build();
     Services.AddSingleton<IConfiguration>(config);
     Services.AddSingleton(new PhoneHubService(
-      NullLogger<PhoneHubService>.Instance, config));
+      NullLogger<PhoneHubService>.Instance, config, new OfflineHubTransport()));
     Services.AddSingleton(new GvTrunkHubService(
-      NullLogger<GvTrunkHubService>.Instance, config));
+      NullLogger<GvTrunkHubService>.Instance, config, new OfflineHubTransport()));
 
     // Never started here — no live poll in tests, matching PhonePageTests.
     Services.AddSingleton<PhoneUnreadState>();
@@ -89,7 +95,7 @@ public class PhonePageThreadLoadErrorTests : TestContext
 
     Services.AddHttpClient<GvBridgeSendService>(client =>
     {
-      client.BaseAddress = new Uri("http://localhost:5004");
+      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
     Services.AddScoped<ContactResolutionService>();

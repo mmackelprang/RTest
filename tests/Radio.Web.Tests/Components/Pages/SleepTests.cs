@@ -12,6 +12,7 @@ using Radio.Web.Components.Pages;
 using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Components.Pages;
 
@@ -47,13 +48,18 @@ public class SleepTests : TestContext
 
   public SleepTests()
   {
+    // Hermetic rig: fails every outbound HTTP request and every SignalR
+    // negotiate without touching the network, so this fixture's result never
+    // depends on whether radio-api happens to be running locally.
+    Services.AddHermeticTestRig();
+
     _loggerFactory = new NullLoggerFactory();
     JSInterop.Mode = JSRuntimeMode.Loose;
 
     var configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        { "ApiBaseUrl", "http://localhost:5000" }
+        { "ApiBaseUrl", HermeticTestRig.ApiBaseUrl }
       })
       .Build();
 
@@ -84,7 +90,8 @@ public class SleepTests : TestContext
     Services.AddSingleton(sp =>
       new AudioStateHubService(
         NullLogger<AudioStateHubService>.Instance,
-        sp.GetRequiredService<IConfiguration>()
+        sp.GetRequiredService<IConfiguration>(),
+        transport: new OfflineHubTransport()
       )
     );
 

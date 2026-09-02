@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Models;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Services;
 
@@ -90,7 +91,7 @@ public class WeatherApiServiceTests
     var handler = new CannedResponseHandler(status, jsonBody);
     var client = new HttpClient(handler)
     {
-      BaseAddress = new Uri("http://localhost:5000"),
+      BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl),
     };
     return new WeatherApiService(client, NullLogger<WeatherApiService>.Instance);
   }

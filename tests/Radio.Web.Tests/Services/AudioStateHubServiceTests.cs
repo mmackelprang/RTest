@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Models;
 using Radio.Web.Services.Hub;
+using Radio.Web.Tests.TestHelpers;
 
 namespace Radio.Web.Tests.Services;
 
@@ -9,8 +10,18 @@ namespace Radio.Web.Tests.Services;
 /// Unit tests for AudioStateHubService
 /// Tests SignalR hub initialization and event handling
 /// </summary>
-public class AudioStateHubServiceTests
+///
+/// <remarks>
+/// Every service this fixture builds goes through <see cref="CreateService"/> so it can be
+/// disposed in <see cref="DisposeAsync"/>. That is not tidiness: a failed
+/// <c>StartAsync</c> leaves a detached <c>StartRetryLoop</c> task behind, and an undisposed
+/// service leaks one of those for the lifetime of the test process. The
+/// <see cref="OfflineHubTransport"/> passed to each instance keeps those attempts off the
+/// network in the first place.
+/// </remarks>
+public class AudioStateHubServiceTests : IAsyncLifetime
 {
+  private readonly List<AudioStateHubService> _created = [];
   private readonly AudioStateHubService _service;
   private readonly IConfiguration _configuration;
 
@@ -19,24 +30,42 @@ public class AudioStateHubServiceTests
     _configuration = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
       {
-        { "ApiBaseUrl", "http://localhost:5000" }
+        { "ApiBaseUrl", HermeticTestRig.ApiBaseUrl }
       })
       .Build();
 
-    _service = new AudioStateHubService(
+    _service = CreateService();
+  }
+
+  /// <summary>Builds a tracked service wired to the offline transport.</summary>
+  private AudioStateHubService CreateService()
+  {
+    var service = new AudioStateHubService(
       NullLogger<AudioStateHubService>.Instance,
-      _configuration
+      _configuration,
+      transport: new OfflineHubTransport()
     );
+    _created.Add(service);
+    return service;
+  }
+
+  public Task InitializeAsync() => Task.CompletedTask;
+
+  public async Task DisposeAsync()
+  {
+    // Disposing twice is safe (AudioStateHubService_MultipleDispose_DoesNotThrow pins that),
+    // so services a test already disposed need no special handling here.
+    foreach (AudioStateHubService service in _created)
+    {
+      await service.DisposeAsync();
+    }
   }
 
   [Fact]
   public void AudioStateHubService_Constructor_InitializesSuccessfully()
   {
     // Arrange & Act
-    var service = new AudioStateHubService(
-      NullLogger<AudioStateHubService>.Instance,
-      _configuration
-    );
+    AudioStateHubService service = CreateService();
 
     // Assert
     Assert.NotNull(service);
