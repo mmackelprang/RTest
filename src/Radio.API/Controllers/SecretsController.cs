@@ -11,6 +11,18 @@ namespace Radio.API.Controllers;
 [Produces("application/json")]
 public class SecretsController : ControllerBase
 {
+  /// <summary>Mask shown for a secret short enough that partial disclosure would reveal much of it.</summary>
+  private const string FullMask = "********";
+
+  /// <summary>Longest secret rendered as <see cref="FullMask"/> rather than partially.</summary>
+  private const int MaskShortValueLength = 8;
+
+  /// <summary>Clear-text characters kept at each end of a partially masked secret.</summary>
+  private const int MaskEdgeLength = 4;
+
+  /// <summary>Separator between the two clear-text runs of a partially masked secret.</summary>
+  private const string MaskSeparator = "...";
+
   private readonly ISecretsProvider _secrets;
   private readonly ILogger<SecretsController> _logger;
 
@@ -93,7 +105,7 @@ public class SecretsController : ControllerBase
         await _secrets.DeleteSecretAsync(tag);
         _logger.LogInformation("Secret '{Tag}' cleared for section '{Section}'", tag, section);
       }
-      else if (await IsMaskOfStoredSecretAsync(tag, value))
+      else if (LooksLikeMask(value))
       {
         // GetSectionSecrets returns masked values and the config UI binds them straight into
         // its inputs, so a field the user did not edit posts its own mask back. Storing that
@@ -159,20 +171,28 @@ public class SecretsController : ControllerBase
   }
 
   /// <summary>
-  /// Determines whether a submitted value is just the mask of the secret already stored under
-  /// <paramref name="tag"/>, i.e. the caller echoed back what <see cref="GetSectionSecrets"/> showed.
+  /// Determines whether a submitted value has the shape of a <see cref="MaskValue"/> result, and
+  /// is therefore a display form echoed back rather than a secret to store.
   /// </summary>
-  private async Task<bool> IsMaskOfStoredSecretAsync(string tag, string submitted)
-  {
-    var existing = await _secrets.GetSecretAsync(tag);
-    return existing != null && submitted == MaskValue(existing);
-  }
+  /// <remarks>
+  /// The test deliberately looks at the submitted string alone rather than comparing it against
+  /// the secret currently stored. A comparison would only recognise a mask built from the value
+  /// stored *now*, so a form loaded before the secret changed elsewhere would post a mask that no
+  /// longer matches — and that stale mask would be written over the newer secret, which is the
+  /// same unrecoverable overwrite this guard exists to prevent.
+  ///
+  /// The cost is that a genuine secret shaped like a mask cannot be saved through this endpoint.
+  /// Declining to store is the safe direction, and the response reports it in
+  /// <c>unchangedCount</c>.
+  /// </remarks>
+  private static bool LooksLikeMask(string value) =>
+    value == FullMask ||
+    (value.Length == (MaskEdgeLength * 2) + MaskSeparator.Length &&
+     value.AsSpan(MaskEdgeLength, MaskSeparator.Length).SequenceEqual(MaskSeparator));
 
   /// <summary>
-  /// Renders a secret for display. A submitted value is rejected as an echo only when it equals
-  /// the mask of the secret currently stored under the same tag — see
-  /// <see cref="IsMaskOfStoredSecretAsync"/>. A mask-shaped string submitted for a tag that holds
-  /// nothing is stored like any other value.
+  /// Renders a secret for display. Every non-empty result satisfies <see cref="LooksLikeMask"/>,
+  /// so a value this method produced is never stored back as a secret.
   /// </summary>
   private static string MaskValue(string? value)
   {
@@ -181,11 +201,11 @@ public class SecretsController : ControllerBase
       return "";
     }
 
-    if (value.Length <= 8)
+    if (value.Length <= MaskShortValueLength)
     {
-      return "********";
+      return FullMask;
     }
 
-    return $"{value[..4]}...{value[^4..]}";
+    return $"{value[..MaskEdgeLength]}{MaskSeparator}{value[^MaskEdgeLength..]}";
   }
 }

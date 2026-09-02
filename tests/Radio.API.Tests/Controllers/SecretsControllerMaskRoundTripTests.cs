@@ -83,17 +83,40 @@ public class SecretsControllerMaskRoundTripTests
     Assert.Equal("a-genuinely-new-key", await provider.GetSecretAsync("tts_azure_api_key"));
   }
 
-  [Fact]
-  public async Task PostingAMaskShapedValue_ForAnEmptySlot_IsStored()
+  [Theory]
+  [InlineData("********")]
+  [InlineData("abcd...wxyz")]
+  public async Task PostingAMaskShapedValue_IsNeverStored_EvenForAnEmptySlot(string maskShaped)
   {
-    // Nothing is stored, so the value cannot be an echo of a mask and must be taken literally.
+    // The guard reads only the submitted string, so it declines a mask even with nothing stored.
     var provider = new InMemorySecretsProvider();
     var controller = CreateController(provider);
 
     await controller.SetSectionSecrets(
-      "tts", new Dictionary<string, string> { ["AzureRegion"] = "********" });
+      "tts", new Dictionary<string, string> { ["AzureRegion"] = maskShaped });
 
-    Assert.Equal("********", await provider.GetSecretAsync("tts_azure_region"));
+    Assert.Null(await provider.GetSecretAsync("tts_azure_region"));
+  }
+
+  [Fact]
+  public async Task AStaleMask_DoesNotOverwriteASecretThatChangedSinceItWasShown()
+  {
+    // A form loaded in one place, saved after the secret was changed somewhere else. The posted
+    // mask no longer corresponds to the stored value, so a guard that compared the two would let
+    // it through and destroy the newer secret.
+    var provider = new InMemorySecretsProvider();
+    await provider.SetSecretAsync("tts_azure_api_key", "AAAAAAAAAAAAxxxx");
+    var controller = CreateController(provider);
+
+    var staleMask = await GetMaskAsync(controller, "AzureAPIKey");
+
+    await provider.SetSecretAsync("tts_azure_api_key", "ZZZZZZZZZZZZyyyy");
+    Assert.NotEqual(staleMask, await GetMaskAsync(controller, "AzureAPIKey"));
+
+    await controller.SetSectionSecrets(
+      "tts", new Dictionary<string, string> { ["AzureAPIKey"] = staleMask });
+
+    Assert.Equal("ZZZZZZZZZZZZyyyy", await provider.GetSecretAsync("tts_azure_api_key"));
   }
 
   [Fact]
