@@ -1,7 +1,7 @@
 # HANDOFF — Rotary encoder control mapping (four knobs on the cabinet face)
 
 **Surface:** Physical — 4× rotary encoder + integrated shaft button (`github.com/mmackelprang/RotaryUsb`, Pi Pico, USB HID) mounted permanently in the restored console cabinet — **plus** the on-screen feedback those knobs drive across Home, the always-present topbar, and the sleep screen — **plus** the presence, configuration and blanking behavior the app owns on their behalf (§7, §8).
-**Status:** **`[DESIGNER-PHASE DRAFT — REV 4 — AMENDED TO THE AS-BUILT PANEL]`**. §13 is down to four open questions. **The escutcheon is final (D2) — §9 is now a build document, not a proposal.** ⚠ **Rev 4 amends §6.2, §9 and §10.1 to the owner's actual front-panel drawing** (`design/hardware/front-panel-layout_4.svg`), which keeps D2's *order* and supersedes D2's *dimensions*. **The knobs are one vertical column left of the screen, not a horizontal row below it.** §10.1's mis-grab conclusion lost its premise and has been re-derived rather than re-worded.
+**Status:** **`[DESIGNER-PHASE DRAFT — REV 5 — AS-BUILT PANEL, HUD COLLISIONS RESOLVED]`**. §13 is down to four open questions. **The escutcheon is final (D2) — §9 is now a build document, not a proposal.** ⚠ **Rev 4 amends §6.2, §9 and §10.1 to the owner's actual front-panel drawing** (`design/hardware/front-panel-layout_4.svg`), which keeps D2's *order* and supersedes D2's *dimensions*. **The knobs are one vertical column left of the screen, not a horizontal row below it.** §10.1's mis-grab conclusion lost its premise and has been re-derived rather than re-worded. **Rev 5 closes the left-edge collisions that rotation walks into (§6.2), settles the phase contract (§6.10), and records owner decisions D26 (engraving clearance, §9.5) and D27 (reduced motion, §6.5).**
 **Status vs. existing handoffs:**
 - **Extends** `design_handoff_radio_console` and `design_handoff_radio_controller` into a surface neither covers: there is no existing handoff for physical input. Every visual element is composed from tokens and components those handoffs already established; **no new design tokens are introduced** (§6.9).
 - **Deviates (small, deliberate) from `HANDOFF-saved-station-display.md`** — that handoff's bank is titled `MEMORY · n saved`. The cabinet is engraved **PRESETS** (D10), so the on-screen bank is retitled to match. Rationale in §4.4; this is a one-word change and nothing else in that handoff moves.
@@ -9,12 +9,45 @@
 - **Follows** `HANDOFF-bell-failure-surfacing.md` §3.7 for cross-route surfacing of a persistent hardware fault (§7.6).
 - **Extends** `HANDOFF-sleep-weather-visual-redesign.md` with a sleep-screen readout in that handoff's own dim-amber, single-emissive-color palette (§8.6). Its "one emissive color" rule is honored, not broken.
 **Author:** Designer
-**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel)**
+**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)**
 **Consumers:** Owner (§13) → Architect (§12.1) → Planner
 
 ---
 
 ## 0. Revision history
+
+### Rev 5 — the left-edge collisions resolved, and two owner decisions (2026-09-02)
+
+Rev 4 rotated the HUD onto the correct axis and **flagged** the collisions that rotation walks into.
+This closes them, so the rotation can be implemented with no design question left open.
+
+**First, a correction to Rev 4, which over-reported the problem.** Rev 4's table listed all four
+bands as if each carries a left-edge card. **In the target mapping only two do.** §6.2's own rule is
+*"transient readouts appear beside the knob; **selection overlays center**"* — and SOURCE and PRESETS
+are selector knobs, whose feedback is §6.6's centred overlay, not a left-edge card. **Bands 270 and
+450 are transitional only:** they carry cards today because the router still runs the pre-`ENC-5`
+index table, and they stop when `ENC-5` / `ENC-7` land. Corrected in §6.2.
+
+| Decision | Where |
+|---|---|
+| **Accept transient occlusion on every band.** No inset, no narrower card, no per-route suppression, no z-order yielding, no left gutter — four alternatives considered and rejected with reasons | §6.2 |
+| **The VOLUME/topbar overlap is safe because every VOLUME card carries the console's mute state** — verified in code rather than assumed, then promoted to an invariant so it stays true | §6.2, §6.7 |
+| **Vertical centring is clamped to the viewport**, because a ~173 px volume card on a band centred at 90 px sits 3.5 px from the top edge | §6.2 |
+| **One mirrored keyframe pair is authorised**, as a declared exception so a Polisher does not revert it | §6.1, §6.2 |
+| **An unknown HUD phase is *not holding*** — and `Value` keeps its preserve behaviour explicitly, because the obvious edit would break it | §6.10 (new) |
+
+**Two owner decisions, recorded here rather than left for a later pass:**
+
+- **D26 — the knobs are straight-sided, so the engraving clearance holds.** Rev 4's shop-floor
+  finding went to the owner and came back confirmed. Recorded in §9.5 as a **checked and closed
+  constraint, not a silent non-issue**: the 0.8 mm figure is the reason *"any 15 mm knob"* is not a
+  safe substitution later.
+- **D27 — `prefers-reduced-motion` keeps the ring sweeping.** §6.5 specified a filling bar; `ENC-4`
+  shipped a sweeping ring, and **the owner has accepted what shipped.** §6.5 is amended to describe
+  it as an owner-accepted deviation with the reason, and it is added to the punch list's parked
+  table. **Declaring it is the point** — an undeclared deviation from an accessibility line item is
+  exactly what a later consistency pass "corrects" back to a spec the owner deliberately overruled,
+  which is the same knock-on the `PRESETS` rename got in Rev 3's header.
 
 ### Rev 4 — amended to the as-built panel drawing (2026-09-02)
 
@@ -416,6 +449,7 @@ What survives is larger and sits at §2.2 defect 5: the shipped `HidRotaryEncode
 There is **no HUD, toast convention, or transient-overlay component in this project.** The inventory turned up exactly three reusable pieces, and the proposal is built entirely from them:
 
 1. **`.snackbar-enter` / `.snackbar-exit`** (`design-system.css:1218-1219`) and `@keyframes snackbarSlideIn` / `snackbarSlideOut` (`:1030`, `:1035`) — 200 ms, `--anim-ease-emphasized`. **These exist and no Razor component consumes them.** Use them; do not write new keyframes.
+   > ⚠ **One declared exception, added in Rev 5 — do not "correct" this back.** The existing pair slides on `translateY(100%)`, which is right for a bottom-anchored card and wrong for the left-edge card Rev 4's rotation produces. **A mirrored horizontal pair is authorised**, at the same 200 ms and `--anim-ease-emphasized`, used only by `.encoder-hud` in `Variant="Normal"`. The rule exists to stop a **parallel motion vocabulary** being invented; a mirror of an existing pair at identical duration and easing is not that. **§6.9's no-new-tokens rule is untouched** — this adds two keyframe blocks and no token. A Polisher finding it should read it as declared, not as drift.
 2. **The `GainPopoverService` pattern** (`src/Radio.Web/Services/GainPopoverService.cs`, backdrop in `MainLayout.razor:236-245`) — the established way to host an overlay *above* the `.page-transition` stacking context.
 3. **`SourceBubble.razor` + `SourceTypeHelper.cs`** for the source overlay rows, and **`PresetCard.razor`'s field hierarchy** for the preset overlay rows — so neither overlay can drift from the surfaces they mirror.
 
@@ -497,40 +531,86 @@ Today the correction is a rotation; the next one will be a number, and it should
   face       so a card on the left edge is as near its knob as the bezel permits
 ```
 
-#### Two mechanics the rotation breaks, flagged for Planner rather than solved here
+#### Two mechanics the rotation breaks — decided in Rev 5
 
-1. **`margin-left: -180px` has no vertical twin.** It works because the card is a fixed 360 px wide.
-   **Card height is content-dependent** — the volume variant is ~173 px, the generic and track variants
-   ~90–110 px — so there is no constant half-height to subtract, and the existing comment's own reason
-   (*`.snackbar-enter` animates `transform`, so `translateY(-50%)` would be dropped for the length of the
-   animation*) still stands and now bites on the axis that matters. **Requirement: the card is vertically
-   centred on its knob at every content height.** The mechanism is Planner's call; separating the
-   positioned element from the animated one satisfies it without touching the keyframes.
-2. **The entrance animation now points the wrong way.** `snackbarSlideIn` is `translateY(100%) → 0`
-   (`design-system.css:1030`) — it rises from the bottom edge, which is exactly right for a
-   bottom-anchored card and arbitrary for one pinned to the left edge at mid-screen. **A card should enter
-   from the edge it is anchored to**, so this wants a horizontal counterpart. ⚠ **This is a deliberate,
-   narrow amendment to §6.1's *"do not write new keyframes"*** — that instruction existed to stop a
-   parallel motion vocabulary being invented, and one mirrored pair at the same duration and easing is not
-   that. **§6.9 is untouched: this adds no token.**
+1. **Vertical centring, and a clamp.** `margin-left: -180px` works because the card is a fixed 360 px
+   wide. **Card height is not fixed:** the volume variant is ~173 px — its progress ring alone is
+   152 px (`design-system.css`, `.encoder-hud-ring`) — against ~90–110 px for the generic and track
+   variants. So there is no constant half-height to subtract, and the existing comment's own reason
+   (`.snackbar-enter` animates `transform`, so a `translateY(-50%)` would be dropped for the length
+   of the animation) still stands.
+   **Decision: the card is vertically centred on its knob's height, clamped so it stays fully inside
+   the viewport with a ≥ 8 px margin.** The clamp is not defensive padding — a 173 px card centred
+   on band 90 spans y 3.5–176.5, and band 630 spans y 543.5–716.5, so **both end bands already sit
+   within 4 px of a viewport edge** and any growth clips. The clamp moves the volume card ~4.5 px in
+   the worst case, well under the 0.5 mm of parallax this section already accepts. ⚠ **If the clamp
+   engages routinely, the card has grown too tall and the card is what should change — not the
+   band.** The mechanism (a positioned wrapper around the animated element being the obvious one) is
+   Planner's call; the requirement is the centring and the clamp.
+2. **The entrance direction.** A card should enter from the edge it is anchored to, so a **mirrored
+   horizontal keyframe pair is authorised** — declared as an explicit exception in §6.1, at the same
+   duration and easing, adding no token.
 
-#### Left-edge collisions — flagged, not fixed
+#### Left-edge collisions — resolved
 
-The bottom of this screen was largely empty. **The left edge is not**, and the card is `z-index: 10000`, so
-it **occludes** nearly everything beneath rather than being occluded. Every one of the four bands
-(± half a card around each centre) hits something on at least one route:
+⚠ **First, a correction to Rev 4, which over-reported this.** Rev 4's table listed four bands as if
+all four carry a left-edge card. **In the target mapping only two do.** This section's own rule is
+*transient readouts appear beside the knob; **selection overlays center*** — and SOURCE and PRESETS
+are **selector** knobs, whose feedback is §6.6's centred ~440 px overlay, not a left-edge card.
 
-| Band | What it lands on |
+| Band | Target state | Today |
+|---|---|---|
+| **90 px** | **VOLUME card** | VOLUME card |
+| 270 px | *unused* — SOURCE's overlay centres | a card, because the router still runs the pre-`ENC-5` index table |
+| 450 px | *unused* — PRESETS' overlay centres | a card, same reason |
+| **630 px** | **TUNING card** | a card |
+
+`RotaryEncoderActionRouter` publishes `VOLUME` at index 0, `TRACK`/`TUNING` at index 1, `SOURCE` at
+index 2 and `VISUALIZER` at index 3 — the pre-`ENC-5` mapping `EncoderHud.razor`'s own header comment
+already calls out (*"a card can be in the right place and say the wrong word"*). **Bands 270 and 450
+are therefore transitional**, and they disappear when `ENC-5` / `ENC-7` replace those cards with
+overlays. The rotation ships **into** that transitional state, so both are decided below rather than
+deferred.
+
+> ### **Decision: accept transient occlusion on every band. Nothing about position, width or z-order changes.**
+
+The card is up for **1500 ms** after the last detent (§6.5), carries `pointer-events: none`, and
+appears only while a hand is on a knob. **The occlusion is purely visual — everything beneath stays
+operable**, because taps pass straight through it. Against that, every alternative costs more than it
+buys:
+
+| Alternative | Rejected because |
 |---|---|
-| **90 px — VOLUME** | ⚠ **The worst one. The fixed `.topbar`** (`design-system.css:189-197`, y 0–120, full width, `z-index: 1100`). A VOLUME card covers the TIME cluster and LED clock (x 16–146), the IN/OUT clusters, and the first two or three `.source-bubble`s. **And it covers the `ENC-4a` `topbar-mute-chip`** (`MainLayout.razor:77-84`, y ≈ 21–43) — so the volume readout would hide the one persistent element that explains why turning volume produces no sound. **§6.7's mute chip and §6.3's muted volume card would collide with each other**, on the most-used knob. |
-| **270 px — SOURCE** | Home's `NowPlayingPanel` 520 px rail and its album art; the `.np-gain-popover` (340 px, x ≈ 164–504) when open; `/history`'s **360 px** filter panel — an exact width match, total overlap; `/phone`'s 156 px tab rail; the Radzen left tab strips on `/system` and `/devices`. |
-| **450 px — PRESETS** | The same full-height left rails on every route that has one. |
-| **630 px — TUNING** | The `.now-playing-dock` (y 656–720) on every route except Home; on Home, `NowPlayingPanel`'s transport bar including its 44 × 44 mute button and volume slider. **This band is also where the current bottom-anchored HUD already sits** (y ≈ 523–696), so it is the one position that is barely a change. `.virtual-keyboard-container` (`z-index: 10001`) is the only layer in the project that paints *over* the HUD, and it lands here when active. |
+| **Inset the card further from the edge** | **It cannot work on the band that matters.** The topbar is full-width, so no horizontal inset escapes it — the VOLUME collision is *vertical*. Inset only pushes the card away from its knob and deeper into the content area, weakening the single cue the geometry exists to provide |
+| **A narrower card in the vertical orientation** | Same reason — narrowing does not escape a full-width topbar. It would also shrink the 64 px volume numerals that §10.5 sizes for *"the whole room"* as reading distance, and it leaves two card geometries to keep in step |
+| **Per-route suppression** | **Violates principle 2 directly** — *"a visible surface, on every route, within 100 ms."* A knob turn on `/history` producing nothing **is** the defect (§2.1) this entire handoff exists to fix, and *"the user's response to silence is to turn it further"* |
+| **Yield z-order to specific elements** | The same violation by a different route: rendering under the gain popover or the topbar makes a knob turn invisible in exactly the states someone is most likely to be leaning in. `z-index: 10000` was chosen to sit one tier above the gain-popover backdrop (9999) for that reason, and per-element exceptions would need re-auditing every time an overlay is added |
+| **A permanent left gutter** | Pays continuously for something transient. 1920 × 720 is already tight — Home allocates 520 + ~688 + 710 px with no slack — so a 384 px gutter takes ~20 % of the width from **every route, forever**, to serve a card visible ~1500 ms per interaction |
 
-**No band is clean on every route.** Resolving this is a design question in its own right — whether cards
-inset past the rails, whether the topbar yields, or whether the VOLUME card alone is treated as a special
-case — and it is **not** settled by this amendment. It is recorded here so that whoever implements the
-rotation meets it in the spec rather than on the glass.
+**Band 630 is not even a regression.** The shipped bottom-anchored card (`bottom: 24px`) already
+overlaps `.now-playing-dock` (y 656–720) and has drawn no complaint; centred on 630 it overlaps
+*less*. The status quo is the precedent.
+
+**Band 90 is the one that needed an argument, and it survives on a verified fact rather than a
+judgement call.** The topbar's clock, IN/OUT clusters and source bubbles are **ambient chrome —
+nothing there explains an audible state**, so hiding them for 1500 ms while someone is turning a knob
+costs nothing anyone can act on. The one topbar element that *does* carry audible state is `ENC-4a`'s
+`MUTED` chip — and **the card that covers it always says the same thing, larger**:
+
+- Both VOLUME publish paths set `IsMuted` from the live audio manager — `HandleVolumeTurn` and
+  `PublishHold` in `RotaryEncoderActionRouter`.
+- The card renders the literal word **`MUTED`** in `--signal-red`, and `.is-muted` additionally dims
+  the numerals and outlines the bar red (§6.3).
+- The value is **post-toggle**, and that ordering is already enforced *and documented as
+  load-bearing*: `EncoderLongPressGesture` raises `ShortPress` **before** `HoldCancelled` precisely so
+  the card cannot publish the mute state from before the press.
+- Mute reached any other way — the touchscreen button, the API — **publishes no card at all**, so the
+  chip is never covered in those cases. The same holds for a tap shorter than 300 ms, which raises no
+  hold phase.
+
+**So there is no reachable state in which the chip is hidden by something that contradicts or omits
+it.** §6.7 promotes that from a fact about today's code into a requirement, because a future card at
+index 0 could otherwise break it by omission.
 
 Card chrome, shared: 360 px wide, `--surface-overlay` at ~92% opacity with `backdrop-filter: blur(12px)`, `1px solid var(--surface-separator)`, 10 px radius, `padding: var(--sp-4)`. (This project has no `--radius-*` or `--shadow-*` tokens — radii are per-component literals — so a literal `10px` matching `.nav-pill` is the consistent choice.)
 
@@ -588,7 +668,7 @@ Long-press variant: from 300 ms a `--accent-primary` ring draws around the numer
 | Long-press ring | Starts 300 ms, completes 600 ms | The first 300 ms is indistinguishable from a click |
 | Selector overlay idle dismiss | **4000 ms**, nothing committed | §6.6 |
 | Mute chip | Persistent while muted | State, not event |
-| `prefers-reduced-motion` | Enter/exit instant; bars still move; ring becomes a filling bar | Matches `RdsScrollMarquee` and `.sleep-screen-drift` |
+| `prefers-reduced-motion` | Enter/exit instant; bars still move; **the ring keeps sweeping** | ⭐ **Owner-accepted deviation (D27, 2026-09-02). This row describes what ships, not what Rev 3 specified** — ~~ring becomes a filling bar~~. The ring is *"the only on-screen indication that a 600 ms hold is arming standby"*, and freezing it puts the machine back in the state this row exists to fix: an input that acts with no visible evidence. ⚠ **The original spec was also not implementable as drafted** — the plan's literal `animation-name: none` freezes `--ring-turn` at `0turn`, i.e. an *empty* ring, not a filling bar. Recorded here **and** in the punch list's parked table so a later consistency pass does not "restore" it. Enter/exit still match `RdsScrollMarquee` and `.sleep-screen-drift` |
 
 ### 6.6 The two selector overlays — SOURCE and PRESETS
 
@@ -673,6 +753,21 @@ Mute currently shows as a single icon glyph inside `NowPlayingPanel`, which exis
 
 Add a `.topbar-mute-chip` to the primary topbar row, right of the OUT cluster: `volume_off` glyph + `MUTED` in `--font-mono` 11 px uppercase, `letter-spacing: 0.20em`, `--signal-red`, 1 px `--signal-red` border at 30% mix. Visible on every route the topbar is on. Tapping it unmutes. On the sleep screen the equivalent is a dim `MUTED` line above `.sleep-screen-hint` (§8.6).
 
+**Rev 5 — one invariant, because the rotated HUD's VOLUME card now covers this chip.** Band 90 puts
+the volume card over the topbar (§6.2). That is accepted, and it is safe **only** while the covering
+card carries the same information:
+
+> ### **A card rendered in the VOLUME band must carry the console's mute state.**
+
+That is true today on every path that publishes one (§6.2 verifies it), and it is written down
+because it is exactly the kind of thing a *later* card — an `ENC-8` fault readout at index 0, say —
+could quietly break by omitting `IsMuted`, producing a card that hides the reason the room is silent
+while saying nothing about it. **The chip may be occluded only by something that says what it says.**
+
+Mute reached from the touchscreen or the API publishes **no card at all**, and so does a tap shorter
+than the 300 ms hold threshold — in those cases the chip stands alone and uncovered, which is why it
+stays unconditional and persistent rather than becoming a fallback for the card.
+
 ### 6.8 Throttling is a requirement, not an optimization
 
 `PollIntervalMs = 10` with no rate limiting means a fast spin can drive up to 100 state changes per second, each fanning out over SignalR to a Blazor Server circuit that re-renders a component tree. **This box is an Intel N100 on WiFi where audio distortion already correlates with incidental CPU load** (§2.2 defect 4).
@@ -685,6 +780,49 @@ Add a `.topbar-mute-chip` to the primary topbar row, right of the OUT cluster: `
 ### 6.9 Tokens
 
 **No new design tokens.** Everything resolves to: `--surface-overlay`, `--surface-separator`, `--surface-hover`, `--text-high`, `--text-medium`, `--text-low`, `--accent-primary`, `--signal-amber`, `--signal-red`, the five `--source-*` accents, `--font-led`, `--font-display`, `--font-mono`, `--sp-1`…`--sp-4`, `--touch-min`, and the `--anim-duration-*` / `--anim-ease-*` set. Builder must not add `--hud-*` anything.
+
+---
+
+### 6.10 The phase contract — what an unknown phase must not do
+
+*(Ordered after §6.9 in the file; numbered 6.10 because it is new in Rev 5.)*
+
+`EncoderHudPhase` travels as an **open string**, and the client renders nothing for a phase it does
+not recognise. That is right and it stays. **What an unknown phase must not do is suppress the
+dismissal timer.**
+
+Today `EncoderHudService.Publish` leaves `IsHolding` unchanged for any phase outside
+`HoldStart` / `HoldCancel` / `HoldCommit`, and a true `IsHolding` **cancels the 1500 ms dismissal
+timer**. So `HoldStart` → *unknown* → `Value` leaves a card on screen **with no timer to remove it**.
+
+Unreachable today, because both builds know the same four names — but **`ENC-5` and `ENC-7` add
+phases**, and an API-ahead-of-Web deploy is ordinary rather than exotic. The symptom is a **card
+stuck on a kiosk nobody is watching**, which is precisely the failure the forward-compatibility rule
+exists to prevent.
+
+**Decision: an unrecognised phase is *not holding*.** It renders nothing, so `IsHolding` on it can
+never draw a ring — its only reachable effect is to strand a card. All cost, no benefit.
+
+⚠ **One trap, because the obvious edit is wrong.** `"Value"` currently falls into the **same default
+arm** as unknown phases, and `Value` **must keep preserving `IsHolding`**: turning the knob while the
+button is held publishes a `Value` card, and the ring has to keep drawing through it. Flipping the
+default arm to `false` would fix the stranding **and silently break the hold-and-turn ring.** The
+contract is four explicit arms, not three:
+
+| Phase | `IsHolding` |
+|---|---|
+| `HoldStart` | **true** |
+| `HoldCancel`, `HoldCommit` | **false** |
+| `Value` | **preserved** — explicitly, no longer by falling through |
+| anything else | **false** |
+
+This **supersedes the plan's §2.5 contract** and the test pinning it
+(`EncoderHudServiceTests.UnknownPhase_LeavesIsHoldingAlone`, whose comment reads *"the service must
+not invent a transition out of it"*). **That reasoning was sound about the card and wrong about the
+timer** — the card still renders nothing, which is all the original rule was defending. **The test
+should be updated to assert the new contract, not deleted:** the forward-compatibility behaviour it
+guards still matters, it just has a different correct answer. This is a spec decision, not a
+tidy-up.
 
 ---
 
@@ -1085,13 +1223,21 @@ the knob's *surface* is the entire tactile vocabulary, and a pointer would spend
 so the engraver does not depend on a font being installed. Each label sits **immediately beneath its own
 knob**, inside the 25.4 mm column, roughly x 15.3–35.4 mm and about 4 mm tall.
 
-⚠ **One build tolerance worth knowing before anything is cut, because the column is tight.** A label's top
-edge clears the knob above it by about **0.8 mm** — VOLUME's label occupies y 40.03–43.99 mm while a 15 mm
-VOLUME knob ends at y 39.25 mm; TUNING is the same to within a tenth. **That clearance assumes the knob
-bodies are 15 mm all the way down to the panel.** Any knob whose skirt or base flares wider than 15 mm
-**will cover its own engraving**, and it is the label of the knob *above* that goes first. This is an
-observation from the drawing handed to whoever sources the knobs — **not** a proposed change to the
-drawing.
+✅ **A build tolerance — checked and closed (D26, 2026-09-02). Kept in full, because the reason
+outlives the answer.** The column is tight: a label's top edge clears the knob above it by about
+**0.8 mm** — VOLUME's label occupies y 40.03–43.99 mm while a 15 mm VOLUME knob ends at y 39.25 mm,
+and TUNING is the same to within a tenth. **That clearance assumes the knob bodies are 15 mm all the
+way down to the panel face.**
+
+**The fitted knobs are straight-sided, so the clearance holds as drawn and nothing moves.** The owner
+confirmed it when this was raised.
+
+⚠ **This stays recorded as a live constraint rather than a closed non-issue, and the distinction is
+the whole point.** *"Any 15 mm knob"* is **not** a safe substitution: a knob with a flared skirt or a
+wider base is still 15 mm at the top and **will bury its own engraving**. Worse, the label that
+disappears belongs to the knob *above* it — so the symptom reads as a drawing error rather than a
+sourcing one, and the person debugging it starts in the wrong document. **Whoever sources
+replacements years from now needs the 0.8 mm figure, not the conclusion that it was once fine.**
 
 ### 9.6 The drawing is the source of truth
 
@@ -1142,7 +1288,7 @@ appeared on screen. Test it directly instead:
 | Input | Changes an audible state? | Puts something on screen? |
 |---|---|---|
 | **VOLUME turn** | Yes | **Yes** — volume card, every route including `/sleep` (§6.3, `ENC-4` shipped) |
-| **VOLUME press** (mute) | Yes — the room goes quiet | **Yes** — card, plus the **persistent** topbar chip (§6.7, `ENC-4a` shipped) |
+| **VOLUME press** (mute) | Yes — the room goes quiet | **Yes** — the **persistent** topbar chip (§6.7, `ENC-4a` shipped), plus a card whenever the press was long enough to raise a hold phase. ⭐ **Rev 5:** the rotated HUD's VOLUME card *covers* that chip for ~1500 ms — but **every VOLUME card carries and displays the same mute state** (verified in §6.2, made an invariant in §6.7), so **the information is continuous even though the element carrying it changes.** A tap under 300 ms raises no card at all, so there the chip stands alone and uncovered |
 | **VOLUME long-press** (standby) | Yes | **Yes** — progress ring from 300 ms, then the standby screen |
 | **SOURCE turn** | **No** — preview only | Yes (overlay) |
 | **PRESETS turn** | **No** — preview only | Yes (overlay) |
