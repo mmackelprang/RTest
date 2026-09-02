@@ -5965,17 +5965,20 @@ body {
   /* Vertically centred on the band, clamped to stay at least 8px inside the
      viewport.
 
-     Card height is NOT fixed - the volume card is ~173px against ~90-110px for
-     the others - so there is no constant half-height to offset by, the way the
-     old horizontal geometry could offset by a constant -180px against a fixed
-     360px width. The percentages below resolve against the card's own height,
-     which is what centres it without anything having to know that height.
+     Card height is NOT fixed - measured on the appliance at 1920x720 the volume
+     card is 178.5px against 92.5px (frequency) and 113.5px (track) - so there is
+     no constant half-height to offset by, the way the old horizontal geometry
+     could offset by a constant -180px against a fixed 360px width. The
+     percentages below resolve against the card's own height, which is what
+     centres it without anything having to know that height.
 
-     The clamp is load-bearing rather than defensive padding: centred on band 90
-     a 173px card spans y 3.5-176.5, and on band 630 y 543.5-716.5, so both end
-     bands already sit within 4px of a viewport edge. If it engages routinely
-     the card has grown too tall and the card is what should change, not the
-     band.
+     The clamp is load-bearing rather than defensive padding, and the measured
+     card is past the handoff's ~173px estimate: centred on band 90 a 178.5px
+     card would span y 0.75-179.25, which is OFF the top of the viewport, and on
+     band 630 y 540.75-719.25, which is 0.75px from the bottom. Measured on the
+     box, the clamp engages on exactly those two bands and nowhere else, moving
+     the card 7.25px. If it starts engaging routinely the card has grown too tall
+     and the card is what should change, not the band.
 
      This is the `translate` property, not `transform`. The entrance keyframes
      animate `transform`, and a transform declared here would be overridden for
