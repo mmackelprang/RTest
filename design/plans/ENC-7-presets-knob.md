@@ -1028,10 +1028,10 @@ Bluetooth device paired.
 
 | # | Steps | Expected |
 |---|---|---|
-| A1 | Turn knob 1 | Volume card, far-left quarter. Volume changes |
+| A1 | Turn knob 1 (topmost) | Volume card, top band (y ≈ 90 px), left-anchored. Volume changes |
 | A2 | Turn knob 2 | The SOURCE overlay |
 | A3 | Turn knob 3 | **The PRESETS overlay** — this is the row |
-| A4 | Turn knob 4 | Tuning card, far-right quarter. The station changes |
+| A4 | Turn knob 4 (bottommost) | Tuning card, bottom band (y ≈ 630 px). The station changes |
 | A5 | Turn knob 3 and confirm nothing else moves | The visualiser mode does **not** change. Its knob is gone by design |
 | A6 | Change the visualiser from the six-segment picker on Home | Still works. The capability moved, it did not go |
 

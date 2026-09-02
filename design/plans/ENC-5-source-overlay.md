@@ -106,8 +106,8 @@ the remap.
 **`ENC-4`'s hard-coded HUD indices move with the handlers, and this is the trap.** `ENC-4` Task 5
 writes `PublishHud(1, "TUNING", …)` inside `HandleTuningTurn`, `PublishHud(2, "SOURCE", …)` inside
 `HandleSourceTurn`, and `PublishHud(3, "VISUALIZER", …)` inside `HandleVizTurn` — literals chosen to
-match the *old* table. After the remap those literals put the tuning card in the SOURCE quarter and
-the visualiser card in the TUNING quarter: **the card would appear above the wrong knob, which is the
+match the *old* table. After the remap those literals put the tuning card in the SOURCE band and
+the visualiser card in the TUNING band: **the card would appear beside the wrong knob, which is the
 one thing `ENC-4` exists to get right.** Task 7 removes the possibility by threading the real encoder
 index into every handler. Do not leave a literal behind.
 
@@ -126,7 +126,7 @@ Resolved here so Builder does not guess and Polisher does not flag the result as
 | **D-1** | §4.4: *"List composition is fixed per tuner, resolved once at startup, **from the bands the active tuner reports**"* — so a tuner that never reports SW does not render a dead SW row | **No tuner reports its bands.** `IRadioControl` has no `SupportedBands` / capability member of any kind (`src/Radio.Core/Interfaces/Audio/IRadioControl.cs`). `IRadioBandService.GetAvailableBands()` is **device-agnostic** — it reflects over `BandPresets` and returns all six every time (`src/Radio.Infrastructure/Services/RadioBandService.cs:29`) | **Add the capability the spec requires** (Task 3): `IReadOnlyList<RadioBand> SupportedBands { get; }` on `IRadioControl`, **with a default interface implementation** returning `[FM, AM]` so the existing `FakeRadioControl` in `RadioStateMapperTests.cs:113` keeps compiling. `SDRRadioAudioSource` overrides with the `BandPresets` set; `RadioAudioSource` (RF320) overrides with `[FM]`, which is the truth — its `SetBandAsync` is a logged no-op (`RadioAudioSource.cs:177`) |
 | **D-2** | §4.4: the overlay's band rows are `FM`, `AM`, `(SW / WB)` — four bands at most | `RadioControlPanel`'s on-screen pills render **six** — AM, FM, WB, VHF, SW, AIR — because they come from the device-agnostic `GetBandsAsync()` | **The overlay carries Designer's four; the pills keep their six.** VHF and AIR stay touchscreen-only: they are not broadcast bands anyone reaches for a knob to find, and adding them puts the list at 10 rows against a 7-row fit (§6.6). **The knob and the pills share the *active band*, which is what §4.4's one-state rule is about; they do not share list composition.** Recorded here rather than silently resolved |
 | **D-3** | §6.6: the selector overlay idle-dismisses at **4000 ms**; §6.5: a HUD card holds **1500 ms** | `ENC-4`'s `EncoderHudService` arms a single dismissal timer at the constant `EncoderInteractionTimings.HudHoldMs` (1500) | **Carry the duration on the payload** (Tasks 1, 11): `DurationMs` is nullable and the service uses `Current.DurationMs ?? HudHoldMs`. One three-line change covers 1500 / 2000 / 4000 and every later message duration, instead of a phase-to-timer lookup that `ENC-7` would have to extend again |
-| **D-4** | `ENC-4` §2.5 item 3: adding an overlay is *"adding a branch and a fragment, not restructuring the host, the geometry, the timers or the mounts"* | The geometry genuinely differs: §6.2 is explicit that **"transient readouts appear above the knob that produced them. Selection overlays center."** `ENC-4`'s root is 360 px wide, `bottom: 24px`, quartered by `left: QuarterCentre(index)` | **Both are satisfied by a branch, not a restructure**: `EncoderHud.razor` picks a root class and skips the `left` style for selector phases. `.encoder-hud` (quartered, 360 px) and `.encoder-selector-overlay` (centred, 440 px) are siblings. The host, the timers, the mounts and the subscription are untouched — only the root's class and inline style become phase-dependent |
+| **D-4** | `ENC-4` §2.5 item 3: adding an overlay is *"adding a branch and a fragment, not restructuring the host, the geometry, the timers or the mounts"* | The geometry genuinely differs: §6.2 is explicit that **"transient readouts appear beside the knob that produced them. Selection overlays center."** `ENC-4`'s root is a left-anchored card banded by the knob's own y (90 / 270 / 450 / 630), viewport-clamped | **Both are satisfied by a branch, not a restructure**: `EncoderHud.razor` picks a root class and skips the `left` style for selector phases. `.encoder-hud` (quartered, 360 px) and `.encoder-selector-overlay` (centred, 440 px) are siblings. The host, the timers, the mounts and the subscription are untouched — only the root's class and inline style become phase-dependent |
 | **D-5** | §6.6 mock shows a fixed list *("Seven rows plus chrome fits comfortably inside the 600 px content area")* | For SOURCE the list is at most 7 and this is fine. **For `ENC-7` it is not** — the preset bank's cap is **50** (`RadioPresetService.cs:18`), not 7 (see the `ENC-7` plan's §0.3) | **The shared overlay windows to 7 visible rows** around the highlight from the start (Task 12), even though SOURCE never needs it. Building the window here is the difference between `ENC-7` consuming the component and `ENC-7` rewriting it — which is the exact drift the punch list says to prevent |
 
 ### 0.5 Two live findings the row's text does not anticipate
@@ -1437,7 +1437,7 @@ service start on the appliance, which is what that test exists to prevent.
 ///
 /// <para>
 /// The HUD's geometry keys off the encoder index the event arrived on, not off this table, so a
-/// card always appears above the knob that was turned.
+/// card always appears beside the knob that was turned.
 /// </para>
 ///
 /// Uses Func&lt;IAudioManager&gt; for deferred resolution to break circular DI.
@@ -1794,8 +1794,8 @@ Requirements it must satisfy — Builder writes the markup:
   /// True for the phases that render as a centred selection overlay rather than a quartered card.
   ///
   /// <para>
-  /// Handoff §6.2 draws the line: "transient readouts appear above the knob that produced them.
-  /// Selection overlays center." The quarter geometry is what makes a readout legible at a glance;
+  /// Handoff §6.2 draws the line: "transient readouts appear beside the knob that produced them.
+  /// Selection overlays center." The band geometry is what makes a readout legible at a glance;
   /// a list is read, not glanced at, and a 440 px list pinned under one knob would run off the
   /// edge for encoder 0.
   /// </para>
@@ -2069,10 +2069,10 @@ one Bluetooth device paired but **not** connected (needed for D and E).
 
 | # | Steps | Expected |
 |---|---|---|
-| A1 | Turn knob 1 (far left, VOLUME) | Volume card in the far-left quarter (≈240 px). Volume changes |
-| A2 | Turn knob 2 (SOURCE) | **The SOURCE overlay opens, centred** — not a quartered card |
-| A3 | Turn knob 3 (PRESETS) | A `VISUALIZER` card at ≈1200 px, and the on-screen visualiser mode changes. **Expected — index 2 is `ENC-7`'s** |
-| A4 | Turn knob 4 (TUNING) | A `TUNING` card at ≈1680 px showing the frequency. The station changes |
+| A1 | Turn knob 1 (**topmost**, VOLUME) | Volume card in the top band (y ≈ 90 px), left-anchored. Volume changes |
+| A2 | Turn knob 2 (SOURCE) | **The SOURCE overlay opens, centred** — not a banded card |
+| A3 | Turn knob 3 (PRESETS) | A `VISUALIZER` card at y ≈ 450 px, and the on-screen visualiser mode changes. **Expected — index 2 is `ENC-7`'s** |
+| A4 | Turn knob 4 (**bottommost**, TUNING) | A `TUNING` card at y ≈ 630 px showing the frequency. The station changes |
 | A5 | Turn knob 4 fast for ~1 s on FM | Frequency moves in large steps — acceleration, live for the first time. No audible distortion, no stall |
 | A6 | Turn knob 2 fast | The highlight moves **exactly one entry per detent** at every speed |
 
