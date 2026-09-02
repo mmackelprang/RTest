@@ -5980,6 +5980,13 @@ body {
      the card 7.25px. If it starts engaging routinely the card has grown too tall
      and the card is what should change, not the band.
 
+     Past 704px the two bounds cross (MIN > MAX), and clamp() is defined as
+     max(MIN, min(VAL, MAX)), so it returns MIN: the top pins to 8px and the
+     card overflows off the bottom rather than centring. Unreachable at any
+     height this component renders - the tallest card measures 178.5px, four
+     times under that - and recorded so a future reader who does grow one that
+     far is not surprised by it.
+
      This is the `translate` property, not `transform`. The entrance keyframes
      animate `transform`, and a transform declared here would be overridden for
      the length of that animation - the same hazard the old `margin-left:-180px`
