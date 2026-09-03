@@ -25,11 +25,10 @@ public class TTSFactoryTests
     // Default options
     _optionsMock.Setup(x => x.CurrentValue).Returns(new TTSOptions
     {
-      DefaultEngine = "ESpeak",
-      DefaultVoice = "en",
+      DefaultEngine = "Google",
+      DefaultVoice = "en-US-Standard-A",
       DefaultSpeed = 1.0f,
-      DefaultPitch = 1.0f,
-      ESpeakPath = "espeak-ng"
+      DefaultPitch = 1.0f
     });
 
     // Default secrets (empty for tests)
@@ -52,21 +51,23 @@ public class TTSFactoryTests
 
     var engines = factory.AvailableEngines;
 
-    Assert.Equal(3, engines.Count);
-    Assert.Contains(engines, e => e.Engine == TTSEngine.ESpeak);
+    Assert.Equal(2, engines.Count);
     Assert.Contains(engines, e => e.Engine == TTSEngine.Google);
     Assert.Contains(engines, e => e.Engine == TTSEngine.Azure);
   }
 
   [Fact]
-  public void AvailableEngines_ESpeakIsOffline()
+  public void AvailableEngines_OffersNoOfflineEngine()
   {
+    // TTS-9 removed eSpeak, the only offline engine. Both survivors are cloud engines, so
+    // nothing in the list may claim to work without an API key.
     var factory = CreateFactory();
 
-    var espeak = factory.AvailableEngines.First(e => e.Engine == TTSEngine.ESpeak);
+    var engines = factory.AvailableEngines;
 
-    Assert.True(espeak.IsOffline);
-    Assert.False(espeak.RequiresApiKey);
+    Assert.DoesNotContain(engines, e => e.IsOffline);
+    Assert.DoesNotContain(engines, e => e.Name.Contains("speak", StringComparison.OrdinalIgnoreCase));
+    Assert.All(engines, e => Assert.True(e.RequiresApiKey));
   }
 
   [Fact]
@@ -200,17 +201,6 @@ public class TTSFactoryTests
   }
 
   [Fact]
-  public async Task GetVoicesAsync_ReturnsDefaultVoicesForESpeak()
-  {
-    var factory = CreateFactory();
-
-    // This will fall back to default voices if espeak is not installed
-    var voices = await factory.GetVoicesAsync(TTSEngine.ESpeak);
-
-    Assert.NotEmpty(voices);
-  }
-
-  [Fact]
   public async Task CreateAsync_GoogleEngine_AttemptsConnection()
   {
     // Since Google TTS is now implemented, it will attempt an actual HTTP call
@@ -267,5 +257,88 @@ public class TTSFactoryTests
 
     await Assert.ThrowsAsync<InvalidOperationException>(() =>
       factory.CreateAsync("Test", new TTSParameters { Engine = TTSEngine.Azure }));
+  }
+
+  // ── TTS-9: the removal must fail loudly rather than fall back ─────────────────────────────
+
+  [Fact]
+  public void TTSEngine_DefaultValueIsNotADefinedMember()
+  {
+    // Regression test for the zero-value trap: TTSEngine is numbered from 1 so an engine that
+    // was never set cannot be mistaken for a real one. Renumbering from 0 fails here.
+    Assert.False(Enum.IsDefined(default(TTSEngine)));
+  }
+
+  [Theory]
+  [InlineData("Rhubarb")]
+  [InlineData("0")]   // Enum.TryParse accepts the decimal form; Enum.IsDefined is what rejects it
+  [InlineData("7")]
+  public async Task CreateAsync_ThrowsForUnknownConfiguredEngine(string configuredEngine)
+  {
+    _optionsMock.Setup(x => x.CurrentValue).Returns(new TTSOptions
+    {
+      DefaultEngine = configuredEngine,
+      DefaultVoice = "en-US-Standard-A"
+    });
+    var factory = CreateFactory();
+
+    var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.CreateAsync("Test"));
+
+    Assert.Contains(configuredEngine, ex.Message, StringComparison.Ordinal);
+    Assert.Contains("Google, Azure", ex.Message, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task CreateAsync_ThrowsForRemovedESpeakEngine()
+  {
+    // A stored or hand-edited "ESpeak" must be rejected, not silently reinterpreted.
+    _optionsMock.Setup(x => x.CurrentValue).Returns(new TTSOptions
+    {
+      DefaultEngine = "ESpeak",
+      DefaultVoice = "en-US-Standard-A"
+    });
+    var factory = CreateFactory();
+
+    var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.CreateAsync("Test"));
+
+    Assert.Contains("ESpeak", ex.Message, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task CreateAsync_ThrowsWhenNoEngineIsConfigured()
+  {
+    _optionsMock.Setup(x => x.CurrentValue).Returns(new TTSOptions());
+    var factory = CreateFactory();
+
+    var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.CreateAsync("Test"));
+
+    Assert.Contains("TTS:DefaultEngine", ex.Message, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task CreateAsync_ThrowsWhenNoVoiceIsConfigured()
+  {
+    _optionsMock.Setup(x => x.CurrentValue).Returns(new TTSOptions
+    {
+      DefaultEngine = "Google",
+      DefaultVoice = string.Empty
+    });
+    var factory = CreateFactory();
+
+    var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => factory.CreateAsync("Test"));
+
+    Assert.Contains("TTS:DefaultVoice", ex.Message, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task CreateAsync_ThrowsWhenCallerSuppliesABlankVoice()
+  {
+    // The guard sits after the config fallback, so it covers a caller-supplied voice too.
+    var factory = CreateFactory();
+
+    var ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+      factory.CreateAsync("Test", new TTSParameters { Engine = TTSEngine.Google, Voice = "  " }));
+
+    Assert.Contains("TTS:DefaultVoice", ex.Message, StringComparison.Ordinal);
   }
 }

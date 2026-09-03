@@ -592,16 +592,14 @@ public class TTSIntegrationTest : IPhaseTest
         }
       }
 
-      // Simulate TTS generation
+      // Simulate TTS generation. No engine is invoked here: the engines that remain after
+      // TTS-9 are both cloud engines, and this phase must not depend on an API key or network.
       ConsoleUI.WriteInfo("");
-      ConsoleUI.WriteInfo("Generating TTS audio...");
+      ConsoleUI.WriteInfo("Simulating TTS generation (no engine is called)...");
       ConsoleUI.WriteInfo("  Text: \"Testing audio system\"");
-      ConsoleUI.WriteInfo("  Engine: eSpeak-ng");
-      ConsoleUI.WriteInfo("  Voice: en");
       await Task.Delay(100, ct);
 
-      ConsoleUI.WriteSuccess("TTS audio generated successfully");
-      ConsoleUI.WriteInfo("  Duration: ~1.5 seconds");
+      ConsoleUI.WriteSuccess("TTS generation simulated");
 
       ConsoleUI.WriteInfo("");
       ConsoleUI.WriteInfo("Playing TTS announcement...");

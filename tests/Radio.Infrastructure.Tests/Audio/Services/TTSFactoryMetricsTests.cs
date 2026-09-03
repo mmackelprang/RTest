@@ -25,11 +25,10 @@ public class TTSFactoryMetricsTests
 
     _mockOptions.Setup(x => x.CurrentValue).Returns(new TTSOptions
     {
-      DefaultEngine = "eSpeak",
-      DefaultVoice = "en",
+      DefaultEngine = "Google",
+      DefaultVoice = "en-US-Standard-A",
       DefaultSpeed = 1.0f,
-      DefaultPitch = 1.0f,
-      ESpeakPath = "espeak-ng"
+      DefaultPitch = 1.0f
     });
 
     _mockSecrets.Setup(x => x.CurrentValue).Returns(new TTSSecrets());
@@ -52,7 +51,7 @@ public class TTSFactoryMetricsTests
     }
     catch
     {
-      // Expected to fail without espeak-ng installed
+      // Expected to fail: the mocked secrets carry no Google API key
     }
 
     // Assert
@@ -74,7 +73,7 @@ public class TTSFactoryMetricsTests
     }
     catch
     {
-      // Expected to fail without espeak-ng installed
+      // Expected to fail: the mocked secrets carry no Google API key
     }
 
     // Assert
@@ -93,7 +92,7 @@ public class TTSFactoryMetricsTests
     }
     catch
     {
-      // Expected to fail without espeak-ng installed
+      // Expected to fail: the mocked secrets carry no Google API key
     }
 
     // Assert
@@ -112,7 +111,7 @@ public class TTSFactoryMetricsTests
     }
     catch
     {
-      // Expected to fail without espeak-ng installed
+      // Expected to fail: the mocked secrets carry no Google API key
     }
 
     // Assert - Latency should be tracked even on failure
@@ -131,7 +130,7 @@ public class TTSFactoryMetricsTests
     }
     catch
     {
-      // Expected to fail without espeak-ng installed
+      // Expected to fail: the mocked secrets carry no Google API key
     }
 
     // Assert
@@ -139,7 +138,7 @@ public class TTSFactoryMetricsTests
       x => x.Increment(
         "tts.requests_total", 
         1.0, 
-        It.Is<IDictionary<string, string>>(d => d.ContainsKey("provider") && d["provider"] == "espeak")),
+        It.Is<IDictionary<string, string>>(d => d.ContainsKey("provider") && d["provider"] == "google")),
       Times.Once);
   }
 }
