@@ -69,13 +69,32 @@ public class RotaryEncoderRouterMappingTests
 
   private sealed class FakeSleepService : ISleepService
   {
+    private int _wakeClaimed;
+
     public bool IsSleeping { get; set; }
+    public bool IsSleepScreenVisible { get; set; }
     public int EnterSleepCalls { get; private set; }
     public int WakeCalls { get; private set; }
+    public int ClaimAttempts { get; private set; }
+
+    /// <summary>
+    /// Mirrors the shipped derivation in <c>SleepService</c>, claim latch included, so a router test
+    /// exercises the same three-way decision the box does rather than a simplified one.
+    /// </summary>
+    public ConsoleWakeState WakeState
+    {
+      get
+      {
+        if (Volatile.Read(ref _wakeClaimed) == 1) return ConsoleWakeState.Awake;
+        if (IsSleeping) return ConsoleWakeState.Standby;
+        return IsSleepScreenVisible ? ConsoleWakeState.Ambient : ConsoleWakeState.Awake;
+      }
+    }
 
     public Task EnterSleepAsync()
     {
       EnterSleepCalls++;
+      Interlocked.Exchange(ref _wakeClaimed, 0);
       return Task.CompletedTask;
     }
 
@@ -83,6 +102,19 @@ public class RotaryEncoderRouterMappingTests
     {
       WakeCalls++;
       return Task.CompletedTask;
+    }
+
+    public void SetSleepScreenVisible(bool visible)
+    {
+      IsSleepScreenVisible = visible;
+      Interlocked.Exchange(ref _wakeClaimed, 0);
+    }
+
+    public bool TryClaimWake()
+    {
+      ClaimAttempts++;
+      if (WakeState == ConsoleWakeState.Awake) return false;
+      return Interlocked.CompareExchange(ref _wakeClaimed, 1, 0) == 0;
     }
   }
 
@@ -730,5 +762,123 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.False(h.PresetSelector.IsOpen);
     Assert.Empty(h.Audio.GetOrCreateCalls);
+  }
+
+  // --- The sleep gate (ENC-6, handoff 8.3) --------------------------------------------------
+
+  [Fact]
+  public void Ambient_VolumeTurn_ActsInPlace()
+  {
+    // Rule 2. The lit clock is the one state where a knob still changes the machine, and it is the
+    // knob whose readout the sleep screen was already built to host.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.True(h.Audio.MasterVolume > 0.5f);
+  }
+
+  [Fact]
+  public void Ambient_SourceTurn_IsConsumedAndWakes()
+  {
+    // Renamed from the plan's Ambient_TuningTurn_IsConsumedAndWakes: index 1 was TUNING when the
+    // plan was written and is SOURCE since ENC-5 merged. The index and the assertions are the
+    // plan's; only the name moved, so it says what it actually exercises.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+    h.Audio.ActiveSource = null;
+
+    h.Encoders.RaiseTurn(1, 1);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Ambient_ASecondTurnDuringTheWake_Acts()
+  {
+    // The latch, from the router's side. The browser has not left /sleep yet, so IsSleepScreenVisible
+    // is still true - but the claim is spent, so the second detent must reach its handler.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(1, 1);
+    h.Encoders.RaiseTurn(1, 1);
+    h.Encoders.RaiseTurn(1, 1);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+    Assert.Equal(ConsoleWakeState.Awake, h.Sleep.WakeState);
+  }
+
+  [Fact]
+  public void Standby_ATurn_DoesNotResumeAudio()
+  {
+    // D22, verbatim: "a turn is what a passing sleeve does; a press is what a person does."
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(1, 1);
+    h.Encoders.RaiseTurn(2, 1);
+    h.Encoders.RaiseTurn(3, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0.5f, h.Audio.MasterVolume);
+    Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  [Fact]
+  public void Standby_APress_Resumes()
+  {
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseButton(2, isPressed: true);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Standby_APressAfterATurn_StillResumes()
+  {
+    // The turn must not have burned the claim - otherwise a sleeve brushing a knob would leave the
+    // console unable to be turned on by the press that follows it.
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(3, 1);
+    h.Encoders.RaiseButton(0, isPressed: true);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Ambient_VolumeLongPress_StillEntersStandby()
+  {
+    // 8.3's Ambient column keeps encoder 0 fully live, hold included. This is the one path from the
+    // clock into Standby that does not involve the topbar.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+
+    Assert.Equal(1, h.Sleep.EnterSleepCalls);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Awake_NothingIsConsumed()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
   }
 }

@@ -151,9 +151,15 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
-      // If sleeping, wake on any encoder input and consume the event
-      if (TryWakeFromSleep("encoder-turn"))
+      SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: true);
+      if (gate != SleepGateOutcome.Dispatch)
       {
+        PublishCurrentValue(e.EncoderIndex);
+        if (gate == SleepGateOutcome.ConsumeAndWake && _sleepService is not null)
+        {
+          _ = _sleepService.WakeAsync("encoder-turn");
+          _logger.LogInformation("Woke via encoder-turn on encoder {Index}", e.EncoderIndex);
+        }
         return;
       }
 
@@ -179,16 +185,27 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
-      // Both edges matter now. The short action fires on release and the long action fires at the
+      // Both edges matter. The short action fires on release and the long action fires at the
       // threshold while still held, so this handler routes the edge and leaves the choice of action
       // to the gesture.
       //
-      // The sleep-wake consumption stays on the PRESS edge: waking is what the input is spent on,
-      // and letting the release through would fire a short action into a UI that has just changed
-      // underneath the user.
-      if (e.IsPressed && TryWakeFromSleep("encoder-button"))
+      // The sleep gate is applied to the PRESS edge only: waking is what the input is spent on, and
+      // letting the release through would fire a short action into a UI that has just changed
+      // underneath the user. The release that follows a consumed press reaches the gesture and is
+      // dropped by its orphan-release guard, which exists for exactly this path.
+      if (e.IsPressed)
       {
-        return;
+        SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: false);
+        if (gate != SleepGateOutcome.Dispatch)
+        {
+          PublishCurrentValue(e.EncoderIndex);
+          if (gate == SleepGateOutcome.ConsumeAndWake && _sleepService is not null)
+          {
+            _ = _sleepService.WakeAsync("encoder-button");
+            _logger.LogInformation("Woke via encoder-button on encoder {Index}", e.EncoderIndex);
+          }
+          return;
+        }
       }
 
       _gesture.OnButtonEdge(e.EncoderIndex, e.IsPressed);
@@ -344,18 +361,72 @@ public class RotaryEncoderActionRouter : IDisposable
   }
 
   /// <summary>
-  /// Checks if the system is sleeping and wakes it if so.
+  /// What the sleep model does with one encoder input, decided before any handler runs.
   /// </summary>
-  private bool TryWakeFromSleep(string wakeSource)
+  private enum SleepGateOutcome
   {
-    if (_sleepService == null || !_sleepService.IsSleeping)
+    /// <summary>Run the handler. The console is awake, or this is VOLUME on the lit Ambient clock.</summary>
+    Dispatch,
+
+    /// <summary>Spend this input waking: publish this knob's current value, start the wake, run no handler.</summary>
+    ConsumeAndWake,
+
+    /// <summary>Spend this input: publish this knob's current value, run no handler, and do not wake.</summary>
+    Consume,
+  }
+
+  /// <summary>
+  /// Applies handoff §8.3's two surviving columns to one input.
+  ///
+  /// <para>
+  /// Rule 2 on a lit panel: VOLUME acts in place and everything else is spent waking. Standby adds
+  /// D22 on top of it — a <b>turn</b> never resumes audio, only a press or a screen tap does — so a
+  /// turn there is consumed without a wake. <b>The two dark states are withdrawn by
+  /// <c>ENC-15</c></b>, so Rule 1 has no reachable state and appears nowhere below.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ <paramref name="index"/> is compared against
+  /// <see cref="RotaryEncoderConfigDefaults.VolumeEncoderIndex"/> and nothing else, which is why
+  /// this survives the ENC-5 / ENC-7 remap: index 0 is VOLUME under both the current handler table
+  /// and the remapped one, and every other index reaches the same branch.
+  /// </para>
+  /// </summary>
+  private SleepGateOutcome GateInput(int index, bool isTurn)
+  {
+    if (_sleepService is null)
     {
-      return false;
+      return SleepGateOutcome.Dispatch;
     }
 
-    _ = _sleepService.WakeAsync(wakeSource);
-    _logger.LogInformation("Woke from sleep via {WakeSource}", wakeSource);
-    return true;
+    switch (_sleepService.WakeState)
+    {
+      case ConsoleWakeState.Ambient when index == RotaryEncoderConfigDefaults.VolumeEncoderIndex:
+        // The handler runs and publishes as usual; the card lands on Sleep.razor's own HUD host,
+        // which is why this needs no code of its own.
+        return SleepGateOutcome.Dispatch;
+
+      case ConsoleWakeState.Standby when isTurn:
+        return SleepGateOutcome.Consume;
+
+      case ConsoleWakeState.Ambient:
+      case ConsoleWakeState.Standby:
+        // A lost claim means an earlier input in this same burst already started the wake, so
+        // WakeState now reads Awake and dispatching is the correct answer rather than a fallback:
+        // a fast spin must lose one detent, not twelve.
+        return _sleepService.TryClaimWake()
+          ? SleepGateOutcome.ConsumeAndWake
+          : SleepGateOutcome.Dispatch;
+
+      default:
+        return SleepGateOutcome.Dispatch;
+    }
+  }
+
+  // Task 6 replaces this body with the real readout. It is a no-op for exactly one commit so the
+  // gate can be reviewed on its own; the tests that force it to publish are in Task 6.
+  private void PublishCurrentValue(int index)
+  {
   }
 
   /// <summary>
