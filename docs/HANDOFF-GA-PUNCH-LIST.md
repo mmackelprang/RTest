@@ -1,15 +1,16 @@
 # HANDOFF — GA punch list for the cabinet install
 
 **Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `TEST-3`, `LOG-1`, `LOG-11`, `OPS-1`, `AUD-6`, `AUD-7`, `SEC-1`, and the first half of the encoder arc — `ENC-0`/`ENC-0a`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-11`/`ENC-11a` — all deployed and verified on the box.**
-> **P0 remaining as of 2026-09-02 (late evening): 4.** `ENC-6` and `ENC-7` are in flight; `PHN-1` is
+> **P0 remaining as of 2026-09-02 (late evening): 3.** `ENC-7` is in flight; `PHN-1` is
 > **partially shipped** — the ADR-029 arc is seven PRs and PRs 1 and 2 landed as `PHN-1a` ([#528](https://github.com/mmackelprang/RTest/pull/528))
 > and `PHN-1b` ([#534](https://github.com/mmackelprang/RTest/pull/534)), so PRs 3-7 remain; `PHN-2` has not
 > started and sits behind them (`O6`).
 >
 > ✅ **Shipped 2026-09-02:** `ENC-4` ([#519](https://github.com/mmackelprang/RTest/pull/519), geometry corrected by [#526](https://github.com/mmackelprang/RTest/pull/526)),
 > `ENC-5` ([#536](https://github.com/mmackelprang/RTest/pull/536)), `ENC-8` ([#527](https://github.com/mmackelprang/RTest/pull/527)),
-> `ENC-12` ([#535](https://github.com/mmackelprang/RTest/pull/535)), and `ENC-15` — closed with a **FAILED**
-> gate, which removes `ENC-6`'s blanking half from scope entirely. `TTS-1`'s two P0 parts are both closed; part (iii) is P1. The owner has read §7, closed `D23` / `D24` / `D9`, and
+> `ENC-12` ([#535](https://github.com/mmackelprang/RTest/pull/535)),
+> **`ENC-6` ([#539](https://github.com/mmackelprang/RTest/pull/539) — the non-blanking half only)**, and `ENC-15` — closed with a **FAILED**
+> gate, which removes `ENC-6`'s blanking half from scope entirely and is why `#539` ships three states rather than five. `TTS-1`'s two P0 parts are both closed; part (iii) is P1. The owner has read §7, closed `D23` / `D24` / `D9`, and
 authorised autonomous execution against this list in the §2 order, merging on green review + tests + UAT.
 **Every decision is now closed** — `D25` was answered 2026-09-02 (full ADR-029 arc, no stopgap).
 ⚠ **AMENDED 2026-09-02 — the as-built front panel.** The owner supplied the real drawing, now committed at
