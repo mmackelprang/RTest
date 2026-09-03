@@ -393,8 +393,20 @@ keeps the knobs from becoming a new distortion source.
 > correlates with incidental CPU load, that is a plausible new distortion trigger — **and a miserable one to
 > diagnose, because it would only reproduce while someone was touching the radio.**
 
-- **Why the cabinet cares:** criterion (a). Minimum time from silence to full must be ≥1.33 s of deliberate
-  spinning. The rest of the row is about not making the distortion problem worse.
+- **Why the cabinet cares:** criterion (a). **No single detent may move volume by more than 4 points**,
+  which the host clamp enforces whatever the device sends; silence to full is 2.0 s of deliberate spinning
+  at 80 ms per detent and 1.0 s at 40 ms, the fastest rate the top tier still qualifies for. The rest of the
+  row is about not making the distortion problem worse.
+  ⚠ **`ENC-20` (2026-09-03) re-derived this criterion, and the original was never satisfied by the shipped
+  code.** This bullet used to read *"minimum time from silence to full must be ≥1.33 s"*. That figure came
+  from handoff §5.4's table, which computed points per detent as `multiplier × 2` — correct only at
+  `step_size = 1`, while the code shipped `step_size = 2`. Every points figure was therefore **half** the
+  real value and the true time was 0.67 s, so the criterion as written was failing from the day it was
+  written and nothing could have detected that, because the criterion and the defect shared an assumption.
+  It is now stated as **points per detent**, the quantity the clamp actually bounds: a tier threshold is a
+  *maximum interval*, not the user's spin rate, so a bare figure in seconds was never a floor. The clamp
+  values in the bullets above are the row's original text and are superseded — volume is **±4**, not ±6,
+  and at `VolumeStepPercent = 1` a unit is a point. Handoff §5.4 and §10.2 carry the full derivation.
 - **Evidence:** `RotaryEncoderActionRouter.cs:128-136` (today's clamp is on the *value*, not the delta);
   Designer §5.2 host-clamp row, §5.4, §6.8, §10.2. **Rev 2 §7.3 gives the clamps the concrete justification
   they previously had only in the abstract: between USB detect and a verified config the device runs

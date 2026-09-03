@@ -144,11 +144,12 @@ public static class EncoderFaultRules
   /// <list type="bullet">
   ///   <item>The <b>Degraded</b> line promises the knobs still work and says <i>nothing</i> about
   ///   volume. Both halves hold: the host clamps stay in force, acceleration is treated as absent,
-  ///   and since ENC-16 the volume clamp stays at its normal 6 units per event, because read-back
+  ///   and since ENC-16 the volume clamp stays at its normal 4 units per event, because read-back
   ///   confirmed <c>wrap</c> and <c>reverse</c> and only a feel field disagreed. Its silence about
-  ///   volume is now accurate rather than merely unfalsifiable.</item>
+  ///   volume is now accurate rather than merely unfalsifiable. (Units, not points — though since
+  ///   ENC-20 set <c>VolumeStepPercent = 1</c> they are the same number on VOLUME.)</item>
   ///   <item>The <b>hard-fault</b> line promises volume is limited, and it is — <c>VolumeClampFor</c>
-  ///   returns 2 instead of 6 until a push verifies. That covers a safety field reading back wrong
+  ///   returns 2 instead of 4 until a push verifies. That covers a safety field reading back wrong
   ///   <i>and</i> a device that never answered at all, which is the other way the safety fields end
   ///   up unconfirmed.</item>
   /// </list>

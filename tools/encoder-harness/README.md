@@ -180,7 +180,7 @@ virtual_encoder.py (root, foreground)
 
 The harness answers the configuration handshake so the console reaches the **`Configured`**
 tier. That matters for measurement, not tidiness: since `ENC-16`, `VolumeClampFor` runs the
-normal 6-unit clamp for `Configured` and `Degraded` and the tightened 2-unit clamp for
+normal 4-unit clamp for `Configured` and `Degraded` and the tightened 2-unit clamp for
 `Transient`, `HardFault` and `Unknown`, so a harness that did not answer would silently change
 what a clamp measurement means.
 
@@ -211,11 +211,18 @@ encoder report format for months and nothing mechanical caught it.
 
 **Covered, and measured on the appliance 2026-09-03:** the service connects to the virtual
 device and reports `Encoder report length 107 bytes (movement accumulators: true)`; the
-configuration push verifies `Configured` on attempt 1; turns move volume at 2% per unit; the
-`ENC-3` per-event clamp holds at ±6 units (±12 points) against 20- and 50-detent single
-events; the `ENC-4` HUD renders left-anchored at the index band; a > 600 ms hold synthesises a
-long press with the progress ring while a 200 ms hold does not; and `ENC-1`'s re-baseline rule
-holds across a real USB disconnect.
+configuration push verifies `Configured` on attempt 1; turns move volume at the configured
+rate per unit; the `ENC-3` per-event clamp holds against 20- and 50-detent single events; the
+`ENC-4` HUD renders left-anchored at the index band; a > 600 ms hold synthesises a long press
+with the progress ring while a 200 ms hold does not; and `ENC-1`'s re-baseline rule holds
+across a real USB disconnect.
+
+**The live figures are 1% per unit and ±4 units (±4 points).** Since `ENC-20` set both
+`step_size` and `VolumeStepPercent` to `1`, a device unit *is* a volume point, so the clamp
+reads the same either way. ⚠ That run was made against the **pre-`ENC-20`** build and measured
+2% per unit and ±6 units (±12 points); it is correct as history and is not restated here as a
+current number. Re-run it to measure the values above rather than trusting this paragraph —
+which is the whole point of the harness existing.
 
 **Not covered.** The harness cannot tell you how a knob *feels* — detent weight, acceleration
 ramp, whether a spin *sounds* right. `ENC-3`'s deferred volume ramp says so explicitly, and the

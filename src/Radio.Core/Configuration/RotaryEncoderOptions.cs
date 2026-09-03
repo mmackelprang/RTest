@@ -37,8 +37,23 @@ public class RotaryEncoderOptions
   /// <summary>HID report polling interval in milliseconds.</summary>
   public int PollIntervalMs { get; set; } = 10;
 
-  /// <summary>Volume change per encoder step (percentage, 0-100).</summary>
-  public int VolumeStepPercent { get; set; } = 2;
+  /// <summary>
+  /// <b>Volume points per device unit of movement</b> (percentage points of full scale, 0-100).
+  ///
+  /// <para>
+  /// The device has already applied its own <c>step_size</c> and acceleration tier by the time a
+  /// movement reaches the host, so this multiplies <i>units the device computed</i>, not detents.
+  /// At 1 the two quantities are the same thing — one unit is one point — which is what makes a
+  /// tier multiplier readable as points per detent with no further arithmetic.
+  /// </para>
+  ///
+  /// <para>
+  /// ENC-20 lowered it from 2. Paired with <c>step_size 2</c> on the VOLUME channel it made a
+  /// single base detent move volume by 4 points, and it invited every downstream comment to count
+  /// device units as though they were already points.
+  /// </para>
+  /// </summary>
+  public int VolumeStepPercent { get; set; } = 1;
 
   /// <summary>Delay before attempting device reconnection in milliseconds.</summary>
   public int ReconnectDelayMs { get; set; } = 2000;

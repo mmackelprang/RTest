@@ -61,15 +61,44 @@ public enum RotaryEncoderConfigStatus
 /// <b>Why this is a safety change, not a tuning preference.</b> A device that has never been
 /// configured runs its factory defaults, and those were read off the live hardware on 2026-09-02:
 /// <c>step_size = 1</c> with tiers <c>(150ms ×5), (80ms ×15), (40ms ×50)</c> on every encoder. The
-/// host applies <c>VolumeStepPercent</c> (2%) per unit of movement, so a single fast detent at the
-/// ×50 tier moves volume by <c>50 × 2% = 100 points</c> — silence to full, in one click, from a knob
-/// a guest may be touching for the first time.
+/// host applies <c>VolumeStepPercent</c> per <i>device unit</i> of movement, and since ENC-20 that
+/// is <b>1</b> — so a single fast detent at the ×50 tier arrives as <c>50 units = 50 points</c>,
+/// half the range in one click, from a knob a guest may be touching for the first time. The host
+/// clamp is what makes that window survivable: it cuts such an event to <see cref="VolumeClamp"/>,
+/// <b>4 points</b>, where before ENC-20 the same clamp let through 12. The unverified window is
+/// therefore strictly <i>safer</i> after this change, not merely better-feeling.
 /// </para>
 ///
 /// <para>
-/// The values below cap volume's fastest tier at ×3, giving a maximum slew of 6 points per 80 ms:
-/// silence to full takes at least 1.33 seconds of sustained, deliberate spinning. Fast enough to
-/// kill the volume when the phone rings; slow enough that no single gesture produces a blast.
+/// ⭐ <b>One device unit is one volume point.</b> That is the property which makes this arithmetic
+/// hard to get wrong again: with <c>VolumeStepPercent = 1</c> a tier multiplier reads directly as
+/// points per detent, and there is no second multiplication left to forget. ENC-20 exists because
+/// there was one — <c>step_size 2</c> multiplied by 2% made a single <i>base</i> detent move volume
+/// by 4 points, and every figure previously written down here counted device units as though they
+/// were already points.
+/// </para>
+///
+/// <para>
+/// The values below cap volume's fastest tier at ×4, which is <b>4 volume points per detent</b>.
+/// That bound is the host clamp's rather than the device's, so it holds regardless of what actually
+/// arrives on the wire. Silence to full is 25 detents: at tier 2's own threshold rate (80 ms per
+/// detent) <b>2.0 s</b>, and at 40 ms per detent — the fastest rate the firmware's tier ladder
+/// contemplates at all — <b>1.0 s</b>.
+/// </para>
+///
+/// <para>
+/// ⚠ <b>A tier threshold is a maximum interval, not the rate the user turns at.</b> Crossing the
+/// 80 ms threshold means only that detents arrived <i>at least</i> that fast; nothing stops them
+/// arriving faster. A "points per 80 ms" figure is therefore not a floor and never was — the
+/// wording this paragraph replaces stated exactly such a rate-based floor and could not guarantee
+/// it. The honest bound is points <b>per detent</b>, which the host clamp enforces unconditionally,
+/// and any figure in seconds must name the spin rate it assumes, as the two above do.
+/// </para>
+///
+/// <para>
+/// Fast enough to kill the volume when the phone rings; slow enough that no single gesture produces
+/// a blast. For reference: one full revolution of a 24-detent knob at tier 2 crosses the whole
+/// range.
 /// </para>
 /// </summary>
 public static class RotaryEncoderConfigDefaults
@@ -77,8 +106,20 @@ public static class RotaryEncoderConfigDefaults
   /// <summary>Encoder index of the VOLUME knob, per the physical order VOLUME · SOURCE · PRESETS · TUNING.</summary>
   public const int VolumeEncoderIndex = 0;
 
-  /// <summary>Host per-event movement clamp for volume, in device units.</summary>
-  public const int VolumeClamp = 6;
+  /// <summary>
+  /// Host per-event movement clamp for volume, in device units — which, since
+  /// <c>VolumeStepPercent</c> is 1, is also <b>volume points</b>. The two are one quantity here, so
+  /// this number can be read either way without converting between them.
+  ///
+  /// <para>
+  /// It equals the fastest configured tier's movement (<c>step_size 1</c> × tier 2's ×4), and that
+  /// equality is the design rather than a coincidence: the clamp permits <i>exactly</i> the
+  /// configured top tier and nothing beyond it. A device doing what it was told is never clamped at
+  /// all; a device on factory tiers is cut back to the same 4 points the top tier would have
+  /// produced.
+  /// </para>
+  /// </summary>
+  public const int VolumeClamp = 4;
 
   /// <summary>
   /// Host per-event clamp for the selector knobs — SOURCE and PRESETS.
@@ -117,6 +158,22 @@ public static class RotaryEncoderConfigDefaults
   /// <c>reverse</c> were right in it, an acceleration tier was not — runs on
   /// <see cref="VolumeClamp"/>. See <c>RotaryEncoderConfigVerifier.VolumeClampFor</c> for the table.
   /// </para>
+  ///
+  /// <para>
+  /// <b>ENC-20 left the number at 2 and thereby tightened it.</b> It used to bound 2 units = 4
+  /// points; it now bounds 2 units = <b>2 points</b>, because <c>VolumeStepPercent</c> fell from 2
+  /// to 1. Strictly tighter in absolute terms, while still being twice the base rate — so the knob
+  /// is sluggish during the boot window rather than dead. That distinction earns its keep: a knob
+  /// that appears not to work is a knob the user keeps turning, which is the input pattern this
+  /// whole mechanism exists to survive.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ Do <b>not</b> raise this to 4 to "match" the new <see cref="VolumeClamp"/>. That would make
+  /// the unverified clamp equal to the normal one and destroy the tightening outright — the
+  /// distinction between "confirmed safe" and "not confirmed yet" would still be classified,
+  /// reported and tested, and would no longer do anything.
+  /// </para>
   /// </summary>
   public const int VolumeClampUnverified = 2;
 
@@ -139,9 +196,12 @@ public static class RotaryEncoderConfigDefaults
       StepsPerDetent = 4,
     };
 
-    // Enc 0 — VOLUME. Two tiers, no third: see the slew argument above.
-    config.Encoders[0] = Channel(max: 100, step: 2,
-      t1: (150, 2), t2: (80, 3), t3: (0, 0));
+    // Enc 0 — VOLUME. step_size 1, so with VolumeStepPercent = 1 one detent is one volume point and
+    // a tier multiplier is literally points per detent (ENC-20). Two tiers, and the third is still
+    // deliberately absent — see the slew argument above: ×4 at 40 ms per detent already crosses the
+    // range in a second, so a further rung would put a blast inside one flick of the wrist.
+    config.Encoders[0] = Channel(max: 100, step: 1,
+      t1: (150, 2), t2: (80, 4), t3: (0, 0));
 
     // Enc 1 — SOURCE. Acceleration disabled outright. A seven-entry list with a x5 multiplier means
     // one quick flick moves the highlight five entries and lands somewhere the user did not aim.
