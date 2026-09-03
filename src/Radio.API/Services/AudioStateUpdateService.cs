@@ -1019,6 +1019,13 @@ public class AudioStateUpdateService : BackgroundService
         Status = e.Status.ToString(),
         PreviousStatus = e.PreviousStatus.ToString(),
       });
+      // Information, where the adjacent connection broadcast logs at Debug, and that asymmetry is
+      // deliberate. The tier changes a handful of times per connection rather than continuously, so
+      // this is not volume; and since LOG-11 the API's console sink is level-restricted to WARNING
+      // and above, which under systemd means Information no longer reaches journald at all — it goes
+      // to the file sink under /opt/radio-console/logs, which is where a "why is the volume knob
+      // sluggish" question is actually triaged from. At Debug it would not be written anywhere in
+      // production.
       _logger.LogInformation(
         "Broadcast EncoderConfigStatusChanged: {Previous} -> {Status}", e.PreviousStatus, e.Status);
     }

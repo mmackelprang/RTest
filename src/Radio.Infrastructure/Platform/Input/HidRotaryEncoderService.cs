@@ -146,6 +146,30 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
 
   private RotaryEncoderConfigStatus _configStatus = RotaryEncoderConfigStatus.Unknown;
 
+  /// <summary>
+  /// Makes the compare-and-set in <see cref="ConfigStatus"/>'s setter atomic against the two threads
+  /// that write it.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// Every write inside <see cref="ApplyConfigurationAsync"/> is serialised by
+  /// <see cref="_maintenanceLock"/>. The write in <see cref="RaiseConnectionChanged"/> is not — it runs
+  /// on the <b>read-loop thread</b>, while a <i>Re-apply</i> or <i>Save to device</i> from the Settings
+  /// page is running concurrently on an <b>ASP.NET request thread</b> that holds that lock. The setter
+  /// is a check-then-act, so without this gate a <i>Re-apply</i> completing as the USB lead is knocked
+  /// loose can interleave with the disconnect reset and leave <c>ConfigStatus == Configured</c> while
+  /// <c>IsConnected == false</c> — the exact stale tier ENC-12 exists to remove — and emit a
+  /// <c>Configured</c> broadcast after the disconnect one.
+  /// </para>
+  /// <para>
+  /// It covers the compare-and-set and nothing else. <c>ConfigStatusChanged</c> is deliberately raised
+  /// <b>outside</b> it: a subscriber that called back into this service while the gate was held would
+  /// deadlock. The getter is an unsynchronised read of an <c>int</c>-sized enum, which is atomic; it
+  /// can return a value one transition stale and no caller needs better than that.
+  /// </para>
+  /// </remarks>
+  private readonly object _configStatusGate = new();
+
   /// <inheritdoc />
   public RotaryEncoderConfigStatus ConfigStatus
   {
@@ -154,15 +178,26 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     // RaiseConnectionChanged are testable without a device; nothing outside this assembly can write it.
     internal set
     {
-      // The change check lives here rather than at the assignment sites, so a site added later cannot
-      // introduce a duplicate broadcast by omission.
-      if (_configStatus == value)
+      RotaryEncoderConfigStatus previous;
+      bool changed;
+
+      lock (_configStatusGate)
+      {
+        // The change check lives here rather than at the assignment sites, so a site added later
+        // cannot introduce a duplicate broadcast by omission.
+        previous = _configStatus;
+        changed = previous != value;
+        if (changed)
+        {
+          _configStatus = value;
+        }
+      }
+
+      if (!changed)
       {
         return;
       }
 
-      RotaryEncoderConfigStatus previous = _configStatus;
-      _configStatus = value;
       ConfigStatusChanged?.Invoke(this, new EncoderConfigStatusEventArgs
       {
         Status = value,
