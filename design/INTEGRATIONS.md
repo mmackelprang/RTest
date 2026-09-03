@@ -404,6 +404,71 @@ and `enabled` are reported independently and do not always agree.
 
 ---
 
+### Driving the knobs from software — the ENC-17 harness
+
+**`tools/encoder-harness/virtual_encoder.py` turns "a human must turn each knob" into "a script
+can."** It creates a real USB HID device carrying the RotaryUsb identity and report descriptor and
+injects genuine Input Report `0x01` frames, so the shipped `HidRotaryEncoderService` opens it,
+decodes it and acts on it exactly as it does the physical device — same udev rule, same HidSharp
+enumeration, same decoder, same `ENC-1` accumulator semantics. It is not a mock, and nothing in the
+console is modified, reconfigured or restarted to accommodate it.
+
+```bash
+scp tools/encoder-harness/virtual_encoder.py mmack@radio:/tmp/
+ssh mmack@radio "sudo python3 /tmp/virtual_encoder.py -c 'turn 0 3' -c 'hold 0 900'"
+```
+
+`turn` / `offline-turn` / `press` / `release` / `tap` / `hold` / `idle` / `detach` / `attach`.
+Encoders are `0 = VOLUME, 1 = SOURCE, 2 = PRESETS, 3 = TUNING`. Full command table, design
+rationale and the recovery procedure: **`tools/encoder-harness/README.md`**.
+
+**It takes the real device's identity (`cafe:4005`) and unbinds the real encoder for the duration**,
+rebinding it on exit. A distinct VID/PID via `RotaryEncoder:VendorId`/`:ProductId` was rejected
+because it moves UAT off the shipped configuration at exactly the layer under test, and because an
+override left behind points the console at a device that does not exist — the real knobs then stay
+dead across reboots with nothing on screen to say why.
+
+**It cannot be left running by accident.** stdin EOF exits, `--max-seconds` (default 300) is a hard
+watchdog, `SIGINT`/`SIGTERM`/`SIGHUP` exit cleanly, and teardown runs in a `finally:` on every exit
+the process can observe. `usbipd` is a child with `PR_SET_PDEATHSIG=SIGKILL` so the kernel reaps it
+even when the harness cannot clean up. There is no unit file and no autostart, deliberately.
+
+⚠ **`SIGKILL` is the exception and leaks.** Measured 2026-09-03: usbipd died as designed, but the
+configfs gadget and the vhci attachment both survived, leaving a virtual `cafe:4005` enumerated and
+the real encoder unbound. What survives is **inert** — every report originates from a typed command,
+so an undriven harness sends nothing and the `ENC-3` synthetic-volume hazard is not reachable from a
+leak; the real cost is that the physical knobs stay dead. **Recover with
+`sudo python3 /tmp/virtual_encoder.py --cleanup`** — or just start the harness again, which tears
+down leftovers on the way in and rebinds the real encoder on the way out. A reboot also clears it.
+
+⚠ **`/dev/uhid` does not work for this, despite being present on the appliance.** A uhid device is
+parented to `/sys/devices/virtual/...` and so has no USB ancestor. The shipped udev rule matches
+`ATTRS{idVendor}`, which resolves by walking up to a USB parent, so it never fires — workaroundable.
+**HidSharp is not**: measured 2026-09-03, with a uhid `cafe:4005` device present and readable,
+`DeviceList.Local.GetHidDevices()` did not list it at all, so `GetHidDevices(0xCAFE, 0x4005)`
+returned 0 and even the `DevicePath` override could not select it. HidSharp's Linux backend resolves
+vendor and product from the USB parent's sysfs attributes. Hence the usbip loopback gadget, which
+needs `usbip-vudc`, `vhci-hcd`, `libcomposite`, `usb_f_hid` and the `usbip`/`usbipd` binaries —
+**all already installed on this box**. `dummy_hcd`, the more usual virtual UDC, is *not* available
+for this kernel.
+
+**The harness answers the configuration handshake**, so the console reaches `Configured` rather than
+sitting on the tightened clamp — otherwise a clamp measurement would silently measure the wrong
+thing.
+
+**What it proved on the appliance, 2026-09-03** (against `5e571b8`): the service reports
+`Encoder report length 107 bytes (movement accumulators: true)` and verifies its configuration on
+attempt 1; a turn moves volume at 2% per unit; the `ENC-3` per-event clamp holds at ±6 units
+(±12 points) against single events of 20 and 50 detents; the `ENC-4` HUD renders left-anchored at
+its band; a 900 ms hold on encoder 0 synthesises a long press with the progress ring while a 200 ms
+hold does not; and **`ENC-1`'s re-baseline rule holds across a real USB disconnect — 50 detents
+accrued while unplugged produced a 0-point jump on replug.**
+
+⚠ **It does not replace the owner's hand on the panel.** Feel, acceleration and whether a spin
+*sounds* right are still his. It also does not exercise the firmware: acceleration tiers,
+`step_size` and detent density are the device's, and the harness asserts a movement value where the
+real device would compute one.
+
 ## 2. Phone Call Integration (RotaryPhone)
 
 Connects to an external **RotaryPhone** server via SignalR to receive incoming call notifications. When a call comes in, the Radio Console:

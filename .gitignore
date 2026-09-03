@@ -103,3 +103,7 @@ task_plan.md
 # docs/design-handoffs/ IS tracked and must stay tracked.
 /uat-*.png
 /uat-*.jpg
+
+# Python bytecode from tools/encoder-harness
+__pycache__/
+*.py[cod]
