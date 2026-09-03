@@ -72,11 +72,17 @@ alone and pinned with a test.
 🔵 **One ENC-4 question is still open for the owner:** under `prefers-reduced-motion` the progress ring keeps
 sweeping instead of becoming handoff §6.5's "filling bar". See `design/FUTURE-WORK.md`.
 
-It is the right next row for a reason beyond its own value: **ENC-11 currently has no way to tell the
-owner anything.** Its tiered fault model (Configured / Transient / Degraded / Hard fault) works and is
-verified on hardware, but a Degraded or Hard-fault outcome is visible only in the log and the API.
-ENC-4 hosts the badge; ENC-12 is the notification. Until then the safety response is real — the host
-volume clamp tightens — but silent.
+It was the right next row for a reason beyond its own value, and that reason is now closed: **ENC-11's
+tiered fault model used to have no way to tell the owner anything.** It works and is verified on
+hardware, but a Degraded or Hard-fault outcome reached only the log and the API — so the safety
+response was real (the host volume clamp tightens from 6 units per event to 2) and completely silent,
+experienced as a volume knob that had quietly gone sluggish inside sealed furniture. **ENC-4 landed the
+topbar host, ENC-8 [#527](https://github.com/mmackelprang/RTest/pull/527) built the page that explains it, and ENC-12 [#535](https://github.com/mmackelprang/RTest/pull/535) made it
+*noticed*:** an amber/red fault badge on the Settings nav pill that is correct on every route, plus one
+notification per browser session on escalation only. A healthy boot is still completely silent — the
+repair path speaks only when something needed repairing. The record is kept here rather than deleted
+because the gap is worth remembering: a correct safety response nobody can perceive is indistinguishable
+from a broken knob.
 
 ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the pattern to follow.
 
