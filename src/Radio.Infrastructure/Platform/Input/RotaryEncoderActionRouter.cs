@@ -116,11 +116,12 @@ public class RotaryEncoderActionRouter : IDisposable
     // (handoff 8.3). The index is threaded in rather than baked into each publisher so the ENC-5 /
     // ENC-7 remap moves entries here and leaves no literal behind to chase.
     //
-    // The order below is 0=Volume, 1=Source, 2=Visualization, 3=Tuning, matching _turnHandlers and
-    // _pressHandlers above. ENC-6's plan spelled a different literal because it was written before
-    // ENC-5 merged; the shipped tables are what this has to agree with, and
-    // TheFourDispatchArraysAgreeInLength is what fails if it ever stops.
-    _currentValuePublishers = [PublishCurrentVolume, PublishCurrentSource, PublishCurrentViz, PublishCurrentTuning];
+    // The order below is 0=Volume, 1=SOURCE, 2=PRESETS, 3=Tuning, matching _turnHandlers and
+    // _pressHandlers above. ENC-6's plan spelled a different literal again because it was written
+    // before ENC-5 merged, and index 2 then moved a SECOND time when ENC-7 replaced the visualiser
+    // with PRESETS - which is exactly why TheFourDispatchArraysAgreeInOrder pins the label per
+    // index rather than the index alone. The shipped tables are what this has to agree with.
+    _currentValuePublishers = [PublishCurrentVolume, PublishCurrentSource, PublishCurrentPresets, PublishCurrentTuning];
 
     // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
     // EncoderButtonEventArgs document.
@@ -505,9 +506,28 @@ public class RotaryEncoderActionRouter : IDisposable
       b.PrimaryText = mgr.ActiveSource?.Name.ToUpperInvariant() ?? "NONE");
   }
 
-  private void PublishCurrentViz(int index)
+  /// <summary>
+  /// The PRESETS readout for a consumed input.
+  ///
+  /// <para>
+  /// ⚠ <b>Label only, and that is a deliberate limit rather than an oversight.</b> Handoff §8.3 asks
+  /// a consumed input to show "what is currently selected", which for the other three knobs is a
+  /// value already in memory. The preset bank is not: <see cref="PresetSelectorService"/> reads it
+  /// through a scoped service on a background path precisely because, in its own words, blocking the
+  /// HID read loop on a database read is how a knob becomes laggy. This method runs <i>on</i> that
+  /// loop, so it must not read the bank, and naming a row it has not read would be worse than
+  /// naming none.
+  /// </para>
+  ///
+  /// <para>
+  /// The label alone still satisfies what the readout exists for — handoff §3 principle 1, that no
+  /// knob may be inert in a reachable state. <c>EncoderHud</c> renders <c>card.Label</c>
+  /// unconditionally on the Value phase, so this draws a visible card beside the PRESETS knob.
+  /// </para>
+  /// </summary>
+  private void PublishCurrentPresets(int index)
   {
-    PublishHud(index, "VISUALIZER", b => b.PrimaryText = _vizModeService.CurrentMode.ToUpperInvariant());
+    PublishHud(index, "PRESETS", _ => { });
   }
 
   /// <summary>

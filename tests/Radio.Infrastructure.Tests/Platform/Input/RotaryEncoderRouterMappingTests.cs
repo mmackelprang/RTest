@@ -962,7 +962,7 @@ public class RotaryEncoderRouterMappingTests
   [Theory]
   [InlineData(0, "VOLUME")]
   [InlineData(1, "SOURCE")]
-  [InlineData(2, "VISUALIZER")]
+  [InlineData(2, "PRESETS")]
   [InlineData(3, "TUNING")]
   public void TheFourDispatchArraysAgreeInOrder(int index, string expectedLabel)
   {
