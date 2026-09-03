@@ -9,17 +9,34 @@ namespace Radio.Web.Services;
 /// <b>Scoped, not singleton</b> — unlike <see cref="AudioStateStore"/>, which caches one cabinet's
 /// hardware state and is correctly process-wide. This tracks what <i>this browser session</i> has
 /// already been told. A process-wide latch would mean a page reload never re-announces a fault that
-/// is still present, and that a second browser never hears about it at all. On the kiosk, which runs
-/// one long-lived circuit, the two behave identically.
+/// is still present, and that a second browser never hears about it at all. A reload does in fact
+/// re-announce: <c>MainLayout.OnInitializedAsync</c> seeds the encoder state and then evaluates it
+/// through a freshly-constructed announcer, so a fault that is still live when a new circuit opens is
+/// told once more. On the kiosk, which runs one long-lived circuit, scoped and singleton behave
+/// identically.
 /// </para>
 ///
 /// <para>
-/// <b>The rule: each session announces each severity at most once, and only on escalation.</b> The
-/// remembered level is never reset — not on recovery, not on reconnect. That is deliberate and it is
-/// the whole anti-storm property: a tier that oscillates Degraded → Configured → Degraded speaks
-/// exactly once. The trade is that a fault which clears and returns an hour later is silent the
-/// second time, and the <b>badge</b> is what covers that — it is stateless, tracks the live tier, and
-/// is on screen for as long as the fault exists.
+/// <b>The rule is TWO INDEPENDENT LATCHES, not one ladder.</b> Presence and configuration are
+/// different facts about the cabinet, and each is latched on its own:
+/// <list type="bullet">
+///   <item><b>Configuration</b> — at most one notification per severity, and only on escalation.
+///         <see cref="_highestAnnounced"/> is never reset, not on recovery and not on reconnect.</item>
+///   <item><b>Presence</b> — at most one <i>disconnect</i> notification and at most one
+///         <i>reconnect</i> notification, each once. These never touch
+///         <see cref="_highestAnnounced"/>, and the configuration branch never consults them.</item>
+/// </list>
+/// So a session that unplugs the lead, replugs it, and then degrades produces three notifications —
+/// not two — and repeating all of it produces no more. That is deliberate: a knob that is missing and
+/// a knob that is misconfigured are not the same news. Nothing repeats and nothing resets.
+/// </para>
+///
+/// <para>
+/// That is the whole anti-storm property: a tier that oscillates Degraded → Configured → Degraded
+/// speaks exactly once, and a lead that bounces inside furniture speaks at most once each way. The
+/// trade is that a fault which clears and returns an hour later is silent the second time, and the
+/// <b>badge</b> is what covers that — it is stateless, tracks the live tier, and is on screen for as
+/// long as the fault exists.
 /// </para>
 /// </summary>
 public sealed class EncoderFaultAnnouncer

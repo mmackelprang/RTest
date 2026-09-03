@@ -8,6 +8,7 @@
 @inject AudioStateHubService HubService
 @inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
+@inject IntegrationsApiService IntegrationsApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
 @inject IJSRuntime JSRuntime
@@ -377,15 +378,37 @@
       _bellHealth = BellHealth.Health;
       BellHealth.HealthChanged += OnBellHealthChanged;
 
-      // ENC-12 — seed the encoder fault badge from the store's cache before subscribing, for the
-      // same reason the mute chip is seeded above: these events fire on CHANGE only, so a circuit
-      // that starts after the fault would otherwise render a blank pill while the fault was still
-      // live. The kiosk reloads (a deploy relaunches Chrome), which is exactly that case.
-      _encoderStatus = AudioState.EncoderConfigStatus?.Status;
-      _encoderConnected = AudioState.EncoderConnection?.IsConnected;
-      _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? false;
+      // ENC-12 — subscribe first, then seed the encoder fault badge from the API.
+      //
+      // The seed is an authoritative PULL, following the same precedent as LoadMuteStateAsync above,
+      // which reads AudioApi.GetVolumeAsync() rather than any cached broadcast. The change-only
+      // EncoderConfigStatusChanged / EncoderConnectionChanged broadcasts subscribed here are what
+      // keep it current afterwards; AudioStateStore's cache of those broadcasts is the FALLBACK for
+      // when the API cannot be reached, not the primary.
+      //
+      // Seeding from that cache alone was wrong on exactly the boot the badge exists for: a deploy
+      // restarts radio-api and radio-web together, so the API's boot config push can fire while
+      // AudioStateHubService.StartAsync is still in its retry loop. That broadcast reaches nobody,
+      // the cache stays null, and the badge never appears for the life of the process.
+      //
+      // Order: the subscriptions go on BEFORE the await so a broadcast arriving while the pull is in
+      // flight is not dropped, and SeedEncoderStateAsync yields to it rather than overwriting it with
+      // an older response.
       AudioState.EncoderConfigStatusChanged += OnEncoderConfigStatusChangedAsync;
       AudioState.EncoderConnectionChanged += OnEncoderConnectionChangedAsync;
+      await SeedEncoderStateAsync();
+
+      // ENC-12 — a circuit that opens onto a fault that is already live must still speak once.
+      // Together with the pull above this is the COMMON case rather than an edge one: the fault
+      // happens during boot, before any browser exists, so without this nothing is ever said about
+      // it.
+      //
+      // This does not breach the silent-boot rule (handoff §7.4), because the decision is not taken
+      // here — EncoderAnnouncer's own latch takes it, and it returns null for Configured, Transient,
+      // Unknown and for a device that was already absent at boot (wasEverConnected == false). A
+      // healthy console still says nothing at all. A RELOAD facing a live fault does re-announce,
+      // and that is intended: the announcer is scoped, so a reload is a new session (Test Plan T7).
+      AnnounceEncoderStateIfNeeded();
 
       // Dock visibility is route-dependent (handoff §P1·1: dock only on
       // non-Home routes). Seed from the current URI and update on every nav.
@@ -1193,16 +1216,77 @@
   private string? _encoderStatus;
   private bool? _encoderConnected;
   private bool _encoderWasEverConnected;
+  // Seeded true so a console whose provisioning pull fails is treated as having the knobs switched
+  // ON — the direction that still shows a fault — rather than silently suppressing every indicator.
+  // GET /api/integrations/encoder/provisioning carries the real value.
+  private bool _encoderEnabled = true;
+  // Set by either broadcast handler, and read by SeedEncoderStateAsync so the boot seed does not
+  // overwrite a value a broadcast has already delivered. The subscriptions are wired before the
+  // seed's HTTP call, so anything arriving during that await is newer than the response in flight.
+  private bool _encoderBroadcastSeen;
 
-  private string EncoderBadgeIcon => EncoderFaultRules.BadgeIcon(_encoderStatus, _encoderConnected);
-  private string EncoderBadgeClass => EncoderFaultRules.BadgeClass(_encoderStatus, _encoderConnected);
-  private string EncoderNavLabel => EncoderFaultRules.NavPillAriaLabel(_encoderStatus, _encoderConnected);
+  private string EncoderBadgeIcon => EncoderFaultRules.BadgeIcon(_encoderStatus, _encoderConnected, _encoderEnabled);
+  private string EncoderBadgeClass => EncoderFaultRules.BadgeClass(_encoderStatus, _encoderConnected, _encoderEnabled);
+  private string EncoderNavLabel => EncoderFaultRules.NavPillAriaLabel(_encoderStatus, _encoderConnected, _encoderEnabled);
 
+  /// <summary>
+  /// Seeds the badge fields from <c>GET /api/integrations/encoder/provisioning</c>, falling back to
+  /// <see cref="AudioStateStore"/>'s cached broadcasts when that call returns nothing.
+  /// </summary>
+  /// <remarks>
+  /// Never throws. <c>OnInitializedAsync</c> rethrows what reaches it, which crashes the circuit, and
+  /// a fault badge is not worth a blank screen.
+  /// </remarks>
+  private async Task SeedEncoderStateAsync()
+  {
+    try
+    {
+      EncoderProvisioningDto? provisioning = await IntegrationsApi.GetEncoderProvisioningAsync();
+
+      if (_encoderBroadcastSeen)
+      {
+        // A broadcast landed while the pull was in flight. It describes a later moment than the
+        // response now in hand, so it stands and the response is discarded.
+        return;
+      }
+
+      if (provisioning is not null)
+      {
+        _encoderEnabled = provisioning.Enabled;
+        // Status is already the serialized tier name on the DTO, which is the shape
+        // EncoderFaultRules takes — no enum conversion in between.
+        _encoderStatus = provisioning.Status;
+        _encoderConnected = provisioning.IsConnected;
+        _encoderWasEverConnected = provisioning.WasEverConnected;
+        return;
+      }
+
+      // IntegrationsApiService swallows its own transport failures and returns null, so this covers
+      // both "the API said nothing" and "the API could not be reached".
+      Logger.LogDebug("Encoder provisioning pull returned nothing; seeding the badge from the cache");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Encoder provisioning pull failed; seeding the badge from the cache");
+    }
+
+    _encoderStatus = AudioState.EncoderConfigStatus?.Status;
+    _encoderConnected = AudioState.EncoderConnection?.IsConnected;
+    _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? false;
+  }
+
+  // The new value is captured into a local out here but ASSIGNED to the field inside InvokeAsync, so
+  // each broadcast is evaluated against the state it carried. Assigning the field out here let two
+  // broadcasts arriving back to back both be evaluated against the newer one, collapsing
+  // Degraded → HardFault into a single toast — and one notification per escalation is the single
+  // requirement this row is judged on (plan §0.5).
   private async Task OnEncoderConfigStatusChangedAsync()
   {
-    _encoderStatus = AudioState.EncoderConfigStatus?.Status;
+    string? status = AudioState.EncoderConfigStatus?.Status;
     await InvokeAsync(() =>
     {
+      _encoderStatus = status;
+      _encoderBroadcastSeen = true;
       AnnounceEncoderStateIfNeeded();
       StateHasChanged();
     });
@@ -1210,12 +1294,16 @@
 
   // ENC-12 Task 8b. This is the branch that finally consumes WasEverConnected — the flag ENC-0 added
   // specifically to tell absent-at-boot from dropped-mid-session, and which nothing has used since.
+  // Same locals-capture as above, and for the same reason.
   private async Task OnEncoderConnectionChangedAsync()
   {
-    _encoderConnected = AudioState.EncoderConnection?.IsConnected;
-    _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? _encoderWasEverConnected;
+    bool? isConnected = AudioState.EncoderConnection?.IsConnected;
+    bool? wasEverConnected = AudioState.EncoderConnection?.WasEverConnected;
     await InvokeAsync(() =>
     {
+      _encoderConnected = isConnected;
+      _encoderWasEverConnected = wasEverConnected ?? _encoderWasEverConnected;
+      _encoderBroadcastSeen = true;
       AnnounceEncoderStateIfNeeded();
       StateHasChanged();
     });

@@ -559,14 +559,6 @@ builder.Services.Configure<Radio.Core.Configuration.WeatherDisplayOptions>(
 
 var app = builder.Build();
 
-// ENC-12. AudioStateStore subscribes to the hub in its constructor, and a singleton nobody injects
-// is never constructed — the same trap Program.cs already documents for EncoderHudService. Until
-// this row the store had no consumers at all, so its cache had never run. The encoder fault badge
-// seeds from that cache on every circuit start, including one that begins minutes after the fault
-// and including the kiosk booting straight onto /sleep, so the cache has to be alive before the
-// first circuit rather than because of it.
-_ = app.Services.GetRequiredService<AudioStateStore>();
-
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())
 {
