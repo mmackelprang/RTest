@@ -41,7 +41,6 @@ namespace Radio.Web.Tests.Components.Shared;
 public class VisualizerPanelTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
-  private readonly AudioStateHubService _stateHub;
 
   public VisualizerPanelTests()
   {
@@ -81,15 +80,6 @@ public class VisualizerPanelTests : TestContext
       )
     );
 
-    // ENC-9a: the panel now also subscribes to AudioStateHubService for out-of-band mode
-    // changes. Kept as a field so a test can raise the event the server would have sent.
-    _stateHub = new AudioStateHubService(
-      NullLogger<AudioStateHubService>.Instance,
-      configuration,
-      transport: new OfflineHubTransport()
-    );
-    Services.AddSingleton(_stateHub);
-
     Services.AddSingleton<VisualizerTelemetryService>();
   }
 
@@ -98,7 +88,6 @@ public class VisualizerPanelTests : TestContext
     if (disposing)
     {
       _loggerFactory?.Dispose();
-      _stateHub?.DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
     base.Dispose(disposing);
   }
