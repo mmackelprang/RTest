@@ -32,7 +32,11 @@ public class SleepService : ISleepService
   private readonly IHubContext<AudioStateHub> _hubContext;
   private readonly IAudioManager? _audioManager;
   private readonly SemaphoreSlim _lock = new(1, 1);
-  private bool _isSleeping;
+  // Volatile for the same reason _isSleepScreenVisible below is: ENC-6 made this readable from the
+  // encoder thread through WakeState, where it is not under _lock. Writes still happen only under
+  // _lock; this makes the unsynchronized READ well-defined rather than relying on x64 happening to
+  // be stronger than the memory model requires.
+  private volatile bool _isSleeping;
   private bool _wasMutedBeforeSleep;
   private bool _wasPlayingBeforeSleep;
 
@@ -86,8 +90,17 @@ public class SleepService : ISleepService
 
   public void SetSleepScreenVisible(bool visible)
   {
+    // The claim is released on an EDGE, not on every report. Clearing it unconditionally would mean
+    // a client that re-reported the state it is already in - which nothing does today, but which is
+    // the shape any future re-report heartbeat would take - could wipe a claim mid-wake and drop the
+    // console back into Ambient, consuming a second input for the same wake.
+    bool changed = _isSleepScreenVisible != visible;
     _isSleepScreenVisible = visible;
-    Interlocked.Exchange(ref _wakeClaimed, 0);
+    if (changed)
+    {
+      Interlocked.Exchange(ref _wakeClaimed, 0);
+    }
+
     _logger.LogDebug("Sleep screen reported {Visible}", visible ? "visible" : "hidden");
   }
 

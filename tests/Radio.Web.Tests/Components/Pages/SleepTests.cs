@@ -476,12 +476,21 @@ public class SleepTests : TestContext
     // ENC-6 deviation D-1. Handoff 8.6's own line omits the tap, and 8.3's table says a screen touch
     // in Standby resumes - so the handoff copy would have the screen assert something false by
     // omission on a touchscreen. Pinned so a later consistency pass does not "restore" it.
+    //
+    // BOTH halves are asserted, and that is what makes this fact non-vacuous. Checking only for
+    // "tap" passed against the Ambient fallback copy "tap anywhere to wake" as well, so it stayed
+    // green whether or not the Standby transition happened at all. The two clauses below fail
+    // against each of the two wrong lines: the Ambient copy names the tap but not the knobs, and
+    // handoff 8.6's literal ("hold VOLUME or press any knob to turn on") names the knobs but not
+    // the tap. Only the shipped Standby line satisfies both.
     var hub = Services.GetRequiredService<AudioStateHubService>();
     var cut = RenderComponent<Sleep>();
 
     await cut.InvokeAsync(() => FireSleepStateChangedAsync(hub, true));
 
-    cut.Find(".sleep-screen-hint").TextContent.Should().Contain("tap");
+    string hint = cut.Find(".sleep-screen-hint").TextContent;
+    hint.Should().Contain("tap");
+    hint.Should().Contain("press any knob");
   }
 
   /// <summary>

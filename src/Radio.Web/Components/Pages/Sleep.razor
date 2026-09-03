@@ -520,12 +520,19 @@
 
     if (_reportedVisible)
     {
-      // Best effort. A hard browser navigation can tear the circuit down before this lands, which
-      // is why MainLayout reports the opposite on its own first render: between them the flag is
-      // self-correcting, and the worst case is one knob input consumed on the way out.
+      // Best effort, and deliberately time-boxed. A hard browser navigation can tear the circuit
+      // down before this lands, which is why MainLayout reports the opposite on its own first
+      // render; between them the flag recovers on the next layout render, and the worst case is one
+      // knob input consumed on the way out.
+      //
+      // The timeout is the point of the CTS: this await sits on the teardown path of the page the
+      // user has just tapped to leave, on a box whose API shares a WiFi link with everything else.
+      // Without a bound, an API that is slow rather than down would hold the dispose - and the
+      // navigation the user is waiting on - for the HttpClient's full default timeout.
       try
       {
-        await SystemApi.SetSleepScreenVisibleAsync(false);
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await SystemApi.SetSleepScreenVisibleAsync(false, cts.Token);
       }
       catch (Exception ex)
       {

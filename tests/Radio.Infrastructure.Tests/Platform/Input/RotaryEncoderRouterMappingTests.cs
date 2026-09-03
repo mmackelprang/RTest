@@ -114,8 +114,14 @@ public class RotaryEncoderRouterMappingTests
 
     public void SetSleepScreenVisible(bool visible)
     {
+      // Edge-triggered, mirroring the shipped SleepService. If these two ever disagree, every gate
+      // test above is exercising a policy the box does not run.
+      bool changed = IsSleepScreenVisible != visible;
       IsSleepScreenVisible = visible;
-      Interlocked.Exchange(ref _wakeClaimed, 0);
+      if (changed)
+      {
+        Interlocked.Exchange(ref _wakeClaimed, 0);
+      }
     }
 
     public bool TryClaimWake()
@@ -953,26 +959,37 @@ public class RotaryEncoderRouterMappingTests
     Assert.Equal(0, h.Sleep.WakeCalls);
   }
 
-  [Fact]
-  public void TheFourDispatchArraysAgreeInLength()
+  [Theory]
+  [InlineData(0, "VOLUME")]
+  [InlineData(1, "SOURCE")]
+  [InlineData(2, "VISUALIZER")]
+  [InlineData(3, "TUNING")]
+  public void TheFourDispatchArraysAgreeInOrder(int index, string expectedLabel)
   {
-    // The ENC-5 / ENC-7 remap reorders _turnHandlers and _pressHandlers. This is the third and
-    // fourth array beside them; a remap that reorders three of four is the exact failure this
+    // The ENC-5 / ENC-7 remap reorders _turnHandlers and _pressHandlers. _currentValuePublishers is
+    // the fourth array beside them; a remap that reorders three of four is the exact failure this
     // pins - it would put a TUNING readout on the SOURCE band with nothing else disagreeing.
+    //
+    // The LABEL is what pins the order, not the index. Every PublishCurrent* method takes the index
+    // as a parameter and threads it straight into the card, so EncoderIndex reads correctly no
+    // matter which publisher ran - asserting only that would pass against a fully shuffled array
+    // and catch nothing but a length mismatch. The expectations below are deliberately the same
+    // four labels EncoderTurn_PublishesACardLabelledForThatKnob pins for the acting path, because
+    // the consumed readout answering a different word than the knob's own handler is the defect.
     using var h = new Harness();
 
     Assert.Equal(FrontPanelGeometry.EncoderCount, h.Router.Mapping.Count);
 
-    for (int i = 0; i < FrontPanelGeometry.EncoderCount; i++)
-    {
-      h.Hud.Published.Clear();
-      h.Sleep.IsSleeping = true;
-      h.Sleep.SetSleepScreenVisible(true);
+    // A tuner is active so index 3 takes its radio branch; without one it publishes TRACK, which is
+    // the no-radio fallback rather than this knob's identity.
+    h.WithActiveRadio();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
 
-      h.Encoders.RaiseTurn(i, 1);
+    h.Encoders.RaiseTurn(index, 1);
 
-      var card = Assert.Single(h.Hud.Published);
-      Assert.Equal(i, card.EncoderIndex);
-    }
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(index, card.EncoderIndex);
+    Assert.Equal(expectedLabel, card.Label);
   }
 }

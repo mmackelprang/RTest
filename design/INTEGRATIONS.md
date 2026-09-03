@@ -336,7 +336,11 @@ see the recovery section below for why the panel must never blank.
   The server learns about Ambient from **`Sleep.razor` reporting itself** via
   `POST /api/system/sleep-screen`, on first render and on dispose — which is also what makes all
   three ways of reaching `/sleep` one state rather than two. `MainLayout` reports the opposite on its
-  own first render, so a hard browser navigation cannot leave the flag stale.
+  own first render, which is what corrects the flag after a hard browser navigation kills the page's
+  circuit before its dispose can report. ⚠ **That correction happens on the next `MainLayout`
+  render, not immediately, and it does not cover an API restart** — the flag lives in memory on
+  `radio-api`, so a restart while the kiosk sits on `/sleep` leaves the server reading `Awake` until
+  something re-reports. See `design/FUTURE-WORK.md` §7 for the open follow-up.
 - **A wake spends exactly one input.** `ISleepService.TryClaimWake()` is a synchronous latch, and
   `WakeState` reads `Awake` from the instant a claim is taken — earlier than either `IsSleeping`
   flipping or the browser leaving the route. Without it a fast spin would lose every detent for the

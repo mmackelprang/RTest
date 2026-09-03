@@ -803,6 +803,32 @@ now a three-state model — `Awake` / `Ambient` / `Standby`, in `Radio.Core.Inte
 itself. Nothing in that work turns the panel off, and nothing should: the two dark states in
 Designer Rev 5 §8.2 are withdrawn with the blanking half.
 
+### ⚠ `IsSleepScreenVisible` does not survive an API restart — open follow-up from `ENC-6`
+
+**Deliberately not fixed on `ENC-6`; recorded here so it is not rediscovered as a new bug.**
+`_isSleepScreenVisible` and the wake claim are in-memory fields on `SleepService`. If `radio-api`
+restarts while the kiosk is parked on `/sleep`, the new process boots with the flag `false`, so
+`WakeState` reads `Awake` while the browser is still showing the clock — which silently reinstates
+exactly the defect `ENC-6` fixed, until something re-reports.
+
+**Nothing re-reports on its own.** `Sleep.razor.OnAfterRenderAsync` fires once per component
+lifetime, and `Radio.Web` is a separate process whose circuit survives an API restart untouched, so
+the page has no reason to render again. `MainLayout` only corrects the flag when the user navigates
+back through it. **This matters because every deploy restarts `radio-api`**, and the deploy relaunches
+the kiosk onto Home rather than `/sleep`, so the common case self-corrects — but an API crash or a
+manual `systemctl restart radio-api` overnight does not.
+
+A second, related exposure: the claim taken by `TryClaimWake()` is released by the browser confirming
+it left the route. If the `SleepStateChanged(false)` broadcast that drives that navigation is ever
+lost — this box is WiFi-only — the claim stays set, `WakeState` reads `Awake`, and further knob
+turns dispatch for real against overlays that live in `MainLayout` and are therefore not on screen
+under `/sleep`'s `EmptyLayout`. A screen tap self-heals it; a knob-only interaction does not.
+
+**Both are closed by the same mechanism:** a periodic re-report from `Sleep.razor` (the page already
+runs a 60 s drift timer that could carry it), or a `Reconnected` hook on `AudioStateHubService`
+re-asserting visibility. `SleepService.SetSleepScreenVisible` was made **edge-triggered** on `ENC-6`
+specifically so that such a heartbeat can be added without wiping an in-flight wake claim.
+
 ## 12. GV (Google Voice) Messages — Durable Read-State, Send & Auth Seams
 
 **Status:** PR1 foundation + PR2 voicemail surface + PR3 texts surface + PR4 durable mark-read shipped (DTOs, read client, status poll, `/phone` unified Messages feed with call rows + voicemail rows + inline player + new-arrival path + **text thread rows interleaved into the feed** + master-detail conversation + bubbles + compose/new-recipient composer + **durable read-state via GV write-through**). **SMS send is feature-flagged OFF** (`RotaryPhone:Gv:SendEnabled=false`). **Mark-read is now durable (GV write-through, ADR-024)** behind `RotaryPhone:Gv:MarkReadEnabled=false`. RotaryPhone's routes are **shipped** and dark behind their own `GVBridge:EnableMarkRead=false`, so lighting it up is a **two-side config flip** (theirs first), not a build wait. The inter-service auth gate remains deferred.
