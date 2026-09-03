@@ -1322,6 +1322,25 @@ public class EncoderConnectionDto
 
 
 /// <summary>
+/// Payload of the SignalR <c>EncoderConfigStatusChanged</c> broadcast (ENC-12).
+///
+/// <para>
+/// <see cref="Status"/> is an open string, not an enum, for the same reason
+/// <c>EncoderHudDto.Phase</c> is: a tier this build does not recognise must render as "nothing
+/// special" rather than throw on a kiosk nobody is watching. <c>EncoderFaultRules</c> treats every
+/// unrecognised value as not-reportable.
+/// </para>
+/// </summary>
+public class EncoderConfigStatusDto
+{
+  /// <summary>Unknown / Configured / Transient / Degraded / HardFault.</summary>
+  public string Status { get; set; } = "Unknown";
+
+  /// <summary>The tier immediately before this change.</summary>
+  public string PreviousStatus { get; set; } = "Unknown";
+}
+
+/// <summary>
 /// Payload of the SignalR <c>EncoderHudChanged</c> broadcast (ENC-4).
 ///
 /// <para>

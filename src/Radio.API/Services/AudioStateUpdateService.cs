@@ -144,6 +144,15 @@ public class AudioStateUpdateService : BackgroundService
       _logger.LogInformation("Subscribed to encoder connection changes");
     }
 
+    // ENC-12: the config-fault push path. The Settings page polls at 2 Hz while it is open, which is
+    // useless for a badge that must be correct on /queue and /metrics, so the tier — and only the
+    // tier — goes out on the hub.
+    if (_encoderService != null)
+    {
+      _encoderService.ConfigStatusChanged += OnEncoderConfigStatusChanged;
+      _logger.LogInformation("Subscribed to encoder config status changes");
+    }
+
     // ENC-4: the encoder HUD push path. Separate from the 500ms volume poller below because a
     // 2 Hz poller cannot meet the 100ms feedback requirement and does not carry which knob moved.
     if (_encoderFeedback != null)
@@ -960,6 +969,7 @@ public class AudioStateUpdateService : BackgroundService
     if (_encoderService != null)
     {
       _encoderService.ConnectionChanged -= OnEncoderConnectionChanged;
+      _encoderService.ConfigStatusChanged -= OnEncoderConfigStatusChanged;
     }
 
     if (_encoderFeedback != null)
@@ -990,6 +1000,38 @@ public class AudioStateUpdateService : BackgroundService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error broadcasting encoder connection change");
+    }
+  }
+
+  private async void OnEncoderConfigStatusChanged(object? sender, EncoderConfigStatusEventArgs e)
+  {
+    try
+    {
+      // The tier only. No field detail: the 24-field comparison belongs on the Settings page (ENC-8),
+      // which is the only place it is actionable, and shipping it to every circuit on every change
+      // would be traffic nobody reads.
+      //
+      // Sent as strings for the same reason EncoderHudDto.Phase is: an unknown tier from a newer API
+      // build must degrade to "show nothing special" on a kiosk nobody is watching, not throw during
+      // deserialization.
+      await _hubContext.Clients.All.SendAsync("EncoderConfigStatusChanged", new
+      {
+        Status = e.Status.ToString(),
+        PreviousStatus = e.PreviousStatus.ToString(),
+      });
+      // Information, where the adjacent connection broadcast logs at Debug, and that asymmetry is
+      // deliberate. The tier changes a handful of times per connection rather than continuously, so
+      // this is not volume; and since LOG-11 the API's console sink is level-restricted to WARNING
+      // and above, which under systemd means Information no longer reaches journald at all — it goes
+      // to the file sink under /opt/radio-console/logs, which is where a "why is the volume knob
+      // sluggish" question is actually triaged from. At Debug it would not be written anywhere in
+      // production.
+      _logger.LogInformation(
+        "Broadcast EncoderConfigStatusChanged: {Previous} -> {Status}", e.PreviousStatus, e.Status);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting encoder config status");
     }
   }
 

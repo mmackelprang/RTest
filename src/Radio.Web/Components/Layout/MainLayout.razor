@@ -8,6 +8,7 @@
 @inject AudioStateHubService HubService
 @inject AudioApiService AudioApi
 @inject QueueApiService QueueApi
+@inject IntegrationsApiService IntegrationsApi
 @inject NavigationManager NavigationManager
 @inject ILogger<MainLayout> Logger
 @inject IJSRuntime JSRuntime
@@ -16,6 +17,9 @@
 @inject Radio.Web.Services.GainPopoverService GainPopover
 @inject Radio.Web.Services.PhoneUnreadState PhoneUnread
 @inject Radio.Web.Services.BellHealthService BellHealth
+@inject AudioStateStore AudioState
+@inject NotificationService NotificationService
+@inject Radio.Web.Services.EncoderFaultAnnouncer EncoderAnnouncer
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
@@ -149,9 +153,28 @@
           <RadzenIcon Icon="history" />
           <span class="nav-pill-label">History</span>
         </a>
-        <a href="/system" class="nav-pill @(IsCurrentPage("/system") ? "nav-active" : "")" title="Settings" aria-label="Settings">
+        @* ENC-12 — encoder fault badge (encoder handoff §7.6 surface 1), reusing the pattern the
+           bell fault badge established at §3.7 of HANDOFF-bell-failure-surfacing.md. It sits on the
+           SETTINGS pill because that is where the explanation is, exactly as the bell badge sits on
+           /phone for the same reason. Bottom-right, so it would clear a count badge if this pill ever
+           gained one.
+           Three states get three GLYPHS, not one glyph in two colours: Designer separates Degraded
+           from a hard fault by colour alone, and colour alone fails WCAG 1.4.1 and this project's own
+           §8.3 rule. EncoderNavLabel carries the state in text regardless.
+           title stays the short static "Settings", matching every other pill: mirroring the dynamic
+           aria-label would give the element an identical accessible name and description, which
+           several screen readers announce twice. *@
+        <a href="/system" class="nav-pill @(IsCurrentPage("/system") ? "nav-active" : "")"
+           title="Settings"
+           aria-label="@EncoderNavLabel">
           <RadzenIcon Icon="settings" />
           <span class="nav-pill-label">Settings</span>
+          @if (EncoderBadgeIcon.Length > 0)
+          {
+            <span class="@EncoderBadgeClass">
+              <RadzenIcon Icon="@EncoderBadgeIcon" aria-hidden="true" />
+            </span>
+          }
         </a>
         @* Bell-failure handoff §3.7 — the fault badge is what makes a dead bell
            findable without being on /phone, which matters because the phone page is
@@ -354,6 +377,38 @@
       // not require the user to have already visited the page it points at.
       _bellHealth = BellHealth.Health;
       BellHealth.HealthChanged += OnBellHealthChanged;
+
+      // ENC-12 — subscribe first, then seed the encoder fault badge from the API.
+      //
+      // The seed is an authoritative PULL, following the same precedent as LoadMuteStateAsync above,
+      // which reads AudioApi.GetVolumeAsync() rather than any cached broadcast. The change-only
+      // EncoderConfigStatusChanged / EncoderConnectionChanged broadcasts subscribed here are what
+      // keep it current afterwards; AudioStateStore's cache of those broadcasts is the FALLBACK for
+      // when the API cannot be reached, not the primary.
+      //
+      // Seeding from that cache alone was wrong on exactly the boot the badge exists for: a deploy
+      // restarts radio-api and radio-web together, so the API's boot config push can fire while
+      // AudioStateHubService.StartAsync is still in its retry loop. That broadcast reaches nobody,
+      // the cache stays null, and the badge never appears for the life of the process.
+      //
+      // Order: the subscriptions go on BEFORE the await so a broadcast arriving while the pull is in
+      // flight is not dropped, and SeedEncoderStateAsync yields to it rather than overwriting it with
+      // an older response.
+      AudioState.EncoderConfigStatusChanged += OnEncoderConfigStatusChangedAsync;
+      AudioState.EncoderConnectionChanged += OnEncoderConnectionChangedAsync;
+      await SeedEncoderStateAsync();
+
+      // ENC-12 — a circuit that opens onto a fault that is already live must still speak once.
+      // Together with the pull above this is the COMMON case rather than an edge one: the fault
+      // happens during boot, before any browser exists, so without this nothing is ever said about
+      // it.
+      //
+      // This does not breach the silent-boot rule (handoff §7.4), because the decision is not taken
+      // here — EncoderAnnouncer's own latch takes it, and it returns null for Configured, Transient,
+      // Unknown and for a device that was already absent at boot (wasEverConnected == false). A
+      // healthy console still says nothing at all. A RELOAD facing a live fault does re-announce,
+      // and that is intended: the announcer is scoped, so a reload is a new session (Test Plan T7).
+      AnnounceEncoderStateIfNeeded();
 
       // Dock visibility is route-dependent (handoff §P1·1: dock only on
       // non-Home routes). Seed from the current URI and update on every nav.
@@ -1152,6 +1207,142 @@
     InvokeAsync(StateHasChanged);
   }
 
+  // --- ENC-12: encoder fault badge + notification ---
+  //
+  // Every decision is in EncoderFaultRules / EncoderFaultAnnouncer rather than here, because
+  // MainLayoutTests renders nothing (Radzen + JSInterop) and logic written in this file would ship
+  // with no automated coverage. Same reason BellHealthRules exists.
+
+  private string? _encoderStatus;
+  private bool? _encoderConnected;
+  private bool _encoderWasEverConnected;
+  // Seeded true so a console whose provisioning pull fails is treated as having the knobs switched
+  // ON — the direction that still shows a fault — rather than silently suppressing every indicator.
+  // GET /api/integrations/encoder/provisioning carries the real value.
+  private bool _encoderEnabled = true;
+  // Set by either broadcast handler, and read by SeedEncoderStateAsync so the boot seed does not
+  // overwrite a value a broadcast has already delivered. The subscriptions are wired before the
+  // seed's HTTP call, so anything arriving during that await is newer than the response in flight.
+  private bool _encoderBroadcastSeen;
+
+  private string EncoderBadgeIcon => EncoderFaultRules.BadgeIcon(_encoderStatus, _encoderConnected, _encoderEnabled);
+  private string EncoderBadgeClass => EncoderFaultRules.BadgeClass(_encoderStatus, _encoderConnected, _encoderEnabled);
+  private string EncoderNavLabel => EncoderFaultRules.NavPillAriaLabel(_encoderStatus, _encoderConnected, _encoderEnabled);
+
+  /// <summary>
+  /// Seeds the badge fields from <c>GET /api/integrations/encoder/provisioning</c>, falling back to
+  /// <see cref="AudioStateStore"/>'s cached broadcasts when that call returns nothing.
+  /// </summary>
+  /// <remarks>
+  /// Never throws. <c>OnInitializedAsync</c> rethrows what reaches it, which crashes the circuit, and
+  /// a fault badge is not worth a blank screen.
+  /// </remarks>
+  private async Task SeedEncoderStateAsync()
+  {
+    try
+    {
+      EncoderProvisioningDto? provisioning = await IntegrationsApi.GetEncoderProvisioningAsync();
+
+      if (_encoderBroadcastSeen)
+      {
+        // A broadcast landed while the pull was in flight. It describes a later moment than the
+        // response now in hand, so it stands and the response is discarded.
+        return;
+      }
+
+      if (provisioning is not null)
+      {
+        _encoderEnabled = provisioning.Enabled;
+        // Status is already the serialized tier name on the DTO, which is the shape
+        // EncoderFaultRules takes — no enum conversion in between.
+        _encoderStatus = provisioning.Status;
+        _encoderConnected = provisioning.IsConnected;
+        _encoderWasEverConnected = provisioning.WasEverConnected;
+        return;
+      }
+
+      // IntegrationsApiService swallows its own transport failures and returns null, so this covers
+      // both "the API said nothing" and "the API could not be reached".
+      Logger.LogDebug("Encoder provisioning pull returned nothing; seeding the badge from the cache");
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Encoder provisioning pull failed; seeding the badge from the cache");
+    }
+
+    _encoderStatus = AudioState.EncoderConfigStatus?.Status;
+    _encoderConnected = AudioState.EncoderConnection?.IsConnected;
+    _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? false;
+  }
+
+  // The new value is captured into a local out here but ASSIGNED to the field inside InvokeAsync, so
+  // each broadcast is evaluated against the state it carried. Assigning the field out here let two
+  // broadcasts arriving back to back both be evaluated against the newer one, collapsing
+  // Degraded → HardFault into a single toast — and one notification per escalation is the single
+  // requirement this row is judged on (plan §0.5).
+  private async Task OnEncoderConfigStatusChangedAsync()
+  {
+    string? status = AudioState.EncoderConfigStatus?.Status;
+    await InvokeAsync(() =>
+    {
+      _encoderStatus = status;
+      _encoderBroadcastSeen = true;
+      AnnounceEncoderStateIfNeeded();
+      StateHasChanged();
+    });
+  }
+
+  // ENC-12 Task 8b. This is the branch that finally consumes WasEverConnected — the flag ENC-0 added
+  // specifically to tell absent-at-boot from dropped-mid-session, and which nothing has used since.
+  // Same locals-capture as above, and for the same reason.
+  private async Task OnEncoderConnectionChangedAsync()
+  {
+    bool? isConnected = AudioState.EncoderConnection?.IsConnected;
+    bool? wasEverConnected = AudioState.EncoderConnection?.WasEverConnected;
+    await InvokeAsync(() =>
+    {
+      _encoderConnected = isConnected;
+      _encoderWasEverConnected = wasEverConnected ?? _encoderWasEverConnected;
+      _encoderBroadcastSeen = true;
+      AnnounceEncoderStateIfNeeded();
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>
+  /// Raises at most one notification per escalation, per browser session. The latch is in
+  /// EncoderFaultAnnouncer; this method only renders what it decides.
+  /// </summary>
+  private void AnnounceEncoderStateIfNeeded()
+  {
+    var announcement = EncoderAnnouncer.Evaluate(_encoderStatus, _encoderConnected, _encoderWasEverConnected);
+    if (announcement is not { } a)
+    {
+      return;
+    }
+
+    NotificationService.Notify(new NotificationMessage
+    {
+      Severity = a.Level switch
+      {
+        EncoderFaultLevel.Critical => NotificationSeverity.Error,
+        EncoderFaultLevel.Warning => NotificationSeverity.Warning,
+        _ => NotificationSeverity.Success,
+      },
+      Summary = a.Summary,
+      Detail = a.Detail,
+      // Longer than the 5 s preset-undo toast: that one races a user who is already looking at the
+      // control they just used, while this one may land while nobody is at the cabinet.
+      Duration = 10000,
+      // Handoff §7.6 gives each of these an action: "-> Open encoder settings". Clicking the toast
+      // body is how this codebase already does toast actions (RadioControlPanel.razor:1372).
+      // It lands on /system, not on the Integrations sub-tab: SystemConfigPage's RadzenTabs has no
+      // route parameter, so this is one tap short of the card. Recorded in design/FUTURE-WORK.md;
+      // the copy does not promise more than it delivers.
+      Click = _ => NavigationManager.NavigateTo("/system"),
+    });
+  }
+
   // --- ENC-4a: persistent mute indicator ---
 
   private bool _isMuted;
@@ -1214,6 +1405,10 @@
     GainPopover.StateChanged -= OnGainPopoverStateChanged;
     PhoneUnread.Changed -= OnPhoneUnreadChanged;
     BellHealth.HealthChanged -= OnBellHealthChanged;
+    // ENC-12. AudioStateStore is a singleton, so a missed unsubscribe here would keep every circuit
+    // that has ever rendered this layout alive for the life of the process.
+    AudioState.EncoderConfigStatusChanged -= OnEncoderConfigStatusChangedAsync;
+    AudioState.EncoderConnectionChanged -= OnEncoderConnectionChangedAsync;
     NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();

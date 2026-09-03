@@ -4,6 +4,70 @@ Running log of development sessions, organized chronologically. Each entry captu
 
 ---
 
+## 2026-09-02 — ENC-12: giving ENC-11's safety response a voice
+
+**PR:** _(filled in by Builder)_ · **Branch:** `feat/enc-12-fault-surfacing`
+
+- `ENC-11` already drops the volume knob's per-event clamp from 6 units to 2 when a **safety** field
+  fails to read back, and holds it there until a push verifies. That response is real, correct and
+  **completely silent** — it reached one log line and the API and stopped. The owner experienced it as
+  a volume knob that had quietly become sluggish, on a console inside sealed furniture. This row is the
+  two surfaces that explain it: a badge legible from any route, and one notification, once.
+- **A healthy boot stays completely silent.** No toast, no banner, no badge, and `Transient` is
+  deliberately scored as nothing — a USB peripheral missing a report on the first try is ordinary, and
+  badging it would train the owner to ignore the badge that matters.
+- **The tier is now observable.** `ConfigStatus` was a silent auto-property; it now raises
+  `ConfigStatusChanged` **on change only**, with the change detection in the setter so no assignment
+  site can forget it. The retry loop assigns the same value repeatedly, and a broadcast per assignment
+  would put SignalR traffic on the wire for a state that did not change, on a box where incidental load
+  correlates with audible distortion.
+- **Disconnect now resets the tier to `Unknown`**, and the reset lives inside `RaiseConnectionChanged`
+  rather than at its five call sites. A device that was `Configured` and is then unplugged must not keep
+  claiming it — and because the same value drives the volume clamp, an absent device now also holds the
+  tight clamp, which is the correct direction for hardware nobody can verify. That reset runs on the
+  **read-loop thread** while a *Re-apply* from the Settings page runs on an **ASP.NET request thread**
+  inside `_maintenanceLock`, and the setter was a check-then-act, so the compare-and-set now happens
+  under its own gate. Without it the two could interleave and leave `Configured` standing on a device
+  that is gone — the exact stale tier this row exists to remove.
+- **The badge decisions are a pure static class**, `EncoderFaultRules`, following `BellHealthRules`
+  exactly. `MainLayout` cannot be rendered in bUnit, so logic written inline there would ship with zero
+  automated coverage; `MainLayout` gets branches with no logic in them. Three tiers get three **glyphs**
+  rather than one glyph in two colours — colour alone fails WCAG 1.4.1 — and the `aria-label` carries
+  the state in words regardless.
+- **The anti-storm rule is TWO INDEPENDENT LATCHES, not one ladder** — stated plainly because the
+  plan's §0.5 prose describes a single ranked ladder and the shipped code does not implement one.
+  **Configuration:** at most one notification per severity, on escalation only, never reset — Degraded
+  × 50 is one toast, Degraded → HardFault is two, anything de-escalating or recurring is silent.
+  **Presence:** at most one disconnect notification and at most one reconnect notification per session.
+  The two never consult each other, so a session that unplugs, replugs and then degrades produces
+  **three** notifications, and repeating the whole sequence produces none. That behaviour was kept
+  rather than "fixed" — presence and configuration are genuinely different facts and the session total
+  is bounded at a small number — and every description of it was corrected instead. Ten tests pin every
+  row, one of them named for this decision. The spec-vs-code mismatch it exposes is logged in
+  `design/FUTURE-WORK.md` for the Planner. The trade — a fault that clears and returns an hour later is
+  silent the second time — is covered by the badge, which is stateless and on screen for the whole of
+  it.
+- **The badge seeds from an authoritative pull, not from a cache of the events it compensates for.**
+  The first cut read `AudioStateStore`'s cache, which only change-only SignalR broadcasts fill — so on
+  a deploy, where `radio-api` and `radio-web` restart together, the API's boot config push fired while
+  the hub client was still in its retry loop, landed on nobody, and the badge never appeared for the
+  life of the process. It now pulls `GET /api/integrations/encoder/provisioning` *after* wiring the
+  subscriptions, exactly as the mute chip pulls `GetVolumeAsync()`; the cache is the fallback. It also
+  **evaluates** that seed, so a circuit opening onto a live fault speaks once — which, given the above,
+  is the common case and not an edge one.
+- **`AudioStateStore` needs no eager resolve.** An interim `app.Services.GetRequiredService` line was
+  removed rather than reworded: the store's constructor wires C# event handlers and does **not** start
+  the SignalR connection (that is `MainLayout`'s `HubService.StartAsync()`, inside a circuit), and
+  `MainLayout` injects the store, which constructs the singleton at circuit creation. `/sleep` is on
+  `EmptyLayout` and never calls `StartAsync` at all.
+- Corrected a shipped false comment on `AudioStateStore.EncoderConnection`, which claimed the field was
+  per circuit when the store is a singleton. The comment was wrong, not the lifetime.
+- **Not built here, deliberately:** anything on the Settings page or `IntegrationsController` (`ENC-8`
+  owns every pixel and every endpoint there), tab deep-linking for the toast, and anything on `/sleep`.
+  The first two are logged in `design/FUTURE-WORK.md`.
+
+---
+
 ## 2026-09-02 — PHN-1a: the event-playback contracts (ADR-029 PR 1 of 7)
 
 **PR:** [#528](https://github.com/mmackelprang/RTest/pull/528)

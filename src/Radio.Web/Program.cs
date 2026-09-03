@@ -462,6 +462,10 @@ builder.Services.AddScoped<Radio.Web.Services.ContactResolutionService>();
 // escapes the sub-tree stacking context that previously trapped it.
 builder.Services.AddScoped<Radio.Web.Services.GainPopoverService>();
 
+// ENC-12. Scoped, like GainPopoverService and unlike AudioStateStore: this tracks what THIS browser
+// session has already been told about the knobs, not the state of the knobs themselves.
+builder.Services.AddScoped<Radio.Web.Services.EncoderFaultAnnouncer>();
+
 // Visualizer "updates/sec" telemetry. Singleton because the value is shared
 // across all visualizer panels and consumed by the dev tray (PR 6).
 builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();

@@ -153,6 +153,75 @@ at all, and the failure is silent to the user. Fix: rename the anonymous propert
 boundary that nothing checks against the other side. A contract test over `RadioApiService`'s payloads
 would have caught both.
 
+---
+
+## Encoder fault surfacing (ENC-12) — two things left open
+
+**1. `SystemConfigPage` has no tab deep-linking, so the fault toast lands one tap short.** The
+notification's `Click` navigates to `/system`, but the encoder card lives under **Integrations →
+Rotary Encoders** and the page's tabs are `RadzenTabs` with no route parameter — so the owner arrives
+on the page and still has to pick the tab. Fixing it means giving `SystemConfigPage` a route parameter
+or query string (`/system?tab=integrations`) and seeding `SelectedIndex` from it, which is a change to
+a page `ENC-8` had just rewritten and which nothing else needed, so it was left out rather than
+smuggled in. The toast copy deliberately does not promise more than it delivers. Roughly an hour,
+including the two other places that would then want to link straight to a tab.
+
+**2. `MainLayout` has no bUnit coverage at all, and that is now load-bearing for three indicators.**
+`tests/Radio.Web.Tests/Components/Layout/MainLayoutTests.cs` is a documented stub that renders nothing
+— its own XML doc says Radzen plus JSInterop make the layout impractical to render — so **nothing under
+`tests/` asserts `.topbar-mute-chip` (ENC-4a), `.phone-nav-fault` (bell surfacing) or
+`.encoder-nav-fault` (ENC-12) in rendered markup.** Each of those is a fault indicator whose whole job
+is to be correct when nobody is looking at it.
+
+The workaround so far has been to push every decision into a pure, unit-testable class
+(`BellHealthRules`, now `EncoderFaultRules`) and leave the layout with branches that contain no logic.
+That is worth keeping regardless, but it does not cover the wiring: a badge bound to the wrong property,
+a missing `@if`, or a subscription that is never made would pass every test in the suite.
+
+Making the layout renderable needs: a bUnit `TestContext` with `Services.AddRadzenComponents()`,
+`JSInterop.Mode = JSRuntimeMode.Loose` (the pattern `EncoderHudTests` already uses), and test doubles
+for the ~15 injected services — `SystemApiService`, `SourcesApiService`, `DevicesApiService`,
+`AudioApiService`, `QueueApiService`, `AudioStateHubService`, `AudioStateStore`, `BellHealthService`,
+`PhoneUnreadState`, `GainPopoverService`, `EncoderHudService`, `EncoderFaultAnnouncer`,
+`DeviceDisplayStateService`, `RadioPanelToggleService`, and two `IOptionsMonitor<>`s. Most are concrete
+classes rather than interfaces, so this needs either extracted interfaces or a real
+`IServiceCollection` wired to stubs. Realistically a day, and it pays for itself the first time one of
+the three indicators regresses silently.
+
+**3. The handoff's tier table puts the volume clamp in the hard-fault row only, and the code does not.
+Spec defect — for the Planner to resolve.**
+`RotaryEncoderConfigVerifier.VolumeClampFor` returns the loose 6-unit clamp for **`Configured` and
+nothing else**; `Transient`, `Degraded`, `HardFault` and `Unknown` all get the tight 2. So a *Degraded*
+console has volume-knob behaviour identical to one in hard fault, and so does a disconnected one (the
+ENC-12 disconnect reset makes the tier `Unknown`). Encoder handoff §7.6's tier table models the clamp
+as a **hard-fault consequence**, and the owner-facing copy is pinned verbatim against that table: the
+Degraded toast says *"The knobs still work, but they may feel wrong"* and says nothing about volume,
+while only the hard-fault toast says *"Volume is limited until this is fixed."*
+
+**ENC-12 deliberately did not change that copy.** It is spec-verbatim, the toast strings are the one
+thing the plan pins word for word, and a Builder quietly rewording owner-facing text to match code is
+how a spec and an implementation stop being comparable. `design/INTEGRATIONS.md` was corrected to state
+what the code actually does instead. What the Planner has to decide is which side is wrong: either the
+copy should tell a *Degraded* owner that volume is limited too, or `VolumeClampFor` should return the
+loose clamp for `Degraded` — which it almost certainly should not, since a feel-field mismatch still
+means read-back did not confirm the device's tiers. Small either way; the point is that it is a spec
+decision and not a Builder one.
+
+**4. `AudioStateStore.NotifyAsync` awaits only the last subscriber of a multicast `Func<Task>`.**
+`await handler.Invoke()` on a multicast delegate returns the task of the **final** subscriber only.
+Every earlier subscriber's task is started and then dropped: it runs unobserved, its exceptions escape
+the `try`/`catch` written to contain them, and the ordering the store appears to give — each broadcast
+fully handled before the next is processed — holds for one subscriber and silently stops holding for
+two. Pre-existing and long-standing, but **ENC-12 is the first code to give that singleton real
+per-circuit subscribers**, so it is newly load-bearing: with two browsers open, two encoder broadcasts
+arriving back to back can be handled concurrently by the first circuit. Fix:
+`await Task.WhenAll(handler.GetInvocationList().Cast<Func<Task>>().Select(h => h()))` with per-handler
+exception capture. It applies to the eight `Func<Task>` events routed through `NotifyAsync`, and the
+same flaw is in the two typed events (`RadioStateChanged`, `SleepStateChanged`) that invoke themselves
+directly. An hour, plus a test that subscribes twice and asserts both tasks were awaited.
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed

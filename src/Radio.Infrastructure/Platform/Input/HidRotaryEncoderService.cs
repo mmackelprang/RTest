@@ -144,8 +144,67 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   // would otherwise log a warning and a stack trace every couple of seconds indefinitely.
   private bool _announcedUnauthorized;
 
+  private RotaryEncoderConfigStatus _configStatus = RotaryEncoderConfigStatus.Unknown;
+
+  /// <summary>
+  /// Makes the compare-and-set in <see cref="ConfigStatus"/>'s setter atomic against the two threads
+  /// that write it.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// Every write inside <see cref="ApplyConfigurationAsync"/> is serialised by
+  /// <see cref="_maintenanceLock"/>. The write in <see cref="RaiseConnectionChanged"/> is not — it runs
+  /// on the <b>read-loop thread</b>, while a <i>Re-apply</i> or <i>Save to device</i> from the Settings
+  /// page is running concurrently on an <b>ASP.NET request thread</b> that holds that lock. The setter
+  /// is a check-then-act, so without this gate a <i>Re-apply</i> completing as the USB lead is knocked
+  /// loose can interleave with the disconnect reset and leave <c>ConfigStatus == Configured</c> while
+  /// <c>IsConnected == false</c> — the exact stale tier ENC-12 exists to remove — and emit a
+  /// <c>Configured</c> broadcast after the disconnect one.
+  /// </para>
+  /// <para>
+  /// It covers the compare-and-set and nothing else. <c>ConfigStatusChanged</c> is deliberately raised
+  /// <b>outside</b> it: a subscriber that called back into this service while the gate was held would
+  /// deadlock. The getter is an unsynchronised read of an <c>int</c>-sized enum, which is atomic; it
+  /// can return a value one transition stale and no caller needs better than that.
+  /// </para>
+  /// </remarks>
+  private readonly object _configStatusGate = new();
+
   /// <inheritdoc />
-  public RotaryEncoderConfigStatus ConfigStatus { get; private set; } = RotaryEncoderConfigStatus.Unknown;
+  public RotaryEncoderConfigStatus ConfigStatus
+  {
+    get => _configStatus;
+    // internal rather than private only so the change-detection below and the disconnect reset in
+    // RaiseConnectionChanged are testable without a device; nothing outside this assembly can write it.
+    internal set
+    {
+      RotaryEncoderConfigStatus previous;
+      bool changed;
+
+      lock (_configStatusGate)
+      {
+        // The change check lives here rather than at the assignment sites, so a site added later
+        // cannot introduce a duplicate broadcast by omission.
+        previous = _configStatus;
+        changed = previous != value;
+        if (changed)
+        {
+          _configStatus = value;
+        }
+      }
+
+      if (!changed)
+      {
+        return;
+      }
+
+      ConfigStatusChanged?.Invoke(this, new EncoderConfigStatusEventArgs
+      {
+        Status = value,
+        PreviousStatus = previous,
+      });
+    }
+  }
 
   /// <summary>
   /// Upper bound on the absent-device rescan interval. Presence is discovered by enumerating HID
@@ -179,6 +238,9 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
 
   /// <inheritdoc />
   public event EventHandler<EncoderConnectionEventArgs>? ConnectionChanged;
+
+  /// <inheritdoc />
+  public event EventHandler<EncoderConfigStatusEventArgs>? ConfigStatusChanged;
 
   /// <inheritdoc />
   public Task StartAsync(CancellationToken cancellationToken = default)
@@ -364,8 +426,19 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     ex is UnauthorizedAccessException ||
     ex.GetType().Name == "DeviceUnauthorizedAccessException";
 
-  private void RaiseConnectionChanged(bool isConnected)
+  internal void RaiseConnectionChanged(bool isConnected)
   {
+    if (!isConnected)
+    {
+      // ENC-12. The app cannot know what an absent device is running, so a device that was
+      // Configured and is then unplugged must not keep claiming it — the badge would report a
+      // healthy configuration for hardware that is not there. The reset lives here rather than at
+      // the five call sites so a sixth added later cannot reintroduce the stale tier by omission.
+      // Note the same value drives the host's volume clamp, and VolumeClampFor(Unknown) is the
+      // TIGHT one, which is the correct direction for a device nobody can verify.
+      ConfigStatus = RotaryEncoderConfigStatus.Unknown;
+    }
+
     ConnectionChanged?.Invoke(this, new EncoderConnectionEventArgs
     {
       IsConnected = isConnected,
