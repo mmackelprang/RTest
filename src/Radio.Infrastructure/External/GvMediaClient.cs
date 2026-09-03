@@ -137,13 +137,7 @@ public sealed class GvMediaClient
     }
     catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
     {
-      // HttpClient surfaces its own timeout as a cancellation the caller did not request, so this
-      // filter classifies most timeouts correctly. It is not exact: a caller token cancelled
-      // BETWEEN the throw and the filter reads as a timeout here. That race is narrow and accepted.
-      _logger.LogWarning(
-        "GV voicemail {MaskedId} fetch timed out after {Seconds}s", masked, options.FetchTimeoutSeconds);
-      throw new GvMediaUnavailableException(
-        GvMediaFailure.Timeout, $"Timed out fetching {masked}.", ex);
+      throw TimedOut(masked, options.FetchTimeoutSeconds, ex);
     }
     catch (HttpRequestException ex)
     {
@@ -184,32 +178,79 @@ public sealed class GvMediaClient
           GvMediaFailure.TooLarge, $"{masked} declared {declared} bytes, over the fetch bound.");
       }
 
-      // Read with an explicit bound rather than ReadAsByteArrayAsync: Content-Length is advisory
-      // and may be absent, so the bound has to hold while streaming too.
-      await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-      using var buffer = new MemoryStream();
-      var chunk = new byte[81920];
-      int read;
-      while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
+      // ⚠ The body phase is inside a try of its own, and that is not tidiness. Under
+      // ResponseHeadersRead the headers arrive cheaply and the body is where the time is spent, so
+      // the COMMON timeout and the realistic gvbridge blackout — a connection reset mid-body — both
+      // land here rather than on GetAsync above. Left uncaught they escaped as a bare
+      // TaskCanceledException / HttpIOException carrying no Reason at all, which would have made
+      // this class's own summary ("failures throw a GvMediaUnavailableException carrying a reason")
+      // false for the likeliest failure, and left PR 3 with nothing to map.
+      try
       {
-        if (buffer.Length + read > maxBytes)
+        // Read with an explicit bound rather than ReadAsByteArrayAsync: Content-Length is advisory
+        // and may be absent, so the bound has to hold while streaming too.
+        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, cancellationToken)) > 0)
         {
-          _logger.LogWarning(
-            "GV voicemail {MaskedId} exceeded the {Max} byte bound while streaming", masked, maxBytes);
-          throw new GvMediaUnavailableException(
-            GvMediaFailure.TooLarge, $"{masked} exceeded the fetch bound while streaming.");
+          if (buffer.Length + read > maxBytes)
+          {
+            _logger.LogWarning(
+              "GV voicemail {MaskedId} exceeded the {Max} byte bound while streaming", masked, maxBytes);
+            throw new GvMediaUnavailableException(
+              GvMediaFailure.TooLarge, $"{masked} exceeded the fetch bound while streaming.");
+          }
+          buffer.Write(chunk, 0, read);
         }
-        buffer.Write(chunk, 0, read);
-      }
 
-      if (buffer.Length == 0)
+        if (buffer.Length == 0)
+        {
+          _logger.LogWarning("GV voicemail {MaskedId} fetch returned an empty body", masked);
+          throw new GvMediaUnavailableException(
+            GvMediaFailure.Upstream, $"Fetch of {masked} returned an empty body.");
+        }
+
+        return buffer.ToArray();
+      }
+      catch (GvMediaUnavailableException)
       {
-        _logger.LogWarning("GV voicemail {MaskedId} fetch returned an empty body", masked);
-        throw new GvMediaUnavailableException(
-          GvMediaFailure.Upstream, $"Fetch of {masked} returned an empty body.");
+        // TooLarge and Upstream are raised deliberately a few lines up and already carry the right
+        // Reason. Rethrow first so the transport catch below cannot relabel them.
+        throw;
       }
-
-      return buffer.ToArray();
+      catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+      {
+        throw TimedOut(masked, options.FetchTimeoutSeconds, ex);
+      }
+      catch (Exception ex) when (ex is HttpRequestException or IOException)
+      {
+        // HttpIOException derives from IOException, so a mid-body reset lands here. A timeout that
+        // surfaces as an IOException rather than a cancellation is reported as Transport; both are
+        // retryable, so the distinction costs the caller nothing.
+        _logger.LogWarning(
+          "GV voicemail {MaskedId} fetch failed below HTTP while reading the body", masked);
+        throw new GvMediaUnavailableException(
+          GvMediaFailure.Transport, $"Transport failure reading the body of {masked}.", ex);
+      }
     }
+  }
+
+  /// <summary>
+  /// Logs and builds the Timeout failure. Shared by the header phase and the body phase because
+  /// HttpClient's own timeout can elapse in either, and both must carry the same Reason.
+  /// </summary>
+  /// <remarks>
+  /// HttpClient surfaces its own timeout as a cancellation the caller did not request, which is what
+  /// the callers' <c>when</c> filters test. That is not exact: a caller token cancelled BETWEEN the
+  /// throw and the filter reads as a timeout here. The race is narrow and accepted.
+  /// </remarks>
+  private GvMediaUnavailableException TimedOut(string masked, int timeoutSeconds, Exception inner)
+  {
+    _logger.LogWarning(
+      "GV voicemail {MaskedId} fetch timed out after {Seconds}s", masked, timeoutSeconds);
+    return new GvMediaUnavailableException(
+      GvMediaFailure.Timeout, $"Timed out fetching {masked}.", inner);
   }
 }

@@ -79,6 +79,77 @@ public sealed class GvMediaCacheTests : IDisposable
   }
 
   [Fact]
+  public async Task AFailedWrite_LeavesNoServableEntry_RatherThanAPoisoned0ByteOne()
+  {
+    // The shape being guarded: writing the final path directly means FileMode.Create truncates
+    // first, so a write that dies part-way leaves a 0-byte file at the path TryGetPath serves — and
+    // since every hit touches LastWriteTimeUtc, that entry is also the LAST thing eviction would
+    // reclaim. It poisons the cache permanently and defends itself while doing it.
+    //
+    // Squatting a DIRECTORY on the staging path is what makes the failure deterministic: the very
+    // first write into it throws, with no clock and nothing to wait for. Under the old code — which
+    // never touched ".tmp" — nothing throws at all and this test fails on the missing exception.
+    var cache = CreateCache(capMegabytes: 50);
+    Directory.CreateDirectory(_dir);
+    var finalPath = Path.Combine(_dir, GvMediaCache.FileNameFor("vm-1"));
+    Directory.CreateDirectory(finalPath + ".tmp");
+
+    // The exception type is the platform's business (Windows and Linux map "that is a directory"
+    // differently); what this test pins is the state left behind.
+    await Assert.ThrowsAnyAsync<Exception>(
+      () => cache.WriteAsync("vm-1", new byte[1024], CancellationToken.None));
+
+    Assert.False(File.Exists(finalPath));
+    Assert.Null(cache.TryGetPath("vm-1"));
+  }
+
+  [Fact]
+  public async Task ACancelledWrite_LeavesNoServableEntry()
+  {
+    // PR 3 passes HttpContext.RequestAborted, so a kiosk reload cancels a write in flight. This
+    // pins the outer contract only: an already-cancelled token is refused at the write lock, before
+    // the filesystem is touched at all. The staging behaviour that makes a part-way failure safe is
+    // pinned by the test above.
+    var cache = CreateCache(capMegabytes: 50);
+    using var cts = new CancellationTokenSource();
+    await cts.CancelAsync();
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => cache.WriteAsync("vm-1", new byte[1024], cts.Token));
+
+    Assert.Null(cache.TryGetPath("vm-1"));
+    Assert.False(File.Exists(Path.Combine(_dir, GvMediaCache.FileNameFor("vm-1"))));
+  }
+
+  [Fact]
+  public async Task WriteAsync_LeavesNoStagingFileBehindOnSuccess()
+  {
+    // The staging file is an implementation detail everywhere except here: if it survived a
+    // successful write it would count against the cap forever, as an entry nothing can ever serve.
+    var cache = CreateCache(capMegabytes: 50);
+
+    var written = await cache.WriteAsync("vm-1", new byte[1024], CancellationToken.None);
+
+    Assert.True(File.Exists(written));
+    Assert.Empty(Directory.EnumerateFiles(_dir, "*.tmp"));
+  }
+
+  [Fact]
+  public void EvictToCap_ReclaimsAnOrphanedStagingFile()
+  {
+    // The deliberate consequence of enumerating the directory unfiltered: a ".tmp" left by a
+    // crashed run is an ordinary eviction candidate, so it cannot occupy the cap forever. Safe
+    // because reclamation only ever runs while this provider's write lock is held, so no live
+    // ".tmp" can be visible to it — see GvMediaCache.WriteAsync's remarks.
+    Directory.CreateDirectory(_dir);
+    var orphan = WriteFile("orphan.mp3.tmp", 4096, DateTime.UtcNow.AddHours(-1));
+
+    GvMediaCache.EvictToCap(_dir, maxBytes: 1, protectedPath: null, NullLogger.Instance);
+
+    Assert.False(File.Exists(orphan));
+  }
+
+  [Fact]
   public void EvictToCap_DeletesOldestFirstUntilItFits()
   {
     Directory.CreateDirectory(_dir);

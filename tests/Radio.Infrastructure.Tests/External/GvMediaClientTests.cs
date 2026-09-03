@@ -42,6 +42,114 @@ public sealed class GvMediaClientTests : IDisposable
     }
   }
 
+  /// <summary>
+  /// An HttpContent that declares NO length and hands out a stream which yields a fixed number of
+  /// bytes and then either ends or fails. It exists because ByteArrayContent sets Content-Length,
+  /// so it can only ever reach FetchAsync's declared-length branch — the streaming branch and every
+  /// body-phase failure need a content type that behaves like a real chunked response.
+  /// </summary>
+  private sealed class ScriptedContent : HttpContent
+  {
+    private readonly long _bytesToYield;
+    private readonly Func<Exception>? _failure;
+
+    public ScriptedContent(long bytesToYield, Func<Exception>? failure)
+    {
+      _bytesToYield = bytesToYield;
+      _failure = failure;
+    }
+
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context) =>
+      throw new NotSupportedException("This content is only ever read as a stream.");
+
+    // false is the whole point: no Content-Length header, so the declared-length check is skipped
+    // and the bound has to hold while streaming.
+    protected override bool TryComputeLength(out long length)
+    {
+      length = 0;
+      return false;
+    }
+
+    protected override Task<Stream> CreateContentReadStreamAsync() =>
+      Task.FromResult<Stream>(new ScriptedStream(_bytesToYield, _failure));
+  }
+
+  /// <summary>
+  /// Yields zero bytes then throws, or yields N bytes then ends. ⚠ The failure is thrown
+  /// SYNCHRONOUSLY from the read — nothing here sleeps or waits for a real timeout to elapse
+  /// (CLAUDE.md § "Test Timing"): a test that waited on HttpClient.Timeout would be racing a wall
+  /// clock against a wall clock.
+  /// </summary>
+  private sealed class ScriptedStream : Stream
+  {
+    private readonly long _bytesToYield;
+    private readonly Func<Exception>? _failure;
+    private long _yielded;
+
+    public ScriptedStream(long bytesToYield, Func<Exception>? failure)
+    {
+      _bytesToYield = bytesToYield;
+      _failure = failure;
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+      var taken = Take(count);
+      if (taken == 0)
+      {
+        return Finish();
+      }
+      Array.Clear(buffer, offset, taken);
+      return taken;
+    }
+
+    public override ValueTask<int> ReadAsync(
+      Memory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+      var taken = Take(buffer.Length);
+      if (taken == 0)
+      {
+        return ValueTask.FromResult(Finish());
+      }
+      buffer.Span[..taken].Clear();
+      return ValueTask.FromResult(taken);
+    }
+
+    private int Take(int wanted)
+    {
+      var available = _bytesToYield - _yielded;
+      if (available <= 0)
+      {
+        return 0;
+      }
+      var taken = (int)Math.Min(wanted, available);
+      _yielded += taken;
+      return taken;
+    }
+
+    private int Finish() => _failure is null ? 0 : throw _failure();
+
+    public override bool CanRead => true;
+    public override bool CanSeek => false;
+    public override bool CanWrite => false;
+    public override long Length => throw new NotSupportedException();
+
+    public override long Position
+    {
+      get => throw new NotSupportedException();
+      set => throw new NotSupportedException();
+    }
+
+    public override void Flush() { }
+
+    public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+    public override void SetLength(long value) => throw new NotSupportedException();
+
+    public override void Write(byte[] buffer, int offset, int count) =>
+      throw new NotSupportedException();
+  }
+
   private (GvMediaClient Client, StubHandler Handler) CreateClient(
     Func<HttpRequestMessage, HttpResponseMessage> respond,
     int capMegabytes = 50,
@@ -144,6 +252,60 @@ public sealed class GvMediaClientTests : IDisposable
       () => client.GetVoicemailFileAsync(RawId));
 
     Assert.Equal(GvMediaFailure.TooLarge, ex.Reason);
+  }
+
+  // ── The body phase is inside the taxonomy too ─────────────────────────────
+  // Under ResponseHeadersRead the headers are cheap and the body is where the time and the failures
+  // are, so these two are the LIKELIEST failures in production — and before this they escaped as a
+  // bare HttpIOException / TaskCanceledException carrying no Reason at all.
+
+  [Fact]
+  public async Task ABodyThatDiesMidStream_IsClassifiedAsTransport()
+  {
+    // The realistic gvbridge blackout failure: the connection is reset after the headers land.
+    var (client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+    {
+      Content = new ScriptedContent(4096, () => new IOException("connection reset by peer"))
+    });
+
+    var ex = await Assert.ThrowsAsync<GvMediaUnavailableException>(
+      () => client.GetVoicemailFileAsync(RawId));
+
+    Assert.Equal(GvMediaFailure.Transport, ex.Reason);
+    Assert.False(ex.IsPermanent);
+  }
+
+  [Fact]
+  public async Task ABodyPhaseTimeout_IsClassifiedAsTimeout()
+  {
+    // HttpClient.Timeout elapsing during the body is the COMMON timeout here, and it surfaces as a
+    // cancellation the caller never asked for. Thrown synchronously — see ScriptedStream.
+    var (client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+    {
+      Content = new ScriptedContent(
+        4096, () => new TaskCanceledException("HttpClient.Timeout elapsed."))
+    });
+
+    var ex = await Assert.ThrowsAsync<GvMediaUnavailableException>(
+      () => client.GetVoicemailFileAsync(RawId));
+
+    Assert.Equal(GvMediaFailure.Timeout, ex.Reason);
+  }
+
+  [Fact]
+  public async Task ABodyPhaseFailure_DoesNotRelabelTheClientsOwnRefusals()
+  {
+    // The rethrow guard: an empty body is refused as Upstream from inside the same try that now
+    // catches transport failures, so it must not come back out as Transport.
+    var (client, _) = CreateClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+    {
+      Content = new ScriptedContent(0, failure: null)
+    });
+
+    var ex = await Assert.ThrowsAsync<GvMediaUnavailableException>(
+      () => client.GetVoicemailFileAsync(RawId));
+
+    Assert.Equal(GvMediaFailure.Upstream, ex.Reason);
   }
 
   // ── The masking pin ───────────────────────────────────────────────────────

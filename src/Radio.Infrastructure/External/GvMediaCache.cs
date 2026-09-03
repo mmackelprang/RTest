@@ -122,6 +122,30 @@ public sealed class GvMediaCache
   /// Writes a fetched recording and returns its path. Reclamation runs after the write, so a fetch
   /// never fails because reclamation did.
   /// </summary>
+  /// <remarks>
+  /// ⚠ The bytes are staged in "&lt;name&gt;.mp3.tmp" and published with File.Move(overwrite: true).
+  /// Writing the final path directly is NOT equivalent: FileMode.Create truncates first, so a write
+  /// that is cancelled or fails part-way leaves a 0-byte file at exactly the path
+  /// <see cref="TryGetPath"/> serves — and because every hit touches LastWriteTimeUtc, that poisoned
+  /// entry immediately becomes the most-recently-used one and is the LAST thing eviction reclaims.
+  /// It is self-preserving, and PR 3 passes HttpContext.RequestAborted, so a kiosk reload is enough
+  /// to create one. Staging also closes a read race: <see cref="TryGetPath"/> takes no lock, so
+  /// without it a concurrent reader could observe a created-but-not-yet-filled file.
+  ///
+  /// ⚠ What the reclaimers do with a ".tmp", stated rather than hoped for. Both
+  /// <see cref="EvictToCap"/> and <see cref="SweepOlderThan"/> enumerate the directory unfiltered,
+  /// so a ".tmp" is an ordinary deletion candidate — only the FINAL path is protected. That is
+  /// deliberate, and it is safe for one specific reason: reclamation runs INSIDE the same
+  /// _writeLock hold that just published the move, and _writeLock serialises every writer in this
+  /// provider. No other write here can have a ".tmp" in flight while a reclaimer runs, so every
+  /// ".tmp" a reclaimer can see is an orphan from a crashed or failed earlier write — and making
+  /// those reclaimable is the point, since otherwise they would occupy the cap forever.
+  ///
+  /// The guarantee is exactly that narrow. It does not survive reclamation moving outside the lock,
+  /// nor a second process sharing the directory. Neither would corrupt an entry silently — the
+  /// File.Move below would throw and the fetch would fail loudly — but both would invalidate this
+  /// reasoning, so change one and re-derive the other.
+  /// </remarks>
   /// <param name="mediaId">The raw media id — used only to derive the hashed filename.</param>
   /// <param name="content">The fetched recording.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
@@ -130,12 +154,23 @@ public sealed class GvMediaCache
     var options = _options.CurrentValue;
     var directory = options.CacheDirectory;
     var path = Path.Combine(directory, FileNameFor(mediaId));
+    var staging = path + ".tmp";
 
     await _writeLock.WaitAsync(cancellationToken);
     try
     {
       Directory.CreateDirectory(directory);
-      await File.WriteAllBytesAsync(path, content, cancellationToken);
+
+      try
+      {
+        await File.WriteAllBytesAsync(staging, content, cancellationToken);
+        File.Move(staging, path, overwrite: true);
+      }
+      catch
+      {
+        TryDeleteStaging(staging, mediaId, _logger);
+        throw;
+      }
 
       if (options.CacheMaxMegabytes > 0)
       {
@@ -153,6 +188,24 @@ public sealed class GvMediaCache
     }
 
     return path;
+  }
+
+  /// <summary>
+  /// Best-effort removal of a staging file whose write did not complete. Failure is logged and
+  /// swallowed — the caller is already throwing, and an orphan left behind is still reclaimable
+  /// because both reclaimers enumerate ".tmp" files too (see <see cref="WriteAsync"/>).
+  /// </summary>
+  private static void TryDeleteStaging(string staging, string mediaId, ILogger logger)
+  {
+    try
+    {
+      File.Delete(staging);
+    }
+    catch (Exception ex)
+    {
+      logger.LogDebug(
+        ex, "Could not remove the staging file for {MaskedId}", MaskFor(mediaId));
+    }
   }
 
   /// <summary>

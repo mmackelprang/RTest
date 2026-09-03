@@ -23,7 +23,9 @@ public enum GvMediaFailure
 
   /// <summary>
   /// The provider returned 401 or 403. On this box that most likely means GvMedia:AuthKey and
-  /// RotaryPhone's expected key have diverged — see GvMediaStartupCheck.
+  /// RotaryPhone's expected key have diverged. ⚠ That state has no boot-time signal:
+  /// GvMediaStartupCheck warns only on an EMPTY GvMedia:AuthKey, never on two differing non-empty
+  /// keys — it cannot read Radio.Web's per-machine overlay. This exception is the whole diagnosis.
   /// </summary>
   Unauthorized,
 

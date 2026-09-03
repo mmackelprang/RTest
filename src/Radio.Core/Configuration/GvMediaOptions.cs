@@ -27,9 +27,24 @@ public sealed class GvMediaOptions
   /// <summary>
   /// Value for the X-RotaryPhone-Auth header. Empty means no header is sent, which matches the
   /// current LAN-only posture; set it when RotaryPhone's gate ships (ADR-022 §8.1, ADR-029 §10.1).
-  /// This is the API-side twin of Radio.Web's RotaryPhone:Gv:AuthKey — two keys in one shared
-  /// per-machine file, and a mismatch fails only as a 401 on voicemail playback, which is why
-  /// GvMediaStartupCheck warns about it at boot.
+  ///
+  /// <para>
+  /// This is the API-side twin of Radio.Web's RotaryPhone:Gv:AuthKey. ⚠ The two are NOT one shared
+  /// file: /opt/radio-console/api/ and /opt/radio-console/web/ each hold their OWN
+  /// appsettings.Production.json, and on the appliance they have already diverged — measured
+  /// 2026-09-02 at 1057 B (mtime 2026-03-05) and 75 B (mtime 2026-07-31), with different content —
+  /// because Deploy-ToLinux.ps1 excludes that file from rsync and seeds it only when it is absent.
+  /// Setting the secret is therefore two hand edits on two files, and a mismatch surfaces only as a
+  /// 401 on voicemail playback. See design/INTEGRATIONS.md for the runbook.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ The boot check does not catch that mismatch, and it is worth being exact about why, because
+  /// the obvious reading is wrong. GvMediaStartupCheck warns only when THIS key is EMPTY; two
+  /// non-empty keys that differ — which is what "a mismatch" means, and the only state that
+  /// produces the 401 above — pass it in silence, since Radio.API cannot see Radio.Web's overlay at
+  /// all. Its remarks state the same limitation from the other side.
+  /// </para>
   /// </summary>
   public string AuthKey { get; set; } = "";
 
