@@ -279,6 +279,27 @@ public class EncoderHudTests : TestContext
   }
 
   [Fact]
+  public void HoldCardWithNoVolume_StillRendersTheRing()
+  {
+    // ENC-7. The PRESETS knob's hold card carries no volume percentage, and the ring used to live
+    // only inside the volume branch — so this card would have rendered a label and nothing else,
+    // with a fully green suite. The ring is the only indication that a 600 ms hold is arming a
+    // write.
+    _hud.Publish(new EncoderHudDto
+    {
+      EncoderIndex = 2,
+      Label = "HOLD TO SAVE",
+      Phase = "HoldStart",
+    });
+
+    var cut = RenderComponent<EncoderHud>();
+
+    cut.Find(".encoder-hud-label-text").TextContent.Trim().Should().Be("HOLD TO SAVE");
+    cut.FindAll(".encoder-hud-ring").Should().ContainSingle();
+    cut.FindAll(".encoder-hud-value").Should().BeEmpty("this card has no numerals to wrap");
+  }
+
+  [Fact]
   public void Card_IsAPoliteLiveRegion()
   {
     _hud.Publish(VolumeCard());

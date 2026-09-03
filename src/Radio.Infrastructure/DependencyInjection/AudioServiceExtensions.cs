@@ -425,7 +425,20 @@ public static class AudioServiceExtensions
     // owner-initiated concerns.
     services.AddSingleton<IRotaryEncoderProvisioning>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
 
-    // Register visualization mode service (tracks current viz mode for encoder + SignalR)
+    // Visualization mode. The encoder ENC-7 removed was this service's ONLY writer: nothing in
+    // src/ calls CycleMode or ToggleEnabled any more, so ModeChanged cannot fire and
+    // AudioStateUpdateService.OnVisualizationModeChanged - and the VisualizationModeChanged SignalR
+    // broadcast it makes - are unreachable.
+    //
+    // The registration stays for two reasons: AudioStateUpdateService still resolves this type and
+    // subscribes to ModeChanged, and removing the now-dead broadcast chain is ENC-9's work rather
+    // than this row's. It is recorded in design/FUTURE-WORK.md so it is not rediscovered.
+    //
+    // ⚠ The CAPABILITY is unaffected. Home's six-segment picker changes the mode through
+    // VisualizerPanel's own state and its saved preference and never went through this service, so
+    // what was lost is the encoder input that was deliberately removed - not the ability to choose
+    // a mode. The System Config "Visualizer" tab is FFT size / smoothing / peak-hold; it has no
+    // mode control at all.
     services.AddSingleton<VisualizationModeService>();
 
     // HUD feedback channel. Singleton because the coalescer is per-encoder state that must outlive
@@ -450,17 +463,38 @@ public static class AudioServiceExtensions
       // constructor default is TimeProvider.System, as with the router below.
       sp.GetService<TimeProvider>()));
 
+    // ENC-7. Singleton for the same reason SourceSelectorService is, and built by a factory for the
+    // same reason.
+    //
+    // IRadioPresetService is registered SCOPED (FingerprintingServiceExtensions), and this service
+    // is a singleton driven by the HID read loop, which has no request scope. A singleton may not
+    // capture a scoped service - the container either refuses the injection or satisfies it once
+    // out of a scope that then outlives its use - so this takes IServiceScopeFactory, which the
+    // container registers itself and so needs no deferral, and opens a scope per operation.
+    //
+    // That buys lifetime legality and nothing else. FingerprintDbContext, which the preset
+    // repository reads through, is registered SINGLETON and hands every caller the same
+    // SqliteConnection, so a repository built in a fresh scope still works over the same connection
+    // as every HTTP request. No isolation is claimed here; see design/FUTURE-WORK.md.
+    services.AddSingleton<PresetSelectorService>(sp => new PresetSelectorService(
+      sp.GetRequiredService<ILogger<PresetSelectorService>>(),
+      sp.GetRequiredService<IServiceScopeFactory>(),
+      () => sp.GetRequiredService<IAudioManager>(),
+      () => sp.GetRequiredService<IRadioBandMemory>(),
+      sp.GetRequiredService<IEncoderFeedbackSink>(),
+      sp.GetService<TimeProvider>()));
+
     // Register action router (Func<> defers IAudioManager resolution)
     // ISleepService is registered in Radio.API — optional here via GetService
     services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
       sp.GetRequiredService<ILogger<RotaryEncoderActionRouter>>(),
       sp.GetRequiredService<IRotaryEncoderService>(),
       () => sp.GetRequiredService<IAudioManager>(),
-      sp.GetRequiredService<VisualizationModeService>(),
       sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
       sleepService: sp.GetService<ISleepService>(),
       hud: sp.GetRequiredService<IEncoderFeedbackSink>(),
       sourceSelector: sp.GetRequiredService<SourceSelectorService>(),
+      presetSelector: sp.GetRequiredService<PresetSelectorService>(),
       // GetService, not GetRequiredService: nothing registers TimeProvider in production, and the
       // constructor default is TimeProvider.System. Tests inject a fake clock directly instead.
       timeProvider: sp.GetService<TimeProvider>()));

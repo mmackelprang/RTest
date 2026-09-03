@@ -297,6 +297,51 @@ public class EncoderSelectorOverlayTests : TestContext
   }
 
   [Fact]
+  public void PresetRows_RenderTheOrdinalCell()
+  {
+    // The only rendering difference between the two lists this component serves: a source list has
+    // no ordinals and a preset list does. One assertion that the same component handles both.
+    var presets = new List<EncoderSelectorRowDto>
+    {
+      Row("preset:a", "KEXP", "FM 90.3 MHz", ordinal: "01", accentVar: "--source-radio"),
+      Row("preset:b", "KIRO", "AM 710 kHz", ordinal: "01", accentVar: "--source-radio"),
+    };
+
+    var cut = RenderOverlay(Overlay(
+      highlight: 0, rows: presets, title: "PRESETS", titleSuffix: "2 saved",
+      footer: "PRESS TO PLAY · HOLD TO SAVE"));
+
+    var rendered = cut.FindAll(".encoder-selector-row");
+    rendered.Count.Should().Be(2);
+    // Both read "01": ordinals are per band, so two rows from different bands can share one.
+    rendered.Select(r => r.QuerySelector(".encoder-selector-ordinal")!.TextContent.Trim())
+      .Should().Equal(new[] { "01", "01" });
+
+    // A source row leaves the same cell empty rather than omitting it, which is what keeps the
+    // glyph and text columns on one x across both lists.
+    var sources = RenderOverlay(Overlay(highlight: 0));
+    sources.Find(".encoder-selector-ordinal").TextContent.Trim().Should().BeEmpty();
+  }
+
+  [Fact]
+  public void FiftyPresetRows_StillRenderSeven()
+  {
+    // ENC-7's real load: RadioPresetService.MaxPresets is 50, one global cap across every band.
+    // This is the assertion that would have caught ENC-5 shipping a fixed seven-row list.
+    var rows = Enumerable.Range(0, 50)
+      .Select(i => Row($"preset:{i}", $"STATION {i}", ordinal: $"{i + 1:00}"))
+      .ToList();
+
+    var cut = RenderOverlay(Overlay(highlight: 25, rows: rows, title: "PRESETS"));
+
+    var rendered = cut.FindAll(".encoder-selector-row");
+    rendered.Count.Should().Be(EncoderInteractionTimings.SelectorVisibleRows);
+    // Centred on the highlight rather than clamped, because 25 is nowhere near either end.
+    rendered[0].QuerySelector(".encoder-selector-primary")!.TextContent.Trim().Should().Be("STATION 22");
+    rendered[3].ClassList.Should().Contain("is-highlighted");
+  }
+
+  [Fact]
   public void Overlay_IsNotClickable()
   {
     var cut = RenderOverlay(Overlay(highlight: 1));

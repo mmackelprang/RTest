@@ -5,7 +5,6 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
-using Radio.Infrastructure.Audio.Services;
 
 namespace Radio.Infrastructure.Platform.Input;
 
@@ -28,11 +27,9 @@ public sealed record RotaryEncoderMapping(int EncoderIndex, string TurnDescripti
 /// Maps rotary encoder events to audio actions.
 ///
 /// <para>
-/// <b>Index mapping: 0 = Volume, 1 = Source, 2 = Visualization, 3 = Tuning.</b> The cabinet reads
-/// VOLUME / SOURCE / PRESETS / TUNING, so three of the four now match the engraving. Index 2 does
-/// not: it holds the visualiser as a seat-warmer until ENC-7 puts PRESETS there. Leaving the old
-/// source cycler on index 2 instead would have given two adjacent knobs two divergent copies of the
-/// source selection, which is worse than a knob that does something harmless and unlabelled.
+/// <b>Index mapping: 0 = Volume, 1 = Source, 2 = Presets, 3 = Tuning.</b> This matches the cabinet's
+/// engraving (VOLUME / SOURCE / PRESETS / TUNING) and the per-encoder configuration ENC-11 pushes to
+/// the device. The transitional mismatch that ENC-4 and ENC-5 documented is closed.
 /// </para>
 ///
 /// <para>
@@ -48,10 +45,10 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly IRotaryEncoderService _encoderService;
   private readonly Func<IAudioManager> _audioManagerFactory;
   private readonly ISleepService? _sleepService;
-  private readonly VisualizationModeService _vizModeService;
   private readonly IOptionsMonitor<RotaryEncoderOptions> _options;
   private readonly IEncoderFeedbackSink _hud;
   private readonly SourceSelectorService _sourceSelector;
+  private readonly PresetSelectorService _presetSelector;
   private readonly EncoderLongPressGesture _gesture;
   private bool _disposed;
 
@@ -67,10 +64,16 @@ public class RotaryEncoderActionRouter : IDisposable
   /// description kept alongside it, so the Settings page cannot disagree with the code.
   ///
   /// <para>
-  /// ⚠ <b>Index 2 is the one entry that does not match the cabinet engraving</b>
-  /// (VOLUME / SOURCE / PRESETS / TUNING). ENC-5 remapped indices 1 and 3 onto SOURCE and TUNING and
-  /// parked the visualiser on 2; ENC-7 replaces it with PRESETS. Editing this array is how that
-  /// remap is made — there is no second place to change.
+  /// All four entries now match the cabinet engraving (VOLUME / SOURCE / PRESETS / TUNING). Editing
+  /// this array is how a remap is made — there is no second place to change.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ <b>The Settings page reads the descriptions, not the indices.</b>
+  /// <c>SystemConfigPage.DescribesItsCabinetRole</c> decides whether a knob agrees with its
+  /// engraving by keyword-matching <see cref="RotaryEncoderMapping.TurnDescription"/> — "Volume",
+  /// "source", "preset", "Tune" — because there is no handler identity on the wire. A reword that
+  /// drops the keyword relights the "does not match the cabinet" banner on a knob that is correct.
   /// </para>
   /// </summary>
   public IReadOnlyList<RotaryEncoderMapping> Mapping => _mapping;
@@ -79,20 +82,20 @@ public class RotaryEncoderActionRouter : IDisposable
     ILogger<RotaryEncoderActionRouter> logger,
     IRotaryEncoderService encoderService,
     Func<IAudioManager> audioManagerFactory,
-    VisualizationModeService vizModeService,
     IOptionsMonitor<RotaryEncoderOptions> options,
     IEncoderFeedbackSink hud,
     SourceSelectorService sourceSelector,
+    PresetSelectorService presetSelector,
     ISleepService? sleepService = null,
     TimeProvider? timeProvider = null)
   {
     _logger = logger;
     _encoderService = encoderService;
     _audioManagerFactory = audioManagerFactory;
-    _vizModeService = vizModeService;
     _options = options;
     _hud = hud;
     _sourceSelector = sourceSelector;
+    _presetSelector = presetSelector;
     _sleepService = sleepService;
 
     // Index-ordered and index-addressed: entry n dispatches encoder n. Kept as three parallel arrays
@@ -101,11 +104,11 @@ public class RotaryEncoderActionRouter : IDisposable
     [
       new RotaryEncoderMapping(0, "Volume up / down", "Mute on / off"),
       new RotaryEncoderMapping(1, "Preview a source or radio band", "Switch to the highlighted entry"),
-      new RotaryEncoderMapping(2, "Cycle visualization mode", "Visualization on / off"),
+      new RotaryEncoderMapping(2, "Preview a saved preset", "Recall the highlighted preset"),
       new RotaryEncoderMapping(3, "Tune up / down (radio sources)", "Start / stop station scan"),
     ];
-    _turnHandlers = [HandleVolumeTurn, HandleSourceTurn, HandleVizTurn, HandleTuningTurn];
-    _pressHandlers = [HandleVolumePress, HandleSourcePress, HandleVizPress, HandleTuningPress];
+    _turnHandlers = [HandleVolumeTurn, HandleSourceTurn, HandlePresetsTurn, HandleTuningTurn];
+    _pressHandlers = [HandleVolumePress, HandleSourcePress, HandlePresetsPress, HandleTuningPress];
 
     // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
     // EncoderButtonEventArgs document.
@@ -127,6 +130,11 @@ public class RotaryEncoderActionRouter : IDisposable
   /// ENC-0's notification policy: an overlay left on screen after the knob that drives it has gone
   /// is a list nobody can navigate or commit. Dismissing it commits nothing.
   /// </para>
+  ///
+  /// <para>
+  /// Both selectors are torn down, because half a teardown is worse than none: only one of the two
+  /// knobs would recover, and the other would keep an unnavigable list.
+  /// </para>
   /// </summary>
   private void OnConnectionChanged(object? sender, EncoderConnectionEventArgs e)
   {
@@ -136,6 +144,7 @@ public class RotaryEncoderActionRouter : IDisposable
     }
 
     _sourceSelector.Dismiss();
+    _presetSelector.Dismiss();
   }
 
   private void OnEncoderTurned(object? sender, EncoderTurnedEventArgs e)
@@ -208,22 +217,27 @@ public class RotaryEncoderActionRouter : IDisposable
 
   private void OnLongPress(int index)
   {
-    // Two long-press consumers exist in the spec: VOLUME -> Standby and PRESETS -> Save. Only the
-    // first is wired here. PRESETS is ENC-7's action, and encoder 2 currently drives the visualiser
-    // - registering a save on it now would put a preset write behind a knob that still cycles
-    // visualisation modes.
-    if (index != 0)
+    // The spec defines exactly two long-press consumers and deliberately no third: VOLUME enters
+    // standby and PRESETS saves what is playing. SOURCE and TUNING have no long action at all.
+    switch (index)
     {
-      return;
-    }
+      case 0:
+        if (_sleepService is null)
+        {
+          _logger.LogDebug("Volume long-press ignored: no sleep service is registered");
+          return;
+        }
 
-    if (_sleepService is null)
-    {
-      _logger.LogDebug("Volume long-press ignored: no sleep service is registered");
-      return;
-    }
+        _ = EnterStandbyAsync();
+        break;
 
-    _ = EnterStandbyAsync();
+      case 2:
+        // No PublishHold here. The save's own notice is a selector phase, and EncoderHudService
+        // clears IsHolding for it, so the ring collapses without a hold-phase card being sent -
+        // which is what keeps a label-only HoldCommit card from replacing the overlay.
+        _presetSelector.LongPress();
+        break;
+    }
   }
 
   private async Task EnterStandbyAsync()
@@ -245,8 +259,43 @@ public class RotaryEncoderActionRouter : IDisposable
   /// </summary>
   private void PublishHold(int index, EncoderHudPhase phase)
   {
-    // Encoder 0 is the only index OnLongPress acts on, so it is the only index that publishes hold
-    // phases. A ring drawing on the other three would promise an action nothing performs.
+    // Only VOLUME and PRESETS have a long action, so only they publish hold phases. A ring drawing
+    // on SOURCE or TUNING would promise something neither performs.
+    if (index == 2)
+    {
+      // PRESETS publishes the START edge only, and only while the selector list is not already up.
+      //
+      // Nothing else is published because a save always ends in a SelectorNotice, and
+      // EncoderHudService clears IsHolding for any selector phase, so the ring collapses there.
+      // Publishing HoldCancel or HoldCommit here instead would send a label-only card with no rows,
+      // and since EncoderLongPressGesture raises ShortPress BEFORE HoldCancelled, a sub-threshold
+      // press would open the overlay and then have it wiped by that card.
+      //
+      // The IsOpen check is the same hazard on the START edge. EncoderLongPressGesture raises
+      // HoldStarted on the PRESS-DOWN edge - not when the ring reaches its 300 ms draw threshold -
+      // and a hold phase is not a selector phase, so EncoderHudService.Publish would swap the open
+      // list for a label-only card on EVERY press - from the press-down edge until the press
+      // resolves, on release or at the threshold. That is this row's primary interaction (turn to
+      // preview, press to recall) broken on every press.
+      //
+      // The trade, stated plainly: a hold begun with the overlay ALREADY OPEN draws no ring. The
+      // save still happens and its notice still lands at the 600 ms threshold; only the ring is
+      // missing. The documented save gesture - tune a station, hold PRESETS with no overlay up -
+      // keeps its ring.
+      if (phase != EncoderHudPhase.HoldStart || _presetSelector.IsOpen)
+      {
+        return;
+      }
+
+      _hud.Publish(new EncoderHudEventArgs
+      {
+        EncoderIndex = 2,
+        Label = "HOLD TO SAVE",
+        Phase = EncoderHudPhase.HoldStart,
+      });
+      return;
+    }
+
     if (index != 0)
     {
       return;
@@ -478,19 +527,28 @@ public class RotaryEncoderActionRouter : IDisposable
     _sourceSelector.Press();
   }
 
-  // --- Encoder 2: PRESETS on the cabinet, the visualiser until ENC-7 puts PRESETS here ---
+  // --- Encoder 2: PRESETS ---
 
-  private void HandleVizTurn(int index, int delta)
+  private void HandlePresetsTurn(int index, int delta)
   {
-    // ENC-3 clamp: the visualiser list is a selector like any other.
-    _vizModeService.CycleMode(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
-
-    PublishHud(index, "VISUALIZER", b => b.PrimaryText = _vizModeService.CurrentMode.ToUpperInvariant());
+    // ENC-3 clamp: the same one-entry-per-detent bound SOURCE uses, which is what keeps the two
+    // adjacent selector knobs interchangeable in the hand.
+    //
+    // Not "always", though, and the difference is the first detent of a session: PRESETS opens on
+    // an empty list and fills it from the background bank read that opening starts, so that detent
+    // moves nothing. SOURCE recomposes synchronously before it moves, so its first detent already
+    // moves an entry. From the second detent on the two knobs behave identically.
+    _presetSelector.EncoderIndex = index;
+    _presetSelector.Turn(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
   }
 
-  private void HandleVizPress(int index)
+  private void HandlePresetsPress(int index)
   {
-    _vizModeService.ToggleEnabled();
+    // Set here as well as on turn, for the same reason HandleSourcePress does it: a press is the
+    // other way the overlay opens, and if only the turn path set it, a press-first interaction
+    // would render the overlay against whatever index was last turned.
+    _presetSelector.EncoderIndex = index;
+    _presetSelector.Press();
   }
 
   public void Dispose()

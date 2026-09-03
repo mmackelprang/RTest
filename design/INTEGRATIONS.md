@@ -12,7 +12,7 @@ for turning a working device off, not as a switch you must find before the knobs
 
 ## 1. Rotary Encoders (USB HID)
 
-Physical rotary encoders connected via a Raspberry Pi Pico running custom firmware, exposed as a USB HID device. The cabinet engraves the four knobs, top to bottom, **VOLUME / SOURCE / PRESETS / TUNING**. Three of the four are wired to that engraving; PRESETS lands with `ENC-7`, and until it does index 2 holds the visualiser as a seat-warmer.
+Physical rotary encoders connected via a Raspberry Pi Pico running custom firmware, exposed as a USB HID device. The cabinet engraves the four knobs, top to bottom, **VOLUME / SOURCE / PRESETS / TUNING**, and since `ENC-7` **all four are wired to that engraving**.
 
 ### Hardware Requirements
 
@@ -56,17 +56,43 @@ The knobs are a vertical column to the **left of the LCD**, so index 0 is the **
 
 | Encoder | Engraved | Turn Action | Button Press | Long-press (600 ms) |
 |---------|----------|-------------|--------------|---------------------|
-| 0 | **VOLUME** | Volume up/down (configurable step %); a turn while muted **unmutes and applies the delta in the same frame** | Mute toggle | Enter standby |
+| 0 | **VOLUME** | Volume up/down (configurable step %); a turn while muted **unmutes and applies the delta in the same frame** | Mute toggle | **Enter standby** |
 | 1 | **SOURCE** | Opens the SOURCE overlay and moves the highlight one entry per detent. **Nothing switches** — preview only | Commits the highlighted entry. With the overlay closed it opens on the current entry, so a press commits what is already playing | *none* |
-| 2 | **PRESETS** | ⚠ **Currently cycles visualization modes** — a seat-warmer until `ENC-7` | Toggle visualization on/off | *none until `ENC-7`* |
+| 2 | **PRESETS** | Opens the PRESETS overlay and moves the highlight one entry per detent. **Nothing plays** — preview only | Recalls the highlighted station: switches source and band if needed, tunes, and plays. With the overlay closed it opens instead | **Save what is playing** |
 | 3 | **TUNING** | Frequency step up/down when Radio is active (accelerated ×2/×4/×8, host-clamped to 8 steps per event); publishes a "no track control on this source" card otherwise | Start/stop frequency scan | *none* |
 
-⚠ **Index 2 is the one remaining mismatch with the engraving, and it is deliberate.** `ENC-5` remapped indices 1
-and 3 onto SOURCE and TUNING and parked the visualiser on 2. Leaving the *old source cycler* there was rejected:
-index 1 now opens the SOURCE overlay, so a cycler beside it would have given two adjacent knobs two divergent
-copies of the source selection — the defect the encoder handoff §4.4 spends a paragraph forbidding. `ENC-7`
-replaces index 2 with PRESETS and ends the remap. **The Settings page computes this warning per knob**, so it
-names whichever knobs actually disagree and disappears on its own when the last one is fixed.
+**There are exactly two long-presses on the whole panel, and there is deliberately no third:**
+VOLUME → standby and PRESETS → save. SOURCE and TUNING have no long action at all, and they publish no
+progress ring either — a ring that fills and then does nothing is a promise the code does not keep.
+
+**The engraving mismatch is closed.** `ENC-5` remapped indices 1 and 3 onto SOURCE and TUNING and parked the
+visualiser on 2 as a seat-warmer; `ENC-7` replaced it with PRESETS. Leaving the *old source cycler* on index 2
+was rejected along the way: index 1 opens the SOURCE overlay, so a cycler beside it would have given two
+adjacent knobs two divergent copies of the source selection — the defect the encoder handoff §4.4 spends a
+paragraph forbidding. **The Settings page computes its "does not match the cabinet" warning per knob**, by
+keyword-matching each row's turn description against its engraved name, so it now names nothing. ⚠ That is a
+live coupling: rewording an entry in `RotaryEncoderActionRouter._mapping` so it no longer contains its
+engraving's keyword relights the banner on a knob that is correct.
+
+**PRESETS saves; it never overwrites.** A hold appends to the existing bank — the same bank the touchscreen
+shows — and reports the per-band slot the bank then derives. Replacement and deletion stay on the touchscreen
+behind the kebab, where they have a confirmation and an undo. Three boundaries are reported rather than
+swallowed: `Only radio stations can be saved` on a non-radio source, `ALREADY SAVED · slot NN` for a station
+already in the bank, and `PRESETS FULL` at the 50-preset cap.
+
+**Visualization kept its capability and lost its only writer — both halves matter.** `ENC-7` removed
+`VisualizationModeService` from the router. The **capability is unaffected**: Home's six-segment picker changes
+the mode through `VisualizerPanel`'s own state and its saved preference, and never went through that service,
+so choosing a visualisation is still something the touchscreen does (encoder handoff §11). (The System Config
+"Visualizer" tab is FFT size / smoothing / peak-hold — it has never had a mode control.)
+
+**The `VisualizationModeChanged` SignalR broadcast, however, no longer fires.** The encoder was the only caller
+of `VisualizationModeService.CycleMode` / `ToggleEnabled`, so `ModeChanged` can no longer be raised,
+`AudioStateUpdateService.OnVisualizationModeChanged` never runs, and `VisualizerPanel`'s subscription to it is
+dead code. The service, its registration and the whole chain still *ship*; nothing drives them. Cross-circuit
+visualiser-mode sync therefore does not happen — and it never happened from the picker either, because the
+picker was never a writer. Deleting the chain or wiring the picker through it is `ENC-9`'s call; recorded in
+`design/FUTURE-WORK.md` § 17.
 
 **The device-side configuration table has always been in cabinet order** (`RotaryEncoderConfigDefaults.Create()`),
 so acceleration-disabled lands on the two selector knobs and the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` land on
@@ -812,7 +838,6 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 │                                                                 │
 │  RotaryEncoderHostedService ← IRotaryEncoderService (HID)       │
 │    └→ RotaryEncoderActionRouter → IAudioManager                 │
-│                                 → VisualizationModeService      │
 │                                                                 │
 │  PhoneCallIntegrationService ← IPhoneIntegrationService (SignalR)│
 │    └→ PhoneContactLookupService (PBAP SQLite + REST fallback)   │
@@ -862,7 +887,7 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 | Infrastructure | `Bluetooth/VCardParser.cs` | vCard 2.1/3.0 parser |
 | Infrastructure | `Bluetooth/pbap_download.py` | Python D-Bus OBEX helper script |
 | Infrastructure | `Audio/Services/AnnouncementService.cs` | TTS + ducking orchestration |
-| Infrastructure | `Audio/Services/VisualizationModeService.cs` | Viz mode cycling for encoder 3 |
+| Infrastructure | `Audio/Services/VisualizationModeService.cs` | Viz mode cycling — **no caller since `ENC-7`** (FUTURE-WORK § 17) |
 | API | `Controllers/NotificationsController.cs` | `POST /api/notifications/announce` |
 | API | `Controllers/IntegrationsController.cs` | `GET /api/integrations/{encoder,phone}/status` |
 | API | `Services/RotaryEncoderHostedService.cs` | Encoder lifecycle management |

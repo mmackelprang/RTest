@@ -9,7 +9,7 @@ namespace Radio.Web.Tests.Components.Shared;
 /// <summary>
 /// bUnit tests for the shared <see cref="PresetCard"/> component — the single
 /// saved-station renderer (Proposal A, HANDOFF-saved-station-display). One
-/// component, two variants (Rail = Home MEMORY rail compact row; Card = Radio
+/// component, two variants (Rail = Home PRESETS rail compact row; Card = Radio
 /// page 480px card) so the two surfaces can't drift.
 ///
 /// Contract under test:

@@ -6,6 +6,25 @@
 **Date:** 2026-05-30
 **Consumer:** Planner
 
+> **⭐ Rename note (`ENC-7`, 2026-09-02) — the bank is now titled `PRESETS · n saved`, and this
+> handoff's `MEMORY · n saved` is deliberately not the shipped wording.**
+>
+> The cabinet's third knob is **engraved PRESETS** (encoder handoff Rev 3, decision D10), and an
+> engraving cannot be edited later. A panel that says PRESETS over a screen that says MEMORY is the
+> mismatch class Rev 3 flagged in the settings table, so the on-screen bank took the engraved word.
+> `RadioPage.razor` already headed its own panel `Presets`, so the rename moved the two on-screen
+> surfaces **into** agreement rather than out of it.
+>
+> Recorded in three places on purpose:
+> [`HANDOFF-rotary-encoder-mapping.md`](HANDOFF-rotary-encoder-mapping.md) Rev 3 (its header and
+> §4.4 Knob 3), [`docs/HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §6's
+> "deliberately parked" table, and here.
+>
+> **Do not "fix" this on a later consistency pass.** Everything else in this document — field
+> hierarchy, slot numbering, long-press-to-save, the kebab menu — is untouched and still current;
+> only the one word in the header changed. The body below is left as written because it is the
+> record of what was deviated from.
+
 ---
 
 ## 1. Problem & intent

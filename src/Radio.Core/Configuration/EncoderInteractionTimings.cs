@@ -87,6 +87,19 @@ public static class EncoderInteractionTimings
   public const int SelectorCommitCeilingMs = 30000;
 
   /// <summary>
+  /// How long a selector notice stays up, in milliseconds — "Saved to 05", "PRESETS FULL"
+  /// (handoff §6.6 State F).
+  /// </summary>
+  public const int SelectorNoticeMs = 2000;
+
+  /// <summary>
+  /// How long a short v1-boundary notice stays up, in milliseconds — "Only radio stations can be
+  /// saved". Shorter than <see cref="SelectorNoticeMs"/> because it reports a rule rather than a
+  /// result, and the user is still holding the knob when it appears (handoff §4.4).
+  /// </summary>
+  public const int SelectorNoticeShortMs = 1500;
+
+  /// <summary>
   /// How many rows the selector overlay shows at once. Seven rows plus chrome is what fits the
   /// 600 px content area (handoff §6.6); a longer list scrolls a window of this size around the
   /// highlight.

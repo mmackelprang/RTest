@@ -8,11 +8,13 @@ This document catalogs features that have been designed at the interface level b
 
 ## Encoder HUD (ENC-4) — three seams left open on purpose
 
-**1. The PRESETS long-press consumer is not wired.** The design names two long-press actions: VOLUME → Standby and
-PRESETS → Save. Only the first exists. `RotaryEncoderActionRouter.OnLongPress` returns early for every index except
-0, and `PublishHold` refuses to publish a hold phase for indices 1–3 — deliberately, because a progress ring that
-fills and then does nothing is a promise the code does not keep. Wiring the second one belongs to `ENC-7`, which
-introduces the PRESETS handler; it also needs the router's index→handler remap, which `ENC-5`/`ENC-7` own.
+**1. ~~The PRESETS long-press consumer is not wired.~~ CLOSED by `ENC-7`.** Both long-press actions the design
+names now exist — VOLUME → Standby and PRESETS → Save — and there is deliberately no third. `OnLongPress`
+switches on indices 0 and 2; `PublishHold` publishes for those two only, and for index 2 only on the `HoldStart`
+edge — and only while the PRESETS overlay is **not already open**, because a hold phase is not a selector phase,
+so a card published over the open list would replace it with a label-only card for the whole of every press. The
+save's own `SelectorNotice` is what collapses the ring. Indices 1 and 3 still publish no hold phase at all, for
+the original reason: a progress ring that fills and then does nothing is a promise the code does not keep.
 
 **2. There is no exit animation.** The card enters with `.snackbar-enter` and then simply unmounts. A 200 ms exit
 needs a two-phase teardown (keep the element alive while it animates out), which changes `EncoderHudService`'s
@@ -1033,3 +1035,156 @@ is the shape of test that pins it.
   the phone integration, and `PhoneIntegration:Enabled` is `false` and has never been true — so this
   is not leaking today, and widening a voicemail-cache PR into a phone-integration one is how a
   Medium change becomes a risky one.
+## 16. Radio presets (found by `ENC-7`, deliberately not fixed there)
+
+`ENC-7` put the preset bank behind a knob and read the stack end to end doing it. Four things it found and
+left alone, because each is a change to a shipped surface with existing callers rather than an encoder change.
+
+### 1. `RadioPresetService` signals "bank full" and "duplicate" through exception **message text**
+
+`AddPresetAsync` throws `InvalidOperationException` for both, and the only thing distinguishing them is the
+wording: `"Maximum of 50 presets reached. Please delete an existing preset first."` and
+`"A preset already exists for {band} - {frequency}: {name}"`.
+
+**Two call sites now match on those strings.** `RadioController` routes them to 409 / 400
+(`ex.Message.Contains("already exists")` / `.Contains("Maximum")`), and `ENC-7`'s
+`PresetSelectorService.SaveAsync` uses a `when (ex.Message.Contains("Maximum", StringComparison.Ordinal))`
+filter to reach its `PRESETS FULL` notice. Both are commented as debt rather than defended.
+
+#### What's Needed
+
+A typed exception pair (`PresetLimitReachedException` / `DuplicatePresetException`) or a result object, and
+the two call sites moved onto it. **Gotcha:** it is a breaking change to a shipped service, and the
+controller's status-code mapping has to move with it or the API starts returning 500s for a full bank. Both
+callers must change in the same PR; a half-migration leaves one of them matching text that no longer exists.
+
+### 2. `RadioApiService`'s preset mutations return `bool` and discard the server's DTO
+
+`SavePresetAsync`, `LoadPresetAsync` and `RenamePresetAsync` all return `bool`, throwing away the
+`RadioPresetDto` the server sent back — so every touchscreen mutation is followed by a full refetch of the
+whole bank to learn what it already knew.
+
+`RenamePresetAsync`'s XML doc is also **wrong**: it promises *"the new name on success"* and returns a
+`bool`. That is the `CLAUDE.md` § Pre-Merge Review failure class — a comment asserting more than the code
+does — in a doc comment on a shipped method.
+
+#### What's Needed
+
+Return the DTO (nullable for the failure case) and have the callers apply it locally. Fix the doc comment
+with it, or independently and immediately — it costs nothing and it is actively misleading today.
+
+### 3. `RadioPreset` ordering is derived three different ways in one stack
+
+- the repository sorts by `Name`;
+- `RadioControlPanel` re-sorts by band, then per-band slot, then creation time;
+- `RadioPage` sorts by `CreatedAt`.
+
+`ENC-7`'s knob follows `RadioControlPanel`, because that is the bank it is a remote control for, which makes
+**four** derivations of one order. There is no stored slot number — neither `RadioPreset` nor the
+`RadioPresets` table has one, and `RadioController.GetPresets` recomputes the per-band ordinal on every
+request — so this is a presentation decision repeated in four places rather than a data problem.
+
+#### What's Needed
+
+One ordering helper the repository, both pages and the selector share. **Gotcha:** do not "fix" it by adding
+`SlotNumber` to the persisted model. Deleting a preset renumbers the ones after it within its band, so a
+stored ordinal becomes state that every delete has to maintain, in exchange for saving a projection.
+
+### 4. `RadioPreset.GetDefaultName` formats hertz as display units
+
+`RadioPreset.Frequency` holds **hertz** (a `double`). `GetDefaultName(band, frequency)` formats it as though
+it were display units — `RadioBand.FM => $"FM - {frequency:F1}"` — so a real frequency produces
+**`FM - 101500000.0`**, not `FM - 101.5`.
+
+It is reachable: `RadioPresetService.AddPresetAsync` calls it whenever a caller passes a null or blank name.
+`ENC-7`'s save path deliberately routes around it by always passing an explicit non-blank name built from
+`new Frequency((long)hz).ToDisplayString()`, matching `RadioControlPanel.OpenSavePresetDialog`'s own
+fallback, and its tests pin that the generated name contains no raw hertz.
+
+#### What's Needed
+
+Either take a `Frequency` rather than a `double`, or convert inside the method. **Gotcha:** it is a shipped
+`public static` with other callers, and any fix changes the names those callers generate — so it needs a
+look at every call site and at whatever is already stored in the database, rather than a one-line edit.
+
+---
+
+## 17. Visualisation mode has no writer, and its broadcast chain is unreachable (`ENC-7`)
+
+`ENC-7` removed `VisualizationModeService` from `RotaryEncoderActionRouter`. The encoder was that service's
+**only** writer, so the removal left a whole chain shipping with nothing to drive it.
+
+### What is dead, precisely
+
+- `VisualizationModeService.CycleMode` and `VisualizationModeService.ToggleEnabled` have **no callers** anywhere
+  in `src/`.
+- Therefore `VisualizationModeService.ModeChanged` **cannot fire**.
+- Therefore `AudioStateUpdateService.OnVisualizationModeChanged` never runs, and the
+  `VisualizationModeChanged` SignalR broadcast it makes is unreachable.
+- Therefore `VisualizerPanel.HandleModeChangedRemotely` and its `StateHub.VisualizationModeChanged`
+  subscription are dead, as is `VisualizationModeDto` on that path.
+
+`VisualizerPanel`'s own comment on that subscription still describes the mode changing via "the encoder's
+visualizer knob, another browser, or an API call" — none of those is true today. It is left in place only
+because deleting the chain, not editing the comment, is the resolution.
+
+### What is *not* lost
+
+**The capability.** Home's six-segment picker calls `VisualizerPanel.SelectMode`, which mutates the panel's own
+`_currentMode` and persists a preference; it never touched `VisualizationModeService`. The System Config
+"Visualizer" tab is FFT size / smoothing / peak-hold and has no mode control at all. So a user can still choose
+a visualisation exactly as before.
+
+What *is* lost is **cross-circuit sync** — a mode change in one browser no longer reaches another. Note honestly
+that the picker never produced that sync either: the knob was the only writer, so what stopped happening is
+exactly the input `ENC-7` deliberately removed.
+
+### What's Needed — `ENC-9`'s to resolve
+
+Either **wire the picker through the service** (`SelectMode` → `VisualizationModeService`, so the broadcast fires
+and the sync becomes real for the first time), or **delete the chain** (`CycleMode`/`ToggleEnabled`,
+`ModeChanged`, the `AudioStateUpdateService` subscription and broadcast, the `VisualizerPanel` subscription and
+`HandleModeChangedRemotely`). `ENC-7` did neither on purpose: the registration is kept because
+`AudioStateUpdateService` still resolves the type, and a deletion spanning API, Infrastructure and Web is a
+different row's change. **Gotcha:** `VisualizerPanelTests` asserts the panel *has* subscribed to
+`VisualizationModeChanged`, so the delete option has to take that test with it.
+
+---
+
+## 18. `FingerprintDbContext` is a singleton over one unsynchronised `SqliteConnection`
+
+**Pre-existing and widened by `ENC-7`, not introduced by it.**
+
+`FingerprintDbContext` is registered `AddSingleton` (`FingerprintingServiceExtensions`) and
+`GetConnectionAsync` returns the **same** `SqliteConnection` instance to every caller. Its only lock,
+`_initLock`, guards *initialisation* — it is released before the connection is handed out and does not
+serialise use of it. `Microsoft.Data.Sqlite` connections are **not** thread-safe.
+
+The scoped registrations above it (`IRadioPresetRepository`, `IRadioPresetService`) do not change this: a scope
+yields a fresh repository object over the same singleton connection, so scoping buys **lifetime legality, not
+isolation**. Both `PresetSelectorService` and `AddRotaryEncoders` are commented to say exactly that, so the
+comments do not imply an isolation that does not exist.
+
+### Why `ENC-7` widened it
+
+Before this row the callers were HTTP request threads and `BackgroundIdentificationService`. `ENC-7` adds
+another non-request-thread caller: the HID read loop and the fire-and-forget continuations it starts
+(`PresetSelectorService.RefreshAsync` / `RecallAsync` / `SaveAsync`). A knob turn and an HTTP request can now
+touch the same connection concurrently.
+
+### What's Needed
+
+Either serialise access (a `SemaphoreSlim` taken for the whole of each repository method) or stop sharing one
+connection (open per-operation connections against the same file and let SQLite's own locking do the work).
+
+**Gotcha 1:** the lock has to span the whole method, not the `ExecuteReaderAsync` call. Every repository here
+drains its reader after the command returns, so a lock released at the command boundary would let a second
+caller issue against the same connection while the first is still reading.
+
+**Gotcha 2:** serialising individual commands does not make the *service* atomic. `RadioPresetService.
+AddPresetAsync` is three separate repository calls — count, existence check, insert — so its own
+check-then-write window survives any per-command lock. That window is what `PresetSelectorService`'s duplicate
+catch arm exists to report.
+
+Whichever way it goes, it is a change to the whole fingerprinting data layer, not to the encoder row that
+noticed it.

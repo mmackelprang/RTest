@@ -184,19 +184,11 @@ ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the patt
 
 ---
 
-## Known mismatch, deliberate — now down to ONE index
+## The remap is complete — three things it left behind
 
-**`ENC-5` did two thirds of the remap.** `RotaryEncoderActionRouter` now dispatches
-**`0 = Volume · 1 = SOURCE · 2 = Visualization · 3 = Tuning`** against a cabinet reading
-**VOLUME / SOURCE / PRESETS / TUNING**. Three of the four match the engraving.
-
-**Index 2 is the only one left, and `ENC-7` closes it.** It holds the visualiser as a deliberate
-seat-warmer. Leaving the *old source cycler* there was rejected: index 1 now opens the SOURCE
-overlay, so a cycler beside it would have given two adjacent knobs two divergent copies of the source
-selection — the defect handoff §4.4 forbids. The visualiser is shipped, harmless and visible, and
-moving it cost no new code.
-
-**Three consequences worth knowing before the next row:**
+`ENC-7` closed the last index. `RotaryEncoderActionRouter` dispatches
+**`0 = Volume · 1 = SOURCE · 2 = PRESETS · 3 = Tuning`**, matching the cabinet's
+**VOLUME / SOURCE / PRESETS / TUNING** on every knob and matching what `ENC-11` pushes to the device.
 
 1. **Tuning acceleration went live for the first time in `ENC-5`.** `RotaryEncoderConfigDefaults`
    always pushed the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` to encoder 3; before the remap they
@@ -206,10 +198,11 @@ moving it cost no new code.
    friends as literals matching the *old* table; after a remap those put each card beside the wrong
    knob. `_turnHandlers` / `_pressHandlers` are now `Action<int,int>` / `Action<int>` and the router
    passes the index the event arrived on. **A future remap must not reintroduce a literal.**
-3. **The Settings page's "does not match the cabinet" warning is computed per knob.** `ENC-8` tested
-   the TUNING knob alone, which would have gone silent after `ENC-5` while PRESETS still disagreed —
-   asserting a full agreement the cabinet does not have. It now names whichever knobs actually
-   disagree and empties itself when `ENC-7` lands. **`ENC-7` should not need to touch it.**
+3. **The Settings page's "does not match the cabinet" warning is computed per knob, by keyword.**
+   `SystemConfigPage.DescribesItsCabinetRole` matches each row's *turn description* against its
+   engraved name — there is no handler identity on the wire. It names nothing today. ⚠ **Rewording
+   `_mapping` so an entry loses its engraving's keyword relights the banner on a knob that is
+   correct**, which is why `RotaryEncoderRouterMappingTests` pins the index-2 wording.
 
 ---
 

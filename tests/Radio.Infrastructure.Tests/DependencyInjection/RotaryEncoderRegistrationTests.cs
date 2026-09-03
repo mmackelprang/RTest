@@ -54,6 +54,20 @@ public class RotaryEncoderRegistrationTests
   }
 
   [Fact]
+  public void AddRotaryEncoders_ResolvesThePresetSelector()
+  {
+    // ENC-7. It takes IServiceScopeFactory — which the container registers itself — plus the same
+    // two Func<> deferrals the source selector uses, so it resolves out of this deliberately
+    // minimal provider. Injecting the scoped IRadioPresetService directly instead would be a
+    // captive dependency, and it would fail at service start on the appliance rather than here.
+    using var provider = BuildProvider();
+
+    using var selector = provider.GetRequiredService<PresetSelectorService>();
+
+    Assert.NotNull(selector);
+  }
+
+  [Fact]
   public void AddRotaryEncoders_ResolvesTheFeedbackSink()
   {
     using var provider = BuildProvider();

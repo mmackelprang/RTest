@@ -15,10 +15,10 @@
   a since-corrected drawing; this is the 90° rotation of that, not a redesign.
 
   Geometry keys off the encoder index; content keys off the payload. The two are independent on
-  purpose, and ENC-5 is what cashed that in: it remapped the router's index-to-handler table to
-  0 = Volume · 1 = SOURCE · 2 = Visualization · 3 = Tuning without touching this component. Index 2
-  is a seat-warmer — the cabinet's legend reads PRESETS there and ENC-7 puts the presets knob on
-  it, so until then a correctly placed card on that knob says VISUALIZER.
+  purpose, and ENC-5 is what cashed that in: it remapped the router's index-to-handler table
+  without touching this component. The mapping is now final and matches the cabinet —
+  0 = VOLUME · 1 = SOURCE · 2 = PRESETS · 3 = TUNING — so a card on index 2 carries the presets
+  knob's words: a PRESETS overlay on a turn or a press, and HOLD TO SAVE while the knob is held.
 
   ENC-5 also gave this component a second shape. A selector phase is not a card: it renders the
   centred <EncoderSelectorOverlay/> instead (handoff §6.2 — readouts appear beside their knob,
@@ -91,8 +91,8 @@ else if (card is not null && IsKnownPhase(card.Phase))
           @if (Hud.IsHolding)
           {
             @* The ring is CSS-driven from 300 ms to 600 ms; the server sends only the two discrete
-               hold edges. It is inside the volume branch, so only a card that carries a volume
-               percentage can draw one. *@
+               hold edges. This copy wraps the numerals, which is why it is inside the volume
+               branch; the non-volume branch below draws its own in an empty wrapper. *@
             <div class="encoder-hud-ring" aria-hidden="true"></div>
           }
           <div class="encoder-hud-value">@percent</div>
@@ -111,6 +111,16 @@ else if (card is not null && IsKnownPhase(card.Phase))
     }
     else
     {
+      @if (Hud.IsHolding)
+      {
+        @* ENC-7. The ring on a knob whose long action has no numeric value. It reuses the volume
+           card's wrapper and ring verbatim - .encoder-hud-value-wrap is what gives the absolutely
+           positioned ring a relative box and a fixed size - so this adds no CSS. The volume branch
+           above keeps its own copy because there the ring wraps the numerals. *@
+        <div class="encoder-hud-value-wrap">
+          <div class="encoder-hud-ring" aria-hidden="true"></div>
+        </div>
+      }
       @if (!string.IsNullOrWhiteSpace(card.PrimaryText))
       {
         <div class="encoder-hud-primary">@card.PrimaryText</div>

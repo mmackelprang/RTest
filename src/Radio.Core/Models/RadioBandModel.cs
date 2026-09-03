@@ -21,8 +21,8 @@ public class RadioBandModel
     public string Range { get; set; } = string.Empty;
 
     /// <summary>
-    /// Maximum number of memory preset slots for this band (e.g. 16 FM,
-    /// 4 WB). Drives the <c>MEMORY · n of N</c> header count and the
+    /// Maximum number of preset slots for this band (e.g. 16 FM,
+    /// 4 WB). Drives the <c>PRESETS · n saved</c> header count and the
     /// empty-slot placeholder logic. PR 3 of the Radio Controller Polish
     /// arc.
     /// </summary>
