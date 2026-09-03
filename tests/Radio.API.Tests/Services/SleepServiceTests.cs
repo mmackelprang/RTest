@@ -4,6 +4,7 @@ using Moq;
 using Radio.API.Hubs;
 using Radio.API.Services;
 using Radio.Core.Interfaces;
+using Radio.Core.Interfaces.Audio;
 
 namespace Radio.API.Tests.Services;
 
@@ -17,7 +18,8 @@ namespace Radio.API.Tests.Services;
 /// </summary>
 public class SleepServiceTests
 {
-  private static (SleepService service, Mock<IClientProxy> allClients) CreateService()
+  private static (SleepService service, Mock<IClientProxy> allClients) CreateService(
+    IAudioManager? audioManager = null)
   {
     var hubContextMock = new Mock<IHubContext<AudioStateHub>>();
     var clientsMock = new Mock<IHubClients>();
@@ -28,7 +30,7 @@ public class SleepServiceTests
     var service = new SleepService(
       NullLogger<SleepService>.Instance,
       hubContextMock.Object,
-      audioManager: null);
+      audioManager);
 
     return (service, allClientsMock);
   }
@@ -212,5 +214,58 @@ public class SleepServiceTests
     await service.EnterSleepAsync();
 
     Assert.Equal(ConsoleWakeState.Standby, service.WakeState);
+  }
+
+  // --- ENC-6: WakeAsync can wake from Ambient, where audio was never parked --------------------
+
+  [Fact]
+  public async Task WakeAsync_FromAmbient_BroadcastsTheWakeEvenThoughAudioWasNeverParked()
+  {
+    // The Ambient wake is a NAVIGATION, not an audio change. SleepStateChanged(false) is the only
+    // thing Sleep.razor listens for to leave /sleep, so skipping it here would strand the kiosk on
+    // a clock with the knobs already acting.
+    var (service, allClients) = CreateService();
+    service.SetSleepScreenVisible(true);
+
+    await service.WakeAsync("encoder-turn");
+
+    allClients.Verify(
+      c => c.SendCoreAsync(
+        "SleepStateChanged",
+        It.Is<object?[]>(args => MatchesBool(args, false)),
+        It.IsAny<CancellationToken>()),
+      Times.Once);
+    Assert.False(service.IsSleeping);
+  }
+
+  [Fact]
+  public async Task WakeAsync_FromAmbient_DoesNotTouchAudio()
+  {
+    // Ambient's defining property is that audio never stopped. A wake from it must not "restore" a
+    // mute state that was never saved.
+    var audio = new Mock<IAudioManager>();
+    var (service, _) = CreateService(audioManager: audio.Object);
+    service.SetSleepScreenVisible(true);
+
+    await service.WakeAsync("encoder-turn");
+
+    audio.VerifySet(m => m.IsMuted = It.IsAny<bool>(), Times.Never);
+  }
+
+  [Fact]
+  public async Task WakeAsync_WithNothingToWakeFrom_StillDoesNotRebroadcast()
+  {
+    // The shipped guard, restated against the new condition: awake plus no sleep screen is nothing
+    // to wake from, and a broadcast there would navigate every other tab home for no reason.
+    var (service, allClients) = CreateService();
+
+    await service.WakeAsync("api");
+
+    allClients.Verify(
+      c => c.SendCoreAsync(
+        It.IsAny<string>(),
+        It.IsAny<object?[]>(),
+        It.IsAny<CancellationToken>()),
+      Times.Never);
   }
 }

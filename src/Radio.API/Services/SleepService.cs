@@ -169,8 +169,13 @@ public class SleepService : ISleepService
     await _lock.WaitAsync();
     try
     {
-      if (!_isSleeping)
+      // Two ways to be somewhere other than Awake, and only one of them parked audio. Standby has
+      // playback to restore; Ambient has nothing but a browser to send home. Both need the
+      // broadcast, so both fall through.
+      bool wasSleeping = _isSleeping;
+      if (!wasSleeping && !_isSleepScreenVisible)
       {
+        Interlocked.Exchange(ref _wakeClaimed, 0);
         return;
       }
 
@@ -181,7 +186,7 @@ public class SleepService : ISleepService
 
       _isSleeping = false;
 
-      if (_audioManager != null)
+      if (wasSleeping && _audioManager != null)
       {
         // Restore pre-sleep mute state
         _audioManager.IsMuted = _wasMutedBeforeSleep;
