@@ -795,11 +795,10 @@ public class FingerprintingConfigDto
 
 public class TTSConfigDto
 {
-  public string DefaultEngine { get; set; } = "ESpeak";
-  public string DefaultVoice { get; set; } = "en";
+  public string DefaultEngine { get; set; } = string.Empty;
+  public string DefaultVoice { get; set; } = string.Empty;
   public float DefaultPitch { get; set; } = 1.0f;
   public float DefaultSpeed { get; set; } = 1.0f;
-  public string ESpeakPath { get; set; } = "espeak-ng";
   public int GenerationTimeoutSeconds { get; set; } = 30;
 }
 

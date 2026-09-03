@@ -681,11 +681,7 @@
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
                 <RadzenTextBox @bind-Value="_ttsConfig.DefaultVoice" Placeholder="Default Voice" Style="width:100%" />
-                <small>Voice ID — engine-specific (e.g. 'en-US-News-K' for Google, 'en' for ESpeak)</small>
-              </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="4">
-                <RadzenTextBox @bind-Value="_ttsConfig.ESpeakPath" Placeholder="ESpeak Path" Style="width:100%" />
-                <small>Path to espeak-ng binary</small>
+                <small>Voice ID — engine-specific (e.g. 'en-US-News-K' for Google)</small>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
                 <RadzenNumeric TValue="float" @bind-Value="_ttsConfig.DefaultPitch" Min="(decimal)0.5f" Max="(decimal)2.0f" Step="(decimal)0.1f" Placeholder="Default Pitch" Style="width:100%" />
@@ -923,7 +919,7 @@
             {
               <div style="margin-top:12px">
                 <RadzenTextBox @bind-Value="_ttsVoice" Placeholder="Voice (Optional)" Style="width:100%" />
-                <small>e.g., 'en', 'en-US-Standard-A'</small>
+                <small>e.g., 'en-US-Standard-A'</small>
               </div>
             }
 
@@ -2062,8 +2058,9 @@
   private List<TTSVoiceInfoDto>? _cloudVoices;
   private bool _scanningVoices;
   private string _ttsText = string.Empty;
-  private string _selectedTTSEngine = "ESpeak";
-  private string _ttsVoice = "en";
+  // No engine is selected until LoadTTSEnginesAsync picks the first available one.
+  private string _selectedTTSEngine = string.Empty;
+  private string _ttsVoice = string.Empty;
   private double _ttsSpeed = 1.0;
   private double _ttsPitch = 1.0;
 
@@ -2124,7 +2121,7 @@
   };
   private static readonly List<DropDownItem> _ttsEngineOptions = new()
   {
-    new("ESpeak (Offline)", "ESpeak"), new("Google Cloud TTS", "Google"), new("Azure Cognitive Services", "Azure")
+    new("Google Cloud TTS", "Google"), new("Azure Cognitive Services", "Azure")
   };
   private static readonly List<DropDownItem> _logLevelOptions = new()
   {
@@ -2424,8 +2421,10 @@
     }
     else
     {
+      // No voice list to offer for an engine we cannot enumerate, so drop the stale
+      // selection rather than sending the previous engine's voice with the next request.
       _cloudVoices = null;
-      _ttsVoice = "en";
+      _ttsVoice = string.Empty;
     }
 
     StateHasChanged();

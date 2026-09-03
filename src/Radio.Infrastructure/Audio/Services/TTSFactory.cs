@@ -12,7 +12,7 @@ namespace Radio.Infrastructure.Audio.Services;
 
 /// <summary>
 /// Factory for creating TTS audio sources.
-/// Supports eSpeak (offline), Google Cloud TTS, and Azure TTS engines.
+/// Supports the Google Cloud TTS and Azure TTS engines.
 /// </summary>
 public class TTSFactory : ITTSFactory, IDisposable
 {
@@ -79,6 +79,15 @@ public class TTSFactory : ITTSFactory, IDisposable
     var speed = parameters?.Speed ?? opts.DefaultSpeed;
     var pitch = parameters?.Pitch ?? opts.DefaultPitch;
 
+    // Both remaining engines address a voice by name, so an unset voice cannot be synthesized.
+    // Checked after the fallback, so it covers a caller-supplied voice and the configured one alike.
+    if (string.IsNullOrWhiteSpace(voice))
+    {
+      throw new InvalidOperationException(
+        $"No TTS voice is configured for engine {engine}. Set 'TTS:DefaultVoice' " +
+        "or pass a voice with the request.");
+    }
+
     var effectiveParams = new TTSParameters
     {
       Engine = engine,
@@ -111,7 +120,6 @@ public class TTSFactory : ITTSFactory, IDisposable
     // Generate audio based on engine
     var (audioStream, duration) = engine switch
     {
-      TTSEngine.ESpeak => await GenerateESpeakAsync(text, voice, speed, pitch, cancellationToken),
       TTSEngine.Google => await GenerateGoogleTTSAsync(text, voice, speed, pitch, cancellationToken),
       TTSEngine.Azure => await GenerateAzureTTSAsync(text, voice, speed, pitch, cancellationToken),
       _ => throw new NotSupportedException($"TTS engine '{engine}' is not supported")
@@ -128,11 +136,6 @@ public class TTSFactory : ITTSFactory, IDisposable
     TTSEngine engine,
     CancellationToken cancellationToken = default)
   {
-    if (engine == TTSEngine.ESpeak)
-    {
-      return await GetESpeakVoicesAsync(cancellationToken);
-    }
-
     // For cloud engines, return cached voices from DB (sorted by favorites + price tier)
     if (_voiceRepository != null)
     {
@@ -226,28 +229,37 @@ public class TTSFactory : ITTSFactory, IDisposable
     return 2;
   }
 
+  /// <summary>
+  /// Resolves a configured engine name to a <see cref="TTSEngine"/>, throwing on anything the
+  /// enum does not define. A silent fallback here would announce nothing while reporting success.
+  /// </summary>
+  /// <remarks>
+  /// <c>Enum.TryParse</c> also accepts the decimal form of a value, so <c>"0"</c> or <c>"7"</c>
+  /// parse into an undefined member; <c>Enum.IsDefined</c> is what rejects those.
+  /// </remarks>
   private static TTSEngine ParseEngine(string engineName)
   {
-    return Enum.TryParse<TTSEngine>(engineName, ignoreCase: true, out var engine)
-      ? engine
-      : TTSEngine.ESpeak;
+    if (string.IsNullOrWhiteSpace(engineName))
+    {
+      throw new InvalidOperationException(
+        "No TTS engine is configured. Set 'TTS:DefaultEngine' to one of: Google, Azure.");
+    }
+
+    if (!Enum.TryParse<TTSEngine>(engineName, ignoreCase: true, out var engine) ||
+        !Enum.IsDefined(engine))
+    {
+      throw new InvalidOperationException(
+        $"Unknown TTS engine '{engineName}'. Valid engines are: Google, Azure. " +
+        "eSpeak was removed in TTS-9.");
+    }
+
+    return engine;
   }
 
   private IReadOnlyList<TTSEngineInfo> DetectAvailableEngines()
   {
     var engines = new List<TTSEngineInfo>();
     var secrets = _secrets.CurrentValue;
-
-    // Check eSpeak availability
-    var espeakAvailable = IsESpeakAvailable();
-    engines.Add(new TTSEngineInfo
-    {
-      Engine = TTSEngine.ESpeak,
-      Name = "eSpeak-ng",
-      IsAvailable = espeakAvailable,
-      RequiresApiKey = false,
-      IsOffline = true
-    });
 
     // Check Google TTS availability
     var googleAvailable = !string.IsNullOrEmpty(secrets.GoogleAPIKey);
@@ -273,109 +285,6 @@ public class TTSFactory : ITTSFactory, IDisposable
     });
 
     return engines.AsReadOnly();
-  }
-
-  private bool IsESpeakAvailable()
-  {
-    try
-    {
-      var espeakPath = _options.CurrentValue.ESpeakPath;
-      using var process = new Process
-      {
-        StartInfo = new ProcessStartInfo
-        {
-          FileName = espeakPath,
-          Arguments = "--version",
-          RedirectStandardOutput = true,
-          RedirectStandardError = true,
-          UseShellExecute = false,
-          CreateNoWindow = true
-        }
-      };
-
-      process.Start();
-      process.WaitForExit(5000);
-      return process.ExitCode == 0;
-    }
-    catch (Exception ex)
-    {
-      _logger.LogDebug(ex, "eSpeak-ng not available");
-      return false;
-    }
-  }
-
-  private async Task<(Stream audioStream, TimeSpan duration)> GenerateESpeakAsync(
-    string text,
-    string voice,
-    float speed,
-    float pitch,
-    CancellationToken cancellationToken)
-  {
-    var opts = _options.CurrentValue;
-    var espeakPath = opts.ESpeakPath;
-
-    // Calculate espeak parameters
-    // eSpeak speed: 80-450 wpm, default ~175
-    var espeakSpeed = (int)(175 * speed);
-    // eSpeak pitch: 0-99, default 50
-    var espeakPitch = (int)(50 * pitch);
-
-    var arguments = $"-v {voice} -s {espeakSpeed} -p {espeakPitch} --stdout";
-
-    _logger.LogDebug("Running eSpeak-ng: {Arguments}", arguments);
-
-    var memoryStream = new MemoryStream();
-
-    try
-    {
-      using var process = new Process
-      {
-        StartInfo = new ProcessStartInfo
-        {
-          FileName = espeakPath,
-          Arguments = arguments,
-          RedirectStandardInput = true,
-          RedirectStandardOutput = true,
-          RedirectStandardError = true,
-          UseShellExecute = false,
-          CreateNoWindow = true
-        }
-      };
-
-      process.Start();
-
-      // Write text to stdin
-      await process.StandardInput.WriteAsync(text);
-      process.StandardInput.Close();
-
-      // Read audio output
-      await process.StandardOutput.BaseStream.CopyToAsync(memoryStream, cancellationToken);
-
-      await process.WaitForExitAsync(cancellationToken);
-
-      if (process.ExitCode != 0)
-      {
-        var error = await process.StandardError.ReadToEndAsync(cancellationToken);
-        throw new InvalidOperationException($"eSpeak-ng failed with exit code {process.ExitCode}: {error}");
-      }
-
-      memoryStream.Position = 0;
-
-      // Estimate duration based on output size (16-bit, 22050Hz mono WAV)
-      // This is a rough estimate; actual duration depends on the audio format
-      var estimatedDuration = EstimateWavDuration(memoryStream.Length);
-
-      _logger.LogDebug("Generated TTS audio: {Length} bytes, estimated duration: {Duration}",
-        memoryStream.Length, estimatedDuration);
-
-      return (memoryStream, estimatedDuration);
-    }
-    catch (Exception ex)
-    {
-      memoryStream.Dispose();
-      _logger.LogError(ex, "Failed to generate eSpeak audio");
-      throw;
-    }
   }
 
   private async Task<(Stream audioStream, TimeSpan duration)> GenerateGoogleTTSAsync(
@@ -593,68 +502,6 @@ public class TTSFactory : ITTSFactory, IDisposable
     return $"body: {(string.IsNullOrWhiteSpace(body) ? "(empty)" : body)} | headers: {string.Join("; ", headers)}";
   }
 
-  private async Task<IReadOnlyList<TTSVoiceInfo>> GetESpeakVoicesAsync(CancellationToken cancellationToken)
-  {
-    var voices = new List<TTSVoiceInfo>();
-
-    try
-    {
-      var espeakPath = _options.CurrentValue.ESpeakPath;
-
-      using var process = new Process
-      {
-        StartInfo = new ProcessStartInfo
-        {
-          FileName = espeakPath,
-          Arguments = "--voices",
-          RedirectStandardOutput = true,
-          RedirectStandardError = true,
-          UseShellExecute = false,
-          CreateNoWindow = true
-        }
-      };
-
-      process.Start();
-      var output = await process.StandardOutput.ReadToEndAsync(cancellationToken);
-      await process.WaitForExitAsync(cancellationToken);
-
-      // Parse the espeak voice list
-      // Format: Pty Language Age/Gender VoiceName   File        Other Languages
-      var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-      foreach (var line in lines.Skip(1)) // Skip header
-      {
-        var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length >= 4)
-        {
-          var language = parts[1];
-          var gender = parts[2].Contains('M') ? TTSVoiceGender.Male :
-                       parts[2].Contains('F') ? TTSVoiceGender.Female :
-                       TTSVoiceGender.Neutral;
-          var voiceName = parts[3];
-
-          voices.Add(new TTSVoiceInfo
-          {
-            Id = voiceName,
-            Name = voiceName,
-            Language = language,
-            Gender = gender
-          });
-        }
-      }
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to enumerate eSpeak voices");
-
-      // Return some common default voices
-      voices.Add(new TTSVoiceInfo { Id = "en", Name = "English", Language = "en", Gender = TTSVoiceGender.Male });
-      voices.Add(new TTSVoiceInfo { Id = "en-us", Name = "English (US)", Language = "en-US", Gender = TTSVoiceGender.Male });
-      voices.Add(new TTSVoiceInfo { Id = "en-gb", Name = "English (UK)", Language = "en-GB", Gender = TTSVoiceGender.Male });
-    }
-
-    return voices.AsReadOnly();
-  }
-
   /// <summary>
   /// Fetches English voices from Google Cloud TTS API.
   /// </summary>
@@ -848,25 +695,6 @@ public class TTSFactory : ITTSFactory, IDisposable
     public string? Gender { get; set; }
     public string? Locale { get; set; }
     public string? VoiceType { get; set; }
-  }
-
-  private static TimeSpan EstimateWavDuration(long bytes)
-  {
-    // eSpeak outputs WAV at 22050 Hz, 16-bit, mono by default
-    // Bytes per second = 22050 * 2 = 44100
-    // Account for WAV header (~44 bytes)
-    const int bytesPerSecond = 44100;
-    const int headerSize = 44;
-
-    if (bytes <= headerSize)
-    {
-      return TimeSpan.Zero;
-    }
-
-    var audioBytes = bytes - headerSize;
-    var seconds = (double)audioBytes / bytesPerSecond;
-
-    return TimeSpan.FromSeconds(seconds);
   }
 
   private static TimeSpan EstimateLinear16Duration(long bytes)
