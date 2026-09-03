@@ -34,18 +34,26 @@ public class RotaryEncoderConfigVerifierTests
   public void Defaults_TameTheFactoryVolumeAcceleration()
   {
     // The measured factory state on this hardware was step_size 1 with tiers x5 / x15 / x50. At the
-    // host's 2% per unit that is 100 volume points in one detent. These defaults exist to replace
-    // exactly that, so the values are worth pinning rather than trusting.
+    // host's 1% per unit that is 50 volume points in one detent — half the range. These defaults
+    // exist to replace exactly that, so the values are worth pinning rather than trusting.
     RotaryEncoderChannelConfig volume = Desired().Encoders[RotaryEncoderConfigDefaults.VolumeEncoderIndex];
 
-    Assert.Equal(2, volume.StepSize);
+    Assert.Equal(1, volume.StepSize);
     Assert.Equal(2, volume.Tiers[0].Multiplier);
-    Assert.Equal(3, volume.Tiers[1].Multiplier);
+    Assert.Equal(4, volume.Tiers[1].Multiplier);
     Assert.Equal(0, volume.Tiers[2].ThresholdMs);   // third tier disabled outright
     Assert.Equal(0, volume.Tiers[2].Multiplier);
 
-    int worstCasePoints = volume.StepSize * volume.Tiers[1].Multiplier;
-    Assert.Equal(6, worstCasePoints);
+    // ⚠ ENC-20: these are TWO quantities and this test used to conflate them, calling the first one
+    // "worstCasePoints" when it is device units. step_size x tier_multiplier gives DEVICE UNITS;
+    // multiplying by VolumeStepPercent gives VOLUME POINTS. They happen to be equal now — that is
+    // the point of setting VolumeStepPercent to 1 — but the conversion is written out anyway so the
+    // day they stop being equal, this reads as arithmetic rather than as a coincidence.
+    int worstCaseUnits = volume.StepSize * volume.Tiers[1].Multiplier;
+    int worstCasePoints = worstCaseUnits * new RotaryEncoderOptions().VolumeStepPercent;
+
+    Assert.Equal(4, worstCaseUnits);
+    Assert.Equal(4, worstCasePoints);
     Assert.True(worstCasePoints * 2 < 100, "one detent must not be able to cross the volume range");
   }
 

@@ -131,7 +131,9 @@ are all in the `.encoder-hud` rule. `90 / 270 / 450 / 630` are the measured proj
 band 178 px away; do not "restore" the measured values.
 
 **Transient occlusion is accepted on every band** and nothing about position, width or z-order changes for it. The
-card is up 1500 ms after the last detent, carries `pointer-events: none`, and appears only while a hand is on a knob.
+card is up `EncoderInteractionTimings.HudHoldMs` — 2500 ms since `ENC-20`, raised from 1500 — after the last
+detent, carries `pointer-events: none`, and appears only while a hand is on a knob. That is a tail, not a lifetime:
+the timer re-arms on every detent, so the card is really up for the turn plus the hold.
 The VOLUME band lands on the fixed topbar and covers `ENC-4a`'s `MUTED` chip; that is safe **only because every card
 in the VOLUME band carries the console's mute state**, which is an invariant rather than a coincidence — a future
 card at index 0 that omitted `IsMuted` would hide the reason the room is silent while saying nothing about it.
@@ -185,12 +187,20 @@ Nothing at all is shown when the configuration verified, when the device is mere
 boot is completely silent: no toast, no banner, no badge.
 
 **⚠ The volume clamp tracks the *safety* fields, not "did everything apply" (`ENC-16`).**
-`RotaryEncoderConfigVerifier.VolumeClampFor` returns the full **6 units** per event for `Configured`
+`RotaryEncoderConfigVerifier.VolumeClampFor` returns the full **4 units** per event for `Configured`
 **and for `Degraded`**, and the tight **2** for `Unknown`, `Transient` and `HardFault` — exactly the
 tiers where `wrap` on VOLUME or `reverse` on any knob is unverified or disagreeing. A `Degraded`
 console's volume knob behaves normally: read-back confirmed the safety fields and only a feel field
 (an acceleration tier, `step_size`) disagreed, so the knob may accelerate differently from the design
 but it is not limited.
+
+**The clamp is counted in device units, and since `ENC-20` a unit is a point.** `VolumeStepPercent = 1`,
+so 4 units per event is **4 volume points** and the tight 2 is 2 points — the same number read either
+way. That is not how it used to be: at `VolumeStepPercent = 2` this paragraph's *"6 units"* meant
+**12 points**, and reading the clamp as points understated what a single event could actually do by
+half. `ENC-20` pinned `step_size` and `VolumeStepPercent` both to `1` precisely so the two quantities
+coincide on VOLUME; the tightened value itself did not change, but it now bounds 2 points instead of 4
+and so is strictly tighter than before. The derivation lives in encoder handoff §5.4 (Rev 8).
 
 `Transient` keeps the tight clamp because it means *"not confirmed yet"*, not *"confirmed fine"*, and
 the boot window is exactly when a fresh or factory-reset device is running acceleration at ×50. An
@@ -271,7 +281,7 @@ Edit `appsettings.json` (or `appsettings.Production.json` for per-machine overri
     "ProductId": 16389,
     "DevicePath": "",
     "PollIntervalMs": 10,
-    "VolumeStepPercent": 2,
+    "VolumeStepPercent": 1,
     "ReconnectDelayMs": 2000
   }
 }
@@ -285,7 +295,7 @@ Configuration fields:
 | `ProductId` | USB HID Product ID (decimal) | `16389` (0x4005) |
 | `DevicePath` | Explicit `/dev/hidrawN` path (empty = auto-detect by VID/PID) | `""` |
 | `PollIntervalMs` | Delay between HID report reads in ms | `10` |
-| `VolumeStepPercent` | Volume change per encoder click (0-100). Shown **read-only** on the Settings page as VOLUME's step size; the editable duplicate was removed by `ENC-8` | `2` |
+| `VolumeStepPercent` | Volume points applied per **device unit** of movement (0-100) — not per detent, which is `step_size × tier multiplier` units. Shown **read-only** on the Settings page as VOLUME's step size; the editable duplicate was removed by `ENC-8`. `ENC-20` set it to `1` alongside `step_size = 1`, so one unit is one point and one slow detent is one point | `1` |
 | `ReconnectDelayMs` | Delay before retrying after device disconnect | `2000` |
 
 You can also configure these from the Web UI: **System Config → Integrations → Rotary Encoders**.
@@ -459,7 +469,9 @@ thing.
 **What it proved on the appliance, 2026-09-03** (against `5e571b8`): the service reports
 `Encoder report length 107 bytes (movement accumulators: true)` and verifies its configuration on
 attempt 1; a turn moves volume at 2% per unit; the `ENC-3` per-event clamp holds at ±6 units
-(±12 points) against single events of 20 and 50 detents; the `ENC-4` HUD renders left-anchored at
+(±12 points) against single events of 20 and 50 detents — ⚠ **those two figures are pre-`ENC-20`
+and are kept as dated history, not as current behaviour; the live values are 1% per unit and ±4
+units, which is also ±4 points** — the `ENC-4` HUD renders left-anchored at
 its band; a 900 ms hold on encoder 0 synthesises a long press with the progress ring while a 200 ms
 hold does not; and **`ENC-1`'s re-baseline rule holds across a real USB disconnect — 50 detents
 accrued while unplugged produced a 0-point jump on replug.**

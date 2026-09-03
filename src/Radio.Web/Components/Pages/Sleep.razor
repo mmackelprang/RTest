@@ -480,7 +480,7 @@
     });
   }
 
-  // ENC-4. EncoderHudService raises this from whichever thread published — the 1500 ms dismissal
+  // ENC-4. EncoderHudService raises this from whichever thread published — the HudHoldMs dismissal
   // fires on a thread-pool thread — so the re-render is marshalled onto the circuit. The
   // _disposed check mirrors the timer callbacks above: DisposeAsync unsubscribes, but the service
   // is a process-wide singleton and can raise concurrently with that unsubscribe.

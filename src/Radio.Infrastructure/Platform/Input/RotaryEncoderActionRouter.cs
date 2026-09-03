@@ -554,10 +554,14 @@ public class RotaryEncoderActionRouter : IDisposable
     // ENC-11 host clamp, and it is not defensive boilerplate.
     //
     // The device's movement already includes its own acceleration, so the host is handed
-    // step_size x tier_multiplier per detent and multiplies it by 2% again. On factory defaults —
-    // measured on this hardware as step_size 1 with a x50 tier — that is 50 x 2% = 100 points, a
-    // single click from silence to full, in a living room, from a knob a guest may be touching for
-    // the first time.
+    // step_size x tier_multiplier DEVICE UNITS per detent and multiplies that by VolumeStepPercent
+    // to get volume points. Since ENC-20 that percentage is 1, so a unit IS a point and the two
+    // quantities stop needing to be told apart — which is the whole reason ENC-20 changed it, since
+    // conflating them is how one base detent came to move volume by 4 points.
+    //
+    // On factory defaults — measured on this hardware as step_size 1 with a x50 tier — a single
+    // fast detent is 50 units = 50 points, half the range in one click, in a living room, from a
+    // knob a guest may be touching for the first time.
     //
     // There is a real window on every boot and after every reconnect during which the device runs
     // whatever is in its flash, and this clamp is what makes that window safe. It tightens further

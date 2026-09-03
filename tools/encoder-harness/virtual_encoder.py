@@ -128,10 +128,16 @@ that rule under test -- see ENC-1 and the re-baseline scenario in README.md.
 Configuration reports 0x02 (106-byte payload) and command reports 0x03 (2-byte
 payload) are answered so the console reaches the `Configured` tier. That matters
 for measurement, not just tidiness. Since ENC-16, RotaryEncoderConfigVerifier
-.VolumeClampFor runs the normal 6-unit clamp for `Configured` and `Degraded` and
+.VolumeClampFor runs the normal 4-unit clamp for `Configured` and `Degraded` and
 the tightened 2-unit clamp for `Transient`, `HardFault` and `Unknown` -- so a
 harness that did not answer the read-back would leave the console on the tight
 clamp and silently change what a clamp measurement means.
+
+Both clamps are in DEVICE UNITS. Since ENC-20 set VolumeStepPercent to 1 they are
+also volume points, but the two are different quantities in general -- the device
+emits step_size x tier_multiplier units and the host multiplies by
+VolumeStepPercent to get points -- and reading one as the other is the defect
+ENC-20 was raised to fix.
 """
 
 from __future__ import annotations
@@ -815,8 +821,18 @@ class VirtualEncoder:
         """Advance one encoder's accumulator and (optionally) report it.
 
         `multiplier` stands in for the firmware's acceleration tier: real movement is
-        detents x step_size x tier_multiplier, and the designed config uses
-        step_size 1, so a slow turn is one movement unit per detent.
+        detents x step_size x tier_multiplier, and since ENC-20 the designed config
+        uses step_size 1 on ALL FOUR encoders, so a slow turn is one movement unit
+        per detent everywhere.
+
+        That was not true before ENC-20 and is why this harness under-reported the
+        real knob: VOLUME carried step_size 2, so every unaccelerated detent the
+        device sent was worth two of the units emitted here, and a clamp measured
+        against this gadget was measured against half the movement.
+
+        Note the asymmetry with `default_config_payload`, which is deliberate: that
+        models the device's FACTORY defaults (also step_size 1, but with x5/x15/x50
+        tiers), not the config the host pushes.
 
         `emit=False` is the `offline-turn` case -- the knob moved while nothing was
         listening. That is not a hypothetical: the accumulator is free-running, so it

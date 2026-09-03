@@ -154,7 +154,9 @@ Three things to know before you reach for it:
 
 **What it has already verified on the appliance** (2026-09-03, against `5e571b8`): configuration
 verifies `Configured` on attempt 1; a turn moves volume at 2% per unit; the `ENC-3` per-event clamp
-holds at ±6 units against single events of 20 and 50 detents; the `ENC-4` HUD renders left-anchored
+holds at ±6 units against single events of 20 and 50 detents (⚠ **both figures are pre-`ENC-20` and
+are dated history, not current** — the live values are **1% per unit** and **±4 units = ±4 points**;
+`ENC-20` re-ran this measurement and recorded 1 point per detent at base speed); the `ENC-4` HUD renders left-anchored
 at its band; a 900 ms hold on encoder 0 synthesises a long press with the progress ring and a 200 ms
 hold does not; and **`ENC-1`'s re-baseline rule holds across a real USB disconnect — 50 detents
 accrued while unplugged produced a 0-point jump on replug.** That last one was Designer's
@@ -217,8 +219,20 @@ Bluetooth — is the next row's work and is now cheap.
 - **The encoders factory config was measured, not inferred.** Before ENC-11 all four sat on `step=1`
   with tiers `(150ms x5), (80ms x15), (40ms x50)`. At the host 2% per unit that is 50 x 2% = 100
   volume points in one detent — the "one detent from silence to full" the handoff has warned about
-  since Rev 2, read off the device. It is now `step=2` with `[150ms x2, 80ms x3, disabled]`, worst
-  case 6 points.
+  since Rev 2, read off the device. **Since ENC-20 (2026-09-03) it is `step=1` with
+  `[150ms x2, 80ms x4, disabled]`, `VolumeStepPercent = 1` and a host clamp of `VolumeClamp = 4`,
+  worst case 4 points per detent** and 1 point per detent at an ordinary slow turn.
+  ⚠ **Two things in the sentence this replaced were wrong, and both are worth carrying forward.**
+  ENC-11 shipped `step=2`, which ENC-20 has since reverted to `1`. And *"worst case 6 points"* was
+  units read as points: at `step=2` with the ×3 tier the device emitted 6 **units**, which the host
+  turned into **12 points** at 2% per unit. Device units and volume points are different quantities —
+  `step_size × multiplier` gives units, `× VolumeStepPercent` gives points — and conflating them is
+  what put a safety floor of 1.33 s in the handoff that the shipped code never met (the real figure
+  was 0.67 s at 80 ms/detent). ENC-20 sets both `step_size` and `VolumeStepPercent` to `1` so that on
+  VOLUME one unit *is* one point and the two cannot drift apart again. Full account: handoff Rev 8
+  and §5.4.
+  ⚠ Older verification notes in this file and in `design/INTEGRATIONS.md` that quote **±6 units** are
+  dated measurements against the pre-ENC-20 build and are correct as history; the live clamp is ±4.
 
 - **max_value is marked *inert* in the handoff and the device validates it anyway.** A 0 on TUNING
   made the firmware reject the **entire** config, because `validate_config` is all-or-nothing — so

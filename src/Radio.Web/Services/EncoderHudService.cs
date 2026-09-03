@@ -16,7 +16,8 @@ namespace Radio.Web.Services;
 /// </para>
 ///
 /// <para>
-/// The 1500 ms dismissal timer lives here rather than in CSS so that a new detent can re-arm it
+/// The dismissal timer (<c>EncoderInteractionTimings.HudHoldMs</c>, 2500 ms since ENC-20) lives
+/// here rather than in CSS so that a new detent can re-arm it
 /// without re-animating the card — continuous turning shows one stable card that stays up, which is
 /// what the handoff's "re-arm" row asks for.
 /// </para>
@@ -232,9 +233,10 @@ public sealed class EncoderHudService : IDisposable
     // dismiss.
     //
     // A null duration means two different things depending on the phase, and conflating them is a
-    // bug this shipped once. For an ordinary card it means "use ENC-4's 1500 ms default". For a
-    // commit in flight it means "no duration is known" — the card is supposed to stay until the
-    // switch succeeds or fails (handoff §6.6 State D), and arming 1500 ms against it drops the
+    // bug this shipped once. For an ordinary card it means "use the HudHoldMs default" — ENC-4 set
+    // that to 1500 and ENC-20 raised it to 2500. For a commit in flight it means "no duration is
+    // known" — the card is supposed to stay until the switch succeeds or fails (handoff §6.6
+    // State D), and arming the ordinary hold against it drops the
     // spinner mid-switch on exactly the slow Bluetooth connect the spinner exists to explain, then
     // flashes it back when the terminal phase lands.
     //

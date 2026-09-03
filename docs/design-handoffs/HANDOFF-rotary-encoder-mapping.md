@@ -9,12 +9,48 @@
 - **Follows** `HANDOFF-bell-failure-surfacing.md` §3.7 for cross-route surfacing of a persistent hardware fault (§7.6).
 - **Extends** `HANDOFF-sleep-weather-visual-redesign.md` with a sleep-screen readout in that handoff's own dim-amber, single-emissive-color palette (§8.6). Its "one emissive color" rule is honored, not broken.
 **Author:** Designer
-**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault; Rev 7 — §11 settled as single-surface, local-only visualiser mode)**
+**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault; Rev 7 — §11 settled as single-surface, local-only visualiser mode; Rev 8 — §5.4's points-per-detent arithmetic corrected, having been half the real value because the table assumed a `step_size` the code did not have)**
 **Consumers:** Owner (§13) → Architect (§12.1) → Planner
 
 ---
 
 ## 0. Revision history
+
+### Rev 8 — §5.4's arithmetic was wrong by a factor of two, and the safety claim rested on it (2026-09-03, `ENC-20`)
+
+**The document whose entire job is to justify a safety decision asserted a floor that was never true of
+the shipped console.** §5.4's table computed *points per detent* as `multiplier × 2` — arithmetic that is
+correct **only if `step_size = 1`**, because the ×2 is `VolumeStepPercent` applied to *one* device unit.
+The code shipped `step_size = 2`. So the device emitted two units per detent, the host doubled each unit
+again, and **every "points" figure in that table, and everything derived from it, was half the real
+value**: base was 4 points rather than 2, T2 was **12** rather than 6, and the headline *"silence to full
+takes at least 1.33 seconds"* was really 0.67 s at an 80 ms/detent spin and 0.33 s at 40 ms.
+
+**This was not a typo.** It was a table that silently assumed a `step_size` the code did not have, and
+then four sections and an acceptance criterion were built on top of it without anyone re-deriving the
+first row. A derived number inherits every assumption above it; this document did not write that
+assumption down, so it could not be checked.
+
+**Two quantities, and they were being conflated.** The device emits `step_size × tier_multiplier`
+**device units** per detent. The host multiplies units by `VolumeStepPercent` to get **volume points**.
+Every clamp in this document is in units; every "points per detent" and every time figure is in points.
+
+**What ships.** `step_size = 1`, `VolumeStepPercent = 1`, volume tiers `(150 ms ×2), (80 ms ×4), T3
+disabled`, host clamp `VolumeClamp = 4`. Base is **1 point per detent** — the owner's actual complaint,
+a volume knob that moves volume by one — and the ceiling is **4 points per detent**, hard-bounded by the
+clamp whatever the device sends. `VolumeClampUnverified` is unchanged at **2**, and now bounds 2 points
+rather than 4: strictly tighter than before, not merely renumbered. Because one unit is now one point on
+VOLUME, **the two quantities coincide** — deliberately, since that is the property that makes this class
+of error impossible to repeat here.
+
+⚠ **The methodological correction, which outlives the numbers.** A tier threshold is a **maximum
+interval**, not the rate the user turns at, so *"N points per 80 ms"* was never a floor: T2 fires on
+anything from 80 ms down to the 40 ms floor of its band. The honest bound is
+**points per detent**, because that is what the host clamp actually enforces. Any figure in seconds must
+name the spin rate it assumes — and both rates get stated, never one. Corrected in §5.2, §5.4, §7.1,
+§7.5, §7.6, §9.2, §10.1, §10.2 and §15; the owner's governing constraint — *fast enough to kill the
+volume when the phone rings, slow enough that no single gesture produces a blast* — is unchanged and
+still met.
 
 ### Rev 7 — §11 settled: single-surface, local-only visualiser mode (2026-09-03, `ENC-9`)
 
@@ -420,18 +456,27 @@ What remains is smaller and cosmetic: **detents per revolution is a mechanical p
 | **Semantics** | accumulator | accumulator | accumulator | accumulator |
 | `min_value` | `0` *(inert)* | `0` *(inert)* | `0` *(inert)* | `0` *(inert)* |
 | `max_value` | `100` *(inert)* | `6` *(inert)* | `6` *(inert)* | `0` *(inert)* |
-| `step_size` | `2` | `1` | `1` | `1` |
+| `step_size` | `1` *(was `2` before `ENC-20` — §5.4)* | `1` | `1` | `1` |
 | `wrap` | **`false`** | `false` *(host wraps the list)* | `false` *(host wraps the list)* | `false` *(host wraps the band — §4.4)* |
 | `reverse` | `false` | `false` | `false` | `false` |
 | **T1** (threshold ms, ×) | `150, 2` | **`0, 0` — disabled** | **`0, 0` — disabled** | `150, 2` |
-| **T2** | `80, 3` | **`0, 0` — disabled** | **`0, 0` — disabled** | `80, 4` |
+| **T2** | `80, 4` | **`0, 0` — disabled** | **`0, 0` — disabled** | `80, 4` |
 | **T3** | **`0, 0` — disabled** | **`0, 0` — disabled** | **`0, 0` — disabled** | `40, 8` |
-| **Host per-event clamp** | **`±6`** | **`±1`** | **`±1`** | `±8` radio / **`±1`** track |
-| One count means | 1 percentage point | 1 list entry | 1 list entry | 1 tuner `STEP` |
+| **Host per-event clamp** | **`±4`** *(units — and since `ENC-20`, also points)* | **`±1`** | **`±1`** | `±8` radio / **`±1`** track |
+| One count means | 1 percentage point (`VolumeStepPercent = 1`) | 1 list entry | 1 list entry | 1 tuner `STEP` |
 
 `reverse` is `false` on all four, meaning **clockwise increases** — louder, down the list, down the list, up in frequency. If a knob is wired backwards, this flag is the fix, and it is the one field a human should ever edit (§7.8). `INTEGRATIONS.md`'s troubleshooting section currently tells the reader to swap the A/B pins on the Pico or negate the delta in firmware; with a `reverse` flag in the protocol that advice is wrong and should be replaced (§12.2).
 
 **The host-clamp row is not defensive boilerplate.** There is a real window on every boot and after every reconnect during which the device runs whatever is in its flash (§7.5), and the clamp is what makes that window safe. It is also — see §7.7 — the reason flash can honestly hold the real operating configuration instead of a deliberately duller one.
+
+⚠ **`step_size` and the clamp are in *device units*; volume is in *points*. They are two different
+quantities and this document once conflated them.** The device emits `step_size × tier_multiplier`
+units per detent; the host multiplies units by `VolumeStepPercent` to get points of volume. With the
+pre-`ENC-20` pair — `step_size = 2`, `VolumeStepPercent = 2` — one unit was two points, and every
+"points" figure in §5.4 was **half** the real value. `ENC-20` sets both to `1` so that **one unit is
+one point on VOLUME**, which is not a cosmetic simplification: it is the property that makes the
+conflation impossible to repeat. On the other three knobs a count was always one thing (one entry,
+one `STEP`), which is why the error lived only on volume — the one knob where it mattered.
 
 ### 5.3 Why acceleration is disabled entirely on both selector knobs
 
@@ -439,18 +484,50 @@ A seven-entry list with a ×5 multiplier means one quick flick moves the highlig
 
 ### 5.4 Volume — the numbers, and why there is no third tier
 
-Full scale is 0 → 100. At a conventional 20-detent revolution:
+Full scale is 0 → 100. At a conventional 20-detent revolution, with `step_size = 1` and
+`VolumeStepPercent = 1`:
 
-| Tier | Interval per detent | Mult | Points per detent | Detents 0 → 100 | Revolutions |
-|---|---|---|---|---|---|
-| base | > 150 ms | ×1 | 2 | 50 | ≈ 2.5 |
-| T1 | 80–150 ms | ×2 | 4 | 25 | ≈ 1.25 |
-| T2 | 40–80 ms | ×3 | 6 | 17 | ≈ 0.85 |
-| T3 | — | *disabled* | — | — | — |
+| Tier | Interval per detent | Mult | Device units per detent | Points per detent | Detents 0 → 100 | Revolutions |
+|---|---|---|---|---|---|---|
+| base | > 150 ms | ×1 | 1 | **1** | 100 | ≈ 5.0 |
+| T1 | 80–150 ms | ×2 | 2 | **2** | 50 | ≈ 2.5 |
+| T2 | 40–80 ms | ×4 | 4 | **4** | 25 | ≈ 1.25 |
+| T3 | — | *disabled* | — | — | — | — |
 
-Maximum slew is **6 points per 80 ms = 75 points/second** — silence to full takes at least **1.33 seconds** of sustained, deliberate spinning. Fast enough to kill the volume when the phone rings; slow enough that no single gesture produces a blast.
+**The bound that actually holds is per detent, not per second: no single detent can move volume by
+more than 4 points**, because the host clamps every event to ±4 units and a unit is a point (§5.2).
+That is true whatever the device sends — a factory-tier ×50 delta included — which is why it is the
+figure to quote.
 
-**Compare the factory defaults on this knob.** With `step_size = 2` and T3 at ×50, **one detent moves volume by 100 points** — a single click from silence to full, in a living room, from a knob a guest may be touching for the first time. This is the whole case against the factory tiers, and it is why §7.5 treats "the device is running factory defaults right now" as a live safety state rather than a startup detail.
+**Time figures are secondary, and each one has to name the spin rate it assumes.** T2's *threshold*
+is 80 ms, but a threshold is a **maximum interval**, not the rate the user turns at: T2 fires on
+anything from 80 ms down to the 40 ms floor of its band. At a sustained 80 ms per detent, silence to
+full is **25 detents × 80 ms = 2.0 s**. At 40 ms per detent — the fastest rate T2 still qualifies for
+— it is **1.0 s**. Both, always, or the number is a floor that is not a floor. **Fast enough to kill the volume when the phone rings; slow
+enough that no single gesture produces a blast** — the owner's constraint, and it is met at either
+rate.
+
+⚠ **This table was wrong by exactly a factor of two until `ENC-20` (2026-09-03), and the failure mode
+is worth more than the corrected digits.** The old table computed points per detent as
+`multiplier × 2` and labelled the column *"Points per detent"*. That arithmetic is correct **only if
+`step_size = 1`** — the ×2 is `VolumeStepPercent`, applied to *one* unit. The shipped code used
+`step_size = 2`, so the device was emitting two units per detent and every figure in the column was
+half the real value: base was 4 points, not 2; T2 was **12** points, not 6. Nothing was mistyped. A
+table silently assumed a `step_size` the code did not have, and then the whole safety argument was
+built on top of it — including a headline floor of 1.33 s that was never once true of the shipped
+console (the real figures were 0.67 s at 80 ms/detent and 0.33 s at 40 ms/detent). **A derived number
+inherits every assumption of the row above it, and this document did not write that assumption down.**
+
+**Compare the factory defaults on this knob** — read off the live hardware on 2026-09-02, not
+inferred: `step_size = 1` with tiers `(150 ms ×5), (80 ms ×15), (40 ms ×50)` on every encoder. At the
+×50 tier one detent emits **50 units**, which at `VolumeStepPercent = 1` is **50 points — half of
+full scale in a single click**, in a living room, from a knob a guest may be touching for the first
+time; two clicks is silence to full. (The pre-`ENC-20` text put this at 100 points via *"`step_size = 2`
+and T3 at ×50"*. The conclusion was right and the derivation was not: the doubling came from
+`VolumeStepPercent`, not from a `step_size` the factory device never had.) This is the whole case
+against the factory tiers, it is why §7.5 treats "the device is running factory defaults right now"
+as a live safety state rather than a startup detail, and it is what the ±4 host clamp exists to bound
+— 50 units arriving is 4 points applied.
 
 **Volume must not wrap.** `wrap = false` is the single most safety-critical value in the table — one detent past zero would be full scale, at 2 a.m., pointed at a sofa. This is why §7.6 promotes a `wrap` mismatch to a hard fault while a mismatched acceleration tier is only amber.
 
@@ -881,7 +958,7 @@ Recorded here because Rev 2 referred to reports loosely and D4 supplied the full
 | **`0x03`** commands (2 bytes) | host → device | `0x01` save config to flash · `0x02` factory reset · `0x03` reset positions to min · `0x04` read config back · `0x05` zero diagnostics counters | `0x04` verification (§7.6) · `0x03` handshake reset (§5.1) · `0x01` owner-initiated Save (§7.7) · `0x05` the Diagnostics reset button (§7.9) |
 | Diagnostics | device → host | Edge counts, invalid-transition counts, detent counts | §7.9 |
 
-**Command `0x02` (factory reset) is never sent automatically, ever.** It would wipe the flashed configuration and leave the device on defaults where one volume detent spans the full range (§5.4). If it is exposed at all it belongs behind an Advanced disclosure and a typed confirmation, and §7.8 does not include it.
+**Command `0x02` (factory reset) is never sent automatically, ever.** It would wipe the flashed configuration and leave the device on defaults where one volume detent spans **half** the range and two span all of it (§5.4). If it is exposed at all it belongs behind an Advanced disclosure and a typed confirmation, and §7.8 does not include it.
 
 ### 7.2 The governing rule
 
@@ -933,7 +1010,7 @@ Where it *is* visible, for someone who goes looking: **System Config → Integra
 
 ### 7.5 The configuration window — and why the host clamps exist
 
-Between USB detect and a verified config, the device runs **whatever is in its flash**, which on a fresh, replaced or factory-reset Pico means defaults — including **volume acceleration at ×50, where one detent is silence to full** (§5.4). Not theoretical: it happens on every boot and every reconnect.
+Between USB detect and a verified config, the device runs **whatever is in its flash**, which on a fresh, replaced or factory-reset Pico means defaults — including **volume acceleration at ×50, where one detent emits 50 units: half of full scale, and two detents is silence to full** (§5.4). Not theoretical: it happens on every boot and every reconnect.
 
 - **The knobs stay live throughout.** A knob that ignores you for two seconds is a broken knob, and this window can coincide exactly with someone walking up to a just-powered console.
 - **The host clamps (§5.2) are in force from the very first report**, independent of what the device believes. That is what makes the window safe.
@@ -946,9 +1023,9 @@ Between USB detect and a verified config, the device runs **whatever is in its f
 
 | Tier | Trigger | Response | Volume clamp | Owner-visible? |
 |---|---|---|---|---|
-| **Configured** | Present, read-back matches | — | **±6** (normal) | Status card only |
+| **Configured** | Present, read-back matches | — | **±4** (normal) | Status card only |
 | **Transient** | Mismatch or no response, attempts 1–3 | Silent retry, backoff **250 ms / 1 s / 3 s** | **±2** | **No.** A USB peripheral missing a report on the first try is ordinary. |
-| **Degraded** | Read-back arrived, its *safety* fields were **correct**, and a *feel* field (any acceleration tier, `step_size`) is still wrong after 3 attempts | Knobs stay live on host clamps. Acceleration **treated as absent** rather than assumed present. | **±6** (normal) | **Yes** — amber badge, one toast |
+| **Degraded** | Read-back arrived, its *safety* fields were **correct**, and a *feel* field (any acceleration tier, `step_size`) is still wrong after 3 attempts | Knobs stay live on host clamps. Acceleration **treated as absent** rather than assumed present. | **±4** (normal) | **Yes** — amber badge, one toast |
 | **Hard fault** | A *safety* field — `wrap` on VOLUME, or `reverse` on any knob — is not known to be right: read-back disagreed on one, **or the device never answered at all within the 3 attempts** | Volume host clamp drops to **±2 per event** until a verified push succeeds | **±2** | **Yes** — red badge, one toast |
 | **Absent** (§7.3) | Device not detected | Touch UI unchanged and complete. **Blanking disabled.** | **±2** (tier resets to `Unknown`) | **Yes** — amber badge; toast only on mid-session loss |
 
@@ -960,10 +1037,20 @@ Degraded toast below tells the owner only that the knobs may feel wrong. `Transi
 clamp precisely because it means *"not confirmed yet"* rather than *"confirmed fine"* — and the boot
 window is exactly when a fresh or factory-reset Pico is running acceleration at ×50.
 
+**Both clamp figures are in device units.** Since `ENC-20` set `VolumeStepPercent = 1` a unit *is* a
+point on VOLUME, so ±4 is 4 points and ±2 is 2 points and the column can be read either way without
+error. That was not true before `ENC-20`: at `VolumeStepPercent = 2` the same column meant 12 points
+and 4 points, and reading it as points understated the real movement by half (§5.4). The tightened
+value did not change — `VolumeClampUnverified` is still **2** — but it now bounds 2 points rather
+than 4, so the unverified window is **strictly tighter** than it was, not merely renumbered.
+
 ⚠ **The residual risk of the Degraded row is stated rather than glossed.** A Degraded device's
 acceleration tiers are by definition *not* confirmed, so it may be emitting factory ×50 deltas; the
-±6 clamp bounds each event to 12 % of full scale (nine events minimum from silence to full) but does
-**not** preserve §5.4's 1.33 s floor, which is a property of the *configured* tiers. The owner
+±4 clamp bounds each event to 4 % of full scale (**25 events minimum** from silence to full) but does
+**not** preserve any *time* floor, because a floor in seconds is a property of the *configured* tiers
+and of the rate the user happens to spin at — not of the clamp. That distinction is the whole point
+and it is why the criterion this section leans on is **points per detent**, which the clamp really
+does enforce, rather than seconds, which it never could. The owner
 accepted that trade: no single gesture can produce a blast either way, and `wrap`/`reverse` are
 confirmed before this tier is ever reached.
 
@@ -1035,7 +1122,7 @@ The owner asked for the device's configuration and an explicit Save in the app. 
 
   **The Save copy is the load-bearing part.** It says what it writes, and because §7.7 dropped the baseline, what it writes is what is on screen. If a future revision reintroduces any divergence, this copy has to change with it, and the reviewer should treat a mismatch here as a defect (see this project's pre-merge rule on comments and messages that overclaim).
 
-  **Factory reset (`0x03/0x02`) is not on this page.** It would put the device on defaults where one volume detent spans the full range.
+  **Factory reset (`0x03/0x02`) is not on this page.** It would put the device on defaults where one volume detent spans half the range and two span all of it.
 
 **Should `VolumeStepPercent` and `TuningStepKHz` still be deleted?**
 
@@ -1225,7 +1312,7 @@ claim is the one this section actually needs, and it survived the change of orie
 | Meant → grabbed | As built | What happens | Cost |
 |---|---|---|---|
 | Volume → Source | adjacent (29.63 mm) | An overlay opens; **nothing changes** | **Free** |
-| Source → Volume | adjacent — *was 90 mm* | Level changes; instantly audible and self-correcting, bounded by `ENC-3`'s ±6 clamp | Trivial |
+| Source → Volume | adjacent — *was 90 mm* | Level changes; instantly audible and self-correcting, bounded by `ENC-3`'s ±4 clamp (4 points — §5.4) | Trivial |
 | Source ↔ Presets | adjacent (unchanged in kind) | The other overlay opens; **nothing changes** | **Free** |
 | Presets → Tuning | adjacent — *was 90 mm* | Radio: station drifts. Other sources: **one track skip** (delta collapsed to ±1, 300 ms debounce, §4.4) | Recoverable, but see §10.1 — a frequency step is exactly reversible and a track skip is not |
 | Tuning → Presets | adjacent — *was 90 mm* | An overlay opens; **nothing changes** | **Free** |
@@ -1385,7 +1472,10 @@ what holds it up:
 2. **Preview-then-commit (§4.1, §4.4)** — turning SOURCE or PRESETS changes nothing. **Half the panel
    cannot produce an audible mis-grab at all**, by construction rather than by distance.
 3. **`ENC-3`'s host clamp (shipped)** and the other five guards in §10.2 — none of which ever depended on
-   geometry. Silence to full still takes ≥ 1.33 s of deliberate spinning.
+   geometry. **No single detent moves volume more than 4 points** (§5.4), and silence to full still
+   takes 2.0 s of deliberate spinning at 80 ms per detent — 1.0 s if the spin is as fast as T2 goes.
+   *(Corrected by `ENC-20`; this line previously claimed a ≥ 1.33 s floor, which was both derived
+   from a `step_size` the code did not have and stated without naming a spin rate.)*
 4. **Ordinal position** — the one geometric property that survived. VOLUME and TUNING are at the two
    **ends** of the column, and the ends are the two positions a hand finds without counting. Rev 3's point 1
    was half metric and half ordinal; **the ordinal half was the load-bearing one and it is intact.**
@@ -1404,8 +1494,9 @@ slip, defended by ordinal position and by the two most distinct surfaces on the 
 
 *Why this is still acceptable, and it is a claim about **cost**, not about **likelihood**:* probability went
 up and there is no software substitute for that. But both outcomes stay bounded. In the volume direction —
-the dangerous one — `ENC-3` clamps every event to ±6 regardless of what the device sends, so the worst
-single gesture is small and the worst sustained one takes over a second. In the tuning direction the result
+the dangerous one — `ENC-3` clamps every event to ±4 units regardless of what the device sends, and since
+`ENC-20` a unit is a point, so **the worst single gesture is 4 points** and a sustained slip still needs a
+second or more of continuous spinning to cross the scale. In the tuning direction the result
 is a frequency step, which is **exactly reversible** by turning back, and PRESETS recalls the station in one
 press. **The mis-grab got more likely; it did not get more expensive.**
 
@@ -1440,13 +1531,22 @@ only SOURCE vs. PRESETS: those two are now separated by surface alone, and they 
 The most plausible way this machine could hurt someone. Six independent guards, because device configuration can be lost, stale, or unverified:
 
 1. `wrap = false` — a wrapping volume knob puts full scale one detent past silence.
-2. **T3 disabled** on volume — the fastest tier is ×3, not ×50.
-3. **Host clamp `|delta| ≤ 6`** in the router, applied regardless of what the device sends — what makes an unconfigured or factory-reset Pico *sluggish* rather than *dangerous*, including during the boot window (§7.5).
+2. **T3 disabled** on volume — the fastest tier is ×4, not ×50, and at `step_size = 1` that is 4 units per detent.
+3. **Host clamp `|delta| ≤ 4` units** in the router, applied regardless of what the device sends — what makes an unconfigured or factory-reset Pico *sluggish* rather than *dangerous*, including during the boot window (§7.5). Since `ENC-20`'s `VolumeStepPercent = 1`, that is also **4 points**, so the guard states its own effect without a conversion step.
 4. **A `wrap` read-back mismatch is a hard fault** that drops the clamp to ±2 and says so on the topbar (§7.6).
 5. **The first sample after any connect is a baseline, not an input** (§5.1) — so a lead knocked loose and re-seated cannot deliver forty detents of accumulated turning as one delta.
 6. 60–80 ms ramp per applied step (§6.8) — no clicks, no discontinuities.
 
-Minimum 1.33 s of deliberate spinning from silence to full, and less than that only ever in the safe direction.
+**The bound is 4 points per detent, and it is the clamp that enforces it.** Stated as time: silence to
+full is **2.0 s** at a sustained 80 ms per detent and **1.0 s** at 40 ms per detent, the fastest rate T2
+still qualifies for — and less than that only ever in the safe direction.
+
+⚠ **Quote the per-detent figure, not a bare number of seconds.** This line used to read *"minimum 1.33 s
+of deliberate spinning"*, which was wrong twice over: the arithmetic behind it assumed `step_size = 1`
+while the code shipped `2` (§5.4), and even the corrected time is not a *minimum* — a tier threshold is a
+**maximum interval**, so T2 fires at any rate down to 40 ms per detent and a "per 80 ms" figure describes
+the slowest spin that reaches the tier, not the fastest. Points per detent is the honest bound because it
+is the one the host actually enforces; any time figure must name the rate it assumes.
 
 ### 10.3 Startling changes
 
@@ -1620,7 +1720,8 @@ not re-attempt this as an acceptance test.** Result: `docs/uat/2026-09-02-enc15-
 - [ ] ⚠ **Both `/sleep` entry paths, separately.** Idle-at-30-minutes and the Sleep pill produce different server-side states today (`idle-dimmer.js` navigates without calling `SetSleepAsync(true)`), so verifying one proves nothing about the other.
 
 **Safety**
-- [ ] From volume 0, spin as fast as physically possible: reaching 100 takes **≥ 1.3 s**, and no single detent moves volume more than 6 points.
+- [ ] From volume 0, spin as fast as physically possible: reaching 100 takes **≥ 1.0 s**, and **no single detent moves volume more than 4 points**. ⚠ The per-detent half is the real criterion — the host clamp enforces it whatever the device sends. The time half assumes a spin at T2's 40 ms floor, the fastest rate that tier qualifies for; **state the rate or the number means nothing**, because a tier threshold is a maximum interval, not the rate the hand turns at (§5.4).
+- [ ] **At a slow, ordinary turn — the owner's actual complaint — one detent moves volume by exactly 1 point.** Not 2, not 4. This is the base tier at `step_size = 1` and `VolumeStepPercent = 1`, and it is what "a volume knob that behaves like a volume knob" means here.
 - [ ] Turning volume down past 0 does not wrap to 100. Ever.
 - [ ] No knob or gesture can power off the box or factory-reset the encoder device.
 - [ ] PRESETS' long-press never overwrites an occupied slot; with a full bank it writes nothing and says so.

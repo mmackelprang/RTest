@@ -80,7 +80,7 @@ public class EncoderHudServiceTests
   }
 
   [Fact]
-  public void Card_DismissesAfterFifteenHundredMilliseconds()
+  public void Card_DismissesAfterTheHoldWindow()
   {
     var clock = new FakeTimeProvider();
     using var svc = NewService(clock);
@@ -99,12 +99,19 @@ public class EncoderHudServiceTests
     var clock = new FakeTimeProvider();
     using var svc = NewService(clock);
 
-    svc.Publish(Card(percent: 40));
-    clock.Advance(TimeSpan.FromMilliseconds(1400));
-    svc.Publish(Card(percent: 41));
-    clock.Advance(TimeSpan.FromMilliseconds(1400));
+    // Derived from the constant rather than written out. These were literal 1400s, chosen against
+    // ENC-4's 1500 ms hold, and ENC-20's raise to 2500 turned the final assertion into a false pass:
+    // 1400 + 200 no longer exceeds the window, so the card would have been alive for a reason that
+    // had nothing to do with re-arming.
+    int justInsideTheWindow = EncoderInteractionTimings.HudHoldMs - 100;
 
-    // The second detent restarted the window rather than letting the first one expire.
+    svc.Publish(Card(percent: 40));
+    clock.Advance(TimeSpan.FromMilliseconds(justInsideTheWindow));
+    svc.Publish(Card(percent: 41));
+    clock.Advance(TimeSpan.FromMilliseconds(justInsideTheWindow));
+
+    // The second detent restarted the window rather than letting the first one expire — twice
+    // `justInsideTheWindow` is comfortably past a single hold.
     svc.Current.Should().NotBeNull();
     svc.Current!.VolumePercent.Should().Be(41);
 
@@ -161,7 +168,7 @@ public class EncoderHudServiceTests
     // ⚠ This test was inverted by handoff §6.10, deliberately and with the reasoning recorded
     // there. It previously asserted that an unknown phase LEAVES IsHolding alone, because "the
     // service must not invent a transition out of it". That was sound about the CARD and wrong
-    // about the TIMER: a true IsHolding suspends the 1500 ms dismissal, so HoldStart → unknown →
+    // about the TIMER: a true IsHolding suspends the HudHoldMs dismissal, so HoldStart → unknown →
     // Value left a card on screen with nothing left to remove it. The renderer still draws
     // nothing for a phase it does not know, which is all the original rule was defending, so the
     // forward-compatibility question this test guards still matters — it just has a different
@@ -314,18 +321,24 @@ public class EncoderHudServiceTests
   public void SelectorPreview_HoldsForItsOwnDuration_NotTheDefault()
   {
     // ENC-5 / handoff §6.5: a selector overlay is up for 4000 ms because a list has to be READ,
-    // where a value card is glanced at in 1500 ms. The duration rides on the payload rather than
+    // where a value card is glanced at in HudHoldMs. The duration rides on the payload rather than
     // being looked up from the phase, so ENC-7's notices need no change here.
+    //
+    // Both advances are derived. The first was a literal 1600, sized against ENC-4's 1500 ms hold;
+    // ENC-20's raise to 2500 left the assertion passing while its stated reason — "past the default
+    // hold" — had become false, which is the failure mode this whole row is about.
     var clock = new FakeTimeProvider();
     using var svc = NewService(clock);
 
     svc.Publish(SelectorCard(EncoderInteractionTimings.SelectorIdleDismissMs));
 
-    clock.Advance(TimeSpan.FromMilliseconds(1600));
-    svc.Current.Should().NotBeNull("1600 ms is past the default hold but well inside 4000 ms");
+    int pastTheDefaultHold = EncoderInteractionTimings.HudHoldMs + 100;
+    clock.Advance(TimeSpan.FromMilliseconds(pastTheDefaultHold));
+    svc.Current.Should().NotBeNull("past the default hold but well inside the payload's 4000 ms");
 
-    clock.Advance(TimeSpan.FromMilliseconds(2500));
-    svc.Current.Should().BeNull("4100 ms is past the duration the payload asked for");
+    clock.Advance(TimeSpan.FromMilliseconds(
+      EncoderInteractionTimings.SelectorIdleDismissMs - pastTheDefaultHold + 100));
+    svc.Current.Should().BeNull("now past the duration the payload asked for");
   }
 
   [Fact]
@@ -349,7 +362,7 @@ public class EncoderHudServiceTests
   {
     // The regression this pins, found in pre-merge review. SourceSelectorService publishes
     // SelectorCommitting with DurationMs = null ON PURPOSE, because handoff §6.6 State D says the
-    // spinner stays up until the switch succeeds or fails. Treating that null as "use the 1500 ms
+    // spinner stays up until the switch succeeds or fails. Treating that null as "use the HudHoldMs
     // default" dropped the spinner mid-switch on exactly the slow Bluetooth connect it exists to
     // explain, then flashed it back when the terminal phase arrived.
     var clock = new FakeTimeProvider();
@@ -405,7 +418,7 @@ public class EncoderHudServiceTests
   {
     // The ordering this depends on: Publish assigns Current before it arms the timer, so the arm
     // reads the duration of the card being published rather than of the one it replaced. A
-    // 4000 ms overlay followed by a 1500 ms value card must dismiss at 1500.
+    // 4000 ms overlay followed by a value card must dismiss at the card's own HudHoldMs.
     var clock = new FakeTimeProvider();
     using var svc = NewService(clock);
 
@@ -417,7 +430,37 @@ public class EncoderHudServiceTests
     svc.Current.Should().NotBeNull();
 
     clock.Advance(TimeSpan.FromMilliseconds(2));
-    svc.Current.Should().BeNull("the value card re-armed at its own 1500 ms, not the overlay's 4000");
+    svc.Current.Should().BeNull("the value card re-armed at its own HudHoldMs, not the overlay's 4000");
+  }
+
+  [Fact]
+  public void CurrentIsTheSignalThatAHandIsOnAKnob_NotThatSomethingHappened()
+  {
+    // ENC-20. MainLayout subscribes to StateChanged to undim the screen and reset idle-dimmer.js's
+    // dim and sleep timers, because encoder input arrives as a SignalR push and dispatches no DOM
+    // event for the dimmer to hear. It guards that wake on `Current is not null`, and this pins the
+    // predicate the guard is built on.
+    //
+    // ⚠ The guard is load-bearing, not defensive. StateChanged fires on Dismiss() too — the hold
+    // timer expiring, and the device DISCONNECTING — and waking on those would reset the five-minute
+    // idle countdown moments after the user stopped touching anything, or let unplugging the encoder
+    // count as a human being present. Only a non-null Current means a card is on screen because a
+    // hand is on a knob.
+    //
+    // Asserted here rather than through MainLayout: that component is not renderable under bUnit
+    // (see MainLayoutTests — Radzen dropdowns, JSInterop and the full API service graph), and
+    // contorting it into a harness for this would test the harness.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Current.Should().BeNull("nothing has been published yet, so no wake may be triggered");
+
+    svc.Publish(Card());
+    svc.Current.Should().NotBeNull("a published card is the state that means a knob is being used");
+
+    svc.Dismiss();
+    svc.Current.Should().BeNull(
+      "Dismiss is the hold timer expiring or the device disconnecting — neither is user activity");
   }
 
   [Fact]

@@ -151,7 +151,7 @@ else if (card is not null && IsKnownPhase(card.Phase))
     Hud.StateChanged -= OnHudStateChanged;
   }
 
-  // EncoderHudService raises StateChanged from whichever thread published — for the 1500 ms
+  // EncoderHudService raises StateChanged from whichever thread published — for the HudHoldMs
   // dismissal that is a thread-pool thread — so the re-render is marshalled onto the circuit.
   // The service is a process-wide singleton and can raise concurrently with Dispose's
   // unsubscribe, so the flag is checked as well.

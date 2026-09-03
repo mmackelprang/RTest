@@ -20,6 +20,7 @@
 @inject AudioStateStore AudioState
 @inject NotificationService NotificationService
 @inject Radio.Web.Services.EncoderFaultAnnouncer EncoderAnnouncer
+@inject Radio.Web.Services.EncoderHudService EncoderHud
 @inject IConfiguration Configuration
 @inject IOptionsMonitor<DevicesOptions> DevicesOptionsMonitor
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
@@ -317,6 +318,10 @@
   // Seeded Unknown so nothing alarms before the first status poll returns (§7m).
   private BellHealth _bellHealth = Radio.Web.Models.BellHealth.Unknown;
   private DotNetObjectReference<MainLayout>? _selfReference;
+  // ENC-20. Gates OnEncoderHudActivity's interop: StateChanged is a process-wide singleton event and
+  // can fire during prerender, before any JS exists to call. Set at the same point the layout's
+  // other radioSleepManager interop happens, so "ready" means that object is actually there.
+  private bool _sleepManagerReady;
   private DotNetObjectReference<MainLayout>? _devTrayRef;
   private IJSObjectReference? _devGestureModule;
   private bool _isDevTrayOpen;
@@ -398,6 +403,25 @@
       AudioState.EncoderConnectionChanged += OnEncoderConnectionChangedAsync;
       await SeedEncoderStateAsync();
 
+      // ENC-20 — a knob turn has to wake the dimmed screen.
+      //
+      // idle-dimmer.js drops the panel to brightness(0.3) after five idle minutes and undims on
+      // pointerdown / keydown / wheel / pointermove. Encoder input produces NONE of those: it
+      // arrives as a SignalR push from the API, so before this the knobs acted on a screen that
+      // stayed dim and, worse, never reset dimTimer or sleepTimer — turning the volume up for five
+      // minutes still put the console to sleep on schedule.
+      //
+      // ⚠ This is NOT ENC-6's /sleep wake and must not be folded into it. ENC-6 owns the 30-minute
+      // sleep route, where Rule 1 deliberately CONSUMES the first input to light a dark panel. This
+      // is the 5-minute dim, where the input is not consumed at all — the knob has already acted,
+      // in the API, before the HUD event that triggers this was ever published.
+      //
+      // The two stay separate BY CONSTRUCTION rather than by a runtime check: Sleep.razor declares
+      // `@layout Radio.Web.Components.Layout.EmptyLayout`, so MainLayout is not mounted on /sleep
+      // and this handler cannot run there to be wrong. (radioSleepManager.wake early-returns on
+      // that route as well, but that is a second belt, not the reason.)
+      EncoderHud.StateChanged += OnEncoderHudActivity;
+
       // ENC-12 — a circuit that opens onto a fault that is already live must still speak once.
       // Together with the pull above this is the COMMON case rather than an edge one: the fault
       // happens during boot, before any browser exists, so without this nothing is ever said about
@@ -450,6 +474,11 @@
       // Register .NET reference so JS sleep/wake can call back into Blazor
       _selfReference = DotNetObjectReference.Create(this);
       await JSRuntime.InvokeVoidAsync("radioSleepManager.setBlazorRef", _selfReference);
+
+      // ENC-20. Only now is radioSleepManager known to be reachable — this line is deliberately
+      // after the call above rather than at the top of the firstRender block, so a failed interop
+      // leaves the flag false instead of licensing a call that would throw.
+      _sleepManagerReady = true;
 
       // Wire the dev-tray triple-tap gesture (handoff §P2·2, PR 6). The JS
       // module listens on the invisible .dev-gesture-hit element and calls
@@ -1315,6 +1344,48 @@
     });
   }
 
+  // ENC-20. Any encoder activity undims the screen and resets both idle timers. The input is NOT
+  // consumed: the knob's action already happened in the API, and this only makes the panel visible
+  // for it.
+  //
+  // ⚠ GUARDED ON A CARD BEING PRESENT, which is the whole subtlety. StateChanged also fires on
+  // Dismiss() — the hold timer expiring, and the device DISCONNECTING. Waking on the first would
+  // reset the five-minute idle countdown a second or two after the user stopped touching anything,
+  // quietly extending it by the card's hold duration on every interaction; waking on the second
+  // would let unplugging the encoder count as human activity. A non-null Current is the only state
+  // that means "something is on screen because a hand is on a knob".
+  private void OnEncoderHudActivity()
+  {
+    if (!_sleepManagerReady || EncoderHud.Current is null)
+    {
+      return;
+    }
+
+    // EncoderHudService raises this from whichever thread published — for the dismissal timer that
+    // is a thread-pool thread with no Blazor context — so the interop is marshalled onto the
+    // circuit, exactly as OnEncoderConnectionChangedAsync above does.
+    _ = InvokeAsync(async () =>
+    {
+      try
+      {
+        await JSRuntime.InvokeVoidAsync("radioSleepManager.wake", "encoder");
+      }
+      catch (JSDisconnectedException)
+      {
+        // Circuit is gone. A wake is cosmetic, so there is nothing to recover and nothing to say.
+      }
+      catch (ObjectDisposedException)
+      {
+        // Same: raced this circuit's teardown. The service is a singleton and can raise
+        // concurrently with Dispose's unsubscribe.
+      }
+      catch (TaskCanceledException)
+      {
+        // The interop call was cut short by the circuit closing.
+      }
+    });
+  }
+
   /// <summary>
   /// Raises at most one notification per escalation, per browser session. The latch is in
   /// EncoderFaultAnnouncer; this method only renders what it decides.
@@ -1415,6 +1486,10 @@
     // that has ever rendered this layout alive for the life of the process.
     AudioState.EncoderConfigStatusChanged -= OnEncoderConfigStatusChangedAsync;
     AudioState.EncoderConnectionChanged -= OnEncoderConnectionChangedAsync;
+    // ENC-20. EncoderHudService is a singleton for the same reason AudioStateStore is, so the same
+    // hazard applies: a missed unsubscribe here pins every circuit that has ever rendered this
+    // layout for the life of the process.
+    EncoderHud.StateChanged -= OnEncoderHudActivity;
     NavigationManager.LocationChanged -= OnLocationChanged;
 
     _timer?.Stop();
