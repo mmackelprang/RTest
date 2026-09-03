@@ -164,8 +164,10 @@
   // copy: a failed report must not put the Standby hint on a console whose audio is still playing.
   private string _wakeState = nameof(Radio.Core.Interfaces.ConsoleWakeState.Ambient);
 
-  // Set only once the report has actually been sent, so the prerender pass - which renders and
-  // disposes without ever reaching OnAfterRenderAsync - cannot clear a flag it never set.
+  // Set as soon as the report is issued - deliberately before it is awaited, so a dispose that
+  // lands while the POST is still in flight still retracts it. What it guards is the prerender
+  // pass, which renders and disposes without ever reaching OnAfterRenderAsync: that instance never
+  // sets this, so it cannot clear a flag it never reported.
   private bool _reportedVisible;
 
   /// <summary>
