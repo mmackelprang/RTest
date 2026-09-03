@@ -153,26 +153,43 @@ Nothing at all is shown when the configuration verified, when the device is mere
 (`Transient` — attempts 1-3 are silent on purpose), or when `RotaryEncoder:Enabled` is false. A healthy
 boot is completely silent: no toast, no banner, no badge.
 
-**⚠ A hard fault limits how far the volume knob moves, and that is the most surprising shipped
-behaviour in the encoder arc.** When a *safety* field fails to read back, the host drops the volume
-knob's per-event clamp from **6 units to 2** and holds it there until a push verifies. The knob is not
-broken and the console is not faulty — it is refusing to trust movement from a device that may still be
-on factory tiers, where one detent can be worth 100 volume points. Turning the knob will feel sluggish
-until the configuration is re-applied from **System Config → Integrations → Rotary Encoders**. Touch
-volume is unaffected.
+**⚠ Anything short of a verified configuration limits how far the volume knob moves, and that is the
+most surprising shipped behaviour in the encoder arc.** `RotaryEncoderConfigVerifier.VolumeClampFor`
+returns the full **6 units** per event for **`Configured` and for nothing else**; `Transient`,
+`Degraded`, `HardFault` and `Unknown` all get the tight **2**. So a merely *Degraded* console has
+identical volume-knob behaviour to one in hard fault — and so does an unplugged one, because a
+disconnect resets the tier to `Unknown`. The knob is not broken and the console is not faulty: it is
+refusing to trust movement from a device that may still be on factory tiers, where one detent can be
+worth 100 volume points.
 
-**One notification, once.** A fault also raises a single Radzen toast that navigates to `/system` when
-clicked. It fires **once per browser session, and only on escalation** — a fault that flaps between
-Degraded and Configured fifty times produces exactly one toast, and a Degraded that later becomes a
-hard fault produces one more because the volume clamp has just tightened. It **never repeats**: nothing
-de-escalating, recovering or recurring speaks again. So if you dismissed the toast and want it back,
-**reload the page** — a reload is a new session. The badge does not need reloading; it tracks the live
-state for as long as the fault exists, which is the half of the pair meant to still be there when you
-come back.
+A **hard fault** is the case the owner is actually *told* about, and its toast says so — *"Volume is
+limited until this is fixed."* The other tiers tighten the clamp exactly as much and say nothing about
+it, on the grounds that `Transient` clears within three attempts and an unplugged lead explains itself.
+In every one of those cases the knob feels sluggish until the configuration is re-applied from
+**System Config → Integrations → Rotary Encoders**. Touch volume is unaffected.
 
-Unplugging the knobs mid-session raises one *"Knobs disconnected"* toast and one *"Knobs connected"* on
-return, also at most once each per session. Booting with the knobs **already** unplugged raises no
-toast at all — just the badge — on the assumption that whoever unplugged them knows.
+**Two independent latches, and neither repeats or resets.** A fault also raises a Radzen toast that
+navigates to `/system` when clicked. Presence and configuration are latched **separately**, because a
+knob that is missing and a knob that is misconfigured are not the same news:
+
+- **Configuration** — at most **one notification per severity, and only on escalation**. A tier that
+  flaps between Degraded and Configured fifty times produces exactly one toast; a Degraded that later
+  becomes a hard fault produces one more, because the situation got strictly worse. Every
+  de-escalation and every repeat is silent.
+- **Presence** — at most **one *"Knobs disconnected"*** and at most **one *"Knobs connected"*** per
+  session. A lead that bounces inside the furniture ten times still says each of those exactly once.
+
+The two never consult each other, so the worst a single session can produce is a small, bounded
+handful — one disconnect, one reconnect, one Degraded, one hard fault — in any order, and never more.
+Nothing is ever reset, so a fault that clears and returns an hour later is silent the second time. If
+you dismissed a toast and want it back, **reload the page**: a reload is a new browser session, and a
+fault that is still live is announced once to it. The badge needs no reload — it is stateless and
+tracks the live state for as long as the fault exists, which is the half of the pair meant to still be
+there when you come back.
+
+Booting with the knobs **already** unplugged raises no toast at all — just the badge — on the
+assumption that whoever unplugged them knows. Booting *into* a configuration fault does raise its
+toast, once, as soon as a browser is there to receive it.
 
 ### Setup Steps
 

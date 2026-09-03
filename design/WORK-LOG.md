@@ -24,21 +24,42 @@ Running log of development sessions, organized chronologically. Each entry captu
 - **Disconnect now resets the tier to `Unknown`**, and the reset lives inside `RaiseConnectionChanged`
   rather than at its five call sites. A device that was `Configured` and is then unplugged must not keep
   claiming it — and because the same value drives the volume clamp, an absent device now also holds the
-  tight clamp, which is the correct direction for hardware nobody can verify.
+  tight clamp, which is the correct direction for hardware nobody can verify. That reset runs on the
+  **read-loop thread** while a *Re-apply* from the Settings page runs on an **ASP.NET request thread**
+  inside `_maintenanceLock`, and the setter was a check-then-act, so the compare-and-set now happens
+  under its own gate. Without it the two could interleave and leave `Configured` standing on a device
+  that is gone — the exact stale tier this row exists to remove.
 - **The badge decisions are a pure static class**, `EncoderFaultRules`, following `BellHealthRules`
   exactly. `MainLayout` cannot be rendered in bUnit, so logic written inline there would ship with zero
   automated coverage; `MainLayout` gets branches with no logic in them. Three tiers get three **glyphs**
   rather than one glyph in two colours — colour alone fails WCAG 1.4.1 — and the `aria-label` carries
   the state in words regardless.
-- **The anti-storm rule is a latch with a stated definition:** each browser session announces each
-  severity at most once, and only on escalation; the memory is never reset. Degraded × 50 is one toast;
-  Degraded → HardFault is two; anything de-escalating or recurring is silent. Nine tests pin every row
-  of that table. The trade — a fault that clears and returns an hour later is silent the second time —
-  is covered by the badge, which is stateless and on screen for the whole of it.
-- **`AudioStateStore` is now actually constructed.** It was registered `AddSingleton` and had **zero
-  consumers** in `Radio.Web`, so it had never once subscribed to the hub and its cache had never run.
-  The badge seeds from that cache on every circuit start, so `Program.cs` now resolves it at startup —
-  the same trap the file already documents for `EncoderHudService`.
+- **The anti-storm rule is TWO INDEPENDENT LATCHES, not one ladder** — stated plainly because the
+  plan's §0.5 prose describes a single ranked ladder and the shipped code does not implement one.
+  **Configuration:** at most one notification per severity, on escalation only, never reset — Degraded
+  × 50 is one toast, Degraded → HardFault is two, anything de-escalating or recurring is silent.
+  **Presence:** at most one disconnect notification and at most one reconnect notification per session.
+  The two never consult each other, so a session that unplugs, replugs and then degrades produces
+  **three** notifications, and repeating the whole sequence produces none. That behaviour was kept
+  rather than "fixed" — presence and configuration are genuinely different facts and the session total
+  is bounded at a small number — and every description of it was corrected instead. Ten tests pin every
+  row, one of them named for this decision. The spec-vs-code mismatch it exposes is logged in
+  `design/FUTURE-WORK.md` for the Planner. The trade — a fault that clears and returns an hour later is
+  silent the second time — is covered by the badge, which is stateless and on screen for the whole of
+  it.
+- **The badge seeds from an authoritative pull, not from a cache of the events it compensates for.**
+  The first cut read `AudioStateStore`'s cache, which only change-only SignalR broadcasts fill — so on
+  a deploy, where `radio-api` and `radio-web` restart together, the API's boot config push fired while
+  the hub client was still in its retry loop, landed on nobody, and the badge never appeared for the
+  life of the process. It now pulls `GET /api/integrations/encoder/provisioning` *after* wiring the
+  subscriptions, exactly as the mute chip pulls `GetVolumeAsync()`; the cache is the fallback. It also
+  **evaluates** that seed, so a circuit opening onto a live fault speaks once — which, given the above,
+  is the common case and not an edge one.
+- **`AudioStateStore` needs no eager resolve.** An interim `app.Services.GetRequiredService` line was
+  removed rather than reworded: the store's constructor wires C# event handlers and does **not** start
+  the SignalR connection (that is `MainLayout`'s `HubService.StartAsync()`, inside a circuit), and
+  `MainLayout` injects the store, which constructs the singleton at circuit creation. `/sleep` is on
+  `EmptyLayout` and never calls `StartAsync` at all.
 - Corrected a shipped false comment on `AudioStateStore.EncoderConnection`, which claimed the field was
   per circuit when the store is a singleton. The comment was wrong, not the lifetime.
 - **Not built here, deliberately:** anything on the Settings page or `IntegrationsController` (`ENC-8`

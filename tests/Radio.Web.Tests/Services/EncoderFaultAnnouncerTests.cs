@@ -8,11 +8,13 @@ namespace Radio.Web.Tests.Services;
 /// Proves the notification latch (ENC-12 plan §0.5).
 ///
 /// <para>
-/// <b>The rule: each browser session announces each reportable severity at most once, and only on
-/// escalation.</b> Configured and Transient are rank 0 and never announce; Degraded and Absent are
-/// rank 1; HardFault is rank 2. The remembered rank is never reset — not on recovery, not on
-/// reconnect — and that is the whole anti-storm property, named as a requirement in the punch list,
-/// in encoder handoff §7.6, and in the task brief.
+/// <b>The rule is two independent latches: at most one config-fault notification per severity on
+/// escalation, plus at most one disconnect and one reconnect notification, per browser session.</b>
+/// Configured and Transient never announce; on the configuration ladder Degraded is rank 1 and
+/// HardFault rank 2. Presence is latched separately and does not move that ladder, so a disconnect and
+/// a Degraded in the same session are two notifications, not one. Nothing is ever reset — not on
+/// recovery, not on reconnect — and that is the whole anti-storm property, named as a requirement in
+/// the punch list, in encoder handoff §7.6, and in the task brief.
 /// </para>
 ///
 /// <para>
@@ -128,6 +130,41 @@ public class EncoderFaultAnnouncerTests
     }
 
     Assert.Equal(2, announcements);
+  }
+
+  [Fact]
+  public void PresenceAndConfigurationAreLatchedIndependently_AndNeitherRepeats()
+  {
+    // A DECISION, pinned here so it cannot be "tidied" into one ladder later.
+    //
+    // The rule as implemented is TWO latches, not one: the disconnect branch never touches
+    // _highestAnnounced, and the configuration branch never consults the disconnect flags. So a
+    // single session can produce a disconnect toast AND a Degraded toast — both of which plan §0.5's
+    // single-ladder prose calls "rank 1", and which that prose therefore reads as a double
+    // announcement. The implementation is verbatim the plan's own Task 6 code and the behaviour is
+    // kept: presence and configuration are genuinely different facts about the cabinet, and the
+    // session total stays bounded at a small number. It is §0.5's wording that was corrected.
+    var sut = new EncoderFaultAnnouncer();
+    int announcements = 0;
+
+    void Feed(string? status, bool? isConnected)
+    {
+      if (sut.Evaluate(status, isConnected, wasEverConnected: true) is not null)
+      {
+        announcements++;
+      }
+    }
+
+    Feed("Unknown", isConnected: false);     // "Knobs disconnected"
+    Feed("Configured", isConnected: true);   // "Knobs connected"
+    Feed("Degraded", isConnected: true);     // "Knob settings couldn't be applied"
+    Assert.Equal(3, announcements);
+
+    // And nothing repeats. Running the whole sequence again says nothing at all.
+    Feed("Unknown", isConnected: false);
+    Feed("Configured", isConnected: true);
+    Feed("Degraded", isConnected: true);
+    Assert.Equal(3, announcements);
   }
 
   [Fact]

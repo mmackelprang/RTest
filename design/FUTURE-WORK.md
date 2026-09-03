@@ -188,6 +188,38 @@ classes rather than interfaces, so this needs either extracted interfaces or a r
 `IServiceCollection` wired to stubs. Realistically a day, and it pays for itself the first time one of
 the three indicators regresses silently.
 
+**3. The handoff's tier table puts the volume clamp in the hard-fault row only, and the code does not.
+Spec defect — for the Planner to resolve.**
+`RotaryEncoderConfigVerifier.VolumeClampFor` returns the loose 6-unit clamp for **`Configured` and
+nothing else**; `Transient`, `Degraded`, `HardFault` and `Unknown` all get the tight 2. So a *Degraded*
+console has volume-knob behaviour identical to one in hard fault, and so does a disconnected one (the
+ENC-12 disconnect reset makes the tier `Unknown`). Encoder handoff §7.6's tier table models the clamp
+as a **hard-fault consequence**, and the owner-facing copy is pinned verbatim against that table: the
+Degraded toast says *"The knobs still work, but they may feel wrong"* and says nothing about volume,
+while only the hard-fault toast says *"Volume is limited until this is fixed."*
+
+**ENC-12 deliberately did not change that copy.** It is spec-verbatim, the toast strings are the one
+thing the plan pins word for word, and a Builder quietly rewording owner-facing text to match code is
+how a spec and an implementation stop being comparable. `design/INTEGRATIONS.md` was corrected to state
+what the code actually does instead. What the Planner has to decide is which side is wrong: either the
+copy should tell a *Degraded* owner that volume is limited too, or `VolumeClampFor` should return the
+loose clamp for `Degraded` — which it almost certainly should not, since a feel-field mismatch still
+means read-back did not confirm the device's tiers. Small either way; the point is that it is a spec
+decision and not a Builder one.
+
+**4. `AudioStateStore.NotifyAsync` awaits only the last subscriber of a multicast `Func<Task>`.**
+`await handler.Invoke()` on a multicast delegate returns the task of the **final** subscriber only.
+Every earlier subscriber's task is started and then dropped: it runs unobserved, its exceptions escape
+the `try`/`catch` written to contain them, and the ordering the store appears to give — each broadcast
+fully handled before the next is processed — holds for one subscriber and silently stops holding for
+two. Pre-existing and long-standing, but **ENC-12 is the first code to give that singleton real
+per-circuit subscribers**, so it is newly load-bearing: with two browsers open, two encoder broadcasts
+arriving back to back can be handled concurrently by the first circuit. Fix:
+`await Task.WhenAll(handler.GetInvocationList().Cast<Func<Task>>().Select(h => h()))` with per-handler
+exception capture. It applies to the eight `Func<Task>` events routed through `NotifyAsync`, and the
+same flaw is in the two typed events (`RadioStateChanged`, `SleepStateChanged`) that invoke themselves
+directly. An hour, plus a test that subscribes twice and asserts both tasks were awaited.
+
 ---
 
 ## 1. Bluetooth AVRCP Volume Sync — Windows
