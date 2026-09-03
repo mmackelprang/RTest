@@ -3507,7 +3507,7 @@ clear of the whole `ENC-*` bundle including the two Builders currently in flight
    > 2026-09-03. **This is the sentence that made two untracked deferrals look tracked**, and it is
    > the most consequential inaccuracy the 2026-09-03 tracking audit found: an item recorded as filed
    > is an item nobody goes looking for. Both are **now** genuinely in `design/FUTURE-WORK.md`
-   > § *TTS seam*, with reproductions — filed by that audit, not by this plan. Item 1 of §5 below
+   > § *TTS seam*, each with a labelled reproduction — filed by that audit, not by this plan. Item 1 of §5 below
    > carried the same error about the eSpeak defect and is corrected in place.
 6. **Ask RotaryPhone to fix `FindNodeAsync`** (C-22). The right long-term fix for the 404-during-blackout
    is theirs — propagate `Succeeded` so `GetAudio` answers `502` the way `GetList` already does. PR 3 does

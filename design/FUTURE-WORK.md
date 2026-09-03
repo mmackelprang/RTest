@@ -322,8 +322,13 @@ frozen is **availability detection**: `DetectAvailableEngines` (`:259`) snapshot
 once (`:262`) and derives each `IsAvailable` from whether `GoogleAPIKey` (`:265`) / `AzureAPIKey` +
 `AzureRegion` (`:276-277`) are non-empty. So an owner who pastes a Google or Azure key into the Secrets
 page sees
-`GET /api/sources/tts/engines` (`SourcesController.cs:350`) keep reporting that engine **unavailable**
+`GET /api/sources/events/tts/engines` (`SourcesController.cs:17` + `:339`, reading at `:350`) keep
+reporting that engine **unavailable**
 until `radio-api` restarts — on an appliance that runs for weeks.
+
+**Reproduction:** with no Google key configured, `GET /api/sources/events/tts/engines` reports Google
+`isAvailable: false`. Paste a valid key into the Secrets page and save. Call the endpoint again — it still
+reports `false`. Restart `radio-api` and it reports `true`, with no other change.
 
 **Fix:** subscribe to `IOptionsMonitor<TTSSecrets>.OnChange` and clear the field, or drop the cache
 entirely. `PHN-1c` §4 item 4 notes this is **one change** with that plan's §9.4 defect (a).
@@ -370,9 +375,12 @@ still *under* the prefix, so the prefix check passes. **Only `EventPlaybackReque
 refuses it**, and `BuildVoicemailUri` deliberately does not rely on that validator, which is the whole
 reason it compares rather than asserts.
 
-**Impact is low and should not be overstated:** every reachable caller goes through `ValidateMediaId`,
-whose allow-list is `[A-Za-z0-9._~-]` with `"."` and `".."` explicitly rejected. This is a
-defence-in-depth gap in a method written to hold *without* the validator — not a live hole.
+**Impact is low and should not be overstated — and the honest reason is narrower than "callers validate".**
+`BuildVoicemailUri` has exactly one caller (`GvMediaClient.cs:81`, inside `FetchAsync`), and `FetchAsync`
+has **no production caller at all** at `194fce01` — the route that will reach it is `PHN-1c`, unshipped. When
+it lands, `EventPlaybackRequest.ValidateMediaId` allow-lists the id to `[A-Za-z0-9._~-]` with `"."` and
+`".."` explicitly rejected, in front of it. So this is a defence-in-depth gap in a method deliberately
+written to hold *without* that validator — not a live hole, and not yet an exercised path either.
 
 **Fix, if taken:** reject any path segment equal to `"."` or `".."` inside `BuildVoicemailUri` itself, or
 compare against the full expected path rather than its prefix.
@@ -848,12 +856,17 @@ assumed, because the assumption was wrong in every particular.**
 > **free-running movement accumulators**, not per-report deltas, so the decoder differences successive samples — and
 > **the first report after any connect is a baseline, not an input** (`:53-60`), or an outage's worth of accumulated
 > movement arrives as one delta on the volume knob. VID/PID `0xCAFE`/`0x4005` were confirmed correct. Two further
-> reports exist that this section never anticipated: `0x02` (106-byte config, `ENC-2`) and `0x04` (diagnostics,
-> whose byte 4 is `steps_per_detent` as the firmware is actually using it).
+> reports exist that this section never anticipated: `0x02` (config — **106-byte payload, 107 on the wire**,
+> `ENC-2`) and `0x04` (diagnostics). ⚠ **This tree has no `0x04` decoder** — `HidRotaryEncoderService.cs:962`
+> says so explicitly — so any claim about that report's field layout has to be sourced to the RotaryUsb repo
+> rather than to anything here.
 >
-> **Also stale in the table below:** `RotaryEncoderHostedService` is **no longer "gated by `RotaryEncoder:Enabled`"** —
-> `ENC-0` inverted that flag's meaning to an escape hatch defaulting to `true`, and **presence decides**. And the
-> udev rule is no longer something to add by hand: it ships as `deploy/common/99-rotaryusb-encoder.rules`.
+> **Also worth correcting in the table below, precisely:** the flag **still gates** the hosted service —
+> `RotaryEncoderHostedService.cs:39-46` returns early when `RotaryEncoder:Enabled` is false — so *"gated by
+> `RotaryEncoder:Enabled`"* is still literally true. What `ENC-0` changed is its **default and meaning**: it
+> defaults to `true` and is an escape hatch for switching off a misbehaving encoder, so **presence, not
+> configuration, decides** whether the knobs do anything. And the udev rule is no longer something to add by
+> hand: it ships as `deploy/common/99-rotaryusb-encoder.rules`.
 
 ### What Exists
 

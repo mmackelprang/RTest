@@ -14,7 +14,8 @@ BT/Cast/SDR/vinyl/phone) on an Intel N100 Ubuntu box in kiosk Chrome at 1920x720
 nearly built and this is going into it** — recoverable only by SSH once the back is closed. The full
 prioritised punch list is [`docs/HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md); the encoder
 design is [`HANDOFF-rotary-encoder-mapping.md`](design-handoffs/HANDOFF-rotary-encoder-mapping.md)
-(Rev 6). **Read the punch list section 2 ordering constraints before claiming anything.**
+(**Rev 7** as of 2026-09-03 — ⚠ that document's own `Status:` line still says `REV 5`; the revision list at
+its `:12` is the accurate one). **Read the punch list section 2 ordering constraints before claiming anything.**
 
 **All owner decisions are closed.** D23, D24, D9, D25 and D27 are answered.
 
@@ -53,7 +54,7 @@ weeks.
 
 `ENC-4`/`ENC-4a`/`ENC-4c` · `ENC-5` · `ENC-6` · `ENC-7` · `ENC-8`/`ENC-8a`/`ENC-8b` · `ENC-9` ·
 `ENC-11`/`ENC-11a` · `ENC-12` · `ENC-15` (gate failed) · `ENC-16` · `OPS-5` · `PHN-1a` · `PHN-1b` ·
-`PHN-5` · `SEC-1` · `SEC-2` · `TEST-4` · `TTS-3` · `TTS-9` · `XR-1a`, plus the 2026-09-01/02 batch
+`SEC-1` · `SEC-2` · `TEST-4` · `TTS-3` · `TTS-9` · `XR-1a`, plus the 2026-09-01/02 batch
 (`TEST-1` `TEST-3` `OPS-1` `LOG-1` `LOG-11` `AUD-6` `AUD-7` `ENC-0`/`ENC-0a` `ENC-1` `ENC-2` `ENC-3`
 `UI-1` `UI-5` `TTS-1(ii)`, all 11 quick wins) and a firmware fix in the separate **RotaryUsb** repo
 (its PR #11).
@@ -94,7 +95,9 @@ re-sequencing cannot lose them.
 `ENC-17` (input injection via `/dev/uhid`, 1 d) is the highest-leverage non-phone row on the board —
 it converts *"a human must turn each knob"* into *"a test can"*, which is the substrate the rest of
 the encoder arc's unrun UAT rests on. `TEST-7` (a `TimeProvider` seam for `NowPlayingPanel`'s two
-hardcoded debounce timers) is queued and claimable.
+hardcoded debounce timers) is queued and claimable, as is **`PHN-5`** — ⚠ **not shipped, despite what an
+earlier draft of this file said**: `PhoneContactLookupService.cs:62` still logs a raw phone number and the
+contact's full name on the same line, and the row is still `📋` in the queue.
 
 ---
 
