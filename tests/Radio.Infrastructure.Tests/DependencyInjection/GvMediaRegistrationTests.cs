@@ -8,14 +8,16 @@ using Radio.Infrastructure.External;
 namespace Radio.Infrastructure.Tests.DependencyInjection;
 
 /// <summary>
-/// The first real container guard in this repository.
+/// The first container guard in this repository with eager validation.
 ///
 /// <para>
 /// PR 1 registered nothing and was exempt. PR 2 is the first PR in the ADR-029 arc that registers
 /// services, and the failure mode is a service that will not start — on an appliance, in a cabinet.
 /// Nothing existing would catch it: RotaryEncoderRegistrationTests covers only AddRotaryEncoders,
 /// ActiveSourceAccessorRegistrationTests inspects descriptors rather than resolving, and neither
-/// ValidateOnBuild nor ValidateScopes appears anywhere in src/ or tests/.
+/// ValidateOnBuild nor ValidateScopes appeared anywhere in src/ or tests/ before this file - which
+/// is why RotaryEncoderRegistrationTests, which does build a provider and resolve from it, cannot
+/// fail on a dependency that is merely unregistered until something asks for it.
 /// </para>
 ///
 /// <para>
@@ -69,10 +71,14 @@ public class GvMediaRegistrationTests
   }
 
   [Fact]
-  public void TheCacheIsASingleton_SoTheWriteLockIsProcessWide()
+  public void TheCacheIsASingleton_SoOneWriteLockSerialisesEveryWriter()
   {
     // Two instances would be two write locks over one directory: concurrent evictions racing each
-    // other's deletes, failing quietly rather than loudly.
+    // other's deletes, failing quietly rather than loudly. Two things this does NOT claim. The
+    // scope is this PROVIDER, not the process - a second container in the same process gets its own
+    // cache and its own lock, which is exactly what every test in this file relies on. And the lock
+    // serialises writers against writers only: TryGetPath takes no lock at all, which is why
+    // WriteAsync publishes through a staging file rather than filling the final path in place.
     using var provider = BuildProvider();
 
     Assert.Same(

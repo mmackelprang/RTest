@@ -97,8 +97,10 @@ public sealed class GvMediaClient
   /// "http:evil.example" would have escaped the configured host through exactly that call.
   /// EventPlaybackRequest.ValidateMediaId now allow-lists the id to [A-Za-z0-9._~-], which refuses
   /// ':' outright and closes that class. This method does not rely on that: it places the id in a
-  /// path segment via UriBuilder, which cannot alter scheme or authority, and then COMPARES scheme
-  /// and authority against the base rather than asserting that they cannot have changed.
+  /// path segment via UriBuilder, which cannot alter scheme or authority, and then COMPARES scheme,
+  /// authority AND its own route prefix against what it built, rather than asserting that they
+  /// cannot have changed. The prefix is part of that comparison because scheme and authority alone
+  /// are not the whole of "the same place" — see the check itself for the dot-segment case.
   ///
   /// Uri.EscapeDataString is a no-op over the allow-listed set, and is applied anyway so this stays
   /// correct if the allow-list is ever loosened. It introduces no '%' for the allow-listed set, so
@@ -113,13 +115,33 @@ public sealed class GvMediaClient
         GvMediaFailure.Transport, "GvMedia:BaseUrl is not an absolute http(s) URI.");
     }
 
-    var builder = new UriBuilder(baseUri)
+    // UriBuilder is documented to signal an unassemblable URI with UriFormatException, from the
+    // Path setter and from the Uri getter alike, and an escaping UriFormatException would put this
+    // method outside the failure taxonomy in exactly the way a mid-body reset used to be: a caller
+    // left holding an exception with no Reason on it.
+    //
+    // ⚠ Honest about what this guard is. No input reachable through this method was found to
+    // trigger it on .NET 10 - Uri.EscapeDataString neutralised every candidate tried, including a
+    // 200 000-character id and lone surrogates, which it folds to U+FFFD rather than rejecting. It
+    // is kept because it makes the taxonomy hold by construction rather than by that measurement,
+    // which is a property of the current runtime and not of this code. Do not read it as evidence
+    // that a reachable case is known.
+    Uri candidate;
+    try
     {
-      Path = $"{VoicemailPathPrefix}{Uri.EscapeDataString(mediaId)}/audio",
-      Query = string.Empty,
-      Fragment = string.Empty
-    };
-    var candidate = builder.Uri;
+      var builder = new UriBuilder(baseUri)
+      {
+        Path = $"{VoicemailPathPrefix}{Uri.EscapeDataString(mediaId)}/audio",
+        Query = string.Empty,
+        Fragment = string.Empty
+      };
+      candidate = builder.Uri;
+    }
+    catch (UriFormatException ex)
+    {
+      throw new GvMediaUnavailableException(
+        GvMediaFailure.Transport, $"Could not build a fetch URI for {maskedId}.", ex);
+    }
 
     if (!string.Equals(candidate.Scheme, baseUri.Scheme, StringComparison.OrdinalIgnoreCase)
         || !string.Equals(candidate.Authority, baseUri.Authority, StringComparison.OrdinalIgnoreCase))

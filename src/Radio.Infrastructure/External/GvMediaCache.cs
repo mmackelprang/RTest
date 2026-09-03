@@ -71,7 +71,11 @@ public sealed class GvMediaCache
     return string.Concat(Convert.ToHexString(hash, 0, 16).ToLowerInvariant(), ".mp3");
   }
 
-  /// <summary>The 8-character log mask for a media id. Same hash as <see cref="FileNameFor"/>.</summary>
+  /// <summary>
+  /// The 12-character log mask for a media id: the literal "gvm:" plus the first 8 hex characters
+  /// of the same SHA-256 hash <see cref="FileNameFor"/> uses, so a log line and a file on disk
+  /// correlate without either carrying the id.
+  /// </summary>
   internal static string MaskFor(string mediaId)
   {
     var hash = SHA256.HashData(Encoding.UTF8.GetBytes(mediaId));
@@ -178,7 +182,10 @@ public sealed class GvMediaCache
       }
       else
       {
-        var window = TimeSpan.FromSeconds(Math.Max(60, options.MaxPlaybackSeconds * 2));
+        // 60L and the cast are load-bearing: MaxPlaybackSeconds is an int read from configuration,
+        // and int arithmetic wraps NEGATIVE just past 1073741823, which would turn the sweep window
+        // into a cutoff in the future and delete every unprotected entry on every write.
+        var window = TimeSpan.FromSeconds(Math.Max(60L, (long)options.MaxPlaybackSeconds * 2));
         SweepOlderThan(directory, window, path, _logger);
       }
     }

@@ -65,6 +65,32 @@ public sealed class GvMediaCacheTests : IDisposable
     Assert.Equal(Path.GetFullPath(written), Path.GetFullPath(found!));
   }
 
+  [Theory]
+  [InlineData(50, true)]
+  [InlineData(1, true)]
+  [InlineData(0, false)]
+  public void RetainsEntries_IsFalseOnlyInNoCacheMode(int capMegabytes, bool expected)
+  {
+    // PR 3 consumes this to decide whether a replay can be served without the network, so it is not
+    // dead surface - it was simply untested public surface until now. The pairing that matters is
+    // with TryGetPath: RetainsEntries is exactly the condition under which a hit is possible.
+    Assert.Equal(expected, CreateCache(capMegabytes).RetainsEntries);
+  }
+
+  [Fact]
+  public async Task RetainsEntries_AgreesWithWhetherAWriteCanBeReadBack()
+  {
+    // The two must not drift: a caller that trusts RetainsEntries and then gets a null from
+    // TryGetPath would go back to the network during the very blackout the cache exists to survive.
+    foreach (var cap in new[] { 50, 0 })
+    {
+      var cache = CreateCache(cap);
+      await cache.WriteAsync("vm-1", new byte[64], CancellationToken.None);
+
+      Assert.Equal(cache.RetainsEntries, cache.TryGetPath("vm-1") is not null);
+    }
+  }
+
   [Fact]
   public async Task TryGetPath_AlwaysMisses_WhenTheCapIsZero()
   {
