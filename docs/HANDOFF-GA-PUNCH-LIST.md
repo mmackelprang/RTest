@@ -613,7 +613,16 @@ the interaction design paying for the new physical layout (D2).
 ---
 
 **`ENC-7` — The PRESETS knob: recall and save on the existing preset bank.** ⭐ **NEW SHAPE IN REV 2.**
-*Not queued. Effort: 2–3 days.*
+✅ **SHIPPED 2026-09-02 — [#541](https://github.com/mmackelprang/RTest/pull/541).** Plan at [`design/plans/ENC-7-presets-knob.md`](../design/plans/ENC-7-presets-knob.md).
+
+> ⚠ **Five corrections this row makes to the text below — read these before trusting it.**
+> **(1) There are no 7 slots.** `RadioPresetService.MaxPresets` is **50 globally**; `RadioPreset` has no `SlotNumber` and neither does the SQLite table; the ordinal is re-derived per request. So *“next free slot”* searches nothing and *“never overwrites”* is free by construction — there is no overwrite path to guard — and `PRESETS FULL` is kept verbatim while being honestly a message that will essentially never fire.
+> **(2) Recall could not use `POST /api/radio/presets/{id}/load`** — it returns 400 *“Radio is not the active source”*, which is exactly the case the knob exists to serve. Recall is implemented server-side instead.
+> **(3) `ALREADY SAVED · slot NN` is an ADDITION to the spec**, not an interpretation. Holding on a station already saved throws a duplicate error this handoff never covers, and silence there is the defect the arc exists to fix.
+> **(4) The `MEMORY → PRESETS` rename is now recorded in a FOURTH place** — a note at the head of [`HANDOFF-saved-station-display.md`](design-handoffs/HANDOFF-saved-station-display.md) itself, which is the only place a consistency pass will actually look. ⛔ **Do not revert it.**
+> **(5) `ENC-9` is now more load-bearing than “removing a knob must not remove a capability” implies.** Taking the visualiser off index 2 removed the **last writer** of `VisualizationModeService`, so `ModeChanged` cannot fire and the `VisualizationModeChanged` broadcast plus `VisualizerPanel`'s subscription are unreachable. The capability survives on Home's six-segment picker — which never went through that service — but the cross-surface sync does not. `ENC-9` is still **P1 and unqueued**; see `design/FUTURE-WORK.md` §17.
+
+> ⚠ **UAT gap, declared:** Test Plan sections A–H need a hand on the physical knobs and no agent can inject a HID report. **C4 — recall from Bluetooth, the plan's own highest-weighted check — is unverified on hardware.**
 
 ⚠ **This item replaces Rev 1's "Tone DSP or Browse fallback" entirely, and it changes tier: P1 → P0.** Rev 1's
 knob 2 was P1 because Tone was blocked on an Architect ADR that might never land and had a weak fallback.
