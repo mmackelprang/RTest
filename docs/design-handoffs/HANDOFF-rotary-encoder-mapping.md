@@ -9,12 +9,29 @@
 - **Follows** `HANDOFF-bell-failure-surfacing.md` §3.7 for cross-route surfacing of a persistent hardware fault (§7.6).
 - **Extends** `HANDOFF-sleep-weather-visual-redesign.md` with a sleep-screen readout in that handoff's own dim-amber, single-emissive-color palette (§8.6). Its "one emissive color" rule is honored, not broken.
 **Author:** Designer
-**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault)**
+**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault; Rev 7 — §11 settled as single-surface, local-only visualiser mode)**
 **Consumers:** Owner (§13) → Architect (§12.1) → Planner
 
 ---
 
 ## 0. Revision history
+
+### Rev 7 — §11 settled: single-surface, local-only visualiser mode (2026-09-03, `ENC-9`)
+
+**The owner chose to delete the visualisation-sync chain rather than revive it.** `ENC-7` took encoder
+index 2 for PRESETS, which removed `VisualizationModeService`'s only writer; `ModeChanged` could no
+longer fire, so the `VisualizationModeChanged` SignalR broadcast could never be sent, and `ENC-9a`'s
+`VisualizerPanel` subscription was inert. All three layers are now removed, together with the
+client-side hub event, its `_hubConnection.On` handler and `VisualizationModeDto` — deleting the
+producer while leaving a listener is how the next reader concludes the feature still exists.
+
+**§11 is annotated rather than rewritten, because two of its five items were false and the record of
+that matters.** Item 4 promised a System Config dropdown as a second surface; that tab has never had a
+mode control. Item 5 asked for the subscription that `ENC-9a` duly built and `ENC-7` then orphaned.
+
+**The capability survives and was verified on the appliance**: the six-segment picker mutates
+`VisualizerPanel`'s own private enum and never went through the service. What is lost is cross-client
+sync — stated precisely, the *mechanism* for it, since the picker never produced it either.
 
 ### Rev 6 — §7.6's clamp column, which the table never had and the code guessed at (2026-09-03, `ENC-16`)
 
@@ -1467,13 +1484,33 @@ The five silences this design removes:
 
 ## 11. Capability preservation — where visualization goes
 
+> ⚠ **SETTLED 2026-09-03 by `ENC-9`, and two items below were wrong. Read this box, not the list, for
+> what ships.** The owner's decision is **single-surface, local-only** visualiser mode: the six-segment
+> picker is the whole mechanism. `VisualizationModeService`, the `VisualizationModeChanged` broadcast,
+> the client-side hub event and `VisualizerPanel`'s subscription are all **deleted**.
+>
+> - **Item 1 stands.** The picker is the capability and always was — it mutates `VisualizerPanel`'s own
+>   private enum and never went through the service.
+> - **Item 4 was FALSE and is struck.** The System Config "Visualizer" tab has **no mode dropdown at
+>   all** — it is FFT size / smoothing / peak-hold. There is no second surface and there never was.
+> - **Item 5 is struck.** `ENC-9a` did exactly what it asked and subscribed the panel to
+>   `VisualizationModeChanged`; `ENC-7` then removed the only writer, making the subscription inert.
+>   A listener cannot resolve a disagreement with server state when nothing can write that state.
+> - **Items 2–3 (tap / long-press the canvas) were never built**, are not blocked by any of this, and
+>   remain open design. With one surface there is nothing left for them to disagree with.
+>
+> **Cost, stated precisely:** no cross-client sync — but the picker never produced it either, so what is
+> gone is the mechanism, not a behaviour anyone had. Rebuilding it needs a **writer**, not a listener.
+> `design/FUTURE-WORK.md` §17 lists exactly what was removed.
+
 1. **The six-segment picker stays** — `VisualizerPanel.razor:34-71` (`VU · Wave · Spectrum · Fall · Ring · Phase`).
 2. **Tap the visualizer canvas** → advance to the next mode. A 710 px-wide target, discoverable by the universal instinct to poke at the moving thing.
 3. **Long-press the canvas (600 ms)** → the mode list, so a person can jump rather than cycle.
-4. **System Config keeps its dropdown**, unchanged.
-5. **Fold in the §2.2 defect 3 fix**: `VisualizerPanel` must subscribe to `VisualizationModeChanged`, or items 2–4 can still disagree with server state.
+4. ~~**System Config keeps its dropdown**, unchanged.~~ — **false; there is no such dropdown.**
+5. ~~**Fold in the §2.2 defect 3 fix**: `VisualizerPanel` must subscribe to `VisualizationModeChanged`, or items 2–4 can still disagree with server state.~~ — **superseded; the broadcast is deleted.**
 
-`VisualizationModeService` and its API surface are untouched — this is purely a change in which input drives it.
+~~`VisualizationModeService` and its API surface are untouched — this is purely a change in which input drives it.~~
+**`VisualizationModeService` and its API surface are gone (`ENC-9`).**
 
 ---
 

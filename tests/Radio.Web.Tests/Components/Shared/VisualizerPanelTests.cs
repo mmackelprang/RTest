@@ -226,54 +226,25 @@ public class VisualizerPanelTests : TestContext
   }
 
   [Fact]
-  public void ModePicker_RemoteModeChange_MovesTheActiveSegment()
+  public void ModePicker_HasNoRemoteModeChannel()
   {
-    // ENC-9a. The mode can change without this picker being what changed it — the encoder's
-    // visualizer knob, another browser, an API call. The server has always broadcast
-    // VisualizationModeChanged; before this, nothing consumed it, so the picker kept showing the
-    // old segment until a page reload.
+    // ENC-9. The replacement for the two ENC-9a tests that used to live here, and it asserts the
+    // DECISION rather than merely the absence: visualiser mode is local to this circuit.
+    //
+    // ENC-7 took encoder index 2 for PRESETS, which removed VisualizationModeService's only writer,
+    // so ModeChanged could never fire, the VisualizationModeChanged broadcast could never be sent,
+    // and the subscription ENC-9a added was inert. All three layers are deleted. This test fails if
+    // a remote channel is reintroduced without the writer that would justify it - which is how the
+    // dead chain came back into existence the first time.
+    typeof(AudioStateHubService)
+      .GetEvents(BindingFlags.Public | BindingFlags.Instance)
+      .Select(e => e.Name)
+      .Should().NotContain("VisualizationModeChanged");
+
+    // And the capability itself still works locally - see ModePicker_ClickingPhase_ActivatesPhaseSegment
+    // above, which drives the six-segment picker and is what the owner actually uses.
     var cut = RenderComponent<VisualizerPanel>();
-
-    var vuBefore = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
-    (vuBefore.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-
-    RaiseRemoteModeChange("Spectrum");
-
-    cut.WaitForAssertion(() =>
-    {
-      var spectrum = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "SPECTRUM"
-        || b.TextContent.Trim() == "Spectrum");
-      (spectrum.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-      spectrum.GetAttribute("aria-selected").Should().Be("true");
-
-      var vuAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
-      (vuAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
-    }, timeout: TimeSpan.FromSeconds(2));
-  }
-
-  [Fact]
-  public void ModePicker_RemoteModeChange_WithUnrecognisedMode_LeavesSelectionAlone()
-  {
-    // The API models modes as strings; this component declares its own enum. If those drift, the
-    // safe failure is to keep showing the mode that is actually running rather than to guess.
-    var cut = RenderComponent<VisualizerPanel>();
-
-    RaiseRemoteModeChange("NotARealMode");
-
-    var vu = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
-    (vu.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-  }
-
-  /// <summary>Raises the event the server's VisualizationModeChanged broadcast would raise.</summary>
-  private void RaiseRemoteModeChange(string mode)
-  {
-    var handler = typeof(AudioStateHubService)
-      .GetField("VisualizationModeChanged", BindingFlags.Instance | BindingFlags.NonPublic)?
-      .GetValue(_stateHub) as Func<VisualizationModeDto, Task>;
-
-    handler.Should().NotBeNull("the panel should have subscribed to VisualizationModeChanged");
-    handler!.Invoke(new VisualizationModeDto { Mode = mode, IsEnabled = true })
-      .GetAwaiter().GetResult();
+    cut.FindAll(".visualizer-mode").Count.Should().Be(6);
   }
 
   [Fact]

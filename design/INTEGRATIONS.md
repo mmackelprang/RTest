@@ -86,13 +86,18 @@ the mode through `VisualizerPanel`'s own state and its saved preference, and nev
 so choosing a visualisation is still something the touchscreen does (encoder handoff §11). (The System Config
 "Visualizer" tab is FFT size / smoothing / peak-hold — it has never had a mode control.)
 
-**The `VisualizationModeChanged` SignalR broadcast, however, no longer fires.** The encoder was the only caller
-of `VisualizationModeService.CycleMode` / `ToggleEnabled`, so `ModeChanged` can no longer be raised,
-`AudioStateUpdateService.OnVisualizationModeChanged` never runs, and `VisualizerPanel`'s subscription to it is
-dead code. The service, its registration and the whole chain still *ship*; nothing drives them. Cross-circuit
-visualiser-mode sync therefore does not happen — and it never happened from the picker either, because the
-picker was never a writer. Deleting the chain or wiring the picker through it is `ENC-9`'s call; recorded in
-`design/FUTURE-WORK.md` § 17.
+**The `VisualizationModeChanged` chain is gone — `ENC-9` deleted it (2026-09-03).** The encoder was the only
+caller of `VisualizationModeService.CycleMode` / `ToggleEnabled`, so `ModeChanged` could no longer be raised,
+the broadcast could never be sent, and the browser subscription behind it was inert. Removed together: the
+service and its registration, `AudioStateUpdateService`'s subscription and broadcast, `AudioStateHubService`'s
+client-side event and `_hubConnection.On` handler, `VisualizationModeDto`, and `VisualizerPanel`'s
+subscription. **Visualiser mode is single-surface and local-only by decision.**
+
+⚠ **What that costs, stated precisely:** there is no cross-circuit visualiser-mode sync — change the mode on
+the kiosk and a phone browsing the same console will not follow. But *the picker never produced that sync
+either*: the knob was the only writer, so no user ever had it from the picker. What is gone is the
+**mechanism**, not a behaviour anyone was using, and rebuilding it means writing a **writer** rather than
+re-adding a listener. `design/FUTURE-WORK.md` § 17 lists exactly what was removed.
 
 **The device-side configuration table has always been in cabinet order** (`RotaryEncoderConfigDefaults.Create()`),
 so acceleration-disabled lands on the two selector knobs and the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` land on
@@ -934,7 +939,6 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 | Infrastructure | `Bluetooth/VCardParser.cs` | vCard 2.1/3.0 parser |
 | Infrastructure | `Bluetooth/pbap_download.py` | Python D-Bus OBEX helper script |
 | Infrastructure | `Audio/Services/AnnouncementService.cs` | TTS + ducking orchestration |
-| Infrastructure | `Audio/Services/VisualizationModeService.cs` | Viz mode cycling — **no caller since `ENC-7`** (FUTURE-WORK § 17) |
 | API | `Controllers/NotificationsController.cs` | `POST /api/notifications/announce` |
 | API | `Controllers/IntegrationsController.cs` | `GET /api/integrations/{encoder,phone}/status` |
 | API | `Services/RotaryEncoderHostedService.cs` | Encoder lifecycle management |

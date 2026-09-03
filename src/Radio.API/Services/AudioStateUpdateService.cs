@@ -28,7 +28,6 @@ public class AudioStateUpdateService : BackgroundService
   private readonly IBluetoothService? _bluetoothService;
   private readonly GoogleCastOutput? _castOutput;
   private readonly BackgroundIdentificationService? _fingerprintService;
-  private readonly VisualizationModeService? _vizModeService;
   private readonly IRotaryEncoderService? _encoderService;
   private readonly IEncoderFeedbackSink? _encoderFeedback;
   private string? _apiBaseUrl;
@@ -87,7 +86,6 @@ public class AudioStateUpdateService : BackgroundService
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
     _fingerprintService = serviceProvider.GetService<BackgroundIdentificationService>();
-    _vizModeService = serviceProvider.GetService<VisualizationModeService>();
     _encoderService = serviceProvider.GetService<IRotaryEncoderService>();
     // GetService, not GetRequiredService: the encoder subsystem may not be registered at all, which
     // is the same reason _encoderService is nullable.
@@ -128,13 +126,6 @@ public class AudioStateUpdateService : BackgroundService
     {
       _fingerprintService.StatusChanged += OnFingerprintStatusChanged;
       _logger.LogInformation("Subscribed to fingerprint status changes");
-    }
-
-    // Subscribe to visualization mode changes from rotary encoder
-    if (_vizModeService != null)
-    {
-      _vizModeService.ModeChanged += OnVisualizationModeChanged;
-      _logger.LogInformation("Subscribed to visualization mode changes");
     }
 
     // Subscribe to encoder connection changes for UI status updates
@@ -961,11 +952,6 @@ public class AudioStateUpdateService : BackgroundService
       _fingerprintService.StatusChanged -= OnFingerprintStatusChanged;
     }
 
-    if (_vizModeService != null)
-    {
-      _vizModeService.ModeChanged -= OnVisualizationModeChanged;
-    }
-
     if (_encoderService != null)
     {
       _encoderService.ConnectionChanged -= OnEncoderConnectionChanged;
@@ -1076,23 +1062,6 @@ public class AudioStateUpdateService : BackgroundService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error broadcasting encoder HUD update");
-    }
-  }
-
-  private async void OnVisualizationModeChanged(object? sender, VisualizationModeChangedEventArgs e)
-  {
-    try
-    {
-      await _hubContext.Clients.All.SendAsync("VisualizationModeChanged", new
-      {
-        e.Mode,
-        e.IsEnabled
-      });
-      _logger.LogDebug("Broadcast VisualizationModeChanged: {Mode}, Enabled={Enabled}", e.Mode, e.IsEnabled);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Error broadcasting visualization mode change");
     }
   }
 }
