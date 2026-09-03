@@ -236,10 +236,16 @@ public class VisualizerPanelTests : TestContext
     // and the subscription ENC-9a added was inert. All three layers are deleted. This test fails if
     // a remote channel is reintroduced without the writer that would justify it - which is how the
     // dead chain came back into existence the first time.
-    typeof(AudioStateHubService)
+    var hubEvents = typeof(AudioStateHubService)
       .GetEvents(BindingFlags.Public | BindingFlags.Instance)
       .Select(e => e.Name)
-      .Should().NotContain("VisualizationModeChanged");
+      .ToList();
+
+    // ⚠ Prove the instrument before trusting its silence. A NotContain against an empty list passes
+    // for the wrong reason, so pin a surviving event first: if this reflection call ever stops seeing
+    // the hub's events, THIS line fails rather than the one below quietly passing forever.
+    hubEvents.Should().Contain("EncoderConfigStatusChanged");
+    hubEvents.Should().NotContain("VisualizationModeChanged");
 
     // And the capability itself still works locally - see ModePicker_ClickingPhase_ActivatesPhaseSegment
     // above, which drives the six-segment picker and is what the owner actually uses.
