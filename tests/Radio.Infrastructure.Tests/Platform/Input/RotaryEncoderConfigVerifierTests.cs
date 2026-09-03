@@ -156,36 +156,89 @@ public class RotaryEncoderConfigVerifierTests
   }
 
   [Fact]
-  public void Classify_NoResponse_IsTreatedAsAMismatchNotAnError()
+  public void Classify_NoResponse_IsSilentInsideTheBudget()
   {
-    // "The device did not confirm" and "the device confirmed something wrong" carry the same
-    // consequence: the configuration is not trustworthy.
+    // "The device did not confirm" is not an error to swallow — it is a mismatch that has not run out
+    // of retries yet. A USB peripheral missing a report on the first try is ordinary.
     Assert.Equal(RotaryEncoderConfigStatus.Transient, RotaryEncoderConfigVerifier.Classify(null, 1));
+  }
+
+  [Fact]
+  public void Classify_NoResponseAfterTheBudget_IsAHardFaultNotDegraded()
+  {
+    // ENC-16. This is the case that decides whether relaxing Degraded's clamp is safe. A device that
+    // never answered has confirmed NOTHING — least of all wrap and reverse — so it must not land in
+    // the one non-Configured tier that runs the normal volume clamp. It may still be on factory
+    // tiers, which is the "one detent from silence to full" hazard the whole arc exists to prevent.
     Assert.Equal(
-      RotaryEncoderConfigStatus.Degraded,
+      RotaryEncoderConfigStatus.HardFault,
       RotaryEncoderConfigVerifier.Classify(null, RotaryEncoderConfigVerifier.TransientAttempts));
+
+    // And the consequence, asserted rather than assumed: the clamp is the tight one either way.
+    Assert.Equal(
+      RotaryEncoderConfigDefaults.VolumeClampUnverified,
+      RotaryEncoderConfigVerifier.VolumeClampFor(
+        RotaryEncoderConfigVerifier.Classify(null, RotaryEncoderConfigVerifier.TransientAttempts)));
   }
 
   [Theory]
   [InlineData(RotaryEncoderConfigStatus.Unknown)]
   [InlineData(RotaryEncoderConfigStatus.Transient)]
-  [InlineData(RotaryEncoderConfigStatus.Degraded)]
   [InlineData(RotaryEncoderConfigStatus.HardFault)]
-  public void VolumeClamp_IsTightenedForEveryUnverifiedStatus(RotaryEncoderConfigStatus status)
+  public void VolumeClamp_IsTightenedWhereverASafetyFieldIsUnconfirmed(RotaryEncoderConfigStatus status)
   {
-    // The window between connect and a verified push is real, and during it the device may still be
-    // on factory tiers. Anything short of Configured must clamp hard.
+    // ENC-16: the predicate is "are wrap and reverse confirmed", not "did everything apply".
+    //
+    // Unknown  — no push attempted yet this connection.
+    // Transient — not confirmed YET. This is the boot window, which is exactly when a fresh or
+    //             factory-reset Pico is running acceleration at x50, so it is the single most
+    //             important row in this table to get right.
+    // HardFault — a safety field read back wrong, or the device never answered at all.
     Assert.Equal(
       RotaryEncoderConfigDefaults.VolumeClampUnverified,
       RotaryEncoderConfigVerifier.VolumeClampFor(status));
   }
 
-  [Fact]
-  public void VolumeClamp_RelaxesOnlyWhenVerified()
+  [Theory]
+  [InlineData(RotaryEncoderConfigStatus.Configured)]
+  [InlineData(RotaryEncoderConfigStatus.Degraded)]
+  public void VolumeClamp_StaysNormalOnceTheSafetyFieldsAreConfirmed(RotaryEncoderConfigStatus status)
   {
+    // ENC-16. Degraded means read-back arrived and wrap/reverse were right in it; only a feel field
+    // (an acceleration tier, step_size) disagreed. That is a knob that feels wrong, not a knob that
+    // can blast the room — and tightening the clamp for it made the console misreport its own safety
+    // state, since ENC-12's Degraded toast tells the owner only that the knobs "may feel wrong".
     Assert.Equal(
       RotaryEncoderConfigDefaults.VolumeClamp,
-      RotaryEncoderConfigVerifier.VolumeClampFor(RotaryEncoderConfigStatus.Configured));
+      RotaryEncoderConfigVerifier.VolumeClampFor(status));
+  }
+
+  [Fact]
+  public void VolumeClamp_FollowsTheSafetyFieldRatherThanTheMismatchCount()
+  {
+    // The whole table in one assertion, driven off Classify rather off hand-written statuses, so a
+    // future change to the tier boundaries cannot quietly relax the clamp for an unverified device.
+    var feel = new[] { new RotaryEncoderConfigMismatch(0, "tier1_multiplier", IsSafetyField: false) };
+    var safety = new[] { new RotaryEncoderConfigMismatch(0, "reverse", IsSafetyField: true) };
+    int budget = RotaryEncoderConfigVerifier.TransientAttempts;
+
+    Assert.Equal(
+      RotaryEncoderConfigDefaults.VolumeClamp,
+      RotaryEncoderConfigVerifier.VolumeClampFor(RotaryEncoderConfigVerifier.Classify(feel, budget)));
+
+    Assert.Equal(
+      RotaryEncoderConfigDefaults.VolumeClampUnverified,
+      RotaryEncoderConfigVerifier.VolumeClampFor(RotaryEncoderConfigVerifier.Classify(safety, 1)));
+
+    // Sixteen feel-field mismatches are still only feel fields. Volume of disagreement is not the
+    // predicate; which fields disagreed is.
+    var manyFeel = Enumerable.Range(0, 16)
+      .Select(i => new RotaryEncoderConfigMismatch(i % 4, $"tier{(i % 3) + 1}_multiplier", IsSafetyField: false))
+      .ToArray();
+
+    Assert.Equal(
+      RotaryEncoderConfigDefaults.VolumeClamp,
+      RotaryEncoderConfigVerifier.VolumeClampFor(RotaryEncoderConfigVerifier.Classify(manyFeel, budget)));
   }
 
   [Fact]

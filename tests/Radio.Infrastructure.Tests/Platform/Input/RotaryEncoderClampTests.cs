@@ -38,6 +38,30 @@ public class RotaryEncoderClampTests
   }
 
   [Fact]
+  public void VolumeClamp_BoundsASingleEventEvenOnFactoryTiers()
+  {
+    // ENC-16 relaxed the tightened clamp for Degraded, so a Degraded console runs on VolumeClamp
+    // while its acceleration tiers are, by definition, NOT confirmed — the device may be emitting
+    // factory x50 deltas. This is the bound that survives that, and it is the honest one to state:
+    // the clamp makes the delta irrelevant, so no single event can cross the range no matter what
+    // arrives, and at least nine events are needed to get from silence to full.
+    //
+    // ⚠ It does NOT preserve the 1.33 s floor from handoff §5.4. That floor is a property of the
+    // CONFIGURED tiers (6 points per 80 ms); a device on factory tiers can deliver events faster than
+    // that, and clamping each one bounds movement per event, not events per second. The owner
+    // accepted that trade in ENC-16: an acceleration tier that did not apply is a feel fault, and the
+    // safety fields — wrap and reverse — are confirmed before Degraded is ever reached.
+    const float hostStepPercent = 0.02f;   // RotaryEncoderOptions.VolumeStepPercent default
+
+    float maxFractionPerEvent = RotaryEncoderConfigDefaults.VolumeClamp * hostStepPercent;
+
+    Assert.True(maxFractionPerEvent < 1.0f,
+      "one event must never cross the whole range, whatever the device believes its tiers are");
+    Assert.True(Math.Ceiling(1.0 / maxFractionPerEvent) >= 9,
+      "silence to full must take at least nine separate movement events");
+  }
+
+  [Fact]
   public void SelectorClamp_IsExactlyOneEntry()
   {
     // One detent, one entry, always — on SOURCE and PRESETS alike. A seven-entry list has no long
