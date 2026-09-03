@@ -88,6 +88,44 @@ wrapper now would touch a dozen files across two rows for no behavioural gain.
 
 ---
 
+## Tuning acceleration meets a 52 ms tuner — measured in `ENC-5` UAT, deliberately not changed there
+
+**What was measured**, on the appliance at `80fcacf`, radio active on FM (SDR / RTL-SDR):
+
+- **One `StepFrequencyUpAsync` costs ~52 ms.** Five consecutive `POST /api/radio/frequency/up` calls
+  measured 51.8-54.4 ms each; a `GET /api/health/version` on the same connection is 1.1-1.5 ms, so
+  essentially all of it is the hardware call, not HTTP.
+- **The tuner serializes.** Three parallel step requests completed in 158 ms — the same as three
+  sequential (201 ms) within noise — so overlapping `StepRadioFrequencyAsync` batches queue at the
+  device rather than racing. There is no state-corruption hazard here.
+- **No audio distortion.** 1,664 tuner calls over ~94 s of continuous stepping produced **zero new
+  PipeWire xruns** (output sink `ERR` 2 → 2, `Radio.API` 0 → 0) and one "missed callback deadline"
+  warning attributed to a GC burst, during the *lighter* of the two runs. That was UAT check H2 and
+  it passed.
+
+**The consequence, which is a UX issue rather than a correctness one.** `ENC-5`'s remap put the
+tuning tiers `(150 x2 / 80 x4 / 40 x8)` on the knob that actually tunes, so `TuningClamp = 8` became
+reachable for the first time. A full 8-step detent therefore costs **~416 ms of sequential awaits**,
+and `HandleTuningTurn` launches it fire-and-forget (`_ = StepRadioFrequencyAsync(...)`). Detents
+arriving faster than 416 ms queue at the tuner, so **the dial keeps moving after the hand stops**.
+Handoff §5.5's design target — "a hard flick crosses the FM band in ~0.6 revolutions" — is ~14
+detents x 8 steps = ~112 steps = **~6 seconds** of tuning after the flick ends.
+
+**Why `ENC-5` did not change it.** Nothing here is a defect in `ENC-5`'s code: this is the designed
+acceleration meeting a slow tuner, and the row's job was to make the knob reachable, which it did.
+Every available fix — coalescing overlapping batches, dropping queued steps when a newer detent
+arrives, lowering `TuningClamp`, or making the step call cheaper — changes how tuning *feels* and
+needs design input rather than a Builder's judgement inside a P0 row about a different knob.
+
+**What a follow-up should consider**, in rough order of cost:
+1. **Coalesce, don't queue.** If a step batch is in flight, fold a newly arrived delta into it rather
+   than starting a second batch. Bounds the overshoot to one batch (~416 ms) regardless of spin speed.
+2. **Ask why a step costs 52 ms.** For an SDR this is a retune of a software front end; 52 ms is
+   suspicious for something that should be a register write plus a resample-chain flush. If it can be
+   brought to single-digit ms the problem evaporates without any behaviour change.
+3. **Only then** reconsider the tier values. They came from the handoff and match the cabinet's feel;
+   they are the last thing to change, not the first.
+
 ## Two `RadioApiService` client/server contract bugs (found by `ENC-5`, deliberately not fixed there)
 
 Both were found while mapping the radio surface for the SOURCE overlay. Neither is in `ENC-5`'s path, and
