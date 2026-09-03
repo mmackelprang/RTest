@@ -22,6 +22,46 @@ public enum EncoderHudPhase
 
   /// <summary>The hold reached the threshold and the long action fired while still held.</summary>
   HoldCommit,
+
+  /// <summary>
+  /// A selector overlay is open and previewing. Nothing has been committed. Coalesced like
+  /// <see cref="Value"/> — a moving highlight is a sampled value, not a discrete edge.
+  /// </summary>
+  SelectorPreview,
+
+  /// <summary>
+  /// A commit landed on an unavailable row. The overlay stays open and flashes that row.
+  /// Handoff §6.6 State C — never a silent no-op.
+  /// </summary>
+  SelectorBlocked,
+
+  /// <summary>A real switch is in flight. Handoff §6.6 State D — spinner, card stays up.</summary>
+  SelectorCommitting,
+
+  /// <summary>The switch failed. Handoff §6.6 State E — reason plus what is still playing.</summary>
+  SelectorFailed,
+
+  /// <summary>
+  /// A short message replacing the list for its own duration — ENC-7's "Saved to 05", "PRESETS
+  /// FULL", "Only radio stations can be saved". Declared here rather than in ENC-7 so the phase set
+  /// is one enum and the Web's dispatch table is written once.
+  /// </summary>
+  SelectorNotice,
+}
+
+/// <summary>
+/// Which phases are samples of a moving value and may therefore be coalesced, and which are
+/// discrete edges that must not be dropped.
+/// </summary>
+public static class EncoderHudPhases
+{
+  /// <summary>
+  /// True for phases that represent "the current value, sampled" — a turning knob. False for edges
+  /// whose loss would strand something on screen: a progress ring that never resolves, a spinner
+  /// that never clears, a flash that never fires.
+  /// </summary>
+  public static bool IsCoalescable(EncoderHudPhase phase) =>
+    phase is EncoderHudPhase.Value or EncoderHudPhase.SelectorPreview;
 }
 
 /// <summary>
@@ -33,9 +73,9 @@ public enum EncoderHudPhase
 /// this encoder's own band and the readout appears beside the knob that produced it, at the same
 /// height. The bands are <see cref="Radio.Core.Configuration.FrontPanelGeometry"/>, which is the
 /// single definition of the panel. The remaining fields decide <b>what</b> it says. The two are
-/// deliberately independent: the router's index-to-handler mapping is still the pre-ENC-5 one, so
-/// the card is in the right place before it says the right word, and it will say the right word
-/// without the HUD changing.
+/// deliberately independent, and ENC-5 is the demonstration: it reassigned three of the four
+/// index-to-handler pairs without touching this type or the HUD's geometry, because a card's
+/// position comes from the index the event arrived on rather than from the router's table.
 /// </remarks>
 public class EncoderHudEventArgs : EventArgs
 {
@@ -69,6 +109,48 @@ public class EncoderHudEventArgs : EventArgs
   /// formatting the API already did.
   /// </summary>
   public bool PrimaryIsFrequency { get; init; }
+
+  /// <summary>
+  /// How long the client should hold this card before dismissing it, in milliseconds. Null means
+  /// the default (<see cref="Radio.Core.Configuration.EncoderInteractionTimings.HudHoldMs"/>).
+  ///
+  /// <para>
+  /// Carried on the payload rather than derived from <see cref="Phase"/> because the handoff
+  /// specifies four different durations across five states (1500 value / 1500 blocked / 2000 saved /
+  /// 4000 selector idle / 4000 failed), and ENC-7 adds more. One nullable field beats a lookup
+  /// table each row has to extend.
+  /// </para>
+  /// </summary>
+  public int? DurationMs { get; init; }
+
+  /// <summary>
+  /// The selector list, when this is a selector phase. Null on every non-selector phase.
+  ///
+  /// <para>
+  /// <b>Always the complete list, never a delta.</b> <c>EncoderFeedbackService</c> coalesces by
+  /// replacing the pending update for an encoder, so a rows-less update arriving inside the 50 ms
+  /// window would discard the rows the overlay needs. Every selector update is self-contained.
+  /// </para>
+  /// </summary>
+  public IReadOnlyList<EncoderSelectorRow>? Rows { get; init; }
+
+  /// <summary>Index into <see cref="Rows"/> of the highlighted row, or -1 when the list is empty.</summary>
+  public int HighlightIndex { get; init; } = -1;
+
+  /// <summary>Overlay heading — "SOURCE" or "PRESETS".</summary>
+  public string? Title { get; init; }
+
+  /// <summary>Right-hand side of the heading row — ENC-7's "4 saved". Null for SOURCE.</summary>
+  public string? TitleSuffix { get; init; }
+
+  /// <summary>Footer line — "PRESS THE KNOB TO SWITCH" / "PRESS TO PLAY · HOLD TO SAVE".</summary>
+  public string? Footer { get; init; }
+
+  /// <summary>Primary line of the instructional empty state, when <see cref="Rows"/> is empty.</summary>
+  public string? EmptyPrimary { get; init; }
+
+  /// <summary>Secondary line of the instructional empty state.</summary>
+  public string? EmptySecondary { get; init; }
 }
 
 /// <summary>

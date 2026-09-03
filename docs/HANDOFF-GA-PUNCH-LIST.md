@@ -96,7 +96,7 @@ index are in §9.
 > **✅ STATUS AS OF 2026-08-19: THE OWNER HAS ANSWERED ALMOST EVERY OPEN DECISION.** §7 is no longer a list
 > of questions — it is a record of answers. The headline is **D1: the knobs ship live at install**, which
 > collapses the conditional tiering and makes **22 items P0**, of which **11 are the encoder arc** at ≈3–4
-> working weeks. **✅ Designer Rev 3 has since landed (1,126 lines) and unblocks everything that was marked
+> working weeks. **✅ Designer Rev 3 landed (1,126 lines) — since amended to Rev 4 (as-built panel) and Rev 5 (HUD collisions, `ENC-15` absorbed) — and unblocks everything that was marked
 > pending** — `ENC-6` (the D8 wake collision) and `ENC-8` (the D21 settings surface) are both fully specced,
 > `ENC-13`'s safe-baseline idea was withdrawn by Designer and folded into `ENC-8`, and one new P0 gate
 > (`ENC-15`) and one new decoder hazard (the re-baseline rule, in `ENC-1`) came out of it. **A short startup
@@ -503,7 +503,42 @@ words today; the card is in the right *place*, which is what this row owns.
 ---
 
 **`ENC-5` — The SOURCE overlay, with the radio bands folded in.**
-*Not queued. Effort: **5–6 days** (2–3 originally; D7 added the bands, and Rev 3 specified what that actually costs).* ⚠ **Rev 2 note: SOURCE is now encoder 1, not encoder 2** — and this overlay
+✅ **SHIPPED 2026-09-03 — [#536](https://github.com/mmackelprang/RTest/pull/536).**
+*Effort: **5–6 days** (2–3 originally; D7 added the bands, and Rev 3 specified what that actually costs).*
+
+> **End state of the remap: `0 = Volume · 1 = SOURCE · 2 = Visualization · 3 = Tuning`.** Index 2 holds the
+> visualiser as a deliberate seat-warmer until `ENC-7` puts PRESETS there; leaving the *old source cycler*
+> there was rejected, because index 1 now opens the overlay and a cycler beside it would have given two
+> adjacent knobs two divergent copies of the source selection — the defect §4.4 forbids. The Settings page
+> names the one remaining mismatch by knob and empties itself when `ENC-7` lands.
+>
+> **Five plan deviations, all forced by the tree rather than chosen** (plan §0.4), plus three the build found:
+> `IConfigurationStore` has no section API, so `RadioBandMemoryService` uses `IConfigurationManager` and one
+> entry per band, the mechanism `PreferencesPersistenceService` already uses; the plan's Task 11 never
+> mentions **`EncoderHudService.IsKnownPhase`**, which gates *all* rendering — without extending it every
+> selector payload would have rendered nothing **with a fully green suite**; and the plan's Task 14 CSS
+> snippet contradicted the shipped `ENC-4` rule beside it three times (surface `color-mix`,
+> `-webkit-backdrop-filter`, and centring on `translate` rather than `transform`, which `.snackbar-enter`
+> animates and would otherwise drop for the whole 200 ms entrance).
+>
+> ⚠ **`ENC-9a` did not remove `VisualizerPanel`'s local `_currentMode`**, contrary to this row's own text
+> above. `VisualizerPanel.razor:155` still declares it; #491 added the missing *subscription* plus a typed
+> DTO. The real template is "one authoritative owner, a typed broadcast, and a component that re-syncs a
+> derived copy without echoing" — a weaker claim than "no component may hold a copy", and worth knowing
+> before anyone tries to enforce the stronger one.
+>
+> ⚠ **`RadioControlPanel` already satisfied the one-state rule**, so that task became a regression guard
+> plus a one-line rollback rather than a rebuild.
+>
+> ⚠ **Pre-merge review caught two HIGH defects, both fixed with regression tests.** The State D spinner
+> dismissed itself at 1500 ms mid-switch (it sends no duration *on purpose*, and that null was read as
+> "use the default"); and the no-tuner band fallback was cached for the life of the process, so a knob
+> turned during boot froze FM+AM permanently and an SDR's SW/WB rows could never appear.
+>
+> ⚠ **UAT H2 passed but measured something the plan did not predict.** No distortion — 1,664 tuner calls
+> over ~94 s produced **zero** new PipeWire xruns. But one tuner step costs **~52 ms**, so a full 8-step
+> detent is ~416 ms and a hard flick keeps tuning for ~6 s after the hand stops. Logged in
+> `design/FUTURE-WORK.md`; not changed here, because every fix alters how tuning *feels*. ⚠ **Rev 2 note: SOURCE is now encoder 1, not encoder 2** — and this overlay
 and `ENC-7`'s PRESETS overlay are **one component with two lists** (Designer §6.6, "the two selector
 overlays"). Same interaction grammar on purpose: *learn one, you have learned both.* Build them together or
 back to back; building them apart is how they drift.
@@ -1238,7 +1273,7 @@ now a 15-minute record correction. Do not budget the remaining five as guarantee
 | `docs/plans/2026-05-22-audio-thread-isolation.md` | `LOG-9`, `LOG-10` |
 | `design/plans/2026-03-11-bt-disconnect-reason.md` | `AUD-10` |
 | `docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md` (2026-08-01) + **ADR-029** (2026-08-03) | `PHN-1`, `PHN-2`, `PHN-3`, `PHN-4` |
-| `docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md` (**Rev 3**, 2026-08-19, draft, 1,126 lines) | `ENC-0` … `ENC-15` (`ENC-13` folded into `ENC-8`) |
+| `docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md` (**Rev 5**, 2026-09-02, 1,573 lines) | `ENC-0` … `ENC-15` (`ENC-13` folded into `ENC-8`) |
 | `design/plans/SECRET-KEYRING-INVESTIGATION.md` + branch `fix/dataprotection-keyring-persist-path` | `SEC-1` |
 
 > **Worth noticing as a pattern rather than a list:** nine plan or handoff documents exist for work that has

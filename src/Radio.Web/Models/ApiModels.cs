@@ -1346,6 +1346,62 @@ public class EncoderHudDto
   public string? PrimaryText { get; set; }
   public string? SecondaryText { get; set; }
   public bool PrimaryIsFrequency { get; set; }
+
+  /// <summary>
+  /// How long the client holds this card before dismissing it, in milliseconds. Null means the
+  /// default, <c>EncoderInteractionTimings.HudHoldMs</c> (ENC-5).
+  /// </summary>
+  public int? DurationMs { get; set; }
+
+  /// <summary>
+  /// The selector list, on a selector phase; null otherwise (ENC-5).
+  ///
+  /// <para>
+  /// The API sends the complete list on every selector update rather than a delta, because its
+  /// coalescer replaces a pending update wholesale — a rows-less update arriving inside the 50 ms
+  /// window would leave this null while a highlight index still pointed into it.
+  /// </para>
+  /// </summary>
+  public List<EncoderSelectorRowDto>? Rows { get; set; }
+
+  /// <summary>Index into <see cref="Rows"/> of the highlighted row, or -1 when the list is empty.</summary>
+  public int HighlightIndex { get; set; } = -1;
+
+  /// <summary>Overlay heading — "SOURCE" or "PRESETS".</summary>
+  public string? Title { get; set; }
+
+  /// <summary>Right-hand side of the heading row — ENC-7's "4 saved". Null for SOURCE.</summary>
+  public string? TitleSuffix { get; set; }
+
+  /// <summary>Footer line — "PRESS THE KNOB TO SWITCH" / "PRESS TO PLAY · HOLD TO SAVE".</summary>
+  public string? Footer { get; set; }
+
+  /// <summary>Primary line of the instructional empty state, when <see cref="Rows"/> is empty.</summary>
+  public string? EmptyPrimary { get; set; }
+
+  /// <summary>Secondary line of the instructional empty state.</summary>
+  public string? EmptySecondary { get; set; }
+}
+
+/// <summary>
+/// One row of a selector overlay, as it crosses the wire (ENC-5).
+///
+/// <para>
+/// A flat presentation record with no behaviour. <see cref="Id"/> is opaque to the Web — the API
+/// decides what committing it does — and is used here only as the Blazor <c>@key</c>.
+/// </para>
+/// </summary>
+public class EncoderSelectorRowDto
+{
+  public string Id { get; set; } = string.Empty;
+  public string Primary { get; set; } = string.Empty;
+  public string? Secondary { get; set; }
+  public string? Ordinal { get; set; }
+  public string? Icon { get; set; }
+  public string? AccentVar { get; set; }
+  public bool IsCurrent { get; set; }
+  public bool IsAvailable { get; set; } = true;
+  public string? UnavailableReason { get; set; }
 }
 
 /// <summary>Whether the device agreed with one configured field (ENC-8). Mirrors <c>RotaryEncoderFieldAgreement</c>.</summary>

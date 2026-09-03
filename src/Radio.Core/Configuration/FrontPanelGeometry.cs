@@ -16,9 +16,10 @@ public sealed record EncoderPanelPosition
   /// The word engraved on the panel beneath this knob.
   ///
   /// <para>
-  /// This is what the cabinet says, not what the software currently does with the knob. The
-  /// router's index-to-handler table is still the pre-ENC-5 one, so for indices 1-3 the engraving
-  /// and the behaviour disagree today; ENC-5 and ENC-7 introduce the handlers that reconcile them.
+  /// This is what the cabinet says, not what the software currently does with the knob. ENC-5's
+  /// remap brought indices 0, 1 and 3 into line with the engraving. Index 2 still disagrees: it is
+  /// engraved PRESETS and drives the visualiser until ENC-7 introduces the handler that reconciles
+  /// them.
   /// </para>
   /// </summary>
   public required string EngravedName { get; init; }

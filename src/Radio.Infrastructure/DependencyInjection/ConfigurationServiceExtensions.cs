@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Radio.Configuration.Models;
 using Radio.Core.Configuration;
+using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Configuration.Abstractions;
 using Radio.Infrastructure.Configuration.Backup;
 using Radio.Infrastructure.Configuration.Services;
@@ -49,6 +51,15 @@ public static class ConfigurationServiceExtensions
 
     // Register unified database backup service (backs up config + fingerprinting DBs)
     services.AddSingleton<IUnifiedDatabaseBackupService, UnifiedDatabaseBackupService>();
+
+    // ENC-5. Singleton: per-band dial memory is one physical dial's state, read on every band
+    // commit and written after every tune, and every consumer of it is a singleton.
+    //
+    // Registered here, beside the configuration manager it reads through, rather than in
+    // AddRotaryEncoders: RotaryEncoderRegistrationTests builds a provider holding only AddLogging
+    // and AddRotaryEncoders, so a registration there would need IConfigurationManager in that
+    // provider too and the failure would surface at service start on the appliance.
+    services.AddSingleton<IRadioBandMemory, RadioBandMemoryService>();
 
     // Register preferences persistence service as a background service
     services.AddHostedService<PreferencesPersistenceService>();

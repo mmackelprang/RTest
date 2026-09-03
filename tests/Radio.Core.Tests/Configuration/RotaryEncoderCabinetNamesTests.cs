@@ -7,8 +7,9 @@ namespace Radio.Core.Tests.Configuration;
 ///
 /// <para>
 /// These names are a fact about a drilled escutcheon, not a software mapping, so they must not be
-/// derived from the router's index order — the two deliberately disagree on indices 1-3 until
-/// ENC-5 / ENC-7 land.
+/// derived from the router's index order. Since ENC-5 the two agree everywhere except index 2,
+/// where the visualiser sits until ENC-7 — and the point of keeping them separate is that this
+/// list does not move when that one does.
 /// </para>
 /// </summary>
 public class RotaryEncoderCabinetNamesTests
