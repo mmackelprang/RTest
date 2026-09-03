@@ -74,9 +74,18 @@ public sealed class EncoderHudService : IDisposable
   /// <summary>
   /// The phases this build knows how to draw. An unrecognised phase renders nothing rather than
   /// throwing, so a newer API build degrades to silence on an older kiosk (plan §2.5).
+  ///
+  /// <para>
+  /// ENC-5 adds the five selector phases. This list gates <c>EncoderHud.razor</c>'s entire render
+  /// and, through <see cref="HasRenderableCard"/>, whether <c>Sleep.razor</c> swaps its clock out
+  /// for the HUD at all — so a selector phase missing from here is an overlay that never draws,
+  /// not an overlay that draws wrongly.
+  /// </para>
   /// </summary>
   public static bool IsKnownPhase(string? phase)
-    => phase is "Value" or "HoldStart" or "HoldCancel" or "HoldCommit";
+    => phase is "Value" or "HoldStart" or "HoldCancel" or "HoldCommit"
+      or "SelectorPreview" or "SelectorBlocked" or "SelectorCommitting"
+      or "SelectorFailed" or "SelectorNotice";
 
   /// <summary>
   /// True when <see cref="Current"/> holds a card this build can actually render.
@@ -144,7 +153,7 @@ public sealed class EncoderHudService : IDisposable
       }
       else
       {
-        ArmDismissLocked();
+        ArmDismissLocked(dto);
       }
     }
 
@@ -214,13 +223,32 @@ public sealed class EncoderHudService : IDisposable
     }
   }
 
-  private void ArmDismissLocked()
+  private void ArmDismissLocked(EncoderHudDto dto)
   {
     CancelTimerLocked();
+
+    // ENC-5. The payload carries how long to hold, because the handoff specifies four different
+    // durations across the value card, the blocked flash, the save notice and the selector's idle
+    // dismiss.
+    //
+    // A null duration means two different things depending on the phase, and conflating them is a
+    // bug this shipped once. For an ordinary card it means "use ENC-4's 1500 ms default". For a
+    // commit in flight it means "no duration is known" — the card is supposed to stay until the
+    // switch succeeds or fails (handoff §6.6 State D), and arming 1500 ms against it drops the
+    // spinner mid-switch on exactly the slow Bluetooth connect the spinner exists to explain, then
+    // flashes it back when the terminal phase lands.
+    //
+    // So a commit gets the failsafe ceiling instead: long enough that no real switch reaches it,
+    // bounded so that a dropped hub connection cannot strand a spinner forever the way ENC-4's
+    // ring was once stranded by a device unplugged mid-hold.
+    int holdMs = dto.Phase == "SelectorCommitting"
+      ? dto.DurationMs ?? EncoderInteractionTimings.SelectorCommitCeilingMs
+      : dto.DurationMs ?? EncoderInteractionTimings.HudHoldMs;
+
     _dismissTimer = _timeProvider.CreateTimer(
       _ => Dismiss(),
       null,
-      TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs),
+      TimeSpan.FromMilliseconds(holdMs),
       Timeout.InfiniteTimeSpan);
   }
 

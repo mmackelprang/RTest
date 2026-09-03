@@ -213,6 +213,47 @@ public class EncoderHudTests : TestContext
   }
 
   [Fact]
+  public void SleepVariant_CollapsesASelectorToOneLine()
+  {
+    // Handoff §8.3 — a consumed wake input shows what is currently selected, "SOURCE · FM", and
+    // NOT the full overlay. The second reason is the load-bearing one: this host renders inside
+    // .sleep-screen-drift, the anti-burn-in wrapper, and a bordered 440px panel with its own
+    // background is the fixed bright composition that wrapper exists to prevent.
+    //
+    // Reachable today, and not hypothetically: /sleep entered by the idle timer leaves
+    // SleepService.IsSleeping false, so a SOURCE turn is not consumed as a wake and renders here.
+    var selector = new EncoderHudDto
+    {
+      EncoderIndex = 1,
+      Label = "SOURCE",
+      Phase = "SelectorPreview",
+      Title = "SOURCE",
+      HighlightIndex = 1,
+      Footer = "PRESS THE KNOB TO SWITCH",
+      Rows =
+      [
+        new EncoderSelectorRowDto { Id = "band:FM", Primary = "FM" },
+        new EncoderSelectorRowDto { Id = "band:AM", Primary = "AM" },
+      ],
+    };
+    _hud.Publish(selector);
+
+    var sleep = RenderComponent<EncoderHud>(p => p.Add(x => x.Variant, EncoderHudVariant.Sleep));
+
+    sleep.FindAll(".encoder-selector-overlay").Should().BeEmpty();
+    sleep.FindAll(".encoder-selector-row").Should().BeEmpty();
+    sleep.Find(".encoder-selector-sleep-line").TextContent.Trim().Should().Be("SOURCE · AM");
+    sleep.Find(".encoder-hud").ClassList.Should().Contain("encoder-hud--sleep");
+
+    // The contrast that makes "collapses" mean anything: the same payload on the normal route
+    // renders the full centred list.
+    var normal = RenderComponent<EncoderHud>();
+
+    normal.FindAll(".encoder-selector-overlay").Should().ContainSingle();
+    normal.FindAll(".encoder-selector-row").Count.Should().Be(2);
+  }
+
+  [Fact]
   public void UnknownPhase_RendersNothing()
   {
     _hud.Publish(VolumeCard(phase: "SomethingENC5WillAdd"));

@@ -45,4 +45,51 @@ public static class EncoderInteractionTimings
   /// </para>
   /// </summary>
   public const int HudCoalesceMs = 50;
+
+  /// <summary>
+  /// How long a selector overlay stays up with nothing committed, in milliseconds (handoff §6.5).
+  ///
+  /// <para>
+  /// Longer than a value card's 1500 ms because a list has to be read, and because dismissing it
+  /// costs nothing: nothing has been committed, so a timeout is not a lost action.
+  /// </para>
+  /// </summary>
+  public const int SelectorIdleDismissMs = 4000;
+
+  /// <summary>
+  /// How long a commit on an unavailable row flashes that row before the overlay returns to
+  /// previewing, in milliseconds (handoff §6.6 State C).
+  /// </summary>
+  public const int SelectorBlockedFlashMs = 1500;
+
+  /// <summary>
+  /// How long a failed switch stays on screen before dismissing, in milliseconds (§6.6 State E).
+  /// It has to outlast a glance across a room, because the whole point is that the user learns the
+  /// old source is still playing rather than concluding the knob is broken.
+  /// </summary>
+  public const int SelectorFailedMs = 4000;
+
+  /// <summary>
+  /// The longest a commit-in-flight card is allowed to stay on screen before it is dismissed
+  /// anyway, in milliseconds.
+  ///
+  /// <para>
+  /// <b>A failsafe, not a UX duration.</b> Handoff §6.6 State D is explicit that the spinner stays
+  /// up until the switch succeeds or fails, and every path out of the commit publishes a terminal
+  /// phase, so under normal operation this never fires. It exists because the terminal phase
+  /// travels over SignalR: if the API process dies or the hub connection drops mid-commit, nothing
+  /// else would ever clear the card. ENC-4 shipped exactly that bug on the hold ring — a device
+  /// that vanished mid-hold left a card up indefinitely — and this is the same hazard on a
+  /// different phase. Deliberately far longer than any real switch so it cannot be mistaken for a
+  /// timeout on a slow Bluetooth connect.
+  /// </para>
+  /// </summary>
+  public const int SelectorCommitCeilingMs = 30000;
+
+  /// <summary>
+  /// How many rows the selector overlay shows at once. Seven rows plus chrome is what fits the
+  /// 600 px content area (handoff §6.6); a longer list scrolls a window of this size around the
+  /// highlight.
+  /// </summary>
+  public const int SelectorVisibleRows = 7;
 }

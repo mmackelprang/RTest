@@ -1093,6 +1093,7 @@
   {
     try
     {
+      var previous = _radioState;
       if (_radioState != null) _radioState = _radioState with { Band = newBand };
       if (await RadioApi.SetBandAsync(newBand))
       {
@@ -1101,6 +1102,14 @@
         // skip the re-fetch the previous implementation did on band change.
         // The empty-slot placeholder re-evaluates against the new band's
         // count on the next render via _presets.Count(p => p.Band == ...).
+        await InvokeAsync(StateHasChanged);
+      }
+      else if (previous is not null)
+      {
+        // ENC-5. The optimistic band above is corrected by the next
+        // RadioStateChanged tick either way; this just makes a failed call
+        // correct itself now rather than up to 500 ms later.
+        _radioState = previous;
         await InvokeAsync(StateHasChanged);
       }
     }

@@ -1,0 +1,300 @@
+@using Radio.Core.Configuration
+
+@*
+  ENC-5 — the selector overlay. ONE COMPONENT, TWO LISTS.
+
+  ENC-5 fills it with the SOURCE list (the tuner's bands plus the non-radio sources); ENC-7 fills
+  it with the preset bank. It adds a caller and changes nothing in here — which is only true
+  because this component knows nothing about sources, bands or presets. Everything it draws comes
+  off one payload, and there is deliberately no parameter saying which list this is: the moment it
+  branches on that, "one component, two lists" has become two components sharing a file.
+
+  Centred rather than banded beside a knob (handoff §6.2): a transient readout is glanced at above
+  the knob that produced it, a list is read, and a 440px list pinned under encoder 0 would run off
+  the top of the 720px screen.
+
+  It is a READOUT, NOT A CONTROL. `pointer-events: none` in CSS, no backdrop, no focus trap, no
+  Escape handling, and no <button> anywhere in a row. Every function it offers already has a touch
+  equivalent — the topbar source strip and the band pills — so making it tappable would add a
+  second, divergent way to switch sources and hang a 440px touch shield over the middle of Home.
+*@
+
+<div class="encoder-selector-overlay snackbar-enter"
+     role="status"
+     aria-live="polite"
+     aria-atomic="true"
+     aria-label="@AccessibleSummary()">
+
+  @* Heading. Same mono/uppercase/0.20em treatment as .sleep-screen-hint, which is the call ENC-4
+     made for the HUD card's label row; the two headings are the same thing at two sizes. *@
+  <div class="encoder-selector-title">
+    <span class="encoder-selector-title-text">@Hud.Title</span>
+    @if (!string.IsNullOrWhiteSpace(Hud.TitleSuffix))
+    {
+      <span class="encoder-selector-title-suffix">@Hud.TitleSuffix</span>
+    }
+  </div>
+
+  @if (IsMessagePhase(Hud.Phase))
+  {
+    @* States D and E (and ENC-7's notices) replace the LIST, not the card: the overlay stays up
+       and keeps saying something. An overlay that dismissed into silence is how a person concludes
+       the knob is broken and presses it repeatedly. *@
+    <div class="encoder-selector-message">
+      @if (Hud.Phase == "SelectorCommitting")
+      {
+        @* Decoration only — the words beside it carry the state, so it is hidden from AT. *@
+        <div class="encoder-selector-spinner" aria-hidden="true"></div>
+      }
+      @if (!string.IsNullOrWhiteSpace(Hud.PrimaryText))
+      {
+        <div class="encoder-selector-message-primary">@Hud.PrimaryText</div>
+      }
+      @if (!string.IsNullOrWhiteSpace(Hud.SecondaryText))
+      {
+        <div class="encoder-selector-message-secondary">@Hud.SecondaryText</div>
+      }
+    </div>
+  }
+  else if (Rows.Count == 0)
+  {
+    @* State B — the instructional empty state, and the footer is omitted with it: a "PRESS THE
+       KNOB TO SWITCH" line under an empty list instructs nothing. Nothing in ENC-5 reaches this
+       (the SOURCE list always has rows, dimmed when unavailable); ENC-7's empty preset bank is
+       what it exists for. *@
+    <div class="encoder-selector-empty">
+      @if (!string.IsNullOrWhiteSpace(Hud.EmptyPrimary))
+      {
+        <div class="encoder-selector-empty-primary">@Hud.EmptyPrimary</div>
+      }
+      @if (!string.IsNullOrWhiteSpace(Hud.EmptySecondary))
+      {
+        <div class="encoder-selector-empty-secondary">@Hud.EmptySecondary</div>
+      }
+    </div>
+  }
+  else
+  {
+    <div class="encoder-selector-list">
+      @for (int i = VisibleStart; i < VisibleEnd; i++)
+      {
+        var row = Rows[i];
+        var isHighlighted = i == Hud.HighlightIndex;
+        <div @key="row.Id"
+             class="@RowClass(row, isHighlighted)"
+             style="--row-accent: var(@(row.AccentVar ?? "--accent-primary"));">
+          @* Fixed cells, so every row's glyph and text start on the same x whether or not this
+             list uses ordinals. ENC-7's presets carry one; ENC-5's sources never do. *@
+          <span class="encoder-selector-ordinal">@row.Ordinal</span>
+          <span class="encoder-selector-glyph" aria-hidden="true">
+            @if (!string.IsNullOrWhiteSpace(row.Icon))
+            {
+              <RadzenIcon Icon="@row.Icon" />
+            }
+          </span>
+          <span class="encoder-selector-primary">@row.Primary</span>
+          <span class="encoder-selector-secondary">@SecondaryFor(row)</span>
+          @* The current row's marker is a glyph, not a colour — handoff §15 wants every state
+             distinguishable in greyscale. *@
+          <span class="encoder-selector-marker" aria-hidden="true">@(row.IsCurrent ? "◀" : null)</span>
+          @if (isHighlighted)
+          {
+            @* The highlight bar. It is a CHILD of the highlighted row rather than a class on the
+               row itself, and that is what makes the wrap animation fire: the @key'd rows persist
+               across renders, so a class toggled on one of them retriggers unreliably, whereas
+               this span is created on whichever row becomes highlighted and a freshly inserted
+               element starts its animation unconditionally. Animating the row instead would shove
+               a 48px row's text 32px past its neighbours. *@
+            <span class="encoder-selector-bar @_wrapClass" aria-hidden="true"></span>
+          }
+        </div>
+      }
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(Hud.Footer))
+    {
+      @* The footer says what a press does to the list, so it renders with the list. *@
+      <div class="encoder-selector-footer">@Hud.Footer</div>
+    }
+  }
+</div>
+
+@code {
+  /// <summary>
+  /// The whole payload. The only parameter, deliberately — see the header comment.
+  /// </summary>
+  [Parameter, EditorRequired]
+  public EncoderHudDto Hud { get; set; } = default!;
+
+  /// <summary>
+  /// The highlight index this component last drew, so a wrap can be told from an ordinary step.
+  /// -1 before the first render, which is also what an empty list reports.
+  /// </summary>
+  private int _lastHighlight = -1;
+
+  /// <summary>
+  /// The wrap class currently on the highlight bar, or null when the last move was not a wrap.
+  /// </summary>
+  private string? _wrapClass;
+
+  private IReadOnlyList<EncoderSelectorRowDto> Rows => Hud.Rows ?? [];
+
+  private int VisibleStart =>
+    WindowStart(Rows.Count, Hud.HighlightIndex, EncoderInteractionTimings.SelectorVisibleRows);
+
+  private int VisibleEnd =>
+    Math.Min(Rows.Count, VisibleStart + EncoderInteractionTimings.SelectorVisibleRows);
+
+  protected override void OnParametersSet()
+  {
+    int current = Hud.HighlightIndex;
+
+    // Only a CHANGED index touches the remembered one or the wrap class. Blazor re-renders this
+    // component whenever its parent renders, and clearing the class on a re-render carrying the
+    // same payload would cancel a wrap animation still in flight.
+    if (current == _lastHighlight)
+    {
+      return;
+    }
+
+    _wrapClass = WrapClassFor(_lastHighlight, current, Rows.Count);
+    _lastHighlight = current;
+  }
+
+  /// <summary>
+  /// First row index of the visible window: the whole list when it fits, otherwise a window of
+  /// <c>SelectorVisibleRows</c> clamped to the ends with the highlight inside it.
+  /// </summary>
+  internal static int WindowStart(int total, int highlight, int visible)
+  {
+    if (total <= visible)
+    {
+      return 0;
+    }
+
+    int start = highlight - (visible / 2);
+    return Math.Clamp(start, 0, total - visible);
+  }
+
+  /// <summary>
+  /// The animation class for a highlight that has just wrapped past an end of the list, or null
+  /// for an ordinary one-row step.
+  ///
+  /// <para>
+  /// Two classes, not one: a backward wrap travels first-to-last, and running it on the same
+  /// bottom-to-top animation as the forward wrap would read as a teleport in the wrong direction —
+  /// which is the exact thing handoff §4.4 asks the animation to prevent. Both classes bind to
+  /// keyframes design-system.css already declares, so this adds no keyframes and no token.
+  /// </para>
+  /// </summary>
+  private static string? WrapClassFor(int previous, int current, int total)
+  {
+    if (previous < 0 || total < 2)
+    {
+      return null;
+    }
+
+    if (previous == total - 1 && current == 0)
+    {
+      return "encoder-selector-wrap-in";
+    }
+
+    if (previous == 0 && current == total - 1)
+    {
+      return "encoder-selector-wrap-in-reverse";
+    }
+
+    return null;
+  }
+
+  /// <summary>
+  /// The phases that replace the list with a line of text: a commit in flight, a commit that
+  /// failed, and ENC-7's short notices.
+  /// </summary>
+  private static bool IsMessagePhase(string? phase) =>
+    phase is "SelectorCommitting" or "SelectorFailed" or "SelectorNotice";
+
+  private string RowClass(EncoderSelectorRowDto row, bool isHighlighted)
+  {
+    var classes = new List<string> { "encoder-selector-row" };
+    if (isHighlighted)
+    {
+      classes.Add("is-highlighted");
+    }
+    if (row.IsCurrent)
+    {
+      classes.Add("is-current");
+    }
+    if (!row.IsAvailable)
+    {
+      classes.Add("is-unavailable");
+    }
+    // State C. The API commits the highlighted row and sends the same HighlightIndex back on
+    // the blocked card, so the flash lands on the row the press was aimed at.
+    if (isHighlighted && Hud.Phase == "SelectorBlocked")
+    {
+      classes.Add("is-blocked");
+    }
+    return string.Join(' ', classes);
+  }
+
+  /// <summary>
+  /// The secondary cell. An unavailable row appends its reason with SourceBubble's separator idiom
+  /// (<c>SourceBubble.razor:29</c>), so a row with no secondary of its own reads "no tuner
+  /// detected" rather than " · no tuner detected".
+  /// </summary>
+  private static string? SecondaryFor(EncoderSelectorRowDto row) =>
+    row.IsAvailable
+      ? row.Secondary
+      : $"{row.Secondary} · {row.UnavailableReason}".TrimStart(' ', '·');
+
+  /// <summary>
+  /// A text-only summary of what the overlay is currently saying, for AT and for the AT-SPI tree
+  /// this kiosk is inspected through. Handoff §15: no state may depend on colour, so the dimming
+  /// is accompanied by the reason in words here too.
+  /// </summary>
+  private string AccessibleSummary()
+  {
+    string title = Hud.Title ?? string.Empty;
+
+    if (IsMessagePhase(Hud.Phase))
+    {
+      return Join(title, Hud.PrimaryText, Hud.SecondaryText);
+    }
+
+    if (Rows.Count == 0)
+    {
+      return Join(title, Hud.EmptyPrimary, Hud.EmptySecondary);
+    }
+
+    int index = Hud.HighlightIndex;
+    if (index < 0 || index >= Rows.Count)
+    {
+      return Join(title, null, null);
+    }
+
+    var row = Rows[index];
+    string primary = row.IsAvailable || string.IsNullOrWhiteSpace(row.UnavailableReason)
+      ? row.Primary
+      : $"{row.Primary}, {row.UnavailableReason}";
+    return Join(title, primary, null);
+  }
+
+  private static string Join(string title, string? first, string? second)
+  {
+    var parts = new List<string>();
+    if (!string.IsNullOrWhiteSpace(title))
+    {
+      parts.Add(title);
+    }
+    if (!string.IsNullOrWhiteSpace(first))
+    {
+      parts.Add(first);
+    }
+    if (!string.IsNullOrWhiteSpace(second))
+    {
+      parts.Add(second);
+    }
+    return parts.Count == 0 ? string.Empty : string.Join(". ", parts) + ".";
+  }
+}

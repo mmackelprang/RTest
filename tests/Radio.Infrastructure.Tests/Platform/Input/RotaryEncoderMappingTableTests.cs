@@ -100,7 +100,24 @@ public class RotaryEncoderMappingTableTests
       () => new StubAudioManager(),
       viz ?? new VisualizationModeService(NullLogger<VisualizationModeService>.Instance),
       new StaticOptionsMonitor<RotaryEncoderOptions>(new RotaryEncoderOptions()),
-      new NullHudSink());
+      new NullHudSink(),
+      // ENC-5. The router owns the SOURCE overlay now; these tests never turn encoder 1, so a
+      // selector wired to stubs is enough to construct one.
+      new SourceSelectorService(
+        NullLogger<SourceSelectorService>.Instance,
+        () => new StubAudioManager(),
+        () => new StubBandMemory(),
+        new NullHudSink()));
+
+  /// <summary>Nothing here commits a band, so the memory only has to exist.</summary>
+  private sealed class StubBandMemory : IRadioBandMemory
+  {
+    public Task<Frequency?> GetAsync(RadioBand band, CancellationToken cancellationToken = default) =>
+      Task.FromResult<Frequency?>(null);
+
+    public Task SetAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default) =>
+      Task.CompletedTask;
+  }
 
   [Fact]
   public void Mapping_CoversEveryEncoderExactlyOnce_InIndexOrder()
@@ -137,9 +154,12 @@ public class RotaryEncoderMappingTableTests
     viz.ModeChanged += (_, _) => vizModeCycleCount++;
     using var router = BuildRouter(encoder, viz);
 
-    encoder.RaiseTurn(encoderIndex: 3, delta: 1);
+    // ENC-5 moved the visualiser from index 3 to index 2 (index 3 is now TUNING). The knob under
+    // test is whichever one the visualiser is on, because it is the handler with an observable
+    // side effect that needs no hardware.
+    encoder.RaiseTurn(encoderIndex: 2, delta: 1);
 
-    Assert.Equal("Cycle visualization mode", router.Mapping[3].TurnDescription);
+    Assert.Equal("Cycle visualization mode", router.Mapping[2].TurnDescription);
     Assert.Equal(1, vizModeCycleCount);   // the handler the table points at actually ran
   }
 
@@ -152,10 +172,10 @@ public class RotaryEncoderMappingTableTests
     using var router = BuildRouter(encoder, viz);
 
     // Short press = press edge then release edge; the gesture fires the short action on release.
-    encoder.RaiseButton(3, isPressed: true);
-    encoder.RaiseButton(3, isPressed: false);
+    encoder.RaiseButton(2, isPressed: true);
+    encoder.RaiseButton(2, isPressed: false);
 
-    Assert.Equal("Visualization on / off", router.Mapping[3].PressDescription);
+    Assert.Equal("Visualization on / off", router.Mapping[2].PressDescription);
     Assert.NotEqual(enabledBefore, viz.IsEnabled);
   }
 }

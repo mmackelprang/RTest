@@ -392,6 +392,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   public RadioBand CurrentBand => MapBandFromRTLSDR(_radioReceiver.CurrentBand);
 
+  /// <summary>
+  /// Every band the RTL-SDR front end covers, from <c>BandPresets</c> — the same definitions the
+  /// band list endpoint serves, so the two cannot disagree.
+  /// </summary>
+  public IReadOnlyList<RadioBand> SupportedBands { get; } =
+    [RadioBand.FM, RadioBand.AM, RadioBand.SW, RadioBand.WB, RadioBand.VHF, RadioBand.AIR];
+
   /// <inheritdoc/>
   public async Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default)
   {

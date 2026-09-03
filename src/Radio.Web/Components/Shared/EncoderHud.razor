@@ -15,9 +15,14 @@
   a since-corrected drawing; this is the 90° rotation of that, not a redesign.
 
   Geometry keys off the encoder index; content keys off the payload. The two are independent on
-  purpose — the router's index-to-handler table is still the pre-ENC-5 one, so today a card can be
-  in the right place and say the wrong word. Remapping the handlers later changes what it says
-  without touching this component.
+  purpose, and ENC-5 is what cashed that in: it remapped the router's index-to-handler table to
+  0 = Volume · 1 = SOURCE · 2 = Visualization · 3 = Tuning without touching this component. Index 2
+  is a seat-warmer — the cabinet's legend reads PRESETS there and ENC-7 puts the presets knob on
+  it, so until then a correctly placed card on that knob says VISUALIZER.
+
+  ENC-5 also gave this component a second shape. A selector phase is not a card: it renders the
+  centred <EncoderSelectorOverlay/> instead (handoff §6.2 — readouts appear beside their knob,
+  selection lists centre), and on the sleep screen it collapses to a single line.
 
   Phase is an open string, not an enum. A phase this build does not know renders nothing rather
   than throwing, which is the correct degraded behaviour on a kiosk nobody is watching.
@@ -27,7 +32,30 @@
   var card = Hud.Current;
 }
 
-@if (card is not null && IsKnownPhase(card.Phase))
+@if (card is not null && IsKnownPhase(card.Phase) && IsSelectorPhase(card.Phase))
+{
+  @if (Variant == EncoderHudVariant.Sleep)
+  {
+    @* ENC-5. On the sleep screen a selector renders as one dim line, not the overlay.
+       Two reasons, and the second is the load-bearing one: handoff §8.3 specifies "SOURCE · FM,
+       not the full overlay" for a consumed input, and this host is inside the anti-burn-in drift
+       wrapper, which a bordered 440px panel would defeat. *@
+    <div class="@RootClass(card)"
+         style="@GeometryStyle(card)"
+         data-encoder-index="@FrontPanelGeometry.ForIndex(card.EncoderIndex).Index"
+         role="status"
+         aria-live="polite"
+         aria-atomic="true">
+      <div class="encoder-selector-sleep-line">@SleepSelectorLine(card)</div>
+    </div>
+  }
+  else
+  {
+    @* No geometry style at all: the overlay is centred by CSS rather than banded beside its knob. *@
+    <EncoderSelectorOverlay Hud="card" />
+  }
+}
+else if (card is not null && IsKnownPhase(card.Phase))
 {
   @* role/aria-live make this a polite live region. Everything that carries meaning here is text —
      the fill bar and the ring are decoration and are aria-hidden — so what a screen reader (and
@@ -132,6 +160,51 @@
   /// a newer API build relies on (handoff §6.10).
   /// </summary>
   private static bool IsKnownPhase(string? phase) => EncoderHudService.IsKnownPhase(phase);
+
+  /// <summary>
+  /// True for the phases that render as a centred selection overlay rather than a quartered card.
+  ///
+  /// <para>
+  /// Handoff §6.2 draws the line: "transient readouts appear beside the knob that produced them.
+  /// Selection overlays center." The band geometry is what makes a readout legible at a glance;
+  /// a list is read, not glanced at, and a 440 px list pinned under one knob would run off the
+  /// edge for encoder 0.
+  /// </para>
+  /// </summary>
+  private static bool IsSelectorPhase(string? phase) =>
+    phase is "SelectorPreview" or "SelectorBlocked" or "SelectorCommitting"
+      or "SelectorFailed" or "SelectorNotice";
+
+  /// <summary>
+  /// The sleep screen's one-line collapse of a selector — "SOURCE · FM" (handoff §8.3).
+  ///
+  /// <para>
+  /// Falls back to the card's own primary line when the payload carries no rows or an out-of-range
+  /// highlight, which is what a message phase (a commit in flight, a failure) sends.
+  /// </para>
+  /// </summary>
+  private static string SleepSelectorLine(EncoderHudDto card)
+  {
+    string? primary = HighlightedPrimary(card) ?? card.PrimaryText;
+
+    if (string.IsNullOrWhiteSpace(card.Title))
+    {
+      return primary ?? string.Empty;
+    }
+
+    return string.IsNullOrWhiteSpace(primary) ? card.Title : $"{card.Title} · {primary}";
+  }
+
+  private static string? HighlightedPrimary(EncoderHudDto card)
+  {
+    var rows = card.Rows;
+    if (rows is null || card.HighlightIndex < 0 || card.HighlightIndex >= rows.Count)
+    {
+      return null;
+    }
+
+    return rows[card.HighlightIndex].Primary;
+  }
 
   private static int ClampPercent(int percent) => Math.Clamp(percent, 0, 100);
 

@@ -433,6 +433,23 @@ public static class AudioServiceExtensions
     services.AddSingleton<EncoderFeedbackService>();
     services.AddSingleton<IEncoderFeedbackSink>(sp => sp.GetRequiredService<EncoderFeedbackService>());
 
+    // ENC-5. Singleton: one physical knob, one preview state, and the router that drives it is a
+    // singleton.
+    //
+    // Built by a factory rather than by constructor injection so the two Func<> arguments defer
+    // their resolution, exactly as the router defers IAudioManager. That is what keeps
+    // RotaryEncoderRegistrationTests' deliberately minimal provider - AddLogging plus
+    // AddRotaryEncoders and nothing else - able to resolve the router without building the audio
+    // graph or the configuration store IRadioBandMemory reads through.
+    services.AddSingleton<SourceSelectorService>(sp => new SourceSelectorService(
+      sp.GetRequiredService<ILogger<SourceSelectorService>>(),
+      () => sp.GetRequiredService<IAudioManager>(),
+      () => sp.GetRequiredService<IRadioBandMemory>(),
+      sp.GetRequiredService<IEncoderFeedbackSink>(),
+      // GetService, not GetRequiredService: nothing registers TimeProvider in production and the
+      // constructor default is TimeProvider.System, as with the router below.
+      sp.GetService<TimeProvider>()));
+
     // Register action router (Func<> defers IAudioManager resolution)
     // ISleepService is registered in Radio.API — optional here via GetService
     services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
@@ -443,6 +460,7 @@ public static class AudioServiceExtensions
       sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
       sleepService: sp.GetService<ISleepService>(),
       hud: sp.GetRequiredService<IEncoderFeedbackSink>(),
+      sourceSelector: sp.GetRequiredService<SourceSelectorService>(),
       // GetService, not GetRequiredService: nothing registers TimeProvider in production, and the
       // constructor default is TimeProvider.System. Tests inject a fake clock directly instead.
       timeProvider: sp.GetService<TimeProvider>()));

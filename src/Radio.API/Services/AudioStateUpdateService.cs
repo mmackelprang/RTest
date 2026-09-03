@@ -1008,6 +1008,27 @@ public class AudioStateUpdateService : BackgroundService
         e.PrimaryText,
         e.SecondaryText,
         e.PrimaryIsFrequency,
+        // ENC-5 selector payload. Null on every non-selector phase, so a volume card costs the same
+        // bytes it did before.
+        e.DurationMs,
+        e.Title,
+        e.TitleSuffix,
+        e.Footer,
+        e.EmptyPrimary,
+        e.EmptySecondary,
+        e.HighlightIndex,
+        Rows = e.Rows?.Select(r => new
+        {
+          r.Id,
+          r.Primary,
+          r.Secondary,
+          r.Ordinal,
+          r.Icon,
+          r.AccentVar,
+          r.IsCurrent,
+          r.IsAvailable,
+          r.UnavailableReason,
+        }),
       });
     }
     catch (Exception ex)
