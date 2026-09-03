@@ -4,6 +4,61 @@ Running log of development sessions, organized chronologically. Each entry captu
 
 ---
 
+## 2026-09-02 — ENC-6: sleep, wake, and the three-state model
+
+**PR:** [#539](https://github.com/mmackelprang/RTest/pull/539) · **Branch:** `feat/enc-6-sleep-wake`
+
+- **The defect was live in the cabinet every night.** `idle-dimmer.js` navigated to `/sleep` after 30
+  minutes **without calling `SleepService`**, so `IsSleeping` stayed `false`, the API never learned the
+  clock was up, and every knob acted normally and invisibly on a screen showing a clock. The fix is not
+  to make the idle timer park audio — Ambient is *defined* by playback continuing — but to make the
+  server learn about the screen without audio changing: `Sleep.razor` reports itself through a new
+  `POST /api/system/sleep-screen`, on first render and on dispose.
+- **That one change also collapsed two states into one.** `/sleep` reached by the idle timer and
+  `/sleep` reached by the Sleep pill were different server-side states, which meant UAT through the
+  pill produced a **false pass** for the idle path. Reporting from the page makes all three ways in —
+  idle, pill, direct navigation — produce the same fact.
+- **Three states, derived, not stored.** `Awake` / `Ambient` / `Standby` compose from `IsSleeping` plus
+  the new `IsSleepScreenVisible`, so there is no second state machine to keep in step.
+- **The wake latch.** `TryWakeFromSleep` called `WakeAsync` fire-and-forget and returned `true`, so with
+  a 10 ms poll every event arriving during the wake was discarded. `TryClaimWake()` is a synchronous
+  `Interlocked` claim and `WakeState` reads `Awake` from the claim instant — a fast spin loses one
+  detent, not twelve. Under the new model the window is *worse* than the handoff assumed: leaving
+  Ambient needs a browser round trip, not just an await.
+- **`WakeAsync` could not wake from Ambient at all.** It early-returned on `!_isSleeping`, which is
+  precisely the Ambient condition, so the Ambient-to-Awake transition was unreachable through
+  `SleepStateChanged(false)` — the only signal `Sleep.razor` listens for. The broadcast now fires
+  whenever there was something to wake from; the audio restore still runs only where audio was parked.
+- **Blanking did not ship and must not be reinstated.** `ENC-15`'s gate failed on the box: the
+  touchscreen is powered by the panel and leaves the USB bus when it blanks, and `cafe:4005` has zero
+  evdev nodes. `SleepService`'s class doc had claimed DPMS control it has never performed — a **sixth**
+  comment/code mismatch of the class `CLAUDE.md`'s pre-merge rule exists for — and that was corrected.
+
+**Three things the plan got wrong, all verified against the tree:**
+
+- **Its `_currentValuePublishers` literal was the pre-`ENC-5` order** — `[Volume, Tuning, Source, Viz]`
+  against merged tables of `[Volume, Source, Viz, Tuning]`. Following it verbatim would have put a
+  TUNING readout on the SOURCE band: *the exact defect the plan's own four-array test exists to catch*.
+- **And that test would not have caught it.** It asserted only `card.EncoderIndex`, which every
+  publisher threads through from its own parameter, so it reads correctly no matter which publisher
+  ran — it caught a length mismatch and nothing else. Pre-merge review found this; the test now pins
+  the **label** per index and was falsified against the plan's ordering (3 of 4 fail) before reverting.
+- **`SystemControllerTests` is an HTTP integration class**, so the plan's controller-construction
+  helpers do not exist. Rewritten over real HTTP, asserting the **raw wire text**
+  `"wakeState":"Ambient"` — which catches the enum-as-number regression a typed read would accept.
+
+**Also worth carrying forward:** *"0 warnings"* has never been true of this tree. `main` builds with
+**53** pre-existing `IDE0011` warnings across 15 files; the set was captured before and after and is
+byte-identical, so the honest gate is *"adds no warnings"*.
+
+**Open follow-up, recorded rather than fixed:** `IsSleepScreenVisible` lives in memory on `radio-api`,
+so an API restart while the kiosk is parked on `/sleep` silently reinstates this row's own headline
+defect until something re-renders — and every deploy restarts `radio-api`. `design/FUTURE-WORK.md` §7
+carries it. `SetSleepScreenVisible` was made **edge-triggered** here specifically so the re-report
+heartbeat that closes it cannot wipe an in-flight wake claim.
+
+---
+
 ## 2026-09-02 — ENC-12: giving ENC-11's safety response a voice
 
 **PR:** _(filled in by Builder)_ · **Branch:** `feat/enc-12-fault-surfacing`
