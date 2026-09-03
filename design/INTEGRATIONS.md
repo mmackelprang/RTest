@@ -307,6 +307,46 @@ Or open **System Config → Integrations → Rotary Encoders** in the Web UI and
 - **No response on button press:** check the button bitmask at **payload offset 16** of report `0x01` (buffer index 17) in the Pico firmware. The service uses bit N for encoder N (bit 0 = encoder 0)
 - **Service starts but can't find device:** Try setting `DevicePath` explicitly to `/dev/hidraw0` (or whichever device the Pico is)
 
+### Sleep, wake, and the three states (`ENC-6`)
+
+The console has **three** states, derived from two facts rather than stored as a state machine.
+`ISleepService.WakeState` is the derivation and `Radio.Core.Interfaces.ConsoleWakeState` is the enum.
+
+| State | `IsSleeping` | `/sleep` on screen | Audio | Reached by |
+|---|---|---|---|---|
+| **Awake** | false | no | playing | any wake |
+| **Ambient** | false | yes | **playing** | 30 min idle (`idle-dimmer.js`), or navigating to `/sleep` |
+| **Standby** | **true** | yes | **paused + muted** | the topbar Sleep pill · a VOLUME long-press · `POST /api/system/sleep` |
+
+**Designer Rev 5 §8 describes five states. The two dark ones are withdrawn** with the blanking half —
+see the recovery section below for why the panel must never blank.
+
+**What each input does** (handoff §8.3, minus the two dark columns):
+
+| Input | Awake | Ambient | Standby |
+|---|---|---|---|
+| VOLUME turn / press / hold | acts | **acts in place** — the readout renders on the sleep screen's own HUD host | consumed; the press **resumes** |
+| SOURCE / PRESETS / TUNING turn | acts | consumed, and **wakes** to the full UI | consumed; **does not resume audio** (D22) |
+| SOURCE / PRESETS / TUNING press | acts | consumed, and **wakes** | **resumes** |
+| Screen tap | acts | wakes | **resumes** |
+
+**Two things that are easy to get wrong here, both of which shipped as bugs:**
+
+- **The idle timer must NOT call `SetSleepAsync(true)`.** Ambient is defined by playback continuing.
+  The server learns about Ambient from **`Sleep.razor` reporting itself** via
+  `POST /api/system/sleep-screen`, on first render and on dispose — which is also what makes all
+  three ways of reaching `/sleep` one state rather than two. `MainLayout` reports the opposite on its
+  own first render, which is what corrects the flag after a hard browser navigation kills the page's
+  circuit before its dispose can report. ⚠ **That correction happens on the next `MainLayout`
+  render, not immediately, and it does not cover an API restart** — the flag lives in memory on
+  `radio-api`, so a restart while the kiosk sits on `/sleep` leaves the server reading `Awake` until
+  something re-reports. See `design/FUTURE-WORK.md` §7 for the open follow-up.
+- **A wake spends exactly one input.** `ISleepService.TryClaimWake()` is a synchronous latch, and
+  `WakeState` reads `Awake` from the instant a claim is taken — earlier than either `IsSleeping`
+  flipping or the browser leaving the route. Without it a fast spin would lose every detent for the
+  length of a page navigation instead of one. A consumed input still publishes that knob's current
+  value, so the first detent answers *where am I* and the second one moves it.
+
 ### ⚠ The screen is dark and will not come back — recovery
 
 Read this first if you are at the cabinet and the panel is black. **You need SSH; the panel itself cannot

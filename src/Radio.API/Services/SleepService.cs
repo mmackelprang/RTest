@@ -7,11 +7,24 @@ using Radio.Core.Interfaces.Audio;
 namespace Radio.API.Services;
 
 /// <summary>
-/// Manages sleep/standby mode for the kiosk UI.
-/// When sleeping: pauses audio playback, mutes audio, turns off display via DPMS,
-/// broadcasts state via SignalR so UI shows black overlay.
-/// Wake sources: touch screen, rotary encoder, API call.
-/// On wake: restores display, mute state, and resumes playback if it was playing before sleep.
+/// Manages the console's sleep states for the kiosk UI.
+///
+/// <para>
+/// <b>Standby</b> pauses the active source, saves and applies mute, and broadcasts
+/// <c>SleepStateChanged</c> over SignalR. <b>Ambient</b> changes no audio at all — it is the
+/// <c>/sleep</c> route being on screen while playback continues, reported by the page itself. Waking
+/// restores the pre-sleep mute state and resumes playback <i>only</i> where playback was parked.
+/// </para>
+///
+/// <para>
+/// ⚠ <b>This service does not touch display power, and must not.</b> <see cref="SetDisplayPowerAsync"/>
+/// is retained but uncalled: <c>ENC-15</c> established on the box that the touchscreen is powered by
+/// the panel and leaves the USB bus when it blanks, so touch cannot wake a blanked panel, and the
+/// encoder exposes no evdev node so it cannot wake one either. See <c>design/INTEGRATIONS.md</c> §1
+/// for the recovery commands and <c>design/FUTURE-WORK.md</c> §7 (Sleep Mode) for the full record.
+/// </para>
+///
+/// Wake sources: a screen tap, an encoder input, or an API call.
 /// </summary>
 public class SleepService : ISleepService
 {
@@ -19,9 +32,22 @@ public class SleepService : ISleepService
   private readonly IHubContext<AudioStateHub> _hubContext;
   private readonly IAudioManager? _audioManager;
   private readonly SemaphoreSlim _lock = new(1, 1);
-  private bool _isSleeping;
+  // Volatile for the same reason _isSleepScreenVisible below is: ENC-6 made this readable from the
+  // encoder thread through WakeState, where it is not under _lock. Writes still happen only under
+  // _lock; this makes the unsynchronized READ well-defined rather than relying on x64 happening to
+  // be stronger than the memory model requires.
+  private volatile bool _isSleeping;
   private bool _wasMutedBeforeSleep;
   private bool _wasPlayingBeforeSleep;
+
+  // Set by the /sleep page reporting itself, cleared by that page disposing or by MainLayout
+  // rendering. Written from request threads and read from the encoder thread, so it is volatile
+  // rather than lock-guarded: it is one independent bool and taking _lock to read it would put an
+  // await on the encoder input path.
+  private volatile bool _isSleepScreenVisible;
+
+  // 1 once a wake has been claimed and has not yet been confirmed by the browser leaving the route.
+  private int _wakeClaimed;
 
   // GNOME ScreenSaver D-Bus for physical display DPMS control.
   // Runs as the desktop session user (mmack) to reach the GNOME session bus.
@@ -31,6 +57,64 @@ public class SleepService : ISleepService
   private const string SessionBusEnv = "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus";
 
   public bool IsSleeping => _isSleeping;
+
+  public bool IsSleepScreenVisible => _isSleepScreenVisible;
+
+  /// <summary>
+  /// The three states, derived rather than stored, so there is no second state machine to keep in
+  /// step with <see cref="IsSleeping"/>.
+  /// </summary>
+  public ConsoleWakeState WakeState
+  {
+    get
+    {
+      // A claimed wake reads as Awake from this instant. Both of the things that would otherwise
+      // clear it - the resume inside WakeAsync, and the browser navigating off /sleep - are far
+      // slower than the 10 ms encoder poll, so without this the second detent of a fast spin is
+      // discarded along with the tenth.
+      if (Volatile.Read(ref _wakeClaimed) == 1)
+      {
+        return ConsoleWakeState.Awake;
+      }
+
+      // Standby is checked first because it is defined by audio being parked, which is true before
+      // any client has reported the route.
+      if (_isSleeping)
+      {
+        return ConsoleWakeState.Standby;
+      }
+
+      return _isSleepScreenVisible ? ConsoleWakeState.Ambient : ConsoleWakeState.Awake;
+    }
+  }
+
+  public void SetSleepScreenVisible(bool visible)
+  {
+    // The claim is released on an EDGE, not on every report. Clearing it unconditionally would mean
+    // a client that re-reported the state it is already in - which nothing does today, but which is
+    // the shape any future re-report heartbeat would take - could wipe a claim mid-wake and drop the
+    // console back into Ambient, consuming a second input for the same wake.
+    bool changed = _isSleepScreenVisible != visible;
+    _isSleepScreenVisible = visible;
+    if (changed)
+    {
+      Interlocked.Exchange(ref _wakeClaimed, 0);
+    }
+
+    _logger.LogDebug("Sleep screen reported {Visible}", visible ? "visible" : "hidden");
+  }
+
+  public bool TryClaimWake()
+  {
+    // Read before claiming so an already-awake console never burns the claim that the next genuine
+    // sleep would need.
+    if (WakeState == ConsoleWakeState.Awake)
+    {
+      return false;
+    }
+
+    return Interlocked.CompareExchange(ref _wakeClaimed, 1, 0) == 0;
+  }
 
   public SleepService(
     ILogger<SleepService> logger,
@@ -83,12 +167,17 @@ public class SleepService : ISleepService
 
       _isSleeping = true;
 
+      // A claim that was never confirmed would otherwise keep WakeState reading Awake through this
+      // standby, and every knob would act on a console the owner just parked.
+      Interlocked.Exchange(ref _wakeClaimed, 0);
+
       await _hubContext.Clients.All
         .SendAsync("SleepStateChanged", true);
 
-      // NOTE: Hardware DPMS (SetDisplayPowerAsync) is disabled because touch-to-wake
-      // doesn't work when the compositor blanks input. Will be re-enabled when rotary
-      // encoders provide a hardware wake source. See design/FUTURE-WORK.md #7.
+      // Hardware DPMS stays off. ENC-15 (2026-09-02) tested the precondition on this box and it
+      // failed: the touchscreen leaves the USB bus when the panel powers down, so no touch event can
+      // be generated while dark, and the encoder has no evdev node so it cannot wake the compositor
+      // either. That leaves one application-mediated wake path where two were required.
       // await SetDisplayPowerAsync(false);
 
       _logger.LogInformation("Sleep mode entered");
@@ -107,19 +196,24 @@ public class SleepService : ISleepService
     await _lock.WaitAsync();
     try
     {
-      if (!_isSleeping)
+      // Two ways to be somewhere other than Awake, and only one of them parked audio. Standby has
+      // playback to restore; Ambient has nothing but a browser to send home. Both need the
+      // broadcast, so both fall through.
+      bool wasSleeping = _isSleeping;
+      if (!wasSleeping && !_isSleepScreenVisible)
       {
+        Interlocked.Exchange(ref _wakeClaimed, 0);
         return;
       }
 
       _logger.LogInformation("Waking from sleep mode (source: {WakeSource})", wakeSource);
 
-      // NOTE: Hardware DPMS wake disabled — see sleep comment above.
+      // Hardware DPMS wake stays off - see the note in EnterSleepAsync.
       // await SetDisplayPowerAsync(true);
 
       _isSleeping = false;
 
-      if (_audioManager != null)
+      if (wasSleeping && _audioManager != null)
       {
         // Restore pre-sleep mute state
         _audioManager.IsMuted = _wasMutedBeforeSleep;
@@ -153,9 +247,16 @@ public class SleepService : ISleepService
   }
 
   /// <summary>
-  /// Controls the physical display via GNOME ScreenSaver D-Bus (DPMS on/off).
-  /// Runs as the desktop session user to reach the GNOME session bus.
-  /// Fails silently on non-Linux or non-GNOME environments.
+  /// Controls the physical display via GNOME ScreenSaver D-Bus.
+  ///
+  /// <para>
+  /// ⚠ <b>Nothing calls this, deliberately</b> (see the class remarks). It is retained as the
+  /// recorded shape of the thing <c>ENC-15</c> ruled out, so the FUTURE-WORK entry explaining why
+  /// blanking does not ship points at real code. Two further reasons not to revive it as written:
+  /// the ScreenSaver route <b>does not reach DPMS-off</b> — <c>ENC-15</c> found the panel dark with
+  /// <c>dpms=Off</c> while the screensaver reported inactive — and it needs the desktop session bus,
+  /// which it reaches by shelling out as another user.
+  /// </para>
   /// </summary>
   private async Task SetDisplayPowerAsync(bool on)
   {

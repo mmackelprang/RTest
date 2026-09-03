@@ -232,4 +232,126 @@ public class SystemControllerTests : IClassFixture<CustomWebApplicationFactory<P
       }
     }
   }
+
+  // --- ENC-6: the sleep-screen endpoint and the three-state response ---------------------------
+  //
+  // These drive the real endpoints through the class fixture's HttpClient, because that is what
+  // this class is: there is no controller-construction helper to reuse. That also makes them the
+  // only automated cover for the JSON shape the Web deserializes.
+
+  /// <summary>
+  /// Puts the console back in Awake through the same endpoints the facts below exercise.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The fixture's host is shared by every fact in this class and <c>SleepService</c> is a
+  /// singleton, so sleep state written by one fact is still set when the next one runs. Each sleep
+  /// fact therefore resets on the way in <b>and</b> in a <c>finally</c> on the way out, rather than
+  /// relying on an execution order xUnit does not promise.
+  /// </remarks>
+  private async Task ResetSleepStateAsync()
+  {
+    await _client.PostAsJsonAsync("/api/system/sleep", new { sleep = false });
+    await _client.PostAsJsonAsync("/api/system/sleep-screen", new { visible = false });
+  }
+
+  [Fact]
+  public async Task GetSleepState_ReportsBothTheAudioTruthAndTheWakeState()
+  {
+    await ResetSleepStateAsync();
+    try
+    {
+      var response = await _client.GetAsync("/api/system/sleep");
+
+      Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+      var body = await response.Content.ReadFromJsonAsync<SleepStateResponse>();
+      Assert.NotNull(body);
+      Assert.False(body!.IsSleeping);
+      Assert.Equal("Awake", body.WakeState);
+    }
+    finally
+    {
+      await ResetSleepStateAsync();
+    }
+  }
+
+  [Fact]
+  public async Task SetSleepScreenVisible_True_PutsTheConsoleInAmbientAndSaysSo()
+  {
+    // This is the call the /sleep page makes on first render, and the response is how the page
+    // learns which hint to draw without a second round trip.
+    await ResetSleepStateAsync();
+    try
+    {
+      var response = await _client.PostAsJsonAsync(
+        "/api/system/sleep-screen", new { visible = true });
+
+      Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+      var body = await response.Content.ReadFromJsonAsync<SleepStateResponse>();
+      Assert.NotNull(body);
+      Assert.Equal("Ambient", body!.WakeState);
+      Assert.False(body.IsSleeping);
+
+      // The flag is recorded, not merely echoed: a second, independent request sees it too.
+      var followUp = await _client.GetFromJsonAsync<SleepStateResponse>("/api/system/sleep");
+      Assert.Equal("Ambient", followUp!.WakeState);
+    }
+    finally
+    {
+      await ResetSleepStateAsync();
+    }
+  }
+
+  [Fact]
+  public async Task SetSleepScreenVisible_True_WhileSleeping_ReportsStandby()
+  {
+    await ResetSleepStateAsync();
+    try
+    {
+      await _client.PostAsJsonAsync("/api/system/sleep", new { sleep = true });
+
+      var response = await _client.PostAsJsonAsync(
+        "/api/system/sleep-screen", new { visible = true });
+
+      Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+      var body = await response.Content.ReadFromJsonAsync<SleepStateResponse>();
+      Assert.NotNull(body);
+      Assert.Equal("Standby", body!.WakeState);
+      Assert.True(body.IsSleeping);
+    }
+    finally
+    {
+      await ResetSleepStateAsync();
+    }
+  }
+
+  [Fact]
+  public async Task SetSleepScreenVisible_SendsTheWakeStateAsAStringOnTheWire()
+  {
+    // ENC-8's lesson, pinned on the wire rather than on a typed read: the enum crosses as a
+    // string. The typed deserialization above would accept a numeric wakeState just as happily,
+    // and the Web's string-typed DTO would then hold a value it can never match against
+    // nameof(ConsoleWakeState.Standby).
+    //
+    // The 501 branch SetSleepScreenVisible carries for a missing sleep service is deliberately not
+    // covered here: Program.cs always registers SleepService, so it is unreachable through this
+    // host. It stays in the controller because it matches the shipped POST /api/system/sleep
+    // posture rather than inventing a second one.
+    await ResetSleepStateAsync();
+    try
+    {
+      var response = await _client.PostAsJsonAsync(
+        "/api/system/sleep-screen", new { visible = true });
+
+      // Whitespace-stripped so the assertion pins the shape rather than the serializer's
+      // formatting settings.
+      string json = new string(
+        (await response.Content.ReadAsStringAsync()).Where(c => !char.IsWhiteSpace(c)).ToArray());
+
+      Assert.Contains("\"wakeState\":\"Ambient\"", json);
+    }
+    finally
+    {
+      await ResetSleepStateAsync();
+    }
+  }
 }

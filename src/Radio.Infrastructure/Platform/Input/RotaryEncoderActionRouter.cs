@@ -58,6 +58,7 @@ public class RotaryEncoderActionRouter : IDisposable
   // land beside the wrong knob after a remap.
   private readonly Action<int, int>[] _turnHandlers;
   private readonly Action<int>[] _pressHandlers;
+  private readonly Action<int>[] _currentValuePublishers;
 
   /// <summary>
   /// What each knob currently does. <b>This is the table the router dispatches through</b>, not a
@@ -110,6 +111,18 @@ public class RotaryEncoderActionRouter : IDisposable
     _turnHandlers = [HandleVolumeTurn, HandleSourceTurn, HandlePresetsTurn, HandleTuningTurn];
     _pressHandlers = [HandleVolumePress, HandleSourcePress, HandlePresetsPress, HandleTuningPress];
 
+    // The third and fourth arrays in this block, and they are reordered together or not at all.
+    // This one renders what a knob currently reads when the sleep model spends its input on a wake
+    // (handoff 8.3). The index is threaded in rather than baked into each publisher so the ENC-5 /
+    // ENC-7 remap moves entries here and leaves no literal behind to chase.
+    //
+    // The order below is 0=Volume, 1=SOURCE, 2=PRESETS, 3=Tuning, matching _turnHandlers and
+    // _pressHandlers above. ENC-6's plan spelled a different literal again because it was written
+    // before ENC-5 merged, and index 2 then moved a SECOND time when ENC-7 replaced the visualiser
+    // with PRESETS - which is exactly why TheFourDispatchArraysAgreeInOrder pins the label per
+    // index rather than the index alone. The shipped tables are what this has to agree with.
+    _currentValuePublishers = [PublishCurrentVolume, PublishCurrentSource, PublishCurrentPresets, PublishCurrentTuning];
+
     // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
     // EncoderButtonEventArgs document.
     _gesture = new EncoderLongPressGesture(4, logger, timeProvider);
@@ -151,9 +164,15 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
-      // If sleeping, wake on any encoder input and consume the event
-      if (TryWakeFromSleep("encoder-turn"))
+      SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: true);
+      if (gate != SleepGateOutcome.Dispatch)
       {
+        PublishCurrentValue(e.EncoderIndex);
+        if (gate == SleepGateOutcome.ConsumeAndWake && _sleepService is not null)
+        {
+          _ = _sleepService.WakeAsync("encoder-turn");
+          _logger.LogInformation("Woke via encoder-turn on encoder {Index}", e.EncoderIndex);
+        }
         return;
       }
 
@@ -179,16 +198,27 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
-      // Both edges matter now. The short action fires on release and the long action fires at the
+      // Both edges matter. The short action fires on release and the long action fires at the
       // threshold while still held, so this handler routes the edge and leaves the choice of action
       // to the gesture.
       //
-      // The sleep-wake consumption stays on the PRESS edge: waking is what the input is spent on,
-      // and letting the release through would fire a short action into a UI that has just changed
-      // underneath the user.
-      if (e.IsPressed && TryWakeFromSleep("encoder-button"))
+      // The sleep gate is applied to the PRESS edge only: waking is what the input is spent on, and
+      // letting the release through would fire a short action into a UI that has just changed
+      // underneath the user. The release that follows a consumed press reaches the gesture and is
+      // dropped by its orphan-release guard, which exists for exactly this path.
+      if (e.IsPressed)
       {
-        return;
+        SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: false);
+        if (gate != SleepGateOutcome.Dispatch)
+        {
+          PublishCurrentValue(e.EncoderIndex);
+          if (gate == SleepGateOutcome.ConsumeAndWake && _sleepService is not null)
+          {
+            _ = _sleepService.WakeAsync("encoder-button");
+            _logger.LogInformation("Woke via encoder-button on encoder {Index}", e.EncoderIndex);
+          }
+          return;
+        }
       }
 
       _gesture.OnButtonEdge(e.EncoderIndex, e.IsPressed);
@@ -344,18 +374,160 @@ public class RotaryEncoderActionRouter : IDisposable
   }
 
   /// <summary>
-  /// Checks if the system is sleeping and wakes it if so.
+  /// What the sleep model does with one encoder input, decided before any handler runs.
   /// </summary>
-  private bool TryWakeFromSleep(string wakeSource)
+  private enum SleepGateOutcome
   {
-    if (_sleepService == null || !_sleepService.IsSleeping)
+    /// <summary>Run the handler. The console is awake, or this is VOLUME on the lit Ambient clock.</summary>
+    Dispatch,
+
+    /// <summary>Spend this input waking: publish this knob's current value, start the wake, run no handler.</summary>
+    ConsumeAndWake,
+
+    /// <summary>Spend this input: publish this knob's current value, run no handler, and do not wake.</summary>
+    Consume,
+  }
+
+  /// <summary>
+  /// Applies handoff §8.3's two surviving columns to one input.
+  ///
+  /// <para>
+  /// Rule 2 on a lit panel: VOLUME acts in place and everything else is spent waking. Standby adds
+  /// D22 on top of it — a <b>turn</b> never resumes audio, only a press or a screen tap does — so a
+  /// turn there is consumed without a wake. <b>The two dark states are withdrawn by
+  /// <c>ENC-15</c></b>, so Rule 1 has no reachable state and appears nowhere below.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ <paramref name="index"/> is compared against
+  /// <see cref="RotaryEncoderConfigDefaults.VolumeEncoderIndex"/> and nothing else, which is why
+  /// this survives the ENC-5 / ENC-7 remap: index 0 is VOLUME under both the current handler table
+  /// and the remapped one, and every other index reaches the same branch.
+  /// </para>
+  /// </summary>
+  private SleepGateOutcome GateInput(int index, bool isTurn)
+  {
+    if (_sleepService is null)
     {
-      return false;
+      return SleepGateOutcome.Dispatch;
     }
 
-    _ = _sleepService.WakeAsync(wakeSource);
-    _logger.LogInformation("Woke from sleep via {WakeSource}", wakeSource);
-    return true;
+    switch (_sleepService.WakeState)
+    {
+      case ConsoleWakeState.Ambient when index == RotaryEncoderConfigDefaults.VolumeEncoderIndex:
+        // The handler runs and publishes as usual; the card lands on Sleep.razor's own HUD host,
+        // which is why this needs no code of its own.
+        return SleepGateOutcome.Dispatch;
+
+      case ConsoleWakeState.Standby when isTurn:
+        return SleepGateOutcome.Consume;
+
+      case ConsoleWakeState.Ambient:
+      case ConsoleWakeState.Standby:
+        // A lost claim means an earlier input in this same burst already started the wake, so
+        // WakeState now reads Awake and dispatching is the correct answer rather than a fallback:
+        // a fast spin must lose one detent, not twelve.
+        return _sleepService.TryClaimWake()
+          ? SleepGateOutcome.ConsumeAndWake
+          : SleepGateOutcome.Dispatch;
+
+      default:
+        return SleepGateOutcome.Dispatch;
+    }
+  }
+
+  /// <summary>
+  /// Renders what this knob currently reads, without changing it.
+  ///
+  /// <para>
+  /// Handoff §8.3 — <i>the first detent tells you where you are; the second one moves it.</i> A knob
+  /// whose input is spent on a wake and which shows nothing is indistinguishable from a broken one,
+  /// and the user's response to that silence is to turn it harder (§3 principle 1).
+  /// </para>
+  /// </summary>
+  private void PublishCurrentValue(int index)
+  {
+    if (index < 0 || index >= _currentValuePublishers.Length)
+    {
+      return;
+    }
+
+    try
+    {
+      _currentValuePublishers[index](index);
+    }
+    catch (Exception ex)
+    {
+      // The input has already been spent and the wake still has to happen, so a cosmetic readout
+      // must not take it down.
+      _logger.LogError(ex, "Error publishing the current value for encoder {Index}", index);
+    }
+  }
+
+  private void PublishCurrentVolume(int index)
+  {
+    var mgr = _audioManagerFactory();
+    PublishHud(index, "VOLUME", b =>
+    {
+      b.VolumePercent = (int)Math.Round(mgr.MasterVolume * 100f);
+      b.IsMuted = mgr.IsMuted;
+    });
+  }
+
+  private void PublishCurrentTuning(int index)
+  {
+    var mgr = _audioManagerFactory();
+    if (mgr.ActiveSource is IRadioControl radio)
+    {
+      PublishHud(index, "TUNING", b =>
+      {
+        b.PrimaryText = radio.CurrentFrequency.ToDisplayString();
+        b.SecondaryText = radio.CurrentBand.ToString().ToUpperInvariant();
+        b.PrimaryIsFrequency = true;
+      });
+      return;
+    }
+
+    PublishHud(index, "TRACK", b =>
+    {
+      b.PrimaryText = mgr.ActiveSource?.Name;
+      b.SecondaryText = "no track control on this source";
+    });
+  }
+
+  private void PublishCurrentSource(int index)
+  {
+    var mgr = _audioManagerFactory();
+
+    // The ACTIVE source, not _currentSourceIndex. Handoff 8.3 asks for "what is currently
+    // selected", and the cycler's cursor is where an uncommitted preview left it, which can be a
+    // source the console is not playing.
+    PublishHud(index, "SOURCE", b =>
+      b.PrimaryText = mgr.ActiveSource?.Name.ToUpperInvariant() ?? "NONE");
+  }
+
+  /// <summary>
+  /// The PRESETS readout for a consumed input.
+  ///
+  /// <para>
+  /// ⚠ <b>Label only, and that is a deliberate limit rather than an oversight.</b> Handoff §8.3 asks
+  /// a consumed input to show "what is currently selected", which for the other three knobs is a
+  /// value already in memory. The preset bank is not: <see cref="PresetSelectorService"/> reads it
+  /// through a scoped service on a background path precisely because, in its own words, blocking the
+  /// HID read loop on a database read is how a knob becomes laggy. This method runs <i>on</i> that
+  /// loop, so it must not read the bank, and naming a row it has not read would be worse than
+  /// naming none.
+  /// </para>
+  ///
+  /// <para>
+  /// The label alone still satisfies what the readout exists for — handoff §3 principle 1, that no
+  /// knob may be inert in a reachable state. <c>EncoderHud</c> renders <c>card.Label</c>
+  /// unconditionally on the Value phase, so this draws a visible card beside the PRESETS knob.
+  /// </para>
+  /// </summary>
+  private void PublishCurrentPresets(int index)
+  {
+    PublishHud(index, "PRESETS", _ => { });
   }
 
   /// <summary>

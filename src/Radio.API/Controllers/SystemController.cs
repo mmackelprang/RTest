@@ -495,13 +495,13 @@ public class SystemController : ControllerBase
   }
 
   /// <summary>
-  /// Gets the current sleep/standby state.
+  /// Gets the current sleep/standby state, as both the audio truth and the three-state model.
   /// </summary>
   [HttpGet("sleep")]
-  [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+  [ProducesResponseType(typeof(SleepStateResponse), StatusCodes.Status200OK)]
   public IActionResult GetSleepState()
   {
-    return Ok(new { isSleeping = _sleepService?.IsSleeping ?? false });
+    return Ok(BuildSleepState());
   }
 
   /// <summary>
@@ -526,6 +526,48 @@ public class SystemController : ControllerBase
     }
 
     return Ok(new { isSleeping = _sleepService.IsSleeping });
+  }
+
+  /// <summary>
+  /// Reports whether the <c>/sleep</c> route is on screen, and answers with the resulting state.
+  /// </summary>
+  /// <remarks>
+  /// Called by the sleep page itself on first render and on dispose, and by <c>MainLayout</c> on
+  /// first render to report the opposite. That is what makes all three ways of reaching
+  /// <c>/sleep</c> - the idle timer, the Sleep pill, and a direct navigation - produce the same
+  /// server-side fact, so a knob turned on the idle clock is no longer in a different state from a
+  /// knob turned on the pill clock.
+  ///
+  /// <para>
+  /// It changes no audio. Ambient is defined by playback continuing, so a call reporting the screen
+  /// visible must never pause anything.
+  /// </para>
+  /// </remarks>
+  [HttpPost("sleep-screen")]
+  [ProducesResponseType(typeof(SleepStateResponse), StatusCodes.Status200OK)]
+  public IActionResult SetSleepScreenVisible([FromBody] SetSleepScreenVisibleRequest request)
+  {
+    if (_sleepService == null)
+    {
+      return StatusCode(501, new { error = "Sleep service not available" });
+    }
+
+    _sleepService.SetSleepScreenVisible(request.Visible);
+    return Ok(BuildSleepState());
+  }
+
+  private SleepStateResponse BuildSleepState()
+  {
+    if (_sleepService == null)
+    {
+      return new SleepStateResponse();
+    }
+
+    return new SleepStateResponse
+    {
+      IsSleeping = _sleepService.IsSleeping,
+      WakeState = _sleepService.WakeState.ToString(),
+    };
   }
 
   /// <summary>

@@ -110,10 +110,9 @@
     }
   </div>
 
-  @* TODO(ENC-6): handoff §8.6 asks for a Standby-specific hint — `hold VOLUME or press any knob
-     to turn on` — which needs the Ambient-vs-Standby distinction ENC-6 introduces. Until that
-     state model exists there is nothing here to branch on, so the line stays as it is. *@
-  <div class="sleep-screen-hint">tap anywhere to wake</div>
+  @* Handoff §8.6. In Standby a tap does something different from a turn — a tap or a press resumes,
+     a turn only answers where you are — and this line is the only place on screen that can say so. *@
+  <div class="sleep-screen-hint">@HintText</div>
 </div>
 
 @code {
@@ -160,6 +159,28 @@
   private const double DriftAmplitudeY = 0.20; // fraction of viewport height
   private string _shiftStyle = "--sleep-shift-x: 0px; --sleep-shift-y: 0px;";
   private readonly Random _drift = new();
+
+  // ENC-6. Which of the three states the server says this screen is in. Defaults to the Ambient
+  // copy: a failed report must not put the Standby hint on a console whose audio is still playing.
+  private string _wakeState = nameof(Radio.Core.Interfaces.ConsoleWakeState.Ambient);
+
+  // Set as soon as the report is issued - deliberately before it is awaited, so a dispose that
+  // lands while the POST is still in flight still retracts it. What it guards is the prerender
+  // pass, which renders and disposes without ever reaching OnAfterRenderAsync: that instance never
+  // sets this, so it cannot clear a flag it never reported.
+  private bool _reportedVisible;
+
+  /// <summary>
+  /// ENC-6 deviation D-1: the Standby line names the tap, which handoff §8.6's copy omits. §8.3's
+  /// own table says a screen touch in Standby resumes, so a line reading only "hold VOLUME or press
+  /// any knob" would have the screen assert something false by omission on a touchscreen. Any wake
+  /// state this build does not recognise falls back to the Ambient line — the same open-string rule
+  /// §6.10 sets for the HUD phase.
+  /// </summary>
+  private string HintText =>
+    _wakeState == nameof(Radio.Core.Interfaces.ConsoleWakeState.Standby)
+      ? "tap anywhere, or press any knob, to turn on"
+      : "tap anywhere to wake";
 
   protected override async Task OnInitializedAsync()
   {
@@ -219,6 +240,40 @@
     {
       Logger.LogDebug(ex, "Sleep screen could not hydrate now-playing state");
     }
+  }
+
+  /// <summary>
+  /// ENC-6. Tells the server this route is on screen.
+  ///
+  /// <para>
+  /// This is what collapses the two <c>/sleep</c> states into one. Reached by the idle timer the
+  /// server previously knew nothing at all, so every knob acted normally on a screen showing a
+  /// clock; reached by the Sleep pill it knew only that audio was parked. Reporting from the page
+  /// means all three routes in — the idle timer, the pill, and a direct navigation — produce the
+  /// same fact.
+  /// </para>
+  ///
+  /// <para>
+  /// <c>OnAfterRenderAsync</c> rather than <c>OnInitializedAsync</c> because the latter also runs
+  /// during prerender, where a matching dispose would immediately retract the report.
+  /// </para>
+  /// </summary>
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (!firstRender)
+    {
+      return;
+    }
+
+    _reportedVisible = true;
+    var state = await SystemApi.SetSleepScreenVisibleAsync(true);
+    if (state is null || _disposed)
+    {
+      return;
+    }
+
+    _wakeState = state.WakeState;
+    await InvokeAsync(StateHasChanged);
   }
 
   // The clock text is rebuilt every 1 s. We read DisplayOptionsMonitor.CurrentValue
@@ -396,9 +451,15 @@
 
   /// <summary>
   /// If the server (or another tab) flips wake while we're on /sleep, follow
-  /// it home so the route doesn't linger behind an awake system. Idempotent —
+  /// it home so the route doesn't linger behind an already-awake system. Idempotent —
   /// firing on a wake we initiated is harmless because we already navigated
   /// away in HandleWakeAsync.
+  ///
+  /// <para>
+  /// ENC-6: the sleeping edge is no longer a no-op. Audio has just been parked while this page was
+  /// already up — the Sleep pill on another tab, or a VOLUME long-press on the cabinet — so the
+  /// screen is now in Standby and the hint has to say what a tap does there.
+  /// </para>
   /// </summary>
   private Task OnSleepStateChanged(bool isSleeping)
   {
@@ -406,7 +467,17 @@
     {
       return InvokeAsync(() => Nav.NavigateTo("/"));
     }
-    return Task.CompletedTask;
+
+    return InvokeAsync(() =>
+    {
+      if (_disposed)
+      {
+        return;
+      }
+
+      _wakeState = nameof(Radio.Core.Interfaces.ConsoleWakeState.Standby);
+      StateHasChanged();
+    });
   }
 
   // ENC-4. EncoderHudService raises this from whichever thread published — the 1500 ms dismissal
@@ -446,6 +517,29 @@
   public async ValueTask DisposeAsync()
   {
     _disposed = true;
+
+    if (_reportedVisible)
+    {
+      // Best effort, and deliberately time-boxed. A hard browser navigation can tear the circuit
+      // down before this lands, which is why MainLayout reports the opposite on its own first
+      // render; between them the flag recovers on the next layout render, and the worst case is one
+      // knob input consumed on the way out.
+      //
+      // The timeout is the point of the CTS: this await sits on the teardown path of the page the
+      // user has just tapped to leave, on a box whose API shares a WiFi link with everything else.
+      // Without a bound, an API that is slow rather than down would hold the dispose - and the
+      // navigation the user is waiting on - for the HttpClient's full default timeout.
+      try
+      {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await SystemApi.SetSleepScreenVisibleAsync(false, cts.Token);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogDebug(ex, "Could not report the sleep screen hidden during dispose");
+      }
+    }
+
     AudioState.NowPlayingChanged -= OnNowPlayingChanged;
     AudioState.SleepStateChanged -= OnSleepStateChanged;
     EncoderHud.StateChanged -= OnEncoderHudChanged;

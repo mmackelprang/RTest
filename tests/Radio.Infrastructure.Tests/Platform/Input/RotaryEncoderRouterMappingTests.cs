@@ -69,13 +69,40 @@ public class RotaryEncoderRouterMappingTests
 
   private sealed class FakeSleepService : ISleepService
   {
+    private int _wakeClaimed;
+
     public bool IsSleeping { get; set; }
+    public bool IsSleepScreenVisible { get; set; }
     public int EnterSleepCalls { get; private set; }
     public int WakeCalls { get; private set; }
+    public int ClaimAttempts { get; private set; }
+
+    /// <summary>
+    /// Mirrors the shipped derivation in <c>SleepService</c>, claim latch included, so a router test
+    /// exercises the same three-way decision the box does rather than a simplified one.
+    /// </summary>
+    public ConsoleWakeState WakeState
+    {
+      get
+      {
+        if (Volatile.Read(ref _wakeClaimed) == 1)
+        {
+          return ConsoleWakeState.Awake;
+        }
+
+        if (IsSleeping)
+        {
+          return ConsoleWakeState.Standby;
+        }
+
+        return IsSleepScreenVisible ? ConsoleWakeState.Ambient : ConsoleWakeState.Awake;
+      }
+    }
 
     public Task EnterSleepAsync()
     {
       EnterSleepCalls++;
+      Interlocked.Exchange(ref _wakeClaimed, 0);
       return Task.CompletedTask;
     }
 
@@ -83,6 +110,29 @@ public class RotaryEncoderRouterMappingTests
     {
       WakeCalls++;
       return Task.CompletedTask;
+    }
+
+    public void SetSleepScreenVisible(bool visible)
+    {
+      // Edge-triggered, mirroring the shipped SleepService. If these two ever disagree, every gate
+      // test above is exercising a policy the box does not run.
+      bool changed = IsSleepScreenVisible != visible;
+      IsSleepScreenVisible = visible;
+      if (changed)
+      {
+        Interlocked.Exchange(ref _wakeClaimed, 0);
+      }
+    }
+
+    public bool TryClaimWake()
+    {
+      ClaimAttempts++;
+      if (WakeState == ConsoleWakeState.Awake)
+      {
+        return false;
+      }
+
+      return Interlocked.CompareExchange(ref _wakeClaimed, 1, 0) == 0;
     }
   }
 
@@ -568,7 +618,15 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.Equal(1, h.Sleep.WakeCalls);
     Assert.False(h.Audio.IsMuted);
-    Assert.Empty(h.Hud.Published);
+    Assert.Equal(0, h.Audio.MuteWrites);
+    // ENC-6 inverts the last assertion of this fact deliberately. It used to be
+    // Assert.Empty(h.Hud.Published) - written when a consumed input produced nothing at all. A
+    // consumed input now answers "where am I" without changing anything (handoff 8.3), so the card
+    // is the deliverable and MuteWrites above is what carries the "no action fired" half.
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(0, card.EncoderIndex);
+    Assert.Equal("VOLUME", card.Label);
+    Assert.Equal(EncoderHudPhase.Value, card.Phase);
   }
 
   // --- ENC-7: the PRESETS knob -----------------------------------------------------------------
@@ -730,5 +788,208 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.False(h.PresetSelector.IsOpen);
     Assert.Empty(h.Audio.GetOrCreateCalls);
+  }
+
+  // --- The sleep gate (ENC-6, handoff 8.3) --------------------------------------------------
+
+  [Fact]
+  public void Ambient_VolumeTurn_ActsInPlace()
+  {
+    // Rule 2. The lit clock is the one state where a knob still changes the machine, and it is the
+    // knob whose readout the sleep screen was already built to host.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.True(h.Audio.MasterVolume > 0.5f);
+  }
+
+  [Fact]
+  public void Ambient_SourceTurn_IsConsumedAndWakes()
+  {
+    // Renamed from the plan's Ambient_TuningTurn_IsConsumedAndWakes: index 1 was TUNING when the
+    // plan was written and is SOURCE since ENC-5 merged. The index and the assertions are the
+    // plan's; only the name moved, so it says what it actually exercises.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+    h.Audio.ActiveSource = null;
+
+    h.Encoders.RaiseTurn(1, 1);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Ambient_ASecondTurnDuringTheWake_Acts()
+  {
+    // The latch, from the router's side. The browser has not left /sleep yet, so IsSleepScreenVisible
+    // is still true - but the claim is spent, so the second detent must reach its handler.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(1, 1);
+    h.Encoders.RaiseTurn(1, 1);
+    h.Encoders.RaiseTurn(1, 1);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+    Assert.Equal(ConsoleWakeState.Awake, h.Sleep.WakeState);
+  }
+
+  [Fact]
+  public void Standby_ATurn_DoesNotResumeAudio()
+  {
+    // D22, verbatim: "a turn is what a passing sleeve does; a press is what a person does."
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(1, 1);
+    h.Encoders.RaiseTurn(2, 1);
+    h.Encoders.RaiseTurn(3, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0.5f, h.Audio.MasterVolume);
+    Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  [Fact]
+  public void Standby_APress_Resumes()
+  {
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseButton(2, isPressed: true);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Standby_APressAfterATurn_StillResumes()
+  {
+    // The turn must not have burned the claim - otherwise a sleeve brushing a knob would leave the
+    // console unable to be turned on by the press that follows it.
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(3, 1);
+    h.Encoders.RaiseButton(0, isPressed: true);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Ambient_VolumeLongPress_StillEntersStandby()
+  {
+    // 8.3's Ambient column keeps encoder 0 fully live, hold included. This is the one path from the
+    // clock into Standby that does not involve the topbar.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+
+    Assert.Equal(1, h.Sleep.EnterSleepCalls);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Awake_NothingIsConsumed()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
+  }
+
+  // --- A consumed input still says where you are (ENC-6, handoff 8.3) ------------------------
+
+  [Fact]
+  public void Standby_AConsumedTurn_PublishesThatKnobsCurrentValueWithoutChangingIt()
+  {
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+    h.Audio.MasterVolume = 0.62f;
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(0, card.EncoderIndex);
+    Assert.Equal("VOLUME", card.Label);
+    Assert.Equal(62, card.VolumePercent);
+    Assert.Equal(0.62f, h.Audio.MasterVolume);
+  }
+
+  [Fact]
+  public void Ambient_AConsumedTurn_PublishesOnItsOwnBand()
+  {
+    // The card has to appear beside the knob that was turned, not beside the knob that woke the
+    // console - the geometry keys off the index the event arrived on.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+    h.Audio.ActiveSource = null;
+
+    h.Encoders.RaiseTurn(3, 1);
+
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(3, card.EncoderIndex);
+  }
+
+  [Fact]
+  public void ConsumedTurnsInStandby_KeepAnswering_TheyDoNotFallSilentAfterTheFirst()
+  {
+    // D22 makes a turn in Standby permanently consumed, so "spend one and stop rendering" would
+    // leave three knobs looking broken for the whole standby.
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(3, h.Hud.Published.Count);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+  }
+
+  [Theory]
+  [InlineData(0, "VOLUME")]
+  [InlineData(1, "SOURCE")]
+  [InlineData(2, "PRESETS")]
+  [InlineData(3, "TUNING")]
+  public void TheFourDispatchArraysAgreeInOrder(int index, string expectedLabel)
+  {
+    // The ENC-5 / ENC-7 remap reorders _turnHandlers and _pressHandlers. _currentValuePublishers is
+    // the fourth array beside them; a remap that reorders three of four is the exact failure this
+    // pins - it would put a TUNING readout on the SOURCE band with nothing else disagreeing.
+    //
+    // The LABEL is what pins the order, not the index. Every PublishCurrent* method takes the index
+    // as a parameter and threads it straight into the card, so EncoderIndex reads correctly no
+    // matter which publisher ran - asserting only that would pass against a fully shuffled array
+    // and catch nothing but a length mismatch. The expectations below are deliberately the same
+    // four labels EncoderTurn_PublishesACardLabelledForThatKnob pins for the acting path, because
+    // the consumed readout answering a different word than the knob's own handler is the defect.
+    using var h = new Harness();
+
+    Assert.Equal(FrontPanelGeometry.EncoderCount, h.Router.Mapping.Count);
+
+    // A tuner is active so index 3 takes its radio branch; without one it publishes TRACK, which is
+    // the no-radio fallback rather than this knob's identity.
+    h.WithActiveRadio();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(index, 1);
+
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(index, card.EncoderIndex);
+    Assert.Equal(expectedLabel, card.Label);
   }
 }
