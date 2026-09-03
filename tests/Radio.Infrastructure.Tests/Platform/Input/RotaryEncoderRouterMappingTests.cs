@@ -600,7 +600,15 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.Equal(1, h.Sleep.WakeCalls);
     Assert.False(h.Audio.IsMuted);
-    Assert.Empty(h.Hud.Published);
+    Assert.Equal(0, h.Audio.MuteWrites);
+    // ENC-6 inverts the last assertion of this fact deliberately. It used to be
+    // Assert.Empty(h.Hud.Published) - written when a consumed input produced nothing at all. A
+    // consumed input now answers "where am I" without changing anything (handoff 8.3), so the card
+    // is the deliverable and MuteWrites above is what carries the "no action fired" half.
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(0, card.EncoderIndex);
+    Assert.Equal("VOLUME", card.Label);
+    Assert.Equal(EncoderHudPhase.Value, card.Phase);
   }
 
   // --- ENC-7: the PRESETS knob -----------------------------------------------------------------
@@ -880,5 +888,79 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.Equal(0, h.Sleep.WakeCalls);
     Assert.Equal(0, h.Sleep.ClaimAttempts);
+  }
+
+  // --- A consumed input still says where you are (ENC-6, handoff 8.3) ------------------------
+
+  [Fact]
+  public void Standby_AConsumedTurn_PublishesThatKnobsCurrentValueWithoutChangingIt()
+  {
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+    h.Audio.MasterVolume = 0.62f;
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(0, card.EncoderIndex);
+    Assert.Equal("VOLUME", card.Label);
+    Assert.Equal(62, card.VolumePercent);
+    Assert.Equal(0.62f, h.Audio.MasterVolume);
+  }
+
+  [Fact]
+  public void Ambient_AConsumedTurn_PublishesOnItsOwnBand()
+  {
+    // The card has to appear beside the knob that was turned, not beside the knob that woke the
+    // console - the geometry keys off the index the event arrived on.
+    using var h = new Harness();
+    h.Sleep.SetSleepScreenVisible(true);
+    h.Audio.ActiveSource = null;
+
+    h.Encoders.RaiseTurn(3, 1);
+
+    var card = Assert.Single(h.Hud.Published);
+    Assert.Equal(3, card.EncoderIndex);
+  }
+
+  [Fact]
+  public void ConsumedTurnsInStandby_KeepAnswering_TheyDoNotFallSilentAfterTheFirst()
+  {
+    // D22 makes a turn in Standby permanently consumed, so "spend one and stop rendering" would
+    // leave three knobs looking broken for the whole standby.
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.SetSleepScreenVisible(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(3, h.Hud.Published.Count);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void TheFourDispatchArraysAgreeInLength()
+  {
+    // The ENC-5 / ENC-7 remap reorders _turnHandlers and _pressHandlers. This is the third and
+    // fourth array beside them; a remap that reorders three of four is the exact failure this
+    // pins - it would put a TUNING readout on the SOURCE band with nothing else disagreeing.
+    using var h = new Harness();
+
+    Assert.Equal(FrontPanelGeometry.EncoderCount, h.Router.Mapping.Count);
+
+    for (int i = 0; i < FrontPanelGeometry.EncoderCount; i++)
+    {
+      h.Hud.Published.Clear();
+      h.Sleep.IsSleeping = true;
+      h.Sleep.SetSleepScreenVisible(true);
+
+      h.Encoders.RaiseTurn(i, 1);
+
+      var card = Assert.Single(h.Hud.Published);
+      Assert.Equal(i, card.EncoderIndex);
+    }
   }
 }

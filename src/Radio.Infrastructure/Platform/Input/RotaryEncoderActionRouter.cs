@@ -58,6 +58,7 @@ public class RotaryEncoderActionRouter : IDisposable
   // land beside the wrong knob after a remap.
   private readonly Action<int, int>[] _turnHandlers;
   private readonly Action<int>[] _pressHandlers;
+  private readonly Action<int>[] _currentValuePublishers;
 
   /// <summary>
   /// What each knob currently does. <b>This is the table the router dispatches through</b>, not a
@@ -109,6 +110,17 @@ public class RotaryEncoderActionRouter : IDisposable
     ];
     _turnHandlers = [HandleVolumeTurn, HandleSourceTurn, HandlePresetsTurn, HandleTuningTurn];
     _pressHandlers = [HandleVolumePress, HandleSourcePress, HandlePresetsPress, HandleTuningPress];
+
+    // The third and fourth arrays in this block, and they are reordered together or not at all.
+    // This one renders what a knob currently reads when the sleep model spends its input on a wake
+    // (handoff 8.3). The index is threaded in rather than baked into each publisher so the ENC-5 /
+    // ENC-7 remap moves entries here and leaves no literal behind to chase.
+    //
+    // The order below is 0=Volume, 1=Source, 2=Visualization, 3=Tuning, matching _turnHandlers and
+    // _pressHandlers above. ENC-6's plan spelled a different literal because it was written before
+    // ENC-5 merged; the shipped tables are what this has to agree with, and
+    // TheFourDispatchArraysAgreeInLength is what fails if it ever stops.
+    _currentValuePublishers = [PublishCurrentVolume, PublishCurrentSource, PublishCurrentViz, PublishCurrentTuning];
 
     // Four channels, matching the 0-3 index range EncoderTurnedEventArgs and
     // EncoderButtonEventArgs document.
@@ -423,10 +435,79 @@ public class RotaryEncoderActionRouter : IDisposable
     }
   }
 
-  // Task 6 replaces this body with the real readout. It is a no-op for exactly one commit so the
-  // gate can be reviewed on its own; the tests that force it to publish are in Task 6.
+  /// <summary>
+  /// Renders what this knob currently reads, without changing it.
+  ///
+  /// <para>
+  /// Handoff §8.3 — <i>the first detent tells you where you are; the second one moves it.</i> A knob
+  /// whose input is spent on a wake and which shows nothing is indistinguishable from a broken one,
+  /// and the user's response to that silence is to turn it harder (§3 principle 1).
+  /// </para>
+  /// </summary>
   private void PublishCurrentValue(int index)
   {
+    if (index < 0 || index >= _currentValuePublishers.Length)
+    {
+      return;
+    }
+
+    try
+    {
+      _currentValuePublishers[index](index);
+    }
+    catch (Exception ex)
+    {
+      // The input has already been spent and the wake still has to happen, so a cosmetic readout
+      // must not take it down.
+      _logger.LogError(ex, "Error publishing the current value for encoder {Index}", index);
+    }
+  }
+
+  private void PublishCurrentVolume(int index)
+  {
+    var mgr = _audioManagerFactory();
+    PublishHud(index, "VOLUME", b =>
+    {
+      b.VolumePercent = (int)Math.Round(mgr.MasterVolume * 100f);
+      b.IsMuted = mgr.IsMuted;
+    });
+  }
+
+  private void PublishCurrentTuning(int index)
+  {
+    var mgr = _audioManagerFactory();
+    if (mgr.ActiveSource is IRadioControl radio)
+    {
+      PublishHud(index, "TUNING", b =>
+      {
+        b.PrimaryText = radio.CurrentFrequency.ToDisplayString();
+        b.SecondaryText = radio.CurrentBand.ToString().ToUpperInvariant();
+        b.PrimaryIsFrequency = true;
+      });
+      return;
+    }
+
+    PublishHud(index, "TRACK", b =>
+    {
+      b.PrimaryText = mgr.ActiveSource?.Name;
+      b.SecondaryText = "no track control on this source";
+    });
+  }
+
+  private void PublishCurrentSource(int index)
+  {
+    var mgr = _audioManagerFactory();
+
+    // The ACTIVE source, not _currentSourceIndex. Handoff 8.3 asks for "what is currently
+    // selected", and the cycler's cursor is where an uncommitted preview left it, which can be a
+    // source the console is not playing.
+    PublishHud(index, "SOURCE", b =>
+      b.PrimaryText = mgr.ActiveSource?.Name.ToUpperInvariant() ?? "NONE");
+  }
+
+  private void PublishCurrentViz(int index)
+  {
+    PublishHud(index, "VISUALIZER", b => b.PrimaryText = _vizModeService.CurrentMode.ToUpperInvariant());
   }
 
   /// <summary>
