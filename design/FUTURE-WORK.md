@@ -228,6 +228,160 @@ directly. An hour, plus a test that subscribes twice and asserts both tasks were
 
 ---
 
+## TTS seam — four deferrals that existed only in prose until 2026-09-03
+
+**Status:** filed here for the first time. **Nothing below was fixed by the act of filing it.**
+**Verified against the tree at `5e571b88`, i.e. after `TTS-9` (#548) removed eSpeak** — which closed
+half of item 1 and left the rest standing. Line numbers below are post-`TTS-9`.
+
+> ⚠ **Why this section exists.** `design/plans/PHN-1c-event-playback-service-and-route.md` §4 item 5
+> stated that items **1** and **2** below were already *"recorded in `design/FUTURE-WORK.md` with
+> reproductions."* They were not — `git show --stat 34f73c7` touched only that plan and
+> `docs/BUILDER_QUEUE.md`. That single sentence is what made two untracked deferrals look tracked. The
+> plan has been corrected; this section is what makes the sentence true.
+
+### 1. `TTSParameters` — a four-field default trap, of which `TTS-9` closed two
+
+⚠ **Half of this was fixed while it was being filed, and the surviving half is the quieter half.**
+As audited (at `01220d0c`) all four fields of `TTSParameters` were **non-nullable with type
+initializers**, so `TTSFactory.CreateAsync`'s fallback chain could never fire for a caller who passed
+any instance at all. **`TTS-9` (#548) made `Engine` and `Voice` nullable**, which fixes those two by
+construction. **`Speed` and `Pitch` were left as `float` with `= 1.0f`, so the trap survives on them.**
+
+Current state, `src/Radio.Core/Interfaces/Audio/ITTSFactory.cs:84-107`:
+
+```csharp
+public TTSEngine? Engine { get; init; }          // fixed by TTS-9
+public string? Voice { get; init; }              // fixed by TTS-9
+public float Speed { get; init; } = 1.0f;        // still traps
+public float Pitch { get; init; } = 1.0f;        // still traps
+```
+
+`TTSFactory.CreateAsync` resolves them at
+`src/Radio.Infrastructure/Audio/Services/TTSFactory.cs:77-80`:
+
+```csharp
+var engine = parameters?.Engine ?? ParseEngine(opts.DefaultEngine);
+var voice  = parameters?.Voice  ?? opts.DefaultVoice;
+var speed  = parameters?.Speed  ?? opts.DefaultSpeed;   // ?? unreachable
+var pitch  = parameters?.Pitch  ?? opts.DefaultPitch;   // ?? unreachable
+```
+
+**On the last two lines the `??` can only fire when `parameters` itself is null**, because `float` is a
+non-nullable member of a non-null instance. So a caller who passes *any* instance silently overrides the
+configured `TTS:DefaultSpeed` and `TTS:DefaultPitch` with `1.0f` — even when the owner set them to
+something else.
+
+**Reproduction:** set `TTS:DefaultSpeed` to `1.4` in configuration, then call
+`ITTSFactory.CreateAsync("hello", new TTSParameters { Voice = "en-US-News-K" })`. The synthesis runs at
+speed `1.0`, not `1.4`, and nothing logs a discrepancy.
+
+**Why this is smaller than it was, and still worth a row:** the pre-`TTS-9` version of this defect
+swapped the *engine and voice*, which is audible immediately. Speed and pitch drift is subtle — it
+sounds like the configured value never took, which is precisely the failure mode that gets misdiagnosed
+as a broken settings page. It is also the same defect class `ENC-8a` and `TTS-10` exist for.
+
+**Fix:** make `Speed` and `Pitch` nullable too, so "unset" is expressible for all four. ADR-029 §9.3 and
+`PHN-1a` §4 flagged the whole record; `PHN-1c` declined it deliberately, because a nullable `Engine`
+alone *looks* like a complete fix while being a quarter of one — an argument that now applies to the
+remaining half.
+
+### 2. `TTSFactory._cachedEngines` is never invalidated, so a key added in the UI needs a restart
+
+`src/Radio.Infrastructure/Audio/Services/TTSFactory.cs:32,60-61`. `_cachedEngines ??=
+DetectAvailableEngines()` is the **only** write to the field, and `TTSFactory` is registered **singleton**
+(`AudioServiceExtensions.cs:334-335`), so the cache lives for the life of the process. **Unaffected by
+`TTS-9`** — verified at `5e571b88`, which leaves lines 32 and 60-61 exactly as they were. With eSpeak
+gone, both remaining engines are key-gated, so this is now the *only* thing standing between pasting a
+key and the engine becoming usable.
+
+⚠ **Be precise about what is stale, because the obvious phrasing is wrong.** Engine and voice
+*selection* is **not** affected — `CreateAsync` reads `_options.CurrentValue` on every call. What is
+frozen is **availability detection**: `DetectAvailableEngines` (`:259`) snapshots `_secrets.CurrentValue`
+once (`:262`) and derives each `IsAvailable` from whether `GoogleAPIKey` (`:265`) / `AzureAPIKey` +
+`AzureRegion` (`:276-277`) are non-empty. So an owner who pastes a Google or Azure key into the Secrets
+page sees
+`GET /api/sources/tts/engines` (`SourcesController.cs:350`) keep reporting that engine **unavailable**
+until `radio-api` restarts — on an appliance that runs for weeks.
+
+**Fix:** subscribe to `IOptionsMonitor<TTSSecrets>.OnChange` and clear the field, or drop the cache
+entirely. `PHN-1c` §4 item 4 notes this is **one change** with that plan's §9.4 defect (a).
+
+### 3. `TTSEventSource.Position` is never overridden, so every speech snapshot reports zero
+
+`EventAudioSourceBase.Position` is `public virtual TimeSpan Position => TimeSpan.Zero`
+(`src/Radio.Infrastructure/Audio/Sources/Events/EventAudioSourceBase.cs:31`). `AudioFileEventSource`
+overrides it (`:93`); **`TTSEventSource` does not** — it overrides `Name`, `Type`, `Duration` and the
+lifecycle methods only.
+
+⚠ **This is deliberately pinned, and the pin is the hazard.** `PHN-1c`'s plan ships
+`ASpeechSnapshotReportsPositionZeroForItsWholeLife`, which asserts the real behaviour rather than the
+desirable one, and its "do not do this here" list names *"Override `TTSEventSource.Position`"* first. Once
+that PR lands, **a scrubber rendered from `PositionAtBroadcast` sits at zero for the life of every spoken
+message, with a green test saying that is intended.** Pinning is the right call for that PR; leaving the
+consequence undiscoverable is not.
+
+**Fix (belongs to the arc's PR 5, per the plan):** mirror `AudioFileEventSource` —
+`_playbackService.GetPosition(Id) ?? TimeSpan.Zero`. Update the pin's name and reason in the same commit;
+never delete it.
+
+### 4. `TTSOptions.GenerationTimeoutSeconds` has never had a reader
+
+Filed as punch-list **`TTS-10`** (P1, §4.4) rather than here, because the owner can edit it in the UI —
+which makes it a settings-field-that-lies rather than a private code defect. Cross-referenced here so all
+four TTS deferrals are findable in one place.
+
+---
+
+## `GvMediaClient.BuildVoicemailUri` — an accepted security residual
+
+**Status:** accepted; honest in the method's own comment; filed for completeness.
+
+`src/Radio.Infrastructure/External/GvMediaClient.cs:154-168`. The method defends against an id that walks
+**out** of the media prefix: `Uri` compresses dot segments, so an id of `".."` turns
+`/api/gvbridge/voicemail/../audio` into `/api/gvbridge/audio` — same host, different route — and
+`Uri.EscapeDataString` leaves `".."` untouched because both characters are unreserved. The
+`AbsolutePath.StartsWith(VoicemailPathPrefix)` check refuses that, pinned by
+`ADotDotIdIsRefused_BecauseUriCompressionWalksItOffTheRoute`.
+
+**The residual:** a **single** `"."` collapses to `/api/gvbridge/voicemail/audio` — a different route, but
+still *under* the prefix, so the prefix check passes. **Only `EventPlaybackRequest.ValidateMediaId`
+refuses it**, and `BuildVoicemailUri` deliberately does not rely on that validator, which is the whole
+reason it compares rather than asserts.
+
+**Impact is low and should not be overstated:** every reachable caller goes through `ValidateMediaId`,
+whose allow-list is `[A-Za-z0-9._~-]` with `"."` and `".."` explicitly rejected. This is a
+defence-in-depth gap in a method written to hold *without* the validator — not a live hole.
+
+**Fix, if taken:** reject any path segment equal to `"."` or `".."` inside `BuildVoicemailUri` itself, or
+compare against the full expected path rather than its prefix.
+
+---
+
+## `RotaryEncoderOptions` — a stated hand-off that evaporated, recorded so it is not later read as lost work
+
+**Status:** ✅ **no work is owed.** This entry exists only to close a dangling plan reference.
+
+`ENC-2` (#504) deliberately did **not** replace `RotaryEncoderOptions`' flat fields with the per-encoder
+shape its punch-list row asks for. Its commit message says so plainly:
+
+> *DELIBERATELY NOT DONE: replacing RotaryEncoderOptions' eight flat fields with the per-encoder shape,
+> which the row also lists. ... **The swap belongs with ENC-11**, where the values start meaning something.*
+
+**`ENC-11` shipped (#508 / #509 / #510) without it, and nothing recorded that.** What happened instead is
+that `ENC-8` introduced **`RotaryEncoderDesignedConfig`**
+(`src/Radio.Infrastructure/Platform/Input/RotaryEncoderDesignedConfig.cs`, #527) as the single source of
+truth for the designed table plus the owner's per-knob overrides — *"one object, three consumers ... the
+bytes pushed, the bytes flashed, and the rows the Settings page renders."* That is a **better** answer than
+widening `RotaryEncoderOptions`, and it is why the swap is no longer wanted.
+
+`RotaryEncoderOptions` therefore still holds its **seven** settable fields (`Enabled`, `VendorId`,
+`ProductId`, `DevicePath`, `PollIntervalMs`, `VolumeStepPercent`, `ReconnectDelayMs`) plus the
+`SectionName` const — the "eight" in `ENC-2`'s message counts the const. All seven have readers; none is
+a settings-field-that-lies. **Functionally fine. Do not "finish" the swap.**
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed
