@@ -1,6 +1,5 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.External;
 
@@ -153,19 +152,25 @@ public sealed class GvMediaClientTests : IDisposable
   private (GvMediaClient Client, StubHandler Handler) CreateClient(
     Func<HttpRequestMessage, HttpResponseMessage> respond,
     int capMegabytes = 50,
-    bool enabled = true)
+    bool enabled = true,
+    int maxPlaybackSeconds = 300)
   {
     var options = new GvMediaOptions
     {
       Enabled = enabled,
       BaseUrl = "http://radio:5004",
       CacheDirectory = _dir,
-      CacheMaxMegabytes = capMegabytes
+      CacheMaxMegabytes = capMegabytes,
+      MaxPlaybackSeconds = maxPlaybackSeconds
     };
     var monitor = new StaticOptionsMonitor<GvMediaOptions>(options);
     var handler = new StubHandler(respond);
     var http = new HttpClient(handler);
-    var cache = new GvMediaCache(NullLogger<GvMediaCache>.Instance, monitor);
+    // The CAPTURING logger, not NullLogger. The masking pin below claims to cover "every path and
+    // every level", and the cache logs too - a NullLogger here would quietly put those log sites
+    // outside the pin whose comment says otherwise. The cache is clean today; this is what stops a
+    // future edit to it from leaking an id without failing a test.
+    var cache = new GvMediaCache(_logs.CreateLogger<GvMediaCache>(), monitor);
     var client = new GvMediaClient(
       _logs.CreateLogger<GvMediaClient>(), monitor, http, cache);
     return (client, handler);
@@ -245,8 +250,31 @@ public sealed class GvMediaClientTests : IDisposable
   [Fact]
   public async Task AnOversizeBodyIsRefusedRatherThanBuffered()
   {
+    // ByteArrayContent sets Content-Length, so this is the DECLARED-length branch and only that.
     var oversize = new byte[300 * 32_000 + 1];
     var (client, _) = CreateClient(_ => Audio(oversize));
+
+    var ex = await Assert.ThrowsAsync<GvMediaUnavailableException>(
+      () => client.GetVoicemailFileAsync(RawId));
+
+    Assert.Equal(GvMediaFailure.TooLarge, ex.Reason);
+  }
+
+  [Fact]
+  public async Task AnOversizeBodyWithNoContentLength_IsRefusedWhileStreaming()
+  {
+    // The streaming half of the bound, which the test above cannot reach. It matters because
+    // nobody has yet established whether the real gvbridge sends Content-Length at all - if it does
+    // not, this is the ONLY branch that ever runs, and it was untested.
+    //
+    // MaxPlaybackSeconds = 1 puts the bound at 32 000 bytes, so this streams kilobytes rather than
+    // the ~9.6 MB the default bound would need.
+    var content = new ScriptedContent(1_000_000, failure: null);
+    Assert.Null(content.Headers.ContentLength); // the precondition the whole test rests on
+
+    var (client, _) = CreateClient(
+      _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = content },
+      maxPlaybackSeconds: 1);
 
     var ex = await Assert.ThrowsAsync<GvMediaUnavailableException>(
       () => client.GetVoicemailFileAsync(RawId));
@@ -368,17 +396,47 @@ public sealed class GvMediaClientTests : IDisposable
   [InlineData("https://evil.example/payload.mp3")]
   [InlineData("//evil.example/payload.mp3")]
   [InlineData("../../etc/passwd")]
-  public void ASchemeOrPathBearingIdCannotMoveTheFetchOffTheConfiguredHost(string hostileId)
+  [InlineData(".")]
+  [InlineData("..")]
+  public void ASchemeOrPathBearingIdCannotMoveTheFetchOffTheConfiguredRoute(string hostileId)
   {
     // PR 1's review found the deny-list defeated by a scheme-bearing id: under RFC 3986 §4.2 a
     // relative reference carrying a scheme resolves as ABSOLUTE, so new Uri(base, id) escaped the
     // base. EventPlaybackRequest now allow-lists the id; this pins that GvMediaClient does not
     // reintroduce the hole even if it is handed an id that never went through that validator.
-    var uri = GvMediaClient.BuildVoicemailUri("http://radio:5004", hostileId, "gvm:test");
+    //
+    // Two acceptable outcomes, and the distinction is real rather than a hedge: most of these are
+    // neutralised by escaping and come back as a URI still on the host and under the route, while
+    // ".." is refused outright because Uri's dot-segment compression moves it off the route
+    // entirely. Both mean "the fetch did not move"; only one of them can return a Uri.
+    Uri uri;
+    try
+    {
+      uri = GvMediaClient.BuildVoicemailUri("http://radio:5004", hostileId, "gvm:test");
+    }
+    catch (GvMediaUnavailableException ex)
+    {
+      Assert.Equal(GvMediaFailure.Transport, ex.Reason);
+      return;
+    }
 
     Assert.Equal("radio:5004", uri.Authority);
     Assert.Equal("http", uri.Scheme);
     Assert.StartsWith("/api/gvbridge/voicemail/", uri.AbsolutePath, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public void ADotDotIdIsRefused_BecauseUriCompressionWalksItOffTheRoute()
+  {
+    // Named separately so the theory above cannot pass vacuously by throwing for everything, and
+    // because this is the case the prefix check exists for: /api/gvbridge/voicemail/../audio
+    // collapses to /api/gvbridge/audio - same host, a completely different route.
+    // Uri.EscapeDataString does not touch "..", both characters being unreserved, so escaping alone
+    // never had a chance at this one.
+    var ex = Assert.Throws<GvMediaUnavailableException>(
+      () => GvMediaClient.BuildVoicemailUri("http://radio:5004", "..", "gvm:test"));
+
+    Assert.Equal(GvMediaFailure.Transport, ex.Reason);
   }
 }
 

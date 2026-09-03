@@ -25,6 +25,12 @@ public sealed class GvMediaClient
   /// </summary>
   private const int AssumedMaxBytesPerSecond = 32_000;
 
+  /// <summary>
+  /// The route prefix every fetch must stay under. Used both to BUILD the path and to check the
+  /// built Uri, so the two cannot drift apart into a check that passes whatever it is given.
+  /// </summary>
+  private const string VoicemailPathPrefix = "/api/gvbridge/voicemail/";
+
   private readonly ILogger<GvMediaClient> _logger;
   private readonly IOptionsMonitor<GvMediaOptions> _options;
   private readonly HttpClient _httpClient;
@@ -109,7 +115,7 @@ public sealed class GvMediaClient
 
     var builder = new UriBuilder(baseUri)
     {
-      Path = $"/api/gvbridge/voicemail/{Uri.EscapeDataString(mediaId)}/audio",
+      Path = $"{VoicemailPathPrefix}{Uri.EscapeDataString(mediaId)}/audio",
       Query = string.Empty,
       Fragment = string.Empty
     };
@@ -121,6 +127,23 @@ public sealed class GvMediaClient
       throw new GvMediaUnavailableException(
         GvMediaFailure.Transport,
         $"Refusing to fetch {maskedId} outside the configured GvMedia host.");
+    }
+
+    // ⚠ Scheme and authority are not the whole of "the same place". Uri compresses dot segments, so
+    // an id of ".." turns /api/gvbridge/voicemail/../audio into /api/gvbridge/audio — same host,
+    // different route — and Uri.EscapeDataString leaves ".." untouched because both characters are
+    // unreserved. ValidateMediaId rejects "." and ".." already; this method deliberately does not
+    // rely on that validator, which is the whole reason it compares rather than asserts, so it
+    // checks its own prefix too.
+    //
+    // Honest about the residual: this catches an id that walks OUT of the prefix. An id of "."
+    // collapses to /api/gvbridge/voicemail/audio, which is a different route but still under the
+    // prefix, so only ValidateMediaId refuses that one.
+    if (!candidate.AbsolutePath.StartsWith(VoicemailPathPrefix, StringComparison.Ordinal))
+    {
+      throw new GvMediaUnavailableException(
+        GvMediaFailure.Transport,
+        $"Refusing to fetch {maskedId} outside the configured GvMedia media route.");
     }
 
     return candidate;
@@ -137,7 +160,7 @@ public sealed class GvMediaClient
     }
     catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
     {
-      throw TimedOut(masked, options.FetchTimeoutSeconds, ex);
+      throw TimedOut(masked, ex);
     }
     catch (HttpRequestException ex)
     {
@@ -222,7 +245,7 @@ public sealed class GvMediaClient
       }
       catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
       {
-        throw TimedOut(masked, options.FetchTimeoutSeconds, ex);
+        throw TimedOut(masked, ex);
       }
       catch (Exception ex) when (ex is HttpRequestException or IOException)
       {
@@ -245,11 +268,18 @@ public sealed class GvMediaClient
   /// HttpClient surfaces its own timeout as a cancellation the caller did not request, which is what
   /// the callers' <c>when</c> filters test. That is not exact: a caller token cancelled BETWEEN the
   /// throw and the filter reads as a timeout here. The race is narrow and accepted.
+  ///
+  /// ⚠ The logged number is HttpClient.Timeout, NOT options.FetchTimeoutSeconds. They are not the
+  /// same value: GvMediaServiceExtensions snapshots the option once at registration, while
+  /// IOptionsMonitor tracks the live SQLite config bridge — so after a UI edit the option says one
+  /// thing and the client still enforces another. Logging the option would hand the operator a
+  /// timeout that did not govern the request they are diagnosing.
   /// </remarks>
-  private GvMediaUnavailableException TimedOut(string masked, int timeoutSeconds, Exception inner)
+  private GvMediaUnavailableException TimedOut(string masked, Exception inner)
   {
     _logger.LogWarning(
-      "GV voicemail {MaskedId} fetch timed out after {Seconds}s", masked, timeoutSeconds);
+      "GV voicemail {MaskedId} fetch timed out after {Seconds}s",
+      masked, _httpClient.Timeout.TotalSeconds);
     return new GvMediaUnavailableException(
       GvMediaFailure.Timeout, $"Timed out fetching {masked}.", inner);
   }
