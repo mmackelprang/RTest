@@ -122,4 +122,30 @@ public class TTSFactoryAzureRequestTests
     var document = System.Xml.Linq.XDocument.Parse(ssml);
     Assert.Equal("speak", document.Root!.Name.LocalName);
   }
+
+  /// <summary>
+  /// The voice id is caller-supplied and reaches this document from the unauthenticated
+  /// <c>POST /api/sources/events/tts</c> route, so it must not be able to close the
+  /// single-quoted <c>name</c> attribute and append SSML of the attacker's choosing.
+  /// </summary>
+  [Fact]
+  public void Ssml_EscapesMarkupInTheVoiceId()
+  {
+    // Closes the name attribute and the voice element, then opens an attacker-chosen one.
+    var hostileVoice = "en-US-JennyNeural'></voice><voice name='en-US-GuyNeural";
+
+    var ssml = TTSFactory.BuildAzureSsml(hostileVoice, "Hello", 1.0f, 1.0f);
+
+    // The breakout characters survive only in escaped form.
+    Assert.DoesNotContain("</voice><voice", ssml);
+    Assert.Contains("&apos;&gt;&lt;/voice&gt;", ssml);
+
+    // And the document still has exactly one voice element, carrying the whole hostile
+    // string as a single literal name rather than as markup.
+    var document = System.Xml.Linq.XDocument.Parse(ssml);
+    System.Xml.Linq.XNamespace ns = "http://www.w3.org/2001/10/synthesis";
+    var voices = document.Root!.Elements(ns + "voice").ToList();
+    Assert.Single(voices);
+    Assert.Equal(hostileVoice, voices[0].Attribute("name")!.Value);
+  }
 }

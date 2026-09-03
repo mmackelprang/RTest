@@ -366,7 +366,8 @@ public class TTSFactory : ITTSFactory, IDisposable
     var audioBytes = Convert.FromBase64String(audioBase64);
     var memoryStream = new MemoryStream(audioBytes);
 
-    // Estimate duration from audio size (16-bit, 22050Hz mono - Google's LINEAR16 format)
+    // Estimate duration from audio size (16-bit, 24kHz mono - Google's LINEAR16 format),
+    // which is the rate EstimateLinear16Duration actually divides by.
     var estimatedDuration = EstimateLinear16Duration(audioBytes.Length);
 
     _logger.LogDebug("Generated Google TTS audio: {Length} bytes, estimated duration: {Duration}",
@@ -458,6 +459,13 @@ public class TTSFactory : ITTSFactory, IDisposable
   /// Azure accepts <c>rate</c> and <c>pitch</c> as a percentage where the leading "+" is
   /// optional, so a speed or pitch of 1.0 renders as <c>0%</c>. The percentages are rounded
   /// rather than truncated: 0.8f is 0.80000001 as a double, and truncating that yields -19%.
+  /// <para>
+  /// <paramref name="voice"/> and <paramref name="text"/> are both XML-escaped because both are
+  /// caller-supplied and reach this document from the unauthenticated
+  /// <c>POST /api/sources/events/tts</c> route. Escaping prevents a value from closing the
+  /// single-quoted attribute or the element and injecting further SSML — it does <b>not</b>
+  /// validate that the voice exists; an unknown voice is rejected by Azure, not here.
+  /// </para>
   /// </remarks>
   internal static string BuildAzureSsml(string voice, string text, float speed, float pitch)
   {
@@ -465,7 +473,7 @@ public class TTSFactory : ITTSFactory, IDisposable
     var pitchPercent = (int)Math.Round((pitch - 1.0) * 100);
 
     return $@"<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'>
-  <voice name='{voice}'>
+  <voice name='{System.Security.SecurityElement.Escape(voice)}'>
     <prosody rate='{ratePercent:+#;-#;0}%' pitch='{pitchPercent:+#;-#;0}%'>
       {System.Security.SecurityElement.Escape(text)}
     </prosody>
