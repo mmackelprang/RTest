@@ -4,7 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
-using Radio.Infrastructure.Audio.Services;
+using Microsoft.Extensions.DependencyInjection;
 using Radio.Infrastructure.Platform.Input;
 
 namespace Radio.Infrastructure.Tests.Platform.Input;
@@ -94,21 +94,32 @@ public class RotaryEncoderMappingTableTests
 
   private static RotaryEncoderActionRouter BuildRouter(
     FakeRotaryEncoderService? encoder = null,
-    VisualizationModeService? viz = null) =>
-    new(
+    IEncoderFeedbackSink? hud = null,
+    IServiceScopeFactory? presetScope = null)
+  {
+    var sink = hud ?? new NullHudSink();
+    return new RotaryEncoderActionRouter(
       NullLogger<RotaryEncoderActionRouter>.Instance,
       encoder ?? new FakeRotaryEncoderService(),
       () => new StubAudioManager(),
-      viz ?? new VisualizationModeService(NullLogger<VisualizationModeService>.Instance),
       new StaticOptionsMonitor<RotaryEncoderOptions>(new RotaryEncoderOptions()),
-      new NullHudSink(),
+      sink,
       // ENC-5. The router owns the SOURCE overlay now; these tests never turn encoder 1, so a
       // selector wired to stubs is enough to construct one.
       new SourceSelectorService(
         NullLogger<SourceSelectorService>.Instance,
         () => new StubAudioManager(),
         () => new StubBandMemory(),
-        new NullHudSink()));
+        sink),
+      // ENC-7. Encoder 2 IS turned below, so this one is wired to a real scope factory over an
+      // empty bank rather than to a stub.
+      new PresetSelectorService(
+        NullLogger<PresetSelectorService>.Instance,
+        presetScope ?? new PresetBankScope().Factory,
+        () => new StubAudioManager(),
+        () => new StubBandMemory(),
+        sink));
+  }
 
   /// <summary>Nothing here commits a band, so the memory only has to exist.</summary>
   private sealed class StubBandMemory : IRadioBandMemory
@@ -150,33 +161,38 @@ public class RotaryEncoderMappingTableTests
   {
     // The point of the table. If dispatch ever stops going through Mapping, this fails.
     var encoder = new FakeRotaryEncoderService();
-    var viz = new VisualizationModeService(NullLogger<VisualizationModeService>.Instance);
-    int vizModeCycleCount = 0;
-    viz.ModeChanged += (_, _) => vizModeCycleCount++;
-    using var router = BuildRouter(encoder, viz);
+    var hud = new RecordingSelectorSink();
+    using var bank = new PresetBankScope();
+    using var router = BuildRouter(encoder, hud, bank.Factory);
 
-    // ENC-5 moved the visualiser from index 3 to index 2 (index 3 is now TUNING). The knob under
-    // test is whichever one the visualiser is on, because it is the handler with an observable
-    // side effect that needs no hardware.
+    // ENC-7 put PRESETS on index 2. It is the knob under test because its handler has an
+    // observable side effect that needs no hardware: turning it opens the overlay and publishes.
     encoder.RaiseTurn(encoderIndex: 2, delta: 1);
 
-    Assert.Equal("Cycle visualization mode", router.Mapping[2].TurnDescription);
-    Assert.Equal(1, vizModeCycleCount);   // the handler the table points at actually ran
+    Assert.Equal("Preview a saved preset", router.Mapping[2].TurnDescription);
+    // The handler the table points at actually ran.
+    var card = Assert.Single(hud.Published);
+    Assert.Equal(2, card.EncoderIndex);
+    Assert.Equal(EncoderHudPhase.SelectorPreview, card.Phase);
   }
 
   [Fact]
   public void PressingAnEncoderDispatchesThroughTheSameTableTheUiRenders()
   {
     var encoder = new FakeRotaryEncoderService();
-    var viz = new VisualizationModeService(NullLogger<VisualizationModeService>.Instance);
-    bool enabledBefore = viz.IsEnabled;
-    using var router = BuildRouter(encoder, viz);
+    var hud = new RecordingSelectorSink();
+    using var bank = new PresetBankScope();
+    using var router = BuildRouter(encoder, hud, bank.Factory);
 
     // Short press = press edge then release edge; the gesture fires the short action on release.
     encoder.RaiseButton(2, isPressed: true);
     encoder.RaiseButton(2, isPressed: false);
 
-    Assert.Equal("Visualization on / off", router.Mapping[2].PressDescription);
-    Assert.NotEqual(enabledBefore, viz.IsEnabled);
+    Assert.Equal("Recall the highlighted preset", router.Mapping[2].PressDescription);
+    // A press on a closed overlay opens it, which is this handler's observable side effect. The
+    // press EDGE also publishes the hold ring's start on this knob, so the preview is selected out
+    // rather than asserted as the only card.
+    var card = Assert.Single(hud.OfPhase(EncoderHudPhase.SelectorPreview));
+    Assert.Equal(2, card.EncoderIndex);
   }
 }

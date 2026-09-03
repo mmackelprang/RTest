@@ -1,3 +1,5 @@
+using System.Reflection;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -6,7 +8,6 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
-using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Platform.Input;
 
 namespace Radio.Infrastructure.Tests.Platform.Input;
@@ -16,11 +17,10 @@ namespace Radio.Infrastructure.Tests.Platform.Input;
 /// and the press/release split that ENC-4 introduced.
 ///
 /// <para>
-/// It also <b>pins the encoder-index to handler mapping</b>, which ENC-5 changed to
-/// 0=Volume, 1=Source, 2=Visualization, 3=Tuning. Three of the four now match the cabinet's
-/// VOLUME / SOURCE / PRESETS / TUNING engraving; index 2 holds the visualiser until ENC-7 puts
-/// PRESETS there. Pinning it here makes the next change a decision somebody had to make rather than
-/// something that drifted.
+/// It also <b>pins the encoder-index to handler mapping</b>, which ENC-7 brought to its final
+/// state: 0=Volume, 1=Source, 2=Presets, 3=Tuning, matching the cabinet's
+/// VOLUME / SOURCE / PRESETS / TUNING engraving on every knob. Pinning it here makes the next change
+/// a decision somebody had to make rather than something that drifted.
 /// </para>
 /// </summary>
 public class RotaryEncoderRouterMappingTests
@@ -162,7 +162,9 @@ public class RotaryEncoderRouterMappingTests
     public readonly FakeAudioManager Audio = new();
     public readonly FakeBandMemory BandMemory = new();
     public readonly FakeTimeProvider Time = new();
+    public readonly PresetBankScope Presets = new();
     public readonly SourceSelectorService Selector;
+    public readonly PresetSelectorService PresetSelector;
     public readonly RotaryEncoderActionRouter Router;
 
     public Harness()
@@ -174,17 +176,32 @@ public class RotaryEncoderRouterMappingTests
         Hud,
         Time);
 
+      // The bank is EMPTY by default, so a turn on index 2 publishes exactly one card: the
+      // overlay's own preview. The background reload that follows finds nothing to change and
+      // therefore publishes nothing, which is what keeps the Assert.Single assertions here sound.
+      PresetSelector = new PresetSelectorService(
+        NullLogger<PresetSelectorService>.Instance,
+        Presets.Factory,
+        () => Audio,
+        () => BandMemory,
+        Hud,
+        Time);
+
       Router = new RotaryEncoderActionRouter(
         NullLogger<RotaryEncoderActionRouter>.Instance,
         Encoders,
         () => Audio,
-        new VisualizationModeService(NullLogger<VisualizationModeService>.Instance),
         new StaticOptionsMonitor<RotaryEncoderOptions>(new RotaryEncoderOptions()),
         Hud,
         Selector,
+        PresetSelector,
         Sleep,
         Time);
     }
+
+    /// <summary>Puts one saved station in the bank the PRESETS knob reads.</summary>
+    public void SeedPreset(string name, RadioBand band, double hertz) =>
+      Presets.Bank.Seed(name, band, hertz);
 
     /// <summary>Makes a tuner the active source, so the tuning handler takes its radio branch.</summary>
     public FakeRadioSource WithActiveRadio()
@@ -201,6 +218,8 @@ public class RotaryEncoderRouterMappingTests
     {
       Router.Dispose();
       Selector.Dispose();
+      PresetSelector.Dispose();
+      Presets.Dispose();
     }
   }
 
@@ -214,19 +233,18 @@ public class RotaryEncoderRouterMappingTests
   }
 
   /// <summary>
-  /// Pins the index-to-handler mapping after ENC-5's remap.
+  /// Pins the final index-to-handler mapping: 0 = VOLUME, 1 = SOURCE, 2 = PRESETS, 3 = TUNING.
   ///
   /// <para>
-  /// Index 2 is the odd one out and it is expected to change once more: ENC-7 replaces the
-  /// visualiser there with PRESETS. When that lands, this row's expectation moves with it — a red
-  /// assertion here means the mapping changed, which is either ENC-7 or a mistake, and the diff says
-  /// which.
+  /// This matches the escutcheon (D2) and the configuration ENC-11 pushes to the device. A red
+  /// assertion here means the router and the cabinet have diverged, and on the volume row it means
+  /// they have diverged on the knob with a safety hazard behind it.
   /// </para>
   /// </summary>
   [Theory]
   [InlineData(0, "VOLUME")]
   [InlineData(1, "SOURCE")]
-  [InlineData(2, "VISUALIZER")]
+  [InlineData(2, "PRESETS")]
   [InlineData(3, "TUNING")]
   public void EncoderTurn_PublishesACardLabelledForThatKnob(int index, string expectedLabel)
   {
@@ -484,17 +502,19 @@ public class RotaryEncoderRouterMappingTests
   {
     using var h = new Harness();
 
-    h.Encoders.RaiseButton(2, true);
+    // Moved from index 2 to index 1 by ENC-7: index 2 now saves a preset, and SOURCE is the
+    // selector knob that still has no long action at all.
+    h.Encoders.RaiseButton(1, true);
     h.Time.Advance(TimeSpan.FromMilliseconds(1000));
-    h.Encoders.RaiseButton(2, false);
+    h.Encoders.RaiseButton(1, false);
 
-    // Encoder 2 has no long action wired, so nothing commits and no ring is promised.
+    // Nothing commits and no ring is promised.
     Assert.Empty(h.Audio.GetOrCreateCalls);
     Assert.Empty(h.Cards(EncoderHudPhase.HoldStart));
   }
 
   [Fact]
-  public void HoldStart_IsPublishedForVolumeOnly()
+  public void HoldStart_IsPublishedForVolumeAndPresetsOnly()
   {
     using var h = new Harness();
 
@@ -505,9 +525,40 @@ public class RotaryEncoderRouterMappingTests
       h.Encoders.RaiseButton(index, false);
     }
 
+    // Exactly two knobs have a long action, so exactly two draw a ring. A third would promise an
+    // action nothing performs.
     var holdStarts = h.Cards(EncoderHudPhase.HoldStart);
-    Assert.Equal(0, Assert.Single(holdStarts).EncoderIndex);
+    Assert.Equal(2, holdStarts.Count);
+    Assert.Equal(0, holdStarts[0].EncoderIndex);
     Assert.Equal("HOLD FOR STANDBY", holdStarts[0].Label);
+    Assert.Equal(2, holdStarts[1].EncoderIndex);
+    Assert.Equal("HOLD TO SAVE", holdStarts[1].Label);
+    Assert.DoesNotContain(holdStarts, c => c.EncoderIndex is 1 or 3);
+  }
+
+  [Fact]
+  public void SourceLongPress_StillDoesNothing()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(1, true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(1000));
+
+    Assert.Empty(h.Cards(EncoderHudPhase.HoldStart));
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+  }
+
+  [Fact]
+  public void TuningLongPress_StillDoesNothing()
+  {
+    using var h = new Harness();
+    h.WithActiveRadio();
+
+    h.Encoders.RaiseButton(3, true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(1000));
+
+    Assert.Empty(h.Cards(EncoderHudPhase.HoldStart));
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
   }
 
   [Fact]
@@ -527,6 +578,109 @@ public class RotaryEncoderRouterMappingTests
     Assert.Empty(h.Hud.Published);
   }
 
+  // --- ENC-7: the PRESETS knob -----------------------------------------------------------------
+
+  [Fact]
+  public void PresetsTurn_PublishesInItsOwnQuarter()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseTurn(2, 1);
+
+    Assert.Equal(2, Assert.Single(h.Hud.Published).EncoderIndex);
+  }
+
+  [Fact]
+  public void PresetsTurn_PlaysNothing()
+  {
+    // Handoff 4.4: a turn moves a highlight and nothing plays. Seeded and spun, because the hazard
+    // is a recall on the way past a row rather than on the first detent of an empty list.
+    using var h = new Harness();
+    h.SeedPreset("KEXP", RadioBand.FM, 90_300_000);
+    h.SeedPreset("KUOW", RadioBand.FM, 94_900_000);
+    var radio = h.WithActiveRadio();
+
+    for (int i = 0; i < 6; i++)
+    {
+      h.Encoders.RaiseTurn(2, 1);
+    }
+
+    Assert.Empty(h.Audio.GetOrCreateCalls);
+    Assert.Empty(radio.FrequenciesSet);
+    Assert.Empty(radio.BandsSet);
+  }
+
+  [Fact]
+  public void PresetsLongPress_PublishesAHoldStartRing()
+  {
+    // ENC-4 suppressed the ring on this knob because a ring elsewhere would promise an action
+    // nothing performs. Index 2 now performs one, so the ring has to draw.
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(2, true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(600));
+
+    var card = Assert.Single(h.Cards(EncoderHudPhase.HoldStart));
+    Assert.Equal(2, card.EncoderIndex);
+    Assert.Equal("HOLD TO SAVE", card.Label);
+  }
+
+  [Fact]
+  public void PresetsShortPress_DoesNotPublishAHoldCancelCardOverTheOverlay()
+  {
+    // Regression guard. EncoderLongPressGesture raises ShortPress BEFORE HoldCancelled, so a
+    // sub-threshold press opens the overlay and the cancel edge arrives afterwards. If index 2
+    // published a hold phase on that edge, a label-only card with no rows would replace the
+    // overlay the press had just opened.
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(2, true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(2, false);
+
+    Assert.Empty(h.Cards(EncoderHudPhase.HoldCancel));
+    Assert.Equal(EncoderHudPhase.SelectorPreview, h.Hud.Published[^1].Phase);
+  }
+
+  /// <summary>
+  /// The index-2 turn description has to contain the word "preset", and this is the only place
+  /// that says so.
+  ///
+  /// <para>
+  /// <c>SystemConfigPage.DescribesItsCabinetRole</c> decides whether a knob agrees with its
+  /// engraving by keyword-matching the turn description — there is no handler identity on the
+  /// wire — and feeds the "does not match the cabinet" banner. A reword that drops the keyword
+  /// relights that banner on a knob that is correct, with nothing else failing.
+  /// </para>
+  /// </summary>
+  [Fact]
+  public void PresetsMappingDescription_SatisfiesTheSettingsPageCabinetCheck()
+  {
+    using var h = new Harness();
+
+    Assert.Contains("preset", h.Router.Mapping[2].TurnDescription, StringComparison.OrdinalIgnoreCase);
+  }
+
+  /// <summary>
+  /// The visualiser is no longer an input to the router, and re-adding it should be a deliberate
+  /// act rather than a merge artefact.
+  ///
+  /// <para>
+  /// <c>VisualizationModeService</c> itself, its registration, its broadcast and the on-screen
+  /// six-segment picker all still ship — ENC-7 removed the knob, not the capability.
+  /// </para>
+  /// </summary>
+  [Fact]
+  public void Router_NoLongerDependsOnVisualizationModeService()
+  {
+    var parameters = typeof(RotaryEncoderActionRouter)
+      .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+      .SelectMany(c => c.GetParameters())
+      .Select(p => p.ParameterType.Name);
+
+    Assert.DoesNotContain("VisualizationModeService", parameters);
+  }
+
   // --- ENC-0 teardown --------------------------------------------------------------------------
 
   [Fact]
@@ -539,6 +693,20 @@ public class RotaryEncoderRouterMappingTests
     h.Encoders.RaiseConnection(connected: false);
 
     Assert.False(h.Selector.IsOpen);
+    Assert.Empty(h.Audio.GetOrCreateCalls);
+  }
+
+  [Fact]
+  public void EncoderDisconnect_AlsoDismissesThePresetsOverlay()
+  {
+    // Half a teardown is worse than none: only one of the two selector knobs would recover.
+    using var h = new Harness();
+    h.Encoders.RaiseTurn(2, 1);
+    Assert.True(h.PresetSelector.IsOpen);
+
+    h.Encoders.RaiseConnection(connected: false);
+
+    Assert.False(h.PresetSelector.IsOpen);
     Assert.Empty(h.Audio.GetOrCreateCalls);
   }
 }

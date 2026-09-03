@@ -425,7 +425,10 @@ public static class AudioServiceExtensions
     // owner-initiated concerns.
     services.AddSingleton<IRotaryEncoderProvisioning>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
 
-    // Register visualization mode service (tracks current viz mode for encoder + SignalR)
+    // Visualization mode, broadcast over SignalR by AudioStateUpdateService and driven from the
+    // touchscreen — the six-segment picker on Home and the System Config dropdown. ENC-7 removed
+    // the encoder that also drove it; the capability moved to the screen rather than going away,
+    // so this registration stays.
     services.AddSingleton<VisualizationModeService>();
 
     // HUD feedback channel. Singleton because the coalescer is per-encoder state that must outlive
@@ -450,17 +453,33 @@ public static class AudioServiceExtensions
       // constructor default is TimeProvider.System, as with the router below.
       sp.GetService<TimeProvider>()));
 
+    // ENC-7. Singleton for the same reason SourceSelectorService is, and built by a factory for the
+    // same reason.
+    //
+    // IRadioPresetService is registered SCOPED (FingerprintingServiceExtensions), and this service
+    // is a singleton driven by the HID read loop, which has no request scope. It therefore takes
+    // IServiceScopeFactory - which the container registers itself, so it needs no deferral - and
+    // opens a scope per operation, rather than capturing a scoped repository that holds a database
+    // context shared with the API's request-scoped consumers.
+    services.AddSingleton<PresetSelectorService>(sp => new PresetSelectorService(
+      sp.GetRequiredService<ILogger<PresetSelectorService>>(),
+      sp.GetRequiredService<IServiceScopeFactory>(),
+      () => sp.GetRequiredService<IAudioManager>(),
+      () => sp.GetRequiredService<IRadioBandMemory>(),
+      sp.GetRequiredService<IEncoderFeedbackSink>(),
+      sp.GetService<TimeProvider>()));
+
     // Register action router (Func<> defers IAudioManager resolution)
     // ISleepService is registered in Radio.API — optional here via GetService
     services.AddSingleton<RotaryEncoderActionRouter>(sp => new RotaryEncoderActionRouter(
       sp.GetRequiredService<ILogger<RotaryEncoderActionRouter>>(),
       sp.GetRequiredService<IRotaryEncoderService>(),
       () => sp.GetRequiredService<IAudioManager>(),
-      sp.GetRequiredService<VisualizationModeService>(),
       sp.GetRequiredService<IOptionsMonitor<RotaryEncoderOptions>>(),
       sleepService: sp.GetService<ISleepService>(),
       hud: sp.GetRequiredService<IEncoderFeedbackSink>(),
       sourceSelector: sp.GetRequiredService<SourceSelectorService>(),
+      presetSelector: sp.GetRequiredService<PresetSelectorService>(),
       // GetService, not GetRequiredService: nothing registers TimeProvider in production, and the
       // constructor default is TimeProvider.System. Tests inject a fake clock directly instead.
       timeProvider: sp.GetService<TimeProvider>()));
