@@ -11,9 +11,10 @@ This document catalogs features that have been designed at the interface level b
 **1. ~~The PRESETS long-press consumer is not wired.~~ CLOSED by `ENC-7`.** Both long-press actions the design
 names now exist — VOLUME → Standby and PRESETS → Save — and there is deliberately no third. `OnLongPress`
 switches on indices 0 and 2; `PublishHold` publishes for those two only, and for index 2 only on the `HoldStart`
-edge, because the save's own `SelectorNotice` is what collapses the ring. Indices 1 and 3 still publish no hold
-phase at all, for the original reason: a progress ring that fills and then does nothing is a promise the code
-does not keep.
+edge — and only while the PRESETS overlay is **not already open**, because a hold phase is not a selector phase,
+so a card published over the open list would replace it with a label-only card for the whole of every press. The
+save's own `SelectorNotice` is what collapses the ring. Indices 1 and 3 still publish no hold phase at all, for
+the original reason: a progress ring that fills and then does nothing is a promise the code does not keep.
 
 **2. There is no exit animation.** The card enters with `.snackbar-enter` and then simply unmounts. A 200 ms exit
 needs a two-phase teardown (keep the element alive while it animates out), which changes `EncoderHudService`'s
@@ -1105,3 +1106,85 @@ fallback, and its tests pin that the generated name contains no raw hertz.
 Either take a `Frequency` rather than a `double`, or convert inside the method. **Gotcha:** it is a shipped
 `public static` with other callers, and any fix changes the names those callers generate — so it needs a
 look at every call site and at whatever is already stored in the database, rather than a one-line edit.
+
+---
+
+## 17. Visualisation mode has no writer, and its broadcast chain is unreachable (`ENC-7`)
+
+`ENC-7` removed `VisualizationModeService` from `RotaryEncoderActionRouter`. The encoder was that service's
+**only** writer, so the removal left a whole chain shipping with nothing to drive it.
+
+### What is dead, precisely
+
+- `VisualizationModeService.CycleMode` and `VisualizationModeService.ToggleEnabled` have **no callers** anywhere
+  in `src/`.
+- Therefore `VisualizationModeService.ModeChanged` **cannot fire**.
+- Therefore `AudioStateUpdateService.OnVisualizationModeChanged` never runs, and the
+  `VisualizationModeChanged` SignalR broadcast it makes is unreachable.
+- Therefore `VisualizerPanel.HandleModeChangedRemotely` and its `StateHub.VisualizationModeChanged`
+  subscription are dead, as is `VisualizationModeDto` on that path.
+
+`VisualizerPanel`'s own comment on that subscription still describes the mode changing via "the encoder's
+visualizer knob, another browser, or an API call" — none of those is true today. It is left in place only
+because deleting the chain, not editing the comment, is the resolution.
+
+### What is *not* lost
+
+**The capability.** Home's six-segment picker calls `VisualizerPanel.SelectMode`, which mutates the panel's own
+`_currentMode` and persists a preference; it never touched `VisualizationModeService`. The System Config
+"Visualizer" tab is FFT size / smoothing / peak-hold and has no mode control at all. So a user can still choose
+a visualisation exactly as before.
+
+What *is* lost is **cross-circuit sync** — a mode change in one browser no longer reaches another. Note honestly
+that the picker never produced that sync either: the knob was the only writer, so what stopped happening is
+exactly the input `ENC-7` deliberately removed.
+
+### What's Needed — `ENC-9`'s to resolve
+
+Either **wire the picker through the service** (`SelectMode` → `VisualizationModeService`, so the broadcast fires
+and the sync becomes real for the first time), or **delete the chain** (`CycleMode`/`ToggleEnabled`,
+`ModeChanged`, the `AudioStateUpdateService` subscription and broadcast, the `VisualizerPanel` subscription and
+`HandleModeChangedRemotely`). `ENC-7` did neither on purpose: the registration is kept because
+`AudioStateUpdateService` still resolves the type, and a deletion spanning API, Infrastructure and Web is a
+different row's change. **Gotcha:** `VisualizerPanelTests` asserts the panel *has* subscribed to
+`VisualizationModeChanged`, so the delete option has to take that test with it.
+
+---
+
+## 18. `FingerprintDbContext` is a singleton over one unsynchronised `SqliteConnection`
+
+**Pre-existing and widened by `ENC-7`, not introduced by it.**
+
+`FingerprintDbContext` is registered `AddSingleton` (`FingerprintingServiceExtensions`) and
+`GetConnectionAsync` returns the **same** `SqliteConnection` instance to every caller. Its only lock,
+`_initLock`, guards *initialisation* — it is released before the connection is handed out and does not
+serialise use of it. `Microsoft.Data.Sqlite` connections are **not** thread-safe.
+
+The scoped registrations above it (`IRadioPresetRepository`, `IRadioPresetService`) do not change this: a scope
+yields a fresh repository object over the same singleton connection, so scoping buys **lifetime legality, not
+isolation**. Both `PresetSelectorService` and `AddRotaryEncoders` are commented to say exactly that, so the
+comments do not imply an isolation that does not exist.
+
+### Why `ENC-7` widened it
+
+Before this row the callers were HTTP request threads and `BackgroundIdentificationService`. `ENC-7` adds
+another non-request-thread caller: the HID read loop and the fire-and-forget continuations it starts
+(`PresetSelectorService.RefreshAsync` / `RecallAsync` / `SaveAsync`). A knob turn and an HTTP request can now
+touch the same connection concurrently.
+
+### What's Needed
+
+Either serialise access (a `SemaphoreSlim` taken for the whole of each repository method) or stop sharing one
+connection (open per-operation connections against the same file and let SQLite's own locking do the work).
+
+**Gotcha 1:** the lock has to span the whole method, not the `ExecuteReaderAsync` call. Every repository here
+drains its reader after the command returns, so a lock released at the command boundary would let a second
+caller issue against the same connection while the first is still reading.
+
+**Gotcha 2:** serialising individual commands does not make the *service* atomic. `RadioPresetService.
+AddPresetAsync` is three separate repository calls — count, existence check, insert — so its own
+check-then-write window survives any per-command lock. That window is what `PresetSelectorService`'s duplicate
+catch arm exists to report.
+
+Whichever way it goes, it is a change to the whole fingerprinting data layer, not to the encoder row that
+noticed it.

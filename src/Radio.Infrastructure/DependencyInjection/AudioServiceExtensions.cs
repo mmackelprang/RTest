@@ -425,10 +425,20 @@ public static class AudioServiceExtensions
     // owner-initiated concerns.
     services.AddSingleton<IRotaryEncoderProvisioning>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
 
-    // Visualization mode, broadcast over SignalR by AudioStateUpdateService and driven from the
-    // touchscreen — the six-segment picker on Home and the System Config dropdown. ENC-7 removed
-    // the encoder that also drove it; the capability moved to the screen rather than going away,
-    // so this registration stays.
+    // Visualization mode. The encoder ENC-7 removed was this service's ONLY writer: nothing in
+    // src/ calls CycleMode or ToggleEnabled any more, so ModeChanged cannot fire and
+    // AudioStateUpdateService.OnVisualizationModeChanged - and the VisualizationModeChanged SignalR
+    // broadcast it makes - are unreachable.
+    //
+    // The registration stays for two reasons: AudioStateUpdateService still resolves this type and
+    // subscribes to ModeChanged, and removing the now-dead broadcast chain is ENC-9's work rather
+    // than this row's. It is recorded in design/FUTURE-WORK.md so it is not rediscovered.
+    //
+    // ⚠ The CAPABILITY is unaffected. Home's six-segment picker changes the mode through
+    // VisualizerPanel's own state and its saved preference and never went through this service, so
+    // what was lost is the encoder input that was deliberately removed - not the ability to choose
+    // a mode. The System Config "Visualizer" tab is FFT size / smoothing / peak-hold; it has no
+    // mode control at all.
     services.AddSingleton<VisualizationModeService>();
 
     // HUD feedback channel. Singleton because the coalescer is per-encoder state that must outlive
@@ -457,10 +467,15 @@ public static class AudioServiceExtensions
     // same reason.
     //
     // IRadioPresetService is registered SCOPED (FingerprintingServiceExtensions), and this service
-    // is a singleton driven by the HID read loop, which has no request scope. It therefore takes
-    // IServiceScopeFactory - which the container registers itself, so it needs no deferral - and
-    // opens a scope per operation, rather than capturing a scoped repository that holds a database
-    // context shared with the API's request-scoped consumers.
+    // is a singleton driven by the HID read loop, which has no request scope. A singleton may not
+    // capture a scoped service - the container either refuses the injection or satisfies it once
+    // out of a scope that then outlives its use - so this takes IServiceScopeFactory, which the
+    // container registers itself and so needs no deferral, and opens a scope per operation.
+    //
+    // That buys lifetime legality and nothing else. FingerprintDbContext, which the preset
+    // repository reads through, is registered SINGLETON and hands every caller the same
+    // SqliteConnection, so a repository built in a fresh scope still works over the same connection
+    // as every HTTP request. No isolation is claimed here; see design/FUTURE-WORK.md.
     services.AddSingleton<PresetSelectorService>(sp => new PresetSelectorService(
       sp.GetRequiredService<ILogger<PresetSelectorService>>(),
       sp.GetRequiredService<IServiceScopeFactory>(),

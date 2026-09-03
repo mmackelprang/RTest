@@ -271,6 +271,31 @@ public class PresetSelectorServiceTests
     Assert.Equal("0 saved", card.TitleSuffix);
   }
 
+  [Fact]
+  public void Press_OnAnOpenButEmptyOverlay_RepublishesTheEmptyState_AndReArmsTheWindow()
+  {
+    // There is no row to recall, but a silent return would publish nothing and leave the idle
+    // window running from the press that opened the overlay - so pressing again would let the card
+    // vanish under the user's finger, on the one screen with no other affordance.
+    using var h = new Harness();
+
+    h.Selector.Press();                                          // opens on an empty bank
+    h.Time.Advance(TimeSpan.FromMilliseconds(3000));             // most of the 4 s window is gone
+    int before = h.Hud.Published.Count;
+
+    h.Selector.Press();                                          // the press this test is about
+
+    Assert.Equal(before + 1, h.Hud.Published.Count);
+    var card = h.LastPreview;
+    Assert.Empty(card.Rows!);
+    Assert.Equal("NO STATIONS SAVED", card.EmptyPrimary);
+
+    // The window was re-armed rather than left to expire: 3000 + 1500 is past the original 4000 ms
+    // deadline, and the overlay is still up. Driven by the injected clock, not by elapsed time.
+    h.Time.Advance(TimeSpan.FromMilliseconds(1500));
+    Assert.True(h.Selector.IsOpen);
+  }
+
   // --- 8-14: recall ------------------------------------------------------------------------------
 
   [Fact]
@@ -412,6 +437,28 @@ public class PresetSelectorServiceTests
     // gap was filled.
     Assert.Equal("Saved to 02", notice.PrimaryText);
     Assert.Equal(EncoderInteractionTimings.SelectorNoticeMs, notice.DurationMs);
+    // The overlay draws the title row for a notice as well as for a list, so the count has to
+    // include the row just written. The bank is re-read before the notice is composed for exactly
+    // this reason; composing it first reported the count from before the save.
+    Assert.Equal("2 saved", notice.TitleSuffix);
+  }
+
+  [Fact]
+  public void Save_OnAColdSession_HeadsItsNoticeWithACountItActuallyRead()
+  {
+    // A hold never opens the overlay, and the bank is otherwise read only on open, after a save and
+    // after a recall - so on a cold session nothing has read it when a boundary notice is composed.
+    // Before the read at the top of SaveAsync every such notice was headed "0 saved".
+    using var h = new Harness();
+    h.Bank.Seed("KEXP", RadioBand.FM, 90_300_000);
+    h.Bank.Seed("KUOW", RadioBand.FM, 94_900_000);
+    h.Audio.ActiveSource = new FakePrimarySource(AudioSourceType.Bluetooth, "Pixel 8");
+
+    h.Selector.LongPress();
+
+    var notice = h.LastNotice;
+    Assert.Equal("Only radio stations can be saved", notice.PrimaryText);
+    Assert.Equal("2 saved", notice.TitleSuffix);
   }
 
   [Fact]
@@ -502,6 +549,30 @@ public class PresetSelectorServiceTests
   }
 
   [Fact]
+  public void Save_WhenTheAddRacesADuplicateNamedLikeTheCap_ReportsTheDuplicate_NotAFullBank()
+  {
+    // RadioPresetService's duplicate message interpolates the existing preset's NAME - "A preset
+    // already exists for {band} - {frequency}: {name}" - so a station called "Maximum Rock"
+    // satisfies the bank-full filter's Contains("Maximum") too. This passes only while the
+    // duplicate arm is listed FIRST; swapping the two catch arms turns it red.
+    //
+    // Reachable through the TOCTOU window between PresetExistsAsync and AddPresetAsync, which is
+    // what HideDuplicatesFromExistsCheck models.
+    using var h = new Harness();
+    h.Bank.Seed("Maximum Rock", RadioBand.FM, 101_500_000);
+    h.Bank.HideDuplicatesFromExistsCheck = true;
+    h.ActiveRadio(RadioBand.FM, 101_500_000);
+
+    h.Selector.LongPress();
+
+    var notice = h.LastNotice;
+    Assert.Equal("ALREADY SAVED", notice.PrimaryText);
+    Assert.DoesNotContain("FULL", notice.PrimaryText!, StringComparison.Ordinal);
+    // The add threw, so nothing was written.
+    Assert.Equal("Maximum Rock", Assert.Single(h.Bank.Presets).Name);
+  }
+
+  [Fact]
   public void Save_NeverCallsAnyOverwriteOrDeletePath()
   {
     // The guard for the one gesture on the panel that writes data. Replacement stays on the
@@ -520,6 +591,25 @@ public class PresetSelectorServiceTests
     Assert.Empty(h.Bank.RenameCalls);
     // Exactly one write landed across all three holds, and it was an append.
     Assert.Equal(2, h.Bank.Presets.Count);
+  }
+
+  // --- 23: a bank read that fails ----------------------------------------------------------------
+
+  [Fact]
+  public void BankReadFailure_WithTheOverlayOpen_SaysSo_RatherThanShowingAnEmptyBank()
+  {
+    // The catch used to log and return, which left State B on screen - and State B reads
+    // "NO STATIONS SAVED". A bank that could not be read is not a bank that is empty, and the user
+    // has no other affordance on this screen to check against.
+    using var h = new Harness();
+    h.Bank.Seed("KEXP", RadioBand.FM, 90_300_000);
+    h.Bank.GetAllThrows = new InvalidOperationException("database is locked");
+
+    h.Selector.Turn(1);
+
+    var notice = h.LastNotice;
+    Assert.Equal("Could not read your presets", notice.PrimaryText);
+    Assert.Equal(EncoderInteractionTimings.SelectorNoticeMs, notice.DurationMs);
   }
 
   // --- 22: teardown ------------------------------------------------------------------------------

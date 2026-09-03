@@ -14,8 +14,12 @@ namespace Radio.Infrastructure.Platform.Input;
 /// <para>
 /// Deliberately the same grammar as <see cref="SourceSelectorService"/>, on the same
 /// <see cref="EncoderSelectorState"/> and through the same overlay: the two knobs are adjacent and
-/// the handoff wants them interchangeable in the hand — learn one, you have learned both. The lists
-/// differ in their contents and in what a commit does, and in nothing else.
+/// the handoff wants them interchangeable in the hand — learn one, you have learned both. What
+/// differs is the contents of the list, what a commit does, and <b>when the list is composed</b>:
+/// <see cref="SourceSelectorService.Turn"/> recomposes synchronously before it opens and moves, so
+/// its first detent already moves an entry, while this one opens on an empty list and fills it from
+/// a background bank read, so its first detent of a session moves nothing. From the second detent
+/// on the two behave identically.
 /// </para>
 ///
 /// <para>
@@ -27,8 +31,13 @@ namespace Radio.Infrastructure.Platform.Input;
 /// <para>
 /// <b>Scope factory, not an injected repository.</b> <see cref="IRadioPresetService"/> is registered
 /// scoped and this service is a singleton driven by the HID read loop, which has no request scope.
-/// A scope is opened per operation rather than promoting the repository's lifetime, because the
-/// repository holds a database context and the API's other consumers are request-scoped.
+/// A singleton may not capture a scoped service — the container either refuses the injection or
+/// satisfies it once out of a scope that then outlives its use — so a scope is opened per operation
+/// instead. <b>That buys lifetime legality and nothing else.</b> The repository reads through
+/// <c>FingerprintDbContext</c>, which is registered <b>singleton</b> and hands every caller the same
+/// <c>SqliteConnection</c>, so a fresh repository from a fresh scope still works over the same
+/// connection the API's request-scoped consumers use. No isolation is claimed or obtained here; the
+/// hazard that leaves is recorded in <c>design/FUTURE-WORK.md</c>.
 /// </para>
 ///
 /// <para>
@@ -175,6 +184,12 @@ public sealed class PresetSelectorService : IDisposable
 
     if (row is null)
     {
+      // The overlay is open with nothing highlighted — an empty bank, on the one screen with no
+      // other affordance. Returning silently would publish nothing and leave the idle window
+      // running from whatever input opened the overlay, so pressing repeatedly would let the card
+      // vanish under the user's finger. Republishing re-shows the instructional empty state and
+      // re-arms that window, which is this row's "never a silent no-op" rule.
+      PublishPreview();
       return;
     }
 
@@ -288,6 +303,20 @@ public sealed class PresetSelectorService : IDisposable
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error loading the preset bank for the PRESETS knob");
+
+      // A read that throws while the overlay is up would otherwise leave State B on screen, and
+      // State B reads "NO STATIONS SAVED" — a bank that could not be read, reported as a bank that
+      // is empty. The notice replaces the list for its own duration and re-arms the idle window.
+      //
+      // Published regardless of the publish flag. That flag exists to stop a routine preview
+      // replacing a card the caller has just put up deliberately - a notice or a failure - not to
+      // suppress an error the user is looking straight at.
+      if (IsOpen)
+      {
+        PublishNotice(
+          "Could not read your presets", null, EncoderInteractionTimings.SelectorNoticeMs);
+      }
+
       return;
     }
 
@@ -353,7 +382,7 @@ public sealed class PresetSelectorService : IDisposable
     {
       // A unit separator between rows, so no run of row text can spell another list's
       // signature.
-      sb.Append('')
+      sb.Append('\u001f')
         .Append(row.Id).Append('|')
         .Append(row.Primary).Append('|')
         .Append(row.Secondary).Append('|')
@@ -450,6 +479,16 @@ public sealed class PresetSelectorService : IDisposable
   {
     try
     {
+      // The bank is read before anything is reported. ComposeLocked builds TitleSuffix from
+      // _state.Rows and the overlay draws that title row for a notice as well as for a list, but a
+      // hold never opens the overlay — and the bank is otherwise read only on open, after a save
+      // and after a recall. Without this the first save of a cold session heads its notice
+      // "PRESETS · 0 saved", and every later one shows the count from before that save.
+      //
+      // This is not the "no I/O per detent" rule being broken: that rule is about turns. A hold is
+      // a discrete gesture, so this is one read per gesture.
+      await RefreshAsync(publish: false);
+
       var mgr = _audioManagerFactory();
 
       if (mgr.ActiveSource is not IRadioControl radio)
@@ -479,16 +518,37 @@ public sealed class PresetSelectorService : IDisposable
       var saved = await presets.AddPresetAsync(name, band, hz);
       int newSlot = await SlotOfAsync(presets, band, hz);
 
+      // Reloaded BEFORE the notice, so the notice's title suffix counts the row just written. Not
+      // republished, because a preview published here would replace the notice immediately — a new
+      // row always changes the list.
+      await RefreshAsync(publish: false);
+
       PublishNotice(
         $"Saved to {newSlot:00}",
         $"{saved.Name} · {new Frequency((long)hz).ToDisplayString()} {band}",
         EncoderInteractionTimings.SelectorNoticeMs);
 
-      // Reloaded but not republished: the notice is what should be on screen for its own duration,
-      // and a preview published here would replace it immediately, since a new row always changes
-      // the list.
-      await RefreshAsync(publish: false);
       _logger.LogInformation("Saved preset {Name} to {Band} slot {Slot}", saved.Name, band, newSlot);
+    }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("already exists", StringComparison.Ordinal))
+    {
+      // The station was written between the PresetExistsAsync check above and the add — the only
+      // way to reach this arm, since that check is what normally reports a duplicate.
+      //
+      // ⚠ THE ORDER IS WHAT MAKES THIS SAFE, not the filter. RadioPresetService's duplicate
+      // message interpolates the existing preset's NAME — "A preset already exists for {band} -
+      // {frequency}: {name}" — so a station called e.g. "Maximum Rock" satisfies the "full" filter
+      // below as well. C# takes the first arm whose filter passes, so the more specific match has
+      // to be listed first; moving this arm below the next one reports that duplicate as a full
+      // bank.
+      //
+      // No slot number: presets, band and hz are locals of the try block and are out of scope
+      // here, and the scope that owned the repository is disposed on the way out of it. What this
+      // notice has to say is that nothing was written.
+      PublishNotice(
+        "ALREADY SAVED",
+        "that station is already in your presets",
+        EncoderInteractionTimings.SelectorNoticeShortMs);
     }
     catch (InvalidOperationException ex) when (ex.Message.Contains("Maximum", StringComparison.Ordinal))
     {

@@ -263,14 +263,26 @@ public class RotaryEncoderActionRouter : IDisposable
     // on SOURCE or TUNING would promise something neither performs.
     if (index == 2)
     {
-      // PRESETS publishes the START edge and nothing else. Its terminating edges come from the
-      // selector's own selector-phase publishes: a save always ends in a SelectorNotice, and
-      // EncoderHudService clears IsHolding for any selector phase, so the ring collapses there.
+      // PRESETS publishes the START edge only, and only while the selector list is not already up.
       //
+      // Nothing else is published because a save always ends in a SelectorNotice, and
+      // EncoderHudService clears IsHolding for any selector phase, so the ring collapses there.
       // Publishing HoldCancel or HoldCommit here instead would send a label-only card with no rows,
       // and since EncoderLongPressGesture raises ShortPress BEFORE HoldCancelled, a sub-threshold
       // press would open the overlay and then have it wiped by that card.
-      if (phase != EncoderHudPhase.HoldStart)
+      //
+      // The IsOpen check is the same hazard on the START edge. EncoderLongPressGesture raises
+      // HoldStarted on the PRESS-DOWN edge - not when the ring reaches its 300 ms draw threshold -
+      // and a hold phase is not a selector phase, so EncoderHudService.Publish would swap the open
+      // list for a label-only card on EVERY press - from the press-down edge until the press
+      // resolves, on release or at the threshold. That is this row's primary interaction (turn to
+      // preview, press to recall) broken on every press.
+      //
+      // The trade, stated plainly: a hold begun with the overlay ALREADY OPEN draws no ring. The
+      // save still happens and its notice still lands at the 600 ms threshold; only the ring is
+      // missing. The documented save gesture - tune a station, hold PRESETS with no overlay up -
+      // keeps its ring.
+      if (phase != EncoderHudPhase.HoldStart || _presetSelector.IsOpen)
       {
         return;
       }
@@ -519,8 +531,13 @@ public class RotaryEncoderActionRouter : IDisposable
 
   private void HandlePresetsTurn(int index, int delta)
   {
-    // ENC-3 clamp: one detent, one entry, always — the same rule as SOURCE, which is what keeps the
-    // two adjacent selector knobs interchangeable in the hand.
+    // ENC-3 clamp: the same one-entry-per-detent bound SOURCE uses, which is what keeps the two
+    // adjacent selector knobs interchangeable in the hand.
+    //
+    // Not "always", though, and the difference is the first detent of a session: PRESETS opens on
+    // an empty list and fills it from the background bank read that opening starts, so that detent
+    // moves nothing. SOURCE recomposes synchronously before it moves, so its first detent already
+    // moves an entry. From the second detent on the two knobs behave identically.
     _presetSelector.EncoderIndex = index;
     _presetSelector.Turn(Clamp(delta, RotaryEncoderConfigDefaults.SelectorClamp));
   }

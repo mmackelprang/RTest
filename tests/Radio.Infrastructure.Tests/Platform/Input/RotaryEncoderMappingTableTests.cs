@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.Input;
 using Radio.Core.Models.Audio;
-using Microsoft.Extensions.DependencyInjection;
 using Radio.Infrastructure.Platform.Input;
 
 namespace Radio.Infrastructure.Tests.Platform.Input;
@@ -92,12 +92,30 @@ public class RotaryEncoderMappingTableTests
     private sealed class NullDisposable : IDisposable { public void Dispose() { } }
   }
 
+  /// <summary>
+  /// The router under test, over fakes.
+  ///
+  /// <para>
+  /// <paramref name="presets"/> is passed in rather than created here so the caller owns the
+  /// <c>ServiceProvider</c> behind it and disposes it; building one inline leaked a provider
+  /// per test.
+  /// </para>
+  ///
+  /// <para>
+  /// Every timer in the graph runs on one <see cref="FakeTimeProvider"/> - the gesture's long-press
+  /// threshold and both selectors' idle-dismiss windows. Nothing in this file advances it, and no
+  /// assertion here depends on elapsed time: the point is that constructing a router and turning a
+  /// knob arms no real system timer. Wiring the preset selector without one armed a real 4-second
+  /// timer on every index-2 turn and press.
+  /// </para>
+  /// </summary>
   private static RotaryEncoderActionRouter BuildRouter(
+    PresetBankScope presets,
     FakeRotaryEncoderService? encoder = null,
-    IEncoderFeedbackSink? hud = null,
-    IServiceScopeFactory? presetScope = null)
+    IEncoderFeedbackSink? hud = null)
   {
     var sink = hud ?? new NullHudSink();
+    var time = new FakeTimeProvider();
     return new RotaryEncoderActionRouter(
       NullLogger<RotaryEncoderActionRouter>.Instance,
       encoder ?? new FakeRotaryEncoderService(),
@@ -110,15 +128,19 @@ public class RotaryEncoderMappingTableTests
         NullLogger<SourceSelectorService>.Instance,
         () => new StubAudioManager(),
         () => new StubBandMemory(),
-        sink),
+        sink,
+        time),
       // ENC-7. Encoder 2 IS turned below, so this one is wired to a real scope factory over an
       // empty bank rather than to a stub.
       new PresetSelectorService(
         NullLogger<PresetSelectorService>.Instance,
-        presetScope ?? new PresetBankScope().Factory,
+        presets.Factory,
         () => new StubAudioManager(),
         () => new StubBandMemory(),
-        sink));
+        sink,
+        time),
+      sleepService: null,
+      timeProvider: time);
   }
 
   /// <summary>Nothing here commits a band, so the memory only has to exist.</summary>
@@ -135,7 +157,8 @@ public class RotaryEncoderMappingTableTests
   public void Mapping_CoversEveryEncoderExactlyOnce_InIndexOrder()
   {
     // The API projects this array positionally; a gap or a duplicate would silently mislabel a knob.
-    using var router = BuildRouter();
+    using var bank = new PresetBankScope();
+    using var router = BuildRouter(bank);
     Assert.Equal(RotaryEncoderDeviceConfig.EncoderCount, router.Mapping.Count);
     for (int i = 0; i < router.Mapping.Count; i++)
     {
@@ -146,7 +169,8 @@ public class RotaryEncoderMappingTableTests
   [Fact]
   public void Mapping_DescribesEveryKnob_WithNoPlaceholderText()
   {
-    using var router = BuildRouter();
+    using var bank = new PresetBankScope();
+    using var router = BuildRouter(bank);
     Assert.All(router.Mapping, m =>
     {
       Assert.False(string.IsNullOrWhiteSpace(m.TurnDescription));
@@ -163,7 +187,7 @@ public class RotaryEncoderMappingTableTests
     var encoder = new FakeRotaryEncoderService();
     var hud = new RecordingSelectorSink();
     using var bank = new PresetBankScope();
-    using var router = BuildRouter(encoder, hud, bank.Factory);
+    using var router = BuildRouter(bank, encoder, hud);
 
     // ENC-7 put PRESETS on index 2. It is the knob under test because its handler has an
     // observable side effect that needs no hardware: turning it opens the overlay and publishes.
@@ -182,7 +206,7 @@ public class RotaryEncoderMappingTableTests
     var encoder = new FakeRotaryEncoderService();
     var hud = new RecordingSelectorSink();
     using var bank = new PresetBankScope();
-    using var router = BuildRouter(encoder, hud, bank.Factory);
+    using var router = BuildRouter(bank, encoder, hud);
 
     // Short press = press edge then release edge; the gesture fires the short action on release.
     encoder.RaiseButton(2, isPressed: true);

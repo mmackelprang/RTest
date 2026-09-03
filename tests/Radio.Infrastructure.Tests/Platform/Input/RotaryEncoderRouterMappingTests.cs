@@ -497,6 +497,11 @@ public class RotaryEncoderRouterMappingTests
     Assert.Equal(0, h.Audio.MuteWrites);
   }
 
+  /// <summary>
+  /// Pins SOURCE (index 1): the selector knob that still has no long action, so it commits nothing
+  /// and promises nothing. Kept under its original name because it moved knobs rather than
+  /// disappearing - it pinned index 2 until ENC-7 put the save gesture there.
+  /// </summary>
   [Fact]
   public void SelectorLongPress_DoesNothing()
   {
@@ -534,18 +539,6 @@ public class RotaryEncoderRouterMappingTests
     Assert.Equal(2, holdStarts[1].EncoderIndex);
     Assert.Equal("HOLD TO SAVE", holdStarts[1].Label);
     Assert.DoesNotContain(holdStarts, c => c.EncoderIndex is 1 or 3);
-  }
-
-  [Fact]
-  public void SourceLongPress_StillDoesNothing()
-  {
-    using var h = new Harness();
-
-    h.Encoders.RaiseButton(1, true);
-    h.Time.Advance(TimeSpan.FromMilliseconds(1000));
-
-    Assert.Empty(h.Cards(EncoderHudPhase.HoldStart));
-    Assert.Equal(0, h.Sleep.EnterSleepCalls);
   }
 
   [Fact]
@@ -623,6 +616,33 @@ public class RotaryEncoderRouterMappingTests
     var card = Assert.Single(h.Cards(EncoderHudPhase.HoldStart));
     Assert.Equal(2, card.EncoderIndex);
     Assert.Equal("HOLD TO SAVE", card.Label);
+
+    // The other half of the design, and the half that would regress silently: a completed hold on
+    // this knob publishes NO HoldCommit. The save's own SelectorNotice is what collapses the ring,
+    // and a label-only HoldCommit card would replace the overlay to do the same job worse.
+    Assert.Empty(h.Cards(EncoderHudPhase.HoldCommit));
+  }
+
+  [Fact]
+  public void PresetsPress_WithTheOverlayAlreadyOpen_PublishesNoHoldCard()
+  {
+    // Regression guard for the PRESS-DOWN edge. EncoderLongPressGesture raises HoldStarted on
+    // press-down, not when the ring reaches its draw threshold, and a hold phase is not a selector
+    // phase - so an unguarded publish here would swap the open list for a label-only card on every
+    // press, for as long as the finger is down. That is this row's primary interaction (turn to
+    // preview, press to recall) broken on every press.
+    using var h = new Harness();
+    h.SeedPreset("KEXP", RadioBand.FM, 90_300_000);
+    h.Encoders.RaiseTurn(2, 1);
+    Assert.True(h.PresetSelector.IsOpen);
+
+    h.Encoders.RaiseButton(2, isPressed: true);
+
+    Assert.Empty(h.Cards(EncoderHudPhase.HoldStart));
+    // The list is still what is on screen.
+    EncoderHudEventArgs last = h.Hud.Published[^1];
+    Assert.Equal(EncoderHudPhase.SelectorPreview, last.Phase);
+    Assert.NotEmpty(last.Rows!);
   }
 
   [Fact]
@@ -666,8 +686,10 @@ public class RotaryEncoderRouterMappingTests
   /// act rather than a merge artefact.
   ///
   /// <para>
-  /// <c>VisualizationModeService</c> itself, its registration, its broadcast and the on-screen
-  /// six-segment picker all still ship — ENC-7 removed the knob, not the capability.
+  /// <c>VisualizationModeService</c> and its registration still ship, and so does the on-screen
+  /// six-segment picker — which is the capability, and which never went through that service.
+  /// The service's <c>ModeChanged</c> broadcast, on the other hand, can no longer fire: the encoder
+  /// was its only writer. See <c>design/FUTURE-WORK.md</c> § 17, which is ENC-9's to resolve.
   /// </para>
   /// </summary>
   [Fact]

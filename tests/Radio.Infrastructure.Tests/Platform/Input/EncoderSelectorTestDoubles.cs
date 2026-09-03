@@ -331,6 +331,20 @@ internal sealed class FakePresetBank : IRadioPresetService
   /// <summary>The cap, lowered by tests that want to reach it without seeding fifty rows.</summary>
   public int MaxPresets { get; set; } = 50;
 
+  /// <summary>
+  /// Thrown by <see cref="GetAllPresetsAsync"/> when set, so a test can drive the bank-read failure
+  /// path. The real one is a locked or missing SQLite file, which a unit test cannot arrange.
+  /// </summary>
+  public Exception? GetAllThrows { get; set; }
+
+  /// <summary>
+  /// Makes <see cref="PresetExistsAsync"/> report false for a preset that is in fact present, which
+  /// is the only way to model the TOCTOU window between that check and
+  /// <see cref="AddPresetAsync"/>: the caller checks first, so without this the add's duplicate
+  /// throw is unreachable.
+  /// </summary>
+  public bool HideDuplicatesFromExistsCheck { get; set; }
+
   /// <summary>Seeds one preset, oldest first, so the derived per-band ordinal is predictable.</summary>
   public RadioPreset Seed(string name, RadioBand band, double hertz, DateTimeOffset? createdAt = null)
   {
@@ -347,7 +361,9 @@ internal sealed class FakePresetBank : IRadioPresetService
   }
 
   public Task<IReadOnlyList<RadioPreset>> GetAllPresetsAsync(CancellationToken cancellationToken = default) =>
-    Task.FromResult<IReadOnlyList<RadioPreset>>(Presets.ToList());
+    GetAllThrows is null
+      ? Task.FromResult<IReadOnlyList<RadioPreset>>(Presets.ToList())
+      : Task.FromException<IReadOnlyList<RadioPreset>>(GetAllThrows);
 
   public Task<RadioPreset?> GetPresetByIdAsync(string id, CancellationToken cancellationToken = default) =>
     Task.FromResult(Presets.FirstOrDefault(p => p.Id == id));
@@ -392,7 +408,9 @@ internal sealed class FakePresetBank : IRadioPresetService
   }
 
   public Task<bool> PresetExistsAsync(RadioBand band, double frequency, CancellationToken cancellationToken = default) =>
-    Task.FromResult(Presets.Any(p => p.Band == band && Math.Abs(p.Frequency - frequency) < 1.0));
+    Task.FromResult(
+      !HideDuplicatesFromExistsCheck
+      && Presets.Any(p => p.Band == band && Math.Abs(p.Frequency - frequency) < 1.0));
 
   public Task<int> GetPresetCountAsync(CancellationToken cancellationToken = default) =>
     Task.FromResult(Presets.Count);

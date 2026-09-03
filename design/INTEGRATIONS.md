@@ -80,9 +80,19 @@ behind the kebab, where they have a confirmation and an undo. Three boundaries a
 swallowed: `Only radio stations can be saved` on a non-radio source, `ALREADY SAVED · slot NN` for a station
 already in the bank, and `PRESETS FULL` at the 50-preset cap.
 
-**Visualization lost its knob and kept its capability.** `ENC-7` removed `VisualizationModeService` from the
-router only. The service, its registration, its SignalR broadcast, the six-segment picker on Home and the
-System Config dropdown all still ship — the mode is changed from the touchscreen now (encoder handoff §11).
+**Visualization kept its capability and lost its only writer — both halves matter.** `ENC-7` removed
+`VisualizationModeService` from the router. The **capability is unaffected**: Home's six-segment picker changes
+the mode through `VisualizerPanel`'s own state and its saved preference, and never went through that service,
+so choosing a visualisation is still something the touchscreen does (encoder handoff §11). (The System Config
+"Visualizer" tab is FFT size / smoothing / peak-hold — it has never had a mode control.)
+
+**The `VisualizationModeChanged` SignalR broadcast, however, no longer fires.** The encoder was the only caller
+of `VisualizationModeService.CycleMode` / `ToggleEnabled`, so `ModeChanged` can no longer be raised,
+`AudioStateUpdateService.OnVisualizationModeChanged` never runs, and `VisualizerPanel`'s subscription to it is
+dead code. The service, its registration and the whole chain still *ship*; nothing drives them. Cross-circuit
+visualiser-mode sync therefore does not happen — and it never happened from the picker either, because the
+picker was never a writer. Deleting the chain or wiring the picker through it is `ENC-9`'s call; recorded in
+`design/FUTURE-WORK.md` § 17.
 
 **The device-side configuration table has always been in cabinet order** (`RotaryEncoderConfigDefaults.Create()`),
 so acceleration-disabled lands on the two selector knobs and the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` land on
@@ -828,7 +838,6 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 │                                                                 │
 │  RotaryEncoderHostedService ← IRotaryEncoderService (HID)       │
 │    └→ RotaryEncoderActionRouter → IAudioManager                 │
-│                                 → VisualizationModeService      │
 │                                                                 │
 │  PhoneCallIntegrationService ← IPhoneIntegrationService (SignalR)│
 │    └→ PhoneContactLookupService (PBAP SQLite + REST fallback)   │
@@ -878,7 +887,7 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 | Infrastructure | `Bluetooth/VCardParser.cs` | vCard 2.1/3.0 parser |
 | Infrastructure | `Bluetooth/pbap_download.py` | Python D-Bus OBEX helper script |
 | Infrastructure | `Audio/Services/AnnouncementService.cs` | TTS + ducking orchestration |
-| Infrastructure | `Audio/Services/VisualizationModeService.cs` | Viz mode cycling for encoder 3 |
+| Infrastructure | `Audio/Services/VisualizationModeService.cs` | Viz mode cycling — **no caller since `ENC-7`** (FUTURE-WORK § 17) |
 | API | `Controllers/NotificationsController.cs` | `POST /api/notifications/announce` |
 | API | `Controllers/IntegrationsController.cs` | `GET /api/integrations/{encoder,phone}/status` |
 | API | `Services/RotaryEncoderHostedService.cs` | Encoder lifecycle management |
