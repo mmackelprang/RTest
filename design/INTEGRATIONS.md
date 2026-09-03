@@ -131,7 +131,9 @@ are all in the `.encoder-hud` rule. `90 / 270 / 450 / 630` are the measured proj
 band 178 px away; do not "restore" the measured values.
 
 **Transient occlusion is accepted on every band** and nothing about position, width or z-order changes for it. The
-card is up 1500 ms after the last detent, carries `pointer-events: none`, and appears only while a hand is on a knob.
+card is up `EncoderInteractionTimings.HudHoldMs` — 2500 ms since `ENC-20`, raised from 1500 — after the last
+detent, carries `pointer-events: none`, and appears only while a hand is on a knob. That is a tail, not a lifetime:
+the timer re-arms on every detent, so the card is really up for the turn plus the hold.
 The VOLUME band lands on the fixed topbar and covers `ENC-4a`'s `MUTED` chip; that is safe **only because every card
 in the VOLUME band carries the console's mute state**, which is an invariant rather than a coincidence — a future
 card at index 0 that omitted `IsMuted` would hide the reason the room is silent while saying nothing about it.

@@ -99,7 +99,7 @@ public class SleepTests : TestContext
     // singleton has to be resolvable for the page to activate. The fixture's hub transport is
     // offline, so nothing arrives over SignalR and the page renders the clock/forecast
     // composition these tests assert on unless a test publishes a card itself. The fake clock
-    // keeps the 1500 ms dismissal off the real thread pool.
+    // keeps the HudHoldMs dismissal off the real thread pool.
     Services.AddSingleton(sp =>
       new Radio.Web.Services.EncoderHudService(
         sp.GetRequiredService<AudioStateHubService>(),

@@ -116,9 +116,10 @@ public class EncoderHudEventArgs : EventArgs
   ///
   /// <para>
   /// Carried on the payload rather than derived from <see cref="Phase"/> because the handoff
-  /// specifies four different durations across five states (1500 value / 1500 blocked / 2000 saved /
+  /// specifies four different durations across five states (2500 value / 1500 blocked / 2000 saved /
   /// 4000 selector idle / 4000 failed), and ENC-7 adds more. One nullable field beats a lookup
-  /// table each row has to extend.
+  /// table each row has to extend. (The value card was 1500 too until ENC-20 raised it; the blocked
+  /// flash deliberately did not follow it up, since it reports a rule rather than a value to read.)
   /// </para>
   /// </summary>
   public int? DurationMs { get; init; }

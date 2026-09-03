@@ -33,8 +33,36 @@ public static class EncoderInteractionTimings
   /// <summary>
   /// How long a HUD card stays up after the last input, in milliseconds. Long enough to read a
   /// two-digit number after the hand stops; short enough not to camp on the visualizer.
+  ///
+  /// <para>
+  /// <b>This is the tail, not the lifetime.</b> <c>EncoderHudService.ArmDismissLocked</c> cancels
+  /// and re-arms on every detent, so a card is up for <i>turn duration + this</i>. Lengthening it
+  /// therefore lengthens only what remains after the hand stops and cannot make continuous turning
+  /// sticky. ENC-20 raised it from 1500, and that row is also why it matters more than it did: at
+  /// 1 volume point per detent an adjustment takes many more detents than it used to, so the
+  /// turning phase is longer and the reading phase is the same glance it always was.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ It also cannot lengthen a <i>suspended</i> state, and that is worth knowing before reaching
+  /// for it as a general dial. <c>ArmDismissLocked</c> is reached only when <c>!IsHolding</c> —
+  /// during a button hold the timer is cancelled outright rather than extended — and a
+  /// <c>SelectorCommitting</c> card is armed against
+  /// <see cref="SelectorCommitCeilingMs"/> instead. Neither path reads this value.
+  /// </para>
+  ///
+  /// <para>
+  /// <b>Deliberately longer than <see cref="SelectorNoticeMs"/> (2000 ms), and the inversion is not
+  /// an oversight.</b> A notice reports a committed action, which sounds like it deserves the longer
+  /// window — but the READ CONTEXT differs. A selector notice ends an interaction the user is
+  /// already inside and already looking at, so it only has to survive a glance that has begun. The
+  /// volume knob is reached for <i>without</i> looking, so its card must additionally survive the
+  /// user's latency in deciding to look up at all. <see cref="SelectorNoticeMs"/>,
+  /// <see cref="SelectorNoticeShortMs"/> and <see cref="SelectorBlockedFlashMs"/> are unchanged for
+  /// that reason.
+  /// </para>
   /// </summary>
-  public const int HudHoldMs = 1500;
+  public const int HudHoldMs = 2500;
 
   /// <summary>
   /// Minimum interval between coalesced HUD broadcasts, in milliseconds (20 Hz).
@@ -50,8 +78,16 @@ public static class EncoderInteractionTimings
   /// How long a selector overlay stays up with nothing committed, in milliseconds (handoff §6.5).
   ///
   /// <para>
-  /// Longer than a value card's 1500 ms because a list has to be read, and because dismissing it
-  /// costs nothing: nothing has been committed, so a timeout is not a lost action.
+  /// Longer than a value card's <see cref="HudHoldMs"/> (2500 ms) because a list has to be read,
+  /// and because dismissing it costs nothing: nothing has been committed, so a timeout is not a
+  /// lost action.
+  ///
+  /// <para>
+  /// ⚠ The margin is much narrower than it was. ENC-20 raised the value card from 1500 to 2500, so
+  /// the gap fell from 2500 ms to 1500 ms while this constant stayed put. Still the right order,
+  /// but no longer a comfortable one — raise this if the value card is ever lengthened again,
+  /// rather than letting a list get the same dwell as a two-digit number.
+  /// </para>
   /// </para>
   /// </summary>
   public const int SelectorIdleDismissMs = 4000;
