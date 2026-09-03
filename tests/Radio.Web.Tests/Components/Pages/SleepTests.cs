@@ -438,6 +438,52 @@ public class SleepTests : TestContext
   // above (which now runs through the new helper) and by the helper unit
   // tests in ClocksTests.
 
+  // ─── ENC-6: the Ambient / Standby hint ────────────────────────────────────
+  //
+  // ⚠ These drive the Standby state through the SignalR path, not the HTTP one. The hermetic rig
+  // fails every outbound request by design, so SetSleepScreenVisibleAsync returns null here and the
+  // page keeps its Ambient default - a test that tried to reach Standby through the API response
+  // would pass without asserting anything. The HTTP round trip is UAT's job.
+
+  [Fact]
+  public void Sleep_ByDefault_ShowsTheAmbientHint()
+  {
+    // The API report fails in this rig by design, so this also pins the fallback: a console whose
+    // audio is still playing must never be labelled as switched off.
+    var cut = RenderComponent<Sleep>();
+
+    cut.Find(".sleep-screen-hint").TextContent.Trim().Should().Be("tap anywhere to wake");
+  }
+
+  [Fact]
+  public async Task Sleep_WhenAudioIsParkedWhileTheScreenIsUp_SwitchesToTheStandbyHint()
+  {
+    // Handoff 8.6: in Standby a tap does something different from a turn, and this line is the only
+    // place on screen that can say so. Reachable while the page is already up - the Sleep pill on
+    // another tab, or a VOLUME long-press on the cabinet.
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var cut = RenderComponent<Sleep>();
+
+    await cut.InvokeAsync(() => FireSleepStateChangedAsync(hub, true));
+
+    cut.Find(".sleep-screen-hint").TextContent.Trim()
+      .Should().Be("tap anywhere, or press any knob, to turn on");
+  }
+
+  [Fact]
+  public async Task Sleep_StandbyHint_NamesTheTap()
+  {
+    // ENC-6 deviation D-1. Handoff 8.6's own line omits the tap, and 8.3's table says a screen touch
+    // in Standby resumes - so the handoff copy would have the screen assert something false by
+    // omission on a touchscreen. Pinned so a later consistency pass does not "restore" it.
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var cut = RenderComponent<Sleep>();
+
+    await cut.InvokeAsync(() => FireSleepStateChangedAsync(hub, true));
+
+    cut.Find(".sleep-screen-hint").TextContent.Should().Contain("tap");
+  }
+
   /// <summary>
   /// Reach into <see cref="AudioStateHubService"/>'s NowPlayingChanged event
   /// via reflection and invoke its multicast delegate. This mirrors the

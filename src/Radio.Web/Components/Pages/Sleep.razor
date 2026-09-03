@@ -110,10 +110,9 @@
     }
   </div>
 
-  @* TODO(ENC-6): handoff §8.6 asks for a Standby-specific hint — `hold VOLUME or press any knob
-     to turn on` — which needs the Ambient-vs-Standby distinction ENC-6 introduces. Until that
-     state model exists there is nothing here to branch on, so the line stays as it is. *@
-  <div class="sleep-screen-hint">tap anywhere to wake</div>
+  @* Handoff §8.6. In Standby a tap does something different from a turn — a tap or a press resumes,
+     a turn only answers where you are — and this line is the only place on screen that can say so. *@
+  <div class="sleep-screen-hint">@HintText</div>
 </div>
 
 @code {
@@ -168,6 +167,18 @@
   // Set only once the report has actually been sent, so the prerender pass - which renders and
   // disposes without ever reaching OnAfterRenderAsync - cannot clear a flag it never set.
   private bool _reportedVisible;
+
+  /// <summary>
+  /// ENC-6 deviation D-1: the Standby line names the tap, which handoff §8.6's copy omits. §8.3's
+  /// own table says a screen touch in Standby resumes, so a line reading only "hold VOLUME or press
+  /// any knob" would have the screen assert something false by omission on a touchscreen. Any wake
+  /// state this build does not recognise falls back to the Ambient line — the same open-string rule
+  /// §6.10 sets for the HUD phase.
+  /// </summary>
+  private string HintText =>
+    _wakeState == nameof(Radio.Core.Interfaces.ConsoleWakeState.Standby)
+      ? "tap anywhere, or press any knob, to turn on"
+      : "tap anywhere to wake";
 
   protected override async Task OnInitializedAsync()
   {
@@ -438,9 +449,15 @@
 
   /// <summary>
   /// If the server (or another tab) flips wake while we're on /sleep, follow
-  /// it home so the route doesn't linger behind an awake system. Idempotent —
+  /// it home so the route doesn't linger behind an already-awake system. Idempotent —
   /// firing on a wake we initiated is harmless because we already navigated
   /// away in HandleWakeAsync.
+  ///
+  /// <para>
+  /// ENC-6: the sleeping edge is no longer a no-op. Audio has just been parked while this page was
+  /// already up — the Sleep pill on another tab, or a VOLUME long-press on the cabinet — so the
+  /// screen is now in Standby and the hint has to say what a tap does there.
+  /// </para>
   /// </summary>
   private Task OnSleepStateChanged(bool isSleeping)
   {
@@ -448,7 +465,17 @@
     {
       return InvokeAsync(() => Nav.NavigateTo("/"));
     }
-    return Task.CompletedTask;
+
+    return InvokeAsync(() =>
+    {
+      if (_disposed)
+      {
+        return;
+      }
+
+      _wakeState = nameof(Radio.Core.Interfaces.ConsoleWakeState.Standby);
+      StateHasChanged();
+    });
   }
 
   // ENC-4. EncoderHudService raises this from whichever thread published — the 1500 ms dismissal
