@@ -493,7 +493,7 @@ Currently tracks characters and cache hits, but **missing latency per provider**
 
 | Metric | Type | Location | Purpose |
 |--------|------|----------|---------|
-| `tts.provider_latency_ms` | Gauge | `TTSFactory` | Tag by provider (eSpeak/Google/Azure) |
+| `tts.provider_latency_ms` | Gauge | `TTSFactory` | Tag by provider (`google`/`azure`) |
 | `tts.provider_errors` | Counter | `TTSFactory` | Provider reliability |
 | `tts.cost_estimate_cents` | Counter | `TTSFactory` | Cloud cost tracking (Google/Azure) |
 

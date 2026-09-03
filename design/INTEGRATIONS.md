@@ -588,7 +588,7 @@ When an incoming call is detected (`Ringing` state):
 ### Troubleshooting
 
 - **"Disconnected" but server is running:** Check firewall rules, verify the hub URL is reachable from the Radio Console host with `curl http://<phone-server>:5555/hubs/phone/negotiate`
-- **No announcement on ring:** Check TTS engine availability in **System Config → Event Sources**. Ensure at least one TTS engine (ESpeak, Google, or Azure) is configured
+- **No announcement on ring:** Check TTS engine availability in **System Config → Event Sources**. Ensure a TTS engine (Google or Azure) is configured, with its API key present. Both engines are cloud services and there is no offline fallback, so announcements also go silent whenever the network is down - see the `TTS-9` note in [SYSTEMCONFIGURATION.md](SYSTEMCONFIGURATION.md#text-to-speech-tts-setup)
 - **Wrong caller name:** Verify the contacts API response shape matches the expected schema above
 - **Ring sound doesn't play:** Verify the file exists at the configured path and is a valid WAV or MP3
 
