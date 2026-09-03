@@ -3496,10 +3496,19 @@ clear of the whole `ENC-*` bundle including the two Builders currently in flight
    like a complete fix while being a quarter of one. Filed as one row covering all four.
 4. **Invalidate `TTSFactory._cachedEngines`** (C-31). The other acceptable answer to ADR §14 Q10; not
    taken, for the reasons in C-31, and filed with §9.4 defect (a) because they are one change.
-5. **Add a queue row for either of the above.** Two Builders are editing `docs/BUILDER_QUEUE.md` right
-   now, and this PR was scoped to touch **only its own row**. Both are recorded in
-   `design/FUTURE-WORK.md` with reproductions, and the eSpeak one is called out to the owner directly.
-   A security row is the owner's to prioritise, not a planning PR's to slip in.
+5. **Add a queue row for either of the above.** Two Builders were editing `docs/BUILDER_QUEUE.md` at the
+   time, and this PR was scoped to touch **only its own row**. A security row is the owner's to
+   prioritise, not a planning PR's to slip in.
+
+   > ⚠ **CORRECTED 2026-09-03. This item previously stated that items 3 and 4 were *"recorded in
+   > `design/FUTURE-WORK.md` with reproductions."* They were not.** `git show --stat 34f73c7` touched
+   > exactly two files — this plan and `docs/BUILDER_QUEUE.md` — and `FUTURE-WORK.md` contained no
+   > `TTSParameters` entry and no `_cachedEngines` entry at any point between that merge and
+   > 2026-09-03. **This is the sentence that made two untracked deferrals look tracked**, and it is
+   > the most consequential inaccuracy the 2026-09-03 tracking audit found: an item recorded as filed
+   > is an item nobody goes looking for. Both are **now** genuinely in `design/FUTURE-WORK.md`
+   > § *TTS seam*, each with a labelled reproduction — filed by that audit, not by this plan. Item 1 of §5 below
+   > carried the same error about the eSpeak defect and is corrected in place.
 6. **Ask RotaryPhone to fix `FindNodeAsync`** (C-22). The right long-term fix for the 404-during-blackout
    is theirs — propagate `Succeeded` so `GetAudio` answers `502` the way `GetList` already does. PR 3 does
    not make the ask, because a cross-repo ask goes through
@@ -3600,10 +3609,18 @@ C-30 clarifies a boundary the breakdown left implicit; it moves nothing between 
    `POST /api/sources/events/tts` reaches it unauthenticated.** A `voice` of
    `"en -w /opt/radio-console/api/appsettings.Production.json"` becomes extra `espeak-ng` flags — an
    arbitrary file write as `mmack`. Argument injection, not command injection; no shell is involved and no
-   credential is disclosed, but integrity is. Live today, not introduced by this arc, filed in
-   `design/FUTURE-WORK.md` with the reproduction. **PR 3 closes its own path; the `SourcesController` path
-   stays open until someone takes the row.** This plan did not add that row because two Builders are
-   editing the queue and it was scoped to one.
+   credential is disclosed, but integrity is. Live at the time of writing and not introduced by this arc.
+   This plan did not add a row because two Builders were editing the queue and it was scoped to one.
+
+   > ⚠ **CORRECTED 2026-09-03, twice over.** *(a)* This item said the defect was *"filed in
+   > `design/FUTURE-WORK.md` with the reproduction."* **It was not filed anywhere when this plan
+   > merged.** It was filed a day later as punch-list **`SEC-4`** (§5, P2) by
+   > [#545](https://github.com/mmackelprang/RTest/pull/545) — a different file, by a different PR.
+   > *(b)* **`SEC-4` is now ✅ CLOSED** by `TTS-9` ([#548](https://github.com/mmackelprang/RTest/pull/548)),
+   > which removed the eSpeak engine entirely rather than sanitising the argument line — so the
+   > vulnerable path no longer exists and `GenerateESpeakAsync` is gone. **Nothing is owed here.** The
+   > item is kept because PR 3's own `VoiceId` allow-list was written against it and is still correct
+   > and still wanted for the remaining engines.
 2. **A cross-repo ask for RotaryPhone**, ready to paste (C-22):
 
    > `GvVoicemailController.GetAudio` resolves a recording through `FindNodeAsync`, which calls
