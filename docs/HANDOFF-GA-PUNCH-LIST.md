@@ -391,7 +391,7 @@ keeps the knobs from becoming a new distortion source.
 
 ---
 
-**`ENC-4` — `EncoderHud` + the persistent mute indicator: every knob visible within 100 ms, on every route.**
+**`ENC-4` — `EncoderHud` + the persistent mute indicator: every knob visible within 100 ms, on every route.** ✅ **SHIPPED 2026-09-02 as [#519](https://github.com/mmackelprang/RTest/pull/519)** — whose review found three HIGH defects that had reached `main` without a PR, including an unguarded timer-thread callback that could kill the web process. ⚠ **Its geometry was then corrected by [#526](https://github.com/mmackelprang/RTest/pull/526)**: the original shipped horizontal quarters (x = 240/720/1200/1680) for knobs that are in fact a **vertical column left of the LCD**, so cards now anchor left and band at y = 90/270/450/630. `ENC-4a` shipped separately as [#493](https://github.com/mmackelprang/RTest/pull/493).
 ✅ **SHIPPED 2026-09-02** — implementation in `507b0d3`/`eb4005e`/`bd762d1`/`29acc01`, pre-merge review and its
 three HIGH fixes in #519. Plan: [`design/plans/ENC-4-encoder-hud.md`](../design/plans/ENC-4-encoder-hud.md), 17 tasks.
 Dependencies were `ENC-1` #498 and `ENC-3` #511. **`ENC-4a` shipped separately as #493.**
@@ -511,7 +511,7 @@ words today; the card is in the right *place*, which is what this row owns.
 
 ---
 
-**`ENC-5` — The SOURCE overlay, with the radio bands folded in.**
+**`ENC-5` — The SOURCE overlay, with the radio bands folded in.** ✅ **SHIPPED 2026-09-02 as [#536](https://github.com/mmackelprang/RTest/pull/536).** Carries the first half of the router remap — index 1 becomes SOURCE, with Visualization a deliberate seat-warmer on index 2 until `ENC-7`. ⚠ **Its plan omitted `EncoderHudService.IsKnownPhase`, which gates all rendering** — without extending it every selector payload would have rendered **nothing, with a fully green test suite**. Also measured on the box: one `StepFrequencyUpAsync` costs ~52 ms and the tuner serializes, so an 8-step detent is ~416 ms and **a hard flick keeps tuning for ~6 s after the hand stops** — designed acceleration meeting a slow tuner, logged to `FUTURE-WORK.md` with three ranked options.
 ✅ **SHIPPED 2026-09-03 — [#536](https://github.com/mmackelprang/RTest/pull/536).**
 *Effort: **5–6 days** (2–3 originally; D7 added the bands, and Rev 3 specified what that actually costs).*
 
@@ -613,7 +613,7 @@ the interaction design paying for the new physical layout (D2).
 
 ---
 
-**`ENC-7` — The PRESETS knob: recall and save on the existing preset bank.** ⭐ **NEW SHAPE IN REV 2.**
+**`ENC-7` — The PRESETS knob: recall and save on the existing preset bank.** ⭐ **NEW SHAPE IN REV 2.** ✅ **SHIPPED 2026-09-03 as [#541](https://github.com/mmackelprang/RTest/pull/541), completing the router remap — the four knobs now do what the escutcheon says: `0 = Volume · 1 = SOURCE · 2 = PRESETS · 3 = Tuning`, verified live via `/api/integrations/encoder/mapping`.** ⭐ **`ENC-5`'s five shared artifacts came through untouched**, and the seven-row window and `SelectorNotice` phase `ENC-5` built *speculatively for this row* both worked as delivered — the "one component, two lists" bet paid off exactly as argued. ⚠ **Two traps its plan had wrong, both invisible to CI:** `.encoder-hud-ring` lives inside `EncoderHud.razor`'s **volume** branch, so a PRESETS hold card renders **no ring with a green suite**; and `HoldStarted` fires on the **press-down** edge, so an early fix wiped the overlay on *every* press. It also removed `VisualizationModeService`'s last writer — see `ENC-9`.
 ✅ **SHIPPED 2026-09-02 — [#541](https://github.com/mmackelprang/RTest/pull/541).** Plan at [`design/plans/ENC-7-presets-knob.md`](../design/plans/ENC-7-presets-knob.md).
 
 > ⚠ **Five corrections this row makes to the text below — read these before trusting it.**
