@@ -1,7 +1,19 @@
 # HANDOFF — GA punch list for the cabinet install
 
 **Status:** **`[APPROVED 2026-09-01 — EXECUTING]`**. **All 11 §8 quick wins are shipped, plus `TEST-1`, `TEST-3`, `LOG-1`, `LOG-11`, `OPS-1`, `AUD-6`, `AUD-7`, `SEC-1`, and the first half of the encoder arc — `ENC-0`/`ENC-0a`, `ENC-1`, `ENC-2`, `ENC-3`, `ENC-11`/`ENC-11a` — all deployed and verified on the box.**
-> **P0 remaining as of 2026-09-02 (late evening): 3.** `ENC-7` is in flight; `PHN-1` is
+> ⭐ **THE ENCODER ARC IS COMPLETE — all 12 encoder P0s shipped, 2026-09-02/03.** `ENC-0` `ENC-1` `ENC-2`
+> `ENC-3` `ENC-4` `ENC-5` `ENC-6` `ENC-7` `ENC-8` `ENC-11` `ENC-12` `ENC-15`. The knobs are live, the router
+> matches the escutcheon (`0 = Volume · 1 = SOURCE · 2 = PRESETS · 3 = Tuning`), the HUD renders on the
+> panel's real axis, and `ENC-11`'s fault model finally has a voice. This was priced at 3–4 working weeks.
+>
+> ⚠ **Two things temper that, and both are recorded rather than glossed.** **(1) `ENC-15`'s gate FAILED**, so
+> panel blanking is withdrawn permanently — touch cannot wake a blanked panel *by construction*, and the
+> encoders are not compositor input devices either. **(2) Roughly half of every encoder row's UAT could not be
+> run**, because there is no software path to inject encoder input; every row stated that as an uncovered gap
+> rather than a pass, and `ENC-17` is filed to close it. **The behaviour a guest actually touches is the part
+> least verified**, and it still wants the owner's hand on the panel.
+>
+> **P0 remaining: 2, both in the phone arc.** `PHN-1` is
 > **partially shipped** — the ADR-029 arc is seven PRs and PRs 1 and 2 landed as `PHN-1a` ([#528](https://github.com/mmackelprang/RTest/pull/528))
 > and `PHN-1b` ([#534](https://github.com/mmackelprang/RTest/pull/534)), so PRs 3-7 remain; `PHN-2` has not
 > started and sits behind them (`O6`).
