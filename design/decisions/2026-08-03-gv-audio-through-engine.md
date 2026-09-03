@@ -520,9 +520,34 @@ Two fields could plausibly mean "currently selected," and they are **not** the s
 
 > **Requirement on the implementation:** `EventPlaybackService` must **resolve the engine explicitly and pass it**. Read `IOptionsMonitor<TTSOptions>.CurrentValue.DefaultEngine`, parse it exactly as `TTSFactory.ParseEngine` does (`:223-228` — `Enum.TryParse` ignoring case, falling back to `ESpeak` on garbage), and set `TTSParameters.Engine` to the result. **Do not rely on passing `parameters: null`.** The request already carries `VoiceId` (§4), so the moment a voice is attached the null-parameters path is gone and the default silently becomes ESpeak — reintroducing the pinning the owner just reversed, as a type-system accident.
 
-*Optional cleanup, flagged for Planner rather than required here:* making `TTSParameters.Engine` a `TTSEngine?` would let "unset" be expressible, make `:71` behave as it reads, and fix `SourcesController:623` at the same time. Blast radius is small. Not required by this ADR — noted because it is the root cause and someone will otherwise re-discover it.
+*Optional cleanup, flagged for Planner rather than required here:* making `TTSParameters.Engine` a `TTSEngine?` would let "unset" be expressible, make `:71` behave as it reads, and fix `SourcesController:623` at the same time. Blast radius is small. Not required by this ADR — noted because it is the root cause and someone will otherwise re-discover it. ✅ **DONE 2026-09-03 by `TTS-9`** — removing eSpeak deleted the enum's zero value, which turned this from tidy-up into a correctness requirement: without it, "unset" would have silently meant `Google`. `TTSParameters.Engine` is now `TTSEngine?` with no initializer, resolved once in `TTSFactory.CreateAsync` against the configured default, which **throws** rather than falling back if that default is missing or unknown.
 
 ### 9.4 Three engines, and what happens when the selected one cannot run
+
+> ⚠ **AMENDED 2026-09-03 by `TTS-9` — there are now TWO engines, not three. eSpeak has been removed entirely.**
+> The **decision in this section is unchanged and survives intact**; what changed is one of the facts it reasons over.
+> Read the section as written — it is the record of why the decision was made — with these four corrections:
+>
+> 1. **The `ESpeak` row of the table below no longer exists.** `GenerateESpeakAsync`, `IsESpeakAvailable`,
+>    `GetESpeakVoicesAsync`, the `TTSEngine.ESpeak` member and `TTSOptions.ESpeakPath` are all deleted. The enum
+>    is now `{ Google = 1, Azure = 2 }` — **explicitly numbered from 1 so that `default(TTSEngine)` is not a
+>    valid engine.** Had the members been allowed to renumber from 0, `Google` would have silently become the
+>    default value of the type, which is precisely the silent cloud substitution this section forbids.
+> 2. **Point 1's `ESpeak → cloud` / `cloud → ESpeak` framing is obsolete, and the decision it supports is now
+>    *more* load-bearing, not less.** With both survivors being cloud engines, a silent `Google → Azure`
+>    substitution would ship a private SMS body to a **different** third party than the owner selected. The
+>    exposure §9.1 exists to keep explicit did not go away; it lost its one privacy-safe direction.
+> 3. **The "`espeak-ng` missing from `PATH`" example at the end of §9.4 is obsolete.** The remaining authoritative
+>    synthesis failures are unsubstituted `${secret:` tags, revoked or expired keys, and network failure.
+> 4. **`espeak-ng` is never installed** (`TTS-7` closed as *remove*, owner decision `D26`). ⚠ **Accepted
+>    trade-off:** eSpeak was the only `IsOffline = true` engine, so **feature B now requires network.** Under
+>    §9.4's own decision this surfaces correctly as `Failed` + `SpeechSynthesisFailed` rather than as silence.
+>
+> ⚠ **`PHN-1c` implementers, read this:** the optional cleanup flagged at the end of §9.3 — *"making
+> `TTSParameters.Engine` a `TTSEngine?`"* — **has been done** by `TTS-9`, because removing the enum's zero value
+> made it necessary rather than merely tidy. `TTSParameters.Engine` is now `TTSEngine?` with no initializer, and
+> `SourcesController`'s `Engine = engine ?? TTSEngine.ESpeak` is now `Engine = engine`. **A `PHN-1c` branch cut
+> before 2026-09-03 will need to rebase onto this.**
 
 **Azure is fully implemented and the original ADR never mentioned it.** `TTSEngine` is `{ ESpeak = 0, Google = 1, Azure = 2 }` (`ITTSFactory.cs:67-77`), and all three are real generate paths:
 

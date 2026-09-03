@@ -370,7 +370,7 @@ public class SourcesController : ControllerBase
   /// <summary>
   /// Gets available voices for a specific TTS engine.
   /// </summary>
-  /// <param name="engine">The TTS engine to query (ESpeak, Google, Azure).</param>
+  /// <param name="engine">The TTS engine to query (Google, Azure).</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>List of available voices for the engine.</returns>
   [HttpGet("events/tts/voices")]
@@ -391,10 +391,12 @@ public class SourcesController : ControllerBase
         return BadRequest(new { error = "Engine parameter is required" });
       }
 
-      // Parse engine parameter
-      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      // Parse engine parameter. Enum.TryParse also accepts the decimal form of a value, so "0"
+      // or "7" parse into an undefined member — Enum.IsDefined is what rejects those.
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine) ||
+          !Enum.IsDefined(ttsEngine))
       {
-        return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: ESpeak, Google, Azure" });
+        return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: Google, Azure" });
       }
 
       var voices = await _ttsFactory.GetVoicesAsync(ttsEngine, cancellationToken);
@@ -433,14 +435,10 @@ public class SourcesController : ControllerBase
         return StatusCode(501, new { error = "TTS factory not available" });
       }
 
-      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine) ||
+          !Enum.IsDefined(ttsEngine))
       {
         return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: Google, Azure" });
-      }
-
-      if (ttsEngine == TTSEngine.ESpeak)
-      {
-        return BadRequest(new { error = "Voice refresh is not supported for eSpeak" });
       }
 
       var count = await _ttsFactory.RefreshVoicesAsync(ttsEngine, cancellationToken);
@@ -470,9 +468,10 @@ public class SourcesController : ControllerBase
         return StatusCode(501, new { error = "TTS factory not available" });
       }
 
-      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine) ||
+          !Enum.IsDefined(ttsEngine))
       {
-        return BadRequest(new { error = $"Invalid engine: {engine}" });
+        return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: Google, Azure" });
       }
 
       await _ttsFactory.SetVoiceFavoriteAsync(ttsEngine, voiceId, cancellationToken);
@@ -502,9 +501,10 @@ public class SourcesController : ControllerBase
         return StatusCode(501, new { error = "TTS factory not available" });
       }
 
-      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine))
+      if (!Enum.TryParse<TTSEngine>(engine, ignoreCase: true, out var ttsEngine) ||
+          !Enum.IsDefined(ttsEngine))
       {
-        return BadRequest(new { error = $"Invalid engine: {engine}" });
+        return BadRequest(new { error = $"Invalid engine: {engine}. Valid values are: Google, Azure" });
       }
 
       await _ttsFactory.RemoveVoiceFavoriteAsync(ttsEngine, voiceId, cancellationToken);
@@ -616,32 +616,35 @@ public class SourcesController : ControllerBase
         return StatusCode(501, new { error = "TTS playback not available" });
       }
 
-      // Parse engine if provided
+      // Parse engine if provided. Enum.TryParse also accepts the decimal form of a value, so "0"
+      // or "7" parse into an undefined member — Enum.IsDefined is what rejects those.
       TTSEngine? engine = null;
       if (!string.IsNullOrWhiteSpace(request.Engine))
       {
-        if (Enum.TryParse<TTSEngine>(request.Engine, ignoreCase: true, out var parsedEngine))
+        if (Enum.TryParse<TTSEngine>(request.Engine, ignoreCase: true, out var parsedEngine) &&
+            Enum.IsDefined(parsedEngine))
         {
           engine = parsedEngine;
         }
         else
         {
-          return BadRequest(new { error = $"Invalid TTS engine: {request.Engine}" });
+          return BadRequest(new { error = $"Invalid TTS engine: {request.Engine}. Valid values are: Google, Azure" });
         }
       }
 
-      // Build TTS parameters
+      // Build TTS parameters. A null engine or voice is left unspecified here and resolved
+      // against the configured TTS defaults inside the factory.
       var parameters = new TTSParameters
       {
-        Engine = engine ?? TTSEngine.ESpeak,
-        Voice = request.Voice ?? "en",
+        Engine = engine,
+        Voice = request.Voice,
         Speed = request.Speed ?? 1.0f,
         Pitch = request.Pitch ?? 1.0f
       };
 
-      _logger.LogInformation("Playing TTS event: {Text} with engine {Engine}", 
-        request.Text.Length > 50 ? request.Text[..50] + "..." : request.Text, 
-        parameters.Engine);
+      _logger.LogInformation("Playing TTS event: {Text} with engine {Engine}",
+        request.Text.Length > 50 ? request.Text[..50] + "..." : request.Text,
+        engine?.ToString() ?? "(configured default)");
 
       // Create TTS event source
       var ttsSource = await _ttsFactory.CreateAsync(request.Text, parameters, cancellationToken);

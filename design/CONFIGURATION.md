@@ -971,12 +971,17 @@ The System Configuration page (`/system` > Configuration tab) exposes all major 
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DefaultEngine` | string | "ESpeak" | TTS engine ("ESpeak", "Google", "Azure") |
-| `DefaultVoice` | string | "en" | Default voice ID |
+| `DefaultEngine` | string | `""` | TTS engine (`"Google"` or `"Azure"`). **Empty by default on purpose** — an unset or unknown engine **throws** with the valid set named, rather than falling back. `appsettings.json` ships `"Google"`. |
+| `DefaultVoice` | string | `""` | Default voice ID. Empty throws on use rather than sending an engine a voice it will reject. `appsettings.json` ships `"en-US-Standard-A"`; the appliance's config store overrides it with `en-US-News-K`. |
 | `DefaultPitch` | float | 1.0 | Default pitch (0.5-2.0) |
 | `DefaultSpeed` | float | 1.0 | Default speed (0.5-2.0) |
-| `ESpeakPath` | string | "espeak-ng" | Path to espeak-ng binary |
 | `GenerationTimeoutSeconds` | int | 30 | Max time for TTS generation |
+
+> ⚠ **`ESpeakPath` was removed 2026-09-03 by `TTS-9`, along with the eSpeak engine itself.** eSpeak was the only
+> `IsOffline = true` engine, so **there is no TTS without network** — an accepted trade-off (owner decision
+> `D26`), on the grounds that announcements are smart-home events that would not be arriving either.
+> The two defaults above were deliberately **not** repointed at Google: they were defaults *because* eSpeak
+> needed no API key, and a cloud engine inherited as an implicit fallback fails with no key configured.
 
 ### MetricsOptions
 **Location**: `src/Radio.Core/Configuration/MetricsOptions.cs`

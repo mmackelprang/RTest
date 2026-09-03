@@ -81,8 +81,8 @@ public static class AudioDtoMapper
       if (source is TTSEventSource ttsSource)
       {
         dto.Metadata["Text"] = ttsSource.Text;
-        dto.Metadata["Engine"] = ttsSource.Parameters.Engine.ToString();
-        dto.Metadata["Voice"] = ttsSource.Parameters.Voice;
+        dto.Metadata["Engine"] = ttsSource.Parameters.Engine?.ToString() ?? string.Empty;
+        dto.Metadata["Voice"] = ttsSource.Parameters.Voice ?? string.Empty;
         dto.Metadata["Speed"] = ttsSource.Parameters.Speed;
         dto.Metadata["Pitch"] = ttsSource.Parameters.Pitch;
       }

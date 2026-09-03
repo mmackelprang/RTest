@@ -4,6 +4,13 @@ namespace Radio.Core.Configuration;
 /// User preferences for TTS playback.
 /// Persisted to the 'audio-preferences' store.
 /// </summary>
+/// <remarks>
+/// <see cref="LastEngine"/> and <see cref="LastVoice"/> are written by
+/// <c>PreferencesPersistenceService</c>; no code reads them back, and nothing parses
+/// <see cref="LastEngine"/> into a <c>TTSEngine</c>. A value already stored by an earlier build
+/// therefore binds harmlessly and cannot select an engine, which is why removing eSpeak needed no
+/// config-store migration.
+/// </remarks>
 public class TTSPreferences
 {
   /// <summary>
@@ -14,12 +21,12 @@ public class TTSPreferences
   /// <summary>
   /// Gets or sets the last used TTS engine.
   /// </summary>
-  public string LastEngine { get; set; } = "ESpeak";
+  public string LastEngine { get; set; } = string.Empty;
 
   /// <summary>
   /// Gets or sets the last used voice.
   /// </summary>
-  public string LastVoice { get; set; } = "en";
+  public string LastVoice { get; set; } = string.Empty;
 
   /// <summary>
   /// Gets or sets the last used pitch value.

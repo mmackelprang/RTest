@@ -123,18 +123,18 @@ public class InfrastructureTests : IDisposable
     // Test that TTSEngineInfo record works correctly
     var engineInfo = new TTSEngineInfo
     {
-      Engine = TTSEngine.ESpeak,
-      Name = "eSpeak-ng",
+      Engine = TTSEngine.Google,
+      Name = "Google Cloud TTS",
       IsAvailable = true,
-      RequiresApiKey = false,
-      IsOffline = true
+      RequiresApiKey = true,
+      IsOffline = false
     };
 
-    Assert.Equal(TTSEngine.ESpeak, engineInfo.Engine);
-    Assert.Equal("eSpeak-ng", engineInfo.Name);
+    Assert.Equal(TTSEngine.Google, engineInfo.Engine);
+    Assert.Equal("Google Cloud TTS", engineInfo.Name);
     Assert.True(engineInfo.IsAvailable);
-    Assert.False(engineInfo.RequiresApiKey);
-    Assert.True(engineInfo.IsOffline);
+    Assert.True(engineInfo.RequiresApiKey);
+    Assert.False(engineInfo.IsOffline);
   }
 
   [Fact]
@@ -158,11 +158,12 @@ public class InfrastructureTests : IDisposable
   [Fact]
   public void TTSParameters_HasDefaultValues()
   {
-    // Test that TTSParameters has sensible defaults
+    // Engine and Voice are deliberately unset: "unspecified" is a representable state that
+    // TTSFactory.CreateAsync resolves against the configured defaults, not a silent engine choice.
     var parameters = new TTSParameters();
 
-    Assert.Equal(TTSEngine.ESpeak, parameters.Engine);
-    Assert.Equal("en", parameters.Voice);
+    Assert.Null(parameters.Engine);
+    Assert.Null(parameters.Voice);
     Assert.Equal(1.0f, parameters.Speed);
     Assert.Equal(1.0f, parameters.Pitch);
   }

@@ -14,7 +14,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
 | 3 - Audio Sources | ✅ Completed | Radio (RF320 + RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
-| 4 - Event Sources | ✅ Completed | TTS (eSpeak/Google/Azure), Audio File Events |
+| 4 - Event Sources | ✅ Completed | TTS (Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
@@ -280,16 +280,19 @@ The event audio system provides ephemeral audio sources for notifications, annou
 
 - **IEventAudioSource**: Interface for one-shot audio playback with auto-disposal
 - **ITTSFactory**: Factory for creating TTS audio with multiple engine support
-- **TTSEventSource**: Text-to-Speech audio from eSpeak, Google, or Azure engines
+- **TTSEventSource**: Text-to-Speech audio from Google or Azure engines
 - **AudioFileEventSource**: Play notification sounds and audio file events
 
 ### TTS Engines Supported
 
 | Engine | Type | Requirements |
 |--------|------|--------------|
-| eSpeak-ng | Offline | `espeak-ng` installed |
 | Google Cloud TTS | Cloud | API key in secrets |
 | Azure Speech | Cloud | API key and region in secrets |
+
+Both engines are cloud services, so **TTS requires network access** - there is no offline engine. The offline eSpeak-ng engine was removed on 2026-09-03 (`TTS-9`) after it was found to interpolate a caller-supplied voice identifier into a command line reachable from the events API (`SEC-4`). Losing offline announcements is an accepted trade-off (decision `D26`): announcements are triggered by smart-home events, which do not arrive when the network is down either.
+
+`TTS:DefaultEngine` and `TTS:DefaultVoice` have no built-in default; an unset or unrecognised value fails with an explicit error naming the valid engines. `appsettings.json` ships `Google` / `en-US-Standard-A`.
 
 ### Usage Example
 

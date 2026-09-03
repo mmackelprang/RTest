@@ -1226,7 +1226,7 @@ The Phase 4 tests enable QA to verify:
    - Event cancellation before trigger
 
 4. **Text-to-Speech** (P4-009 to P4-010)
-   - TTS engine availability detection (eSpeak, Google, Azure)
+   - TTS engine availability detection (Google, Azure)
    - TTS audio generation and playback
    - TTS message queue processing
 

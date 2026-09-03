@@ -73,12 +73,12 @@
       "lastModified": "2026-02-11T18:44:17.3401+00:00"
     },
     "TTS:LastEngine": {
-      "value": "ESpeak",
+      "value": "",
       "description": null,
       "lastModified": "2026-02-11T18:44:17.3407328+00:00"
     },
     "TTS:LastVoice": {
-      "value": "en",
+      "value": "",
       "description": null,
       "lastModified": "2026-02-11T18:44:17.3407331+00:00"
     },

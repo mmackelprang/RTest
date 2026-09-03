@@ -2,7 +2,7 @@ namespace Radio.Core.Interfaces.Audio;
 
 /// <summary>
 /// Factory for creating Text-to-Speech audio from text.
-/// Supports multiple TTS engines including offline (eSpeak) and cloud (Google, Azure).
+/// Supports the cloud TTS engines (Google, Azure).
 /// </summary>
 public interface ITTSFactory
 {
@@ -64,16 +64,18 @@ public interface ITTSFactory
 /// <summary>
 /// TTS engines supported by the system.
 /// </summary>
+/// <remarks>
+/// The members are numbered explicitly from 1 so zero — and therefore <c>default(TTSEngine)</c> —
+/// is not a defined member: an engine that was never set is a value <c>Enum.IsDefined</c> returns
+/// <see langword="false"/> for, rather than silently being a real engine. Do not renumber from 0.
+/// </remarks>
 public enum TTSEngine
 {
-  /// <summary>eSpeak-ng - Offline, open source speech synthesizer.</summary>
-  ESpeak,
-
   /// <summary>Google Cloud Text-to-Speech API.</summary>
-  Google,
+  Google = 1,
 
   /// <summary>Azure Cognitive Services Speech.</summary>
-  Azure
+  Azure = 2
 }
 
 /// <summary>
@@ -82,14 +84,16 @@ public enum TTSEngine
 public record TTSParameters
 {
   /// <summary>
-  /// Gets or sets the TTS engine to use.
+  /// Gets or sets the TTS engine to use. <see langword="null"/> leaves the engine unspecified;
+  /// <c>CreateAsync</c> then falls back to the configured <c>TTS:DefaultEngine</c>.
   /// </summary>
-  public TTSEngine Engine { get; init; } = TTSEngine.ESpeak;
+  public TTSEngine? Engine { get; init; }
 
   /// <summary>
-  /// Gets or sets the voice identifier.
+  /// Gets or sets the voice identifier. <see langword="null"/> leaves the voice unspecified;
+  /// <c>CreateAsync</c> then falls back to the configured <c>TTS:DefaultVoice</c>.
   /// </summary>
-  public string Voice { get; init; } = "en";
+  public string? Voice { get; init; }
 
   /// <summary>
   /// Gets or sets the speaking rate (0.5 to 2.0, 1.0 = normal).

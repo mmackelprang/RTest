@@ -40,7 +40,7 @@ This document provides a comprehensive reference for all Configuration, Preferen
 1. **System Prerequisites**
    ```bash
    sudo apt update
-   sudo apt install -y dotnet-sdk-8.0 sqlite3 espeak-ng
+   sudo apt install -y dotnet-sdk-8.0 sqlite3
    ```
 
 2. **Clone and Build**
@@ -265,31 +265,11 @@ sudo systemctl start radio-console
 
 ## Text-to-Speech (TTS) Setup
 
-### eSpeak-NG (Offline, Default)
+Two engines are supported, **Google Cloud TTS** and **Azure Speech**. Both are cloud services: each needs an API key and network access to reach it.
 
-**Prerequisites:**
-```bash
-# Raspberry Pi / Linux
-sudo apt install espeak-ng
+`TTS:DefaultEngine` and `TTS:DefaultVoice` have **no built-in default** - they are empty unless you configure them. An unset or unrecognised engine or voice makes TTS generation fail with an explicit error naming the valid engines, rather than silently picking one. The shipped `src/Radio.API/appsettings.json` sets them to `Google` and `en-US-Standard-A`, which is where the working values on a normal install come from.
 
-# Verify installation
-espeak-ng --version
-```
-
-**Configuration:**
-```json
-{
-  "TTS": {
-    "DefaultEngine": "ESpeak",
-    "ESpeakPath": "espeak-ng",
-    "DefaultVoice": "en",
-    "DefaultSpeed": 1.0,
-    "DefaultPitch": 1.0
-  }
-}
-```
-
-**No additional setup required** - works offline immediately.
+**Note (2026-09-03, `TTS-9`):** the offline eSpeak-NG engine was removed, along with its `espeak-ng` apt prerequisite and its `ESpeakPath` setting. It had interpolated a caller-supplied voice identifier into an `espeak-ng` command line reachable from `POST /api/sources/events/tts` (`SEC-4`); with `espeak-ng -w <path>` that was an arbitrary file write as the account owning `/opt/radio-console`, so the engine was deleted rather than sanitised. eSpeak-NG was the only engine that worked without network, so **there is now no TTS at all when the network is down.** That is an accepted trade-off (decision `D26`): announcements are triggered by smart-home events, and if the network is down those events are not arriving either.
 
 ### Google Cloud TTS (Cloud, High Quality)
 
@@ -839,11 +819,10 @@ When the file sink is configured:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DefaultEngine` | `string` | `ESpeak` | Default TTS engine to use |
-| `DefaultVoice` | `string` | `en` | Default voice identifier |
+| `DefaultEngine` | `string` | *(empty)* | Default TTS engine to use: `Google` or `Azure`. Empty or unrecognised makes TTS generation fail with an explicit error rather than picking an engine. |
+| `DefaultVoice` | `string` | *(empty)* | Default voice identifier, in the selected engine's own format (e.g. `en-US-Standard-A`). Empty makes TTS generation fail with an explicit error. |
 | `DefaultPitch` | `float` | `1.0` | Default pitch (0.5 to 2.0, 1.0 = normal) |
 | `DefaultSpeed` | `float` | `1.0` | Default speaking speed (0.5 to 2.0, 1.0 = normal) |
-| `ESpeakPath` | `string` | `espeak-ng` | Path to the espeak-ng executable |
 | `GenerationTimeoutSeconds` | `int` | `30` | Timeout in seconds for TTS generation |
 
 ---
@@ -1103,8 +1082,8 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `LastEngine` | `string` | `ESpeak` | Last used TTS engine |
-| `LastVoice` | `string` | `en-US-Standard-A` | Last used voice identifier |
+| `LastEngine` | `string` | *(empty)* | Last used TTS engine |
+| `LastVoice` | `string` | *(empty)* | Last used voice identifier |
 | `LastPitch` | `float` | `1.0` | Last used pitch setting |
 
 ---
@@ -1222,7 +1201,6 @@ Example:
 ### TTSEngine
 | Value | Description |
 |-------|-------------|
-| `ESpeak` | Local eSpeak-NG engine |
 | `Google` | Google Cloud Text-to-Speech |
 | `Azure` | Azure Cognitive Services Speech |
 

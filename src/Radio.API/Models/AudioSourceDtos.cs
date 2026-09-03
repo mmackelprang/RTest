@@ -280,7 +280,7 @@ public class UsbPortDto
 public class TTSEngineInfoDto
 {
   /// <summary>
-  /// Gets or sets the engine identifier (ESpeak, Google, Azure).
+  /// Gets or sets the engine identifier (Google, Azure).
   /// </summary>
   public string Engine { get; set; } = string.Empty;
 
