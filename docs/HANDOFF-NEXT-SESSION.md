@@ -1,7 +1,9 @@
 # HANDOFF — Start here
 
-**Status:** `[CURRENT — 2026-09-02]` · Supersedes the 2026-08-19 planning handoff, whose "start with
-`TEST-1`" instruction is done.
+**Status:** `[CURRENT — 2026-09-03]` · Rewritten against the tree at `5e571b88`. **The previous
+revision was ~30 merges stale in its first three sections** — it named `#511` as the latest merge,
+the box at `739a859`, a P0 count of "21 listed, 18 effective", and pointed "Start here" at `ENC-5` /
+`ENC-7`, both of which had shipped. Its later sections were correct and are kept.
 
 ---
 
@@ -12,9 +14,9 @@ BT/Cast/SDR/vinyl/phone) on an Intel N100 Ubuntu box in kiosk Chrome at 1920x720
 nearly built and this is going into it** — recoverable only by SSH once the back is closed. The full
 prioritised punch list is [`docs/HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md); the encoder
 design is [`HANDOFF-rotary-encoder-mapping.md`](design-handoffs/HANDOFF-rotary-encoder-mapping.md)
-(Rev 3). **Read the punch list section 2 ordering constraints before claiming anything.**
+(Rev 6). **Read the punch list section 2 ordering constraints before claiming anything.**
 
-**All owner decisions are closed.** D23, D24, D9 and D25 were answered on 2026-09-01/02.
+**All owner decisions are closed.** D23, D24, D9, D25 and D27 are answered.
 
 ---
 
@@ -22,69 +24,96 @@ design is [`HANDOFF-rotary-encoder-mapping.md`](design-handoffs/HANDOFF-rotary-e
 
 | | |
 |---|---|
-| **Open PR** | none. **`ENC-3` merged as [#511](https://github.com/mmackelprang/RTest/pull/511)** (`d358d5f`). |
-| **Working tree** | clean, on `main` |
-| **Box** | deployed and healthy at `739a859`, encoder connected |
-| **P0 count** | **21 listed, 18 effective** |
+| **Latest merge** | **`TTS-9` as [#548](https://github.com/mmackelprang/RTest/pull/548)** (`5e571b88`) — eSpeak removed entirely. |
+| **Working tree** | `main` at `5e571b88` |
+| **Box** | deployed and **SHA-verified at `5e571b88` on both services** (`/api/health/version` on `:5000` and `:5002`, checked 2026-09-03), encoder connected |
+| **P0 count** | **21 listed, 2 open** — `PHN-1` and `PHN-2`, both in the phone arc |
 
-### Shipped 2026-09-01/02
+### The headline: the encoder arc is complete
 
-`TEST-1` · `TEST-3` · `OPS-1` · `LOG-1` · `LOG-11` · `SEC-1` · `AUD-6` · `AUD-7` ·
-`ENC-0` · `ENC-0a` · `ENC-1` · `ENC-2` · `ENC-9a` · `ENC-4a` · `ENC-11` · `ENC-11a` ·
-`UI-1` · `UI-5` · `TTS-1(ii)` · `ENC-8a` · `ENC-8b` · `XR-1a`, all 11 quick wins, and a firmware fix
-in the separate **RotaryUsb** repo (its PR #11).
+⭐ **All 12 encoder P0s have shipped** — `ENC-0` `ENC-1` `ENC-2` `ENC-3` `ENC-4` `ENC-5` `ENC-6`
+`ENC-7` `ENC-8` `ENC-11` `ENC-12` `ENC-15`. The knobs are live, the router matches the escutcheon
+(`0 = VOLUME · 1 = SOURCE · 2 = PRESETS · 3 = TUNING`), the HUD renders on the panel's real axis, and
+`ENC-11`'s tiered fault model finally has a voice through `ENC-12`. This was priced at 3–4 working
+weeks.
 
-**Three P0s closed without writing code** — AUD-8 and AUD-9 had already shipped on 2026-05-22 and the
-punch list never recorded it; SEC-1 closed by verification.
+⚠ **Two things temper that, and both are recorded rather than glossed.**
+
+1. **`ENC-15`'s gate FAILED, so panel blanking is withdrawn permanently — do not reinstate it.** Touch
+   cannot wake a blanked panel *by construction*: the touchscreen is powered by the panel and leaves
+   the USB bus when it blanks. The encoders are not compositor input devices either (`cafe:4005` has
+   zero evdev nodes), so a knob wake only works if `radio-api` reads hidraw and itself calls the D-Bus
+   unblank. `ENC-6` therefore shipped three sleep states, not five.
+2. **Roughly half of every encoder row's UAT could not be run.** There is no software path to inject
+   encoder input, so the behaviour a guest actually touches is the part least verified. Every row
+   stated that as an uncovered gap rather than a pass. **`ENC-17` is filed to close it** via
+   `/dev/uhid`, which is present on the appliance.
+
+### Shipped since the previous revision of this file
+
+`ENC-4`/`ENC-4a`/`ENC-4c` · `ENC-5` · `ENC-6` · `ENC-7` · `ENC-8`/`ENC-8a`/`ENC-8b` · `ENC-9` ·
+`ENC-11`/`ENC-11a` · `ENC-12` · `ENC-15` (gate failed) · `ENC-16` · `OPS-5` · `PHN-1a` · `PHN-1b` ·
+`PHN-5` · `SEC-1` · `SEC-2` · `TEST-4` · `TTS-3` · `TTS-9` · `XR-1a`, plus the 2026-09-01/02 batch
+(`TEST-1` `TEST-3` `OPS-1` `LOG-1` `LOG-11` `AUD-6` `AUD-7` `ENC-0`/`ENC-0a` `ENC-1` `ENC-2` `ENC-3`
+`UI-1` `UI-5` `TTS-1(ii)`, all 11 quick wins) and a firmware fix in the separate **RotaryUsb** repo
+(its PR #11).
+
+**Three P0s closed without writing code** — `AUD-8` and `AUD-9` had already shipped on 2026-05-22 and
+the punch list never recorded it; `SEC-1` closed by verification.
+
+**`TTS-9` closed three rows by deletion rather than repair.** Removing eSpeak entirely closed `SEC-4`
+(unauthenticated argument injection into `espeak-ng`), `TTS-7` (whose *completion* was what made
+`SEC-4` reachable) and `TTS-3`. The owner chose removal over sanitising, because it was comparable
+effort and closed three rows instead of guarding one.
 
 ---
 
-> **Added by the `ENC-8` cycle (2026-09-02, [#527](https://github.com/mmackelprang/RTest/pull/527)).** `ENC-8` has shipped, so
-> **`ENC-12` is now unblocked** and is the other claimable row — both its dependencies (`ENC-8`, `ENC-4`) are done. It was
-> sequenced deliberately after `ENC-8`: its toast copy ends *"Open encoder settings"*, and that page now exists. Take
-> `ENC-5`/`ENC-7` or `ENC-12`; the queue banner has the detail. **This start-here pointer was left as the previous session
-> wrote it rather than repointed**, because two Builders were running concurrently when `ENC-8` merged.
->
-> ⚠ **One thing from the `ENC-8` cycle that will cost you directly:** `ENC-5`/`ENC-7` own the router remap, and the router
-> no longer has a `switch` to edit. `RotaryEncoderActionRouter` now dispatches through `_mapping` / `_turnHandlers` /
-> `_pressHandlers`, and the Settings page renders whatever that array says over an API projection. **The remap is an edit to
-> those three arrays and nothing else — do not reintroduce a `switch` beside them**, and do not hand-edit the page's mapping
-> table, which no longer exists as HTML. `RotaryEncoderMappingTableTests` pins the order so the change has to be deliberate,
-> and the page's "these do not match the cabinet labels yet" note is computed from the two orders, so it disappears by
-> itself the day you land the remap.
+## Start here: `PHN-1c`, the third of the seven-PR phone arc
 
-## Start here: ENC-5 / ENC-7 (and read the ENC-4 note first)
+**The claimable row is `PHN-1c`** — `EventPlaybackService` and the `/api/audio/events` route family.
+Both its dependencies are merged (`PHN-1a` [#528](https://github.com/mmackelprang/RTest/pull/528),
+`PHN-1b` [#534](https://github.com/mmackelprang/RTest/pull/534)), it has a full plan at
+[`design/plans/PHN-1c-event-playback-service-and-route.md`](../design/plans/PHN-1c-event-playback-service-and-route.md),
+and it is **the first PR of the arc a user can reach**.
 
-**ENC-4 is shipped** — the EncoderHud renders in the quarter above the knob that moved, on every route. The next
-rows are **`ENC-5` (SOURCE overlay) and `ENC-7` (PRESETS)**, which the design handoff says to build together or back
-to back: one component, two lists. **They also own the router's index→handler remap**, which ENC-4 deliberately left
-alone and pinned with a test.
+⚠ **The whole arc is `O6`-ordered and `PHN-2` sits behind it.** `PHN-2` is what the cabinet does
+*wrong* today: `VoicemailPlayer.razor` is an HTML5 `<audio>` element pointed straight at the bridge,
+so a voicemail bypasses mute, master volume, balance, ducking and Cast routing — press play while the
+radio is on and two sounds run in the room at full level each. That is live behaviour, not a latent
+risk (D17).
 
-⚠ **Two things from the ENC-4 cycle that will cost you if you skip them.**
+⚠ **Read the plan's §0.4 C-21…C-33 first.** It is authority over both ADR-029 and the `PHN-1a`/`PHN-1b`
+plans wherever they disagree, and it disagrees in three places.
 
-1. **ENC-4's implementation reached `main` without a PR and was never reviewed pre-merge.** The cause was a subagent
-   switching the shared working tree off the feature branch mid-cycle; it happened **twice** in one cycle. If you
-   dispatch subagents that touch the tree, re-check `git branch --show-current` immediately before every commit and
-   every push. The review, run late, found three HEAD-level defects that were already live in the cabinet.
-2. **The short button press now fires on RELEASE, and a >600 ms hold on knobs 2–4 does nothing at all.** That is the
-   correct pre-ENC-5 behaviour, not a fault — only encoder 0 has a long action wired.
+⚠ **`PHN-2` also carries the arc's entire verification debt** — four device-only checks deferred to
+"PR 6", which has no plan file of its own. They are pinned to the `PHN-2` punch-list row so a
+re-sequencing cannot lose them.
 
-🔵 **One ENC-4 question is still open for the owner:** under `prefers-reduced-motion` the progress ring keeps
-sweeping instead of becoming handoff §6.5's "filling bar". See `design/FUTURE-WORK.md`.
+### If you would rather take something small and self-contained
 
-It was the right next row for a reason beyond its own value, and that reason is now closed: **ENC-11's
-tiered fault model used to have no way to tell the owner anything.** It works and is verified on
-hardware, but a Degraded or Hard-fault outcome reached only the log and the API — so the safety
-response was real (the host volume clamp tightens from 6 units per event to 2) and completely silent,
-experienced as a volume knob that had quietly gone sluggish inside sealed furniture. **ENC-4 landed the
-topbar host, ENC-8 [#527](https://github.com/mmackelprang/RTest/pull/527) built the page that explains it, and ENC-12 [#535](https://github.com/mmackelprang/RTest/pull/535) made it
-*noticed*:** an amber/red fault badge on the Settings nav pill that is correct on every route, plus one
-notification per browser session on escalation only. A healthy boot is still completely silent — the
-repair path speaks only when something needed repairing. The record is kept here rather than deleted
-because the gap is worth remembering: a correct safety response nobody can perceive is indistinguishable
-from a broken knob.
+`ENC-17` (input injection via `/dev/uhid`, 1 d) is the highest-leverage non-phone row on the board —
+it converts *"a human must turn each knob"* into *"a test can"*, which is the substrate the rest of
+the encoder arc's unrun UAT rests on. `TEST-7` (a `TimeProvider` seam for `NowPlayingPanel`'s two
+hardcoded debounce timers) is queued and claimable.
 
-ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the pattern to follow.
+---
+
+## Two documentation defects closed on 2026-09-03, worth knowing about
+
+1. **14 deferred items existed only in a commit message, a PR body or a plan, with no row anywhere.**
+   They are now filed — see the punch list's `ENC-18`, `ENC-19`, `TTS-10`, `TEST-5`, `TEST-6`,
+   `TEST-7`, `XR-6`, `OPS-6`, and `design/FUTURE-WORK.md` § *TTS seam*.
+2. **"0 warnings expected" has never been true, and the number depends on the command you run.**
+   `dotnet build RadioConsole.sln -c Release --no-incremental` produces **53** `IDE0011` warnings across
+   **15** files, which **confirms** the figure in `WORK-LOG.md:51` and the two 2026-05-22 plans.
+   ⚠ **Without `--no-incremental` the same commit reports 30 across 13** — MSBuild skips up-to-date
+   projects and does not re-emit their analyzer warnings. Quote the number with the command, or you will
+   "correct" the record wrongly, which is what happened while `TEST-6` was being filed. ⚠ **`CLAUDE.md`'s
+   "warnings as errors in Release builds" is NOT contradicted**: `Directory.Build.props:6-7` exempts
+   `IDE0011` and `IDE0161` explicitly and deliberately, and every other class still fails the build.
+   **The honest local test gate is "adds no new failures", not "zero failures"** — see `TEST-5` for the
+   four `SrcVariableResamplerTests` that fail on every Windows dev machine because the native library is
+   `libsamplerate.so.0`.
 
 ---
 

@@ -6,7 +6,12 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
-## Encoder HUD (ENC-4) — three seams left open on purpose
+## Encoder HUD (ENC-4) — three seams left open on purpose, of which ONE is still open
+
+> Seam **1** was closed by `ENC-7`, seam **3** by the owner's decision `D27`, and the `ENC-5`/`ENC-7`
+> warning below was discharged by `ENC-4c`. **Only seam 2 (no exit animation) remains.** The closed ones
+> are struck through rather than deleted, because each is a decision a later session would otherwise
+> re-derive and possibly reverse.
 
 **1. ~~The PRESETS long-press consumer is not wired.~~ CLOSED by `ENC-7`.** Both long-press actions the design
 names now exist — VOLUME → Standby and PRESETS → Save — and there is deliberately no third. `OnLongPress`
@@ -21,26 +26,42 @@ needs a two-phase teardown (keep the element alive while it animates out), which
 contract and would be inherited by the `ENC-5`/`ENC-7` overlays. Judged not worth a state machine: the enter is the
 perceptually load-bearing half.
 
-**3. `prefers-reduced-motion` keeps the ring sweeping — an open question for the owner.** Handoff §6.5 asks that the
-ring "become a filling bar" under reduced motion. It currently keeps sweeping, because freezing it hides the only
-indication that a 600 ms hold is arming standby. Note the plan's own draft CSS (`animation-name: none`) would not
-have produced a filling bar either — it freezes `--ring-turn` at `0turn`, i.e. an empty ring. Needs an explicit
-decision, then either ratifying or implementing a genuine filling-bar treatment.
+**3. ~~`prefers-reduced-motion` keeps the ring sweeping — an open question for the owner.~~ ✅ CLOSED by `D27`,
+2026-09-02 — the owner ratified the shipped behaviour.** Handoff §6.5 asked that the ring *"become a filling bar"*
+under reduced motion. It keeps sweeping, because freezing it hides the only indication that a 600 ms hold is arming
+standby — and the plan's own draft CSS (`animation-name: none`) would not have produced a filling bar either, since
+it freezes `--ring-turn` at `0turn`, i.e. an empty ring.
+
+⛔ **Do NOT re-open this, and do not "restore" §6.5 on a later consistency pass.** Punch list §6 records it as
+**WON'T DO — owner-accepted deviation, D27**, and §6.5 has been amended to describe what actually ships. This is a
+*declared* deviation from an accessibility line item, not drift. The entry is kept, struck through rather than
+deleted, because an empty space here is what invites the next session to re-derive the question and re-ask a closed
+one.
 
 **Also unverified rather than stubbed:** the encoder-disconnect → `Dismiss()` wiring is confirmed by inspection
 only. `AudioStateHubService.EncoderConnectionChanged` is a field-like event, so a unit test cannot raise it, and
 unplugging USB is not reachable remotely.
 
-**⚠ `ENC-5`/`ENC-7` must deal with this before they add a phase.** `EncoderHudService.Publish` maps an unrecognised
-phase to `_ => IsHolding`, i.e. it *preserves* the current hold state, and a true `IsHolding` cancels the dismissal
-timer. So the sequence `HoldStart` → unknown phase → `Value` leaves the card up with a ring and **no timer to take it
-down**. That is unreachable today because the API and the Web build know exactly the same four phase names — but
-`ENC-5` and `ENC-7` introduce new phases, which makes API-ahead-of-Web skew a real deploy-window state rather than a
-hypothetical one. The plan's §2.5 contract deliberately specified "leave `IsHolding` alone" and a test pins it
-(`UnknownPhase_LeavesIsHoldingAlone`), so changing it is a decision, not a tidy-up. Recommended resolution when those
-rows land: treat an unknown phase as **non-holding**, since it renders nothing anyway, and update that test with the
-reason. Raised by the automated reviewer on #519 and deliberately not changed there, to keep an already-late review
-scoped to the defects it found.
+**✅ ~~`ENC-5`/`ENC-7` must deal with this before they add a phase.~~ DONE by `ENC-4c`
+([#526](https://github.com/mmackelprang/RTest/pull/526)) — the instruction outlived the work.** *The problem, kept
+for the record:* `EncoderHudService.Publish` used to map an unrecognised phase to `_ => IsHolding`, i.e. it
+*preserved* the current hold state, and a true `IsHolding` cancels the dismissal timer — so `HoldStart` → unknown
+phase → `Value` left the card up with a ring and **no timer to take it down**, on a kiosk nobody is watching. It was
+unreachable while both builds knew the same four phase names, but `ENC-5`/`ENC-7` added phases and API-ahead-of-Web
+skew is an ordinary deploy-window state.
+
+**What `ENC-4c` actually shipped** (`src/Radio.Web/Services/EncoderHudService.cs:140-146`) is the recommended
+resolution: four explicit arms, `_ => false`, under the comment *"Handoff 6.10 — four explicit arms, and the fourth
+one is the point."* ⚠ **`"Value" => IsHolding` is deliberately its own arm and must stay one** — turning the knob
+mid-hold publishes a `Value` card and the ring has to keep drawing through it, so the obvious edit of flipping a
+shared default to `false` would fix the stranding and silently break hold-and-turn.
+
+⚠ **The test named above no longer exists under that name.** `UnknownPhase_LeavesIsHoldingAlone` was **renamed, not
+deleted**, and now asserts the opposite behaviour with its reason in the title:
+`UnknownPhase_IsNotHolding_SoTheCardCannotBeStranded`
+(`tests/Radio.Web.Tests/Services/EncoderHudServiceTests.cs:159`), joined by
+`UnknownPhaseMidHold_StillDismissesOnTime` (`:182`). Searching for the old name will find nothing and could easily
+be misread as the pin having been dropped.
 
 ---
 
@@ -814,9 +835,25 @@ The dedicated `/queue` page had several features not carried over:
 
 ## 10. Rotary Encoders — Pico HID Report Format Verification
 
-**Status:** Code implemented, HID report parsing assumed
-**Added:** 2026-03-03
-**Priority:** High — must verify on first hardware connection
+**Status:** ✅ **RESOLVED by `ENC-1` (2026-09-02) and verified on the live device. Kept as the record of what was
+assumed, because the assumption was wrong in every particular.**
+**Added:** 2026-03-03 · **Closed:** 2026-09-03
+
+> ⚠ **Everything in "What Needs Verification" below is the 2026-03-03 *guess*, and it is superseded.** It is struck
+> through rather than deleted so that a reader who finds the old 8-byte layout quoted somewhere else can see it was
+> retired deliberately. **The real format:** Input Report **`0x01`** carries a **36-byte payload** (37 bytes on the
+> wire including the report id), not 8 — `RotaryEncoderDecoder.PositionPayloadSize = 36`,
+> `src/Radio.Infrastructure/Platform/Input/RotaryEncoderDecoder.cs:23`. Pre-accumulator firmware sends a **21-byte**
+> payload (`LegacyPositionPayloadSize`, `:26`) and positions/buttons parse identically in both. The device reports
+> **free-running movement accumulators**, not per-report deltas, so the decoder differences successive samples — and
+> **the first report after any connect is a baseline, not an input** (`:53-60`), or an outage's worth of accumulated
+> movement arrives as one delta on the volume knob. VID/PID `0xCAFE`/`0x4005` were confirmed correct. Two further
+> reports exist that this section never anticipated: `0x02` (106-byte config, `ENC-2`) and `0x04` (diagnostics,
+> whose byte 4 is `steps_per_detent` as the firmware is actually using it).
+>
+> **Also stale in the table below:** `RotaryEncoderHostedService` is **no longer "gated by `RotaryEncoder:Enabled`"** —
+> `ENC-0` inverted that flag's meaning to an escape hatch defaulting to `true`, and **presence decides**. And the
+> udev rule is no longer something to add by hand: it ships as `deploy/common/99-rotaryusb-encoder.rules`.
 
 ### What Exists
 
@@ -829,10 +866,12 @@ The dedicated `/queue` page had several features not carried over:
 
 ### What Needs Verification
 
-The HID report format is **assumed** based on typical KY-040 Pico implementations:
-- **Bytes 1-4**: signed encoder deltas (`sbyte` per encoder)
-- **Byte 5**: button bitmask (bit N = encoder N)
-- **Report size**: 8 bytes
+~~The HID report format is **assumed** based on typical KY-040 Pico implementations:~~ **(all three lines below
+are the retired guess — see the banner above for the measured format)**
+- ~~**Bytes 1-4**: signed encoder deltas (`sbyte` per encoder)~~ — actually free-running **accumulators**, differenced
+  by the host
+- ~~**Byte 5**: button bitmask (bit N = encoder N)~~
+- ~~**Report size**: 8 bytes~~ — actually **36-byte payload / 37-byte report** (21-byte payload on legacy firmware)
 
 **On first hardware connection:**
 1. Enable logging, connect Pico, verify report bytes match assumed format
