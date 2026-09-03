@@ -17,19 +17,33 @@ public enum RotaryEncoderConfigStatus
   /// Mismatched or unanswered within the first three attempts. Silent by design: a USB peripheral
   /// missing a report on the first try is ordinary, and reporting it would train the owner to ignore
   /// the badge.
+  ///
+  /// <para>
+  /// The volume clamp is <b>tight</b> here, and that is not an oversight. Transient means "not
+  /// confirmed <i>yet</i>", not "confirmed fine" — and this is the boot window, which is exactly when
+  /// a fresh or factory-reset device is running acceleration at ×50.
+  /// </para>
   /// </summary>
   Transient = 2,
 
   /// <summary>
-  /// Still mismatched after three attempts, on a <i>feel</i> field — an acceleration tier or
-  /// <c>step_size</c>. Knobs stay live on host clamps, and acceleration is treated as <b>absent</b>
+  /// Read-back arrived, its <i>safety</i> fields were correct, and what is still wrong after three
+  /// attempts is a <i>feel</i> field — an acceleration tier or <c>step_size</c>.
+  ///
+  /// <para>
+  /// Knobs stay live on the <b>normal</b> host clamps, and acceleration is treated as <b>absent</b>
   /// rather than assumed present, because assuming it is how a knob ends up moving further than the
-  /// host expects.
+  /// host expects. The volume clamp is deliberately <i>not</i> tightened (ENC-16): a knob that feels
+  /// wrong is not a knob that can blast the room, and tightening for it makes the console misreport
+  /// its own safety state to the owner.
+  /// </para>
   /// </summary>
   Degraded = 3,
 
   /// <summary>
-  /// Mismatch on a <i>safety</i> field — <c>wrap</c> on VOLUME, or <c>reverse</c> on any knob.
+  /// A <i>safety</i> field — <c>wrap</c> on VOLUME, or <c>reverse</c> on any knob — is not known to be
+  /// right. Either read-back disagreed on one, or the device never answered within the retry budget
+  /// and therefore confirmed nothing at all.
   ///
   /// <para>
   /// These are not "feels wrong", they are "can blast the room". One detent past zero on a wrapping
@@ -95,6 +109,13 @@ public static class RotaryEncoderConfigDefaults
   /// This is what makes the window between connect and a verified push survivable: until read-back
   /// confirms <c>wrap</c> and <c>reverse</c>, the device may still be on factory tiers, and the host
   /// refuses to act on more than this much movement per event regardless of what arrives.
+  /// </para>
+  ///
+  /// <para>
+  /// The trigger is the <i>safety</i> fields specifically, not "anything that failed to apply".
+  /// A <see cref="RotaryEncoderConfigStatus.Degraded"/> console — read-back arrived, <c>wrap</c> and
+  /// <c>reverse</c> were right in it, an acceleration tier was not — runs on
+  /// <see cref="VolumeClamp"/>. See <c>RotaryEncoderConfigVerifier.VolumeClampFor</c> for the table.
   /// </para>
   /// </summary>
   public const int VolumeClampUnverified = 2;

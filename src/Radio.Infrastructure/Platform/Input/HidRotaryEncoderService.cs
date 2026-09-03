@@ -477,15 +477,19 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     // ParseReport from inside that loop. Awaiting the push here — which is what ENC-11 did, when the
     // push still owned an inline read of its own — means nothing can ever complete it: the loop
     // cannot start until the push returns, and the push cannot return until the loop answers it. It
-    // does not hang, which is what makes it easy to miss; it times out on all four attempts and
-    // settles in Degraded, and Degraded tightens the host's volume clamp from 6 units per event to
-    // 2. Every boot would leave the volume knob sluggish inside sealed furniture with nobody to
-    // press Re-apply.
+    // does not hang, which is what makes it easy to miss; it times out on every attempt and settles
+    // in a tier that tightens the host's volume clamp from 6 units per event to 2. Every boot would
+    // leave the volume knob sluggish inside sealed furniture with nobody to press Re-apply.
     //
-    // Measured on the appliance 2026-09-02: awaited, the boot push reports Degraded with every field
-    // "not read back"; started concurrently, it reports Configured with real read-back values. The
-    // three writes still land before the loop's first read, and the device's reply waits in the HID
-    // queue until the loop picks it up.
+    // Measured on the appliance 2026-09-02: awaited, the boot push reported the timed-out tier with
+    // every field "not read back"; started concurrently, it reports Configured with real read-back
+    // values. The three writes still land before the loop's first read, and the device's reply waits
+    // in the HID queue until the loop picks it up.
+    //
+    // ⚠ That measurement predates ENC-16, which moved the never-answered outcome from Degraded to
+    // HardFault — nothing about the device confirms its safety fields, so it cannot sit in the tier
+    // that runs the normal clamp. If this regresses now, it is a RED badge and a "volume is limited"
+    // toast on every boot rather than an amber one, which is louder but no less wrong.
     Task bootPush = RunBootConfigurationPushAsync(stream, cancellationToken);
 
     try
@@ -724,9 +728,13 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   {
     if (mismatches is null)
     {
-      _logger.LogWarning(
-        "Encoder did not confirm its configuration after {Attempts} attempts. Treating acceleration " +
-        "as absent and clamping volume movement to {Clamp} per event.",
+      // Error, not Warning: since ENC-16 an unanswered read-back after the retry budget classifies as
+      // a hard fault, because it leaves the safety fields unconfirmed. It does NOT say the device
+      // rejected a safety field — it said nothing at all, and that is a different sentence.
+      _logger.LogError(
+        "Encoder did not confirm its configuration after {Attempts} attempts, so its safety fields " +
+        "are unverified. Treating acceleration as absent and clamping volume movement to {Clamp} " +
+        "per event.",
         RotaryEncoderConfigVerifier.TransientAttempts,
         RotaryEncoderConfigVerifier.VolumeClampFor(ConfigStatus));
       return;
@@ -744,10 +752,13 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     }
     else
     {
+      // Feel fields only, and read-back confirmed the safety fields, so the volume clamp is NOT
+      // tightened here (ENC-16). The clamp value is logged so the line cannot drift from the code.
       _logger.LogWarning(
-        "Encoder configuration not fully applied: {Detail}. Knobs stay live on host clamps and " +
-        "acceleration is treated as absent.",
-        detail);
+        "Encoder configuration not fully applied: {Detail}. The safety fields read back correctly, " +
+        "so knobs stay live on the normal host clamps ({Clamp} per event on volume) and acceleration " +
+        "is treated as absent.",
+        detail, RotaryEncoderConfigVerifier.VolumeClampFor(ConfigStatus));
     }
   }
 

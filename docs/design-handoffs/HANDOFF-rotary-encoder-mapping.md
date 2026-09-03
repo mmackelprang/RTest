@@ -9,12 +9,37 @@
 - **Follows** `HANDOFF-bell-failure-surfacing.md` §3.7 for cross-route surfacing of a persistent hardware fault (§7.6).
 - **Extends** `HANDOFF-sleep-weather-visual-redesign.md` with a sleep-screen readout in that handoff's own dim-amber, single-emissive-color palette (§8.6). Its "one emissive color" rule is honored, not broken.
 **Author:** Designer
-**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)**
+**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault)**
 **Consumers:** Owner (§13) → Architect (§12.1) → Planner
 
 ---
 
 ## 0. Revision history
+
+### Rev 6 — §7.6's clamp column, which the table never had and the code guessed at (2026-09-03, `ENC-16`)
+
+**The tier table modelled the tightened volume clamp as a hard-fault consequence and said nothing
+about the other four rows; the shipped code applied it to every row except `Configured`.** So a
+`Degraded` console was volume-clamped exactly as hard as a hard-faulted one while its toast told the
+owner only that the knobs *"may feel wrong"* — the console misreporting its own safety state. Neither
+side was simply wrong: the table under-specified and the code over-applied.
+
+**Owner decision: relax the clamp.** Acceleration disagreeing is a *feel* fault, not a safety fault,
+and tightening volume for it is the actual bug. §7.6 now carries an explicit **volume clamp column**
+for all five rows, and two triggers are restated to match the split the table already claimed:
+
+- **`Degraded` keeps the normal ±6 clamp**, and its trigger now says out loud what it always
+  required — read-back *arrived* and its safety fields were *correct*.
+- **A device that never answers within the 3 attempts is a hard fault, not Degraded.** It confirmed
+  nothing, least of all `wrap` and `reverse`, so it cannot sit in the one non-`Configured` tier that
+  runs the normal clamp. The table previously left this case undefined and the code filed it under
+  `Degraded`; relaxing that row without moving it would have handed the normal clamp to a device
+  possibly still on factory tiers, which is the hazard this whole section exists to prevent.
+
+**No owner-facing copy changed.** Both toasts were already written for this behaviour and are true of
+it for the first time: the Degraded line's silence about volume is now accurate rather than merely
+unfalsifiable, and the hard-fault line's *"Volume is limited until this is fixed"* now covers the
+never-answered case as well.
 
 ### Rev 5 — the left-edge collisions resolved, and two owner decisions (2026-09-02)
 
@@ -902,13 +927,28 @@ Between USB detect and a verified config, the device runs **whatever is in its f
 
 **Not all mismatches are equal**, and treating them the same is the mistake to avoid. A wrong acceleration tier is a knob that feels off. A wrong `wrap` on volume is a knob that can blast the room. Presence joins the same table as a fourth tier rather than becoming a second model.
 
-| Tier | Trigger | Response | Owner-visible? |
-|---|---|---|---|
-| **Configured** | Present, read-back matches | — | Status card only |
-| **Transient** | Mismatch or no response, attempts 1–3 | Silent retry, backoff **250 ms / 1 s / 3 s** | **No.** A USB peripheral missing a report on the first try is ordinary. |
-| **Degraded** | Still mismatched after 3 attempts on a *feel* field (any acceleration tier, `step_size`) | Knobs stay live on host clamps. Acceleration **treated as absent** rather than assumed present. | **Yes** — amber badge, one toast |
-| **Hard fault** | Mismatch on a *safety* field — `wrap` on VOLUME, or `reverse` on any knob | Volume host clamp drops to **±2 per event** until a verified push succeeds | **Yes** — red badge, one toast |
-| **Absent** (§7.3) | Device not detected | Touch UI unchanged and complete. **Blanking disabled.** | **Yes** — amber badge; toast only on mid-session loss |
+| Tier | Trigger | Response | Volume clamp | Owner-visible? |
+|---|---|---|---|---|
+| **Configured** | Present, read-back matches | — | **±6** (normal) | Status card only |
+| **Transient** | Mismatch or no response, attempts 1–3 | Silent retry, backoff **250 ms / 1 s / 3 s** | **±2** | **No.** A USB peripheral missing a report on the first try is ordinary. |
+| **Degraded** | Read-back arrived, its *safety* fields were **correct**, and a *feel* field (any acceleration tier, `step_size`) is still wrong after 3 attempts | Knobs stay live on host clamps. Acceleration **treated as absent** rather than assumed present. | **±6** (normal) | **Yes** — amber badge, one toast |
+| **Hard fault** | A *safety* field — `wrap` on VOLUME, or `reverse` on any knob — is not known to be right: read-back disagreed on one, **or the device never answered at all within the 3 attempts** | Volume host clamp drops to **±2 per event** until a verified push succeeds | **±2** | **Yes** — red badge, one toast |
+| **Absent** (§7.3) | Device not detected | Touch UI unchanged and complete. **Blanking disabled.** | **±2** (tier resets to `Unknown`) | **Yes** — amber badge; toast only on mid-session loss |
+
+**The clamp column answers one question — are `wrap` and `reverse` confirmed? — and not "did everything
+apply."** That is the whole safety-vs-feel split this table exists for, applied to its own response
+column. An acceleration tier that did not apply is a knob that feels wrong; tightening the volume
+clamp for it buys nothing and makes the console **misreport its own safety state**, because the
+Degraded toast below tells the owner only that the knobs may feel wrong. `Transient` keeps the tight
+clamp precisely because it means *"not confirmed yet"* rather than *"confirmed fine"* — and the boot
+window is exactly when a fresh or factory-reset Pico is running acceleration at ×50.
+
+⚠ **The residual risk of the Degraded row is stated rather than glossed.** A Degraded device's
+acceleration tiers are by definition *not* confirmed, so it may be emitting factory ×50 deltas; the
+±6 clamp bounds each event to 12 % of full scale (nine events minimum from silence to full) but does
+**not** preserve §5.4's 1.33 s floor, which is a property of the *configured* tiers. The owner
+accepted that trade: no single gesture can produce a blast either way, and `wrap`/`reverse` are
+confirmed before this tier is ever reached.
 
 Three surfaces, in the order the owner encounters them:
 

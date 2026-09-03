@@ -171,28 +171,35 @@ from red:
 
 | Glyph | Colour | Means | Accessible name |
 |---|---|---|---|
-| `warning` | amber | **Degraded** — a non-safety field did not read back | *"Settings — knob settings not applied"* |
-| `error` | red | **Hard fault** — a safety field did not read back | *"Settings — knob safety settings not applied, volume limited"* |
+| `warning` | amber | **Degraded** — read-back arrived and its safety fields were right; a non-safety field did not apply | *"Settings — knob settings not applied"* |
+| `error` | red | **Hard fault** — a safety field did not read back, **or the device never answered at all** | *"Settings — knob safety settings not applied, volume limited"* |
 | `link_off` | amber | the knobs are **not connected** | *"Settings — knobs not connected"* |
 
 Nothing at all is shown when the configuration verified, when the device is merely retrying
 (`Transient` — attempts 1-3 are silent on purpose), or when `RotaryEncoder:Enabled` is false. A healthy
 boot is completely silent: no toast, no banner, no badge.
 
-**⚠ Anything short of a verified configuration limits how far the volume knob moves, and that is the
-most surprising shipped behaviour in the encoder arc.** `RotaryEncoderConfigVerifier.VolumeClampFor`
-returns the full **6 units** per event for **`Configured` and for nothing else**; `Transient`,
-`Degraded`, `HardFault` and `Unknown` all get the tight **2**. So a merely *Degraded* console has
-identical volume-knob behaviour to one in hard fault — and so does an unplugged one, because a
-disconnect resets the tier to `Unknown`. The knob is not broken and the console is not faulty: it is
-refusing to trust movement from a device that may still be on factory tiers, where one detent can be
-worth 100 volume points.
+**⚠ The volume clamp tracks the *safety* fields, not "did everything apply" (`ENC-16`).**
+`RotaryEncoderConfigVerifier.VolumeClampFor` returns the full **6 units** per event for `Configured`
+**and for `Degraded`**, and the tight **2** for `Unknown`, `Transient` and `HardFault` — exactly the
+tiers where `wrap` on VOLUME or `reverse` on any knob is unverified or disagreeing. A `Degraded`
+console's volume knob behaves normally: read-back confirmed the safety fields and only a feel field
+(an acceleration tier, `step_size`) disagreed, so the knob may accelerate differently from the design
+but it is not limited.
 
-A **hard fault** is the case the owner is actually *told* about, and its toast says so — *"Volume is
-limited until this is fixed."* The other tiers tighten the clamp exactly as much and say nothing about
-it, on the grounds that `Transient` clears within three attempts and an unplugged lead explains itself.
-In every one of those cases the knob feels sluggish until the configuration is re-applied from
+`Transient` keeps the tight clamp because it means *"not confirmed yet"*, not *"confirmed fine"*, and
+the boot window is exactly when a fresh or factory-reset device is running acceleration at ×50. An
+unplugged console gets it too, because a disconnect resets the tier to `Unknown`.
+
+**A hard fault is the one tier that limits the volume knob, and it is also the one the owner is told
+about** — its toast says so, *"Volume is limited until this is fixed."* It covers both ways the safety
+fields end up unconfirmed: a read-back that disagreed on one, and a device that never answered within
+the three attempts. In either case the knob feels sluggish until the configuration is re-applied from
 **System Config → Integrations → Rotary Encoders**. Touch volume is unaffected.
+
+*Until 2026-09-03 the tight clamp applied to every tier except `Configured`, so a `Degraded` console
+was limited exactly as hard as a hard-faulted one while being told only that its knobs "may feel
+wrong". That is the defect `ENC-16` closed; this paragraph used to describe it as shipped behaviour.*
 
 **Two independent latches, and neither repeats or resets.** A fault also raises a Radzen toast that
 navigates to `/system` when clicked. Presence and configuration are latched **separately**, because a
