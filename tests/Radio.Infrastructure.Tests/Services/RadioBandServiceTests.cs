@@ -6,7 +6,7 @@ namespace Radio.Infrastructure.Tests.Services;
 /// Locks down PR 3 of the Radio Controller Polish arc — the server-side
 /// projection of <c>RadioBandModel.Range</c> (human-formatted sub-range
 /// string for the tall band pills) and <c>RadioBandModel.BandPresetCapacity</c>
-/// (per-band memory-slot count). Tests target the static helpers exposed via
+/// (per-band preset-slot count). Tests target the static helpers exposed via
 /// <c>internal</c> + <c>InternalsVisibleTo</c> so the formatting logic is
 /// covered without needing to spin up the full <c>BandPresets</c> reflection
 /// path.

@@ -568,7 +568,7 @@ public class RadioControlPanelTests : TestContext
   }
 
   // ─── PR 3 of the Radio Controller Polish arc ──────────────────────────────
-  // Tuner header, RDS card mount, tall band pills, RT line, memory presets
+  // Tuner header, RDS card mount, tall band pills, RT line, presets
   // grid (slot · name+band · freq) + dashed empty-slot placeholder.
 
   [Fact]
@@ -832,7 +832,7 @@ public class RadioControlPanelTests : TestContext
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
 
     var count = cut.Find(".rcp-presets-count");
-    Assert.Contains("MEMORY", count.TextContent);
+    Assert.Contains("PRESETS", count.TextContent);
     Assert.Contains("2 saved", count.TextContent);
     // The old "of CAP" form must be gone — defends against a regression.
     Assert.DoesNotContain(" of ", count.TextContent);

@@ -4229,11 +4229,11 @@ body {
   border: 0;
 }
 
-/* ─── §X  Memory Presets Grid (PR 3) ──────────────────────────────────────── *
+/* ─── §X  Presets Grid (PR 3) ──────────────────────────────────────── *
    Implements handoff §P1·2 — preset rows become a CSS grid (slot · text · freq),
    slot numbers are always visible (not hover-only), and the save action is a
    long-press on the active band pill instead of a separate button. The header
-   carries the "MEMORY · n of N" count + a "HOLD <band> TO SAVE" hint.
+   carries the "PRESETS · n saved" count + a "HOLD <band> TO SAVE" hint.
 */
 
 .rcp-presets-count {

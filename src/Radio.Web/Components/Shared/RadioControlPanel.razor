@@ -229,7 +229,7 @@
       }
     </div>
 
-    <!-- Presets Memory Bank — handoff §P1·2 (slot · name+band · freq grid),
+    <!-- Presets bank — handoff §P1·2 (slot · name+band · freq grid),
          updated by the hot-fix off PR #371 (user feedback) so:
            1. ALL presets across ALL bands are shown (not just the current
               band) — the user couldn't find their saved WB station while
@@ -246,7 +246,7 @@
     <div class="rcp-presets">
       <div class="rcp-presets-header">
         <span class="rcp-presets-count">
-          MEMORY · @presetCount saved
+          PRESETS · @presetCount saved
         </span>
         @if (bandSavable)
         {
@@ -828,7 +828,7 @@
      rules were removed in PR 1 of the Radio Controller Polish arc when the
      flex strip became a fixed two-cell grid. ──────────────────────────── */
 
-  /* ═══ Presets Memory Bank ═══ */
+  /* ═══ Presets bank ═══ */
 
   .rcp-presets {
     width: 210px;
