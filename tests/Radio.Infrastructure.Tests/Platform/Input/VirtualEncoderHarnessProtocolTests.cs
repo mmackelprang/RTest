@@ -6,7 +6,7 @@ namespace Radio.Infrastructure.Tests.Platform.Input;
 
 /// <summary>
 /// The contract between the ENC-17 virtual-encoder harness
-/// (<c>tools/encoder-harness/uhid_rotary_encoder.py</c>) and the shipped
+/// (<c>tools/encoder-harness/virtual_encoder.py</c>) and the shipped
 /// <see cref="RotaryEncoderDecoder"/>.
 ///
 /// <para>

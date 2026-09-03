@@ -415,6 +415,36 @@ def _set_pdeathsig():
     libc.prctl(PR_SET_PDEATHSIG, signal.SIGKILL)
 
 
+def our_vhci_ports():
+    """Return the vhci port numbers carrying THIS harness's gadget.
+
+    `usbip port` prints a numbered header per attached device followed by an
+    indented detail line naming the remote, e.g.
+
+        Port 00: <Port in Use> at High Speed(480Mbps)
+               unknown vendor : unknown product (cafe:4005)
+               3-1 -> usbip://127.0.0.1:3240/usbip-vudc.0
+
+    so a port is ours when its block mentions our UDC. Matching rather than
+    detaching everything matters because `usbip detach` is not scoped: an earlier
+    revision tore down every attached port on the box while its own comment claimed
+    it only took our own, which would silently rip out a concurrent operator's
+    device. Nothing else on this appliance is known to use usbip today; that is a
+    fact about the box, not a property of the code, so the code is scoped.
+    """
+    result = _run(["usbip", "port"])
+    ports, current = [], None
+    for line in result.stdout.splitlines():
+        header = re.match(r"^Port (\d+):", line.strip())
+        if header:
+            current = header.group(1)
+            continue
+        if current is not None and UDC_NAME in line:
+            ports.append(current)
+            current = None
+    return ports
+
+
 def teardown_gadget(verbose=True):
     """Remove every piece of harness state, in dependency order.
 
@@ -426,13 +456,10 @@ def teardown_gadget(verbose=True):
         if verbose:
             print(f"[gadget] {message}", file=sys.stderr, flush=True)
 
-    # 1. Detach every vhci port carrying our gadget.
-    result = _run(["usbip", "port"])
-    for line in result.stdout.splitlines():
-        match = re.match(r"^Port (\d+):", line.strip())
-        if match:
-            _run(["usbip", "detach", "-p", match.group(1)])
-            log(f"detached vhci port {match.group(1)}")
+    # 1. Detach the vhci ports carrying our gadget, and only those.
+    for port in our_vhci_ports():
+        _run(["usbip", "detach", "-p", port])
+        log(f"detached vhci port {port}")
 
     # 2. Stop any usbipd we started. Matched on the device-mode argument so a
     #    usbipd somebody else is running for another purpose is left alone.
@@ -594,39 +621,58 @@ class VirtualEncoder:
         """
         if not self._attached:
             return
-        result = _run(["usbip", "port"])
-        ports = [m.group(1) for m in
-                 (re.match(r"^Port (\d+):", line.strip()) for line in result.stdout.splitlines())
-                 if m]
-        for port in ports:
+        for port in our_vhci_ports():
             _run(["usbip", "detach", "-p", port])
         self._attached = False
         self.hidraw_node = None
         self._log("detached (accumulators retained)")
 
     def close(self):
-        try:
-            if self._attached:
-                self.detach()
-        except Exception:
-            pass
-        # Stop and join the reader BEFORE closing the fd, so it cannot be parked in
-        # select() on a descriptor that is about to be closed and reused.
+        """Tear everything down, running every step even if an earlier one fails.
+
+        Each step is guarded individually and on purpose. This is the only thing that
+        removes the gadget, and main()'s finally: block calls it immediately before
+        rebinding the real encoder -- so an exception escaping here would skip the
+        remaining teardown AND the rebind, leaving the box worse off than a step that
+        simply failed. A teardown that gives up halfway is the failure mode this
+        method exists to prevent, so it reports problems rather than propagating them.
+        """
+        def step(what, fn):
+            try:
+                fn()
+            except Exception as exc:
+                self._log(f"teardown step '{what}' failed: {exc}")
+
+        step("detach", lambda: self.detach() if self._attached else None)
+
+        # Stop and join the reader before closing the fd, so it is not parked in
+        # select() on a descriptor about to be closed and reused. The join has a
+        # timeout, so this narrows the window rather than closing it: a reader inside
+        # _on_command's write when teardown starts can still outlive the join. That is
+        # survivable -- _read_loop catches its own exceptions and would log rather than
+        # crash -- and it is why the fd close below is guarded too.
         self._stop.set()
         if self._reader is not None and self._reader.is_alive():
-            self._reader.join(timeout=1.0)
-        if self.fd is not None:
-            try:
-                os.close(self.fd)
-            finally:
-                self.fd = None
-        if self._usbipd is not None and self._usbipd.poll() is None:
-            self._usbipd.terminate()
-            try:
-                self._usbipd.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                self._usbipd.kill()
-        teardown_gadget(verbose=self.verbose)
+            step("join reader", lambda: self._reader.join(timeout=1.0))
+
+        def close_fd():
+            if self.fd is not None:
+                try:
+                    os.close(self.fd)
+                finally:
+                    self.fd = None
+        step("close /dev/hidg0", close_fd)
+
+        def stop_usbipd():
+            if self._usbipd is not None and self._usbipd.poll() is None:
+                self._usbipd.terminate()
+                try:
+                    self._usbipd.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    self._usbipd.kill()
+        step("stop usbipd", stop_usbipd)
+
+        step("remove gadget", lambda: teardown_gadget(verbose=self.verbose))
 
     # -- the hidraw node ---------------------------------------------------
 

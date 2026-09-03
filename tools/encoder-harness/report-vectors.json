@@ -3,7 +3,7 @@
     "ENC-17 shared golden vectors for the virtual rotary-encoder harness.",
     "",
     "READ BY TWO THINGS, WHICH IS THE POINT:",
-    "  tools/encoder-harness/uhid_rotary_encoder.py --selftest   (builds these frames)",
+    "  tools/encoder-harness/virtual_encoder.py --selftest   (builds these frames)",
     "  tests/Radio.Infrastructure.Tests/Platform/Input/VirtualEncoderHarnessProtocolTests.cs",
     "      (decodes these frames with the shipped RotaryEncoderDecoder)",
     "",
@@ -12,7 +12,7 @@
     "encoder format for months, and nothing mechanical caught it.",
     "",
     "'hex' is the full 37-byte Input Report 0x01 including the leading report ID.",
-    "Regenerate with tools/encoder-harness/uhid_rotary_encoder.py's build_positions_report.",
+    "Regenerate with tools/encoder-harness/virtual_encoder.py's build_positions_report.",
     "",
     "'reportLength' is 107 because that is what the real device reports: HidSharp's GetMaxInputReportLength() is the maximum across ALL input report IDs, and the config read-back report 0x02 (106-byte payload + 1 report ID) is larger than the 37-byte positions report. Measured on the appliance 2026-09-03, and confirmed in the service's own log line 'Encoder report length 107 bytes (movement accumulators: true)'. BeginConnection only needs >= 37 to enable movement, so this also proves the decoder uses >= rather than ==."
   ],
