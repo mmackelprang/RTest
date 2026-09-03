@@ -97,8 +97,18 @@ public enum RotaryEncoderConfigStatus
 ///
 /// <para>
 /// Fast enough to kill the volume when the phone rings; slow enough that no single gesture produces
-/// a blast. For reference: one full revolution of a 24-detent knob at tier 2 crosses the whole
-/// range.
+/// a blast.
+/// </para>
+///
+/// <para>
+/// ⚠ <b>Do not restate that bound in revolutions.</b> It is tempting — 25 detents sounds like about
+/// one turn — but <b>detents per revolution is a mechanical property of the encoder body that
+/// nobody has measured yet</b>, and it is still an open question in the handoff (§7.9, §13 Q2). The
+/// handoff's own feel figures say so explicitly and assume a conventional 20-detent knob purely as
+/// a placeholder (§5.2), on which 25 detents is a turn and a quarter rather than a turn. Writing a
+/// specific detent count here would assert a measurement that has never been taken, which is the
+/// exact failure ENC-20 was raised to fix. Detents are the honest unit until the calibration flow
+/// answers it.
 /// </para>
 /// </summary>
 public static class RotaryEncoderConfigDefaults

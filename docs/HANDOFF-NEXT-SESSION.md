@@ -154,7 +154,9 @@ Three things to know before you reach for it:
 
 **What it has already verified on the appliance** (2026-09-03, against `5e571b8`): configuration
 verifies `Configured` on attempt 1; a turn moves volume at 2% per unit; the `ENC-3` per-event clamp
-holds at ±6 units against single events of 20 and 50 detents; the `ENC-4` HUD renders left-anchored
+holds at ±6 units against single events of 20 and 50 detents (⚠ **both figures are pre-`ENC-20` and
+are dated history, not current** — the live values are **1% per unit** and **±4 units = ±4 points**;
+`ENC-20` re-ran this measurement and recorded 1 point per detent at base speed); the `ENC-4` HUD renders left-anchored
 at its band; a 900 ms hold on encoder 0 synthesises a long press with the progress ring and a 200 ms
 hold does not; and **`ENC-1`'s re-baseline rule holds across a real USB disconnect — 50 detents
 accrued while unplugged produced a 0-point jump on replug.** That last one was Designer's

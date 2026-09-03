@@ -81,13 +81,13 @@ public static class EncoderInteractionTimings
   /// Longer than a value card's <see cref="HudHoldMs"/> (2500 ms) because a list has to be read,
   /// and because dismissing it costs nothing: nothing has been committed, so a timeout is not a
   /// lost action.
+  /// </para>
   ///
   /// <para>
   /// ⚠ The margin is much narrower than it was. ENC-20 raised the value card from 1500 to 2500, so
   /// the gap fell from 2500 ms to 1500 ms while this constant stayed put. Still the right order,
   /// but no longer a comfortable one — raise this if the value card is ever lengthened again,
   /// rather than letting a list get the same dwell as a two-digit number.
-  /// </para>
   /// </para>
   /// </summary>
   public const int SelectorIdleDismissMs = 4000;

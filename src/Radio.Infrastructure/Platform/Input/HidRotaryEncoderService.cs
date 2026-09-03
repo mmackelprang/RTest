@@ -542,8 +542,17 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   ///
   /// <para>
   /// ENC-11: pushed before the knobs are trusted, because until it succeeds the device may be on
-  /// factory defaults — measured on this hardware as tiers (150ms x5), (80ms x15), (40ms x50), which
-  /// at the host's 2% per unit is one detent from silence to full.
+  /// factory defaults — measured on this hardware as <c>step_size 1</c> with tiers (150ms x5),
+  /// (80ms x15), (40ms x50). At the host's 1% per unit (ENC-20) the x50 tier is 50 points from a
+  /// single detent: half the range in one click, the whole range in two. The host clamp is what
+  /// makes that window survivable — <c>VolumeClampUnverified</c> cuts such an event to 2 points
+  /// until a push has been verified.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ This paragraph said "2% per unit ... one detent from silence to full" until ENC-20. That was
+  /// the pre-ENC-20 host step, and it is the same units-read-as-points conflation ENC-20 was raised
+  /// to fix — so re-derive it here rather than trusting it if <c>VolumeStepPercent</c> moves again.
   /// </para>
   ///
   /// <para>
