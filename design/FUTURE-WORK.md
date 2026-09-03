@@ -8,11 +8,12 @@ This document catalogs features that have been designed at the interface level b
 
 ## Encoder HUD (ENC-4) — three seams left open on purpose
 
-**1. The PRESETS long-press consumer is not wired.** The design names two long-press actions: VOLUME → Standby and
-PRESETS → Save. Only the first exists. `RotaryEncoderActionRouter.OnLongPress` returns early for every index except
-0, and `PublishHold` refuses to publish a hold phase for indices 1–3 — deliberately, because a progress ring that
-fills and then does nothing is a promise the code does not keep. Wiring the second one belongs to `ENC-7`, which
-introduces the PRESETS handler; it also needs the router's index→handler remap, which `ENC-5`/`ENC-7` own.
+**1. ~~The PRESETS long-press consumer is not wired.~~ CLOSED by `ENC-7`.** Both long-press actions the design
+names now exist — VOLUME → Standby and PRESETS → Save — and there is deliberately no third. `OnLongPress`
+switches on indices 0 and 2; `PublishHold` publishes for those two only, and for index 2 only on the `HoldStart`
+edge, because the save's own `SelectorNotice` is what collapses the ring. Indices 1 and 3 still publish no hold
+phase at all, for the original reason: a progress ring that fills and then does nothing is a promise the code
+does not keep.
 
 **2. There is no exit animation.** The card enters with `.snackbar-enter` and then simply unmounts. A 200 ms exit
 needs a two-phase teardown (keep the element alive while it animates out), which changes `EncoderHudService`'s
@@ -1033,3 +1034,74 @@ is the shape of test that pins it.
   the phone integration, and `PhoneIntegration:Enabled` is `false` and has never been true — so this
   is not leaking today, and widening a voicemail-cache PR into a phone-integration one is how a
   Medium change becomes a risky one.
+## 16. Radio presets (found by `ENC-7`, deliberately not fixed there)
+
+`ENC-7` put the preset bank behind a knob and read the stack end to end doing it. Four things it found and
+left alone, because each is a change to a shipped surface with existing callers rather than an encoder change.
+
+### 1. `RadioPresetService` signals "bank full" and "duplicate" through exception **message text**
+
+`AddPresetAsync` throws `InvalidOperationException` for both, and the only thing distinguishing them is the
+wording: `"Maximum of 50 presets reached. Please delete an existing preset first."` and
+`"A preset already exists for {band} - {frequency}: {name}"`.
+
+**Two call sites now match on those strings.** `RadioController` routes them to 409 / 400
+(`ex.Message.Contains("already exists")` / `.Contains("Maximum")`), and `ENC-7`'s
+`PresetSelectorService.SaveAsync` uses a `when (ex.Message.Contains("Maximum", StringComparison.Ordinal))`
+filter to reach its `PRESETS FULL` notice. Both are commented as debt rather than defended.
+
+#### What's Needed
+
+A typed exception pair (`PresetLimitReachedException` / `DuplicatePresetException`) or a result object, and
+the two call sites moved onto it. **Gotcha:** it is a breaking change to a shipped service, and the
+controller's status-code mapping has to move with it or the API starts returning 500s for a full bank. Both
+callers must change in the same PR; a half-migration leaves one of them matching text that no longer exists.
+
+### 2. `RadioApiService`'s preset mutations return `bool` and discard the server's DTO
+
+`SavePresetAsync`, `LoadPresetAsync` and `RenamePresetAsync` all return `bool`, throwing away the
+`RadioPresetDto` the server sent back — so every touchscreen mutation is followed by a full refetch of the
+whole bank to learn what it already knew.
+
+`RenamePresetAsync`'s XML doc is also **wrong**: it promises *"the new name on success"* and returns a
+`bool`. That is the `CLAUDE.md` § Pre-Merge Review failure class — a comment asserting more than the code
+does — in a doc comment on a shipped method.
+
+#### What's Needed
+
+Return the DTO (nullable for the failure case) and have the callers apply it locally. Fix the doc comment
+with it, or independently and immediately — it costs nothing and it is actively misleading today.
+
+### 3. `RadioPreset` ordering is derived three different ways in one stack
+
+- the repository sorts by `Name`;
+- `RadioControlPanel` re-sorts by band, then per-band slot, then creation time;
+- `RadioPage` sorts by `CreatedAt`.
+
+`ENC-7`'s knob follows `RadioControlPanel`, because that is the bank it is a remote control for, which makes
+**four** derivations of one order. There is no stored slot number — neither `RadioPreset` nor the
+`RadioPresets` table has one, and `RadioController.GetPresets` recomputes the per-band ordinal on every
+request — so this is a presentation decision repeated in four places rather than a data problem.
+
+#### What's Needed
+
+One ordering helper the repository, both pages and the selector share. **Gotcha:** do not "fix" it by adding
+`SlotNumber` to the persisted model. Deleting a preset renumbers the ones after it within its band, so a
+stored ordinal becomes state that every delete has to maintain, in exchange for saving a projection.
+
+### 4. `RadioPreset.GetDefaultName` formats hertz as display units
+
+`RadioPreset.Frequency` holds **hertz** (a `double`). `GetDefaultName(band, frequency)` formats it as though
+it were display units — `RadioBand.FM => $"FM - {frequency:F1}"` — so a real frequency produces
+**`FM - 101500000.0`**, not `FM - 101.5`.
+
+It is reachable: `RadioPresetService.AddPresetAsync` calls it whenever a caller passes a null or blank name.
+`ENC-7`'s save path deliberately routes around it by always passing an explicit non-blank name built from
+`new Frequency((long)hz).ToDisplayString()`, matching `RadioControlPanel.OpenSavePresetDialog`'s own
+fallback, and its tests pin that the generated name contains no raw hertz.
+
+#### What's Needed
+
+Either take a `Frequency` rather than a `double`, or convert inside the method. **Gotcha:** it is a shipped
+`public static` with other callers, and any fix changes the names those callers generate — so it needs a
+look at every call site and at whatever is already stored in the database, rather than a one-line edit.
