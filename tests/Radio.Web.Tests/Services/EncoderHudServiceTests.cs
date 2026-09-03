@@ -53,6 +53,17 @@ public class EncoderHudServiceTests
     Rows = [new EncoderSelectorRowDto { Id = "band:FM", Primary = "FM", IsCurrent = true }],
   };
 
+  /// <summary>A commit in flight — State D, which deliberately carries no duration.</summary>
+  private static EncoderHudDto CommittingCard() => new()
+  {
+    EncoderIndex = 1,
+    Label = "SOURCE",
+    Phase = "SelectorCommitting",
+    Title = "SOURCE",
+    PrimaryText = "Switching to BLUETOOTH…",
+    DurationMs = null,
+  };
+
   [Fact]
   public void Publish_SetsCurrentAndRaisesStateChanged()
   {
@@ -327,6 +338,62 @@ public class EncoderHudServiceTests
     svc.Publish(SelectorCard(durationMs: null));
 
     clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs - 1));
+    svc.Current.Should().NotBeNull();
+
+    clock.Advance(TimeSpan.FromMilliseconds(1));
+    svc.Current.Should().BeNull();
+  }
+
+  [Fact]
+  public void CommittingCard_DoesNotDismissAtTheDefaultHold()
+  {
+    // The regression this pins, found in pre-merge review. SourceSelectorService publishes
+    // SelectorCommitting with DurationMs = null ON PURPOSE, because handoff §6.6 State D says the
+    // spinner stays up until the switch succeeds or fails. Treating that null as "use the 1500 ms
+    // default" dropped the spinner mid-switch on exactly the slow Bluetooth connect it exists to
+    // explain, then flashed it back when the terminal phase arrived.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(CommittingCard());
+
+    clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.HudHoldMs * 3));
+    svc.Current.Should().NotBeNull("a commit in flight outlasts the ordinary card hold");
+  }
+
+  [Fact]
+  public void CommittingCard_StillDismissesAtTheFailsafeCeiling()
+  {
+    // The other half, and the reason the fix is a ceiling rather than an infinite hold. The
+    // terminal phase travels over SignalR; if the hub drops mid-commit nothing else clears the
+    // card. ENC-4 shipped exactly that bug on the hold ring, where a device unplugged mid-hold
+    // left a card up indefinitely.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(CommittingCard());
+
+    clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.SelectorCommitCeilingMs - 1));
+    svc.Current.Should().NotBeNull();
+
+    clock.Advance(TimeSpan.FromMilliseconds(1));
+    svc.Current.Should().BeNull("nothing may stay on screen forever");
+  }
+
+  [Fact]
+  public void ATerminalPhaseAfterACommit_ReArmsAtItsOwnDuration()
+  {
+    // The normal path: the spinner is replaced by a failure card, which must then dismiss on the
+    // failure card's own 4000 ms rather than inheriting the commit ceiling.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Publish(CommittingCard());
+    clock.Advance(TimeSpan.FromSeconds(2));
+
+    svc.Publish(SelectorCard(durationMs: EncoderInteractionTimings.SelectorFailedMs));
+
+    clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.SelectorFailedMs - 1));
     svc.Current.Should().NotBeNull();
 
     clock.Advance(TimeSpan.FromMilliseconds(1));

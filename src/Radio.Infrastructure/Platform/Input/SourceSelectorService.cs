@@ -281,17 +281,36 @@ public sealed class SourceSelectorService : IDisposable
     var mgr = _audioManagerFactory();
     var radio = mgr.ActiveSource as IRadioControl ?? mgr.GetCachedSource(AudioSourceType.Radio) as IRadioControl;
 
-    _composedBands ??= radio is null
-      // No tuner has ever existed this session, so nothing can be asked what it supports. FM and AM
-      // are rendered anyway, dimmed with a reason: handoff §4.4 wants "no tuner detected" on a row
-      // that is there, not an absent row that gives the user nothing to aim at.
-      ? [RadioBand.FM, RadioBand.AM]
-      : BandOrder.Where(b => radio.SupportedBands.Contains(b)).ToArray();
+    // Composition is resolved ONCE — but only once there is a tuner to resolve it from.
+    //
+    // The distinction is load-bearing rather than pedantic. A radio source does not exist until
+    // something creates one, so a knob turned before that (the common case on a cold boot, where
+    // the overlay is one of the first things a hand reaches for) sees null here. Caching the
+    // no-tuner fallback at that moment would freeze FM+AM in place for the rest of the process,
+    // and an SDR's SW and WB rows would never appear no matter how long the tuner ran afterwards.
+    // So the fallback is used but NOT cached, and the first open that finds a real tuner is what
+    // fixes the list.
+    var bands = _composedBands;
+    if (bands is null)
+    {
+      if (radio is null)
+      {
+        // No tuner has ever existed this session, so nothing can be asked what it supports. FM and
+        // AM are rendered anyway, dimmed with a reason: handoff §4.4 wants "no tuner detected" on a
+        // row that is there, not an absent row that gives the user nothing to aim at.
+        bands = [RadioBand.FM, RadioBand.AM];
+      }
+      else
+      {
+        bands = BandOrder.Where(b => radio.SupportedBands.Contains(b)).ToArray();
+        _composedBands = bands;
+      }
+    }
 
-    var rows = new List<EncoderSelectorRow>(_composedBands.Length + SourceOrder.Length);
+    var rows = new List<EncoderSelectorRow>(bands.Length + SourceOrder.Length);
     var activeBand = radio is not null && mgr.ActiveSource is IRadioControl ? radio.CurrentBand : (RadioBand?)null;
 
-    foreach (var band in _composedBands)
+    foreach (var band in bands)
     {
       bool available = radio is not null;
       rows.Add(new EncoderSelectorRow

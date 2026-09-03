@@ -5996,7 +5996,16 @@ body {
     calc(8px - var(--encoder-band-y)),
     -50%,
     calc(712px - var(--encoder-band-y) - 100%));
-  z-index: 10000;                 /* one tier above the gain-popover backdrop (9999) */
+  /* 10000. Above the 9999 tier (the sleep screen at :2840 and
+     .rcp-preset-menu-overlay at :4455) and level with .np-gain-popover-anchor
+     (:4767), which is the only other 10000 on the page — there is no
+     gain-popover backdrop, and an earlier revision of this comment said there
+     was one at 9999. Level, not above, means DOM order decides between those
+     two; both are layout-root children and the HUD mounts after, so the HUD
+     wins today. Raising this to beat the popover outright was not done: the
+     popover is a control the user is touching, and a readout should not cover
+     one. */
+  z-index: 10000;
   /* A readout, not a control. Without this the card is a 360px transparent
      shield over whatever route is underneath it. */
   pointer-events: none;
@@ -6233,7 +6242,16 @@ body {
      properties compose (translate is applied before transform). */
   translate: -50% -50%;
   width: 440px;
-  z-index: 10000;                 /* one tier above the gain-popover backdrop (9999) */
+  /* 10000. Above the 9999 tier (the sleep screen at :2840 and
+     .rcp-preset-menu-overlay at :4455) and level with .np-gain-popover-anchor
+     (:4767), which is the only other 10000 on the page — there is no
+     gain-popover backdrop, and an earlier revision of this comment said there
+     was one at 9999. Level, not above, means DOM order decides between those
+     two; both are layout-root children and the HUD mounts after, so the HUD
+     wins today. Raising this to beat the popover outright was not done: the
+     popover is a control the user is touching, and a readout should not cover
+     one. */
+  z-index: 10000;
   /* A readout, not a control. Every function it offers has a touch equivalent
      (the topbar source strip, the band pills), and a 440px transparent shield
      over the middle of Home would eat taps meant for the panel underneath. */

@@ -153,7 +153,7 @@ public sealed class EncoderHudService : IDisposable
       }
       else
       {
-        ArmDismissLocked();
+        ArmDismissLocked(dto);
       }
     }
 
@@ -223,17 +223,27 @@ public sealed class EncoderHudService : IDisposable
     }
   }
 
-  private void ArmDismissLocked()
+  private void ArmDismissLocked(EncoderHudDto dto)
   {
     CancelTimerLocked();
 
     // ENC-5. The payload carries how long to hold, because the handoff specifies four different
     // durations across the value card, the blocked flash, the save notice and the selector's idle
-    // dismiss. Null keeps ENC-4's default.
+    // dismiss.
     //
-    // This reads the card being published, not the one it replaced: Publish assigns Current before
-    // it calls here.
-    int holdMs = Current?.DurationMs ?? EncoderInteractionTimings.HudHoldMs;
+    // A null duration means two different things depending on the phase, and conflating them is a
+    // bug this shipped once. For an ordinary card it means "use ENC-4's 1500 ms default". For a
+    // commit in flight it means "no duration is known" — the card is supposed to stay until the
+    // switch succeeds or fails (handoff §6.6 State D), and arming 1500 ms against it drops the
+    // spinner mid-switch on exactly the slow Bluetooth connect the spinner exists to explain, then
+    // flashes it back when the terminal phase lands.
+    //
+    // So a commit gets the failsafe ceiling instead: long enough that no real switch reaches it,
+    // bounded so that a dropped hub connection cannot strand a spinner forever the way ENC-4's
+    // ring was once stranded by a device unplugged mid-hold.
+    int holdMs = dto.Phase == "SelectorCommitting"
+      ? dto.DurationMs ?? EncoderInteractionTimings.SelectorCommitCeilingMs
+      : dto.DurationMs ?? EncoderInteractionTimings.HudHoldMs;
 
     _dismissTimer = _timeProvider.CreateTimer(
       _ => Dismiss(),

@@ -70,6 +70,23 @@ public static class EncoderInteractionTimings
   public const int SelectorFailedMs = 4000;
 
   /// <summary>
+  /// The longest a commit-in-flight card is allowed to stay on screen before it is dismissed
+  /// anyway, in milliseconds.
+  ///
+  /// <para>
+  /// <b>A failsafe, not a UX duration.</b> Handoff §6.6 State D is explicit that the spinner stays
+  /// up until the switch succeeds or fails, and every path out of the commit publishes a terminal
+  /// phase, so under normal operation this never fires. It exists because the terminal phase
+  /// travels over SignalR: if the API process dies or the hub connection drops mid-commit, nothing
+  /// else would ever clear the card. ENC-4 shipped exactly that bug on the hold ring — a device
+  /// that vanished mid-hold left a card up indefinitely — and this is the same hazard on a
+  /// different phase. Deliberately far longer than any real switch so it cannot be mistaken for a
+  /// timeout on a slow Bluetooth connect.
+  /// </para>
+  /// </summary>
+  public const int SelectorCommitCeilingMs = 30000;
+
+  /// <summary>
   /// How many rows the selector overlay shows at once. Seven rows plus chrome is what fits the
   /// 600 px content area (handoff §6.6); a longer list scrolls a window of this size around the
   /// highlight.

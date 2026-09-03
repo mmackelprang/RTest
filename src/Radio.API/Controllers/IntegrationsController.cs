@@ -135,9 +135,10 @@ public class IntegrationsController : ControllerBase
   /// What each knob currently does, read from the router's own dispatch table (ENC-8).
   ///
   /// <para>
-  /// ⚠ This is the <b>software</b> mapping, and it is not the cabinet's engraved order. The two
-  /// currently disagree on indices 1-3 — ENC-5 / ENC-7 own the remap. The Settings page renders both
-  /// and states the disagreement; it does not pick one.
+  /// ⚠ This is the <b>software</b> mapping, which is not guaranteed to be the cabinet's engraved
+  /// order. Since ENC-5 the two agree on every index except <b>2</b>, where the visualiser sits
+  /// until ENC-7 puts PRESETS there. The Settings page renders both and names whichever knobs
+  /// actually disagree; it does not pick one.
   /// </para>
   /// </summary>
   [HttpGet("encoder/mapping")]

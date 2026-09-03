@@ -17,6 +17,20 @@ namespace Radio.Infrastructure.Tests.Platform.Input;
 /// active <b>band</b> rather than the word "Radio". Both are the difference between this feature and
 /// a re-implementation of the source cycler it replaces.
 /// </para>
+///
+/// <para>
+/// ⚠ <b>How these tests rendezvous with the commit, since it is fire-and-forget.</b>
+/// <c>Press()</c> launches <c>CommitAsync</c> as <c>_ = CommitAsync(row)</c> and returns without
+/// awaiting it, so an assertion made after <c>Press()</c> is only sound because <b>every fake in
+/// <c>EncoderSelectorTestDoubles</c> returns an already-completed task</b>. With no true
+/// suspension point, <c>CommitAsync</c> runs to completion synchronously on the calling thread
+/// before <c>Press()</c> returns, and the call stack itself is the rendezvous — the assertions are
+/// deterministic rather than timed. Per <c>CLAUDE.md</c> § "Test Timing", this is stated rather
+/// than assumed: <b>giving any of those fakes a real await (a <c>Task.Delay</c>, a
+/// <c>Task.Yield</c>, a <c>Task.Run</c>) silently converts every commit assertion in this file
+/// into a race.</b> If a fake ever needs to suspend, add an explicit completion signal and wait on
+/// it; do not add a sleep.
+/// </para>
 /// </summary>
 public class SourceSelectorServiceTests
 {
@@ -183,6 +197,49 @@ public class SourceSelectorServiceTests
 
     Assert.Equal(before, h.Rows.Select(r => r.Id).ToArray());
     Assert.All(h.Rows.Where(r => r.Id.StartsWith("band:")), r => Assert.False(r.IsAvailable));
+  }
+
+  [Fact]
+  public void Composition_WithNoTuner_IsNotCached_AndResolvesWhenATunerAppears()
+  {
+    // The regression this pins, found in pre-merge review. Composition is resolved once — but the
+    // no-tuner fallback must NOT be what gets cached. A radio source does not exist until something
+    // creates one, so a knob turned on a cold boot (the common case: the overlay is one of the
+    // first things a hand reaches for) sees no tuner. Caching FM+AM at that moment froze the list
+    // for the life of the process, and an SDR's SW and WB rows could never appear afterwards no
+    // matter how long the tuner ran.
+    using var h = new Harness();
+
+    h.Selector.Turn(1);
+    Assert.Equal(["band:FM", "band:AM"], h.Rows.Where(r => r.Id.StartsWith("band:")).Select(r => r.Id));
+
+    // The tuner arrives, as it does a few seconds into a boot.
+    ActiveRadio(h);
+    h.Selector.Dismiss();
+    h.Selector.Turn(1);
+
+    Assert.Equal(
+      ["band:FM", "band:AM", "band:SW", "band:WB"],
+      h.Rows.Where(r => r.Id.StartsWith("band:")).Select(r => r.Id));
+  }
+
+  [Fact]
+  public void Composition_OnceResolvedFromARealTuner_IsStableEvenIfItDisappears()
+  {
+    // The other half: once a real tuner HAS answered, that answer is the composition for the
+    // session. This is what "positions never move" means, and it is why the fix above is about
+    // which value gets cached rather than about caching at all.
+    using var h = new Harness();
+    ActiveRadio(h, supported: [RadioBand.FM, RadioBand.AM, RadioBand.SW]);
+    h.Selector.Turn(1);
+    var resolved = h.Rows.Where(r => r.Id.StartsWith("band:")).Select(r => r.Id).ToArray();
+
+    h.Audio.ActiveSource = null;
+    h.Audio.Cached.Remove(AudioSourceType.Radio);
+    h.Selector.Dismiss();
+    h.Selector.Turn(1);
+
+    Assert.Equal(resolved, h.Rows.Where(r => r.Id.StartsWith("band:")).Select(r => r.Id));
   }
 
   [Fact]
