@@ -1,3 +1,5 @@
+using Radio.Core.Interfaces;
+
 namespace Radio.API.Models;
 
 /// <summary>
@@ -133,6 +135,38 @@ public class SetSleepRequest
   /// Gets or sets whether to enter sleep mode (true) or wake (false).
   /// </summary>
   public bool Sleep { get; set; }
+}
+
+/// <summary>
+/// Request to report whether the <c>/sleep</c> route is on screen.
+/// </summary>
+public class SetSleepScreenVisibleRequest
+{
+  /// <summary>
+  /// Gets or sets whether the sleep screen is currently rendered on this client.
+  /// </summary>
+  public bool Visible { get; set; }
+}
+
+/// <summary>
+/// The console's sleep state, in both the forms a caller needs.
+/// </summary>
+/// <remarks>
+/// A named DTO rather than an anonymous object because the Web deserializes this one. <c>ENC-8</c>
+/// shipped a page that could not read its own API response and every test stayed green, because the
+/// bUnit rig fails each HTTP call by design and a null result is what it expects either way.
+/// </remarks>
+public class SleepStateResponse
+{
+  /// <summary>True when audio is paused and muted.</summary>
+  public bool IsSleeping { get; init; }
+
+  /// <summary>
+  /// <c>Awake</c>, <c>Ambient</c> or <c>Standby</c>. Crosses the wire as a <b>string</b> so a value
+  /// a client does not recognise degrades to that client's default rather than failing to
+  /// deserialize - the same open-string rule handoff 6.10 sets for the HUD phase.
+  /// </summary>
+  public string WakeState { get; init; } = nameof(ConsoleWakeState.Awake);
 }
 
 /// <summary>
