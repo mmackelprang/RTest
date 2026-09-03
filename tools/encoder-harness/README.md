@@ -217,12 +217,31 @@ rate per unit; the `ENC-3` per-event clamp holds against 20- and 50-detent singl
 with the progress ring while a 200 ms hold does not; and `ENC-1`'s re-baseline rule holds
 across a real USB disconnect.
 
-**The live figures are 1% per unit and ±4 units (±4 points).** Since `ENC-20` set both
-`step_size` and `VolumeStepPercent` to `1`, a device unit *is* a volume point, so the clamp
-reads the same either way. ⚠ That run was made against the **pre-`ENC-20`** build and measured
-2% per unit and ±6 units (±12 points); it is correct as history and is not restated here as a
-current number. Re-run it to measure the values above rather than trusting this paragraph —
-which is the whole point of the harness existing.
+⚠ **That run was made against the pre-`ENC-20` build** and measured 2% per unit and ±6 units
+(±12 points). It is correct as history and is not a current number.
+
+**Re-measured on the appliance 2026-09-03 against `6b2e580` (`ENC-20`)** — this row is what the
+harness was built for, and it is the first time a points-per-detent figure in this repo came from
+a measurement rather than from arithmetic:
+
+| injected movement | volume | Δ points |
+|---|---|---|
+| 1 unit (= **one detent**, `step_size 1`) | 0.71 → 0.72 | **1** |
+| 1 unit | 0.72 → 0.73 | **1** |
+| 2 units (tier 1, ×2) | 0.73 → 0.75 | 2 |
+| 4 units (tier 2, ×4) | 0.75 → 0.79 | 4 |
+| 20 units | 0.79 → 0.83 | **4** (clamped) |
+| 50 units | 0.83 → 0.87 | **4** (clamped) |
+
+So: **1% per unit, ±4 units = ±4 points**, and a factory-tier `×50` event is cut to 4 points.
+The same run against the pre-`ENC-20` build measured **4 points for a single detent and 12 for a
+clamped event** — the defect the owner reported, reproduced mechanically before it was fixed.
+
+⚠ **Before `ENC-20` this harness under-reported the real VOLUME knob by exactly 2×**, because
+`turn 0 1` emits one *unit* while the device's `step_size` was 2. That is why a clamp measured
+here read half the movement a hand produced, and it is why `turn`'s docstring — which claimed the
+designed config used `step_size 1` — was itself one of the wrong assertions `ENC-20` fixed. All
+four encoders are `step_size 1` now, so one `turn` unit is one detent everywhere.
 
 **Not covered.** The harness cannot tell you how a knob *feels* — detent weight, acceleration
 ramp, whether a spin *sounds* right. `ENC-3`'s deferred volume ramp says so explicitly, and the
