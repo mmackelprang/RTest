@@ -106,6 +106,10 @@ builder.Services.AddRadioServices();
 // and binds Display:Weather → WeatherDisplayOptions. See ADR-022.
 builder.Services.AddRadioWeather(builder.Configuration);
 
+// GV media fetch + bounded on-disk cache + the API-side X-RotaryPhone-Auth handler (ADR-029 D3/D8).
+// Standalone rather than folded into AddSoundFlowAudio; see GvMediaServiceExtensions' remarks.
+builder.Services.AddGvMedia(builder.Configuration);
+
 // Add diagnostic capture service (+ bind retention options for its output pruning)
 builder.Services.Configure<Radio.Core.Configuration.DiagnosticsOptions>(
   builder.Configuration.GetSection(Radio.Core.Configuration.DiagnosticsOptions.SectionName));

@@ -43,9 +43,13 @@ public interface IEventPlaybackService
   /// <see cref="IEventAudioSource.IsSeekable"/> and answer false from that, but a seek the
   /// PLAYER refused is not distinguishable from one it honoured at this seam.
   ///
-  /// Widening IEventAudioSource.SeekAsync to Task&lt;bool&gt; would close the gap and is an open
-  /// question for PR 3, not something to settle here: ADR-029 D4 copies those signatures
-  /// verbatim from IPrimaryAudioSource, so changing one changes both.
+  /// Widening IEventAudioSource.SeekAsync to Task&lt;bool&gt; would close the gap, and was CLOSED as
+  /// "no" by the PHN-1b plan (§0.3 ⓶). ADR-029 D4's only justification is that these signatures are
+  /// copied verbatim from IPrimaryAudioSource, so widening one either leaves the codebase with two
+  /// seek shapes or changes IPrimaryAudioSource too — which pulls in FilePlayerAudioSource, a live
+  /// primary-source path with a persisted resume position and its own UAT (FUTURE-WORK §14a).
+  /// A refused seek is still observable: Position reads through to the player, so the next
+  /// snapshot's anchor simply does not move, and the scrubber snaps back.
   /// </remarks>
   /// <param name="playbackId">The server-minted playback identifier.</param>
   /// <param name="position">The position to seek to, from the beginning of the content.</param>

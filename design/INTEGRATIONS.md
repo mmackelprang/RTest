@@ -547,6 +547,93 @@ Since 2026-08-18 the Web UI is **not** the only thing in this repo that leans on
 
 ---
 
+### Server-side GV media fetch and cache (`GvMedia`) — ADR-029 D3/D8
+
+Since `PHN-1b` the API can fetch a voicemail recording **itself**, into a bounded on-disk cache,
+rather than handing the browser an absolute URL to fetch. Nothing yet calls it — there is no route
+until `PHN-1c` — but the configuration block, the client and the cache ship now.
+
+**Why it exists, and why the cache is not an optimisation.** GV auth on the bridge is dead roughly
+**9 minutes in every 20** (punch list `XR-3`), and `/api/gvbridge/status` reports
+`available:true, degraded:false` *during* the blackout. A user who replays a voicemail thirty
+seconds later therefore has roughly a **45% chance** the second fetch would 502 if it went back to
+the network. A cache hit never touches the network, which is what makes replay reliable on a wall
+clock nobody can see. The accepted cost: private voicemail audio now sits **at rest on disk**.
+
+**Why the API fetches rather than the browser.** `GvBridgeApiService.GetVoicemailAudioUrl` only ever
+*builds* a string that the `<audio>` element then fetches, so no `DelegatingHandler` can touch it —
+which is why browser-side playback would break the moment RotaryPhone's `/api/gvbridge/*` auth gate
+flips on. `GvMediaAuthHandler` attaches `X-RotaryPhone-Auth` to the server-side fetch, which is the
+thing the browser could never do.
+
+**Configuration — `GvMedia`, in `src/Radio.API/appsettings.json`:**
+
+| Key | Default | Meaning |
+|---|---|---|
+| `Enabled` | `false` | Master gate. `GvMediaClient` refuses to fetch when false. |
+| `BaseUrl` | `http://radio:5004` | The gvbridge host. Deliberately **not** `PhoneIntegration:ContactsApiBaseUrl` — same host today, different feature, independently disableable. |
+| `AuthKey` | `""` | Value for `X-RotaryPhone-Auth`. Empty means **no header is sent**, which matches the current LAN-only posture. |
+| `CacheDirectory` | `./data/gvmedia` | Resolves to `/opt/radio-console/data/gvmedia` on the appliance — `radio-api.service` sets `WorkingDirectory=/opt/radio-console` and runs as `mmack`, who owns `data/` (its sibling `albumart/` is already there). |
+| `CacheMaxMegabytes` | `50` | Cap in MB. **`0` is a supported escape hatch and means NO CACHE** — see below. |
+| `MaxPlaybackSeconds` | `300` | Bounds the download (≈9.6 MB at an assumed 32 000 B/s) and the no-cache sweep window. Becomes the attended-playback cap in a later PR. |
+| `MaxSpeechChars` | `1000` | Cap on event-playback speech text. ⚠ The behaviour is **rejection, not truncation** — `Radio.Web` truncates visibly before posting. |
+| `PreemptAtPriority` | `8` | Priority at or above which a starting source preempts attended playback. Not read yet. |
+| `FetchTimeoutSeconds` | `15` | HTTP timeout for one media fetch. |
+
+**Cache behaviour.** Recency is `LastWriteTimeUtc`, touched on every hit — **not** access time,
+because Linux mounts default to `relatime` and would silently degrade the LRU to something between
+LRU and FIFO. Eviction really deletes, oldest first, until the directory fits the cap; the entry the
+caller is about to play is exempt, so a cap smaller than one recording is left violated by exactly
+that one file and corrected on the next write. With `CacheMaxMegabytes = 0` recordings are still
+written — playback needs a local path — but **never served back**, and a short-TTL sweep
+(`max(60s, MaxPlaybackSeconds × 2)`) reclaims them; at most one recording lingers until the next
+fetch. Choosing `0` re-exposes replay to the blackout above.
+
+**Failure taxonomy.** `GvMediaUnavailableException.Reason` distinguishes `Disabled`, `NotFound`
+(404, permanent), `Unauthorized` (401/403 — most likely an `AuthKey` divergence), `Upstream` (5xx,
+usually the blackout, retryable), `Timeout`, `Transport` and `TooLarge`. Collapsing these is the
+shared root of the open `GV-6` and `GV-8` rows; do not.
+
+**Logging.** A raw voicemail id reaches **no** log message, log argument or exception message. Ids
+are masked as a hash prefix (`gvm:1a2b3c4d`) — the first 8 hex of the same SHA-256 that names the
+cache file, so a log line and a file on disk correlate while leaking nothing. A `***1234` suffix
+mask is right for a phone number and wrong here: nobody recognises a voicemail id by its last four
+characters, so a suffix would leak for zero operator benefit.
+
+#### ⚠ Runbook: setting `AuthKey` on a live box is a hand edit, twice
+
+Nothing in the deploy will do this for you, and the two services do **not** share one file.
+
+```bash
+# Radio.API — the GvMedia key
+ssh mmack@radio 'sudo nano /opt/radio-console/api/appsettings.Production.json'   # add GvMedia:AuthKey
+ssh mmack@radio 'sudo systemctl restart radio-api'
+
+# Radio.Web — its own RotaryPhone:Gv:AuthKey, the same secret under a different key
+ssh mmack@radio 'sudo nano /opt/radio-console/web/appsettings.Production.json'
+ssh mmack@radio 'sudo systemctl restart radio-web'
+```
+
+*Why the deploy cannot do it:* `Deploy-ToLinux.ps1` rsyncs with
+`--exclude='appsettings.Production.json'` and seeds that file only when it is **absent**
+(`test -f` guard), deliberately, so per-machine settings survive a deploy. Editing the repo's
+`deploy/*/appsettings.Production.json` seed therefore never reaches a box that already has one.
+And the two overlays are genuinely separate files that diverged months ago — measured on `radio`
+on 2026-09-02, the API's is **1057 bytes, mtime 2026-03-05** (AudioOutput / Devices / FilePlayer /
+Diagnostics / Fingerprinting) while the Web's is **75 bytes, mtime 2026-07-31** (only
+`RotaryPhone:Gv:MarkReadEnabled`). Neither carries an auth key today.
+
+`src/Radio.API/appsettings.json` **is** overwritten on every deploy, which is why the non-secret
+`GvMedia` defaults live there and the secret does not.
+
+`GvMediaStartupCheck` logs one Warning at boot when `Enabled` is true and `AuthKey` is empty. It
+also has a narrower branch for when `RotaryPhone:Gv:AuthKey` is visible to Radio.API and `GvMedia`'s
+is not — but note that Radio.API cannot normally see Radio.Web's overlay, for exactly the reason
+above, so that branch fires only when the key has also been placed in Radio.API's own configuration
+or environment (`RotaryPhone__Gv__AuthKey`).
+
+---
+
 ## 3. Notification / Announcement API
 
 A REST endpoint that any external service can call to trigger a TTS announcement with audio ducking. No setup required beyond having the Radio Console API running.
