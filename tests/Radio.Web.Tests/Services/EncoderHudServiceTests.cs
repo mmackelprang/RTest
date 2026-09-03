@@ -421,6 +421,36 @@ public class EncoderHudServiceTests
   }
 
   [Fact]
+  public void CurrentIsTheSignalThatAHandIsOnAKnob_NotThatSomethingHappened()
+  {
+    // ENC-20. MainLayout subscribes to StateChanged to undim the screen and reset idle-dimmer.js's
+    // dim and sleep timers, because encoder input arrives as a SignalR push and dispatches no DOM
+    // event for the dimmer to hear. It guards that wake on `Current is not null`, and this pins the
+    // predicate the guard is built on.
+    //
+    // ⚠ The guard is load-bearing, not defensive. StateChanged fires on Dismiss() too — the hold
+    // timer expiring, and the device DISCONNECTING — and waking on those would reset the five-minute
+    // idle countdown moments after the user stopped touching anything, or let unplugging the encoder
+    // count as a human being present. Only a non-null Current means a card is on screen because a
+    // hand is on a knob.
+    //
+    // Asserted here rather than through MainLayout: that component is not renderable under bUnit
+    // (see MainLayoutTests — Radzen dropdowns, JSInterop and the full API service graph), and
+    // contorting it into a harness for this would test the harness.
+    var clock = new FakeTimeProvider();
+    using var svc = NewService(clock);
+
+    svc.Current.Should().BeNull("nothing has been published yet, so no wake may be triggered");
+
+    svc.Publish(Card());
+    svc.Current.Should().NotBeNull("a published card is the state that means a knob is being used");
+
+    svc.Dismiss();
+    svc.Current.Should().BeNull(
+      "Dismiss is the hold timer expiring or the device disconnecting — neither is user activity");
+  }
+
+  [Fact]
   public async Task DependencyInjection_ResolvesOneInstanceWithTheHubInjected()
   {
     // Program.cs registers this with a bare AddSingleton<EncoderHudService>(), which only works

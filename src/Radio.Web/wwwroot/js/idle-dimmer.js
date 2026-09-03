@@ -19,6 +19,21 @@
 //     drive sleep/wake from server-pushed SleepStateChanged events. The bridge
 //     no longer mutates DOM; it navigates the route instead.
 //
+// What counts as activity (both halves matter — each resets dimTimer AND
+// sleepTimer, so activity postpones the /sleep navigation as well as undimming):
+//   - DOM events, listened for at the bottom of this file: pointerdown, keydown,
+//     wheel, and a throttled pointermove.
+//   - The physical encoder knobs, via MainLayout calling radioSleepManager.wake
+//     ('encoder') from its EncoderHudService.StateChanged subscription (ENC-20).
+//     There is no DOM event to listen for in that case and there cannot be: a
+//     knob turn reaches the browser as a SignalR push from the API, so nothing
+//     is ever dispatched into this document. Before ENC-20 the knobs therefore
+//     acted on a screen that stayed dim and still slept on schedule while a hand
+//     was on the panel.
+//
+// wake() needs no change to serve that caller — it already undims and resets the
+// timers, and already early-returns on /sleep, which owns its own wake flow.
+//
 // Exposes window.radioSleepManager for JS interop from Blazor.
 
 // Safe setter for API base URL (called from Blazor JS interop instead of eval).
