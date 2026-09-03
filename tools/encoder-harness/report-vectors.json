@@ -1,0 +1,478 @@
+{
+  "$comment": [
+    "ENC-17 shared golden vectors for the virtual rotary-encoder harness.",
+    "",
+    "READ BY TWO THINGS, WHICH IS THE POINT:",
+    "  tools/encoder-harness/uhid_rotary_encoder.py --selftest   (builds these frames)",
+    "  tests/Radio.Infrastructure.Tests/Platform/Input/VirtualEncoderHarnessProtocolTests.cs",
+    "      (decodes these frames with the shipped RotaryEncoderDecoder)",
+    "",
+    "If the harness's byte layout ever drifts from the decoder's, one of those two fails.",
+    "That matters here specifically: design/INTEGRATIONS.md documented a wrong 8-byte",
+    "encoder format for months, and nothing mechanical caught it.",
+    "",
+    "'hex' is the full 37-byte Input Report 0x01 including the leading report ID.",
+    "Regenerate with tools/encoder-harness/uhid_rotary_encoder.py's build_positions_report.",
+    "",
+    "'reportLength' is 107 because that is what the real device reports: HidSharp's GetMaxInputReportLength() is the maximum across ALL input report IDs, and the config read-back report 0x02 (106-byte payload + 1 report ID) is larger than the 37-byte positions report. Measured on the appliance 2026-09-03, and confirmed in the service's own log line 'Encoder report length 107 bytes (movement accumulators: true)'. BeginConnection only needs >= 37 to enable movement, so this also proves the decoder uses >= rather than ==."
+  ],
+  "reportIdPositions": 1,
+  "positionsReportSize": 37,
+  "configReportSize": 107,
+  "encoderNames": [
+    "VOLUME",
+    "SOURCE",
+    "PRESETS",
+    "TUNING"
+  ],
+  "positionReports": [
+    {
+      "name": "baselineZero",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "hex": "01000000000000000000000000000000000000000000000000000000000000000000000000",
+      "note": "The first frame of a connection. Absorbed as a baseline, never as input."
+    },
+    {
+      "name": "volumeOneDetentUp",
+      "positions": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        1,
+        0,
+        0,
+        0
+      ],
+      "hex": "01010000000000000000000000000000000000000001000000000000000000000000000000"
+    },
+    {
+      "name": "volumeThreeDetentsDown",
+      "positions": [
+        -3,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        -3,
+        0,
+        0,
+        0
+      ],
+      "hex": "01fdffffff00000000000000000000000000000000fdffffff000000000000000000000000"
+    },
+    {
+      "name": "volumeTwentyDetentsUp",
+      "positions": [
+        20,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        20,
+        0,
+        0,
+        0
+      ],
+      "hex": "01140000000000000000000000000000000000000014000000000000000000000000000000",
+      "note": "Twenty units of movement. The host clamps volume to 6 per event (ENC-3)."
+    },
+    {
+      "name": "allFourMoved",
+      "positions": [
+        1,
+        -2,
+        3,
+        -4
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        10,
+        -20,
+        30,
+        -40
+      ],
+      "hex": "0101000000feffffff03000000fcffffff000000000a000000ecffffff1e000000d8ffffff"
+    },
+    {
+      "name": "volumeButtonDown",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 1,
+      "tiersByte": 0,
+      "accumulators": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "hex": "01000000000000000000000000000000000100000000000000000000000000000000000000"
+    },
+    {
+      "name": "allButtonsDown",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 15,
+      "tiersByte": 0,
+      "accumulators": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "hex": "01000000000000000000000000000000000f00000000000000000000000000000000000000"
+    },
+    {
+      "name": "tuningButtonDown",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 8,
+      "tiersByte": 0,
+      "accumulators": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "hex": "01000000000000000000000000000000000800000000000000000000000000000000000000"
+    },
+    {
+      "name": "accelerationTierByteSet",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 180,
+      "accumulators": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "hex": "010000000000000000000000000000000000b4000000000000000000000000000000000000",
+      "note": "Tier byte is reported but the host does not act on it; movement already includes acceleration."
+    },
+    {
+      "name": "accumulatorAtInt32Max",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        2147483647,
+        0,
+        0,
+        0
+      ],
+      "hex": "010000000000000000000000000000000000000000ffffff7f000000000000000000000000"
+    },
+    {
+      "name": "accumulatorWrappedToInt32Min",
+      "positions": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        -2147483648,
+        0,
+        0,
+        0
+      ],
+      "hex": "01000000000000000000000000000000000000000000000080000000000000000000000000",
+      "note": "One unit past INT32_MAX. Two's-complement subtraction must yield +1, not -4294967295."
+    },
+    {
+      "name": "accumulatorAfterFiftyOfflineDetents",
+      "positions": [
+        50,
+        0,
+        0,
+        0
+      ],
+      "buttonsMask": 0,
+      "tiersByte": 0,
+      "accumulators": [
+        50,
+        0,
+        0,
+        0
+      ],
+      "hex": "01320000000000000000000000000000000000000032000000000000000000000000000000",
+      "note": "Designer's re-baseline test: fifty detents accrued while nothing was listening."
+    }
+  ],
+  "decodeSequences": [
+    {
+      "name": "SteadyStateTurnProducesTheDelta",
+      "description": "Ordinary operation: baseline first, then each report's delta is the difference from the previous accumulator.",
+      "reportLength": 107,
+      "steps": [
+        {
+          "frame": "baselineZero",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "expectIsBaselinedAfter": true,
+          "note": "First report of the connection: absorbed, produces no movement."
+        },
+        {
+          "frame": "volumeOneDetentUp",
+          "expectDeltas": [
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "volumeThreeDetentsDown",
+          "expectDeltas": [
+            -4,
+            0,
+            0,
+            0
+          ],
+          "note": "1 -> -3 is a delta of -4. Deltas are differences, not absolute values."
+        }
+      ]
+    },
+    {
+      "name": "ReconnectAfterFiftyOfflineDetentsDeliversNoJump",
+      "description": "ENC-1, Designer's highest-weighted test, verbatim: 'Turn a knob ~50 detents while unplugged, then replug: volume does not jump.' The accumulator is free-running, so a host that differenced against its last remembered value would deliver all fifty detents at once, on the volume knob. BeginConnection must discard the first report of the new connection.",
+      "reportLength": 107,
+      "steps": [
+        {
+          "frame": "baselineZero",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "volumeOneDetentUp",
+          "expectDeltas": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "note": "A normal turn before the disconnect, so the decoder is holding a non-zero last value."
+        },
+        {
+          "beginConnection": 57,
+          "note": "The unplug and replug. Everything between here and the next report is the knob being turned with nobody listening."
+        },
+        {
+          "frame": "accumulatorAfterFiftyOfflineDetents",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "note": "THE ASSERTION. Fifty units of accrued movement arrive and produce zero delta."
+        },
+        {
+          "frame": "volumeOneDetentUp",
+          "expectDeltas": [
+            -49,
+            0,
+            0,
+            0
+          ],
+          "note": "And the connection is live again immediately: the next real turn produces a real delta measured from the new baseline."
+        }
+      ]
+    },
+    {
+      "name": "AccumulatorWrapProducesTheShortDelta",
+      "description": "The accumulator wraps at 32 bits rather than saturating, and the decoder subtracts unchecked so two's-complement gives the correct signed delta straight across the boundary. A saturating design would have frozen the control after ~119 hours of continuous fast spinning.",
+      "reportLength": 107,
+      "steps": [
+        {
+          "frame": "accumulatorAtInt32Max",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "accumulatorWrappedToInt32Min",
+          "expectDeltas": [
+            1,
+            0,
+            0,
+            0
+          ],
+          "note": "INT32_MAX -> INT32_MIN is one unit forward, not 4294967295 units backward."
+        }
+      ]
+    },
+    {
+      "name": "RepeatedIdenticalReportsProduceNoMovement",
+      "description": "The harness's `idle <s> <hz>` mode re-emits an unchanged report. A device that repeats itself must not be read as movement.",
+      "reportLength": 107,
+      "steps": [
+        {
+          "frame": "baselineZero",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "volumeOneDetentUp",
+          "expectDeltas": [
+            1,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "volumeOneDetentUp",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "volumeOneDetentUp",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "name": "ButtonTransitionsAreEdgesNotLevels",
+      "description": "The decoder reports a button change only on transition, so a held button does not re-fire. EncoderLongPressGesture depends on that: a repeated press edge must not stack timers.",
+      "reportLength": 107,
+      "steps": [
+        {
+          "frame": "baselineZero",
+          "expectButtonChanges": [
+            null,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "frame": "volumeButtonDown",
+          "expectButtonChanges": [
+            true,
+            null,
+            null,
+            null
+          ]
+        },
+        {
+          "frame": "volumeButtonDown",
+          "expectButtonChanges": [
+            null,
+            null,
+            null,
+            null
+          ],
+          "note": "Same level again: no edge."
+        },
+        {
+          "frame": "baselineZero",
+          "expectButtonChanges": [
+            false,
+            null,
+            null,
+            null
+          ]
+        }
+      ]
+    },
+    {
+      "name": "AllFourEncodersDecodeIndependently",
+      "description": "Index order is VOLUME 0, SOURCE 1, PRESETS 2, TUNING 3, and the four accumulators are read from distinct offsets.",
+      "reportLength": 107,
+      "steps": [
+        {
+          "frame": "baselineZero",
+          "expectDeltas": [
+            0,
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": "allFourMoved",
+          "expectDeltas": [
+            10,
+            -20,
+            30,
+            -40
+          ]
+        }
+      ]
+    }
+  ]
+}

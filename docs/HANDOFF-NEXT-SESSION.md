@@ -88,6 +88,52 @@ ENC-4a (the persistent MUTED chip in the topbar) already shipped and is the patt
 
 ---
 
+## ⭐ You can now drive the encoders from a script (`ENC-17`)
+
+**`tools/encoder-harness/virtual_encoder.py`.** Six encoder rows shipped on 2026-09-02/03 and not one
+could fully verify the behaviour a guest actually touches, because there was no way to synthesise a
+turn or a press. There is now.
+
+```bash
+scp tools/encoder-harness/virtual_encoder.py mmack@radio:/tmp/
+ssh mmack@radio "sudo python3 /tmp/virtual_encoder.py -c 'turn 0 3' -c 'hold 0 900'"
+```
+
+It creates a **real USB HID device** with the RotaryUsb identity and descriptor, so the shipped
+`HidRotaryEncoderService` reads it exactly as it reads the physical knobs. Commands: `turn`,
+`offline-turn`, `press`, `release`, `tap`, `hold`, `idle`, `detach`, `attach`. Encoders are
+`0 = VOLUME, 1 = SOURCE, 2 = PRESETS, 3 = TUNING`. **Read
+[`tools/encoder-harness/README.md`](../tools/encoder-harness/README.md) before using it** — it
+carries the recovery procedure and the two design decisions.
+
+Three things to know before you reach for it:
+
+- **It unbinds the real encoder** for the duration and rebinds it on exit. A `SIGKILL` is the one
+  case that leaks — verified: the gadget and the vhci attachment survive it, leaving a virtual
+  `cafe:4005` enumerated (but **inert**, since it only ever sends what you type) and the physical
+  knobs dead. `sudo python3 /tmp/virtual_encoder.py --cleanup` puts everything back; so does simply
+  starting the harness again, or a reboot.
+- **`/dev/uhid` does not work for this**, even though it is present on the box and the `ENC-17` row
+  named it as the route. HidSharp does not enumerate a device with no USB parent — measured, with the
+  uhid device present and readable, `GetHidDevices(0xCAFE, 0x4005)` returned 0. The harness uses a
+  usbip loopback USB gadget instead. Do not spend the afternoon re-testing uhid.
+- **It does not replace the owner's hand on the panel.** Feel and acceleration are still his, and it
+  does not exercise the firmware at all.
+
+**What it has already verified on the appliance** (2026-09-03, against `5e571b8`): configuration
+verifies `Configured` on attempt 1; a turn moves volume at 2% per unit; the `ENC-3` per-event clamp
+holds at ±6 units against single events of 20 and 50 detents; the `ENC-4` HUD renders left-anchored
+at its band; a 900 ms hold on encoder 0 synthesises a long press with the progress ring and a 200 ms
+hold does not; and **`ENC-1`'s re-baseline rule holds across a real USB disconnect — 50 detents
+accrued while unplugged produced a 0-point jump on replug.** That last one was Designer's
+highest-weighted encoder test and had never been run against a real disconnect.
+
+**`ENC-17` delivered the instrument only.** Re-verifying the rest of the encoder arc with it —
+`ENC-5`'s states A–E and the wrap animation, `ENC-6`'s scenarios B/C/D/E/I, `ENC-7`'s C4 recall from
+Bluetooth — is the next row's work and is now cheap.
+
+---
+
 ## Gotchas that will otherwise cost an hour each
 
 1. **journalctl only carries WARNING and above now.** LOG-11 level-restricted the API console sink,

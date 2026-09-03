@@ -35,4 +35,12 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
+  <ItemGroup>
+    <!-- ENC-17: the golden vectors are shared with tools/encoder-harness/uhid_rotary_encoder.py.
+         One artifact, two readers - that is what stops the harness and the decoder drifting. -->
+    <Content Include="..\..\tools\encoder-harness\report-vectors.json">
+      <Link>report-vectors.json</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>
