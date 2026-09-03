@@ -23,6 +23,15 @@ public class SleepService : ISleepService
   private bool _wasMutedBeforeSleep;
   private bool _wasPlayingBeforeSleep;
 
+  // Set by the /sleep page reporting itself, cleared by that page disposing or by MainLayout
+  // rendering. Written from request threads and read from the encoder thread, so it is volatile
+  // rather than lock-guarded: it is one independent bool and taking _lock to read it would put an
+  // await on the encoder input path.
+  private volatile bool _isSleepScreenVisible;
+
+  // 1 once a wake has been claimed and has not yet been confirmed by the browser leaving the route.
+  private int _wakeClaimed;
+
   // GNOME ScreenSaver D-Bus for physical display DPMS control.
   // Runs as the desktop session user (mmack) to reach the GNOME session bus.
   private const string GnomeScreenSaverSetActive =
@@ -31,6 +40,55 @@ public class SleepService : ISleepService
   private const string SessionBusEnv = "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus";
 
   public bool IsSleeping => _isSleeping;
+
+  public bool IsSleepScreenVisible => _isSleepScreenVisible;
+
+  /// <summary>
+  /// The three states, derived rather than stored, so there is no second state machine to keep in
+  /// step with <see cref="IsSleeping"/>.
+  /// </summary>
+  public ConsoleWakeState WakeState
+  {
+    get
+    {
+      // A claimed wake reads as Awake from this instant. Both of the things that would otherwise
+      // clear it - the resume inside WakeAsync, and the browser navigating off /sleep - are far
+      // slower than the 10 ms encoder poll, so without this the second detent of a fast spin is
+      // discarded along with the tenth.
+      if (Volatile.Read(ref _wakeClaimed) == 1)
+      {
+        return ConsoleWakeState.Awake;
+      }
+
+      // Standby is checked first because it is defined by audio being parked, which is true before
+      // any client has reported the route.
+      if (_isSleeping)
+      {
+        return ConsoleWakeState.Standby;
+      }
+
+      return _isSleepScreenVisible ? ConsoleWakeState.Ambient : ConsoleWakeState.Awake;
+    }
+  }
+
+  public void SetSleepScreenVisible(bool visible)
+  {
+    _isSleepScreenVisible = visible;
+    Interlocked.Exchange(ref _wakeClaimed, 0);
+    _logger.LogDebug("Sleep screen reported {Visible}", visible ? "visible" : "hidden");
+  }
+
+  public bool TryClaimWake()
+  {
+    // Read before claiming so an already-awake console never burns the claim that the next genuine
+    // sleep would need.
+    if (WakeState == ConsoleWakeState.Awake)
+    {
+      return false;
+    }
+
+    return Interlocked.CompareExchange(ref _wakeClaimed, 1, 0) == 0;
+  }
 
   public SleepService(
     ILogger<SleepService> logger,
@@ -82,6 +140,10 @@ public class SleepService : ISleepService
       }
 
       _isSleeping = true;
+
+      // A claim that was never confirmed would otherwise keep WakeState reading Awake through this
+      // standby, and every knob would act on a console the owner just parked.
+      Interlocked.Exchange(ref _wakeClaimed, 0);
 
       await _hubContext.Clients.All
         .SendAsync("SleepStateChanged", true);
