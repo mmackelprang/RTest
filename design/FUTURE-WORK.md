@@ -735,7 +735,7 @@ The HID report format is **assumed** based on typical KY-040 Pico implementation
 
 **Status:** ⚠ **CORRECTED 2026-09-02 by the `ENC-15` gate result — the previous status overclaimed in two
 ways.** (1) It said *"Display DPMS control implemented … in `SleepService`"*; the display-power calls at
-`SleepService.cs:84-87` and `:114-115` are **commented out**, so nothing in the running service turns the
+`SleepService.cs:164-168` and `:198-199` are **commented out**, so nothing in the running service turns the
 panel off today. (2) It named `org.gnome.ScreenSaver SetActive` as the DPMS control; that route **does not
 reach DPMS-off** — see the recovery section in `design/INTEGRATIONS.md` §1 and the full write-up at
 [`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
@@ -778,7 +778,7 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 1. **Sleep trigger:** Long-press (or dedicated button press) on a rotary encoder should call `ISleepService.EnterSleepAsync()`
 2. **Wake trigger:** Any rotary encoder event (press or turn) while sleeping should call `ISleepService.WakeAsync("rotary-encoder")` BEFORE processing the encoder action. ⚠ This is an **application-mediated** wake, not a hardware one — it only functions while `radio-api` is running and reading hidraw.
 3. **Implementation:** In `RotaryEncoderActionRouter`, check `ISleepService.IsSleeping` at the top of each event handler. If sleeping, call `WakeAsync` and consume the event (don't pass it through as a source change or volume adjustment)
-4. ⚠ **The wake latch is a real defect here:** `TryWakeFromSleep` calls `WakeAsync` fire-and-forget (`:121`) and returns true, so with a 10 ms poll several more events arrive and are silently discarded before `IsSleeping` flips. Tracked on `ENC-6`.
+4. ✅ **The wake latch was a real defect here, and `ENC-6` fixed it.** `TryWakeFromSleep` called `WakeAsync` fire-and-forget and returned true, so with a 10 ms poll several more events arrived and were silently discarded before `IsSleeping` flipped. It is replaced by a sleep gate that consults `ISleepService.WakeState` and takes a synchronous claim through `TryClaimWake()`; a fast spin now loses one detent rather than every detent that arrives before the browser leaves `/sleep`.
 
 ### Code Pointers
 
@@ -791,6 +791,17 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 - GNOME ScreenSaver D-Bus requires the desktop session user (`mmack`) and session bus address — Radio.API runs `sudo -u mmack DBUS_SESSION_BUS_ADDRESS=... gdbus call`
 - ⚠ **`org.gnome.ScreenSaver SetActive false` is a no-op when the panel is held down by DPMS rather than by the screensaver** — a state observed on this box, with `GetActive=(false,)` while `dpms=Off`. The control that works in both states is `org.gnome.Mutter.DisplayConfig PowerSaveMode`, set to `0`. The recovery commands, in the order to try them, are in `design/INTEGRATIONS.md` §1.
 - An earlier revision of this section warned that *"`SetActive(true)` may not reliably wake the display"*. `SetActive(true)` **blanks**; `SetActive(false)` wakes. The real unreliability is the DPMS/screensaver split above.
+
+⚠ **There are two sections numbered 7 in this file** — *Google Cast — WebSocket + Web Audio API* and
+this one. `SleepService`'s class remarks point at **this** one. Renumbering is deliberately not done
+here: it would churn every cross-reference in the file for a cosmetic gain, and the ambiguity is now
+recorded rather than latent.
+
+**`ENC-6` (2026-09-02) shipped the sleep/wake half and left the blanking half withdrawn.** Sleep is
+now a three-state model — `Awake` / `Ambient` / `Standby`, in `Radio.Core.Interfaces.ConsoleWakeState`
+— derived from `IsSleeping` plus a new `IsSleepScreenVisible` that the `/sleep` page reports about
+itself. Nothing in that work turns the panel off, and nothing should: the two dark states in
+Designer Rev 5 §8.2 are withdrawn with the blanking half.
 
 ## 12. GV (Google Voice) Messages — Durable Read-State, Send & Auth Seams
 
