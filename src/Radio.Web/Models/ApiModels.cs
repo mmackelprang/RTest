@@ -1287,23 +1287,6 @@ public class GvTrunkCallLogEntryDto
 }
 
 /// <summary>
-/// Payload of the SignalR <c>VisualizationModeChanged</c> broadcast
-/// (<c>AudioStateUpdateService.OnVisualizationModeChanged</c>).
-///
-/// <para>
-/// <c>Mode</c> is a string, not an enum, because the API side models modes as strings
-/// (<c>VisualizationModeService</c>) while the Web side uses a private enum inside
-/// <c>VisualizerPanel</c>. The names match, so the component parses it — but that is a
-/// convention held by two independent declarations, not a shared type.
-/// </para>
-/// </summary>
-public class VisualizationModeDto
-{
-  public string? Mode { get; set; }
-  public bool IsEnabled { get; set; }
-}
-
-/// <summary>
 /// Payload of the SignalR <c>EncoderConnectionChanged</c> broadcast (ENC-0).
 ///
 /// <para>

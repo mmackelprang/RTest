@@ -10,7 +10,7 @@ namespace Radio.Web.Services.Hub;
 /// SignalR hub service for real-time audio state updates
 /// Handles: PlaybackStateChanged, NowPlayingChanged, QueueChanged,
 /// RadioStateChanged, VolumeChanged, SourceChanged, FingerprintStatusChanged,
-/// PhoneCallStateChanged, VisualizationModeChanged, EncoderConnectionChanged,
+/// PhoneCallStateChanged, EncoderConnectionChanged,
 /// EncoderConfigStatusChanged, EncoderHudChanged, SleepStateChanged, ConfigChanged
 /// </summary>
 public class AudioStateHubService : IAsyncDisposable
@@ -48,10 +48,6 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<Task>? SourceChanged;
   public event Func<Task>? FingerprintStatusChanged;
   public event Func<Task>? PhoneCallStateChanged;
-  /// <summary>Raised when the server broadcasts a visualization-mode change, carrying the
-  /// new mode. Typed because a parameterless event tells a subscriber that something changed
-  /// without telling it what to change to (ENC-9a).</summary>
-  public event Func<VisualizationModeDto, Task>? VisualizationModeChanged;
   /// <summary>Raised when the encoder's presence changes, carrying which transition occurred.
   /// Typed because absent-at-boot and dropped-mid-session share <c>IsConnected=false</c> and call for
   /// different notifications (ENC-0).</summary>
@@ -211,16 +207,6 @@ public class AudioStateHubService : IAsyncDisposable
         if (PhoneCallStateChanged != null)
         {
           await PhoneCallStateChanged.Invoke();
-        }
-      });
-
-      // Server sends VisualizationModeChanged with mode payload
-      _hubConnection.On<VisualizationModeDto>("VisualizationModeChanged", async (dto) =>
-      {
-        _logger.LogDebug("Received VisualizationModeChanged event: {Mode}", dto?.Mode);
-        if (VisualizationModeChanged != null && dto != null)
-        {
-          await VisualizationModeChanged.Invoke(dto);
         }
       });
 

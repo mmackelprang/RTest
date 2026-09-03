@@ -1,6 +1,5 @@
 @rendermode InteractiveServer
 @inject AudioVisualizationHubService VisualizationHub
-@inject AudioStateHubService StateHub
 @inject VisualizerTelemetryService Telemetry
 @inject IJSRuntime JS
 @inject ILogger<VisualizerPanel> Logger
@@ -167,11 +166,11 @@
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
 
-      // ENC-9a. The mode can change without this picker being the thing that changed it — the
-      // encoder's visualizer knob, another browser, or an API call. The server has always
-      // broadcast VisualizationModeChanged; until now no component consumed it, so any
-      // out-of-band change left the picker showing the wrong segment until a reload.
-      StateHub.VisualizationModeChanged += HandleModeChangedRemotely;
+      // ⚠ There is deliberately no remote mode subscription here. ENC-9a added one against the
+      // server's VisualizationModeChanged broadcast; ENC-7 then removed the only thing that could
+      // ever send it, and ENC-9 deleted the broadcast, the service behind it and this subscription
+      // together. Mode is local to this circuit by decision: _currentMode plus the saved preference
+      // below are the whole mechanism, and nothing outside this component changes it.
 
       // Publish an "updates/sec" sample once per second by snapshotting
       // the frame counter and resetting it. The dev tray (PR 6) reads
@@ -209,35 +208,6 @@
         Logger.LogError(ex, "Error initializing visualizer canvas");
       }
     }
-  }
-
-  /// <summary>
-  /// Re-syncs the picker when the mode was changed somewhere other than here.
-  ///
-  /// <para>
-  /// Deliberately assigns <c>_currentMode</c> directly rather than calling <see cref="SelectMode"/>:
-  /// SelectMode re-subscribes hub groups, clears canvas buffers and persists the preference, all of
-  /// which the originator of the change has already done. Routing a remote notification back through
-  /// it would echo the change outward again.
-  /// </para>
-  /// </summary>
-  private async Task HandleModeChangedRemotely(VisualizationModeDto dto)
-  {
-    if (dto.Mode is null || !Enum.TryParse<VisualizationMode>(dto.Mode, ignoreCase: true, out var mode))
-    {
-      // The API models modes as strings and this enum is declared separately; an unrecognised
-      // value means those two drifted, and silently selecting a wrong segment would be worse.
-      Logger.LogWarning("Ignoring VisualizationModeChanged with unrecognised mode '{Mode}'", dto.Mode);
-      return;
-    }
-
-    if (mode == _currentMode)
-    {
-      return;
-    }
-
-    _currentMode = mode;
-    await InvokeAsync(StateHasChanged);
   }
 
   private async Task SelectMode(VisualizationMode mode)
@@ -415,8 +385,6 @@
 
   public async ValueTask DisposeAsync()
   {
-    StateHub.VisualizationModeChanged -= HandleModeChangedRemotely;
-
     _isDisposed = true;
 
     _telemetryTimer?.Dispose();

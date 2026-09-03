@@ -425,21 +425,17 @@ public static class AudioServiceExtensions
     // owner-initiated concerns.
     services.AddSingleton<IRotaryEncoderProvisioning>(sp => sp.GetRequiredService<HidRotaryEncoderService>());
 
-    // Visualization mode. The encoder ENC-7 removed was this service's ONLY writer: nothing in
-    // src/ calls CycleMode or ToggleEnabled any more, so ModeChanged cannot fire and
-    // AudioStateUpdateService.OnVisualizationModeChanged - and the VisualizationModeChanged SignalR
-    // broadcast it makes - are unreachable.
+    // ENC-9 deleted VisualizationModeService and its whole broadcast chain, and there is deliberately
+    // nothing registered here in its place. ENC-7 took index 2 for PRESETS, which removed the
+    // service's ONLY writer: ModeChanged could no longer fire, so the VisualizationModeChanged
+    // SignalR broadcast could never be sent, and the browser subscription behind it was inert. Three
+    // layers asserting a mechanism that did not run.
     //
-    // The registration stays for two reasons: AudioStateUpdateService still resolves this type and
-    // subscribes to ModeChanged, and removing the now-dead broadcast chain is ENC-9's work rather
-    // than this row's. It is recorded in design/FUTURE-WORK.md so it is not rediscovered.
-    //
-    // ⚠ The CAPABILITY is unaffected. Home's six-segment picker changes the mode through
-    // VisualizerPanel's own state and its saved preference and never went through this service, so
-    // what was lost is the encoder input that was deliberately removed - not the ability to choose
-    // a mode. The System Config "Visualizer" tab is FFT size / smoothing / peak-hold; it has no
-    // mode control at all.
-    services.AddSingleton<VisualizationModeService>();
+    // ⚠ The CAPABILITY is unaffected, which is the part worth carrying forward: Home's six-segment
+    // picker mutates VisualizerPanel's own private enum and its saved preference, and never went
+    // through this service. Visualiser mode is now single-surface and local-only BY DECISION - a
+    // mode change on the kiosk does not reach a phone browsing the same console. If a second surface
+    // is ever wanted, design/FUTURE-WORK.md §17 records exactly what was removed and why.
 
     // HUD feedback channel. Singleton because the coalescer is per-encoder state that must outlive
     // any single event, and because AudioStateUpdateService subscribes to it once for the process.

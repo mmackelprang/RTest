@@ -1150,7 +1150,31 @@ look at every call site and at whatever is already stored in the database, rathe
 
 ---
 
-## 17. Visualisation mode has no writer, and its broadcast chain is unreachable (`ENC-7`)
+## 17. ~~Visualisation mode has no writer, and its broadcast chain is unreachable~~ — RESOLVED 2026-09-03 by `ENC-9`: the chain is deleted
+
+> **Owner's decision: delete. Visualiser mode is now single-surface and local-only.**
+>
+> **What was removed**, so anyone wanting a second surface knows exactly what they have to rebuild:
+> `VisualizationModeService` (with `CycleMode`, `ToggleEnabled`, `ModeChanged` and
+> `VisualizationModeChangedEventArgs`), its DI registration in `AudioServiceExtensions`,
+> `AudioStateUpdateService`'s field / resolve / subscribe / unsubscribe / `OnVisualizationModeChanged`
+> broadcast, `AudioStateHubService`'s `VisualizationModeChanged` event and its `_hubConnection.On`
+> handler, `VisualizationModeDto`, and `VisualizerPanel`'s `AudioStateHubService` injection, its
+> subscription, `HandleModeChangedRemotely`, and the dispose-time unsubscribe.
+>
+> **What is lost: cross-client sync.** Change the visualiser mode on the kiosk and a phone browsing
+> the same console will not follow. ⚠ **State that precisely rather than as a regression** — per the
+> analysis below, *the picker never produced that sync either*. The knob was the only writer, so no
+> user ever had cross-client sync from the picker; what is gone is the **mechanism** that would have
+> carried it, not a behaviour anyone was using. **Rebuilding it means writing a writer, not just
+> re-adding a listener** — which is precisely the mistake `ENC-9a` made, subscribing to a broadcast
+> that could already never be sent.
+>
+> **What survives, verified on the appliance rather than reasoned about:** the six-segment picker. It
+> mutates `VisualizerPanel`'s own private enum and never went through the service.
+>
+> The original analysis is kept below, unedited apart from this banner, because it is the record of
+> how three layers of unreachable code came to ship.
 
 `ENC-7` removed `VisualizationModeService` from `RotaryEncoderActionRouter`. The encoder was that service's
 **only** writer, so the removal left a whole chain shipping with nothing to drive it.

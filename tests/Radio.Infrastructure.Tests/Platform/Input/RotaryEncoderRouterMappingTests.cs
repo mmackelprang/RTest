@@ -744,10 +744,16 @@ public class RotaryEncoderRouterMappingTests
   /// act rather than a merge artefact.
   ///
   /// <para>
-  /// <c>VisualizationModeService</c> and its registration still ship, and so does the on-screen
-  /// six-segment picker — which is the capability, and which never went through that service.
-  /// The service's <c>ModeChanged</c> broadcast, on the other hand, can no longer fire: the encoder
-  /// was its only writer. See <c>design/FUTURE-WORK.md</c> § 17, which is ENC-9's to resolve.
+  /// <c>VisualizationModeService</c> no longer exists — <c>ENC-9</c> deleted it, together with the
+  /// SignalR broadcast and the browser subscription behind it, once <c>ENC-7</c> removed its only
+  /// writer. This test therefore asserts against a type <i>name</i> rather than a type, and that is
+  /// deliberate: a string still works after the class is gone, and re-introducing a visualiser
+  /// dependency on the router should be a deliberate act rather than a merge artefact.
+  /// </para>
+  ///
+  /// <para>
+  /// The <b>capability</b> is unaffected and always was: the on-screen six-segment picker mutates
+  /// <c>VisualizerPanel</c>'s own private enum and never went through that service.
   /// </para>
   /// </summary>
   [Fact]
