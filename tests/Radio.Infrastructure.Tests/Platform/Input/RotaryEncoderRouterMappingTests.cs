@@ -85,8 +85,16 @@ public class RotaryEncoderRouterMappingTests
     {
       get
       {
-        if (Volatile.Read(ref _wakeClaimed) == 1) return ConsoleWakeState.Awake;
-        if (IsSleeping) return ConsoleWakeState.Standby;
+        if (Volatile.Read(ref _wakeClaimed) == 1)
+        {
+          return ConsoleWakeState.Awake;
+        }
+
+        if (IsSleeping)
+        {
+          return ConsoleWakeState.Standby;
+        }
+
         return IsSleepScreenVisible ? ConsoleWakeState.Ambient : ConsoleWakeState.Awake;
       }
     }
@@ -113,7 +121,11 @@ public class RotaryEncoderRouterMappingTests
     public bool TryClaimWake()
     {
       ClaimAttempts++;
-      if (WakeState == ConsoleWakeState.Awake) return false;
+      if (WakeState == ConsoleWakeState.Awake)
+      {
+        return false;
+      }
+
       return Interlocked.CompareExchange(ref _wakeClaimed, 1, 0) == 0;
     }
   }

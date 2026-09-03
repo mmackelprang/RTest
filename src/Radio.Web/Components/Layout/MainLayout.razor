@@ -467,6 +467,12 @@
         // the gesture; the dev tray simply stays unreachable in that build.
         Logger.LogWarning(ex, "Failed to initialize dev-gesture JS module");
       }
+
+      // ENC-6. MainLayout rendering is proof the sleep screen is not up, which is what corrects a
+      // stale flag left behind when a hard navigation killed Sleep.razor's circuit before its
+      // dispose could report. Fire-and-forget on purpose: the layout must render whether or not the
+      // API is reachable.
+      _ = SystemApi.SetSleepScreenVisibleAsync(false);
     }
   }
 

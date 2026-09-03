@@ -1484,3 +1484,18 @@ public class EncoderMappingDto
   public string TurnDescription { get; set; } = "";
   public string PressDescription { get; set; } = "";
 }
+
+/// <summary>
+/// The console's sleep state as <c>/api/system/sleep-screen</c> and <c>/api/system/sleep</c> report it.
+/// </summary>
+/// <remarks>
+/// <see cref="WakeState"/> is a <b>string</b>, not an enum, for the same reason
+/// <see cref="EncoderHudDto.Phase"/> is: a value this build does not recognise must degrade to this
+/// build's default rather than fail to deserialize. <c>ENC-8</c> shipped a page that could not read
+/// its own API response precisely because an enum crossed as a string.
+/// </remarks>
+public class SleepStateDto
+{
+  public bool IsSleeping { get; set; }
+  public string WakeState { get; set; } = "Awake";
+}

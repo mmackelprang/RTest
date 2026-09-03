@@ -161,6 +161,14 @@
   private string _shiftStyle = "--sleep-shift-x: 0px; --sleep-shift-y: 0px;";
   private readonly Random _drift = new();
 
+  // ENC-6. Which of the three states the server says this screen is in. Defaults to the Ambient
+  // copy: a failed report must not put the Standby hint on a console whose audio is still playing.
+  private string _wakeState = nameof(Radio.Core.Interfaces.ConsoleWakeState.Ambient);
+
+  // Set only once the report has actually been sent, so the prerender pass - which renders and
+  // disposes without ever reaching OnAfterRenderAsync - cannot clear a flag it never set.
+  private bool _reportedVisible;
+
   protected override async Task OnInitializedAsync()
   {
     UpdateClock();
@@ -219,6 +227,40 @@
     {
       Logger.LogDebug(ex, "Sleep screen could not hydrate now-playing state");
     }
+  }
+
+  /// <summary>
+  /// ENC-6. Tells the server this route is on screen.
+  ///
+  /// <para>
+  /// This is what collapses the two <c>/sleep</c> states into one. Reached by the idle timer the
+  /// server previously knew nothing at all, so every knob acted normally on a screen showing a
+  /// clock; reached by the Sleep pill it knew only that audio was parked. Reporting from the page
+  /// means all three routes in — the idle timer, the pill, and a direct navigation — produce the
+  /// same fact.
+  /// </para>
+  ///
+  /// <para>
+  /// <c>OnAfterRenderAsync</c> rather than <c>OnInitializedAsync</c> because the latter also runs
+  /// during prerender, where a matching dispose would immediately retract the report.
+  /// </para>
+  /// </summary>
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (!firstRender)
+    {
+      return;
+    }
+
+    _reportedVisible = true;
+    var state = await SystemApi.SetSleepScreenVisibleAsync(true);
+    if (state is null || _disposed)
+    {
+      return;
+    }
+
+    _wakeState = state.WakeState;
+    await InvokeAsync(StateHasChanged);
   }
 
   // The clock text is rebuilt every 1 s. We read DisplayOptionsMonitor.CurrentValue
@@ -446,6 +488,22 @@
   public async ValueTask DisposeAsync()
   {
     _disposed = true;
+
+    if (_reportedVisible)
+    {
+      // Best effort. A hard browser navigation can tear the circuit down before this lands, which
+      // is why MainLayout reports the opposite on its own first render: between them the flag is
+      // self-correcting, and the worst case is one knob input consumed on the way out.
+      try
+      {
+        await SystemApi.SetSleepScreenVisibleAsync(false);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogDebug(ex, "Could not report the sleep screen hidden during dispose");
+      }
+    }
+
     AudioState.NowPlayingChanged -= OnNowPlayingChanged;
     AudioState.SleepStateChanged -= OnSleepStateChanged;
     EncoderHud.StateChanged -= OnEncoderHudChanged;

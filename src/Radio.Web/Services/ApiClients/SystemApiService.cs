@@ -80,6 +80,36 @@ public class SystemApiService
     }
   }
 
+  /// <summary>
+  /// Reports whether the <c>/sleep</c> route is on screen, and returns the resulting state.
+  /// </summary>
+  /// <remarks>
+  /// Returns <c>null</c> on any failure, and every caller must render correctly from that: the
+  /// bUnit rig fails every outbound request by design, and the kiosk can call this while the API is
+  /// still starting. Failing means the caller keeps its default, which is the Ambient copy.
+  /// </remarks>
+  public async Task<SleepStateDto?> SetSleepScreenVisibleAsync(
+    bool visible,
+    CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync(
+        "/api/system/sleep-screen", new { visible }, cancellationToken);
+      if (!response.IsSuccessStatusCode)
+      {
+        return null;
+      }
+
+      return await response.Content.ReadFromJsonAsync<SleepStateDto>(JsonOptions, cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to report sleep screen visibility {Visible}", visible);
+      return null;
+    }
+  }
+
   public async Task<bool> PowerOffSystemAsync(CancellationToken cancellationToken = default)
   {
     try
