@@ -352,6 +352,17 @@ public class EventPlaybackRequestTests
   }
 
   [Fact]
+  public void Validate_AcceptsAVoiceIdAtTheCap()
+  {
+    // The ACCEPTED boundary, which was the one missing: 0 and 65 are covered above, so a cap written
+    // as ">= MaxVoiceIdChars" instead of "> MaxVoiceIdChars" would have passed every existing test.
+    // Label already had this pair; VoiceId did not.
+    var request = Speech() with { VoiceId = new string('a', EventPlaybackRequest.MaxVoiceIdChars) };
+
+    Assert.Equal(EventPlaybackRejection.None, request.Validate());
+  }
+
+  [Fact]
   public void Validate_AcceptsANullVoiceId_MeaningTheConfiguredDefault()
   {
     Assert.Null(Speech().VoiceId);

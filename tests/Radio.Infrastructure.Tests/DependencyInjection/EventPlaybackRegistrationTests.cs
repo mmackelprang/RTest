@@ -68,8 +68,17 @@ public class EventPlaybackRegistrationTests
   }
 
   [Fact]
-  public void AddEventPlayback_BuildsAndResolvesTheSeam()
+  public void AddEventPlayback_BuildsAndResolvesTheSeam_WithNoGvMediaSectionAtAll()
   {
+    // ⚠ Merged, because this and ItResolvesWithNoGvMediaSectionAtAll were the SAME TEST written
+    // twice: BuildProvider's default configuration is an empty ConfigurationBuilder, so both were
+    // "resolve with no GvMedia section", differing only in which of the two registrations they asked
+    // for — and TheInterfaceAndTheConcreteTypeResolveToOneInstance already covers that difference
+    // properly, by asserting they are the same object. Two green tests for one fact is a coverage
+    // number, not coverage.
+    //
+    // What it asserts: the defaults are sufficient to construct everything, which is what an
+    // appliance with no GvMedia block gets. ItResolvesWithAGvMediaSectionPresent is the contrast.
     using var provider = BuildProvider();
 
     Assert.NotNull(provider.GetRequiredService<IEventPlaybackService>());
@@ -85,16 +94,6 @@ public class EventPlaybackRegistrationTests
     Assert.Same(
       provider.GetRequiredService<EventPlaybackService>(),
       (EventPlaybackService)provider.GetRequiredService<IEventPlaybackService>());
-  }
-
-  [Fact]
-  public void ItResolvesWithNoGvMediaSectionAtAll()
-  {
-    // What an appliance with no GvMedia block gets. Proves the defaults are sufficient to construct
-    // everything, which is the property GvMediaRegistrationTests asserts for its own graph.
-    using var provider = BuildProvider();
-
-    Assert.NotNull(provider.GetRequiredService<EventPlaybackService>());
   }
 
   [Fact]

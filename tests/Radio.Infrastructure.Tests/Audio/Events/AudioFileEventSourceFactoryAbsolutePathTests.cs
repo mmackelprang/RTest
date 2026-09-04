@@ -55,6 +55,11 @@ public class AudioFileEventSourceFactoryAbsolutePathTests : IDisposable
 
     var source = await factory.CreateFromAbsolutePathAsync(file, TimeSpan.FromSeconds(9));
 
+    // ⚠ The FILE PATH is the assertion this test needs, and it used to assert only Duration — which
+    // a source built by combining against the (nonexistent) root would report just as happily, since
+    // the caller supplied it. FilePath is the only observable that distinguishes "did not re-root"
+    // from "re-rooted and happened to carry my duration through".
+    Assert.Equal(file, Assert.IsType<AudioFileEventSource>(source).FilePath);
     Assert.Equal(TimeSpan.FromSeconds(9), source.Duration);
     await source.DisposeAsync();
   }

@@ -445,6 +445,10 @@ public sealed class GvMediaClientTests : IDisposable
   }
 
   [Theory]
+  // Unknown = 0 is the default value, so it is what a GvMediaUnavailableException constructed
+  // without a reason carries. It was the one member this theory omitted, which meant "true ONLY for
+  // Disabled" was asserted over seven of the enum's eight members.
+  [InlineData(GvMediaFailure.Unknown, false)]
   [InlineData(GvMediaFailure.Disabled, true)]
   [InlineData(GvMediaFailure.NotFound, false)]
   [InlineData(GvMediaFailure.Unauthorized, false)]
