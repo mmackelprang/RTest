@@ -1526,3 +1526,63 @@ catch arm exists to report.
 
 Whichever way it goes, it is a change to the whole fingerprinting data layer, not to the encoder row that
 noticed it.
+
+---
+
+## 19. `AudioStateStore` does not re-seed after a hub reconnect
+
+**Found and deliberately not fixed by `PHN-1e`.** Priority: **low**.
+
+### What Exists
+
+`AudioStateStore.EnsureEventPlaybackSeededAsync` pulls `GET /api/audio/events/current` **once per
+process**, driven by the first Blazor circuit opening
+(`AttendedPlaybackCircuitHandler.OnCircuitOpenedAsync`). It exists because
+`EventPlaybackChanged` fires on **transitions**, so a client that connects between two of them would
+render "nothing is playing" over a room that is talking (ADR-029 §8.1 ⟨A1·4⟩).
+
+### What's Needed
+
+`HubConnection.Reconnected` does not re-run the seed. A hub connection that drops and comes back can
+therefore miss every transition that happened while it was away, and the cache stays stale until the
+next one. The fix is to hang a re-seed off `AudioStateHubService`'s reconnect path and reset
+`_eventPlaybackSeedStarted` — but note the ordering guard has to survive it, because a re-seed races
+broadcasts exactly the way the first one does.
+
+### Gotchas
+
+- **This is not specific to attended playback.** Every cached broadcast in that store has the same
+  hole — `EncoderConnection` and `EncoderConfigStatus` are stale after a reconnect too. Fixing it for
+  one field would be the inconsistency it looks like a fix for, which is why `PHN-1e` filed it rather
+  than patching its own field.
+- **What bounds the damage:** the next transition corrects the cache, and
+  `GvMedia:MaxPlaybackSeconds` (300 s) bounds how long a missed one can matter.
+
+---
+
+## 20. A user stop, a preemption and the duration cap are indistinguishable on the wire
+
+**Deliberately not added by `PHN-1e`.** Priority: **low — do it only if a renderer asks.**
+
+### What Exists
+
+Four things end an attended playback early and all four publish
+`EventPlaybackState.Stopped`: a user stop, a new playback taking the single slot, a source starting at
+or above `GvMedia:PreemptAtPriority` (`PHN-1d`), and the `GvMedia:MaxPlaybackSeconds` cap (`PHN-1e`).
+The snapshot does not say which. **An operator can already tell them apart from the log** — the
+preemption warning names the preempting source, and the cap logs its own line naming the id and the
+configured seconds.
+
+### What's Needed
+
+One nullable string — `EndReason` — on `EventPlaybackSnapshot`, set at the three call sites, plus the
+matching field on `Radio.Web`'s `EventPlaybackSnapshotDto`.
+
+### Gotchas
+
+- **Do not add it speculatively.** `PHN-1d` offered to add it and set the right condition: *"if the
+  chip needs to distinguish."* Per ADR-029 §12 item 4, PR 6's chip returns the UI to an idle,
+  replayable state in all four cases — so today no renderer branches on it, and a wire field nothing
+  reads is a commitment bought with nothing.
+- If it is added, it is a **new nullable field**, not a renumbering of `EventPlaybackState`. The
+  states already on the wire are strings for exactly this reason (`PHN-1e` C-47).
