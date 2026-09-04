@@ -498,6 +498,75 @@ public sealed class EventPlaybackServiceTests : IDisposable
     await Assert.ThrowsAsync<ObjectDisposedException>(() => service.StartAsync(SpeechRequest()));
   }
 
+  [Fact]
+  public async Task StopDuringAcquisitionDisposesTheSourceItWasHolding()
+  {
+    // ⚠ A LEAK PIN. Every terminal caller claims the flag and then tears down, and teardown can
+    // only release a source the playback already owns — which it does not, for the whole of
+    // acquisition. So a stop landing mid-acquisition used to leave the source that acquisition then
+    // produced with nobody to dispose it: on the RemoteMedia arm an AudioFileEventSource holding an
+    // open FileStream over the cached recording, which on Windows also stops GvMediaCache's evictor
+    // reclaiming that entry.
+    var source = new FakeEventSource();
+    var reached = new TaskCompletionSource();
+    var release = new TaskCompletionSource();
+    var tts = new FakeTtsFactory
+    {
+      OnCreate = async (_, _, _) =>
+      {
+        reached.TrySetResult();
+        // Deliberately NOT awaited on the token: this models a synthesis that finished just as the
+        // stop landed, which is the case where a source really does come into existence afterwards.
+        await release.Task;
+        return (IEventAudioSource)source;
+      }
+    };
+    using var service = CreateService(ttsFactory: tts);
+
+    var accepted = await service.StartAsync(SpeechRequest());
+    await reached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert.True(await service.StopAsync(accepted.Id));
+    release.SetResult();
+
+    await WaitUntilAsync(() => source.DisposeCalls == 1, TimeSpan.FromSeconds(5));
+
+    // Never adopted, so never ducked and never played — there is nothing to stop, only to release.
+    Assert.Equal(0, source.PlayCalls);
+    Assert.Equal(0, source.StopCalls);
+    Assert.Empty(_ducking.Started);
+  }
+
+  [Fact]
+  public async Task DisposeDuringAcquisitionDisposesTheSourceItWasHolding()
+  {
+    // The same leak by the other door, and the one that needs its own test: Dispose CANCELS without
+    // claiming the terminal flag — it is synchronous and teardown is not — so a check written
+    // against the terminal flag alone would still leak here.
+    var source = new FakeEventSource();
+    var reached = new TaskCompletionSource();
+    var release = new TaskCompletionSource();
+    var tts = new FakeTtsFactory
+    {
+      OnCreate = async (_, _, _) =>
+      {
+        reached.TrySetResult();
+        await release.Task;
+        return (IEventAudioSource)source;
+      }
+    };
+    var service = CreateService(ttsFactory: tts);
+
+    await service.StartAsync(SpeechRequest());
+    await reached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+    service.Dispose();
+    release.SetResult();
+
+    await WaitUntilAsync(() => source.DisposeCalls == 1, TimeSpan.FromSeconds(5));
+    Assert.Equal(0, source.PlayCalls);
+  }
+
   // ── the single-slot rule ────────────────────────────────────────────────
 
   [Fact]

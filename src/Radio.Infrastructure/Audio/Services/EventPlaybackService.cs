@@ -314,13 +314,33 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
           throw new InvalidOperationException($"Unhandled kind {request.Kind}.");
       }
 
-      token.ThrowIfCancellationRequested();
+      // The source handover is an ATOMIC check-and-assign, and that is a leak fix rather than
+      // tidiness. Every terminal caller claims the flag and then tears down, and teardown can only
+      // release a source the playback already OWNS - which it does not for the whole of
+      // acquisition. So a stop, a replacement or a disposal landing here used to leave the source
+      // acquisition then produced with nobody to dispose it: on the RemoteMedia arm an
+      // AudioFileEventSource holding an open FileStream over the cached recording, which on Windows
+      // also stops GvMediaCache's evictor reclaiming that entry. TryAdopt refusing is how this path
+      // learns that it owns the disposal instead.
+      if (!playback.TryAdopt(source, token))
+      {
+        await DisposeOrphanAsync(playback, source);
+        return;
+      }
 
-      playback.Source = source;
       source.PlaybackCompleted += (_, e) => OnSourceCompleted(playback, e);
 
       _duckingService.SetPriority(source, request.Priority);
       await _duckingService.StartDuckingAsync(source, token);
+
+      // Re-checked between ducking and audio, deliberately rather than argued benign. A terminal
+      // transition can land in the window between those two awaits, and PR 4's preemption path
+      // lands on exactly this window - so a preempted playback must not still start producing
+      // sound. Throwing hands it to the catch below, which releases what this now owns.
+      if (playback.IsTerminal || token.IsCancellationRequested)
+      {
+        throw new OperationCanceledException(token);
+      }
 
       await source.PlayAsync(token);
 
@@ -335,7 +355,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       // Stop, replacement or shutdown. The transition was already published by whoever cancelled,
       // or is about to be; claiming the flag here only stops a late failure from overwriting it.
       playback.ClaimTerminal();
-      _logger.LogDebug("Attended playback {Id} cancelled during acquisition", playback.Id);
+      _logger.LogDebug("Attended playback {Id} cancelled before it could play", playback.Id);
+
+      // And release whatever it is holding. Dispose() cancels WITHOUT claiming the flag and without
+      // tearing anything down - it is synchronous and teardown is not - so this is the only path
+      // that releases a source adopted just before the container went away. Once-only through
+      // ClaimSourceForRelease, so a concurrent teardown under the gate cannot double-release.
+      await TearDownAsync(playback);
     }
     catch (GvMediaUnavailableException ex)
     {
@@ -585,8 +611,11 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   {
     playback.Cancel();
 
-    if (playback.Source is not { } source)
+    if (playback.ClaimSourceForRelease() is not { } source)
     {
+      // Either another terminal path already released it, or acquisition never handed one over -
+      // in which case ClaimSourceForRelease has just closed adoption, so acquisition disposes
+      // whatever it is about to produce rather than dropping it.
       return;
     }
 
@@ -602,6 +631,27 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     // continues — so a leaked handle there costs cap accuracy, not correctness.
     try { await source.DisposeAsync(); }
     catch (Exception ex) { _logger.LogWarning(ex, "Error disposing source for {Id}", playback.Id); }
+  }
+
+  /// <summary>
+  /// Releases a source the playback refused to adopt, because it had already ended.
+  /// </summary>
+  /// <remarks>
+  /// Disposal only, never StopAsync: this source was never ducked and never played, so there is
+  /// nothing to stop. Guarded the way TearDownAsync guards its steps, because this runs on a
+  /// background task where an escaping exception is a process-level hazard.
+  /// </remarks>
+  private async Task DisposeOrphanAsync(Playback playback, IEventAudioSource source)
+  {
+    _logger.LogDebug(
+      "Attended playback {Id} ended while its audio was still being acquired; releasing it",
+      playback.Id);
+
+    try { await source.DisposeAsync(); }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error disposing an unadopted source for {Id}", playback.Id);
+    }
   }
 
   // ── snapshots ───────────────────────────────────────────────────────────
@@ -725,6 +775,9 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   private sealed class Playback
   {
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _sourceLock = new();
+    private IEventAudioSource? _source;
+    private bool _released;
     private int _terminal;
 
     public Playback(string id, EventPlaybackKind kind, string? label)
@@ -737,9 +790,19 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     public string Id { get; }
     public EventPlaybackKind Kind { get; }
     public string? Label { get; }
-    public IEventAudioSource? Source { get; set; }
     public TimeSpan? ReportedDuration { get; set; }
     public CancellationToken Token => _cts.Token;
+
+    /// <summary>The acquired source, or null while acquisition is still in flight.</summary>
+    /// <remarks>
+    /// Still readable after release, deliberately: the terminal snapshot is minted AFTER teardown
+    /// and reads Duration and Position from here, so nulling it would make a completed speech
+    /// playback report no duration at all.
+    /// </remarks>
+    public IEventAudioSource? Source
+    {
+      get { lock (_sourceLock) { return _source; } }
+    }
 
     /// <summary>True once any terminal transition has been claimed. Never goes back to false.</summary>
     public bool IsTerminal => Volatile.Read(ref _terminal) != 0;
@@ -750,6 +813,51 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     /// PlaybackCompleted events its source raises.
     /// </summary>
     public bool ClaimTerminal() => Interlocked.CompareExchange(ref _terminal, 1, 0) == 0;
+
+    /// <summary>
+    /// Hands a freshly acquired source to the playback, and refuses if the playback has ended.
+    /// </summary>
+    /// <remarks>
+    /// The check and the assignment are ONE atomic step, against the same lock
+    /// <see cref="ClaimSourceForRelease"/> takes, and that is the whole of the fix. Whichever side
+    /// wins, exactly one owns the disposal: if a terminal transition gets there first this returns
+    /// false and the acquisition path disposes what it is holding, and if this gets there first
+    /// teardown finds a non-null source and releases it.
+    ///
+    /// The token is checked as well as the terminal flag because Dispose() cancels WITHOUT claiming
+    /// the flag - it is synchronous and teardown is not - so a check written against the flag alone
+    /// would still leak at container shutdown.
+    /// </remarks>
+    public bool TryAdopt(IEventAudioSource source, CancellationToken token)
+    {
+      lock (_sourceLock)
+      {
+        if (_released || IsTerminal || token.IsCancellationRequested)
+        {
+          return false;
+        }
+        _source = source;
+        return true;
+      }
+    }
+
+    /// <summary>
+    /// Takes responsibility for releasing the source. Returns it to the FIRST caller only, and null
+    /// to everyone after - including when acquisition has not handed one over yet, which it then
+    /// permanently prevents, so the source can never end up with no owner at all.
+    /// </summary>
+    public IEventAudioSource? ClaimSourceForRelease()
+    {
+      lock (_sourceLock)
+      {
+        if (_released)
+        {
+          return null;
+        }
+        _released = true;
+        return _source;
+      }
+    }
 
     public void Cancel()
     {
