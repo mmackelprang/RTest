@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Components.Server.Circuits;
+﻿using Microsoft.AspNetCore.Components.Server.Circuits;
 using Radio.Web.Services.ApiClients;
 
 namespace Radio.Web.Services;
@@ -10,7 +10,7 @@ namespace Radio.Web.Services;
 /// <remarks>
 /// <para>
 /// ⚠ It fires on "no circuits remain", NOT on "the circuit that started it left". The original design
-/// matched a departing circuit against an OwnerToken; ADR-029 ⟨A1·4⟩ deleted both, because a kiosk
+/// matched a departing circuit against an owner token; ADR-029 ⟨A1·4⟩ deleted both, because a kiosk
 /// refresh drops one circuit and opens another, so an owner-matched handler would stop audio the user
 /// is actively watching some minutes later for no visible reason. There is one audio engine and one
 /// set of speakers, so there is no owner (§7.4).

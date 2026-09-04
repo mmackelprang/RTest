@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
@@ -1380,7 +1380,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     /// ⚠ ITimer.Dispose does NOT wait for a callback already running, and it deliberately is not
     /// made to: the callback only dispatches StopAsync(Id), which is idempotent through
     /// ClaimTerminal, so a cap firing at the same instant as a natural end is a no-op rather than a
-    /// double stop. Waiting here would mean blocking a teardown on a timer thread.
+    /// double stop. Blocking here would mean parking a teardown on a timer thread.
     /// </remarks>
     public void DisarmDurationCap()
     {
