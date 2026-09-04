@@ -165,8 +165,17 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     // That is the better direction, and the consequence is worth seeing rather than discovering:
     // GvMediaClient, AudioFileEventSourceFactory, ITTSFactory and IDuckingService are all now
     // constructed at startup, so a resolution failure in any of them is a service that will not start
-    // — visible — rather than a 500 on the first voicemail. EventPlaybackRegistrationTests is what
-    // keeps that a test rather than a hope.
+    // — visible — rather than a 500 on the first voicemail.
+    //
+    // ⚠ NOTHING IN THE SUITE COVERS THAT, and an earlier draft of this comment claimed
+    // EventPlaybackRegistrationTests did. It does not, twice over: it registers FAKES for three of
+    // the four named above (ITTSFactory, IDuckingService, AudioFileEventSourceFactory) and its own
+    // class remark says it therefore proves nothing about AddSoundFlowAudio registering them, and it
+    // builds a bare ServiceCollection rather than a host, so it says nothing about WHEN anything is
+    // constructed. The API-container route is closed too: AudioStateUpdateService is registered
+    // AddHostedService (Program.cs), and CustomWebApplicationFactory removes every IHostedService
+    // descriptor — so no test host ever constructs the subscriber that makes this eager. Boot order
+    // here is a box observation, not a test.
     _duckingService.DuckingStateChanged += OnDuckingStateChanged;
   }
 
@@ -533,16 +542,17 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         // handler reads the category default 8, clears the threshold, and is then turned away by the
         // same identity check, so moving it below changes nothing and reds no test. It stays here
         // because the RECORDED priority has to be right for everything that reads it later —
-        // GetActiveEventsByPriority, and PR 5's queue — not because it guards this rule.
+        // GetActiveEventsByPriority, and PHN-1f's queue — not because it guards this rule.
         _duckingService.SetPriority(source, request.Priority);
         await _duckingService.StartDuckingAsync(source, token);
 
         // ⚠ Nothing is checked here about OTHER active sources, and that is the owner's decision
         // (punch list D28), not an omission. A playback starting while a source at or above
         // GvMedia:PreemptAtPriority is already sounding must WAIT for it and then play — which needs a
-        // waiting state on the wire and a chip that renders it, so it lands in PR 5 with them. Until
-        // then this mixes, exactly as it does today. Do not "fix" it by refusing the start: that
-        // option was put to the owner and rejected.
+        // waiting state on the wire and a chip that renders it. PHN-1e was expected to carry those and
+        // did NOT: the queue and its waiting state are PHN-1f. Until then this mixes, exactly as it
+        // does today. Do not "fix" it by refusing the start: that option was put to the owner and
+        // rejected.
         //
         // Still re-checked between ducking and audio. Under the gate this is closed against StopAsync
         // and the replacement arm; against Dispose, which does not take the gate, it remains the
@@ -731,8 +741,8 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// AudioSourceBase.StopAsync short-circuits only on Created or Disposed, never on Stopped. So
   /// teardown after a natural end raises a SECOND event. AnnouncementService is immune by accident
   /// (TrySetResult discards it); this holds a state machine and is not, so an unguarded handler
-  /// would overwrite Completed with Stopped and — from PR 5 — broadcast a transition that did not
-  /// happen.
+  /// would overwrite Completed with Stopped and — since PHN-1e wired the hub subscriber —
+  /// broadcast a transition that did not happen.
   /// </remarks>
   private void OnSourceCompleted(Playback playback, AudioSourceCompletedEventArgs e)
   {
@@ -921,9 +931,9 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
 
     // Addressed BY ID, captured now. If a replacing StartAsync wins the race the id no longer matches
     // _current and StopAsync is a no-op — which is right: that playback started AFTER the preempting
-    // source, so "a source starts" never applied to it. What SHOULD cover that case is PR 5's queue
+    // source, so "a source starts" never applied to it. What SHOULD cover that case is PHN-1f's queue
     // (plan §0.4 C-46): a playback starting under a live >= 8 source waits for it. Until then it mixes,
-    // and APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY is what pins that so PR 5's fix is
+    // and APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY is what pins that so PHN-1f's fix is
     // a visible diff.
     var victimId = victim.Id;
     _preemptionTail = Task.Run(
@@ -1049,12 +1059,21 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// </summary>
   /// <remarks>
   /// ⚠ This is NOT CancelAfter on playback.Token, which is what PHN-1c §5 and PHN-1d §5 both
-  /// prescribe — and the difference is the whole feature rather than a detail. Nothing observes that
-  /// token once acquisition has returned: AcquireAndPlayAsync's last read of it is
-  /// source.PlayAsync(token), which STARTS playback and returns rather than awaiting completion, and
-  /// both event sources drive their own completion from a duration they were given. So cancelling it
-  /// stops no audio. A cap built that way would expire silently at 300 s and change nothing, which is
-  /// the worst available shape for something the ADR calls "the guarantee".
+  /// prescribe — and the difference is the whole feature rather than a detail. The token IS observed
+  /// after acquisition returns, and that is exactly why cancelling it is the wrong instrument rather
+  /// than a merely inert one. AudioSourceBase.PlayAsync forwards it to PlayCoreAsync, and BOTH event
+  /// sources build a linked CTS over it there (AudioFileEventSource.PlayCoreAsync,
+  /// TTSEventSource.PlayCoreAsync) and await their completion delay on that linked token. So a
+  /// cancellation reaches the source — but what it reaches is the COMPLETION path, not the audio.
+  /// AudioFileEventSource.PlayWithSoundFlowAsync awaits AwaitCompletionAsync on that token and gates
+  /// OnPlaybackCompleted(EndOfContent) behind !IsCancellationRequested; the OperationCanceledException
+  /// arm below it only clears _isPlaybackActive. Nothing on that path stops the player — only
+  /// StopCoreAsync and DisposeAsyncCore call SoundFlowPlaybackService.StopAsync. TTSEventSource is
+  /// shaped the same way.
+  ///
+  /// So a CancelAfter cap at 300 s would leave the audio sounding AND suppress the EndOfContent that
+  /// would otherwise have ended it — strictly worse than doing nothing, for something the ADR calls
+  /// "the guarantee".
   ///
   /// What actually stops audio is TearDownAsync -> ReleaseSourceAsync, and StopAsync is the public
   /// door to it. Hence a timer whose callback dispatches a stop.
@@ -1080,8 +1099,20 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       // Warning, not Information: since LOG-11 the journal carries Warning and above, and "the
       // voicemail stopped by itself after five minutes" is exactly what an operator diagnoses from
       // the box. Ids only — never a media id and never request text (PHN-1b §0.3 ④).
+      //
+      // ⚠ "dispatching a stop", NOT "stopping it". This line is emitted UNCONDITIONALLY, before the
+      // dispatch below and without reading StopAsync's bool result — so it is a record that the
+      // timer fired while still armed, not a claim that anything was stopped. A playback that ended
+      // naturally in the window between the timer becoming due and this callback running would get
+      // the same line, and StopAsync would then return false having touched nothing.
+      //
+      // ⚠ Do NOT restructure this to log on the result. ANaturalEndDisarmsTheDurationCap asserts on
+      // the ABSENCE of this line, and it is the only assertion in that test that can fail — a
+      // StopCalls assertion there is satisfied by ClaimTerminal's idempotence whether or not the
+      // disarm happened (measured: 62/62 still passed with the disarm deleted). Moving this below
+      // the dispatch, or behind the result, destroys that falsifiability.
       _logger.LogWarning(
-        "Attended playback {Id} reached GvMedia:MaxPlaybackSeconds ({Seconds}s); stopping it",
+        "Attended playback {Id} reached GvMedia:MaxPlaybackSeconds ({Seconds}s); dispatching a stop",
         playbackId, seconds);
 
       _ = Task.Run(
@@ -1180,10 +1211,10 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// correct rather than merely likely. A source can fail synchronously inside PlayAsync
   /// (AudioFileEventSource.PlayCoreAsync catches and raises Error completion on the calling
   /// thread), so a terminal transition can already be claimed by the time the acquisition path says
-  /// "Playing". Publishing it anyway would report audio that never started, and from PR 5 would
-  /// broadcast a Failed → Playing transition that did not happen. Every terminal publish stores
-  /// under the same lock, so the two orderings that remain — this one first, or skipped entirely —
-  /// are both honest.
+  /// "Playing". Publishing it anyway would report audio that never started, and since PHN-1e wired
+  /// the hub subscriber it would broadcast a Failed → Playing transition that did not happen. Every
+  /// terminal publish stores under the same lock, so the two orderings that remain — this one
+  /// first, or skipped entirely — are both honest.
   /// </remarks>
   private void PublishNonTerminal(Playback playback, EventPlaybackState state)
   {
@@ -1213,18 +1244,21 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// the stop) but not retained (so Current keeps describing the playback that is actually in
   /// flight).
   ///
-  /// Nothing subscribes to PlaybackChanged in this PR — PR 5 is what connects it to /hubs/audio. It
-  /// is raised now because the IEventPlaybackService contract requires it and because a broadcast
-  /// bolted on later would be a second place transitions are decided.
+  /// PHN-1e connected this to /hubs/audio: AudioStateUpdateService subscribes to PlaybackChanged in
+  /// its constructor and broadcasts "EventPlaybackChanged" from OnEventPlaybackChanged. It was
+  /// already raised before that subscriber existed, because the IEventPlaybackService contract
+  /// requires it and because a broadcast bolted on later would be a second place transitions are
+  /// decided.
   ///
-  /// ⚠ FOR PR 5, BEFORE YOU SUBSCRIBE. Every terminal call site of this method — StartAsync's
+  /// ⚠ READ THIS BEFORE ADDING A SUBSCRIBER. Every terminal call site of this method — StartAsync's
   /// replacement arm, StopAsync, OnSourceCompleted and FailAsync — invokes it WHILE HOLDING _gate,
   /// so a subscriber runs on a thread that already owns a non-reentrant semaphore. A hub broadcast
-  /// that only serialises and sends is fine. A subscriber that re-enters this seam — StopAsync,
-  /// StartAsync, or anything that awaits something which does — DEADLOCKS, in exactly the way
-  /// OnSourceCompleted is written to avoid. This is flagged rather than fixed here: restructuring
-  /// the publishes to happen outside the gate is a real change to the ordering guarantees above, and
-  /// it belongs to the PR that first has a subscriber to test it with.
+  /// that only serialises and sends is fine, and that is exactly the shape the one shipped subscriber
+  /// has (AudioStateUpdateService.OnEventPlaybackChanged: SendAsync and a LogDebug, nothing else — its
+  /// own remark says so). A subscriber that re-enters this seam — StopAsync, StartAsync, or anything
+  /// that awaits something which does — DEADLOCKS, in exactly the way OnSourceCompleted is written to
+  /// avoid. Still flagged rather than fixed: restructuring the publishes to happen outside the gate is
+  /// a real change to the ordering guarantees above, and the shipped subscriber does not force it.
   /// </remarks>
   private void Publish(EventPlaybackSnapshot snapshot)
   {
