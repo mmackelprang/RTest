@@ -1073,7 +1073,7 @@ public class AudioStateUpdateService : BackgroundService
   /// EventPlaybackService holds its non-reentrant _gate, and that file's own remark says so to this
   /// PR by name: a subscriber that re-enters StopAsync or StartAsync deadlocks.
   ///
-  /// async void with a catch-all, matching the five sibling handlers here. This is also raised from
+  /// async void with a catch-all, matching the eight sibling handlers here. This is also raised from
   /// arbitrary thread-pool threads since PHN-1d — a preemption arrives on a Task.Run — which
   /// IHubContext is safe for.
   /// </remarks>

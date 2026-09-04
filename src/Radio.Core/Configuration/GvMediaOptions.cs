@@ -64,8 +64,9 @@ public sealed class GvMediaOptions
   /// Hard cap on one attended playback (ADR-029 D7 §7.1). Read by
   /// <c>EventPlaybackService.ArmDurationCap</c>, which arms a one-shot timer when the source starts
   /// producing audio and stops the playback when it fires — with no client cooperation, no heartbeat
-  /// and no poll. D5 rule 1 bounds the count of armed timers at one. Also bounds the download size
-  /// and the no-cache sweep window in GvMediaCache.
+  /// and no poll. D5 rule 1 bounds the count of armed timers at one. Two other readers derive bounds
+  /// from it, in different types: <c>GvMediaClient</c> turns it into the maximum response size it
+  /// will accept, and <c>GvMediaCache</c> turns it into the no-cache sweep window.
   ///
   /// <para>
   /// ⚠ There is no "off". A value below 1 clamps to 1 rather than disabling the cap: this is the one

@@ -268,7 +268,8 @@ public class AudioStateStore : IAsyncDisposable
   public EventPlaybackSnapshotDto? EventPlayback { get; private set; }
 
   // 0 or 1. Set the first time a broadcast lands, read by the seed so a response already in flight
-  // cannot overwrite something newer. The ENC-12 rule (MainLayout.razor:388-397).
+  // cannot overwrite something newer. The ENC-12 rule — the pull precedent is MainLayout.razor:387-397
+  // and the ORDERING rule this field implements is stated at MainLayout.razor:399-401.
   private int _eventPlaybackBroadcastSeen;
 
   // 0 or 1, claimed with Interlocked so two circuits opening at once seed exactly once.

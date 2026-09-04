@@ -220,8 +220,10 @@ public class SleepService : ISleepService
   /// <remarks>
   /// ⚠ A non-null Current is NOT the same as audio in the room. IEventPlaybackService.Current
   /// RETAINS the last snapshot after a playback ends, because StartAsync answers before any audio
-  /// exists and that surface is the only place an acquisition failure can be read from. So the state
-  /// is what decides, not the null check.
+  /// exists — so an acquisition failure has no response left to carry it, and this is the surface a
+  /// caller re-reads to find out what happened. (Not the ONLY one: since PHN-1e the same Failed
+  /// snapshot is also broadcast over /hubs/audio. Retention is what serves a caller who was not
+  /// listening at the moment it fired.) So the state is what decides, not the null check.
   /// </remarks>
   private async Task StopAttendedPlaybackAsync()
   {
