@@ -149,12 +149,20 @@ public sealed class EventPlaybackServiceTests : IDisposable
   /// </remarks>
   private static Task<EventPlaybackSnapshot> NextSnapshotWith(
     EventPlaybackService service, EventPlaybackState state)
+    => NextSnapshotMatching(service, s => s.State == state);
+
+  /// <summary>
+  /// The same rendezvous, on an arbitrary predicate — for the cases where the STATE alone does not
+  /// identify the snapshot being waited for, because two playbacks are in play at once.
+  /// </summary>
+  private static Task<EventPlaybackSnapshot> NextSnapshotMatching(
+    EventPlaybackService service, Func<EventPlaybackSnapshot, bool> predicate)
   {
     var tcs = new TaskCompletionSource<EventPlaybackSnapshot>(
       TaskCreationOptions.RunContinuationsAsynchronously);
     service.PlaybackChanged += (_, s) =>
     {
-      if (s.State == state)
+      if (predicate(s))
       {
         tcs.TrySetResult(s);
       }
@@ -197,7 +205,12 @@ public sealed class EventPlaybackServiceTests : IDisposable
 
     Assert.Equal(EventPlaybackState.Preparing, snapshot.State);
     Assert.StartsWith("evp-", snapshot.Id, StringComparison.Ordinal);
-    Assert.Null(snapshot.Duration);              // no audio exists yet, so no duration is known
+    // ⚠ A DOCUMENTATION assertion, and it is labelled because it CANNOT FAIL as written: SnapshotOf
+    // returns null for Duration unconditionally while the state is Preparing, so no change to the
+    // acquisition path can make this red. It stays because the rule it records — nothing claims a
+    // duration before audio exists — is what a future edit to SnapshotOf would break, and then it
+    // would start doing real work.
+    Assert.Null(snapshot.Duration);
     Assert.Equal(TimeSpan.Zero, snapshot.PositionAtBroadcast);
     Assert.Equal(snapshot.Id, service.Current?.Id);
 
@@ -307,16 +320,25 @@ public sealed class EventPlaybackServiceTests : IDisposable
     await service.StartAsync(SpeechRequest());
     await playing.WaitAsync(TimeSpan.FromSeconds(5));
 
+    // Rendezvous on the PUBLISHED terminal snapshot rather than on service.Current, and raise the
+    // second completion only after it: the publish is the last statement of the handler's gated
+    // body, so awaiting it means the first completion has been processed to the end — teardown
+    // included — before the second is raised. Waiting on service.Current instead, as this test used
+    // to, let both completions be in flight at once, so "exactly once" could pass by luck.
+    var completed = NextSnapshotWith(service, EventPlaybackState.Completed);
     source.RaiseCompleted(PlaybackCompletionReason.EndOfContent);
+    await completed.WaitAsync(TimeSpan.FromSeconds(5));
+
     source.RaiseCompleted(PlaybackCompletionReason.UserStopped);
 
-    await WaitUntilAsync(
-      () => service.Current is
-      {
-        State: EventPlaybackState.Completed or EventPlaybackState.Stopped
-          or EventPlaybackState.Failed
-      },
-      TimeSpan.FromSeconds(5));
+    // ⚠ The second half is a BOUNDED NEGATIVE check and says so (CLAUDE.md § Test Timing). With the
+    // ClaimTerminal guard working there is nothing to wait FOR — the correct behaviour is that
+    // nothing happens — so this waits on two gated round-trips instead. Each StopAsync takes and
+    // releases _gate, which is the same gate a stray second teardown would have to acquire, so a
+    // stray one has a real opportunity to land before the assertions run. Starvation can only
+    // WEAKEN this (less opportunity), never flip it into a false failure.
+    Assert.False(await service.StopAsync("evp-nope"));
+    Assert.False(await service.StopAsync("evp-nope"));
 
     lock (terminals)
     {
@@ -327,7 +349,9 @@ public sealed class EventPlaybackServiceTests : IDisposable
     }
 
     // The second half of the same claim: without the guard the second completion runs its own
-    // teardown, so these counts would be 2 rather than 1.
+    // teardown, so these counts would be 2 rather than 1. Note that the FIRST teardown's own
+    // source.StopAsync raises UserStopped inline, exactly as the real sources do — so the guard is
+    // already being exercised once before the explicit raise above.
     Assert.Equal(1, source.StopCalls);
     Assert.Equal(1, source.DisposeCalls);
     Assert.Equal(EventPlaybackState.Completed, service.Current!.State);
@@ -401,6 +425,17 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // FetchTimeoutSeconds = 1 is mirrored onto HttpClient.Timeout by CreateService, exactly as
     // GvMediaServiceExtensions does at registration, so this is the real timeout path rather than a
     // constructed exception.
+    //
+    // ⚠ TIMING DECLARATION (CLAUDE.md § Test Timing). This test DOES depend on a production timer
+    // firing inside a test-side wait — HttpClient's own 1 s timeout, inside the 15 s wait below. The
+    // margin is 15x, and starvation pushes it toward FAILURE, which is the dangerous direction of
+    // the two; state that rather than implying a determinism this does not have.
+    //
+    // Not converted to an injected TimeProvider, and the reason is that there is no seam here to
+    // inject one into: the clock belongs to HttpClient, not to this seam or to GvMediaClient, so the
+    // honest alternative is replacing HttpClient.Timeout with a self-imposed CancelAfter inside
+    // GvMediaClient — a change to a shipped class, in a test-only fix pass. If this ever flakes on
+    // CI, raise the wait, or take that route deliberately.
     var handler = new StubHandler(async (_, ct) =>
     {
       // A delay inside a fake collaborator SIMULATING an upstream that never answers. It is not a
@@ -461,7 +496,12 @@ public sealed class EventPlaybackServiceTests : IDisposable
 
     Assert.Equal(accepted.Id, final.Id);
     Assert.Equal(EventPlaybackState.Stopped, service.Current!.State);
-    Assert.False(await service.StopAsync(accepted.Id));   // idempotent through ClaimTerminal
+    // A second stop is refused — but NOT by ClaimTerminal, which is what this line used to claim.
+    // The first StopAsync set _current to null, so this returns at the "playback is null" branch
+    // several statements earlier and never reaches the flag. ClaimTerminal is what makes a stop
+    // racing a COMPLETION once-only; that is a different guard on a different path, pinned by
+    // ATerminalTransitionHappensExactlyOnce.
+    Assert.False(await service.StopAsync(accepted.Id));
   }
 
   [Fact]
@@ -567,6 +607,43 @@ public sealed class EventPlaybackServiceTests : IDisposable
     Assert.Equal(0, source.PlayCalls);
   }
 
+  [Fact]
+  public async Task DisposeReleasesASourceThatIsAlreadyPlaying()
+  {
+    // ⚠ THE OTHER HALF OF THE LEAK, and the half that had no test. Both Dispose tests above cancel
+    // MID-ACQUISITION, where TryAdopt's refusal is what releases the source. Once AcquireAndPlayAsync
+    // has RETURNED, nothing else will ever run teardown for that playback — so before PHN-1c's
+    // review Dispose cancelled a token nobody was waiting on and walked away: StopDuckingAsync and
+    // DisposeAsync never ran, and on the RemoteMedia arm an AudioFileEventSource's FileStream over
+    // the cached recording was left to the finalizer, which on Windows also blocks GvMediaCache from
+    // evicting that entry.
+    //
+    // No WaitUntilAsync here, deliberately: Dispose blocks on the release (bounded), so by the time
+    // it returns the three assertions below are already settled. If that ever stops being true these
+    // fail immediately rather than flaking.
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory
+    {
+      OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source)
+    };
+    var service = CreateService(ttsFactory: tts);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    service.Dispose();
+
+    Assert.Equal(1, source.StopCalls);
+    Assert.Equal(1, source.DisposeCalls);
+    Assert.Contains(source.Id, _ducking.Stopped);
+
+    // Once-only: a second Dispose must not run the release again. _disposedFlag is claimed with
+    // Interlocked.Exchange precisely so two disposers cannot both get here.
+    service.Dispose();
+    Assert.Equal(1, source.DisposeCalls);
+  }
+
   // ── the single-slot rule ────────────────────────────────────────────────
 
   [Fact]
@@ -599,9 +676,16 @@ public sealed class EventPlaybackServiceTests : IDisposable
   public async Task ALateCompletionFromAReplacedPlaybackDoesNotClearTheCurrentOne()
   {
     // A completion arriving for a playback that has already been replaced must not clear the slot
-    // the replacement occupies. Two guards make that true and this pins the observable outcome of
-    // both: the replaced playback's terminal flag was already claimed by StartAsync, and the
-    // ReferenceEquals check on the completion path would refuse to clear a slot it does not own.
+    // the replacement occupies. The guard is the ReferenceEquals(_current, playback) check on the
+    // completion path.
+    //
+    // ⚠ THE ORDER OF THE NEXT TWO STATEMENTS IS THE ENTIRE TEST, and it was wrong until PHN-1c's
+    // review. Written the other way round — replace first, then raise the completion — the guard is
+    // STATICALLY UNREACHABLE: the replacing StartAsync has already claimed the first playback's
+    // terminal flag, so OnSourceCompleted returns at its first line, several statements short of the
+    // check this test claimed to pin. Raising the completion FIRST claims that flag for the handler
+    // instead, so the replacing StartAsync finds a playback it cannot claim, skips teardown, and
+    // simply installs the replacement — which is the only shape in which the guard runs at all.
     var first = new FakeEventSource();
     var second = new FakeEventSource();
     var queue = new Queue<IEventAudioSource>([first, second]);
@@ -609,20 +693,124 @@ public sealed class EventPlaybackServiceTests : IDisposable
     using var service = CreateService(ttsFactory: tts);
 
     var firstPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
-    await service.StartAsync(SpeechRequest());
+    var one = await service.StartAsync(SpeechRequest());
     await firstPlaying.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Subscribed before the completion is raised, and matched on the FIRST playback's id: two
+    // playbacks are in flight here, so the state alone does not identify the snapshot.
+    // Completed, not Stopped: the completion below is EndOfContent, and OnSourceCompleted maps that
+    // to Completed. A replacing StartAsync would have published Stopped — and the fact that it does
+    // not is half of what this test is about.
+    var oneEnded = NextSnapshotMatching(
+      service, s => s.Id == one.Id && s.State == EventPlaybackState.Completed);
+
+    // OnSourceCompleted claims the terminal flag SYNCHRONOUSLY inside this call and only then queues
+    // its gated body, so the claim is ordered even though the body is not.
+    first.RaiseCompleted(PlaybackCompletionReason.EndOfContent);
 
     var two = await service.StartAsync(SpeechRequest());
     await WaitUntilAsync(() => second.PlayCalls == 1, TimeSpan.FromSeconds(5));
 
-    first.RaiseCompleted(PlaybackCompletionReason.EndOfContent);
-
-    // Nothing to wait FOR — the assertion is that a thing does not happen. Give the completion a
-    // bounded chance to be processed by waiting on an observation the same handler would make.
-    await WaitUntilAsync(() => first.StopCalls >= 1, TimeSpan.FromSeconds(5));
+    // A REAL rendezvous with the handler: this snapshot is published on the statement AFTER the
+    // guard, so awaiting it means the guard has run. The previous version waited on
+    // "first.StopCalls >= 1", which the replacing StartAsync had already satisfied before the
+    // completion was even raised — so the negative assertions below got zero grace.
+    await oneEnded.WaitAsync(TimeSpan.FromSeconds(5));
 
     Assert.Equal(two.Id, service.Current?.Id);
     Assert.Equal(EventPlaybackState.Playing, service.Current?.State);
+
+    // ⚠ Honest about the residual. Which of the two reaches _gate first — the handler's queued body
+    // or the replacing StartAsync — is a genuine race, and nothing here can order it without a seam
+    // the production type does not have. StartAsync almost always wins because it takes a free
+    // semaphore synchronously on this thread while the handler's body has still to be dispatched to
+    // the pool. When it does not, the handler clears a slot it legitimately owns and StartAsync
+    // installs into an empty one: the assertions above still hold, but the guard was not the reason.
+    // So starvation WEAKENS this test rather than failing it, which is the safe direction
+    // (CLAUDE.md § Test Timing). What the reordering bought is that the guard is reachable at all.
+  }
+
+  [Fact]
+  public async Task AnErrorCompletionReachesTheSnapshotAsPlaybackError()
+  {
+    // The one FailureReason that is NOT an acquisition failure: the audio existed and the PLAYER
+    // failed. It is why OnSourceCompleted maps PlaybackCompletionReason.Error to Failed rather than
+    // to Stopped, and why EventPlaybackState.Failed cannot be documented as "never produced sound" —
+    // an Error completion can arrive after minutes of audio.
+    //
+    // ⚠ This whole arm was unexercised until PHN-1c's review: FakeEventSource.RaiseCompleted has
+    // always taken an Exception?, and no test passed one. On the box "PlaybackError" is what an
+    // operator sees when SoundFlow fails to start, which is a completely different diagnosis from
+    // every "Media*" reason — so it is in design/INTEGRATIONS.md's table now, and here.
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory
+    {
+      OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source)
+    };
+    using var service = CreateService(ttsFactory: tts);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    var failed = NextSnapshotWith(service, EventPlaybackState.Failed);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    source.RaiseCompleted(
+      PlaybackCompletionReason.Error, new InvalidOperationException("the device went away"));
+
+    var final = await failed.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal("PlaybackError", final.FailureReason);
+    Assert.Equal(EventPlaybackState.Failed, service.Current!.State);
+    Assert.Equal("PlaybackError", service.Current.FailureReason);
+
+    // Torn down like any other terminal transition — an Error completion is not a special case that
+    // leaves the source running.
+    Assert.Equal(1, source.DisposeCalls);
+  }
+
+  // ── ducking ─────────────────────────────────────────────────────────────
+
+  [Fact]
+  public async Task TheRequestPriorityReachesDucking_AndDefaultsToTheAttendedClass()
+  {
+    // ⚠ FakeDuckingService has recorded SetPriority since the fake was written and NOTHING ASSERTED
+    // THE RECORDING, so a Priority that never reached ducking would have been invisible — the field
+    // that decides whether a voicemail is audible over an announcement, unpinned. 6 is the
+    // attended-playback class (ADR-029 §6.1): below the 8 this system gives an event that did not
+    // state its importance, so anything that did not claim a rank still outranks a user listening
+    // to a recording.
+    var configured = new FakeDuckingService();
+    using (var service = CreateService(
+      ttsFactory: new FakeTtsFactory
+      {
+        OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(new FakeEventSource())
+      },
+      ducking: configured))
+    {
+      var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+      await service.StartAsync(SpeechRequest());
+      await playing.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    Assert.Equal(6, Assert.Single(configured.Priorities).Priority);
+
+    // And the request's own value wins when it names one — otherwise the default above would pass
+    // against an implementation that hard-coded 6 and ignored the request entirely.
+    var overridden = new FakeDuckingService();
+    using (var service = CreateService(
+      ttsFactory: new FakeTtsFactory
+      {
+        OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(new FakeEventSource())
+      },
+      ducking: overridden))
+    {
+      var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+      await service.StartAsync(SpeechRequest() with { Priority = 3 });
+      await playing.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    Assert.Equal(3, Assert.Single(overridden.Priorities).Priority);
   }
 
   // ── the TTSParameters pin ───────────────────────────────────────────────
@@ -631,9 +819,12 @@ public sealed class EventPlaybackServiceTests : IDisposable
   public async Task SpeechFillsAllFourTtsParametersFromConfiguration()
   {
     // ⚠ THE C-25 PIN, and it must assert all four. TTSFactory resolves each field as
-    // "parameters?.X ?? opts.X", and all four ?? are lifted by the null-conditional on the OBJECT —
-    // so a partially-filled TTSParameters pins whatever it left unset. Two of the four still carry
-    // that trap after TTS-9: Speed and Pitch are non-nullable with a 1.0f initializer.
+    // "parameters?.X ?? opts.X", and for Speed and Pitch the ?? is lifted by the null-conditional on
+    // the OBJECT — they are non-nullable floats with a 1.0f initializer, so a partially-filled
+    // TTSParameters pins them to the TYPE's default rather than to configuration. Engine and Voice
+    // became nullable in TTS-9 and their ?? does fire; the trap survives on exactly two of the four.
+    // (This comment said "all four" until PHN-1c's review, matching a wrong comment in
+    // AcquireSpeechAsync. design/FUTURE-WORK.md § "TTS seam" item 1 always had it right.)
     //
     // ⚠ The configured speed and pitch are deliberately NOT 1.0f. With the shipped defaults they
     // would be identical to the type's own initializers, and this test would pass against a
@@ -729,6 +920,18 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // C-24. TTSOptions.GenerationTimeoutSeconds has never had a reader in src/Radio.Infrastructure;
     // this is its first. Without it a hung synthesis parks the seam in Preparing with no route
     // that clears it.
+    //
+    // ⚠ TIMING DECLARATION (CLAUDE.md § Test Timing). Production's own CancelAfter(1 s) inside
+    // AcquireSpeechAsync has to fire inside the 15 s wait below — a wall clock racing a wall clock,
+    // which that section names as the shape not to write. Margin is 15x, and starvation pushes it
+    // toward FAILURE, the dangerous direction.
+    //
+    // Not converted to an injected TimeProvider because it is not the cheap change it looks like:
+    // CancellationTokenSource.CreateLinkedTokenSource takes no TimeProvider, so doing it properly
+    // means replacing the linked-source-plus-CancelAfter in AcquireSpeechAsync with a
+    // TimeProvider.CreateTimer, adding a constructor parameter to EventPlaybackService and wiring it
+    // through AddEventPlayback — production changes in a fix pass scoped to the review findings.
+    // Declared here so the dependency is visible rather than implied, and filed as the reason.
     var tts = new FakeTtsFactory
     {
       OnCreate = async (_, _, ct) =>
@@ -879,6 +1082,43 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
+  public async Task ASeekPastTheEndIsRefused_RatherThanEscapingAsA500()
+  {
+    // ⚠ A seek past the end used to be a bare 500. The controller range-checks only for negative,
+    // NaN and infinite, so a finite position beyond the content reaches
+    // AudioFileEventSource.SeekCoreAsync, which throws ArgumentOutOfRangeException — and Radio.API
+    // registers neither UseExceptionHandler nor AddProblemDetails, so nothing turned that into a
+    // status code a caller could read.
+    //
+    // It is most reachable exactly where the scrubber is least trustworthy: when the provider
+    // reported duration 0 (unknown), the snapshot carries null and the source's duration is a
+    // size-based ESTIMATE, so the UI's idea of "the end" and the source's do not agree. The seam
+    // catches it and answers false, which the route turns into the same clean 409 "NotSeekable" a
+    // non-seekable source already gets.
+    var source = new FakeEventSource { Duration = TimeSpan.FromSeconds(30) };
+    var tts = new FakeTtsFactory
+    {
+      OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source)
+    };
+    using var service = CreateService(ttsFactory: tts);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert.False(await service.SeekAsync(accepted.Id, TimeSpan.FromSeconds(45)));
+    Assert.Null(source.SoughtTo);
+
+    // And the playback is untouched by the refusal — it is still the current one, still playing.
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+    Assert.Equal(accepted.Id, service.Current.Id);
+
+    // A position inside the content still works, so the guard is a bound rather than a blanket.
+    Assert.True(await service.SeekAsync(accepted.Id, TimeSpan.FromSeconds(29)));
+    Assert.Equal(TimeSpan.FromSeconds(29), source.SoughtTo);
+  }
+
+  [Fact]
   public async Task PauseAndResumeAreRefusedFromTheWrongState()
   {
     // EventAudioSourceBase already no-ops these with a warning; the seam must not report success
@@ -916,17 +1156,27 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // which is where its per-play leak comes from.
     //
     // ⚠ Asserted structurally rather than by recording a mixer, and the difference is worth being
-    // exact about: this service takes no mixer at all, so there is no call to record. What this
-    // pins is that it cannot acquire one — no constructor parameter and no field can hold an
-    // IMasterMixer or a SoundFlow playback service. A grep over the file is the textual half.
+    // exact about: this service takes no mixer at all, so there is no call to record. What this pins
+    // is exactly one thing — no constructor parameter and no field, instance or static, can hold an
+    // IMasterMixer. A grep over the file is the textual half.
+    //
+    // ⚠ What it does NOT pin, because the claim would be FALSE BY DESIGN: that no SoundFlow playback
+    // service is reachable from here. This comment used to say "an IMasterMixer or a SoundFlow
+    // playback service", and only the first half was ever asserted. AudioFileEventSourceFactory —
+    // which IS a constructor parameter — holds a SoundFlowPlaybackService and hands it to every
+    // AudioFileEventSource it builds; that is precisely how the RemoteMedia arm makes sound. The
+    // invariant is about AddSource, which mutates bookkeeping and routes no audio, not about
+    // SoundFlow being absent from the graph.
     var constructor = Assert.Single(typeof(EventPlaybackService).GetConstructors());
 
     Assert.DoesNotContain(
       constructor.GetParameters(), p => typeof(IMasterMixer).IsAssignableFrom(p.ParameterType));
 
+    // Static as well as instance: a static field holding a mixer would defeat the whole check, and
+    // a `static readonly IMasterMixer` is exactly the kind of thing a hurried fix reaches for.
     var fields = typeof(EventPlaybackService).GetFields(
-      System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic
-      | System.Reflection.BindingFlags.Public);
+      System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static
+      | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
 
     Assert.DoesNotContain(fields, f => typeof(IMasterMixer).IsAssignableFrom(f.FieldType));
   }
@@ -1123,6 +1373,15 @@ internal sealed class FakeEventSource : IEventAudioSource
 
   public Task SeekAsync(TimeSpan position, CancellationToken cancellationToken = default)
   {
+    // ⚠ Mirrors AudioFileEventSource.SeekCoreAsync, which throws ArgumentOutOfRangeException for a
+    // position outside [0, _duration]. A fake that accepted ANY position made the seam's handling of
+    // a seek past the end untestable — and that path escaped as a bare 500 until PHN-1c's review,
+    // because Radio.API registers no UseExceptionHandler and no AddProblemDetails.
+    if (position < TimeSpan.Zero || position > Duration)
+    {
+      throw new ArgumentOutOfRangeException(nameof(position), "Seek position out of range");
+    }
+
     SoughtTo = position;
     return Task.CompletedTask;
   }

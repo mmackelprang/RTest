@@ -13,8 +13,11 @@ namespace Radio.Infrastructure.Audio.Services;
 /// Shaped after <see cref="AnnouncementService"/>, which is the only non-defective event path in
 /// this tree, with a state machine added. Like it, this NEVER calls IMasterMixer.AddSource: audio
 /// reaches the speakers because SoundFlowPlaybackService adds a component to the playback device's
-/// mixer itself, and AddSource only mutates a bookkeeping list. SourcesController calls it and
-/// never removes, which is where its per-play leak comes from.
+/// mixer itself, and AddSource only mutates a bookkeeping list. SourcesController.PlayFileEvent adds
+/// on every play and removes only on its OWN failure path (SourcesController.cs:730, when
+/// PlayFileAsync returns false) — so a play that SUCCEEDS leaves the entry behind for good, which is
+/// where its per-play leak comes from. "Never removes" would be the tidier sentence and it is not
+/// true.
 /// </para>
 ///
 /// <para>
@@ -45,13 +48,27 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   private readonly IDuckingService _duckingService;
   private readonly GvMediaClient _gvMediaClient;
 
+  /// <summary>
+  /// How long <see cref="Dispose"/> will block waiting for an already-playing source to release.
+  /// Bounded so a wedged source delays shutdown rather than preventing it.
+  /// </summary>
+  private static readonly TimeSpan DisposeReleaseTimeout = TimeSpan.FromSeconds(5);
+
   // Serialises the transitions that install or tear down a playback. Async because teardown awaits
   // StopDuckingAsync / StopAsync / DisposeAsync.
   //
   // ⚠ The PlaybackCompleted handler must NEVER wait on this. That event is raised from inside
   // StopCoreAsync, which this service calls while holding the gate — so a handler that waited here
   // would deadlock on a non-reentrant semaphore. The handler instead claims the terminal flag and
-  // returns; see OnSourceCompleted.
+  // returns; see OnSourceCompleted. FakeEventSource.StopAsync raises UserStopped inline for exactly
+  // this reason, so the suite exercises the re-entrancy rather than only documenting it.
+  //
+  // ⚠ DELIBERATELY NEVER DISPOSED, and that is a fix rather than an oversight. SemaphoreSlim.Dispose
+  // releases only the AvailableWaitHandle, which nothing here ever touches — but it also drops the
+  // async waiter queue WITHOUT completing it, so a task already parked in WaitAsync is stranded and
+  // its TearDownAsync never runs. Not disposing means every parked waiter is eventually released by
+  // whoever holds the gate (every holder releases in a finally), and it also means _gate.Release()
+  // cannot throw ObjectDisposedException out of an HTTP call that raced Dispose.
   private readonly SemaphoreSlim _gate = new(1, 1);
 
   // Guards the two fields below only. Never held across an await.
@@ -59,7 +76,9 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   private Playback? _current;
   private EventPlaybackSnapshot? _snapshot;
 
-  private bool _disposed;
+  // 0 or 1. An int rather than a bool because Dispose claims it with Interlocked.Exchange: a
+  // check-then-set on a bool would let two disposers both run the release path below.
+  private int _disposedFlag;
 
   /// <summary>Creates the service.</summary>
   /// <param name="logger">The logger.</param>
@@ -107,7 +126,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     EventPlaybackRequest request, CancellationToken cancellationToken = default)
   {
     ArgumentNullException.ThrowIfNull(request);
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     var gv = _gvMediaOptions.CurrentValue;
 
@@ -182,7 +201,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// <inheritdoc />
   public async Task<bool> StopAsync(string playbackId, CancellationToken cancellationToken = default)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     await _gate.WaitAsync(cancellationToken);
     try
@@ -208,10 +227,20 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   }
 
   /// <inheritdoc />
+  /// <remarks>
+  /// ⚠ ACCEPTED RACE, stated rather than locked away — and it applies equally to
+  /// <see cref="PauseAsync"/> and <see cref="ResumeAsync"/>. None of the three takes _gate, so a
+  /// stop or a replacement landing between the source.State read below and the call that follows it
+  /// reaches a source that has just been disposed, which surfaces as ObjectDisposedException and, on
+  /// the HTTP path, as a 500. The window is the few instructions between those two statements, there
+  /// is one user in front of one console, and the alternative is holding a semaphore across an HTTP
+  /// handler that can await ducking and teardown — which is worse than the imprecision it buys. The
+  /// same trade is recorded on EventPlaybackController.Transport for the 404/409 race.
+  /// </remarks>
   public async Task<bool> SeekAsync(
     string playbackId, TimeSpan position, CancellationToken cancellationToken = default)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     var playback = Resolve(playbackId);
     if (playback?.Source is not { } source || !source.IsSeekable)
@@ -222,7 +251,23 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       return false;
     }
 
-    await source.SeekAsync(position, cancellationToken);
+    try
+    {
+      await source.SeekAsync(position, cancellationToken);
+    }
+    catch (ArgumentOutOfRangeException)
+    {
+      // ⚠ A seek PAST THE END, reported the same way "this cannot scrub" already is. The controller
+      // range-checks only for negative/NaN/infinite, so a position inside [0, ∞) but beyond the
+      // content reaches AudioFileEventSource.SeekCoreAsync, which throws
+      // ArgumentOutOfRangeException — and Radio.API registers neither UseExceptionHandler nor
+      // AddProblemDetails, so that escaped as a bare 500. It is most reachable exactly where the
+      // scrubber is least trustworthy: when the provider reported duration 0 and the factory had to
+      // estimate one from file size, the UI's idea of "the end" and the source's do not agree.
+      // False here becomes a clean 409 with reason "NotSeekable", which is the honest answer.
+      return false;
+    }
+
     PublishNonTerminal(
       playback,
       source.State == AudioSourceState.Paused
@@ -234,7 +279,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// <inheritdoc />
   public async Task<bool> PauseAsync(string playbackId, CancellationToken cancellationToken = default)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     var playback = Resolve(playbackId);
     if (playback?.Source is not { } source || source.State != AudioSourceState.Playing)
@@ -250,7 +295,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// <inheritdoc />
   public async Task<bool> ResumeAsync(string playbackId, CancellationToken cancellationToken = default)
   {
-    ObjectDisposedException.ThrowIf(_disposed, this);
+    ObjectDisposedException.ThrowIf(IsDisposed, this);
 
     var playback = Resolve(playbackId);
     if (playback?.Source is not { } source || source.State != AudioSourceState.Paused)
@@ -263,24 +308,41 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     return true;
   }
 
-  /// <summary>Cancels anything in flight and releases the gate.</summary>
+  /// <summary>True once <see cref="Dispose"/> has claimed this instance.</summary>
+  private bool IsDisposed => Volatile.Read(ref _disposedFlag) != 0;
+
+  /// <summary>Cancels anything in flight and releases a source that is already playing.</summary>
   /// <remarks>
-  /// Cancel rather than tear down: Dispose is synchronous, teardown is not, and the acquisition
-  /// task's own catch handles the cancellation. What this guarantees is that no fetch or synthesis
-  /// keeps running after the container has gone.
+  /// Two different jobs, because there are two different states a playback can be in.
   ///
-  /// ⚠ A background completion or failure that reaches _gate after this has disposed it observes
-  /// an ObjectDisposedException, which both of those paths catch by name. The transport methods
-  /// cannot: ObjectDisposedException.ThrowIf rejects them before they touch the gate, which is the
-  /// correct answer for a call made against a disposed service.
+  /// While ACQUISITION is still in flight, cancelling is the whole answer: the acquisition task's
+  /// own catch runs, and <see cref="Playback.TryAdopt"/> refuses whatever the fetch or the synthesis
+  /// then produces, so that path disposes it.
+  ///
+  /// Once acquisition has RETURNED, nobody else will ever run teardown for that playback —
+  /// AcquireAndPlayAsync has finished, and no completion is coming from a source the container is
+  /// about to abandon. So this claims the source itself and releases it here. Until PHN-1c's review
+  /// that case leaked: StopDuckingAsync and DisposeAsync never ran, and on the RemoteMedia arm an
+  /// AudioFileEventSource's FileStream over the cached recording was left to the finalizer, which on
+  /// Windows also blocks GvMediaCache from evicting that entry.
+  ///
+  /// ⚠ The release BLOCKS, and is bounded at <see cref="DisposeReleaseTimeout"/>. Dispose is
+  /// synchronous and the release is not; Task.Run puts it on the thread pool so it cannot deadlock
+  /// against a captured synchronization context, and the bound means a wedged source delays shutdown
+  /// rather than preventing it. No snapshot is published — there is nothing left to publish to.
+  ///
+  /// ⚠ _gate is NOT disposed; see its declaration. What this guarantees is only that no fetch or
+  /// synthesis keeps running after the container has gone, and that an adopted source is released. A
+  /// gated operation already in flight is allowed to finish rather than being stranded, and a
+  /// transport call made AFTER this is rejected by ObjectDisposedException.ThrowIf before it ever
+  /// reaches the gate.
   /// </remarks>
   public void Dispose()
   {
-    if (_disposed)
+    if (Interlocked.Exchange(ref _disposedFlag, 1) != 0)
     {
       return;
     }
-    _disposed = true;
 
     Playback? playback;
     lock (_stateLock)
@@ -289,8 +351,37 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       _current = null;
     }
 
-    playback?.Cancel();
-    _gate.Dispose();
+    if (playback is null)
+    {
+      return;
+    }
+
+    // Claimed so a completion racing this cannot also tear down. Cancel first regardless: that is
+    // what stops an acquisition that has not returned yet.
+    playback.ClaimTerminal();
+    playback.Cancel();
+
+    if (playback.ClaimSourceForRelease() is not { } source)
+    {
+      // Either acquisition never handed one over — in which case that claim has just closed
+      // adoption, so the acquisition path disposes what it is about to produce — or another
+      // terminal path released it already.
+      return;
+    }
+
+    try
+    {
+      if (!Task.Run(() => ReleaseSourceAsync(playback, source)).Wait(DisposeReleaseTimeout))
+      {
+        _logger.LogWarning(
+          "Attended playback {Id} did not release within {Timeout}; abandoning it at shutdown",
+          playback.Id, DisposeReleaseTimeout);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error releasing attended playback {Id} at shutdown", playback.Id);
+    }
   }
 
   // ── acquisition ─────────────────────────────────────────────────────────
@@ -357,10 +448,9 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       playback.ClaimTerminal();
       _logger.LogDebug("Attended playback {Id} cancelled before it could play", playback.Id);
 
-      // And release whatever it is holding. Dispose() cancels WITHOUT claiming the flag and without
-      // tearing anything down - it is synchronous and teardown is not - so this is the only path
-      // that releases a source adopted just before the container went away. Once-only through
-      // ClaimSourceForRelease, so a concurrent teardown under the gate cannot double-release.
+      // And release whatever it is holding. Once-only through ClaimSourceForRelease, so a concurrent
+      // teardown under the gate — or Dispose, which claims the same way — cannot double-release, and
+      // whichever of them gets there second finds null and does nothing.
       await TearDownAsync(playback);
     }
     catch (GvMediaUnavailableException ex)
@@ -404,13 +494,14 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     var tts = _ttsOptions.CurrentValue;
 
     // ⚠ ALL FOUR fields, filled explicitly from configuration. TTSFactory resolves each one as
-    // "parameters?.X ?? opts.X", and every one of those four ?? is lifted by the null-conditional
-    // on the OBJECT — so they fire only when parameters itself is null. TWO of the four fields
-    // still carry the trap that follows from that: Speed and Pitch are non-nullable with a 1.0f
-    // initializer, so any non-null TTSParameters silently pins them to the TYPE's default rather
-    // than to configuration. Engine and Voice are nullable now and do fall back correctly, so this
-    // filling them is belt-and-braces rather than load-bearing — but passing null instead would be
-    // correct only until VoiceId is set, which is the trap re-armed, so it is never passed.
+    // "parameters?.X ?? opts.X", and TWO of those four ?? — Speed and Pitch — are lifted by the
+    // null-conditional on the OBJECT, so they fire only when parameters itself is null. TWO of the
+    // four fields still carry the trap that follows from that: Speed and Pitch are non-nullable with
+    // a 1.0f initializer, so any non-null TTSParameters silently pins them to the TYPE's default
+    // rather than to configuration. Engine and Voice are nullable since TTS-9 and their ?? DOES
+    // fire, so filling them here is belt-and-braces rather than load-bearing — but passing null
+    // instead would be correct only until VoiceId is set, which is the trap re-armed, so it is never
+    // passed. See design/FUTURE-WORK.md § "TTS seam" item 1.
     var parameters = new TTSParameters
     {
       Engine = ResolveEngine(request.Engine, tts.DefaultEngine),
@@ -548,12 +639,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
           _gate.Release();
         }
       }
-      catch (ObjectDisposedException)
-      {
-        // The container went away underneath us. Nothing to publish to.
-      }
       catch (Exception ex)
       {
+        // ⚠ There used to be an ObjectDisposedException arm here, describing a container that went
+        // away underneath this task. It cannot happen any more and so it is gone: _gate is
+        // deliberately never disposed, so a waiter parked here is released by whoever holds the gate
+        // rather than being stranded. This general arm stays because the task is fire-and-forget and
+        // an escaping exception would be unobserved.
         _logger.LogWarning(ex, "Error finalising attended playback {Id}", playback.Id);
       }
     }, CancellationToken.None);
@@ -592,16 +684,22 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         _gate.Release();
       }
     }
-    catch (ObjectDisposedException)
+    catch (Exception publishFailure)
     {
-      // Disposed mid-failure. Nothing to publish to.
+      // ⚠ Same change as OnSourceCompleted's: the ObjectDisposedException arm that used to sit here
+      // described a disposed _gate, which is no longer a state that exists. Kept as a general arm
+      // because FailAsync is reached from a fire-and-forget task, where an escaping exception is
+      // unobserved rather than fatal-but-visible.
+      _logger.LogWarning(
+        publishFailure, "Error publishing the failure of attended playback {Id}", playback.Id);
     }
   }
 
   /// <summary>
-  /// Stops ducking, stops the source and disposes it. Every step is independently guarded: this
-  /// runs on the failure path too, where any of them may already be in a bad state, and a throw
-  /// here would leave the seam holding a playback it can never clear.
+  /// Cancels the playback and releases whatever source it owns, through
+  /// <see cref="ReleaseSourceAsync"/>. Every step there is independently guarded: this runs on the
+  /// failure path too, where any of them may already be in a bad state, and a throw here would leave
+  /// the seam holding a playback it can never clear.
   /// </summary>
   /// <remarks>
   /// The caller must have claimed the terminal flag first. That is what keeps source.StopAsync's
@@ -619,6 +717,19 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       return;
     }
 
+    await ReleaseSourceAsync(playback, source);
+  }
+
+  /// <summary>
+  /// Stops ducking, stops the source and disposes it. Every step is independently guarded.
+  /// </summary>
+  /// <remarks>
+  /// Split out of <see cref="TearDownAsync"/> so <see cref="Dispose"/> can run the same three steps
+  /// against a source it claimed itself. The caller has already taken ownership through
+  /// <see cref="Playback.ClaimSourceForRelease"/>, so this is reached at most once per source.
+  /// </remarks>
+  private async Task ReleaseSourceAsync(Playback playback, IEventAudioSource source)
+  {
     try { await _duckingService.StopDuckingAsync(source); }
     catch (Exception ex) { _logger.LogWarning(ex, "Error stopping ducking for {Id}", playback.Id); }
 
@@ -744,6 +855,15 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// Nothing subscribes to PlaybackChanged in this PR — PR 5 is what connects it to /hubs/audio. It
   /// is raised now because the IEventPlaybackService contract requires it and because a broadcast
   /// bolted on later would be a second place transitions are decided.
+  ///
+  /// ⚠ FOR PR 5, BEFORE YOU SUBSCRIBE. Every terminal call site of this method — StartAsync's
+  /// replacement arm, StopAsync, OnSourceCompleted and FailAsync — invokes it WHILE HOLDING _gate,
+  /// so a subscriber runs on a thread that already owns a non-reentrant semaphore. A hub broadcast
+  /// that only serialises and sends is fine. A subscriber that re-enters this seam — StopAsync,
+  /// StartAsync, or anything that awaits something which does — DEADLOCKS, in exactly the way
+  /// OnSourceCompleted is written to avoid. This is flagged rather than fixed here: restructuring
+  /// the publishes to happen outside the gate is a real change to the ordering guarantees above, and
+  /// it belongs to the PR that first has a subscriber to test it with.
   /// </remarks>
   private void Publish(EventPlaybackSnapshot snapshot)
   {
@@ -774,6 +894,19 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// <summary>One in-flight attended playback. At most one exists at a time (ADR-029 D6 §8.1).</summary>
   private sealed class Playback
   {
+    /// <summary>
+    /// The playback's own cancellation, cancelled by every terminal path.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ DELIBERATELY NEVER DISPOSED, and the reason is not laziness. AcquireAndPlayAsync holds this
+    /// token by value for the whole of acquisition, and AcquireSpeechAsync builds a LINKED source
+    /// from it — CancellationTokenSource.CreateLinkedTokenSource registers a callback on the source,
+    /// which throws ObjectDisposedException if the source has been disposed. Disposing here would
+    /// therefore trade a leaked registration list for an exception on a background task, at a moment
+    /// (shutdown, or a stop landing mid-synthesis) when there is nothing left to report it to. The
+    /// cost of not disposing is one finalizable registration list per playback, on a seam that holds
+    /// at most one playback at a time.
+    /// </remarks>
     private readonly CancellationTokenSource _cts = new();
     private readonly object _sourceLock = new();
     private IEventAudioSource? _source;
@@ -824,9 +957,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     /// false and the acquisition path disposes what it is holding, and if this gets there first
     /// teardown finds a non-null source and releases it.
     ///
-    /// The token is checked as well as the terminal flag because Dispose() cancels WITHOUT claiming
-    /// the flag - it is synchronous and teardown is not - so a check written against the flag alone
-    /// would still leak at container shutdown.
+    /// The token is checked as well as the terminal flag because the flag is not the only signal a
+    /// playback has ended: cancellation can arrive on its own. ⚠ Scoped precisely, because the
+    /// earlier wording ("a check written against the flag alone would still leak at container
+    /// shutdown") claimed more than this method can deliver: everything here is about the window
+    /// where acquisition is STILL IN FLIGHT. A source that has already been adopted is past this
+    /// method entirely, and releasing THAT one at shutdown is <see cref="Dispose"/>'s job — which is
+    /// why Dispose claims the source itself rather than relying on this refusal.
     /// </remarks>
     public bool TryAdopt(IEventAudioSource source, CancellationToken token)
     {
@@ -859,9 +996,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       }
     }
 
-    public void Cancel()
-    {
-      try { _cts.Cancel(); } catch (ObjectDisposedException) { /* already cancelled and disposed */ }
-    }
+    /// <summary>Cancels the playback's token. Idempotent; safe on an already-cancelled playback.</summary>
+    /// <remarks>
+    /// ⚠ No ObjectDisposedException guard, deliberately. There used to be one, commented "already
+    /// cancelled and disposed" — a state nothing in this file can produce, because <c>_cts</c> is
+    /// never disposed. A catch for an impossible exception reads as evidence that the exception is
+    /// possible, which is the way the next reader gets misled.
+    /// </remarks>
+    public void Cancel() => _cts.Cancel();
   }
 }
