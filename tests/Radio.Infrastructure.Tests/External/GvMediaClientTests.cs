@@ -228,7 +228,12 @@ public sealed class GvMediaClientTests : IDisposable
   }
 
   [Theory]
-  [InlineData(HttpStatusCode.NotFound, GvMediaFailure.NotFound, true)]
+  // ⚠ NotFound was `true` here until PR 3. It changed deliberately, not because the test was
+  // inconvenient: RotaryPhone's GvVoicemailController.GetAudio answers 404 when its voicemail LIST
+  // call fails, which is the Google Voice auth blackout, so a 404 from this upstream is ambiguous
+  // between "gone" and "try again in a few minutes". See GvMediaUnavailableException.IsPermanent.
+  // The REASON is unchanged and still distinct; only the retryability claim moved.
+  [InlineData(HttpStatusCode.NotFound, GvMediaFailure.NotFound, false)]
   [InlineData(HttpStatusCode.Unauthorized, GvMediaFailure.Unauthorized, false)]
   [InlineData(HttpStatusCode.Forbidden, GvMediaFailure.Unauthorized, false)]
   [InlineData(HttpStatusCode.BadGateway, GvMediaFailure.Upstream, false)]
@@ -437,6 +442,24 @@ public sealed class GvMediaClientTests : IDisposable
       () => GvMediaClient.BuildVoicemailUri("http://radio:5004", "..", "gvm:test"));
 
     Assert.Equal(GvMediaFailure.Transport, ex.Reason);
+  }
+
+  [Theory]
+  [InlineData(GvMediaFailure.Disabled, true)]
+  [InlineData(GvMediaFailure.NotFound, false)]
+  [InlineData(GvMediaFailure.Unauthorized, false)]
+  [InlineData(GvMediaFailure.Upstream, false)]
+  [InlineData(GvMediaFailure.Timeout, false)]
+  [InlineData(GvMediaFailure.Transport, false)]
+  [InlineData(GvMediaFailure.TooLarge, false)]
+  public void IsPermanentIsTrueOnlyForDisabled(GvMediaFailure reason, bool expected)
+  {
+    // NotFound is false on purpose and this is the assertion that says so. RotaryPhone's
+    // GvVoicemailController.GetAudio answers 404 when its voicemail LIST call fails, which is the
+    // GV auth blackout - so a 404 here is ambiguous between "gone" and "try again", and this side
+    // cannot tell. If RotaryPhone ever propagates Succeeded so the route answers 502 during a
+    // blackout, THIS test is what should change, deliberately, alongside the doc that explains it.
+    Assert.Equal(expected, new GvMediaUnavailableException(reason, "masked").IsPermanent);
   }
 }
 
