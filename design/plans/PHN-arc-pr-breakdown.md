@@ -20,6 +20,17 @@ first means building the seam twice, and the second build inherits the first's s
 
 ## The PRs
 
+⚠ **AMENDED 2026-09-04 — the table below is SEVEN rows and the arc is now EIGHT. It is kept as the
+original sequencing and is not re-cut here.** Owner decision **`D28`** (punch list §7) put the
+mirror-case queue into PR 5, and the `PHN-1e` planning pass then split PR 5 in two: **PR 5 =
+`PHN-1e`** (server-owned state and the three stop conditions, row 5 below, unchanged) and **PR 5b =
+`PHN-1f`** (the mirror-case queue, plus the `DuckingStateChangedEventArgs` change that makes its wake
+correct — a new row with no equivalent below). The split is the same argument this document opens
+with, applied one level down: `PHN-1f` is the narrow, deep change to a shared audio service, and
+burying it inside PR 5's plumbing is the thing *"Why a breakdown at all"* exists to prevent.
+**The current sequence lives in [`docs/BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md)
+§ *Dependency / ordering notes*** — read that, not this table, for what remains.
+
 | # | Scope | ADR | Risk | Est. |
 |---|---|---|---|---|
 | **1** | **Core contracts, no behaviour change.** `IEventPlaybackService` + `EventPlaybackRequest` (closed discriminated set, asymmetric arms). Extend `IEventAudioSource` with `Position` / `IsSeekable` / `SeekAsync` / `PauseAsync` / `ResumeAsync`, implemented on `AudioFileEventSource` and the TTS source. | D1, D2, D4 | **Low** - D4 lifts a contract `IPrimaryAudioSource` already declares and `FilePlayerAudioSource` already implements. Not new API design. | 1-2 d |
