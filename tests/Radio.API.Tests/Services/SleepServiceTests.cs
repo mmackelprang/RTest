@@ -19,7 +19,8 @@ namespace Radio.API.Tests.Services;
 public class SleepServiceTests
 {
   private static (SleepService service, Mock<IClientProxy> allClients) CreateService(
-    IAudioManager? audioManager = null)
+    IAudioManager? audioManager = null,
+    IEventPlaybackService? eventPlayback = null)
   {
     var hubContextMock = new Mock<IHubContext<AudioStateHub>>();
     var clientsMock = new Mock<IHubClients>();
@@ -30,7 +31,8 @@ public class SleepServiceTests
     var service = new SleepService(
       NullLogger<SleepService>.Instance,
       hubContextMock.Object,
-      audioManager);
+      audioManager,
+      eventPlayback);
 
     return (service, allClientsMock);
   }
@@ -267,5 +269,116 @@ public class SleepServiceTests
         It.IsAny<object?[]>(),
         It.IsAny<CancellationToken>()),
       Times.Never);
+  }
+
+  // ─── /sleep stops attended playback (ADR-029 D7 §7.5, closing §14 Q8) ────
+
+  private static EventPlaybackSnapshot SnapshotIn(EventPlaybackState state, string id = "evp-1") =>
+    new(id, EventPlaybackKind.RemoteMedia, "Voicemail from Jane", state,
+      TimeSpan.FromSeconds(29), TimeSpan.Zero, DateTimeOffset.UtcNow, null);
+
+  [Fact]
+  public async Task EnteringSleepStopsAPlayingAttendedPlayback()
+  {
+    // /sleep runs under EmptyLayout and offers no transport, so attended playback may not exist
+    // there. ⚠ And this is a STOP, not a reliance on the mute below it: WakeAsync restores
+    // _wasMutedBeforeSleep, so a muted-but-still-playing voicemail would become audible again
+    // mid-word the instant somebody touched the panel in a dark room.
+    var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Playing) };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.EnterSleepAsync();
+
+    Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+  }
+
+  [Theory]
+  [InlineData(EventPlaybackState.Completed)]
+  [InlineData(EventPlaybackState.Stopped)]
+  [InlineData(EventPlaybackState.Failed)]
+  public async Task EnteringSleepDoesNotStopAPlaybackThatHasAlreadyEnded(EventPlaybackState state)
+  {
+    // ⚠ A non-null Current is NOT the same as audio in the room. IEventPlaybackService.Current
+    // RETAINS the last snapshot after a playback ends — that surface is the only place an acquisition
+    // failure can be read from — so the STATE decides, not the null check. A stop here would be a
+    // pointless 404 against every sleep after any voicemail the console has ever played.
+    var playback = new StoppableEventPlayback { Current = SnapshotIn(state) };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.EnterSleepAsync();
+
+    Assert.Empty(playback.StopIds);
+  }
+
+  [Fact]
+  public async Task EnteringSleepStillSleepsWhenTheStopThrows()
+  {
+    // Sleep is not allowed to fail because a voicemail would not stop. The pause, the mute and the
+    // SleepStateChanged broadcast all still have to happen.
+    var audio = new Mock<IAudioManager>();
+    audio.SetupGet(m => m.IsMuted).Returns(false);
+    var playback = new StoppableEventPlayback
+    {
+      Current = SnapshotIn(EventPlaybackState.Playing),
+      Throws = new InvalidOperationException("the seam is wedged")
+    };
+
+    var (service, allClients) = CreateService(
+      audioManager: audio.Object, eventPlayback: playback);
+
+    await service.EnterSleepAsync();
+
+    Assert.True(service.IsSleeping);
+    audio.VerifySet(m => m.IsMuted = true, Times.Once);
+    allClients.Verify(
+      c => c.SendCoreAsync(
+        "SleepStateChanged",
+        It.Is<object?[]>(args => MatchesBool(args, true)),
+        It.IsAny<CancellationToken>()),
+      Times.Once);
+  }
+
+  /// <summary>
+  /// The attended-playback seam reduced to what <c>EnterSleepAsync</c> touches: a retained
+  /// <see cref="Current"/> and a <see cref="StopAsync"/> that records, or throws.
+  /// </summary>
+  private sealed class StoppableEventPlayback : IEventPlaybackService
+  {
+    public EventPlaybackSnapshot? Current { get; set; }
+
+    public Exception? Throws { get; set; }
+
+    public List<string> StopIds { get; } = [];
+
+    public event EventHandler<EventPlaybackSnapshot>? PlaybackChanged
+    {
+      add { }
+      remove { }
+    }
+
+    public Task<EventPlaybackSnapshot> StartAsync(
+      EventPlaybackRequest request, CancellationToken cancellationToken = default)
+      => throw new NotSupportedException("Sleep never starts a playback.");
+
+    public Task<bool> StopAsync(string playbackId, CancellationToken cancellationToken = default)
+    {
+      if (Throws is { } ex)
+      {
+        throw ex;
+      }
+
+      StopIds.Add(playbackId);
+      return Task.FromResult(true);
+    }
+
+    public Task<bool> SeekAsync(
+      string playbackId, TimeSpan position, CancellationToken cancellationToken = default)
+      => Task.FromResult(false);
+
+    public Task<bool> PauseAsync(string playbackId, CancellationToken cancellationToken = default)
+      => Task.FromResult(false);
+
+    public Task<bool> ResumeAsync(string playbackId, CancellationToken cancellationToken = default)
+      => Task.FromResult(false);
   }
 }
