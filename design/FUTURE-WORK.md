@@ -307,6 +307,17 @@ as a broken settings page. It is also the same defect class `ENC-8a` and `TTS-10
 alone *looks* like a complete fix while being a quarter of one — an argument that now applies to the
 remaining half.
 
+⚠ **The new `/api/audio/events` route is NOT a way to reach this, and that is deliberate rather than
+lucky.** `PHN-1c` shipped the first user-reachable caller that passes a non-null `TTSParameters`, and
+`EventPlaybackService.AcquireSpeechAsync` fills **all four** fields explicitly from
+`IOptionsMonitor<TTSOptions>` for exactly this reason — pinned by
+`SpeechFillsAllFourTtsParametersFromConfiguration`, which was falsified during that PR (omitting
+`Speed`/`Pitch` makes it fail with `Expected 1.14999998, Actual 1`). ⚠ That test only has teeth because its
+fixture configures **non-default** speed and pitch; the shipped `1.0f` defaults are identical to the type's
+own initializers, so a fixture using them would pass against a partially-filled instance and prove nothing.
+Keep the non-default values if this test is ever rewritten. The live callers that *can* still hit the trap
+are `SourcesController.PlayTTSEvent` and anything else constructing a partial `TTSParameters`.
+
 ### 2. `TTSFactory._cachedEngines` is never invalidated, so a key added in the UI needs a restart
 
 `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs:32,60-61`. `_cachedEngines ??=

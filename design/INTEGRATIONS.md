@@ -764,8 +764,10 @@ Since 2026-08-18 the Web UI is **not** the only thing in this repo that leans on
 ### Server-side GV media fetch and cache (`GvMedia`) — ADR-029 D3/D8
 
 Since `PHN-1b` the API can fetch a voicemail recording **itself**, into a bounded on-disk cache,
-rather than handing the browser an absolute URL to fetch. Nothing yet calls it — there is no route
-until `PHN-1c` — but the configuration block, the client and the cache ship now.
+rather than handing the browser an absolute URL to fetch. Since `PHN-1c` there is a route family that
+uses it — `/api/audio/events`, below — so the fetch, the cache and the playback seam are all in place.
+⚠ **`GvMedia:Enabled` still ships `false`**, so no fetch happens on a stock box until it is turned on;
+`Radio.Web` also still plays voicemail through its own `<audio>` element until `PHN-2` retires it.
 
 **Why it exists, and why the cache is not an optimisation.** GV auth on the bridge is dead roughly
 **9 minutes in every 20** (punch list `XR-3`), and `/api/gvbridge/status` reports
@@ -804,15 +806,61 @@ written — playback needs a local path — but **never served back**, and a sho
 fetch. Choosing `0` re-exposes replay to the blackout above.
 
 **Failure taxonomy.** `GvMediaUnavailableException.Reason` distinguishes `Disabled`, `NotFound`
-(404, permanent), `Unauthorized` (401/403 — most likely an `AuthKey` divergence), `Upstream` (5xx,
-usually the blackout, retryable), `Timeout`, `Transport` and `TooLarge`. Collapsing these is the
-shared root of the open `GV-6` and `GV-8` rows; do not.
+(404 — ⚠ **retryable, not permanent**; see the diagnosis table below), `Unauthorized` (401/403 —
+most likely an `AuthKey` divergence), `Upstream` (5xx, usually the blackout, retryable), `Timeout`,
+`Transport` and `TooLarge`. Collapsing these is the shared root of the open `GV-6` and `GV-8` rows;
+do not. `IsPermanent` is true for **`Disabled` only** — it is the one reason that is permanent by
+construction on this side, and no clock changes it.
 
 **Logging.** A raw voicemail id reaches **no** log message, log argument or exception message. Ids
 are masked as a hash prefix (`gvm:1a2b3c4d`) — the first 8 hex of the same SHA-256 that names the
 cache file, so a log line and a file on disk correlate while leaking nothing. A `***1234` suffix
 mask is right for a phone number and wrong here: nobody recognises a voicemail id by its last four
 characters, so a suffix would leak for zero operator benefit.
+
+#### The attended-playback route family (`PHN-1c`, ADR-029 §3.3)
+
+```
+POST   /api/audio/events             → 202 EventPlaybackSnapshot
+GET    /api/audio/events/current     → 200 EventPlaybackSnapshot | 204
+DELETE /api/audio/events/{id}        → 204 | 404
+POST   /api/audio/events/{id}/seek   → 200 | 404 | 409   { positionSeconds }
+POST   /api/audio/events/{id}/pause  → 200 | 404 | 409
+POST   /api/audio/events/{id}/resume → 200 | 404 | 409
+```
+
+Two arms, one mechanism: `kind: "Speech"` carries the literal utterance, `kind: "RemoteMedia"` carries a
+`(mediaKind, mediaId, durationSeconds)` **reference**. ⚠ **There is no URL field and there must never be
+one** — the server builds the fetch URL from its own configuration, which is what keeps this from being an
+SSRF primitive.
+
+⚠ **`POST` answers `202`, not `200`, and that changes where failures appear.** Both arms have an
+acquisition phase — an HTTP fetch, or a TTS synthesis — before any audio exists, so the response describes
+an *accepted* playback in `Preparing`. **An acquisition failure is therefore not a status code**: it arrives
+later as `state: "Failed"` with a named `failureReason` on the snapshot, and `GET /current` is where a
+caller reads it. The one exception is `GvMedia:Enabled` being false, which is knowable without touching the
+network and is answered synchronously as `409`.
+
+⚠ **`GET /current` retains the last snapshot after a playback ends**, until a new one replaces it. `204`
+means *nothing has been started since boot*, not *nothing is playing* — read `state` to tell those apart.
+That is required by the `202` shape: an acquisition failure has no response left to carry it, so this is
+the surface that carries it instead.
+
+**`failureReason` — the operator diagnosis table.** Seven reasons, deliberately not collapsed:
+
+| `failureReason` | Means | Retry? | What to do |
+|---|---|---|---|
+| `MediaNotFound` | gvbridge answered 404 | **Yes** | ⚠ **Does NOT mean the recording is gone.** RotaryPhone's `GetAudio` resolves through `FindNodeAsync`, which does not check its voicemail list's `Succeeded` flag — so a failed authenticated list returns an *empty* set and the route answers 404. That is what a **Google Voice auth blackout** looks like from here (~9 min in every 20). Wait a few minutes and retry before concluding anything. |
+| `MediaUnauthorized` | gvbridge answered 401/403 | No | **`GvMedia:AuthKey` and RotaryPhone's `InterServiceAuthKey` differ.** There are **two** `appsettings.Production.json` files to edit — one under `api/`, one under `web/` — and **neither is re-seeded by the deploy**. See the runbook below. This is the only signal for that mismatch; the boot check cannot detect it. |
+| `MediaUpstream` | any other non-2xx, 5xx included | Yes | Usually the GV auth blackout. Retry. |
+| `MediaTimeout` | exceeded `GvMedia:FetchTimeoutSeconds` | Yes | Check the bridge is up and the LAN is healthy. |
+| `MediaTransport` | DNS/connection/TLS failure below HTTP | Yes | `GvMedia:BaseUrl` wrong, or gvbridge down. |
+| `MediaTooLarge` | body exceeded the size bound | No | Bound is `MaxPlaybackSeconds` × 32 000 B/s. A real voicemail should never hit it. |
+| `SpeechSynthesisFailed` | TTS did not produce audio | Depends | No engine/voice configured (`TTS:DefaultEngine` and `DefaultVoice` ship **empty** since `TTS-9` and throw naming the valid set), a missing API key, or synthesis exceeded `TTS:GenerationTimeoutSeconds`. |
+
+**Before turning `GvMedia:Enabled` on**, check whether RotaryPhone's `InterServiceAuthKey` is set. Its gate
+ships **default-off**, and while it is off `GvMedia:AuthKey` may stay empty — but if it *has* been set, every
+fetch returns 401 and surfaces as `MediaUnauthorized` until the two match, across the two files below.
 
 #### ⚠ Runbook: setting `AuthKey` on a live box is a hand edit, twice
 
