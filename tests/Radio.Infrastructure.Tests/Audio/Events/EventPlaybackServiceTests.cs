@@ -1865,10 +1865,23 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // The disarm lives in ReleaseSourceAsync, the one funnel that stops and disposes a source. If it
     // were missing, a ten-second voicemail would leave a five-minute timer alive — and on this box a
     // timer per playback that never fires is the shape trap 5 of the arc breakdown exists to refuse.
-    // Observable consequence, and the reason this assertion is on StopCalls rather than on a state:
-    // the playback is already Completed, so a late cap would change no snapshot; it would only touch
-    // the source a second time.
+    //
+    // ⚠ THE ASSERTION IS ON THE LOG, AND THAT IS NOT A STYLISTIC CHOICE — it is the only thing here
+    // that can actually fail. The obvious assertion, which plan PHN-1e Task 8 specifies and which an
+    // earlier draft of this test used, is that source.StopCalls does not move. It does not move
+    // EITHER WAY: measured by deleting playback.DisarmDurationCap() from ReleaseSourceAsync and
+    // re-running, 62/62 still passed. The cap timer fires, dispatches StopAsync(id), and StopAsync
+    // finds a playback whose terminal transition ClaimTerminal has already admitted — so it returns
+    // false without ever reaching the source. A StopCalls assertion is therefore satisfied by
+    // ClaimTerminal's idempotence, which is a DIFFERENT property that a different test already pins,
+    // and it would have reported this disarm as covered while covering nothing.
+    //
+    // The cap callback's LogWarning is emitted unconditionally at the top of the callback, before the
+    // dispatch and before any idempotence can absorb it, so it is the one observable that exists if
+    // and only if the timer was still armed. FakeTimeProvider.Advance runs due callbacks
+    // synchronously on the calling thread, so the message is in the sink by the time it returns.
     var time = new FakeTimeProvider();
+    var logs = new CapturingLoggerProvider();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
     using var service = CreateService(
@@ -1877,6 +1890,7 @@ public sealed class EventPlaybackServiceTests : IDisposable
       {
         Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
       },
+      logs: logs,
       timeProvider: time);
 
     var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
@@ -1890,6 +1904,12 @@ public sealed class EventPlaybackServiceTests : IDisposable
     var stopsAtEnd = source.StopCalls;
     time.Advance(TimeSpan.FromMinutes(10));
 
+    Assert.DoesNotContain(
+      logs.Messages,
+      m => m.Contains("reached GvMedia:MaxPlaybackSeconds", StringComparison.Ordinal));
+
+    // Kept, but understood for what they are: true whether or not the disarm happened, and here to
+    // show the natural end itself still behaved. Neither can fail on the disarm's account.
     Assert.Equal(stopsAtEnd, source.StopCalls);
     Assert.Equal(EventPlaybackState.Completed, service.Current!.State);
   }
