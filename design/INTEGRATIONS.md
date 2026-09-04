@@ -821,13 +821,20 @@ characters, so a suffix would leak for zero operator benefit.
 #### The attended-playback route family (`PHN-1c`, ADR-029 §3.3)
 
 ```
-POST   /api/audio/events             → 202 EventPlaybackSnapshot
+POST   /api/audio/events             → 202 EventPlaybackSnapshot | 400 | 409
 GET    /api/audio/events/current     → 200 EventPlaybackSnapshot | 204
-DELETE /api/audio/events/{id}        → 204 | 404
-POST   /api/audio/events/{id}/seek   → 200 | 404 | 409   { positionSeconds }
+DELETE /api/audio/events/{id}        → 204 | 404 | 409
+POST   /api/audio/events/{id}/seek   → 200 | 400 | 404 | 409   { positionSeconds }
 POST   /api/audio/events/{id}/pause  → 200 | 404 | 409
 POST   /api/audio/events/{id}/resume → 200 | 404 | 409
 ```
+
+⚠ **`404` and `409` mean different things and every route uses the same rule.** `404` is reserved for an
+id `GET /current` has **never** described. An id that has just completed or failed is still an id
+`/current` describes — it simply cannot pause, scrub or stop any more — so it gets `409` with a named
+reason (`NotPlaying`, `NotPaused`, `NotSeekable`, `NotStoppable`). `seek` additionally answers `400`
+(`BadPosition`) for a negative, NaN or infinite `positionSeconds`; a *finite* position past the end of
+the content is a `409 NotSeekable`, not a `400` and not a `500`.
 
 Two arms, one mechanism: `kind: "Speech"` carries the literal utterance, `kind: "RemoteMedia"` carries a
 `(mediaKind, mediaId, durationSeconds)` **reference**. ⚠ **There is no URL field and there must never be
@@ -846,7 +853,10 @@ means *nothing has been started since boot*, not *nothing is playing* — read `
 That is required by the `202` shape: an acquisition failure has no response left to carry it, so this is
 the surface that carries it instead.
 
-**`failureReason` — the operator diagnosis table.** Seven reasons, deliberately not collapsed:
+**`failureReason` — the operator diagnosis table.** Nine reasons reach a snapshot, deliberately not
+collapsed. ⚠ **Not all nine are acquisition failures**, and the last two are the ones that send an
+operator to a different place entirely — `MediaAcquisitionFailed` is the generic arm on the media path,
+and `PlaybackError` means the audio *was* acquired and the player failed:
 
 | `failureReason` | Means | Retry? | What to do |
 |---|---|---|---|
@@ -857,6 +867,13 @@ the surface that carries it instead.
 | `MediaTransport` | DNS/connection/TLS failure below HTTP | Yes | `GvMedia:BaseUrl` wrong, or gvbridge down. |
 | `MediaTooLarge` | body exceeded the size bound | No | Bound is `MaxPlaybackSeconds` × 32 000 B/s. A real voicemail should never hit it. |
 | `SpeechSynthesisFailed` | TTS did not produce audio | Depends | No engine/voice configured (`TTS:DefaultEngine` and `DefaultVoice` ship **empty** since `TTS-9` and throw naming the valid set), a missing API key, or synthesis exceeded `TTS:GenerationTimeoutSeconds`. |
+| `MediaAcquisitionFailed` | the RemoteMedia arm threw something that was **not** a `GvMediaUnavailableException` | Maybe | The generic arm, so the log line is the diagnosis: `journalctl -u radio-api` carries a Warning naming the `evp-` id. Most likely a local problem rather than a bridge one — `GvMedia:CacheDirectory` unwritable or not owned by `mmack`, a full disk, or the cached file failing to open. |
+| `PlaybackError` | the source reported `PlaybackCompletionReason.Error` | Maybe | ⚠ **The audio was acquired — `GvMedia` is not where to look.** This is SoundFlow failing to start or continue playback, and it is what an operator sees when the output device is gone or `radio-api` has lost PipeWire (the service must run as `mmack` with `XDG_RUNTIME_DIR=/run/user/1000`). ⚠ It can also arrive **after minutes of audio**, so `state: "Failed"` does not imply nothing was heard. |
+
+⚠ **A tenth string, `MediaDisabled`, exists and is normally unreachable.** `GvMedia:Enabled` being false
+is knowable without the network and is answered synchronously as a `409` on `POST`; the only way it
+reaches a snapshot is if the flag is turned off in the window between accepting a playback and fetching
+its media.
 
 **Before turning `GvMedia:Enabled` on**, check whether RotaryPhone's `InterServiceAuthKey` is set. Its gate
 ships **default-off**, and while it is off `GvMedia:AuthKey` may stay empty — but if it *has* been set, every
