@@ -146,6 +146,11 @@ public class EventPlaybackController : ControllerBase
     string id, [FromBody] EventPlaybackSeekDto dto, CancellationToken cancellationToken)
   {
     // Range-checked before TimeSpan.FromSeconds, which throws on NaN and on infinity.
+    //
+    // ⚠ Only the negative arm is reachable through a JSON body: System.Text.Json refuses to read a
+    // bare NaN or Infinity without JsonNumberHandling.AllowNamedFloatingPointLiterals, so the model
+    // binder rejects those before this method runs. The other two arms are defence for a caller that
+    // is not the model binder, and they cost one comparison each.
     if (dto.PositionSeconds < 0 || double.IsNaN(dto.PositionSeconds)
         || double.IsInfinity(dto.PositionSeconds))
     {
