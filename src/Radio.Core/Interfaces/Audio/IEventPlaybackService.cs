@@ -90,6 +90,15 @@ public interface IEventPlaybackService
   /// The one in-flight attended playback, or null. There is one audio engine and one set of
   /// speakers, so this state is global rather than per-caller (ADR-029 D6).
   /// </summary>
+  /// <remarks>
+  /// ⚠ "In flight" is not the whole of it, and the difference is load-bearing for the 202 shape.
+  /// The LAST snapshot is RETAINED after a playback ends — Completed, Stopped or Failed — until a
+  /// new playback replaces it. It has to be: <see cref="StartAsync"/> answers before any audio
+  /// exists, so an acquisition failure has no response left to carry it, and this is the surface a
+  /// caller re-reads to find out what happened (ADR-029 §8.1's re-attach path). So null means
+  /// "nothing has been started yet", not "nothing is playing" — <see cref="EventPlaybackState"/>
+  /// on the snapshot is what says whether audio is being produced.
+  /// </remarks>
   EventPlaybackSnapshot? Current { get; }
 
   /// <summary>

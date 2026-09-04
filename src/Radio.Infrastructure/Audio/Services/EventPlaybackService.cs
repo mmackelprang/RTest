@@ -154,9 +154,12 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       // ⚠ Published BEFORE the acquisition task is started, and the order is not cosmetic.
       // AcquireAndPlayAsync does not take _gate, so holding it here does not serialise it: with a
       // fast acquisition — a cache hit, or a synthesis that returns immediately — the background
-      // task can publish Playing first, and since both publishes take _stateLock the LATER writer
-      // wins. Current would then report Preparing for a playback that is already producing audio,
-      // and a subscriber would see Playing followed by Preparing: a transition that never happened.
+      // task could publish Playing first, and since both publishes take _stateLock the LATER
+      // writer wins. Current would then report Preparing for a playback already producing audio,
+      // and a subscriber would see Playing followed by Preparing: a transition that never
+      // happened. The window is only the instructions between queueing the work item and
+      // publishing, and was not reproduced on a dev machine; publishing first closes it anyway,
+      // because it costs nothing and the alternative depends on that window staying small.
       Publish(accepted);
 
       // ⚠ playback.Token, NOT cancellationToken. cancellationToken is the CONTROLLER's, which on
