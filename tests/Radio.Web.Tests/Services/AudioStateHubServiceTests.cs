@@ -139,6 +139,32 @@ public class AudioStateHubServiceTests : IAsyncLifetime
   }
 
   [Fact]
+  public void AudioStateHubService_ExposesEventPlaybackChanged()
+  {
+    // ADR-029 D6 §8.1. Typed, like NowPlayingChanged and unlike PlaybackStateChanged: the payload IS
+    // the state, so a subscriber that re-fetched it over REST would add a round trip to a push that
+    // already carries everything.
+    //
+    // ⚠ WHAT THIS DOES NOT PROVE, said plainly because the test's name would otherwise imply it.
+    // It does NOT show that a delivered "EventPlaybackChanged" message reaches this event with its
+    // payload intact. No test in this assembly can: the fixture runs on OfflineHubTransport, the
+    // connection is never started, and there is no in-tree precedent for reflecting into
+    // HubConnection's handler table to inject one — writing that harness for a single test would be
+    // testing SignalR rather than testing us. Plan PHN-1e Task 10d asked for the delivery assertion;
+    // this is the honest subset of it, matching AudioStateHubService_SupportsAllEventTypes above.
+    //
+    // End-to-end delivery — and with it the C-47 question of whether the payload survives the REAL
+    // JsonHubProtocol — is settled on the appliance instead, per the plan's §2.2 item 1. That is
+    // recorded as U1 and it is not a gap this file can close.
+    Func<EventPlaybackSnapshotDto?, Task> handler = _ => Task.CompletedTask;
+
+    _service.EventPlaybackChanged += handler;
+    _service.EventPlaybackChanged -= handler;
+
+    Assert.NotNull(_service);
+  }
+
+  [Fact]
   public async Task AudioStateHubService_StartAsync_HandlesConnectionFailure()
   {
     // Act & Assert - Should handle connection failures gracefully
