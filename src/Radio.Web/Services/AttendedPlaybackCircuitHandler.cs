@@ -9,11 +9,17 @@ namespace Radio.Web.Services;
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⚠ It fires on "no circuits remain", NOT on "the circuit that started it left". The original design
-/// matched a departing circuit against an owner token; ADR-029 ⟨A1·4⟩ deleted both, because a kiosk
-/// refresh drops one circuit and opens another, so an owner-matched handler would stop audio the user
-/// is actively watching some minutes later for no visible reason. There is one audio engine and one
-/// set of speakers, so there is no owner (§7.4).
+/// ⚠ It fires on "no circuits remain", NOT on "the circuit that started it left". ADR-029 ⟨A1·4⟩
+/// deleted the owner token because there is one audio engine and one set of speakers, so there is
+/// no owner (§7.4).
+/// </para>
+/// <para>
+/// ⚠ THAT DOES NOT MAKE A REFRESH SAFE, and the wording here used to claim it did. Measured on the
+/// appliance 2026-09-04: reloading the only browser goes 1 → 0 → 1 — CLOSE THEN OPEN — and this
+/// handler stops the playback at the zero, ~0.4 s before the replacement circuit arrives. With two
+/// tabs it goes 2 → 1 → 2 and nothing is stopped, which is why the multi-client case looks fine and
+/// the single-kiosk case does not. On the one box this ships to, the last-circuit rule has the SAME
+/// failure the owner-token rule had. Plan PHN-1e U3 named this and said "stop and re-plan".
 /// </para>
 /// <para>
 /// ⚠ SINGLETON, deliberately. CircuitHandler instances are resolved from each circuit's scope, so a
@@ -24,19 +30,17 @@ namespace Radio.Web.Services;
 /// is the thing that must be shared, not the handler.
 /// </para>
 /// <para>
-/// ⚠ This is the WEAKEST of the three defences and must not be trusted as the guarantee. Blazor
-/// Server closes a circuit not at tab close but after the disconnect retention window, which THIS
-/// APPLICATION CONFIGURES TO 10 MINUTES (<c>Program.cs</c>,
-/// <c>DisconnectedCircuitRetentionPeriod</c>) rather than leaving at the framework's 3 — so this is a
-/// ten-minute-latency mechanism, not a three-minute one.
+/// ⚠ This is the WEAKEST of the three defences and must not be trusted as the guarantee.
+/// <c>DisconnectedCircuitRetentionPeriod</c> (<c>Program.cs</c>, 10 minutes) is NOT what gates this.
+/// It covers UNEXPECTED disconnects — a network blip, a killed browser. A graceful close (reload,
+/// navigate away from the app, tab close) disposes the circuit at once and <c>OnCircuitClosedAsync</c>
+/// runs then. Zero-latency on the path that actually happens; ten-minute only on an unexpected drop.
 /// </para>
 /// <para>
-/// ⚠ And follow that number through, because the consequence is sharper than the latency alone:
-/// <c>GvMedia:MaxPlaybackSeconds</c> ships at 300 s, the retention window is 600 s, and 300 &lt; 600,
-/// so at shipped configuration the max-duration cap (§7.1) ALWAYS fires before this backstop can.
-/// This is still correct to build — §7.3 requires it, it is defence in depth, and it becomes live the
-/// moment either number moves — but a reader must not believe it is what stops a runaway voicemail.
-/// The cap is.
+/// ⚠ Do not reason about ordering from 300 &lt; 600. Different origins — the cap runs from playback
+/// start, the retention window from disconnect — and on the graceful-close path there is no window at
+/// all: measured, this backstop fires on a single-browser reload, immediately, long before the 300 s
+/// cap.
 /// </para>
 /// <para>
 /// A Web singleton cannot inject a typed HttpClient, so the API client is resolved through a scope
