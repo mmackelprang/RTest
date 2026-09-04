@@ -150,8 +150,13 @@ public class DuckingServiceTests
   }
 
   [Fact]
-  public async Task StartDuckingAsync_MultipleEvents_DoesNotDuckAgain()
+  public async Task StartDuckingAsync_MultipleEvents_DoesNotChangeTheDuckLevel_ButAnnouncesEachSource()
   {
+    // ⚠ WAS StartDuckingAsync_MultipleEvents_DoesNotDuckAgain, asserting stateChangeCount == 1.
+    // This is the SECOND tripwire for ADR-029 D5 and it lives outside
+    // DuckingServiceCharacterizationTests, which is the only one the PHN-1a/1b/1c handoffs named. The
+    // name changed with the assertion: the service still does not duck again — the level is unmoved —
+    // but it now announces the second source.
     var service = CreateService();
     var eventSource1 = CreateMockEventSource("source1");
     var eventSource2 = CreateMockEventSource("source2");
@@ -162,11 +167,12 @@ public class DuckingServiceTests
     service.DuckingStateChanged += (_, _) => stateChangeCount++;
 
     await service.StartDuckingAsync(eventSource1.Object);
+    var levelAfterFirst = service.CurrentDuckLevel;
     await service.StartDuckingAsync(eventSource2.Object);
 
-    // Only one state change event (the first one)
-    Assert.Equal(1, stateChangeCount);
+    Assert.Equal(2, stateChangeCount);
     Assert.Equal(2, service.ActiveEventCount);
+    Assert.Equal(levelAfterFirst, service.CurrentDuckLevel);
   }
 
   [Fact]
@@ -511,5 +517,36 @@ public class DuckingServiceTests
     await service.StopDuckingAsync(eventSource.Object);
 
     Assert.Equal(0, service.ActiveEventCount);
+  }
+
+  [Fact]
+  public async Task StartDuckingAsync_SurvivesASubscriberThatThrows()
+  {
+    // PR 4 adds the first DuckingStateChanged subscriber that does real work, so this is the first
+    // moment a subscriber CAN throw. Unguarded, the exception propagates out of StartDuckingAsync into
+    // AnnouncementService.AnnounceAsync, which catches it and cleans up — so ducking is restored and
+    // nothing is stuck, but the announcement never plays AND POST /api/notifications/announce still
+    // answers 200. A fault in the attended seam would silence the unattended one, invisibly.
+    var service = CreateService();
+    var eventSource = CreateMockEventSource();
+    var reached = false;
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    service.DuckingStateChanged += (_, _) => throw new InvalidOperationException("subscriber is broken");
+    service.DuckingStateChanged += (_, _) => reached = true;
+
+    await service.StartDuckingAsync(eventSource.Object);
+
+    Assert.True(service.IsDucking);
+    Assert.Equal(1, service.ActiveEventCount);
+    // A later subscriber does NOT still run: .NET stops the invocation list at the first handler that
+    // throws, and a single try around Invoke catches the exception without resuming it. The assertion
+    // is written against that honest behaviour rather than a stronger one — overclaiming in a test is
+    // the same failure class as overclaiming in a comment. PR 4 has exactly two subscribers and does
+    // not need per-handler isolation; if a future PR does, that is a GetInvocationList loop and its own
+    // decision.
+    Assert.False(reached, "documented: a throwing handler ends the invocation list; the guard stops the "
+      + "exception escaping StartDuckingAsync, it does not resume the list");
   }
 }
