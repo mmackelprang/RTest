@@ -1,8 +1,8 @@
 # ADR: GV media as ducked event playback — one seam for voicemail audio and text-to-speech (supersedes ADR-022 D4)
 
 - **ID:** ADR-029 (see `design/DECISION-LOG.md` for the one-line pointer)
-- **Status:** Proposed — **Amendment 1 applied 2026-08-03** (owner answers + Designer round). Ready for Planner.
-- **Date:** 2026-08-03 (amended same day)
+- **Status:** Proposed — **Amendment 1 applied 2026-08-03** (owner answers + Designer round); **Amendment 2 applied 2026-09-04** (D7 §7.3 and §7.5 falsified on the appliance, and owner decision **`D30`** answers the first — see §16). Ready for Planner; **`PHN-1e` is unblocked with one required code change** (§16.8).
+- **Date:** 2026-08-03 (amended same day; **amended again 2026-09-04**)
 - **Author:** Architect
 - **Supersedes:** **ADR-022 Decision D4 in full** (voicemail audio via a native `<audio>` element pointed at `radio:5004`). **Narrowly amends ADR-022 D1** — D1's boundary rule still governs the GV *read* path (Web → `radio:5004` direct); it does **not** govern the GV *audio* path, whose stated premise ("no audio-engine involvement") the owner has now reversed. Everything else in ADR-022, ADR-024 and ADR-028 stands.
 - **Scope:** `Radio.Web` + `Radio.API` + the `Radio.Core`/`Radio.Infrastructure` audio layer. RadioConsole still holds **no** Google credentials and never talks to Google; voicemail bytes are fetched from RotaryPhone's `gvbridge` proxy on `radio:5004` exactly as today — only the *fetcher* moves from the browser to Radio.API.
@@ -17,14 +17,18 @@ The original ADR was written before the owner answered §14 and before the Desig
 
 | # | What changed | Driver | Sections |
 |---|---|---|---|
-| **A1·1** | **D10 is new, and D-speech is reversed.** Message speech is no longer pinned to local `espeak-ng`. It **follows the currently selected TTS engine**, resolved as `TTS:DefaultEngine`. **`GvMedia:SpeechEngine` is deleted, not redefined.** Three engines are in play, not two; engine-unavailable is a stated failure, never a silent substitution. | **Owner:** *"the TTS engine in the radio console supports both Google and Azure TTS, so make sure the text messaging uses the currently selected TTS engine."* | §9 (rewritten), §2, §4, §10.2, §13, §14 Q2 |
-| **A1·2** | **Voicemail cache stays on.** §14 Q1 answered: bounded on-disk cache at `./data/gvmedia/` is accepted; voicemail audio at rest is an accepted cost, not an open question. | Owner | §5.3, §14 Q1 |
-| **A1·3** | **Initial-sender is out of scope — the console is reply-only.** New-recipient compose is removed rather than redesigned. One real consequence in the send path. | **Owner:** *"Being the initial text sender can remain out of scope for the radio console."* | §11.5 (new), §11.4, §12 item 10 |
-| **A1·4** | **D7's navigate-away rule is flipped: playback survives navigation.** The Designer accepted §12 item 6's invitation and supplied the persistent affordance the rule was waiting for. Flipping it forced **three** further changes — the circuit backstop is re-scoped, `OwnerToken` is deleted, and `/sleep` needs its own rule. | Designer handoff §Answers item 6 | §7 (rewritten), §4, §8.1, §2 |
-| **A1·5** | **§6.1's priority anchor is replaced.** A live check falsified the anchor: `PhoneIntegration:Enabled` has been `false` since the commit that introduced it and has never been flipped. The number (8) survives; the reasoning that justified it does not. | Live check settling §14 Q5 | §6.1, §14 Q5 |
-| **A1·6** | **Two §1.2 facts confirmed and one §3.1 claim corrected.** The binary-ducking / dead-priority finding was independently confirmed and `design/INTEGRATIONS.md:464` now says so in the doc itself. §3.1's caller list was wrong in one particular. | Independent confirmation | §1.2 correction 2, §3.1 |
+| **A2·1** | **§7.3's circuit-lifetime premise is inverted.** A graceful close (reload, navigate away, tab close) releases the circuit **immediately** — the retention window covers only non-graceful drops. A single-browser reload measures `1 → 0 → 1`, close **before** open, and the rule stops audio at the zero: a 49 s recording died 7 s in. §7.3 describes the opposite in every particular, and sells the rule on *"surviving refreshes"*, which it does not do. | Measured on the box at `dd8e85ec`; refresh run twice | §7.3 (banner), §16.1, §16.2, §15 |
+| **A2·2** | **§7.5's `/sleep` rule never reaches the idle timer — the case it was written for.** `idle-dimmer.js` navigates with `window.location.href` and deliberately does **not** call `SetSleepAsync`, so `IsSleeping` is false on that path and a rule hooked to `EnterSleepAsync` cannot fire. §7.5's cited JS→Blazor path is doubly not taken: not by idle, and `enterSleep` has **zero callers** in the tracked tree. | Comment-accuracy review, confirmed in code | §7.5 (banner), §16.4, §16.5 |
+| **A2·3** | **The corrected trigger already existed.** `ENC-6`'s `ISleepService.IsSleepScreenVisible` — reported by `Sleep.razor` on first render — covers every way of *reaching that route*, including the idle timer. The rule now fires on **two** edges: the screen report *and* `EnterSleepAsync` (reachable with no browser at all). | Verified in tree | §16.5, §14 Q8, §14 Q12 |
+| **A2·4** ⭐ | **OWNER DECISION `D30` — a reload SHOULD stop the audio.** *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."* **§7.3's rule therefore stands; only its reasoning falls.** ⚠ **The Architect recommendation that preceded this — delete the rule, because every firing is a false positive — is WITHDRAWN**: that argument was correct against §7.3's stated goal, and `D30` changes the goal. No grace period, no circuit-identity matching, no survival mechanism, and none to be proposed later. | **Owner**, 2026-09-04 | §16.1 (Error 3), §16.3, §16.7, §16.8, §7.3 (banner) |
+| **A2·5** | **Two questions added, neither blocking.** **§14 Q11** — could a *physical* stop close Q8 at the root? **§14 Q12** — `IsSleepScreenVisible` is last-writer-wins across clients. *(Numbered `§14 Qn` throughout: the Designer handoff already has a `Q11` and a `Q12`, and this ADR cites that document's questions by bare number.)* | Architect | §14, §16.3, §16.5 |
 
-**What did *not* change, stated so it is not re-litigated:** the one-seam decision (D1), the asymmetric request arms (D2), server-side fetch (D3), the transport lift onto `IEventAudioSource` (D4), the anchor-not-tick broadcast model (D6), the auth-seam closure (D8), and the one-to-one reconciler constraint (D9). The Designer's round touched presentation and lifecycle; it left the seam alone.
+**What did *not* change:** the seam (D1), the request arms (D2), server-side fetch (D3), the transport
+lift (D4), priority and exclusivity (D5), the broadcast model (D6), **§7.1's max-duration cap**, §7.2's
+explicit stop, §7.4's no-ownership rule, the auth seam (D8), the reconciler constraint (D9) and the
+engine decision (D10). ⚠ **Precisely on the cap, because a looser phrasing here was caught in review:**
+its *mechanism* was exercised on the box at a temporarily-lowered 20 s value; **the shipped 300 was not
+exercised, and the enforcement is not on `main` at all** — it ships with `PHN-1e`. See §16.3.
 
 ---
 
@@ -366,6 +370,17 @@ The old rule was one way to satisfy that principle (remove the playback); the ch
 
 ### 7.3 Circuit teardown — re-scoped from "owner circuit" to "last circuit" ⟨A1·4⟩
 
+> ⛔ **⟨A2·1⟩ ⟨A2·4⟩ FALSIFIED ON THE APPLIANCE 2026-09-04 — READ §16.1, §16.2 AND §16.3 BEFORE ACTING
+> ON ANYTHING BELOW.** ⭐ **The RULE below survives — owner decision `D30` wants a reload to stop the
+> audio — but the REASONING given for it does not, and §7.3 sells it on "surviving refreshes", which is
+> both false and the opposite of what the owner asked for.**
+> Its framework premise is inverted (a graceful close releases the circuit **immediately**; the
+> retention window covers only non-graceful drops) and its refresh ordering is backwards (measured
+> `1 → 0 → 1`, close before open), so the worked example below is wrong in every particular and the
+> "minutes-latency" self-description is wrong by a factor of ~1500. The text is preserved
+> **unmodified, errors included**, because it is the reasoning a reader would otherwise trust.
+> **§16.3 records `D30` and re-derives every firing path against it.**
+
 `Radio.Web` has **no `CircuitHandler` today** (verified: zero matches across `src/`). One must be added — net-new, small, but real.
 
 **The original design was: `OnCircuitClosedAsync` stops any attended playback whose `OwnerToken` matches the departing circuit. Under the flip that is no longer merely weak — it is wrong**, and the old navigate-away rule was masking it:
@@ -385,6 +400,13 @@ The old rule was one way to satisfy that principle (remove the playback); the ch
 This is *simpler* than what it replaces, and the flip is what made it available: the old §7.4 needed an initiator because the initiator's navigation was a stop trigger. With no such trigger, the concept has no work left to do.
 
 ### 7.5 ⚠ One route on this box has no topbar — and the console navigates itself there ⟨A1·4 — new⟩
+
+> ⚠ **⟨A2·2⟩ ⟨A2·3⟩ THE RULE IS RIGHT; ITS TRIGGER IS WRONG — READ §16.4 AND §16.5.** The claim below that
+> *"`idle-dimmer.js` drives the same path through `OnJsSleepRequested`"* is false: the idle timer
+> navigates with `window.location.href` and never calls `SetSleepAsync`, so `SleepService.IsSleeping`
+> is **false** on the idle path and a rule hooked to `EnterSleepAsync` never fires for the case this
+> section was written about. §16.5 replaces the trigger and keeps the decision. Text below preserved
+> **unmodified**.
 
 The flip rests on the Designer's premise that the chip lives in `.topbar-primary`, *"which is on every route."* **That is true of every route under `MainLayout`, and `/sleep` is not one of them:**
 
@@ -765,9 +787,14 @@ Designer was working the transport UI, the play-button affordance and the canned
 
 **Added by Amendment 1:**
 
-8. **Sleep semantics ⟨A1·4⟩ — does entering `/sleep` stop attended playback, or does the sleep surface grow a stop control?** §7.5 takes the safe position (**stop**) because `/sleep` runs under `EmptyLayout` and has no topbar, and the console navigates itself there on an idle timer. The alternative is a control on the sleep surface, which is the sleep arc's to design (it is the handoff's own **Q9**, explicitly deferred). **What is no longer available is leaving it unanswered** — under the old navigate-away rule this resolved itself; under the flip it does not. — **owner / Designer (sleep arc).**
+8. ⚠ **AMENDED BY A2 — the answer stands, the trigger was wrong. See §16.4-§16.6.** §7.5 chose "stop" and that is unchanged; what §16.5 corrects is that the implemented trigger (`EnterSleepAsync`) never fires on the idle timer, which is the case this question was raised about. The rule now fires on the `SetSleepScreenVisible(true)` edge **as well as** `EnterSleepAsync`. The relaxation below is still available and still belongs to the sleep arc — and **§14 Q11** now offers a second one. *Original text preserved:* **Sleep semantics ⟨A1·4⟩ — does entering `/sleep` stop attended playback, or does the sleep surface grow a stop control?** §7.5 takes the safe position (**stop**) because `/sleep` runs under `EmptyLayout` and has no topbar, and the console navigates itself there on an idle timer. The alternative is a control on the sleep surface, which is the sleep arc's to design (it is the handoff's own **Q9**, explicitly deferred). **What is no longer available is leaving it unanswered** — under the old navigate-away rule this resolved itself; under the flip it does not. — **owner / Designer (sleep arc).**
 9. **`TTSPreferences` is dead ⟨A1·1⟩.** `LastEngine`/`LastVoice`/`LastPitch`/`LastSpeed` have no readers and no writers, and the class binds the same `"TTS"` section as `TTSOptions` (`TTSPreferences.cs:12` == `TTSOptions.cs:12`) with none of its keys present in `appsettings.json` — so `PreferencesPersistenceService:99` writes back compile-time defaults every save period. This ADR does not consume it. Deleting it is outside this arc but should not be forgotten; it is a live trap for exactly the "currently selected engine" question §9.2 had to answer. — **future; worth a queue row.**
 10. **Which gate does the speech pre-flight use ⟨A1·1⟩?** `AvailableEngines` is cached for the process lifetime (`TTSFactory.cs:54`), so an engine fixed from System Config → Secrets stays advertised as unavailable until `radio-api` restarts. Either invalidate `_cachedEngines` on an `IOptionsMonitor<TTSSecrets>` change, or drop the pre-flight and let synthesis be the only gate. **Both acceptable; a cached pre-flight that blocks a now-working engine is not.** Related and worth fixing while in the file: the advertise test and the generate guard disagree for Google, and both miss unsubstituted `${secret:` tags for Azure (§9.4 defect (a)). — **Planner.**
+
+**Added by Amendment 2 ⟨A2⟩:**
+
+11. ⚠ **Could a *physical* control stop attended playback, and would that close Q8 at the root?** ⟨A2·4⟩ The appliance has rotary encoders, and `RotaryEncoderActionRouter` already drives `ISleepService` with no browser involved. §7.2's principle is *"Attended playback may not exist on a surface that offers no way to stop it"* — a physical stop satisfies it on **every** surface at once, including `/sleep`, including a panel with no client attached at all. ⚠ **This no longer bears on the refresh question, which `D30` closed** (§16.3); it bears on Q8 and on `/sleep`, and it would dissolve Q8 rather than answering it. **Not in this arc; it changes no `PHN-1e` work either way.** — **owner / Designer (sleep arc + encoder arc).**
+12. ⚠ **`IsSleepScreenVisible` is last-writer-wins across clients — should the `/sleep` rule key on "*a* client has no transport" or "*no* client has one"?** ⟨A2·4⟩ §16.5 item 3 has the full analysis. The hole is **inherited from `ENC-6`, not created here**, and it is narrow: for it to bite, one client must have started the playback while another idled for thirty minutes, inside a 300 s cap. The safe default (**stop**) is recommended and is what §7.5's own reasoning already chose. Raised so it is a decision rather than an accident. — **owner / Designer.**
 
 ---
 
@@ -784,13 +811,13 @@ Designer was working the transport UI, the play-button affordance and the canned
 - The seek capability ADR-022 fought to preserve **is preserved**, on the correct side of the wire.
 - **⟨A1·1⟩ Engine selection lives in exactly one place.** Message speech, announcements and the events path all resolve to `TTS:DefaultEngine`; there is no GV-specific engine key to drift out of sync, and the owner's privacy posture is a consequence of one visible setting rather than of a hidden default.
 - **⟨A1·4⟩ Playback survives navigation**, which is the right behaviour for a wall panel: the sound is in the room, not in the page. Incidental navigation on a touch kiosk no longer silences the console — and the stop control is now reachable from **more** places than before, not fewer.
-- **⟨A1·4⟩ The lifecycle model got simpler, not more complex.** The flip deleted an ownership concept (`OwnerToken`, §7.4) and replaced a circuit-identity match with an integer, while covering a refresh case the original design would have broken.
+- **⟨A1·4⟩ The lifecycle model got simpler, not more complex.** The flip deleted an ownership concept (`OwnerToken`, §7.4) and replaced a circuit-identity match with an integer, while covering a refresh case the original design would have broken. ⚠ **A2: the last clause is false — the integer breaks the refresh case too, and faster (§16.1). The simplification claim survives and A2 extends it: §16.3's Option 3 deletes the integer's policy as well.**
 
 **Bad / costs:**
 - **`IEventAudioSource` is a Core contract change** (five new members). Bounded — two implementers — and the signatures are copied from `IPrimaryAudioSource` rather than designed, but it is the widest blast radius here.
 - **`DuckingService.StartDuckingAsync` must raise `DuckingStateChanged` unconditionally** (§6.3). Safe for the single existing subscriber, but it is a behavioural change in a shared audio service.
 - **Radio.API gains HttpClient + DelegatingHandler infrastructure it does not have today** (§5.1), and **the auth key is duplicated** across two services' config (§10.2), with a deploy-time sync burden and a 401-only failure mode.
-- **A `CircuitHandler` is net-new** in `Radio.Web`, and it is the *weakest* of the three stop mechanisms (§7.3) — worth having, not worth trusting. ⟨A1·4⟩ It now also owns a live-circuit count, and getting that count wrong fails in the bad direction (audio that stops for no reason, minutes later).
+- ⚠ **CORRECTED BY A2 — the latency is immediate, not "minutes later", and the rule is stronger than "not worth trusting".** Measured: a single-browser reload stops attended playback in under half a second (§16.1). ⭐ **Owner decision `D30` makes that the wanted behaviour**, so the rule is promoted from weakest-of-three to *the mechanism that implements `D30`* in this box's resting configuration, with §7.1's cap as the backstop behind it (§16.3). *An intermediate draft of this note said the rule had "no true-positive path" and should stop carrying a policy; `D30` withdrew that.* *Original text preserved:* **A `CircuitHandler` is net-new** in `Radio.Web`, and it is the *weakest* of the three stop mechanisms (§7.3) — worth having, not worth trusting. ⟨A1·4⟩ It now also owns a live-circuit count, and getting that count wrong fails in the bad direction (audio that stops for no reason, minutes later).
 - **Private voicemail audio now sits at rest on disk** (§5.3) where previously it only streamed through a browser. ⟨A1·2⟩ Owner-accepted; no longer an open question.
 - **⟨A1·1⟩ Private SMS bodies now reach a third-party TTS API** whenever the selected engine is a cloud one — which it is as deployed (`TTS:DefaultEngine = "Google"`). Owner-accepted and explicit (§9.1). The console's *Google Voice* posture is unchanged: it still holds no GV credentials and never talks to Google Voice.
 - **⟨A1·1⟩ Speaking a text now requires the internet** whenever the selection is a cloud engine, and there is **no cache on the speech path** (`TTSFactory.cs:92-103` computes a cache key and then never uses it), so every play is a fresh round trip. A cached voicemail, by contrast, plays offline. Two features on one screen with opposite network dependencies.
@@ -808,5 +835,611 @@ Designer was working the transport UI, the play-button affordance and the canned
 ### Handoff ⟨A1 — updated⟩
 
 - **Designer** — §12 is **consumed**; the authoritative presentation spec is now `docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`. Three things come back the other way and should be folded into it: **§7.5** (`/sleep` has no topbar and therefore no chip — playback stops there unless the sleep surface gains a control), **§8.1** (`GET /api/audio/events/current` is the re-attach path; `AudioStateStore` must be seeded from it so the chip is right on first paint), and **§9.6** (the engine reversal — the tonal-mismatch reasoning in §Answers item 8 is withdrawn, and §B4's "synthesis is on-box, no network round trip" is now factually wrong).
-- **Planner** consumes: §3-§8 for the component list and API shape, §4.1 (`DurationSeconds` passthrough — a correctness fix, not decoration), §3.3 (the two-id hazard in `AudioFileEventSource`), §6.3 (the one required `DuckingService` change), §10.2 for config, §11.3 for the one-to-one reconciler constraint and its regression test — **which lands inside GV-5, since `OutboundSmsReconciler` and `GvCounterparty` do not exist yet** — and §14 Q3/Q4 as **verification tasks to run before sequencing**. **Added by Amendment 1:** **§9.2-§9.4** (resolve the engine explicitly from `TTS:DefaultEngine`; the `TTSParameters.Engine` non-nullable trap at `ITTSFactory.cs:87` will silently pin ESpeak if you pass a partially-filled `TTSParameters`; engine-unavailable is a `Failed` snapshot, never a fallback), **§7.3** (the backstop is a circuit **count**, not a circuit identity — getting this wrong stops audio minutes after a refresh), **§7.5** (the `/sleep` rule), **§8.1** (seed the store from `/current`), **§11.5** (reply-only: `toNumber` **stays**, `GvCounterparty` becomes its sole source, and ADR-028's thread-identity fix demotes to defensive), and **§14 Q10** (pick a pre-flight gate).
+- **Planner** consumes: §3-§8 for the component list and API shape, §4.1 (`DurationSeconds` passthrough — a correctness fix, not decoration), §3.3 (the two-id hazard in `AudioFileEventSource`), §6.3 (the one required `DuckingService` change), §10.2 for config, §11.3 for the one-to-one reconciler constraint and its regression test — **which lands inside GV-5, since `OutboundSmsReconciler` and `GvCounterparty` do not exist yet** — and §14 Q3/Q4 as **verification tasks to run before sequencing**. **Added by Amendment 1:** **§9.2-§9.4** (resolve the engine explicitly from `TTS:DefaultEngine`; the `TTSParameters.Engine` non-nullable trap at `ITTSFactory.cs:87` will silently pin ESpeak if you pass a partially-filled `TTSParameters`; engine-unavailable is a `Failed` snapshot, never a fallback), **§7.3** ⚠ **SUPERSEDED BY §16.1-§16.3 — do not implement the last-circuit stop; §16.3 is an open owner decision** *(original: "the backstop is a circuit **count**, not a circuit identity — getting this wrong stops audio minutes after a refresh")*, **§7.5** (the `/sleep` rule — ⚠ **trigger corrected by §16.5**: hook the `SetSleepScreenVisible(true)` edge as well as `EnterSleepAsync`, or the idle timer is never covered), **§8.1** (seed the store from `/current`), **§11.5** (reply-only: `toNumber` **stays**, `GvCounterparty` becomes its sole source, and ADR-028's thread-identity fix demotes to defensive), and **§14 Q10** (pick a pre-flight gate).
 - **Owner** — §14 Q1, Q2 and Q5 are **closed**. One new decision is routed back: **§14 Q8**, sleep semantics, jointly with the sleep arc's Designer.
+- **Owner ⟨A2 — 2026-09-04⟩ — ANSWERED, and `PHN-1e` is unblocked.** **`D30`:** *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."* §7.3's rule therefore **stands as built** and the Architect recommendation to delete it is **withdrawn** (§16.3). ⚠ Two things still route back, neither blocking: **§14 Q11** (a physical stop, which would dissolve **§14 Q8** at the root) and **§14 Q12** (the multi-client hole in `IsSleepScreenVisible`; recommended default is *stop*). ⚠ And **`docs/HANDOFF-GA-PUNCH-LIST.md` §7 still needs the `D30` register entry — this ADR does not write it** (§16.8).
+
+---
+
+## 16. Amendment 2 — D7's two client-side stop conditions were falsified on the appliance ⟨A2 — 2026-09-04⟩
+
+> **Status of this section:** it **amends D7 only.** D1-D6 and D8-D10 are untouched, and nothing in
+> §§1-6, §8-§13 changes. **§7.1's max-duration cap is untouched and is now carrying more weight, not
+> less.**
+>
+> **Trigger:** `PHN-1e` ([#561](https://github.com/mmackelprang/RTest/pull/561)) implemented D7's three
+> stop conditions, deployed them to `radio`, and measured them. Two of the three work. The third
+> reproduces, immediately, the exact failure §7.3 was rewritten to remove — and a comment-accuracy
+> review found that §7.5 never reaches the case it was written for. The Builder stopped rather than
+> merging, which is what the plan's own U3 instructed. Both findings are ADR-level.
+>
+> ⚠ **Terminology, because it matters for every claim below.** Where §16 says *"as built"*, *"the
+> shipped handler"* or *"the branch"*, it means **`feat/phn-1e-server-owned-state`, which is NOT
+> merged.** `main` has no `CircuitHandler`, no duration-cap enforcement and no `/sleep` stop rule.
+> Nothing described here is running on the appliance in a merged build, and nothing a user can reach
+> is affected today — `GvMedia:Enabled` is `false` and the defect is reachable only by posting to
+> `/api/audio/events` directly.
+
+### 16.0 Why this is an amendment and not a superseding ADR
+
+**Decision: Amendment 2, in place, with the falsified text preserved verbatim.**
+
+An ADR that supersedes §7.3 and §7.5 was considered and rejected. Four reasons, in order of weight:
+
+1. **The unit being corrected is two subsections of one decision inside a ten-decision ADR that is
+   otherwise correct and actively shipping.** Counted rather than asserted: **seven** rows in
+   `docs/BUILDER_QUEUE.md` and **six** plan files cite ADR-029, and the citation is **by section** —
+   the `PHN-1e` row alone cites `D7 §7.1`, `§7.3` and `§7.5`. Superseding two subsections of D7 would
+   leave those pointing into a document marked superseded, and a reader would need two files to know
+   what D7 says. *(An earlier draft of this bullet claimed "eight queue rows, five plan files"; an
+   adversarial check produced neither number, and the corrected counts are above. Noted rather than
+   quietly fixed, because a fabricated-looking count is exactly the failure this amendment is about.)*
+2. **This ADR already has the machinery and the convention.** §0 is an amendment log, `⟨A1·n⟩` marks
+   amended text inline, and the standing rule in this document is that *"the superseded reasoning is
+   kept where it still has explanatory value."* A second amendment is the established in-repo form;
+   inventing a second form for the second amendment is drift.
+3. **ADR-029's status is `Proposed`, not `Accepted`.** It is the arc's working design document, not a
+   sealed record. Superseding is the right instrument for reversing a settled decision with a
+   different one; amending is the right instrument for a working document whose premise was measured
+   and found false.
+4. **The correction is bounded, and `D30` made it smaller still.** One rule keeps its behaviour and
+   loses its **reasoning**; the other keeps its intent and changes its **trigger**. Neither touches the
+   seam, the request shape, the transport, the broadcast model or the priority rule, and — after `D30` —
+   neither removes a mechanism. *(An earlier draft justified this bullet by "one rule loses its
+   mechanism," which presumed an outcome the owner had not yet granted. `D30` granted the opposite.)*
+
+The cost is stated so it is not discovered later: **§7 is now the longest section in this ADR and must
+be read together with §16.** §7.3 and §7.5 carry a falsification banner at their head and are otherwise
+**unmodified** — including their errors, which are part of the record.
+
+---
+
+### 16.1 §7.3 — what it claimed, and the three ways it is false ⟨A2·1⟩
+
+**What it claimed.** Verbatim, three passages:
+
+> **Decision: the backstop fires on "no circuits remain," not on "the initiating circuit left."** […]
+> This preserves the original intent exactly — *audio is playing and no client is watching* — while
+> surviving refreshes, reconnects and multiple browsers.
+
+> Circuit A starts a voicemail. The kiosk browser refreshes (or the circuit drops and reconnects as a
+> new one — routine on a wall panel). Circuit B is now displaying the chip and the live transport,
+> correctly, because state is global (D6). Roughly three minutes later circuit A finally times out of
+> Blazor's disconnect retention window, the handler fires, and **audio the user is actively watching
+> stops for no visible reason.**
+
+> **Be honest about its limits, unchanged:** Blazor Server does not tear a circuit down at tab close
+> but after the disconnect retention window (default ~3 minutes), so this is a minutes-latency
+> mechanism.
+
+**Error 1 — the framework claim is inverted for the case it names.** *"Blazor Server does not tear a
+circuit down at tab close but after the disconnect retention window"* is the opposite of the documented
+behaviour. Microsoft's own hosting-models documentation:
+
+> *"Blazor considers closing a browser tab or navigating to an external URL a **graceful** termination.
+> In the event of a graceful termination, the circuit and associated resources are **immediately
+> released.** A client may also disconnect non-gracefully, for instance due to a network interruption.
+> Blazor Server stores disconnected circuits for a configurable interval to allow the client to
+> reconnect."*
+> — *ASP.NET Core Blazor hosting models* § Blazor Server
+
+The retention window governs **non-graceful** disconnects only. The client-side trigger is documented
+too: *"Blazor's SignalR circuit is disconnected when the `unload` page event is triggered"*
+(*ASP.NET Core Blazor SignalR guidance* § Disconnect Blazor's SignalR circuit from the client). A
+reload fires `unload`; so does a tab close; so does a `window.location.href` assignment.
+
+**Error 2 — the ordering the whole rule rests on is backwards.** §7.3 assumes circuit B is *already
+open* when circuit A closes. It cannot be, when B is the same browser tab: the old document must unload
+before the new one loads, and the unload is what closes A. **Both rows below were observed on `radio` at
+`dd8e85ec`** — the two-tab sequence directly, and the single-browser sequence together with the stop it
+caused; the refresh was run **twice** with identical results, which is what "deterministic" refers to:
+
+| Browsers open | Sequence on reload | Touches zero? |
+|---|---|---|
+| One (the kiosk alone — **the appliance's resting state**) | **`1 → 0 → 1`** | **Yes** |
+| Two (kiosk + a laptop) | **`2 → 1 → 2`** | No |
+
+`GET /api/audio/events/current` went `Playing` → `Stopped` **seven seconds into a forty-nine second
+recording**, ~0.4 s before the replacement circuit opened. Not a race — a strict ordering.
+
+⟨A2·4⟩ **Error 3 — the *latency* is inverted. ⚠ The *verdict* this error originally carried is WITHDRAWN by
+`D30`; see §16.3.** §15 records the risk as `audio that stops for no reason, minutes later` (plain text
+in the original; no emphasis of mine). Measured, it stops in **under half a second**:
+
+| How the client left | When the rule fires | Latency source |
+|---|---|---|
+| Graceful — reload, navigate away, tab close | **Immediately** | **Measured** on the box |
+| Non-graceful — WiFi drop, power cut | At eviction, after `DisconnectedCircuitRetentionPeriod` = **10 minutes** (`Radio.Web/Program.cs`, in the circuit-options block; `App.razor`'s reconnect comment names the same 10 minutes) | ⚠ **DERIVED** — a config value plus documented framework behaviour. **Nobody has watched it on this box**, and the `PHN-1e` plan's own UAT step asks for the real figure precisely because §7.3's "~3 minutes" was a framework default nobody had timed. Treat the 10 as the configured intent, not an observation |
+
+⚠ **What this error said before, and why it is withdrawn.** It concluded: *"As built, the last-circuit
+rule has no true-positive path — every reachable firing is either a false positive or dead behind the
+cap."* That was correct **against §7.3's stated goal** (*"audio is playing and no client is watching"*),
+under which a reload is a false positive because the user is watching and is coming straight back.
+**Owner decision `D30` changes the goal**: a reload *should* stop the audio. The same firing is now a
+true positive, and the conclusion does not survive. **The two rows above are untouched by that** — the
+latency facts are what they are; only the verdict moved. §16.3 re-derives it in full.
+
+**One consequence worth naming, because it is not obvious from the table:**
+
+- **Any full-page reload of the only browser does it**, not just an `F5` — a hand-run
+  `/usr/local/bin/radio-kiosk-launch` after a `radio-kiosk-exit`, or a kiosk relaunched while
+  `radio-api` keeps running, is the same `1 → 0 → 1` shape.
+  ⚠ *A **deploy** is deliberately **not** offered as an example here, although it looks like one:
+  `Deploy-ToLinux.ps1` does stop and relaunch the kiosk, but the same `-not $NoRestart` block also
+  stops `radio-api`, which owns the playback. A deploy silences attended playback whether or not this
+  rule exists, so it cannot be used as evidence about the rule.*
+- **The idle path to `/sleep` rides on the same mechanism.** `idle-dimmer.js` reaches `/sleep` by
+  `window.location.href`, a *hard* navigation, so the idle case is `1 → 0 → 1` too and the circuit rule
+  stops it. Under `D30` that firing is wanted — but it is wanted for the *circuit* reason, and §7.5
+  needs it to happen for the *surface* reason as well, on the routes that do not tear a circuit down
+  (§16.5). **Neither rule is redundant with the other**; they overlap on exactly this one path.
+  ⚠ *Derived from the mechanism, not measured. Worth measuring alongside the refresh case.*
+
+### 16.2 The corrected model of circuit lifetime on this appliance ⟨A2·1⟩
+
+The root error is not the ordering. It is that **a circuit was taken as a proxy for a viewer, and it is
+not one — in either direction.**
+
+**What a circuit actually is.** Server-side component state for one browser screen. Its lifetime is
+bounded by the *document*, not by the person:
+
+- it **outlives** the viewer by up to 10 minutes on a non-graceful drop (nobody is watching; count > 0);
+- it **predeceases** the viewer on any reload or in-app hard navigation (somebody is watching; count = 0).
+
+**What the four `CircuitHandler` callbacks mean.** The handler has four, and `PHN-1e` uses two. From
+the framework's own summary:
+
+| Callback | Documented meaning | Latency on a graceful close | Latency on a drop |
+|---|---|---|---|
+| `OnCircuitOpenedAsync` | *"invoked after an initial circuit to the client has been established"* | — | — |
+| `OnConnectionUpAsync` | *"invoked immediately after the completion of `OnCircuitOpenedAsync` … and each time a connection is re-established with a client after it's been dropped"* | — | — |
+| `OnConnectionDownAsync` | *"invoked each time a connection is dropped"* | prompt | prompt |
+| `OnCircuitClosedAsync` | *"invoked **prior to the server evicting the circuit** to the client"* | **immediate** | **after the 10-minute retention window** |
+
+**`OnCircuitClosedAsync` is bimodal and carries no indication of which mode it is in.** That single fact
+is the defect: the ADR picked a signal whose latency varies by a factor of ~1500 with the cause, and
+then reasoned about it as if it had only the slow mode.
+
+*(Not measured on this box: the connection-callback latencies above are documented behaviour, not
+appliance measurements. `PHN-1e` measured the circuit callbacks only.)*
+
+**The general statement, which is what §7.3 should have said and did not:**
+
+> **"No client is attached" is not an instantaneously observable fact. It is only observable over an
+> interval.** At the instant the last client goes away, a reload and a departure are
+> indistinguishable — the difference is entirely in what happens over the next few seconds. Any rule
+> that acts on the edge is wrong regardless of which edge it counts.
+
+A connection-based count is a strictly better proxy than a circuit-based one — it is prompt in both
+cases rather than in neither — but it does **not** escape that statement, because a reload is *by
+construction* an interval with zero connections.
+
+**The multi-browser case, stated properly.** Kiosk + a laptop on the LAN is a normal state on this
+appliance — and it is the configuration in which the defect is **invisible**: any single browser
+reloading goes `2 → 1 → 2` and nothing stops. The kiosk alone is the *resting* state, and it is the one
+that breaks. **So the rule behaves correctly whenever a second client happens to be open, and
+destructively the rest of the time** — which is why it survived design review and why only the box
+could find it. That is not "mostly right"; it is right only when it is least needed.
+
+**Two properties of `PHN-1e`'s implementation that are correct and must survive whatever replaces the
+rule:**
+
+1. **Singleton registration.** `CircuitHandler` instances resolve from each circuit's scope, so a
+   singleton is what makes the count process-wide; scoped would give every circuit its own counter
+   reaching zero on its own close — which is precisely the owner-circuit rule ⟨A1·4⟩ deleted. This is
+   also the framework's documented pattern (*"a singleton service is created because the state of all
+   circuits must be tracked"*). Confirmed on the box as `PHN-1e` **U2**.
+2. **Act on the transition to zero, never on an observed zero** (plan C-52). `Radio.Web` restarting
+   while `Radio.API` keeps playing leaves the count at zero at rest with audio in the room, and no
+   client has left. Any future debounce inherits this requirement.
+
+One framework hazard to carry forward if the handler ever regains policy: *"If a custom circuit
+handler's methods throw an unhandled exception, the exception is fatal to the circuit."* `PHN-1e`'s
+handler wraps its **I/O** in `try`/`catch` — the seed and the stop call — but `OnCircuitClosedAsync`
+itself is unguarded, and the store read and the log line that precede the stop sit outside the `try`.
+That is not comprehensive, and against this hazard it should be: a throw there kills the circuit.
+**Whatever survives §16.3 should be guarded whole, not guarded where a throw looked likely.**
+
+### 16.3 `D30` — the owner's answer, and the re-derivation it forces ⟨A2·4⟩
+
+**Owner decision `D30`, 2026-09-04:**
+
+> *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can
+> replay."*
+
+*D-number verified before use: `D28` is the wait-then-play queue (punch list §7, closed 2026-09-04),
+`D29` is the knob-geometry decision renumbered out of the `D26` collision the same day, and `D30`
+appears nowhere in `docs/` or `design/`.* ⚠ **The punch-list §7 register entry is not written by this
+ADR** — that file is owned by another pass; see §16.8.
+
+**⚠ I am withdrawing the recommendation this section carried, and recording why rather than deleting
+it.** The previous draft recommended *"playback is not client-bound at all — delete §7.3's stop,"* and
+its load-bearing argument was that **every reachable firing of the rule is a false positive**. That
+argument was correct *relative to §7.3's stated goal* — *"audio is playing and no client is watching"* —
+under which a reload is a false positive precisely because the user **is** watching and is coming
+straight back. `D30` changes the goal. Under it the same firing is a **true positive**: the owner wants
+the audio to stop there.
+
+**Nothing measured or documented in §16.1 or §16.2 changes.** The retention window still does not gate
+a graceful close; the ordering is still close-before-open; §7.3's worked example is still wrong in every
+particular. **What moved is the verdict, because the objective moved** — and that distinction is the
+whole content of this section.
+
+#### The re-derivation — every firing path of the live-circuit count, assessed against `D30`
+
+Enumerated from the shipped handler's behaviour and from what can actually drive it. **`window.location.href`
+occurs exactly twice in the entire tracked `Radio.Web` project, both to `/sleep`**, and every other
+in-app navigation is `NavigationManager.NavigateTo` **without** `forceLoad` — so the set of things that
+can tear a circuit down mid-playback is small and enumerable rather than open-ended.
+
+| # | Path | Count | Fires? | Wanted under `D30`? |
+|---|---|---|---|---|
+| **P1** | **Reload of the only browser** | `1 → 0 → 1` | **Yes, immediately** | ✅ **Yes — this is `D30` exactly** |
+| **P2** | Last browser closes, or navigates to an external URL | `1 → 0` | Yes, immediately | ✅ Yes — nobody is there, and it is a graceful termination |
+| **P3** | The idle timer's hard navigation to `/sleep` | `1 → 0 → 1` | Yes | ✅ Yes — and §7.5 wants it independently (§16.5) |
+| **P4** | **Reload while a second browser is open** | `2 → 1 → 2` | **No** | ⚠ **Diverges from `D30`** — analysed below |
+| **P5** | One of two browsers closes | `2 → 1` | **No** | ✅ Correct — the shipped handler returns early on any non-zero remainder |
+| **P6** | Non-graceful drop of the last browser that never reconnects | stays `1`, then `0` at eviction | Yes, ~10 min later | ⚠ **Unreachable behind the cap** — analysed below |
+| **P7** | `Radio.Web` restarts gracefully while `Radio.API` keeps playing | `→ 0` | Yes | Defensible — the attending UI vanished |
+| **P8** | `Radio.Web` already down; count at zero at rest | no transition | **No** | ✅ Correct, and this is why plan **C-52** insisted on the transition |
+
+**P5 confirmed in the shipped code, since it was asked for explicitly:** `OnCircuitClosedAsync`
+decrements, and `if (remaining != 0)` logs and returns before reaching the stop. Closing a laptop while
+the kiosk is open stops nothing.
+
+#### What this does to §7.3
+
+**Its decision sentence stands. Its rationale and its worked example do not.**
+
+- ✅ **Stands:** *"the backstop fires on 'no circuits remain,' not on 'the initiating circuit left.'"*
+  The rule is right, and `D30` is why — not the reasoning §7.3 gives for it.
+- ⛔ **Falls:** *"while surviving refreshes, reconnects and multiple browsers."* It does not survive
+  refreshes, and under `D30` **it must not.** §7.3 sells the rule on a property the owner does not want.
+- ⛔ **Falls:** the retention-window claim and the circuit-A/circuit-B story (§16.1, errors 1 and 2).
+  A reader reasoning from them concludes this is a minutes-latency mechanism; it is immediate on the
+  only path that matters.
+- ⛔ **Falls:** *"weakest of the three defences … worth having, not worth trusting."* Under `D30` the
+  rule is not a backstop at all — it is **the mechanism that implements `D30`** in this appliance's
+  resting configuration, and the cap is the backstop behind it. Its role is promoted; the ADR should
+  say so.
+
+**Consequence for the handler's robustness, which is now more than housekeeping.** §16.2 notes that the
+shipped handler guards its I/O but leaves `OnCircuitClosedAsync` itself, the store read and the log line
+outside the `try`. That mattered little for a defence described as "not worth trusting". For a rule that
+now carries `D30`, it should be guarded whole. *(Bounded, and worth saying so rather than inflating it:
+the framework hazard is that a throw is fatal to the circuit, and this circuit is already closing —
+so the realistic loss is the stop not happening, not a broken session.)*
+
+#### ⚠ P4 — the divergence, and why it is not a new owner question
+
+`D30` says a reload mid-voicemail should stop the audio. The circuit-count rule delivers that **only
+when the reloading browser is the only one open.** With a laptop also on the LAN, a kiosk reload is
+`2 → 1 → 2` and nothing stops. So the rule does not implement `D30` literally; it implements *"stop when
+no client remains,"* which **coincides** with `D30` in this box's resting configuration and diverges from
+it when a second browser is open.
+
+**I am not raising this as a decision, for two reasons, and I would rather be told I am wrong than have
+smuggled it past:**
+
+1. **The only mechanism that would close it is the one that has been forbidden twice.** Stopping on
+   *this circuit's* reload regardless of the others requires knowing which circuit started the playback —
+   that is `OwnerToken` and the ownership model, deleted by ⟨A1·4⟩ and explicitly excluded again by
+   `D30`'s framing. There is no third option to put to the owner.
+2. **The divergence is in the benign direction.** When a second browser is open, the audio never becomes
+   unattended: a client still has the transport (PR 6's chip), so nothing was lost and no one is left
+   without a way to stop it. The rule declines to stop only in the case where stopping was not needed.
+
+**Recorded rather than decided.** If the owner reads `D30` literally — *every* reload stops, second
+browser or not — this is the sentence that says so and the mechanism question reopens with the ownership
+model as its only answer.
+
+#### ⚠ P6 — the network drop, which needs no decision because it cannot happen
+
+The coordinator asked whether stopping is right when a transient drop takes the count to zero with
+nobody having asked for anything. **The case does not arise, and the reason is arithmetic rather than
+judgement:**
+
+- A drop that **reconnects** never closes the circuit at all — that is what the retention window is for —
+  so the count never moves and nothing fires. *(Note the count is then wrong in the other direction: it
+  reads 1 while nobody is watching. That is §16.2's "outlives the viewer" half, and it is bounded by the
+  cap.)*
+- A drop that **never reconnects** closes the circuit at eviction, ~10 minutes in. **`MaxPlaybackSeconds`
+  is 300.** The audio stopped five minutes earlier. The rule fires on a playback that has already ended
+  and does nothing.
+
+So P6 is dead at the shipped values, and no owner ruling is needed for a path that cannot execute.
+
+> ⚠ **But the two numbers are independent and nothing enforces their ordering, so record the coupling.**
+> P6 is unreachable **only while `MaxPlaybackSeconds` (300) stays below `DisconnectedCircuitRetentionPeriod`
+> (600).** The cap clamps at a *minimum* of 1 and has **no maximum**; the retention period is set in
+> `Radio.Web/Program.cs` and known to nothing in `Radio.API`. Raise the cap past ten minutes — a plausible
+> thing for someone to do for a long voicemail — and a behaviour nobody has ever seen appears silently.
+> **Worth an assertion or a documented constraint; not worth a decision today.**
+>
+> ⚠ **And the 600 has never been watched on this box.** It is a config value plus documented framework
+> behaviour, not a measurement — the `PHN-1e` plan's own UAT step says so in as many words and asks for
+> the real latency to be recorded. It has not been. **Everything above that rests on "10 minutes" is a
+> derivation, and is marked as one here because this amendment exists to condemn exactly that class of
+> unflagged claim.**
+
+#### The options that were considered, preserved as the record
+
+`D30` closed this before the options reached the owner. They are kept because a later reader deciding to
+reopen the question should see what was already weighed, not re-derive it.
+
+- **Option 1 — accept a refresh stopping playback.** *This is what `D30` chose*, though the owner
+  reached it as a product judgement rather than by picking from this list.
+- **Option 2 — a grace period keyed on `OnConnectionUpAsync`/`OnConnectionDownAsync` rather than on the
+  circuit.** It would have fixed both the reload case and the ten-minute drop case, and §1.3 would not
+  have disqualified it (one one-shot timer, at most one in the process — the same shape as §7.1's cap).
+  ⛔ **Rejected by `D30` and not to be proposed again as a future row.** Its cost was a constant `N`
+  nobody has measured, failing in the direction that returns the bug intermittently.
+- **Option 3 — playback not client-bound at all; delete §7.3's stop.** ⛔ **Withdrawn.** Its argument was
+  that the rule never fires correctly; under `D30` it fires correctly on P1, P2 and P3.
+
+---
+
+**⚠ An adjacent decision, re-scoped by `D30`.** §7.2's principle — *"attended playback may not exist on
+a surface that offers no way to stop it"* — is unaffected by the refresh answer, and a **physical** stop
+would satisfy it on every surface at once, with no browser attached at all. `RotaryEncoderActionRouter`
+already drives `ISleepService` from encoder input, so the seam exists. That no longer bears on the
+refresh question, which `D30` has closed; it bears on §14 Q8 and on `/sleep`, and it would close Q8 at
+the root rather than answering it. Raised as **§14 Q11**; out of scope for `PHN-1e`.
+
+### 16.4 §7.5 — what it claimed, and why the rule never reaches its own motivating case ⟨A2·2⟩
+
+**What it claimed.** Verbatim:
+
+> `/sleep` is **not** reached only by a deliberate tap. `MainLayout.OnSleepStateChanged` navigates to it
+> on a **server-pushed** `SleepStateChanged` (`:1045-1057`), and `idle-dimmer.js` drives the same path
+> through `OnJsSleepRequested` (`:418-430`). **The console can put itself into a layout with no stop
+> control, on an idle timer, while a voicemail is playing.**
+
+*(⚠ Both line cites inside that quotation are stale and are reproduced only because the quote is
+verbatim. `OnSleepStateChanged` and `OnJsSleepRequested` have both moved within `MainLayout.razor`, and
+`idle-dimmer.js` is ~156 lines long, so no `:418-430` in it could ever have been the referent. **Cite
+these by content.** Every citation §16 adds is by content for this reason.)*
+
+**The conclusion is right. The middle clause is false, and it is the clause the implementation was built
+on.** `idle-dimmer.js` does not drive `OnJsSleepRequested` on the idle path:
+
+- The idle timer calls `navigateToSleep('idle')`, which clears its timers and ends by setting
+  `window.location.href = '/sleep'` — **and calls nothing else.** It carries its own comment saying it
+  *"does NOT call `SystemApi.SetSleepAsync` because idle-induced navigation must not pause playback."*
+- `OnJsSleepRequested` is invoked from **one** place, `enterSleep()`, whose own comment reads *"Called
+  from Blazor (MainLayout sleep button, server push) — **not from idle**."*
+- **And `enterSleep` has zero callers in the tracked tree.** The only `radioSleepManager` members Blazor
+  invokes are `setBlazorRef` and `wake`; both the Sleep pill (`HandleSleepButtonAsync`) and the server
+  push (`OnSleepStateChanged`) use `NavigationManager.NavigateTo("/sleep")` directly. So §7.5 cited a
+  JS→Blazor path that is **doubly** not taken: not by idle, and currently not by anything.
+  *(`idle-dimmer.js`'s own export comment — "server-push callers (MainLayout.OnSleepStateChanged hits
+  enterSleep/wake)" — is stale in the same way, and is a Builder-side comment fix.)*
+
+**Consequence.** `PHN-1e` implemented the rule in `SleepService.EnterSleepAsync`, which is the correct
+single server-side funnel for the paths that *park audio* — and the idle path is not one of them.
+`SleepService.IsSleeping` is **false** on the idle path, so the obvious predicate is the wrong one.
+This is already written down: `docs/HANDOFF-NEXT-SESSION.md` gotcha 9 — *"`/sleep` reached by idle and
+`/sleep` reached by the Sleep pill are different states"* — and confirmed in the code today.
+
+**⚠ The error propagated through four documents, which is why it survived.** §7.5 → plan constraint
+**C-51** (*"the button and the JS callback both call `SystemApi.SetSleepAsync(true)`"*) → the branch's
+comment in `SleepService.EnterSleepAsync` (*"Three client paths reach sleep … and all three arrive at
+this method"*) → `PHN-1e`'s PR body. Each restated the one before it. **Not one of them checked
+`idle-dimmer.js` against the claim**, and the file contradicts it in a comment written for exactly this
+reason.
+
+**The entry points, verified in tree, complete:**
+
+| # | Trigger | Path | Reaches `EnterSleepAsync`? | Circuit effect |
+|---|---|---|---|---|
+| 1 | Topbar Sleep pill | `MainLayout.HandleSleepButtonAsync` → `SetSleepAsync(true)` → `NavigateTo("/sleep")` | **Yes** | soft nav — circuit survives |
+| 2 | **30-minute idle timer** | `idle-dimmer.js` `navigateToSleep('idle')` → `window.location.href` | **No** | **hard nav — circuit torn down and replaced** |
+| 3 | Server push | `EnterSleepAsync` → `SleepStateChanged(true)` → `MainLayout.OnSleepStateChanged` → `NavigateTo("/sleep")` | **Yes** (it is the origin) | soft nav |
+| 4 | Server-side, no browser | `POST /api/system/sleep`; `RotaryEncoderActionRouter` long-press | **Yes** | none required |
+| 5 | Direct navigation to `/sleep` | any client | **No** | depends on the caller |
+
+`EnterSleepAsync` covers 1, 3 and 4. It misses **2 and 5** — and 2 is the case §7.5's own motivating
+sentence names.
+
+**What does not change:** C-51's other half is confirmed and stands. **Mute is not a substitute for a
+stop.** `EnterSleepAsync` saves `IsMuted` and sets it true; `WakeAsync` restores the saved value on the
+`wasSleeping` branch — which is the branch that muted, so the restore is exactly as reachable as the
+mute. A muted-but-still-playing voicemail therefore becomes **audible again mid-word** the moment anyone
+touches the panel (a tap on `/sleep` calls `SetSleepAsync(false)` → `WakeAsync`) — worse than the
+problem the rule was written about. The rule must stop, not mute.
+
+### 16.5 How `/sleep` must be detected ⟨A2·3 — replaces §7.5's trigger, keeps its rule⟩
+
+**The seam already exists, and `ENC-6` built it before Amendment 1 was written.**
+`ISleepService.IsSleepScreenVisible`, whose own contract doc says:
+
+> *"True while a client reports the `/sleep` route on screen. Set by the page itself, on first render
+> and on dispose, so **all three ways of reaching that route produce the same server-side fact**."*
+
+`Sleep.razor` reports it from `OnAfterRenderAsync(firstRender)` via `SetSleepScreenVisibleAsync(true)`
+→ `POST /api/system/sleep-screen` → `SleepService.SetSleepScreenVisible(true)`, with a remark stating
+the same property: *"all three routes in — the idle timer, the pill, and a direct navigation — produce
+the same fact."* `MainLayout` clears it on its own first render, because MainLayout rendering is proof
+the sleep screen is not up.
+
+> ⚠ **Do not read either "three" as a count of the entry points in §16.4's table, and do not let this
+> ADR endorse it as one.** The comments count **routes to the page** — idle, pill, direct navigation —
+> and they are right about that. §16.4 counts **triggers**, and finds five, because it separates the
+> server push and the browserless server-side entry from the tap that produces them. `SetSleepScreenVisible(true)`
+> covers **four** of §16.4's five rows, not three.
+> **This distinction is flagged rather than glossed for a specific reason:** §16.4's whole finding is
+> that an unexamined *"three client paths"* claim propagated through four documents because nobody
+> checked it. Quoting a different, correct "three" approvingly in the very next section — without
+> saying what it counts — is how the next one starts.
+
+§7.5 reached for `EnterSleepAsync` because it reasoned from *"sleep parks the audio."* **Its own
+principle points somewhere else** — *"a surface that offers no way to stop it"* is a statement about
+**what is on screen**, not about what the audio is doing.
+
+**Decision (A2): attended playback stops on BOTH edges, and they are not redundant.**
+
+| Edge | Condition it expresses | Covers | Why it cannot be dropped |
+|---|---|---|---|
+| `SetSleepScreenVisible(true)` | A client has put the **no-transport surface** on screen | rows **1, 2, 3, 5** | The only one that sees the idle timer and a direct navigation |
+| `EnterSleepAsync` | **The room is being parked** | rows **1, 3, 4** | Row 4 has no browser at all — the encoder long-press and the API reach it with no page to render and no report to make |
+
+Stated in the repo's own vocabulary, which is better than either hook: **stop when `ConsoleWakeState`
+leaves `Awake`.** `Ambient` (the sleep screen is up, audio still playing) and `Standby` (audio parked)
+both qualify; `Awake` does not. That tri-state already exists, is already derived from exactly these two
+facts, and already encodes the distinction the rule needs.
+
+**⚠ Use it as an edge at the two write sites, never as a polled predicate.** `WakeState` deliberately
+reads `Awake` while a wake claim is outstanding — that is `ENC-6`'s fast-spin behaviour, and a rule that
+polled it would answer `Awake` for a console that is not.
+
+**Three things the Planner must settle, none of which I am settling here:**
+
+1. **`SetSleepScreenVisible` is `void`, called from a synchronous controller action; the stop is
+   `async`.** Either the `ISleepService` member becomes `Task`-returning (a `Radio.Core` contract change
+   with two call sites) or the stop is dispatched and nothing awaits it. ⚠ **This repo has a fresh,
+   expensive lesson about dispatching a stop that nothing observes** — plan constraint **C-49**, where
+   two merged plans specified a cap that would have expired silently. Awaiting is the safer default and
+   the change is small; the `Radio.Core` edit is the argument against. **Planner's call.**
+2. **Latency is real and must not be documented away.** On the idle path the report only lands after a
+   full-page load and the first *interactive* render of `Sleep.razor` on a brand-new circuit. On this box
+   (N100, WiFi, cold circuit) that is plausibly seconds, and attended audio continues through it.
+   **Unmeasured.** It should be measured on the appliance the way U1, U2 and the cap were.
+3. **⚠ `IsSleepScreenVisible` is a single global bool, last-writer-wins — a genuine multi-client hole.**
+   With the kiosk on `/sleep` and a laptop on `/phone`, the flag reads `true` although a client *does*
+   have a transport; a laptop rendering `MainLayout` afterwards flips it back to `false`. Under D6/§7.4
+   (state is global, every client equal) the strict reading is that the predicate should be *"**no**
+   client offers a stop"*, and this flag cannot express that.
+   - **The hole is inherited, not created.** `ENC-6` already gates encoder behaviour on this flag with
+     the same property. §7.5 consuming it adds no new defect.
+   - **It is narrow.** The idle timer only fires after 30 minutes without activity on that client, and
+     attended playback is capped at 300 s — so for the two to coincide, the playback must have been
+     started by a *different* client while this one idled.
+   - **And there is a defensible reading in which stopping is simply right:** the speakers are in the
+     room the panel is in. §7.5's concern is a dark room with no control, not a browser with no control.
+   - **Recommended default: stop**, consistent with §7.5's own *"Silence resolves to "stop," because
+     that is the safe direction."* Recorded as **§14 Q12** rather than decided.
+
+**What stays exactly as `PHN-1e` built it:** the stop covers `Preparing` as well as `Playing`/`Paused`
+(a fetch in flight would otherwise start audio moments after the panel goes dark); it never throws
+(sleep must happen whether or not a voicemail could be stopped); and **`WakeAsync` gains no symmetric
+restore** — §6.2 rule 2's reasoning holds, the recording is replayable at zero cost and resuming
+mid-word after a wake is worse than restarting.
+
+### 16.6 §14 Q8 is closed in the direction §7.5 chose — but on a corrected trigger
+
+Q8 asked whether entering `/sleep` stops attended playback or whether the sleep surface grows a stop
+control. **The answer is unchanged: it stops.** What changes is that the rule now actually fires on the
+idle timer, which is the case Q8 was raised about. The relaxation Q8 offers — a stop control on the
+sleep surface — remains available and remains the sleep arc's to design, and **§14 Q11** now offers a second
+relaxation (a physical stop) that would close it more thoroughly.
+
+### 16.7 Consequences of this amendment ⟨A2⟩
+
+**Good:**
+- The one stop condition §7.1 calls **the** guarantee (*"This is **the** guarantee"* — lowercase, in the
+  original) had its mechanism exercised on real hardware and is unchanged.
+- **`D30` cost the arc almost nothing.** Because the owner's answer endorses the behaviour the code
+  already has, `PHN-1e` keeps its `CircuitHandler` exactly as written; the correction is to the ADR's
+  *reasoning*, not to the branch's *behaviour*. One code change remains (§16.5's `/sleep` trigger).
+- §7.5's rule finally covers the case it was written for, using a seam that already existed and that
+  `ENC-6` had built before Amendment 1 was written.
+- **D7 is now honest about which of its rules is load-bearing.** §7.3 stops being *"the weakest of three
+  defences, worth having, not worth trusting"* and becomes the mechanism that implements `D30` in this
+  box's resting configuration, with the cap as the backstop behind it.
+
+**Bad / costs:**
+- **§7.3 is now right for reasons it does not state.** Its decision sentence survives while its
+  rationale, its worked example and its self-description are all superseded — a shape that is easy to
+  misread. The banner and this section are the mitigation; there is no way to make it pretty.
+- **`D30` is a product decision that a future reader will meet as a surprise.** *"Reload the page, lose
+  the audio"* is not what a web UI usually does, and without `D30` recorded next to the rule, the next
+  engineer will read the behaviour as the bug this amendment originally took it for. It is filed in
+  §16.3, in `design/DECISION-LOG.md`, and needs a punch-list §7 register entry (§16.8).
+- **The rule implements `D30` only in the single-browser case** (§16.3, P4), and the mechanism that
+  would close the gap is the ownership model ⟨A1·4⟩ deleted.
+- **§7 must now be read with §16.** Two of its subsections are preserved with their errors intact, on
+  purpose.
+
+**⭐ The process consequence, which is the most reusable thing here.**
+**This defect was caught only because the plan declared the assertion unverifiable in a test host and
+pinned it to an on-box check.** `PHN-1e`'s U3 said, in advance, that the refresh ordering *"is what
+makes ADR §7.3 safe, and §7.3 was written from it rather than from a measurement"*, and attached the
+instruction *"stop and re-plan"* to the false branch. **A green test host would have shipped it** —
+nothing in a bUnit or xUnit host has a browser, an `unload` event or a real circuit, so no test that
+could have been written for this row would have gone red.
+
+Note carefully **where the value was**: U3's *prediction* was wrong — it guessed `1 → 2 → 1` and the box
+answered `1 → 0 → 1`. The value was in **declaring the assumption unverifiable and naming the
+observation that would settle it**, not in guessing right. A plan that had simply asserted the ordering
+with more confidence would have produced the same code and no discovery.
+
+⚠ **And the same standard now applies to this amendment.** Two claims in §16 are derivations wearing
+measurement's clothes unless they are marked, and both are marked: the **10-minute** eviction latency
+(a config value plus documented behaviour — nobody has watched it here), and the **idle-path
+`1 → 0 → 1`** (the mechanism is certain, the observation has not been made). **This is the second time a
+D7 rule has been written from reasoning rather than measurement, and both times the box disagreed.**
+Anything further in D7 gets measured first.
+
+### 16.8 What `PHN-1e` needs — concretely, for a Builder ⟨A2·4⟩
+
+**The row proceeds, it does not need re-planning, and `D30` made the change list shorter than it was an
+hour ago.**
+
+**Verified on the appliance and untouched — do not re-litigate:** the hub broadcast with both enums as
+**strings** (C-47, `PHN-1e` **U1**); the store's cache and one-shot seed (**U2**, C-52 — and see the
+note below on which section owns it); `EventPlaybackApiService`; the **singleton** `CircuitHandler` and
+its process-wide count; and the max-duration cap as a one-shot `TimeProvider` timer whose callback
+*dispatches* a stop (C-49), measured stopping a 42 s recording at a temporarily-lowered 20 s value.
+
+**⭐ ONE code change, not two. The circuit backstop ships AS BUILT.**
+
+1. ⛔ **CANCELLED — do not remove §7.3's stop from `AttendedPlaybackCircuitHandler`.** An earlier draft
+   of this amendment told a Builder to delete it. `D30` says the behaviour is wanted. **The handler
+   ships unchanged**, including its transition-to-zero guard, its negative-count reset and its tests.
+   *Worth doing while the file is open, and it is now more than housekeeping (§16.3):* guard
+   `OnCircuitClosedAsync` **whole** rather than only its I/O — the store read and the log line currently
+   sit outside the `try`.
+2. ✅ **REQUIRED — §7.5's trigger gains the `SetSleepScreenVisible(true)` edge** beside the existing
+   `EnterSleepAsync` hook, per §16.5. Confined to `SleepService`, `SystemController` and their tests,
+   plus one `Radio.Core` signature change **if** the Planner chooses to await the stop (§16.5 item 1) —
+   and §16.5 argues it should, on C-49's own lesson.
+
+**⚠ One attribution to fix while correcting the docs, because this ADR got it wrong too.** The seed on
+`OnCircuitOpenedAsync` is **not** what §8.1 specifies. §8.1 requires `AudioStateStore` to be seeded from
+`GET /api/audio/events/current` and calls it *"a one-shot fetch per store initialisation, not a poll"* —
+and the store is a **singleton**, so §8.1's seed is once per **process**. `OnCircuitOpenedAsync` fires
+once per **circuit**. The per-circuit identification is the `PHN-1e` plan's, not §8.1's; it is a
+reasonable extension, and it should be described as one rather than as a restatement.
+
+**Documentation corrections are now the bulk of the row**, and they are corrections of *reasoning*
+rather than of behaviour. ⚠ Note which branch each lives on:
+
+*On `main`:*
+- `docs/BUILDER_QUEUE.md`'s `PHN-1e` row — and its `🚫` status, which `D30` and this amendment clear.
+- The `PHN-1e` plan's **U3** (its prediction was wrong; its existence was right — say both), **C-51**
+  (the "three client paths" claim), and **C-52** (correct, and worth keeping verbatim).
+- `docs/HANDOFF-NEXT-SESSION.md` gotcha 9 — substance right, its `idle-dimmer.js:73-81` cite has moved;
+  the function is `navigateToSleep`.
+- ⭐ **`docs/HANDOFF-GA-PUNCH-LIST.md` §7 needs the `D30` register entry.** **This ADR does not write
+  it** — that file is owned by another pass. `D30` is verified free: `D28` is the wait-then-play queue,
+  `D29` the knob geometry renumbered out of the `D26` collision on 2026-09-04.
+
+*On `feat/phn-1e-server-owned-state` only:*
+- `design/INTEGRATIONS.md`'s three-stop-conditions paragraph. ⚠ **Half of it is already corrected** —
+  the circuit-backstop item is marked *"Known broken — do not rely on this"*, **which `D30` now makes
+  wrong in the other direction** and which must be rewritten as *intended behaviour, with `D30` cited*.
+  The `/sleep` item is the one still asserting the falsified "all three client entry points" claim.
+- Builder-side comment fixes: the stale `radioSleepManager` export comment in `idle-dimmer.js`
+  (*"MainLayout.OnSleepStateChanged hits enterSleep/wake"* — it hits neither), the *"all three arrive at
+  this method"* remark in `SleepService.EnterSleepAsync`, and `AttendedPlaybackCircuitHandler`'s own
+  remark, which currently describes the refresh behaviour as a defect and must instead cite `D30` as
+  the reason it is correct.
+
+**Nothing moves to `PHN-1f` or PR 6, and it must not:**
+- **`PHN-1f`** is the ducking-args and mirror-case-queue row — a `Radio.Core` change to
+  `DuckingStateChangedEventArgs` on a shared audio service with a live subscriber. The sleep hook has
+  nothing to do with ducking, and the queue's own reason for splitting PR 5 was *"do not bury the change
+  most likely to make the room sound wrong inside a diff of plumbing."*
+- **PR 6** flips `GvMedia:Enabled` and lands the chip — it is what makes any of this reachable by a
+  user, so it is the true deadline for the `/sleep` fix; but the code lives in `PHN-1e`.
+- **§14 Q11** (a physical stop) and **§14 Q8**'s relaxation stay out of `PHN-1e` entirely.
