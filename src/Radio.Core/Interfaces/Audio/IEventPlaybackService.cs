@@ -145,10 +145,10 @@ public enum EventPlaybackState
   Completed = 3,
 
   /// <summary>
-  /// Ended before the end of the content. Today that means a user stop, or a new playback taking
-  /// the single slot. ⚠ Preemption (PR 4) and the duration cap (PR 5) will land here too, and
-  /// NEITHER EXISTS YET — nothing reads GvMedia:PreemptAtPriority or GvMedia:MaxPlaybackSeconds for
-  /// this purpose as of PHN-1c.
+  /// Ended before the end of the content. Four things produce it: a user stop, a new playback taking
+  /// the single slot, a source starting at or above GvMedia:PreemptAtPriority (PHN-1d), and the
+  /// GvMedia:MaxPlaybackSeconds cap (PHN-1e). ⚠ The snapshot does not say WHICH — all four are a
+  /// stop, and no renderer branches on the difference today. The log line does say which.
   /// </summary>
   Stopped = 4,
 
