@@ -49,6 +49,18 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   private readonly GvMediaClient _gvMediaClient;
 
   /// <summary>
+  /// Clock for the max-duration cap. Injectable so a test can advance it rather than wait on it —
+  /// CLAUDE.md § Test Timing's named idiom, and the reason FakeTimeProvider is already referenced by
+  /// Radio.Infrastructure.Tests.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ PHN-1d deliberately did NOT take this dependency, and its C-44 says why: that PR added no
+  /// timer, so the thing a test had to synchronise on was a dispatch (PreemptionTail), not a clock.
+  /// This PR adds a real timer, so the idiom now applies. Both are true; neither supersedes the other.
+  /// </remarks>
+  private readonly TimeProvider _timeProvider;
+
+  /// <summary>
   /// How long <see cref="Dispose"/> will block waiting for an already-playing source to release.
   /// Bounded so a wedged source delays shutdown rather than preventing it.
   /// </summary>
@@ -117,6 +129,11 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// <param name="fileFactory">The event-source factory for the RemoteMedia arm.</param>
   /// <param name="duckingService">Ducking, wired exactly as AnnouncementService wires it.</param>
   /// <param name="gvMediaClient">The server-side media fetcher.</param>
+  /// <param name="timeProvider">
+  /// Clock for the max-duration cap. Trailing and optional so the container and
+  /// <c>EventPlaybackServiceTests.CreateService</c> both keep working with no registration;
+  /// <see cref="TimeProvider.System"/> is the production value.
+  /// </param>
   public EventPlaybackService(
     ILogger<EventPlaybackService> logger,
     IOptionsMonitor<GvMediaOptions> gvMediaOptions,
@@ -124,7 +141,8 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     ITTSFactory ttsFactory,
     AudioFileEventSourceFactory fileFactory,
     IDuckingService duckingService,
-    GvMediaClient gvMediaClient)
+    GvMediaClient gvMediaClient,
+    TimeProvider? timeProvider = null)
   {
     _logger = logger;
     _gvMediaOptions = gvMediaOptions;
@@ -133,15 +151,22 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     _fileFactory = fileFactory;
     _duckingService = duckingService;
     _gvMediaClient = gvMediaClient;
+    _timeProvider = timeProvider ?? TimeProvider.System;
 
     // ADR-029 D5 §6.3. Subscribed here rather than lazily: both this service and DuckingService are
     // registered singleton (AddEventPlayback, AddSoundFlowAudio), so the subscription lives for the
     // process and Dispose is the only place it is removed.
     //
-    // ⚠ This service is constructed lazily — on the first injection into EventPlaybackController — so
-    // before anything has ever posted to /api/audio/events there is no subscription at all. That is
-    // correct rather than a gap: with no attended playback there is nothing to preempt, and the
-    // constructor necessarily runs before this instance's first StartAsync.
+    // ⚠ This singleton is built at HOST START, not lazily, and the comment that used to sit here said
+    // the opposite. It was true until PHN-1e: AudioStateUpdateService now resolves
+    // IEventPlaybackService in its own constructor and is registered AddHostedService, so this
+    // subscription is live from boot rather than from the first POST to /api/audio/events.
+    //
+    // That is the better direction, and the consequence is worth seeing rather than discovering:
+    // GvMediaClient, AudioFileEventSourceFactory, ITTSFactory and IDuckingService are all now
+    // constructed at startup, so a resolution failure in any of them is a service that will not start
+    // — visible — rather than a 500 on the first voicemail. EventPlaybackRegistrationTests is what
+    // keeps that a test rather than a hope.
     _duckingService.DuckingStateChanged += OnDuckingStateChanged;
   }
 
@@ -529,6 +554,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         }
 
         await source.PlayAsync(token);
+
+        // ADR-029 D7 §7.1 — THE guarantee, and the only stop condition that needs no client at all.
+        // ⚠ Armed HERE, inside _gate and after PlayAsync returned, for two reasons. The gate is what
+        // makes it impossible to arm a cap on a playback a preemption has already torn down (PHN-1d
+        // §5 flags exactly this). And "at most one timer exists" then follows from D5 rule 1 — one
+        // attended playback at a time — rather than from bookkeeping this class would have to keep.
+        ArmDurationCap(playback);
 
         // Guarded rather than published unconditionally: a source can fail synchronously inside
         // PlayAsync — AudioFileEventSource.PlayCoreAsync catches and raises Error completion on the
@@ -993,6 +1025,11 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// </remarks>
   private async Task ReleaseSourceAsync(Playback playback, IEventAudioSource source)
   {
+    // The single funnel for stopping and disposing a source — six callers reach it through
+    // TearDownAsync or Dispose — so the single place the cap is disarmed. A ten-second voicemail must
+    // not leave a five-minute timer alive behind it.
+    playback.DisarmDurationCap();
+
     try { await _duckingService.StopDuckingAsync(source); }
     catch (Exception ex) { _logger.LogWarning(ex, "Error stopping ducking for {Id}", playback.Id); }
 
@@ -1005,6 +1042,67 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     // continues — so a leaked handle there costs cap accuracy, not correctness.
     try { await source.DisposeAsync(); }
     catch (Exception ex) { _logger.LogWarning(ex, "Error disposing source for {Id}", playback.Id); }
+  }
+
+  /// <summary>
+  /// Arms the hard max-duration cap on a playback that has just started producing audio.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ This is NOT CancelAfter on playback.Token, which is what PHN-1c §5 and PHN-1d §5 both
+  /// prescribe — and the difference is the whole feature rather than a detail. Nothing observes that
+  /// token once acquisition has returned: AcquireAndPlayAsync's last read of it is
+  /// source.PlayAsync(token), which STARTS playback and returns rather than awaiting completion, and
+  /// both event sources drive their own completion from a duration they were given. So cancelling it
+  /// stops no audio. A cap built that way would expire silently at 300 s and change nothing, which is
+  /// the worst available shape for something the ADR calls "the guarantee".
+  ///
+  /// What actually stops audio is TearDownAsync -> ReleaseSourceAsync, and StopAsync is the public
+  /// door to it. Hence a timer whose callback dispatches a stop.
+  ///
+  /// ⚠ DISPATCHED, never awaited, for OnSourceCompleted's reason: StopAsync takes _gate, and the
+  /// callback arrives on a timer thread that must not be parked for the length of a teardown
+  /// (ducking release fade included). Idempotence is free — StopAsync resolves by id and
+  /// ClaimTerminal admits exactly one terminal transition — so a cap racing a natural end is a
+  /// no-op.
+  ///
+  /// ⚠ Math.Max(1, …): there is NO off switch, and that is deliberate. ADR-029 §7.1 calls this the
+  /// guarantee that everything else is a latency improvement on, and GvMediaOptions.PreemptAtPriority
+  /// is this arc's worked example (plan PHN-1d C-43) of a knob that silently disables a feature while
+  /// leaving it looking intact. A 0 here clamps to one second rather than meaning "never".
+  /// </remarks>
+  private void ArmDurationCap(Playback playback)
+  {
+    var seconds = Math.Max(1, _gvMediaOptions.CurrentValue.MaxPlaybackSeconds);
+    var playbackId = playback.Id;
+
+    playback.ArmDurationCap(_timeProvider, TimeSpan.FromSeconds(seconds), () =>
+    {
+      // Warning, not Information: since LOG-11 the journal carries Warning and above, and "the
+      // voicemail stopped by itself after five minutes" is exactly what an operator diagnoses from
+      // the box. Ids only — never a media id and never request text (PHN-1b §0.3 ④).
+      _logger.LogWarning(
+        "Attended playback {Id} reached GvMedia:MaxPlaybackSeconds ({Seconds}s); stopping it",
+        playbackId, seconds);
+
+      _ = Task.Run(
+        async () =>
+        {
+          try
+          {
+            await StopAsync(playbackId);
+          }
+          catch (ObjectDisposedException)
+          {
+            // The container went away underneath the timer. Nothing left to stop.
+          }
+          catch (Exception ex)
+          {
+            // An unobserved faulted task is a process-level hazard on this box.
+            _logger.LogWarning(ex, "Error stopping capped attended playback {Id}", playbackId);
+          }
+        },
+        CancellationToken.None);
+    });
   }
 
   /// <summary>
@@ -1175,6 +1273,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     private IEventAudioSource? _source;
     private bool _released;
     private int _terminal;
+    private ITimer? _capTimer;
 
     public Playback(string id, EventPlaybackKind kind, string? label)
     {
@@ -1256,6 +1355,39 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         }
         _released = true;
         return _source;
+      }
+    }
+
+    /// <summary>
+    /// Arms the hard max-duration cap on this playback (ADR-029 D7 §7.1).
+    /// </summary>
+    /// <remarks>
+    /// Idempotent: a second arm disposes the first timer, so a re-arm can never leave two running.
+    /// Guarded by _sourceLock rather than by a lock of its own — the callback takes no lock at all,
+    /// so reusing it introduces no ordering this class does not already have.
+    /// </remarks>
+    public void ArmDurationCap(TimeProvider timeProvider, TimeSpan after, Action onExpired)
+    {
+      lock (_sourceLock)
+      {
+        _capTimer?.Dispose();
+        _capTimer = timeProvider.CreateTimer(_ => onExpired(), null, after, Timeout.InfiniteTimeSpan);
+      }
+    }
+
+    /// <summary>Disarms the cap. Safe when it was never armed, and safe to call twice.</summary>
+    /// <remarks>
+    /// ⚠ ITimer.Dispose does NOT wait for a callback already running, and it deliberately is not
+    /// made to: the callback only dispatches StopAsync(Id), which is idempotent through
+    /// ClaimTerminal, so a cap firing at the same instant as a natural end is a no-op rather than a
+    /// double stop. Waiting here would mean blocking a teardown on a timer thread.
+    /// </remarks>
+    public void DisarmDurationCap()
+    {
+      lock (_sourceLock)
+      {
+        _capTimer?.Dispose();
+        _capTimer = null;
       }
     }
 
