@@ -93,6 +93,40 @@ public class DuckingService : IDuckingService
   public event EventHandler<DuckingLevelChangedEventArgs>? DuckingLevelChanged;
 
   /// <inheritdoc />
+  /// <remarks>
+  /// ⚠ DuckingStateChanged is raised for EVERY source that joins the ducking set, not only for the
+  /// one that caused the fade. That is ADR-029 D5 §6.3, and it is what makes priority load-bearing:
+  /// EventPlaybackService subscribes and stops attended playback when a source at or above
+  /// GvMedia:PreemptAtPriority starts. Before this change a second concurrent event reached only a
+  /// LogDebug, so nothing downstream could ever learn that it had started.
+  ///
+  /// The ADR's wording is "on every call"; this raises on every call that ADDS a source. A repeat call
+  /// for a source already in the set is not a start — nothing joins, the level does not move — and
+  /// raising for it would fan an event out to AudioManager, which writes an Information line per raise
+  /// once a playback service is attached (it returns early before that), on a box where avoidable churn
+  /// is audible (PHN arc breakdown, trap 5).
+  ///
+  /// ⚠ Ordering is NOT the order of starts. The transition raise happens after ApplyFadeAsync, which
+  /// awaits for Audio:DuckingAttackMs; a second source arriving inside that window is announced first.
+  /// Each raise carries its own TriggeringSource, so a subscriber that reads that field rather than
+  /// assuming sequence is unaffected.
+  ///
+  /// ⚠ Two consequences of that ordering, both real, neither a reason to reorder:
+  ///
+  /// (a) A source announced from inside the first source's fade carries a MID-FADE DuckLevel, so
+  ///     AudioManager already logs "Ducking started: duckLevel=NN%" for a level the fade has not
+  ///     reached. An earlier draft of this remark offered exactly that as the reason not to move the
+  ///     transition raise ahead of the fade — which was inconsistent, because the raise this change
+  ///     adds already does it. The honest reason not to move it is narrower: the transition raise is
+  ///     the one AudioManager's "ducking started" line is keyed to, and firing it before the fade would
+  ///     make the level wrong on the path where it is currently right.
+  ///
+  /// (b) A stop for the SAME source landing inside that fade deletes its priority override before this
+  ///     raise fires, so a subscriber resolving priority from the args reads the category default.
+  ///     EventPlaybackService.OnDuckingStateChanged rejects that case on ActiveEventCount; see its
+  ///     remark. Closing it here would mean carrying the priority on the args, which is a Radio.Core
+  ///     change and a deliberate one.
+  /// </remarks>
   public async Task StartDuckingAsync(IEventAudioSource eventSource, CancellationToken cancellationToken = default)
   {
     ArgumentNullException.ThrowIfNull(eventSource);
@@ -100,26 +134,32 @@ public class DuckingService : IDuckingService
 
     var options = _audioOptions.CurrentValue;
     bool needsTransition;
-    bool wasAlreadyDucking;
+    bool wasNewlyAdded;
+    int activeCount;
 
     lock (_lock)
     {
-      wasAlreadyDucking = _isDucking;
       needsTransition = !_isDucking;
 
-      // Add to active events
-      if (!_activeEvents.ContainsKey(eventSource.Id))
+      wasNewlyAdded = !_activeEvents.ContainsKey(eventSource.Id);
+      if (wasNewlyAdded)
       {
         _activeEvents[eventSource.Id] = eventSource;
-        _logger.LogDebug(
-          "Added event source '{SourceId}' to ducking queue. Active events: {Count}",
-          eventSource.Id, _activeEvents.Count);
       }
+
+      activeCount = _activeEvents.Count;
 
       if (!_isDucking)
       {
         _isDucking = true;
       }
+    }
+
+    if (wasNewlyAdded)
+    {
+      _logger.LogDebug(
+        "Added event source '{SourceId}' to ducking queue. Active events: {Count}",
+        eventSource.Id, activeCount);
     }
 
     if (needsTransition)
@@ -132,14 +172,21 @@ public class DuckingService : IDuckingService
         targetLevel, attackMs, options.DuckingPolicy);
 
       await ApplyFadeAsync(targetLevel, attackMs, options.DuckingPolicy, eventSource, cancellationToken);
+    }
 
+    // needsTransition implies wasNewlyAdded in every state reachable today — _activeEvents is
+    // non-empty only while _isDucking is true, and StopAllDuckingAsync clears both together. The
+    // disjunction is written out anyway so that a state where they diverge still announces the
+    // transition.
+    if (needsTransition || wasNewlyAdded)
+    {
       RaiseDuckingStateChanged(true, eventSource);
     }
-    else if (wasAlreadyDucking)
+    else
     {
       _logger.LogDebug(
-        "Already ducking for source '{SourceId}'. Active events: {Count}",
-        eventSource.Id, _activeEvents.Count);
+        "Event source '{SourceId}' was already in the ducking queue; nothing started. Active events: {Count}",
+        eventSource.Id, activeCount);
     }
   }
 
@@ -414,6 +461,26 @@ public class DuckingService : IDuckingService
   /// <summary>
   /// Raises the DuckingStateChanged event.
   /// </summary>
+  /// <remarks>
+  /// ⚠ Guarded because ADR-029 D5 makes this event load-bearing: EventPlaybackService subscribes to it
+  /// to preempt attended playback, and it is the first subscriber that DOES WORK the caller depends on.
+  /// (Not the first that can throw — AudioManager's handler calls ClearDuckingMultiplier on the
+  /// IsDucking:false arm, and SoundFlowPlaybackService.ClearDuckingMultiplier opens with
+  /// ThrowIfDisposed, which is reachable at shutdown. The stronger sentence was the wrong one.)
+  /// Unguarded, that exception propagates out of StartDuckingAsync into whichever event path called it.
+  /// Traced against the tree: AnnounceAsync, PlaySoundWithAnnouncementAsync and
+  /// EventPlaybackService.AcquireAndPlayAsync all catch and then restore ducking, so the cost is NOT
+  /// stuck ducking — it is an announcement that never plays while POST /api/notifications/announce
+  /// still reports 200. Silent to the CALLER, not to the log: AnnounceAsync logs it at Error, which
+  /// survives the LOG-11 journal filter.
+  ///
+  /// This catches; it does not resume the invocation list. A handler that throws still prevents the
+  /// handlers registered after it from running. That is accepted for two subscribers; anything more
+  /// would want a GetInvocationList loop and a reason.
+  ///
+  /// RaiseDuckingLevelChanged is deliberately NOT given the same guard: it gains no new subscriber in
+  /// this PR and it fires once per fade step, so a try inside that loop would buy nothing that exists.
+  /// </remarks>
   private void RaiseDuckingStateChanged(bool isDucking, IEventAudioSource? triggeringSource)
   {
     var args = new DuckingStateChangedEventArgs
@@ -424,7 +491,19 @@ public class DuckingService : IDuckingService
       ActiveEventCount = ActiveEventCount
     };
 
-    DuckingStateChanged?.Invoke(this, args);
+    try
+    {
+      DuckingStateChanged?.Invoke(this, args);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(
+        ex,
+        "A DuckingStateChanged subscriber threw (isDucking={IsDucking}, source='{SourceId}'). "
+        + "Ducking state is unaffected; the subscriber's work did not happen.",
+        isDucking,
+        triggeringSource?.Id ?? "<none>");
+    }
   }
 
   /// <summary>

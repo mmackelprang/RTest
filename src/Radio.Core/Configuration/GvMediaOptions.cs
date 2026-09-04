@@ -78,8 +78,32 @@ public sealed class GvMediaOptions
   public int MaxSpeechChars { get; set; } = 1000;
 
   /// <summary>
-  /// Priority at or above which a starting source preempts attended playback. Consumed by PR 4
-  /// (ADR-029 D5 §6.1). Not read by this PR.
+  /// Priority at or above which a starting event source stops attended playback (ADR-029 D5 §6.1).
+  /// Read by <c>EventPlaybackService.OnDuckingStateChanged</c>, which stops an in-flight playback when
+  /// such a source starts. ⚠ The mirror direction — a playback STARTING while such a source is
+  /// already sounding — is not implemented yet: it mixes. The owner's decision is that it must WAIT
+  /// for the blocking source and then play, and that lands with the server-owned playback state that
+  /// can broadcast a waiting state to a client. Do not implement it as a refusal; that option was
+  /// considered and rejected.
+  ///
+  /// <para>
+  /// ⚠ This value is safe to LOWER and a trap to RAISE, and only the lowering case is argued in the
+  /// ADR. ⚠ Be exact about WHY, because the obvious reason is not the live one: every source that
+  /// reaches this rule had its priority set explicitly. All four <c>StartDuckingAsync</c> call sites in
+  /// the tree — three in <c>AnnouncementService</c>, one in <c>EventPlaybackService</c> — call
+  /// <c>SetPriority</c> on the same source immediately before, so <c>GetPriority</c>'s category-default
+  /// fallback is never what answers a start raise.
+  ///
+  /// What makes 9 a trap is where the live 8 comes from: <c>NotificationsController.Announce</c>
+  /// clamps <c>request.Priority ?? 8</c>, so every external notification that does not name a priority
+  /// — the doorbell, the laundry, anything Home Assistant posts — arrives at exactly 8. Raise this to
+  /// 9 and all of those silently stop preempting, while the dormant <c>PhoneIntegration:RingPriority</c>
+  /// (9) still would, so the feature keeps looking intact while it has stopped happening for everything
+  /// that can actually make a sound on this box. 7 widens it to the documented high-importance band.
+  /// Keep this at or below <c>DuckingService.DefaultEventPriority</c>, which is what ADR-029 §6.1
+  /// anchored the number on; a test pins those two compile-time defaults against each other, and it
+  /// can see neither a per-machine override nor the controller's <c>?? 8</c>.
+  /// </para>
   /// </summary>
   public int PreemptAtPriority { get; set; } = 8;
 
