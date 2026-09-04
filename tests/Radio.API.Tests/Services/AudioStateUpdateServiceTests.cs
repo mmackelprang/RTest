@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Radio.API.Hubs;
@@ -263,7 +264,8 @@ public class AudioStateUpdateServiceTests
   private static AudioStateUpdateService CreateServiceWith(
     IEventPlaybackService? eventPlayback,
     Action<string, object?[]>? onSend = null,
-    Exception? sendThrows = null)
+    Exception? sendThrows = null,
+    ILogger<AudioStateUpdateService>? logger = null)
   {
     var hubContextMock = new Mock<IHubContext<AudioStateHub>>();
     var clientsMock = new Mock<IHubClients>();
@@ -298,7 +300,7 @@ public class AudioStateUpdateServiceTests
     }
 
     return new AudioStateUpdateService(
-      NullLogger<AudioStateUpdateService>.Instance,
+      logger ?? NullLogger<AudioStateUpdateService>.Instance,
       hubContextMock.Object,
       collection.BuildServiceProvider(),
       configuration);
@@ -456,19 +458,68 @@ public class AudioStateUpdateServiceTests
   }
 
   [Fact]
-  public void ASubscriberExceptionDoesNotEscapeTheHandler()
+  public async Task ASubscriberExceptionDoesNotEscapeTheHandler()
   {
     // The async void hazard, and the reason the catch-all is there. An exception escaping an
     // async void handler is a process-level fault; escaping it here would ALSO be logged by
     // EventPlaybackService.Raise as "a PlaybackChanged subscriber threw" — accurate, but filed
     // against the seam rather than against the broadcaster.
+    //
+    // ⚠ THE ASSERTION IS ON THE LOG, AND THAT IS NOT A STYLISTIC CHOICE. The obvious assertion —
+    // Record.Exception(() => fake.Raise(...)) then Assert.Null — is UNFALSIFIABLE here, and an
+    // earlier draft of this test used it. Record.Exception observes the CALLING thread; an
+    // exception thrown inside an async void method is captured by its state machine and rethrown on
+    // the synchronization context, never at the raise. So Assert.Null passed whether or not the
+    // catch-all existed, which is the shape of a test that pins nothing.
+    //
+    // The LogError inside the catch is the one observable that exists if and only if the catch does.
+    // Measured by deleting the catch block from OnEventPlaybackChanged and re-running: this test
+    // FAILS. Restored, it passes.
     var fake = new FakeEventPlaybackService();
-    var service = CreateServiceWith(fake, sendThrows: new InvalidOperationException("hub is down"));
+    var logs = new CapturingLogger<AudioStateUpdateService>();
+    var service = CreateServiceWith(
+      fake, sendThrows: new InvalidOperationException("hub is down"), logger: logs);
 
-    var ex = Record.Exception(() => fake.Raise(PlayingSnapshot()));
+    fake.Raise(PlayingSnapshot());
 
-    Assert.Null(ex);
+    // async void: the raise returns before the handler has necessarily reached its catch, so the
+    // rendezvous is on the observation rather than on a sleep.
+    await WaitUntilAsync(() => logs.Errors.Count > 0, TimeSpan.FromSeconds(5));
+
+    Assert.Contains(
+      logs.Errors,
+      m => m.Contains("Error broadcasting attended event playback state", StringComparison.Ordinal));
     service.Dispose();
+  }
+
+  /// <summary>
+  /// Records the message of every Error-or-above line, for the catch-all assertion above.
+  /// </summary>
+  private sealed class CapturingLogger<T> : ILogger<T>
+  {
+    private readonly List<string> _sink = [];
+
+    public List<string> Errors
+    {
+      get { lock (_sink) { return [.. _sink]; } }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter)
+    {
+      if (logLevel >= LogLevel.Error)
+      {
+        lock (_sink)
+        {
+          _sink.Add(formatter(state, exception));
+        }
+      }
+    }
   }
 
   /// <summary>Mirrors Radio.Web's EventPlaybackSnapshotDto member-for-member.</summary>
