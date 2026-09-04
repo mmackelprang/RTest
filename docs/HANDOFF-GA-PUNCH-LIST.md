@@ -14,9 +14,13 @@
 > least verified**, and it still wants the owner's hand on the panel.
 >
 > **P0 remaining: 2, both in the phone arc.** `PHN-1` is
-> **partially shipped** — the ADR-029 arc is seven PRs and PRs 1 and 2 landed as `PHN-1a` ([#528](https://github.com/mmackelprang/RTest/pull/528))
-> and `PHN-1b` ([#534](https://github.com/mmackelprang/RTest/pull/534)), so PRs 3-7 remain; `PHN-2` has not
-> started and sits behind them (`O6`).
+> **partially shipped** — the ADR-029 arc is seven PRs and PRs 1, 2 and 3 landed as `PHN-1a` ([#528](https://github.com/mmackelprang/RTest/pull/528)),
+> `PHN-1b` ([#534](https://github.com/mmackelprang/RTest/pull/534)) and `PHN-1c` ([#556](https://github.com/mmackelprang/RTest/pull/556)),
+> so **PRs 4-7 remain**; `PHN-2` has not started and sits behind them (`O6`). ⚠ **As of `PHN-1c` the seam is
+> reachable over HTTP** — `/api/audio/events`, six routes, both arms — but **`GvMedia:Enabled` still ships
+> `false`**, so nothing fetches on a stock box, and `Radio.Web` still plays voicemail through its own
+> `<audio>` element until PR 6. **That a voicemail is audible remains unverified and is PR 6's UAT**, along
+> with `./data/gvmedia` writability, which `PHN-1c` re-carried rather than claimed.
 >
 > ✅ **Shipped 2026-09-02:** `ENC-4` ([#519](https://github.com/mmackelprang/RTest/pull/519), geometry corrected by [#526](https://github.com/mmackelprang/RTest/pull/526)),
 > `ENC-5` ([#536](https://github.com/mmackelprang/RTest/pull/536)), `ENC-8` ([#527](https://github.com/mmackelprang/RTest/pull/527)),
