@@ -83,8 +83,8 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   private volatile Task _preemptionTail = Task.CompletedTask;
 
   /// <summary>
-  /// Test seam: the tail of the most recent preemption decision, or a completed task when the most
-  /// recent decision was "do nothing".
+  /// Test seam: the tail of the most recently DISPATCHED preemption, or a completed task if none has
+  /// been dispatched yet.
   /// </summary>
   /// <remarks>
   /// ⚠ This exists so tests can synchronise on the OBSERVATION rather than on elapsed time.
@@ -97,6 +97,11 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   ///
   /// PR 4 adds no timer, so the house TimeProvider/FakeTimeProvider idiom does not apply here: what is
   /// asynchronous is a Task.Run, not a clock.
+  ///
+  /// ⚠ A decision to do NOTHING leaves this unchanged rather than resetting it to a completed task —
+  /// an earlier summary here claimed the opposite, and no code assigned it. Unchanged is also the more
+  /// useful contract: a test that preempts and then raises something sub-threshold keeps its
+  /// rendezvous instead of silently losing it.
   ///
   /// Last-writer-wins under no lock. Two concurrent preemptions would leave one tail unobserved, which
   /// costs a test its rendezvous and costs production nothing — the work is already dispatched and is
@@ -442,10 +447,16 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       }
 
       // ⚠ From here to Publish(Playing) runs under _gate, and PR 4 is what makes that necessary.
-      // ReleaseSourceAsync — the only thing that stops ducking, stops the source and disposes it — is
-      // reached from StopAsync, from StartAsync's replacement arm, from OnSourceCompleted and from
-      // FailAsync, and every one of those holds _gate. Holding it here makes "tear this playback down"
-      // and "start its audio" MUTUALLY EXCLUSIVE against all four rather than merely ordered.
+      // ReleaseSourceAsync — the only thing that stops ducking, stops the source and disposes it — has
+      // six callers. Four hold _gate: StopAsync, StartAsync's replacement arm, OnSourceCompleted's
+      // dispatched task, and FailAsync. Holding it here makes "tear this playback down" and "start its
+      // audio" MUTUALLY EXCLUSIVE against those four rather than merely ordered.
+      //
+      // ⚠ TWO do not, and naming only one of them would be the overclaim this file keeps warning
+      // about: Dispose (which claims the source through ClaimSourceForRelease instead), and the
+      // catch (OperationCanceledException) below — which calls TearDownAsync after the finally has
+      // already released the gate. Neither can race THIS block: the catch is the same task, reached
+      // only after the block has exited, and Dispose is container shutdown.
       //
       // What that closes: PR 3 narrowed the ducking-to-play window with the IsTerminal re-check below,
       // but a re-check is not a lock. A preemption landing between that check and PlayAsync could still
@@ -487,12 +498,17 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
 
         source.PlaybackCompleted += (_, e) => OnSourceCompleted(playback, e);
 
-        // Priority is set and the source is adopted BEFORE ducking starts, and both orderings are
-        // load-bearing after PR 4. StartDuckingAsync now raises DuckingStateChanged for this very
-        // source, so OnDuckingStateChanged runs synchronously on this thread: it reads the priority
-        // from _duckingService (which must already hold it, or an attended playback would read as the
-        // category default of 8) and compares TriggeringSource against _current.Source (which must
-        // already be adopted, or a playback at Priority >= 8 would preempt itself).
+        // Both happen BEFORE ducking starts, because StartDuckingAsync now raises DuckingStateChanged
+        // for this very source and OnDuckingStateChanged therefore runs synchronously on this thread.
+        //
+        // ⚠ Only ONE of the two orderings is load-bearing for preemption, and the first draft of this
+        // comment claimed both were. ADOPTION is: the handler compares TriggeringSource against
+        // _current.Source, so adopting after ducking would let a playback at Priority >= 8 preempt
+        // itself — moving TryAdopt below reds two tests. SetPriority is NOT: with the entry missing the
+        // handler reads the category default 8, clears the threshold, and is then turned away by the
+        // same identity check, so moving it below changes nothing and reds no test. It stays here
+        // because the RECORDED priority has to be right for everything that reads it later —
+        // GetActiveEventsByPriority, and PR 5's queue — not because it guards this rule.
         _duckingService.SetPriority(source, request.Priority);
         await _duckingService.StartDuckingAsync(source, token);
 
@@ -753,10 +769,29 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   ///     DefaultEventPriority (8) — so acting on a stop would read every ending announcement as a
   ///     priority-8 preemption. StopAllDuckingAsync also raises with a NULL TriggeringSource.
   ///
-  /// (2) The priority is read SYNCHRONOUSLY, here, on the raising thread. Every caller in the tree does
-  ///     SetPriority(source, p) immediately before StartDuckingAsync(source), so the entry is present at
-  ///     this instant and gone after the source stops. Resolving it on the dispatched task would race
-  ///     that removal and read 8 for a source whose caller had explicitly claimed 3.
+  /// (2) The priority is read SYNCHRONOUSLY, here, on the raising thread, and a source that has
+  ///     already LEFT the ducking set is rejected before it is read. Both halves are needed and the
+  ///     reason is narrower than it first looks, so it is stated exactly rather than reassuringly.
+  ///
+  ///     Every caller does SetPriority(source, p) immediately before StartDuckingAsync(source), and
+  ///     DuckingService.StopDuckingAsync deletes that entry before IT raises — so resolving the
+  ///     priority on the dispatched task would race the removal and read the category default 8 for a
+  ///     source whose caller had explicitly claimed 3.
+  ///
+  ///     ⚠ But "synchronous" is NOT by itself enough, and the earlier wording here — "the entry is
+  ///     present at this instant" — was FALSE on one path. DuckingService raises the TRANSITION event
+  ///     after awaiting ApplyFadeAsync (Audio:DuckingAttackMs, 100 ms shipped), so a StopDuckingAsync
+  ///     for that same source landing inside the fade deletes the entry BEFORE this handler ever runs,
+  ///     and a synchronous read answers 8 for an announcement that explicitly claimed 3. Demonstrated
+  ///     against the real DuckingService, not theorised. It is not reachable in the shipped
+  ///     configuration — the only caller that can stop an announcement concurrently with its own start
+  ///     is PhoneCallIntegrationService, and PhoneIntegration:Enabled is false and has never been true
+  ///     — but it becomes reachable the moment the phone arc turns that flag on, which is what this
+  ///     arc is building toward.
+  ///
+  ///     The ActiveEventCount check below is what closes it. An IsDucking:true raise means a source
+  ///     just JOINED the set, so the count cannot be zero unless that source has since left; zero is
+  ///     therefore the signature of exactly this race, and never of a healthy start.
   ///
   /// (3) The stop is DISPATCHED, never awaited here. Two reasons, and the second one is the one that
   ///     is easy to state too strongly, so it is stated exactly.
@@ -781,6 +816,25 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   {
     if (!e.IsDucking || e.TriggeringSource is not { } trigger)
     {
+      return;
+    }
+
+    if (e.ActiveEventCount == 0)
+    {
+      // The starting source has already left the ducking set, so its priority override has already
+      // been deleted and GetPriority would answer the category default (8) for it. See point (2):
+      // DuckingService raises the transition event AFTER its attack fade, so a stop landing inside
+      // that ~100 ms window produces exactly these args. A start that is still a start always leaves
+      // at least itself in the set.
+      //
+      // ⚠ Residual, stated rather than glossed: if some OTHER source is still ducking, the count is
+      // non-zero and this guard does not fire, so a stop racing the fade can still be read as a
+      // priority-8 start. Closing that needs the priority captured into DuckingStateChangedEventArgs
+      // at raise time, which is a Radio.Core change and belongs to the PR that also wants a start/stop
+      // discriminator on those args rather than being slipped in here.
+      _logger.LogDebug(
+        "Ignoring a ducking start for source '{SourceId}' that is no longer in the ducking set",
+        trigger.Id);
       return;
     }
 

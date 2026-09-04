@@ -522,8 +522,9 @@ public class DuckingServiceTests
   [Fact]
   public async Task StartDuckingAsync_SurvivesASubscriberThatThrows()
   {
-    // PR 4 adds the first DuckingStateChanged subscriber that does real work, so this is the first
-    // moment a subscriber CAN throw. Unguarded, the exception propagates out of StartDuckingAsync into
+    // PR 4 adds the first DuckingStateChanged subscriber that does work the caller depends on. (It is
+    // not the first that CAN throw: AudioManager's handler reaches ThrowIfDisposed at shutdown.)
+    // Unguarded, the exception propagates out of StartDuckingAsync into
     // AnnouncementService.AnnounceAsync, which catches it and cleans up — so ducking is restored and
     // nothing is stuck, but the announcement never plays AND POST /api/notifications/announce still
     // answers 200. A fault in the attended seam would silence the unattended one, invisibly.

@@ -88,13 +88,21 @@ public sealed class GvMediaOptions
   ///
   /// <para>
   /// ⚠ This value is safe to LOWER and a trap to RAISE, and only the lowering case is argued in the
-  /// ADR. <c>DuckingService.GetPriority</c> answers <c>DefaultEventPriority</c> — 8 — for every event
-  /// source whose caller never called <c>SetPriority</c>, which is every source in this tree outside
-  /// <c>AnnouncementService</c>. So 7 widens preemption to the documented high-importance band, while 9
-  /// or 10 exempts almost everything: preemption still works for a caller that names an explicit 9, so
-  /// nothing looks broken, and it stops happening for the live ones. Keep this at or below
-  /// <c>DuckingService.DefaultEventPriority</c>; a test pins the two shipped defaults against each
-  /// other, and it cannot see a per-machine override.
+  /// ADR. ⚠ Be exact about WHY, because the obvious reason is not the live one: every source that
+  /// reaches this rule had its priority set explicitly. All four <c>StartDuckingAsync</c> call sites in
+  /// the tree — three in <c>AnnouncementService</c>, one in <c>EventPlaybackService</c> — call
+  /// <c>SetPriority</c> on the same source immediately before, so <c>GetPriority</c>'s category-default
+  /// fallback is never what answers a start raise.
+  ///
+  /// What makes 9 a trap is where the live 8 comes from: <c>NotificationsController.Announce</c>
+  /// clamps <c>request.Priority ?? 8</c>, so every external notification that does not name a priority
+  /// — the doorbell, the laundry, anything Home Assistant posts — arrives at exactly 8. Raise this to
+  /// 9 and all of those silently stop preempting, while the dormant <c>PhoneIntegration:RingPriority</c>
+  /// (9) still would, so the feature keeps looking intact while it has stopped happening for everything
+  /// that can actually make a sound on this box. 7 widens it to the documented high-importance band.
+  /// Keep this at or below <c>DuckingService.DefaultEventPriority</c>, which is what ADR-029 §6.1
+  /// anchored the number on; a test pins those two compile-time defaults against each other, and it
+  /// can see neither a per-machine override nor the controller's <c>?? 8</c>.
   /// </para>
   /// </summary>
   public int PreemptAtPriority { get; set; } = 8;
