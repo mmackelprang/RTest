@@ -112,7 +112,25 @@ public class RotaryEncoderRouterMappingTests
       return Task.CompletedTask;
     }
 
-    public void SetSleepScreenVisible(bool visible)
+    public Task SetSleepScreenVisibleAsync(bool visible)
+    {
+      ReportSleepScreen(visible);
+      return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// The synchronous body, so the gate tests below can drive the state without an await on a fake
+    /// that never yields. Calling the interface method from a sync test body would be CS4014 under
+    /// warnings-as-errors, and awaiting a Task.CompletedTask would say something about ordering that
+    /// this fake does not actually promise.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ This fake deliberately does NOT mirror the attended-playback stop that the real
+    /// <c>SetSleepScreenVisibleAsync</c> gained in ADR-029 Amendment 2. These tests are about the
+    /// encoder router's gating on <c>ConsoleWakeState</c> and nothing else; the stop is pinned in
+    /// <c>SleepServiceTests</c>, against the real service.
+    /// </remarks>
+    public void ReportSleepScreen(bool visible)
     {
       // Edge-triggered, mirroring the shipped SleepService. If these two ever disagree, every gate
       // test above is exercising a policy the box does not run.
@@ -804,7 +822,7 @@ public class RotaryEncoderRouterMappingTests
     // Rule 2. The lit clock is the one state where a knob still changes the machine, and it is the
     // knob whose readout the sleep screen was already built to host.
     using var h = new Harness();
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseTurn(0, 1);
 
@@ -819,7 +837,7 @@ public class RotaryEncoderRouterMappingTests
     // plan was written and is SOURCE since ENC-5 merged. The index and the assertions are the
     // plan's; only the name moved, so it says what it actually exercises.
     using var h = new Harness();
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
     h.Audio.ActiveSource = null;
 
     h.Encoders.RaiseTurn(1, 1);
@@ -833,7 +851,7 @@ public class RotaryEncoderRouterMappingTests
     // The latch, from the router's side. The browser has not left /sleep yet, so IsSleepScreenVisible
     // is still true - but the claim is spent, so the second detent must reach its handler.
     using var h = new Harness();
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseTurn(1, 1);
     h.Encoders.RaiseTurn(1, 1);
@@ -849,7 +867,7 @@ public class RotaryEncoderRouterMappingTests
     // D22, verbatim: "a turn is what a passing sleeve does; a press is what a person does."
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseTurn(0, 1);
     h.Encoders.RaiseTurn(1, 1);
@@ -866,7 +884,7 @@ public class RotaryEncoderRouterMappingTests
   {
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseButton(2, isPressed: true);
 
@@ -880,7 +898,7 @@ public class RotaryEncoderRouterMappingTests
     // console unable to be turned on by the press that follows it.
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseTurn(3, 1);
     h.Encoders.RaiseButton(0, isPressed: true);
@@ -894,7 +912,7 @@ public class RotaryEncoderRouterMappingTests
     // 8.3's Ambient column keeps encoder 0 fully live, hold included. This is the one path from the
     // clock into Standby that does not involve the topbar.
     using var h = new Harness();
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseButton(0, isPressed: true);
     h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
@@ -921,7 +939,7 @@ public class RotaryEncoderRouterMappingTests
   {
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
     h.Audio.MasterVolume = 0.62f;
 
     h.Encoders.RaiseTurn(0, 1);
@@ -939,7 +957,7 @@ public class RotaryEncoderRouterMappingTests
     // The card has to appear beside the knob that was turned, not beside the knob that woke the
     // console - the geometry keys off the index the event arrived on.
     using var h = new Harness();
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
     h.Audio.ActiveSource = null;
 
     h.Encoders.RaiseTurn(3, 1);
@@ -955,7 +973,7 @@ public class RotaryEncoderRouterMappingTests
     // leave three knobs looking broken for the whole standby.
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseTurn(0, 1);
     h.Encoders.RaiseTurn(0, 1);
@@ -990,7 +1008,7 @@ public class RotaryEncoderRouterMappingTests
     // the no-radio fallback rather than this knob's identity.
     h.WithActiveRadio();
     h.Sleep.IsSleeping = true;
-    h.Sleep.SetSleepScreenVisible(true);
+    h.Sleep.ReportSleepScreen(true);
 
     h.Encoders.RaiseTurn(index, 1);
 

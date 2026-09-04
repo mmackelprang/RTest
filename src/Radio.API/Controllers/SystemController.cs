@@ -539,20 +539,28 @@ public class SystemController : ControllerBase
   /// knob turned on the pill clock.
   ///
   /// <para>
-  /// It changes no audio. Ambient is defined by playback continuing, so a call reporting the screen
-  /// visible must never pause anything.
+  /// It pauses no primary source. Ambient is defined by the radio playing on, so a call reporting
+  /// the screen visible must never pause it.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ <b>It does, since ADR-029 Amendment 2, stop attended EVENT playback</b> when the report is
+  /// what takes the console out of <c>ConsoleWakeState.Awake</c> — D7 §7.5 on §16.5's
+  /// corrected trigger, and the only edge that sees the 30-minute idle timer. The response is
+  /// therefore sent <i>after</i> that stop rather than racing it (plan constraint <c>C-49</c>);
+  /// <c>ISleepService.SetSleepScreenVisibleAsync</c> carries the reasoning.
   /// </para>
   /// </remarks>
   [HttpPost("sleep-screen")]
   [ProducesResponseType(typeof(SleepStateResponse), StatusCodes.Status200OK)]
-  public IActionResult SetSleepScreenVisible([FromBody] SetSleepScreenVisibleRequest request)
+  public async Task<IActionResult> SetSleepScreenVisible([FromBody] SetSleepScreenVisibleRequest request)
   {
     if (_sleepService == null)
     {
       return StatusCode(501, new { error = "Sleep service not available" });
     }
 
-    _sleepService.SetSleepScreenVisible(request.Visible);
+    await _sleepService.SetSleepScreenVisibleAsync(request.Visible);
     return Ok(BuildSleepState());
   }
 

@@ -11,9 +11,17 @@ namespace Radio.API.Services;
 ///
 /// <para>
 /// <b>Standby</b> pauses the active source, saves and applies mute, and broadcasts
-/// <c>SleepStateChanged</c> over SignalR. <b>Ambient</b> changes no audio at all — it is the
-/// <c>/sleep</c> route being on screen while playback continues, reported by the page itself. Waking
-/// restores the pre-sleep mute state and resumes playback <i>only</i> where playback was parked.
+/// <c>SleepStateChanged</c> over SignalR. <b>Ambient</b> is the <c>/sleep</c> route being on screen
+/// while the primary source plays on, reported by the page itself. Waking restores the pre-sleep
+/// mute state and resumes playback <i>only</i> where playback was parked.
+/// </para>
+///
+/// <para>
+/// ⚠ <b>One qualification on "Ambient changes no audio", which is how that sentence used to read.</b>
+/// Ambient still changes nothing about the <i>primary</i> source — that is what defines it. But
+/// since ADR-029 Amendment 2 <b>both</b> transitions out of <see cref="ConsoleWakeState.Awake"/>
+/// stop attended EVENT playback (D7 §7.5), because the <c>/sleep</c> surface offers no transport to
+/// stop it with. See <see cref="SetSleepScreenVisibleAsync"/> for why one edge was not enough.
 /// </para>
 ///
 /// <para>
@@ -88,8 +96,50 @@ public class SleepService : ISleepService
     }
   }
 
-  public void SetSleepScreenVisible(bool visible)
+  /// <summary>
+  /// Records that a client has put the sleep screen on screen, or taken it off — and, when that
+  /// report is what takes the console out of <see cref="ConsoleWakeState.Awake"/>, stops attended
+  /// playback (ADR-029 D7 §7.5 on §16.5's corrected trigger).
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// ⚠ <b>This is the SECOND of §7.5's two edges, and it is the only one that sees the idle timer.</b>
+  /// §7.5 originally hung the rule on <see cref="EnterSleepAsync"/> alone, reasoning that "sleep
+  /// parks the audio". ADR-029 §16.4 measured that against the tree and found it false for the case
+  /// §7.5 was written about: <c>idle-dimmer.js</c>'s <c>navigateToSleep('idle')</c> reaches
+  /// <c>/sleep</c> by <c>window.location.href</c> and deliberately calls nothing else, so the
+  /// 30-minute idle path never reaches <see cref="EnterSleepAsync"/> and
+  /// <see cref="IsSleeping"/> is <b>false</b> on it. The obvious predicate is the wrong one.
+  /// </para>
+  /// <para>
+  /// ⚠ <b>The two edges are not redundant and neither may be dropped.</b> This one covers the idle
+  /// timer, the pill, the server push and a direct navigation — every route that renders the page.
+  /// <see cref="EnterSleepAsync"/> covers the route with no page at all: the encoder long-press and
+  /// <c>POST /api/system/sleep</c> park the room with no browser to report anything.
+  /// </para>
+  /// <para>
+  /// ⚠ <b>An EDGE, computed here, never a polled predicate.</b> <see cref="WakeState"/> reads
+  /// <see cref="ConsoleWakeState.Awake"/> while a wake claim is outstanding — <c>ENC-6</c>'s
+  /// fast-spin behaviour — so anything that polled it would answer "Awake" for a console that is
+  /// not. Read once before the write and once after, the claim can only make the BEFORE read say
+  /// Awake, which can only make this rule fire when it might otherwise not have. It cannot suppress
+  /// a stop: a before-state that is already Ambient or Standby is one where the earlier edge already
+  /// ran. That asymmetry is the safe direction §7.5 asks for, and it is why the claim is not
+  /// special-cased.
+  /// </para>
+  /// <para>
+  /// ⚠ <b>Stopping, not muting</b> — see <see cref="WakeAsync"/>'s remarks and ADR-029 §16.4. And no
+  /// primary source is touched: Ambient is <i>defined</i> by the radio continuing to play with the
+  /// sleep screen up. What ends here is attended EVENT playback, which is the thing §7.5's rule is
+  /// about.
+  /// </para>
+  /// </remarks>
+  public async Task SetSleepScreenVisibleAsync(bool visible)
   {
+    // Read before the write. See the remarks above for why the wake claim's effect on this read is
+    // benign in one direction only.
+    var before = WakeState;
+
     // The claim is released on an EDGE, not on every report. Clearing it unconditionally would mean
     // a client that re-reported the state it is already in - which nothing does today, but which is
     // the shape any future re-report heartbeat would take - could wipe a claim mid-wake and drop the
@@ -102,6 +152,15 @@ public class SleepService : ISleepService
     }
 
     _logger.LogDebug("Sleep screen reported {Visible}", visible ? "visible" : "hidden");
+
+    // The rule, in the repo's own vocabulary: stop when ConsoleWakeState LEAVES Awake. Ambient (the
+    // sleep screen is up, audio still playing) and Standby (audio parked) both qualify. Written this
+    // way rather than as "visible went false -> true" because the tri-state is what the rule is
+    // actually about, and it is already derived from exactly the two facts §16.5's table names.
+    if (before == ConsoleWakeState.Awake && WakeState != ConsoleWakeState.Awake)
+    {
+      await StopAttendedPlaybackAsync();
+    }
   }
 
   public bool TryClaimWake()
@@ -160,10 +219,14 @@ public class SleepService : ISleepService
       // MID-WORD the instant somebody touches the panel in a dark room — worse than the problem the
       // rule was written about.
       //
-      // ⚠ Here rather than in Radio.Web. Three client paths reach sleep — the Sleep pill, the
-      // idle-dimmer JS callback, and a server-pushed SleepStateChanged — and all three arrive at this
-      // method. One place covers every route, every client, and the entry point nobody has written
-      // yet.
+      // ⚠ Here rather than in Radio.Web, and this is ONE OF TWO edges rather than the single funnel
+      // an earlier revision of this comment claimed. It said "three client paths reach sleep … and
+      // all three arrive at this method". ADR-029 §16.4 checked that against the tree and it is
+      // false: the 30-minute idle timer reaches /sleep by window.location.href and calls nothing
+      // server-side, so IsSleeping is false on the path §7.5 was actually written about. This method
+      // covers the routes that PARK THE ROOM — the pill, the server push, and the browserless
+      // entries (POST /api/system/sleep, the encoder long-press), the last of which has no page to
+      // render and so can never report a screen. SetSleepScreenVisibleAsync covers the rest.
       await StopAttendedPlaybackAsync();
 
       if (_audioManager != null)

@@ -141,11 +141,23 @@ window.radioSetApiBaseUrl = function (url) {
   });
   document.addEventListener('pointermove', onPointerMove, { passive: true });
 
-  // Expose global API for Blazor JS interop. The shape is preserved for
-  // server-push callers (MainLayout.OnSleepStateChanged hits enterSleep/wake)
-  // but the implementations no longer mutate the DOM — they navigate routes.
+  // Expose global API for Blazor JS interop. The implementations no longer
+  // mutate the DOM — they navigate routes.
+  //
+  // ⚠ CORRECTED (ADR-029 §16.4). This comment used to say the shape was
+  // preserved "for server-push callers (MainLayout.OnSleepStateChanged hits
+  // enterSleep/wake)". It hits NEITHER: OnSleepStateChanged calls
+  // NavigationManager.NavigateTo("/sleep") directly, and so does the Sleep
+  // pill. The only members Blazor actually invokes are setBlazorRef and wake.
+  // enterSleep has ZERO callers in the tracked tree — it is kept as the
+  // recorded shape of the JS→Blazor path, not because anything walks it.
+  //
+  // ⚠ That stale line was load-bearing: ADR-029 §7.5 cited this file as proof
+  // the idle timer reached the server, built a stop condition on it, and the
+  // stop then never fired for the case it was written about. See
+  // navigateToSleep above — the idle path deliberately calls nothing.
   window.radioSleepManager = {
-    enterSleep: enterSleep,         // explicit-action sleep → /sleep
+    enterSleep: enterSleep,         // explicit-action sleep → /sleep; no callers today
     wake: wake,                     // reset dim timer; sleep page handles its own wake
     isSleeping: isOnSleepRoute,
     isScreenBlanked: function () { return false; }, // overlay hack removed

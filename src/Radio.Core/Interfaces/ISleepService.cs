@@ -50,6 +50,13 @@ public interface ISleepService
   /// render and on dispose, so all three ways of reaching that route produce the same server-side
   /// fact.
   /// </summary>
+  /// <remarks>
+  /// ⚠ The "three" counts <b>routes to the page</b> — the idle timer, the Sleep pill, and a direct
+  /// navigation — and is right about that. It is <b>not</b> a count of the ways sleep is entered:
+  /// ADR-029 §16.4 finds five of those, because it separates the server push and the browserless
+  /// server-side entry from the taps that produce them. Named here because §16.4's whole finding is
+  /// that an unexamined "three client paths" claim propagated through four documents.
+  /// </remarks>
   bool IsSleepScreenVisible { get; }
 
   /// <summary>
@@ -66,7 +73,15 @@ public interface ISleepService
   /// Records that a client has put the sleep screen on screen, or taken it off. Releases any
   /// outstanding wake claim either way, because both edges mean the transition has settled.
   /// </summary>
-  void SetSleepScreenVisible(bool visible);
+  /// <remarks>
+  /// ⚠ <b>Task-returning because it stops attended playback</b> (ADR-029 §16.5), not because the
+  /// flag write needs to be. The write is synchronous and complete before the returned task is
+  /// awaited; what the task carries is the stop. It was <c>void</c> until ADR-029 Amendment 2, and
+  /// the reason it is not any more is plan constraint <c>C-49</c>: this repo has a fresh, expensive
+  /// lesson about dispatching a stop that nothing observes. §16.5 left the choice between awaiting
+  /// and dispatching open and argued for awaiting; this is that choice, taken.
+  /// </remarks>
+  Task SetSleepScreenVisibleAsync(bool visible);
 
   /// <summary>
   /// Claims the single input that is spent waking, synchronously.
