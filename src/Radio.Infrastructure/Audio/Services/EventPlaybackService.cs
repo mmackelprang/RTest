@@ -80,6 +80,30 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   // check-then-set on a bool would let two disposers both run the release path below.
   private int _disposedFlag;
 
+  private volatile Task _preemptionTail = Task.CompletedTask;
+
+  /// <summary>
+  /// Test seam: the tail of the most recent preemption decision, or a completed task when the most
+  /// recent decision was "do nothing".
+  /// </summary>
+  /// <remarks>
+  /// ⚠ This exists so tests can synchronise on the OBSERVATION rather than on elapsed time.
+  /// OnDuckingStateChanged decides synchronously on the raising thread and then DISPATCHES the stop,
+  /// so a test asserting straight after raising the event would be racing that dispatch. For the
+  /// positive case PlaybackChanged is already a rendezvous; for the NEGATIVE case — "a priority-5
+  /// source changed nothing" — there is no event to wait for, and the only alternatives are a sleep
+  /// (forbidden by CLAUDE.md § Test Timing, and the reason TEST-4 exists) or a poll that starvation
+  /// can only weaken.
+  ///
+  /// PR 4 adds no timer, so the house TimeProvider/FakeTimeProvider idiom does not apply here: what is
+  /// asynchronous is a Task.Run, not a clock.
+  ///
+  /// Last-writer-wins under no lock. Two concurrent preemptions would leave one tail unobserved, which
+  /// costs a test its rendezvous and costs production nothing — the work is already dispatched and is
+  /// idempotent through Playback.ClaimTerminal.
+  /// </remarks>
+  internal Task PreemptionTail => _preemptionTail;
+
   /// <summary>Creates the service.</summary>
   /// <param name="logger">The logger.</param>
   /// <param name="gvMediaOptions">GvMedia options — Enabled and MaxSpeechChars are read here.</param>
@@ -104,6 +128,16 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     _fileFactory = fileFactory;
     _duckingService = duckingService;
     _gvMediaClient = gvMediaClient;
+
+    // ADR-029 D5 §6.3. Subscribed here rather than lazily: both this service and DuckingService are
+    // registered singleton (AddEventPlayback, AddSoundFlowAudio), so the subscription lives for the
+    // process and Dispose is the only place it is removed.
+    //
+    // ⚠ This service is constructed lazily — on the first injection into EventPlaybackController — so
+    // before anything has ever posted to /api/audio/events there is no subscription at all. That is
+    // correct rather than a gap: with no attended playback there is nothing to preempt, and the
+    // constructor necessarily runs before this instance's first StartAsync.
+    _duckingService.DuckingStateChanged += OnDuckingStateChanged;
   }
 
   /// <inheritdoc />
@@ -344,6 +378,8 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       return;
     }
 
+    _duckingService.DuckingStateChanged -= OnDuckingStateChanged;
+
     Playback? playback;
     lock (_stateLock)
     {
@@ -405,41 +441,89 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
           throw new InvalidOperationException($"Unhandled kind {request.Kind}.");
       }
 
-      // The source handover is an ATOMIC check-and-assign, and that is a leak fix rather than
-      // tidiness. Every terminal caller claims the flag and then tears down, and teardown can only
-      // release a source the playback already OWNS - which it does not for the whole of
-      // acquisition. So a stop, a replacement or a disposal landing here used to leave the source
-      // acquisition then produced with nobody to dispose it: on the RemoteMedia arm an
-      // AudioFileEventSource holding an open FileStream over the cached recording, which on Windows
-      // also stops GvMediaCache's evictor reclaiming that entry. TryAdopt refusing is how this path
-      // learns that it owns the disposal instead.
-      if (!playback.TryAdopt(source, token))
+      // ⚠ From here to Publish(Playing) runs under _gate, and PR 4 is what makes that necessary.
+      // ReleaseSourceAsync — the only thing that stops ducking, stops the source and disposes it — is
+      // reached from StopAsync, from StartAsync's replacement arm, from OnSourceCompleted and from
+      // FailAsync, and every one of those holds _gate. Holding it here makes "tear this playback down"
+      // and "start its audio" MUTUALLY EXCLUSIVE against all four rather than merely ordered.
+      //
+      // What that closes: PR 3 narrowed the ducking-to-play window with the IsTerminal re-check below,
+      // but a re-check is not a lock. A preemption landing between that check and PlayAsync could still
+      // complete a whole teardown — stop ducking, stop the source, publish Stopped — and PlayAsync
+      // would then start audio on a source the seam has already forgotten, in the window before
+      // DisposeAsync. AudioSourceBase.PlayAsync only refuses once _disposed is set; between StopAsync
+      // and DisposeAsync the state reads Stopped and PlayCoreAsync runs. That sound has no playbackId,
+      // so no route, no chip and no later preemption can address it: it plays to the end, over the
+      // announcement that preempted it. It is the worst outcome available in this PR.
+      //
+      // ⚠ Stated precisely rather than overclaimed: Dispose does NOT take _gate (it claims the source
+      // through ClaimSourceForRelease instead), so container shutdown remains outside this exclusion.
+      // The re-check below is what still covers that, and it is why it stays.
+      //
+      // The cost, and it is a real one: a stop arriving while this holds the gate is delayed by one
+      // ducking attack fade (Audio:DuckingAttackMs, 100 ms shipped) plus one PlayAsync — which starts
+      // playback and returns rather than awaiting completion. So a preemption landing mid-tail lets a
+      // short burst of audio out before stopping it, where before it could suppress the start
+      // entirely. A brief blip that stops is strictly better than audio that nothing can stop.
+      //
+      // CancellationToken.None on the wait, matching OnSourceCompleted: acquiring the gate must not be
+      // abandoned half-way. The cancellation that matters is checked inside it.
+      await _gate.WaitAsync(CancellationToken.None);
+      try
       {
-        await DisposeOrphanAsync(playback, source);
-        return;
+        // The source handover is an ATOMIC check-and-assign, and that is a leak fix rather than
+        // tidiness. Every terminal caller claims the flag and then tears down, and teardown can only
+        // release a source the playback already OWNS - which it does not for the whole of
+        // acquisition. So a stop, a replacement or a disposal landing here used to leave the source
+        // acquisition then produced with nobody to dispose it: on the RemoteMedia arm an
+        // AudioFileEventSource holding an open FileStream over the cached recording, which on Windows
+        // also stops GvMediaCache's evictor reclaiming that entry. TryAdopt refusing is how this path
+        // learns that it owns the disposal instead.
+        if (!playback.TryAdopt(source, token))
+        {
+          await DisposeOrphanAsync(playback, source);
+          return;
+        }
+
+        source.PlaybackCompleted += (_, e) => OnSourceCompleted(playback, e);
+
+        // Priority is set and the source is adopted BEFORE ducking starts, and both orderings are
+        // load-bearing after PR 4. StartDuckingAsync now raises DuckingStateChanged for this very
+        // source, so OnDuckingStateChanged runs synchronously on this thread: it reads the priority
+        // from _duckingService (which must already hold it, or an attended playback would read as the
+        // category default of 8) and compares TriggeringSource against _current.Source (which must
+        // already be adopted, or a playback at Priority >= 8 would preempt itself).
+        _duckingService.SetPriority(source, request.Priority);
+        await _duckingService.StartDuckingAsync(source, token);
+
+        // ⚠ Nothing is checked here about OTHER active sources, and that is the owner's decision
+        // (punch list D28), not an omission. A playback starting while a source at or above
+        // GvMedia:PreemptAtPriority is already sounding must WAIT for it and then play — which needs a
+        // waiting state on the wire and a chip that renders it, so it lands in PR 5 with them. Until
+        // then this mixes, exactly as it does today. Do not "fix" it by refusing the start: that
+        // option was put to the owner and rejected.
+        //
+        // Still re-checked between ducking and audio. Under the gate this is closed against StopAsync
+        // and the replacement arm; against Dispose, which does not take the gate, it remains the
+        // narrowing check PR 3 wrote it as. Throwing hands it to the catch below, which releases what
+        // this now owns.
+        if (playback.IsTerminal || token.IsCancellationRequested)
+        {
+          throw new OperationCanceledException(token);
+        }
+
+        await source.PlayAsync(token);
+
+        // Guarded rather than published unconditionally: a source can fail synchronously inside
+        // PlayAsync — AudioFileEventSource.PlayCoreAsync catches and raises Error completion on the
+        // calling thread — so the terminal transition may already be claimed by the time control
+        // returns here. See PublishNonTerminal.
+        PublishNonTerminal(playback, EventPlaybackState.Playing);
       }
-
-      source.PlaybackCompleted += (_, e) => OnSourceCompleted(playback, e);
-
-      _duckingService.SetPriority(source, request.Priority);
-      await _duckingService.StartDuckingAsync(source, token);
-
-      // Re-checked between ducking and audio, deliberately rather than argued benign. A terminal
-      // transition can land in the window between those two awaits, and PR 4's preemption path
-      // lands on exactly this window - so a preempted playback must not still start producing
-      // sound. Throwing hands it to the catch below, which releases what this now owns.
-      if (playback.IsTerminal || token.IsCancellationRequested)
+      finally
       {
-        throw new OperationCanceledException(token);
+        _gate.Release();
       }
-
-      await source.PlayAsync(token);
-
-      // Guarded rather than published unconditionally: a source can fail synchronously inside
-      // PlayAsync — AudioFileEventSource.PlayCoreAsync catches and raises Error completion on the
-      // calling thread — so the terminal transition may already be claimed by the time control
-      // returns here. See PublishNonTerminal.
-      PublishNonTerminal(playback, EventPlaybackState.Playing);
     }
     catch (OperationCanceledException)
     {
@@ -649,6 +733,131 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         _logger.LogWarning(ex, "Error finalising attended playback {Id}", playback.Id);
       }
     }, CancellationToken.None);
+  }
+
+  // ── preemption (ADR-029 D5) ───────────────────────────────────────
+
+  /// <summary>
+  /// ADR-029 D5 §6.2 rule 2: a source starting at or above GvMedia:PreemptAtPriority stops attended
+  /// playback outright.
+  /// </summary>
+  /// <remarks>
+  /// It STOPS rather than pausing. Resuming a voicemail mid-word twenty seconds after a phone call is
+  /// worse than restarting it, and the recording is replayable at zero cost — it is a local cached
+  /// file. The UI returns to an idle, replayable state (ADR-029 §12 item 4).
+  ///
+  /// ⚠ Three things in this method are load-bearing and none of them is obvious:
+  ///
+  /// (1) IsDucking:false is ignored. DuckingService.StopDuckingAsync removes the source's
+  ///     _sourcePriorities entry BEFORE it raises, and GetPriority then falls back to
+  ///     DefaultEventPriority (8) — so acting on a stop would read every ending announcement as a
+  ///     priority-8 preemption. StopAllDuckingAsync also raises with a NULL TriggeringSource.
+  ///
+  /// (2) The priority is read SYNCHRONOUSLY, here, on the raising thread. Every caller in the tree does
+  ///     SetPriority(source, p) immediately before StartDuckingAsync(source), so the entry is present at
+  ///     this instant and gone after the source stops. Resolving it on the dispatched task would race
+  ///     that removal and read 8 for a source whose caller had explicitly claimed 3.
+  ///
+  /// (3) The stop is DISPATCHED, never awaited here. Two reasons, and the second one is the one that
+  ///     is easy to state too strongly, so it is stated exactly.
+  ///
+  ///     First: this runs on the thread inside DuckingService.StartDuckingAsync — on the live path
+  ///     that is AnnouncementService's, mid-announcement, reached from
+  ///     POST /api/notifications/announce. Awaiting StopAsync would block the doorbell for the length
+  ///     of our whole teardown, which includes DuckingService's 500 ms release fade.
+  ///
+  ///     Second: StopAsync takes _gate, and since PHN-1d the acquisition tail holds _gate across the
+  ///     very StartDuckingAsync call that raises this event. ⚠ That is NOT a live deadlock today, and
+  ///     claiming it would be the overclaim this repo keeps shipping: the raise arriving on a thread
+  ///     that already holds _gate is our OWN source's, and the identity check below returns before the
+  ///     dispatch is reached. Every other reachable raise arrives on a foreign thread, where awaiting
+  ///     would block rather than deadlock. What dispatching buys is that neither of those stays true
+  ///     by accident — an awaiting handler becomes a hard deadlock the first time any raise reaches
+  ///     this point from a gate-holding thread, and rule 1 and the identity check are the only two
+  ///     things standing between here and that. OnSourceCompleted is written the same way, for the
+  ///     same reason, and its remark says so.
+  /// </remarks>
+  private void OnDuckingStateChanged(object? sender, DuckingStateChangedEventArgs e)
+  {
+    if (!e.IsDucking || e.TriggeringSource is not { } trigger)
+    {
+      return;
+    }
+
+    int priority;
+    try
+    {
+      priority = _duckingService.GetPriority(trigger);
+    }
+    catch (Exception ex)
+    {
+      // Reading a priority must never take down the announcement path that raised this.
+      _logger.LogWarning(ex, "Could not read the priority of starting source '{SourceId}'", trigger.Id);
+      return;
+    }
+
+    var threshold = _gvMediaOptions.CurrentValue.PreemptAtPriority;
+    if (priority < threshold)
+    {
+      // ADR-029 §6.2 rule 3: sub-threshold events keep MIXING, exactly as they do today over TTS
+      // announcements. This ADR does not fix that; the fix would be a queue across every caller of
+      // IAnnouncementService, and it is separate work with its own risk.
+      return;
+    }
+
+    Playback? victim;
+    lock (_stateLock)
+    {
+      victim = _current;
+    }
+
+    // ⚠ Never preempt ourselves. StartDuckingAsync raises for the ATTENDED source too, and
+    // EventPlaybackRequest.Priority accepts 1-10 — so a caller posting Priority 8 would otherwise stop
+    // its own playback the instant it started ducking. Compared by REFERENCE on the instance this
+    // service holds: three id spaces meet in this file and only the instance is unambiguous.
+    //
+    // Source is read OUTSIDE _stateLock deliberately. It is guarded by Playback's own _sourceLock, and
+    // nesting that inside _stateLock would introduce a lock ordering this file does not otherwise have.
+    // Nothing is lost by reading it a moment later: the decision is addressed by id below, and
+    // StopAsync re-checks the id under the gate.
+    if (victim is null || ReferenceEquals(victim.Source, trigger))
+    {
+      return;
+    }
+
+    // Warning, not Information: since LOG-11 the journal carries Warning and above, and "the voicemail
+    // stopped by itself" is exactly what an operator diagnoses from the box. Source ids only — never a
+    // media id and never request text (PHN-1b §0.3 ④).
+    _logger.LogWarning(
+      "Attended playback {Id} preempted: source '{SourceId}' started at priority {Priority}, "
+      + "at or above GvMedia:PreemptAtPriority ({Threshold})",
+      victim.Id, trigger.Id, priority, threshold);
+
+    // Addressed BY ID, captured now. If a replacing StartAsync wins the race the id no longer matches
+    // _current and StopAsync is a no-op — which is right: that playback started AFTER the preempting
+    // source, so "a source starts" never applied to it. What SHOULD cover that case is PR 5's queue
+    // (plan §0.4 C-46): a playback starting under a live >= 8 source waits for it. Until then it mixes,
+    // and APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY is what pins that so PR 5's fix is
+    // a visible diff.
+    var victimId = victim.Id;
+    _preemptionTail = Task.Run(
+      async () =>
+      {
+        try
+        {
+          await StopAsync(victimId);
+        }
+        catch (ObjectDisposedException)
+        {
+          // The container went away underneath us. Nothing left to stop.
+        }
+        catch (Exception ex)
+        {
+          // An unobserved faulted task is a process-level hazard on this box.
+          _logger.LogWarning(ex, "Error preempting attended playback {Id}", victimId);
+        }
+      },
+      CancellationToken.None);
   }
 
   private async Task FailAsync(Playback playback, string failureReason, Exception ex)
