@@ -116,14 +116,22 @@ public class SleepService : ISleepService
     return Interlocked.CompareExchange(ref _wakeClaimed, 1, 0) == 0;
   }
 
+  /// <summary>
+  /// The attended-playback seam, or null when event playback is not registered. Used for one thing
+  /// only: ADR-029 §7.5's rule that entering /sleep stops attended playback.
+  /// </summary>
+  private readonly IEventPlaybackService? _eventPlayback;
+
   public SleepService(
     ILogger<SleepService> logger,
     IHubContext<AudioStateHub> hubContext,
-    IAudioManager? audioManager = null)
+    IAudioManager? audioManager = null,
+    IEventPlaybackService? eventPlayback = null)
   {
     _logger = logger;
     _hubContext = hubContext;
     _audioManager = audioManager;
+    _eventPlayback = eventPlayback;
   }
 
   /// <summary>
@@ -140,6 +148,23 @@ public class SleepService : ISleepService
       }
 
       _logger.LogInformation("Entering sleep mode");
+
+      // ADR-029 D7 §7.5, closing that ADR's open question Q8 in the direction it called safe.
+      // /sleep declares @layout EmptyLayout, so PR 6's stop chip — which lives in MainLayout's
+      // .topbar-primary — does not render there, and MainLayout navigates the console to /sleep
+      // ITSELF on a server-pushed sleep and on the idle timer. Attended playback may not exist on a
+      // surface that offers no way to stop it.
+      //
+      // ⚠ A STOP, not a reliance on the mute two blocks below. WakeAsync restores
+      // _wasMutedBeforeSleep, so a muted-but-still-playing voicemail would become audible again
+      // MID-WORD the instant somebody touches the panel in a dark room — worse than the problem the
+      // rule was written about.
+      //
+      // ⚠ Here rather than in Radio.Web. Three client paths reach sleep — the Sleep pill, the
+      // idle-dimmer JS callback, and a server-pushed SleepStateChanged — and all three arrive at this
+      // method. One place covers every route, every client, and the entry point nobody has written
+      // yet.
+      await StopAttendedPlaybackAsync();
 
       if (_audioManager != null)
       {
@@ -189,8 +214,54 @@ public class SleepService : ISleepService
   }
 
   /// <summary>
+  /// Stops attended event playback that could still be producing sound. Never throws: sleep has to
+  /// happen whether or not a voicemail could be stopped.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ A non-null Current is NOT the same as audio in the room. IEventPlaybackService.Current
+  /// RETAINS the last snapshot after a playback ends, because StartAsync answers before any audio
+  /// exists and that surface is the only place an acquisition failure can be read from. So the state
+  /// is what decides, not the null check.
+  /// </remarks>
+  private async Task StopAttendedPlaybackAsync()
+  {
+    if (_eventPlayback?.Current is not { } snapshot)
+    {
+      return;
+    }
+
+    // Preparing is included deliberately: a fetch or a synthesis still in flight would otherwise
+    // start audio moments after the panel went dark.
+    if (snapshot.State is not (EventPlaybackState.Preparing
+        or EventPlaybackState.Playing
+        or EventPlaybackState.Paused))
+    {
+      return;
+    }
+
+    try
+    {
+      if (await _eventPlayback.StopAsync(snapshot.Id))
+      {
+        _logger.LogInformation(
+          "Sleep stopped attended playback {Id}: /sleep offers no transport (ADR-029 §7.5)",
+          snapshot.Id);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error stopping attended playback on the way into sleep");
+    }
+  }
+
+  /// <summary>
   /// Wakes from sleep: restores mute state, resumes playback if it was active before sleep, broadcasts to UI.
   /// </summary>
+  /// <remarks>
+  /// ⚠ There is no symmetric restore for the attended playback EnterSleepAsync stopped, and that is
+  /// deliberate. ADR-029 §6.2 rule 2's reasoning applies: the recording is replayable at zero cost,
+  /// and resuming a voicemail mid-word after a wake is worse than restarting it.
+  /// </remarks>
   public async Task WakeAsync(string wakeSource = "unknown")
   {
     await _lock.WaitAsync();
