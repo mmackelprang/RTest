@@ -932,12 +932,31 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
-  public async Task NeitherTheTextNorTheRawMediaIdReachesAnyLogLine()
+  public async Task NeitherTheTextNorTheRawMediaIdReachesAnyLogLineThisSeamWrites()
   {
     // The masking rule, extended to Text: for the Speech arm the payload is an SMS body, which is
-    // private content by exactly the standard the media-id rule protects. Every logger in the chain
-    // is captured — the service, the client, the cache, the factory and the source — at every
-    // level, across a successful speech playback, a successful voicemail playback and a failed one.
+    // private content by exactly the standard the media-id rule protects. The loggers captured here
+    // are EventPlaybackService, GvMediaClient, GvMediaCache, AudioFileEventSourceFactory and
+    // AudioFileEventSource, at every level, across a successful speech playback, a successful
+    // voicemail playback and a failed one.
+    //
+    // ⚠ THE NAME SAYS "THIS SEAM WRITES" BECAUSE THE CHAIN IS DELIBERATELY INCOMPLETE. The Speech
+    // arm runs on FakeTtsFactory, so the REAL TTSFactory and TTSEventSource are never in the chain
+    // — and both of them DO log the utterance, on the path this PR ships:
+    //
+    //   TTSFactory.cs:99       LogInformation("Creating TTS audio for text: '{Text}' with engine
+    //                          {Engine}", ...)    — the first 50 characters
+    //   TTSEventSource.cs:92   LogInformation("TTS event source initialized: {Text}", _text)
+    //                          — the WHOLE string
+    //   TTSEventSource.cs:107  LogDebug("Playing TTS audio: {Text}", _text)
+    //
+    // Since LOG-11 an Information line no longer reaches the journal but DOES reach the file sink,
+    // so on the appliance a private SMS body ends up at rest in /opt/radio-console/logs/. That is a
+    // real residual and it is filed as design/FUTURE-WORK.md § "TTS seam" item 5; the fix belongs to
+    // TTSFactory and TTSEventSource, two live shared paths this PR may not touch. What this test
+    // pins is the rule the PHN-1c plan actually scoped: EventPlaybackService and
+    // EventPlaybackController never log request.Text. Do NOT widen the name back without first
+    // widening the chain to a real ITTSFactory.
     var logs = new CapturingLoggerProvider();
 
     using (var speech = CreateService(logs: logs))
