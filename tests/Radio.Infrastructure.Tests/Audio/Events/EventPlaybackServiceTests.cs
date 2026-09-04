@@ -1047,6 +1047,15 @@ internal sealed class FakeTtsFactory : ITTSFactory
 /// AudioSourceBase.StopAsync does not short-circuit on Stopped. A fake that could only complete
 /// once would make ATerminalTransitionHappensExactlyOnce vacuous — it would be asserting a property
 /// of the fake rather than of the service.
+///
+/// ⚠ And StopAsync raises UserStopped INLINE, before it returns, for a second and separate reason:
+/// RE-ENTRANCY, not multiplicity. Both real sources raise UserStopped from inside StopCoreAsync,
+/// which EventPlaybackService.TearDownAsync calls WHILE IT HOLDS _gate — so the service's
+/// "OnSourceCompleted must never wait on _gate" invariant is exercised on every teardown here, the
+/// same way it is on the appliance. A fake that stayed silent in StopAsync (which this one did until
+/// PHN-1c's review) leaves that invariant documented in two places and tested in none: re-adding an
+/// await _gate.WaitAsync() to OnSourceCompleted would deadlock every user stop on the box, with a
+/// fully green suite. Verified by doing exactly that and watching the suite hang; see the commit.
 /// </remarks>
 internal sealed class FakeEventSource : IEventAudioSource
 {
@@ -1105,6 +1114,10 @@ internal sealed class FakeEventSource : IEventAudioSource
   {
     StopCalls++;
     State = AudioSourceState.Stopped;
+    // ⚠ Inline, before returning — see the class remarks. This is what the real sources do
+    // (EventAudioSourceBase.StopAsync -> StopCoreAsync -> OnPlaybackCompleted(UserStopped)), and it
+    // is what puts EventPlaybackService.OnSourceCompleted on a thread that is already holding _gate.
+    RaiseCompleted(PlaybackCompletionReason.UserStopped);
     return Task.CompletedTask;
   }
 
