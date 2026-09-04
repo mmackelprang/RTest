@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
@@ -95,7 +96,8 @@ public sealed class EventPlaybackServiceTests : IDisposable
     TTSOptions? tts = null,
     HttpMessageHandler? httpHandler = null,
     FakeDuckingService? ducking = null,
-    CapturingLoggerProvider? logs = null)
+    CapturingLoggerProvider? logs = null,
+    TimeProvider? timeProvider = null)
   {
     var gvOptions = gvMedia ?? new GvMediaOptions { Enabled = true, CacheDirectory = _cacheDir };
     var gvMonitor = new StaticOptionsMonitor<GvMediaOptions>(gvOptions);
@@ -130,7 +132,8 @@ public sealed class EventPlaybackServiceTests : IDisposable
       ttsFactory ?? new FakeTtsFactory(),
       fileFactory,
       ducking ?? _ducking,
-      client);
+      client,
+      timeProvider);
   }
 
   private static HttpResponseMessage Mp3Of(int bytes) =>
@@ -1788,6 +1791,177 @@ public sealed class EventPlaybackServiceTests : IDisposable
       + "that names no priority arrives at exactly 8 via NotificationsController's 'Priority ?? 8', so "
       + "the doorbell silently stops preempting while the dormant ring at 9 still would - the feature "
       + "looks intact and has stopped happening. Lower the threshold, or move both together and say so.");
+  }
+
+  // ── the max-duration cap (ADR-029 D7 §7.1) ────────────────────────────────
+
+  [Fact]
+  public async Task TheDurationCapStopsAPlaybackThatOutlivesMaxPlaybackSeconds()
+  {
+    // ADR-029 D7 §7.1 — "This is THE guarantee. No client cooperation, no heartbeat, no timer loop,
+    // no polling." Everything else in D7 is a latency improvement on this line.
+    //
+    // ⚠ Driven by FakeTimeProvider, never by Task.Delay. CLAUDE.md § Test Timing forbids racing a
+    // wall clock against a wall clock, and TEST-4 is the row about the last time this repo did.
+    // Advance() fires every DUE timer synchronously before it returns, and the rendezvous below is on
+    // the Stopped SNAPSHOT rather than on elapsed time — so both halves are deterministic.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Subscribed BEFORE the advance, so the transition cannot be missed.
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    time.Advance(TimeSpan.FromSeconds(30));
+
+    var final = await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(1, source.StopCalls);
+    Assert.Equal(EventPlaybackState.Stopped, service.Current!.State);
+  }
+
+  [Fact]
+  public async Task TheDurationCapDoesNotFireBeforeItsTime()
+  {
+    // ⚠ A NEGATIVE assertion that is DETERMINISTIC rather than merely patient, and this test says so
+    // about itself because CLAUDE.md § Test Timing asks a test to. FakeTimeProvider.Advance runs
+    // every due timer synchronously before returning, so when it returns with none due there is
+    // nothing in flight for the assertions to lose a race to. This is NOT "no event arrived within
+    // 200 ms", and it is the reason the cap uses TimeProvider rather than a raw Timer.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    time.Advance(TimeSpan.FromSeconds(29));
+
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+    Assert.Equal(0, source.StopCalls);
+  }
+
+  [Fact]
+  public async Task ANaturalEndDisarmsTheDurationCap()
+  {
+    // The disarm lives in ReleaseSourceAsync, the one funnel that stops and disposes a source. If it
+    // were missing, a ten-second voicemail would leave a five-minute timer alive — and on this box a
+    // timer per playback that never fires is the shape trap 5 of the arc breakdown exists to refuse.
+    // Observable consequence, and the reason this assertion is on StopCalls rather than on a state:
+    // the playback is already Completed, so a late cap would change no snapshot; it would only touch
+    // the source a second time.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var completed = NextSnapshotWith(service, EventPlaybackState.Completed);
+    source.RaiseCompleted(PlaybackCompletionReason.EndOfContent);
+    await completed.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var stopsAtEnd = source.StopCalls;
+    time.Advance(TimeSpan.FromMinutes(10));
+
+    Assert.Equal(stopsAtEnd, source.StopCalls);
+    Assert.Equal(EventPlaybackState.Completed, service.Current!.State);
+  }
+
+  [Fact]
+  public async Task AReplacedPlaybackDoesNotTakeItsReplacementDownWhenItsCapExpires()
+  {
+    // Two independent reasons this holds, and the test exists because only one of them is obvious.
+    // (1) The replaced playback's teardown runs ReleaseSourceAsync, which disarms its cap.
+    // (2) Even if it did not, the callback addresses StopAsync BY THE OLD ID, which no longer matches
+    //     _current, so it is a no-op.
+    // Belt and braces — but a refactor that made the cap address "whatever is current" would turn a
+    // stale timer into a stop of an unrelated playback, and this is the test that catches it.
+    var time = new FakeTimeProvider();
+    var first = new FakeEventSource();
+    var second = new FakeEventSource();
+    var queue = new Queue<IEventAudioSource>([first, second]);
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult(queue.Dequeue()) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var firstPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await firstPlaying.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Ten seconds into the first playback, a second one replaces it — so the first's cap would fire
+    // twenty seconds from now, while the second's has thirty seconds to run from here.
+    time.Advance(TimeSpan.FromSeconds(10));
+    var replaced = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    var two = await service.StartAsync(SpeechRequest());
+    await replaced.WaitAsync(TimeSpan.FromSeconds(5));
+    await WaitUntilAsync(() => second.PlayCalls == 1, TimeSpan.FromSeconds(5));
+
+    time.Advance(TimeSpan.FromSeconds(21));
+
+    Assert.Equal(two.Id, service.Current!.Id);
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+    Assert.Equal(0, second.StopCalls);
+  }
+
+  [Fact]
+  public async Task AZeroMaxPlaybackSecondsClampsToOneSecondRatherThanMeaningNoCap()
+  {
+    // ⚠ There is deliberately no off switch (ADR-029 §7.1 calls this THE guarantee), and this pins
+    // which direction a nonsense value resolves in. The alternative reading — 0 means "never cap" —
+    // is the PreemptAtPriority trap in another key: a number that silently deletes a safety property
+    // while leaving it looking configured (plan PHN-1d C-43).
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 0
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    time.Advance(TimeSpan.FromSeconds(1));
+
+    await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, source.StopCalls);
   }
 }
 
