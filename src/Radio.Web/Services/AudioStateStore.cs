@@ -274,7 +274,20 @@ public class AudioStateStore : IAsyncDisposable
   // 0 or 1, claimed with Interlocked so two circuits opening at once seed exactly once.
   private int _eventPlaybackSeedStarted;
 
-  private async Task OnHubEventPlaybackChanged(EventPlaybackSnapshotDto? dto)
+  /// <summary>
+  /// Applies one "EventPlaybackChanged" broadcast. Subscribed to the hub client in the constructor.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ internal rather than private, and only for the test seam — Radio.Web.csproj already declares
+  /// InternalsVisibleTo("Radio.Web.Tests"). A field-like event can only be raised from inside the
+  /// type that declares it, so a test holding an AudioStateHubService cannot make it fire
+  /// EventPlaybackChanged; without this, neither the seed's broadcast-wins ordering nor the circuit
+  /// backstop's "there is a live playback" precondition could be driven at all, because both are
+  /// reachable only through a broadcast having landed. Driving the real handler is also more faithful
+  /// than exposing a setter for EventPlayback: the test sets exactly the state a broadcast sets,
+  /// including _eventPlaybackBroadcastSeen, rather than a subset a future edit could drift from.
+  /// </remarks>
+  internal async Task OnHubEventPlaybackChanged(EventPlaybackSnapshotDto? dto)
   {
     EventPlayback = dto;
     Volatile.Write(ref _eventPlaybackBroadcastSeen, 1);
