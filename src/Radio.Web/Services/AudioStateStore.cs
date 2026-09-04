@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Web.Models;
+using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 
 namespace Radio.Web.Services;
@@ -60,6 +61,9 @@ public class AudioStateStore : IAsyncDisposable
   /// <summary>Raised when the encoder configuration tier changes.</summary>
   public event Func<Task>? EncoderConfigStatusChanged;
 
+  /// <summary>Raised when the one attended event playback changes state (ADR-029 D6).</summary>
+  public event Func<Task>? EventPlaybackChanged;
+
   public AudioStateStore(
     ILogger<AudioStateStore> logger,
     AudioStateHubService hubService)
@@ -78,6 +82,7 @@ public class AudioStateStore : IAsyncDisposable
     _hubService.SleepStateChanged += OnHubSleepStateChanged;
     _hubService.EncoderConnectionChanged += OnHubEncoderConnectionChanged;
     _hubService.EncoderConfigStatusChanged += OnHubEncoderConfigStatusChanged;
+    _hubService.EventPlaybackChanged += OnHubEventPlaybackChanged;
   }
 
   /// <summary>
@@ -249,6 +254,95 @@ public class AudioStateStore : IAsyncDisposable
   /// </summary>
   public EncoderConfigStatusDto? EncoderConfigStatus { get; private set; }
 
+  /// <summary>
+  /// Latest attended-playback snapshot, or null if none has been observed since this process
+  /// started.
+  /// </summary>
+  /// <remarks>
+  /// Process-wide, not per circuit, for the reason EncoderConfigStatus is: this store is registered
+  /// AddSingleton, and there is one audio engine and one set of speakers, so the state it caches is
+  /// global by nature (ADR-029 D6 §8.1). A terminal snapshot is RETAINED here exactly as it is on the
+  /// server, so "nothing is playing" is a state rather than the absence of one — a chip that hid on a
+  /// null would never show a failure.
+  /// </remarks>
+  public EventPlaybackSnapshotDto? EventPlayback { get; private set; }
+
+  // 0 or 1. Set the first time a broadcast lands, read by the seed so a response already in flight
+  // cannot overwrite something newer. The ENC-12 rule (MainLayout.razor:388-397).
+  private int _eventPlaybackBroadcastSeen;
+
+  // 0 or 1, claimed with Interlocked so two circuits opening at once seed exactly once.
+  private int _eventPlaybackSeedStarted;
+
+  private async Task OnHubEventPlaybackChanged(EventPlaybackSnapshotDto? dto)
+  {
+    EventPlayback = dto;
+    Volatile.Write(ref _eventPlaybackBroadcastSeen, 1);
+    await NotifyAsync(EventPlaybackChanged);
+  }
+
+  /// <summary>
+  /// Seeds <see cref="EventPlayback"/> from GET /api/audio/events/current. Runs at most once per
+  /// process; every later call returns immediately.
+  /// </summary>
+  /// <remarks>
+  /// ADR-029 §8.1 ⟨A1·4⟩ makes this a requirement rather than a nicety: broadcasts fire on
+  /// TRANSITIONS, so a client connecting between two of them would render "nothing is playing" while
+  /// the room is talking. A fresh circuit arriving mid-playback is now routine — the user navigated
+  /// away and back, the kiosk refreshed, a second browser opened.
+  ///
+  /// ⚠ A one-shot PULL, not a poll. Trap 5 of the arc breakdown disqualifies a poll outright.
+  ///
+  /// ⚠ The API client is a PARAMETER rather than a constructor dependency, and that is not style. A
+  /// Web singleton cannot inject a typed HttpClient (ADR-022 §6.2, and BellHealthService's class
+  /// remark says so in as many words) — holding one for the process lifetime pins a handler that is
+  /// meant to rotate. The caller resolves it in a scope and hands it in, so this store stays free of
+  /// HTTP.
+  ///
+  /// ⚠ Ordering, and it is ENC-12's rule rather than a new one: a broadcast that lands while the
+  /// pull is in flight describes a LATER moment than the response now in hand, so it wins and the
+  /// response is discarded. Seeding from the cache alone was wrong on exactly the boot the seed
+  /// exists for — a deploy restarts both services together, so the API can broadcast while
+  /// AudioStateHubService.StartAsync is still in its retry loop, and that broadcast reaches nobody.
+  ///
+  /// ⚠ Never throws. Its callers are a CircuitHandler and, from PR 6, a layout; neither is worth a
+  /// blank screen.
+  ///
+  /// ⚠ KNOWN LIMITATION, shared with every other cached broadcast in this store and deliberately not
+  /// fixed here: a hub connection that drops and reconnects can miss transitions, and nothing
+  /// re-seeds. What bounds the damage is that the next transition corrects it, and that
+  /// GvMedia:MaxPlaybackSeconds bounds how long a missed one can matter. Re-seeding on Reconnected is
+  /// a fast-follow.
+  /// </remarks>
+  public async Task EnsureEventPlaybackSeededAsync(
+    EventPlaybackApiService api, CancellationToken cancellationToken = default)
+  {
+    if (Interlocked.Exchange(ref _eventPlaybackSeedStarted, 1) != 0)
+    {
+      return;
+    }
+
+    try
+    {
+      var snapshot = await api.GetCurrentAsync(cancellationToken);
+
+      if (Volatile.Read(ref _eventPlaybackBroadcastSeen) != 0)
+      {
+        return;
+      }
+
+      if (snapshot is not null)
+      {
+        EventPlayback = snapshot;
+        await NotifyAsync(EventPlaybackChanged);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Error seeding attended playback state");
+    }
+  }
+
   private async Task NotifyAsync(Func<Task>? handler)
   {
     if (handler != null)
@@ -276,6 +370,7 @@ public class AudioStateStore : IAsyncDisposable
     _hubService.SleepStateChanged -= OnHubSleepStateChanged;
     _hubService.EncoderConnectionChanged -= OnHubEncoderConnectionChanged;
     _hubService.EncoderConfigStatusChanged -= OnHubEncoderConfigStatusChanged;
+    _hubService.EventPlaybackChanged -= OnHubEventPlaybackChanged;
 
     await Task.CompletedTask;
     GC.SuppressFinalize(this);
