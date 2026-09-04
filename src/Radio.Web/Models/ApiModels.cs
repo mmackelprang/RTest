@@ -1481,3 +1481,44 @@ public class SleepStateDto
   public bool IsSleeping { get; set; }
   public string WakeState { get; set; } = "Awake";
 }
+
+/// <summary>
+/// One attended event playback: the payload of "EventPlaybackChanged" and the body of
+/// GET /api/audio/events/current (ADR-029 D6 §8.1, §8.2).
+/// </summary>
+/// <remarks>
+/// ⚠ Kind and State are STRINGS rather than the Radio.Core enums, deliberately and twice over.
+/// (1) The two paths that fill this record serialise through different System.Text.Json options —
+/// MVC's carry JsonStringEnumConverter, SignalR's do not — so the API spells them explicitly; see
+/// AudioStateUpdateService.OnEventPlaybackChanged. (2) A value this build has never heard of must
+/// degrade to "show nothing special" rather than throw during deserialization on a kiosk nobody is
+/// watching, which is the rule EncoderConfigStatusDto and EncoderHudDto.Phase already follow.
+///
+/// ⚠ This is an ANCHOR, not a tick. PositionAtBroadcast + BroadcastAtUtc + State is everything a
+/// client needs to interpolate a progress bar on its own clock; there is no periodic position
+/// message and there must not be one (ADR-029 §8.2).
+/// </remarks>
+public record EventPlaybackSnapshotDto(
+  string Id,
+  string? Kind,
+  string? Label,
+  string? State,
+  TimeSpan? Duration,
+  TimeSpan PositionAtBroadcast,
+  DateTimeOffset BroadcastAtUtc,
+  string? FailureReason)
+{
+  /// <summary>
+  /// True while this playback could still be producing sound — the only states worth offering a Stop
+  /// for, and the only ones the last-circuit backstop acts on.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Written as "not one of the terminal three" rather than "one of the live three", so a state
+  /// this build does not recognise counts as LIVE. That is the safe direction: an unknown state that
+  /// is in fact playing must keep its stop control. PHN-1f's queued state is exactly such a value,
+  /// and this is what lets it arrive without a lockstep Radio.Web deploy. A null State is the one
+  /// thing that is not live — it means the payload did not carry one at all.
+  /// </remarks>
+  public bool IsLive =>
+    State is not null && State is not ("Completed" or "Stopped" or "Failed");
+}

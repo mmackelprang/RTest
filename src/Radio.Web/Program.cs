@@ -105,6 +105,21 @@ builder.Services.AddHttpClient<AudioApiService>(client =>
   return handler;
 });
 
+// ADR-029 D6/D7 — the read and stop halves of /api/audio/events. Same shape as AudioApiService
+// above; the seed (§8.1) and the last-circuit backstop (§7.3) are its two callers.
+builder.Services.AddHttpClient<EventPlaybackApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
 builder.Services.AddHttpClient<SystemApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
