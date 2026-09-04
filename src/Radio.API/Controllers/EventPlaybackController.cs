@@ -121,16 +121,33 @@ public class EventPlaybackController : ControllerBase
   }
 
   /// <summary>Stops the playback with this id.</summary>
+  /// <remarks>
+  /// ⚠ Refuses by the SAME rule as <see cref="Transport"/>, and it has to. Until PHN-1c's review
+  /// this answered a flat 404 for any refusal, so a just-completed id got 404 here and 409 from
+  /// pause on the very same id — two answers to the same question, one of them contradicting
+  /// Transport's own remark that "404 is reserved for an id Current has never described". Current
+  /// RETAINS the last snapshot after a playback ends, so a just-ended id IS an id Current describes:
+  /// it gets 409.
+  /// </remarks>
   /// <param name="id">The server-minted playback id.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns>204, or 404 when no such playback is in flight.</returns>
+  /// <returns>204, 409 for an id that has already ended, or 404 for one that never existed.</returns>
   [HttpDelete("{id}")]
   [ProducesResponseType(StatusCodes.Status204NoContent)]
   [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
   public async Task<IActionResult> Stop(string id, CancellationToken cancellationToken)
-    => await _playback.StopAsync(id, cancellationToken)
-      ? NoContent()
-      : NotFound(new { error = "No such playback", reason = "UnknownPlaybackId" });
+  {
+    if (await _playback.StopAsync(id, cancellationToken))
+    {
+      return NoContent();
+    }
+
+    var current = _playback.Current;
+    return current is null || current.Id != id
+      ? NotFound(new { error = "No such playback", reason = "UnknownPlaybackId" })
+      : Conflict(new { error = "The playback cannot do that right now", reason = "NotStoppable" });
+  }
 
   /// <summary>Seeks the playback with this id.</summary>
   /// <param name="id">The server-minted playback id.</param>
@@ -201,7 +218,9 @@ public class EventPlaybackController : ControllerBase
   /// id that has just completed or failed answers 409, not 404 — the id is still the one Current
   /// describes, it simply cannot pause or scrub any more. That is the honest answer of the two:
   /// 404 would say the caller invented the id, when in fact the UI is holding a handle that was
-  /// real a moment ago. 404 is reserved for an id Current has never described.
+  /// real a moment ago. 404 is reserved for an id Current has never described — and since PHN-1c's
+  /// review <see cref="Stop"/> applies that same rule, so DELETE and pause no longer disagree about
+  /// the same id.
   ///
   /// ⚠ Honest about the race, because a reviewer will find it: Current is read AFTER the call, so a
   /// playback replaced in between reports 404 rather than 409. Both are refusals, the window is
@@ -214,7 +233,12 @@ public class EventPlaybackController : ControllerBase
     var current = _playback.Current;
     if (succeeded)
     {
-      return current is null ? NoContent() : Ok(current);
+      // ⚠ Not null, and the removed NoContent() branch that used to guard it was unreachable. A
+      // transport method returns true only when it resolved the id against the CURRENT playback, and
+      // every playback publishes its accepted snapshot before it can be addressed at all — so
+      // Current is non-null on any path that reaches here. A branch that cannot be taken is a claim
+      // that it can.
+      return Ok(current);
     }
     return current is null || current.Id != id
       ? NotFound(new { error = "No such playback", reason = "UnknownPlaybackId" })

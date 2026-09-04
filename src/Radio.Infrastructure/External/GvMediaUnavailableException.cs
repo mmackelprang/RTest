@@ -6,8 +6,14 @@ namespace Radio.Infrastructure.External;
 /// <para>
 /// This enum exists because collapsing every failure into one exception is a bug this repo already
 /// carries twice: GV-6 and GV-8 are both open rows whose shared root shape is "maps every non-2xx
-/// to null, destroying the distinction the caller needs." A 404 (the recording is gone) and a 502
-/// (GV auth is inside its ~9-minutes-in-20 blackout) demand opposite responses from the UI.
+/// to null, destroying the distinction the caller needs." A 404 and a 401 demand opposite responses
+/// — wait and retry, versus go and fix a configured key — and neither is recoverable from a null.
+///
+/// ⚠ What this <c>&lt;para&gt;</c> used to say, and must not say again: that a 404 means "the
+/// recording is gone" while a 502 means "the GV auth blackout". From THIS upstream a 404 means
+/// either, and nothing in the response separates them — see <see cref="NotFound"/> and
+/// <see cref="GvMediaUnavailableException.IsPermanent"/>, which is where that was already correct
+/// three lines further down.
 /// </para>
 /// </summary>
 public enum GvMediaFailure
@@ -85,8 +91,15 @@ public sealed class GvMediaUnavailableException : Exception
   /// That failure is exactly the Google Voice auth blackout — roughly 9 minutes in every 20 (XR-3) —
   /// so a 404 from this upstream means "gone" OR "try again in a few minutes", and nothing in the
   /// response distinguishes them. Reporting it as permanent would tell a user a voicemail no longer
-  /// exists roughly 45% of the times it is transient, which is the GV-6 / GV-8 failure class the
-  /// GvMediaFailure enum was built to prevent, arriving through a different door.
+  /// exists on the strength of a signal that cannot support the claim, which is the GV-6 / GV-8
+  /// failure class the GvMediaFailure enum was built to prevent, arriving through a different door.
+  ///
+  /// ⚠ Be careful with the ~45% figure this remark used to quote as "roughly 45% of the times it is
+  /// transient". That number is the blackout's share of WALL-CLOCK TIME (9 in 20 from XR-3), not a
+  /// measured share of 404s — nothing here counts how many 404s are blackouts, and the two are only
+  /// equal if 404s arrive uniformly in time, which nobody has checked. What the number licenses is
+  /// narrower and sufficient: the blackout is common enough that a 404 arriving at an arbitrary
+  /// moment cannot be assumed permanent.
   ///
   /// The distinction is NOT collapsed: NotFound keeps its own name and reaches the snapshot as
   /// "MediaNotFound", distinct from "MediaUpstream". What it no longer carries is a claim about

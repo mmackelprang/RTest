@@ -199,8 +199,14 @@ public class EventPlaybackControllerTests : IClassFixture<CustomWebApplicationFa
     // out. The expected end state is Failed with "MediaTransport".
     //
     // What it can actually catch: a 202 that never starts acquisition, an acquisition wired to the
-    // request's cancellation token (it would report Stopped, not Failed), a taxonomy that collapsed
-    // the reasons, a snapshot never published, or Current never storing it.
+    // request's cancellation token, a taxonomy that collapsed the reasons, a snapshot never
+    // published, or Current never storing it.
+    //
+    // ⚠ On that second one, precisely: an acquisition cancelled with the request's own token would
+    // NOT report Stopped. The OperationCanceledException arm of AcquireAndPlayAsync claims the
+    // terminal flag, tears down and publishes NOTHING — so the playback would sit at Preparing
+    // forever and PollUntilTerminalAsync below would fail on its deadline with "never left
+    // Preparing", which is exactly the message that names the cause.
     var cacheDirectory = Path.Combine(
       Path.GetTempPath(), "evp-route-tests-" + Guid.NewGuid().ToString("N"));
 
@@ -239,6 +245,26 @@ public class EventPlaybackControllerTests : IClassFixture<CustomWebApplicationFa
       Assert.Equal("Failed", final.GetProperty("state").GetString());
       Assert.Equal("MediaTransport", final.GetProperty("failureReason").GetString());
       Assert.Equal(id, final.GetProperty("id").GetString());
+
+      // ⚠ THE 404→409 RULE, END TO END, and this is the only place it is pinned at the wire. Current
+      // RETAINS this snapshot after the playback ended, so the id is still one Current describes — a
+      // transport call against it is "the playback cannot do that right now" (409), not "you
+      // invented that id" (404). Every other route test here uses "evp-nope", an id Current has
+      // never described, and so can only ever exercise the 404 half. This test is the one that
+      // already has a real, finished playback to ask about.
+      using var pause = new HttpRequestMessage(HttpMethod.Post, $"/api/audio/events/{id}/pause");
+      var refused = await client.SendAsync(pause);
+
+      Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+      Assert.Equal("NotPlaying", (await BodyOf(refused)).GetProperty("reason").GetString());
+
+      // And DELETE agrees with pause about the same id, which it did not until PHN-1c's review: it
+      // answered a flat 404 for every refusal, contradicting Transport's own documented rule.
+      using var stop = new HttpRequestMessage(HttpMethod.Delete, $"/api/audio/events/{id}");
+      var refusedStop = await client.SendAsync(stop);
+
+      Assert.Equal(HttpStatusCode.Conflict, refusedStop.StatusCode);
+      Assert.Equal("NotStoppable", (await BodyOf(refusedStop)).GetProperty("reason").GetString());
     }
     finally
     {

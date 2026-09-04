@@ -144,10 +144,20 @@ public enum EventPlaybackState
   /// <summary>Reached the end of the content.</summary>
   Completed = 3,
 
-  /// <summary>Ended before the end of the content — user stop, preemption, or the duration cap.</summary>
+  /// <summary>
+  /// Ended before the end of the content. Today that means a user stop, or a new playback taking
+  /// the single slot. ⚠ Preemption (PR 4) and the duration cap (PR 5) will land here too, and
+  /// NEITHER EXISTS YET — nothing reads GvMedia:PreemptAtPriority or GvMedia:MaxPlaybackSeconds for
+  /// this purpose as of PHN-1c.
+  /// </summary>
   Stopped = 4,
 
-  /// <summary>Never produced sound. <see cref="EventPlaybackSnapshot.FailureReason"/> says why.</summary>
+  /// <summary>
+  /// Ended without completing; <see cref="EventPlaybackSnapshot.FailureReason"/> says why. ⚠ NOT
+  /// "never produced sound": an acquisition failure never does, but a
+  /// <see cref="PlaybackCompletionReason.Error"/> completion arrives as "PlaybackError" and can
+  /// follow minutes of audio.
+  /// </summary>
   Failed = 5
 }
 
