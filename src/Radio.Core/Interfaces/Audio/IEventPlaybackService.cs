@@ -148,7 +148,10 @@ public enum EventPlaybackState
   /// Ended before the end of the content. Four things produce it: a user stop, a new playback taking
   /// the single slot, a source starting at or above GvMedia:PreemptAtPriority (PHN-1d), and the
   /// GvMedia:MaxPlaybackSeconds cap (PHN-1e). ⚠ The snapshot does not say WHICH — all four are a
-  /// stop, and no renderer branches on the difference today. The log line does say which.
+  /// stop, and no renderer branches on the difference today. ⚠ Nor do the logs, for one of the four:
+  /// a replacement logs "replaces", a preemption logs "preempted" and the cap logs "reached
+  /// GvMedia:MaxPlaybackSeconds", but StopAsync logs NOTHING, so a plain user stop is
+  /// indistinguishable from an unexplained one on the box.
   /// </summary>
   Stopped = 4,
 
