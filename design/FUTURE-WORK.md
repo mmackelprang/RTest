@@ -249,9 +249,12 @@ directly. An hour, plus a test that subscribes twice and asserts both tasks were
 
 ---
 
-## TTS seam — four deferrals that existed only in prose until 2026-09-03
+## TTS seam — five deferrals that existed only in prose until 2026-09-03
 
 **Status:** filed here for the first time. **Nothing below was fixed by the act of filing it.**
+⚠ **Item 5 was added on 2026-09-04**, during `PHN-1c`'s pre-merge review, and was never in prose
+anywhere — it was found by falsifying a test comment that claimed to have captured every logger in
+the speech chain. Items 1-4 are as filed on 2026-09-03.
 **Verified against the tree at `5e571b88`, i.e. after `TTS-9` (#548) removed eSpeak** — which closed
 half of item 1 and left the rest standing. Line numbers below are post-`TTS-9`.
 
@@ -307,6 +310,17 @@ as a broken settings page. It is also the same defect class `ENC-8a` and `TTS-10
 alone *looks* like a complete fix while being a quarter of one — an argument that now applies to the
 remaining half.
 
+⚠ **The new `/api/audio/events` route is NOT a way to reach this, and that is deliberate rather than
+lucky.** `PHN-1c` shipped the first user-reachable caller that passes a non-null `TTSParameters`, and
+`EventPlaybackService.AcquireSpeechAsync` fills **all four** fields explicitly from
+`IOptionsMonitor<TTSOptions>` for exactly this reason — pinned by
+`SpeechFillsAllFourTtsParametersFromConfiguration`, which was falsified during that PR (omitting
+`Speed`/`Pitch` makes it fail with `Expected 1.14999998, Actual 1`). ⚠ That test only has teeth because its
+fixture configures **non-default** speed and pitch; the shipped `1.0f` defaults are identical to the type's
+own initializers, so a fixture using them would pass against a partially-filled instance and prove nothing.
+Keep the non-default values if this test is ever rewritten. The live callers that *can* still hit the trap
+are `SourcesController.PlayTTSEvent` and anything else constructing a partial `TTSParameters`.
+
 ### 2. `TTSFactory._cachedEngines` is never invalidated, so a key added in the UI needs a restart
 
 `src/Radio.Infrastructure/Audio/Services/TTSFactory.cs:32,60-61`. `_cachedEngines ??=
@@ -355,7 +369,60 @@ never delete it.
 
 Filed as punch-list **`TTS-10`** (P1, §4.4) rather than here, because the owner can edit it in the UI —
 which makes it a settings-field-that-lies rather than a private code defect. Cross-referenced here so all
-four TTS deferrals are findable in one place.
+five TTS deferrals are findable in one place.
+
+### 5. The TTS chain logs the utterance in full, and since `LOG-11` that means private text at rest on disk
+
+**Status:** filed 2026-09-04. **Not fixed by `PHN-1c`, and `PHN-1c` may not fix it** — both files are
+live shared paths outside that PR's scope.
+
+Three lines log the text a caller asked to be spoken:
+
+```csharp
+// src/Radio.Infrastructure/Audio/Services/TTSFactory.cs:99
+_logger.LogInformation("Creating TTS audio for text: '{Text}' with engine {Engine}",
+    text.Length > 50 ? text[..50] + "..." : text, engine);
+
+// src/Radio.Infrastructure/Audio/Sources/Events/TTSEventSource.cs:92
+Logger.LogInformation("TTS event source initialized: {Text}", _text);   // the WHOLE string
+
+// src/Radio.Infrastructure/Audio/Sources/Events/TTSEventSource.cs:107
+Logger.LogDebug("Playing TTS audio: {Text}", _text);
+```
+
+**Why it matters, and why it got worse rather than better.** Until `PHN-1c` the only caller was
+`SourcesController.PlayTTSEvent` — a developer-facing route with no private payload behind it. `PHN-1c`
+ships `POST /api/audio/events` with `kind: "Speech"`, whose declared purpose (ADR-029 §4.2) is speaking
+**SMS bodies** aloud. That is private third-party content, held to exactly the standard the voicemail
+media-id masking rule enforces two files away — `GvMediaCache.MaskFor` exists so a raw voicemail id
+reaches no log line at all, and the seam that calls it logs `{Chars} characters with {Engine}` and
+nothing else.
+
+⚠ **`LOG-11` changed where this lands, not whether it happens.** Since that change the API's console
+sink is Warning-and-above, and under systemd the console *is* the journal — so these `Information`
+lines no longer appear in `journalctl`. They go to the **file sink** instead:
+`/opt/radio-console/logs/radio-*.txt`, on an appliance that runs for weeks. So the effect of `LOG-11`
+was to move private message bodies from a volatile, rotated journal into a durable file, and to make
+them **harder to notice** while doing it — `journalctl -u radio-api` now shows nothing.
+
+**Reproduction:** with `TTS:DefaultEngine` configured, `POST /api/audio/events`
+`{"kind":"Speech","text":"Meet me at the bridge at nine, bring the envelope"}`, then
+`ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep -c "bridge at nine" $F'`.
+The count is non-zero. `journalctl -u radio-api --since '-5min'` shows nothing, which is the trap.
+
+**What `PHN-1c` did instead, and what it deliberately did not do.**
+`EventPlaybackService.AcquireSpeechAsync` never logs `request.Text` — it logs the character count and
+the engine — and `EventPlaybackController` echoes only a rejection *name* back to the caller. That is
+pinned by `NeitherTheTextNorTheRawMediaIdReachesAnyLogLineThisSeamWrites`, whose name says "this seam
+writes" precisely because its Speech leg runs on `FakeTtsFactory`: the real `TTSFactory` and
+`TTSEventSource` are **not** in the captured chain, and a test that claimed otherwise is what surfaced
+this row.
+
+**Fix:** log a length and a hash, not the text — the shape `GvMediaCache.MaskFor` already establishes
+in this repo. Concretely, replace all three lines with `{Chars} characters` (plus the engine on the
+first). ⚠ `TTSEventSource:92` is the one that matters most: it is the only one that logs the string in
+full and it is `Information`, so it reaches the file sink on a stock box. Roughly half an hour,
+including a capture-logger test in `TTSEventSourceTests` mirroring the seam's existing one.
 
 ---
 

@@ -6,8 +6,14 @@ namespace Radio.Infrastructure.External;
 /// <para>
 /// This enum exists because collapsing every failure into one exception is a bug this repo already
 /// carries twice: GV-6 and GV-8 are both open rows whose shared root shape is "maps every non-2xx
-/// to null, destroying the distinction the caller needs." A 404 (the recording is gone) and a 502
-/// (GV auth is inside its ~9-minutes-in-20 blackout) demand opposite responses from the UI.
+/// to null, destroying the distinction the caller needs." A 404 and a 401 demand opposite responses
+/// — wait and retry, versus go and fix a configured key — and neither is recoverable from a null.
+///
+/// ⚠ What this <c>&lt;para&gt;</c> used to say, and must not say again: that a 404 means "the
+/// recording is gone" while a 502 means "the GV auth blackout". From THIS upstream a 404 means
+/// either, and nothing in the response separates them — see <see cref="NotFound"/> and
+/// <see cref="GvMediaUnavailableException.IsPermanent"/>, which is where that was already correct
+/// three lines further down.
 /// </para>
 /// </summary>
 public enum GvMediaFailure
@@ -18,7 +24,12 @@ public enum GvMediaFailure
   /// <summary>GvMedia:Enabled is false. No request was made.</summary>
   Disabled,
 
-  /// <summary>The provider returned 404 — the recording does not exist. Retrying will not help.</summary>
+  /// <summary>
+  /// The provider returned 404. ⚠ This does NOT mean the recording is gone. RotaryPhone's audio
+  /// route answers 404 both when a recording genuinely has no media and when its authenticated
+  /// voicemail list failed — which is what a Google Voice auth blackout looks like from here. See
+  /// <see cref="GvMediaUnavailableException.IsPermanent"/> for the code path. Treat as retryable.
+  /// </summary>
   NotFound,
 
   /// <summary>
@@ -66,9 +77,36 @@ public sealed class GvMediaUnavailableException : Exception
   public GvMediaFailure Reason { get; }
 
   /// <summary>
-  /// True when retrying the same request cannot succeed. Consumed by PR 3 to choose between a
-  /// retryable error and a terminal one; false for the whole blackout class, which is the case the
-  /// cache exists to mitigate.
+  /// True when retrying the same request cannot succeed.
   /// </summary>
-  public bool IsPermanent => Reason is GvMediaFailure.NotFound or GvMediaFailure.Disabled;
+  /// <remarks>
+  /// ⚠ NotFound was removed from this set, and the reason is a property of the upstream rather than
+  /// of this class. RotaryPhone's <c>GvVoicemailController.GetAudio</c> resolves a recording through
+  /// <c>FindNodeAsync</c>, which calls <c>GvVoicemailClient.ListVoicemailsAsync</c> and — unlike the
+  /// sibling <c>GetList</c>, which guards it explicitly — does NOT check the result's Succeeded
+  /// flag. A failed authenticated list returns <c>GvVoicemailListResult.Empty(succeeded: false)</c>,
+  /// an EMPTY item list, so <c>FirstOrDefault</c> yields null and the route answers
+  /// 404 "has no recording".
+  ///
+  /// That failure is exactly the Google Voice auth blackout — roughly 9 minutes in every 20 (XR-3) —
+  /// so a 404 from this upstream means "gone" OR "try again in a few minutes", and nothing in the
+  /// response distinguishes them. Reporting it as permanent would tell a user a voicemail no longer
+  /// exists on the strength of a signal that cannot support the claim, which is the GV-6 / GV-8
+  /// failure class the GvMediaFailure enum was built to prevent, arriving through a different door.
+  ///
+  /// ⚠ Be careful with the ~45% figure this remark used to quote as "roughly 45% of the times it is
+  /// transient". That number is the blackout's share of WALL-CLOCK TIME (9 in 20 from XR-3), not a
+  /// measured share of 404s — nothing here counts how many 404s are blackouts, and the two are only
+  /// equal if 404s arrive uniformly in time, which nobody has checked. What the number licenses is
+  /// narrower and sufficient: the blackout is common enough that a 404 arriving at an arbitrary
+  /// moment cannot be assumed permanent.
+  ///
+  /// The distinction is NOT collapsed: NotFound keeps its own name and reaches the snapshot as
+  /// "MediaNotFound", distinct from "MediaUpstream". What it no longer carries is a claim about
+  /// retrying that this side cannot support.
+  ///
+  /// Disabled is the only reason that is permanent by construction on OUR side — retrying with the
+  /// feature off cannot succeed, and no clock changes that.
+  /// </remarks>
+  public bool IsPermanent => Reason is GvMediaFailure.Disabled;
 }

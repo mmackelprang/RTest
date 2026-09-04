@@ -110,6 +110,11 @@ builder.Services.AddRadioWeather(builder.Configuration);
 // Standalone rather than folded into AddSoundFlowAudio; see GvMediaServiceExtensions' remarks.
 builder.Services.AddGvMedia(builder.Configuration);
 
+// Attended event playback — the /api/audio/events route family (ADR-029 D1). Standalone for the
+// same reason AddGvMedia is; depends on AddSoundFlowAudio and AddGvMedia above for ITTSFactory /
+// IDuckingService / AudioFileEventSourceFactory / GvMediaClient.
+builder.Services.AddEventPlayback();
+
 // Add diagnostic capture service (+ bind retention options for its output pruning)
 builder.Services.Configure<Radio.Core.Configuration.DiagnosticsOptions>(
   builder.Configuration.GetSection(Radio.Core.Configuration.DiagnosticsOptions.SectionName));

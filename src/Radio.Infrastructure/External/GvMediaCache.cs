@@ -132,9 +132,15 @@ public sealed class GvMediaCache
   /// that is cancelled or fails part-way leaves a 0-byte file at exactly the path
   /// <see cref="TryGetPath"/> serves — and because every hit touches LastWriteTimeUtc, that poisoned
   /// entry immediately becomes the most-recently-used one and is the LAST thing eviction reclaims.
-  /// It is self-preserving, and PR 3 passes HttpContext.RequestAborted, so a kiosk reload is enough
-  /// to create one. Staging also closes a read race: <see cref="TryGetPath"/> takes no lock, so
-  /// without it a concurrent reader could observe a created-but-not-yet-filled file.
+  /// It is self-preserving, so a single poisoned entry outlives everything around it. The
+  /// cancellation that actually reaches this method comes from EventPlaybackService, not from the
+  /// request: a stop during Preparing, a second StartAsync replacing the first, and container
+  /// disposal at shutdown all cancel a fetch mid-write. (An earlier revision of this remark said
+  /// PR 3 would pass HttpContext.RequestAborted; it deliberately does not, because
+  /// acquisition outlives the 202 response and binding it to a request-scoped token would cancel
+  /// every fetch the instant it was accepted.) Staging also closes a read race:
+  /// <see cref="TryGetPath"/> takes no lock, so without it a concurrent reader could observe a
+  /// created-but-not-yet-filled file.
   ///
   /// ⚠ What the reclaimers do with a ".tmp", stated rather than hoped for. Both
   /// <see cref="EvictToCap"/> and <see cref="SweepOlderThan"/> enumerate the directory unfiltered,

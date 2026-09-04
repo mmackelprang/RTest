@@ -22,6 +22,9 @@ public interface IEventPlaybackService
   /// <param name="request">The request describing what to play.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A snapshot of the accepted playback.</returns>
+  /// <exception cref="EventPlaybackRejectedException">
+  /// The request did not pass <see cref="EventPlaybackRequest.Validate"/>.
+  /// </exception>
   Task<EventPlaybackSnapshot> StartAsync(
     EventPlaybackRequest request,
     CancellationToken cancellationToken = default);
@@ -87,6 +90,15 @@ public interface IEventPlaybackService
   /// The one in-flight attended playback, or null. There is one audio engine and one set of
   /// speakers, so this state is global rather than per-caller (ADR-029 D6).
   /// </summary>
+  /// <remarks>
+  /// ⚠ "In flight" is not the whole of it, and the difference is load-bearing for the 202 shape.
+  /// The LAST snapshot is RETAINED after a playback ends — Completed, Stopped or Failed — until a
+  /// new playback replaces it. It has to be: <see cref="StartAsync"/> answers before any audio
+  /// exists, so an acquisition failure has no response left to carry it, and this is the surface a
+  /// caller re-reads to find out what happened (ADR-029 §8.1's re-attach path). So null means
+  /// "nothing has been started yet", not "nothing is playing" — <see cref="EventPlaybackState"/>
+  /// on the snapshot is what says whether audio is being produced.
+  /// </remarks>
   EventPlaybackSnapshot? Current { get; }
 
   /// <summary>
@@ -132,10 +144,20 @@ public enum EventPlaybackState
   /// <summary>Reached the end of the content.</summary>
   Completed = 3,
 
-  /// <summary>Ended before the end of the content — user stop, preemption, or the duration cap.</summary>
+  /// <summary>
+  /// Ended before the end of the content. Today that means a user stop, or a new playback taking
+  /// the single slot. ⚠ Preemption (PR 4) and the duration cap (PR 5) will land here too, and
+  /// NEITHER EXISTS YET — nothing reads GvMedia:PreemptAtPriority or GvMedia:MaxPlaybackSeconds for
+  /// this purpose as of PHN-1c.
+  /// </summary>
   Stopped = 4,
 
-  /// <summary>Never produced sound. <see cref="EventPlaybackSnapshot.FailureReason"/> says why.</summary>
+  /// <summary>
+  /// Ended without completing; <see cref="EventPlaybackSnapshot.FailureReason"/> says why. ⚠ NOT
+  /// "never produced sound": an acquisition failure never does, but a
+  /// <see cref="PlaybackCompletionReason.Error"/> completion arrives as "PlaybackError" and can
+  /// follow minutes of audio.
+  /// </summary>
   Failed = 5
 }
 
@@ -220,6 +242,12 @@ public sealed record EventPlaybackRequest
       return EventPlaybackRejection.PriorityOutOfRange;
     }
 
+    // Both arms: Label is presentation-only but it reaches the snapshot, the wire and the logs.
+    if (Label is not null && Label.Length > MaxLabelChars)
+    {
+      return EventPlaybackRejection.LabelTooLong;
+    }
+
     switch (Kind)
     {
       case EventPlaybackKind.Speech:
@@ -233,9 +261,27 @@ public sealed record EventPlaybackRequest
         {
           return EventPlaybackRejection.MissingText;
         }
-        return Text.Length > maxSpeechChars
-          ? EventPlaybackRejection.TextTooLong
-          : EventPlaybackRejection.None;
+        if (Text.Length > maxSpeechChars)
+        {
+          return EventPlaybackRejection.TextTooLong;
+        }
+        // An engine name that does not resolve is refused HERE, where the caller still gets a
+        // named 400 they can act on. It would otherwise reach engine resolution, which throws for
+        // an unknown name — turning a caller's typo into a Failed playback with the generic
+        // "SpeechSynthesisFailed" reason, several steps away from the field that caused it.
+        //
+        // ⚠ Enum.IsDefined as well as TryParse, and it is load-bearing rather than belt-and-braces:
+        // TTSEngine is numbered explicitly from 1 so default(TTSEngine) is undefined, and
+        // Enum.TryParse accepts any NUMERIC string — "0", "7", "-3" all parse. TryParse alone would
+        // let "0" through here and fail it later, which is the exact outcome this check exists to
+        // prevent.
+        if (Engine is not null
+            && (!Enum.TryParse<TTSEngine>(Engine, ignoreCase: true, out var parsedEngine)
+                || !Enum.IsDefined(parsedEngine)))
+        {
+          return EventPlaybackRejection.UnknownEngine;
+        }
+        return ValidateVoiceId(VoiceId);
 
       case EventPlaybackKind.RemoteMedia:
         if (Text is not null || VoiceId is not null || Engine is not null)
@@ -325,8 +371,73 @@ public sealed record EventPlaybackRequest
     return EventPlaybackRejection.None;
   }
 
+  /// <summary>
+  /// Bounds and allow-lists a per-request voice override.
+  ///
+  /// The rule is an ALLOW-LIST: the RFC 3986 unreserved set <c>[A-Za-z0-9._~-]</c> plus '+'.
+  ///
+  /// ⚠ This is defence in depth on a brand-new caller-controlled string, not a claim that the
+  /// synthesis sinks are broken. Both live engines encode the voice correctly today:
+  /// <c>TTSFactory.BuildAzureSsml</c> runs it through <c>SecurityElement.Escape</c> before it
+  /// reaches the SSML voice attribute (pinned by <c>Ssml_EscapesMarkupInTheVoiceId</c>), and the
+  /// Google path serialises a dictionary with System.Text.Json rather than interpolating. What
+  /// this adds is that the seam never hands a structurally-interesting string — whitespace,
+  /// quotes, angle brackets, anything outside the set — to a synthesis request body in the first
+  /// place, which is a property worth holding independently of a sink this seam does not own.
+  ///
+  /// ⚠ What this does NOT do: it does not decide the CLASS question, which is punch-list SEC-5 and
+  /// belongs to Planner. SEC-5's open half is that escaping stops a breakout but does not
+  /// VALIDATE the voice, and its recorded direction is to allow-list against the engine's known
+  /// voices (ITTSVoiceRepository already holds that set per engine) — with an undecided design
+  /// call about an empty cache. The unreserved set is a strict SUBSET of any such known-voice set,
+  /// so this pre-empts nothing.
+  ///
+  /// ⚠ Declared assumption: every voice id this system uses is inside that set — Google's
+  /// "en-US-Standard-A" and "en-US-Neural2-A", Azure's "en-US-JennyNeural". The one known
+  /// exception is an mbrola-style voice such as "mb/mb-en1", whose '/' this refuses. If one is
+  /// ever wanted, this rejects it as a loud, named 400 rather than misbehaving quietly, and the
+  /// fix is one line here.
+  /// </summary>
+  private static EventPlaybackRejection ValidateVoiceId(string? voiceId)
+  {
+    if (voiceId is null)
+    {
+      return EventPlaybackRejection.None;
+    }
+    // Empty is refused here too; an empty voice is not a voice, and null is how "use the
+    // configured default" is expressed. Deliberately NOT string.IsNullOrEmpty above, which would
+    // accept "" as if it meant "unset".
+    if (voiceId.Length is 0 or > MaxVoiceIdChars)
+    {
+      return EventPlaybackRejection.VoiceIdTooLong;
+    }
+    foreach (var c in voiceId)
+    {
+      if (!char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_' or '.' or '~' or '+'))
+      {
+        return EventPlaybackRejection.VoiceIdHasIllegalCharacter;
+      }
+    }
+    return EventPlaybackRejection.None;
+  }
+
   /// <summary>Upper bound on a media identifier. Generous; the point is that it is bounded.</summary>
   public const int MaxMediaIdChars = 256;
+
+  /// <summary>
+  /// Upper bound on <see cref="Label"/>. Generous — it holds "Voicemail from Jane Smith (555)
+  /// 123-4567" four times over — and the point is that it is bounded. Label flows into
+  /// <see cref="EventPlaybackSnapshot"/>, which is broadcast to every open client, so an unbounded
+  /// string here is a real if small cost on the wire, a log-line hazard, and a layout hazard.
+  /// </summary>
+  public const int MaxLabelChars = 128;
+
+  /// <summary>
+  /// Upper bound on <see cref="VoiceId"/>. Short deliberately: every voice id this system uses is
+  /// well under it — Google's "en-US-Standard-A" and "en-US-Neural2-A", Azure's
+  /// "en-US-JennyNeural".
+  /// </summary>
+  public const int MaxVoiceIdChars = 64;
 }
 
 /// <summary>Why a request was refused. None means it was acceptable.</summary>
@@ -381,7 +492,32 @@ public enum EventPlaybackRejection
   /// reason is the kind of thing that ends up in a log line or on the wire, and inserting into
   /// the middle of the list is how that quietly stops meaning what it used to.
   /// </summary>
-  MediaIdHasIllegalCharacter
+  MediaIdHasIllegalCharacter,
+
+  /// <summary>
+  /// <see cref="EventPlaybackRequest.Label"/> exceeds
+  /// <see cref="EventPlaybackRequest.MaxLabelChars"/>.
+  /// </summary>
+  LabelTooLong,
+
+  /// <summary>
+  /// <see cref="EventPlaybackRequest.VoiceId"/> is empty or exceeds
+  /// <see cref="EventPlaybackRequest.MaxVoiceIdChars"/>.
+  /// </summary>
+  VoiceIdTooLong,
+
+  /// <summary>
+  /// <see cref="EventPlaybackRequest.VoiceId"/> carries a character outside the allow-list
+  /// <c>[A-Za-z0-9._~+-]</c>. See the note on the validator: this seam bounds its own new
+  /// caller-supplied input rather than relying on the synthesis sink's escaping.
+  /// </summary>
+  VoiceIdHasIllegalCharacter,
+
+  /// <summary>
+  /// <see cref="EventPlaybackRequest.Engine"/> does not name a defined
+  /// <see cref="TTSEngine"/> member.
+  /// </summary>
+  UnknownEngine
 }
 
 /// <summary>
@@ -412,3 +548,36 @@ public sealed record EventPlaybackSnapshot(
   TimeSpan PositionAtBroadcast,
   DateTimeOffset BroadcastAtUtc,
   string? FailureReason);
+
+/// <summary>
+/// Thrown by <see cref="IEventPlaybackService.StartAsync"/> when the request is not acceptable.
+/// </summary>
+/// <remarks>
+/// The seam validates rather than trusting its caller, and the controller validates too —
+/// deliberately, and it is not redundant. <see cref="EventPlaybackRequest.Validate"/> holds the
+/// rules; both are callers of it, and neither re-derives anything. The controller's call produces a
+/// clean 400 without an exception on a path a user can hit by typing; this one protects every
+/// non-HTTP caller the arc has not written yet, on a type whose whole posture is defence in depth
+/// against a caller-chosen string.
+/// </remarks>
+public sealed class EventPlaybackRejectedException : Exception
+{
+  /// <summary>
+  /// Creates the exception carrying the reason the request was refused.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The message interpolates the reason NAME and nothing else. Echoing MediaId back would put a
+  /// raw media id into an exception message, and every caller's catch block logs the exception.
+  /// </remarks>
+  /// <param name="reason">
+  /// Why the request was refused. Never <see cref="EventPlaybackRejection.None"/>.
+  /// </param>
+  public EventPlaybackRejectedException(EventPlaybackRejection reason)
+    : base($"Event playback request refused: {reason}.")
+  {
+    Reason = reason;
+  }
+
+  /// <summary>Why the request was refused.</summary>
+  public EventPlaybackRejection Reason { get; }
+}

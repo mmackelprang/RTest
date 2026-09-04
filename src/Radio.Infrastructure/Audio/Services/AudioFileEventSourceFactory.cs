@@ -65,6 +65,67 @@ public class AudioFileEventSourceFactory
   }
 
   /// <summary>
+  /// Creates an event source over a file the caller has already located, with a duration the
+  /// caller already knows.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Deliberately NOT a variant of <see cref="CreateFromFileAsync"/>, and both differences are
+  /// load-bearing for ADR-029's RemoteMedia arm.
+  ///
+  /// It does not re-root. <see cref="CreateFromFileAsync"/> sends a relative path through
+  /// ResolveFilePath, which combines it with FilePlayer:RootDirectory — "media/audio" in the repo
+  /// and "/mnt/nas/music" on the appliance. GvMedia:CacheDirectory ships as the RELATIVE
+  /// "./data/gvmedia", so a fetched recording would be looked for under the music root and the
+  /// play would fail with a FileNotFoundException after a successful fetch.
+  ///
+  /// And it accepts the duration rather than estimating it. ADR-029 §4.1 calls the passthrough of
+  /// VoicemailItemDto.DurationSeconds "a correctness fix, not decoration": AudioFileEventSource
+  /// detects completion from this value, so a wrong duration ends playback early or leaves it
+  /// hanging. A null duration means the provider reported 0 — "unknown" per ADR-022 §4.2 — and
+  /// only then does this fall back to the same size-based estimate CreateFromFileAsync uses, so
+  /// this arc carries no second bytes-per-second constant.
+  /// </remarks>
+  /// <param name="absolutePath">
+  /// A rooted path to an existing audio file. Not resolved against any root.
+  /// </param>
+  /// <param name="duration">The authoritative duration, or null to estimate it from the file size.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>An audio file event source.</returns>
+  /// <exception cref="ArgumentException">The path is not rooted.</exception>
+  /// <exception cref="FileNotFoundException">The file does not exist.</exception>
+  public async Task<IEventAudioSource> CreateFromAbsolutePathAsync(
+    string absolutePath,
+    TimeSpan? duration,
+    CancellationToken cancellationToken = default)
+  {
+    ArgumentException.ThrowIfNullOrWhiteSpace(absolutePath);
+
+    if (!Path.IsPathRooted(absolutePath))
+    {
+      throw new ArgumentException(
+        "CreateFromAbsolutePathAsync requires a rooted path; it deliberately does not resolve "
+        + "against FilePlayer:RootDirectory.", nameof(absolutePath));
+    }
+
+    if (!File.Exists(absolutePath))
+    {
+      throw new FileNotFoundException($"Audio file not found: {absolutePath}");
+    }
+
+    var effective = duration ?? await GetAudioDurationAsync(absolutePath, cancellationToken);
+
+    // ⚠ The path is deliberately absent from this line, unlike CreateFromFileAsync's. For the
+    // RemoteMedia arm the filename is a hash of a voicemail id, and the rule the arc holds to is
+    // that an id's derived forms appear only as GvMediaCache.MaskFor produces them —
+    // EventPlaybackService already logs that mask. One correlating token per playback, not two.
+    _logger.LogDebug(
+      "Creating audio file event source from an absolute path, duration {Duration} ({Source})",
+      effective, duration is null ? "estimated" : "authoritative");
+
+    return new AudioFileEventSource(absolutePath, effective, _sourceLogger, _playbackService);
+  }
+
+  /// <summary>
   /// Creates an audio file event source from a stream.
   /// </summary>
   /// <param name="name">The display name for the event.</param>
