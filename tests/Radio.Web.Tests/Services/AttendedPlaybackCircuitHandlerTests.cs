@@ -1,6 +1,7 @@
 using System.Net;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Models;
 using Radio.Web.Services;
@@ -22,7 +23,11 @@ namespace Radio.Web.Tests.Services;
 ///
 /// ⚠ What these tests CANNOT prove, stated rather than implied: that a singleton CircuitHandler
 /// actually receives every circuit's callbacks (plan U2), and that a browser refresh goes 1 → 2 → 1
-/// rather than touching zero (U3). Both need a real Blazor host. They are settled on the box.
+/// rather than touching zero (U3). Both need a real Blazor host.
+///
+/// ⚠ U2 is settled and holds. U3 has been settled ON THE BOX AND AGAINST THE CODE: a refresh does
+/// NOT go 1 → 2 → 1, it goes 1 → 0 → 1. Every test below asserts the handler's arithmetic, which is
+/// correct; none can see that Blazor feeds it the wrong sequence.
 /// </remarks>
 public class AttendedPlaybackCircuitHandlerTests
 {
@@ -89,12 +94,20 @@ public class AttendedPlaybackCircuitHandlerTests
     // C-52. A count left negative would make the "== 0" test unreachable for the life of the
     // process — a backstop that has silently stopped backstopping. Not reachable today; clamped
     // loudly rather than silently normalised.
+    //
+    // ⚠ "AndWarns" is asserted, not assumed. An earlier draft injected NullLogger and named the
+    // warning in the test's title without ever observing it — a title claiming coverage the body
+    // did not have. LOUDLY is the whole point of the clamp: a silent reset would be
+    // indistinguishable from the bug it exists to make visible.
     var rig = await RigWithLivePlaybackAsync();
 
     await rig.Handler.OnCircuitClosedAsync(null!, default);
 
     Assert.Equal(0, rig.Handler.OpenCircuits);
     Assert.Empty(rig.Stops);
+    Assert.Contains(
+      rig.Warnings,
+      m => m.Contains("no matching open", StringComparison.Ordinal));
   }
 
   [Fact]
@@ -136,7 +149,37 @@ public class AttendedPlaybackCircuitHandlerTests
 
     public required Func<int> GetCount { get; init; }
 
+    public required List<string> Warnings { get; init; }
+
     public int Gets => GetCount();
+  }
+
+  /// <summary>
+  /// Records the message of every Warning-or-above line the handler logs.
+  /// </summary>
+  /// <remarks>
+  /// A local type rather than a reference to Radio.Infrastructure.Tests's CapturingLoggerProvider:
+  /// that one is internal to a different assembly, and adding an assembly reference to reach a
+  /// four-line test double would couple two test projects that share nothing else.
+  /// </remarks>
+  private sealed class CapturingLogger<T>(List<string> sink) : ILogger<T>
+  {
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter)
+    {
+      if (logLevel >= LogLevel.Warning)
+      {
+        lock (sink)
+        {
+          sink.Add(formatter(state, exception));
+        }
+      }
+    }
   }
 
   private static async Task<Rig> RigWithLivePlaybackAsync() =>
@@ -158,6 +201,7 @@ public class AttendedPlaybackCircuitHandlerTests
   private static Task<Rig> RigAsync(string? seedBody = null, bool throwOnGet = false)
   {
     var stops = new List<string>();
+    var warnings = new List<string>();
     var handler = new RouteHandler(stops, seedBody, throwOnGet);
 
     var store = new AudioStateStore(
@@ -179,9 +223,10 @@ public class AttendedPlaybackCircuitHandlerTests
       Handler = new AttendedPlaybackCircuitHandler(
         provider.GetRequiredService<IServiceScopeFactory>(),
         store,
-        NullLogger<AttendedPlaybackCircuitHandler>.Instance),
+        new CapturingLogger<AttendedPlaybackCircuitHandler>(warnings)),
       Store = store,
       Stops = stops,
+      Warnings = warnings,
       GetCount = () => handler.Gets,
     });
   }

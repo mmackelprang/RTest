@@ -872,13 +872,11 @@ trustworthiness:
    points — the Sleep pill, the idle-dimmer callback and a server push — are covered by one rule. It
    is a **stop**, not a mute: `WakeAsync` restores the pre-sleep mute state, so a merely-muted
    voicemail would become audible again mid-word on the next touch.
-3. **The last Blazor circuit closing.** ⚠ This is a *ten-minute*-latency backstop, not a three-minute
-   one: Blazor tears a circuit down after its disconnect-retention window, and `Radio.Web`'s
-   `Program.cs` sets `DisconnectedCircuitRetentionPeriod` to 10 minutes rather than leaving it at the
-   framework's 3. Follow that number through and the consequence is sharper than the latency —
-   300 s < 600 s, so **at shipped configuration the cap always fires first and this path is not
-   reached.** It is still built (§7.3 requires it, and it becomes live the moment either number
-   moves), but it is not what stops a runaway voicemail.
+3. **The last Blazor circuit closing.** ⚠ **Known broken — do not rely on this.** A graceful close
+   (reload, navigate away, tab close) disposes the circuit at once; the 10-minute
+   `DisconnectedCircuitRetentionPeriod` covers only unexpected disconnects. Measured on the appliance:
+   reloading the only browser goes 1 → 0 → 1 and this path stops the playback at the zero — so on a
+   single-kiosk box **a refresh silences a voicemail**, the failure ADR-029 §7.3 was rewritten to avoid.
 
 Navigating between routes does **not** stop playback, and closing one of two open browsers does not
 either.
