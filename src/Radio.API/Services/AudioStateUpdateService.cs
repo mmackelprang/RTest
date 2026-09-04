@@ -30,6 +30,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly BackgroundIdentificationService? _fingerprintService;
   private readonly IRotaryEncoderService? _encoderService;
   private readonly IEncoderFeedbackSink? _encoderFeedback;
+  private readonly IEventPlaybackService? _eventPlayback;
   private string? _apiBaseUrl;
 
   /// <summary>
@@ -150,6 +151,25 @@ public class AudioStateUpdateService : BackgroundService
     {
       _encoderFeedback.Feedback += OnEncoderHudChanged;
       _logger.LogInformation("Subscribed to encoder HUD feedback");
+    }
+
+    // ADR-029 D6 §8.1. GetService rather than GetRequiredService, matching every sibling above: this
+    // service has to start even when parts of the audio stack are not registered at all.
+    _eventPlayback = serviceProvider.GetService<IEventPlaybackService>();
+
+    if (_eventPlayback != null)
+    {
+      // ⚠ Change-driven. There is deliberately NO position tick and this must never move into
+      // CheckAndBroadcastUpdatesAsync's 500 ms loop — ADR-029 §8.2 refuses one outright, because a
+      // tick puts a timer on the server and a message on the wire per client for the whole duration,
+      // on a box where CPU churn is audible.
+      _eventPlayback.PlaybackChanged += OnEventPlaybackChanged;
+      _logger.LogInformation("Subscribed to attended event playback transitions");
+    }
+    else
+    {
+      _logger.LogWarning(
+        "IEventPlaybackService not available - event playback SignalR updates disabled");
     }
   }
 
@@ -963,6 +983,11 @@ public class AudioStateUpdateService : BackgroundService
       _encoderFeedback.Feedback -= OnEncoderHudChanged;
     }
 
+    if (_eventPlayback != null)
+    {
+      _eventPlayback.PlaybackChanged -= OnEventPlaybackChanged;
+    }
+
     base.Dispose();
   }
 
@@ -1018,6 +1043,64 @@ public class AudioStateUpdateService : BackgroundService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error broadcasting encoder config status");
+    }
+  }
+
+  /// <summary>
+  /// Broadcasts one attended-playback transition (ADR-029 D6 §8.1).
+  /// </summary>
+  /// <remarks>
+  /// ⚠ THE ENUMS ARE SENT AS STRINGS, and it is not cosmetic. Radio.API registers
+  /// JsonStringEnumConverter on AddControllers().AddJsonOptions ONLY (Program.cs:58-62); SignalR
+  /// serialises through JsonHubProtocol.PayloadSerializerOptions, which this project never
+  /// configures. Handing the record straight to SendAsync would put "state": 1 on the hub and
+  /// "state": "Playing" on GET /api/audio/events/current — and ADR-029 §8.1 feeds BOTH into the same
+  /// client field, the REST call as the seed and this as the update. ToString() makes them identical.
+  /// It also means a Radio.Web build that predates a new state member receives an unrecognised STRING
+  /// and can ignore it, rather than deserialising a number into an enum that has no such value — the
+  /// same reason EncoderConfigStatusChanged above sends its tier as a string.
+  ///
+  /// ⚠ Every other field is copied verbatim, so both paths hand the same CLR types to the same
+  /// serialiser and cannot diverge on however TimeSpan and DateTimeOffset happen to render.
+  ///
+  /// ⚠ The snapshot ARGUMENT is the payload. Do NOT enrich it from _eventPlayback.Current: this
+  /// handler is invoked from inside EventPlaybackService.Raise, and Current is deliberately not
+  /// retained for a playback that has been replaced — so a re-read would sometimes describe a
+  /// different playback than the transition being broadcast. (It would not deadlock; Current takes
+  /// that service's _stateLock, not its _gate. It would just occasionally lie.)
+  ///
+  /// ⚠ And do not call back into the seam at all. Every TERMINAL publish reaches Raise while
+  /// EventPlaybackService holds its non-reentrant _gate, and that file's own remark says so to this
+  /// PR by name: a subscriber that re-enters StopAsync or StartAsync deadlocks.
+  ///
+  /// async void with a catch-all, matching the five sibling handlers here. This is also raised from
+  /// arbitrary thread-pool threads since PHN-1d — a preemption arrives on a Task.Run — which
+  /// IHubContext is safe for.
+  /// </remarks>
+  private async void OnEventPlaybackChanged(object? sender, EventPlaybackSnapshot snapshot)
+  {
+    try
+    {
+      await _hubContext.Clients.All.SendAsync("EventPlaybackChanged", new
+      {
+        snapshot.Id,
+        Kind = snapshot.Kind.ToString(),
+        snapshot.Label,
+        State = snapshot.State.ToString(),
+        snapshot.Duration,
+        snapshot.PositionAtBroadcast,
+        snapshot.BroadcastAtUtc,
+        snapshot.FailureReason,
+      });
+
+      // Debug, matching PlaybackStateChanged. Label is user-supplied content and the id is a live
+      // handle; neither belongs in a production line by default, and the state alone is what a
+      // "why did the voicemail stop" question needs from this side.
+      _logger.LogDebug("Broadcast EventPlaybackChanged: {State}", snapshot.State);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error broadcasting attended event playback state");
     }
   }
 
