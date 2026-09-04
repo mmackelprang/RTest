@@ -1,7 +1,7 @@
 # HANDOFF — Rotary encoder control mapping (four knobs on the cabinet face)
 
 **Surface:** Physical — 4× rotary encoder + integrated shaft button (`github.com/mmackelprang/RotaryUsb`, Pi Pico, USB HID) mounted permanently in the restored console cabinet — **plus** the on-screen feedback those knobs drive across Home, the always-present topbar, and the sleep screen — **plus** the presence, configuration and blanking behavior the app owns on their behalf (§7, §8).
-**Status:** **`[DESIGNER-PHASE DRAFT — REV 5 — AS-BUILT PANEL, HUD COLLISIONS RESOLVED]`**. §13 is down to four open questions. **The escutcheon is final (D2) — §9 is now a build document, not a proposal.** ⚠ **Rev 4 amends §6.2, §9 and §10.1 to the owner's actual front-panel drawing** (`design/hardware/front-panel-layout_4.svg`), which keeps D2's *order* and supersedes D2's *dimensions*. **The knobs are one vertical column left of the screen, not a horizontal row below it.** §10.1's mis-grab conclusion lost its premise and has been re-derived rather than re-worded. **Rev 5 closes the left-edge collisions that rotation walks into (§6.2), settles the phase contract (§6.10), and records owner decisions D26 (engraving clearance, §9.5) and D27 (reduced motion, §6.5).**
+**Status:** **`[DESIGNER-PHASE DRAFT — REV 5 — AS-BUILT PANEL, HUD COLLISIONS RESOLVED]`**. §13 is down to four open questions. **The escutcheon is final (D2) — §9 is now a build document, not a proposal.** ⚠ **Rev 4 amends §6.2, §9 and §10.1 to the owner's actual front-panel drawing** (`design/hardware/front-panel-layout_4.svg`), which keeps D2's *order* and supersedes D2's *dimensions*. **The knobs are one vertical column left of the screen, not a horizontal row below it.** §10.1's mis-grab conclusion lost its premise and has been re-derived rather than re-worded. **Rev 5 closes the left-edge collisions that rotation walks into (§6.2), settles the phase contract (§6.10), and records owner decisions **D29** (engraving clearance, §9.5 — *recorded as `D26` until 2026-09-04, renumbered because that number was also carrying the eSpeak removal; punch list §7*) and D27 (reduced motion, §6.5).**
 **Status vs. existing handoffs:**
 - **Extends** `design_handoff_radio_console` and `design_handoff_radio_controller` into a surface neither covers: there is no existing handoff for physical input. Every visual element is composed from tokens and components those handoffs already established; **no new design tokens are introduced** (§6.9).
 - **Deviates (small, deliberate) from `HANDOFF-saved-station-display.md`** — that handoff's bank is titled `MEMORY · n saved`. The cabinet is engraved **PRESETS** (D10), so the on-screen bank is retitled to match. Rationale in §4.4; this is a one-word change and nothing else in that handoff moves.
@@ -9,7 +9,7 @@
 - **Follows** `HANDOFF-bell-failure-surfacing.md` §3.7 for cross-route surfacing of a persistent hardware fault (§7.6).
 - **Extends** `HANDOFF-sleep-weather-visual-redesign.md` with a sleep-screen readout in that handoff's own dim-amber, single-emissive-color palette (§8.6). Its "one emissive color" rule is honored, not broken.
 **Author:** Designer
-**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D26/D27)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault; Rev 7 — §11 settled as single-surface, local-only visualiser mode; Rev 8 — §5.4's points-per-detent arithmetic corrected, having been half the real value because the table assumed a `step_size` the code did not have)**
+**Date:** 2026-08-19 (Rev 1) · revised 2026-08-19 (Rev 2, Rev 3) · **amended 2026-09-02 (Rev 4 — as-built panel; Rev 5 — HUD collisions + D29/D27, the first of which was recorded as D26 until 2026-09-04)** · **amended 2026-09-03 (Rev 6 — §7.6 gains a volume-clamp column; `Degraded` keeps the normal clamp, a never-answering device is a hard fault; Rev 7 — §11 settled as single-surface, local-only visualiser mode; Rev 8 — §5.4's points-per-detent arithmetic corrected, having been half the real value because the table assumed a `step_size` the code did not have)**
 **Consumers:** Owner (§13) → Architect (§12.1) → Planner
 
 ---
@@ -116,7 +116,10 @@ index table, and they stop when `ENC-5` / `ENC-7` land. Corrected in §6.2.
 
 **Two owner decisions, recorded here rather than left for a later pass:**
 
-- **D26 — the knobs are straight-sided, so the engraving clearance holds.** Rev 4's shop-floor
+- **D29 — the knobs are straight-sided, so the engraving clearance holds.** ⚠ **Recorded as `D26`
+  until 2026-09-04**, when that number was found to be carrying the eSpeak-removal decision as well;
+  renumbered rather than the eSpeak one because `D26`-as-eSpeak is cited from ADR-029. Both numbers are
+  left greppable here on purpose. Rev 4's shop-floor
   finding went to the owner and came back confirmed. Recorded in §9.5 as a **checked and closed
   constraint, not a silent non-issue**: the 0.8 mm figure is the reason *"any 15 mm knob"* is not a
   safe substitution later.
@@ -1390,7 +1393,7 @@ the knob's *surface* is the entire tactile vocabulary, and a pointer would spend
 so the engraver does not depend on a font being installed. Each label sits **immediately beneath its own
 knob**, inside the 25.4 mm column, roughly x 15.3–35.4 mm and about 4 mm tall.
 
-✅ **A build tolerance — checked and closed (D26, 2026-09-02). Kept in full, because the reason
+✅ **A build tolerance — checked and closed (D29, recorded as D26 until 2026-09-04; 2026-09-02). Kept in full, because the reason
 outlives the answer.** The column is tight: a label's top edge clears the knob above it by about
 **0.8 mm** — VOLUME's label occupies y 40.03–43.99 mm while a 15 mm VOLUME knob ends at y 39.25 mm,
 and TUNING is the same to within a tenth. **That clearance assumes the knob bodies are 15 mm all the
