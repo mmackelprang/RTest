@@ -1944,9 +1944,16 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // twenty seconds from now, while the second's has thirty seconds to run from here.
     time.Advance(TimeSpan.FromSeconds(10));
     var replaced = NextSnapshotWith(service, EventPlaybackState.Stopped);
+
+    // ⚠ The rendezvous is the Playing SNAPSHOT, not second.PlayCalls, and the difference is a real
+    // race rather than a style preference. AcquireAndPlayAsync runs source.PlayAsync (which
+    // increments PlayCalls), then ArmDurationCap, then PublishNonTerminal(Playing) — so a wait on
+    // PlayCalls can return while the state is still Preparing, and the assertion below would read it.
+    // Waiting on the snapshot is what the four sibling cap tests do.
+    var secondPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
     var two = await service.StartAsync(SpeechRequest());
     await replaced.WaitAsync(TimeSpan.FromSeconds(5));
-    await WaitUntilAsync(() => second.PlayCalls == 1, TimeSpan.FromSeconds(5));
+    await secondPlaying.WaitAsync(TimeSpan.FromSeconds(5));
 
     time.Advance(TimeSpan.FromSeconds(21));
 
