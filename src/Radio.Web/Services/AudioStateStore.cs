@@ -322,11 +322,29 @@ public class AudioStateStore : IAsyncDisposable
   /// ⚠ Never throws. Its callers are a CircuitHandler and, from PR 6, a layout; neither is worth a
   /// blank screen.
   ///
-  /// ⚠ KNOWN LIMITATION, shared with every other cached broadcast in this store and deliberately not
-  /// fixed here: a hub connection that drops and reconnects can miss transitions, and nothing
-  /// re-seeds. What bounds the damage is that the next transition corrects it, and that
-  /// GvMedia:MaxPlaybackSeconds bounds how long a missed one can matter. Re-seeding on Reconnected is
-  /// a fast-follow.
+  /// ⚠ KNOWN LIMITATIONS — three, all accepted rather than overlooked, all filed in
+  /// design/FUTURE-WORK.md §19 and §21.
+  ///
+  /// 1. A hub connection that drops and reconnects can miss transitions, and nothing re-seeds. This
+  ///    is shared with every other cached broadcast in this store. What bounds the damage is that the
+  ///    next transition corrects it, and that GvMedia:MaxPlaybackSeconds bounds how long a missed one
+  ///    can matter.
+  ///
+  /// 2. The broadcast-wins rule above is stated more absolutely than this code enforces it. The guard
+  ///    is an unlocked read of _eventPlaybackBroadcastSeen followed by an assignment to EventPlayback,
+  ///    with no lock spanning the two — so a broadcast landing between them is overwritten by the
+  ///    older seed response after all. The window is a few instructions wide and self-corrects on the
+  ///    next transition; closing it means a lock across an assignment this store otherwise takes none
+  ///    for.
+  ///
+  /// 3. The one shot is BURNED BEFORE THE HTTP CALL, not after a successful one. Interlocked.Exchange
+  ///    runs at the top of this method, so if GetCurrentAsync throws — which is exactly what a deploy
+  ///    restarting both services produces, the API still booting while a circuit opens — the catch
+  ///    swallows it and _eventPlaybackSeedStarted stays 1. No later circuit can ever seed, and the
+  ///    store is unseeded for the life of the process. That is the co-restart this seed exists for,
+  ///    so this is the sharpest of the three; it is left alone here only because moving the claim
+  ///    after a successful response also lets N concurrent circuits issue N pulls, and choosing
+  ///    between those is a design call rather than a fix.
   /// </remarks>
   public async Task EnsureEventPlaybackSeededAsync(
     EventPlaybackApiService api, CancellationToken cancellationToken = default)

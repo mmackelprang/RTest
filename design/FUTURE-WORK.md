@@ -1569,9 +1569,10 @@ broadcasts exactly the way the first one does.
 Four things end an attended playback early and all four publish
 `EventPlaybackState.Stopped`: a user stop, a new playback taking the single slot, a source starting at
 or above `GvMedia:PreemptAtPriority` (`PHN-1d`), and the `GvMedia:MaxPlaybackSeconds` cap (`PHN-1e`).
-The snapshot does not say which. **An operator can already tell them apart from the log** — the
-preemption warning names the preempting source, and the cap logs its own line naming the id and the
-configured seconds.
+The snapshot does not say which. **The log distinguishes three of the four, not all four** — a
+replacement logs `"replaces"`, the preemption warning names the preempting source, and the cap logs
+its own line naming the id and the configured seconds, but `StopAsync` logs nothing at all, so a
+plain user stop is indistinguishable from an unexplained one on the box.
 
 ### What's Needed
 
@@ -1586,3 +1587,44 @@ matching field on `Radio.Web`'s `EventPlaybackSnapshotDto`.
   reads is a commitment bought with nothing.
 - If it is added, it is a **new nullable field**, not a renumbering of `EventPlaybackState`. The
   states already on the wire are strings for exactly this reason (`PHN-1e` C-47).
+
+---
+
+## 21. `AudioStateStore`'s attended-playback seed has two accepted races
+
+**Found and deliberately not fixed by `PHN-1e`.** Priority: **low for the first, medium for the
+second.** Sibling of §19, and the two would most likely be fixed in one pass.
+
+### What Exists
+
+`AudioStateStore.EnsureEventPlaybackSeededAsync` pulls `GET /api/audio/events/current` once per
+process and applies the response only if no broadcast has landed meanwhile — the ENC-12
+"broadcast wins" rule, because a broadcast describes a later moment than a response already in
+flight.
+
+### What's Needed
+
+Two windows, both stated in that method's own remark rather than left for a reader to find:
+
+1. **The ordering guard is not atomic.** It is an unlocked `Volatile.Read` of
+   `_eventPlaybackBroadcastSeen` followed by an assignment to `EventPlayback`, with no lock spanning
+   the two. A broadcast landing between them is overwritten by the older seed response — the exact
+   inversion the guard exists to prevent. The window is a few instructions wide.
+
+2. **The one shot is burned before the HTTP call.** `Interlocked.Exchange(ref
+   _eventPlaybackSeedStarted, 1)` runs at the top of the method, before `GetCurrentAsync`. If that
+   call throws, the catch logs a warning and the flag stays set, so **no later circuit can ever
+   seed** and the store stays unseeded for the life of the process.
+
+### Gotchas
+
+- **The second one fires on exactly the boot the seed exists for.** A deploy restarts `radio-api` and
+  `radio-web` together, so a circuit can open while the API is still booting and the pull fails. That
+  is the co-restart case §19 and the seed were both written for — which is what makes this the
+  sharper of the two despite being the simpler bug.
+- **Moving the claim after a successful response is not a free fix.** It lets N circuits opening at
+  once issue N concurrent pulls, which is what the eager claim was avoiding. A retry, or claiming
+  eagerly and resetting the flag in the `catch`, are both better shapes than a straight move — the
+  choice is a design call, which is why `PHN-1e` filed it rather than picking one.
+- **The first window self-corrects**; the next transition overwrites the stale value. It is worth
+  fixing only alongside something else that touches this method.
