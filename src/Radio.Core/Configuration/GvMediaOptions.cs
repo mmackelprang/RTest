@@ -78,8 +78,24 @@ public sealed class GvMediaOptions
   public int MaxSpeechChars { get; set; } = 1000;
 
   /// <summary>
-  /// Priority at or above which a starting source preempts attended playback. Consumed by PR 4
-  /// (ADR-029 D5 §6.1). Not read by this PR.
+  /// Priority at or above which a starting event source stops attended playback (ADR-029 D5 §6.1).
+  /// Read by <c>EventPlaybackService.OnDuckingStateChanged</c>, which stops an in-flight playback when
+  /// such a source starts. ⚠ The mirror direction — a playback STARTING while such a source is
+  /// already sounding — is not implemented yet: it mixes. The owner's decision is that it must WAIT
+  /// for the blocking source and then play, and that lands with the server-owned playback state that
+  /// can broadcast a waiting state to a client. Do not implement it as a refusal; that option was
+  /// considered and rejected.
+  ///
+  /// <para>
+  /// ⚠ This value is safe to LOWER and a trap to RAISE, and only the lowering case is argued in the
+  /// ADR. <c>DuckingService.GetPriority</c> answers <c>DefaultEventPriority</c> — 8 — for every event
+  /// source whose caller never called <c>SetPriority</c>, which is every source in this tree outside
+  /// <c>AnnouncementService</c>. So 7 widens preemption to the documented high-importance band, while 9
+  /// or 10 exempts almost everything: preemption still works for a caller that names an explicit 9, so
+  /// nothing looks broken, and it stops happening for the live ones. Keep this at or below
+  /// <c>DuckingService.DefaultEventPriority</c>; a test pins the two shipped defaults against each
+  /// other, and it cannot see a per-machine override.
+  /// </para>
   /// </summary>
   public int PreemptAtPriority { get; set; } = 8;
 
