@@ -719,7 +719,7 @@ html, body {
   color: var(--text-medium);
 }
 .transport-btn-secondary:hover { color: var(--text-high); border-color: rgba(255, 255, 255, 0.10); }
-/* The house disabled convention for buttons — opacity 0.35 + not-allowed, as at :5010, :5442, :5678.
+/* The house disabled convention for buttons — opacity 0.35 + not-allowed, as at :5010, :5443, :5679.
    NOT the 0.4 + pointer-events: none used for non-buttons; a disabled button must still be hoverable
    so its title explains why. */
 .transport-btn:disabled, .transport-btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
