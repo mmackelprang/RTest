@@ -216,20 +216,86 @@ if ($LASTEXITCODE -ne 0) {
 # Move files into place, preserving data, logs, and Production config
 ssh $SshTarget "sudo mkdir -p $TargetPath/api $TargetPath/web $TargetPath/data $TargetPath/logs && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $TargetPath/api/ && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $TargetPath/web/ && sudo chown -R ${TargetUser}:${TargetUser} $TargetPath && sudo chmod +x $TargetPath/api/Radio.API $TargetPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
 
-# Deploy target-specific Production config if not already present
-$targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
-if (Test-Path $targetConfigPath) {
-  ssh $SshTarget "test -f $TargetPath/api/appsettings.Production.json" 2>$null
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Deploying Production config from deploy/$configDir/..." -ForegroundColor DarkGray
-    scp $targetConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
-    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/api/ && sudo cp /tmp/appsettings.Production.json $TargetPath/web/ && sudo chown ${TargetUser}:${TargetUser} $TargetPath/api/appsettings.Production.json $TargetPath/web/appsettings.Production.json && rm /tmp/appsettings.Production.json"
-  }
-}
-
-if ($LASTEXITCODE -ne 0) {
+# Captured immediately, not read later. Before OPS-7 this check sat AFTER the Production
+# config block below, so by the time it ran, $LASTEXITCODE belonged to whichever native
+# call that block made last — its `ssh ... test -f`, or its `ssh ... cp` when the seed
+# branch was taken. Both $configDir values ship a seed file, so the block always ran and
+# the move's own exit code was therefore always discarded.
+#
+# Not quite the same as "always masked": a move that failed early could leave
+# $TargetPath/api absent, which made the seed's own `cp` fail, which tripped this check
+# with a coincidentally correct message. The bug was that the check could not distinguish
+# those cases and named a step it was not measuring.
+$moveExit = $LASTEXITCODE
+if ($moveExit -ne 0) {
   Write-Host "Remote file move failed!" -ForegroundColor Red
   exit 1
+}
+
+# Deploy target-specific Production config into each service directory that does not
+# already have one.
+#
+# GUARDED PER DESTINATION, NOT ONCE FOR BOTH. Before OPS-7 a single `test -f` on api/
+# gated a copy into BOTH api/ and web/, so a box with a web overlay and no api overlay had
+# its web file OVERWRITTEN by the seed.
+#
+# What that costs: the web overlay is the RotaryPhone:Gv config's home, and the tracked
+# seed has no RotaryPhone section at all — so the overwrite DELETES whatever is there
+# rather than replacing it. On `radio` as measured 2026-09-02 that is
+# RotaryPhone:Gv:MarkReadEnabled (INTEGRATIONS.md:994-997); the AuthKey the row was filed
+# over is not yet set on any box, so the loss is of operator-authored state today and of
+# the auth key once PHN-2's gate is turned on. Either way the file is not reconstructible
+# from the repo.
+#
+# Sync-WpRule below is also per-destination, but do not read it as the model for this
+# block's policy: its guard is compare-and-overwrite, which is the opposite decision. The
+# shared idea is only that each destination is decided on its own.
+#
+# THE PROBE ASKS ONCE AND FAILS CLOSED. `ssh` reports its own transport errors as exit
+# 255, which a per-destination `test -f` cannot tell apart from "file absent" (exit 1) —
+# so on a WiFi-only box a dropped connection would read as "nothing there" and seed over a
+# present overlay, which is the very thing this block exists to prevent. The remote script
+# therefore always `exit 0`s and reports presence on stdout, leaving a non-zero exit to
+# mean only "the question could not be asked" — in which case we abort rather than guess.
+$targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
+if (Test-Path $targetConfigPath) {
+  $probe = ssh $SshTarget "for d in api web; do if [ -f $TargetPath/`$d/appsettings.Production.json ]; then echo `$d; fi; done; exit 0"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Could not determine which Production configs are present - aborting rather than risk overwriting one." -ForegroundColor Red
+    exit 1
+  }
+  $present = @($probe | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+
+  $seedStaged = $false
+  foreach ($dest in @('api', 'web')) {
+    if ($present -contains $dest) {
+      Write-Host "    $dest/appsettings.Production.json present — left alone" -ForegroundColor DarkGray
+      continue
+    }
+
+    if (-not $seedStaged) {
+      scp $targetConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host "Production config upload failed!" -ForegroundColor Red
+        exit 1
+      }
+      $seedStaged = $true
+    }
+
+    # Named per destination on purpose: the skip and the seed are separate decisions and
+    # an operator needs to see which one each directory got. A single un-suffixed
+    # "Deploying..." line cannot distinguish seeding api/ from seeding web/.
+    Write-Host "    $dest/appsettings.Production.json absent — seeding from deploy/$configDir/" -ForegroundColor DarkGray
+    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/$dest/ && sudo chown ${TargetUser}:${TargetUser} $TargetPath/$dest/appsettings.Production.json"
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "Production config seed into $dest/ failed!" -ForegroundColor Red
+      exit 1
+    }
+  }
+
+  if ($seedStaged) {
+    ssh $SshTarget "rm -f /tmp/appsettings.Production.json"
+  }
 }
 
 # Sync WirePlumber Lua rules.
