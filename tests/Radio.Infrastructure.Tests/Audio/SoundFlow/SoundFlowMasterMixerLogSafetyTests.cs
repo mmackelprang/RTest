@@ -73,8 +73,12 @@ public class SoundFlowMasterMixerLogSafetyTests
   [Fact]
   public void BothBookkeepingLinesAreWrittenAndCarryTheIdAndTheType()
   {
-    // "No name" must not be achieved by logging nothing: Id is what joins a mixer line to the
-    // ducking lines in AudioManager for the same source, and Type is what replaced Name.
+    // "No name" must not be achieved by logging nothing: Id identifies WHICH source the line is
+    // about without naming it, and Type is what replaced Name.
+    //
+    // ⚠ Id does NOT join a mixer line to AudioManager's ducking lines, whatever an earlier
+    // revision of this comment said. See SoundFlowMasterMixer.AddSource's own comment for why no
+    // path emits both for the same source.
     var logs = new CapturingLoggerProvider();
     var mixer = new SoundFlowMasterMixer(logs.CreateLogger<SoundFlowMasterMixer>());
     var source = CreateRealTtsSource(logs);

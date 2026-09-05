@@ -99,8 +99,13 @@ public class SoundFlowMasterMixer : IMasterMixer
       {
         _sources.Add(source);
         // Type, not Name: this is domain-agnostic bookkeeping, and TTSEventSource.Name embeds
-        // the utterance text (TTS-11). Id was already here and is the field that joins this line
-        // to the ducking lines in AudioManager.
+        // the utterance text (TTS-11). Id was already here and identifies WHICH source the line is
+        // about without naming it.
+        //
+        // ⚠ Id does NOT join this line to AudioManager's ducking lines, and an earlier revision of
+        // this comment claimed it did. NO path emits both for the same source: the two services
+        // that duck (AnnouncementService, EventPlaybackService) never call AddSource, and the one
+        // route that adds a TTS source here — SourcesController.PlayTTSEvent — does not duck.
         _logger.LogInformation(
           "Added audio source {SourceId} ({SourceType}) to mixer",
           source.Id, source.Type);

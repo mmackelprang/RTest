@@ -135,9 +135,17 @@ public class AudioManagerDuckingLogTests
     Assert.DoesNotContain("Marmalade", started, StringComparison.Ordinal);
     Assert.DoesNotContain("TTS: ", started, StringComparison.Ordinal);
 
-    // …and "no name" is not achieved by logging nothing: Id is what joins this line to the mixer's
-    // Added/Removed line for the same source, which the truncated name never allowed.
+    // …and "no name" is not achieved by logging nothing: Id still says WHICH event source
+    // triggered the duck, which is the only handle left once Name is gone.
+    //
+    // ⚠ Id does NOT join this line to the mixer's Added/Removed line, whatever an earlier revision
+    // of this comment said. See AudioManager.OnDuckingStateChanged's Started arm for the
+    // enumeration of why no path emits both.
     Assert.Contains(source.Id, started, StringComparison.Ordinal);
+    // ⚠ WEAK ON ITS OWN, deliberately kept and deliberately annotated: "source=TTS" is ALSO
+    // satisfied by the leaky form, because that read "source=TTS: Marmalade sentinel four seven".
+    // The DoesNotContain assertions above are the real guards; this one only confirms the Type
+    // field is still populated. Do not "simplify" this test down to this line.
     Assert.Contains("source=TTS", started, StringComparison.Ordinal);
   }
 
@@ -160,6 +168,7 @@ public class AudioManagerDuckingLogTests
     Assert.DoesNotContain("TTS: ", continued, StringComparison.Ordinal);
 
     Assert.Contains(source.Id, continued, StringComparison.Ordinal);
+    // ⚠ Weak on its own for the same reason as the Started arm's — see the note there.
     Assert.Contains("source=TTS", continued, StringComparison.Ordinal);
   }
 }
