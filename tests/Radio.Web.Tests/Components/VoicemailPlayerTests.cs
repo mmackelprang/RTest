@@ -221,30 +221,70 @@ public class VoicemailPlayerTests : TestContext
     Assert.Contains("This usually clears up in a minute.", cut.Markup);
   }
 
+  /// <summary>
+  /// Primes the store's mute/volume the way production does: one hub broadcast.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ NOT AudioStateStore.UpdatePlaybackStateAsync, which is what this test used until PHN-2's
+  /// review. That method is the ONLY writer of AudioStateStore.PlaybackState and it has no production
+  /// caller at all, so the component read a property that is null forever on the box and the pill
+  /// could never appear — a green test over an affordance that did not exist. OnHubVolumeChanged is
+  /// internal for exactly this seam, the same way OnHubEventPlaybackChanged is.
+  /// </remarks>
+  private Task PrimeVolumeAsync(IRenderedComponent<VoicemailPlayer> cut, float volume, bool isMuted) =>
+    cut.InvokeAsync(() => _store.OnHubVolumeChanged(new VolumeDto(volume, isMuted)));
+
   [Fact]
   public async Task MutedAtPlayTime_ShowsTheAmberPill()
   {
     var cut = RenderPlayer();
-    await cut.InvokeAsync(() => _store.UpdatePlaybackStateAsync(
-      new PlaybackStateDto(
-        IsPlaying: true, IsPaused: false, Volume: 0.75f, IsMuted: true, Balance: 0f,
-        Position: null, Duration: null, CanPlay: true, CanPause: true, CanStop: true,
-        CanSeek: false, CanNext: false, CanPrevious: false, CanShuffle: false,
-        CanRepeat: false, CanQueue: false, CanReorderQueue: false, IsShuffleEnabled: false,
-        RepeatMode: "None")));
+    await PrimeVolumeAsync(cut, volume: 0.75f, isMuted: true);
 
     TapPlay(cut);
 
     Assert.Single(cut.FindAll(".phone-pill.amber"));
     Assert.Contains("The console is muted.", cut.Markup);
 
-    // ⚠ HONEST LIMIT. This pins that the pill appears when the store reports muted at play time.
-    // It does NOT pin the ORDERING. The plan named "read mute after the start call" as the falsifying
-    // mutation, and that mutation leaves this GREEN: nothing in this harness changes the mute state
-    // between the read and the start, so both orderings observe the same value. Pinning the ordering
-    // needs a fake that mutates mute from inside the start call, which is a harness this row does not
-    // have. Said here rather than implied, because an assertion that cannot fail is how five
-    // consecutive cycles in this arc shipped a test that passed against a broken implementation.
+    // ⚠ HONEST LIMIT. This pins that the pill appears when the store reports muted at play time,
+    // through the same handler a real broadcast runs. It does NOT pin the ORDERING. The plan named
+    // "read mute after the start call" as the falsifying mutation, and that mutation leaves this
+    // GREEN: nothing in this harness changes the mute state between the read and the start, so both
+    // orderings observe the same value. Pinning the ordering needs a fake that mutates mute from
+    // inside the start call, which is a harness this row does not have. Said here rather than
+    // implied, because an assertion that cannot fail is how five consecutive cycles in this arc
+    // shipped a test that passed against a broken implementation.
+    //
+    // ⚠ And it does NOT pin the SEEDING, because there is none: nothing writes the store's Volume or
+    // IsMuted except this broadcast (see AudioStateStore.OnHubVolumeChanged's remarks). A console
+    // muted before radio-web started is a case no unit test can distinguish from this one.
+  }
+
+  [Fact]
+  public async Task VolumeZeroAtPlayTime_ShowsTheAmberPill()
+  {
+    // The handoff's condition is "muted OR volume 0". A console at zero is inaudible whether or not
+    // anything set the mute flag, and this arm is a separate disjunct in the component.
+    var cut = RenderPlayer();
+    await PrimeVolumeAsync(cut, volume: 0f, isMuted: false);
+
+    TapPlay(cut);
+
+    Assert.Single(cut.FindAll(".phone-pill.amber"));
+  }
+
+  [Fact]
+  public async Task AudibleAtPlayTime_ShowsNoPill()
+  {
+    // ⭐ THE ABSENCE HALF, and the reason it is here: without it, mutating the component's
+    // @if (_mutedAtPlay) to @if (true) left every muted-pill assertion GREEN. A test that only ever
+    // asserts a thing is PRESENT cannot fail on an implementation that always shows it.
+    var cut = RenderPlayer();
+    await PrimeVolumeAsync(cut, volume: 0.75f, isMuted: false);
+
+    TapPlay(cut);
+
+    Assert.Empty(cut.FindAll(".phone-pill.amber"));
+    Assert.DoesNotContain("The console is muted.", cut.Markup);
   }
 
   // ── transcript, unchanged by this row ────────────────────────────────────────────────────────

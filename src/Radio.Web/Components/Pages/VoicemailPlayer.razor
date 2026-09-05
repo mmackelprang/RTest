@@ -143,14 +143,21 @@
   private string? _startReason;   // a synchronous 400/409; never reaches a Failed snapshot
   private bool _heardSent;
   private bool _mutedAtPlay;
+  private bool _starting;                     // a StartVoicemailAsync is in flight; see PlayAsync
+  private IJSObjectReference? _scrubberModule; // imported once per instance; see OnScrubberClickAsync
   private ElementReference _scrubberEl;
 
   protected override void OnInitialized() => ConsolePlayback.Changed += OnPlaybackChangedAsync;
 
   // ⛔ NOTHING ELSE HERE, AND THAT IS THE POINT. There is deliberately no stop on disposal.
-  // ADR-029 §7.2: "component disposal is a rendering event, not a user intent." The previous file's
-  // DisposeAsync tore down the browser <audio> and therefore silenced the room on navigate-away; the
-  // topbar chip is what earns removing that.
+  // ADR-029 §7.2: "component disposal is a rendering event, not a user intent."
+  //
+  // ⚠ What silenced the room before was the <audio> ELEMENT LEAVING THE DOM — the browser stops a
+  // media element it no longer owns — and NOT the previous file's teardown code. That DisposeAsync
+  // released three JS references and called the module's `dispose`, which only ever did five
+  // removeEventListener calls. So there was never a Stop here to delete; the silence was a side
+  // effect of rendering, which is exactly the confusion §7.2 names. The topbar chip is what earns
+  // NOT reinstating it deliberately now that the console, rather than the DOM, owns the sound.
   //
   // Three shipped mechanisms stop unattended audio and NONE of them is this component: the
   // last-circuit backstop (D30 — a page reload DOES stop it, deliberately), the two /sleep edges
@@ -161,7 +168,10 @@
 
   // ── which snapshot is OURS ───────────────────────────────────────────────────────────────────
   //
-  // ⚠ Every predicate below is gated on the snapshot's id matching the handle THIS component started.
+  // ⚠ Every STATE predicate that reads the snapshot is gated on its id matching the handle THIS
+  // component started. (ShowFailure and FailureCode each have an ungated first disjunct, _startReason,
+  // and that is not an exception to the rule: _startReason is component-local — it can only have been
+  // set by THIS row's own synchronously-refused start — so the intent survives.)
   // Playback state is global (ADR-029 D6) and at most one thing plays anywhere on the surface
   // (handoff §A4b), so without this gate every open voicemail row would render the transport for
   // whatever is playing — including something started from a different row, or a different browser.
@@ -181,8 +191,18 @@
   // ── the anchor, interpolated locally ─────────────────────────────────────────────────────────
   //
   // ⚠ There is NO position tick and there must not be one (ADR-029 §8.2). The snapshot carries
-  // PositionAtBroadcast + BroadcastAtUtc + State; the client advances from that anchor on its own
-  // clock and re-anchors on every transition.
+  // PositionAtBroadcast + BroadcastAtUtc + State; this getter interpolates forward from that anchor,
+  // and a new broadcast re-anchors it.
+  //
+  // ⚠ THIS COMPONENT HAS NO CLOCK. It only computes; the number on screen moves because something
+  // else re-renders it, and that something is MainLayout's 1 Hz System.Timers.Timer
+  // (MainLayout.razor:484-487 → OnTimerElapsed → SafeInvokeAsync → StateHasChanged), whose re-render
+  // cascades through @Body to here. Nothing on that path overrides ShouldRender — the only two
+  // overrides in Radio.Web are RdsCard and RdsScrollMarquee, neither on the /phone route. Named
+  // explicitly so that if anyone ever gates that tick — a sleep mode, a render-cost fix, a new
+  // ShouldRender guard on a component in between — the reason every scrubber on the panel froze is
+  // one grep away rather than a fresh investigation. ⛔ Do NOT answer that by adding a timer here
+  // (plan §5 item 10, grep 6): every expanded row would carry one.
   //
   // ⚠ "while State == Playing" is load-bearing, not stylistic. While Waiting the position is zero and
   // STAYS zero, and interpolating there would show a bar advancing through audio that does not exist
@@ -300,7 +320,31 @@
     await PlayAsync();
   }
 
+  // ⚠ RE-ENTRANT ON A TOUCH PANEL WITHOUT _starting. _playbackId is cleared BEFORE the awaited POST,
+  // so a second tap arriving while the first is in flight sees a null id, falls through every "is this
+  // mine" predicate above, and starts a SECOND playback — which EventPlaybackService's replacement arm
+  // honours by tearing the first one down mid-sentence. A double-tap is the default gesture on a wall
+  // panel, not the exceptional one. The button cannot be disabled instead: there is no snapshot to
+  // render Preparing from until the 202 comes back, which is the whole window this guards.
   private async Task PlayAsync()
+  {
+    if (_starting)
+    {
+      return;
+    }
+
+    _starting = true;
+    try
+    {
+      await StartAsync();
+    }
+    finally
+    {
+      _starting = false;
+    }
+  }
+
+  private async Task StartAsync()
   {
     await MarkHeardOnceAsync();
 
@@ -308,8 +352,21 @@
     // The handoff's condition is "muted or volume 0 AT PLAY TIME", which is a snapshot; and
     // VolumeChanged already has live subscribers, so adding one would take a store event this row has
     // no reason to touch from N to N+1 (plan §0.4 C-78).
-    _mutedAtPlay = AudioState.PlaybackState?.IsMuted == true
-      || AudioState.PlaybackState?.Volume is 0f;
+    //
+    // ⚠ AudioState.IsMuted / .Volume, NOT AudioState.PlaybackState. PlaybackState is assigned in
+    // exactly one place — AudioStateStore.UpdatePlaybackStateAsync — and that method has no production
+    // caller anywhere, so it is null for the life of the process on the box. Reading it here made this
+    // pill and its Unmute button unreachable code. IsMuted and Volume are written by the store's
+    // OnHubVolumeChanged, i.e. by a real broadcast.
+    //
+    // ⚠ HONEST LIMIT, stated because a synchronous read is only as good as its seeding and NOTHING
+    // SEEDS THESE TWO. MainLayout's authoritative pull (LoadMuteStateAsync) lands in MainLayout's own
+    // _isMuted field, not in the store, and VolumeChanged fires only on a CHANGE — so until the first
+    // volume or mute change after radio-web starts, these hold their construction defaults (0.75f,
+    // false). A console muted before radio-web started and untouched since will show no pill. That
+    // fails in the SAFE direction — a missing affordance, never a pill over an audible console — and
+    // closing it means seeding the store from the API, not subscribing from here (C-78).
+    _mutedAtPlay = AudioState.IsMuted || AudioState.Volume == 0f;
 
     _startReason = null;
     _playbackId = null;
@@ -366,8 +423,23 @@
     double fraction;
     try
     {
-      var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/voicemail-player.js");
-      fraction = await module.InvokeAsync<double>("fractionFromEvent", _scrubberEl, e.ClientX);
+      // ⚠ Imported ONCE per component instance, not once per click. The browser side is not the cost —
+      // ES modules are cached by URL, so a repeated import() hands back the same module object — but
+      // each InvokeAsync<IJSObjectReference> mints a NEW server-side reference id in the circuit's
+      // interop tracking table, released only by DisposeAsync or by the circuit ending. Importing per
+      // click therefore grew that table by one entry per seek, for the life of the circuit. (The file
+      // this component replaced cached its module in a field too; the per-click import arrived with
+      // the rewrite.)
+      //
+      // ⚠ It is deliberately NOT disposed. Dispose() must stay the single `Changed -=` expression body
+      // (plan C-77 / grep 3) so that nothing in this component's teardown can ever be mistaken for a
+      // stop, and IJSObjectReference only offers DisposeAsync. One reference per expanded row, freed
+      // when the circuit ends, is the price of that guarantee and is bounded by the rows a person can
+      // open — where the per-click version was bounded by nothing.
+      _scrubberModule ??=
+        await JS.InvokeAsync<IJSObjectReference>("import", "./js/voicemail-player.js");
+      fraction = await _scrubberModule.InvokeAsync<double>(
+        "fractionFromEvent", _scrubberEl, e.ClientX);
     }
     catch
     {
@@ -388,7 +460,7 @@
   {
     _mutedAtPlay = false;
 
-    if (AudioState.PlaybackState?.IsMuted == true)
+    if (AudioState.IsMuted)
     {
       await AudioApi.ToggleMuteAsync(false);
     }

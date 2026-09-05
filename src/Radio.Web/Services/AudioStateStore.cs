@@ -178,7 +178,23 @@ public class AudioStateStore : IAsyncDisposable
     await NotifyAsync(NowPlayingChanged);
   }
 
-  private async Task OnHubVolumeChanged(VolumeDto? dto)
+  /// <summary>Applies one "VolumeChanged" broadcast. Subscribed to the hub client in the constructor.</summary>
+  /// <remarks>
+  /// ⚠ internal rather than private, and only for the test seam — Radio.Web.csproj already declares
+  /// InternalsVisibleTo("Radio.Web.Tests"). Same argument as OnHubEventPlaybackChanged below: a
+  /// field-like event cannot be raised from outside the type that declares it, so a test holding an
+  /// AudioStateHubService cannot make VolumeChanged fire. The alternative seam, UpdateVolumeAsync, is
+  /// public and has ZERO production callers — priming through it would be a test driving a path that
+  /// does not exist on the box, which is exactly the defect PHN-2's review found in the muted-pill
+  /// test (it primed through UpdatePlaybackStateAsync, whose only caller is that test).
+  ///
+  /// ⚠ <see cref="Volume"/> and <see cref="IsMuted"/> are written HERE AND NOWHERE ELSE in production.
+  /// Nothing seeds them: MainLayout's authoritative GET /api/audio/volume pull lands in MainLayout's
+  /// own field, and this broadcast fires only on a CHANGE. So they hold their construction defaults
+  /// (0.75f, false) until the first change after this process starts. Readers must be able to live
+  /// with that — VoicemailPlayer.PlayAsync says so explicitly at its own call site.
+  /// </remarks>
+  internal async Task OnHubVolumeChanged(VolumeDto? dto)
   {
     if (dto != null)
     {
