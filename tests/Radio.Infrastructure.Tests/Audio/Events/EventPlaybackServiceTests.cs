@@ -2367,6 +2367,7 @@ internal sealed class FakeDuckingService : IDuckingService
   {
     int count;
     bool newlyAdded;
+    int priorityAtStart;
     lock (Started)
     {
       Started.Add(s.Id);
@@ -2376,6 +2377,7 @@ internal sealed class FakeDuckingService : IDuckingService
       {
         _active.Add(s);
       }
+      priorityAtStart = GetPriorityUnlocked(s);
       count = _active.Count;
     }
 
@@ -2383,9 +2385,14 @@ internal sealed class FakeDuckingService : IDuckingService
     // unconditionally, which made it MORE permissive than production — the wrong direction for a fake,
     // because a handler that misbehaved only on a repeat start would have been exercised here and not
     // on the box.
+    //
+    // Captured inside the lock, mirroring DuckingService: the priority the args carry is the one the
+    // source had when it JOINED, not one resolved later.
     if (newlyAdded)
     {
-      RaiseStateChanged(s, isDucking: true, activeCount: count, duckLevel: 20f);
+      RaiseStateChanged(
+        s, isDucking: true, activeCount: count, duckLevel: 20f,
+        DuckingSourceTransition.Started, priorityAtStart);
     }
 
     return Task.CompletedTask;
@@ -2399,9 +2406,16 @@ internal sealed class FakeDuckingService : IDuckingService
     }
 
     int remaining;
+    int priorityBeforeRemoval;
     lock (Started)
     {
       Stopped.Add(s.Id);
+
+      // ⚠ Captured BEFORE the removals, exactly as DuckingService does. Modelling the capture is the
+      // whole point: a fake that read the priority after the removal would answer the category default
+      // 8, and the starvation test would pass for the wrong reason.
+      priorityBeforeRemoval = GetPriorityUnlocked(s);
+
       _active.RemoveAll(a => string.Equals(a.Id, s.Id, StringComparison.Ordinal));
       // The real service removes the priority override here, BEFORE it raises. That is what makes
       // GetPriority answer the category default for a source that has just stopped.
@@ -2409,11 +2423,13 @@ internal sealed class FakeDuckingService : IDuckingService
       remaining = _active.Count;
     }
 
-    // The real service raises here only when the set empties.
-    if (remaining == 0)
-    {
-      RaiseStateChanged(s, isDucking: false, activeCount: 0, duckLevel: 100f);
-    }
+    // ⚠ RAISES ON EVERY REMOVAL since PHN-1f, matching DuckingService, with the TRUE aggregate in
+    // IsDucking. This line is what makes
+    // AHigherPrioritySourceEndingWhileALowerOneContinuesStillWakesTheQueue meaningful: revert it to
+    // `if (remaining == 0)` — the pre-PHN-1f rule — and that test must go RED.
+    RaiseStateChanged(
+      s, isDucking: remaining > 0, activeCount: remaining, duckLevel: remaining > 0 ? 20f : 100f,
+      DuckingSourceTransition.Ended, priorityBeforeRemoval);
 
     DuckingLevelChanged?.Invoke(this, new DuckingLevelChangedEventArgs { TransitionComplete = true });
   }
@@ -2486,8 +2502,17 @@ internal sealed class FakeDuckingService : IDuckingService
       _effective.Remove(source.Id);
     }
 
-    RaiseStateChanged(source, isDucking: false, activeCount: 0, duckLevel: 100f);
+    RaiseStateChanged(
+      source, isDucking: false, activeCount: 0, duckLevel: 100f,
+      DuckingSourceTransition.Ended, DuckingService.DefaultEventPriority);
   }
+
+  /// <summary>
+  /// Models a higher-priority source LEAVING while a lower-priority one keeps ducking — the starvation
+  /// case. Before PHN-1f this produced NO RAISE AT ALL from the real service.
+  /// </summary>
+  public void RaiseEndedWithOthersRemaining(IEventAudioSource source) =>
+    StopDuckingAsync(source).GetAwaiter().GetResult();
 
   /// <summary>
   /// Raises IsDucking TRUE with a NULL TriggeringSource — the one shape the handler's null check is
@@ -2499,12 +2524,15 @@ internal sealed class FakeDuckingService : IDuckingService
   /// so the subscriber's guard is part of its contract rather than an accident of who calls it.
   /// </remarks>
   public void RaiseStartedWithNoSource() =>
-    RaiseStateChanged(null, isDucking: true, activeCount: 1, duckLevel: 20f);
+    RaiseStateChanged(
+      null, isDucking: true, activeCount: 1, duckLevel: 20f,
+      DuckingSourceTransition.Started, 0);
 
   /// <summary>
-  /// Reproduces DuckingService's TRANSITION raise arriving after the source has already left the set:
-  /// IsDucking true, the starting source as TriggeringSource, its priority override already deleted,
-  /// and ActiveEventCount zero.
+  /// Reproduces DuckingService's Started TRANSITION raise arriving after the source has already left
+  /// the set: the starting source as TriggeringSource, its priority override already deleted from the
+  /// map GetPriority answers from, and ActiveEventCount zero — but the args still carrying the
+  /// priority the source CLAIMED, because DuckingService captures it before the fade.
   /// </summary>
   /// <remarks>
   /// ⚠ These args are not hypothetical. DuckingService raises the transition event AFTER awaiting
@@ -2512,21 +2540,52 @@ internal sealed class FakeDuckingService : IDuckingService
   /// landing inside the fade deletes the override and empties the set before the raise fires. Reached
   /// today only through PhoneCallIntegrationService, which is dormant — and reachable the moment the
   /// phone arc enables it, which is what this arc is building toward.
+  ///
+  /// ⚠ What this helper DEMONSTRATES changed at PHN-1f, and the change is the point. Before it, these
+  /// args were the fade-window race: the subscriber resolved the priority for itself, read the
+  /// category default 8, and PHN-1d's ActiveEventCount == 0 guard was what stopped it acting on a
+  /// source that had already gone. PHN-1f closed the race at the source instead — the priority is
+  /// captured inside the lock that adds the entry, so it survives the deletion — and the guard is
+  /// gone. So the assertion this helper supports is now "the preemption still reads the priority the
+  /// caller claimed, not the default 8", not "the guard rejects it". The helper stays because the
+  /// args shape it produces is still reachable and still worth pinning.
+  ///
+  /// The priority is captured BEFORE the removal for exactly the reason DuckingService captures it
+  /// before its own: capturing after would answer 8 and the test would pass for the wrong reason.
   /// </remarks>
   public void RaiseStartedAfterItAlreadyLeft(IEventAudioSource source)
   {
+    int claimed;
     lock (Started)
     {
+      claimed = GetPriorityUnlocked(source);
       _effective.Remove(source.Id);
       _active.RemoveAll(a => string.Equals(a.Id, source.Id, StringComparison.Ordinal));
     }
 
-    RaiseStateChanged(source, isDucking: true, activeCount: 0, duckLevel: 100f);
+    RaiseStateChanged(
+      source, isDucking: true, activeCount: 0, duckLevel: 100f,
+      DuckingSourceTransition.Started, claimed);
   }
 
   /// <summary>Reproduces StopAllDuckingAsync's raise: IsDucking false and a NULL TriggeringSource.</summary>
-  public void RaiseStopAll() =>
-    RaiseStateChanged(null, isDucking: false, activeCount: 0, duckLevel: 100f);
+  /// <remarks>
+  /// ⚠ It also CLEARS the set, because the real StopAllDuckingAsync does — and since PHN-1f that is
+  /// what makes this raise able to wake a D28 wait rather than merely be ignored by the preemption
+  /// rule. A helper that raised AllCleared while leaving _active populated would let
+  /// StopAllDuckingWakesAWaitingPlayback pass or fail for reasons unrelated to the wake.
+  /// </remarks>
+  public void RaiseStopAll()
+  {
+    lock (Started)
+    {
+      _active.Clear();
+    }
+
+    RaiseStateChanged(
+      null, isDucking: false, activeCount: 0, duckLevel: 100f,
+      DuckingSourceTransition.AllCleared, 0);
+  }
 
   /// <summary>
   /// The single place this fake raises DuckingStateChanged, so every raise records which thread it
@@ -2535,7 +2594,12 @@ internal sealed class FakeDuckingService : IDuckingService
   /// orderings produce the same result until a stop races the read.
   /// </summary>
   private void RaiseStateChanged(
-    IEventAudioSource? source, bool isDucking, int activeCount, float duckLevel)
+    IEventAudioSource? source,
+    bool isDucking,
+    int activeCount,
+    float duckLevel,
+    DuckingSourceTransition transition,
+    int triggeringSourcePriority)
   {
     var previous = Interlocked.Exchange(ref _raisingThreadId, Environment.CurrentManagedThreadId);
     try
@@ -2545,7 +2609,9 @@ internal sealed class FakeDuckingService : IDuckingService
         IsDucking = isDucking,
         TriggeringSource = source,
         ActiveEventCount = activeCount,
-        DuckLevel = duckLevel
+        DuckLevel = duckLevel,
+        Transition = transition,
+        TriggeringSourcePriority = triggeringSourcePriority
       });
     }
     finally
