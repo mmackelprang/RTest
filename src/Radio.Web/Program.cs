@@ -462,6 +462,11 @@ builder.Services.AddHostedService(sp =>
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
 
+// ADR-029 PR 6 — the ONE subscriber to AudioStateStore.EventPlaybackChanged. See the class remarks:
+// it caches nothing, and it exists so the chip and the voicemail transport do not each become a
+// subscriber to a singleton event whose NotifyAsync awaits only the last handler (UI-6).
+builder.Services.AddSingleton<Radio.Web.Services.ConsolePlaybackState>();
+
 // ADR-029 D7 §7.3 — the last-circuit-closed backstop for attended playback. Registered concretely
 // and then aliased so the CircuitHandler every circuit resolves and the singleton holding the count
 // are the SAME object; two would be two counters, each reaching zero on its own circuit's close.
