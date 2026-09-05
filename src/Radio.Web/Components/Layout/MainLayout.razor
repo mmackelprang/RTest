@@ -18,6 +18,8 @@
 @inject Radio.Web.Services.PhoneUnreadState PhoneUnread
 @inject Radio.Web.Services.BellHealthService BellHealth
 @inject AudioStateStore AudioState
+@inject Radio.Web.Services.ConsolePlaybackState ConsolePlayback
+@inject EventPlaybackApiService EventPlaybackApi
 @inject NotificationService NotificationService
 @inject Radio.Web.Services.EncoderFaultAnnouncer EncoderAnnouncer
 @inject Radio.Web.Services.EncoderHudService EncoderHud
@@ -124,6 +126,29 @@
                               AvailableOutputs="_availableOutputs"
                               DeviceAliases="DeviceAliases" />
       </div>
+
+      @* ADR-029 §7.2 / handoff §Cross-3 — the console-playback chip: the global stop control, and
+         the thing that earns "playback survives navigation."
+
+         Here and NOT in NowPlayingDock, because :878 gates the dock on IsDockVisible => !_isOnHome —
+         a stop control absent on the landing page is not a global remote.
+
+         A real <button>, not a marker on the /phone pill: that pill's bottom-right is already the
+         bell-fault glyph (.phone-nav-fault), which is pointer-events: none, and this must be tappable.
+
+         No pulse, no blink — a pulsing element on a wall panel in a dark room is what the sleep work
+         exists to prevent. It occupies no space at rest: the markup is not rendered at all. *@
+      @if (ConsolePlayback.IsLive)
+      {
+        <button type="button" class="nav-pill nav-pill-playing"
+                @onclick="StopConsolePlaybackAsync"
+                title="@ConsolePlaybackTitle"
+                aria-label="@ConsolePlaybackAriaLabel">
+          <RadzenIcon Icon="volume_up" />
+          <span class="nav-pill-label">@ConsolePlayback.KindLabel</span>
+          <RadzenIcon Icon="stop_circle" />
+        </button>
+      }
 
       <!-- Nav pills (right-aligned) -->
       <div class="topbar-nav">
@@ -401,6 +426,11 @@
       // an older response.
       AudioState.EncoderConfigStatusChanged += OnEncoderConfigStatusChangedAsync;
       AudioState.EncoderConnectionChanged += OnEncoderConnectionChangedAsync;
+
+      // ADR-029 PR 6 — the chip. ConsolePlaybackState subscribes to the STORE itself; this subscribes
+      // to IT, so the store's own event keeps exactly one handler no matter how many circuits are
+      // open (plan §0.6).
+      ConsolePlayback.Changed += OnConsolePlaybackChangedAsync;
       await SeedEncoderStateAsync();
 
       // ENC-20 — a knob turn has to wake the dimmed screen.
@@ -1336,6 +1366,42 @@
     });
   }
 
+  /// <remarks>
+  /// ⚠ Nothing before the first await may throw. ConsolePlaybackState isolates each subscriber, but
+  /// AudioStateStore.NotifyAsync one link further up does not, and a synchronous throw there starves
+  /// every handler registered after it (queue row UI-6). Keeping this body to a bare InvokeAsync is
+  /// what makes that unreachable rather than merely unlikely.
+  /// </remarks>
+  private Task OnConsolePlaybackChangedAsync() => InvokeAsync(StateHasChanged);
+
+  // Handoff §Cross-3: the chip's LABEL is the kind; the SENDER goes in title and aria-label, which
+  // have room. The seam's Label is already "Voicemail from Jane" and is capped at 128 chars server
+  // side (PHN-1b §0.3), so it is safe to interpolate.
+  private string ConsolePlaybackTitle => ConsolePlayback.Snapshot?.Label is { Length: > 0 } label
+    ? $"Playing {label} on the console. Tap to stop."
+    : "Playing on the console. Tap to stop.";
+
+  private string ConsolePlaybackAriaLabel => ConsolePlayback.Snapshot?.Label is { Length: > 0 } label
+    ? $"Stop playing {label}"
+    : "Stop playing on the console";
+
+  /// <remarks>
+  /// ⚠ One tap, no confirm. Stopping playback is not destructive, and a confirm dialog on a wall panel
+  /// costs more than the mistake it prevents (handoff §Cross-3).
+  ///
+  /// ⚠ No optimistic hide. The chip disappears when the SERVER says so, because a chip that vanished
+  /// on tap and then came back — a stop that raced a natural end, or lost — is worse than one that
+  /// takes ~5 ms to go. The round trip is Web to API on the same box.
+  /// </remarks>
+  private async Task StopConsolePlaybackAsync()
+  {
+    var id = ConsolePlayback.Snapshot?.Id;
+    if (!string.IsNullOrEmpty(id))
+    {
+      await EventPlaybackApi.StopAsync(id);
+    }
+  }
+
   // ENC-12 Task 8b. This is the branch that finally consumes WasEverConnected — the flag ENC-0 added
   // specifically to tell absent-at-boot from dropped-mid-session, and which nothing has used since.
   // Same locals-capture as above, and for the same reason.
@@ -1495,6 +1561,10 @@
     // that has ever rendered this layout alive for the life of the process.
     AudioState.EncoderConfigStatusChanged -= OnEncoderConfigStatusChangedAsync;
     AudioState.EncoderConnectionChanged -= OnEncoderConnectionChangedAsync;
+    // ADR-029 PR 6. ConsolePlaybackState is a singleton for the same reason AudioStateStore is, so
+    // the same hazard applies: a missed unsubscribe here pins every circuit that has ever rendered
+    // this layout for the life of the process.
+    ConsolePlayback.Changed -= OnConsolePlaybackChangedAsync;
     // ENC-20. EncoderHudService is a singleton for the same reason AudioStateStore is, so the same
     // hazard applies: a missed unsubscribe here pins every circuit that has ever rendered this
     // layout for the life of the process.
