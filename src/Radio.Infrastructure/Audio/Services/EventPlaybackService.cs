@@ -492,6 +492,30 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       {
         await WaitForClearAirAsync(playback, token);
       }
+      catch (TimeoutException ex)
+      {
+        // D28's staleness bound. Thirty seconds is longer than any notification this box makes, so a
+        // wait that reaches it means the blocker was not what we thought.
+        //
+        // Failed is the honest state — it never produced sound — and failing is acceptable HERE and
+        // only here, precisely because by then the user has watched a visible Waiting state. That is
+        // what makes this different from the bare refusal D28 rejected.
+        //
+        // ⚠ HANDLED AT THE WAIT'S OWN CALL SITE rather than in the catch chain at the bottom of this
+        // method, and that is a correctness requirement rather than a preference. AcquireSpeechAsync
+        // ALSO throws TimeoutException — for TTS:GenerationTimeoutSeconds — and it does so from the
+        // switch above, inside the same outer try. A `catch (TimeoutException)` down there would
+        // therefore report every hung synthesis as "WaitExpired" instead of "SpeechSynthesisFailed".
+        // Here the acquisition switch has already returned, and waiter.Task.WaitAsync is the only
+        // thing in WaitForClearAirAsync that can throw this, so the reason cannot be misattributed.
+        //
+        // Disposed FIRST, for the C-57 reason spelled out in the sibling catch below: FailAsync
+        // reaches ClaimSourceForRelease, which answers null for a playback that never adopted, so it
+        // cannot release this source itself.
+        await DisposeOrphanAsync(playback, source);
+        await FailAsync(playback, "WaitExpired", ex);
+        return;
+      }
       catch
       {
         // ⚠ C-57. The source is acquired and NOT adopted, so none of the catches below can release
@@ -624,16 +648,6 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       // teardown under the gate — or Dispose, which claims the same way — cannot double-release, and
       // whichever of them gets there second finds null and does nothing.
       await TearDownAsync(playback);
-    }
-    catch (TimeoutException ex)
-    {
-      // D28's staleness bound. Thirty seconds is longer than any notification this box makes, so a
-      // wait that reaches it means the blocker was not what we thought.
-      //
-      // Failed is the honest state — it never produced sound — and failing is acceptable HERE and
-      // only here, precisely because by then the user has watched a visible Waiting state. That is
-      // what makes this different from the bare refusal D28 rejected.
-      await FailAsync(playback, "WaitExpired", ex);
     }
     catch (GvMediaUnavailableException ex)
     {
