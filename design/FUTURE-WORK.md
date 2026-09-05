@@ -1829,3 +1829,111 @@ one of:
 - ⚠ **Do not close this by disabling the play button on a reopened row.** A row that can neither
   show nor start playback is worse than one that can restart it; the restart is at least a
   recoverable mistake the user understands.
+
+---
+
+## 25. `deploy-to-pi.sh` destroys BOTH Production overlays on every run, and has no seed to restore them
+
+**Found by `OPS-7`'s sweep, deliberately not fixed there.** `OPS-7` corrected the Production-config
+seed in `Deploy-ToLinux.ps1`, whose defect only bit a box in a divergent state (api overlay absent,
+web overlay present). Its sibling `deploy/deploy-to-pi.sh` carries the same outcome by a different
+mechanism, and it bites **every run, on every box**.
+
+### What exists
+
+`deploy/deploy-to-pi.sh:112-119`:
+
+```bash
+sudo rsync -a --delete /tmp/radio-deploy-api/ $PI_PATH/api/ &&
+sudo rsync -a --delete /tmp/radio-deploy-web/ $PI_PATH/web/ &&
+```
+
+Compare the twin at `deploy/Deploy-ToLinux.ps1:217`, which applies
+`--exclude='appsettings.Production.json'` to **both** invocations. `deploy-to-pi.sh` applies it to
+**neither**, and it has no Production-config seed block at all.
+
+Two distinct consequences, both verified by reading the tree:
+
+1. **`web/`'s overlay is overwritten, not merely deleted.** `src/Radio.Web/appsettings.Production.json`
+   is tracked and `Microsoft.NET.Sdk.Web` auto-includes `appsettings*.json`, so it lands in the
+   publish output and rsync copies it over the operator's file. It carries
+   `"RotaryPhone": { ... "Gv": { "AuthKey": "" } }` — an **empty** key. That is the identical failure
+   mode `OPS-7` fixed: the service comes up with inter-service auth silently off.
+2. **`api/`'s overlay is deleted outright.** `src/Radio.API/` has no `appsettings.Production.json`,
+   so `--delete` removes the operator's file with nothing to replace it.
+
+Neither `deploy/debian-x64/appsettings.Production.json` nor `deploy/raspberry-pi/appsettings.Production.json`
+contains a `RotaryPhone` section (`grep -c RotaryPhone` → 0 on both), so no seed path restores the key
+even if one ran. `set -euo pipefail` does not help — rsync succeeds at doing the wrong thing.
+
+It is a documented, supported path, not dead code: `deploy/DEPLOYMENT.md:160` calls it one of
+"Both deploy scripts".
+
+### What is needed
+
+**Not just the two `--exclude` flags.** Adding the exclude alone would leave a freshly provisioned Pi
+with no web overlay at all, because `deploy-to-pi.sh` has no seed block — the exclude and the seed are
+a matched pair in `Deploy-ToLinux.ps1` and have to stay one here. The work is:
+
+1. `--exclude='appsettings.Production.json'` on both `sudo rsync` invocations at `:114-115`.
+2. A per-destination seed block ported from `Deploy-ToLinux.ps1:236-274` (post-`OPS-7`) — guarded
+   **per destination**, not once for both, or this reintroduces the bug `OPS-7` just closed.
+
+### Gotchas
+
+- ⚠ **Port the fixed shape, not the shape that was there before `OPS-7`.** A naive port of the
+  original block recreates the exact defect.
+- ⚠ **This targets `piradio` (ARM64) and could not be exercised.** `OPS-7`'s verification was run
+  off-box against a simulated remote filesystem; the same approach works here and is the honest
+  route, since a live Pi run risks the very overlay under discussion.
+- The api overlay's deletion is the more damaging half operationally, since nothing restores it, but
+  the web overlay's *silent* replacement with an empty `AuthKey` is the harder one to notice.
+
+**Priority: high.** It destroys operator-authored config on every Pi deploy.
+
+---
+
+## 26. A failed `scp` is masked by the `ssh` on the next line, twice, in `Deploy-ToLinux.ps1`
+
+**Found by `OPS-7`'s sweep.** The same class as `OPS-7`'s `C-88` (a `$LASTEXITCODE` read further from
+its command than the next line), in the same file, but on the **scp fallback path** rather than the
+config seed — which is why `OPS-7` fixed `C-88` and left these.
+
+`deploy/Deploy-ToLinux.ps1:194-198` (and identically `:205-212` for Web):
+
+```powershell
+scp -r $ApiPublishDir "${SshTarget}:/tmp/radio-deploy-api-tmp"
+ssh $SshTarget "mv /tmp/radio-deploy-api-tmp/* /tmp/radio-deploy-api/ 2>/dev/null; ... ; rm -rf /tmp/radio-deploy-api-tmp"
+
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "API sync failed!" -ForegroundColor Red
+```
+
+The check names the **transfer**, but reads the exit code of the `ssh` that follows it. That `ssh`'s
+remote compound ends in `rm -rf`, which returns 0 whether or not the directory exists, and both `mv`s
+send their errors to `/dev/null` — so it returns 0 even when the `scp` transferred nothing.
+`$ErrorActionPreference = "Stop"` does not rescue this; it does not apply to native-command exit codes.
+
+**Reached only when `rsync` is not on PATH** (`$useRsync` false), which is why it has not bitten. On the
+rsync path the last native call before the check is the rsync itself and the check is correct.
+
+### What is needed
+
+Capture the transfer's exit code immediately, as `OPS-7` did for the file move:
+
+```powershell
+scp -r $ApiPublishDir "${SshTarget}:/tmp/radio-deploy-api-tmp"
+$xferExit = $LASTEXITCODE
+```
+
+…and test `$xferExit`, keeping the `ssh` tidy-up's own result separate.
+
+### Gotchas
+
+- ⚠ **Verify before tightening.** Making a previously-ignored exit code fatal can start failing
+  deploys that currently succeed. Confirm the fallback path's `scp` genuinely returns 0 on success in
+  this environment before promoting its result to an `exit 1`.
+- The fallback path is untested in practice; anyone touching it should exercise it by making `rsync`
+  temporarily unavailable rather than assuming.
+
+**Priority: medium.** Latent — masks a real failure, but only on a path that is rarely taken.
