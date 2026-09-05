@@ -410,8 +410,14 @@ public class AudioController : ControllerBase
 
       if (primarySource is not IPrimaryAudioSource primary)
       {
-        _logger.LogWarning("Next track failed: No primary audio source is active. Active sources: {Sources}", 
-            string.Join(", ", _audioEngine.GetMasterMixer().GetActiveSources().Select(s => s.Name)));
+        // L12 — Type and Id, never Name. This list is EVERY source the mixer holds, event sources
+        // included, and TTSEventSource.Name embeds 47 characters of the utterance (TTS-11). It is
+        // reachable: SourcesController.PlayTTSEvent adds a TTS source to the mixer and nothing
+        // removes it, so any later /api/audio/next with no primary active printed the utterance.
+        // Worse than the eleven the row was filed for, because this one is a Warning — since LOG-11
+        // that reaches journald as well as the file sink, while Information and Debug do not.
+        _logger.LogWarning("Next track failed: No primary audio source is active. Active sources: {Sources}",
+            string.Join(", ", _audioEngine.GetMasterMixer().GetActiveSources().Select(s => $"{s.Type}:{s.Id}")));
         return BadRequest(new { error = "No primary audio source is active" });
       }
 
