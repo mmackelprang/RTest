@@ -4,10 +4,19 @@ using Radio.Web.Models;
 namespace Radio.Web.Services;
 
 /// <summary>
-/// The single point at which Radio.Web observes attended event playback (ADR-029 D6), and the home of
-/// the two derivations the topbar chip and the voicemail transport would otherwise each invent.
+/// The single point at which Radio.Web observes attended event playback (ADR-029 D6), and the process-
+/// wide fan-out that keeps the store's subscriber count at one however many circuits are open.
 /// </summary>
 /// <remarks>
+/// ⚠ <see cref="IsLive"/> and <see cref="KindLabel"/> are the TOPBAR CHIP's derivations and have one
+/// consumer each, both in MainLayout.razor (:142 and :149). VoicemailPlayer uses neither, and could
+/// not: both read the ambient snapshot, whereas every state the transport renders must first be gated
+/// on the id THIS row started (VoicemailPlayer.razor's `Mine`), or an open row would render a
+/// transport for something another row — or another browser — is playing. Said plainly because this
+/// summary previously called them "the two derivations the topbar chip and the voicemail transport
+/// would otherwise each invent", which would make a future reader look for a second consumer that has
+/// never existed.
+///
 /// ⚠ IT CACHES NOTHING. <see cref="Snapshot"/> reads through to AudioStateStore.EventPlayback, which
 /// PHN-1e already keeps correct through three mechanisms this class must not fork: the hub broadcast,
 /// the one-shot seed from GET /api/audio/events/current, and the broadcast-wins ordering guard between
@@ -92,5 +101,12 @@ public sealed class ConsolePlaybackState : IDisposable
   }
 
   /// <summary>Releases the store subscription.</summary>
+  /// <remarks>
+  /// ⚠ This runs at PROCESS SHUTDOWN and at no other time. The class is registered AddSingleton
+  /// (Program.cs), so the container owns the only instance and disposes it with itself — which is the
+  /// other half of the lifetime argument above: the constructor's one subscription is a subscription
+  /// for the life of the process, not for the life of a circuit. Nothing here is a per-circuit
+  /// cleanup, and a caller reaching for it as one has the wrong object.
+  /// </remarks>
   public void Dispose() => _store.EventPlaybackChanged -= OnStoreChangedAsync;
 }

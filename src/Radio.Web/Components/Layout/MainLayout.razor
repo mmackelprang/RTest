@@ -130,8 +130,9 @@
       @* ADR-029 §7.2 / handoff §Cross-3 — the console-playback chip: the global stop control, and
          the thing that earns "playback survives navigation."
 
-         Here and NOT in NowPlayingDock, because :878 gates the dock on IsDockVisible => !_isOnHome —
-         a stop control absent on the landing page is not a global remote.
+         Here and NOT in NowPlayingDock, because the dock is gated on IsDockVisible => !_isOnHome
+         (defined at :1035, applied at :272 and :276) — a stop control absent on the landing page is
+         not a global remote.
 
          A real <button>, not a marker on the /phone pill: that pill's bottom-right is already the
          bell-fault glyph (.phone-nav-fault), which is pointer-events: none, and this must be tappable.
@@ -1367,10 +1368,18 @@
   }
 
   /// <remarks>
-  /// ⚠ Nothing before the first await may throw. ConsolePlaybackState isolates each subscriber, but
-  /// AudioStateStore.NotifyAsync one link further up does not, and a synchronous throw there starves
-  /// every handler registered after it (queue row UI-6). Keeping this body to a bare InvokeAsync is
-  /// what makes that unreachable rather than merely unlikely.
+  /// ⚠ Nothing before the first await may throw — but NOT for the UI-6 starvation reason an earlier
+  /// draft of this remark gave, which was wrong in both directions. This handler is subscribed to
+  /// ConsolePlaybackState.Changed (:434), and that fan-out walks GetInvocationList() and wraps each
+  /// handler in its own try/catch (ConsolePlaybackState.cs:88-100), so a synchronous throw here cannot
+  /// reach AudioStateStore.NotifyAsync at all — and NotifyAsync has its own try/catch and exactly one
+  /// subscriber besides.
+  ///
+  /// The real cost is that such a throw would be SWALLOWED: one LogWarning, and this circuit's chip
+  /// silently stops re-rendering while every other circuit carries on. A wall panel showing a stale
+  /// chip is indistinguishable from a correct one, and nothing on the box would say otherwise.
+  /// Keeping this body to a bare InvokeAsync is what makes that unreachable rather than merely
+  /// unlikely.
   /// </remarks>
   private Task OnConsolePlaybackChangedAsync() => InvokeAsync(StateHasChanged);
 

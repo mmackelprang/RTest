@@ -17,6 +17,14 @@ namespace Radio.Web.Services.ApiClients;
 /// event handlers on a wall panel: an exception out of one is an unhandled circuit error and a blank
 /// screen, which is strictly worse than a button that appeared not to work. The server is the
 /// authority regardless — the next broadcast corrects whatever the caller assumed.
+///
+/// ⚠ THAT CLAIM IS LOAD-BEARING ON WHERE THE PATH IS BUILT, and it was false until PHN-2's review.
+/// SeekAsync / PauseAsync / ResumeAsync were expression-bodied and NOT async, so their
+/// Uri.EscapeDataString(playbackId) ran in the CALLER's synchronous frame — before PostTransportAsync
+/// was entered and therefore before any try. A null id threw straight into a Blazor handler.
+/// StopAsync did the same call and did not have the bug, purely because it is async and the escape
+/// sits inside its try. Every one of the four now builds its path INSIDE the try that catches. Do not
+/// hoist a path expression back into an argument list.
 /// </remarks>
 public class EventPlaybackApiService
 {
@@ -90,9 +98,14 @@ public class EventPlaybackApiService
   /// the hub. A caller treating this as success renders Playing over a fetch that is about to 404 in a
   /// blackout, which is the failure handoff §Cross-5 exists to prevent.
   ///
-  /// ⚠ 409 is an expected answer, not an error, and is not logged as one: it is what the API returns
-  /// when GvMedia:Enabled is false (EventPlaybackController.cs:96-104). It comes back as a reason
-  /// string so the caller can say what happened instead of showing a generic failure.
+  /// ⚠ 409 is an expected answer rather than a fault — it is what the API returns when
+  /// GvMedia:Enabled is false (EventPlaybackController.cs:96-104) — and it comes back as a reason
+  /// string so the caller can say what happened instead of showing a generic failure. ⚠ It IS still
+  /// logged: the LogWarning below fires for every non-success status, 409 included, and since LOG-11
+  /// Warning is precisely the level that reaches journald on a box where log volume is audible. That
+  /// is accepted here and not below in PostTransportAsync, because a start is one deliberate tap
+  /// rather than a transport verb that can repeat, and a refused start with no line anywhere is a
+  /// button that did nothing for a reason nobody can recover afterwards.
   ///
   /// ⚠ Voicemail only. The Speech arm has no caller until PHN-3, and this file's own history is the
   /// argument for not adding one before it does.
@@ -142,33 +155,35 @@ public class EventPlaybackApiService
   public Task<EventPlaybackSnapshotDto?> SeekAsync(
     string playbackId, TimeSpan position, CancellationToken cancellationToken = default) =>
     PostTransportAsync(
-      $"/api/audio/events/{Uri.EscapeDataString(playbackId)}/seek",
-      new { positionSeconds = position.TotalSeconds },
-      cancellationToken);
+      playbackId, "seek", new { positionSeconds = position.TotalSeconds }, cancellationToken);
 
   /// <summary>Pauses. Returns the re-anchored snapshot, or null when it did not apply.</summary>
   public Task<EventPlaybackSnapshotDto?> PauseAsync(
     string playbackId, CancellationToken cancellationToken = default) =>
-    PostTransportAsync(
-      $"/api/audio/events/{Uri.EscapeDataString(playbackId)}/pause", null, cancellationToken);
+    PostTransportAsync(playbackId, "pause", null, cancellationToken);
 
   /// <summary>Resumes. Returns the re-anchored snapshot, or null when it did not apply.</summary>
   public Task<EventPlaybackSnapshotDto?> ResumeAsync(
     string playbackId, CancellationToken cancellationToken = default) =>
-    PostTransportAsync(
-      $"/api/audio/events/{Uri.EscapeDataString(playbackId)}/resume", null, cancellationToken);
+    PostTransportAsync(playbackId, "resume", null, cancellationToken);
 
   /// <remarks>
   /// ⚠ A 404 or a 409 returns null and logs NOTHING. Both are ordinary: 404 is a playback that ended
   /// between the render and the tap, and 409 is a transport verb reaching a playback that has no
   /// source yet — which is exactly what Preparing and Waiting are (PHN-1f §0.2, S15). Neither is worth
   /// a line on a box where log volume is audible.
+  ///
+  /// ⚠ It takes the id and the VERB rather than a finished path, so that Uri.EscapeDataString runs
+  /// inside this try. Passing an interpolated path in would move that call back into the caller's
+  /// synchronous frame, which is the defect the class remark describes.
   /// </remarks>
   private async Task<EventPlaybackSnapshotDto?> PostTransportAsync(
-    string path, object? body, CancellationToken cancellationToken)
+    string playbackId, string verb, object? body, CancellationToken cancellationToken)
   {
     try
     {
+      var path = $"/api/audio/events/{Uri.EscapeDataString(playbackId)}/{verb}";
+
       using var response = body is null
         ? await _httpClient.PostAsync(path, content: null, cancellationToken)
         : await _httpClient.PostAsJsonAsync(path, body, cancellationToken);
