@@ -463,13 +463,58 @@ row at **seven sites across five files**, not the four across two that `TTS-11` 
 - **Not P0.** None of (a) wrong or dangerous on day one, (b) embarrassing in front of people,
   (c) unrecoverable without a laptop, (d) the substrate other verification rests on, (e) permanent at
   install.
-- **Not P1.** P1's test is *"a real defect a user will hit"*. **Verified dead on a stock box:**
-  `src/Radio.API/appsettings.json` ships `"PhoneIntegration": { "Enabled": false }`, and the only
-  consumer of `PhoneContactLookupService` is `PhoneCallIntegrationService` — a `BackgroundService`
-  that returns at `:44` when `!opts.Enabled`. Nobody hits it today.
-- **P2 with a hard gate.** ⚠ **It must close BEFORE `PhoneIntegration:Enabled` ever ships `true`.**
-  The moment that flips, seven sites begin writing third-party PII, and `:102` is at Warning, so no
-  log-level tightening will contain it. That gate is the strongest single argument for doing it.
+- **Not P1.** ⚠ **THE ARGUMENT THAT STOOD HERE WAS TRUE OF FOUR ROWS AND WAS APPLIED TO ALL SEVEN.
+  Corrected 2026-09-05; the row may still be P2, but not for the reason written.** *Preserved
+  verbatim, because the half that holds is still the argument for those four rows:* **"Verified dead
+  on a stock box:** `src/Radio.API/appsettings.json` ships `"PhoneIntegration": { "Enabled": false }`,
+  and the only consumer of `PhoneContactLookupService` is `PhoneCallIntegrationService` — a
+  `BackgroundService` that returns at `:44` when `!opts.Enabled`. **Nobody hits it today."**
+  **What is wrong with it is its scope, not its content.** That chain retires exactly the rows in
+  `Radio.Infrastructure` and `Radio.API` — `PhoneContactLookupService.cs:62`/`:78`/`:96`/`:102`,
+  `PhoneCallClient.cs:128-129` and `PhoneCallIntegrationService.cs:127`. **It cannot reach
+  `PhoneHubService.cs:82`, and that row is the reason this correction exists.** That site is in
+  **`Radio.Web`, a separate process with its own configuration and its own sink**:
+  `StartAsync` (`:51`) reads **one** config key — `RotaryPhone:HubUrl` at `:66`, with a hardcoded
+  `http://radio:5004/hub` fallback — and the word `Enabled` appears **nowhere in the file**. Its only
+  two guards are re-entrancy (`:53` the connection lock, `:61` the null check), neither config-driven.
+  `Program.cs:652-653` does `_ = phoneHub.StartAsync()` as a top-level statement inside no `if`, and a
+  failure to connect starts a retry loop that never gives up. **So there is no flag anywhere in this
+  repo that switches `:82` off**, and it fires at **Information with an unredacted number** the moment
+  RotaryPhone pushes an `IncomingCall`. ⚠ **Whether it pushes one is NOT VERIFIABLE FROM THIS REPO** —
+  it depends on the service at `radio:5004` — so the honest statement is *"we do not know that this
+  line is dead,"* not *"it is live."* **The same objection applies to `PbapApiService.cs:104`**, also
+  `Radio.Web`, also outside the flag.
+  ⭐ **The reusable half: this document already knew, four paragraphs above, that `Radio.Web` is a
+  separate service outside the API's config** — that is exactly what the ⚠ note at the top of this
+  section says, and it was written in the same pass. The tier argument was then reasoned as though one
+  flag governed all seven rows. **A premise can be correctly recorded and still not be carried three
+  paragraphs down**, which is why the test this project applies is *does the claim name a file someone
+  opened* rather than *is the claim written down somewhere near*.
+- **P2 with a hard gate — the tier survives, on a narrower and differently-shaped argument.** The four
+  API-side rows are latent behind `PhoneIntegration:Enabled` and are P2 on the preserved reasoning
+  above. The three `Radio.Web` rows are **not gated at all**; they are P2 on a *different* ground —
+  the exposure is a log line on a box the owner alone administers, which fails every P0 test and does
+  not meet P1's *"a real defect a user will hit"* either, since no user encounters a log file. ⚠ **But
+  the gate can no longer be stated as one sentence, and stating it as one was the defect.** It must
+  close before `PhoneIntegration:Enabled` ever ships `true` — that part stands, and `:102` at Warning
+  is still its strongest argument. **It must ALSO close, independently, if the `Radio.Web` half is
+  ever confirmed live**, and nothing in this repo can confirm it. ⬆ **Moves to P1 the moment anyone
+  observes an `Incoming call from` line in `/opt/radio-console/logs/radio-*.txt` on the appliance** —
+  that is a one-command check (`grep -c 'Incoming call from' /opt/radio-console/logs/radio-*.txt`) and
+  it is named here so the next person settles it rather than re-deriving the argument.
+- ⚠ **The inventory is also short by two, both found 2026-09-05 and both in `Radio.Web`.**
+  **`src/Radio.Web/Services/ApiClients/GvTrunkApiService.cs:94`** logs a raw dialled number at
+  **`LogError`** — `_logger.LogError(ex, "Failed to dial {Number} via GV Trunk", number)` — which is
+  the **highest level of any site in this section**, above the `:102` Warning line the gate argument
+  leans on, and therefore reaches journald as well as the file sink. **`src/Radio.Web/Services/ContactResolutionService.cs:173`**
+  logs a raw number at Debug and is injected into the live `/phone` texts surface. So the heading's
+  *"seven sites"* is **nine sites across seven files**; the heading is left as written and corrected
+  here rather than silently re-titled, because "seven" is the figure the `TTS-11` cycle recorded and a
+  reader arriving from that PR should land on the correction rather than on a number that quietly moved.
+- ⚠ **This section overlaps `## 15` (2026-09-02, *Priority: Medium*), which covers the same
+  `PhoneContactLookupService` lines from the `PHN-1b` pass and is not cross-referenced from here.**
+  Two independent filings of one defect is the shape `TTS-11` was promoted to a row for. Reconciling
+  them is a Planner pass, not an edit to make in passing.
 
 ---
 
