@@ -704,6 +704,28 @@ html, body {
   box-shadow: 0 0 20px 4px var(--accent-glow);
 }
 
+.transport-btn-primary,
+.transport-btn-secondary {
+  appearance: none; -webkit-appearance: none;
+}
+.transport-btn-primary {
+  background: var(--accent-dim);
+  border: 1px solid rgba(92, 212, 232, 0.22);
+  color: var(--accent-primary);
+}
+.transport-btn-secondary {
+  background: transparent;
+  border: 1px solid var(--surface-separator);
+  color: var(--text-medium);
+}
+.transport-btn-secondary:hover { color: var(--text-high); border-color: rgba(255, 255, 255, 0.10); }
+/* The house disabled convention for buttons — opacity 0.35 + not-allowed, as at :4973, :5406, :5642.
+   NOT the 0.4 + pointer-events: none used for non-buttons; a disabled button must still be hoverable
+   so its title explains why. */
+.transport-btn:disabled, .transport-btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+.transport-btn:focus-visible,
+.transport-btn-primary:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent-primary); }
+
 
 /* ─── §12  LED Display Classes ────────────────────────────────────────────── */
 
@@ -1208,7 +1230,15 @@ html, body {
   border-radius: 2px;
 }
 
-.spinner        { animation: spin 1s linear infinite; }
+.spinner {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border: 2px solid var(--surface-separator);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+.transport-btn .spinner, .transport-btn-primary .spinner { width: 20px; height: 20px; }
 .pulse          { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 .shake          { animation: shake var(--anim-duration-slower) var(--anim-ease-standard); }
 .album-rotating { animation: albumRotate 3s linear infinite; }
@@ -5713,7 +5743,7 @@ body {
 /* §Ph — Voicemail inline player (PR2) */
 .vm-player { padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
 .vm-player-transport { display: flex; align-items: center; gap: var(--sp-3); }
-.vm-scrubber { flex: 1; padding: 11px 0; cursor: pointer; }   /* 3px bar + pad ≥24px hit area */
+.vm-scrubber { flex: 1; padding: 20px 0; cursor: pointer; }   /* 3px bar + 40px pad = 43px hit area */
 .vm-time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-medium); font-size: 13px; }
 .vm-buffering-note { font-family: var(--font-mono); font-size: 12px; color: var(--text-low); }
 .vm-player-error { display: flex; align-items: center; gap: var(--sp-2); color: var(--signal-red); }
@@ -5928,6 +5958,21 @@ body {
   outline: 2px solid var(--signal-red);
   outline-offset: 2px;
 }
+
+/* §Ph — console playback chip (ADR-029 §7.2 / handoff §Cross-3). Geometry is .nav-pill's; the surface
+   is the .phone-mode-btn.active recipe, so "live" reads the same everywhere on this surface. */
+.nav-pill.nav-pill-playing {
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1px rgba(92, 212, 232, 0.22);
+}
+.nav-pill.nav-pill-playing .rzi,
+.nav-pill.nav-pill-playing .nav-pill-label { color: var(--accent-primary); }
+
+/* §Ph — the error row grows a sub-line (handoff §Cross-5), and the scrubber grows an indeterminate
+   state for a voicemail whose DurationSeconds is 0 (handoff §A5 / Q10). */
+.vm-player-error-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.vm-player-error-sub { color: var(--text-medium); font-size: 13px; }
+.vm-scrubber-indeterminate { cursor: default; opacity: 0.45; }
 
 
 /* ─── ENC-4  Encoder HUD ────────────────────────────────────────────────────
