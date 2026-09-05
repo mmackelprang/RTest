@@ -468,11 +468,26 @@ public sealed class GvMediaClientTests : IDisposable
 }
 
 /// <summary>Captures every formatted log message, at every level, for the masking pin.</summary>
-internal sealed class CapturingLoggerProvider
+/// <remarks>
+/// ⚠ <b>Synchronized, because the writers are not the test thread.</b> Several consumers assert on
+/// <see cref="Messages"/> while a background path is still logging into it — the duration cap's timer
+/// callback and its dispatched <c>Task.Run</c> are the live example (<c>EventPlaybackServiceTests</c>
+/// § the max-duration cap). A bare <c>List&lt;string&gt;</c> enumerated while another thread appends
+/// throws <c>InvalidOperationException</c>, which would arrive as a rare unexplained failure in a
+/// test that looks nothing like a concurrency test. <see cref="Messages"/> hands back a SNAPSHOT so
+/// callers can enumerate it freely.
+/// </remarks>
+internal class CapturingLoggerProvider
 {
-  public List<string> Messages { get; } = [];
+  private readonly List<string> _messages = [];
 
-  public ILogger<T> CreateLogger<T>() => new CapturingLogger<T>(Messages);
+  /// <summary>A point-in-time copy. Safe to enumerate while background logging continues.</summary>
+  public IReadOnlyList<string> Messages
+  {
+    get { lock (_messages) { return _messages.ToArray(); } }
+  }
+
+  public virtual ILogger<T> CreateLogger<T>() => new CapturingLogger<T>(_messages);
 
   private sealed class CapturingLogger<T>(List<string> sink) : ILogger<T>
   {
@@ -484,10 +499,13 @@ internal sealed class CapturingLoggerProvider
       LogLevel logLevel, EventId eventId, TState state, Exception? exception,
       Func<TState, Exception?, string> formatter)
     {
-      sink.Add(formatter(state, exception));
-      if (exception is not null)
+      lock (sink)
       {
-        sink.Add(exception.ToString());
+        sink.Add(formatter(state, exception));
+        if (exception is not null)
+        {
+          sink.Add(exception.ToString());
+        }
       }
     }
   }

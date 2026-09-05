@@ -1,5 +1,6 @@
 using System.Net;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
@@ -95,7 +96,8 @@ public sealed class EventPlaybackServiceTests : IDisposable
     TTSOptions? tts = null,
     HttpMessageHandler? httpHandler = null,
     FakeDuckingService? ducking = null,
-    CapturingLoggerProvider? logs = null)
+    CapturingLoggerProvider? logs = null,
+    TimeProvider? timeProvider = null)
   {
     var gvOptions = gvMedia ?? new GvMediaOptions { Enabled = true, CacheDirectory = _cacheDir };
     var gvMonitor = new StaticOptionsMonitor<GvMediaOptions>(gvOptions);
@@ -130,7 +132,8 @@ public sealed class EventPlaybackServiceTests : IDisposable
       ttsFactory ?? new FakeTtsFactory(),
       fileFactory,
       ducking ?? _ducking,
-      client);
+      client,
+      timeProvider);
   }
 
   private static HttpResponseMessage Mp3Of(int bytes) =>
@@ -1788,6 +1791,311 @@ public sealed class EventPlaybackServiceTests : IDisposable
       + "that names no priority arrives at exactly 8 via NotificationsController's 'Priority ?? 8', so "
       + "the doorbell silently stops preempting while the dormant ring at 9 still would - the feature "
       + "looks intact and has stopped happening. Lower the threshold, or move both together and say so.");
+  }
+
+  // ── the max-duration cap (ADR-029 D7 §7.1) ────────────────────────────────
+
+  [Fact]
+  public async Task TheDurationCapStopsAPlaybackThatOutlivesMaxPlaybackSeconds()
+  {
+    // ADR-029 D7 §7.1 — "This is THE guarantee. No client cooperation, no heartbeat, no timer loop,
+    // no polling." Everything else in D7 is a latency improvement on this line.
+    //
+    // ⚠ Driven by FakeTimeProvider, never by Task.Delay. CLAUDE.md § Test Timing forbids racing a
+    // wall clock against a wall clock, and TEST-4 is the row about the last time this repo did.
+    // Advance() fires every DUE timer synchronously before it returns, and the rendezvous below is on
+    // the Stopped SNAPSHOT rather than on elapsed time — so both halves are deterministic.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Subscribed BEFORE the advance, so the transition cannot be missed.
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    time.Advance(TimeSpan.FromSeconds(30));
+
+    var final = await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(1, source.StopCalls);
+    Assert.Equal(EventPlaybackState.Stopped, service.Current!.State);
+  }
+
+  [Fact]
+  public async Task TheDurationCapDoesNotFireBeforeItsTime()
+  {
+    // ⚠ A NEGATIVE assertion that is DETERMINISTIC rather than merely patient, and this test says so
+    // about itself because CLAUDE.md § Test Timing asks a test to. FakeTimeProvider.Advance runs
+    // every due timer synchronously before returning, so when it returns with none due there is
+    // nothing in flight for the assertions to lose a race to. This is NOT "no event arrived within
+    // 200 ms", and it is the reason the cap uses TimeProvider rather than a raw Timer.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    time.Advance(TimeSpan.FromSeconds(29));
+
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+    Assert.Equal(0, source.StopCalls);
+  }
+
+  [Fact]
+  public async Task ANaturalEndDisarmsTheDurationCap()
+  {
+    // The disarm lives in ReleaseSourceAsync, the one funnel that stops and disposes a source. If it
+    // were missing, a ten-second voicemail would leave a five-minute timer alive — and on this box a
+    // timer per playback that never fires is the shape trap 5 of the arc breakdown exists to refuse.
+    //
+    // ⚠ THE ASSERTION IS ON THE LOG, AND THAT IS NOT A STYLISTIC CHOICE — it is the only thing here
+    // that can actually fail. The obvious assertion, which plan PHN-1e Task 8 specifies and which an
+    // earlier draft of this test used, is that source.StopCalls does not move. It does not move
+    // EITHER WAY: measured by deleting playback.DisarmDurationCap() from ReleaseSourceAsync and
+    // re-running, 62/62 still passed. The cap timer fires, dispatches StopAsync(id), and StopAsync
+    // finds a playback whose terminal transition ClaimTerminal has already admitted — so it returns
+    // false without ever reaching the source. A StopCalls assertion is therefore satisfied by
+    // ClaimTerminal's idempotence, which is a DIFFERENT property that a different test already pins,
+    // and it would have reported this disarm as covered while covering nothing.
+    //
+    // The cap callback's LogWarning is emitted unconditionally at the top of the callback, before the
+    // dispatch and before any idempotence can absorb it, so it is the one observable that exists if
+    // and only if the timer was still armed. FakeTimeProvider.Advance runs due callbacks
+    // synchronously on the calling thread, so the message is in the sink by the time it returns.
+    var time = new FakeTimeProvider();
+    var logs = new CapturingLoggerProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      logs: logs,
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var completed = NextSnapshotWith(service, EventPlaybackState.Completed);
+    source.RaiseCompleted(PlaybackCompletionReason.EndOfContent);
+    await completed.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var stopsAtEnd = source.StopCalls;
+    time.Advance(TimeSpan.FromMinutes(10));
+
+    Assert.DoesNotContain(
+      logs.Messages,
+      m => m.Contains("reached GvMedia:MaxPlaybackSeconds", StringComparison.Ordinal));
+
+    // Kept, but understood for what they are: true whether or not the disarm happened, and here to
+    // show the natural end itself still behaved. Neither can fail on the disarm's account.
+    Assert.Equal(stopsAtEnd, source.StopCalls);
+    Assert.Equal(EventPlaybackState.Completed, service.Current!.State);
+  }
+
+  [Fact]
+  public async Task AReplacedPlaybackDoesNotTakeItsReplacementDownWhenItsCapExpires()
+  {
+    // Two independent reasons this holds, and the test exists because only one of them is obvious.
+    // (1) The replaced playback's teardown runs ReleaseSourceAsync, which disarms its cap.
+    // (2) Even if it did not, the callback addresses StopAsync BY THE OLD ID, which no longer matches
+    //     _current, so it is a no-op.
+    // Belt and braces — but a refactor that made the cap address "whatever is current" would turn a
+    // stale timer into a stop of an unrelated playback, and this is the test that catches it.
+    var time = new FakeTimeProvider();
+    var first = new FakeEventSource();
+    var second = new FakeEventSource();
+    var queue = new Queue<IEventAudioSource>([first, second]);
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult(queue.Dequeue()) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      timeProvider: time);
+
+    var firstPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await firstPlaying.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Ten seconds into the first playback, a second one replaces it — so the first's cap would fire
+    // twenty seconds from now, while the second's has thirty seconds to run from here.
+    time.Advance(TimeSpan.FromSeconds(10));
+    var replaced = NextSnapshotWith(service, EventPlaybackState.Stopped);
+
+    // ⚠ The rendezvous is the Playing SNAPSHOT, not second.PlayCalls, and the difference is a real
+    // race rather than a style preference. AcquireAndPlayAsync runs source.PlayAsync (which
+    // increments PlayCalls), then ArmDurationCap, then PublishNonTerminal(Playing) — so a wait on
+    // PlayCalls can return while the state is still Preparing, and the assertion below would read it.
+    // Waiting on the snapshot is what the four sibling cap tests do.
+    var secondPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
+    var two = await service.StartAsync(SpeechRequest());
+    await replaced.WaitAsync(TimeSpan.FromSeconds(5));
+    await secondPlaying.WaitAsync(TimeSpan.FromSeconds(5));
+
+    time.Advance(TimeSpan.FromSeconds(21));
+
+    Assert.Equal(two.Id, service.Current!.Id);
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+    Assert.Equal(0, second.StopCalls);
+  }
+
+  [Fact]
+  public async Task AnAbsurdMaxPlaybackSecondsIsClampedRatherThanKillingEveryPlayback()
+  {
+    // ⚠ A CRASH FIX, and the crash was silent in the worst way. TimeProvider.CreateTimer rejects a
+    // due time above ~49.7 days, so an absurd MaxPlaybackSeconds threw ArgumentOutOfRangeException
+    // out of ArmDurationCap — which runs AFTER PlayAsync returned — landing in AcquireAndPlayAsync's
+    // general catch and failing EVERY attended playback immediately after it started, under a
+    // generic failure reason. One config value, feature dead, no diagnosis.
+    //
+    // ⚠ FakeTimeProvider does NOT enforce that bound, so this test cannot reproduce the throw. What
+    // it pins is the observable consequence of the clamp: the playback reaches Playing and stays
+    // there rather than failing, and the cap does not fire at a clamped-to-something-small value.
+    // Said plainly rather than implied, because a test that cannot see the original fault should not
+    // be read as covering it.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = int.MaxValue
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // A day later - the clamp - it stops. Not immediately, and not never.
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    time.Advance(TimeSpan.FromHours(24));
+
+    await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, source.StopCalls);
+  }
+
+  [Fact]
+  public async Task AThrowingLogSinkInTheCapCallbackDoesNotEscape()
+  {
+    // ⚠ THE CALLBACK BOUNDARY IS A PROCESS BOUNDARY. This lambda IS the TimerCallback:
+    // System.Threading.Timer does not wrap it, so an unhandled exception there runs on a thread-pool
+    // thread and TERMINATES THE PROCESS. The guard used to start inside the dispatched Task.Run,
+    // leaving the LogWarning and the Task.Run scheduling outside it - and ILogger.Log aggregates and
+    // RETHROWS provider exceptions, so a failing Serilog file sink (or a log written after
+    // CloseAndFlush during a shutdown racing an armed cap) escaped straight into the runtime.
+    //
+    // ⚠ FakeTimeProvider is what makes this testable at all: Advance runs due callbacks
+    // SYNCHRONOUSLY on the calling thread, so an unguarded throw surfaces here as a failed
+    // assertion instead of taking the test host down with it. Delete the outer try in
+    // ArmDurationCap's callback and this test throws.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    var logs = new ThrowingLoggerProvider();
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      logs: logs,
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    logs.ThrowOnLog = true;
+
+    // The assertion IS that this does not throw.
+    time.Advance(TimeSpan.FromSeconds(30));
+  }
+
+  [Fact]
+  public async Task AZeroMaxPlaybackSecondsClampsToOneSecondRatherThanMeaningNoCap()
+  {
+    // ⚠ There is deliberately no off switch (ADR-029 §7.1 calls this THE guarantee), and this pins
+    // which direction a nonsense value resolves in. The alternative reading — 0 means "never cap" —
+    // is the PreemptAtPriority trap in another key: a number that silently deletes a safety property
+    // while leaving it looking configured (plan PHN-1d C-43).
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 0
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    time.Advance(TimeSpan.FromSeconds(1));
+
+    await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, source.StopCalls);
+  }
+}
+
+/// <summary>
+/// A <see cref="CapturingLoggerProvider"/> that can be told to start throwing, standing in for a
+/// wedged log sink. <see cref="ILogger"/> aggregates and rethrows provider exceptions, so this is the
+/// shape a failing Serilog sink presents to its caller.
+/// </summary>
+internal sealed class ThrowingLoggerProvider : CapturingLoggerProvider
+{
+  public bool ThrowOnLog { get; set; }
+
+  public new ILogger<T> CreateLogger<T>() => new ThrowingLogger<T>(this, base.CreateLogger<T>());
+
+  private sealed class ThrowingLogger<T>(ThrowingLoggerProvider owner, ILogger<T> inner) : ILogger<T>
+  {
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter)
+    {
+      if (owner.ThrowOnLog)
+      {
+        throw new InvalidOperationException("the log sink is wedged");
+      }
+
+      inner.Log(logLevel, eventId, state, exception, formatter);
+    }
   }
 }
 

@@ -207,10 +207,22 @@ Bluetooth — is the next row's work and is now cheap.
    second throttle" finding below is about `VolumeChanged` and still stands.
 
 9. **`/sleep` reached by idle and `/sleep` reached by the Sleep pill are different states.**
-   `idle-dimmer.js:73-81` navigates without calling `SetSleepAsync(true)`, so
-   `SleepService.IsSleeping` is **false** on the idle path and knobs act normally there; the pill
-   sets it **true** and any encoder input is consumed by the wake. Testing sleep-screen encoder
-   behaviour via the pill will look like a failure when it is the documented pre-ENC-6 behaviour.
+   `idle-dimmer.js`'s **`navigateToSleep`** navigates by `window.location.href` without calling
+   `SetSleepAsync(true)`, so `SleepService.IsSleeping` is **false** on the idle path and knobs act
+   normally there; the pill sets it **true** and any encoder input is consumed by the wake. Testing
+   sleep-screen encoder behaviour via the pill will look like a failure when it is the documented
+   pre-ENC-6 behaviour.
+   *(⚠ Cited by function name since 2026-09-04. This used to say `idle-dimmer.js:73-81`; the function
+   has moved and the line range no longer contains it. The substance was right — and it turned out to
+   be load-bearing.)*
+
+   ⭐ **This gotcha was already true, already written down, and a stop condition was still built on the
+   opposite assumption.** ADR-029 §7.5 hung *"entering `/sleep` stops attended playback"* on
+   `SleepService.EnterSleepAsync`, which the idle path never reaches — so the rule never fired for the
+   30-minute idle timer, which is the case §7.5's own motivating sentence names. Fixed in `PHN-1e` by
+   adding a second edge on `SetSleepScreenVisibleAsync(true)`; ADR-029 §16.4/§16.5 is the record.
+   **If you are about to reason about what happens when the console goes to `/sleep`, this entry is
+   the one to read first, and `IsSleeping` is the wrong predicate.**
 
 ---
 

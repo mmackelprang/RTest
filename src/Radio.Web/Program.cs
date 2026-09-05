@@ -1,4 +1,5 @@
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
+using Microsoft.AspNetCore.Components.Server.Circuits;
 using Radzen;
 using Radio.Configuration.Bridge;
 using Radio.Web;
@@ -93,6 +94,21 @@ void ConfigureHttpClientHandler(HttpMessageHandler handler)
 }
 
 builder.Services.AddHttpClient<AudioApiService>(client =>
+{
+  client.BaseAddress = new Uri(apiBaseUrl);
+  client.Timeout = TimeSpan.FromSeconds(30);
+})
+.AddHttpMessageHandler<ApiConnectionLoggingHandler>()
+.ConfigurePrimaryHttpMessageHandler(() =>
+{
+  var handler = new HttpClientHandler();
+  ConfigureHttpClientHandler(handler);
+  return handler;
+});
+
+// ADR-029 D6/D7 — the read and stop halves of /api/audio/events. Same shape as AudioApiService
+// above; the seed (§8.1) and the last-circuit backstop (§7.3) are its two callers.
+builder.Services.AddHttpClient<EventPlaybackApiService>(client =>
 {
   client.BaseAddress = new Uri(apiBaseUrl);
   client.Timeout = TimeSpan.FromSeconds(30);
@@ -445,6 +461,13 @@ builder.Services.AddHostedService(sp =>
 
 // Register centralized audio state store (subscribes to hub, caches state for components)
 builder.Services.AddSingleton<AudioStateStore>();
+
+// ADR-029 D7 §7.3 — the last-circuit-closed backstop for attended playback. Registered concretely
+// and then aliased so the CircuitHandler every circuit resolves and the singleton holding the count
+// are the SAME object; two would be two counters, each reaching zero on its own circuit's close.
+builder.Services.AddSingleton<AttendedPlaybackCircuitHandler>();
+builder.Services.AddSingleton<CircuitHandler>(sp =>
+  sp.GetRequiredService<AttendedPlaybackCircuitHandler>());
 
 // Register application services
 builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();

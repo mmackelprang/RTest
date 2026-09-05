@@ -11,7 +11,8 @@ namespace Radio.Web.Services.Hub;
 /// Handles: PlaybackStateChanged, NowPlayingChanged, QueueChanged,
 /// RadioStateChanged, VolumeChanged, SourceChanged, FingerprintStatusChanged,
 /// PhoneCallStateChanged, EncoderConnectionChanged,
-/// EncoderConfigStatusChanged, EncoderHudChanged, SleepStateChanged, ConfigChanged
+/// EncoderConfigStatusChanged, EncoderHudChanged, SleepStateChanged, EventPlaybackChanged,
+/// ConfigChanged
 /// </summary>
 public class AudioStateHubService : IAsyncDisposable
 {
@@ -60,6 +61,13 @@ public class AudioStateHubService : IAsyncDisposable
   /// being turned reaches this at up to 20 Hz rather than at the poll rate.</summary>
   public event Func<EncoderHudDto, Task>? EncoderHudChanged;
   public event Func<bool, Task>? SleepStateChanged;
+  /// <summary>
+  /// Raised when the one attended event playback changes state (ADR-029 D6 §8.1). Typed, like
+  /// NowPlayingChanged and unlike PlaybackStateChanged: the payload IS the state, so a subscriber
+  /// that re-fetched it over REST would be adding a round trip to a push that already carries
+  /// everything. Fires on transitions only — there is no position tick (§8.2).
+  /// </summary>
+  public event Func<EventPlaybackSnapshotDto?, Task>? EventPlaybackChanged;
   // Fired after a cross-process ConfigChanged push has reloaded this process's
   // config snapshot. Optional for subscribers that want an immediate re-render;
   // the topbar / sleep clocks don't need it (their 1 s timers repaint anyway).
@@ -249,6 +257,17 @@ public class AudioStateHubService : IAsyncDisposable
         if (SleepStateChanged != null)
         {
           await SleepStateChanged.Invoke(isSleeping);
+        }
+      });
+
+      // Server sends EventPlaybackChanged on every attended-playback transition (ADR-029 D6 §8.1).
+      // Transitions only — there is no position tick, and §8.2 refuses one outright.
+      _hubConnection.On<EventPlaybackSnapshotDto?>("EventPlaybackChanged", async (dto) =>
+      {
+        _logger.LogDebug("Received EventPlaybackChanged event");
+        if (EventPlaybackChanged != null)
+        {
+          await EventPlaybackChanged.Invoke(dto);
         }
       });
 

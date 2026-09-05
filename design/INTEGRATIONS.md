@@ -791,7 +791,7 @@ thing the browser could never do.
 | `AuthKey` | `""` | Value for `X-RotaryPhone-Auth`. Empty means **no header is sent**, which matches the current LAN-only posture. |
 | `CacheDirectory` | `./data/gvmedia` | Resolves to `/opt/radio-console/data/gvmedia` on the appliance — `radio-api.service` sets `WorkingDirectory=/opt/radio-console` and runs as `mmack`, who owns `data/` (its sibling `albumart/` is already there). |
 | `CacheMaxMegabytes` | `50` | Cap in MB. **`0` is a supported escape hatch and means NO CACHE** — see below. |
-| `MaxPlaybackSeconds` | `300` | Bounds the download (≈9.6 MB at an assumed 32 000 B/s) and the no-cache sweep window. Becomes the attended-playback cap in a later PR. |
+| `MaxPlaybackSeconds` | `300` | Bounds the download (≈9.6 MB at an assumed 32 000 B/s) and the no-cache sweep window. Also the hard cap on one attended playback (ADR-029 §7.1): `EventPlaybackService` arms a one-shot timer when audio starts and stops the playback when it fires, with no client cooperation and no poll. **There is no "off"** — a value below 1 clamps to 1. |
 | `MaxSpeechChars` | `1000` | Cap on event-playback speech text. ⚠ The behaviour is **rejection, not truncation** — `Radio.Web` truncates visibly before posting. |
 | `PreemptAtPriority` | `8` | Priority at or above which a starting event source stops attended playback (ADR-029 D5). Read by `EventPlaybackService.OnDuckingStateChanged`. ⚠ **Safe to lower, a trap to raise — and the reason is not the one it looks like.** Every source that reaches this rule had its priority set explicitly: all four `StartDuckingAsync` call sites in the tree call `SetPriority` first, so `GetPriority`'s category default never answers a start raise. What makes `9` a trap is `NotificationsController.Announce`'s `request.Priority ?? 8` — **every external notification that does not name a priority arrives at exactly 8**, so raising this to `9` silently stops the doorbell preempting while the dormant `PhoneIntegration:RingPriority` (9) still would, leaving the feature looking intact after it has stopped happening for everything that can make a sound on this box. `7` widens it to the documented "high importance" band. Keep it at or below `DuckingService.DefaultEventPriority` — the number ADR-029 §6.1 anchored on. A test pins those two compile-time defaults; it can see neither a per-machine override nor the controller's `?? 8`, which is what this line is for. |
 | `FetchTimeoutSeconds` | `15` | HTTP timeout for one media fetch. |
@@ -852,6 +852,84 @@ network and is answered synchronously as `409`.
 means *nothing has been started since boot*, not *nothing is playing* — read `state` to tell those apart.
 That is required by the `202` shape: an acquisition failure has no response left to carry it, so this is
 the surface that carries it instead.
+
+**State reaches the UI by push, and by one pull.** Every transition is broadcast on `/hubs/audio` as
+**`EventPlaybackChanged`**, carrying the same snapshot `GET /api/audio/events/current` returns —
+with `state` and `kind` as **strings** on both, so the same client field can be filled from either.
+There is deliberately **no position tick**: the snapshot is an anchor
+(`positionAtBroadcast` + `broadcastAtUtc` + `state`) and clients interpolate locally (ADR-029 §8.2).
+`Radio.Web` seeds its cache from the REST call **once per process**, because broadcasts fire on
+transitions and a client connecting between two of them would otherwise render silence over a
+talking room.
+
+**Three things stop an attended playback without anyone pressing Stop.** ⚠ They used to be listed
+here "in descending order of trustworthiness", with the circuit rule last. **ADR-029 Amendment 2
+reordered that**, and the ordering is now by *how much of the room's behaviour each one explains*
+rather than by how much each is trusted:
+
+1. **The last Blazor circuit closing** — on this appliance, the one that actually fires. Owner
+   decision **`D30`** (2026-09-04): *"If the page reloads mid-voicemail, the audio should fail. If the
+   user wants to hear it they can replay."* A graceful close (reload, navigate away, tab close)
+   disposes the circuit at once — the 10-minute `DisconnectedCircuitRetentionPeriod` covers only
+   *unexpected* disconnects. Measured on the box: reloading the only browser goes 1 → 0 → 1 and this
+   path stops the playback at the zero, ~0.4 s before the replacement circuit arrives.
+   ⚠ **That is intended behaviour, not a defect.** An earlier revision of this list marked it *"Known
+   broken — do not rely on this"*; `D30` makes that wrong in the other direction, and there is to be
+   no grace period, no circuit-identity matching and no survival mechanism. ⚠ **One acknowledged
+   limit:** with a **second browser** open a reload is 2 → 1 → 2 and nothing stops, so the rule
+   delivers `D30` only in the single-browser case — which is this box's resting state. Closing that
+   gap needs to know which circuit started the playback, i.e. the ownership model ADR-029 ⟨A1·4⟩
+   deleted. The divergence is benign: a second client still holds the transport.
+2. **Entering `/sleep`**, because that route runs under `EmptyLayout` and offers no transport
+   (ADR-029 §7.5 on §16.5's corrected trigger). ⚠ **TWO server-side edges, and the reason there are
+   two is a real defect that shipped in the design and was caught on the box:**
+   - `SleepService.SetSleepScreenVisibleAsync(true)` — the `/sleep` page reporting itself. It is the
+     **only** stopper for the routes that reach `/sleep` *without parking audio first*: the
+     **30-minute idle timer** and a **direct navigation**.
+   - `SleepService.EnterSleepAsync` — the room being parked. Covers the Sleep pill, the server push
+     (which originates there), and the entries with **no browser at all**: `POST /api/system/sleep`
+     and the encoder long-press.
+
+   ⚠ **An earlier revision of this list said the screen edge covers "the idle timer, the pill, the
+   server push and a direct navigation".** It does not, and the distinction is the useful half: the
+   pill and the push park audio *first*, so by the time the page reports itself there is nothing left
+   to stop and the screen edge is a no-op. Every route is covered — but by *which* edge matters when
+   reasoning about what happens if one of them is changed.
+
+   ⚠ **This list used to say "Enforced server-side in `SleepService.EnterSleepAsync`, so all three
+   client entry points … are covered by one rule."** That was false, and it was false for the exact
+   case §7.5 was written about: `idle-dimmer.js`'s `navigateToSleep('idle')` reaches `/sleep` by
+   `window.location.href` and deliberately calls nothing server-side, so `IsSleeping` stays **false**
+   on the idle path and the rule never ran there.
+
+   ⚠ **And the screen edge fires on the REPORT, not on a transition of `ConsoleWakeState`** — which is
+   itself a correction, made during pre-merge review. A transition rule can be **suppressed** by a
+   stale flag: `Sleep.razor`'s dispose report is best-effort behind a 2 s timeout and `MainLayout`'s
+   corrective `false` is fire-and-forget, so losing both leaves the flag reading `true` while the
+   console is awake. The next idle timeout is then not a *change*, and a transition rule does not
+   fire — the failure §7.5 exists to prevent, arrived at by the rule meant to prevent it. Deciding on
+   the report's own argument also removes a race with a concurrent opposite report. **Still never
+   polled:** it is driven by a client's report, with no loop and no timer, and `WakeState` is
+   deliberately not consulted at all — it reads `Awake` while a wake claim is outstanding (`ENC-6`'s
+   fast spin). Repeat reports are free: the stop decides on the playback's *state*, so a second one
+   finds a terminal snapshot and does nothing.
+
+   It is a **stop**, not a mute: `WakeAsync` restores the pre-sleep mute state, so a merely-muted
+   voicemail would become audible again mid-word on the next touch.
+3. **The `GvMedia:MaxPlaybackSeconds` cap** — the only one with no client in the loop at all, and now
+   the backstop behind the other two rather than the thing they back up. Ships at 300 s. Built as a
+   one-shot `TimeProvider` timer whose callback *dispatches* a stop — ⚠ **not** `CancelAfter` on the
+   playback's token, which would leave the audio sounding while suppressing the completion that would
+   otherwise have ended it.
+   ⚠ **The 300 is coupled to the 600 in one direction, and nothing enforces it.** A network drop that
+   never reconnects evicts its circuit ~10 minutes in; that firing is harmless only *because* the cap
+   has already stopped the audio five minutes earlier. Raise `MaxPlaybackSeconds` past ten minutes —
+   plausible, for a long voicemail — and a behaviour nobody has ever seen appears silently. The cap
+   has no maximum, and the retention period lives in `Radio.Web` where nothing in `Radio.API` can see
+   it.
+
+Navigating between routes does **not** stop playback (`NavigationManager.NavigateTo` without
+`forceLoad` keeps the circuit), and closing one of two open browsers does not either.
 
 **`failureReason` — the operator diagnosis table.** Nine reasons reach a snapshot, deliberately not
 collapsed. ⚠ **Not all nine are acquisition failures**, and the last two are the ones that send an

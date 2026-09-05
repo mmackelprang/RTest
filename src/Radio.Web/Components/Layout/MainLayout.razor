@@ -536,6 +536,15 @@
   /// Called from JS (idle-dimmer.js) when user interaction triggers sleep or wake.
   /// Routes through Blazor server-side HttpClient to avoid browser CORS issues.
   /// </summary>
+  /// <remarks>
+  /// ⚠ <b>UNREACHABLE TODAY, and worth knowing before counting it as an entry point into sleep.</b>
+  /// Its only JS caller is <c>idle-dimmer.js</c>'s <c>enterSleep()</c>, which has zero callers in the
+  /// tracked tree — the Sleep pill and the server push both use
+  /// <c>NavigationManager.NavigateTo("/sleep")</c> directly, and the idle timer deliberately calls
+  /// nothing server-side. ADR-029 §7.5 counted this path as live, built a stop condition on it, and
+  /// the condition never fired for the case it was written about (§16.4). Kept because it is the
+  /// seam a future JS-driven sleep would use; do not treat it as a route that runs.
+  /// </remarks>
   [JSInvokable]
   public async Task OnJsSleepRequested(bool sleep)
   {

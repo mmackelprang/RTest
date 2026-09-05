@@ -1,12 +1,15 @@
 using System.Reflection;
+using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Radio.API.Hubs;
 using Radio.API.Models;
 using Radio.API.Services;
+using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 
 namespace Radio.API.Tests.Services;
@@ -239,4 +242,381 @@ public class AudioStateUpdateServiceTests
 
     Assert.True(InvokeHasRdsRelevantChanged(null, curr));
   }
+
+  // ─── attended event playback broadcast (ADR-029 D6 §8.1) ─────────────────
+
+  /// <summary>
+  /// Builds the service over a service provider that really contains <paramref name="eventPlayback"/>,
+  /// and captures every hub send.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The capture seam is <c>IClientProxy.SendCoreAsync</c>, not <c>SendAsync</c>. <c>SendAsync</c>
+  /// is an extension method and cannot be intercepted by Moq; <c>SendCoreAsync(string, object?[],
+  /// CancellationToken)</c> is what it forwards to, and <c>args[0]</c> is the payload. This is the
+  /// same seam <c>SleepServiceTests</c> already asserts through.
+  ///
+  /// ⚠ The fake goes in through a POPULATED ServiceCollection rather than a constructor parameter,
+  /// because <see cref="AudioStateUpdateService"/> resolves it with
+  /// <c>IServiceProvider.GetService</c>. The existing <c>CreateService()</c> above builds an empty
+  /// provider, which is exactly the "not registered at all" case
+  /// <see cref="AMissingEventPlaybackServiceDisablesTheBroadcastRatherThanFailingToStart"/> pins.
+  /// </remarks>
+  private static AudioStateUpdateService CreateServiceWith(
+    IEventPlaybackService? eventPlayback,
+    Action<string, object?[]>? onSend = null,
+    Exception? sendThrows = null,
+    ILogger<AudioStateUpdateService>? logger = null)
+  {
+    var hubContextMock = new Mock<IHubContext<AudioStateHub>>();
+    var clientsMock = new Mock<IHubClients>();
+    var allClientsMock = new Mock<IClientProxy>();
+
+    var setup = allClientsMock.Setup(c => c.SendCoreAsync(
+      It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()));
+
+    if (sendThrows is not null)
+    {
+      setup.ThrowsAsync(sendThrows);
+    }
+    else
+    {
+      setup
+        .Callback<string, object?[], CancellationToken>(
+          (method, args, _) => onSend?.Invoke(method, args))
+        .Returns(Task.CompletedTask);
+    }
+
+    clientsMock.SetupGet(c => c.All).Returns(allClientsMock.Object);
+    hubContextMock.SetupGet(h => h.Clients).Returns(clientsMock.Object);
+
+    var configuration = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>())
+      .Build();
+
+    var collection = new ServiceCollection();
+    if (eventPlayback is not null)
+    {
+      collection.AddSingleton(eventPlayback);
+    }
+
+    return new AudioStateUpdateService(
+      logger ?? NullLogger<AudioStateUpdateService>.Instance,
+      hubContextMock.Object,
+      collection.BuildServiceProvider(),
+      configuration);
+  }
+
+  /// <summary>
+  /// A bounded poll INSIDE a wait, never a sleep before an assertion. The handler is
+  /// <c>async void</c>, so the raise returns before the send has necessarily happened; the
+  /// rendezvous is on the observation.
+  /// </summary>
+  private static async Task WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+  {
+    var deadline = DateTime.UtcNow + timeout;
+    while (DateTime.UtcNow < deadline)
+    {
+      if (condition())
+      {
+        return;
+      }
+      await Task.Delay(10);
+    }
+    Assert.Fail($"Condition was not met within {timeout}.");
+  }
+
+  private static EventPlaybackSnapshot PlayingSnapshot(string id = "evp-abc") => new(
+    id, EventPlaybackKind.RemoteMedia, "Voicemail from Jane",
+    EventPlaybackState.Playing, TimeSpan.FromSeconds(29), TimeSpan.Zero,
+    DateTimeOffset.UtcNow, null);
+
+  [Fact]
+  public async Task EventPlaybackChanged_PutsStateAndKindOnTheWireAsStrings()
+  {
+    // ⚠ THE C-47 PIN. Radio.API registers JsonStringEnumConverter on
+    // AddControllers().AddJsonOptions ONLY; SignalR serialises through
+    // JsonHubProtocol.PayloadSerializerOptions, which this project never configures. Handing the
+    // snapshot record straight to SendAsync would put "state": 1 on the hub while
+    // GET /api/audio/events/current says "state": "Playing" — and ADR-029 §8.1 feeds BOTH into the
+    // same client field, the REST call as the seed and this as the update.
+    //
+    // ⚠ Asserted by SERIALISING the captured payload and reading the JSON, not by reflecting over the
+    // anonymous type. Both would catch today's defect; only the JSON states the property that
+    // actually matters, which is what a client parses.
+    var fake = new FakeEventPlaybackService();
+    object? captured = null;
+
+    var service = CreateServiceWith(fake, onSend: (method, args) =>
+    {
+      if (method == "EventPlaybackChanged")
+      {
+        captured = args[0];
+      }
+    });
+
+    fake.Raise(PlayingSnapshot());
+
+    await WaitUntilAsync(() => captured is not null, TimeSpan.FromSeconds(5));
+
+    var json = JsonSerializer.Serialize(
+      captured, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+    using var doc = JsonDocument.Parse(json);
+
+    Assert.Equal(JsonValueKind.String, doc.RootElement.GetProperty("state").ValueKind);
+    Assert.Equal("Playing", doc.RootElement.GetProperty("state").GetString());
+    Assert.Equal(JsonValueKind.String, doc.RootElement.GetProperty("kind").ValueKind);
+    Assert.Equal("RemoteMedia", doc.RootElement.GetProperty("kind").GetString());
+
+    service.Dispose();
+  }
+
+  [Fact]
+  public async Task EventPlaybackChanged_RoundTripsIntoAHandCopyOfTheWebDtoShape()
+  {
+    // The closest a single assembly can get to proving the ADR §8.1 contract: the payload this
+    // service puts on the wire deserialises into the member set Radio.Web's EventPlaybackSnapshotDto
+    // declares, with every field intact.
+    //
+    // ⚠ A HAND COPY, and the name says so now because the old one (…RoundTripsIntoTheWebDtoShape)
+    // claimed more than this can deliver. WebShapedSnapshot below MIRRORS that DTO; there is no
+    // compile-time link, so renaming or retyping a member on EITHER side leaves this green while the
+    // contract is broken. What this test really pins is the shape Radio.API EMITS.
+    //
+    // The other half now exists and closes the chain:
+    // Radio.Web.Tests/Models/EventPlaybackSnapshotDtoWireTests deserialises the same literal into the
+    // REAL DTO. Keep the two payloads identical — that literal is the contract, and the projects
+    // cannot reference each other to enforce it.
+    //
+    // ⚠ What it does NOT prove, stated rather than implied: it does not exercise JsonHubProtocol's
+    // own serializer options, and no unit test in this repo can — the hub protocol is not reachable
+    // from here. U1 and the real wire shape are settled on the box (plan §2.2 item 1). A `state` that
+    // arrives there as a number rather than "Playing" is this pin having been got wrong, and it will
+    // look like "the chip does not update" rather than like a serialisation fault.
+    var fake = new FakeEventPlaybackService();
+    object? captured = null;
+
+    var service = CreateServiceWith(fake, onSend: (method, args) =>
+    {
+      if (method == "EventPlaybackChanged")
+      {
+        captured = args[0];
+      }
+    });
+
+    var sent = new EventPlaybackSnapshot(
+      "evp-round-trip", EventPlaybackKind.Speech, "Message from Jane",
+      EventPlaybackState.Failed, TimeSpan.FromSeconds(7.5), TimeSpan.FromSeconds(2),
+      DateTimeOffset.UtcNow, "MediaNotFound");
+    fake.Raise(sent);
+
+    await WaitUntilAsync(() => captured is not null, TimeSpan.FromSeconds(5));
+
+    var options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+    var json = JsonSerializer.Serialize(captured, options);
+    var dto = JsonSerializer.Deserialize<WebShapedSnapshot>(json, options);
+
+    Assert.NotNull(dto);
+    Assert.Equal("evp-round-trip", dto!.Id);
+    Assert.Equal("Speech", dto.Kind);
+    Assert.Equal("Message from Jane", dto.Label);
+    Assert.Equal("Failed", dto.State);
+    Assert.Equal(TimeSpan.FromSeconds(7.5), dto.Duration);
+    Assert.Equal(TimeSpan.FromSeconds(2), dto.PositionAtBroadcast);
+    Assert.Equal(sent.BroadcastAtUtc, dto.BroadcastAtUtc);
+    Assert.Equal("MediaNotFound", dto.FailureReason);
+
+    service.Dispose();
+  }
+
+  [Fact]
+  public void AMissingEventPlaybackServiceDisablesTheBroadcastRatherThanFailingToStart()
+  {
+    // GetService, not GetRequiredService — the same posture every sibling collaborator here takes.
+    // This service has to start on a box where parts of the audio stack are not registered at all,
+    // and a hosted service that throws in its constructor takes the whole host down with it.
+    //
+    // ⚠ BOTH HALVES OF THE NAME ARE ASSERTED NOW. Assert.NotNull alone pinned only "rather than
+    // failing to start" — real (it reds if GetService becomes GetRequiredService) but silent about
+    // the disable, which is the half the name leads with. The warning at construction is the one
+    // observable the disable has.
+    var logs = new CapturingLogger<AudioStateUpdateService>();
+    var service = CreateServiceWith(eventPlayback: null, logger: logs);
+
+    Assert.NotNull(service);
+    Assert.Contains(
+      logs.Messages,
+      m => m.Contains("IEventPlaybackService not available", StringComparison.Ordinal));
+
+    service.Dispose();
+  }
+
+  [Fact]
+  public async Task DisposeUnsubscribesFromPlaybackChanged()
+  {
+    // IEventPlaybackService is a SINGLETON, so a missed unsubscribe keeps a disposed hosted service
+    // reachable from a live event source for the rest of the process — and it would keep broadcasting
+    // through a hub context it no longer owns.
+    var fake = new FakeEventPlaybackService();
+    var sends = 0;
+
+    var service = CreateServiceWith(fake, onSend: (method, _) =>
+    {
+      if (method == "EventPlaybackChanged")
+      {
+        Interlocked.Increment(ref sends);
+      }
+    });
+
+    fake.Raise(PlayingSnapshot("evp-before"));
+    await WaitUntilAsync(() => Volatile.Read(ref sends) == 1, TimeSpan.FromSeconds(5));
+
+    service.Dispose();
+    Assert.Equal(0, fake.SubscriberCount);
+
+    fake.Raise(PlayingSnapshot("evp-after"));
+    Assert.Equal(1, Volatile.Read(ref sends));
+  }
+
+  [Fact]
+  public async Task ASubscriberExceptionDoesNotEscapeTheHandler()
+  {
+    // The async void hazard, and the reason the catch-all is there. An exception escaping an
+    // async void handler is a process-level fault; escaping it here would ALSO be logged by
+    // EventPlaybackService.Raise as "a PlaybackChanged subscriber threw" — accurate, but filed
+    // against the seam rather than against the broadcaster.
+    //
+    // ⚠ THE ASSERTION IS ON THE LOG, AND THAT IS NOT A STYLISTIC CHOICE. The obvious assertion —
+    // Record.Exception(() => fake.Raise(...)) then Assert.Null — is UNFALSIFIABLE here, and an
+    // earlier draft of this test used it. Record.Exception observes the CALLING thread; an
+    // exception thrown inside an async void method is captured by its state machine and rethrown on
+    // the synchronization context, never at the raise. So Assert.Null passed whether or not the
+    // catch-all existed, which is the shape of a test that pins nothing.
+    //
+    // The LogError inside the catch is the one observable that exists if and only if the catch does.
+    // Measured by deleting the catch block from OnEventPlaybackChanged and re-running: this test
+    // FAILS. Restored, it passes.
+    var fake = new FakeEventPlaybackService();
+    var logs = new CapturingLogger<AudioStateUpdateService>();
+    var service = CreateServiceWith(
+      fake, sendThrows: new InvalidOperationException("hub is down"), logger: logs);
+
+    fake.Raise(PlayingSnapshot());
+
+    // async void: the raise returns before the handler has necessarily reached its catch, so the
+    // rendezvous is on the observation rather than on a sleep.
+    await WaitUntilAsync(() => logs.Errors.Count > 0, TimeSpan.FromSeconds(5));
+
+    Assert.Contains(
+      logs.Errors,
+      m => m.Contains("Error broadcasting attended event playback state", StringComparison.Ordinal));
+    service.Dispose();
+  }
+
+  /// <summary>
+  /// Records the message of every Warning-or-above line. <see cref="Errors"/> narrows to
+  /// Error-or-above for the catch-all assertion above; <see cref="Messages"/> is everything
+  /// captured, which is what the constructor-time "not available" warnings need.
+  /// </summary>
+  private sealed class CapturingLogger<T> : ILogger<T>
+  {
+    private readonly List<(LogLevel Level, string Message)> _sink = [];
+
+    public List<string> Errors
+    {
+      get
+      {
+        lock (_sink) { return [.. _sink.Where(e => e.Level >= LogLevel.Error).Select(e => e.Message)]; }
+      }
+    }
+
+    public List<string> Messages
+    {
+      get { lock (_sink) { return [.. _sink.Select(e => e.Message)]; } }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter)
+    {
+      if (logLevel >= LogLevel.Warning)
+      {
+        lock (_sink)
+        {
+          _sink.Add((logLevel, formatter(state, exception)));
+        }
+      }
+    }
+  }
+
+  /// <summary>Mirrors Radio.Web's EventPlaybackSnapshotDto member-for-member.</summary>
+  /// <remarks>
+  /// A local copy rather than a project reference: Radio.API.Tests does not reference Radio.Web, and
+  /// adding that dependency to assert a wire shape would couple two assemblies that are deliberately
+  /// connected only by JSON. If the two ever drift, this test is what notices.
+  /// </remarks>
+  private sealed record WebShapedSnapshot(
+    string Id,
+    string? Kind,
+    string? Label,
+    string? State,
+    TimeSpan? Duration,
+    TimeSpan PositionAtBroadcast,
+    DateTimeOffset BroadcastAtUtc,
+    string? FailureReason);
+}
+
+/// <summary>
+/// The attended-playback seam, reduced to what the broadcast subscriber touches: a retained
+/// <see cref="Current"/>, the event, and a <see cref="Raise"/> the test drives.
+/// </summary>
+/// <remarks>
+/// <see cref="SubscriberCount"/> exists so <c>DisposeUnsubscribesFromPlaybackChanged</c> can assert
+/// the unsubscribe DIRECTLY rather than only inferring it from a broadcast that did not happen. Both
+/// assertions are made; the count is the one that cannot pass for the wrong reason.
+/// </remarks>
+internal sealed class FakeEventPlaybackService : IEventPlaybackService
+{
+  private EventHandler<EventPlaybackSnapshot>? _handlers;
+
+  public EventPlaybackSnapshot? Current { get; set; }
+
+  public List<string> StopIds { get; } = [];
+
+  public int SubscriberCount => _handlers?.GetInvocationList().Length ?? 0;
+
+  public event EventHandler<EventPlaybackSnapshot>? PlaybackChanged
+  {
+    add => _handlers += value;
+    remove => _handlers -= value;
+  }
+
+  public void Raise(EventPlaybackSnapshot snapshot)
+  {
+    Current = snapshot;
+    _handlers?.Invoke(this, snapshot);
+  }
+
+  public Task<EventPlaybackSnapshot> StartAsync(
+    EventPlaybackRequest request, CancellationToken cancellationToken = default)
+    => throw new NotSupportedException("PHN-1e's subscribers never start a playback.");
+
+  public Task<bool> StopAsync(string playbackId, CancellationToken cancellationToken = default)
+  {
+    StopIds.Add(playbackId);
+    return Task.FromResult(true);
+  }
+
+  public Task<bool> SeekAsync(
+    string playbackId, TimeSpan position, CancellationToken cancellationToken = default)
+    => Task.FromResult(false);
+
+  public Task<bool> PauseAsync(string playbackId, CancellationToken cancellationToken = default)
+    => Task.FromResult(false);
+
+  public Task<bool> ResumeAsync(string playbackId, CancellationToken cancellationToken = default)
+    => Task.FromResult(false);
 }
