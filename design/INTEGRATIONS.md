@@ -862,24 +862,56 @@ There is deliberately **no position tick**: the snapshot is an anchor
 transitions and a client connecting between two of them would otherwise render silence over a
 talking room.
 
-**Three things stop an attended playback without anyone pressing Stop**, in descending order of
-trustworthiness:
+**Three things stop an attended playback without anyone pressing Stop.** ⚠ They used to be listed
+here "in descending order of trustworthiness", with the circuit rule last. **ADR-029 Amendment 2
+reordered that**, and the ordering is now by *how much of the room's behaviour each one explains*
+rather than by how much each is trusted:
 
-1. **The `GvMedia:MaxPlaybackSeconds` cap** — the guarantee, and the only one with no client in the
-   loop. Ships at 300 s.
+1. **The last Blazor circuit closing** — on this appliance, the one that actually fires. Owner
+   decision **`D30`** (2026-09-04): *"If the page reloads mid-voicemail, the audio should fail. If the
+   user wants to hear it they can replay."* A graceful close (reload, navigate away, tab close)
+   disposes the circuit at once — the 10-minute `DisconnectedCircuitRetentionPeriod` covers only
+   *unexpected* disconnects. Measured on the box: reloading the only browser goes 1 → 0 → 1 and this
+   path stops the playback at the zero, ~0.4 s before the replacement circuit arrives.
+   ⚠ **That is intended behaviour, not a defect.** An earlier revision of this list marked it *"Known
+   broken — do not rely on this"*; `D30` makes that wrong in the other direction, and there is to be
+   no grace period, no circuit-identity matching and no survival mechanism. ⚠ **One acknowledged
+   limit:** with a **second browser** open a reload is 2 → 1 → 2 and nothing stops, so the rule
+   delivers `D30` only in the single-browser case — which is this box's resting state. Closing that
+   gap needs to know which circuit started the playback, i.e. the ownership model ADR-029 ⟨A1·4⟩
+   deleted. The divergence is benign: a second client still holds the transport.
 2. **Entering `/sleep`**, because that route runs under `EmptyLayout` and offers no transport
-   (ADR-029 §7.5). Enforced server-side in `SleepService.EnterSleepAsync`, so all three client entry
-   points — the Sleep pill, the idle-dimmer callback and a server push — are covered by one rule. It
-   is a **stop**, not a mute: `WakeAsync` restores the pre-sleep mute state, so a merely-muted
-   voicemail would become audible again mid-word on the next touch.
-3. **The last Blazor circuit closing.** ⚠ **Known broken — do not rely on this.** A graceful close
-   (reload, navigate away, tab close) disposes the circuit at once; the 10-minute
-   `DisconnectedCircuitRetentionPeriod` covers only unexpected disconnects. Measured on the appliance:
-   reloading the only browser goes 1 → 0 → 1 and this path stops the playback at the zero — so on a
-   single-kiosk box **a refresh silences a voicemail**, the failure ADR-029 §7.3 was rewritten to avoid.
+   (ADR-029 §7.5 on §16.5's corrected trigger). ⚠ **TWO server-side edges, and the reason there are
+   two is a real defect that shipped in the design and was caught on the box:**
+   - `SleepService.SetSleepScreenVisibleAsync(true)` — the `/sleep` page reporting itself. Covers the
+     **30-minute idle timer**, the Sleep pill, the server push and a direct navigation.
+   - `SleepService.EnterSleepAsync` — the room being parked. Covers the entries with **no browser at
+     all**: `POST /api/system/sleep` and the encoder long-press.
 
-Navigating between routes does **not** stop playback, and closing one of two open browsers does not
-either.
+   ⚠ **This list used to say "Enforced server-side in `SleepService.EnterSleepAsync`, so all three
+   client entry points … are covered by one rule."** That was false, and it was false for the exact
+   case §7.5 was written about: `idle-dimmer.js`'s `navigateToSleep('idle')` reaches `/sleep` by
+   `window.location.href` and deliberately calls nothing server-side, so `IsSleeping` stays **false**
+   on the idle path and the rule never ran there. The rule is *"stop when `ConsoleWakeState` leaves
+   `Awake`"*, applied as an edge at both write sites — never polled, because `WakeState` reads `Awake`
+   while a wake claim is outstanding (`ENC-6`'s fast spin).
+
+   It is a **stop**, not a mute: `WakeAsync` restores the pre-sleep mute state, so a merely-muted
+   voicemail would become audible again mid-word on the next touch.
+3. **The `GvMedia:MaxPlaybackSeconds` cap** — the only one with no client in the loop at all, and now
+   the backstop behind the other two rather than the thing they back up. Ships at 300 s. Built as a
+   one-shot `TimeProvider` timer whose callback *dispatches* a stop — ⚠ **not** `CancelAfter` on the
+   playback's token, which would leave the audio sounding while suppressing the completion that would
+   otherwise have ended it.
+   ⚠ **The 300 is coupled to the 600 in one direction, and nothing enforces it.** A network drop that
+   never reconnects evicts its circuit ~10 minutes in; that firing is harmless only *because* the cap
+   has already stopped the audio five minutes earlier. Raise `MaxPlaybackSeconds` past ten minutes —
+   plausible, for a long voicemail — and a behaviour nobody has ever seen appears silently. The cap
+   has no maximum, and the retention period lives in `Radio.Web` where nothing in `Radio.API` can see
+   it.
+
+Navigating between routes does **not** stop playback (`NavigationManager.NavigateTo` without
+`forceLoad` keeps the circuit), and closing one of two open browsers does not either.
 
 **`failureReason` — the operator diagnosis table.** Nine reasons reach a snapshot, deliberately not
 collapsed. ⚠ **Not all nine are acquisition failures**, and the last two are the ones that send an

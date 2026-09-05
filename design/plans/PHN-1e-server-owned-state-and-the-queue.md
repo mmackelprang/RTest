@@ -111,7 +111,30 @@ re-derive**; if any row is false, stop and re-plan rather than improvising.
 |---|---|---|---|
 | U1 | System.Text.Json round-trips `TimeSpan` / `TimeSpan?` on **both** the MVC path and the SignalR path in .NET 10 | `Radio.Web/Models/ApiModels.cs:40-41` already declares `TimeSpan?` on a Web DTO, which is strong evidence but not proof that *this* payload survives both hops | Fall back to `double` seconds on the DTO **and** change `GET /current`'s shape to match. The two must not diverge — that is the whole of C-47 |
 | U2 | A `CircuitHandler` registered **singleton** receives `OnCircuitOpenedAsync` / `OnCircuitClosedAsync` for every circuit | Documented ASP.NET Core behaviour — handlers are resolved from the circuit scope, so a singleton registration yields the same instance to every circuit — but this repo has never had one | Register scoped and move the count into a separate singleton tracker. Task 7 gives that shape explicitly |
-| U3 | `OnCircuitClosedAsync` fires only after Blazor's disconnect-retention window, so a browser **refresh** goes 1 → 2 → 1 and never touches zero | This ordering is what makes ADR §7.3 safe, and §7.3 was written from it rather than from a measurement | The backstop stops audio on a refresh — the exact failure §7.3 exists to avoid. **Stop and re-plan.** Do not paper over it with a delay |
+| U3 | ⛔ **FALSIFIED ON THE BOX, AND THE ROW STILL SHIPPED — see the resolution note directly below this table.** ~~`OnCircuitClosedAsync` fires only after Blazor's disconnect-retention window, so a browser **refresh** goes 1 → 2 → 1 and never touches zero~~ | This ordering is what makes ADR §7.3 safe, and §7.3 was written from it rather than from a measurement | The backstop stops audio on a refresh — the exact failure §7.3 exists to avoid. **Stop and re-plan.** Do not paper over it with a delay |
+
+> ### ⭐ U3, resolved 2026-09-04 — and its **prediction was wrong while its existence was right**
+>
+> **Measured on `radio`, twice, at `dd8e85ec`.** With two tabs a reload is **`2 → 1 → 2`** — the close
+> arrives *first* — so with a single browser it is **`1 → 0 → 1`** and the backstop stops the playback
+> at the zero. A 49-second voicemail died 7 seconds in. The retention window never enters the path: it
+> governs *unexpected* disconnects, and a reload is a graceful close that disposes the circuit at once.
+> **The instruction attached to the false branch was followed** — the row was set 🚫, no delay was
+> added, and nothing merged.
+>
+> **What then happened is the part worth carrying forward.** The re-plan went to the owner rather than
+> to a mechanism, and owner decision **`D30`** answered: *"If the page reloads mid-voicemail, the audio
+> should fail. If the user wants to hear it they can replay."* So the measured behaviour is the
+> **wanted** behaviour, `AttendedPlaybackCircuitHandler` shipped **exactly as this plan built it**, and
+> the correction landed on ADR-029 §7.3's *reasoning* rather than on any code. ADR-029 **§16** is the
+> amendment; the register entry is `D30` in `docs/HANDOFF-GA-PUNCH-LIST.md` §7.
+>
+> ⚠ **Do not read this as "U3 was right".** Its prediction — `1 → 2 → 1` — was **inverted**, and a plan
+> that had merely asserted the ordering with more confidence would have produced the same code and no
+> discovery. **The value was in declaring the assumption unverifiable in a test host and naming the
+> observation that would settle it.** No test that could have been written for this row would have gone
+> red: nothing in a bUnit or xUnit host has a browser, an `unload` event, or a real circuit. That is
+> the reusable lesson, and it is the reason this table exists at all.
 
 ### 0.4 ⚠ Nine contradictions found while planning, and how each resolves
 
@@ -252,6 +275,38 @@ is."*
 
 ---
 
+**C-51 — ⚠ HALF FALSIFIED. The mute half is confirmed and stands; the "one server-side funnel" half
+is FALSE, and it is the half the implementation was built on.**
+
+> ⛔ **CORRECTED 2026-09-04 by ADR-029 §16.4. The original text is preserved below, unedited,
+> because it is what a reader would have trusted and because the way it went wrong is the finding.**
+>
+> **What is false.** The claim that the button, the JS callback and the server push *"all funnel
+> through one server-side method"*. `idle-dimmer.js` does **not** drive `OnJsSleepRequested` on the
+> idle path. The idle timer calls `navigateToSleep('idle')`, which ends by setting
+> `window.location.href = '/sleep'` **and calls nothing else** — carrying its own comment saying it
+> deliberately does not call `SystemApi.SetSleepAsync` because idle navigation must not pause
+> playback. `OnJsSleepRequested` is invoked only from `enterSleep()`, whose own comment reads *"not
+> from idle"* — and `enterSleep` has **zero callers in the tracked tree**. So the cited path is
+> doubly not taken: not by idle, and currently not by anything.
+>
+> **Consequence.** `SleepService.EnterSleepAsync` is the right funnel for the paths that *park the
+> room*, and the 30-minute idle timer is not one of them: `IsSleeping` is **false** on it. The rule as
+> shipped by this plan therefore never fired for the case §7.5's own motivating sentence names.
+>
+> **Resolution — two edges, per ADR-029 §16.5.** `SetSleepScreenVisibleAsync(true)` (the `ENC-6` seam,
+> which sees the idle timer, the pill, the server push and a direct navigation) **beside**
+> `EnterSleepAsync` (which sees the entries with no browser at all — `POST /api/system/sleep` and the
+> encoder long-press). Neither is redundant. In the repo's own vocabulary: **stop when
+> `ConsoleWakeState` leaves `Awake`, as an edge at the two write sites, never polled.**
+>
+> ⚠ **How it survived, which is the transferable part.** The error propagated through four documents —
+> ADR §7.5 → this constraint → the branch's comment in `EnterSleepAsync` → the PR body — each
+> restating the one before it. **Not one of them checked `idle-dimmer.js` against the claim**, and
+> that file contradicts it in a comment written for exactly this reason.
+
+**Original text, preserved:**
+
 **C-51 — ⚠ CHANGES THE WORK. ADR §7.5's `/sleep` rule has THREE client-side entry points and ONE
 server-side one, and mute is not a substitute for a stop.**
 
@@ -282,6 +337,14 @@ with a Designer, and Task 11 records that.
 
 ---
 
+**C-52 — ✅ CONFIRMED ON THE APPLIANCE AND UNCHANGED. Kept verbatim, deliberately.**
+
+> ADR-029 §16.2 names this one of the two properties of `PHN-1e`'s implementation that *"are correct
+> and must survive whatever replaces the rule"* — the other being the singleton registration. It is
+> the only constraint in this plan that the box agreed with in every particular. Amendment 2's `P8`
+> (`Radio.Web` already down, count at zero at rest, no transition, nothing fires) is exactly the case
+> this constraint was written for.
+
 **C-52 — the last-circuit backstop must fire on the TRANSITION to zero, never on an observed zero, and
 the two-browser case the brief names is the easy half.**
 
@@ -299,8 +362,25 @@ negative, rather than silently normalising — a negative count means the handle
 that is worth knowing.
 
 The brief's two-browser case falls out for free and is worth stating so it is tested rather than
-assumed: kiosk + laptop is 2, the laptop closing yields 1, nothing stops. A refresh is 1 → 2 → 1 (U3).
-A tab closing for good is 1 → 0 after the retention window, and stops.
+assumed: kiosk + laptop is 2, the laptop closing yields 1, nothing stops.
+~~A refresh is 1 → 2 → 1 (U3). A tab closing for good is 1 → 0 after the retention window, and stops.~~
+
+> ⛔ **The struck sentence is wrong in both halves, measured 2026-09-04. The resolution is C-52's
+> mechanism, which is unaffected — only these two worked examples of it were false.**
+>
+> - **A refresh is `1 → 0 → 1`**, not `1 → 2 → 1`: the close strictly precedes the open, so the count
+>   *does* touch zero and the stop *does* fire. Under owner decision **`D30`** that is the wanted
+>   behaviour, not a defect — see the U3 resolution note above.
+> - **A tab closing for good is `1 → 0` IMMEDIATELY, not after the retention window.** Blazor treats a
+>   tab close and an external navigation as a **graceful** termination and releases the circuit at
+>   once; `DisconnectedCircuitRetentionPeriod` governs only *non-graceful* drops. So
+>   `OnCircuitClosedAsync` is **bimodal — immediate or ten minutes — and carries no indication of which
+>   mode it is in** (ADR-029 §16.2). That bimodality is the thing this plan did not know it was
+>   building on.
+>
+> **C-52's own resolution — decrement, act only on an exact 0, clamp and warn on negative — is
+> untouched by all of it**, which is why §16.2 lists it as one of the two properties that had to
+> survive whatever replaced the rule.
 
 ---
 
@@ -1885,16 +1965,34 @@ tests/Radio.Web.Tests/Services/AudioStateStoreEventPlaybackTests.cs
    `LOG-11` threshold, so `journalctl -u radio-api --since '-10min'` is the right query). **Put the
    value back.**
 3. **That the last-circuit backstop fires, and how long it takes** (U3). Play a voicemail, close every
-   browser on the LAN including the kiosk, and wait out the disconnect-retention window. ⚠ **Record
-   the measured latency**, because ADR §7.3 asserts "~3 minutes" from the framework default and nobody
-   has watched it here.
-4. ⭐ **That a browser REFRESH does not stop playback** (U3, and the failure §7.3 was rewritten to
+   browser on the LAN including the kiosk. ⚠ **Record the measured latency.**
+   ⛔ **CORRECTED 2026-09-04:** this step said *"wait out the disconnect-retention window"*, and that
+   is wrong for the case it describes. Closing a browser is a **graceful** termination, so the circuit
+   is released **at once** and the stop is immediate. The retention window (`10 minutes` here, not the
+   framework's 3) applies only to a **non-graceful** drop — pull the WiFi rather than close the tab if
+   that is the path you want to time. ⚠ **The 10 minutes has still never been watched on this box** and
+   is a derivation, not a measurement.
+4. ~~⭐ **That a browser REFRESH does not stop playback** (U3, and the failure §7.3 was rewritten to
    avoid). Play a voicemail, reload the kiosk, and confirm the audio continues — then keep watching
    for four minutes, because the old circuit's close lands *after* the retention window and a wrong
-   implementation stops the audio then, not immediately.
-5. **That two browsers behave** — kiosk plus a laptop, close the laptop, audio continues.
+   implementation stops the audio then, not immediately.~~
+   ⛔ **DELETED AS A CHECK — it asserts the opposite of what ships.** Measured: a reload of the only
+   browser is `1 → 0 → 1` and stops the playback **immediately**, and owner decision **`D30`** says
+   that is correct. The replacement check, if anyone wants one, is: *play a voicemail, reload the
+   kiosk, confirm the audio **stops**.* Two further things this step got wrong and that are worth not
+   repeating: the "four minutes" was a **third** retention figure — neither the framework's 3 nor this
+   app's configured 10 — and it presumed the close lands *after* the open, which is backwards.
+5. **That two browsers behave** — kiosk plus a laptop, close the laptop, audio continues. ✅ Still
+   correct, and it is also why the defect in step 4 is invisible in a two-browser configuration: a
+   reload there is `2 → 1 → 2` and nothing stops.
 6. **That entering `/sleep` stops it** — start a voicemail, press the Sleep pill, confirm silence, and
    then **wake the panel and confirm it does not resume** (C-51's whole point).
+   ⚠ **THE PILL IS THE EASY HALF AND IT IS NOT THE CASE THE RULE WAS WRITTEN FOR.** Add: *start a
+   voicemail and leave the panel alone until the **30-minute idle timer** navigates it to `/sleep`,
+   then confirm silence.* That is the path ADR §7.5's own motivating sentence names, it does **not**
+   set `IsSleeping`, and until ADR-029 §16.5's second edge it was not covered at all. A quicker
+   equivalent that exercises the same seam without waiting half an hour: **navigate a browser directly
+   to `/sleep`** — row 5 of §16.4's table, also covered only by the screen edge.
 7. Everything `PHN-1a`/`PHN-1b`/`PHN-1c`/`PHN-1d` already carried to PR 6 is unchanged: seek
    repositions; `Time` advances; pausing a TTS source does not report completion; `./data/gvmedia` is
    writable under the service account; the preemption listening test; and the row's own settling check
