@@ -1,40 +1,14 @@
-// Tiny interop for the voicemail inline player. The <audio> element does Range
-// natively against radio:5004 (ADR D4) — this only bridges events to .NET.
-export function attach(audio, dotnet) {
-  if (!audio) return null;
-  const onTime = () => dotnet.invokeMethodAsync('OnTimeUpdate',
-    audio.currentTime || 0, isFinite(audio.duration) ? audio.duration : 0);
-  const onEnded = () => dotnet.invokeMethodAsync('OnEnded');
-  const onError = () => dotnet.invokeMethodAsync('OnAudioError');
-  const onPlaying = () => dotnet.invokeMethodAsync('OnPlaying');
-  const onWaiting = () => dotnet.invokeMethodAsync('OnBuffering');
-  audio.addEventListener('timeupdate', onTime);
-  audio.addEventListener('ended', onEnded);
-  audio.addEventListener('error', onError);
-  audio.addEventListener('playing', onPlaying);
-  audio.addEventListener('waiting', onWaiting);
-  return {
-    play: () => audio.play().catch(() => dotnet.invokeMethodAsync('OnAudioError')),
-    pause: () => audio.pause(),
-    // fraction in [0,1] from the tap x over the scrubber width
-    seekFraction: (f) => {
-      if (isFinite(audio.duration) && audio.duration > 0) {
-        audio.currentTime = Math.max(0, Math.min(1, f)) * audio.duration;
-      }
-    },
-    dispose: () => {
-      audio.removeEventListener('timeupdate', onTime);
-      audio.removeEventListener('ended', onEnded);
-      audio.removeEventListener('error', onError);
-      audio.removeEventListener('playing', onPlaying);
-      audio.removeEventListener('waiting', onWaiting);
-    }
-  };
-}
-
-// Resolve a [0,1] fraction from a tap's clientX over the scrubber's box. Used by
-// OnScrubberClick to translate a click into a seek position.
-export function fractionFromEvent(el, clientX) {
-  const r = el.getBoundingClientRect();
-  return r.width > 0 ? (clientX - r.left) / r.width : 0;
+// ADR-029 PR 6 — what survives of the browser voicemail player.
+//
+// Everything that attached to an <audio> element is gone: the console fetches, decodes and plays
+// voicemail itself now, through the audio engine, so the browser has no audio to drive. ⛔ Do not
+// re-add a play/pause/seek surface here — a second audio path is exactly what D17 was about.
+//
+// This one function remains because tap-to-seek needs the scrubber's RENDERED GEOMETRY, which has no
+// server-side equivalent. The API takes the fraction from there.
+export function fractionFromEvent(element, clientX) {
+  if (!element) return 0;
+  const box = element.getBoundingClientRect();
+  if (!box.width) return 0;
+  return Math.min(1, Math.max(0, (clientX - box.left) / box.width));
 }

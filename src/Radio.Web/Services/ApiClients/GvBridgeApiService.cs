@@ -126,20 +126,6 @@ public class GvBridgeApiService
   }
 
   /// <summary>
-  /// Builds the ABSOLUTE radio:5004 URL for a voicemail recording, for binding to
-  /// an &lt;audio src&gt;. The DTO's relative AudioUrl resolves against the Web
-  /// origin (:5002) and 404s — ALWAYS rebuild absolute against the API base
-  /// address (ADR-022 D4 / contract risk #3). Never bind the relative AudioUrl.
-  /// </summary>
-  public string GetVoicemailAudioUrl(string id)
-  {
-    var baseUri = _httpClient.BaseAddress
-      ?? new Uri("http://radio:5004");
-    return new Uri(baseUri, $"/api/gvbridge/voicemail/{Uri.EscapeDataString(id)}/audio")
-      .ToString();
-  }
-
-  /// <summary>
   /// Mark a voicemail read via GV write-through (ADR-024 §3.1 / §5). Google is the
   /// single source of truth; the returned DTO is authoritative — reconcile the badge
   /// from it. Gated on RotaryPhone:Gv:MarkReadEnabled (in-tree consumer flag; distinct

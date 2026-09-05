@@ -1126,7 +1126,8 @@ public record VoicemailItemDto(
   int DurationSeconds,          // 0 = unknown → do NOT render "0:00" as real
   bool IsRead,                  // authoritative (GV write-through); ADR-024
   string? Transcript,           // null = pending/absent
-  string AudioUrl);             // RELATIVE from server; rebuild absolute (ADR D4)
+  string AudioUrl);             // relative; the console no longer fetches this — Radio.API does
+                                // (ADR-029 D3). Retained because it is RotaryPhone's contract field.
 
 public record VoicemailListDto(
   IReadOnlyList<VoicemailItemDto> Items,
