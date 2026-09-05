@@ -93,17 +93,73 @@ public sealed class AttendedPlaybackCircuitHandler : CircuitHandler
   internal int OpenCircuits => Volatile.Read(ref _openCircuits);
 
   /// <inheritdoc />
+  /// <remarks>
+  /// ⚠ <b>Guarded like the close, and for a WORSE failure than the close has.</b> A throwing
+  /// <c>CircuitHandler</c> method is fatal to the circuit — here that is a live session rather than
+  /// one already closing. And the count is the part that does not recover: if this method throws
+  /// after incrementing, no matching <see cref="OnCircuitClosedAsync"/> ever runs,
+  /// <c>_openCircuits</c> stays permanently ≥ 1, and the <c>remaining != 0</c> test below means the
+  /// stop rule <b>silently never fires again for the life of the process</b>. That is the same
+  /// failure the negative-count reset guards against, in the direction that has no reset. Hence the
+  /// increment is LAST, after everything that can throw.
+  /// </remarks>
   public override Task OnCircuitOpenedAsync(Circuit circuit, CancellationToken cancellationToken)
   {
-    var count = Interlocked.Increment(ref _openCircuits);
-    _logger.LogDebug("Circuit opened; {Count} live", count);
+    try
+    {
+      Seed();
+      var count = Interlocked.Increment(ref _openCircuits);
+      _logger.LogDebug("Circuit opened; {Count} live", count);
+    }
+    catch (Exception ex)
+    {
+      WarnQuietly(ex, "Error handling an opened circuit");
+    }
 
-    // A circuit opening IS ADR-029 §8.1's re-attach moment: a client has arrived and may be arriving
-    // mid-playback. The seed is one-shot per process and never throws, so this is fire-and-forget by
-    // design rather than by omission — awaiting it would hold the circuit's start behind an HTTP call
-    // to a service that may still be booting, on a deploy that restarts both together.
-    _ = SeedAsync();
     return Task.CompletedTask;
+  }
+
+  /// <summary>
+  /// Logs a warning without letting the logger itself break the guard around it.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>Not defensive noise — the plain version was measured escaping.</b> A throwing
+  /// <c>CircuitHandler</c> method is fatal to the circuit, so both callbacks are wrapped; but
+  /// <c>ILogger.Log</c> aggregates and <b>rethrows</b> provider exceptions, so when the thing that
+  /// threw was the log sink, the <c>catch</c>'s own log threw straight back out and the guard bought
+  /// nothing. <c>AThrowFromTheOPENPathDoesNotFaultTheCircuitOrStrandTheCount</c> caught this by
+  /// failing with the sink's own exception rather than an assertion.
+  /// </remarks>
+  private void WarnQuietly(Exception error, string message)
+  {
+    try
+    {
+      _logger.LogWarning(error, "{Message}", message);
+    }
+    catch
+    {
+      // Nothing left to report with. Swallowing beats killing a live circuit.
+    }
+  }
+
+  /// <summary>Fire-and-forget the one-shot store seed. Never throws.</summary>
+  private void Seed()
+  {
+    // ⚠ ATTRIBUTION, corrected per ADR-029 §16.8 — an earlier revision said "a circuit opening IS
+    // ADR-029 §8.1's re-attach moment", which reads as a restatement of the ADR and is not one.
+    // §8.1 requires AudioStateStore to be seeded from GET /api/audio/events/current and calls it
+    // "a one-shot fetch per store INITIALISATION, not a poll" — and the store is a singleton, so
+    // §8.1's seed is once per PROCESS. OnCircuitOpenedAsync fires once per CIRCUIT. Identifying the
+    // two is the PHN-1e plan's extension, not the ADR's requirement: a reasonable one, because a
+    // fresh circuit is the moment a client can arrive mid-playback, and harmless because
+    // EnsureEventPlaybackSeededAsync is itself one-shot per process — so the extra circuits cost a
+    // returned-immediately call each. Described as an extension so the next reader does not go
+    // looking in §8.1 for a per-circuit rule that is not there.
+    //
+    // Fire-and-forget by design rather than by omission: the seed never throws, and awaiting it
+    // would hold the circuit's start behind an HTTP call to a service that may still be booting, on
+    // a deploy that restarts both together.
+    _ = SeedAsync();
   }
 
   /// <inheritdoc />
@@ -149,7 +205,7 @@ public sealed class AttendedPlaybackCircuitHandler : CircuitHandler
     {
       // Unreachable through StopAttendedPlaybackAsync, which catches its own. This is the backstop
       // for everything else in the method, and for whatever a later edit adds to it.
-      _logger.LogWarning(ex, "Error handling a closed circuit; live-circuit count may be off by one");
+      WarnQuietly(ex, "Error handling a closed circuit; live-circuit count may be off by one");
     }
   }
 

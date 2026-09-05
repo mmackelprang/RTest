@@ -1963,6 +1963,82 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
+  public async Task AnAbsurdMaxPlaybackSecondsIsClampedRatherThanKillingEveryPlayback()
+  {
+    // ⚠ A CRASH FIX, and the crash was silent in the worst way. TimeProvider.CreateTimer rejects a
+    // due time above ~49.7 days, so an absurd MaxPlaybackSeconds threw ArgumentOutOfRangeException
+    // out of ArmDurationCap — which runs AFTER PlayAsync returned — landing in AcquireAndPlayAsync's
+    // general catch and failing EVERY attended playback immediately after it started, under a
+    // generic failure reason. One config value, feature dead, no diagnosis.
+    //
+    // ⚠ FakeTimeProvider does NOT enforce that bound, so this test cannot reproduce the throw. What
+    // it pins is the observable consequence of the clamp: the playback reaches Playing and stays
+    // there rather than failing, and the cap does not fire at a clamped-to-something-small value.
+    // Said plainly rather than implied, because a test that cannot see the original fault should not
+    // be read as covering it.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = int.MaxValue
+      },
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // A day later - the clamp - it stops. Not immediately, and not never.
+    Assert.Equal(EventPlaybackState.Playing, service.Current!.State);
+
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    time.Advance(TimeSpan.FromHours(24));
+
+    await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, source.StopCalls);
+  }
+
+  [Fact]
+  public async Task AThrowingLogSinkInTheCapCallbackDoesNotEscape()
+  {
+    // ⚠ THE CALLBACK BOUNDARY IS A PROCESS BOUNDARY. This lambda IS the TimerCallback:
+    // System.Threading.Timer does not wrap it, so an unhandled exception there runs on a thread-pool
+    // thread and TERMINATES THE PROCESS. The guard used to start inside the dispatched Task.Run,
+    // leaving the LogWarning and the Task.Run scheduling outside it - and ILogger.Log aggregates and
+    // RETHROWS provider exceptions, so a failing Serilog file sink (or a log written after
+    // CloseAndFlush during a shutdown racing an armed cap) escaped straight into the runtime.
+    //
+    // ⚠ FakeTimeProvider is what makes this testable at all: Advance runs due callbacks
+    // SYNCHRONOUSLY on the calling thread, so an unguarded throw surfaces here as a failed
+    // assertion instead of taking the test host down with it. Delete the outer try in
+    // ArmDurationCap's callback and this test throws.
+    var time = new FakeTimeProvider();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    var logs = new ThrowingLoggerProvider();
+    using var service = CreateService(
+      ttsFactory: tts,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxPlaybackSeconds = 30
+      },
+      logs: logs,
+      timeProvider: time);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    logs.ThrowOnLog = true;
+
+    // The assertion IS that this does not throw.
+    time.Advance(TimeSpan.FromSeconds(30));
+  }
+
+  [Fact]
   public async Task AZeroMaxPlaybackSecondsClampsToOneSecondRatherThanMeaningNoCap()
   {
     // ⚠ There is deliberately no off switch (ADR-029 §7.1 calls this THE guarantee), and this pins
@@ -1989,6 +2065,37 @@ public sealed class EventPlaybackServiceTests : IDisposable
 
     await stopped.WaitAsync(TimeSpan.FromSeconds(5));
     Assert.Equal(1, source.StopCalls);
+  }
+}
+
+/// <summary>
+/// A <see cref="CapturingLoggerProvider"/> that can be told to start throwing, standing in for a
+/// wedged log sink. <see cref="ILogger"/> aggregates and rethrows provider exceptions, so this is the
+/// shape a failing Serilog sink presents to its caller.
+/// </summary>
+internal sealed class ThrowingLoggerProvider : CapturingLoggerProvider
+{
+  public bool ThrowOnLog { get; set; }
+
+  public new ILogger<T> CreateLogger<T>() => new ThrowingLogger<T>(this, base.CreateLogger<T>());
+
+  private sealed class ThrowingLogger<T>(ThrowingLoggerProvider owner, ILogger<T> inner) : ILogger<T>
+  {
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter)
+    {
+      if (owner.ThrowOnLog)
+      {
+        throw new InvalidOperationException("the log sink is wedged");
+      }
+
+      inner.Log(logLevel, eventId, state, exception, formatter);
+    }
   }
 }
 

@@ -371,11 +371,21 @@ public class AudioStateUpdateServiceTests
   }
 
   [Fact]
-  public async Task EventPlaybackChanged_RoundTripsIntoTheWebDtoShape()
+  public async Task EventPlaybackChanged_RoundTripsIntoAHandCopyOfTheWebDtoShape()
   {
     // The closest a single assembly can get to proving the ADR §8.1 contract: the payload this
     // service puts on the wire deserialises into the member set Radio.Web's EventPlaybackSnapshotDto
     // declares, with every field intact.
+    //
+    // ⚠ A HAND COPY, and the name says so now because the old one (…RoundTripsIntoTheWebDtoShape)
+    // claimed more than this can deliver. WebShapedSnapshot below MIRRORS that DTO; there is no
+    // compile-time link, so renaming or retyping a member on EITHER side leaves this green while the
+    // contract is broken. What this test really pins is the shape Radio.API EMITS.
+    //
+    // The other half now exists and closes the chain:
+    // Radio.Web.Tests/Models/EventPlaybackSnapshotDtoWireTests deserialises the same literal into the
+    // REAL DTO. Keep the two payloads identical — that literal is the contract, and the projects
+    // cannot reference each other to enforce it.
     //
     // ⚠ What it does NOT prove, stated rather than implied: it does not exercise JsonHubProtocol's
     // own serializer options, and no unit test in this repo can — the hub protocol is not reachable
@@ -424,9 +434,19 @@ public class AudioStateUpdateServiceTests
     // GetService, not GetRequiredService — the same posture every sibling collaborator here takes.
     // This service has to start on a box where parts of the audio stack are not registered at all,
     // and a hosted service that throws in its constructor takes the whole host down with it.
-    var service = CreateServiceWith(eventPlayback: null);
+    //
+    // ⚠ BOTH HALVES OF THE NAME ARE ASSERTED NOW. Assert.NotNull alone pinned only "rather than
+    // failing to start" — real (it reds if GetService becomes GetRequiredService) but silent about
+    // the disable, which is the half the name leads with. The warning at construction is the one
+    // observable the disable has.
+    var logs = new CapturingLogger<AudioStateUpdateService>();
+    var service = CreateServiceWith(eventPlayback: null, logger: logs);
 
     Assert.NotNull(service);
+    Assert.Contains(
+      logs.Messages,
+      m => m.Contains("IEventPlaybackService not available", StringComparison.Ordinal));
+
     service.Dispose();
   }
 
@@ -493,15 +513,25 @@ public class AudioStateUpdateServiceTests
   }
 
   /// <summary>
-  /// Records the message of every Error-or-above line, for the catch-all assertion above.
+  /// Records the message of every Warning-or-above line. <see cref="Errors"/> narrows to
+  /// Error-or-above for the catch-all assertion above; <see cref="Messages"/> is everything
+  /// captured, which is what the constructor-time "not available" warnings need.
   /// </summary>
   private sealed class CapturingLogger<T> : ILogger<T>
   {
-    private readonly List<string> _sink = [];
+    private readonly List<(LogLevel Level, string Message)> _sink = [];
 
     public List<string> Errors
     {
-      get { lock (_sink) { return [.. _sink]; } }
+      get
+      {
+        lock (_sink) { return [.. _sink.Where(e => e.Level >= LogLevel.Error).Select(e => e.Message)]; }
+      }
+    }
+
+    public List<string> Messages
+    {
+      get { lock (_sink) { return [.. _sink.Select(e => e.Message)]; } }
     }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -512,11 +542,11 @@ public class AudioStateUpdateServiceTests
       LogLevel logLevel, EventId eventId, TState state, Exception? exception,
       Func<TState, Exception?, string> formatter)
     {
-      if (logLevel >= LogLevel.Error)
+      if (logLevel >= LogLevel.Warning)
       {
         lock (_sink)
         {
-          _sink.Add(formatter(state, exception));
+          _sink.Add((logLevel, formatter(state, exception)));
         }
       }
     }

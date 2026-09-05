@@ -70,9 +70,16 @@ public interface ISleepService
   Task WakeAsync(string wakeSource = "unknown");
 
   /// <summary>
-  /// Records that a client has put the sleep screen on screen, or taken it off. Releases any
-  /// outstanding wake claim either way, because both edges mean the transition has settled.
+  /// Records that a client has put the sleep screen on screen, or taken it off. Releases an
+  /// outstanding wake claim when the report is a <b>change</b>; a re-report of the state already
+  /// held deliberately leaves the claim alone, so a future heartbeat could not wipe a claim mid-wake.
   /// </summary>
+  /// <remarks>
+  /// ⚠ The "either way" this used to say meant "on both edges, up and down", and read as "on every
+  /// call". The implementation gates the release on <c>changed</c> and its own comment explains at
+  /// length why a re-report must not clear it — so the interface was promising the one input shape
+  /// the implementation is written to refuse.
+  /// </remarks>
   /// <remarks>
   /// ⚠ <b>Task-returning because it stops attended playback</b> (ADR-029 §16.5), not because the
   /// flag write needs to be. The write is synchronous and complete before the returned task is

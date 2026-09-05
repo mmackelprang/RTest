@@ -15,9 +15,14 @@
 // Kept in PR 6:
 //   - The dim step (brightness 0.3 after IDLE_TIMEOUT) — purely cosmetic, music
 //     keeps playing, no API call. Undimmed on the next user activity.
-//   - The Blazor JS interop bridge (window.radioSleepManager) for callers that
-//     drive sleep/wake from server-pushed SleepStateChanged events. The bridge
-//     no longer mutates DOM; it navigates the route instead.
+//   - The Blazor JS interop bridge (window.radioSleepManager). The bridge no
+//     longer mutates DOM; it navigates the route instead.
+//     ⚠ CORRECTED (ADR-029 §16.4): this used to say the bridge exists "for
+//     callers that drive sleep/wake from server-pushed SleepStateChanged
+//     events". No such caller exists. MainLayout.OnSleepStateChanged uses
+//     NavigationManager.NavigateTo("/sleep") directly. The only bridge members
+//     Blazor invokes are setBlazorRef and wake. See the export block at the
+//     bottom of this file for why that mattered.
 //
 // What counts as activity (both halves matter — each resets dimTimer AND
 // sleepTimer, so activity postpones the /sleep navigation as well as undimming):
@@ -94,7 +99,14 @@ window.radioSetApiBaseUrl = function (url) {
   }
 
   // Deep sleep: navigate to /sleep AND pause audio.
-  // Called from Blazor (MainLayout sleep button, server push) — not from idle.
+  //
+  // ⚠ NOT from idle - that part was always right, and navigateToSleep above is
+  // the idle path. ⚠ But "called from Blazor (MainLayout sleep button, server
+  // push)" was WRONG and is corrected here (ADR-029 §16.4): this function has
+  // ZERO callers in the tracked tree. The Sleep pill calls
+  // SystemApi.SetSleepAsync then NavigationManager.NavigateTo, and the server
+  // push does the same - neither comes through here. Retained as the recorded
+  // shape of the JS -> Blazor path, not because anything walks it.
   function enterSleep(source) {
     if (isOnSleepRoute()) return;
     undim();

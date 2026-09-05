@@ -61,6 +61,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   private readonly TimeProvider _timeProvider;
 
   /// <summary>
+  /// Upper clamp for <c>GvMedia:MaxPlaybackSeconds</c> — 24 hours. Not a policy about how long a
+  /// voicemail may be; a guard so an absurd value cannot make <c>TimeProvider.CreateTimer</c> throw
+  /// and take every attended playback down with it. See <see cref="ArmDurationCap"/>.
+  /// </summary>
+  private const int MaxCapSeconds = 86_400;
+
+  /// <summary>
   /// How long <see cref="Dispose"/> will block waiting for an already-playing source to release.
   /// Bounded so a wedged source delays shutdown rather than preventing it.
   /// </summary>
@@ -1067,9 +1074,16 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// cancellation reaches the source — but what it reaches is the COMPLETION path, not the audio.
   /// AudioFileEventSource.PlayWithSoundFlowAsync awaits AwaitCompletionAsync on that token and gates
   /// OnPlaybackCompleted(EndOfContent) behind !IsCancellationRequested; the OperationCanceledException
-  /// arm below it only clears _isPlaybackActive. Nothing on that path stops the player — only
-  /// StopCoreAsync and DisposeAsyncCore call SoundFlowPlaybackService.StopAsync. TTSEventSource is
-  /// shaped the same way.
+  /// arm below it only clears _isPlaybackActive. Nothing on that path stops the player — in
+  /// AudioFileEventSource only StopCoreAsync and DisposeAsyncCore call
+  /// SoundFlowPlaybackService.StopAsync.
+  ///
+  /// ⚠ TTSEventSource is shaped the same way but is NOT quite the same claim, and the difference was
+  /// missed once: it has a THIRD caller, the over-duration safety net in
+  /// StartPlaybackWithMonitoringAsync. That one is inside a while (!token.IsCancellationRequested)
+  /// loop, so a cancellation exits the loop before it — which is why the conclusion below is the
+  /// same for both sources. Stated rather than smoothed over, because "X is the only code that does
+  /// Y" is the exact comment shape CLAUDE.md § Pre-Merge Review says this repo gets wrong.
   ///
   /// So a CancelAfter cap at 300 s would leave the audio sounding AND suppress the EndOfContent that
   /// would otherwise have ended it — strictly worse than doing nothing, for something the ADR calls
@@ -1084,55 +1098,105 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// ClaimTerminal admits exactly one terminal transition — so a cap racing a natural end is a
   /// no-op.
   ///
-  /// ⚠ Math.Max(1, …): there is NO off switch, and that is deliberate. ADR-029 §7.1 calls this the
-  /// guarantee that everything else is a latency improvement on, and GvMediaOptions.PreemptAtPriority
-  /// is this arc's worked example (plan PHN-1d C-43) of a knob that silently disables a feature while
-  /// leaving it looking intact. A 0 here clamps to one second rather than meaning "never".
+  /// ⚠ CLAMPED AT BOTH ENDS, and each end is load-bearing for a different reason.
+  ///
+  /// The LOWER clamp is the one with a policy behind it: there is NO off switch, deliberately.
+  /// ADR-029 §7.1 calls this the guarantee that everything else is a latency improvement on, and
+  /// GvMediaOptions.PreemptAtPriority is this arc's worked example (plan PHN-1d C-43) of a knob that
+  /// silently disables a feature while leaving it looking intact. A 0 here means one second, not
+  /// "never".
+  ///
+  /// The UPPER clamp is a crash fix. TimeProvider.CreateTimer rejects a due time above
+  /// 0xFFFFFFFE ms (~49.7 days), so an absurd MaxPlaybackSeconds threw ArgumentOutOfRangeException
+  /// from HERE — after PlayAsync had returned — landing in AcquireAndPlayAsync's general catch and
+  /// failing EVERY attended playback immediately after it started, under a generic failure reason.
+  /// One config value, feature dead, no diagnosis. The two neighbouring readers of this same option
+  /// already defend their own width (GvMediaCache's Math.Max(60L, …), GvMediaClient's
+  /// (long)Math.Max(1, …)); this one now does too. FakeTimeProvider does NOT enforce the same bound,
+  /// so no unit test can find this — which is why it is written down here.
+  ///
+  /// ⚠ WALL-CLOCK FROM PlayAsync, not playing time. PauseAsync neither disarms nor re-arms, so a
+  /// playback paused for five minutes is capped having sounded ten seconds. Correct for a guarantee
+  /// whose whole point is that it needs no client cooperation — but PR 6 ships the transport that
+  /// makes pause reachable, so it is named here rather than rediscovered there.
   /// </remarks>
   private void ArmDurationCap(Playback playback)
   {
-    var seconds = Math.Max(1, _gvMediaOptions.CurrentValue.MaxPlaybackSeconds);
+    var seconds = Math.Clamp(_gvMediaOptions.CurrentValue.MaxPlaybackSeconds, 1, MaxCapSeconds);
     var playbackId = playback.Id;
 
     playback.ArmDurationCap(_timeProvider, TimeSpan.FromSeconds(seconds), () =>
     {
-      // Warning, not Information: since LOG-11 the journal carries Warning and above, and "the
-      // voicemail stopped by itself after five minutes" is exactly what an operator diagnoses from
-      // the box. Ids only — never a media id and never request text (PHN-1b §0.3 ④).
-      //
-      // ⚠ "dispatching a stop", NOT "stopping it". This line is emitted UNCONDITIONALLY, before the
-      // dispatch below and without reading StopAsync's bool result — so it is a record that the
-      // timer fired while still armed, not a claim that anything was stopped. A playback that ended
-      // naturally in the window between the timer becoming due and this callback running would get
-      // the same line, and StopAsync would then return false having touched nothing.
-      //
-      // ⚠ Do NOT restructure this to log on the result. ANaturalEndDisarmsTheDurationCap asserts on
-      // the ABSENCE of this line, and it is the only assertion in that test that can fail — a
-      // StopCalls assertion there is satisfied by ClaimTerminal's idempotence whether or not the
-      // disarm happened (measured: 62/62 still passed with the disarm deleted). Moving this below
-      // the dispatch, or behind the result, destroys that falsifiability.
-      _logger.LogWarning(
-        "Attended playback {Id} reached GvMedia:MaxPlaybackSeconds ({Seconds}s); dispatching a stop",
-        playbackId, seconds);
+      // ⚠ THE WHOLE BODY IS GUARDED, and it is the callback boundary that makes that necessary
+      // rather than tidiness. This lambda IS the TimerCallback: System.Threading.Timer does not wrap
+      // it, so it runs directly on a thread-pool thread where an unhandled exception TERMINATES THE
+      // PROCESS. The try below used to start inside the dispatched Task.Run, leaving the LogWarning
+      // and the Task.Run scheduling outside it — and ILogger.Log aggregates and RETHROWS provider
+      // exceptions, so a failing Serilog file sink (or a log written after CloseAndFlush during a
+      // shutdown racing an armed cap) escaped straight into the runtime. Every sibling background
+      // entry point in this file is already guarded for this reason; this one was the exception.
+      try
+      {
+        // Warning, not Information: since LOG-11 the journal carries Warning and above, and "the
+        // voicemail stopped by itself after five minutes" is exactly what an operator diagnoses from
+        // the box. Ids only — never a media id and never request text (PHN-1b §0.3 ④).
+        //
+        // ⚠ "dispatching a stop", NOT "stopping it". This line is emitted UNCONDITIONALLY, before the
+        // dispatch below and without reading StopAsync's bool result — so it is a record that the
+        // timer fired, not a claim that anything was stopped. A playback that ended naturally races
+        // this in TWO windows, not one: between the timer becoming due and this callback running, and
+        // also while this callback is ALREADY RUNNING, because DisarmDurationCap disposes the timer
+        // without waiting for an in-flight callback (deliberately — blocking there would park a
+        // teardown on a timer thread). Either way StopAsync returns false having touched nothing, and
+        // an operator reading journald sees a WRN about a cap that capped nothing.
+        //
+        // ⚠ Do NOT restructure this to log on the result. ANaturalEndDisarmsTheDurationCap asserts on
+        // the ABSENCE of this line, and it is the only assertion in that test that can fail — a
+        // StopCalls assertion there passes whether or not the disarm happened (measured: 62/62 still
+        // passed with the disarm deleted). Moving this below the dispatch, or behind the result,
+        // destroys that falsifiability.
+        //
+        // ⚠ WHY that StopCalls assertion cannot fail, corrected: a natural end has already set
+        // _current = null in OnSourceCompleted, so StopAsync returns false at the FIRST clause of its
+        // `playback is null || playback.Id != playbackId || !playback.ClaimTerminal()` guard and never
+        // reaches the source. An earlier revision of this comment credited ClaimTerminal, which is
+        // never evaluated on that path — and is a mutating CompareExchange rather than an idempotent
+        // read, so it would not have been "idempotence" even if it were.
+        _logger.LogWarning(
+          "Attended playback {Id} reached GvMedia:MaxPlaybackSeconds ({Seconds}s); dispatching a stop",
+          playbackId, seconds);
 
-      _ = Task.Run(
-        async () =>
+        _ = Task.Run(
+          async () =>
+          {
+            try
+            {
+              await StopAsync(playbackId);
+            }
+            catch (ObjectDisposedException)
+            {
+              // The container went away underneath the timer. Nothing left to stop.
+            }
+            catch (Exception ex)
+            {
+              // An unobserved faulted task is a process-level hazard on this box.
+              _logger.LogWarning(ex, "Error stopping capped attended playback {Id}", playbackId);
+            }
+          },
+          CancellationToken.None);
+      }
+      catch (Exception ex)
+      {
+        // Best-effort: if the logger itself is what threw, this is expected to do nothing.
+        try
         {
-          try
-          {
-            await StopAsync(playbackId);
-          }
-          catch (ObjectDisposedException)
-          {
-            // The container went away underneath the timer. Nothing left to stop.
-          }
-          catch (Exception ex)
-          {
-            // An unobserved faulted task is a process-level hazard on this box.
-            _logger.LogWarning(ex, "Error stopping capped attended playback {Id}", playbackId);
-          }
-        },
-        CancellationToken.None);
+          _logger.LogWarning(ex, "Duration-cap callback failed for attended playback {Id}", playbackId);
+        }
+        catch
+        {
+          // Nothing left to report with. Swallowing beats killing the process.
+        }
+      }
     });
   }
 

@@ -125,16 +125,69 @@ public class AttendedPlaybackCircuitHandlerTests
   }
 
   [Fact]
-  public async Task ASeedFailureOnOpenDoesNotFaultTheCircuit()
+  public async Task ASeedFailureOnOpenIsCaughtAndLogged()
   {
     // Fire-and-forget by design rather than by omission: awaiting it would hold a circuit's start
     // behind an HTTP call to a service that may still be booting, on a deploy that restarts both.
-    var rig = await RigAsync(throwOnGet: true);
+    //
+    // ⚠ THIS TEST WAS REWRITTEN BECAUSE IT COULD NOT FAIL. As written it asserted
+    // OpenCircuits == 1 and Store.EventPlayback == null, and neither can fail for ANY
+    // implementation: the count is incremented unconditionally, and the seed is dispatched with a
+    // discard, so deleting BOTH try/catches leaves the exception in an unobserved faulted task that
+    // never reaches the caller — the test still passes. Worse, the null assertion was taken before
+    // the seed could have completed, so it would have read null against a SUCCEEDING seed too.
+    //
+    // The containment is observable in exactly one place — the warning SeedAsync's catch emits — so
+    // that is what is asserted, and the wait is on the observation rather than on elapsed time
+    // (CLAUDE.md § Test Timing). Delete SeedAsync's catch and this times out.
+    //
+    // ⚠ AND IT IS DRIVEN THROUGH DI, NOT THROUGH A FAILING GET, which is a fact worth having
+    // written down: throwOnGet CANNOT reach SeedAsync's catch, because
+    // EventPlaybackApiService.GetCurrentAsync catches its own exceptions and answers null, and
+    // EnsureEventPlaybackSeededAsync then returns normally. The only way the seed faults is if the
+    // scope cannot produce the client — so that is the failure this drives. The first attempt at
+    // this rewrite used throwOnGet and went red for exactly that reason.
+    var rig = await RigAsync(breakScopeResolution: true);
 
     await rig.Handler.OnCircuitOpenedAsync(null!, default);
+    await WaitUntilAsync(
+      () => rig.Warnings.Any(m => m.Contains("Error seeding", StringComparison.Ordinal)),
+      TimeSpan.FromSeconds(5));
 
+    Assert.Contains(rig.Warnings, m => m.Contains("Error seeding", StringComparison.Ordinal));
+
+    // And the circuit itself survived: no throw escaped, and the count still moved.
     Assert.Equal(1, rig.Handler.OpenCircuits);
-    Assert.Null(rig.Store.EventPlayback);
+  }
+
+  [Fact]
+  public async Task AThrowFromTheOPENPathDoesNotFaultTheCircuitOrStrandTheCount()
+  {
+    // ⚠ The failure this guards has NO recovery, which is why it earns a test. A throwing
+    // CircuitHandler method is fatal to the circuit — and here that circuit is LIVE, not one already
+    // closing. Worse than losing the session: the increment has already happened, so no matching
+    // OnCircuitClosedAsync ever runs, _openCircuits sits permanently >= 1, and the "remaining != 0"
+    // early return means the D30 stop rule SILENTLY NEVER FIRES AGAIN for the life of the process.
+    // The negative-count reset guards the other direction; there is no equivalent for this one, so
+    // the outer catch is what prevents it.
+    //
+    // ⚠ Driven through a throwing LOGGER, and the choice is forced rather than cute. Nothing else in
+    // OnCircuitOpenedAsync can throw: Interlocked.Increment cannot, and Seed()'s body is an async
+    // method whose every exception — DI resolution included — is captured into the discarded Task
+    // rather than raised at the call site. ILogger.Log is the one synchronous call that can, and it
+    // genuinely does in production: it aggregates and rethrows provider exceptions, so a wedged
+    // Serilog sink is a real instance of this.
+    //
+    // Delete the outer try/catch and this test throws instead of failing an assertion.
+    var rig = await RigAsync(throwOnLog: true);
+
+    // 1. The throw does not escape.
+    await rig.Handler.OnCircuitOpenedAsync(null!, default);
+
+    // 2. And the count is not stranded: the circuit survived, so its close balances the books.
+    Assert.Equal(1, rig.Handler.OpenCircuits);
+    await rig.Handler.OnCircuitClosedAsync(null!, default);
+    Assert.Equal(0, rig.Handler.OpenCircuits);
   }
 
   // ── rig ───────────────────────────────────────────────────────────────────
@@ -162,7 +215,7 @@ public class AttendedPlaybackCircuitHandlerTests
   /// that one is internal to a different assembly, and adding an assembly reference to reach a
   /// four-line test double would couple two test projects that share nothing else.
   /// </remarks>
-  private sealed class CapturingLogger<T>(List<string> sink) : ILogger<T>
+  private sealed class CapturingLogger<T>(List<string> sink, bool throwOnLog = false) : ILogger<T>
   {
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -172,6 +225,13 @@ public class AttendedPlaybackCircuitHandlerTests
       LogLevel logLevel, EventId eventId, TState state, Exception? exception,
       Func<TState, Exception?, string> formatter)
     {
+      // Stands in for a wedged log provider. ILogger.Log aggregates and rethrows provider
+      // exceptions, so this is the shape a failing Serilog sink presents to a caller.
+      if (throwOnLog)
+      {
+        throw new InvalidOperationException("the log sink is wedged");
+      }
+
       if (logLevel >= LogLevel.Warning)
       {
         lock (sink)
@@ -198,7 +258,11 @@ public class AttendedPlaybackCircuitHandlerTests
     return rig;
   }
 
-  private static Task<Rig> RigAsync(string? seedBody = null, bool throwOnGet = false)
+  private static Task<Rig> RigAsync(
+    string? seedBody = null,
+    bool throwOnGet = false,
+    bool breakScopeResolution = false,
+    bool throwOnLog = false)
   {
     var stops = new List<string>();
     var warnings = new List<string>();
@@ -212,9 +276,16 @@ public class AttendedPlaybackCircuitHandlerTests
         transport: new OfflineHubTransport()));
 
     var services = new ServiceCollection();
-    services.AddSingleton(new EventPlaybackApiService(
-      new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
-      NullLogger<EventPlaybackApiService>.Instance));
+
+    // breakScopeResolution leaves EventPlaybackApiService UNREGISTERED, so the handler's
+    // GetRequiredService throws inside Seed() - the one thing in OnCircuitOpenedAsync that can
+    // realistically throw, and the way AnOpenThatThrowsDoesNotLeaveTheCountOverCounted reaches it.
+    if (!breakScopeResolution)
+    {
+      services.AddSingleton(new EventPlaybackApiService(
+        new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+        NullLogger<EventPlaybackApiService>.Instance));
+    }
 
     var provider = services.BuildServiceProvider();
 
@@ -223,7 +294,7 @@ public class AttendedPlaybackCircuitHandlerTests
       Handler = new AttendedPlaybackCircuitHandler(
         provider.GetRequiredService<IServiceScopeFactory>(),
         store,
-        new CapturingLogger<AttendedPlaybackCircuitHandler>(warnings)),
+        new CapturingLogger<AttendedPlaybackCircuitHandler>(warnings, throwOnLog)),
       Store = store,
       Stops = stops,
       Warnings = warnings,

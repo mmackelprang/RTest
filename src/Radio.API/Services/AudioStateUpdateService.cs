@@ -1060,8 +1060,11 @@ public class AudioStateUpdateService : BackgroundService
   /// and can ignore it, rather than deserialising a number into an enum that has no such value — the
   /// same reason EncoderConfigStatusChanged above sends its tier as a string.
   ///
-  /// ⚠ Every other field is copied verbatim, so both paths hand the same CLR types to the same
-  /// serialiser and cannot diverge on however TimeSpan and DateTimeOffset happen to render.
+  /// ⚠ Every other field is copied verbatim, so both paths hand the same CLR types to STJ's own
+  /// built-in TimeSpan and DateTimeOffset converters and cannot diverge on however those render.
+  /// ⚠ NOT "the same serialiser" — they are two different JsonSerializerOptions instances (MVC's,
+  /// from AddJsonOptions, and SignalR's, from JsonHubProtocol), which is the very fact the paragraph
+  /// above exists to warn about. The conclusion holds; the reason had to be the converters.
   ///
   /// ⚠ The snapshot ARGUMENT is the payload. Do NOT enrich it from _eventPlayback.Current: this
   /// handler is invoked from inside EventPlaybackService.Raise, and Current is deliberately not

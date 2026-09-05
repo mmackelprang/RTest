@@ -413,11 +413,22 @@ public class SleepServiceTests
   [Fact]
   public async Task TheSleepScreenGoingDownStopsNothing()
   {
-    // MainLayout reports false on its own first render, on every navigation home. A rule that acted
-    // on any report rather than on the edge OUT OF Awake would kill a voicemail every time the
-    // console came back from /sleep - the exact inversion of what sec 7.5 asks for.
+    // MainLayout reports false on its own first render, on every navigation home. A rule that fired
+    // on any report at all would kill a voicemail every time the console came back from /sleep -
+    // the exact inversion of what sec 7.5 asks for.
+    //
+    // ⚠ The transition is DRIVEN here, true -> false. An earlier version called
+    // SetSleepScreenVisibleAsync(false) from the initial state, where the flag is already false, so
+    // the going-down case it names was never actually exercised.
     var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Playing) };
     var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.SetSleepScreenVisibleAsync(true);
+    Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+
+    // A second playback starts while the console is on /sleep, and the user then leaves.
+    playback.Current = SnapshotIn(EventPlaybackState.Playing, "evp-2");
+    playback.StopIds.Clear();
 
     await service.SetSleepScreenVisibleAsync(false);
 
@@ -426,11 +437,36 @@ public class SleepServiceTests
   }
 
   [Fact]
+  public async Task AGoingDownReportWithAnOutstandingWakeClaimStillStopsNothing()
+  {
+    // ⚠ The specific shape a WakeState-transition rule got wrong. With audio parked and a wake
+    // claimed by a knob, WakeState reads Awake; a report that the screen went AWAY then reads as a
+    // transition Awake -> Standby and a transition-based rule would stop attended playback on a
+    // report meaning the opposite. Deciding from the report's own argument cannot express that bug.
+    var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Playing) };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.SetSleepScreenVisibleAsync(true);
+    await service.EnterSleepAsync();
+    Assert.True(service.TryClaimWake());
+    Assert.Equal(ConsoleWakeState.Awake, service.WakeState);
+
+    playback.Current = SnapshotIn(EventPlaybackState.Playing, "evp-2");
+    playback.StopIds.Clear();
+
+    await service.SetSleepScreenVisibleAsync(false);
+
+    Assert.Empty(playback.StopIds);
+  }
+
+  [Fact]
   public async Task ARepeatedSleepScreenReportStopsOnlyOnce()
   {
-    // An EDGE, not a level. The fake retains Playing across both calls - as the real seam would
-    // between the report and the stop actually landing - so a level-triggered rule would stop twice.
-    // Any future re-report heartbeat from the page would then be a stop per beat.
+    // ⚠ IDEMPOTENCE COMES FROM THE PLAYBACK'S STATE, NOT FROM AN EDGE, and the distinction is the
+    // point of this test. StopAttendedPlaybackAsync decides on the snapshot: the second report finds
+    // a Stopped snapshot and returns without an HTTP call. That is a stronger guarantee than an edge
+    // gave, because it also holds when the two reports come from DIFFERENT clients - which an
+    // edge on a single global flag cannot see.
     var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Playing) };
     var (service, _) = CreateService(eventPlayback: playback);
 
@@ -438,6 +474,41 @@ public class SleepServiceTests
     await service.SetSleepScreenVisibleAsync(true);
 
     Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+  }
+
+  [Fact]
+  public async Task AStaleVisibleFlagDoesNotSUPPRESSTheStop()
+  {
+    // ⭐ THE FINDING THAT REWROTE THE PREDICATE, pinned. Found by the comment-accuracy reviewer
+    // against a rule written as "stop when WakeState LEAVES Awake".
+    //
+    // _isSleepScreenVisible can be left STALE-TRUE while the console is genuinely awake on Home, and
+    // the tree documents both halves of how: Sleep.razor's dispose report is best-effort behind a
+    // 2 s CTS ("a hard browser navigation can tear the circuit down before this lands"), and
+    // MainLayout's corrective false on first render is fire-and-forget with the failure swallowed.
+    // Lose both - one API blip on a WiFi-only box - and the flag sits true.
+    //
+    // A voicemail then starts. Thirty minutes later the idle timer navigates to /sleep and the page
+    // reports visible=true. Nothing CHANGED and the state was already Ambient, so a
+    // transition-based rule does not fire, and attended audio plays on a surface with no transport -
+    // exactly the failure sec 7.5 exists to prevent, on exactly the path sec 16.4 rewrote the rule
+    // for. The old reasoning ("a before-state that is already Ambient is one where the earlier edge
+    // already ran") fails because the earlier edge ran against a DIFFERENT playback, hours earlier.
+    var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Playing) };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    // The stale flag, reached the way the box reaches it: a report that was never corrected.
+    await service.SetSleepScreenVisibleAsync(true);
+    Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+
+    // Console is really awake on Home now, but nothing told the server. A new voicemail starts.
+    playback.Current = SnapshotIn(EventPlaybackState.Playing, "evp-2");
+    playback.StopIds.Clear();
+
+    // The idle timer lands on /sleep and the page reports itself. This is NOT a change.
+    await service.SetSleepScreenVisibleAsync(true);
+
+    Assert.Equal(new[] { "evp-2" }, playback.StopIds);
   }
 
   [Fact]
@@ -456,30 +527,53 @@ public class SleepServiceTests
   }
 
   [Fact]
-  public async Task AnOutstandingWakeClaimMakesTheReportFireRatherThanSuppressIt()
+  public async Task AReportDoesNotDisturbAnOutstandingWakeClaim()
   {
-    // This pins the asymmetry SetSleepScreenVisibleAsync's remarks CLAIM, because a comment that
-    // offers a reason a thing is safe is the claim to check (CLAUDE.md Pre-Merge Review).
-    //
-    // WakeState reads Awake while a claim is outstanding (ENC-6's fast spin). So a claim can make
-    // the BEFORE read say Awake when the console is really in Standby - and the rule then fires
-    // where it otherwise would not. That is the direction sec 7.5 calls safe. It cannot go the other
-    // way: a before-state that is already Ambient or Standby is one the earlier edge already
-    // handled.
-    //
-    // Reached the way the box would: park the room, claim a wake with a knob, then have a browser
-    // report the /sleep page it is only now rendering.
+    // ENC-6's latch is not this rule's business and must survive it. A report that is not a change
+    // leaves the claim alone - which is what stops a future re-report heartbeat from wiping a claim
+    // mid-wake and dropping the console back into Ambient, consuming a second input for one wake.
     var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Playing) };
     var (service, _) = CreateService(eventPlayback: playback);
 
-    await service.EnterSleepAsync();
-    playback.StopIds.Clear();
+    await service.SetSleepScreenVisibleAsync(true);
     Assert.True(service.TryClaimWake());
     Assert.Equal(ConsoleWakeState.Awake, service.WakeState);
 
     await service.SetSleepScreenVisibleAsync(true);
 
-    Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+    Assert.Equal(ConsoleWakeState.Awake, service.WakeState);
+  }
+
+  [Fact]
+  public async Task AWedgedStopDoesNotLeaveTheConsoleUnwakeable()
+  {
+    // ⚠ A HANG FIX, pinned. EnterSleepAsync calls the stop while holding _lock, and WakeAsync takes
+    // that same _lock - so an unbounded wait on a wedged IEventPlaybackService.StopAsync makes the
+    // console unwakeable by EVERY route at once: the encoder, the screen tap and the REST call all
+    // queue behind it. This repo has a documented class of hang in exactly that layer.
+    //
+    // The fake parks inside StopAsync until released and honours the token, so the only thing that
+    // can free this test is SleepService's own timeout. Delete the CTS and this hangs forever
+    // instead of passing.
+    //
+    // ⚠ Bounded-negative-safe by construction: the assertions are that sleep COMPLETED and the wake
+    // COMPLETED, so machine slowness can only make this test slower, never green-when-it-should-red.
+    var playback = new StoppableEventPlayback
+    {
+      Current = SnapshotIn(EventPlaybackState.Playing),
+      BlockUntilReleased = true
+    };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.EnterSleepAsync();
+
+    Assert.True(service.IsSleeping);
+    Assert.Empty(playback.StopIds);
+
+    await service.WakeAsync("encoder-turn");
+
+    Assert.False(service.IsSleeping);
+    playback.ReleaseStop();
   }
 
   [Fact]
@@ -590,10 +684,23 @@ public class SleepServiceTests
       if (BlockUntilReleased)
       {
         StopEntered.TrySetResult();
-        await _release.Task;
+        // Honour the caller's token. SleepService time-boxes this call precisely so a wedged seam
+        // cannot make the console unwakeable, and a fake that ignored the token could not show it.
+        await _release.Task.WaitAsync(cancellationToken);
       }
 
       StopIds.Add(playbackId);
+
+      // ⚠ THE SNAPSHOT TRANSITIONS, as the real service's does. An earlier version of this fake left
+      // Current on Playing forever, which quietly made two tests pass for the wrong reason: they
+      // read as "the rule is edge-triggered" when what actually prevents a second stop in the real
+      // system is that the second call finds a terminal snapshot. A fake that cannot reach the
+      // terminal state cannot tell those apart.
+      if (Current is { } c && c.Id == playbackId)
+      {
+        Current = c with { State = EventPlaybackState.Stopped };
+      }
+
       return true;
     }
 
