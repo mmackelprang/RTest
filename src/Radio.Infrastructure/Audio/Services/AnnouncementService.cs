@@ -90,8 +90,11 @@ public class AnnouncementService : IAnnouncementService
     ArgumentException.ThrowIfNullOrWhiteSpace(message);
     priority = Math.Clamp(priority, 1, 10);
 
-    // soundPath stays as-is: it is a server-side file path chosen by config, not user text.
-    _logger.LogInformation("Playing sound {Sound} then announcing: {Message} (priority {Priority})",
+    // soundPath stays as-is: it is a server-side file path chosen by config, not user text. Its
+    // single quotes stay too — a path can contain spaces, and the quotes are what show where it
+    // ends. The quotes around {Message} correctly did NOT come back: a token is not a
+    // human-readable string, and framing it as one invites reading it as the message.
+    _logger.LogInformation("Playing sound '{Sound}' then announcing: {Message} (priority {Priority})",
       soundPath, LogSafeText.For(message), priority);
 
     IEventAudioSource? soundSource = null;

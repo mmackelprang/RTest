@@ -20,8 +20,9 @@ namespace Radio.Core.Tests;
 /// of these lines in six months, having never read <c>TTS-11</c>. The twelve shapes it knows are
 /// the twelve that actually occurred. The real coverage of the PROPERTY lives in the tests that
 /// drive the real types — <c>TTSEventSourceLogSafetyTests</c>, <c>TTSFactoryLogSafetyTests</c>,
-/// <c>SoundFlowMasterMixerLogSafetyTests</c>, <c>AudioManagerDuckingLogTests</c> (all in
-/// <c>Radio.Infrastructure.Tests</c>) and the three controller pins in <c>Radio.API.Tests</c>.
+/// <c>SoundFlowMasterMixerLogSafetyTests</c>, <c>AudioManagerDuckingLogTests</c>,
+/// <c>AnnouncementServiceLogSafetyTests</c> (all in <c>Radio.Infrastructure.Tests</c>) and the
+/// three controller pins in <c>Radio.API.Tests</c>.
 ///
 /// ⚠ <b>Two shapes from the plan's list are NOT enforced globally, and one is not enforced at
 /// all.</b> Every one of those decisions is recorded here rather than made silently, because a
