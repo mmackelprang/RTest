@@ -236,8 +236,8 @@ if ($moveExit -ne 0) {
 # tracked seed has no RotaryPhone section — so the overwrite deleted the key rather than
 # replacing it, and the service came up with inter-service auth silently off.
 #
-# The per-file shape here matches Sync-WpRule below, which has always guarded each
-# destination independently.
+# The per-file shape here matches Sync-WpRule below, which takes one destination per
+# call and compares against that destination before installing.
 $targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
 if (Test-Path $targetConfigPath) {
   $seedStaged = $false
