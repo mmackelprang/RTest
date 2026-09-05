@@ -1570,9 +1570,16 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // this file that was written to be changed rather than kept. PHN-1d pinned today's mixing so that
     // D28's queue would arrive as an edited assertion. This is that edit.
     //
-    // The assertion that carries the decision is ducking.ActiveEventCount == 1 at the moment audio
-    // starts: every other assertion here is about the new playback eventually reaching Playing, and
-    // only that one shows the two voices no longer overlap.
+    // ⚠ WHAT CARRIES THE DECISION IS A PAIR, AND IT IS TAKEN AT THE WAITING CHECKPOINT — not at the
+    // end: source.PlayCalls == 0 AND ducking.ActiveEventCount == 1 while the blocker is STILL IN THE
+    // SET. One voice in the room, and it is the blocker's; the attended source is demonstrably absent
+    // from the ducking set, which is what "the two voices no longer overlap" actually means here.
+    //
+    // ⚠ The final ActiveEventCount assertion is NOT the decision, and an earlier revision of this
+    // comment said it was. The blocker is removed two statements before it, so 1 is the count in the
+    // waits-world AND in the mixes-world (1 → 2 → 1) — it cannot fail. Its predecessor asserted
+    // Equal(2, …) WHILE BOTH WERE LIVE, which is what made that one load-bearing. It is kept below as
+    // an end-state check and claims nothing more than that.
     //
     // MUTATION (§2.1): delete the WaitForClearAirAsync call in AcquireAndPlayAsync and this reds on
     // the first rendezvous — the playback reaches Playing immediately, so no Waiting snapshot is ever
@@ -1597,8 +1604,13 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // It is WAITING, and it has not made a sound.
     Assert.Equal(accepted.Id, waited.Id);
     Assert.Equal(EventPlaybackState.Waiting, waited.State);
-    Assert.Equal(0, source.PlayCalls);
     Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+
+    // ⭐ THE PAIR THAT CARRIES THE DECISION, taken while the blocker is still in the set: no audio,
+    // and exactly ONE source ducking — the blocker's. The attended source has not joined it, because
+    // the wait happens before TryAdopt and before StartDuckingAsync.
+    Assert.Equal(0, source.PlayCalls);
+    Assert.Equal(1, ducking.ActiveEventCount);
 
     // The doorbell finishes.
     var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
@@ -1609,7 +1621,9 @@ public sealed class EventPlaybackServiceTests : IDisposable
     Assert.Equal(EventPlaybackState.Playing, final.State);
     Assert.Equal(1, source.PlayCalls);
 
-    // ⭐ THE ASSERTION THAT IS THE DECISION. One voice, not two.
+    // End state: the attended source is the only thing ducking now. Kept because it is true and cheap,
+    // NOT because it can fail — see the header. The blocker left two statements ago, so 1 is also what
+    // a seam that had mixed would report by this point.
     Assert.Equal(1, ducking.ActiveEventCount);
   }
 
@@ -1838,6 +1852,67 @@ public sealed class EventPlaybackServiceTests : IDisposable
     var wokenPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
     ducking.RaiseEndedWithOthersRemaining(blocker);
     await wokenPlaying.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, source.PlayCalls);
+  }
+
+  [Fact]
+  public async Task ASecondBlockerStartingDuringAWaitDoesNotStopTheWaitingPlayback()
+  {
+    // ⭐ ADR-029 §6.2 rule 2 stops an IN-FLIGHT attended playback, and a WAITING one is not in flight —
+    // IEventPlaybackService.Current's own remark says so. Without the `victim.IsWaiting` clause in
+    // OnDuckingStateChanged the guard falls straight through, because a waiting playback's Source is
+    // null for the whole of the wait (_source is assigned only in TryAdopt, after the wait and after
+    // _gate), so ReferenceEquals(null, trigger) is false and a real StopAsync is dispatched.
+    //
+    // The user-visible failure that closes: press play behind a doorbell, watch Waiting, and the very
+    // next announcement destroys the queued playback — Waiting → Stopped, no sound, no reason given.
+    // 8 is BOTH DuckingService.DefaultEventPriority and the shipped GvMedia:PreemptAtPriority, so
+    // "the very next announcement" means every announcement that names no priority.
+    //
+    // ⚠ TIMING DECLARATION (CLAUDE.md § Test Timing). The middle assertion is a BOUNDED NEGATIVE —
+    // "no Playing snapshot arrived within 500 ms" — so starvation can only make it pass more easily,
+    // never flip a pass to a fail. The positive half after it is what stops that window being
+    // meaningless: the same playback DOES sound once the second blocker leaves.
+    //
+    // MUTATION (§2.1): delete `victim.IsWaiting` from OnDuckingStateChanged's guard and this reds at
+    // the first block, with the playback Stopped rather than Waiting.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var first = new FakeEventSource();
+    ducking.RaiseStarted(first, 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // A SECOND source starts at the threshold while the first is still sounding. PreemptionTail is the
+    // rendezvous: OnDuckingStateChanged decides on the raising thread and assigns the tail before
+    // RaiseStarted returns, so awaiting it here covers the dispatch a regression would make.
+    var second = new FakeEventSource();
+    ducking.RaiseStarted(second, 8);
+    await service.PreemptionTail;
+
+    Assert.Equal(accepted.Id, service.Current?.Id);
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+    Assert.Equal(0, source.PlayCalls);
+    Assert.Equal(0, source.StopCalls);
+
+    // …and it is now waiting for BOTH. Ending only the first changes nothing, because the wake is a
+    // state re-evaluation against the same predicate and the second blocker still fails it.
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    ducking.RaiseEndedWithOthersRemaining(first);
+    await Assert.ThrowsAsync<TimeoutException>(
+      () => playing.WaitAsync(TimeSpan.FromMilliseconds(500)));
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+    Assert.Equal(0, source.PlayCalls);
+
+    // Ending the second clears the air, and the playback the preemption would have destroyed sounds.
+    ducking.RaiseEndedWithOthersRemaining(second);
+    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
     Assert.Equal(1, source.PlayCalls);
   }
 

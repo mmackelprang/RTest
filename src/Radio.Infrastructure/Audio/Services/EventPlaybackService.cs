@@ -600,13 +600,19 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         _duckingService.SetPriority(source, request.Priority);
         await _duckingService.StartDuckingAsync(source, token);
 
-        // ⚠ Nothing is checked here about OTHER active sources, and that is the owner's decision
-        // (punch list D28), not an omission. A playback starting while a source at or above
-        // GvMedia:PreemptAtPriority is already sounding must WAIT for it and then play — which needs a
-        // waiting state on the wire and a chip that renders it. PHN-1e was expected to carry those and
-        // did NOT: the queue and its waiting state are PHN-1f. Until then this mixes, exactly as it
-        // does today. Do not "fix" it by refusing the start: that option was put to the owner and
-        // rejected.
+        // ⚠ Nothing is checked here about OTHER active sources, and since PHN-1f that is because the
+        // check has already HAPPENED rather than because it is missing. This seam no longer mixes: a
+        // playback starting while a source at or above GvMedia:PreemptAtPriority is already sounding
+        // WAITS for it and then plays (owner decision D28), and the wait is WaitForClearAirAsync,
+        // called above — after acquisition and BEFORE _gate.
+        //
+        // ⚠ Deliberately not moved down here. §0.2 forbids waiting inside the gate: holding it across
+        // a wait bounded by GvMedia:MaxQueuedWaitSeconds would block StopAsync, the replacement arm
+        // and OnSourceCompleted for the whole of that wait, so the user's own Stop button would do
+        // nothing until the blocker finished — which is the shape D28 exists to avoid.
+        //
+        // ⛔ And still do not "fix" this by refusing the start. A refusal was put to the owner and
+        // rejected; deferring is the answer, and deferring is what the wait does.
         //
         // Still re-checked between ducking and audio. Under the gate this is closed against StopAsync
         // and the replacement arm; against Dispose, which does not take the gate, it remains the
@@ -986,7 +992,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
 
   /// <summary>
   /// ADR-029 D5 §6.2 rule 2: a source starting at or above GvMedia:PreemptAtPriority stops attended
-  /// playback outright.
+  /// playback outright — unless that playback is WAITING, which is not attended playback in flight.
   /// </summary>
   /// <remarks>
   /// It STOPS rather than pausing. Resuming a voicemail mid-word twenty seconds after a phone call is
@@ -1074,16 +1080,52 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       victim = _current;
     }
 
-    // ⚠ Never preempt ourselves. StartDuckingAsync raises for the ATTENDED source too, and
-    // EventPlaybackRequest.Priority accepts 1-10 — so a caller posting Priority 8 would otherwise stop
-    // its own playback the instant it started ducking. Compared by REFERENCE on the instance this
-    // service holds: three id spaces meet in this file and only the instance is unambiguous.
+    // Three reasons to do nothing here, and the middle one is the newest.
+    //
+    // (a) Nothing is in the slot at all.
+    //
+    // (b) ⭐ THE VICTIM IS WAITING. ADR-029 §6.2 rule 2 stops an IN-FLIGHT attended playback, and a
+    //     playback parked in WaitForClearAirAsync is by definition not in flight — which is exactly
+    //     what IEventPlaybackService.Current's own remark now says about the Waiting state ("It is not
+    //     in flight and it is not finished"). It has adopted no source and is producing no audio, so
+    //     stopping it prevents no overlap; and because TryWakeWaitingPlayback is a STATE
+    //     re-evaluation rather than an edge, the playback simply keeps waiting for this new blocker
+    //     too and plays when the air is clear.
+    //
+    //     Without this clause the guard falls through, because victim.Source is null for the WHOLE of
+    //     a wait — _source is assigned only in TryAdopt, after the wait and after _gate — so
+    //     ReferenceEquals(null, trigger) is false and a real StopAsync is dispatched. The user presses
+    //     play behind a doorbell, watches Waiting, and the next unprioritised announcement (8 is
+    //     DuckingService.DefaultEventPriority and the shipped PreemptAtPriority) destroys it:
+    //     Waiting → Stopped, no sound, no reason given. That is the outcome D28 exists to remove,
+    //     delivered after a visible wait.
+    //
+    //     ⚠ Two things this clause does NOT do, stated because both are easy to assume it does.
+    //     ① It does not restart GvMedia:MaxQueuedWaitSeconds. That bound runs from the ORIGINAL arm,
+    //        so a long chain of announcements still expires as WaitExpired — the designed staleness
+    //        bound, not a hole in this clause.
+    //     ② It does not cover the window between WaitForClearAirAsync's predicate deciding to wait and
+    //        BeginWait arming the waiter: IsWaiting is still false there, and a raise landing inside it
+    //        preempts the playback exactly as it preempts a Preparing one. C-66's re-check closes the
+    //        missed-WAKE race in that window; nothing closes this one, and nothing needs to — a
+    //        preemption of a not-yet-waiting playback is the Preparing rule doing its job.
+    //
+    // (c) The trigger IS our own source — never preempt ourselves. StartDuckingAsync raises for the
+    //     ATTENDED source too, and EventPlaybackRequest.Priority accepts 1-10, so a caller posting
+    //     Priority 8 would otherwise stop its own playback the instant it started ducking. Compared by
+    //     REFERENCE on the instance this service holds: three id spaces meet in this file and only the
+    //     instance is unambiguous.
+    //
+    // ⛔ Do NOT collapse (b) and (c) into `victim.Source is null`. That would also stop preempting a
+    // PREPARING playback, which is deliberate, shipped, tested behaviour —
+    // PreemptingAPreparingPlaybackCancelsAcquisitionAndDisposesWhatItAcquired pins it. Only Waiting is
+    // excluded.
     //
     // Source is read OUTSIDE _stateLock deliberately. It is guarded by Playback's own _sourceLock, and
     // nesting that inside _stateLock would introduce a lock ordering this file does not otherwise have.
     // Nothing is lost by reading it a moment later: the decision is addressed by id below, and
     // StopAsync re-checks the id under the gate.
-    if (victim is null || ReferenceEquals(victim.Source, trigger))
+    if (victim is null || victim.IsWaiting || ReferenceEquals(victim.Source, trigger))
     {
       return;
     }
