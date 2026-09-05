@@ -90,11 +90,16 @@ public sealed class GvMediaOptions
   /// <summary>
   /// Priority at or above which a starting event source stops attended playback (ADR-029 D5 §6.1).
   /// Read by <c>EventPlaybackService.OnDuckingStateChanged</c>, which stops an in-flight playback when
-  /// such a source starts. ⚠ The mirror direction — a playback STARTING while such a source is
-  /// already sounding — is not implemented yet: it mixes. The owner's decision is that it must WAIT
-  /// for the blocking source and then play, and that lands with the server-owned playback state that
-  /// can broadcast a waiting state to a client. Do not implement it as a refusal; that option was
-  /// considered and rejected.
+  /// such a source starts.
+  /// ⚠ The mirror direction — a playback STARTING while such a source is already sounding — is
+  /// implemented as of PHN-1f and does NOT mix: it publishes EventPlaybackState.Waiting, waits for
+  /// the blocker to leave the ducking set, and then plays (owner decision D28). This value is
+  /// therefore read by TWO rules that are each other's mirror: OnDuckingStateChanged stops an
+  /// in-flight playback when such a source starts, and WaitForClearAirAsync DEFERS the start of one
+  /// while such a source is present — it publishes Waiting, waits, and then plays. ⛔ Do not
+  /// reimplement either as a refusal; that option was put to the owner and rejected, and the two
+  /// sentences above must keep saying "defers" rather than "refuses" for that warning to mean
+  /// anything.
   ///
   /// <para>
   /// ⚠ This value is safe to LOWER and a trap to RAISE, and only the lowering case is argued in the
@@ -116,6 +121,34 @@ public sealed class GvMediaOptions
   /// </para>
   /// </summary>
   public int PreemptAtPriority { get; set; } = 8;
+
+  /// <summary>
+  /// How long an attended playback will WAIT for a blocking source before giving up (owner decision
+  /// D28). Read by <c>EventPlaybackService.WaitForClearAirAsync</c>, which arms one
+  /// <c>Task.WaitAsync</c> — a one-shot bound, not a poll.
+  ///
+  /// <para>
+  /// Thirty seconds because the thing being waited on is a notification measured in seconds; a wait
+  /// longer than its blocker means the blocker was not what we thought. On expiry the playback
+  /// becomes <c>Failed</c> with reason <c>"WaitExpired"</c>, which is honest — it never produced
+  /// sound — and is acceptable HERE and only here, because by then the user has watched a visible
+  /// Waiting state, which is what made a bare refusal embarrassing.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ There is no "off", and a value below 1 clamps to 1 rather than disabling the wait. A 0 meaning
+  /// "never wait" would resolve to MIXING, which is the option D28 rejected — and this arc already
+  /// has a worked example of a knob that deletes a behaviour while looking configured (see
+  /// <see cref="PreemptAtPriority"/>, and PHN-1d C-43).
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ Unrelated to <see cref="MaxPlaybackSeconds"/> and armed by a different timer. A wait does not
+  /// consume the playback cap: the cap is armed after PlayAsync returns, so the worst case is one
+  /// wait plus one full-length playback.
+  /// </para>
+  /// </summary>
+  public int MaxQueuedWaitSeconds { get; set; } = 30;
 
   /// <summary>HTTP timeout for one media fetch. Consumed by GvMediaClient.</summary>
   public int FetchTimeoutSeconds { get; set; } = 15;

@@ -221,6 +221,14 @@ public class DuckingServiceTests
   [Fact]
   public async Task StopDuckingAsync_RaisesDuckingStateChangedEvent_WhenLastEvent()
   {
+    // ⚠ THIS TEST ENCODED THE OLD RULE AND IS UPDATED RATHER THAN DELETED. Before PHN-1f the raise
+    // below was the ONLY one StopDuckingAsync ever made — it lived inside `if (needsRestore)`, so a
+    // source leaving while others remained produced nothing at all. It now raises on every removal,
+    // and what this test still pins is the EMPTYING case: exactly two raises for one start and one
+    // stop, and IsDucking false on the second because the set really is empty.
+    //
+    // ASourceLeavingWhileOthersRemainStillRaises covers the case this one cannot see, and
+    // AnEndedRaiseWithOtherSourcesStillActiveReportsIsDuckingTrue covers the aggregate on that path.
     var service = CreateService();
     var eventSource = CreateMockEventSource();
     var stateChanges = new List<DuckingStateChangedEventArgs>();
@@ -235,6 +243,227 @@ public class DuckingServiceTests
     Assert.Equal(2, stateChanges.Count);
     Assert.True(stateChanges[0].IsDucking);  // Start ducking
     Assert.False(stateChanges[1].IsDucking); // Stop ducking
+    Assert.Equal(DuckingSourceTransition.Started, stateChanges[0].Transition);
+    Assert.Equal(DuckingSourceTransition.Ended, stateChanges[1].Transition);
+  }
+
+  [Fact]
+  public async Task AnEndedRaiseCarriesThePriorityTheSourceHadBeforeItWasRemoved()
+  {
+    // ⭐ THE CAPTURE, on the stop path. StopDuckingAsync deletes the _sourcePriorities override in the
+    // same lock that removes the source, so a subscriber resolving the priority for itself reads the
+    // category default 8 for an announcement whose caller explicitly claimed 3 — and would then read
+    // an ending announcement as a priority-8 preemption.
+    //
+    // MUTATION (§2.1): move the `priorityBeforeRemoval = GetPriority(eventSource)` capture below
+    // `_sourcePriorities.Remove(eventSource.Id)` and this reads 8 instead of 3.
+    var service = CreateService();
+    var eventSource = CreateMockEventSource("announcement").Object;
+    DuckingStateChangedEventArgs? ended = null;
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    service.SetPriority(eventSource, 3);
+    await service.StartDuckingAsync(eventSource);
+
+    service.DuckingStateChanged += (_, args) =>
+    {
+      if (args.Transition == DuckingSourceTransition.Ended) { ended = args; }
+    };
+
+    await service.StopDuckingAsync(eventSource);
+
+    Assert.NotNull(ended);
+    Assert.Equal(3, ended!.TriggeringSourcePriority);
+    Assert.Same(eventSource, ended.TriggeringSource);
+
+    // …and the service itself really has forgotten it by now, which is what makes the captured value
+    // the only place the claimed priority survives.
+    Assert.Equal(DuckingService.DefaultEventPriority, service.GetPriority(eventSource));
+  }
+
+  [Fact]
+  public async Task AnEndedRaiseWithOtherSourcesStillActiveReportsIsDuckingTrue()
+  {
+    // ⚠ THE HAZARD GUARD, and it is the COMBINATION of the two fields that guards it rather than
+    // either alone. AudioManager keys ClearDuckingMultiplier off the IsDucking:false edge, so raising
+    // false here — while a second announcement is still sounding — would restore the radio to full
+    // volume MID-ANNOUNCEMENT. Transition is what lets "a source ended" be said without saying
+    // "ducking ended", and that is the whole reason the field exists.
+    //
+    // MUTATION (§2.1): raise `isDucking: false` unconditionally instead of `!needsRestore`.
+    var service = CreateService();
+    var first = CreateMockEventSource("source1").Object;
+    var second = CreateMockEventSource("source2").Object;
+    DuckingStateChangedEventArgs? ended = null;
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    await service.StartDuckingAsync(first);
+    await service.StartDuckingAsync(second);
+
+    service.DuckingStateChanged += (_, args) =>
+    {
+      if (args.Transition == DuckingSourceTransition.Ended) { ended = args; }
+    };
+
+    await service.StopDuckingAsync(first);
+
+    Assert.NotNull(ended);
+    Assert.True(ended!.IsDucking);
+    Assert.Equal(DuckingSourceTransition.Ended, ended.Transition);
+    Assert.Equal(1, ended.ActiveEventCount);
+    Assert.Same(first, ended.TriggeringSource);
+
+    // The aggregate on the args agrees with the service, so neither is guessing.
+    Assert.True(service.IsDucking);
+  }
+
+  [Fact]
+  public async Task ARedundantStopForASourceNotInTheSetRaisesNothing()
+  {
+    // ⚠ REACHABLE, not hypothetical. AnnouncementService.CleanupSourceAsync calls StopDuckingAsync
+    // unconditionally, so a second stop — or a stop for a source that never started — arrives here.
+    // Since PHN-1f the Ended raise sits OUTSIDE `if (needsRestore)`, so without the wasPresent guard
+    // such a call announces a departure that did not happen: IsDucking:true alongside
+    // ActiveEventCount:0 and DuckLevel:100, a combination this tree had never emitted, to a subscriber
+    // (EventPlaybackService) that re-evaluates a D28 wait on every raise. Before PHN-1f a redundant
+    // stop raised nothing at all; this test is what holds that.
+    //
+    // MUTATION (§2.1): raise unconditionally instead of `if (wasPresent || needsRestore)` and every
+    // Assert after the first block reds — one raise becomes two, then three, then four.
+    var service = CreateService();
+    var eventSource = CreateMockEventSource("announcement").Object;
+    var raises = new List<DuckingStateChangedEventArgs>();
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    await service.StartDuckingAsync(eventSource);
+
+    service.DuckingStateChanged += (_, args) => raises.Add(args);
+
+    // The real stop: one raise, and it is the one that empties the set.
+    await service.StopDuckingAsync(eventSource);
+    Assert.Single(raises);
+    Assert.False(raises[0].IsDucking);
+    Assert.Equal(DuckingSourceTransition.Ended, raises[0].Transition);
+
+    // The redundant stop for the same source. Nothing to remove, nothing to restore, nothing to say.
+    await service.StopDuckingAsync(eventSource);
+    Assert.Single(raises);
+
+    // A source that never started takes the same path.
+    await service.StopDuckingAsync(CreateMockEventSource("never-started").Object);
+    Assert.Single(raises);
+
+    // …and again with the set NON-EMPTY, so the silence comes from the wasPresent guard rather than
+    // from needsRestore happening to be false because everything had already stopped.
+    var other = CreateMockEventSource("other").Object;
+    await service.StartDuckingAsync(other);
+    var afterStart = raises.Count;
+
+    await service.StopDuckingAsync(eventSource);
+    Assert.Equal(afterStart, raises.Count);
+
+    // The service's own state is untouched by any of the three no-op stops.
+    Assert.True(service.IsDucking);
+    Assert.Equal(1, service.ActiveEventCount);
+  }
+
+  [Fact]
+  public async Task AStartedRaiseCarriesThePriorityCapturedBeforeTheAttackFade()
+  {
+    // ⭐ THE CAPTURE, on the start path, and the fade window is the reason it has to be a capture.
+    // DuckingService raises the Started transition AFTER awaiting ApplyFadeAsync
+    // (Audio:DuckingAttackMs, 100 ms shipped), so a StopDuckingAsync for the SAME source landing
+    // inside that fade deletes the override before the raise fires. PHN-1d could only narrow that with
+    // an ActiveEventCount guard whose own residual it documented; capturing before the fade closes it.
+    //
+    // ⚠ THE RENDEZVOUS IS A LEVEL CHANGE, NOT A DELAY (CLAUDE.md § Test Timing). The stop is performed
+    // from inside the first mid-fade DuckingLevelChanged raise, which is a synchronous observation of
+    // "the fade has started and has not finished" — so the stop is inside the window by construction
+    // rather than by being fast enough. The fade's own Task.Delay is awaited by the method under test,
+    // not raced by an assertion.
+    //
+    // The stop is driven synchronously and the policy is flipped to Instant first so its own release
+    // fade cannot await: StopDuckingAsync reads DuckingPolicy at entry, and the start's ApplyFadeAsync
+    // already took its policy by value, so the flip cannot reach back into it.
+    //
+    // MUTATION (§2.1): move the `priorityAtStart = GetPriority(eventSource)` capture below
+    // ApplyFadeAsync and this reads 8 instead of 3.
+    var service = CreateService();
+    var eventSource = CreateMockEventSource("announcement").Object;
+    DuckingStateChangedEventArgs? started = null;
+    var stoppedInsideTheFade = false;
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.FadeSmooth;
+    _defaultOptions.DuckingAttackMs = 100;
+
+    service.SetPriority(eventSource, 3);
+
+    service.DuckingStateChanged += (_, args) =>
+    {
+      if (args.Transition == DuckingSourceTransition.Started) { started = args; }
+    };
+
+    service.DuckingLevelChanged += (_, level) =>
+    {
+      if (stoppedInsideTheFade || level.TransitionComplete)
+      {
+        return;
+      }
+
+      stoppedInsideTheFade = true;
+      _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+      service.StopDuckingAsync(eventSource).GetAwaiter().GetResult();
+    };
+
+    await service.StartDuckingAsync(eventSource);
+
+    // ⚠ Asserted first, and it is not decoration: if the fade collapsed to a single step this handler
+    // never fires, the override is never deleted, and every assertion below would pass under the
+    // mutation too. This is the line that keeps the test honest.
+    Assert.True(
+      stoppedInsideTheFade,
+      "the fade must have produced at least one mid-transition level change for this test to mean anything");
+
+    Assert.NotNull(started);
+    Assert.Equal(3, started!.TriggeringSourcePriority);
+
+    // The override really was gone by the time the raise fired, which is exactly what a subscriber
+    // resolving the priority for itself would have read.
+    Assert.Equal(DuckingService.DefaultEventPriority, service.GetPriority(eventSource));
+  }
+
+  [Fact]
+  public async Task StopAllDuckingRaisesAllClearedWithANullSource()
+  {
+    // AllCleared is its own member rather than an Ended with a null source, because "everything went
+    // away at once" is the strongest reason a D28 wait should end and a subscriber should not have to
+    // infer it from a null. EventPlaybackService.TryWakeWaitingPlayback runs above the transition test
+    // for exactly this raise.
+    var service = CreateService();
+    var first = CreateMockEventSource("source1").Object;
+    var second = CreateMockEventSource("source2").Object;
+    DuckingStateChangedEventArgs? cleared = null;
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    await service.StartDuckingAsync(first);
+    await service.StartDuckingAsync(second);
+
+    service.DuckingStateChanged += (_, args) => cleared = args;
+
+    await service.StopAllDuckingAsync();
+
+    Assert.NotNull(cleared);
+    Assert.Equal(DuckingSourceTransition.AllCleared, cleared!.Transition);
+    Assert.Null(cleared.TriggeringSource);
+    Assert.False(cleared.IsDucking);
+    Assert.Equal(0, cleared.ActiveEventCount);
+
+    // Zero rather than the category default, because there is no triggering source to have a priority.
+    Assert.Equal(0, cleared.TriggeringSourcePriority);
   }
 
   [Fact]

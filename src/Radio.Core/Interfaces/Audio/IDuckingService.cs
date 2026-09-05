@@ -80,6 +80,48 @@ public interface IDuckingService : IDisposable
   event EventHandler<DuckingLevelChangedEventArgs>? DuckingLevelChanged;
 }
 
+/// <summary>What happened to the ducking set, as distinct from what the aggregate state now is.</summary>
+/// <remarks>
+/// ⚠ This exists because <see cref="DuckingStateChangedEventArgs.IsDucking"/> answers a DIFFERENT
+/// question, and overloading it is what makes the obvious implementations wrong. IsDucking is the
+/// AGGREGATE — "is anything ducking" — and AudioManager keys ClearDuckingMultiplier off its false
+/// edge. A source LEAVING while others remain is an <see cref="Ended"/> transition with IsDucking
+/// still TRUE, and the two facts must be separately expressible or one of them has to lie.
+///
+/// ⚠ <see cref="Started"/> is 0, so it is the value an args object gets when nothing sets this
+/// field. That is why AudioManager consults this only to choose a LOG LINE and never to decide
+/// whether to clear the ducking multiplier — see its handler, and plan PHN-1f C-58.
+///
+/// ⚠ THAT DOCTRINE IS NOT UNIVERSAL, and stating it as though it were misdescribes the other
+/// subscriber. There are exactly two: <c>AudioManager.OnDuckingStateChanged</c>, which is the one
+/// C-58 is about, and <c>EventPlaybackService.OnDuckingStateChanged</c> — and the second DOES branch
+/// on this field alone (<c>e.Transition != Started</c>), so a defaulted args object passes that test
+/// rather than being turned away by it. It is safe for a different reason, checked rather than
+/// assumed: the very next clause of the same guard is <c>e.TriggeringSource is not { } trigger</c>,
+/// and a defaulted args object has a null source. Its <c>TriggeringSourcePriority</c> defaults to 0
+/// as well, which is below the shipped <c>GvMedia:PreemptAtPriority</c> of 8 — but that is the second
+/// line of defence, not the first.
+///
+/// ⚠ One thing does run for a defaulted args object, deliberately: EventPlaybackService calls
+/// <c>TryWakeWaitingPlayback</c> BEFORE either test, on every raise in both directions. That is
+/// harmless because it is a state re-evaluation against the live ducking set — it reads nothing off
+/// the args at all, so it cannot be misled by a defaulted one.
+/// </remarks>
+public enum DuckingSourceTransition
+{
+  /// <summary>A source joined the ducking set.</summary>
+  Started = 0,
+
+  /// <summary>A source left the ducking set. Others may remain — read IsDucking for that.</summary>
+  Ended = 1,
+
+  /// <summary>
+  /// Every source was cleared at once (<see cref="IDuckingService.StopAllDuckingAsync"/>).
+  /// TriggeringSource is null.
+  /// </summary>
+  AllCleared = 2
+}
+
 /// <summary>
 /// Event arguments for ducking state changes.
 /// </summary>
@@ -104,6 +146,24 @@ public class DuckingStateChangedEventArgs : EventArgs
   /// Gets the number of active event sources.
   /// </summary>
   public int ActiveEventCount { get; init; }
+
+  /// <summary>What happened to the set. See <see cref="DuckingSourceTransition"/>.</summary>
+  public DuckingSourceTransition Transition { get; init; }
+
+  /// <summary>
+  /// The triggering source's priority, CAPTURED AT RAISE TIME, or 0 when there is no triggering
+  /// source.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Captured rather than looked up, and that is the entire point of the field. A subscriber that
+  /// calls <see cref="IDuckingService.GetPriority"/> for itself races the ducking service, which
+  /// DELETES the override before it raises — so the answer for a source that has just left is the
+  /// category default 8 for an announcement whose caller explicitly claimed 3. The same is true on
+  /// the START path, because the transition raise happens after the attack fade: a stop landing
+  /// inside that ~100 ms deletes the entry first. PHN-1d had to guard that with an ActiveEventCount
+  /// check and could only narrow it; this closes it.
+  /// </remarks>
+  public int TriggeringSourcePriority { get; init; }
 }
 
 /// <summary>

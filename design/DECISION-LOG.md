@@ -523,4 +523,32 @@ PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `T
 
 ---
 
+## Owner decision `D28` is implemented as of `PHN-1f`: the mirror case waits, it does not mix
+
+**Date:** 2026-09-04
+**Status:** Accepted — implements, does not amend, ADR-029 D5 §6.2 rule 2
+**Context:** ADR-029 D5 §6.2 rule 2 is symmetric, but `PHN-1d` implemented only the direction the ADR states in words — a *starting* source at or above `GvMedia:PreemptAtPriority` stops an in-flight attended playback. The mirror case, a playback *starting* while such a source is already sounding, **mixed**, and `APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY` pinned that so the fix would arrive as an edited assertion.
+
+**Decision (owner, `docs/HANDOFF-GA-PUNCH-LIST.md:1303`):** it **waits and then plays**. Not mix (the behaviour before this row), and not refuse — refusal was put to the owner and rejected as *"press play, get an error, nothing happens"*.
+
+**Shape:** a waiting playback **IS** `_current`, in a new state; there is no pending slot. `EventPlaybackState.Waiting` is appended at the end of the enum, and replace semantics, `StopAsync` resolution, `Current` reporting and the transport 409s all come free from that framing. Audio is acquired **before** the wait, so it is ready the instant the room goes quiet and an acquisition failure surfaces at once rather than after thirty seconds; the wait sits **before** `_gate`, so it cannot block the user's own Stop button. `GvMedia:MaxQueuedWaitSeconds` (30 s, no "off") bounds it, and expiry is `Failed` with reason `"WaitExpired"`.
+
+**⭐ What the row had to build first, and it is the durable half.** The wake needs to hear *"a source left the ducking set"*, and **that raise did not exist**: `DuckingService.StopDuckingAsync` raised only when the set **emptied**, so a priority-8 blocker ending while a priority-5 announcement continued produced **no raise at all** — `D28`'s rejected option delivered thirty seconds late. It now raises for every source that leaves, which needed `DuckingStateChangedEventArgs` to be able to say *"a source ended"* without saying *"ducking ended"*: `IsDucking` is the **aggregate** and `AudioManager` keys `ClearDuckingMultiplier` off its false edge, so raising `false` while others remain would restore the radio to full volume **mid-announcement**. Hence `DuckingSourceTransition`, and hence the rule that `AudioManager`'s outer branch stays literally `if (e.IsDucking)` — `Started = 0` is the default of an `init` property, so a branch keyed on `Transition` would skip the clear and leave the radio **stuck ducked**.
+
+The args also now carry `TriggeringSourcePriority`, **captured inside the lock that mutates the set** and therefore before the attack fade. That **closes** the fade-window race `PHN-1d` could only narrow with an `ActiveEventCount == 0` guard whose own residual it documented; both the guard and the subscriber's `GetPriority` call are deleted rather than supplemented.
+
+**Two things the planning pass found that the design input did not.**
+- **The `/sleep` stop is an ALLOW-LIST** (`SleepService`) while `EventPlaybackSnapshotDto.IsLive` is a **DENY-LIST** (`Radio.Web`), so the new member was picked up free by the circuit backstop and **silently dropped** by ADR-029 §7.5's rule. A queued playback would then have started audio up to 30 s after the panel went dark, on `EmptyLayout`, with no stop control on screen. `Waiting` was added to the allow-list, and `TheSleepRuleCoversEveryNonTerminalState` enumerates the enum by **reflection** so the *next* member reds too. ⚠ That was exercised during the row — a member was added temporarily and the test, and only it, went red — but the member was **not committed**, so the claim is not reproducible from this repo. Anyone re-checking it has to add one again.
+- **The wait adds two throwing exits between acquisition and adoption**, and neither `TearDownAsync` nor `FailAsync` can release an *unadopted* source — both reach `ClaimSourceForRelease`, which answers null. Without an explicit guard the `RemoteMedia` arm leaks an open `FileStream` over the cached recording.
+
+**⭐ And one the implementation found, which the plan's literal code would have shipped.** Task 6e put `catch (TimeoutException) → FailAsync("WaitExpired")` in `AcquireAndPlayAsync`'s outer catch chain. **`AcquireSpeechAsync` also throws `TimeoutException`** — for `TTS:GenerationTimeoutSeconds` — from inside that same `try`, so every hung synthesis was reported as `"WaitExpired"` instead of `"SpeechSynthesisFailed"`. `SynthesisIsBoundedByGenerationTimeoutSeconds` caught it. The handling moved to the wait's **own call site**, where the acquisition switch has already returned and `waiter.Task.WaitAsync` is the only thing that can throw one.
+
+**Consequences:** ⛔ **No `Radio.Web` change and no broadcast change.** The hub sends `snapshot.State.ToString()` and MVC uses `JsonStringEnumConverter`, so `"Waiting"` reaches the browser as a string, and `IsLive`'s deny-list gives the chip *"something is happening, offer Stop"* for free. A **quiet room produces no new traffic at all** — the predicate is evaluated before anything is published. PR 6 (`PHN-2`) builds the chip; it must render `Waiting` as live with a Stop, **must not** run the progress bar, and must say *why* rather than showing a bare spinner.
+
+**Declined and filed rather than left implied:** a playback *started* while the console is already on `/sleep` (`design/FUTURE-WORK.md` §22 — a layering question, ADR-029 §14 Q12), and the blocker's identity on the wire (§23 — a request path, not a gap). A merged `SleepService` comment promised this row would take the first; it was rewritten to say the case is unowned rather than left standing.
+
+**Plan of record:** [`design/plans/PHN-1f-the-wait-then-play-queue.md`](plans/PHN-1f-the-wait-then-play-queue.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->

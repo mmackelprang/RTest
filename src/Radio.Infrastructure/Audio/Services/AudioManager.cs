@@ -484,9 +484,21 @@ public class AudioManager : IAudioManager, IAsyncDisposable
   }
 
   /// <summary>
-  /// Handles ducking state changes (start/stop).
-  /// Clears the ducking multiplier when ducking ends to ensure clean restoration.
+  /// Handles ducking state changes.
   /// </summary>
+  /// <remarks>
+  /// ⚠ THE OUTER BRANCH IS <see cref="DuckingStateChangedEventArgs.IsDucking"/> AND MUST STAY THAT
+  /// WAY. Transition (PHN-1f) is consulted only to choose between two LOG LINES; it never decides
+  /// whether to clear the ducking multiplier. The reason is concrete: DuckingSourceTransition.Started
+  /// is 0, so any args object built without setting the field reports Started — and an outer branch
+  /// keyed on it would take the "started" arm for a raise carrying IsDucking:false, skip
+  /// ClearDuckingMultiplier, and leave the radio STUCK DUCKED. That is a worse failure than the
+  /// mislabelled log line the field exists to fix.
+  ///
+  /// ⚠ Since PHN-1f a raise can also mean "a source left while others remain" — Ended with IsDucking
+  /// still TRUE. Before that field existed this method logged "Ducking started" for it, which is the
+  /// comment-accuracy class CLAUDE.md § Pre-Merge Review names.
+  /// </remarks>
   private void OnDuckingStateChanged(object? sender, DuckingStateChangedEventArgs e)
   {
     if (_playbackService == null)
@@ -496,22 +508,40 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     if (e.IsDucking)
     {
-      _logger.LogInformation(
-        "Ducking started: source={TriggerSource}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
-        e.TriggeringSource?.Name ?? "unknown", e.DuckLevel, e.ActiveEventCount);
-    }
-    else
-    {
-      // Ducking ended — clear all ducking multipliers to restore full volume
-      if (_activeSource != null)
+      if (e.Transition == DuckingSourceTransition.Started)
       {
-        _playbackService.ClearDuckingMultiplier(_activeSource.Id);
+        _logger.LogInformation(
+          "Ducking started: source={TriggerSource}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
+          e.TriggeringSource?.Name ?? "unknown", e.DuckLevel, e.ActiveEventCount);
+      }
+      else
+      {
+        // A source left and others remain. Debug rather than Information: the ducking level did not
+        // move and nothing was restored, and since LOG-11 the journal carries Warning and above
+        // anyway — this is file-sink detail, on a box where log volume correlates with audible
+        // distortion.
+        _logger.LogDebug(
+          "Ducking continues: source={TriggerSource} left, activeEvents={EventCount}",
+          e.TriggeringSource?.Name ?? "unknown", e.ActiveEventCount);
       }
 
-      _logger.LogInformation(
-        "Ducking ended: volume restored, activeEvents={EventCount}",
-        e.ActiveEventCount);
+      return;
     }
+
+    // Ducking ended — clear all ducking multipliers to restore full volume.
+    // ⚠ SEMANTICALLY unchanged from before PHN-1f, deliberately: the edge is still literally
+    // `!e.IsDucking`, and nothing about when this block runs has moved. The BYTES did move — the block
+    // came out of an `else` and now sits behind an early `return`, two spaces to the left — and an
+    // earlier revision of this comment said "byte for byte", which is the kind of claim a diff
+    // falsifies at a glance.
+    if (_activeSource != null)
+    {
+      _playbackService.ClearDuckingMultiplier(_activeSource.Id);
+    }
+
+    _logger.LogInformation(
+      "Ducking ended: volume restored, activeEvents={EventCount}",
+      e.ActiveEventCount);
   }
 
   /// <inheritdoc/>

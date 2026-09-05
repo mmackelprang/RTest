@@ -1343,11 +1343,20 @@ public sealed class EventPlaybackServiceTests : IDisposable
   [Fact]
   public async Task AStoppingSourceNeverPreempts()
   {
-    // The sharpest trap in this PR. DuckingService.StopDuckingAsync deletes the source's priority
-    // entry BEFORE it raises, and GetPriority then falls back to DefaultEventPriority (8). So a
-    // handler that acted on IsDucking:false — or that resolved the priority late, on the dispatched
-    // task — would read an ENDING announcement as a priority-8 preemption and stop the voicemail every
-    // time something else finished talking.
+    // The sharpest trap in this PR, and since PHN-1f exactly ONE thing stops it.
+    // DuckingService.StopDuckingAsync deletes the source's priority entry before it raises, and
+    // RaiseSetEmptied reproduces that: its args carry DuckingService.DefaultEventPriority (8), which
+    // is AT the threshold. So the threshold test does not reject these args, and neither does the
+    // identity check — the trigger is a foreign announcement, not our source. What rejects them is
+    // rule 1, `e.Transition != DuckingSourceTransition.Started`: a source LEAVING is not a source
+    // starting. Without it, the voicemail is stopped every time something else finishes talking.
+    //
+    // ⚠ TWO MECHANISMS THIS COMMENT USED TO NAME ARE GONE, and must not be looked for. There is no
+    // "IsDucking filter" — OnDuckingStateChanged has not read that field since PHN-1f — and there is
+    // no late priority resolution, because the priority travels on the args.
+    //
+    // MUTATION: delete `e.Transition != DuckingSourceTransition.Started` from the handler's guard and
+    // this reds: the ending announcement reads as a priority-8 start, and StopCalls becomes 1.
     var ducking = new FakeDuckingService();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
@@ -1357,8 +1366,8 @@ public sealed class EventPlaybackServiceTests : IDisposable
     var accepted = await service.StartAsync(SpeechRequest());
     await playing.WaitAsync(TimeSpan.FromSeconds(5));
 
-    // A foreign announcement that started at priority 3 and has now ended: its entry is gone, so
-    // GetPriority answers 8 for it. Only the IsDucking filter stops this being a preemption.
+    // A foreign announcement that started at priority 3 and has now ended: its entry is gone, so both
+    // GetPriority and the Ended args answer 8 for it. Only rule 1 stops this being a preemption.
     var announcement = new FakeEventSource();
     ducking.RaiseStarted(announcement, 3);
     await service.PreemptionTail;
@@ -1374,25 +1383,32 @@ public sealed class EventPlaybackServiceTests : IDisposable
   [Fact]
   public async Task AStopAllRaiseWithNoTriggeringSourceIsIgnored()
   {
-    // StopAllDuckingAsync raises with IsDucking FALSE and a NULL TriggeringSource. It has no non-test
-    // callers today and this PR does not give it one; the shape is pinned because the event's contract
-    // permits it, not because a caller does it.
+    // StopAllDuckingAsync raises Transition AllCleared with a NULL TriggeringSource, IsDucking false
+    // and priority 0. It has no non-test callers today and this PR does not give it one; the shape is
+    // pinned because the event's contract permits it, not because a caller does it.
     //
     // ⚠ THIS TEST CANNOT FAIL UNDER ANY SINGLE-GUARD MUTATION, and that is stated plainly because the
-    // repo's worst recent defect was a test that could not fail. Measured: dropping "is not { } trigger"
-    // leaves it green (rule 1 returns first, since these args carry IsDucking false); dropping
-    // "!e.IsDucking" ALSO leaves it green (the null pattern then catches it). It only reds when both
-    // halves go. The two guards are fully redundant for this arg shape.
+    // repo's worst recent defect was a test that could not fail. An earlier revision of this comment
+    // named the wrong guards for it — it spoke of "!e.IsDucking", which OnDuckingStateChanged has not
+    // read since PHN-1f. Traced against the handler as it now stands, THREE separate things turn these
+    // args away and each is sufficient alone:
+    //
+    //   • `e.Transition != DuckingSourceTransition.Started` — AllCleared is not Started;
+    //   • `e.TriggeringSource is not { } trigger`           — it is null;
+    //   • `priority < threshold`                            — these args carry 0, and 0 < 8.
+    //
+    // Measured: removing the first two together still leaves this GREEN (the threshold test returns);
+    // removing all three reds it, as a NullReferenceException on trigger.Id. The redundancy is
+    // threefold, not the twofold this comment used to claim.
     //
     // So this is a SHAPE-DOCUMENTATION test, not a guard test: it records what StopAllDuckingAsync
     // actually emits and that the seam survives it. The guards are isolated elsewhere — rule 1 by
     // AStoppingSourceNeverPreempts, the null pattern by AStartRaiseWithNoTriggeringSourceIsIgnored
     // below, each of which reds under its own single mutation.
-    var logs = new CapturingLoggerProvider();
     var ducking = new FakeDuckingService();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
-    using var service = CreateService(ttsFactory: tts, ducking: ducking, logs: logs);
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
 
     var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
     var accepted = await service.StartAsync(SpeechRequest());
@@ -1403,20 +1419,22 @@ public sealed class EventPlaybackServiceTests : IDisposable
 
     Assert.Equal(accepted.Id, service.Current?.Id);
     Assert.Equal(0, source.StopCalls);
-    // Ignored STRUCTURALLY, not swallowed: a handler that reached GetPriority and crashed into its own
-    // catch would leave this line behind, and would look identical in every other assertion.
-    Assert.DoesNotContain(
-      logs.Messages,
-      m => m.Contains("Could not read the priority", StringComparison.Ordinal));
   }
 
   [Fact]
   public async Task AStartRaiseWithNoTriggeringSourceIsIgnored()
   {
-    // The one shape that isolates the null half of the guard: IsDucking TRUE with a null
+    // The one shape that isolates the null half of the guard: a Started transition with a null
     // TriggeringSource, which rule 1 does not filter. Without the pattern match this is a
     // NullReferenceException on the raising thread — which, inside DuckingService, is the swallowed
     // announcement that POST /api/notifications/announce still reports as 200.
+    //
+    // ⚠ THE PRIORITY ON THESE ARGS IS DELIBERATELY DuckingService.DefaultEventPriority (8), NOT 0, and
+    // that is the whole difference between this test having teeth and not. Task 6f moved the priority
+    // onto the args, so with 0 the handler returns at `priority < threshold` BEFORE it ever
+    // dereferences the trigger — the null pattern is never reached, and this test was green with the
+    // pattern deleted. At 8 >= 8 the pattern is the only thing standing between these args and
+    // trigger.Id.
     //
     // ⚠ No producer in this tree emits these args. DuckingService.StartDuckingAsync takes a non-null
     // source (ArgumentNullException.ThrowIfNull) and passes it straight through, so today the guard is
@@ -1424,11 +1442,13 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // DuckingStateChangedEventArgs.TriggeringSource is declared nullable, and a subscriber that
     // assumes otherwise is one producer away from a live fault. Driven through the args directly for
     // exactly that reason: the handler's contract is about the args, not about how they arose.
-    var logs = new CapturingLoggerProvider();
+    //
+    // MUTATION: replace the guard's `e.TriggeringSource is not { } trigger` with
+    // `var trigger = e.TriggeringSource!;` and this reds with a NullReferenceException.
     var ducking = new FakeDuckingService();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
-    using var service = CreateService(ttsFactory: tts, ducking: ducking, logs: logs);
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
 
     var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
     var accepted = await service.StartAsync(SpeechRequest());
@@ -1442,9 +1462,6 @@ public sealed class EventPlaybackServiceTests : IDisposable
     Assert.Equal(accepted.Id, service.Current?.Id);
     Assert.Equal(EventPlaybackState.Playing, service.Current?.State);
     Assert.Equal(0, source.StopCalls);
-    Assert.DoesNotContain(
-      logs.Messages,
-      m => m.Contains("Could not read the priority", StringComparison.Ordinal));
   }
 
   [Fact]
@@ -1564,27 +1581,26 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
-  public async Task APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY()
+  public async Task APlaybackStartedUnderAHigherPrioritySourceWaitsAndThenPlays()
   {
-    // ⚠ CHARACTERIZATION. This asserts what the seam does TODAY, not what it should do, and it is the
-    // ONE test in this file written to be changed rather than kept.
+    // ⚠ THIS WAS APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY, and it is the one test in
+    // this file that was written to be changed rather than kept. PHN-1d pinned today's mixing so that
+    // D28's queue would arrive as an edited assertion. This is that edit.
     //
-    // ADR-029 D5 §6.2 rule 2 is symmetric — "for speech over speech, stopping is strictly better than
-    // mixing" is about the audio, not about who moved first — so a playback starting while a source at
-    // or above GvMedia:PreemptAtPriority is already sounding should not add a second voice. PR 4
-    // implements only the direction the ADR states in words: a STARTING high-priority source stops an
-    // in-flight playback (OnDuckingStateChanged). The mirror case still mixes.
+    // ⚠ WHAT CARRIES THE DECISION IS A PAIR, AND IT IS TAKEN AT THE WAITING CHECKPOINT — not at the
+    // end: source.PlayCalls == 0 AND ducking.ActiveEventCount == 1 while the blocker is STILL IN THE
+    // SET. One voice in the room, and it is the blocker's; the attended source is demonstrably absent
+    // from the ducking set, which is what "the two voices no longer overlap" actually means here.
     //
-    // The owner's decision of 2026-09-04 (punch list D28) is that the mirror case QUEUES: the playback
-    // waits for the blocking source to finish and then plays. Refusing it was considered and rejected —
-    // "press play, get an error, nothing happens" is the punch list's tier (b) shape. Queueing needs a
-    // waiting state on /hubs/audio and a chip that renders it, so it ships in PR 5 with them.
+    // ⚠ The final ActiveEventCount assertion is NOT the decision, and an earlier revision of this
+    // comment said it was. The blocker is removed two statements before it, so 1 is the count in the
+    // waits-world AND in the mixes-world (1 → 2 → 1) — it cannot fail. Its predecessor asserted
+    // Equal(2, …) WHILE BOTH WERE LIVE, which is what made that one load-bearing. It is kept below as
+    // an end-state check and claims nothing more than that.
     //
-    // ⚠ PR 5: this assertion is what should fail when you add the queue. UPDATE it — to Waiting, then
-    // Playing after the blocker completes — do not delete it.
-    //
-    // Nothing reaches a user in the meantime: GvMedia:Enabled ships false and is not flipped until
-    // PR 6, and what this falls back to is the mixing this system has always done.
+    // MUTATION (§2.1): delete the WaitForClearAirAsync call in AcquireAndPlayAsync and this reds on
+    // the first rendezvous — the playback reaches Playing immediately, so no Waiting snapshot is ever
+    // published and its 5 s bound fires.
     var ducking = new FakeDuckingService();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
@@ -1594,26 +1610,575 @@ public sealed class EventPlaybackServiceTests : IDisposable
     var blocker = new FakeEventSource();
     ducking.RaiseStarted(blocker, 8);
 
-    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
-    var accepted = await service.StartAsync(SpeechRequest());
-    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
-    await service.PreemptionTail;
+    // The blocker really is above the threshold, so this test is about the RULE and not about a
+    // mis-configured fixture. Read BEFORE the stop below deletes the override.
+    Assert.True(ducking.GetPriority(blocker) >= new GvMediaOptions().PreemptAtPriority);
 
-    // TODAY: it plays anyway, and the room gets two voices.
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    var waited = await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // It is WAITING, and it has not made a sound.
+    Assert.Equal(accepted.Id, waited.Id);
+    Assert.Equal(EventPlaybackState.Waiting, waited.State);
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+
+    // ⭐ THE PAIR THAT CARRIES THE DECISION, taken while the blocker is still in the set: no audio,
+    // and exactly ONE source ducking — the blocker's. The attended source has not joined it, because
+    // the wait happens before TryAdopt and before StartDuckingAsync.
+    Assert.Equal(0, source.PlayCalls);
+    Assert.Equal(1, ducking.ActiveEventCount);
+
+    // The doorbell finishes.
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await ducking.StopDuckingAsync(blocker);
+    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
     Assert.Equal(accepted.Id, final.Id);
     Assert.Equal(EventPlaybackState.Playing, final.State);
     Assert.Equal(1, source.PlayCalls);
+
+    // End state: the attended source is the only thing ducking now. Kept because it is true and cheap,
+    // NOT because it can fail — see the header. The blocker left two statements ago, so 1 is also what
+    // a seam that had mixed would report by this point.
+    Assert.Equal(1, ducking.ActiveEventCount);
+  }
+
+  [Fact]
+  public async Task AWaitingPlaybackIsReportedByCurrent()
+  {
+    // §0.2: a waiting playback IS _current, in a new state — there is no pending slot. That is what
+    // makes GET /api/audio/events/current carry it with no controller change at all (ADR-029 §8.1's
+    // re-attach path), and what makes StopAsync and the replacement arm resolve it for free.
+    //
+    // MUTATION (§2.1, shared with the test above): delete the WaitForClearAirAsync call and no Waiting
+    // snapshot is ever published, so the rendezvous times out.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    ducking.RaiseStarted(new FakeEventSource(), 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
     Assert.Equal(accepted.Id, service.Current?.Id);
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+    Assert.Null(service.Current?.FailureReason);
 
-    // ⚠ This is what makes the name honest. Every assertion above is about the new playback STARTING;
-    // "mixes" is a claim about two sources sounding AT ONCE, and only this one shows it. The blocker is
-    // still in the ducking set alongside the attended source — two voices, which is exactly what D5
-    // exists to prevent and what PR 5's queue will fix.
-    Assert.Equal(2, ducking.ActiveEventCount);
+    // C-67: a waiting SPEECH playback reports a null duration, because playback.Source is null until
+    // TryAdopt and there is no other estimate. PHN-1e §0.6 item 2 already requires a client to render
+    // that as indeterminate rather than zero. SnapshotOf is unchanged by this row.
+    Assert.Null(service.Current?.Duration);
+    Assert.Equal(TimeSpan.Zero, service.Current?.PositionAtBroadcast);
+  }
 
-    // The blocker really is above the threshold, so this test is about the RULE and not about a
-    // mis-configured fixture. If this line ever fails, the fixture drifted, not the behaviour.
-    Assert.True(ducking.GetPriority(blocker) >= new GvMediaOptions().PreemptAtPriority);
+  [Fact]
+  public async Task StopAsyncResolvesAWaitingPlayback_AndDisposesWhatItAcquired()
+  {
+    // Two claims in one test because they are the same mechanism. StopAsync resolves _current by id
+    // and the waiting playback IS _current, so the stop needs no new code — and TearDownAsync cancels
+    // the token, which is what unblocks the parked waiter as an OperationCanceledException.
+    //
+    // ⚠ THE DISPOSE ASSERTION IS C-57 AND IT IS THE ONE THAT CAN FAIL ALONE. Nothing has been adopted,
+    // so TearDownAsync and FailAsync both reach ClaimSourceForRelease, which answers null — the source
+    // can only be released by AcquireAndPlayAsync's own guard around the wait.
+    //
+    // MUTATION (§2.1): delete that guard's DisposeOrphanAsync calls and DisposeCalls stays 0 while
+    // every other assertion here still passes.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    ducking.RaiseStarted(new FakeEventSource(), 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var stopped = NextSnapshotWith(service, EventPlaybackState.Stopped);
+    Assert.True(await service.StopAsync(accepted.Id));
+
+    var final = await stopped.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(EventPlaybackState.Stopped, final.State);
+    Assert.Equal(0, source.PlayCalls);
+
+    // The acquisition task unwinds on its own thread, so the release is awaited rather than assumed.
+    await WaitUntilAsync(() => source.DisposeCalls == 1, TimeSpan.FromSeconds(5));
+  }
+
+  [Fact]
+  public async Task ASecondStartReplacesAWaitingPlayback()
+  {
+    // §0.2: replace semantics come free, because StartAsync's replacement arm tears down whatever is
+    // in the slot without asking what state it is in. D28 is one deep.
+    //
+    // MUTATION (§2.1): make the replacement arm skip a playback whose Source is null — which is every
+    // waiting playback — and the first one is never stopped, never disposed, and stays _current.
+    var ducking = new FakeDuckingService();
+    var first = new FakeEventSource();
+    var second = new FakeEventSource();
+    var queue = new Queue<IEventAudioSource>([first, second]);
+    var tts = new FakeTtsFactory
+    {
+      OnCreate = (_, _, _) =>
+      {
+        lock (queue) { return Task.FromResult(queue.Dequeue()); }
+      }
+    };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    ducking.RaiseStarted(new FakeEventSource(), 8);
+
+    var firstWaiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var one = await service.StartAsync(SpeechRequest());
+    await firstWaiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var replaced = NextSnapshotMatching(
+      service, s => s.Id == one.Id && s.State == EventPlaybackState.Stopped);
+    var two = await service.StartAsync(SpeechRequest());
+    await replaced.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert.NotEqual(one.Id, two.Id);
+    Assert.Equal(two.Id, service.Current?.Id);
+    Assert.Equal(0, first.PlayCalls);
+    await WaitUntilAsync(() => first.DisposeCalls == 1, TimeSpan.FromSeconds(5));
+  }
+
+  [Fact]
+  public async Task AWaitingPlaybackExpiresAsFailedWaitExpired()
+  {
+    // D28's staleness bound. GvMedia:MaxQueuedWaitSeconds has no "off": a 0 clamps to 1, because a 0
+    // meaning "never wait" would resolve to mixing, which is the option D28 rejected.
+    //
+    // MUTATION (§2.1): drop the timeout argument from waiter.Task.WaitAsync and the wait never ends —
+    // the 5 s bound below turns the hang into a red. Separately, delete the wait guard's
+    // DisposeOrphanAsync calls and the DisposeCalls assertion reds alone (C-57).
+    var time = new FakeTimeProvider();
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(
+      ttsFactory: tts, ducking: ducking, timeProvider: time,
+      gvMedia: new GvMediaOptions
+      {
+        Enabled = true, CacheDirectory = _cacheDir, MaxQueuedWaitSeconds = 30
+      });
+
+    ducking.RaiseStarted(new FakeEventSource(), 8);
+
+    // ⚠ The rendezvous is the WAITING SNAPSHOT, not a delay — but it is a PROXY FOR THE ARM RATHER
+    // THAN THE ARM, and saying so is the point. WaitForClearAirAsync publishes Waiting STRICTLY
+    // BEFORE it reaches waiter.Task.WaitAsync, so a single Advance taken on this rendezvous can land
+    // before the timer exists, advance past nothing, and leave the test hanging on the Failed
+    // snapshot — a race that reads as an unrelated timeout rather than as what it is.
+    //
+    // So the clock is advanced in a BOUNDED LOOP until the Failed task completes. FakeTimeProvider
+    // fires every DUE timer synchronously inside Advance, so the first advance that lands after the
+    // arm produces the expiry and the ones before it are no-ops. Still no elapsed-time assertion:
+    // WaitUntilAsync polls inside a bound, exactly as the rest of this file does.
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var failed = NextSnapshotWith(service, EventPlaybackState.Failed);
+    await WaitUntilAsync(
+      () =>
+      {
+        time.Advance(TimeSpan.FromSeconds(30));
+        return failed.IsCompleted;
+      },
+      TimeSpan.FromSeconds(5));
+
+    var final = await failed;
+
+    Assert.Equal(EventPlaybackState.Failed, final.State);
+    Assert.Equal("WaitExpired", final.FailureReason);
+    Assert.Equal(0, source.PlayCalls);
+    // C-57: the acquired source was disposed rather than leaked.
+    Assert.Equal(1, source.DisposeCalls);
+  }
+
+  [Fact]
+  public async Task AHigherPrioritySourceEndingWhileALowerOneContinuesStillWakesTheQueue()
+  {
+    // ⭐ THE STARVATION CASE, and the whole reason DuckingStateChangedEventArgs gained a Transition
+    // field. Before PHN-1f, StopDuckingAsync raised ONLY when the set emptied — so a priority-8 blocker
+    // ending while a priority-3 announcement kept ducking produced NO RAISE AT ALL, this wake never
+    // ran, and the playback expired as Failed/"WaitExpired" thirty seconds later: D28's rejected option
+    // delivered late.
+    //
+    // MUTATION (§2.1): revert FakeDuckingService.StopDuckingAsync's raise to `if (remaining == 0)` —
+    // the pre-PHN-1f rule — or revert DuckingService's, and this hangs on the Playing rendezvous.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var blocker = new FakeEventSource();
+    var quiet = new FakeEventSource();
+    ducking.RaiseStarted(blocker, 8);
+    ducking.RaiseStarted(quiet, 3);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // The blocker leaves. The set does NOT empty — the priority-3 announcement is still ducking.
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    ducking.RaiseEndedWithOthersRemaining(blocker);
+
+    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(1, source.PlayCalls);
+
+    // And the set really was non-empty across the raise, so this is the starvation case and not the
+    // emptying one wearing its name.
+    Assert.Contains(quiet, ducking.GetActiveEventsByPriority());
+  }
+
+  [Fact]
+  public async Task AWaitingPlaybackIsNotWokenByASubThresholdSourceEnding()
+  {
+    // The wake is a STATE re-evaluation, not an edge: it asks the same predicate that decided to wait
+    // whether the air is clear NOW. A sub-threshold source leaving while the real blocker is still
+    // sounding must therefore change nothing.
+    //
+    // ⚠ TIMING DECLARATION (CLAUDE.md § Test Timing). The negative half is a BOUNDED NEGATIVE — "no
+    // Playing snapshot arrived within 500 ms" — so starvation can only make it pass more easily, never
+    // flip a pass to a fail. That is the safe direction. The positive half that follows is what makes
+    // the negative half mean something: the same playback DOES wake once the real blocker leaves, so
+    // the 500 ms window was not merely too short for anything at all to happen.
+    //
+    // MUTATION (§2.1): make TryWakeWaitingPlayback wake unconditionally instead of re-evaluating the
+    // predicate, and the ThrowsAsync below finds a completed task instead of a timeout.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var blocker = new FakeEventSource();
+    var quiet = new FakeEventSource();
+    ducking.RaiseStarted(blocker, 8);
+    ducking.RaiseStarted(quiet, 3);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    ducking.RaiseEndedWithOthersRemaining(quiet);
+
+    await Assert.ThrowsAsync<TimeoutException>(
+      () => playing.WaitAsync(TimeSpan.FromMilliseconds(500)));
+    Assert.Equal(0, source.PlayCalls);
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+
+    // …and the same playback wakes the moment the source that actually blocks it leaves.
+    var wokenPlaying = NextSnapshotWith(service, EventPlaybackState.Playing);
+    ducking.RaiseEndedWithOthersRemaining(blocker);
+    await wokenPlaying.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(1, source.PlayCalls);
+  }
+
+  [Fact]
+  public async Task ASecondBlockerStartingDuringAWaitDoesNotStopTheWaitingPlayback()
+  {
+    // ⭐ ADR-029 §6.2 rule 2 stops an IN-FLIGHT attended playback, and a WAITING one is not in flight —
+    // IEventPlaybackService.Current's own remark says so. Without the `victim.IsWaiting` clause in
+    // OnDuckingStateChanged the guard falls straight through, because a waiting playback's Source is
+    // null for the whole of the wait (_source is assigned only in TryAdopt, after the wait and after
+    // _gate), so ReferenceEquals(null, trigger) is false and a real StopAsync is dispatched.
+    //
+    // The user-visible failure that closes: press play behind a doorbell, watch Waiting, and the very
+    // next announcement destroys the queued playback — Waiting → Stopped, no sound, no reason given.
+    // 8 is BOTH DuckingService.DefaultEventPriority and the shipped GvMedia:PreemptAtPriority, so
+    // "the very next announcement" means every announcement that names no priority.
+    //
+    // ⚠ TIMING DECLARATION (CLAUDE.md § Test Timing). The middle assertion is a BOUNDED NEGATIVE —
+    // "no Playing snapshot arrived within 500 ms" — so starvation can only make it pass more easily,
+    // never flip a pass to a fail. The positive half after it is what stops that window being
+    // meaningless: the same playback DOES sound once the second blocker leaves.
+    //
+    // MUTATION (§2.1): delete `victim.IsWaiting` from OnDuckingStateChanged's guard and this reds at
+    // the first block, with the playback Stopped rather than Waiting.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var first = new FakeEventSource();
+    ducking.RaiseStarted(first, 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // A SECOND source starts at the threshold while the first is still sounding. PreemptionTail is the
+    // rendezvous: OnDuckingStateChanged decides on the raising thread and assigns the tail before
+    // RaiseStarted returns, so awaiting it here covers the dispatch a regression would make.
+    var second = new FakeEventSource();
+    ducking.RaiseStarted(second, 8);
+    await service.PreemptionTail;
+
+    Assert.Equal(accepted.Id, service.Current?.Id);
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+    Assert.Equal(0, source.PlayCalls);
+    Assert.Equal(0, source.StopCalls);
+
+    // …and it is now waiting for BOTH. Ending only the first changes nothing, because the wake is a
+    // state re-evaluation against the same predicate and the second blocker still fails it.
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    ducking.RaiseEndedWithOthersRemaining(first);
+    await Assert.ThrowsAsync<TimeoutException>(
+      () => playing.WaitAsync(TimeSpan.FromMilliseconds(500)));
+    Assert.Equal(EventPlaybackState.Waiting, service.Current?.State);
+    Assert.Equal(0, source.PlayCalls);
+
+    // Ending the second clears the air, and the playback the preemption would have destroyed sounds.
+    ducking.RaiseEndedWithOthersRemaining(second);
+    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(1, source.PlayCalls);
+  }
+
+  [Fact]
+  public async Task APlaybackAtPriorityEightDoesNotBlockItself()
+  {
+    // IsBlockedByAHigherPrioritySource deliberately writes NO exclusion for the attended source, and
+    // this is what says the exclusion is unnecessary rather than merely absent: the predicate is only
+    // ever evaluated before StartDuckingAsync, so our own source is not in the set when it is asked.
+    // A guard for a state that cannot occur reads as evidence that it can.
+    //
+    // MUTATION (§2.1) — and it is the REVERSE of the obvious one: move WaitForClearAirAsync BELOW
+    // StartDuckingAsync and this playback blocks on itself until WaitExpired, so the Playing
+    // rendezvous times out. Adding a self-exclusion to the predicate leaves it green, which is the
+    // point.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    var accepted = await service.StartAsync(SpeechRequest() with { Priority = 8 });
+    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(1, source.PlayCalls);
+
+    // It really did claim 8 — at or above the threshold — so the predicate WOULD have blocked on it
+    // had it been asked after ducking started.
+    Assert.Equal(8, ducking.GetPriority(source));
+    Assert.True(8 >= new GvMediaOptions().PreemptAtPriority);
+  }
+
+  [Fact]
+  public async Task AQuietRoomPublishesNoWaitingSnapshotAtAll()
+  {
+    // §0.6: the overwhelmingly common case must cost one walk of an empty list and ZERO extra messages
+    // on the wire. Trap 5 is about churn on an N100, and a queue that broadcast a Waiting nobody
+    // waited for would be churn with a straight face.
+    //
+    // MUTATION (§2.1): publish Waiting before the predicate in WaitForClearAirAsync and this reds.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var seen = new List<EventPlaybackState>();
+    service.PlaybackChanged += (_, s) => { lock (seen) { seen.Add(s.State); } };
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await service.StartAsync(SpeechRequest());
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    lock (seen)
+    {
+      Assert.Equal(new[] { EventPlaybackState.Preparing, EventPlaybackState.Playing }, seen);
+    }
+  }
+
+  [Fact]
+  public async Task StopAllDuckingWakesAWaitingPlayback()
+  {
+    // StopAllDuckingAsync raises with a NULL TriggeringSource and clears the whole set, so it is one of
+    // the strongest reasons a wait should end — and the one shape a wake wired below the null check
+    // would miss entirely.
+    //
+    // MUTATION (§2.1): move TryWakeWaitingPlayback() below the `e.TriggeringSource is not { } trigger`
+    // test in OnDuckingStateChanged and this hangs on the Playing rendezvous.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    ducking.RaiseStarted(new FakeEventSource(), 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    var accepted = await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    ducking.RaiseStopAll();
+
+    var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+    Assert.Equal(accepted.Id, final.Id);
+    Assert.Equal(1, source.PlayCalls);
+  }
+
+  [Fact]
+  public async Task AWaitIsNotMissedWhenTheBlockerEndsWhileTheWaiterIsBeingArmed()
+  {
+    // ⚠ SAY WHAT THIS DOES AND DOES NOT PROVE. There is no rendezvous INSIDE WaitForClearAirAsync, so
+    // this cannot deterministically place the blocker's end between BeginWait and the re-check. It is
+    // a REPETITION test: N runs, so the interleaving is sampled rather than forced.
+    //
+    // ⚠ THE RENDEZVOUS IS AT ACQUISITION, and it is the only thing that makes the sampling worth
+    // doing. FakeTtsFactory.OnCreate signals before it hands the source back, so the test resumes with
+    // the acquisition switch about to return — a few statements from WaitForClearAirAsync's first
+    // predicate check, rather than an unbounded distance away. WITHOUT it the test stopped the blocker
+    // straight after StartAsync returned, and StartAsync returns as soon as it has QUEUED
+    // Task.Run(AcquireAndPlayAsync) — so most iterations never reached even the first predicate check
+    // and the loop sampled thread-pool scheduling latency instead of the window it names.
+    //
+    // ⛔ IT IS STILL A SAMPLER, NOT A PROOF, and the plan records it as a gap (§2.2 item 1). A run that
+    // passes has not shown the window is closed — it has shown it was not hit. The re-check is
+    // justified by C-66's argument, not by this test. Making it a proof means a test-only hook inside
+    // the production wait, which is a bigger change to that path than the race is worth.
+    //
+    // ⚠ THE RED RATE, MEASURED RATHER THAN ASSUMED, and the measurement is why the rendezvous exists.
+    // An earlier revision of this comment claimed deleting the re-check "reds MOST of the time". It
+    // did not. Both shapes were run against that mutation on the dev box, five runs each:
+    //
+    //   • WITHOUT the acquisition rendezvous — 5 of 5 GREEN, whole test in ~22 ms. The stop landed
+    //     before the first predicate check every time, so no wait was ever armed and the window the
+    //     test is named for was never entered.
+    //   • WITH it — 5 of 5 RED, each run parking on the 5 s bound. The wait IS armed, the wake is
+    //     missed, and without the re-check the playback never proceeds.
+    //
+    // ⚠ Five of five is not "always", and this comment must not be read as promising determinism the
+    // test does not have: the interleaving is still produced by the scheduler rather than forced.
+    //
+    // It is in the SAFE direction of CLAUDE.md § Test Timing: starvation can only make it pass more
+    // often, never flip a pass to a fail.
+    const int Runs = 30;
+
+    for (var i = 0; i < Runs; i++)
+    {
+      var ducking = new FakeDuckingService();
+      var source = new FakeEventSource();
+      var acquired = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      var tts = new FakeTtsFactory
+      {
+        OnCreate = (_, _, _) =>
+        {
+          // Signalled BEFORE the source is handed back, so the waiter below resumes while the
+          // acquisition switch is still returning.
+          acquired.TrySetResult();
+          return Task.FromResult<IEventAudioSource>(source);
+        }
+      };
+      using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+      var blocker = new FakeEventSource();
+      ducking.RaiseStarted(blocker, 8);
+
+      var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+      await service.StartAsync(SpeechRequest());
+
+      // Not a rendezvous on Waiting — the whole point is to race the arming rather than wait for it —
+      // but a rendezvous on ACQUISITION, which is the statement before it.
+      await acquired.Task.WaitAsync(TimeSpan.FromSeconds(5));
+      await ducking.StopDuckingAsync(blocker);
+
+      // The bound is what turns a missed wake into a red rather than a 30 s hang.
+      var final = await playing.WaitAsync(TimeSpan.FromSeconds(5));
+      Assert.Equal(EventPlaybackState.Playing, final.State);
+      Assert.Equal(1, source.PlayCalls);
+    }
+  }
+
+  [Fact]
+  public async Task TheWakeDoesNotStartAudioOnTheRaisingThread()
+  {
+    // BeginWait's TaskCreationOptions.RunContinuationsAsynchronously is what this pins. Without it,
+    // TrySetResult runs the waiting playback's continuation INLINE on the thread that raised
+    // DuckingStateChanged — and that continuation's next acts are a log write, _gate.WaitAsync,
+    // ducking and PlayAsync, none of which the announcement's own thread should be made to run.
+    //
+    // ⚠ WHAT THIS PINS IS THREAD OWNERSHIP, NOT DEADLOCK-FREEDOM, and the reason given here used to be
+    // wrong. See BeginWait's remark: a gate-holding raiser exists in this file today, and what makes
+    // an inline continuation safe anyway is that SemaphoreSlim.WaitAsync SUSPENDS rather than blocks.
+    //
+    // MUTATION (§2.1): drop RunContinuationsAsynchronously from BeginWait and PlayAsync happens inline
+    // on this thread, so PlayThreadId equals raisingThreadId.
+    //
+    // ⚠ TWO CAVEATS, because Assert.NotEqual is the kind of assertion that can pass for the wrong
+    // reason.
+    //
+    // ① The mutation only reds while `_gate.WaitAsync` completes SYNCHRONOUSLY. It does here, because
+    //    nothing else holds the gate at that instant. If something did, the inline continuation would
+    //    suspend there and PlayAsync would resume on a pool thread — and the assertion would pass with
+    //    the flag removed. The property is real; this instrument depends on the gate being free.
+    //
+    // ② The thread behaviour exercised is the FAKE's. FakeDuckingService raises synchronously on the
+    //    calling thread for every removal. The real DuckingService does so only where there is no fade
+    //    to await — a source leaving while OTHERS REMAIN, or a second source joining. The case driven
+    //    here is the set EMPTYING, and on that path the real service raises after
+    //    `await ApplyFadeAsync` (FadeSmooth over Audio:DuckingReleaseMs, 500 ms shipped), which hands
+    //    the continuation to the pool, so on the box that raise is already off the caller's thread.
+    //    The paths where the property actually bites are the non-emptying ones, and this test reaches
+    //    their thread shape only through the fake.
+    var ducking = new FakeDuckingService();
+    var source = new FakeEventSource();
+    var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
+    using var service = CreateService(ttsFactory: tts, ducking: ducking);
+
+    var blocker = new FakeEventSource();
+    ducking.RaiseStarted(blocker, 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    await service.StartAsync(SpeechRequest());
+    await waiting.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // The fake raises synchronously on whichever thread calls it, so this IS the raising thread.
+    var raisingThreadId = Environment.CurrentManagedThreadId;
+
+    var playing = NextSnapshotWith(service, EventPlaybackState.Playing);
+    await ducking.StopDuckingAsync(blocker);
+    await playing.WaitAsync(TimeSpan.FromSeconds(5));
+
+    // Asserted together: PlayThreadId is 0 until PlayAsync runs, so without the first line a test that
+    // never started audio would pass the second.
+    Assert.Equal(1, source.PlayCalls);
+    Assert.NotEqual(raisingThreadId, source.PlayThreadId);
+  }
+
+  [Fact]
+  public async Task AWaitingRemoteMediaSnapshotCarriesTheProvidersDuration()
+  {
+    // C-67: a waiting playback's Duration differs by ARM and both answers are honest. RemoteMedia
+    // reports the provider's value because playback.ReportedDuration is assigned during acquisition,
+    // which happens BEFORE the wait — so the chip can render a real bar while it waits. Speech reports
+    // null, which AWaitingPlaybackIsReportedByCurrent asserts. SnapshotOf is unchanged by this row.
+    var ducking = new FakeDuckingService();
+    using var service = CreateService(
+      ducking: ducking,
+      httpHandler: new StubHandler(_ => Mp3Of(320_000)));   // would estimate to 20s
+
+    ducking.RaiseStarted(new FakeEventSource(), 8);
+
+    var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
+    await service.StartAsync(VoicemailRequest(durationSeconds: 47));
+    var final = await waiting.WaitAsync(TimeSpan.FromSeconds(10));
+
+    Assert.Equal(EventPlaybackState.Waiting, final.State);
+    Assert.Equal(TimeSpan.FromSeconds(47), final.Duration);
+    Assert.Equal(TimeSpan.Zero, final.PositionAtBroadcast);
   }
 
   [Fact]
@@ -1657,11 +2222,21 @@ public sealed class EventPlaybackServiceTests : IDisposable
     await service.PreemptionTail;
 
     // ...and its transition raise arrives only after a concurrent stop deleted the override and
-    // emptied the set. GetPriority now answers 8 for it, so only the ActiveEventCount guard stands
-    // between here and a preemption.
+    // emptied the set.
+    //
+    // ⚠ WHAT SAVES THE PLAYBACK HERE CHANGED AT PHN-1f, and the change is the whole point of the args.
+    // Before it, the subscriber resolved the priority for itself, read the category default 8 for an
+    // announcement that had explicitly claimed 3, and only PHN-1d's ActiveEventCount == 0 guard stood
+    // between here and a preemption — a guard whose own acknowledged residual was that a second
+    // still-ducking source made the count non-zero and it fell silent. That guard is GONE. What stands
+    // here now is that the args carry the priority the source CLAIMED, captured inside the lock that
+    // added it and therefore before the fade that delayed this raise. So the rule that rejects it is
+    // the ordinary sub-threshold one: 3 < GvMedia:PreemptAtPriority.
     ducking.RaiseStartedAfterItAlreadyLeft(announcement);
     await service.PreemptionTail;
 
+    // The service's own map really has forgotten it — which is exactly why resolving the priority from
+    // the service rather than from the args would answer 8 and preempt.
     Assert.Equal(DuckingService.DefaultEventPriority, ducking.GetPriority(announcement));
     Assert.Equal(EventPlaybackState.Preparing, service.Current?.State);
 
@@ -1674,18 +2249,21 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
-  public async Task ThePriorityIsReadOnTheRaisingThread_NotOnTheDispatchedStop()
+  public async Task ThePreemptionPriorityComesFromTheArgs_NotFromTheDuckingService()
   {
-    // ⚠ THE C-36 GUARD, pinned at last. This was shipped as a declared gap — "no single-line mutation
-    // a test catches" — and that was true of a single line but wrong as an excuse: moving the whole
-    // resolution onto the dispatched Task.Run left the entire suite green, so the argument at
-    // OnDuckingStateChanged point (2) was carrying no test at all.
+    // ⚠ THIS WAS ThePriorityIsReadOnTheRaisingThread_NotOnTheDispatchedStop, and its premise is gone
+    // rather than merely renamed. PHN-1d's answer to C-36 was "resolve the priority SYNCHRONOUSLY, on
+    // the raising thread", and this test pinned WHERE the read happened because no outcome assertion
+    // could separate the two orderings. PHN-1f removed the read entirely: the priority is captured by
+    // DuckingService inside the lock that ADDS the source and travels on
+    // DuckingStateChangedEventArgs.TriggeringSourcePriority, so the subscriber asks nothing.
     //
-    // Why it matters: DuckingService.StopDuckingAsync DELETES the source's priority override before it
-    // raises, so a resolution that happens after the dispatch can read the category default 8 for a
-    // source whose caller explicitly claimed 3 - and stop a voicemail because something else FINISHED
-    // talking. No outcome assertion can separate the two orderings, because they agree until a stop
-    // races the read. What separates them is WHERE the read happens, so that is what this asserts.
+    // That is strictly stronger, and it is why the assertion inverts. Synchronous-on-the-raising-thread
+    // still lost the race when the transition raise arrived AFTER the attack fade — PHN-1d could only
+    // narrow that with an ActiveEventCount guard. Not reading at all cannot lose it.
+    //
+    // MUTATION: restore `priority = _duckingService.GetPriority(trigger)` in OnDuckingStateChanged and
+    // PriorityReadsOnTheRaisingThread moves, so the first assertion reds.
     var ducking = new FakeDuckingService();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };
@@ -1701,12 +2279,20 @@ public sealed class EventPlaybackServiceTests : IDisposable
     ducking.RaiseStarted(new FakeEventSource(), 9);
     await service.PreemptionTail;
 
-    // Fully deterministic in both directions: Task.Run never runs its body on the thread that queued
-    // it, so a dispatched resolution can only ever land in the second counter.
-    Assert.True(
-      ducking.PriorityReadsOnTheRaisingThread > readsOnThreadBefore,
-      "the preemption decision must resolve the priority synchronously, on the raising thread");
+    // NEITHER counter moves. Not on the raising thread, because the args already carry it; and not
+    // elsewhere, because nothing was dispatched to resolve it either.
+    //
+    // ⚠ TryWakeWaitingPlayback runs first on this raise and DOES call GetPriority — but only after its
+    // "is anything waiting" guard, and nothing is waiting here. That guard is a trap-5 requirement in
+    // its own right (this handler runs for every announcement on the box), and this test is the only
+    // place in the suite that would notice it being removed: without it the wake walks the ducking set
+    // on every raise and the raising-thread counter moves.
+    Assert.Equal(readsOnThreadBefore, ducking.PriorityReadsOnTheRaisingThread);
     Assert.Equal(readsElsewhereBefore, ducking.PriorityReadsElsewhere);
+
+    // …and the preemption still happened, so this is "it did not need to ask", not "it did not act".
+    Assert.Equal(EventPlaybackState.Stopped, service.Current?.State);
+    Assert.Equal(1, source.StopCalls);
   }
 
   [Fact]
@@ -2179,6 +2765,17 @@ internal sealed class FakeEventSource : IEventAudioSource
   public int DisposeCalls { get; private set; }
 
   /// <summary>
+  /// The managed thread PlayAsync was entered on, or 0 if it has never been called.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Recorded rather than counted, because the question TheWakeDoesNotStartAudioOnTheRaisingThread
+  /// asks is WHERE the audio started, not whether it did. Managed thread ids are never 0, so an
+  /// unset value cannot be mistaken for a real one — and a test that forgot to make PlayAsync happen
+  /// at all would compare against 0 and pass, so that test asserts PlayCalls too.
+  /// </remarks>
+  public int PlayThreadId { get; private set; }
+
+  /// <summary>
   /// When set, PlayAsync parks on it before returning. PlayCalls is incremented BEFORE the park, so a
   /// test can rendezvous on "the tail has entered PlayAsync" and then act while it is still in flight.
   /// </summary>
@@ -2208,6 +2805,7 @@ internal sealed class FakeEventSource : IEventAudioSource
   public async Task PlayAsync(CancellationToken cancellationToken = default)
   {
     PlayCalls++;
+    PlayThreadId = Environment.CurrentManagedThreadId;
     if (PlayGate is { } gate)
     {
       await gate.Task;
@@ -2298,6 +2896,14 @@ internal sealed class FakeEventSource : IEventAudioSource
 /// (3) IsDucking:false is raised only when the active set EMPTIES, as the real service does.
 /// (4) StopGate lets a test park StopDuckingAsync, which is how "the stop is dispatched, not awaited"
 ///     is observed rather than asserted.
+///
+/// ⚠ PHN-1f's fixer added a FIFTH, and it is the one this fake got wrong for a whole cycle:
+///
+/// (5) StopDuckingAsync raises for a source that was actually IN the set, and for the removal that
+///     empties it, and for nothing else — DuckingService's `wasPresent || needsRestore`, copied. The
+///     fake previously raised unconditionally with `isDucking: remaining > 0`, which is what the
+///     production COMMENT claimed rather than what the production CODE did, so the two could not
+///     disagree in front of a test. See StopDuckingAsync below.
 /// </remarks>
 internal sealed class FakeDuckingService : IDuckingService
 {
@@ -2367,6 +2973,7 @@ internal sealed class FakeDuckingService : IDuckingService
   {
     int count;
     bool newlyAdded;
+    int priorityAtStart;
     lock (Started)
     {
       Started.Add(s.Id);
@@ -2376,6 +2983,7 @@ internal sealed class FakeDuckingService : IDuckingService
       {
         _active.Add(s);
       }
+      priorityAtStart = GetPriorityUnlocked(s);
       count = _active.Count;
     }
 
@@ -2383,9 +2991,14 @@ internal sealed class FakeDuckingService : IDuckingService
     // unconditionally, which made it MORE permissive than production — the wrong direction for a fake,
     // because a handler that misbehaved only on a repeat start would have been exercised here and not
     // on the box.
+    //
+    // Captured inside the lock, mirroring DuckingService: the priority the args carry is the one the
+    // source had when it JOINED, not one resolved later.
     if (newlyAdded)
     {
-      RaiseStateChanged(s, isDucking: true, activeCount: count, duckLevel: 20f);
+      RaiseStateChanged(
+        s, isDucking: true, activeCount: count, duckLevel: 20f,
+        DuckingSourceTransition.Started, priorityAtStart);
     }
 
     return Task.CompletedTask;
@@ -2399,20 +3012,50 @@ internal sealed class FakeDuckingService : IDuckingService
     }
 
     int remaining;
+    int priorityBeforeRemoval;
+    bool wasPresent;
+    bool needsRestore;
     lock (Started)
     {
       Stopped.Add(s.Id);
-      _active.RemoveAll(a => string.Equals(a.Id, s.Id, StringComparison.Ordinal));
+
+      // ⚠ Captured BEFORE the removals, exactly as DuckingService does. Modelling the capture is the
+      // whole point: a fake that read the priority after the removal would answer the category default
+      // 8, and the starvation test would pass for the wrong reason.
+      priorityBeforeRemoval = GetPriorityUnlocked(s);
+
+      // This fake keeps no _isDucking field — its IsDucking IS "_active is non-empty" — so reading the
+      // count before the removal is the same predicate DuckingService writes as `_isDucking`.
+      var wasDucking = _active.Count > 0;
+
+      // ⚠ The bool is KEPT, as DuckingService now keeps Dictionary.Remove's. A stop for a source that
+      // is not in the set must raise NOTHING.
+      wasPresent = _active.RemoveAll(a => string.Equals(a.Id, s.Id, StringComparison.Ordinal)) > 0;
       // The real service removes the priority override here, BEFORE it raises. That is what makes
       // GetPriority answer the category default for a source that has just stopped.
       _effective.Remove(s.Id);
       remaining = _active.Count;
+      needsRestore = wasDucking && remaining == 0;
     }
 
-    // The real service raises here only when the set empties.
-    if (remaining == 0)
+    // ⚠ RAISES ON EVERY REMOVAL since PHN-1f, matching DuckingService, carrying the aggregate
+    // DuckingService carries. This line is what makes
+    // AHigherPrioritySourceEndingWhileALowerOneContinuesStillWakesTheQueue meaningful: revert it to
+    // `if (remaining == 0)` — the pre-PHN-1f rule — and that test must go RED.
+    //
+    // ⚠ AND ON NO OTHER CALL. The `wasPresent || needsRestore` guard and the `!needsRestore` argument
+    // are DuckingService's own, copied rather than approximated. This fake used to raise
+    // unconditionally with `isDucking: remaining > 0`, which implemented the production COMMENT rather
+    // than the production CODE — so a redundant stop emitted IsDucking:true with ActiveEventCount:0
+    // in production while the fake emitted IsDucking:false, and no test in this suite could see the
+    // divergence. Plan §2.2 item 2 makes this fake's fidelity the row's load-bearing assumption; this
+    // is that assumption being kept rather than asserted.
+    if (wasPresent || needsRestore)
     {
-      RaiseStateChanged(s, isDucking: false, activeCount: 0, duckLevel: 100f);
+      RaiseStateChanged(
+        s, isDucking: !needsRestore, activeCount: remaining,
+        duckLevel: remaining > 0 ? 20f : 100f,
+        DuckingSourceTransition.Ended, priorityBeforeRemoval);
     }
 
     DuckingLevelChanged?.Invoke(this, new DuckingLevelChangedEventArgs { TransitionComplete = true });
@@ -2486,25 +3129,44 @@ internal sealed class FakeDuckingService : IDuckingService
       _effective.Remove(source.Id);
     }
 
-    RaiseStateChanged(source, isDucking: false, activeCount: 0, duckLevel: 100f);
+    RaiseStateChanged(
+      source, isDucking: false, activeCount: 0, duckLevel: 100f,
+      DuckingSourceTransition.Ended, DuckingService.DefaultEventPriority);
   }
 
   /// <summary>
-  /// Raises IsDucking TRUE with a NULL TriggeringSource — the one shape the handler's null check is
-  /// the only guard against, because rule 1 lets it through.
+  /// Models a higher-priority source LEAVING while a lower-priority one keeps ducking — the starvation
+  /// case. Before PHN-1f this produced NO RAISE AT ALL from the real service.
+  /// </summary>
+  public void RaiseEndedWithOthersRemaining(IEventAudioSource source) =>
+    StopDuckingAsync(source).GetAwaiter().GetResult();
+
+  /// <summary>
+  /// Raises a STARTED transition with a NULL TriggeringSource — the one shape the handler's null check
+  /// is the only guard against, because rule 1 lets it through.
   /// </summary>
   /// <remarks>
   /// ⚠ Nothing in the tree produces these args: DuckingService.StartDuckingAsync refuses a null
   /// source outright. This exists because DuckingStateChangedEventArgs.TriggeringSource is nullable,
   /// so the subscriber's guard is part of its contract rather than an accident of who calls it.
+  ///
+  /// ⚠ THE PRIORITY IS DuckingService.DefaultEventPriority (8) AND MUST STAY AT OR ABOVE THE
+  /// THRESHOLD. It was 0 until PHN-1f's fixer, and at 0 these args are turned away by
+  /// `priority &lt; threshold` before the null check is ever reached — so
+  /// AStartRaiseWithNoTriggeringSourceIsIgnored was green with the null check deleted, which is
+  /// exactly the "test that cannot fail" this arc keeps finding. 8 is the value a real Started raise
+  /// carries when its caller named no priority, so it is also the honest one.
   /// </remarks>
   public void RaiseStartedWithNoSource() =>
-    RaiseStateChanged(null, isDucking: true, activeCount: 1, duckLevel: 20f);
+    RaiseStateChanged(
+      null, isDucking: true, activeCount: 1, duckLevel: 20f,
+      DuckingSourceTransition.Started, DuckingService.DefaultEventPriority);
 
   /// <summary>
-  /// Reproduces DuckingService's TRANSITION raise arriving after the source has already left the set:
-  /// IsDucking true, the starting source as TriggeringSource, its priority override already deleted,
-  /// and ActiveEventCount zero.
+  /// Reproduces DuckingService's Started TRANSITION raise arriving after the source has already left
+  /// the set: the starting source as TriggeringSource, its priority override already deleted from the
+  /// map GetPriority answers from, and ActiveEventCount zero — but the args still carrying the
+  /// priority the source CLAIMED, because DuckingService captures it before the fade.
   /// </summary>
   /// <remarks>
   /// ⚠ These args are not hypothetical. DuckingService raises the transition event AFTER awaiting
@@ -2512,21 +3174,52 @@ internal sealed class FakeDuckingService : IDuckingService
   /// landing inside the fade deletes the override and empties the set before the raise fires. Reached
   /// today only through PhoneCallIntegrationService, which is dormant — and reachable the moment the
   /// phone arc enables it, which is what this arc is building toward.
+  ///
+  /// ⚠ What this helper DEMONSTRATES changed at PHN-1f, and the change is the point. Before it, these
+  /// args were the fade-window race: the subscriber resolved the priority for itself, read the
+  /// category default 8, and PHN-1d's ActiveEventCount == 0 guard was what stopped it acting on a
+  /// source that had already gone. PHN-1f closed the race at the source instead — the priority is
+  /// captured inside the lock that adds the entry, so it survives the deletion — and the guard is
+  /// gone. So the assertion this helper supports is now "the preemption still reads the priority the
+  /// caller claimed, not the default 8", not "the guard rejects it". The helper stays because the
+  /// args shape it produces is still reachable and still worth pinning.
+  ///
+  /// The priority is captured BEFORE the removal for exactly the reason DuckingService captures it
+  /// before its own: capturing after would answer 8 and the test would pass for the wrong reason.
   /// </remarks>
   public void RaiseStartedAfterItAlreadyLeft(IEventAudioSource source)
   {
+    int claimed;
     lock (Started)
     {
+      claimed = GetPriorityUnlocked(source);
       _effective.Remove(source.Id);
       _active.RemoveAll(a => string.Equals(a.Id, source.Id, StringComparison.Ordinal));
     }
 
-    RaiseStateChanged(source, isDucking: true, activeCount: 0, duckLevel: 100f);
+    RaiseStateChanged(
+      source, isDucking: true, activeCount: 0, duckLevel: 100f,
+      DuckingSourceTransition.Started, claimed);
   }
 
   /// <summary>Reproduces StopAllDuckingAsync's raise: IsDucking false and a NULL TriggeringSource.</summary>
-  public void RaiseStopAll() =>
-    RaiseStateChanged(null, isDucking: false, activeCount: 0, duckLevel: 100f);
+  /// <remarks>
+  /// ⚠ It also CLEARS the set, because the real StopAllDuckingAsync does — and since PHN-1f that is
+  /// what makes this raise able to wake a D28 wait rather than merely be ignored by the preemption
+  /// rule. A helper that raised AllCleared while leaving _active populated would let
+  /// StopAllDuckingWakesAWaitingPlayback pass or fail for reasons unrelated to the wake.
+  /// </remarks>
+  public void RaiseStopAll()
+  {
+    lock (Started)
+    {
+      _active.Clear();
+    }
+
+    RaiseStateChanged(
+      null, isDucking: false, activeCount: 0, duckLevel: 100f,
+      DuckingSourceTransition.AllCleared, 0);
+  }
 
   /// <summary>
   /// The single place this fake raises DuckingStateChanged, so every raise records which thread it
@@ -2535,7 +3228,12 @@ internal sealed class FakeDuckingService : IDuckingService
   /// orderings produce the same result until a stop races the read.
   /// </summary>
   private void RaiseStateChanged(
-    IEventAudioSource? source, bool isDucking, int activeCount, float duckLevel)
+    IEventAudioSource? source,
+    bool isDucking,
+    int activeCount,
+    float duckLevel,
+    DuckingSourceTransition transition,
+    int triggeringSourcePriority)
   {
     var previous = Interlocked.Exchange(ref _raisingThreadId, Environment.CurrentManagedThreadId);
     try
@@ -2545,7 +3243,9 @@ internal sealed class FakeDuckingService : IDuckingService
         IsDucking = isDucking,
         TriggeringSource = source,
         ActiveEventCount = activeCount,
-        DuckLevel = duckLevel
+        DuckLevel = duckLevel,
+        Transition = transition,
+        TriggeringSourcePriority = triggeringSourcePriority
       });
     }
     finally

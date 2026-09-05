@@ -87,17 +87,24 @@ public interface IEventPlaybackService
   Task<bool> ResumeAsync(string playbackId, CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// The one in-flight attended playback, or null. There is one audio engine and one set of
-  /// speakers, so this state is global rather than per-caller (ADR-029 D6).
+  /// The one attended playback this seam is tracking, or null. There is one audio engine and one set
+  /// of speakers, so this state is global rather than per-caller (ADR-029 D6).
   /// </summary>
   /// <remarks>
-  /// ⚠ "In flight" is not the whole of it, and the difference is load-bearing for the 202 shape.
-  /// The LAST snapshot is RETAINED after a playback ends — Completed, Stopped or Failed — until a
-  /// new playback replaces it. It has to be: <see cref="StartAsync"/> answers before any audio
-  /// exists, so an acquisition failure has no response left to carry it, and this is the surface a
-  /// caller re-reads to find out what happened (ADR-029 §8.1's re-attach path). So null means
-  /// "nothing has been started yet", not "nothing is playing" — <see cref="EventPlaybackState"/>
-  /// on the snapshot is what says whether audio is being produced.
+  /// ⚠ "In flight" is not the whole of it, in TWO directions, and both are load-bearing for the 202
+  /// shape.
+  ///
+  /// The LAST snapshot is RETAINED after a playback ends — Completed, Stopped or Failed — until a new
+  /// playback replaces it. It has to be: <see cref="StartAsync"/> answers before any audio exists, so
+  /// an acquisition failure has no response left to carry it, and this is the surface a caller
+  /// re-reads to find out what happened (ADR-029 §8.1's re-attach path).
+  ///
+  /// And a playback can be WAITING: accepted, its audio already acquired, and deliberately not
+  /// sounding because a source at or above GvMedia:PreemptAtPriority is (owner decision D28). It is
+  /// not in flight and it is not finished.
+  ///
+  /// So null means "nothing has been started yet", never "nothing is playing" —
+  /// <see cref="EventPlaybackState"/> on the snapshot is what says whether audio is being produced.
   /// </remarks>
   EventPlaybackSnapshot? Current { get; }
 
@@ -161,7 +168,25 @@ public enum EventPlaybackState
   /// <see cref="PlaybackCompletionReason.Error"/> completion arrives as "PlaybackError" and can
   /// follow minutes of audio.
   /// </summary>
-  Failed = 5
+  Failed = 5,
+
+  /// <summary>
+  /// Accepted, its audio already acquired, and deliberately NOT sounding because a source at or above
+  /// GvMedia:PreemptAtPriority is (ADR-029 D5 §6.2 rule 2 read symmetrically; owner decision D28).
+  /// Resolves to Playing when the blocker leaves the ducking set, or to Failed with "WaitExpired"
+  /// at GvMedia:MaxQueuedWaitSeconds.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ APPENDED AT THE END, deliberately, and it must stay there. See the remark on
+  /// EventPlaybackRejection's illegal-media-id member for why: these names reach the wire and the
+  /// logs, and inserting into the middle is how one quietly stops meaning what it used to.
+  ///
+  /// ⚠ It is LIVE, not terminal, and two rules read that differently. Radio.Web's
+  /// EventPlaybackSnapshotDto.IsLive is a DENY-LIST and picks this up for free; SleepService's stop
+  /// is an ALLOW-LIST and had to be told. A third reader must DECIDE which it is rather than
+  /// inheriting one (plan PHN-1f C-56).
+  /// </remarks>
+  Waiting = 6
 }
 
 /// <summary>
@@ -490,10 +515,13 @@ public enum EventPlaybackRejection
 
   /// <summary>
   /// The media identifier carries a character outside the allow-list <c>[A-Za-z0-9._~-]</c>.
-  /// Appended deliberately at the END so that no member above it is renumbered. Nothing today
-  /// depends on the numeric values — every reference in this repo is by name — but a rejection
-  /// reason is the kind of thing that ends up in a log line or on the wire, and inserting into
-  /// the middle of the list is how that quietly stops meaning what it used to.
+  /// Appended at the end of the list AS IT THEN STOOD, so that no member above it was renumbered —
+  /// the members below it were added later, by the same rule, and this member is no longer last.
+  /// Nothing today depends on the numeric values — every reference in this repo is by name — but a
+  /// rejection reason is the kind of thing that ends up in a log line or on the wire, and inserting
+  /// into the MIDDLE of the list is how that quietly stops meaning what it used to. That is the rule
+  /// <see cref="EventPlaybackState.Waiting"/>'s remark cites this member for, and it is still the
+  /// rule: append, never insert.
   /// </summary>
   MediaIdHasIllegalCharacter,
 
