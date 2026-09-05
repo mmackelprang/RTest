@@ -237,6 +237,14 @@ public class VoicemailPlayerTests : TestContext
 
     Assert.Single(cut.FindAll(".phone-pill.amber"));
     Assert.Contains("The console is muted.", cut.Markup);
+
+    // ⚠ HONEST LIMIT. This pins that the pill appears when the store reports muted at play time.
+    // It does NOT pin the ORDERING. The plan named "read mute after the start call" as the falsifying
+    // mutation, and that mutation leaves this GREEN: nothing in this harness changes the mute state
+    // between the read and the start, so both orderings observe the same value. Pinning the ordering
+    // needs a fake that mutates mute from inside the start call, which is a harness this row does not
+    // have. Said here rather than implied, because an assertion that cannot fail is how five
+    // consecutive cycles in this arc shipped a test that passed against a broken implementation.
   }
 
   // ── transcript, unchanged by this row ────────────────────────────────────────────────────────
