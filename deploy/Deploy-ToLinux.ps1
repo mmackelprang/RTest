@@ -216,20 +216,58 @@ if ($LASTEXITCODE -ne 0) {
 # Move files into place, preserving data, logs, and Production config
 ssh $SshTarget "sudo mkdir -p $TargetPath/api $TargetPath/web $TargetPath/data $TargetPath/logs && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $TargetPath/api/ && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $TargetPath/web/ && sudo chown -R ${TargetUser}:${TargetUser} $TargetPath && sudo chmod +x $TargetPath/api/Radio.API $TargetPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
 
-# Deploy target-specific Production config if not already present
-$targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
-if (Test-Path $targetConfigPath) {
-  ssh $SshTarget "test -f $TargetPath/api/appsettings.Production.json" 2>$null
-  if ($LASTEXITCODE -ne 0) {
-    Write-Host "  Deploying Production config from deploy/$configDir/..." -ForegroundColor DarkGray
-    scp $targetConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
-    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/api/ && sudo cp /tmp/appsettings.Production.json $TargetPath/web/ && sudo chown ${TargetUser}:${TargetUser} $TargetPath/api/appsettings.Production.json $TargetPath/web/appsettings.Production.json && rm /tmp/appsettings.Production.json"
-  }
-}
-
-if ($LASTEXITCODE -ne 0) {
+# Captured immediately, not read later. Before OPS-7 this check sat AFTER the Production
+# config block below, where $LASTEXITCODE had already been overwritten by that block's
+# `ssh ... test -f` - and since both $configDir values ship a seed file, that block always
+# ran. A genuine failure of the move above was therefore always masked, and the message
+# named the wrong step.
+$moveExit = $LASTEXITCODE
+if ($moveExit -ne 0) {
   Write-Host "Remote file move failed!" -ForegroundColor Red
   exit 1
+}
+
+# Deploy target-specific Production config into each service directory that does not
+# already have one.
+#
+# GUARDED PER DESTINATION, NOT ONCE FOR BOTH. Before OPS-7 a single `test -f` on api/
+# gated a copy into BOTH api/ and web/, so a box with a web overlay and no api overlay had
+# its web file OVERWRITTEN by the seed. That file holds RotaryPhone:Gv:AuthKey, and the
+# tracked seed has no RotaryPhone section - so the overwrite deleted the key rather than
+# replacing it, and the service came up with inter-service auth silently off.
+#
+# The per-file shape here matches Sync-WpRule below, which has always guarded each
+# destination independently.
+$targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
+if (Test-Path $targetConfigPath) {
+  $seedStaged = $false
+  foreach ($dest in @('api', 'web')) {
+    ssh $SshTarget "test -f $TargetPath/$dest/appsettings.Production.json" 2>$null
+    if ($LASTEXITCODE -eq 0) {
+      Write-Host "    $dest/appsettings.Production.json present - left alone" -ForegroundColor DarkGray
+      continue
+    }
+
+    if (-not $seedStaged) {
+      Write-Host "  Deploying Production config from deploy/$configDir/..." -ForegroundColor DarkGray
+      scp $targetConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
+      if ($LASTEXITCODE -ne 0) {
+        Write-Host "Production config upload failed!" -ForegroundColor Red
+        exit 1
+      }
+      $seedStaged = $true
+    }
+
+    ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/$dest/ && sudo chown ${TargetUser}:${TargetUser} $TargetPath/$dest/appsettings.Production.json"
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host "Production config seed into $dest/ failed!" -ForegroundColor Red
+      exit 1
+    }
+  }
+
+  if ($seedStaged) {
+    ssh $SshTarget "rm -f /tmp/appsettings.Production.json"
+  }
 }
 
 # Sync WirePlumber Lua rules.

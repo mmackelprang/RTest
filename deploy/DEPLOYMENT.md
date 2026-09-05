@@ -534,6 +534,20 @@ Both services read `appsettings.Production.json` from their respective binary di
 The API settings are the primary configuration; the Web settings mainly configure the
 API connection URL.
 
+**Seeding is per service directory, and an existing overlay is never overwritten.** When
+`Deploy-ToLinux.ps1` finds no `appsettings.Production.json` in `api/` or in `web/`, it seeds
+that directory from `deploy/<target>/appsettings.Production.json`; a directory that already
+has one is left byte-for-byte alone, and the deploy prints `present - left alone` for it.
+The two directories are decided independently, so provisioning a box by hand-placing only
+one of the two overlays is safe.
+
+> Before `OPS-7` it was not. A single `test -f` on `api/` gated the copy into **both**
+> directories, so a box with a `web/` overlay and no `api/` one had its web file
+> overwritten by the seed — which deleted `RotaryPhone:Gv:AuthKey`, since the tracked seed
+> carries no `RotaryPhone` section, and brought the service up with inter-service auth
+> silently off. The same guard also meant a box with only an `api/` overlay never received
+> a `web/` one at all.
+
 **API** (`/opt/radio-console/api/appsettings.Production.json`):
 
 ```json
