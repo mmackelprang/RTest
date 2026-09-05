@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Utilities;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -37,7 +38,8 @@ public class AnnouncementService : IAnnouncementService
     ArgumentException.ThrowIfNullOrWhiteSpace(message);
     priority = Math.Clamp(priority, 1, 10);
 
-    _logger.LogInformation("Announcing: '{Message}' (priority {Priority})", message, priority);
+    _logger.LogInformation("Announcing: {Message} (priority {Priority})",
+      LogSafeText.For(message), priority);
 
     IEventAudioSource? ttsSource = null;
     try
@@ -88,8 +90,9 @@ public class AnnouncementService : IAnnouncementService
     ArgumentException.ThrowIfNullOrWhiteSpace(message);
     priority = Math.Clamp(priority, 1, 10);
 
-    _logger.LogInformation("Playing sound '{Sound}' then announcing: '{Message}' (priority {Priority})",
-      soundPath, message, priority);
+    // soundPath stays as-is: it is a server-side file path chosen by config, not user text.
+    _logger.LogInformation("Playing sound {Sound} then announcing: {Message} (priority {Priority})",
+      soundPath, LogSafeText.For(message), priority);
 
     IEventAudioSource? soundSource = null;
     IEventAudioSource? ttsSource = null;

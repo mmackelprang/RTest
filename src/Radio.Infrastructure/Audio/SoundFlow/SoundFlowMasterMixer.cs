@@ -98,9 +98,12 @@ public class SoundFlowMasterMixer : IMasterMixer
       if (!_sources.Contains(source))
       {
         _sources.Add(source);
+        // Type, not Name: this is domain-agnostic bookkeeping, and TTSEventSource.Name embeds
+        // the utterance text (TTS-11). Id was already here and is the field that joins this line
+        // to the ducking lines in AudioManager.
         _logger.LogInformation(
-          "Added audio source {SourceId} ({SourceName}) to mixer",
-          source.Id, source.Name);
+          "Added audio source {SourceId} ({SourceType}) to mixer",
+          source.Id, source.Type);
       }
     }
   }
@@ -115,8 +118,8 @@ public class SoundFlowMasterMixer : IMasterMixer
       if (_sources.Remove(source))
       {
         _logger.LogInformation(
-          "Removed audio source {SourceId} ({SourceName}) from mixer",
-          source.Id, source.Name);
+          "Removed audio source {SourceId} ({SourceType}) from mixer",
+          source.Id, source.Type);
       }
     }
   }

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Utilities;
 using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Audio.Sources.Events;
@@ -106,7 +107,7 @@ public class TTSEventSource : EventAudioSourceBase
       }
 
       State = AudioSourceState.Ready;
-      Logger.LogInformation("TTS event source initialized: {Text}", _text);
+      Logger.LogInformation("TTS event source initialized: {Text}", LogSafeText.For(_text));
     }
     catch (Exception ex)
     {
@@ -121,7 +122,7 @@ public class TTSEventSource : EventAudioSourceBase
   {
     _playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
-    Logger.LogDebug("Playing TTS audio: {Text}", _text);
+    Logger.LogDebug("Playing TTS audio: {Text}", LogSafeText.For(_text));
 
     try
     {

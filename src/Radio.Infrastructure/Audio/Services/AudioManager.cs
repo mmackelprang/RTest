@@ -510,9 +510,13 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     {
       if (e.Transition == DuckingSourceTransition.Started)
       {
+        // Type and Id, never Name: the triggering source is an event source, and
+        // TTSEventSource.Name embeds the utterance text (TTS-11). Id is new here and is what lets
+        // an operator join this line to the mixer's Added/Removed line for the same source.
         _logger.LogInformation(
-          "Ducking started: source={TriggerSource}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
-          e.TriggeringSource?.Name ?? "unknown", e.DuckLevel, e.ActiveEventCount);
+          "Ducking started: source={TriggerSource} id={TriggerId}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
+          e.TriggeringSource?.Type.ToString() ?? "unknown", e.TriggeringSource?.Id ?? "unknown",
+          e.DuckLevel, e.ActiveEventCount);
       }
       else
       {
@@ -521,8 +525,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         // anyway — this is file-sink detail, on a box where log volume correlates with audible
         // distortion.
         _logger.LogDebug(
-          "Ducking continues: source={TriggerSource} left, activeEvents={EventCount}",
-          e.TriggeringSource?.Name ?? "unknown", e.ActiveEventCount);
+          "Ducking continues: source={TriggerSource} id={TriggerId} left, activeEvents={EventCount}",
+          e.TriggeringSource?.Type.ToString() ?? "unknown", e.TriggeringSource?.Id ?? "unknown",
+          e.ActiveEventCount);
       }
 
       return;

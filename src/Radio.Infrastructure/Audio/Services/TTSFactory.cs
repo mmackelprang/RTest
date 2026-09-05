@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Utilities;
 using Radio.Infrastructure.Audio.Sources.Events;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Metrics;
@@ -96,8 +97,8 @@ public class TTSFactory : ITTSFactory, IDisposable
       Pitch = pitch
     };
 
-    _logger.LogInformation("Creating TTS audio for text: '{Text}' with engine {Engine}",
-      text.Length > 50 ? text[..50] + "..." : text, engine);
+    _logger.LogInformation("Creating TTS audio for text: {Text} with engine {Engine}",
+      LogSafeText.For(text), engine);
 
     // Track TTS request metrics
     var providerTag = new Dictionary<string, string> { { "provider", engine.ToString().ToLowerInvariant() } };
