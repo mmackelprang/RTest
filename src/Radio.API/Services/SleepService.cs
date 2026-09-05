@@ -180,10 +180,17 @@ public class SleepService : ISleepService
   /// about.
   /// </para>
   /// <para>
-  /// ⚠ <b>One case NEITHER edge covers, named so it is not mistaken for covered:</b> a playback
+  /// ⚠ <b>One case NEITHER edge covers, and it is UNOWNED rather than pending:</b> a playback
   /// <i>started</i> while the console is already on <c>/sleep</c>. No report and no sleep entry
-  /// follows it, so nothing stops it. §7.5 is written about <i>entering</i> the surface; a playback
-  /// arriving at one is the mirror case, and it belongs with <c>D28</c>'s queue in <c>PHN-1f</c>.
+  /// follows it, so nothing stops it. An earlier revision of this remark assigned it to
+  /// <c>PHN-1f</c> with <c>D28</c>'s queue; <c>PHN-1f</c> examined it and declined it, on the
+  /// dependency direction rather than on appetite. This service lives in <c>Radio.API</c> and holds
+  /// <see cref="IEventPlaybackService"/>; the seam lives in <c>Radio.Infrastructure</c> and knows
+  /// nothing about sleep. Making <c>StartAsync</c> consult the sleep state inverts that, and the only
+  /// alternatives are a refusal — the shape <c>D28</c> rejected — or a new <c>Radio.Core</c> seam for
+  /// <i>"does any surface offer a transport"</i>, which is ADR-029 §14 <b>Q12</b>'s multi-client
+  /// question and belongs to the sleep arc with the Designer. Reaching the case needs a second client
+  /// on <c>/phone</c> while this one sits on <c>/sleep</c>, which is Q12 exactly.
   /// </para>
   /// </remarks>
   public async Task SetSleepScreenVisibleAsync(bool visible)
@@ -351,9 +358,22 @@ public class SleepService : ISleepService
       return;
     }
 
-    // Preparing is included deliberately: a fetch or a synthesis still in flight would otherwise
-    // start audio moments after the panel went dark.
+    // ⚠ AN ALLOW-LIST, so every new non-terminal EventPlaybackState must be added HERE as well as
+    // wherever else it is read — and forgetting is SILENT. Radio.Web's EventPlaybackSnapshotDto.IsLive
+    // is a DENY-LIST and picks a new member up for free; these two rules are siblings with opposite
+    // polarity (plan PHN-1f C-56). TheSleepRuleCoversEveryNonTerminalState reds if a member is added
+    // to the enum and not listed here.
+    //
+    // Preparing is included deliberately: a fetch or a synthesis still in flight would otherwise start
+    // audio moments after the panel went dark.
+    //
+    // Waiting for the same reason, with a longer fuse and a certainty in place of a maybe: a queued
+    // playback (D28) is holding acquired audio and will start it the instant the blocking source ends,
+    // which can be up to GvMedia:MaxQueuedWaitSeconds after the screen goes dark — on /sleep, which
+    // declares EmptyLayout and therefore renders no stop control at all. ADR-029 §7.5's principle is
+    // exactly this case: attended playback may not exist on a surface that offers no way to stop it.
     if (snapshot.State is not (EventPlaybackState.Preparing
+        or EventPlaybackState.Waiting
         or EventPlaybackState.Playing
         or EventPlaybackState.Paused))
     {
