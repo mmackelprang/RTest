@@ -487,6 +487,29 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
           throw new InvalidOperationException($"Unhandled kind {request.Kind}.");
       }
 
+      // ⭐ D28's wait. See WaitForClearAirAsync's remarks for why it is here and nowhere else.
+      try
+      {
+        await WaitForClearAirAsync(playback, token);
+      }
+      catch
+      {
+        // ⚠ C-57. The source is acquired and NOT adopted, so none of the catches below can release
+        // it: TearDownAsync and FailAsync both go through ClaimSourceForRelease, which answers null
+        // for a playback that never adopted. Before this row the only await between acquisition and
+        // TryAdopt was _gate.WaitAsync(CancellationToken.None), which cannot throw — so no exit
+        // existed here and none was guarded. The wait adds two (the staleness bound and a cancel),
+        // and without this the RemoteMedia arm leaks an open FileStream over the cached recording for
+        // the life of the process, which on Windows also stops GvMediaCache's evictor reclaiming that
+        // entry.
+        //
+        // DisposeOrphanAsync is the right tool and already exists: this source was never ducked and
+        // never played, so there is nothing to stop. A later TearDownAsync finds null and does
+        // nothing, so there is no double-dispose.
+        await DisposeOrphanAsync(playback, source);
+        throw;
+      }
+
       // ⚠ From here to Publish(Playing) runs under _gate, and PR 4 is what makes that necessary.
       // ReleaseSourceAsync — the only thing that stops ducking, stops the source and disposes it — has
       // six callers. Four hold _gate: StopAsync, StartAsync's replacement arm, OnSourceCompleted's
@@ -601,6 +624,16 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
       // teardown under the gate — or Dispose, which claims the same way — cannot double-release, and
       // whichever of them gets there second finds null and does nothing.
       await TearDownAsync(playback);
+    }
+    catch (TimeoutException ex)
+    {
+      // D28's staleness bound. Thirty seconds is longer than any notification this box makes, so a
+      // wait that reaches it means the blocker was not what we thought.
+      //
+      // Failed is the honest state — it never produced sound — and failing is acceptable HERE and
+      // only here, precisely because by then the user has watched a visible Waiting state. That is
+      // what makes this different from the bare refusal D28 rejected.
+      await FailAsync(playback, "WaitExpired", ex);
     }
     catch (GvMediaUnavailableException ex)
     {
@@ -803,6 +836,141 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   // ── preemption (ADR-029 D5) ───────────────────────────────────────
 
   /// <summary>
+  /// True while some event source at or above <paramref name="threshold"/> is in the ducking set.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ This gives <see cref="IDuckingService.GetActiveEventsByPriority"/> its FIRST non-test caller
+  /// since it was written — which PHN-1d C-42 predicted would be the queue, and it was.
+  ///
+  /// ⚠ No exclusion for our own source is needed, and one is deliberately NOT written. The predicate
+  /// is only ever evaluated for a playback that has not yet reached StartDuckingAsync, so the attended
+  /// source is not in the set when it is asked. A guard for a state that cannot occur reads as
+  /// evidence that it can. APlaybackAtPriorityEightDoesNotBlockItself pins it.
+  ///
+  /// ⚠ GetPriority is called here rather than read from event args because this is a question about
+  /// the CURRENT SET, not about one transition — there are no args. The fade-window race the args
+  /// exist to close does not apply: these sources are resident in the set, not arriving or leaving.
+  /// </remarks>
+  private bool IsBlockedByAHigherPrioritySource(int threshold) =>
+    _duckingService.GetActiveEventsByPriority()
+      .Any(s => _duckingService.GetPriority(s) >= threshold);
+
+  /// <summary>
+  /// ⭐ Owner decision D28: waits for the air to clear before the acquisition tail starts audio.
+  /// Returns as soon as nothing at or above GvMedia:PreemptAtPriority is in the ducking set.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Called AFTER acquisition and BEFORE _gate. Both halves matter and neither is arbitrary.
+  ///
+  /// After acquisition, so the audio is ready the instant the room goes quiet and an acquisition
+  /// FAILURE surfaces at once rather than after thirty seconds of Waiting — "wait, then fail" being a
+  /// strictly worse version of the shape D28 rejected.
+  ///
+  /// Before the gate, because holding _gate across a wait this long would block StopAsync, the
+  /// replacement arm and OnSourceCompleted for its whole length — the user's own Stop button would do
+  /// nothing until the blocker finished.
+  ///
+  /// ⚠ THE CALLER OWNS THE SOURCE ACROSS THIS CALL AND MUST DISPOSE IT IF THIS THROWS. Nothing has
+  /// been adopted yet, so TearDownAsync and FailAsync both reach ClaimSourceForRelease, which answers
+  /// null. See AcquireAndPlayAsync's guard, and plan PHN-1f C-57.
+  /// </remarks>
+  private async Task WaitForClearAirAsync(Playback playback, CancellationToken token)
+  {
+    var gv = _gvMediaOptions.CurrentValue;
+
+    // Evaluated BEFORE anything is armed or published, so the overwhelmingly common case — a quiet
+    // room — walks an empty list, allocates nothing, and puts no extra message on the wire. Trap 5 is
+    // about churn on an N100, and a queue that broadcast a Waiting nobody waited for would be churn.
+    if (!IsBlockedByAHigherPrioritySource(gv.PreemptAtPriority))
+    {
+      return;
+    }
+
+    var waiter = playback.BeginWait();
+    try
+    {
+      // ⚠ RE-CHECKED AFTER ARMING, and this closes a real missed-wake race rather than being belt and
+      // braces. TryWakeWaitingPlayback asks "is anything waiting?" before it touches the ducking set —
+      // it has to, because it runs on the raising thread for every announcement on this box. So a
+      // blocker ending between the check above and BeginWait finds nothing waiting, wakes nothing, and
+      // parks this playback until WaitExpired FOR A ROOM THAT IS ALREADY QUIET — which is D28's
+      // rejected option delivered thirty seconds late, the exact outcome this row exists to prevent.
+      // Arm, then re-check. The wake is idempotent, so a redundant TrySetResult costs nothing.
+      if (!IsBlockedByAHigherPrioritySource(gv.PreemptAtPriority))
+      {
+        return;
+      }
+
+      // Information rather than Warning: this is the feature working, not a fault. Since LOG-11 it
+      // lands in the file sink rather than the journal, which is where "why did the voicemail take a
+      // moment" is diagnosed from. Source ids only — never a media id and never request text
+      // (PHN-1b §0.3 ④).
+      _logger.LogInformation(
+        "Attended playback {Id} is waiting: a source at or above GvMedia:PreemptAtPriority "
+        + "({Threshold}) is already sounding (owner decision D28)",
+        playback.Id, gv.PreemptAtPriority);
+
+      PublishNonTerminal(playback, EventPlaybackState.Waiting);
+
+      // ⭐ ONE call is the wake, the staleness bound AND the cancel. A one-shot timer, not a poll and
+      // not a tick — trap 5 forbids both. It takes the TimeProvider PHN-1e injected, so
+      // FakeTimeProvider.Advance produces WaitExpired deterministically with no Task.Delay anywhere
+      // near an assertion (CLAUDE.md § Test Timing).
+      //
+      // Clamped at 1 for the reason GvMediaOptions.MaxQueuedWaitSeconds gives: a 0 meaning "never
+      // wait" would resolve to mixing, which is the option D28 rejected.
+      await waiter.Task.WaitAsync(
+        TimeSpan.FromSeconds(Math.Max(1, gv.MaxQueuedWaitSeconds)), _timeProvider, token);
+
+      _logger.LogInformation("Attended playback {Id} stopped waiting; the air is clear", playback.Id);
+    }
+    finally
+    {
+      playback.EndWait();
+    }
+  }
+
+  /// <summary>
+  /// Re-evaluates whether a waiting playback can proceed, and releases it if so.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ A STATE re-evaluation, not an edge, and that is deliberate. An edge would have to be right
+  /// about which transitions can unblock a wait; a state re-evaluation is idempotent, cannot be
+  /// desynchronised by a missed raise, and — the part that matters — uses the SAME predicate that
+  /// decided to wait, so "blocked" has exactly one definition in this file.
+  ///
+  /// ⚠ The "is anything waiting" guard comes FIRST, and it is a trap-5 requirement rather than a
+  /// micro-optimisation: this runs on the raising thread for EVERY ducking transition on the box,
+  /// including every announcement with no attended playback anywhere near it. Without the guard each
+  /// one would walk the ducking set and call GetPriority per member, on an N100 where churn is
+  /// audible. The race that guard creates is closed by WaitForClearAirAsync's re-check (C-66).
+  ///
+  /// ⚠ It never touches a source, never takes _gate and never starts audio. The acquisition task that
+  /// was already running resumes, takes _gate, and runs PR 3's tail unchanged — so there is no second
+  /// entry point into that tail and none of PHN-1d Task 5's properties has to be re-established.
+  /// </remarks>
+  private void TryWakeWaitingPlayback()
+  {
+    Playback? waiting;
+    lock (_stateLock)
+    {
+      waiting = _current;
+    }
+
+    if (waiting is null || !waiting.IsWaiting)
+    {
+      return;
+    }
+
+    if (IsBlockedByAHigherPrioritySource(_gvMediaOptions.CurrentValue.PreemptAtPriority))
+    {
+      return;
+    }
+
+    waiting.TryWake();
+  }
+
+  /// <summary>
   /// ADR-029 D5 §6.2 rule 2: a source starting at or above GvMedia:PreemptAtPriority stops attended
   /// playback outright.
   /// </summary>
@@ -813,34 +981,30 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   ///
   /// ⚠ Three things in this method are load-bearing and none of them is obvious:
   ///
-  /// (1) IsDucking:false is ignored. DuckingService.StopDuckingAsync removes the source's
-  ///     _sourcePriorities entry BEFORE it raises, and GetPriority then falls back to
-  ///     DefaultEventPriority (8) — so acting on a stop would read every ending announcement as a
-  ///     priority-8 preemption. StopAllDuckingAsync also raises with a NULL TriggeringSource.
+  /// (1) Only a Started transition is acted on. Since PHN-1f DuckingService raises for every source
+  ///     that LEAVES as well — Ended, with IsDucking carrying the true aggregate — and
+  ///     StopAllDuckingAsync raises AllCleared with a NULL TriggeringSource. Neither is a start, so
+  ///     neither can preempt. ⚠ They are not ignored, though: TryWakeWaitingPlayback runs above this
+  ///     test, on every raise in both directions, because a source leaving is precisely what a D28
+  ///     wait is waiting for.
   ///
-  /// (2) The priority is read SYNCHRONOUSLY, here, on the raising thread, and a source that has
-  ///     already LEFT the ducking set is rejected before it is read. Both halves are needed and the
-  ///     reason is narrower than it first looks, so it is stated exactly rather than reassuringly.
+  /// (2) The priority is READ FROM THE ARGS, captured by DuckingService inside the lock that added the
+  ///     source. It is not resolved here and it is not resolved on the dispatched task, and the
+  ///     difference is a real bug rather than a style choice.
   ///
   ///     Every caller does SetPriority(source, p) immediately before StartDuckingAsync(source), and
-  ///     DuckingService.StopDuckingAsync deletes that entry before IT raises — so resolving the
-  ///     priority on the dispatched task would race the removal and read the category default 8 for a
-  ///     source whose caller had explicitly claimed 3.
+  ///     DuckingService.StopDuckingAsync deletes that entry before IT raises — so any subscriber that
+  ///     resolves the priority for itself can read the category default 8 for a source whose caller
+  ///     had explicitly claimed 3.
   ///
-  ///     ⚠ But "synchronous" is NOT by itself enough, and the earlier wording here — "the entry is
-  ///     present at this instant" — was FALSE on one path. DuckingService raises the TRANSITION event
-  ///     after awaiting ApplyFadeAsync (Audio:DuckingAttackMs, 100 ms shipped), so a StopDuckingAsync
-  ///     for that same source landing inside the fade deletes the entry BEFORE this handler ever runs,
-  ///     and a synchronous read answers 8 for an announcement that explicitly claimed 3. Demonstrated
-  ///     against the real DuckingService, not theorised. It is not reachable in the shipped
-  ///     configuration — the only caller that can stop an announcement concurrently with its own start
-  ///     is PhoneCallIntegrationService, and PhoneIntegration:Enabled is false and has never been true
-  ///     — but it becomes reachable the moment the phone arc turns that flag on, which is what this
-  ///     arc is building toward.
-  ///
-  ///     The ActiveEventCount check below is what closes it. An IsDucking:true raise means a source
-  ///     just JOINED the set, so the count cannot be zero unless that source has since left; zero is
-  ///     therefore the signature of exactly this race, and never of a healthy start.
+  ///     ⚠ Reading it synchronously on the raising thread was NOT enough, which is what PHN-1d found:
+  ///     DuckingService raises the TRANSITION event after awaiting ApplyFadeAsync
+  ///     (Audio:DuckingAttackMs, 100 ms shipped), so a StopDuckingAsync for that same source landing
+  ///     inside the fade deletes the entry BEFORE this handler ever runs. PHN-1d could only narrow
+  ///     that with an ActiveEventCount == 0 guard, whose own residual was that a second still-ducking
+  ///     source made the count non-zero and the guard silent. PHN-1f closed it at the source: the
+  ///     capture happens before the fade, so there is nothing left to race. The guard and the
+  ///     GetPriority call are both GONE.
   ///
   /// (3) The stop is DISPATCHED, never awaited here. Two reasons, and the second one is the one that
   ///     is easy to state too strongly, so it is stated exactly.
@@ -863,47 +1027,29 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// </remarks>
   private void OnDuckingStateChanged(object? sender, DuckingStateChangedEventArgs e)
   {
-    if (!e.IsDucking || e.TriggeringSource is not { } trigger)
+    // ⭐ FIRST, and on EVERY raise in both directions — including StopAllDuckingAsync's, which carries
+    // a null TriggeringSource and clears the whole set, and is therefore one of the strongest reasons
+    // a wait should end. See TryWakeWaitingPlayback: it returns before touching the ducking set when
+    // nothing is waiting, which is the overwhelmingly common case.
+    TryWakeWaitingPlayback();
+
+    if (e.Transition != DuckingSourceTransition.Started || e.TriggeringSource is not { } trigger)
     {
       return;
     }
 
-    if (e.ActiveEventCount == 0)
-    {
-      // The starting source has already left the ducking set, so its priority override has already
-      // been deleted and GetPriority would answer the category default (8) for it. See point (2):
-      // DuckingService raises the transition event AFTER its attack fade, so a stop landing inside
-      // that ~100 ms window produces exactly these args. A start that is still a start always leaves
-      // at least itself in the set.
-      //
-      // ⚠ Residual, stated rather than glossed: if some OTHER source is still ducking, the count is
-      // non-zero and this guard does not fire, so a stop racing the fade can still be read as a
-      // priority-8 start. Closing that needs the priority captured into DuckingStateChangedEventArgs
-      // at raise time, which is a Radio.Core change and belongs to the PR that also wants a start/stop
-      // discriminator on those args rather than being slipped in here.
-      _logger.LogDebug(
-        "Ignoring a ducking start for source '{SourceId}' that is no longer in the ducking set",
-        trigger.Id);
-      return;
-    }
-
-    int priority;
-    try
-    {
-      priority = _duckingService.GetPriority(trigger);
-    }
-    catch (Exception ex)
-    {
-      // Reading a priority must never take down the announcement path that raised this.
-      _logger.LogWarning(ex, "Could not read the priority of starting source '{SourceId}'", trigger.Id);
-      return;
-    }
+    // ⚠ READ FROM THE ARGS, captured by DuckingService inside the lock that ADDED the entry and before
+    // the attack fade. PHN-1d resolved this with a synchronous GetPriority and had to guard the fade
+    // window with an ActiveEventCount == 0 check; both the call and the guard are GONE, and this is
+    // why. The guard's own acknowledged residual — "if some OTHER source is still ducking, the count
+    // is non-zero and this guard does not fire" — is closed by the same change rather than narrowed.
+    var priority = e.TriggeringSourcePriority;
 
     var threshold = _gvMediaOptions.CurrentValue.PreemptAtPriority;
     if (priority < threshold)
     {
       // ADR-029 §6.2 rule 3: sub-threshold events keep MIXING, exactly as they do today over TTS
-      // announcements. This ADR does not fix that; the fix would be a queue across every caller of
+      // announcements. This row does not fix that; the fix would be a queue across every caller of
       // IAnnouncementService, and it is separate work with its own risk.
       return;
     }
@@ -938,10 +1084,11 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
 
     // Addressed BY ID, captured now. If a replacing StartAsync wins the race the id no longer matches
     // _current and StopAsync is a no-op — which is right: that playback started AFTER the preempting
-    // source, so "a source starts" never applied to it. What SHOULD cover that case is PHN-1f's queue
-    // (plan §0.4 C-46): a playback starting under a live >= 8 source waits for it. Until then it mixes,
-    // and APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY is what pins that so PHN-1f's fix is
-    // a visible diff.
+    // source, so "a source starts" never applied to it. That case is now covered from the other side:
+    // since PHN-1f a playback starting under a live >= 8 source WAITS for it rather than mixing
+    // (WaitForClearAirAsync, owner decision D28), so the replacing playback publishes Waiting instead
+    // of sounding over the announcement. APlaybackStartedUnderAHigherPrioritySourceWaitsAndThenPlays
+    // is what pins it; it is the renamed successor of the characterization test that pinned the mixing.
     var victimId = victim.Id;
     _preemptionTail = Task.Run(
       async () =>
@@ -1268,7 +1415,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   }
 
   /// <summary>
-  /// Publishes a NON-terminal state — Playing or Paused — for a playback that has not ended.
+  /// Publishes a NON-terminal state — Waiting, Playing or Paused — for a playback that has not ended.
   /// </summary>
   /// <remarks>
   /// ⚠ The terminal check and the store happen under ONE _stateLock, and that is what makes this
@@ -1373,6 +1520,16 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     private int _terminal;
     private ITimer? _capTimer;
 
+    // D28's wait. Non-null only between the moment acquisition decides the air is not clear and the
+    // moment it stops waiting.
+    //
+    // ⚠ On Playback rather than on the service, deliberately (plan PHN-1f C-65). A service field
+    // works today only because a replacing StartAsync cancels the displaced playback synchronously
+    // before the replacement can arm its own — true, and one refactor away from not being. Here the
+    // wake reads _current under _stateLock and can only ever wake THAT playback's waiter, so "the
+    // waiting playback IS _current" is structural rather than incidental.
+    private TaskCompletionSource? _waiter;
+
     public Playback(string id, EventPlaybackKind kind, string? label)
     {
       Id = id;
@@ -1399,6 +1556,34 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
 
     /// <summary>True once any terminal transition has been claimed. Never goes back to false.</summary>
     public bool IsTerminal => Volatile.Read(ref _terminal) != 0;
+
+    /// <summary>True while this playback is parked waiting for the air to clear.</summary>
+    public bool IsWaiting => Volatile.Read(ref _waiter) is not null;
+
+    /// <summary>Arms the wait and returns the waiter to await.</summary>
+    /// <remarks>
+    /// ⚠ RunContinuationsAsynchronously is load-bearing, and the overclaim is the trap here so it is
+    /// stated exactly. Without it, TrySetResult runs the continuation INLINE on the thread that raised
+    /// DuckingStateChanged — and that continuation's next act is _gate.WaitAsync.
+    ///
+    /// It is NOT a deadlock today: the live wake comes from AnnouncementService's teardown, which
+    /// holds none of this service's locks. What the flag buys is that it STAYS not-a-deadlock, because
+    /// the acquisition tail does hold _gate across StartDuckingAsync — so a raising thread that also
+    /// holds the gate is one refactor away. OnSourceCompleted and the preemption dispatch are both
+    /// written from this same reasoning, and their remarks say so.
+    /// </remarks>
+    public TaskCompletionSource BeginWait()
+    {
+      var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      Volatile.Write(ref _waiter, waiter);
+      return waiter;
+    }
+
+    /// <summary>Disarms the wait. Called from the waiter's own finally, so it always runs.</summary>
+    public void EndWait() => Volatile.Write(ref _waiter, null);
+
+    /// <summary>Releases a wait if one is armed. Idempotent, and safe from any thread.</summary>
+    public bool TryWake() => Volatile.Read(ref _waiter)?.TrySetResult() ?? false;
 
     /// <summary>
     /// True for the FIRST caller only. Every terminal transition — natural completion, user stop,
