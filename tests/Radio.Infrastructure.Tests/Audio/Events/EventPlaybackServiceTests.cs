@@ -1033,16 +1033,32 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
-  public async Task ASpeechSnapshotReportsPositionZeroForItsWholeLife()
+  public async Task TTSEventSourceDeclaresItsOwnPositionOverride_AndNothingHereProvesItMoves()
   {
-    // ⚠ THE C-27 HONESTY PIN, and it asserts the CURRENT behaviour rather than the desirable one.
-    // The first assertion is the real one: TTSEventSource does not override Position, so it
-    // inherits EventAudioSourceBase's TimeSpan.Zero for the whole playback. When PR 5 adds the
-    // three-line override, THIS is what fails, which is how it should be found — update it, do not
-    // delete it.
+    // ⚠ UPDATED, NOT DELETED. PHN-1c pinned the inverse of the first assertion deliberately
+    // (C-27): TTSEventSource did not override Position, so it inherited EventAudioSourceBase's
+    // TimeSpan.Zero for the whole playback, and adding the override was meant to red exactly this
+    // line. PHN-2 added it, so the line now names TTSEventSource. Deleting it instead would have
+    // erased the record that the behaviour changed.
+    //
+    // This reflection assertion is the ONLY load-bearing one in this test: it pins the DECLARATION,
+    // and removing the override reds it.
     var positionGetter = typeof(TTSEventSource).GetProperty(nameof(IEventAudioSource.Position))!
       .GetGetMethod()!;
-    Assert.Equal(typeof(EventAudioSourceBase), positionGetter.DeclaringType);
+    Assert.Equal(typeof(TTSEventSource), positionGetter.DeclaringType);
+
+    // ⚠ THE TWO ASSERTIONS BELOW ARE NOT A CHECK ON TTSEventSource AT ALL, and the earlier wording
+    // here — "the override's null-conditional falls through", "proves the override is declared AND
+    // REACHABLE" — was simply false. CreateService() with no arguments builds a FakeTtsFactory, which
+    // hands EventPlaybackService a FakeEventSource; TTSEventSource is NEVER CONSTRUCTED on this path.
+    // The zero comes from FakeEventSource.Position, an auto-property that starts at TimeSpan.Zero.
+    // Mutating TTSEventSource.Position to `=> TimeSpan.Zero` leaves this whole test green.
+    //
+    // They are kept as what they actually are: a pin that the SERVICE reports whatever its source
+    // reports, unmodified, for a Speech playback. No speech source in this harness reports a moving
+    // position, and none is being added to chase it — a fake that returned a rising number would pin
+    // the fake. A speech position that MOVES is unverified in this repo and reachable only on the
+    // appliance (plan §2.2 item 2).
 
     using var service = CreateService();
 

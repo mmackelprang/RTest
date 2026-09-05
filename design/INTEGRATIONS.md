@@ -717,7 +717,7 @@ The same RotaryPhone service exposes a Google Voice bridge that the Web UI consu
 ```
 
 **Gotchas:**
-- **Voicemail audio URL must be absolute.** The DTO's relative `AudioUrl` resolves against the Web origin (`:5002`) and 404s — always rebuild it against the API base via `GvBridgeApiService.GetVoicemailAudioUrl(id)` (→ `http://radio:5004/...`). Never bind the relative `AudioUrl` (ADR-022 D4).
+- **The browser no longer fetches voicemail audio at all (`PHN-2`).** `VoicemailItemDto.AudioUrl` is still RotaryPhone's contract field and is still server-relative, but nothing in `Radio.Web` binds it or rebuilds it: `GvBridgeApiService.GetVoicemailAudioUrl` is **deleted**, and so is the `<audio>` element it fed. `Radio.API` fetches the recording itself through `GvMedia` (ADR-029 D3) and plays it on the audio engine. ⚠ *Previously* this entry said to always rebuild the URL absolute against `http://radio:5004/...`; that advice is for a code path that no longer exists.
 - **A failed conversation load is NOT an empty conversation (GV-8 / UAT F-1).** `GetSmsThreadMessagesAsync` returns `GvResult<SmsThreadMessagesDto>` — `Success` / `HttpError` (with `StatusCode` + RotaryPhone's `error`/`code` discriminator) / `Timeout` / `Transport` / `Malformed` — precisely because it used to map all of them to `null`, which `PhonePage` then coalesced with `?? new()` into an empty list. A 502 and a genuinely empty thread became byte-identical, and the pane rendered **"Start the conversation below."** with no error, no spinner and no retry. The conversation pane now branches **skeleton → error → empty → list** in that order, so the empty copy is reachable only for a real zero-message result. Two consequences worth holding: **(a)** a group thread (id containing `/`) returns a genuine **HTTP 200 with `messages: []`** because RotaryPhone never decodes the `%2F` — from our side that IS an empty, and rendering it as one is correct, not a bug (their fix is tracked as a cross-repo item); **(b)** the failure is **invisible to browser instrumentation** — Blazor Server fetches server-side over SignalR, so the UAT saw 0 console errors and 0 failed requests. The only probe is `journalctl -u radio-web --since '-30min' | grep 'Failed to get GV SMS thread'` — keep it bounded with `--since`, do not tail; the box is an Intel N100 and heavy journald reads compete with the audio pipeline. **`GvResult<T>` is the reusable shape** — GV-6 adopts it for the mark-read methods rather than inventing a second mechanism.
 - **`psidtsAgeSeconds` is the ONLY trustworthy field on `GET :5004/api/gvbridge/status` — and it is a live blackout clock.** Twice-confirmed (2026-07-31 root-cause pass and the GV-8 UAT). Google's PSIDTS cookie is good for ~11 minutes; RotaryPhone's CDP refresh only fires every ~20, with no reactive refresh on 401 — so GV auth is dead for roughly **9 minutes out of every 20**, on a wall clock that is independent of anything we do. Read it as: **`< 660` healthy · `660–1200` blackout (expect HTTP 502 on every GV read) · resets at ~1200.** The sibling fields **lie** — `{"available": true, "degraded": false, "cookiesValid": true, "psidtsAgeSeconds": 707}` was captured while both SMS endpoints were returning hard 502s, which is exactly why our "Google Voice is reconnecting" banner (`PhoneMessagesPanel.razor:14-20`) never fires in the window it exists for. **Practical consequence: any test of this surface that does not record `psidtsAgeSeconds` (or wall-clock time) produces results that look random.** That is how a previous pass came to hypothesise throttling — a hypothesis the logs then falsified three ways (401 never 429; failure tracks wall-clock not request volume; recovery lands on fixed boundaries). Prefer this one-shot probe over reading journals; the box is an Intel N100 and heavy journald reads compete with the audio pipeline. _Both the refresh interval and the dishonest health fields are RotaryPhone-side items, tracked in `docs/BUILDER_QUEUE.md` § Cross-repo handoffs #6._
 
@@ -766,8 +766,15 @@ Since 2026-08-18 the Web UI is **not** the only thing in this repo that leans on
 Since `PHN-1b` the API can fetch a voicemail recording **itself**, into a bounded on-disk cache,
 rather than handing the browser an absolute URL to fetch. Since `PHN-1c` there is a route family that
 uses it — `/api/audio/events`, below — so the fetch, the cache and the playback seam are all in place.
-⚠ **`GvMedia:Enabled` still ships `false`**, so no fetch happens on a stock box until it is turned on;
-`Radio.Web` also still plays voicemail through its own `<audio>` element until `PHN-2` retires it.
+✅ **Voicemail plays through the audio engine as of `PHN-2`.** `GvMedia:Enabled` ships **`true`** in
+`src/Radio.API/appsettings.json`, which the deploy overwrites, so it reaches every box. The browser no
+longer fetches or decodes voicemail audio; mute, master volume, balance, ducking and output routing
+(including Cast) all apply to it, because it is an ordinary source on the master mixer. A failed play is
+diagnosed from the snapshot — `curl -s http://radio:5000/api/audio/events/current` — where a
+`failureReason` of `MediaUnauthorized` means the two `AuthKey` halves have diverged (see the runbook
+below), `MediaNotFound` most often means the GV auth blackout rather than a missing recording, and
+`MediaAcquisitionFailed` is the one that needs the log line rather than the panel — most likely
+`/opt/radio-console/data/gvmedia` unwritable.
 
 **Why it exists, and why the cache is not an optimisation.** GV auth on the bridge is dead roughly
 **9 minutes in every 20** (punch list `XR-3`), and `/api/gvbridge/status` reports
@@ -776,17 +783,21 @@ seconds later therefore has roughly a **45% chance** the second fetch would 502 
 the network. A cache hit never touches the network, which is what makes replay reliable on a wall
 clock nobody can see. The accepted cost: private voicemail audio now sits **at rest on disk**.
 
-**Why the API fetches rather than the browser.** `GvBridgeApiService.GetVoicemailAudioUrl` only ever
-*builds* a string that the `<audio>` element then fetches, so no `DelegatingHandler` can touch it —
-which is why browser-side playback would break the moment RotaryPhone's `/api/gvbridge/*` auth gate
-flips on. `GvMediaAuthHandler` attaches `X-RotaryPhone-Auth` to the server-side fetch, which is the
-thing the browser could never do.
+**Why the API fetches rather than the browser.** Two reasons, and `PHN-2` acted on both. The first is
+authentication: the deleted `GvBridgeApiService.GetVoicemailAudioUrl` only ever *built* a string that
+the `<audio>` element then fetched, so no `DelegatingHandler` could touch it, and browser-side playback
+would have broken the moment RotaryPhone's `/api/gvbridge/*` auth gate flipped on.
+`GvMediaAuthHandler` attaches `X-RotaryPhone-Auth` to the server-side fetch, which is the thing the
+browser could never do. The second is the one the user can hear (owner decision `D17`): an `<audio>`
+element is a **second audio path**, sharing no node with the SoundFlow playback device, so mute, master
+volume, balance, ducking and Cast routing all bypassed it — press play while the radio was on and two
+sounds ran in the room at full level each.
 
 **Configuration — `GvMedia`, in `src/Radio.API/appsettings.json`:**
 
 | Key | Default | Meaning |
 |---|---|---|
-| `Enabled` | `false` | Master gate. `GvMediaClient` refuses to fetch when false. |
+| `Enabled` | `true` | Master gate. `GvMediaClient` refuses to fetch when false, and `StartAsync` answers **409** synchronously for a `RemoteMedia` request — which reaches the panel as *"Voicemail playback is switched off on the console."* Shipped `false` through `PHN-1b`…`PHN-1f` while the seam was dark; `PHN-2` flipped it, because a dark P0 is worse than a loud one. |
 | `BaseUrl` | `http://radio:5004` | The gvbridge host. Deliberately **not** `PhoneIntegration:ContactsApiBaseUrl` — same host today, different feature, independently disableable. |
 | `AuthKey` | `""` | Value for `X-RotaryPhone-Auth`. Empty means **no header is sent**, which matches the current LAN-only posture. |
 | `CacheDirectory` | `./data/gvmedia` | Resolves to `/opt/radio-console/data/gvmedia` on the appliance — `radio-api.service` sets `WorkingDirectory=/opt/radio-console` and runs as `mmack`, who owns `data/` (its sibling `albumart/` is already there). |
@@ -949,14 +960,18 @@ and `PlaybackError` means the audio *was* acquired and the player failed:
 | `MediaAcquisitionFailed` | the RemoteMedia arm threw something that was **not** a `GvMediaUnavailableException` | Maybe | The generic arm, so the log line is the diagnosis: `journalctl -u radio-api` carries a Warning naming the `evp-` id. Most likely a local problem rather than a bridge one — `GvMedia:CacheDirectory` unwritable or not owned by `mmack`, a full disk, or the cached file failing to open. |
 | `PlaybackError` | the source reported `PlaybackCompletionReason.Error` | Maybe | ⚠ **The audio was acquired — `GvMedia` is not where to look.** This is SoundFlow failing to start or continue playback, and it is what an operator sees when the output device is gone or `radio-api` has lost PipeWire (the service must run as `mmack` with `XDG_RUNTIME_DIR=/run/user/1000`). ⚠ It can also arrive **after minutes of audio**, so `state: "Failed"` does not imply nothing was heard. |
 
-⚠ **A tenth string, `MediaDisabled`, exists and is normally unreachable.** `GvMedia:Enabled` being false
-is knowable without the network and is answered synchronously as a `409` on `POST`; the only way it
-reaches a snapshot is if the flag is turned off in the window between accepting a playback and fetching
-its media.
+⚠ **A tenth string, `MediaDisabled`, exists and is normally unreachable** — doubly so since `PHN-2`
+shipped `Enabled: true`. `GvMedia:Enabled` being false is knowable without the network and is answered
+synchronously as a `409` on `POST`; the only way it reaches a *snapshot* is if the flag is turned off in
+the window between accepting a playback and fetching its media. ⚠ The `409`'s own `reason` is the bare
+`"Disabled"`, not `"MediaDisabled"`, and `VoicemailPlayer` matches **both** spellings for that reason.
 
-**Before turning `GvMedia:Enabled` on**, check whether RotaryPhone's `InterServiceAuthKey` is set. Its gate
-ships **default-off**, and while it is off `GvMedia:AuthKey` may stay empty — but if it *has* been set, every
-fetch returns 401 and surfaces as `MediaUnauthorized` until the two match, across the two files below.
+⚠ **`GvMedia:Enabled` is now on by default, so this check is a PRE-FLIGHT for the first deploy of `PHN-2`
+onto any box** rather than something to do before flipping a flag. Check whether RotaryPhone's
+`InterServiceAuthKey` is set. Its gate ships **default-off**, and while it is off `GvMedia:AuthKey` may stay
+empty — but if it *has* been set, every fetch returns 401 and surfaces as `MediaUnauthorized` until the two
+match, across the two files below. ⚠ **The repository cannot answer this**: `GVBridgeConfig` instructs
+storing the real value outside source, so a green repo says nothing. Verify on the live box.
 
 #### ⚠ Runbook: setting `AuthKey` on a live box is a hand edit, twice
 

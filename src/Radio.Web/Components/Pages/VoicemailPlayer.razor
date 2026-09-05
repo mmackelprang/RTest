@@ -1,50 +1,114 @@
 @using Radio.Web.Models
+@using Radio.Web.Services
 @using Radio.Web.Services.ApiClients
-@inject GvBridgeApiService GvBridgeApi
+@inject EventPlaybackApiService EventPlaybackApi
+@inject ConsolePlaybackState ConsolePlayback
+@inject AudioStateStore AudioState
+@inject AudioApiService AudioApi
 @inject IJSRuntime JS
-@implements IAsyncDisposable
+@implements IDisposable
 
+@* ADR-029 Feature A. This transport is a REMOTE CONTROL for something happening in the room, not a
+   media player: there is latency on every command, the sound does not come from the thing being
+   touched, and it keeps going after this component is disposed.
+
+   ⛔ There is no <audio> element and there must never be one again. That element is what bypassed
+   mute, master volume, balance, ducking and Cast routing (owner decision D17). *@
 <div class="vm-player">
-  <audio src="@AudioSrc" preload="none" @ref="_audioEl"></audio>
 
-  @if (_state == PlayerState.AudioError)
+  @if (ShowFailure)
   {
     <div class="vm-player-error" role="alert">
       <RadzenIcon Icon="error_outline" />
-      <span>Couldn't load this recording.</span>
-      <button type="button" class="phone-btn-sm" @onclick="RetryAsync">Retry</button>
+      <div class="vm-player-error-text">
+        <span>@FailurePrimary</span>
+        @if (FailureSubline.Length > 0)
+        {
+          <span class="vm-player-error-sub">@FailureSubline</span>
+        }
+      </div>
+      <button type="button" class="phone-btn-sm" @onclick="PlayAsync">Retry</button>
     </div>
   }
   else
   {
     <div class="vm-player-transport">
-      <button type="button" class="transport-btn-primary"
-              aria-label="@PlayPauseLabel" @onclick="TogglePlayAsync">
-        @if (_state == PlayerState.Buffering)
+      @* Handoff §A2 / Q11: the numeral-free glyphs. Material Icons has replay_10 and replay_30 but no
+         _15, and a glyph that says "10" while the button does 15 is a small permanent lie. The real
+         interval lives in the aria-label. *@
+      <button type="button" class="transport-btn transport-btn-secondary"
+              aria-label="Back 15 seconds" title="Back 15 seconds"
+              disabled="@(!CanSkip)" @onclick="() => SkipAsync(-15)">
+        <RadzenIcon Icon="fast_rewind" />
+      </button>
+
+      <button type="button" class="transport-btn transport-btn-primary"
+              aria-label="@PrimaryLabel" @onclick="TogglePlayAsync">
+        @if (IsMineAndPreparing)
         {
           <span class="spinner"></span>
         }
         else
         {
-          <RadzenIcon Icon="@(_state == PlayerState.Playing ? "pause" : "play_arrow")" />
+          <RadzenIcon Icon="@(IsMineAndPlaying ? "pause" : "play_arrow")" />
         }
       </button>
 
-      <div class="vm-scrubber" role="slider"
-           aria-label="Playback position"
-           aria-valuemin="0" aria-valuemax="@_totalForAria" aria-valuenow="@((int)_current)"
-           @onclick="OnScrubberClick" @ref="_scrubberEl">
-        <div class="now-playing-dock-progress">
-          <div class="now-playing-dock-progress-bar" style="width:@(ProgressPercent)%"></div>
-        </div>
-      </div>
+      <button type="button" class="transport-btn transport-btn-secondary"
+              aria-label="Forward 15 seconds" title="Forward 15 seconds"
+              disabled="@(!CanSkip)" @onclick="() => SkipAsync(15)">
+        <RadzenIcon Icon="fast_forward" />
+      </button>
 
-      <span class="vm-time">@FormatTime(_current) / @TotalDisplay</span>
+      @* Seek is meaningless without a total, so an unknown duration downgrades the ROLE rather than
+         leaving an unchangeable slider — an accessibility lie in exactly that state (handoff §A6). *@
+      @if (DurationKnown)
+      {
+        <div class="vm-scrubber" role="slider"
+             aria-label="Playback position"
+             aria-valuemin="0" aria-valuemax="@((int)TotalSeconds)"
+             aria-valuenow="@((int)ElapsedSeconds)"
+             @onclick="OnScrubberClickAsync" @ref="_scrubberEl">
+          <div class="now-playing-dock-progress">
+            <div class="now-playing-dock-progress-bar" style="width:@ProgressWidth"></div>
+          </div>
+        </div>
+      }
+      else
+      {
+        <div class="vm-scrubber vm-scrubber-indeterminate" role="progressbar"
+             aria-label="Playback position" aria-valuetext="Unknown length">
+          <div class="now-playing-dock-progress"></div>
+        </div>
+      }
+
+      <span class="vm-time">@FormatTime(ElapsedSeconds) / @TotalDisplay</span>
+
+      <button type="button" class="transport-btn transport-btn-secondary"
+              aria-label="Stop playing" title="Stop"
+              disabled="@(!IsMineAndLive)" @onclick="StopAsync">
+        <RadzenIcon Icon="stop" />
+      </button>
     </div>
 
-    @if (_state == PlayerState.Buffering)
+    @if (IsMineAndPreparing)
     {
       <div class="vm-buffering-note">Fetching recording…</div>
+    }
+    else if (IsMineAndWaiting)
+    {
+      @* PHN-1f §0.6 item 3: say WHY, not just THAT. A bare spinner is the complaint D28 rejected,
+         rendered. The snapshot does not carry the blocker's identity and this row does not ask for it
+         — one voice at a time is the invariant that makes naming it unnecessary. *@
+      <div class="vm-buffering-note">Waiting for the announcement to finish…</div>
+    }
+
+    @if (_mutedAtPlay)
+    {
+      <div class="phone-pill amber">
+        <span>The console is muted.</span>
+        <button type="button" class="phone-btn-sm" @onclick="UnmuteAsync">Unmute</button>
+      </div>
     }
   }
 
@@ -66,121 +130,362 @@
     }
   </div>
 
-  @* fast-follow (deferred, owner decision 3): Call back / Text back actions *@
+  @* The sound is somewhere else, so a non-sighted user gets no other confirmation (handoff §A6).
+     Same idiom as Skeleton.razor:79. *@
+  <span class="visually-hidden" role="status" aria-live="polite">@LiveRegionText</span>
 </div>
 
 @code {
   [Parameter, EditorRequired] public VoicemailItemDto Item { get; set; } = default!;
   [Parameter] public EventCallback OnHeard { get; set; }
 
-  private enum PlayerState { Idle, Buffering, Playing, Paused, Ended, AudioError }
-  private PlayerState _state = PlayerState.Idle;
-  private double _current;
-  private double _duration;
-  private ElementReference _audioEl;
-  private ElementReference _scrubberEl;
-  private IJSObjectReference? _module;
-  private IJSObjectReference? _player;
-  private DotNetObjectReference<VoicemailPlayer>? _self;
+  private string? _playbackId;    // the handle THIS component started, or null
+  private string? _startReason;   // a synchronous 400/409; never reaches a Failed snapshot
   private bool _heardSent;
+  private bool _mutedAtPlay;
+  private bool _starting;                     // a StartVoicemailAsync is in flight; see PlayAsync
+  private IJSObjectReference? _scrubberModule; // imported once per instance; see OnScrubberClickAsync
+  private ElementReference _scrubberEl;
 
-  private string AudioSrc => GvBridgeApi.GetVoicemailAudioUrl(Item.Id);
-  private bool IsRecent => (DateTime.UtcNow - Item.ReceivedAt) < TimeSpan.FromMinutes(30);
-  private bool DurationKnown => Item.DurationSeconds > 0 || _duration > 0;
-  private double EffectiveDuration => _duration > 0 ? _duration : Item.DurationSeconds;
-  private int _totalForAria => Item.DurationSeconds > 0 ? Item.DurationSeconds : 0;
-  private double ProgressPercent =>
-    EffectiveDuration > 0 ? Math.Clamp(_current / EffectiveDuration * 100, 0, 100) : 0;
-  private string TotalDisplay => DurationKnown ? FormatTime(EffectiveDuration) : "--:--";
-  private string PlayPauseLabel =>
-    _state == PlayerState.Playing ? "Pause" : $"Play voicemail from {Item.FromName ?? Item.FromNumber}";
+  protected override void OnInitialized() => ConsolePlayback.Changed += OnPlaybackChangedAsync;
 
-  protected override async Task OnAfterRenderAsync(bool firstRender)
+  // ⛔ NOTHING ELSE HERE, AND THAT IS THE POINT. There is deliberately no stop on disposal.
+  // ADR-029 §7.2: "component disposal is a rendering event, not a user intent."
+  //
+  // ⚠ What silenced the room before was the <audio> ELEMENT LEAVING THE DOM — the browser stops a
+  // media element it no longer owns — and NOT the previous file's teardown code. That DisposeAsync
+  // released three JS references and called the module's `dispose`, which only ever did five
+  // removeEventListener calls. So there was never a Stop here to delete; the silence was a side
+  // effect of rendering, which is exactly the confusion §7.2 names. The topbar chip is what earns
+  // NOT reinstating it deliberately now that the console, rather than the DOM, owns the sound.
+  //
+  // Three shipped mechanisms stop unattended audio and NONE of them is this component: the
+  // last-circuit backstop (D30 — a page reload DOES stop it, deliberately), the two /sleep edges
+  // (ADR §16.5), and the GvMedia:MaxPlaybackSeconds cap.
+  public void Dispose() => ConsolePlayback.Changed -= OnPlaybackChangedAsync;
+
+  private Task OnPlaybackChangedAsync() => InvokeAsync(StateHasChanged);
+
+  // ── which snapshot is OURS ───────────────────────────────────────────────────────────────────
+  //
+  // ⚠ Every STATE predicate that reads the snapshot is gated on its id matching the handle THIS
+  // component started. (ShowFailure and FailureCode each have an ungated first disjunct, _startReason,
+  // and that is not an exception to the rule: _startReason is component-local — it can only have been
+  // set by THIS row's own synchronously-refused start — so the intent survives.)
+  // Playback state is global (ADR-029 D6) and at most one thing plays anywhere on the surface
+  // (handoff §A4b), so without this gate every open voicemail row would render the transport for
+  // whatever is playing — including something started from a different row, or a different browser.
+  private EventPlaybackSnapshotDto? Mine =>
+    _playbackId is not null && ConsolePlayback.Snapshot?.Id == _playbackId
+      ? ConsolePlayback.Snapshot
+      : null;
+
+  private string? MineState => Mine?.State;
+  private bool IsMineAndLive => Mine?.IsLive == true;
+  private bool IsMineAndPlaying => MineState == "Playing";
+  private bool IsMineAndPreparing => MineState == "Preparing";
+  private bool IsMineAndWaiting => MineState == "Waiting";
+  private bool CanSkip => IsMineAndPlaying || MineState == "Paused";
+  private bool ShowFailure => _startReason is not null || MineState == "Failed";
+
+  // ── the anchor, interpolated locally ─────────────────────────────────────────────────────────
+  //
+  // ⚠ There is NO position tick and there must not be one (ADR-029 §8.2). The snapshot carries
+  // PositionAtBroadcast + BroadcastAtUtc + State; this getter interpolates forward from that anchor,
+  // and a new broadcast re-anchors it.
+  //
+  // ⚠ THIS COMPONENT HAS NO CLOCK. It only computes; the number on screen moves because something
+  // else re-renders it, and that something is MainLayout's 1 Hz System.Timers.Timer
+  // (MainLayout.razor:484-487 → OnTimerElapsed → SafeInvokeAsync → StateHasChanged), whose re-render
+  // cascades through @Body to here. Nothing on that path overrides ShouldRender — the only two
+  // overrides in Radio.Web are RdsCard and RdsScrollMarquee, neither on the /phone route. Named
+  // explicitly so that if anyone ever gates that tick — a sleep mode, a render-cost fix, a new
+  // ShouldRender guard on a component in between — the reason every scrubber on the panel froze is
+  // one grep away rather than a fresh investigation. ⛔ Do NOT answer that by adding a timer here
+  // (plan §5 item 10, grep 6): every expanded row would carry one.
+  //
+  // ⚠ "while State == Playing" is load-bearing, not stylistic. While Waiting the position is zero and
+  // STAYS zero, and interpolating there would show a bar advancing through audio that does not exist
+  // (PHN-1f §0.6 item 2).
+  private double ElapsedSeconds
   {
-    if (firstRender)
+    get
     {
-      // Resilient import/attach: under bUnit's loose JS interop the module never
-      // really loads, so guard so a test that doesn't mock it doesn't crash. In
-      // production this binds the <audio> events to the JSInvokable callbacks.
-      try
+      var snapshot = Mine;
+      if (snapshot is null)
       {
-        _self = DotNetObjectReference.Create(this);
-        _module = await JS.InvokeAsync<IJSObjectReference>(
-          "import", "./js/voicemail-player.js");
-        _player = await _module.InvokeAsync<IJSObjectReference>("attach", _audioEl, _self);
+        return 0;
       }
-      catch
+
+      var elapsed = snapshot.PositionAtBroadcast;
+      if (snapshot.State == "Playing")
       {
-        // No-op: player interactions are null-guarded; transcript + markup remain valid.
+        elapsed += DateTimeOffset.UtcNow - snapshot.BroadcastAtUtc;
       }
+
+      var seconds = Math.Max(0, elapsed.TotalSeconds);
+      return TotalSeconds > 0 ? Math.Min(seconds, TotalSeconds) : seconds;
     }
   }
+
+  // ⚠ DurationSeconds == 0 means UNKNOWN in the GV contract (ADR-022 §4.2, ADR-029 §4.1). It is a live
+  // and expected case, not a defect. Never render 0:00 as a real total: the same number drives the bar
+  // AND AudioFileEventSource's completion timer, so a confident zero is a bar that crawls to 100% and
+  // stops while sound continues.
+  //
+  // ⚠ The snapshot's Duration outranks the DTO's, because the server resolved "0 means unknown" into a
+  // null and the DTO did not.
+  private double TotalSeconds => Mine?.Duration?.TotalSeconds ?? Item.DurationSeconds;
+  private bool DurationKnown => TotalSeconds > 0;
+  private string TotalDisplay => DurationKnown ? FormatTime(TotalSeconds) : "--:--";
+  private string ProgressWidth =>
+    (DurationKnown ? Math.Clamp(ElapsedSeconds / TotalSeconds * 100, 0, 100) : 0)
+      .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+  private string PrimaryLabel => IsMineAndPlaying
+    ? "Pause"
+    : $"Play voicemail from {Item.FromName ?? Item.FromNumber}";
+
+  private string LiveRegionText => MineState switch
+  {
+    "Preparing" => "Fetching the recording.",
+    "Waiting" => "Waiting for the console.",
+    "Playing" => "Playing on the console.",
+    "Paused" => "Paused.",
+    "Stopped" => "Stopped.",
+    "Completed" => "Finished.",
+    _ => string.Empty
+  };
+
+  private string FailureCode => _startReason ?? Mine?.FailureReason ?? string.Empty;
+
+  // ⚠ FIVE rows, not the handoff's four — an extension UNDER its own rule rather than a deviation
+  // from it: "Four distinct failures, four distinct sentences. Do not collapse them."
+  // MediaUnauthorized is a fifth distinct failure with a fifth distinct fix.
+  //
+  // ⚠ The distinction that matters most in the room: MediaNotFound does NOT mean the recording is
+  // gone. RotaryPhone's GetAudio resolves through FindNodeAsync, which never checks its list result's
+  // Succeeded flag, so a Google Voice auth blackout — dead ~9 minutes in every 20 — surfaces here as
+  // a 404. Six distinct transient conditions reach it. "This usually clears up in a minute" is
+  // therefore an ACCURATE promise, not a soothing one, and the cache makes Retry's odds real.
+  //
+  // ⚠ And MediaUnauthorized must NEVER wear that sub-line, because it never clears up: it means
+  // GvMedia:AuthKey and RotaryPhone's InterServiceAuthKey have diverged, which is two hand edits on
+  // two files the deploy does not re-seed. Giving it the blackout's copy sends the owner into a retry
+  // loop against a configuration fault, and nothing else on the box would tell him.
+  private string FailurePrimary => FailureCode switch
+  {
+    "MediaUnauthorized" => "The console isn't allowed to fetch recordings.",
+    "MediaDisabled" or "Disabled" => "Voicemail playback is switched off on the console.",
+    "MediaTooLarge" => "This recording is too large for the console to play.",
+    "WaitExpired" => "The console was busy and gave up waiting.",
+    "MediaNotFound" or "MediaUpstream" or "MediaTimeout" or "MediaTransport" or "MediaUnknown"
+      or "Transport" => "Couldn't load this recording.",
+    _ => "The console can't play this right now."
+  };
+
+  private string FailureSubline => FailureCode switch
+  {
+    "MediaUnauthorized" => "This won't clear on its own — the console's key doesn't match the bridge's.",
+    "MediaNotFound" or "MediaUpstream" or "MediaTimeout" or "MediaTransport" or "MediaUnknown"
+      or "Transport" => "This usually clears up in a minute. Try again.",
+    _ => string.Empty
+  };
+
+  // ── the transport actions ────────────────────────────────────────────────────────────────────
 
   private async Task TogglePlayAsync()
   {
+    if (IsMineAndPlaying)
+    {
+      await PauseAsync();
+      return;
+    }
+
+    if (MineState == "Paused")
+    {
+      await EventPlaybackApi.ResumeAsync(_playbackId!);
+      return;
+    }
+
+    // Tapping the ACTIVE item's own button while it is preparing or waiting stops it — handoff
+    // §Cross-1's "play → stop → play", which is unambiguous here because the primary shows a spinner
+    // rather than a play glyph in those states.
+    if (IsMineAndLive)
+    {
+      await StopAsync();
+      return;
+    }
+
+    await PlayAsync();
+  }
+
+  // ⚠ RE-ENTRANT ON A TOUCH PANEL WITHOUT _starting. _playbackId is cleared BEFORE the awaited POST,
+  // so a second tap arriving while the first is in flight sees a null id, falls through every "is this
+  // mine" predicate above, and starts a SECOND playback — which EventPlaybackService's replacement arm
+  // honours by tearing the first one down mid-sentence. A double-tap is the default gesture on a wall
+  // panel, not the exceptional one. The button cannot be disabled instead: there is no snapshot to
+  // render Preparing from until the 202 comes back, which is the whole window this guards.
+  private async Task PlayAsync()
+  {
+    if (_starting)
+    {
+      return;
+    }
+
+    _starting = true;
+    try
+    {
+      await StartAsync();
+    }
+    finally
+    {
+      _starting = false;
+    }
+  }
+
+  private async Task StartAsync()
+  {
     await MarkHeardOnceAsync();
-    if (_player == null) return;            // module not loaded (e.g. under tests)
-    if (_state == PlayerState.Playing)
+
+    // ⚠ Read mute/volume SYNCHRONOUSLY here rather than subscribing to AudioStateStore.VolumeChanged.
+    // The handoff's condition is "muted or volume 0 AT PLAY TIME", which is a snapshot; and
+    // VolumeChanged already has live subscribers, so adding one would take a store event this row has
+    // no reason to touch from N to N+1 (plan §0.4 C-78).
+    //
+    // ⚠ AudioState.IsMuted / .Volume, NOT AudioState.PlaybackState. PlaybackState is assigned in
+    // exactly one place — AudioStateStore.UpdatePlaybackStateAsync — and that method has no production
+    // caller anywhere, so it is null for the life of the process on the box. Reading it here made this
+    // pill and its Unmute button unreachable code. IsMuted and Volume are written by the store's
+    // OnHubVolumeChanged, i.e. by a real broadcast.
+    //
+    // ⚠ HONEST LIMIT, stated because a synchronous read is only as good as its seeding and NOTHING
+    // SEEDS THESE TWO. MainLayout's authoritative pull (LoadMuteStateAsync) lands in MainLayout's own
+    // _isMuted field, not in the store, and VolumeChanged fires only on a CHANGE — so until the first
+    // volume or mute change after radio-web starts, these hold their construction defaults (0.75f,
+    // false). A console muted before radio-web started and untouched since will show no pill. That
+    // fails in the SAFE direction — a missing affordance, never a pill over an audible console — and
+    // closing it means seeding the store from the API, not subscribing from here (C-78).
+    _mutedAtPlay = AudioState.IsMuted || AudioState.Volume == 0f;
+
+    _startReason = null;
+    _playbackId = null;
+
+    var (snapshot, reason) = await EventPlaybackApi.StartVoicemailAsync(
+      Item.Id,
+      Item.DurationSeconds,
+      $"Voicemail from {Item.FromName ?? Item.FromNumber}");
+
+    if (snapshot is null)
     {
-      await _player.InvokeVoidAsync("pause");
-      _state = PlayerState.Paused;
+      // A refusal answered synchronously — 400 or 409 — never reaches a Failed snapshot, so it has to
+      // be held locally or the panel would show nothing at all.
+      _startReason = reason ?? "Transport";
+      return;
     }
-    else
-    {
-      _state = PlayerState.Buffering;  // first-play stall is expected (ADR/contract)
-      await _player.InvokeVoidAsync("play");
-    }
+
+    // ⚠ 202 means ACCEPTED, not playing. The outcome arrives on the hub. Do not render Playing here.
+    _playbackId = snapshot.Id;
   }
 
-  private async Task OnScrubberClick(MouseEventArgs e)
+  private Task PauseAsync() =>
+    _playbackId is null ? Task.CompletedTask : EventPlaybackApi.PauseAsync(_playbackId);
+
+  private Task StopAsync() =>
+    _playbackId is null ? Task.CompletedTask : EventPlaybackApi.StopAsync(_playbackId);
+
+  private async Task SkipAsync(int deltaSeconds)
   {
-    if (_module == null || _player == null) return;
-    // Compute fraction from clientX vs the scrubber's bounding box (JS reads box).
-    var fraction = await _module.InvokeAsync<double>("fractionFromEvent", _scrubberEl, e.ClientX);
-    await _player.InvokeVoidAsync("seekFraction", fraction);
+    if (_playbackId is null)
+    {
+      return;
+    }
+
+    var target = TimeSpan.FromSeconds(Math.Max(0, ElapsedSeconds + deltaSeconds));
+    await EventPlaybackApi.SeekAsync(_playbackId, target);
   }
 
-  private async Task RetryAsync()
+  // ⚠ Tap-to-seek only. There is no pointermove handler and never was — the previous player was
+  // already tap-only (:36 bound @onclick, :135 took a MouseEventArgs). Drag-scrub needs a ~16 ms
+  // budget we do not have and a grabbable thumb .now-playing-dock-progress does not have (handoff
+  // §A3). If it is ever added, commit-on-release is the only acceptable pattern.
+  //
+  // ⚠ The fraction still comes from JS, and that is the ONE thing on this path with no server-side
+  // replacement: converting a click's clientX to a fraction needs the element's rendered box, which
+  // only the browser has. It is why js/voicemail-player.js is REDUCED rather than deleted (Task 7a).
+  private async Task OnScrubberClickAsync(MouseEventArgs e)
   {
-    _state = PlayerState.Idle;
-    StateHasChanged();
-    await TogglePlayAsync();
+    if (_playbackId is null || !DurationKnown)
+    {
+      return;
+    }
+
+    double fraction;
+    try
+    {
+      // ⚠ Imported ONCE per component instance, not once per click. The browser side is not the cost —
+      // ES modules are cached by URL, so a repeated import() hands back the same module object — but
+      // each InvokeAsync<IJSObjectReference> mints a NEW server-side reference id in the circuit's
+      // interop tracking table, released only by DisposeAsync or by the circuit ending. Importing per
+      // click therefore grew that table by one entry per seek, for the life of the circuit. (The file
+      // this component replaced cached its module in a field too; the per-click import arrived with
+      // the rewrite.)
+      //
+      // ⚠ It is deliberately NOT disposed. Dispose() must stay the single `Changed -=` expression body
+      // (plan C-77 / grep 3) so that nothing in this component's teardown can ever be mistaken for a
+      // stop, and IJSObjectReference only offers DisposeAsync. One reference per expanded row, freed
+      // when the circuit ends, is the price of that guarantee and is bounded by the rows a person can
+      // open — where the per-click version was bounded by nothing.
+      _scrubberModule ??=
+        await JS.InvokeAsync<IJSObjectReference>("import", "./js/voicemail-player.js");
+      fraction = await _scrubberModule.InvokeAsync<double>(
+        "fractionFromEvent", _scrubberEl, e.ClientX);
+    }
+    catch
+    {
+      // bUnit's loose interop and a missing module both land here. A seek that cannot be located is a
+      // no-op, never an exception out of an event handler on a wall panel.
+      return;
+    }
+
+    await EventPlaybackApi.SeekAsync(
+      _playbackId, TimeSpan.FromSeconds(Math.Clamp(fraction, 0, 1) * TotalSeconds));
+  }
+
+  // ⚠ ToggleMuteAsync IGNORES its bool argument: POST /api/audio/mute is a pure TOGGLE
+  // (AudioController.cs:381-391), so it is only a set-to-false while the console is still muted. The
+  // guard is what keeps a button labelled "Unmute" from muting a console that somebody unmuted
+  // elsewhere between the tap that raised this pill and the tap on the pill.
+  private async Task UnmuteAsync()
+  {
+    _mutedAtPlay = false;
+
+    if (AudioState.IsMuted)
+    {
+      await AudioApi.ToggleMuteAsync(false);
+    }
   }
 
   private async Task MarkHeardOnceAsync()
   {
-    if (_heardSent) return;
+    if (_heardSent)
+    {
+      return;
+    }
+
     _heardSent = true;
-    // SINGLE write path: bubble to PhonePage.OnVoicemailHeard, which does the optimistic
-    // flip + durable GV write-through + idempotent reconcile (GV-4 / ADR-024). The player
-    // does NOT call MarkVoicemailReadAsync directly — that would double-write. There is no
-    // "mark unread" affordance (ADR-024 §6 — no unread toggle in v1).
+    // UNCHANGED from the previous file, deliberately. Single write path: bubble to
+    // PhonePage.OnVoicemailHeard, which does the optimistic flip + durable GV write-through +
+    // idempotent reconcile (GV-4 / ADR-024). The player does NOT call MarkVoicemailReadAsync directly.
     await OnHeard.InvokeAsync();
   }
 
-  [JSInvokable] public Task OnTimeUpdate(double current, double duration)
-  {
-    _current = current;
-    if (duration > 0) _duration = duration;
-    return InvokeAsync(StateHasChanged);
-  }
-  [JSInvokable] public Task OnPlaying() { _state = PlayerState.Playing; return InvokeAsync(StateHasChanged); }
-  [JSInvokable] public Task OnBuffering() { if (_state != PlayerState.Playing) _state = PlayerState.Buffering; return InvokeAsync(StateHasChanged); }
-  [JSInvokable] public Task OnEnded() { _state = PlayerState.Ended; _current = 0; return InvokeAsync(StateHasChanged); }
-  [JSInvokable] public Task OnAudioError() { _state = PlayerState.AudioError; return InvokeAsync(StateHasChanged); }
+  private bool IsRecent => (DateTime.UtcNow - Item.ReceivedAt) < TimeSpan.FromMinutes(30);
 
   private static string FormatTime(double seconds)
   {
     if (double.IsNaN(seconds) || seconds < 0) seconds = 0;
     var ts = TimeSpan.FromSeconds(Math.Floor(seconds));
     return ts.TotalHours >= 1 ? ts.ToString(@"h\:mm\:ss") : ts.ToString(@"m\:ss");
-  }
-
-  public async ValueTask DisposeAsync()
-  {
-    try { if (_player != null) await _player.InvokeVoidAsync("dispose"); } catch { }
-    try { if (_player != null) await _player.DisposeAsync(); } catch { }
-    try { if (_module != null) await _module.DisposeAsync(); } catch { }
-    _self?.Dispose();
   }
 }

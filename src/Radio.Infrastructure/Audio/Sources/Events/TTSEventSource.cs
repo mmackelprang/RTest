@@ -58,6 +58,23 @@ public class TTSEventSource : EventAudioSourceBase
   /// <inheritdoc/>
   public override TimeSpan Duration => _duration;
 
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Read from the player rather than tracked here, so it stays correct across a seek.
+  ///
+  /// ⚠ The key is Id, NOT a separately minted playback id. This source registers itself with
+  /// SoundFlowPlaybackService under Id (StartPlaybackWithMonitoringAsync); AudioFileEventSource
+  /// mints a separate _playbackId and does not. Confusing the two is ADR-029 §3.3's identity hazard:
+  /// it fails for exactly one of the two arms and looks like it works for the other.
+  ///
+  /// ⚠ Zero outside Playing and Paused, which is the state before playback starts and after it
+  /// ends. A stopped source reporting its last position would make a finished playback look paused.
+  /// </remarks>
+  public override TimeSpan Position =>
+    State is AudioSourceState.Playing or AudioSourceState.Paused
+      ? _playbackService?.GetPosition(Id) ?? TimeSpan.Zero
+      : TimeSpan.Zero;
+
   /// <summary>
   /// Gets the original text that was converted to speech.
   /// </summary>

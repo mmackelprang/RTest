@@ -25,8 +25,8 @@ public abstract class EventAudioSourceBase : AudioSourceBase, IEventAudioSource
 
   /// <inheritdoc/>
   /// <remarks>
-  /// Defaults to zero. An implementer that can report a real position overrides this;
-  /// TTSEventSource deliberately does not.
+  /// Defaults to zero. An implementer that can report a real position overrides this — both shipped
+  /// event sources now do, AudioFileEventSource and, since PHN-2, TTSEventSource.
   /// </remarks>
   public virtual TimeSpan Position => TimeSpan.Zero;
 

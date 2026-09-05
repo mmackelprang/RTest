@@ -163,17 +163,6 @@ public class GvBridgeApiServiceVoicemailSmsTests
   }
 
   [Fact]
-  public void GetVoicemailAudioUrl_BuildsAbsoluteUrl_AgainstBaseAddress()
-  {
-    var client = new HttpClient(new MockHttpHandler("{}"))
-    { BaseAddress = new Uri("http://radio:5004") };
-
-    var url = CreateService(client).GetVoicemailAudioUrl("vm1");
-
-    Assert.Equal("http://radio:5004/api/gvbridge/voicemail/vm1/audio", url);
-  }
-
-  [Fact]
   public async Task MarkVoicemailReadAsync_NoOps_WhenFlagOff()
   {
     var handler = new MockHttpHandler("{}");

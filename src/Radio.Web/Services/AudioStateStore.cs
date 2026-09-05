@@ -62,6 +62,14 @@ public class AudioStateStore : IAsyncDisposable
   public event Func<Task>? EncoderConfigStatusChanged;
 
   /// <summary>Raised when the one attended event playback changes state (ADR-029 D6).</summary>
+  /// <remarks>
+  /// ⚠ ConsolePlaybackState is this event's ONE subscriber, and keeping it at one is a design
+  /// decision rather than an accident (PHN-2 §0.6). This store is a singleton, so a component
+  /// subscribing here subscribes once PER CIRCUIT; the topbar chip and the voicemail transport both
+  /// need the snapshot, so subscribing them directly would put two handlers per circuit — four with
+  /// two browsers open — on an event whose NotifyAsync awaits only the LAST of them (queue row
+  /// UI-6). A row that adds a second subscriber here expires that argument with it.
+  /// </remarks>
   public event Func<Task>? EventPlaybackChanged;
 
   public AudioStateStore(
@@ -170,7 +178,23 @@ public class AudioStateStore : IAsyncDisposable
     await NotifyAsync(NowPlayingChanged);
   }
 
-  private async Task OnHubVolumeChanged(VolumeDto? dto)
+  /// <summary>Applies one "VolumeChanged" broadcast. Subscribed to the hub client in the constructor.</summary>
+  /// <remarks>
+  /// ⚠ internal rather than private, and only for the test seam — Radio.Web.csproj already declares
+  /// InternalsVisibleTo("Radio.Web.Tests"). Same argument as OnHubEventPlaybackChanged below: a
+  /// field-like event cannot be raised from outside the type that declares it, so a test holding an
+  /// AudioStateHubService cannot make VolumeChanged fire. The alternative seam, UpdateVolumeAsync, is
+  /// public and has ZERO production callers — priming through it would be a test driving a path that
+  /// does not exist on the box, which is exactly the defect PHN-2's review found in the muted-pill
+  /// test (it primed through UpdatePlaybackStateAsync, whose only caller is that test).
+  ///
+  /// ⚠ <see cref="Volume"/> and <see cref="IsMuted"/> are written HERE AND NOWHERE ELSE in production.
+  /// Nothing seeds them: MainLayout's authoritative GET /api/audio/volume pull lands in MainLayout's
+  /// own field, and this broadcast fires only on a CHANGE. So they hold their construction defaults
+  /// (0.75f, false) until the first change after this process starts. Readers must be able to live
+  /// with that — VoicemailPlayer.PlayAsync says so explicitly at its own call site.
+  /// </remarks>
+  internal async Task OnHubVolumeChanged(VolumeDto? dto)
   {
     if (dto != null)
     {
@@ -276,7 +300,8 @@ public class AudioStateStore : IAsyncDisposable
   private int _eventPlaybackSeedStarted;
 
   /// <summary>
-  /// Applies one "EventPlaybackChanged" broadcast. Subscribed to the hub client in the constructor.
+  /// Applies one "EventPlaybackChanged" broadcast. Subscribed to the hub client in the constructor,
+  /// and consumed by ConsolePlaybackState — this event's ONE subscriber, by design (PHN-2 §0.6).
   /// </summary>
   /// <remarks>
   /// ⚠ internal rather than private, and only for the test seam — Radio.Web.csproj already declares
@@ -319,8 +344,11 @@ public class AudioStateStore : IAsyncDisposable
   /// exists for — a deploy restarts both services together, so the API can broadcast while
   /// AudioStateHubService.StartAsync is still in its retry loop, and that broadcast reaches nobody.
   ///
-  /// ⚠ Never throws. Its callers are a CircuitHandler and, from PR 6, a layout; neither is worth a
-  /// blank screen.
+  /// ⚠ Never throws. Its one caller is AttendedPlaybackCircuitHandler, which is not worth a blank
+  /// screen. ⚠ PHN-1e predicted a layout would join it in PR 6 and PR 6 did NOT: the topbar chip
+  /// reads the snapshot this seed already placed when the circuit opened, and adds no fetch of its
+  /// own. Correcting the prediction rather than leaving it, because the next reader would otherwise
+  /// go looking for a caller that does not exist.
   ///
   /// ⚠ KNOWN LIMITATIONS — three, all accepted rather than overlooked, all filed in
   /// design/FUTURE-WORK.md §19 and §21.
