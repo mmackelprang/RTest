@@ -63,8 +63,9 @@ public class SoundFlowMasterMixerLogSafetyTests
     foreach (var message in logs.Messages)
     {
       Assert.DoesNotContain(Sentinel, message, StringComparison.Ordinal);
-      // The truncated form too: Name clips at 47 characters, so a leak through Name would show up
-      // as a prefix rather than the whole sentinel.
+      // ⚠ The sentinel is 29 characters and Name clips at 47, so a leak through Name here carries
+      // it WHOLE — the assertion above would catch it unaided. This one earns its place against a
+      // LONGER utterance, which Name would clip and which an exact-match check would then miss.
       Assert.DoesNotContain("Marmalade", message, StringComparison.Ordinal);
       Assert.DoesNotContain("TTS: ", message, StringComparison.Ordinal);
     }
@@ -94,7 +95,14 @@ public class SoundFlowMasterMixerLogSafetyTests
     foreach (var line in new[] { added, removed })
     {
       Assert.Contains(source.Id, line, StringComparison.Ordinal);
-      Assert.Contains(AudioSourceType.TTS.ToString(), line, StringComparison.Ordinal);
+
+      // ⚠ The PARENTHESISED form, and that is the whole point of this assertion. A bare
+      // Contains("TTS") passes on the Id alone — AudioSourceBase builds Id as $"{Type}-{Guid:N}" —
+      // so it could not tell "the line logs Type and Id" apart from "the line logs only Id". An
+      // earlier revision asserted exactly that and was a test passing against a template with no
+      // {SourceType} in it at all. Mutation-verified: dropping {SourceType} from the message
+      // template makes this fail.
+      Assert.Contains($"({AudioSourceType.TTS})", line, StringComparison.Ordinal);
     }
   }
 }
