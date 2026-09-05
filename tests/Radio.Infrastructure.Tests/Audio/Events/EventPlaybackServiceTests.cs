@@ -1033,16 +1033,23 @@ public sealed class EventPlaybackServiceTests : IDisposable
   }
 
   [Fact]
-  public async Task ASpeechSnapshotReportsPositionZeroForItsWholeLife()
+  public async Task ASpeechSourceReportsItsOwnPosition_ThoughThisHarnessCannotMakeItMove()
   {
-    // ⚠ THE C-27 HONESTY PIN, and it asserts the CURRENT behaviour rather than the desirable one.
-    // The first assertion is the real one: TTSEventSource does not override Position, so it
-    // inherits EventAudioSourceBase's TimeSpan.Zero for the whole playback. When PR 5 adds the
-    // three-line override, THIS is what fails, which is how it should be found — update it, do not
-    // delete it.
+    // ⚠ UPDATED, NOT DELETED. PHN-1c pinned the inverse of the first assertion deliberately
+    // (C-27): TTSEventSource did not override Position, so it inherited EventAudioSourceBase's
+    // TimeSpan.Zero for the whole playback, and adding the override was meant to red exactly this
+    // line. PHN-2 added it, so the line now names TTSEventSource. Deleting it instead would have
+    // erased the record that the behaviour changed.
     var positionGetter = typeof(TTSEventSource).GetProperty(nameof(IEventAudioSource.Position))!
       .GetGetMethod()!;
-    Assert.Equal(typeof(EventAudioSourceBase), positionGetter.DeclaringType);
+    Assert.Equal(typeof(TTSEventSource), positionGetter.DeclaringType);
+
+    // ⚠ AND THE TWO ASSERTIONS BELOW STILL PASS, which is the point of saying so rather than
+    // quietly keeping them. There is no real SoundFlowPlaybackService in this harness, so the
+    // override's null-conditional falls through to TimeSpan.Zero and the snapshot reports zero for
+    // the same OBSERVED value as before, by a different route. This is a PATH check: it proves the
+    // override is declared and reachable, and it proves nothing at all about a position that moves.
+    // That needs the appliance (plan §2.2 item 2).
 
     using var service = CreateService();
 
