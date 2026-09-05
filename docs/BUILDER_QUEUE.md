@@ -305,16 +305,22 @@ All at `dd8e85ec`, on the appliance. Recorded so nobody re-runs them:
 
 ### On-box UAT of the new edge, 2026-09-04 — including the latency ADR §16.5 asked for
 
-Deployed to `radio` at `947fb2e` (both services SHA-verified, kiosk relaunched and live), driven
-through the real controller, real DI and real JSON. **All four checks are of the edge that did not
-exist before this row.**
+Deployed to `radio` and driven through the real controller, real DI and real JSON; both services
+SHA-verified, kiosk relaunched and live each time.
+
+⚠ **RUN TWICE, AND THE SECOND RUN IS THE ONE THAT COUNTS.** T1–T4 were first measured at `947fb2e`,
+**which carried the transition predicate the pre-merge review then replaced.** Publishing those
+numbers for the shipped build would have been the "measured several commits back" mistake this queue
+has had to retract before — so T1 and T3 were re-run at `01dec7f`, and **T5 exists only at `01dec7f`,
+because it is the case the change was for.**
 
 | # | What was driven | Result |
 |---|---|---|
-| **T1** | `POST /api/system/sleep-screen {visible:true}` with a live playback, **no browser and no `EnterSleepAsync`** | `Playing` → `Stopped`. `isSleeping` stayed **false** throughout — the idle-path state, where the old rule did nothing. The API log carries `Sleep stopped attended playback evp-52d6…` with **no preceding `Entering sleep mode`**, which is what isolates the new edge from the old one |
+| **T1** | `POST /api/system/sleep-screen {visible:true}` with a live playback, **no browser and no `EnterSleepAsync`** — re-run at `01dec7f` | `Playing` → `Stopped`. `isSleeping` stayed **false** throughout — the idle-path state, where the old rule did nothing. The API log carries `Sleep stopped attended playback evp-52d6…` with **no preceding `Entering sleep mode`**, which is what isolates the new edge from the old one |
 | **T2** | The idle timer's own mechanism — `window.location.href = '/sleep'` driven over kiosk CDP — with a live playback | Stopped **592 ms** after the navigation. ⚠ **The CIRCUIT rule won on this path**, logging `Last circuit closed with attended playback … still live`. That is ADR §16.1's predicted overlap, which it marked *"derived from the mechanism, not measured"* — **now measured.** The two rules are not redundant; they overlap on exactly this path |
-| **T3** | `{visible:false}` (what `MainLayout` reports on every navigation home) with a live playback | Still `Playing`. The inverse holds |
+| **T3** | `{visible:false}` (what `MainLayout` reports on every navigation home) with a live playback — re-run at `01dec7f` | Still `Playing`. The inverse holds |
 | **T4** | ⭐ **The latency §16.5 item 2 called "plausibly seconds" and left UNMEASURED** — hard navigation → the sleep screen reporting itself | **112 ms / 113 ms / 140 ms** over three runs, verified with the page really at `/sleep` and Blazor connected. It is milliseconds, not seconds |
+| **T5** | ⭐ **THE STALE-FLAG CASE, at `01dec7f`** — flag already `true`, a **new** playback starts, then a report that is **not a change** (what the idle timer sends when the flag was never cleared) | `Playing` → **`Stopped`**. ⛔ **Under the transition predicate this stops NOTHING** — it is the defect the comment reviewer found, and this is it reproduced and closed on real hardware rather than only in a unit test |
 
 ⭐ **T2 also settles a MEDIUM the lifecycle reviewer could not settle from the tree.** This row moves
 `IEventPlaybackService` (and `GvMediaClient`, `AudioFileEventSourceFactory`, `ITTSFactory`,
@@ -325,7 +331,12 @@ i.e. a restart loop on a headless appliance. `CustomWebApplicationFactory` strip
 `IHostedService`, so **no test in the suite covers it**. The deploy did: `radio-api` came up, answered
 `/api/health/version` at the right SHA, and served every check above.
 
-⚠ **What was NOT re-run, and why:** `U1` (the payload survives the real `JsonHubProtocol`) and `U2`
+⚠ **T2 and T4 were not re-run at `01dec7f`, and that is defensible rather than an oversight:** T2's
+result is that the **circuit** rule wins the hard-navigation path, and the circuit rule is byte-for-byte
+unchanged by the review; T4 measures how fast `Sleep.razor` reports itself, which is a Blazor render
+latency the predicate does not touch. Said here rather than left for a reader to assume.
+
+⚠ **What was NOT re-run at all, and why:** `U1` (the payload survives the real `JsonHubProtocol`) and `U2`
 (a singleton `CircuitHandler` sees every circuit) were settled on the box by the previous cycle and
 are unchanged by this one. `U3` needed no re-run because `D30` settled it as a decision rather than a
 measurement.
