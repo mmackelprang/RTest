@@ -217,10 +217,15 @@ if ($LASTEXITCODE -ne 0) {
 ssh $SshTarget "sudo mkdir -p $TargetPath/api $TargetPath/web $TargetPath/data $TargetPath/logs && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $TargetPath/api/ && sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $TargetPath/web/ && sudo chown -R ${TargetUser}:${TargetUser} $TargetPath && sudo chmod +x $TargetPath/api/Radio.API $TargetPath/web/Radio.Web && rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web"
 
 # Captured immediately, not read later. Before OPS-7 this check sat AFTER the Production
-# config block below, where $LASTEXITCODE had already been overwritten by that block's
-# `ssh ... test -f` — and since both $configDir values ship a seed file, that block always
-# ran. A genuine failure of the move above was therefore always masked, and the message
-# named the wrong step.
+# config block below, so by the time it ran, $LASTEXITCODE belonged to whichever native
+# call that block made last — its `ssh ... test -f`, or its `ssh ... cp` when the seed
+# branch was taken. Both $configDir values ship a seed file, so the block always ran and
+# the move's own exit code was therefore always discarded.
+#
+# Not quite the same as "always masked": a move that failed early could leave
+# $TargetPath/api absent, which made the seed's own `cp` fail, which tripped this check
+# with a coincidentally correct message. The bug was that the check could not distinguish
+# those cases and named a step it was not measuring.
 $moveExit = $LASTEXITCODE
 if ($moveExit -ne 0) {
   Write-Host "Remote file move failed!" -ForegroundColor Red
@@ -236,14 +241,28 @@ if ($moveExit -ne 0) {
 # tracked seed has no RotaryPhone section — so the overwrite deleted the key rather than
 # replacing it, and the service came up with inter-service auth silently off.
 #
-# The per-file shape here matches Sync-WpRule below, which takes one destination per
-# call and compares against that destination before installing.
+# Sync-WpRule below is also per-destination, but do not read it as the model for this
+# block's policy: its guard is compare-and-overwrite, which is the opposite decision. The
+# shared idea is only that each destination is decided on its own.
+#
+# THE PROBE ASKS ONCE AND FAILS CLOSED. `ssh` reports its own transport errors as exit
+# 255, which a per-destination `test -f` cannot tell apart from "file absent" (exit 1) —
+# so on a WiFi-only box a dropped connection would read as "nothing there" and seed over a
+# present overlay, which is the very thing this block exists to prevent. The remote script
+# therefore always `exit 0`s and reports presence on stdout, leaving a non-zero exit to
+# mean only "the question could not be asked" — in which case we abort rather than guess.
 $targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
 if (Test-Path $targetConfigPath) {
+  $probe = ssh $SshTarget "for d in api web; do if [ -f $TargetPath/`$d/appsettings.Production.json ]; then echo `$d; fi; done; exit 0"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Could not determine which Production configs are present - aborting rather than risk overwriting one." -ForegroundColor Red
+    exit 1
+  }
+  $present = @($probe | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+
   $seedStaged = $false
   foreach ($dest in @('api', 'web')) {
-    ssh $SshTarget "test -f $TargetPath/$dest/appsettings.Production.json" 2>$null
-    if ($LASTEXITCODE -eq 0) {
+    if ($present -contains $dest) {
       Write-Host "    $dest/appsettings.Production.json present — left alone" -ForegroundColor DarkGray
       continue
     }
