@@ -49,6 +49,31 @@ dotnet run --project tools/Radio.Tools.AudioUAT
 ./deploy/Deploy-ToPi.ps1 -PiHost piradio -PiUser radio
 ```
 
+### ⚠ Never pipe `dotnet test` into `tail` — it swallows the exit code
+
+**Measured 2026-09-05: `dotnet test ... | tail` exited `0` while five tests were failing.** In a
+pipeline the shell reports the exit status of the *last* command, and `tail` succeeds at tailing
+whatever it was handed — including the output of a failed run. The same is true of `head`, `grep`,
+and `cat`. Anything that reads a gate's result from `$?` or `$LASTEXITCODE` after a pipe is reading
+`tail`'s opinion, not the suite's.
+
+This matters more here than it looks, because the suite is large enough that piping to `tail` is the
+natural reflex: a full run prints thousands of lines and only the last few are the summary.
+
+```bash
+# WRONG — always "passes"
+dotnet test RadioConsole.sln -c Release | tail -30
+
+# Right — keep the exit code, then read the file
+dotnet test RadioConsole.sln -c Release > /tmp/test.log 2>&1; echo "exit=$?"
+grep -E "Passed!|Failed!|error" /tmp/test.log
+```
+
+Read the **per-project summary lines** (`Passed! - Failed: 0, Passed: 141, ...`), one per test
+project — a single missed `Failed: 4` is the whole point of the gate. Known-failing on Windows and
+not a regression: four `SrcVariableResamplerTests` (`libsamplerate.so.0`, `TEST-5`) and
+`NwsObservationIntegrationTests.RealNwsCall_*` (live network, `Category=Integration`, CI-excluded).
+
 ## Solution Structure
 
 ```
