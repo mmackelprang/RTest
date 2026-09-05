@@ -30,7 +30,14 @@ public class LogSafeTextTests
   [Fact]
   public void For_DifferentInput_ProducesDifferentToken()
   {
-    Assert.NotEqual(LogSafeText.For("The front door is open"), LogSafeText.For("The garage is open"));
+    // ⚠ SAME LENGTH, deliberately. An earlier revision compared a 22-character string with an
+    // 18-character one, so it also passed against a length-only implementation that had dropped
+    // the hash entirely — which is the one thing this test exists to rule out.
+    const string a = "The front door is open";
+    const string b = "The front gate is shut";
+    Assert.Equal(a.Length, b.Length);
+
+    Assert.NotEqual(LogSafeText.For(a), LogSafeText.For(b));
   }
 
   [Theory]

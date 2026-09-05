@@ -65,9 +65,11 @@ public class NotificationsControllerLogSafetyTests
   [Fact]
   public async Task TheAnnounceLineKeepsTheTokenAndThePriority()
   {
-    // "No body" must not be achieved by logging nothing. Priority is the field that decides
-    // preemption and is untouched by this row; the token's length still catches an empty or
-    // truncated body, which is the operator question the text was actually answering.
+    // "No body" must not be achieved by logging nothing. Priority is what the announcement is
+    // registered at with IDuckingService and it is untouched by this row — it does NOT decide
+    // preemption on this route, see the controller's own comment. The token's length catches a
+    // TRUNCATED body; it cannot catch an empty one, because the controller rejects those before
+    // this line runs.
     var logs = await AnnounceAsync();
 
     var line = Assert.Single(

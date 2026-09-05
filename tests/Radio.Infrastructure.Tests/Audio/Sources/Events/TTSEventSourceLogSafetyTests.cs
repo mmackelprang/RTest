@@ -10,8 +10,9 @@ namespace Radio.Infrastructure.Tests.Audio.Sources.Events;
 /// log line on the initialize-then-play path.
 /// </summary>
 /// <remarks>
-/// ⚠ NO FAKE ANYWHERE IN THE CHAIN, and that is the point. The type is <c>internal</c> and
-/// <c>Radio.Infrastructure.csproj</c> grants <c>InternalsVisibleTo</c> to this assembly, so the real
+/// ⚠ NO FAKE ANYWHERE IN THE CHAIN, and that is the point. The type is <c>public</c>; it is its
+/// CONSTRUCTOR that is <c>internal</c>, and <c>Radio.Infrastructure.csproj</c> grants
+/// <c>InternalsVisibleTo</c> to this assembly, so the real
 /// source is constructed over a <see cref="MemoryStream"/> with no HTTP, no factory and no
 /// substitute logger behaviour. <c>PHN-1c</c>'s trap was a test whose name promised a property its
 /// harness could not observe (see <c>EventPlaybackServiceTests</c> §

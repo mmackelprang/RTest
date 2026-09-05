@@ -46,8 +46,15 @@ public class NotificationsController : ControllerBase
 
       var priority = Math.Clamp(request.Priority ?? 8, 1, 10);
 
-      // Priority is the field that decides preemption and is untouched; the token's length
-      // still catches an empty or truncated body. See LogSafeText for what it does not promise.
+      // Priority is kept because it is what this announcement is registered at with
+      // IDuckingService, and it is the only request field left on the line once the body is a
+      // token. It does NOT decide preemption on THIS route: AnnouncementService.SetActiveSource
+      // cancels whatever announcement was active, unconditionally and without consulting either
+      // priority, and the GvMedia:PreemptAtPriority threshold is read only by EventPlaybackService,
+      // which /api/notifications/announce does not go through.
+      //
+      // The token's length catches a truncated body. It cannot catch an EMPTY one — the guard four
+      // lines up already rejected that. See LogSafeText for what the token does not promise.
       _logger.LogInformation("Notification announce request: {Message} (priority {Priority})",
         LogSafeText.For(request.Message), priority);
 
