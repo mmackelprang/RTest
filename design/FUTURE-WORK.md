@@ -1628,3 +1628,76 @@ Two windows, both stated in that method's own remark rather than left for a read
   choice is a design call, which is why `PHN-1e` filed it rather than picking one.
 - **The first window self-corrects**; the next transition overwrites the stale value. It is worth
   fixing only alongside something else that touches this method.
+
+---
+
+## 22. A playback *started* while the console is already on `/sleep` is unowned
+
+**Found and deliberately declined by `PHN-1f`.** Priority: **low**, and it is a design question
+rather than a defect — **no queue row is proposed for it.**
+
+### What Exists
+
+ADR-029 §7.5's rule is *"attended playback may not exist on a surface that offers no way to stop
+it"*, and `SleepService` enforces it on two edges: `EnterSleepAsync` (the room is being parked) and
+`SetSleepScreenVisibleAsync(true)` (a client has the no-transport surface on screen). `PHN-1f` added
+`EventPlaybackState.Waiting` to the allow-list both edges share, so a queued playback is stopped by
+either.
+
+Neither edge covers the mirror case: a playback **started** while the console is *already* on
+`/sleep`. No report and no sleep entry follows it, so nothing stops it.
+
+### What's Needed
+
+⚠ **A design decision, not an implementation.** A merged `SleepService` comment used to assign this
+case to `PHN-1f` with `D28`'s queue; `PHN-1f` examined it and declined it, **on the dependency
+direction rather than on appetite**, and rewrote that comment to say so.
+
+`SleepService` lives in `Radio.API` and holds `IEventPlaybackService`. `EventPlaybackService` lives
+in `Radio.Infrastructure` and knows nothing about sleep. Making `StartAsync` consult the sleep state
+**inverts that dependency**. The alternatives are:
+
+1. **Refuse the start** — the shape owner decision `D28` explicitly rejected (*"press play, get an
+   error, nothing happens"*).
+2. **A new `Radio.Core` seam** for *"does any surface offer a transport"* — which is ADR-029 §14
+   **Q12**'s multi-client question, and belongs to the sleep arc with the Designer.
+
+### Gotchas
+
+- **It is narrow today.** `GvMedia:Enabled` ships `false` until PR 6, and reaching the case needs a
+  **second client** on `/phone` while the kiosk sits on `/sleep` — which is Q12 exactly.
+- **Do not "fix" it inside `EventPlaybackService`.** Any version of that reads as a layering
+  violation to the next reviewer, and the reason it was declined is recorded in
+  `SleepService.SetSleepScreenVisibleAsync`'s remark rather than only here.
+
+---
+
+## 23. The blocker's identity is not on the wire for a `Waiting` playback
+
+**Found and deliberately not added by `PHN-1f`.** Priority: **low.** It is a request path rather
+than a gap: nothing renders it yet.
+
+### What Exists
+
+`EventPlaybackSnapshot` carries `state: "Waiting"` and nothing about **what** it is waiting for.
+`PHN-1f` §0.6 item 3 requires the chip to say *why* rather than showing a bare spinner — *"Waiting
+for the announcement to finish"* — but that copy is generic and needs no field.
+
+### What's Needed
+
+Nothing, until a renderer branches on it. A field no renderer reads is a wire commitment bought
+with nothing, and *one voice at a time* is the invariant that makes the blocker's identity
+uninteresting: there is only ever one.
+
+If PR 6's chip wants to name the blocker — *"Waiting for the doorbell announcement"* — the shape
+would be a nullable label on the snapshot, populated from `IDuckingService.GetActiveEventsByPriority()`
+at the moment `Waiting` is published.
+
+### Gotchas
+
+- ⚠ **It would be a snapshot of one instant, not a subscription.** The snapshot is an ANCHOR
+  (ADR-029 §8.2), so a blocker that ends and is replaced by another would leave the chip naming the
+  wrong one until the next transition. That is a reason to want the request stated before it is
+  built, not a reason it cannot be.
+- The source's `Name` is *"fake"*-grade in places and is not a user-facing string anywhere today;
+  it would need a label of its own.
