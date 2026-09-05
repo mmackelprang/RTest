@@ -113,8 +113,17 @@ public class ConsolePlaybackChipTests : TestContext
     await BroadcastAsync(cut, Snapshot("Waiting"));
 
     Assert.Single(cut.FindAll(".nav-pill-playing"));
+
     // Handoff §Cross-3: the LABEL is the kind, never the sender.
-    Assert.Contains("Voicemail", cut.Find(".nav-pill-playing .nav-pill-label").TextContent);
+    //
+    // ⚠ Equal, not Contains, and the DoesNotContain is not redundant with it. The fixture's Label is
+    // "Voicemail from Jane", so a Contains("Voicemail") passes just as happily on
+    // @ConsolePlayback.Snapshot?.Label — which is the exact mutation §Cross-3 forbids and this
+    // assertion exists to catch. Verified by making that mutation in MainLayout and watching this
+    // test red.
+    var label = cut.Find(".nav-pill-playing .nav-pill-label").TextContent.Trim();
+    Assert.Equal("Voicemail", label);
+    Assert.DoesNotContain("Jane", label);
   }
 
   [Fact]
