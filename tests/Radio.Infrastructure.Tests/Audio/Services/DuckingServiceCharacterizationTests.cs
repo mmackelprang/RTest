@@ -1,3 +1,4 @@
+using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Services;
 
@@ -13,7 +14,14 @@ namespace Radio.Infrastructure.Tests.Audio.Services;
 /// once. Ducking itself is still binary and reference-counted — the duck LEVEL is still the fixed
 /// global Audio:DuckingPercentage regardless of priority, which is what the third test still pins.
 /// What changed is that the service now ANNOUNCES each source that joins the set, so a subscriber
-/// can arbitrate on priority. It does not arbitrate on priority itself and this PR did not make it.
+/// can arbitrate on priority. It does not arbitrate on priority itself and PR 4 did not make it.
+///
+/// ⚠ PHN-1f (PR 5b) CHANGED THE OTHER HALF, and ASourceLeavingWhileOthersRemainStillRaises is the
+/// test it added. StopDuckingAsync used to raise ONLY when the set emptied, so a source leaving while
+/// others remained produced nothing at all — and a subscriber cannot act on a source ending if it is
+/// never told one did, which is what starved D28's wait-then-play queue. It now raises on every
+/// removal, with IsDucking carrying the TRUE AGGREGATE and DuckingSourceTransition saying which of the
+/// two things happened. Still no arbitration here; still binary and reference-counted.
 ///
 /// ⚠ If you are changing these again: update them, do not delete them.
 /// </summary>
@@ -123,5 +131,37 @@ public class DuckingServiceCharacterizationTests
     await service.StopDuckingAsync(second);
     Assert.Equal(0, service.ActiveEventCount);
     Assert.False(service.IsDucking);
+  }
+
+  [Fact]
+  public async Task ASourceLeavingWhileOthersRemainStillRaises()
+  {
+    // ⚠ THIS IS THE PHN-1f CHANGE, characterized. Before it, this scenario produced ZERO raises: the
+    // raise lived inside `if (needsRestore)`, and needsRestore is `_isDucking && remaining == 0`. So a
+    // priority-8 blocker ending while a priority-3 announcement kept ducking was invisible to every
+    // subscriber — which is exactly the source-ended fact D28's queue has to hear in order to wake.
+    //
+    // MUTATION (§2.1): put the raise back inside `if (needsRestore)` and the count below is 0.
+    var service = CreateService();
+    var first = CreateEventSource("event-1");
+    var second = CreateEventSource("event-2");
+
+    _fixture.Options.DuckingPolicy = DuckingPolicy.Instant;
+
+    await service.StartDuckingAsync(first);
+    await service.StartDuckingAsync(second);
+
+    var raised = 0;
+    DuckingStateChangedEventArgs? last = null;
+    service.DuckingStateChanged += (_, args) => { raised++; last = args; };
+
+    await service.StopDuckingAsync(first);
+
+    Assert.Equal(1, raised);
+    Assert.NotNull(last);
+    Assert.Equal(DuckingSourceTransition.Ended, last!.Transition);
+
+    // The set did NOT empty, so this is the case the old rule could not express at all.
+    Assert.Equal(1, service.ActiveEventCount);
   }
 }

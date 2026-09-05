@@ -1,9 +1,13 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
+using Radio.Configuration.Abstractions;
+using Radio.Core.Configuration;
 using Radio.Core.Events;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Services;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Tests.Audio.Services;
 
@@ -368,6 +372,170 @@ public class AudioManagerTests : IAsyncDisposable
 
     // Assert — one of them should be the final active source
     Assert.NotNull(_sut.ActiveSource);
+  }
+
+  // --- Ducking handler (PHN-1f C-58) ---
+
+  /// <summary>
+  /// Builds an AudioManager wired to a real <see cref="SoundFlowPlaybackService"/> and a mocked
+  /// <see cref="IDuckingService"/>, with a primary source already active.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ THE PLAYBACK SERVICE IS REAL, NOT MOCKED, AND THAT IS FORCED RATHER THAN CHOSEN.
+  /// AudioManager's constructor takes the CONCRETE SoundFlowPlaybackService — there is no
+  /// ISoundFlowPlaybackService in the tree — and ClearDuckingMultiplier is a non-virtual public
+  /// method, so Moq can neither substitute it nor record the call. Adding an interface would be a
+  /// production seam this row is not scoped to add, so the two tests below instrument the call
+  /// differently and each says how.
+  ///
+  /// Constructing it reaches no hardware: SoundFlowAudioEngine's constructor stores its
+  /// collaborators and subscribes to three of their events, and the MiniAudio device is not created
+  /// until InitializeAsync, which nothing here calls. SoundFlowPlaybackServiceTransportTests does the
+  /// same construction for the same reason.
+  /// </remarks>
+  private async Task<(AudioManager Manager, Mock<IDuckingService> Ducking,
+      SoundFlowPlaybackService Playback, Mock<IPrimaryAudioSource> Source, int IdReads)>
+    CreateManagerWithDuckingAsync()
+  {
+    var ducking = new Mock<IDuckingService>();
+    var playback = CreatePlaybackService();
+
+    var manager = new AudioManager(
+      _loggerMock.Object,
+      _engineMock.Object,
+      _sourceFactoryMock.Object,
+      playbackService: playback,
+      duckingService: ducking.Object);
+
+    var source = CreateMockPrimarySource(AudioSourceType.Radio, "FM Radio");
+    await manager.SwitchSourceAsync(source.Object);
+
+    return (manager, ducking, playback, source, 0);
+  }
+
+  private static SoundFlowPlaybackService CreatePlaybackService()
+  {
+    var engineOptions = new Mock<IOptions<AudioEngineOptions>>();
+    engineOptions.Setup(o => o.Value).Returns(new AudioEngineOptions
+    {
+      EnableHotPlugDetection = false
+    });
+
+    var audioPreferences = new Mock<IOptionsMonitor<AudioPreferences>>();
+    audioPreferences.Setup(m => m.CurrentValue).Returns(new AudioPreferences());
+
+    var audioOutputOptions = new Mock<IOptionsMonitor<AudioOutputOptions>>();
+    audioOutputOptions.Setup(m => m.CurrentValue).Returns(new AudioOutputOptions());
+
+    var masterMixer = new SoundFlowMasterMixer(Mock.Of<ILogger<SoundFlowMasterMixer>>());
+    var deviceManager = new SoundFlowDeviceManager(
+      Mock.Of<ILogger<SoundFlowDeviceManager>>(),
+      Mock.Of<IConfigurationManager>(),
+      audioPreferences.Object,
+      audioOutputOptions.Object);
+
+    var engine = new SoundFlowAudioEngine(
+      Mock.Of<ILogger<SoundFlowAudioEngine>>(),
+      engineOptions.Object,
+      masterMixer,
+      deviceManager);
+
+    return new SoundFlowPlaybackService(Mock.Of<ILogger<SoundFlowPlaybackService>>(), engine);
+  }
+
+  [Fact]
+  public async Task ADefaultedTransitionOnAnIsDuckingFalseRaiseStillClearsTheMultiplier()
+  {
+    // ⛔ THE C-58 PIN, and the whole of C-58 rests on it. DuckingSourceTransition.Started is 0, so it
+    // is the value an args object gets when nothing sets the field. If AudioManager's OUTER branch
+    // were keyed on Transition rather than on IsDucking, this raise — IsDucking false, Transition
+    // never set — would take the "started" arm, skip ClearDuckingMultiplier, and leave the radio
+    // STUCK DUCKED. That is a worse failure than the mislabelled log line the field exists to fix.
+    //
+    // ⚠ TWO INSTRUMENTS, because neither alone is a proof and the reason is stated in
+    // CreateManagerWithDuckingAsync's remark: ClearDuckingMultiplier is non-virtual on a concrete
+    // class, so Moq cannot record it.
+    //
+    //   (1) The ACTIVE SOURCE'S Id getter. `_playbackService.ClearDuckingMultiplier(_activeSource.Id)`
+    //       is the only statement in the handler that reads it, and C# evaluates a call's arguments
+    //       only as part of making the call — so a read during the raise means the statement ran.
+    //   (2) A DISPOSED playback service. ClearDuckingMultiplier opens with ThrowIfDisposed(), so an
+    //       ObjectDisposedException escaping the raise proves the method body was ENTERED, not merely
+    //       that its argument was evaluated. (1) alone could not distinguish an argument evaluated
+    //       for a call that was then optimised away; (2) alone could not run before disposal.
+    //
+    // MUTATION (§2.1): key AudioManager's outer branch on Transition and both halves red.
+    var (manager, ducking, playback, source, _) = await CreateManagerWithDuckingAsync();
+    await using (manager)
+    {
+      var idReads = 0;
+      var id = source.Object.Id;
+      source.Setup(s => s.Id).Returns(() => { idReads++; return id; });
+
+      // ⚠ Transition is DELIBERATELY NOT SET. That is the whole point: it defaults to Started.
+      var args = new DuckingStateChangedEventArgs
+      {
+        IsDucking = false,
+        TriggeringSource = null,
+        DuckLevel = 100f,
+        ActiveEventCount = 0
+      };
+
+      Assert.Equal(DuckingSourceTransition.Started, args.Transition);
+
+      ducking.Raise(d => d.DuckingStateChanged += null, ducking.Object, args);
+
+      Assert.Equal(1, idReads);
+
+      // …and the call really reached ClearDuckingMultiplier's body.
+      playback.Dispose();
+      var thrown = Record.Exception(
+        () => ducking.Raise(d => d.DuckingStateChanged += null, ducking.Object, args));
+      Assert.IsType<ObjectDisposedException>(thrown);
+    }
+  }
+
+  [Fact]
+  public async Task AnEndedRaiseWithOthersRemainingDoesNotClearTheDuckingMultiplier()
+  {
+    // The mirror of the pin above, and the hazard PHN-1f's DuckingService change would have created
+    // without it: since this row StopDuckingAsync raises for EVERY source that leaves, so a
+    // priority-8 blocker ending while a priority-3 announcement keeps ducking now reaches this
+    // handler. IsDucking is TRUE on that raise — the aggregate is still ducking — and clearing the
+    // multiplier there would restore the radio to full volume MID-ANNOUNCEMENT.
+    //
+    // Instrumented by the disposed playback service alone, because the assertion is a NEGATIVE: if
+    // ClearDuckingMultiplier were reached it would throw, and the absence of the throw is the claim.
+    // The Id-read counter is asserted too, so "nothing happened at all" cannot pass as "the right
+    // thing happened".
+    //
+    // MUTATION: drop the `return;` from the IsDucking arm of OnDuckingStateChanged — so the raise
+    // falls through into the ducking-ended block — and this throws.
+    var (manager, ducking, playback, source, _) = await CreateManagerWithDuckingAsync();
+    await using (manager)
+    {
+      var idReads = 0;
+      var id = source.Object.Id;
+      source.Setup(s => s.Id).Returns(() => { idReads++; return id; });
+
+      playback.Dispose();
+
+      var args = new DuckingStateChangedEventArgs
+      {
+        IsDucking = true,
+        TriggeringSource = null,
+        DuckLevel = 20f,
+        ActiveEventCount = 1,
+        Transition = DuckingSourceTransition.Ended,
+        TriggeringSourcePriority = 8
+      };
+
+      var thrown = Record.Exception(
+        () => ducking.Raise(d => d.DuckingStateChanged += null, ducking.Object, args));
+
+      Assert.Null(thrown);
+      Assert.Equal(0, idReads);
+    }
   }
 
   // --- Helper Methods ---
