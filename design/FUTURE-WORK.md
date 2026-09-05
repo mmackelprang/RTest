@@ -1116,7 +1116,7 @@ specifically so that such a heartbeat can be added without wiping an in-flight w
 ### What's Implemented (PR1)
 
 - DTOs: `VoicemailItemDto`/`VoicemailListDto`, `SmsMessageDto`/`SmsThreadDto`/`SmsThreadListDto`/`SmsThreadMessagesDto`, `SendSmsRequest`/`SendSmsResponse`, `GvDirection` helper (`src/Radio.Web/Models/ApiModels.cs`).
-- `GvBridgeApiService` read methods: voicemail list/item + **absolute** audio-URL builder, SMS threads/messages (`src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs`).
+- `GvBridgeApiService` read methods: voicemail list/item, SMS threads/messages (`src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs`). ⚠ The **absolute audio-URL builder** that was here is **deleted by `PHN-2`** — Radio.API fetches the recording itself now (ADR-029 D3).
 - `PhoneHubService.GvSmsReceived` / `GvVoicemailReceived` push events on the existing `/hub` connection.
 - `GvBridgeStatusService` — single ~10s `/api/gvbridge/status` poll → reconnecting banner + (future) Send gate.
 - `RotaryPhoneAuthHandler` — header seam, OFF.
@@ -1125,7 +1125,7 @@ specifically so that such a heartbeat can be added without wiping an in-flight w
 
 ### What's Implemented (PR2)
 
-- `VoicemailRow` + `VoicemailPlayer` components (`src/Radio.Web/Components/Pages/`) — row (chip + unread dot + caller + transcript-preview + duration) and inline accordion player (seekable Range-backed scrubber via `wwwroot/js/voicemail-player.js`, transcript present/pending/absent, 502 audio-error state). `<audio src>` is the **absolute** `radio:5004` URL from `GvBridgeApiService.GetVoicemailAudioUrl` (never the relative DTO field).
+- `VoicemailRow` + `VoicemailPlayer` components (`src/Radio.Web/Components/Pages/`) — row (chip + unread dot + caller + transcript-preview + duration) and inline accordion player. ⚠ **`PHN-2` rewrote the player.** As shipped in PR2 it was an HTML5 `<audio>` element bound to the absolute `radio:5004` URL, with a Range-backed scrubber driven from `wwwroot/js/voicemail-player.js` and a 502 audio-error state. It is now a **remote control** for `POST /api/audio/events`: no `<audio>` element, the console fetches and plays the recording on the audio engine, and the transport renders the server's snapshot. Only `fractionFromEvent` survives in the JS, because tap-to-seek needs the scrubber's rendered geometry.
 - Unified-feed `FeedItem`/`FeedKind` projection in `PhoneMessagesPanel` — interleaves calls + voicemail by timestamp under **All**; single-stream under **Voicemail**. **PR3 (texts) extends this projection** (add `FeedKind.Text` + project threads; the shape is intentionally trivial to extend).
 - `GvVoicemailReceived` new-arrival path in `PhonePage` — prepend + animate row, calm `NotificationSeverity.Info` toast only (never modal, never pauses audio per the hard rule), badge ++.
 - Mark-heard on the voicemail-open path — opening a voicemail flips it heard (optimistic) + decrements the badge. **PR4 made this durable** (see below): the optimistic flip is now a presentation-only bridge to the authoritative GV write-through.
@@ -1144,11 +1144,11 @@ specifically so that such a heartbeat can be added without wiping an in-flight w
    - **Behavior while our flag is off:** the optimistic flip is no longer replayed onto refetched lists (the GV-2/GV-3 `_locallyHeard`/`_locallyReadThreads` seeding is gone by design — ADR-024 §2). So hearing a voicemail and then pressing **Refresh** in the same session restores the unread marker, because we never wrote the read through. Lists reload only on initial load, the explicit Refresh button, and error-retry — no background poll refetches them — so this is the full extent of the difference. It resolves the moment both flags are on.
    - **Deferred (informational, not blocking) — unread support:** their `GVBridge:AllowMarkUnread` is `false`, so `isRead:false` returns `400 unread_unsupported`; our UI never sends `false` and the toggle stays hidden (ADR-024 §6). One UI change if unread is ever wanted, no contract change.
    - **Deferred (informational, not blocking) — path (b), phone→kiosk LIVE push:** RotaryPhone's poller-flip fast-follow. Until it ships, externally-originated reads (phone/GV-web) reconcile on our **next list refresh / poll**, not as an instant push. The SAME `ReadStateChanged` handler covers both — no GV-4-side change when it lands.
-   - **Constraint to hold:** keep the voicemail audio endpoint **unauthenticated** (ADR-022 §8.1) — the native `<audio src>` cannot send the auth header (see deferred item 3 gotcha).
+   - ~~**Constraint to hold:** keep the voicemail audio endpoint **unauthenticated** (ADR-022 §8.1) — the native `<audio src>` cannot send the auth header.~~ ✅ **DISSOLVED by `PHN-1b`, and finished by `PHN-2`.** The constraint existed only because the BROWSER fetched the recording. Radio.API fetches it server-side through `GvMediaClient`, which attaches `X-RotaryPhone-Auth` itself, and `PHN-2` removed the `<audio>` element entirely — so the endpoint is free to require the header and there is nothing to ask RotaryPhone for (`docs/BUILDER_QUEUE.md` § Cross-repo handoffs #3).
 2. **GV SMS send** — **built in PR3, flagged off** via `RotaryPhone:Gv:SendEnabled=false`. The whole compose/reply + new-recipient write path (optimistic → sending → sent → failed-with-preserved-text, 429/in-flight/degraded guardrails) is implemented behind `GvBridgeSendService` (`src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs`); `SendAsync` throws `SendNotAvailableException` until the flag flips. **`POST /api/gvbridge/sms/send` has now SHIPPED on RotaryPhone** (dark behind their `GVBridge:EnableSmsSend=false`), so the endpoint is no longer the blocker — but **do not flip `RotaryPhone:Gv:SendEnabled` until the response shape is reconciled.** The shapes have diverged: ours is `SendSmsResponse(SmsMessageDto? Message, string? Error)` (still marked **provisional**); theirs is `SendSmsResponse(bool Queued, string Code, string? ThreadId, string? Error, SmsMessageDto? Message)`. `Message`/`Error` still bind by name, so this fails *quietly* rather than loudly — we silently drop **`Queued`** and the **`Code`** taxonomy (`queued` | `invalid_number` | `rate_limited` | `auth_unavailable` | `upstream_error` | `timeout` | `send_disabled` | `error`) that `GvBridgeSendService`'s 429/degraded guardrails need to distinguish a retryable rate-limit from a hard failure. Their dark response is `409` + `Code:"send_disabled"`. Needs its own queue row.
 3. **On-screen text entry — reuses the EXISTING global virtual keyboard.** The compose message field and the new-recipient field are ordinary `<input>`s; the app-wide keyboard (`wwwroot/js/virtual-keyboard.js`, loaded in `App.razor`) auto-shows on focus, and the recipient field opts into the numeric layout via `data-keyboard="numeric"`. **This supersedes the design spec's "build a touch keyboard" recommendation** — no new keyboard component was built or skinned. If explicit show/hide is ever needed, use `window.virtualKeyboardInterop.show(element)` / `.hide()`.
 4. **`RotaryPhoneAuthHandler`** — header (`X-RotaryPhone-Auth`) injected only when `RotaryPhone:Gv:AuthKey` is non-empty; empty today (LAN-only no-auth posture). One place to flip on when the inter-service auth gate ships (ADR-022 §8.1). The `GvBridgeSendService` typed client carries this handler too, so send authenticates the moment the gate flips. **GV-4 mark-read routes ride the same `RotaryPhone:Gv:AuthKey` seam** — the `/api/gvbridge/*` prefix gate auto-covers the two POST routes; no new auth key (ADR-024 §7).
-   - **Gotcha:** a native `<audio>` element CANNOT send the auth header. If the voicemail audio endpoint ever becomes auth-required, the direct-`<audio src>` approach (PR2) breaks — keep that endpoint unauthenticated or token-in-query (ADR-022 §8.1 / contract risk #4).
+   - ~~**Gotcha:** a native `<audio>` element CANNOT send the auth header…~~ ✅ **Moot since `PHN-2`: there is no `<audio>` element.** The remaining live concern is the opposite one and it is an operational hazard rather than a design constraint — `GvMedia:AuthKey` and RotaryPhone's `InterServiceAuthKey` are two halves of one secret in two `appsettings.Production.json` files the deploy does not re-seed, and a divergence surfaces only as `MediaUnauthorized` on the panel. Runbook in `design/INTEGRATIONS.md`.
 5. **Voicemail player Call back / Text back quick actions** — deferred (owner decision 3). The `VoicemailPlayer` carries a `@* fast-follow … *@` marker where these belong. Call back routes through the existing phone dial path; Text back opens/creates the GV text thread for the caller (the PR3 texts surface is now in place to host it). No UI shipped yet.
 
 ### Code Pointers
@@ -1162,7 +1162,7 @@ specifically so that such a heartbeat can be added without wiping an in-flight w
 - `src/Radio.Web/Components/Pages/MessageBubble.razor` — **PR3** inbound/outbound bubble + status glyph.
 - `src/Radio.Web/wwwroot/js/phone-texts.js` — **PR3** auto-scroll-to-bottom helper for the conversation pane.
 - `src/Radio.Web/Components/Pages/VoicemailRow.razor` / `VoicemailPlayer.razor` — voicemail row + inline player (PR2).
-- `src/Radio.Web/wwwroot/js/voicemail-player.js` — seek + HTML5 `<audio>` event bridge (PR2).
+- `src/Radio.Web/wwwroot/js/voicemail-player.js` — **reduced by `PHN-2` to `fractionFromEvent` alone.** The HTML5 `<audio>` attach/play/pause/seek/event bridge is gone; what survives converts a tap's `clientX` to a fraction of the scrubber's box, which is the one thing on this path with no server-side equivalent.
 - `src/Radio.Web/Services/Http/RotaryPhoneAuthHandler.cs` — the auth seam.
 - `src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor` — unified feed with the `FeedItem`/`FeedKind` projection: **PR2 added `Call`/`Voicemail`, PR3 added the `Text` case** + renders text thread rows interleaved newest-first + hosts the conversation in the detail pane.
 - `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` — ADR-022 (decisions + risks).
@@ -1562,7 +1562,14 @@ broadcasts exactly the way the first one does.
 
 ## 20. A user stop, a preemption and the duration cap are indistinguishable on the wire
 
-**Deliberately not added by `PHN-1e`.** Priority: **low — do it only if a renderer asks.**
+**Deliberately not added by `PHN-1e`. ✅ ASKED AND DECLINED by `PHN-2`.** Priority: **low — do it
+only if a renderer asks.**
+
+⚠ **The condition is answered, not still open.** `PHN-1d` set it as *"if the chip needs to
+distinguish"*, and PR 6 built the chip. It does **not** need to: per ADR-029 §12 item 4 the chip
+returns to an idle, replayable state for all four end causes, and the transport row does the same.
+Recorded here rather than left implicit, because an open condition nobody closes gets re-asked every
+cycle — this is the third row that could have asked and the first that actually could have answered.
 
 ### What Exists
 
@@ -1674,8 +1681,13 @@ in `Radio.Infrastructure` and knows nothing about sleep. Making `StartAsync` con
 
 ## 23. The blocker's identity is not on the wire for a `Waiting` playback
 
-**Found and deliberately not added by `PHN-1f`.** Priority: **low.** It is a request path rather
-than a gap: nothing renders it yet.
+**Found and deliberately not added by `PHN-1f`. ✅ ASKED AND DECLINED by `PHN-2`.** Priority:
+**low.** It is a request path rather than a gap.
+
+⚠ **`PHN-1f` §0.6 item 3 set the condition *"if the chip wants it, ask"*, and `PHN-2` built the chip
+and the transport. Neither asks.** *"Waiting for the announcement to finish…"* is accurate without
+the field, because one-voice-at-a-time means there is exactly one thing it could be waiting for. The
+shape below stands unchanged for whoever does want it.
 
 ### What Exists
 
@@ -1689,9 +1701,10 @@ Nothing, until a renderer branches on it. A field no renderer reads is a wire co
 with nothing, and *one voice at a time* is the invariant that makes the blocker's identity
 uninteresting: there is only ever one.
 
-If PR 6's chip wants to name the blocker — *"Waiting for the doorbell announcement"* — the shape
+If a renderer ever wants to name the blocker — *"Waiting for the doorbell announcement"* — the shape
 would be a nullable label on the snapshot, populated from `IDuckingService.GetActiveEventsByPriority()`
-at the moment `Waiting` is published.
+at the moment `Waiting` is published. (`PHN-2`'s chip and transport were the first renderers able to
+want it, and did not.)
 
 ### Gotchas
 
