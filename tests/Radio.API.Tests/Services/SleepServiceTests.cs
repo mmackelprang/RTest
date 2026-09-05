@@ -379,18 +379,102 @@ public class SleepServiceTests
 
   [Theory]
   [InlineData(EventPlaybackState.Preparing)]
+  [InlineData(EventPlaybackState.Waiting)]
   [InlineData(EventPlaybackState.Playing)]
   [InlineData(EventPlaybackState.Paused)]
   public async Task TheSleepScreenGoingUpStopsEveryLiveState(EventPlaybackState state)
   {
     // Preparing is in the list deliberately: a fetch or a synthesis still in flight would otherwise
     // start audio moments after the panel went dark.
+    //
+    // Waiting (PHN-1f, owner decision D28) for the same reason with a longer fuse and a certainty in
+    // place of a maybe: a queued playback is HOLDING acquired audio and will start it the instant the
+    // blocking source ends, which can be up to GvMedia:MaxQueuedWaitSeconds after the screen goes
+    // dark. ⚠ This list is HAND-WRITTEN, so TheSleepRuleCoversEveryNonTerminalState below is what
+    // keeps it honest for the member after this one.
     var playback = new StoppableEventPlayback { Current = SnapshotIn(state) };
     var (service, _) = CreateService(eventPlayback: playback);
 
     await service.SetSleepScreenVisibleAsync(true);
 
     Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+  }
+
+  [Fact]
+  public async Task EnteringSleepStopsAWaitingPlayback()
+  {
+    // ⛔ C-56, on the EnterSleepAsync edge. A waiting playback is LIVE: it has already acquired its
+    // audio and is parked only until the blocking source leaves the ducking set. /sleep runs under
+    // EmptyLayout and renders no transport at all, so letting one survive means audio starting up to
+    // GvMedia:MaxQueuedWaitSeconds later on a dark panel with no stop control anywhere on screen.
+    //
+    // MUTATION (§2.1): remove EventPlaybackState.Waiting from SleepService's allow-list.
+    var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Waiting) };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.EnterSleepAsync();
+
+    Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+  }
+
+  [Fact]
+  public async Task TheSleepScreenReportStopsAWaitingPlayback()
+  {
+    // The same rule on the OTHER edge — the idle path, which reaches /sleep by
+    // window.location.href and calls nothing else server-side. No EnterSleepAsync anywhere here, and
+    // IsSleeping stays false throughout, which is the whole reason this edge exists.
+    //
+    // MUTATION (§2.1): remove EventPlaybackState.Waiting from SleepService's allow-list.
+    var playback = new StoppableEventPlayback { Current = SnapshotIn(EventPlaybackState.Waiting) };
+    var (service, _) = CreateService(eventPlayback: playback);
+
+    await service.SetSleepScreenVisibleAsync(true);
+
+    Assert.False(service.IsSleeping);
+    Assert.Equal(new[] { "evp-1" }, playback.StopIds);
+  }
+
+  [Fact]
+  public async Task TheSleepRuleCoversEveryNonTerminalState()
+  {
+    // ⚠ Written against the ENUM rather than a hand-listed set, because the failure C-56 describes is
+    // SILENT: SleepService's rule is an allow-list, so a new non-terminal member is excluded by
+    // default and nothing else in the suite would notice. This reds when someone adds a member and
+    // does not list it there.
+    //
+    // The terminal three are the deny-list Radio.Web's EventPlaybackSnapshotDto.IsLive uses, so the
+    // two rules with opposite polarity end up asserted against ONE definition rather than two.
+    //
+    // ⚠ It drives the REAL SleepService rather than restating its predicate. A test that re-listed
+    // the allow-list would be a copy of the bug: it would agree with the code by construction and
+    // could never disagree with it.
+    var terminal = new[]
+    {
+      EventPlaybackState.Completed, EventPlaybackState.Stopped, EventPlaybackState.Failed
+    };
+
+    var live = Enum.GetValues<EventPlaybackState>().Except(terminal).ToArray();
+
+    // A guard on the guard: if someone deletes members instead of adding them, an empty loop would
+    // pass silently.
+    Assert.NotEmpty(live);
+
+    foreach (var state in live)
+    {
+      // A fresh service per state: the screen report is an EDGE, so a second true on the same
+      // instance is a no-op and every iteration after the first would assert nothing.
+      var playback = new StoppableEventPlayback { Current = SnapshotIn(state) };
+      var (service, _) = CreateService(eventPlayback: playback);
+
+      await service.SetSleepScreenVisibleAsync(true);
+
+      // Asserted with a MESSAGE rather than as a bare collection compare, because the whole value of
+      // this test is naming the member that was forgotten.
+      Assert.True(
+        playback.StopIds.SequenceEqual(new[] { "evp-1" }),
+        $"EventPlaybackState.{state} is not terminal, so entering /sleep must stop it — add it to "
+        + "SleepService.StopAttendedPlaybackAsync's allow-list (plan PHN-1f C-56).");
+    }
   }
 
   [Theory]
