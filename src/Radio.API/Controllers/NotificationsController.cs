@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Utilities;
 
 namespace Radio.API.Controllers;
 
@@ -45,8 +46,10 @@ public class NotificationsController : ControllerBase
 
       var priority = Math.Clamp(request.Priority ?? 8, 1, 10);
 
-      _logger.LogInformation("Notification announce request: '{Message}' (priority {Priority})",
-        request.Message, priority);
+      // Priority is the field that decides preemption and is untouched; the token's length
+      // still catches an empty or truncated body. See LogSafeText for what it does not promise.
+      _logger.LogInformation("Notification announce request: {Message} (priority {Priority})",
+        LogSafeText.For(request.Message), priority);
 
       await _announcementService.AnnounceAsync(request.Message, priority);
 
