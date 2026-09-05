@@ -862,10 +862,29 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// ⚠ This gives <see cref="IDuckingService.GetActiveEventsByPriority"/> its FIRST non-test caller
   /// since it was written — which PHN-1d C-42 predicted would be the queue, and it was.
   ///
-  /// ⚠ No exclusion for our own source is needed, and one is deliberately NOT written. The predicate
-  /// is only ever evaluated for a playback that has not yet reached StartDuckingAsync, so the attended
-  /// source is not in the set when it is asked. A guard for a state that cannot occur reads as
-  /// evidence that it can. APlaybackAtPriorityEightDoesNotBlockItself pins it.
+  /// ⚠ No exclusion for OUR OWN source is needed, and one is deliberately NOT written. Both call sites
+  /// — <see cref="WaitForClearAirAsync"/> and <see cref="TryWakeWaitingPlayback"/> — ask on behalf of a
+  /// playback that has not reached StartDuckingAsync, which happens strictly after the wait and under
+  /// _gate; so THAT playback's own source has never joined the set at the moment the question is
+  /// asked. A guard for a state that cannot occur reads as evidence that it can.
+  /// APlaybackAtPriorityEightDoesNotBlockItself pins it.
+  ///
+  /// ⚠ SCOPED PRECISELY, because the earlier wording — "the attended source is not in the set when it
+  /// is asked" — claimed more than that, and two states falsify the broader reading:
+  ///
+  /// (a) A PREVIOUS attended playback's source can still be in the set while it is being torn down.
+  ///     StopDuckingAsync removes it only inside ReleaseSourceAsync, so between a replacement (or a
+  ///     natural end whose OnSourceCompleted task has not yet taken the gate) and that removal there
+  ///     is a real window in which the new playback asks this question and finds the old source.
+  ///
+  /// (b) This runs on a raising thread from TryWakeWaitingPlayback, so a concurrent raise can evaluate
+  ///     it after ANOTHER thread's wake has already let the waiting playback resume, take the gate and
+  ///     reach StartDuckingAsync — at which point that playback's own source is in the set.
+  ///
+  /// Neither weakens the conclusion. In (a) the source found is one that is genuinely still sounding,
+  /// so waiting for it is the rule working rather than a playback blocking itself. In (b) the answer
+  /// is only ever used to decide whether to call the idempotent TryWake, and the playback has already
+  /// been woken — a redundant "still blocked" costs nothing.
   ///
   /// ⚠ GetPriority is called here rather than read from event args because this is a question about
   /// the CURRENT SET, not about one transition — there are no args. The fade-window race the args
@@ -1619,14 +1638,38 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     /// <summary>Arms the wait and returns the waiter to await.</summary>
     /// <remarks>
     /// ⚠ RunContinuationsAsynchronously is load-bearing, and the overclaim is the trap here so it is
-    /// stated exactly. Without it, TrySetResult runs the continuation INLINE on the thread that raised
-    /// DuckingStateChanged — and that continuation's next act is _gate.WaitAsync.
+    /// stated exactly. Without it TrySetResult runs the continuation INLINE on the thread that raised
+    /// DuckingStateChanged, and that continuation's next acts are a log line and _gate.WaitAsync.
+    /// TheWakeDoesNotStartAudioOnTheRaisingThread is what holds it, by the mutation its comment names.
     ///
-    /// It is NOT a deadlock today: the live wake comes from AnnouncementService's teardown, which
-    /// holds none of this service's locks. What the flag buys is that it STAYS not-a-deadlock, because
-    /// the acquisition tail does hold _gate across StartDuckingAsync — so a raising thread that also
-    /// holds the gate is one refactor away. OnSourceCompleted and the preemption dispatch are both
-    /// written from this same reasoning, and their remarks say so.
+    /// ⚠ AN EARLIER REVISION OF THIS REMARK SAID A GATE-HOLDING RAISER WAS "ONE REFACTOR AWAY". It is
+    /// not. It exists today, unconditionally, on two paths in this very file:
+    ///   • the acquisition tail awaits <c>_duckingService.StartDuckingAsync</c> WHILE HOLDING _gate;
+    ///   • <see cref="ReleaseSourceAsync"/> awaits <c>_duckingService.StopDuckingAsync</c>, and is
+    ///     reached from <see cref="TearDownAsync"/>, four of whose callers hold the gate (StopAsync,
+    ///     StartAsync's replacement arm, OnSourceCompleted's dispatched task, FailAsync).
+    /// PreemptionIsDispatched_TheRaisingThreadIsNotHeldForTheTeardown says the same from the other
+    /// side, and has all along.
+    ///
+    /// ⚠ And such a raise CAN find a WAITING playback in _current. Worked example, every step of it
+    /// reachable today: playback A's source ends naturally, so OnSourceCompleted claims A's terminal
+    /// flag and DISPATCHES a gate-taking task; a replacing StartAsync wins the gate first, finds
+    /// replaced.ClaimTerminal() already claimed and therefore tears nothing down, installs B as
+    /// _current and releases; B's acquisition reaches Waiting; then OnSourceCompleted's task takes the
+    /// gate and tears A down — and A's StopDuckingAsync raises from inside the gate, with B waiting.
+    ///
+    /// So "not a deadlock today" survives, but NOT for the reason that used to be given here. It
+    /// survives because SemaphoreSlim.WaitAsync SUSPENDS rather than blocks: an inline continuation
+    /// reaching <c>await _gate.WaitAsync(...)</c> on a thread that already holds the gate simply
+    /// yields, control returns to the raiser, and the continuation resumes on the pool once the holder
+    /// releases. That, and not the absence of a gate-holding raiser, is the actual guarantee.
+    ///
+    /// What the flag buys is therefore narrower, and still worth having: the raising thread — on the
+    /// live path AnnouncementService's, mid-announcement, inside POST /api/notifications/announce —
+    /// never executes ANY of the waiting playback's tail, not even the log write that precedes the
+    /// gate acquisition, and it keeps that true if anything synchronously blocking is ever added to
+    /// that path. OnSourceCompleted and the preemption dispatch are written from the same reasoning,
+    /// and their remarks say so.
     /// </remarks>
     public TaskCompletionSource BeginWait()
     {

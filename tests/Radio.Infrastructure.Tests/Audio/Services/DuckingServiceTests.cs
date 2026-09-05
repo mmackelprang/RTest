@@ -320,6 +320,57 @@ public class DuckingServiceTests
   }
 
   [Fact]
+  public async Task ARedundantStopForASourceNotInTheSetRaisesNothing()
+  {
+    // ⚠ REACHABLE, not hypothetical. AnnouncementService.CleanupSourceAsync calls StopDuckingAsync
+    // unconditionally, so a second stop — or a stop for a source that never started — arrives here.
+    // Since PHN-1f the Ended raise sits OUTSIDE `if (needsRestore)`, so without the wasPresent guard
+    // such a call announces a departure that did not happen: IsDucking:true alongside
+    // ActiveEventCount:0 and DuckLevel:100, a combination this tree had never emitted, to a subscriber
+    // (EventPlaybackService) that re-evaluates a D28 wait on every raise. Before PHN-1f a redundant
+    // stop raised nothing at all; this test is what holds that.
+    //
+    // MUTATION (§2.1): raise unconditionally instead of `if (wasPresent || needsRestore)` and every
+    // Assert after the first block reds — one raise becomes two, then three, then four.
+    var service = CreateService();
+    var eventSource = CreateMockEventSource("announcement").Object;
+    var raises = new List<DuckingStateChangedEventArgs>();
+
+    _defaultOptions.DuckingPolicy = DuckingPolicy.Instant;
+
+    await service.StartDuckingAsync(eventSource);
+
+    service.DuckingStateChanged += (_, args) => raises.Add(args);
+
+    // The real stop: one raise, and it is the one that empties the set.
+    await service.StopDuckingAsync(eventSource);
+    Assert.Single(raises);
+    Assert.False(raises[0].IsDucking);
+    Assert.Equal(DuckingSourceTransition.Ended, raises[0].Transition);
+
+    // The redundant stop for the same source. Nothing to remove, nothing to restore, nothing to say.
+    await service.StopDuckingAsync(eventSource);
+    Assert.Single(raises);
+
+    // A source that never started takes the same path.
+    await service.StopDuckingAsync(CreateMockEventSource("never-started").Object);
+    Assert.Single(raises);
+
+    // …and again with the set NON-EMPTY, so the silence comes from the wasPresent guard rather than
+    // from needsRestore happening to be false because everything had already stopped.
+    var other = CreateMockEventSource("other").Object;
+    await service.StartDuckingAsync(other);
+    var afterStart = raises.Count;
+
+    await service.StopDuckingAsync(eventSource);
+    Assert.Equal(afterStart, raises.Count);
+
+    // The service's own state is untouched by any of the three no-op stops.
+    Assert.True(service.IsDucking);
+    Assert.Equal(1, service.ActiveEventCount);
+  }
+
+  [Fact]
   public async Task AStartedRaiseCarriesThePriorityCapturedBeforeTheAttackFade()
   {
     // ⭐ THE CAPTURE, on the start path, and the fade window is the reason it has to be a capture.

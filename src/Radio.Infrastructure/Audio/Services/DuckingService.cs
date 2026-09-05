@@ -213,6 +213,7 @@ public class DuckingService : IDuckingService
 
     var options = _audioOptions.CurrentValue;
     bool needsRestore;
+    bool wasPresent;
     int remainingEvents;
     int priorityBeforeRemoval;
 
@@ -223,8 +224,9 @@ public class DuckingService : IDuckingService
       // subscriber that resolved the priority for itself after that point read the category default 8.
       priorityBeforeRemoval = GetPriority(eventSource);
 
-      // Remove from active events
-      _activeEvents.Remove(eventSource.Id);
+      // Remove from active events. ⚠ The bool is KEPT — see the raise at the bottom of this method,
+      // which must not announce a departure that did not happen.
+      wasPresent = _activeEvents.Remove(eventSource.Id);
 
       // Also drop any per-source priority override. Callers (e.g. AnnouncementService)
       // call SetPriority(source) with a fresh GUID id for every TTS/notification before
@@ -243,9 +245,20 @@ public class DuckingService : IDuckingService
       }
     }
 
-    _logger.LogDebug(
-      "Removed event source '{SourceId}' from ducking queue. Remaining events: {Count}",
-      eventSource.Id, remainingEvents);
+    if (wasPresent)
+    {
+      _logger.LogDebug(
+        "Removed event source '{SourceId}' from ducking queue. Remaining events: {Count}",
+        eventSource.Id, remainingEvents);
+    }
+    else
+    {
+      // Said accurately rather than "Removed": nothing was. Mirrors the else-arm StartDuckingAsync
+      // already has for a repeat start.
+      _logger.LogDebug(
+        "Event source '{SourceId}' was not in the ducking queue; nothing removed. Remaining events: {Count}",
+        eventSource.Id, remainingEvents);
+    }
 
     if (needsRestore)
     {
@@ -265,17 +278,39 @@ public class DuckingService : IDuckingService
     // D28 queue would never have been woken and would have expired as Failed/"WaitExpired", which is
     // D28's rejected option delivered thirty seconds late.
     //
-    // ⚠ IsDucking carries the TRUE AGGREGATE — false only when the set is actually empty, which is
-    // exactly what needsRestore means. That is what keeps AudioManager.ClearDuckingMultiplier firing
-    // on precisely the occasions it fires today: raising IsDucking:false while other sources remain
-    // would restore the radio to full volume MID-ANNOUNCEMENT, and that hazard is why this needed the
-    // Transition field before it could be done at all.
+    // ⚠ …AND ONLY THOSE. `wasPresent` is what makes "every source that LEAVES" literal, and it is a
+    // correctness guard rather than tidiness. A stop for a source that is NOT in the set is reachable:
+    // AnnouncementService.CleanupSourceAsync calls StopDuckingAsync unconditionally, so a second stop
+    // — or a stop for a source that never started — arrives here, removes nothing, and restores
+    // nothing (needsRestore is false, because the set is either already empty with _isDucking false or
+    // still non-empty). Raising anyway would emit IsDucking:true alongside ActiveEventCount:0 and
+    // DuckLevel:100, which is a shape this tree has never emitted: before PHN-1f the raise lived
+    // inside `if (needsRestore)`, so a redundant stop raised nothing at all. This restores exactly
+    // that, for exactly those calls.
+    //
+    // The disjunction is written out rather than collapsed to `wasPresent`, the same way
+    // StartDuckingAsync writes `needsTransition || wasNewlyAdded`: needsRestore implies wasPresent in
+    // every state reachable today — _activeEvents is non-empty only while _isDucking is true, and
+    // StopAllDuckingAsync clears both together — but a state where they diverge should still announce
+    // the restore rather than swallow it.
+    //
+    // ⚠ IsDucking is the aggregate AS IT STOOD INSIDE THE LOCK ABOVE: false exactly on the removal
+    // that emptied the set, which is what needsRestore means, and true while others remain. It is a
+    // SNAPSHOT, not a live read — a StartDuckingAsync landing after that lock is not reflected in it.
+    // That is the same pre-existing looseness the ActiveEventCount field has from the other side,
+    // since that one IS read live inside RaiseDuckingStateChanged. What the snapshot buys is the thing
+    // AudioManager.ClearDuckingMultiplier depends on: raising IsDucking:false while other sources
+    // remain would restore the radio to full volume MID-ANNOUNCEMENT, and that hazard is why this
+    // needed the Transition field before it could be done at all.
     //
     // ⚠ PLACED AFTER the fade block, not inside it, so the emptying case still raises AFTER
     // ApplyFadeAsync — byte-identical timing to what AudioManager's "Ducking ended" line has always
     // had. Only the non-emptying case is new, and it has no fade to wait for.
-    RaiseDuckingStateChanged(
-      !needsRestore, eventSource, DuckingSourceTransition.Ended, priorityBeforeRemoval);
+    if (wasPresent || needsRestore)
+    {
+      RaiseDuckingStateChanged(
+        !needsRestore, eventSource, DuckingSourceTransition.Ended, priorityBeforeRemoval);
+    }
   }
 
   /// <inheritdoc />

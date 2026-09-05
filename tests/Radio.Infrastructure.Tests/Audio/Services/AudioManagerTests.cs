@@ -506,8 +506,13 @@ public class AudioManagerTests : IAsyncDisposable
     //
     // Instrumented by the disposed playback service alone, because the assertion is a NEGATIVE: if
     // ClearDuckingMultiplier were reached it would throw, and the absence of the throw is the claim.
-    // The Id-read counter is asserted too, so "nothing happened at all" cannot pass as "the right
-    // thing happened".
+    //
+    // ⚠ THE Id-READ COUNTER ADDS NO SEPARATE PROOF, and an earlier revision of this comment claimed it
+    // did — "so 'nothing happened at all' cannot pass as 'the right thing happened'". It cannot do
+    // that: it is asserted at ZERO, which IS "nothing happened at all", so both assertions hold with
+    // the handler body emptied. It is a second and cheaper witness for the SAME named mutation, and
+    // that is all it is. The positive direction is covered by the pin above, where the counter is
+    // asserted at ONE.
     //
     // MUTATION: drop the `return;` from the IsDucking arm of OnDuckingStateChanged — so the raise
     // falls through into the ducking-ended block — and this throws.
