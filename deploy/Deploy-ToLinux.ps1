@@ -237,9 +237,15 @@ if ($moveExit -ne 0) {
 #
 # GUARDED PER DESTINATION, NOT ONCE FOR BOTH. Before OPS-7 a single `test -f` on api/
 # gated a copy into BOTH api/ and web/, so a box with a web overlay and no api overlay had
-# its web file OVERWRITTEN by the seed. That file holds RotaryPhone:Gv:AuthKey, and the
-# tracked seed has no RotaryPhone section — so the overwrite deleted the key rather than
-# replacing it, and the service came up with inter-service auth silently off.
+# its web file OVERWRITTEN by the seed.
+#
+# What that costs: the web overlay is the RotaryPhone:Gv config's home, and the tracked
+# seed has no RotaryPhone section at all — so the overwrite DELETES whatever is there
+# rather than replacing it. On `radio` as measured 2026-09-02 that is
+# RotaryPhone:Gv:MarkReadEnabled (INTEGRATIONS.md:994-997); the AuthKey the row was filed
+# over is not yet set on any box, so the loss is of operator-authored state today and of
+# the auth key once PHN-2's gate is turned on. Either way the file is not reconstructible
+# from the repo.
 #
 # Sync-WpRule below is also per-destination, but do not read it as the model for this
 # block's policy: its guard is compare-and-overwrite, which is the opposite decision. The
@@ -268,7 +274,6 @@ if (Test-Path $targetConfigPath) {
     }
 
     if (-not $seedStaged) {
-      Write-Host "  Deploying Production config from deploy/$configDir/..." -ForegroundColor DarkGray
       scp $targetConfigPath "${SshTarget}:/tmp/appsettings.Production.json"
       if ($LASTEXITCODE -ne 0) {
         Write-Host "Production config upload failed!" -ForegroundColor Red
@@ -277,6 +282,10 @@ if (Test-Path $targetConfigPath) {
       $seedStaged = $true
     }
 
+    # Named per destination on purpose: the skip and the seed are separate decisions and
+    # an operator needs to see which one each directory got. A single un-suffixed
+    # "Deploying..." line cannot distinguish seeding api/ from seeding web/.
+    Write-Host "    $dest/appsettings.Production.json absent — seeding from deploy/$configDir/" -ForegroundColor DarkGray
     ssh $SshTarget "sudo cp /tmp/appsettings.Production.json $TargetPath/$dest/ && sudo chown ${TargetUser}:${TargetUser} $TargetPath/$dest/appsettings.Production.json"
     if ($LASTEXITCODE -ne 0) {
       Write-Host "Production config seed into $dest/ failed!" -ForegroundColor Red

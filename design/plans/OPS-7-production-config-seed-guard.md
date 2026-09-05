@@ -202,8 +202,8 @@ never restarted.
 
 ### 3.2 ⚠ The trap: `-TargetPath` does **not** isolate everything
 
-**The WirePlumber block at `:299-318` is not parameterised by `$TargetPath` and is not guarded by
-`-NoRestart`.** It runs on every invocation, writes to `/etc/wireplumber/main.lua.d` and
+**The WirePlumber block — `:301-384` after `OPS-7` shifted it; `:299-318` as planned — is not
+parameterised by `$TargetPath` and is not guarded by `-NoRestart`.** It runs on every invocation, writes to `/etc/wireplumber/main.lua.d` and
 `/etc/wireplumber/bluetooth.lua.d`, and can issue
 `systemctl --user restart wireplumber` — **which cycles BT and audio on a box that may be playing
 music in someone's living room.**
@@ -346,7 +346,9 @@ rather than listing them as if they were.
 - `$LASTEXITCODE` masking at `:230` (`C-88`), including that both `$configDir` values have a seed
   file, which is what makes the masking unconditional.
 - `-TargetPath` is a real parameter (`:50`) used at `:217`/`:222`/`:226`.
-- `-NoRestart` guards `:145` and `:323`, and **not** `:299-318` (§3.2).
+- `-NoRestart` guards `:145` and `:323` (now `:389`), and **not** the WirePlumber block (§3.2).
+  Re-verified post-fix by `OPS-7`'s Builder: the block runs `:301-384`, `systemctl --user restart
+  wireplumber` is at `:377`, and a sweep of that range finds neither `$NoRestart` nor `$TargetPath`.
 - `Sync-WpRule` guards per destination (`:268-297`) — the exemplar.
 - No Pester or `*.Tests.ps1` anywhere in the repo.
 

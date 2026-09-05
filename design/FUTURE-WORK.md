@@ -1876,8 +1876,11 @@ with no web overlay at all, because `deploy-to-pi.sh` has no seed block — the 
 a matched pair in `Deploy-ToLinux.ps1` and have to stay one here. The work is:
 
 1. `--exclude='appsettings.Production.json'` on both `sudo rsync` invocations at `:114-115`.
-2. A per-destination seed block ported from `Deploy-ToLinux.ps1:236-274` (post-`OPS-7`) — guarded
-   **per destination**, not once for both, or this reintroduces the bug `OPS-7` just closed.
+2. A per-destination seed block ported from the post-`OPS-7` block in `Deploy-ToLinux.ps1` —
+   the one introduced by the comment `GUARDED PER DESTINATION, NOT ONCE FOR BOTH`, ending at the
+   `if ($seedStaged) { ... rm -f ... }` cleanup. Guard **per destination**, not once for both, or
+   this reintroduces the bug `OPS-7` just closed. (Quoted by anchor rather than line range: that
+   region moved twice during `OPS-7` itself.)
 
 ### Gotchas
 
@@ -1912,7 +1915,11 @@ if ($LASTEXITCODE -ne 0) {
 The check names the **transfer**, but reads the exit code of the `ssh` that follows it. That `ssh`'s
 remote compound ends in `rm -rf`, which returns 0 whether or not the directory exists, and both `mv`s
 send their errors to `/dev/null` — so it returns 0 even when the `scp` transferred nothing.
-`$ErrorActionPreference = "Stop"` does not rescue this; it does not apply to native-command exit codes.
+`$ErrorActionPreference = "Stop"` does not rescue this by default: whether a native command's
+non-zero exit throws is governed by `$PSNativeCommandUseErrorActionPreference`, which is `$false`
+on this box (measured, PowerShell 7.6.5). Setting it `$true` would make native failures throw — and
+would also change the behaviour of every other `$LASTEXITCODE` check in the file, so it is not a
+local fix.
 
 **Reached only when `rsync` is not on PATH** (`$useRsync` false), which is why it has not bitten. On the
 rsync path the last native call before the check is the rsync itself and the check is correct.

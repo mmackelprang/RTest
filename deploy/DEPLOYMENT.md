@@ -537,9 +537,23 @@ API connection URL.
 **Seeding is per service directory, and an existing overlay is never overwritten.** When
 `Deploy-ToLinux.ps1` finds no `appsettings.Production.json` in `api/` or in `web/`, it seeds
 that directory from `deploy/<target>/appsettings.Production.json`; a directory that already
-has one is left byte-for-byte alone, and the deploy prints `present - left alone` for it.
+has one is left byte-for-byte alone, and the deploy prints `present — left alone` for it.
 The two directories are decided independently, so provisioning a box by hand-placing only
 one of the two overlays is safe.
+
+If the presence check itself cannot be completed — an `ssh` transport failure rather than an
+answer — the deploy **aborts instead of seeding**. `ssh` reports its own errors as exit 255,
+which a bare `test -f` cannot tell apart from "file absent", so guessing would risk
+overwriting the very file this guard protects.
+
+> ⚠ **One seed file serves both directories.** `deploy/debian-x64/appsettings.Production.json`
+> holds only API-shaped keys (`AudioOutput`, `Devices`, `FilePlayer`, `Diagnostics`,
+> `Fingerprinting`), so a `web/` directory seeded from it receives keys `Radio.Web` does not
+> bind, and no `ApiBaseUrl` or `Kestrel`. That is inert today, and it is what you will find if
+> you open a freshly seeded `web/` overlay to add `RotaryPhone:Gv:AuthKey`. It also means the
+> seeded file now counts as "present" forever, so that path will not be seeded again. Adding a
+> web-bound key to the shared seed would silently start landing it in `api/` too — splitting
+> the seed per service is the fix if that day comes.
 
 > Before `OPS-7` it was not. A single `test -f` on `api/` gated the copy into **both**
 > directories, so a box with a `web/` overlay and no `api/` one had its web file
