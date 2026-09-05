@@ -45,15 +45,37 @@ if (Test-Path $targetConfigPath) {
 absent, `web/`'s present. The guard sees the missing api file, decides "seed needed", and the copy
 overwrites the web file with the api seed.
 
-`src/Radio.Web`'s Production overlay is where `RotaryPhone:Gv:AuthKey` lives
+`src/Radio.Web`'s Production overlay is where `RotaryPhone:Gv:AuthKey` **belongs**
 (`docs/HANDOFF-rotaryphone-gv-send-markread-auth.md:102`; the handler is
-`src/Radio.Web/Services/Http/RotaryPhoneAuthHandler.cs`), and `PHN-2` made that key load-bearing. The
-tracked seed at `deploy/debian-x64/appsettings.Production.json` contains **no `RotaryPhone` section at
-all** — verified by reading it — so the overwrite does not replace the key with a different value. It
-**deletes it**, and the service comes up with auth silently off.
+`src/Radio.Web/Services/Http/RotaryPhoneAuthHandler.cs`). The tracked seed at
+`deploy/debian-x64/appsettings.Production.json` contains **no `RotaryPhone` section at all** —
+verified by reading it — so the overwrite does not replace what is there with a different value. It
+**deletes it**.
 
-**`C-87` — the row's description is accurate in every particular.** `:222`, `:226`, both destinations,
-the key, and the dormant/live framing all check out against the tree. Nothing to correct.
+> ⚠ **CORRECTED AFTER THE FACT — this paragraph originally said the overlay is where that key
+> "lives", and that `PHN-2` "made that key load-bearing". Both overstate the stakes.** Measured on
+> `radio` 2026-09-02 (`design/INTEGRATIONS.md:994-997`), the web overlay is **75 bytes holding only
+> `RotaryPhone:Gv:MarkReadEnabled`**, and *"Neither carries an auth key today"*;
+> `docs/HANDOFF-...:100-106` records all three `Gv` flags as wired off, and `grep -c AuthKey`
+> returns **0** on both deployed overlays. The key is not on any box, so nothing can delete it yet.
+>
+> **What the overwrite destroys today** is operator-authored config that the repo cannot
+> reconstruct — `MarkReadEnabled` on `radio`, and whatever a given box's operator hand-placed. The
+> `AuthKey` loss is **prospective**: real from the moment `PHN-2`'s gate is set, on a box
+> mis-provisioned before then.
+
+**`C-87` — WITHDRAWN. It said "the row's description is accurate in every particular"; it was not,
+and this plan is the reason the error spread.** `:222`, `:226`, both destinations and the
+dormant/live framing do check out. **The key did not.** The row asserted it, this plan ratified it
+without measuring the deployed files, the dispatch brief repeated the plan, and `OPS-7`'s Builder
+then transcribed it into a source comment — where a pre-merge reviewer finally caught it against
+`INTEGRATIONS.md`. Fixing that comment corrected the **leaf**; this note is the **root**.
+
+The lesson is specific and worth more than the correction: **`C-87` was a claim of verification that
+performed none.** Every other bullet in §5.1 names a file that was opened; this one named the row.
+A plan may not certify a row's factual claims by agreeing with them — checking the tree for `:222`
+and `:226` says nothing about what a *deployed box* holds, and only the deployed box could have
+falsified this. **The defect is real and the fix is unchanged; only the stakes were wrong.**
 
 ### 1.2 ⚠ `C-88` — a second defect in the same fourteen lines, not previously filed
 
@@ -122,6 +144,20 @@ which is what a first provisioning looks like, and what the next box will be.
 #
 # The per-file shape here matches Sync-WpRule below, which has always guarded each
 # destination independently.
+
+⚠ **DO NOT TRANSCRIBE THE COMMENT ABOVE — it is preserved as filed, and two of its claims are
+false.** It is what `OPS-7`'s Builder copied into the source, and both errors reached review:
+
+1. *"That file holds `RotaryPhone:Gv:AuthKey`"* — it does not; see the correction in §1.1. The
+   shipped comment says what is lost **today** (operator-authored `Gv` config) and what is lost
+   **later** (the key, once `PHN-2`'s gate is on).
+2. *"matches Sync-WpRule … which has **always** guarded each destination independently"* — the
+   present-tense half is true, the historical half was never checked, and the pointer is
+   misleading anyway: `Sync-WpRule`'s guard is compare-and-**overwrite**, the opposite policy to
+   this block. A reader following it to confirm "is it safe not to clobber?" lands on a function
+   that clobbers on every deploy.
+
+The shipped wording is in `deploy/Deploy-ToLinux.ps1`; prefer it over this draft.
 $targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
 if (Test-Path $targetConfigPath) {
   $seedStaged = $false
