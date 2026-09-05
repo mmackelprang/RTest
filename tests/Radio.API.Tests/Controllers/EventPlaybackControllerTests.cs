@@ -39,11 +39,24 @@ public class EventPlaybackControllerTests : IClassFixture<CustomWebApplicationFa
   [Fact]
   public async Task Post_RemoteMedia_Returns409_WhenGvMediaIsDisabled()
   {
-    // GvMedia:Enabled ships false. A 409 with reason "Disabled" can only come from the controller's
-    // own catch — an unmapped route gives 404, a broken DTO gives a generic 400, an unresolvable
-    // dependency gives 500. It also proves the whole Radio.API container still builds with
-    // AddEventPlayback in it.
-    var client = _factory.CreateClient();
+    // A 409 with reason "Disabled" can only come from the controller's own catch — an unmapped route
+    // gives 404, a broken DTO gives a generic 400, an unresolvable dependency gives 500. It also
+    // proves the whole Radio.API container still builds with AddEventPlayback in it.
+    //
+    // ⚠ THE FLAG IS SET HERE RATHER THAN INHERITED, and that changed in PHN-2. This test used to say
+    // "GvMedia:Enabled ships false" and lean on the shipped default; PHN-2 flipped that default to
+    // true to turn Feature A on, so leaning on it now returns 202 and the pin evaporates. Setting the
+    // flag the test is ABOUT is also the honest form — the test is named for a disabled gate, so the
+    // gate should be disabled by the test rather than by a value in a file it never mentions.
+    //
+    // ⚠ Its own host, for the same reason. A 202 on the SHARED fixture host would leave a live
+    // playback behind and break Get_Current_Returns204_WhenNothingHasBeenStarted, which is exactly
+    // what happened when the default flipped.
+    var client = _factory.WithWebHostBuilder(b => b.ConfigureAppConfiguration((_, c) =>
+      c.AddInMemoryCollection(new Dictionary<string, string?>
+      {
+        ["GvMedia:Enabled"] = "false"
+      }))).CreateClient();
 
     var response = await client.PostAsJsonAsync("/api/audio/events", new
     {
@@ -147,7 +160,13 @@ public class EventPlaybackControllerTests : IClassFixture<CustomWebApplicationFa
   [Fact]
   public async Task Get_Current_Returns204_WhenNothingHasBeenStarted()
   {
-    var response = await _factory.CreateClient().GetAsync("/api/audio/events/current");
+    // ⚠ ITS OWN HOST, so "nothing has been started" is true BY CONSTRUCTION rather than by luck.
+    // Sharing the class fixture made this test depend on no sibling having started a playback, which
+    // held only while GvMedia:Enabled shipped false and every RemoteMedia POST was refused. PHN-2
+    // flipped that default and this test began failing with 200 — not because Current is wrong, but
+    // because its precondition had quietly been an artefact of a config value.
+    var response = await _factory.WithWebHostBuilder(_ => { })
+      .CreateClient().GetAsync("/api/audio/events/current");
 
     Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
   }
