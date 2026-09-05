@@ -883,18 +883,36 @@ rather than by how much each is trusted:
 2. **Entering `/sleep`**, because that route runs under `EmptyLayout` and offers no transport
    (ADR-029 §7.5 on §16.5's corrected trigger). ⚠ **TWO server-side edges, and the reason there are
    two is a real defect that shipped in the design and was caught on the box:**
-   - `SleepService.SetSleepScreenVisibleAsync(true)` — the `/sleep` page reporting itself. Covers the
-     **30-minute idle timer**, the Sleep pill, the server push and a direct navigation.
-   - `SleepService.EnterSleepAsync` — the room being parked. Covers the entries with **no browser at
-     all**: `POST /api/system/sleep` and the encoder long-press.
+   - `SleepService.SetSleepScreenVisibleAsync(true)` — the `/sleep` page reporting itself. It is the
+     **only** stopper for the routes that reach `/sleep` *without parking audio first*: the
+     **30-minute idle timer** and a **direct navigation**.
+   - `SleepService.EnterSleepAsync` — the room being parked. Covers the Sleep pill, the server push
+     (which originates there), and the entries with **no browser at all**: `POST /api/system/sleep`
+     and the encoder long-press.
+
+   ⚠ **An earlier revision of this list said the screen edge covers "the idle timer, the pill, the
+   server push and a direct navigation".** It does not, and the distinction is the useful half: the
+   pill and the push park audio *first*, so by the time the page reports itself there is nothing left
+   to stop and the screen edge is a no-op. Every route is covered — but by *which* edge matters when
+   reasoning about what happens if one of them is changed.
 
    ⚠ **This list used to say "Enforced server-side in `SleepService.EnterSleepAsync`, so all three
    client entry points … are covered by one rule."** That was false, and it was false for the exact
    case §7.5 was written about: `idle-dimmer.js`'s `navigateToSleep('idle')` reaches `/sleep` by
    `window.location.href` and deliberately calls nothing server-side, so `IsSleeping` stays **false**
-   on the idle path and the rule never ran there. The rule is *"stop when `ConsoleWakeState` leaves
-   `Awake`"*, applied as an edge at both write sites — never polled, because `WakeState` reads `Awake`
-   while a wake claim is outstanding (`ENC-6`'s fast spin).
+   on the idle path and the rule never ran there.
+
+   ⚠ **And the screen edge fires on the REPORT, not on a transition of `ConsoleWakeState`** — which is
+   itself a correction, made during pre-merge review. A transition rule can be **suppressed** by a
+   stale flag: `Sleep.razor`'s dispose report is best-effort behind a 2 s timeout and `MainLayout`'s
+   corrective `false` is fire-and-forget, so losing both leaves the flag reading `true` while the
+   console is awake. The next idle timeout is then not a *change*, and a transition rule does not
+   fire — the failure §7.5 exists to prevent, arrived at by the rule meant to prevent it. Deciding on
+   the report's own argument also removes a race with a concurrent opposite report. **Still never
+   polled:** it is driven by a client's report, with no loop and no timer, and `WakeState` is
+   deliberately not consulted at all — it reads `Awake` while a wake claim is outstanding (`ENC-6`'s
+   fast spin). Repeat reports are free: the stop decides on the playback's *state*, so a second one
+   finds a terminal snapshot and does nothing.
 
    It is a **stop**, not a mute: `WakeAsync` restores the pre-sleep mute state, so a merely-muted
    voicemail would become audible again mid-word on the next touch.

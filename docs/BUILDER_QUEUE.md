@@ -3,7 +3,7 @@
 > Work items queued by **Planner** for **Builder** to clear one PR per cycle.
 > Planner appends rows + spec/plan links; Builder claims a 📋 row whose dependencies are all met, ships it as a PR, then marks it ✅.
 >
-> **Last updated:** 2026-09-04 (Builder) — ✅ **`PHN-1e` MERGED as [#561](https://github.com/mmackelprang/RTest/pull/561), and the 🚫 it carried is cleared. Both blockers resolved, in OPPOSITE directions.** ⭐ **B1 cost no code at all.** Owner decision **`D30`** — *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."* — says the measured refresh behaviour is the **wanted** behaviour, so `AttendedPlaybackCircuitHandler` shipped **byte-for-byte as built**, with no grace period, no circuit-identity matching and no survival mechanism; the correction landed on ADR-029 §7.3's *reasoning* rather than on the branch. ⚠ **What fell with it is worth knowing before citing §7.3:** its worked example (circuit B is "already open" when A closes — the close strictly precedes the open), its retention-window claim (the 10 minutes covers *unexpected* disconnects only), and its self-description as *"the weakest of the three defences"* — the rule is **promoted** to the mechanism that implements `D30`, with the 300 s cap as the backstop behind **it**. ⭐ **B2 is the one that needed code, and it was found by the comment-accuracy reviewer rather than by any test.** ADR §7.5's `/sleep` rule never fired on the **30-minute idle timer** — the case §7.5's own motivating sentence names — because `idle-dimmer.js` reaches `/sleep` by `window.location.href` and deliberately calls nothing server-side, so `IsSleeping` is **false** there. Fixed with a **second edge** on the `ENC-6` seam, `SetSleepScreenVisibleAsync(true)`, beside the existing `EnterSleepAsync` hook: *stop when `ConsoleWakeState` leaves `Awake`, as an edge at the write sites, never polled.* ⚠ **`ISleepService.SetSleepScreenVisible` became `SetSleepScreenVisibleAsync` and the stop is AWAITED**, on **C-49**'s own lesson — a `Radio.Core` signature change with one production call site. ⚠ **That false claim had propagated through FOUR documents** (ADR §7.5 → plan C-51 → the branch's own comment → the PR body), each restating the one before it, and **not one checked `idle-dimmer.js`**, which contradicts it in a comment written for the purpose. ⭐ **THE CAP IS NOW PROVED, NOT ASSUMED, AND IT HAD TO BE:** Amendment 2's argument that the network-drop path is unreachable *depends* on the 300 s cap firing, and the cap ships with this PR rather than existing on `main`. Mutation-tested — removing `ArmDurationCap` reds 2 tests, and keeping the timer while dropping its dispatched `StopAsync` reds the same 2, so the tests pin the **stop** and not merely the timer. **`D30` filed in [`docs/HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) §7**, which ADR-029 deliberately left for this cycle. **Two adversarial reviewers ran** (Copilot still out of quota). ⚠ **`PHN-1f` does NOT become claimable** — it has no plan; its 🔒 clears only on a Planner pass. *Previous two entries preserved below.*
+> **Last updated:** 2026-09-04 (Builder) — ✅ **`PHN-1e` MERGED as [#561](https://github.com/mmackelprang/RTest/pull/561), and the 🚫 it carried is cleared. Both blockers resolved, in OPPOSITE directions.** ⭐ **B1 cost no code at all.** Owner decision **`D30`** — *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."* — says the measured refresh behaviour is the **wanted** behaviour, so `AttendedPlaybackCircuitHandler` shipped **byte-for-byte as built**, with no grace period, no circuit-identity matching and no survival mechanism; the correction landed on ADR-029 §7.3's *reasoning* rather than on the branch. ⚠ **What fell with it is worth knowing before citing §7.3:** its worked example (circuit B is "already open" when A closes — the close strictly precedes the open), its retention-window claim (the 10 minutes covers *unexpected* disconnects only), and its self-description as *"the weakest of the three defences"* — the rule is **promoted** to the mechanism that implements `D30`, with the 300 s cap as the backstop behind **it**. ⭐ **B2 is the one that needed code, and it was found by the comment-accuracy reviewer rather than by any test.** ADR §7.5's `/sleep` rule never fired on the **30-minute idle timer** — the case §7.5's own motivating sentence names — because `idle-dimmer.js` reaches `/sleep` by `window.location.href` and deliberately calls nothing server-side, so `IsSleeping` is **false** there. Fixed with a **second edge** on the `ENC-6` seam, `SetSleepScreenVisibleAsync(true)`, beside the existing `EnterSleepAsync` hook. ⭐ **The predicate is the REPORT ITSELF, not a transition of `ConsoleWakeState` — and that is a pre-merge correction, not the original design.** Written the first way, the rule could be **suppressed by a stale flag**: `Sleep.razor`'s dispose report is best-effort behind a 2 s timeout and `MainLayout`'s corrective `false` is fire-and-forget, so losing both leaves the flag reading `true` while the console is awake, the next idle timeout is not a *change*, and the rule does not fire — §7.5's own failure produced by the rule meant to prevent it. **Still never polled** (no loop, no timer, and `WakeState` is not consulted at all). ⚠ **`ISleepService.SetSleepScreenVisible` became `SetSleepScreenVisibleAsync` and the stop is AWAITED**, on **C-49**'s own lesson — a `Radio.Core` signature change with one production call site. ⚠ **That false claim had propagated through FOUR documents** (ADR §7.5 → plan C-51 → the branch's own comment → the PR body), each restating the one before it, and **not one checked `idle-dimmer.js`**, which contradicts it in a comment written for the purpose. ⭐ **THE CAP IS NOW PROVED, NOT ASSUMED, AND IT HAD TO BE:** Amendment 2's argument that the network-drop path is unreachable *depends* on the 300 s cap firing, and the cap ships with this PR rather than existing on `main`. Mutation-tested — removing `ArmDurationCap` reds 2 tests, and keeping the timer while dropping its dispatched `StopAsync` reds the same 2, so the tests pin the **stop** and not merely the timer. **`D30` filed in [`docs/HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) §7**, which ADR-029 deliberately left for this cycle. **Two adversarial reviewers ran** (Copilot still out of quota) and they earned it a third cycle running. ⭐ **The sharpest finding was a behavioural defect in the day’s OWN fix, and it was found by attacking a comment rather than the code:** the sleep rule was written as *"stop when `ConsoleWakeState` leaves `Awake`"* and its remark claimed *"it cannot suppress a stop"* — it can, whenever `_isSleepScreenVisible` is left stale-`true` (both reports that would clear it are best-effort, and the tree says so in comments), because the next idle timeout is then not a *change*. The predicate is now **the report itself**. Also fixed: a **wedged stop that made the console UNWAKEABLE** (the sleep stop runs under the same `_lock` `WakeAsync` needs — now time-boxed, and the falsification **hangs** rather than failing), a cap timer callback that was a **process kill**, a circuit-open throw that could **strand the count so `D30`’s rule never fires again**, a missing upper clamp on `MaxPlaybackSeconds`, and **four tests that could not fail**. ⛔ **One defect deferred with the deferral logged** — `AudioStateStore.NotifyAsync` awaits only the last subscriber of a multicast delegate, pre-existing across all eleven events on that store; **PR 6 is its real deadline** and it wants a Planner row. ⚠ **`PHN-1f` does NOT become claimable** — it has no plan; its 🔒 clears only on a Planner pass. *Previous two entries preserved below.*
 
 > **Last updated:** 2026-09-04 (Builder) — ⛔ **`PHN-1e` is 🚫 BLOCKED, not done. The branch is complete, green and pushed as [#561](https://github.com/mmackelprang/RTest/pull/561); it is NOT merged and must not be.** ⭐ **The reason is the one thing the plan said only the box could answer, and it resolved against the design.** Plan §0.3 **U3** predicted a browser refresh goes 1 → 2 → 1 and never touches zero. Measured twice on the appliance at `dd8e85ec`: with two tabs it is **2 → 1 → 2** — the close arrives BEFORE the open — so with a single browser it is **1 → 0 → 1** and the last-circuit backstop stops the playback at the zero. A 49-second voicemail died 7 seconds in, on a reload. ⚠ **This is ADR-level, not a code bug.** §7.3 replaced the owner-circuit rule specifically to survive refreshes, reasoning that the replacement circuit is *already open* when the old one closes. It is not. On a single-kiosk box — the normal state of this appliance — the last-circuit rule reproduces the exact failure it was written to remove, and reproduces it faster. The 10-minute `DisconnectedCircuitRetentionPeriod` never enters this path: it covers *unexpected* disconnects, while a reload sends a graceful close that disposes the circuit at once. ⭐ **Consequence worth the Planner's attention: as built, every reachable firing of this backstop is a false positive** — a graceful close fires immediately (usually a user who is still there), and an unexpected drop waits 10 minutes, by which time the 300 s cap has already stopped the audio. The plan's own instruction for this outcome was *"stop and re-plan, do not paper over it with a delay"*; that was followed, and no delay was added. ⚠ **A second, independent blocker from the review: §7.5's `/sleep` rule does not cover the idle timer**, which is the case §7.5 was written for. `idle-dimmer.js` navigates to `/sleep` *without* calling `SetSleepAsync`, by design, so the 30-minute idle path never reaches `SleepService.EnterSleepAsync` and lands the kiosk on a no-transport surface with a voicemail playing. **ADR §7.5 is itself wrong about this**, citing `idle-dimmer.js` line numbers that no longer exist — so it is a Planner correction. ✅ **What IS settled, so a re-plan need not re-litigate it:** **U1** — the payload survives the real `JsonHubProtocol` (the typed handler received it; `GET /current` and the hub agree on `"state":"Playing"` as a string), which is also what makes `PHN-1f`'s new state deployable without a lockstep Web build; **U2** — a singleton `CircuitHandler` does receive every circuit's callbacks (1 → 2 across two circuits), so Task 7's shape is right; **the max-duration cap works on real hardware** (cap 20 s vs a 42 s recording → stopped, with the WRN line in journald); and **the `/sleep` rule works for the path that reaches it** (Playing → sleep → Stopped, and waking does not resume). ⚠ **Review coverage was degraded again** — Copilot is still out of quota — so two adversarial reviewers ran with different briefs, as on `PHN-1d`. They earned it: **5 HIGH and 5 MEDIUM**, including that the cap's central justification comment is false (*both* event sources DO observe the token; a `CancelAfter` cap would be **worse** than the "changes nothing" the comment claims, leaving audio running while killing the transition that would have ended it), and that `EventPlaybackRegistrationTests` — named in a shipped comment as what keeps the eager-construction claim honest — fakes three of the four dependencies and says so itself. ⭐ **And one test in this row could not fail.** `ANaturalEndDisarmsTheDurationCap`, exactly as the plan specified it, passed **62/62 with the disarm deleted** — `ClaimTerminal` absorbs the late stop before it reaches the source, so the `StopCalls` assertion was pinning a different property. Rewritten to assert on the cap's own log line; now red under that mutation. **Two plan defects filed** in the Blocker section: that, and Task 12's scope gate contradicting Task 10c. *Previous entry preserved below.*
 >
@@ -215,14 +215,35 @@ deliberately does not call `SetSleepAsync` because idle navigation must not paus
 
 **Fixed with a second edge, per ADR-029 §16.5 — and the two are not redundant:**
 
-| Edge | Expresses | Covers |
+| Edge | Expresses | Is the ONLY stopper for |
 |---|---|---|
-| `SleepService.SetSleepScreenVisibleAsync(true)` | the **no-transport surface** went up | the idle timer, the Sleep pill, the server push, a direct navigation |
-| `SleepService.EnterSleepAsync` | the **room is being parked** | the entries with no browser at all — `POST /api/system/sleep`, the encoder long-press |
+| `SleepService.SetSleepScreenVisibleAsync(true)` | the **no-transport surface** went up | the **30-minute idle timer** and a **direct navigation** — the routes that reach `/sleep` without parking audio |
+| `SleepService.EnterSleepAsync` | the **room is being parked** | the Sleep pill, the server push, and the entries with **no browser at all** — `POST /api/system/sleep`, the encoder long-press |
 
-In the repo's own vocabulary: **stop when `ConsoleWakeState` leaves `Awake`, as an edge at the two
-write sites, never polled** — `WakeState` reads `Awake` while a wake claim is outstanding (`ENC-6`'s
-fast spin), so a poll would answer `Awake` for a console that is not.
+⚠ **Read the second column carefully, because a first draft of this row got it wrong** and the
+adversarial review caught it. The screen edge does not *stop anything* on the pill or the server
+push: both park audio first, so by the time `Sleep.razor` reports itself there is nothing left to
+stop. Every route is covered; which edge covers it is what matters when one of them changes.
+⚠ **ADR-029 §16.5's own table says this edge "covers rows 1, 2, 3, 5"**, which is true of *producing
+the fact* and false of *stopping the playback*. Worth an Architect's eye on the next pass — this row
+did not amend the merged ADR.
+
+⭐ **AND THE PREDICATE IS THE REPORT, NOT A TRANSITION OF `ConsoleWakeState` — a pre-merge
+correction, and the sharpest finding of the cycle.** The rule was first written as *"stop when
+`WakeState` leaves `Awake`"*, with a comment arguing it *"cannot suppress a stop"*. It can:
+`Sleep.razor`'s dispose report is best-effort behind a 2 s timeout and `MainLayout`'s corrective
+`false` is fire-and-forget with the failure swallowed, so **losing both leaves the flag reading
+`true` while the console is genuinely awake on Home** — the tree documents both halves in comments.
+A voicemail then starts, the idle timer lands on `/sleep` thirty minutes later, the page reports
+`true`, nothing *changed*, and a transition rule **does not fire**. That is §7.5's own failure,
+produced by the rule written to prevent it. A second, independent loss: with no lock, the "after"
+re-read could observe a *concurrent* report's write, which a kiosk reload while on `/sleep` produces
+naturally. Deciding from the report's own argument closes both by construction.
+⚠ **"Never polled" is untouched** — still driven by a client's report, no loop, no timer, and
+`WakeState` is now not consulted at all, which §16.5 also asks for. Idempotence moved somewhere
+stronger: the stop decides on the playback's **state**, so a repeat report finds a terminal snapshot
+and does nothing — and that holds across *different* clients, which an edge on one global flag
+cannot see.
 
 ⚠ **`ISleepService.SetSleepScreenVisible` became `SetSleepScreenVisibleAsync` and the stop is
 AWAITED.** §16.5 left that choice open and argued for awaiting on **C-49**'s own lesson — this arc has
@@ -235,6 +256,43 @@ through **four** documents — ADR §7.5 → plan constraint **C-51** → the br
 `idle-dimmer.js` against the claim**, and that file contradicts it in a comment written for exactly
 this reason.
 
+### What the two reviewers found, and the one thing deliberately NOT fixed
+
+Copilot is out of quota, so two adversarial reviewers ran with different briefs — **lifecycle,
+concurrency and the wire contract**, and **comment-and-test accuracy**. Third cycle running that this
+pairing has earned its cost.
+
+**Fixed in this row** — one behavioural defect in the day's own change, three latent hazards, four
+tests that could not fail, and seven comments that asserted more than the code did. The defect and the
+hang are the two worth remembering:
+
+- ⭐ **The sleep edge could be SUPPRESSED by a stale flag** — see the predicate note above. Found by
+  the comment reviewer, attacking the sentence *"it cannot suppress a stop"* rather than the code.
+  ⚠ **The comment was written the same day, by the Builder, in the fix for the previous cycle's
+  finding.** That is the shape `CLAUDE.md` § *Pre-Merge Review* names: a comment offering a reason a
+  thing is safe, where the reason is the claim to check.
+- ⚠ **A wedged stop made the console UNWAKEABLE.** `EnterSleepAsync` calls the attended-playback stop
+  while holding `_lock`, and `WakeAsync` takes the same `_lock` — so an unbounded
+  `IEventPlaybackService.StopAsync` parks the encoder, the screen tap and the REST wake behind it at
+  once, and this repo has a documented class of hang in exactly that layer. Time-boxed at 3 s.
+  Falsified by removing the bound: **the test hangs rather than failing.**
+- The cap's timer callback was a **process kill** (unguarded `TimerCallback`; `ILogger` rethrows
+  provider exceptions), `OnCircuitOpenedAsync` could **strand the circuit count** so `D30`'s rule
+  silently never fires again, and `MaxPlaybackSeconds` had **no upper clamp** — over ~49.7 days
+  `CreateTimer` throws *after* `PlayAsync`, failing every attended playback under a generic reason.
+
+⛔ **DEFERRED, deliberately, and it is a real defect: `AudioStateStore.NotifyAsync` awaits only the
+LAST subscriber of a multicast `Func<Task>`.** `await handler.Invoke()` on a multicast delegate returns
+one task, so earlier subscribers run to their first `await` and their continuations are never observed
+— the `try`/`catch` around it protects exactly one of N. The store is a **singleton** and every
+circuit's components subscribe, so N > 1 is the normal multi-client state.
+**Why deferred rather than fixed here:** it is **pre-existing and shared by all eleven events on that
+store**; `EventPlaybackChanged` merely inherits it. Fixing it correctly means iterating
+`GetInvocationList()` and awaiting each, which changes the failure semantics of ten events this row
+does not own — the kind of unrelated blast radius the `PHN-1e`/`PHN-1f` split exists to refuse.
+⚠ **It is worth a Planner row, and PR 6 is the deadline that matters**, because PR 6's stop chip is the
+first consumer that will hang off `EventPlaybackChanged` on every circuit at once.
+
 ### What was never blocked, and is verified on the box
 
 All at `dd8e85ec`, on the appliance. Recorded so nobody re-runs them:
@@ -244,6 +302,33 @@ All at `dd8e85ec`, on the appliance. Recorded so nobody re-runs them:
 - **The max-duration cap works on real hardware.** Cap temporarily set to 20 s against a 42 s recording: `Playing` at t+17 s, `Stopped` by t+27 s, with `[WRN] … reached GvMedia:MaxPlaybackSeconds (20s)` in journald. Config restored afterwards. ⭐ **And it is now provably load-bearing in a test host too**, which matters because Amendment 2's P6 reasoning depends on the cap firing: removing `ArmDurationCap` reds 2 tests, and keeping the timer while dropping its dispatched `StopAsync` reds the same 2 — so the tests pin the **stop**, not merely the timer.
 - **The `/sleep` rule works for the path that reaches it.** `Playing` → `POST /api/system/sleep` → `Stopped`, and waking does **not** resume — C-51's surviving half.
 - **U3 is not on this list, and that is the point of the list.** It is the one that resolved against the design; see B1.
+
+### On-box UAT of the new edge, 2026-09-04 — including the latency ADR §16.5 asked for
+
+Deployed to `radio` at `947fb2e` (both services SHA-verified, kiosk relaunched and live), driven
+through the real controller, real DI and real JSON. **All four checks are of the edge that did not
+exist before this row.**
+
+| # | What was driven | Result |
+|---|---|---|
+| **T1** | `POST /api/system/sleep-screen {visible:true}` with a live playback, **no browser and no `EnterSleepAsync`** | `Playing` → `Stopped`. `isSleeping` stayed **false** throughout — the idle-path state, where the old rule did nothing. The API log carries `Sleep stopped attended playback evp-52d6…` with **no preceding `Entering sleep mode`**, which is what isolates the new edge from the old one |
+| **T2** | The idle timer's own mechanism — `window.location.href = '/sleep'` driven over kiosk CDP — with a live playback | Stopped **592 ms** after the navigation. ⚠ **The CIRCUIT rule won on this path**, logging `Last circuit closed with attended playback … still live`. That is ADR §16.1's predicted overlap, which it marked *"derived from the mechanism, not measured"* — **now measured.** The two rules are not redundant; they overlap on exactly this path |
+| **T3** | `{visible:false}` (what `MainLayout` reports on every navigation home) with a live playback | Still `Playing`. The inverse holds |
+| **T4** | ⭐ **The latency §16.5 item 2 called "plausibly seconds" and left UNMEASURED** — hard navigation → the sleep screen reporting itself | **112 ms / 113 ms / 140 ms** over three runs, verified with the page really at `/sleep` and Blazor connected. It is milliseconds, not seconds |
+
+⭐ **T2 also settles a MEDIUM the lifecycle reviewer could not settle from the tree.** This row moves
+`IEventPlaybackService` (and `GvMediaClient`, `AudioFileEventSourceFactory`, `ITTSFactory`,
+`IDuckingService` with it) from lazy construction to **eager, at host start**, because
+`AudioStateUpdateService` is a hosted service that now resolves it in its constructor — so a
+construction failure changes from *"a 500 on the first voicemail"* to *"`radio-api` fails to start"*,
+i.e. a restart loop on a headless appliance. `CustomWebApplicationFactory` strips every
+`IHostedService`, so **no test in the suite covers it**. The deploy did: `radio-api` came up, answered
+`/api/health/version` at the right SHA, and served every check above.
+
+⚠ **What was NOT re-run, and why:** `U1` (the payload survives the real `JsonHubProtocol`) and `U2`
+(a singleton `CircuitHandler` sees every circuit) were settled on the box by the previous cycle and
+are unchanged by this one. `U3` needed no re-run because `D30` settled it as a decision rather than a
+measurement.
 
 ### Two plan defects found by the same cycle, both fixed here
 
