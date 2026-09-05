@@ -19,9 +19,11 @@ namespace Radio.Web.Tests.Components.Layout;
 /// survives navigation" (ADR-029 §7.2 / handoff §Cross-3).
 /// </summary>
 /// <remarks>
-/// ⚠ These render the REAL MainLayout. MainLayoutTests has said since it was written that the layout
-/// "requires extensive JSInterop and service configuration" and asserted <c>Assert.True(true)</c>
-/// instead; the harness below is what that sentence was standing in for. It needs the layout's 24
+/// ⚠ These render the REAL MainLayout. Until this row there was a MainLayoutTests placeholder in this
+/// namespace claiming the layout "requires extensive JSInterop and service configuration" and that it
+/// was "better tested as integration/E2E tests"; its only assertion was <c>Assert.True(true)</c>. The
+/// harness below is what that sentence was standing in for, so PHN-2 DELETED that file rather than
+/// leave a permanently-green test whose stated reason this one disproves. It needs the layout's 24
 /// injected services plus two more its child components pull in, an OfflineHubTransport for each hub
 /// service, and stub IOptionsMonitors — but it does render, so the chip is pinned by its own markup
 /// rather than by the derivations behind it.
