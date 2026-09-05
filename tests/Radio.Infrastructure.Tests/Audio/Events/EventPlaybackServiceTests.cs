@@ -1209,23 +1209,31 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // AudioFileEventSource, at every level, across a successful speech playback, a successful
     // voicemail playback and a failed one.
     //
-    // ⚠ THE NAME SAYS "THIS SEAM WRITES" BECAUSE THE CHAIN IS DELIBERATELY INCOMPLETE. The Speech
-    // arm runs on FakeTtsFactory, so the REAL TTSFactory and TTSEventSource are never in the chain
-    // — and both of them DO log the utterance, on the path this PR ships:
+    // ⚠ THE NAME SAYS "THIS SEAM WRITES" BECAUSE THE CHAIN IS DELIBERATELY INCOMPLETE, AND IT STAYS
+    // THAT WAY. The Speech arm runs on FakeTtsFactory, so the REAL TTSFactory and TTSEventSource
+    // are never in the chain here. What this test pins is the rule the PHN-1c plan actually scoped:
+    // EventPlaybackService and EventPlaybackController never log request.Text.
     //
-    //   TTSFactory.cs:99       LogInformation("Creating TTS audio for text: '{Text}' with engine
-    //                          {Engine}", ...)    — the first 50 characters
-    //   TTSEventSource.cs:92   LogInformation("TTS event source initialized: {Text}", _text)
-    //                          — the WHOLE string
-    //   TTSEventSource.cs:107  LogDebug("Playing TTS audio: {Text}", _text)
+    // THE LEAK THIS COMMENT USED TO DESCRIBE IS CLOSED — TTS-11 fixed eleven sites, including the
+    // three named here. (Two of the three line numbers were wrong even when written, which is its
+    // own small lesson about citing a line rather than quoting the statement.) The comment is kept
+    // rather than deleted because the REASON for the narrow name outlived the defect: TTSFactory
+    // still constructs its own HttpClient inline instead of taking one by injection, so a real
+    // ITTSFactory in this file would still need live credentials and a network. The harness
+    // therefore still cannot observe the wider property, and a name claiming it would still be
+    // false. Do NOT widen the name back on the grounds that the leak is fixed — that would
+    // re-commit the exact PHN-1c error with a fresher justification.
     //
-    // Since LOG-11 an Information line no longer reaches the journal but DOES reach the file sink,
-    // so on the appliance a private SMS body ends up at rest in /opt/radio-console/logs/. That is a
-    // real residual and it is filed as design/FUTURE-WORK.md § "TTS seam" item 5; the fix belongs to
-    // TTSFactory and TTSEventSource, two live shared paths this PR may not touch. What this test
-    // pins is the rule the PHN-1c plan actually scoped: EventPlaybackService and
-    // EventPlaybackController never log request.Text. Do NOT widen the name back without first
-    // widening the chain to a real ITTSFactory.
+    // The wider property is delivered instead by tests that drive the real types directly:
+    //
+    //   TTSEventSourceLogSafetyTests          (Audio/Sources/Events/)  — the real TTSEventSource
+    //   TTSFactoryLogSafetyTests              (Audio/Services/)        — the real TTSFactory
+    //   SoundFlowMasterMixerLogSafetyTests    (Audio/SoundFlow/)       — a real TTS source in a
+    //                                                                    real mixer
+    //   AudioManagerDuckingLogTests           (Audio/Services/)        — both ducking arms
+    //
+    // That is the actual lesson from the PHN-1c trap: when a harness cannot observe a property, the
+    // fix is a harness that can, not a name that sounds like one.
     var logs = new CapturingLoggerProvider();
 
     using (var speech = CreateService(logs: logs))

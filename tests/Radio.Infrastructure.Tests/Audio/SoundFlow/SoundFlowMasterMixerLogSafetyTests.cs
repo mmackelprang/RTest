@@ -1,0 +1,108 @@
+using Radio.Core.Interfaces.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Audio.Sources.Events;
+using Radio.Infrastructure.Tests.External;
+
+namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
+
+/// <summary>
+/// <c>TTS-11</c> <c>T3</c>: <see cref="SoundFlowMasterMixer"/>'s add/remove bookkeeping carries no
+/// utterance text, even while it is holding a real <see cref="TTSEventSource"/>.
+/// </summary>
+/// <remarks>
+/// ⚠ THIS IS THE MOST VALUABLE TEST IN THE TTS-11 SET, because it pins the GENERIC leak rather
+/// than a domain-specific one. The defect was never "three lines that each decided to log text": it
+/// was one property — <c>TTSEventSource.Name</c> is user content wearing a display name's clothes —
+/// meeting a habit of logging an <c>IAudioSource</c>'s name from code that has no idea what it is
+/// holding. A future <c>IAudioSource</c> implementation whose <c>Name</c> embeds user text is
+/// caught here and nowhere else in the suite.
+///
+/// ⚠ <c>RemoveSource</c>'s arm is LATENT — no caller in the tree passes a TTS source to it today —
+/// so the only thing that proves it is covered is running the mutation for it. Plan § 4.4 requires
+/// both, and both were run.
+///
+/// ⛔ The "Removed audio source … from mixer" wording is NOT this row's to fix. CLAUDE.md §
+/// Pre-Merge Review names it as a known comment-accuracy defect (the method mutates
+/// <c>_sources</c> only), and it needs a row about mixer detach semantics rather than an
+/// opportunistic reword inside a logging fix.
+/// </remarks>
+public class SoundFlowMasterMixerLogSafetyTests
+{
+  /// <summary>
+  /// Chosen to be absent from every other fixture in the suite, so a <c>DoesNotContain</c> cannot
+  /// pass by accident against generic text.
+  /// </summary>
+  private const string Sentinel = "Marmalade sentinel four seven";
+
+  private static TTSEventSource CreateRealTtsSource(CapturingLoggerProvider logs) =>
+    new(
+      Sentinel,
+      new TTSParameters(),
+      new MemoryStream(new byte[1000]),
+      TimeSpan.FromMilliseconds(10),
+      logs.CreateLogger<TTSEventSource>());
+
+  [Fact]
+  public void NeitherAddingNorRemovingARealTtsSourceWritesTheUtteranceOrItsName()
+  {
+    var logs = new CapturingLoggerProvider();
+    var mixer = new SoundFlowMasterMixer(logs.CreateLogger<SoundFlowMasterMixer>());
+    var source = CreateRealTtsSource(logs);
+
+    // The source's Name really does embed the text — that is the property this row does NOT change
+    // (plan § 0.4: Name is a display property and changing it would be a UI change wearing a
+    // logging fix's clothes). So the mixer must be the thing that declines to log it.
+    Assert.Contains(Sentinel[..20], source.Name, StringComparison.Ordinal);
+
+    mixer.AddSource(source);
+    mixer.RemoveSource(source);
+
+    // ⚠ Without this the whole test passes vacuously against a mixer that logs nothing at all.
+    Assert.NotEmpty(logs.Messages);
+
+    foreach (var message in logs.Messages)
+    {
+      Assert.DoesNotContain(Sentinel, message, StringComparison.Ordinal);
+      // ⚠ The sentinel is 29 characters and Name clips at 47, so a leak through Name here carries
+      // it WHOLE — the assertion above would catch it unaided. This one earns its place against a
+      // LONGER utterance, which Name would clip and which an exact-match check would then miss.
+      Assert.DoesNotContain("Marmalade", message, StringComparison.Ordinal);
+      Assert.DoesNotContain("TTS: ", message, StringComparison.Ordinal);
+    }
+  }
+
+  [Fact]
+  public void BothBookkeepingLinesAreWrittenAndCarryTheIdAndTheType()
+  {
+    // "No name" must not be achieved by logging nothing: Id identifies WHICH source the line is
+    // about without naming it, and Type is what replaced Name.
+    //
+    // ⚠ Id does NOT join a mixer line to AudioManager's ducking lines, whatever an earlier
+    // revision of this comment said. See SoundFlowMasterMixer.AddSource's own comment for why no
+    // path emits both for the same source.
+    var logs = new CapturingLoggerProvider();
+    var mixer = new SoundFlowMasterMixer(logs.CreateLogger<SoundFlowMasterMixer>());
+    var source = CreateRealTtsSource(logs);
+
+    mixer.AddSource(source);
+    mixer.RemoveSource(source);
+
+    var added = Assert.Single(
+      logs.Messages, m => m.StartsWith("Added audio source", StringComparison.Ordinal));
+    var removed = Assert.Single(
+      logs.Messages, m => m.StartsWith("Removed audio source", StringComparison.Ordinal));
+
+    foreach (var line in new[] { added, removed })
+    {
+      Assert.Contains(source.Id, line, StringComparison.Ordinal);
+
+      // ⚠ The PARENTHESISED form, and that is the whole point of this assertion. A bare
+      // Contains("TTS") passes on the Id alone — AudioSourceBase builds Id as $"{Type}-{Guid:N}" —
+      // so it could not tell "the line logs Type and Id" apart from "the line logs only Id". An
+      // earlier revision asserted exactly that and was a test passing against a template with no
+      // {SourceType} in it at all. Mutation-verified: dropping {SourceType} from the message
+      // template makes this fail.
+      Assert.Contains($"({AudioSourceType.TTS})", line, StringComparison.Ordinal);
+    }
+  }
+}

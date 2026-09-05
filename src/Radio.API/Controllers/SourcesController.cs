@@ -5,6 +5,7 @@ using Radio.API.Mappers;
 using Radio.API.Models;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Utilities;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 
@@ -643,7 +644,7 @@ public class SourcesController : ControllerBase
       };
 
       _logger.LogInformation("Playing TTS event: {Text} with engine {Engine}",
-        request.Text.Length > 50 ? request.Text[..50] + "..." : request.Text,
+        LogSafeText.For(request.Text),
         engine?.ToString() ?? "(configured default)");
 
       // Create TTS event source

@@ -371,58 +371,105 @@ Filed as punch-list **`TTS-10`** (P1, §4.4) rather than here, because the owner
 which makes it a settings-field-that-lies rather than a private code defect. Cross-referenced here so all
 five TTS deferrals are findable in one place.
 
-### 5. The TTS chain logs the utterance in full, and since `LOG-11` that means private text at rest on disk
+### 5. ✅ CLOSED by `TTS-11` (2026-09-05) — the TTS chain logged the utterance in full
 
-**Status:** filed 2026-09-04. **Not fixed by `PHN-1c`, and `PHN-1c` may not fix it** — both files are
-live shared paths outside that PR's scope.
+**Status:** ✅ **fixed, shipped as `TTS-11`.** Filed 2026-09-04 as three log sites; the row shipped
+**twelve**. Kept here rather than deleted, because the count is the lesson.
 
-Three lines log the text a caller asked to be spoken:
+**What it was.** Since `LOG-11` the API's console sink carries Warning and above, and under systemd
+the console *is* the journal — so `Information` lines go to the **file sink** instead
+(`/opt/radio-console/logs/radio-*.txt`; `src/Radio.API/appsettings.json:17-18` sets
+`"Override": { "Radio": "Information" }`). Every log line carrying spoken text therefore left a
+plaintext copy at rest on an appliance in a family home, with `GET /api/system/logs` rendering it in
+Settings → Logs one dropdown away.
 
-```csharp
-// src/Radio.Infrastructure/Audio/Services/TTSFactory.cs:99
-_logger.LogInformation("Creating TTS audio for text: '{Text}' with engine {Engine}",
-    text.Length > 50 ? text[..50] + "..." : text, engine);
+⭐ **The row was filed for three sites. There were twelve, and the three worst were not among the
+three filed.**
 
-// src/Radio.Infrastructure/Audio/Sources/Events/TTSEventSource.cs:92
-Logger.LogInformation("TTS event source initialized: {Text}", _text);   // the WHOLE string
+- `AnnouncementService.cs:40` logged the message **untruncated** — every other site clipped to 47 or
+  50 characters — and it is the shared entry point for `NotificationsController` and for phone-call
+  announcements.
+- `SoundFlowMasterMixer.cs:101/117` logged `source.Name` from **generic mixer bookkeeping that has no
+  idea it is holding speech**.
+- `AudioController.cs:413` logged `GetActiveSources().Select(s => s.Name)` **at `Warning`** — found by
+  an adversarial reviewer *during* the fix, and a strictly larger exposure than any of the other
+  eleven, because Warning reaches journald **as well as** the file sink. It is reachable because
+  `SourcesController.cs:655` adds a TTS source to the mixer and **nothing ever removes it**.
 
-// src/Radio.Infrastructure/Audio/Sources/Events/TTSEventSource.cs:107
-Logger.LogDebug("Playing TTS audio: {Text}", _text);
-```
+**The reframing, which is the durable part.** This was never three lines that each decided to log
+text. It is **one property — `TTSEventSource.Name` is user content wearing a display name's clothes
+— meeting a habit of logging payloads.** Any code that logs an `IAudioSource`'s `Name` is a leak,
+present or future. The twelfth site proved exactly that, in the same cycle that fixed the first
+eleven.
 
-**Why it matters, and why it got worse rather than better.** Until `PHN-1c` the only caller was
-`SourcesController.PlayTTSEvent` — a developer-facing route with no private payload behind it. `PHN-1c`
-ships `POST /api/audio/events` with `kind: "Speech"`, whose declared purpose (ADR-029 §4.2) is speaking
-**SMS bodies** aloud. That is private third-party content, held to exactly the standard the voicemail
-media-id masking rule enforces two files away — `GvMediaCache.MaskFor` exists so a raw voicemail id
-reaches no log line at all, and the seam that calls it logs `{Chars} characters with {Engine}` and
-nothing else.
+**The fix.** Two shapes, two remedies:
 
-⚠ **`LOG-11` changed where this lands, not whether it happens.** Since that change the API's console
-sink is Warning-and-above, and under systemd the console *is* the journal — so these `Information`
-lines no longer appear in `journalctl`. They go to the **file sink** instead:
-`/opt/radio-console/logs/radio-*.txt`, on an appliance that runs for weeks. So the effect of `LOG-11`
-was to move private message bodies from a volatile, rotated journal into a durable file, and to make
-them **harder to notice** while doing it — `journalctl -u radio-api` now shows nothing.
+- **String-argument sites** take `Radio.Core.Utilities.LogSafeText.For(text)` → `txt:9f2ab41c/142`,
+  the shape `GvMediaCache.MaskFor` already established (a literal prefix, 8 hex of SHA-256, a length).
+- **`.Name` sites** drop the name and log `Type` + `Id`.
 
-**Reproduction:** with `TTS:DefaultEngine` configured, `POST /api/audio/events`
-`{"kind":"Speech","text":"Meet me at the bridge at nine, bring the envelope"}`, then
-`ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep -c "bridge at nine" $F'`.
-The count is non-zero. `journalctl -u radio-api --since '-5min'` shows nothing, which is the trap.
+⚠ **`LogSafeText` is a correlation token, NOT a confidentiality boundary** — announcement text has a
+small candidate space, so a short utterance's hash is recoverable by enumeration. Its XML doc says so
+at length. **Do not "improve" that wording into a security claim.**
 
-**What `PHN-1c` did instead, and what it deliberately did not do.**
-`EventPlaybackService.AcquireSpeechAsync` never logs `request.Text` — it logs the character count and
-the engine — and `EventPlaybackController` echoes only a rejection *name* back to the caller. That is
-pinned by `NeitherTheTextNorTheRawMediaIdReachesAnyLogLineThisSeamWrites`, whose name says "this seam
-writes" precisely because its Speech leg runs on `FakeTtsFactory`: the real `TTSFactory` and
-`TTSEventSource` are **not** in the captured chain, and a test that claimed otherwise is what surfaced
-this row.
+**What it bought.** Three sites used to truncate the same utterance at 50, 47 and not-at-all, so an
+operator could not tell they were one event. A stable token makes that chain traceable for the first
+time — the privacy fix made diagnosis *better*, not worse.
 
-**Fix:** log a length and a hash, not the text — the shape `GvMediaCache.MaskFor` already establishes
-in this repo. Concretely, replace all three lines with `{Chars} characters` (plus the engine on the
-first). ⚠ `TTSEventSource:92` is the one that matters most: it is the only one that logs the string in
-full and it is `Information`, so it reaches the file sink on a stock box. Roughly half an hour,
-including a capture-logger test in `TTSEventSourceTests` mirroring the seam's existing one.
+**Pinned by** `TTSEventSourceLogSafetyTests`, `TTSFactoryLogSafetyTests`,
+`SoundFlowMasterMixerLogSafetyTests`, `AudioManagerDuckingLogTests`, the two API-side
+`…LogSafetyTests`, and `LogSafetyLintTests` — the last being a regression lint over the known shapes,
+which is explicitly **not** a proof of the property and says so in its own file.
+
+⛔ **`NeitherTheTextNorTheRawMediaIdReachesAnyLogLineThisSeamWrites` was deliberately NOT widened.**
+`TTSFactory` still constructs its own `HttpClient`, so a real factory cannot run offline and that
+harness still cannot observe the wider property. The honest name stays; the property is delivered
+instead by the tests above, which drive the real types. **When a harness cannot observe a property,
+the fix is a harness that can, not a name that sounds like one.**
+
+---
+
+## Phone-number logging — seven sites log full numbers and contact names, filed and NOT fixed
+
+**Status:** open. Found by the `TTS-11` sweep, 2026-09-04/05, and **deliberately not folded into it.**
+Recommended tier: **P2 with a hard gate** — argued below.
+
+| Site | Level | Leaks |
+|---|---|---|
+| `src/Radio.Infrastructure/External/PhoneContactLookupService.cs:62` | **Info** | full number **and** the contact's display name |
+| `src/Radio.Infrastructure/External/PhoneContactLookupService.cs:102` | ⚠ **Warning** | full number — survives every log-level tightening, `LOG-11`'s included |
+| `src/Radio.Infrastructure/External/PhoneContactLookupService.cs:78, 96` | Debug | full number |
+| `src/Radio.API/Services/PhoneCallIntegrationService.cs:127` | Info | `"Incoming call from {callerName}"`, where `callerName` falls back to the **raw number** |
+| `src/Radio.Infrastructure/External/PhoneCallClient.cs:128-129` | Info | full number **and** caller name |
+| `src/Radio.Web/Services/Hub/PhoneHubService.cs:82` | Info | full number |
+| `src/Radio.Web/Services/ApiClients/PbapApiService.cs:104` | Debug | full number |
+
+⚠ **The last three were missed by the original sweep**, which was scoped to `Radio.API`'s logging
+config. **`Radio.Web` is a separate service with its own sink and was outside it entirely.** Scope any
+row at **seven sites across five files**, not the four across two that `TTS-11` plan §6.1 recorded.
+
+**Why this is a different row rather than a bigger `TTS-11`:**
+
+1. **Different data class.** Phone numbers and contact names are PII about *third parties*; utterance
+   text is content the household authored.
+2. **Different idiom — this is the load-bearing one.** `PhoneContactLookupService.cs:87-90`
+   **already masks**, as `$"***{phoneNumber[^4..]}"`, three lines below `:78` which does not. So the
+   remedy here is *"apply the local idiom the file already contains, consistently"* — **not** *"adopt
+   `LogSafeText`"*. Folding it in would have put two competing masking schemes in one PR.
+3. **Different exposure profile**, because of the Warning-level line.
+
+**Tier argument, against `docs/HANDOFF-GA-PUNCH-LIST.md` §1:**
+
+- **Not P0.** None of (a) wrong or dangerous on day one, (b) embarrassing in front of people,
+  (c) unrecoverable without a laptop, (d) the substrate other verification rests on, (e) permanent at
+  install.
+- **Not P1.** P1's test is *"a real defect a user will hit"*. **Verified dead on a stock box:**
+  `src/Radio.API/appsettings.json` ships `"PhoneIntegration": { "Enabled": false }`, and the only
+  consumer of `PhoneContactLookupService` is `PhoneCallIntegrationService` — a `BackgroundService`
+  that returns at `:44` when `!opts.Enabled`. Nobody hits it today.
+- **P2 with a hard gate.** ⚠ **It must close BEFORE `PhoneIntegration:Enabled` ever ships `true`.**
+  The moment that flips, seven sites begin writing third-party PII, and `:102` is at Warning, so no
+  log-level tightening will contain it. That gate is the strongest single argument for doing it.
 
 ---
 

@@ -86,6 +86,36 @@ Numbered continuing from `C-81`.
   **type** and a character count, never the name"*. That prescribes the fix for `L4`/`L5`/`L9`/`L10`
   (the `.Name` sites) and says nothing about `L1`/`L2`/`L6`/`L7`, which log a **string argument**, not
   a name. §2 splits the fix in two for that reason.
+- **`C-90` — ⚠ ADDED AT MERGE, 2026-09-05. Two of this plan's own claims were falsified during the
+  build, and both are corrected in the shipped code rather than here alone.**
+  1. **§1.3 and §1.4's *"`Id` joins a ducking line to its mixer line"* is FALSE.** An adversarial
+     reviewer enumerated all six `AddSource`/`RemoveSource` callers against all four
+     `StartDuckingAsync` callers: **no path emits both lines for the same source.**
+     `AnnouncementService` and `EventPlaybackService` duck but never call `AddSource`;
+     `SourcesController.PlayTTSEvent` calls `AddSource` but never ducks. `EventPlaybackService.cs:14`
+     already said so in the tree. The `Id` field was **kept** — it identifies the source without
+     naming it, which is independently worth having — but the justification was wrong and is removed
+     from the code comments.
+  2. **§1.3's *"`Name` is redundant there today"* is FALSE for one pair.** `AudioSourceBase.cs:28`
+     defines `Id => $"{Type}-{guid}"`, so `{SourceType}` is fully contained in `{SourceId}` on the
+     same line; and `RadioAudioSource` and `SDRRadioAudioSource` **both** return
+     `AudioSourceType.Radio` while their `Name`s differ (`"Radio (RF320)"` vs `"SDR Radio (RTL-SDR)"`).
+     So the mixer line did lose the only field distinguishing the two radio backends. The change
+     stands (it is required for the privacy property) and the loss is bounded: `AudioManager.cs:230`
+     still logs `source.Name` on the primary path and is deliberately untouched.
+- **`C-91` — the set is TWELVE, not eleven.** `src/Radio.API/Controllers/AudioController.cs:413`
+  logs `GetActiveSources().Select(s => s.Name)` **at `Warning`**, so it reaches journald *as well as*
+  the file sink — a strictly larger exposure than any of `L1`–`L11`. It is reachable because
+  `SourcesController.cs:655` adds a TTS source to the mixer and nothing ever removes it. Found by an
+  adversarial reviewer during the build, not by the planning sweep, and fixed in this row as `L12`.
+  **It is the plan's own thesis coming true inside the plan's own cycle:** any code that logs an
+  `IAudioSource`'s `Name` is a leak, present or future.
+- **`C-92` — §6.1's phone inventory is INCOMPLETE.** It lists five sites in two files; there are
+  **seven across five**. `PhoneCallClient.cs:128-129` (Info, number **and** caller name),
+  `Radio.Web/Services/Hub/PhoneHubService.cs:82` (Info) and
+  `Radio.Web/Services/ApiClients/PbapApiService.cs:104` (Debug) were missed because the sweep was
+  scoped to `Radio.API`'s logging config and **`Radio.Web` is a separate service with its own sink.**
+  Recorded in `design/FUTURE-WORK.md` § *Phone-number logging* with the tier argument.
 - **`C-86` — the estimate.** 0.5 h was scoped to three lines. Eleven sites across five files, plus a
   new helper with its own tests, plus five test classes, plus the mutation runs §4 requires, is **1.5 d**.
 

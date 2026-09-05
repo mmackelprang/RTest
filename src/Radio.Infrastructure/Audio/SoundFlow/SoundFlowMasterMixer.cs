@@ -98,9 +98,28 @@ public class SoundFlowMasterMixer : IMasterMixer
       if (!_sources.Contains(source))
       {
         _sources.Add(source);
+        // Type, not Name: this is domain-agnostic bookkeeping, and TTSEventSource.Name embeds
+        // the utterance text (TTS-11). Id was already here and identifies WHICH source the line is
+        // about without naming it.
+        //
+        // ⚠ Be honest about what this trade cost, because the plan understated it. Type is
+        // REDUNDANT on this line — AudioSourceBase builds Id as $"{Type}-{Guid:N}", so {SourceType}
+        // is already a prefix of {SourceId}. It is kept for readability, not information. And Name
+        // was NOT redundant here: RadioAudioSource and SDRRadioAudioSource both return
+        // AudioSourceType.Radio while their names differ ("Radio (RF320)" vs
+        // "SDR Radio (RTL-SDR)"), so this line no longer distinguishes the two radio backends.
+        // That discrimination is still available one layer up, from
+        // AudioManager.SwitchSourceAsync's "Adding new source {SourceName} to mixer", which logs
+        // Name on the primary path and is deliberately untouched by TTS-11 (every primary
+        // implementation returns a constant Name, so there is nothing to leak there).
+        //
+        // ⚠ Id does NOT join this line to AudioManager's ducking lines, and an earlier revision of
+        // this comment claimed it did. NO path emits both for the same source: the two services
+        // that duck (AnnouncementService, EventPlaybackService) never call AddSource, and the one
+        // route that adds a TTS source here — SourcesController.PlayTTSEvent — does not duck.
         _logger.LogInformation(
-          "Added audio source {SourceId} ({SourceName}) to mixer",
-          source.Id, source.Name);
+          "Added audio source {SourceId} ({SourceType}) to mixer",
+          source.Id, source.Type);
       }
     }
   }
@@ -115,8 +134,8 @@ public class SoundFlowMasterMixer : IMasterMixer
       if (_sources.Remove(source))
       {
         _logger.LogInformation(
-          "Removed audio source {SourceId} ({SourceName}) from mixer",
-          source.Id, source.Name);
+          "Removed audio source {SourceId} ({SourceType}) from mixer",
+          source.Id, source.Type);
       }
     }
   }

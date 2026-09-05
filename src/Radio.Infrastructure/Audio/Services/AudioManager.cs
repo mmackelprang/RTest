@@ -510,9 +510,23 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     {
       if (e.Transition == DuckingSourceTransition.Started)
       {
+        // Type and Id, never Name: the triggering source is an event source, and
+        // TTSEventSource.Name embeds the utterance text (TTS-11). What Id buys is that the line
+        // still says WHICH event source triggered the duck — once Name is gone it is the only
+        // stable handle left, and two concurrent TTS events are otherwise indistinguishable.
+        //
+        // ⚠ Id does NOT join this line to SoundFlowMasterMixer's Added/Removed line, and an
+        // earlier revision of this comment claimed it did. NO path emits both for the same
+        // source, by enumeration: AnnouncementService ducks but never calls IMasterMixer.AddSource
+        // (its SetActiveSource only assigns a field); EventPlaybackService ducks but never adds,
+        // and says so in its own header; SourcesController.PlayTTSEvent adds to the mixer but does
+        // not duck. The mixer lines this method's siblings write are for PRIMARY sources, and
+        // TriggeringSource is an IEventAudioSource. Claiming the join is exactly the failure class
+        // TTS-11 exists to fix — a comment asserting an improvement the code does not deliver.
         _logger.LogInformation(
-          "Ducking started: source={TriggerSource}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
-          e.TriggeringSource?.Name ?? "unknown", e.DuckLevel, e.ActiveEventCount);
+          "Ducking started: source={TriggerSource} id={TriggerId}, duckLevel={DuckLevel:F0}%, activeEvents={EventCount}",
+          e.TriggeringSource?.Type.ToString() ?? "unknown", e.TriggeringSource?.Id ?? "unknown",
+          e.DuckLevel, e.ActiveEventCount);
       }
       else
       {
@@ -521,8 +535,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         // anyway — this is file-sink detail, on a box where log volume correlates with audible
         // distortion.
         _logger.LogDebug(
-          "Ducking continues: source={TriggerSource} left, activeEvents={EventCount}",
-          e.TriggeringSource?.Name ?? "unknown", e.ActiveEventCount);
+          "Ducking continues: source={TriggerSource} id={TriggerId} left, activeEvents={EventCount}",
+          e.TriggeringSource?.Type.ToString() ?? "unknown", e.TriggeringSource?.Id ?? "unknown",
+          e.ActiveEventCount);
       }
 
       return;

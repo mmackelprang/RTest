@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Utilities;
 
 namespace Radio.Infrastructure.Audio.Services;
 
@@ -37,7 +38,8 @@ public class AnnouncementService : IAnnouncementService
     ArgumentException.ThrowIfNullOrWhiteSpace(message);
     priority = Math.Clamp(priority, 1, 10);
 
-    _logger.LogInformation("Announcing: '{Message}' (priority {Priority})", message, priority);
+    _logger.LogInformation("Announcing: {Message} (priority {Priority})",
+      LogSafeText.For(message), priority);
 
     IEventAudioSource? ttsSource = null;
     try
@@ -88,8 +90,12 @@ public class AnnouncementService : IAnnouncementService
     ArgumentException.ThrowIfNullOrWhiteSpace(message);
     priority = Math.Clamp(priority, 1, 10);
 
-    _logger.LogInformation("Playing sound '{Sound}' then announcing: '{Message}' (priority {Priority})",
-      soundPath, message, priority);
+    // soundPath stays as-is: it is a server-side file path chosen by config, not user text. Its
+    // single quotes stay too — a path can contain spaces, and the quotes are what show where it
+    // ends. The quotes around {Message} correctly did NOT come back: a token is not a
+    // human-readable string, and framing it as one invites reading it as the message.
+    _logger.LogInformation("Playing sound '{Sound}' then announcing: {Message} (priority {Priority})",
+      soundPath, LogSafeText.For(message), priority);
 
     IEventAudioSource? soundSource = null;
     IEventAudioSource? ttsSource = null;
