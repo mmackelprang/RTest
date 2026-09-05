@@ -509,9 +509,14 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
         // Here the acquisition switch has already returned, and waiter.Task.WaitAsync is the only
         // thing in WaitForClearAirAsync that can throw this, so the reason cannot be misattributed.
         //
-        // Disposed FIRST, for the C-57 reason spelled out in the sibling catch below: FailAsync
-        // reaches ClaimSourceForRelease, which answers null for a playback that never adopted, so it
-        // cannot release this source itself.
+        // ⚠ C-57, and the ORDER IS NOT WHAT CARRIES IT — an earlier revision of this comment said
+        // "Disposed FIRST, for the C-57 reason", implying a dependency that does not exist.
+        // DisposeOrphanAsync disposes the local `source` directly and never consults
+        // ClaimSourceForRelease, so it works the same either side of FailAsync. What carries C-57 is
+        // that it is called AT ALL: FailAsync's TearDownAsync reaches ClaimSourceForRelease, which
+        // answers null for a playback that never adopted, so nothing on that path can release this
+        // source. Delete this line and the RemoteMedia arm leaks an open FileStream over the cached
+        // recording for the life of the process.
         await DisposeOrphanAsync(playback, source);
         await FailAsync(playback, "WaitExpired", ex);
         return;
@@ -912,6 +917,13 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// ⚠ THE CALLER OWNS THE SOURCE ACROSS THIS CALL AND MUST DISPOSE IT IF THIS THROWS. Nothing has
   /// been adopted yet, so TearDownAsync and FailAsync both reach ClaimSourceForRelease, which answers
   /// null. See AcquireAndPlayAsync's guard, and plan PHN-1f C-57.
+  ///
+  /// ⚠ Which is also why the log lines below need no guard of their own, and the shape was checked
+  /// rather than assumed. ILogger.Log rethrows provider exceptions, so a failing sink throws from
+  /// them — but both sit INSIDE the try whose finally runs EndWait, and this whole call sits inside
+  /// AcquireAndPlayAsync's `catch { await DisposeOrphanAsync(...); throw; }`. A throwing sink
+  /// therefore costs the line and the playback, never the source. <see cref="DisposeOrphanAsync"/>
+  /// is where the same shape was wrong.
   /// </remarks>
   private async Task WaitForClearAirAsync(Playback playback, CancellationToken token)
   {
@@ -1429,18 +1441,29 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// Disposal only, never StopAsync: this source was never ducked and never played, so there is
   /// nothing to stop. Guarded the way TearDownAsync guards its steps, because this runs on a
   /// background task where an escaping exception is a process-level hazard.
+  ///
+  /// ⚠ THE DISPOSAL COMES FIRST AND THE LOG LINE SECOND, and the order is load-bearing rather than
+  /// stylistic. ILogger.Log aggregates and RETHROWS provider exceptions — the same fact
+  /// <see cref="ArmDurationCap"/>'s remark is built on — so with the log above the try, a failing
+  /// Serilog file sink (or a log written after CloseAndFlush during shutdown) skipped the disposal
+  /// entirely and re-labelled the failure as something else. Skipping the disposal defeats C-57, which
+  /// is the only reason this method is called from the wait's guard at all: on the RemoteMedia arm it
+  /// would leak an open FileStream over the cached recording for the life of the process, and on
+  /// Windows stop GvMediaCache evicting that entry. A throwing sink now costs the log line and not the
+  /// disposal. It still escapes this method, where AcquireAndPlayAsync's general catch turns it into a
+  /// Failed snapshot — which is a worse REASON on the snapshot, and not a leak.
   /// </remarks>
   private async Task DisposeOrphanAsync(Playback playback, IEventAudioSource source)
   {
-    _logger.LogDebug(
-      "Attended playback {Id} ended while its audio was still being acquired; releasing it",
-      playback.Id);
-
     try { await source.DisposeAsync(); }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Error disposing an unadopted source for {Id}", playback.Id);
     }
+
+    _logger.LogDebug(
+      "Attended playback {Id} ended while its audio was still being acquired; released it",
+      playback.Id);
   }
 
   // ── snapshots ───────────────────────────────────────────────────────────

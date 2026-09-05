@@ -1771,17 +1771,30 @@ public sealed class EventPlaybackServiceTests : IDisposable
 
     ducking.RaiseStarted(new FakeEventSource(), 8);
 
-    // ⚠ The rendezvous is the WAITING SNAPSHOT, not a delay. Advancing the clock before the service
-    // has armed its Task.WaitAsync would advance past nothing, and the test would then hang on the
-    // Failed snapshot — a race that reads as an unrelated timeout. CLAUDE.md § Test Timing: count the
-    // observation, never the elapsed time.
+    // ⚠ The rendezvous is the WAITING SNAPSHOT, not a delay — but it is a PROXY FOR THE ARM RATHER
+    // THAN THE ARM, and saying so is the point. WaitForClearAirAsync publishes Waiting STRICTLY
+    // BEFORE it reaches waiter.Task.WaitAsync, so a single Advance taken on this rendezvous can land
+    // before the timer exists, advance past nothing, and leave the test hanging on the Failed
+    // snapshot — a race that reads as an unrelated timeout rather than as what it is.
+    //
+    // So the clock is advanced in a BOUNDED LOOP until the Failed task completes. FakeTimeProvider
+    // fires every DUE timer synchronously inside Advance, so the first advance that lands after the
+    // arm produces the expiry and the ones before it are no-ops. Still no elapsed-time assertion:
+    // WaitUntilAsync polls inside a bound, exactly as the rest of this file does.
     var waiting = NextSnapshotWith(service, EventPlaybackState.Waiting);
     await service.StartAsync(SpeechRequest());
     await waiting.WaitAsync(TimeSpan.FromSeconds(5));
 
     var failed = NextSnapshotWith(service, EventPlaybackState.Failed);
-    time.Advance(TimeSpan.FromSeconds(30));
-    var final = await failed.WaitAsync(TimeSpan.FromSeconds(5));
+    await WaitUntilAsync(
+      () =>
+      {
+        time.Advance(TimeSpan.FromSeconds(30));
+        return failed.IsCompleted;
+      },
+      TimeSpan.FromSeconds(5));
+
+    var final = await failed;
 
     Assert.Equal(EventPlaybackState.Failed, final.State);
     Assert.Equal("WaitExpired", final.FailureReason);
@@ -2094,12 +2107,32 @@ public sealed class EventPlaybackServiceTests : IDisposable
   {
     // BeginWait's TaskCreationOptions.RunContinuationsAsynchronously is what this pins. Without it,
     // TrySetResult runs the waiting playback's continuation INLINE on the thread that raised
-    // DuckingStateChanged — and that continuation's next act is _gate.WaitAsync, followed by ducking
-    // and PlayAsync. It is not a deadlock today, because the live wake comes from AnnouncementService's
-    // teardown, which holds none of this service's locks; what the flag buys is that it STAYS not one.
+    // DuckingStateChanged — and that continuation's next acts are a log write, _gate.WaitAsync,
+    // ducking and PlayAsync, none of which the announcement's own thread should be made to run.
+    //
+    // ⚠ WHAT THIS PINS IS THREAD OWNERSHIP, NOT DEADLOCK-FREEDOM, and the reason given here used to be
+    // wrong. See BeginWait's remark: a gate-holding raiser exists in this file today, and what makes
+    // an inline continuation safe anyway is that SemaphoreSlim.WaitAsync SUSPENDS rather than blocks.
     //
     // MUTATION (§2.1): drop RunContinuationsAsynchronously from BeginWait and PlayAsync happens inline
     // on this thread, so PlayThreadId equals raisingThreadId.
+    //
+    // ⚠ TWO CAVEATS, because Assert.NotEqual is the kind of assertion that can pass for the wrong
+    // reason.
+    //
+    // ① The mutation only reds while `_gate.WaitAsync` completes SYNCHRONOUSLY. It does here, because
+    //    nothing else holds the gate at that instant. If something did, the inline continuation would
+    //    suspend there and PlayAsync would resume on a pool thread — and the assertion would pass with
+    //    the flag removed. The property is real; this instrument depends on the gate being free.
+    //
+    // ② The thread behaviour exercised is the FAKE's. FakeDuckingService raises synchronously on the
+    //    calling thread for every removal. The real DuckingService does so only where there is no fade
+    //    to await — a source leaving while OTHERS REMAIN, or a second source joining. The case driven
+    //    here is the set EMPTYING, and on that path the real service raises after
+    //    `await ApplyFadeAsync` (FadeSmooth over Audio:DuckingReleaseMs, 500 ms shipped), which hands
+    //    the continuation to the pool, so on the box that raise is already off the caller's thread.
+    //    The paths where the property actually bites are the non-emptying ones, and this test reaches
+    //    their thread shape only through the fake.
     var ducking = new FakeDuckingService();
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory { OnCreate = (_, _, _) => Task.FromResult<IEventAudioSource>(source) };

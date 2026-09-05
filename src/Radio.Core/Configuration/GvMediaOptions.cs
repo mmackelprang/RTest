@@ -95,9 +95,11 @@ public sealed class GvMediaOptions
   /// implemented as of PHN-1f and does NOT mix: it publishes EventPlaybackState.Waiting, waits for
   /// the blocker to leave the ducking set, and then plays (owner decision D28). This value is
   /// therefore read by TWO rules that are each other's mirror: OnDuckingStateChanged stops an
-  /// in-flight playback when such a source starts, and WaitForClearAirAsync refuses to start one
-  /// while such a source is present. ⛔ Do not reimplement either as a refusal; that option was put
-  /// to the owner and rejected.
+  /// in-flight playback when such a source starts, and WaitForClearAirAsync DEFERS the start of one
+  /// while such a source is present — it publishes Waiting, waits, and then plays. ⛔ Do not
+  /// reimplement either as a refusal; that option was put to the owner and rejected, and the two
+  /// sentences above must keep saying "defers" rather than "refuses" for that warning to mean
+  /// anything.
   ///
   /// <para>
   /// ⚠ This value is safe to LOWER and a trap to RAISE, and only the lowering case is argued in the

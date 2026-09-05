@@ -91,6 +91,21 @@ public interface IDuckingService : IDisposable
 /// ⚠ <see cref="Started"/> is 0, so it is the value an args object gets when nothing sets this
 /// field. That is why AudioManager consults this only to choose a LOG LINE and never to decide
 /// whether to clear the ducking multiplier — see its handler, and plan PHN-1f C-58.
+///
+/// ⚠ THAT DOCTRINE IS NOT UNIVERSAL, and stating it as though it were misdescribes the other
+/// subscriber. There are exactly two: <c>AudioManager.OnDuckingStateChanged</c>, which is the one
+/// C-58 is about, and <c>EventPlaybackService.OnDuckingStateChanged</c> — and the second DOES branch
+/// on this field alone (<c>e.Transition != Started</c>), so a defaulted args object passes that test
+/// rather than being turned away by it. It is safe for a different reason, checked rather than
+/// assumed: the very next clause of the same guard is <c>e.TriggeringSource is not { } trigger</c>,
+/// and a defaulted args object has a null source. Its <c>TriggeringSourcePriority</c> defaults to 0
+/// as well, which is below the shipped <c>GvMedia:PreemptAtPriority</c> of 8 — but that is the second
+/// line of defence, not the first.
+///
+/// ⚠ One thing does run for a defaulted args object, deliberately: EventPlaybackService calls
+/// <c>TryWakeWaitingPlayback</c> BEFORE either test, on every raise in both directions. That is
+/// harmless because it is a state re-evaluation against the live ducking set — it reads nothing off
+/// the args at all, so it cannot be misled by a defaulted one.
 /// </remarks>
 public enum DuckingSourceTransition
 {

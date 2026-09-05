@@ -529,7 +529,11 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     }
 
     // Ducking ended — clear all ducking multipliers to restore full volume.
-    // ⚠ This edge is UNCHANGED from before PHN-1f, deliberately and byte for byte.
+    // ⚠ SEMANTICALLY unchanged from before PHN-1f, deliberately: the edge is still literally
+    // `!e.IsDucking`, and nothing about when this block runs has moved. The BYTES did move — the block
+    // came out of an `else` and now sits behind an early `return`, two spaces to the left — and an
+    // earlier revision of this comment said "byte for byte", which is the kind of claim a diff
+    // falsifies at a glance.
     if (_activeSource != null)
     {
       _playbackService.ClearDuckingMultiplier(_activeSource.Id);

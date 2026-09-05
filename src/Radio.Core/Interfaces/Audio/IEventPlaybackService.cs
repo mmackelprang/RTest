@@ -515,10 +515,13 @@ public enum EventPlaybackRejection
 
   /// <summary>
   /// The media identifier carries a character outside the allow-list <c>[A-Za-z0-9._~-]</c>.
-  /// Appended deliberately at the END so that no member above it is renumbered. Nothing today
-  /// depends on the numeric values — every reference in this repo is by name — but a rejection
-  /// reason is the kind of thing that ends up in a log line or on the wire, and inserting into
-  /// the middle of the list is how that quietly stops meaning what it used to.
+  /// Appended at the end of the list AS IT THEN STOOD, so that no member above it was renumbered —
+  /// the members below it were added later, by the same rule, and this member is no longer last.
+  /// Nothing today depends on the numeric values — every reference in this repo is by name — but a
+  /// rejection reason is the kind of thing that ends up in a log line or on the wire, and inserting
+  /// into the MIDDLE of the list is how that quietly stops meaning what it used to. That is the rule
+  /// <see cref="EventPlaybackState.Waiting"/>'s remark cites this member for, and it is still the
+  /// rule: append, never insert.
   /// </summary>
   MediaIdHasIllegalCharacter,
 
