@@ -8,10 +8,13 @@ namespace Radio.Infrastructure.External;
 /// (ADR-029 D8 §10.1). Empty today, which matches the current LAN-only posture.
 ///
 /// <para>
-/// This handler is the mechanism that closes carried risk #3. GvBridgeApiService.GetVoicemailAudioUrl
-/// only ever BUILDS a string that the browser then fetches, so no DelegatingHandler can touch it —
-/// which is why browser-side voicemail playback would break the moment RotaryPhone's gate flips on.
-/// Once Radio.API fetches the audio itself, through this handler, the constraint dissolves.
+/// This handler is the mechanism that closed carried risk #3, and PHN-2 finished the job. The
+/// now-deleted GvBridgeApiService.GetVoicemailAudioUrl only ever BUILT a string that the browser then
+/// fetched, so no DelegatingHandler could touch it — which is why browser-side voicemail playback
+/// would have broken the moment RotaryPhone's gate flipped on. Radio.API fetches the audio itself
+/// through this handler now, and since PHN-2 there is no browser fetch left to break: the constraint
+/// is dissolved rather than pending. Past tense deliberately — the method this paragraph named no
+/// longer exists, and a comment that outlives the code it described is worse than no comment.
 /// </para>
 ///
 /// <para>
