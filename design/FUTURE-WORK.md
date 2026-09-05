@@ -1714,3 +1714,71 @@ want it, and did not.)
   built, not a reason it cannot be.
 - The source's `Name` is *"fake"*-grade in places and is not a user-facing string anywhere today;
   it would need a label of its own.
+
+---
+
+## 24. Collapsing and re-expanding a voicemail row loses its transport, and re-tapping play restarts the message
+
+**Found by `PHN-2`'s pre-merge review and deliberately not fixed there.** Priority: **low-medium.**
+It is a *consequence* of a correct decision, not a regression — and the one control that always
+works is the one the arc added.
+
+⚠ **This is the price of `C-77`, paid knowingly.** ADR-029 §7.2 — *"component disposal is a
+rendering event, not a user intent"* — is why `VoicemailPlayer.Dispose()` no longer stops playback,
+and that is what makes navigation-survival real. The cost is that the row's `_playbackId`
+(`VoicemailPlayer.razor`, instance state) dies with the component while the playback does not.
+**Do not "fix" this by stopping playback on disposal.** That reintroduces exactly the defect the row
+was built to remove.
+
+### What Exists
+
+A voicemail row that is collapsed and re-expanded mounts a **new** `VoicemailPlayer` with
+`_playbackId == null`. Every state predicate in that component is gated on the snapshot's `Id`
+matching the handle *this instance* started (the `Mine` property), so the reopened row renders the
+idle transport — play glyph, Stop disabled, scrubber pinned at `0:00`, no elapsed time — for a
+voicemail that is audibly playing in the room two feet away.
+
+Tapping play then **restarts the message from the beginning**: `EventPlaybackService.StartAsync`'s
+replacement arm tears down the current playback and starts a new one
+(`EventPlaybackService.cs`, *"Attended playback {NewId} replaces {OldId}"*).
+
+**Why this is not critical:** the topbar console-playback chip is global, is gated on `IsLive`
+rather than on any row's id, and stops the real playback from any route. The user is never stranded
+with unstoppable audio — the affordance they lose is the *scrubber and the elapsed time*, and the
+recovery is one tap on a control that is already on screen.
+
+### What's Needed
+
+**Not a one-line change, and that is the reason this is a deferral rather than a follow-up commit.**
+A re-created row cannot prove that the live playback is *its* voicemail:
+
+`EventPlaybackSnapshotDto` carries `Id`, `Kind`, `Label`, `State`, `Duration`,
+`PositionAtBroadcast`, `BroadcastAtUtc` and `FailureReason` — and **no `MediaId`**. `MediaId` exists
+only on the *request* (`EventPlaybackModels.cs:36`). So adopting a live playback on mount requires
+one of:
+
+1. **A new wire field.** Put the request's `MediaId` on the snapshot, and have a mounting row adopt
+   the live playback when `snapshot.MediaId == Item.Id`. Correct and unambiguous; costs an API
+   change plus the Web DTO, and commits the seam to exposing what is playing by identity.
+2. **Label matching.** Compare `snapshot.Label` against `$"Voicemail from {Item.FromName ?? Item.FromNumber}"`.
+   ⛔ **Ambiguous by construction** — two voicemails from the same caller produce the same label, so
+   the wrong row would adopt the playback and its scrubber would drive a seek into a different
+   message. Recorded so it is rejected once rather than re-proposed.
+3. **Lift the id out of the component.** Hold the started `_playbackId` in a scoped service keyed by
+   voicemail id, so it outlives the row. Avoids the wire change; adds a per-circuit cache that has
+   to be invalidated on every terminal snapshot, which is the fourth thing to keep in step that
+   `ConsolePlaybackState`'s remarks argue against.
+
+**Option 1 is the shape to build if anyone asks for this.** Nobody has.
+
+### Gotchas
+
+- ⚠ **The row is not the only thing that re-mounts.** A page navigation away from `/phone` and back
+  produces the same state, and so does a Blazor circuit reconnect. Any fix must key off something
+  durable, which is the whole argument for the wire field.
+- ⚠ **`_mutedAtPlay` and `_heardSent` die with the row too**, and neither is worth restoring: the
+  first is a snapshot taken at play time by definition, and the second is idempotent downstream
+  (`PhonePage.OnVoicemailHeard` → GV write-through + reconcile, GV-4 / ADR-024).
+- ⚠ **Do not close this by disabling the play button on a reopened row.** A row that can neither
+  show nor start playback is worse than one that can restart it; the restart is at least a
+  recoverable mistake the user understands.
