@@ -218,7 +218,7 @@ ssh $SshTarget "sudo mkdir -p $TargetPath/api $TargetPath/web $TargetPath/data $
 
 # Captured immediately, not read later. Before OPS-7 this check sat AFTER the Production
 # config block below, where $LASTEXITCODE had already been overwritten by that block's
-# `ssh ... test -f` - and since both $configDir values ship a seed file, that block always
+# `ssh ... test -f` — and since both $configDir values ship a seed file, that block always
 # ran. A genuine failure of the move above was therefore always masked, and the message
 # named the wrong step.
 $moveExit = $LASTEXITCODE
@@ -233,7 +233,7 @@ if ($moveExit -ne 0) {
 # GUARDED PER DESTINATION, NOT ONCE FOR BOTH. Before OPS-7 a single `test -f` on api/
 # gated a copy into BOTH api/ and web/, so a box with a web overlay and no api overlay had
 # its web file OVERWRITTEN by the seed. That file holds RotaryPhone:Gv:AuthKey, and the
-# tracked seed has no RotaryPhone section - so the overwrite deleted the key rather than
+# tracked seed has no RotaryPhone section — so the overwrite deleted the key rather than
 # replacing it, and the service came up with inter-service auth silently off.
 #
 # The per-file shape here matches Sync-WpRule below, which has always guarded each
@@ -244,7 +244,7 @@ if (Test-Path $targetConfigPath) {
   foreach ($dest in @('api', 'web')) {
     ssh $SshTarget "test -f $TargetPath/$dest/appsettings.Production.json" 2>$null
     if ($LASTEXITCODE -eq 0) {
-      Write-Host "    $dest/appsettings.Production.json present - left alone" -ForegroundColor DarkGray
+      Write-Host "    $dest/appsettings.Production.json present — left alone" -ForegroundColor DarkGray
       continue
     }
 
