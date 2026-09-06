@@ -1,24 +1,21 @@
 @using Radio.Web.Models
-@using Radio.Web.Services
-@using Radio.Web.Services.ApiClients
 @using Radio.Core.Utilities
-@inject GvBridgeSendService SendService
-@inject GvBridgeStatusService GvStatus
 @inject IJSRuntime JS
-@inject NotificationService Notifications
 
-@* §Ph Texts surface (Screens C/D). One component, three render modes selected by
-   host state:
-     • thread list  — when no thread is open and not composing a new message
+@* §Ph Texts surface (Screen C). One component, two render modes selected by host
+   state:
+     • thread list  — when no thread is open
        (loading skeleton / empty / error / loaded rows);
-     • new-recipient composer — _composingNew (recipient field + empty hint + compose bar);
-     • conversation — when OpenThreadId is set (bubbles + day separators + compose bar).
-   Compose + new-recipient are built in full but feature-flagged OFF
-   (GvBridgeSendService.SendEnabled). The on-screen keyboard is the existing
-   global virtual keyboard (auto-shows on input focus); the recipient field opts
-   into the numeric layout via data-keyboard. *@
+     • conversation — when OpenThreadId is set (bubbles + day separators + the
+       reply-gate pill).
+   This is a READ surface. Owner decision D31 (2026-09-05) settled that SMS
+   sending stays off permanently, so PHN-4 deleted the composer, the
+   new-recipient mode and the whole send path rather than leaving them disabled.
+   The compose slot is kept and always holds the handoff's tier-3a pill
+   ("Replies are turned off.") — an absent slot reads as a rendering bug, a
+   stated one reads as an answer. Handoff §C4/C6. *@
 
-@if (OpenThreadId != null && !_composingNew)
+@if (OpenThreadId != null)
 {
   @* ── Conversation pane ──────────────────────────────────────── *@
   <div class="texts-conversation">
@@ -74,9 +71,12 @@
       }
       else if (Messages != null && Messages.Count == 0)
       {
+        @* Copy is state-neutral (handoff §C6, UAT F-2). It used to read "Start the
+           conversation below." and point at a composer; PHN-4 deleted the composer,
+           so the old string would name an affordance that is not there. *@
         <div class="empty-state">
           <RadzenIcon Icon="forum" class="empty-state-icon" />
-          <div class="empty-state-text">Start the conversation below.</div>
+          <div class="empty-state-text">No messages in this conversation.</div>
         </div>
       }
       else if (Messages != null)
@@ -91,51 +91,25 @@
             <div class="msg-day-sep">@DaySeparator(day)</div>
           }
           var captured = m;
-          <MessageBubble Message="captured"
-                         Status="StatusFor(captured)"
-                         OnRetry="@(() => RetrySend(captured))" />
+          @* Status/OnRetry are deliberately not passed. They described a send this
+             console originated, and PHN-4 removed the only path that could start
+             one; MessageBubble keeps the parameters (and defaults Status to None)
+             because outbound bubbles still render for messages sent from the
+             phone itself. *@
+          <MessageBubble Message="captured" />
         }
       }
     </div>
 
-    @ComposeBar()
-  </div>
-}
-else if (_composingNew)
-{
-  @* ── New-recipient composer (Screen D) ──────────────────────── *@
-  <div class="texts-conversation">
-    <div class="texts-conv-header">
-      <button type="button" class="phone-btn-sm btn-ghost"
-              aria-label="Back to conversations" @onclick="CancelNew">
-        <RadzenIcon Icon="chevron_left" />
-      </button>
-      <div class="texts-conv-title">
-        <span class="texts-conv-name">NEW MESSAGE</span>
-      </div>
+    @* Reply gate, handoff §C4 tier 3a. This is the resting state and the only
+       state: D31 turned replies off permanently, so the pill is unconditional
+       rather than one branch of a flag test. It deliberately does NOT fall back
+       to the tier-3c "Texting unavailable" pill when Google Voice is
+       reconnecting — that string would imply replies resume on reconnect, which
+       under D31 is false. The slot is never hidden (§C4). *@
+    <div class="texts-compose">
+      <span class="phone-pill amber">Replies are turned off.</span>
     </div>
-
-    <div class="texts-compose-new">
-      <input class="phone-input"
-             placeholder="Phone number"
-             aria-label="Recipient phone number"
-             inputmode="tel" data-keyboard="numeric"
-             value="@_recipient"
-             @oninput="OnRecipientInput" />
-      @if (_recipientError != null)
-      {
-        <div class="texts-recipient-error" role="alert">@_recipientError</div>
-      }
-    </div>
-
-    <div class="msg-list" aria-live="polite" @ref="_listEl">
-      <div class="empty-state">
-        <RadzenIcon Icon="forum" class="empty-state-icon" />
-        <div class="empty-state-text">Start the conversation below.</div>
-      </div>
-    </div>
-
-    @ComposeBar()
   </div>
 }
 else
@@ -169,13 +143,11 @@ else
     }
     else if (Threads == null || Threads.Count == 0)
     {
+      @* No "New message" affordance: PHN-4 removed new-recipient mode, so the
+         console can only ever reply into a thread somebody else started. *@
       <div class="empty-state">
         <RadzenIcon Icon="forum" class="empty-state-icon" />
         <div class="empty-state-text">No conversations yet.</div>
-        @if (SendService.SendEnabled)
-        {
-          <button type="button" class="phone-btn-sm" @onclick="StartNew">New message</button>
-        }
       </div>
     }
     else
@@ -206,12 +178,10 @@ else
 }
 
 @code {
-  public enum SendStatus { None, Sending, Sent, Failed }
-
   // ── Thread-list inputs (hosted in the feed pane) ──────────────
   // GV-8: Loading / Error / OnRetry are MODE-SCOPED, not list-scoped. One instance
-  // renders exactly one mode (conversation | new-recipient | thread list), so they
-  // describe whichever fetch that mode is showing — the OPEN CONVERSATION's fetch when
+  // renders exactly one mode (conversation | thread list), so they describe
+  // whichever fetch that mode is showing — the OPEN CONVERSATION's fetch when
   // OpenThreadId is set, the thread list's otherwise. PhoneMessagesPanel hosts the
   // conversation mode only and forwards its OpenThreadLoading / OpenThreadError /
   // OnRetryOpenThread into these three.
@@ -229,178 +199,24 @@ else
   [Parameter] public string? HeaderName { get; set; }
   [Parameter] public string? HeaderNumber { get; set; }
   [Parameter] public EventCallback OnBack { get; set; }
-  [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
 
-  private string _draft = "";
-  private string _recipient = "";
-  private string? _recipientError;
-  private bool _composingNew;
-  // Optimistic + failed tracking keyed by a client-generated temp id.
-  private readonly Dictionary<string, MessageBubble.SendStatus> _statusById = new();
-  private readonly HashSet<string> _sending = new();
   private ElementReference _listEl;
   private string? _lastScrolledThread;
-
-  private bool CanSend =>
-    SendService.SendEnabled && GvStatus.IsAvailable
-    && !string.IsNullOrWhiteSpace(_draft) && _sending.Count == 0
-    && (!_composingNew || !string.IsNullOrWhiteSpace(_recipient));
 
   private static IEnumerable<SmsMessageDto> Ordered(List<SmsMessageDto> m) =>
     m.OrderBy(x => x.SentAt);
 
-  private MessageBubble.SendStatus StatusFor(SmsMessageDto m) =>
-    _statusById.TryGetValue(m.Id, out var s) ? s : MessageBubble.SendStatus.None;
-
-  // Compose bar fragment shared by the conversation + new-recipient modes. When
-  // GV is degraded the bar becomes a "Texting unavailable" pill (Send gated
-  // independent of the flag). The message field is an ordinary input so the
-  // global virtual keyboard auto-shows on focus.
-  private RenderFragment ComposeBar() => @<text>
-    @if (GvStatus.IsAvailable)
-    {
-      <div class="texts-compose">
-        <input class="phone-input texts-compose-input @(SendService.SendEnabled ? "compose-send-enabled" : "")"
-               placeholder="Message"
-               aria-label="Type a message"
-               value="@_draft"
-               @oninput="OnDraftInput"
-               disabled="@(!SendService.SendEnabled)" />
-        <button type="button" class="phone-btn-sm"
-                disabled="@(!CanSend)" @onclick="SendDraftAsync">Send</button>
-      </div>
-    }
-    else
-    {
-      <div class="texts-compose">
-        <span class="phone-pill amber" title="Google Voice is reconnecting.">Texting unavailable</span>
-      </div>
-    }
-  </text>;
-
   protected override async Task OnAfterRenderAsync(bool firstRender)
   {
     // Auto-scroll to the newest bubble when a conversation first opens (and when
-    // the open thread changes). New-message scroll is handled in SendDraftAsync /
-    // the parent's append path.
-    if (OpenThreadId != null && !_composingNew && _lastScrolledThread != OpenThreadId
+    // the open thread changes). Inbound arrivals into an already-open thread are
+    // appended by the parent and are not scrolled here.
+    if (OpenThreadId != null && _lastScrolledThread != OpenThreadId
         && Messages is { Count: > 0 })
     {
       _lastScrolledThread = OpenThreadId;
       await ScrollToBottomAsync();
     }
-  }
-
-  private void StartNew()
-  {
-    _composingNew = true;
-    _recipient = "";
-    _recipientError = null;
-    _draft = "";
-  }
-
-  private void CancelNew()
-  {
-    _composingNew = false;
-    _recipientError = null;
-  }
-
-  // Explicit input handlers (not inline lambdas) so the Send button's
-  // disabled="@(!CanSend)" re-evaluates live as the user types — CanSend depends on
-  // _draft (and _recipient in new-recipient mode), so we must StateHasChanged on each
-  // keystroke.
-  private void OnDraftInput(ChangeEventArgs e)
-  {
-    _draft = e.Value?.ToString() ?? string.Empty;
-    StateHasChanged();
-  }
-
-  private void OnRecipientInput(ChangeEventArgs e)
-  {
-    _recipient = e.Value?.ToString() ?? string.Empty;
-    _recipientError = null;
-    StateHasChanged();
-  }
-
-  private async Task SendDraftAsync()
-  {
-    if (!CanSend) return;
-
-    // New-recipient mode: validate the number lightly (don't pre-validate
-    // aggressively — RotaryPhone normalizes to E.164). Block only obviously
-    // empty/non-numeric; show the inline error and keep the typed text.
-    var targetThreadId = OpenThreadId ?? "";
-    var targetNumber = HeaderNumber ?? "";
-    if (_composingNew)
-    {
-      var normalized = PhoneNumberNormalizer.Normalize(_recipient);
-      if (normalized.Length < 7)
-      {
-        _recipientError = "Enter a valid phone number.";
-        return;
-      }
-      // No thread exists yet; the send creates/resolves it server-side. Use the
-      // raw recipient as the thread key the optimistic bubble is grouped under.
-      targetThreadId = _recipient;
-      targetNumber = _recipient;
-    }
-
-    var text = _draft;
-    var tempId = $"temp-{Guid.NewGuid():N}";
-    var optimistic = new SmsMessageDto(tempId, targetThreadId,
-      GvDirection.Outbound, targetNumber, text, DateTime.UtcNow, true);
-
-    _statusById[tempId] = MessageBubble.SendStatus.Sending;
-    _sending.Add(tempId);
-    _draft = "";                                    // clear input
-    await OnOptimisticAppend.InvokeAsync(optimistic); // parent appends to Messages
-    await ScrollToBottomAsync();
-
-    try
-    {
-      var created = await SendService.SendAsync(targetThreadId, text);
-      _statusById.Remove(tempId);                   // de-dupe: confirmed replaces optimistic
-      _statusById[created.Id] = MessageBubble.SendStatus.Sent;
-      // On a successful new-recipient send, drop back into normal conversation
-      // mode for the resolved thread (parent surfaces it via poll/push).
-      if (_composingNew) _composingNew = false;
-    }
-    catch (SendRateLimitedException)
-    {
-      _statusById[tempId] = MessageBubble.SendStatus.Failed;
-      _draft = text;                                // PRESERVE text
-      Notifications.Notify(NotificationSeverity.Error, "Slow down",
-        "Sending too fast — wait a moment.");
-    }
-    catch (SendNotAvailableException)
-    {
-      _statusById[tempId] = MessageBubble.SendStatus.Failed;
-      _draft = text;
-      Notifications.Notify(NotificationSeverity.Info, "Coming soon",
-        "Texting send isn't available yet.");
-    }
-    catch (Exception)                               // SendUnavailable / network / non-200
-    {
-      _statusById[tempId] = MessageBubble.SendStatus.Failed;
-      _draft = text;                                // PRESERVE; never auto-retry
-      Notifications.Notify(NotificationSeverity.Error, "Message not sent",
-        "Couldn't send your message. Try again.");
-    }
-    finally
-    {
-      _sending.Remove(tempId);
-      await InvokeAsync(StateHasChanged);
-    }
-  }
-
-  private async Task RetrySend(SmsMessageDto m)
-  {
-    // Drop the stale Failed status so the old red bubble doesn't linger alongside
-    // the new sending bubble.
-    _statusById.Remove(m.Id);
-    // TODO(send-ship): also drop the orphan temp bubble from the parent Messages list — needs a parent callback; deferred with the flagged send path.
-    _draft = m.Text ?? "";                          // re-arm with the failed text
-    await SendDraftAsync();
   }
 
   private async Task ScrollToBottomAsync()

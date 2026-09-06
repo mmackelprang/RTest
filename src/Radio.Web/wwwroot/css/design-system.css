@@ -5913,25 +5913,17 @@ body {
 /* The conversation's msg-list fills the space between header and compose. */
 .texts-conversation .msg-list { flex: 1; min-height: 0; }
 
-/* New-recipient composer: recipient field + inline validation. */
-.texts-compose-new {
-  display: flex; flex-direction: column; gap: var(--sp-1);
-  padding: var(--sp-3) var(--sp-4);
-  border-bottom: 1px solid var(--surface-separator);
-  flex-shrink: 0;
-}
-.texts-recipient-error {
-  font-family: var(--font-body); font-size: 12px; color: var(--signal-red);
-}
-
-/* Compose bar pinned to the bottom of the conversation pane. */
+/* Reply-gate slot pinned to the bottom of the conversation pane. Still named
+   .texts-compose because it occupies the compose slot, but since PHN-4 it holds
+   only the "Replies are turned off." pill — there is no composer to lay out.
+   The .texts-compose-new / .texts-recipient-error / .texts-compose-input rules
+   that used to sit here went with it. */
 .texts-compose {
   display: flex; align-items: center; gap: var(--sp-2);
   padding: var(--sp-2) var(--sp-3);
   border-top: 1px solid var(--surface-separator);
   flex-shrink: 0;
 }
-.texts-compose-input { flex: 1; min-width: 0; }
 
 /* The back chevron reuses the ghost button look at the small size. */
 .phone-btn-sm.btn-ghost { background: transparent; border-color: transparent; }

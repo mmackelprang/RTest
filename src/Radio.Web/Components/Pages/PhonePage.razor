@@ -83,8 +83,7 @@
                           OnVoicemailHeard="OnVoicemailHeard"
                           OnRetryThreads="LoadThreadsAsync"
                           OnOpenThread="OpenThreadAsync"
-                          OnCloseThread="CloseThreadAsync"
-                          OnOptimisticAppend="OnOptimisticAppend" />
+                          OnCloseThread="CloseThreadAsync" />
     }
     else if (_activeTab == "dashboard")
     {
@@ -778,24 +777,12 @@
     {
       if (_disposed) return;
 
-      // Optimistic→confirmed de-dupe: when the server echoes back our OWN outbound
-      // send, collapse the optimistic temp bubble so we don't double-render. The
-      // optimistic bubble lives in _openThreadMessages only while the thread is open,
-      // so this is naturally scoped to the open conversation. Match on
-      // text + recency + outbound (NOT ThreadId): for a new-recipient send the temp
-      // bubble is keyed on the raw phone number while the confirmed message carries
-      // the GV thread id, so a ThreadId match would miss. Remove the first match
-      // (there is at most one in flight for a given text/recency window).
-      if (GvDirection.IsOutbound(msg.Direction) && _openThreadMessages != null)
-      {
-        var tempIdx = _openThreadMessages.FindIndex(m =>
-          m.Id.StartsWith("temp-", StringComparison.Ordinal)
-          && GvDirection.IsOutbound(m.Direction)
-          && string.Equals(m.Text, msg.Text, StringComparison.Ordinal)
-          && Math.Abs((m.SentAt - msg.SentAt).TotalSeconds) <= 30);
-        if (tempIdx >= 0) _openThreadMessages.RemoveAt(tempIdx);
-      }
-
+      // PHN-4 removed the optimistic→confirmed de-dupe that used to run here. It
+      // collapsed a client-generated "temp-" bubble when the server echoed back a
+      // send this console had made; owner decision D31 turned sending off
+      // permanently, so no "temp-" message can be created any more and the match
+      // could never fire. Outbound messages still arrive — sent from the phone
+      // itself — and are appended by the ordinary path below.
       var threadOpen = _openThreadId == msg.ThreadId
                        && (_messagesPanel?.IsThreadOpen(msg.ThreadId) ?? false);
 
@@ -846,24 +833,6 @@
       _threads.Insert(0, new SmsThreadDto(msg.ThreadId, msg.CounterpartyNumber,
         null, msg.SentAt, markUnread, msg.Text));
     }
-  }
-
-  // Optimistic outbound append from the compose bar. The real message collapses
-  // it on the next poll/push (matched by text + recency in OnGvSmsReceived).
-  // Reached via an EventCallback already on the UI sync context, but wrapped in
-  // InvokeAsync for consistency with OnGvSmsReceived and safety on the optimistic
-  // path.
-  private void OnOptimisticAppend(SmsMessageDto optimistic)
-  {
-    if (_disposed) return;
-    _ = InvokeAsync(() =>
-    {
-      if (_disposed) return;
-      _openThreadMessages ??= new();
-      _openThreadMessages.Add(optimistic);
-      BumpThread(optimistic, markUnread: false);
-      StateHasChanged();
-    });
   }
 
   // Toast title: a contact/thread name when known, else the counterparty number.
