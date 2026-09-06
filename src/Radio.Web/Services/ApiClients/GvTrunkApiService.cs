@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
+using Radio.Core.Utilities;
 using Radio.Web.Models;
 
 namespace Radio.Web.Services.ApiClients;
@@ -91,7 +92,7 @@ public class GvTrunkApiService
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to dial {Number} via GV Trunk", number);
+      _logger.LogError(ex, "Failed to dial {Number} via GV Trunk", LogSafeText.ForPhone(number));
       return false;
     }
   }

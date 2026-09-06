@@ -170,7 +170,7 @@ public class ContactResolutionService
     {
       // PbapApiService maps its own failures to Unavailable, but guard anyway and
       // treat anything unexpected as transient (do not cache).
-      _logger.LogDebug(ex, "Contact resolution failed for {Number}", number);
+      _logger.LogDebug(ex, "Contact resolution failed for {Number}", LogSafeText.ForPhone(number));
       result = null;
     }
     finally
