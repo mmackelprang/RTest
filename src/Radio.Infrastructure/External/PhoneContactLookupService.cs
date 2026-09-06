@@ -59,7 +59,8 @@ public class PhoneContactLookupService
           var contact = await _pbapRepo.FindByPhoneNumberAsync(connectedDevice.Address, normalized, cancellationToken);
           if (contact != null)
           {
-            _logger.LogInformation("PBAP contact found: {Number} → {Name}", phoneNumber, contact.DisplayName);
+            _logger.LogInformation("PBAP contact resolved for {Number}",
+              LogSafeText.ForPhone(phoneNumber));
             return contact.DisplayName;
           }
         }
@@ -75,7 +76,7 @@ public class PhoneContactLookupService
       var baseUrl = _options.CurrentValue.ContactsApiBaseUrl.TrimEnd('/');
       var url = $"{baseUrl}/api/contacts/lookup?phone={Uri.EscapeDataString(phoneNumber)}";
 
-      _logger.LogDebug("Looking up contact for {PhoneNumber}", phoneNumber);
+      _logger.LogDebug("Looking up contact for {PhoneNumber}", LogSafeText.ForPhone(phoneNumber));
 
       var response = await _httpClient.GetAsync(url, cancellationToken);
 
@@ -84,22 +85,24 @@ public class PhoneContactLookupService
         var contact = await response.Content.ReadFromJsonAsync<ContactLookupResponse>(cancellationToken: cancellationToken);
         if (!string.IsNullOrWhiteSpace(contact?.Name))
         {
-          var maskedNumber = phoneNumber.Length > 4
-            ? $"***{phoneNumber[^4..]}"
-            : "***";
-          _logger.LogDebug("Resolved {PhoneNumber} → {Name}", maskedNumber, contact.Name);
+          // ⚠ The inline "***{last4}" mask that used to be computed here is GONE, and its removal
+          // is the point of PHN-5 rather than a side effect. It was the file's own local idiom,
+          // applied on exactly one of six lines, and it left contact.Name in clear on the one line
+          // it masked. One mask, one shape, every line — see plan PHN-5 §1.2.
+          _logger.LogDebug("Contact lookup resolved {PhoneNumber}", LogSafeText.ForPhone(phoneNumber));
           return contact.Name;
         }
       }
       else
       {
         _logger.LogDebug("Contact lookup returned {StatusCode} for {PhoneNumber}",
-          response.StatusCode, phoneNumber);
+          response.StatusCode, LogSafeText.ForPhone(phoneNumber));
       }
     }
     catch (Exception ex)
     {
-      _logger.LogWarning(ex, "Contact lookup failed for {PhoneNumber}", phoneNumber);
+      _logger.LogWarning(ex, "Contact lookup failed for {PhoneNumber}",
+        LogSafeText.ForPhone(phoneNumber));
     }
 
     // Fall back to the raw phone number
