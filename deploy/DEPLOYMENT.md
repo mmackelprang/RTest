@@ -143,6 +143,24 @@ rsync -avz --delete publish/linux-arm64/web/ mmack@piradio:/opt/radio-console/we
 ssh mmack@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/api/Radio.API /opt/radio-console/web/Radio.Web"
 ```
 
+#### How files reach the target, and what happens when that fails
+
+`Deploy-ToLinux.ps1` uses `rsync` when it is on PATH and falls back to `scp` when it is not
+(`Get-Command rsync` decides; there is no flag). Both routes stage into `/tmp` and are then moved
+into place, so which one ran is not visible in the result — only in the deploy output, where the
+fallback prints `(rsync not found, using scp)`.
+
+⚠ **The fallback is not exotic. On a Windows dev box without `rsync` installed it is the only path
+every deploy takes** — measured on this repo's dev machine 2026-09-05, where `rsync` is absent
+entirely. Check the line above before assuming a deploy went over rsync.
+
+Since `OPS-9`, **a failed transfer stops the deploy** on both routes: the script captures each
+`ssh`/`scp`/`rsync` exit code at its call site and exits with `API sync failed!` or
+`Web sync failed!`. Previously the fallback tested the exit code of the tidy-up command that ran
+*after* the transfer — which returns 0 regardless — so a transfer that moved nothing was reported
+as a successful deploy. If a deploy now stops where it used to pass, that is the guard working;
+check connectivity and disk space on the target before re-running.
+
 ### 3. Start the Services
 
 ```bash
