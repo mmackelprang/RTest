@@ -10,7 +10,7 @@
 
 **Tech stack:** Blazor Server, Radzen (`RadzenIcon`), `design-system.css` tokens (`.empty-state`, `.empty-state-icon`, `.empty-state-text`, `.phone-btn-sm`, `.skeleton-list-row`), xUnit + bUnit. **No new component, no new CSS, no new config key, no new JS, no new hub subscription, no new auth posture.**
 
-**Dependencies:** **GV-3 must be merged** (the texts surface: `PhoneTextsPanel`, `PhoneMessagesPanel`, the `PhonePage` thread-open path). It is. **Explicitly NOT blocked on RotaryPhone** — their two defects (BUILDER_QUEUE § Cross-repo handoffs #5/#6) make this failure *rare*; this row makes it *honest*. Neither subsumes the other.
+**Dependencies:** **GV-3 must be merged** (the texts surface: `PhoneTextsPanel`, `PhoneMessagesPanel`, the `PhonePage` thread-open path). It is. **Explicitly NOT blocked on RotaryPhone** — their two defects ([`CROSS-REPO-HANDOFFS.md`](../../queue/CROSS-REPO-HANDOFFS.md) #5/#6) make this failure *rare*; this row makes it *honest*. Neither subsumes the other.
 
 ---
 
@@ -30,7 +30,7 @@ Every task's requirements implicitly include this section.
 
 - **Branch:** `fix/gv-texts-load-error-state` (assigned in the queue row). Branch before the first source commit.
 - **Copy is fixed, verbatim, ASCII apostrophe:** `Couldn't load messages.` and button label `Retry`. Do not reword, do not add a subtitle, do not add a tooltip. The empty-state copy `Start the conversation below.` is **unchanged in wording** — only the condition under which it renders changes.
-- **Preserve the `journalctl` probe string.** The documented server-side probe is `journalctl -u radio-web --since '-30min' | grep 'Failed to get GV SMS thread'` (BUILDER_QUEUE § Dependency / ordering notes; F-1-DIAGNOSIS § Scope-affecting notes). The rewritten log statement **must keep the literal substring `Failed to get GV SMS thread`** or the only monitoring this surface has goes dark.
+- **Preserve the `journalctl` probe string.** The documented server-side probe is `journalctl -u radio-web --since '-30min' | grep 'Failed to get GV SMS thread'` ([`ORDERING-NOTES.md`](../../queue/ORDERING-NOTES.md); F-1-DIAGNOSIS § Scope-affecting notes). The rewritten log statement **must keep the literal substring `Failed to get GV SMS thread`** or the only monitoring this surface has goes dark.
 - **Do NOT touch `Uri.EscapeDataString(threadId)`.** The group-thread `%2F` failure is RotaryPhone's Defect B. Both client-side workarounds were tested and both fail: `%252F` still yields 0 messages, and a raw `/` misses their API route and falls through to their SPA fallback, returning `index.html` with HTTP 200.
 - **Style:** 2-space indent, file-scoped namespaces, nullable enabled, Allman braces with braces on every `if` (match surrounding code), explicit type annotations preferred. **Warnings are errors in Release.**
 - **Line endings:** the `.razor` and `.cs` files in this diff are **CRLF** on disk despite `.editorconfig` saying `lf`. Edit in place; do not reflow or rewrite whole files, or the PR becomes an unreviewable whole-file diff.
@@ -228,7 +228,7 @@ public enum GvCallOutcome
 /// inventing a second mechanism — branch on
 /// <c>Outcome == GvCallOutcome.HttpError &amp;&amp; StatusCode == HttpStatusCode.Conflict
 /// &amp;&amp; ErrorCode == "markread_disabled"</c>. See
-/// <c>docs/BUILDER_QUEUE.md</c> § "Dependency / ordering notes" for why the two rows
+/// <c>docs/queue/ORDERING-NOTES.md</c> for why the two rows
 /// share the idiom but not the PR.
 /// </para>
 /// </summary>
@@ -1211,7 +1211,7 @@ with:
 
 ```markdown
 - `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder + **PR4 durable mark-read** (`MarkVoicemailReadAsync` / `MarkSmsThreadReadAsync` → the two `POST .../read` routes; 200→DTO, 404→null, 502→null-keep-optimistic, no retry; flag-gated). **GV-8:** `GetSmsThreadMessagesAsync` is the one read method that returns `GvResult<T>` rather than `T?`; the others still return `T?` because their callers already handle `null` correctly (the thread list keeps its last good list and toasts).
-- `src/Radio.Web/Services/ApiClients/GvResult.cs` — **GV-8** outcome type (`Success` / `HttpError` / `Timeout` / `Transport` / `Malformed`, plus `StatusCode` and RotaryPhone's `error`/`code` discriminator). Exists because collapsing every failure to `null` let a 502 render as an empty conversation (UAT F-1). **GV-6 adopts this same type** for the two mark-read methods — the two rows share the idiom, not the PR (see `docs/BUILDER_QUEUE.md` § Dependency / ordering notes).
+- `src/Radio.Web/Services/ApiClients/GvResult.cs` — **GV-8** outcome type (`Success` / `HttpError` / `Timeout` / `Transport` / `Malformed`, plus `StatusCode` and RotaryPhone's `error`/`code` discriminator). Exists because collapsing every failure to `null` let a 502 render as an empty conversation (UAT F-1). **GV-6 adopts this same type** for the two mark-read methods — the two rows share the idiom, not the PR (see [`ORDERING-NOTES.md`](../../queue/ORDERING-NOTES.md) § Dependency / ordering notes).
 ```
 
 - [ ] **Step 3: Final full verification**

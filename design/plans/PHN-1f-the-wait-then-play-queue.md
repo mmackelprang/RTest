@@ -1752,7 +1752,7 @@ uses `OPS-`, `LOG-`, `AUD-`.)*
   await each, catch per subscriber; apply the same shape to the two hand-rolled sites. **Est. 0.5 d.**
 - **Status:** `📋`
 - **Plan:** *to be written — small enough for a plan-in-the-row if the owner prefers*
-- **Spec / handoff:** `docs/BUILDER_QUEUE.md` § *What the two reviewers found* (`:284-295`)
+- **Spec / handoff:** [`BUILDER_QUEUE_ARCHIVE.md`](../../docs/BUILDER_QUEUE_ARCHIVE.md) § *What the two reviewers found*
 - **Depends on:** `—`
 - **Branch:** `fix/audio-state-store-multicast-notify`
 

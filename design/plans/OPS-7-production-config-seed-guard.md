@@ -1,6 +1,6 @@
 # PLAN — `OPS-7` · A deploy that can silently destroy a secret
 
-> **Row:** `OPS-7`, P2, `docs/BUILDER_QUEUE.md:140`.
+> **Row:** `OPS-7`, P2, [`BUILDER_QUEUE_ARCHIVE.md`](../../docs/BUILDER_QUEUE_ARCHIVE.md).
 > **Branch:** `fix/deploy-production-config-seed-guard`
 > **Estimate:** **0.5 d**, as filed. The fix is nine lines; the estimate is verification.
 > **Planned against** `main` at `603207df`. Every line number read out of the tree at that commit.

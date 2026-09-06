@@ -202,7 +202,7 @@ stoppable**, **not** run the progress bar, and **say why** rather than showing a
 obligation that is ALREADY DISCHARGED. Do not redo it.**
 
 `PHN-1b` §5 and `PHN-1c` §5 both instruct PR 6 to *"withdraw the cross-repo ask in
-`docs/BUILDER_QUEUE.md` § Cross-repo handoffs #3 in the same PR."* **Read that item before acting:
+[`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same PR."* **Read that item before acting:
 its audio-endpoint clause is already struck through and marked** *"✅ **DISSOLVED, not resolved, by
 `PHN-1b` ([#534](https://github.com/mmackelprang/RTest/pull/534))**"*, with the mechanism recorded
 (`GvMediaAuthHandler.cs:26` attaches the header server-side). **Nothing is owed.** Task 12 verifies
@@ -1751,7 +1751,7 @@ where they stand, and add one paragraph:
   wants it, ask."* **It does not ask**: *"Waiting for the announcement to finish…"* is accurate
   without it, because one-voice-at-a-time means there is only one thing it could be waiting for.
 
-**12c. ⚠ `docs/BUILDER_QUEUE.md` § Cross-repo handoffs #3 — VERIFY, do not edit (C-73).** `PHN-1b` §5
+**12c. ⚠ [`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 — VERIFY, do not edit (C-73).** `PHN-1b` §5
 and `PHN-1c` §5 both told PR 6 to withdraw the audio-endpoint ask. **Read the item first:** at
 `ba1ae4a6` that clause is already struck through and marked ✅ *"DISSOLVED, not resolved, by `PHN-1b`
 (#534)"*, with the mechanism named (`GvMediaAuthHandler.cs:26`). **If it still reads that way, change

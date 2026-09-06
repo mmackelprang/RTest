@@ -2357,7 +2357,7 @@ from `IOptionsMonitor<GvMediaOptions>`, do not add a second key.
 
 - Remove `VoicemailPlayer.razor:8`'s `<audio>` element **and**
   `GvBridgeApiService.GetVoicemailAudioUrl` together (§4 item 3).
-- **Withdraw the cross-repo ask** in `docs/BUILDER_QUEUE.md` § Cross-repo handoffs #3 in the same
+- **Withdraw the cross-repo ask** in [`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same
   PR (§4 item 4). ADR §10.1 makes it a deliverable; PR 6 is the first moment it is true.
 - Carry PR 1's three device-only checks into the UAT: seek actually repositions; `Time` actually
   advances; pausing a TTS source does not report completion. Add PR 2's two: the gvbridge route's

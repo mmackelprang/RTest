@@ -65,7 +65,7 @@ Concretely:
 
 The new-consumer note for `RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md`'s Change Log is a commit in the
 *other* repo, so per the precedent set on 2026-08-10 it is **not a task here** — it is queued as
-§ Cross-repo handoffs **#8** in `docs/BUILDER_QUEUE.md`.
+§ Cross-repo handoffs **#8** in [`CROSS-REPO-HANDOFFS.md`](../../queue/CROSS-REPO-HANDOFFS.md).
 
 ---
 

@@ -28,7 +28,7 @@ mirror-case queue into PR 5, and the `PHN-1e` planning pass then split PR 5 in t
 correct — a new row with no equivalent below). The split is the same argument this document opens
 with, applied one level down: `PHN-1f` is the narrow, deep change to a shared audio service, and
 burying it inside PR 5's plumbing is the thing *"Why a breakdown at all"* exists to prevent.
-**The current sequence lives in [`docs/BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md)
+**The current sequence lives in [`docs/queue/ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md)
 § *Dependency / ordering notes*** — read that, not this table, for what remains.
 
 | # | Scope | ADR | Risk | Est. |

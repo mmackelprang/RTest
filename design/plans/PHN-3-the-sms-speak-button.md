@@ -7,8 +7,8 @@
 > **Estimate:** **1.5–2 d**. The punch list says 2–3 d *"nearly all its cost is `PHN-1`"* — and
 > `PHN-1a`…`PHN-1f` and `PHN-2` have all shipped, so that cost is already paid. §0.6 says what is
 > left.
-> **Planned against** `main` at **`6c220461`**. Every line number read out of the tree at that
-> commit.
+> **Planned against** `main` at **`6c220461`**; ⭐ **REPAIRED against `main` at `656f58e6`** after
+> `PHN-4` merged — read §0.0 before anything else.
 > **Design input:** [`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`](../../docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md)
 > §B (`:297-430`) and §Cross-1…5 (`:79-181`). **Relationship: `follows`, with three recorded
 > deviations and one section of the handoff that is factually stale** — §0.3.
@@ -16,6 +16,43 @@
 ---
 
 ## 0. Read this before Task 1
+
+### 0.0 ⚠⚠ THIS PLAN WAS REPAIRED AFTER `PHN-4` MERGED. Read this section before trusting any line number in it.
+
+**Repaired 2026-09-05 against `main` at `656f58e6`.** This plan was written against `6c220461`, one
+commit before **`PHN-4`** shipped as [#578](https://github.com/mmackelprang/RTest/pull/578). `PHN-4`
+deleted the composer and the whole SMS write path, **moving essentially every line in
+`PhoneTextsPanel.razor`** — the file went from **442 lines to 258**. Every anchor into that file has
+been re-derived from the current tree, not offset.
+
+⛔ **Three of this plan's edits were not merely displaced — their subject no longer exists.** They are
+corrected in place below, and listed here so the correction is not discovered halfway through Task 4:
+
+| What the plan assumed | What `PHN-4` did | Where it is fixed |
+|---|---|---|
+| The `<MessageBubble>` call passes `Status="StatusFor(captured)"` and `OnRetry="@(() => RetrySend(captured))"` | **Deleted `_statusById`, `StatusFor` and `RetrySend`.** The call is now one line with **one** parameter, `PhoneTextsPanel.razor:99`. The plan's Task 4 markup block **would not have compiled.** | Task 4 |
+| `SpeakableSenderName` calls a zero-arg `ResolveThreadName()` at `:413-430` | `ResolveThreadName` survives at **`:229-246`** but its signature is **`ResolveThreadName(SmsThreadDto t)`**, and it is now reachable **only from the thread-list branch** — conversation mode has no `SmsThreadDto` in hand. The property as written is **dead code**. | Task 4, and `C-108` |
+| The panel's toast copies "how `RetrySend`'s failure path surfaces its message" | **`RetrySend` is deleted, and with it the panel's only failure-surfacing path.** `PhoneTextsPanel` injects `IJSRuntime` and nothing else. There is no `ShowErrorToast` and no notification service in the file. | Task 4 |
+
+⭐ **And two things `PHN-4` made *easier*, which are worth banking rather than leaving as slack:**
+
+1. **`C-115`'s sequencing constraint is gone.** `PHN-4` has merged. There is no longer another row
+   queued against `PhoneTextsPanel.razor`, no "claim them sequentially" instruction, and no 442-line
+   file to re-verify. The constraint is struck through in §0.7 rather than deleted, so a reader who
+   arrives via the queue row's copy of it can see it was retired rather than forgotten.
+2. **The Task 4 markup edit shrank to a one-line invocation.** It was the plan's most line-number-
+   fragile edit; it is now the most stable thing in the row.
+
+⚠ **Two claims got *weaker* without becoming false, and both are the kind that get mis-read as
+retired.** `MessageBubble.razor` itself was **not touched by `PHN-4`** (56 lines, byte-identical), so
+its anchors all stand — but its `Status` / `OnRetry` / `IsFailed` / `OnFailedClick` machinery is now
+**unreachable**, because the only call site stopped passing either parameter. Task 3's ⛔ placement
+argument and Task 5's `.failed`-collision argument both leaned on that machinery being live; both are
+re-argued below on what is true now. **Neither conclusion changes.**
+
+⛔ **Scope and estimate: unchanged at 1.5–2 d.** The panel wiring got cheaper by roughly the amount
+the toast decision got dearer; §0.6 carries the revised split. Nothing was added to or removed from
+what this row ships.
 
 ### 0.1 What this row is, in one paragraph
 
@@ -35,6 +72,14 @@ rules, and a **44px button in the bubble gutter** that joins the one-voice-at-a-
 Owner decision `D31` (2026-09-05) says **SMS sending stays off, permanently**. It parked `GV-5` 🚫
 and converted Feature C from a feature into a deletion (`PHN-4`). It would be an easy and expensive
 mistake to read Feature B as part of that retreat.
+
+⚠ **This warning is no longer anticipatory — `PHN-4` has merged** ([#578](https://github.com/mmackelprang/RTest/pull/578)).
+The composer, the recipient field, the draft path, `GvBridgeSendService` and the send DTOs are
+**already gone from the tree**. `PhoneTextsPanel.razor:11-16` now opens with *"This is a READ
+surface"*, and `:110-112` renders the amber **`Replies are turned off.`** pill. **So the surface this
+row adds a play button to is, today, a surface with no write affordance of any kind** — which is
+precisely the condition under which a future reader is most likely to mistake the button for a
+leftover. Read `:104-109`'s comment before touching anything in that region.
 
 **It is the opposite.** `D31` removes the *write* surface and leaves the *read* surface as the whole
 point of the phone console — and reading a text aloud is the read surface working as intended, not a
@@ -122,24 +167,48 @@ parks the playback for up to `GvMedia:MaxQueuedWaitSeconds` (30 s). The handoff'
 spinner — and differs only in the `title` / `aria-label`, which take `VoicemailPlayer`'s already
 shipped copy (`Waiting for the announcement to finish…`). A bubble gutter has no room for a sub-line
 and the handoff is right that it should not grow one. `EventPlaybackSnapshotDto.IsLive` is a
-**deny-list** (`ApiModels.cs:1517-1521`), so `Waiting` already counts as live and the chip and Stop
-affordance come for free.
+**deny-list** (`ApiModels.cs:1524-1525`, with the reasoning at `:1513-1523`), so `Waiting` already
+counts as live and the chip and Stop affordance come for free.
 
 **`C-108` — `SmsMessageDto` carries no sender name, so the `Message from {Name}.` lead-in needs a
 parameter this component does not have.**
 
 `ApiModels.cs:1138-1145` gives `SmsMessageDto` an `Id`, `ThreadId`, `Direction`,
-`CounterpartyNumber`, `Text`, `SentAt`, `IsRead` — **and no name**. The resolved name lives on
-`SmsThreadDto.CounterpartyName` (`:1150`) and is computed by
-`PhoneTextsPanel.ResolveThreadName` (`:413-430`), which walks `CounterpartyName` → a normalised
-contact match → the raw number.
+`CounterpartyNumber`, `Text`, `SentAt`, `IsRead` — **and no name**. ✅ **Both anchors re-verified at
+`656f58e6`**; `PHN-4`'s edit to this file (`:1182-1188`, the deleted send DTOs) is below them and
+moved neither. The resolved name lives on `SmsThreadDto.CounterpartyName` (`:1150`).
+
+⚠⚠ **REPAIRED — where that name is computed changed, and the plan's original route no longer
+exists.** This constraint used to say the name *"is computed by `PhoneTextsPanel.ResolveThreadName`
+(`:413-430`)"*. After `PHN-4`:
+
+- `ResolveThreadName` **survives at `PhoneTextsPanel.razor:229-246`**, but its signature is
+  **`private string ResolveThreadName(SmsThreadDto t)`** — it takes the thread, and its **only**
+  caller is the thread-list branch at `:169`.
+- ⛔ **Conversation mode cannot call it usefully.** When `OpenThreadId` is set the panel renders from
+  `Messages`, `HeaderName` and `HeaderNumber`; it has no `SmsThreadDto` in hand for the open thread.
+  A zero-argument `ResolveThreadName()` **does not exist and never will**.
+- ✅ **The name is already resolved upstream and handed in.** `PhoneMessagesPanel.razor:192-193`
+  passes `HeaderName="@OpenThreadName"` and `HeaderNumber="@OpenThreadNumber"`, and
+  `PhoneMessagesPanel.OpenThreadName` (`:321-337`) runs exactly the precedence this constraint
+  describes: `CounterpartyName` → normalised contact match → **the bare number**.
 
 ⛔ **Do not resolve the name inside `MessageBubble`**, and do not inject a contact service into it.
 It is a presentational component with three parameters and no services, and the name is a
-**per-thread** fact already computed once by the panel. Task 4 threads it down as one nullable
+**per-thread** fact already computed once, upstream. Task 4 threads it down as one nullable
 parameter. ⚠ **And it must be the resolved *name*, never the raw number** — handoff `:386` says *"Do
-**not** read the identifier aloud"*, and `ResolveThreadName` falls back to the number, so the panel
-must pass `null` rather than that fallback (Task 5).
+**not** read the identifier aloud"*, and `OpenThreadName` falls back to the number, so the panel must
+pass `null` rather than that fallback (**Task 4**, not Task 5 — the original cross-reference was
+wrong).
+
+⚠⚠ **A SECOND FALLBACK, NEWLY VISIBLE, THAT THE ORIGINAL GUARD DOES NOT CATCH.**
+`PhoneMessagesPanel.OpenThreadName:326` reads `if (t == null) return _openThreadId ?? "";` — when the
+open thread is not present in `Threads`, **`HeaderName` is a thread id** while
+`OpenThreadNumber` (`:339`, `OpenThreadData?.CounterpartyNumber ?? ""`) is the **empty string**. So a
+guard of the form *"if the name equals the number, pass null"* answers **false**, and a raw GV thread
+identifier is read to the room — the precise outcome handoff `:386` forbids. **The guard needs a
+second clause: an empty `HeaderNumber` means the thread was not resolved at all, so there is no name
+to speak.** Task 4 carries both clauses and §4.2 pins them.
 
 ### 0.5 What is wiring and what is new — the split the estimate rests on
 
@@ -153,11 +222,17 @@ must pass `null` rather than that fallback (Task 5).
 | ⭐ Topbar chip renders `Speech` as **`Message`** | ✅ **shipped and already B-aware** | `ConsolePlaybackState.cs:73-78` |
 | `.spinner`, `.transport-btn-*`, `.visually-hidden` CSS gaps | ✅ **fixed** | `PHN-2` G-1/G-2 |
 | Transport component pattern (`Mine`, `_starting`, dispose) | ✅ **shipped, to be copied** | `VoicemailPlayer.razor` |
-| `EventPlaybackApiService.StartSpeechAsync` | 🆕 **new** — one method | Task 3 |
+| `EventPlaybackApiService.StartSpeechAsync` | 🆕 **new** — one method | Task 1 |
 | `GvSpeechText.ForMessage` — the eight content rules | 🆕 **new, and the bulk of the row** | Task 2 |
-| `.msg-row-inbound` / `.msg-speak-btn` / `.msg-bubble.speaking` CSS | 🆕 **new** — specified verbatim by the handoff | Task 6 |
-| The button + its state machine in `MessageBubble` | 🆕 **new** | Task 4 |
-| Chip copy for the Speech arm | 🆕 **4 lines** | Task 7 |
+| The button + its state machine in `MessageBubble` | 🆕 **new** | Task 3 |
+| Threading the sender name down + the failure toast | 🆕 **new** | Task 4 |
+| `.msg-row-inbound` / `.msg-speak-btn` / `.msg-bubble.speaking` CSS | 🆕 **new** — specified verbatim by the handoff | Task 5 |
+| Chip copy for the Speech arm | 🆕 **4 lines** | Task 6 |
+
+⚠ **This table's task numbers were all off by one and are corrected here** — it pointed
+`StartSpeechAsync` at "Task 3", the component at "Task 4", the CSS at "Task 6" and the chip at
+"Task 7", none of which matched §2. **A pre-existing defect, not a `PHN-4` casualty**, recorded
+rather than silently fixed because it is the kind of drift that sends a Builder to the wrong section.
 
 ⭐ **`EventPlaybackApiService.cs:110-111` names this row in its own doc comment:** *"⚠ **Voicemail
 only. The Speech arm has no caller until `PHN-3`**, and this file's own history is the argument for
@@ -165,8 +240,19 @@ not adding one before it does."* Task 3 is the sibling that comment is waiting f
 
 ⭐ **And Feature B does NOT need `GvMedia:Enabled`.** `EventPlaybackService.cs:222`'s 409 gate is the
 `RemoteMedia` arm only, so a Speech playback runs with the flag off — unlike Feature A, which is
-still dark on a stock box. ⚠ **Re-verify that line before relying on it for UAT**, because it is what
-makes this row testable end-to-end without a config change, and that is a large claim to inherit.
+still dark on a stock box.
+
+✅ **VERIFIED at `656f58e6` during the `PHN-4` repair pass — this no longer needs re-checking.** The
+line is `src/Radio.Infrastructure/Audio/Services/EventPlaybackService.cs:222`, read directly:
+
+```csharp
+if (request.Kind == EventPlaybackKind.RemoteMedia && !gv.Enabled)
+```
+
+The `Kind` test is a conjunct, so a `Speech` request never reaches the throw. **§4.5's UAT therefore
+needs no config change**, which was the claim this plan flagged as *"a large claim to inherit"*
+(§6.2 item 2). The file was untouched by `PHN-4`, so `:237-244`'s replacement arm and `:493`'s
+`WaitForClearAirAsync` call — the two other anchors this plan leans on — are unmoved as well.
 
 ### 0.6 The estimate
 
@@ -180,6 +266,15 @@ is eight merged PRs behind us. What remains:
   `VoicemailPlayer`'s and the CSS is specified verbatim by the handoff.
 - **`StartSpeechAsync`, chip copy, docs: ~0.25 d.**
 - **UAT: ~0.25 d**, and it needs the box (§4.5).
+
+⭐ **Re-checked against `656f58e6` after `PHN-4`, and the total does not move.** The panel wiring got
+**cheaper** — the `<MessageBubble>` edit is now a one-line invocation with one parameter, and
+`HeaderNumber` turned out to be a real member rather than the placeholder §6.2 flagged. It got
+**dearer** by about the same amount in one place: `PHN-4` deleted `RetrySend`, so the failure toast
+no longer has an in-file pattern to copy and Task 4 must inject a notification service the panel does
+not currently have. **Net: unchanged at 1.5–2 d**, with roughly 0.1 d moved from wiring into the
+toast. ⛔ **Do not re-estimate downward on the strength of `C-115` being retired** — that constraint
+governed *when* the row could be claimed, never how long it takes.
 
 ### 0.7 ⚠ Constraints — numbering continues from `C-104` (`PHN-5`)
 
@@ -290,27 +385,46 @@ order ships.
 
 `MessageBubble.razor:49-50`: `DisplayText => string.IsNullOrEmpty(Message.Text) ? "(no text)" : Message.Text!`.
 A speak helper fed `DisplayText` would say the literal words *"no text"* aloud. The button must be
-**absent** on a bubble with no text, not present and speaking a placeholder (Task 4).
+**absent** on a bubble with no text, not present and speaking a placeholder (**Task 3** — the
+original said Task 4, which is the panel).
+
+✅ **Re-verified at `656f58e6`: `MessageBubble.razor` was NOT touched by `PHN-4`.** It is still 56
+lines, and `:9`, `:49-50` and every other anchor this plan takes into it are byte-identical. It is
+the one file in this row that needed no repair.
 
 ---
 
-**`C-115` — `PHN-4` edits the same 442-line file. Sequential, not concurrent.**
+**~~`C-115` — `PHN-4` edits the same 442-line file. Sequential, not concurrent.~~ ✅ RETIRED
+2026-09-05 — `PHN-4` MERGED. There is no sequencing constraint on this row any more.**
 
-`PhoneTextsPanel.razor` is touched by both rows, and the overlap of *regions* is near-zero:
+⛔ **Struck through rather than deleted, because the queue row still carries a copy of this
+instruction** (*"both edit that one 442-line file, so claim them SEQUENTIALLY, never concurrently"*)
+and a reader arriving from there needs to see it was retired on evidence, not dropped. §9 gives the
+replacement wording for that cell.
 
-| Region | `PHN-3` | `PHN-4` |
+`PHN-4` shipped as [#578](https://github.com/mmackelprang/RTest/pull/578) (`a43c377c`). What it did
+to the file this constraint was about:
+
+| | At `6c220461` (planned) | At `656f58e6` (now) |
 |---|---|---|
-| `.msg-list` list branch, the `<MessageBubble …>` call — `:82-98` | ✅ **its only edit here** | ❌ |
-| `ComposeBar()` `:259-279` + call sites `:101`, `:138` | ❌ | ✅ deleted |
-| New-recipient mode `:104-140`; draft path; `New message` `:175-178` | ❌ | ✅ deleted |
+| `PhoneTextsPanel.razor` length | **442 lines** | ⭐ **258 lines** |
+| The `<MessageBubble …>` call | `:82-98`, three parameters | ⭐ **`:99`, ONE parameter** — `<MessageBubble Message="captured" />` |
+| The `.msg-list` list branch around it | — | `:82-101` |
+| `ComposeBar()` `:259-279` + call sites `:101`, `:138` | present | ⭐ **deleted** |
+| New-recipient mode `:104-140`, draft path, `New message` `:175-178` | present | ⭐ **deleted** |
+| `ResolveThreadName` | `:413-430` | ⭐ **`:229-246`, and now takes `SmsThreadDto`** — see `C-108` |
+| `RetrySend`, `StatusFor`, `_statusById`, `SendStatus` use | present | ⭐ **deleted** |
 
-**So they do not fight over content — they fight over line numbers.** `PHN-4`'s own queue cell warns
-its numbers need re-verifying before editing; the same applies here in reverse. ⚠ **Claim them in
-either order, never concurrently** — the same instruction the queue already gives for `GV-9` vs
-`PHN-4`. Neither is a dependency of the other.
+**The two rows never fought over content, only over line numbers — and now there is nothing to fight
+with.** No other row is queued against this file: `GV-9`, the row `PHN-4`'s own cell paired itself
+with, was about the empty-state block and the thread list, and `PHN-4` removed the `New message`
+button that created the collision. **Claim `PHN-3` whenever it is next in the queue.**
 
-⚠ **And `design-system.css:5842-5859` is LIVE** — `.msg-list`, `.msg-bubble`, `.skeleton-feed-chip`.
-`PHN-4`'s brief once cited it as dead. This row **adds** rules near it and must delete none.
+✅ **`design-system.css:5842-5859` is still LIVE and still must not be deleted** — `.skeleton-feed-chip`
+(`:5843`), `.msg-list` (`:5846`), `.msg-bubble` (`:5852`). `PHN-4`'s brief once cited it as dead; the
+row correctly did not delete it, and its actual CSS deletions were at `:5916-5926`
+(`.texts-compose-new`, `.texts-recipient-error`, `.texts-compose-input`), **entirely below every
+anchor this plan uses**. This row **adds** rules near them and must delete none.
 
 ### 0.8 What this row is NOT
 
@@ -338,7 +452,9 @@ either order, never concurrently** — the same instruction the queue already gi
 
 ADR-029 §4.2 (`:222`) and the handoff's component table (`:703`) both say the composition happens in
 `Radio.Web` and names it `GvSpeechText.ForMessage`. **Verified absent:**
-`grep -rn "GvSpeechText|ForMessage|StartSpeechAsync" src/` returns nothing.
+`grep -rn "GvSpeechText|ForMessage|StartSpeechAsync" src/` returns nothing. ✅ **Re-run at
+`656f58e6`, widened to include `msg-row-inbound` and `msg-speak-btn` — still zero matches across all
+of `src/`.** Nothing about this row was partially built by `PHN-4` or anything since.
 
 `Radio.API` speaks a finished string; it must not learn about MMS prefixes or emoji. The in-tree
 precedent for a pure static text helper in the Web models is `GvCounterparty` and `GvDirection` in
@@ -592,13 +708,18 @@ tests, not by a line in this file.
 ### Task 3 — `MessageBubble` gains the button
 
 **File:** `src/Radio.Web/Components/Pages/MessageBubble.razor` (56 lines today; **no `.razor.css`
-sidecar** — the styles go in `design-system.css`, Task 6).
+sidecar** — the styles go in `design-system.css`, **Task 5**).
 
 **Verified starting point:** the file has no wrapper element, no gutter, no button, no injected
 service and no `IDisposable`. `.msg-bubble` is the outermost element and the only branch is
 `@if (IsOutbound)`.
 
 Wrap the **inbound** path only, exactly as the handoff specifies (`:316-329`):
+
+⚠ **The three `@using` lines below are redundant and can be dropped.** `Radio.Web.Models`,
+`Radio.Web.Services` and `Radio.Web.Services.ApiClients` are all in `Components/_Imports.razor`
+(verified at `656f58e6`). The file already carries a redundant `@using Radio.Web.Models` at `:1`, so
+matching it is harmless — but do not add the other two believing they are required.
 
 ```razor
 @using Radio.Web.Models
@@ -774,11 +895,26 @@ The state machine, copied from `VoicemailPlayer.razor`:
 presentational bubble should not own a toast host. The panel raises it (Task 5).
 
 ⛔ **The button sits OUTSIDE `.msg-bubble`, in the wrapper.** That is the handoff's placement rule
-(`:325`) and it also sidesteps a live hazard: `MessageBubble.razor:9` binds `@onclick="OnFailedClick"`
-on the bubble root **unconditionally**. A button nested inside it would bubble its click into that
-handler and would need `@onclick:stopPropagation="true"` (the in-repo precedent is
-`CastDeviceDropdown.razor`, per `CLAUDE.md` § *UI/UX Patterns*). **Placing it outside means the
-question does not arise** — do not "simplify" by moving it in.
+(`:325`), and it is the reason that survives `PHN-4` intact.
+
+⚠⚠ **REPAIRED — the secondary argument for this placement got weaker, and a Builder who checks it
+will find it inert. It is still the right placement.** This plan also justified the wrapper by a
+click-bubbling hazard: `MessageBubble.razor:9` binds `@onclick="OnFailedClick"` on the bubble root
+**unconditionally**, so a nested button would need `@onclick:stopPropagation="true"` (the in-repo
+precedent is `CastDeviceDropdown.razor`, per `CLAUDE.md` § *UI/UX Patterns*).
+
+**That binding is still there — but since `PHN-4` it can no longer fire.** `OnFailedClick` guards on
+`IsFailed`, `IsFailed` is `Status == SendStatus.Failed`, and the component's only call site
+(`PhoneTextsPanel.razor:99`) stopped passing `Status` at all, so it defaults to `None` forever. The
+handler is a **guaranteed no-op**.
+
+⛔ **Do not read that as permission to move the button inside the bubble.** Three reasons the
+placement is unchanged: (1) the handoff specifies the gutter at `:325` and that is the governing
+instruction, not the hazard; (2) `MessageBubble` **keeps** the `Status` parameter deliberately —
+`PhoneTextsPanel.razor:94-98` says so in its own comment, because outbound bubbles still render for
+messages sent from the phone itself — so the dead branch is dormant, not removed, and anything that
+revives it revives the hazard; (3) a 44px control inside a `max-width: 72%` bubble is not the layout
+the `§Ph` CSS in Task 5 is written for.
 
 ---
 
@@ -786,54 +922,122 @@ question does not arise** — do not "simplify" by moving it in.
 
 **File:** `src/Radio.Web/Components/Pages/PhoneTextsPanel.razor`
 
-⚠ **Re-verify every line number before editing** — the file is 442 lines and `PHN-4` and `GV-9` are
-both queued against it (`C-115`).
+⚠⚠ **THIS TASK WAS REWRITTEN IN THE `PHN-4` REPAIR PASS. The original version referenced three
+members that no longer exist and would not have compiled.** See §0.0. The file is **258 lines**, not
+442; `PHN-4` has merged; **no other row is queued against it**, so there is no sequencing constraint
+and no "re-verify before editing" caveat left to honour. The anchors below were read out of
+`656f58e6` directly.
 
-The **only** markup edit is the `<MessageBubble>` invocation in the list branch (`:94-96` at
-`6c220461`):
+#### 4a. The markup edit — one line, two added attributes
+
+The **only** markup edit is the `<MessageBubble>` invocation in the list branch. At `656f58e6` it is
+**`PhoneTextsPanel.razor:99`**, a single line inside the `else if (Messages != null)` branch
+(`:82-101`):
 
 ```razor
-    <MessageBubble Message="captured"
-                   Status="StatusFor(captured)"
-                   SenderName="@SpeakableSenderName"
-                   OnSpeakFailed="OnSpeakFailedAsync"
-                   OnRetry="@(() => RetrySend(captured))" />
+          <MessageBubble Message="captured" />
 ```
 
-and one computed property plus the toast handler:
+becomes:
+
+```razor
+          <MessageBubble Message="captured"
+                         SenderName="@SpeakableSenderName"
+                         OnSpeakFailed="OnSpeakFailedAsync" />
+```
+
+⛔ **Do NOT add `Status=` or `OnRetry=` back.** The original draft of this task carried
+`Status="StatusFor(captured)"` and `OnRetry="@(() => RetrySend(captured))"`; **`PHN-4` deleted
+`StatusFor`, `_statusById` and `RetrySend`**, and the four comment lines directly above this call
+(`:94-98`) exist to say those parameters are *deliberately* not passed. Re-adding either would
+re-introduce a send-path concept `D31` removed, and neither would compile.
+
+#### 4b. The sender name — two guard clauses, not one
 
 ```csharp
   /// <summary>
   /// The resolved contact name for this thread, or null when only an identifier is known.
   /// </summary>
   /// <remarks>
-  /// ⚠ NULL RATHER THAN THE NUMBER, and that is the whole reason this is not just HeaderName.
-  /// ResolveThreadName falls back to the raw CounterpartyNumber, and handoff :386 says "Do not read
-  /// the identifier aloud" — 14 of the 20 live threads have no resolvable name, so this is the
-  /// COMMON case, not an edge. A number leaking through here would be read digit by digit to the
+  /// ⚠ NULL RATHER THAN THE NAME PARAMETER AS-IS, and that is the whole reason this is not just
+  /// HeaderName. PhoneMessagesPanel.OpenThreadName (:321-337) is what feeds HeaderName, and it
+  /// falls back TWICE: to the bare CounterpartyNumber (:335) when no contact matches, and to the
+  /// raw thread id (:326) when the open thread is not in Threads at all. Handoff :386 says "Do not
+  /// read the identifier aloud", and 14 of the 20 live threads have no resolvable name — so this is
+  /// the COMMON case, not an edge. Either identifier leaking through here would be read out to the
   /// room. See plan PHN-3 C-108.
+  ///
+  /// ⚠ THE SECOND CLAUSE IS NOT BELT-AND-BRACES. HeaderNumber is OpenThreadNumber (:339), which is
+  /// "" when the thread is missing — exactly the case where HeaderName holds the thread id. An
+  /// equality test alone answers false there and speaks the id.
   /// </remarks>
   private string? SpeakableSenderName
   {
     get
     {
-      var name = ResolveThreadName();
-      return string.IsNullOrWhiteSpace(name) || name == HeaderNumber ? null : name;
+      var name = HeaderName;
+      if (string.IsNullOrWhiteSpace(name))
+      {
+        return null;
+      }
+
+      // No number resolved => the thread itself did not resolve, so HeaderName is an identifier.
+      if (string.IsNullOrWhiteSpace(HeaderNumber))
+      {
+        return null;
+      }
+
+      return name == HeaderNumber ? null : name;
     }
   }
 ```
 
-⚠ **`HeaderNumber` is a placeholder for whatever this file actually calls the raw identifier** —
-read `ResolveThreadName` (`:413-430`) and the header parameters (`:229`) and compare against the real
-member. The rule is *"if the resolved name is just the identifier, pass null"*; the spelling is the
-file's.
+✅ **`HeaderName` and `HeaderNumber` are real members, verified — the original's "placeholder"
+caveat is resolved.** They are `[Parameter] public string? HeaderName` / `HeaderNumber` at
+`PhoneTextsPanel.razor:199-200`, fed from `PhoneMessagesPanel.razor:192-193`.
 
-The toast handler uses the panel's existing notification mechanism — **read how `RetrySend`'s failure
-path surfaces its message and copy it**, rather than introducing a second toast route:
+⛔ **Do not route this through `ResolveThreadName`.** After `PHN-4` its signature is
+`ResolveThreadName(SmsThreadDto t)` (`:229-246`) and its only caller is the **thread-list** branch at
+`:169`. Conversation mode holds no `SmsThreadDto` for the open thread, so there is nothing to pass
+it. Reconstructing one from `Threads.FirstOrDefault(...)` would duplicate
+`PhoneMessagesPanel.OpenThreadData` (`:316-317`) and give the name **two** resolution paths that can
+disagree. `C-108`.
+
+#### 4c. The toast — `PHN-4` deleted the pattern this was told to copy
+
+⚠⚠ **The original instruction was *"read how `RetrySend`'s failure path surfaces its message and
+copy it"*. `RetrySend` is gone, and it took the panel's only failure-surfacing path with it.**
+`PhoneTextsPanel` injects **`IJSRuntime` and nothing else** (`:3`); there is no `ShowErrorToast` in
+the file, in `Radio.Web`, or anywhere in the repo.
+
+**The house mechanism is Radzen's `NotificationService`**, and injecting it into this panel matches
+existing practice rather than inventing a route: `PhonePage.razor:8` injects it, and three *shared*
+components do too — `NowPlayingPanel.razor`, `QueueHistoryPanel.razor`, `RadioControlPanel.razor` —
+so a non-page component owning its own toast is established. `Radzen` and `Radzen.Blazor` are in
+`Components/_Imports.razor`, so `NotificationSeverity` needs no `@using`.
+
+Add to the panel's directive block, beside the existing `@inject IJSRuntime JS`:
+
+```razor
+@inject NotificationService NotificationService
+```
+
+and the handler:
 
 ```csharp
   /// <summary>Handoff §Cross-5 :174 — a synthesis failure is a TOAST, not an inline state.</summary>
-  private Task OnSpeakFailedAsync(string? reason) => ShowErrorToast(
+  /// <remarks>
+  /// ⚠ Warning, not Error: the message is still on screen and still readable by eye — nothing was
+  /// lost, one affordance did not work. PhonePage.razor:533 uses the same severity for the same
+  /// shape of failure ("Couldn't refresh" / "Showing the last update").
+  ///
+  /// ⚠ NEVER put the message body, the sender or the number in a toast argument. Radzen toasts are
+  /// rendered on the kiosk in a family room and this row's whole subject matter is private SMS
+  /// content. The reason code is all that crosses this boundary. Same instruction as Task 1's
+  /// "never log text", and the sibling of PHN-5's concern.
+  /// </remarks>
+  private void OnSpeakFailedAsync(string? reason) => NotificationService.Notify(
+    NotificationSeverity.Warning,
     "Couldn't read that message.",
     reason switch
     {
@@ -843,9 +1047,20 @@ path surfaces its message and copy it**, rather than introducing a second toast 
     });
 ```
 
+⚠ **`Notify` returns `void`.** `EventCallback<string?>` binds a `void` handler fine, so the
+`Task`-returning signature the original sketch used is unnecessary — but if Builder prefers the async
+shape for symmetry, `Task OnSpeakFailedAsync(...) { NotificationService.Notify(...); return
+Task.CompletedTask; }` is equivalent. **Do not `await` anything here**; there is nothing to await and
+a toast must not delay the button returning to rest.
+
 The first two strings are copy the handoff does not specify. `TextTooLong` should be unreachable
 (Task 2 caps at the same number) and is a backstop for a server configured below the client's cap
 (`C-106`). ⚠ **Both are new copy and §8 flags them for the Designer.**
+
+⚠ **`PhoneTextsPanelTests.cs` was rewritten by `PHN-4`** (124 lines changed) and no longer sets up a
+composer. It renders the panel directly, so **adding an injected service to the panel will break
+every test in that file until `Services.AddSingleton<NotificationService>()` is added to the bUnit
+`TestContext`.** Expect that, rather than reading it as a regression.
 
 ---
 
@@ -856,11 +1071,26 @@ The first two strings are copy the handoff does not specify. `TextTooLong` shoul
 Add the handoff's §Ph block (`:331-371`) **unchanged** — it is quoted in full in the handoff and
 every token it uses was verified to exist: `--surface-separator` (`:68`), `--accent-primary` (`:72`),
 `--accent-dim` (`:76`), `--text-low` (`:96`), `--touch-compact` 44px (`:130`), `--sp-2` (`:134`).
+✅ **All six re-verified at `656f58e6`** — `PHN-4`'s only edit to this file was at `:5916-5926`, far
+below the `:root` block, so none of them moved.
 
 ⛔ **No `:root` changes.** Handoff `:25`, `:707`. Zero new custom properties are required.
 
-Place it **after** the existing `.msg-*` rules (which end at `design-system.css:5914`), not inside
-them.
+**Where to put it — re-derived at `656f58e6`:**
+
+| Landmark | Line | Note |
+|---|---|---|
+| `/* -- §Ph Text message bubbles (PR3, handoff verbatim) -- */` | `:5845` | start of the block these rules join |
+| `.msg-bubble { max-width: 72% … }` | `:5853` | ✅ unchanged — the number the `calc()` preserves |
+| `.msg-day-sep` closing brace | ⭐ **`:5887`** | **end of the §Ph bubble block; insert here** |
+| `/* -- §Ph Texts: thread list, conversation, compose (PR3) -- */` | `:5889` | the next section — do not land inside it |
+| `.texts-conversation .msg-list { … }` | `:5914` | ✅ still at `:5914`; the original anchor |
+
+⚠ **The original said "after the existing `.msg-*` rules, which end at `:5914`". That anchor is
+still literally correct — `:5914` is unchanged — but it is the wrong landmark**, because `:5914` is a
+`.texts-conversation .msg-list` override sitting inside the *Texts layout* section, three rules past
+where the bubble block ends. **Insert after `:5887`**, so `.msg-row-inbound` / `.msg-speak-btn` /
+`.msg-bubble.speaking` sit with the bubble rules they modify rather than in the pane-layout section.
 
 ⚠ **Three things about that block worth not re-deriving:**
 
@@ -871,12 +1101,26 @@ them.
    transport buttons use `inset`. That is deliberate — this button sits in empty gutter space, so an
    inset ring would be invisible against the background.
 3. `--touch-compact` (44px) rather than `--touch-min` (48px), matching the established chip spine
-   (`.vm-chip`, `.feed-chip`) and the global `button { min-height: 44px }` floor at `:1292`.
+   (`.vm-chip`, `.feed-chip`) and the global button floor — ⭐ **which is
+   `button, .rz-button { min-width: var(--touch-compact); min-height: var(--touch-compact); }` at
+   `design-system.css:1330`, not `:1292` as this plan originally said.** `:1292` is inside
+   `.checkmark-icon` and has nothing to do with touch targets. **A pre-existing bad anchor, not a
+   `PHN-4` casualty** — it was already wrong at `6c220461`. Note also that the floor is expressed as
+   the *token*, not a literal `44px`, so it tracks `--touch-compact` automatically.
 
 ⚠ **`.msg-bubble.speaking` sets `border-color` only**, so it composes with `.msg-bubble.inbound`'s
-own `1px solid var(--surface-separator)` rather than replacing it. And it cannot collide with
-`.failed`: `StatusFor` reads `_statusById`, populated only on the outbound optimistic-send path, so
-an inbound bubble's status is always `None`.
+own `1px solid var(--surface-separator)` (`:5859-5864`) rather than replacing it.
+
+⚠⚠ **REPAIRED — the `.failed` non-collision argument was correct but its evidence was deleted, and
+the replacement is stronger.** The original reasoned: *"it cannot collide with `.failed`: `StatusFor`
+reads `_statusById`, populated only on the outbound optimistic-send path."* **`PHN-4` deleted
+`StatusFor` and `_statusById`.** The conclusion now rests on something simpler and harder to break:
+**the only call site never passes `Status` at all** (`PhoneTextsPanel.razor:99`), so it takes its
+default `SendStatus.None`, so `StatusClass` is `""` and `.msg-bubble.failed` (`:5872-5876`) can never
+be applied to any bubble on this surface — inbound or outbound. ⛔ **Do not delete
+`.msg-bubble.failed` or `.msg-bubble.sending` on the strength of that.** They are dormant, not dead:
+`MessageBubble` keeps the `Status` parameter deliberately (`PhoneTextsPanel.razor:94-98` says why),
+and removing the CSS would make reviving it silently ugly. **This row adds rules and deletes none.**
 
 ---
 
@@ -930,8 +1174,13 @@ sender"*. The queue records a `PHN-2` review defect about that label; it is guar
    requires this file to be updated when the phone integration changes.
 3. **`design/FUTURE-WORK.md`** — record the two items §7 defers.
 4. **`docs/BUILDER_QUEUE.md`** — Builder marks the row ✅ at merge.
-5. **`docs/HANDOFF-GA-PUNCH-LIST.md`** — flip `PHN-3`'s **`Queued?`** cell from **`No`** to a link to
-   the row. ⚠ **The §9 tier counts do NOT move** — see §5.
+5. **`docs/HANDOFF-GA-PUNCH-LIST.md`** — ✅ **ALREADY DONE; do not do it again.** The `Queued?` cell
+   at `:1066` was flipped in the same commit that created this plan (`29bc6244`) and now reads
+   *"✅ **YES — corrected 2026-09-05.** Row created in `BUILDER_QUEUE.md` 📋 with a written plan…"*.
+   ⚠ **A Builder acting on the original instruction would look for a `No` that is not there** and
+   either edit the wrong cell or report the step blocked. **What is still Builder's at merge** is the
+   §9 P1 count — see §5, which has itself been corrected. ⚠ **The §9 tier counts do NOT move for
+   *queueing***; they move when this row ships.
 
 ---
 
@@ -979,17 +1228,30 @@ prepending a lead-in produces a string over the limit, and the server **rejects*
 truncates (`C-106`) — so the bug's symptom is a 400 on exactly the messages that have a resolved
 sender, which is the 30% of threads a demo would use.
 
-⚠ **`MaxChars_MatchesTheServersDefault` requires `Radio.Web.Tests` to reference `Radio.Core`.**
-Verify that it does before writing it; if it does not, assert against the literal `1000` **and say in
-the test's comment that the coupling is unpinned**, rather than adding a project reference for one
-assertion.
+✅ **`MaxChars_MatchesTheServersDefault` is writable as specified — the open question is resolved.**
+`Radio.Web.Tests.csproj:40` references `Radio.Web.csproj`, and `Radio.Web.csproj:17` references
+`Radio.Core.csproj`; project references flow transitively by default, so
+`Radio.Core.Configuration.GvMediaOptions` is reachable from the test project **without adding a
+reference**. Assert `GvSpeechText.MaxChars == new GvMediaOptions().MaxSpeechChars` directly — the
+fallback to a literal `1000` with an "unpinned coupling" comment is **not** needed and should not be
+used. (§6.2 item 5 named this rather than assuming it; this repair pass settled it.)
 
 ### 4.2 `T2` — `MessageBubble`
 
-**File:** `tests/Radio.Web.Tests/Components/MessageBubbleTests.cs` (extend if it exists).
+**File:** `tests/Radio.Web.Tests/Components/MessageBubbleTests.cs` — ✅ **it exists (58 lines, six
+tests); extend it.** `PHN-4` did not touch it.
 
 bUnit, with `JSInterop.Mode = JSRuntimeMode.Loose` (project memory: required for components using JS
 interop) and a fake `EventPlaybackApiService`.
+
+⚠ **Two of the six existing tests now cover a code path production cannot reach**, and Builder should
+know that before reading a green suite as coverage. `Sending_ShowsDimAndSpinner` (`:40-47`) and
+`Failed_ShowsRetryAffordance` (`:49-57`) both set `MessageBubble.SendStatus` explicitly — but since
+`PHN-4` the only production call site never passes `Status` (`PhoneTextsPanel.razor:99`), so those
+two states are unreachable on the live surface. ⛔ **Leave them.** They guard the dormant parameter
+`MessageBubble` deliberately keeps, and deleting them would remove the only thing standing between a
+future revival and a silent regression. **Just do not count them as evidence about the speak button**
+— and note that `Failed_ShowsRetryAffordance` is the reason `.msg-bubble.failed` must survive Task 5.
 
 | Test | Mutation |
 |---|---|
@@ -1024,6 +1286,30 @@ returns `(null, "Unreachable")`.
 > **Mutation:** add `mediaId = (string?)null` to the anonymous body. ⚠ **Check whether that actually
 > serialises** — if `null` members are omitted by the configured `JsonSerializerOptions` the arm
 > check still passes, and the test proves less than it appears to. Report which.
+
+### 4.3b ⭐ `T4` — `PhoneTextsPanel`'s sender-name guard (ADDED BY THE `PHN-4` REPAIR PASS)
+
+**File:** `tests/Radio.Web.Tests/Components/PhoneTextsPanelTests.cs` (extend — `PHN-4` rewrote it,
+124 lines changed, and it no longer sets up a composer).
+
+**Why this section did not exist before:** the original plan put `SpeakableSenderName` behind a
+single equality test and treated it as too small to pin. `C-108`'s repair added a **second** guard
+clause for a fallback that only became visible when `PHN-4`'s deletions exposed how `HeaderName` is
+actually produced. **A guard added without a test is exactly the shape that gets "simplified" back
+out by the next reader**, and the failure it prevents is audible: a phone number or a raw GV thread
+id read to the room.
+
+| Test | Setup → expected | Mutation that must fail it |
+|---|---|---|
+| `SenderName_IsPassedWhenAContactNameResolved` | `HeaderName="Jane"`, `HeaderNumber="+15551234567"` → bubble receives `"Jane"` | pass `null` unconditionally |
+| ⭐ `SenderName_IsNullWhenTheNameIsJustTheNumber` | `HeaderName="+15551234567"`, `HeaderNumber="+15551234567"` → `null` | delete the equality clause |
+| ⭐⭐ `SenderName_IsNullWhenNoNumberResolved` (the new clause) | `HeaderName="t_abc123"` (a thread id), `HeaderNumber=""` → `null` | delete the `IsNullOrWhiteSpace(HeaderNumber)` clause — **this is the mutation that speaks an identifier aloud** |
+| `SenderName_IsNullWhenHeaderNameIsEmpty` | `HeaderName=null`/`""` → `null` | delete the first clause |
+| `SpeakFailure_RaisesAWarningToastAndNoMessageContent` | invoke `OnSpeakFailed` with `"Unreachable"` → one `NotificationService` message; ⭐ **assert the body text contains neither the message text nor the number** | put `reason` or the body into the toast detail |
+
+⚠ **The panel now needs `NotificationService` registered in the bUnit `TestContext`**
+(`Services.AddSingleton<NotificationService>()`) — Task 4c. Without it every existing test in this
+file fails on resolution, which is a setup error, not a regression.
 
 ### 4.4 Gates
 
@@ -1069,12 +1355,19 @@ ceremony — but if the new bubble styles do not appear, that is the first thing
 `docs/HANDOFF-GA-PUNCH-LIST.md` §9 is explicit that counts are corrected **visibly**, so the
 no-change is stated rather than left to inference.
 
-- **`PHN-3`'s `Queued?` cell (`:1066`) changes `No` → a link to the new row.** That is the one cell
-  this pass falsifies, and it is corrected in the same pass.
-- ⛔ **The §9 P1 count does NOT change.** It reads *"38 listed, 34 open"*, and `PHN-3` is **already in
-  that list** (`:1346`). Queueing a row is not shipping it: `listed` is unchanged because the item was
-  always listed, and `open` is unchanged because it is still open. The count moves when the row
-  merges, and it is **Builder's** to move then.
+- ✅ **`PHN-3`'s `Queued?` cell (`:1066`) has already been changed** from `No` to a link to the new
+  row, by the planning commit `29bc6244`. Verified at `656f58e6`. **Task 7 item 5 is a no-op** and
+  now says so.
+- ⛔ **The §9 P1 count does NOT change *for queueing*.** ⚠⚠ **REPAIRED — the number quoted here is
+  stale.** This section said the cell *"reads `38 listed, 34 open`"*. At `656f58e6` `:1346` reads
+  ⭐ **`38 listed, 33 open`** — **`PHN-4` shipped and struck itself through**, taking the open figure
+  down by one. The *reasoning* is untouched and still correct: `PHN-3` is **already in that list**,
+  so `listed` is unchanged because the item was always listed, and `open` is unchanged because it is
+  still open. ⚠ **The consequence of the stale number is not cosmetic** — a Builder who at merge time
+  edits `34 → 33` would silently undo `PHN-4`'s correction and put the count back where it was two
+  rows ago. **The edit at merge is `33 → 32`.**
+- ⚠ **And `PHN-4` is now struck through in that same cell** with *"✅ shipped 2026-09-05 — resolved by
+  deletion"*. Leave it struck; do not re-count it.
 - ⛔ **`PHN-5` touches no count at all** — it has no punch-list row (punch list `:1441` records that
   it *"was minted past"* the `PHN-1…PHN-4` mapping and lives only in the queue).
 
@@ -1108,24 +1401,73 @@ no-change is stated rather than left to inference.
   **no name field**, which is `C-108`.
 - The `PHN-4` and `GV-9` queue cells, for `C-115`'s ordering claim.
 
+⚠ **Everything in the two bullets above was invalidated or retired by `PHN-4`.** See §6.1b.
+
+### 6.1b ⭐ What was re-verified first-hand at `656f58e6` (the `PHN-4` repair pass)
+
+**Read directly out of the working tree, not offset from the old numbers:**
+
+- **`git show a43c377c`** in full — `PHN-4`'s merge commit, its message, and its 15-file stat. The
+  structural changes, not just the displacement, drove every edit in this pass.
+- **`PhoneTextsPanel.razor` in full (258 lines)** — the `<MessageBubble>` call at `:99`, the list
+  branch `:82-101`, the parameters `:188-201`, `ResolveThreadName(SmsThreadDto)` `:229-246`, and the
+  injected services (`:3` — `IJSRuntime` only). Confirmed **absent**: `RetrySend`, `StatusFor`,
+  `_statusById`, `SendStatus` use, `ShowErrorToast`, any notification service.
+- **`MessageBubble.razor` in full (56 lines)** — ✅ **untouched by `PHN-4`**, every anchor stands.
+- **`PhoneMessagesPanel.razor`** — the `<PhoneTextsPanel>` call `:185-194`, `OpenThreadData`
+  `:316-317`, `OpenThreadName` `:321-337` (**both fallbacks**), `OpenThreadNumber` `:339`. This is
+  where `C-108`'s second guard clause came from.
+- **`design-system.css`** — the six tokens (`:68`, `:72`, `:76`, `:96`, `:130`, `:134`), the §Ph
+  bubble block `:5845-5887`, `.msg-bubble` `:5852-5858`, the real button floor at **`:1330`**, and
+  `PHN-4`'s actual deletions at `:5916-5926`.
+- **`ApiModels.cs`** — `SmsMessageDto` `:1138-1145` ✅, `SmsThreadDto.CounterpartyName` `:1150` ✅,
+  `EventPlaybackSnapshotDto.IsLive` **`:1524-1525`**, and `PHN-4`'s edit at `:1182-1188`.
+- ⭐ **`EventPlaybackService.cs:222` read directly** — the 409 gate is `RemoteMedia`-only. This
+  closes the plan's largest inherited assumption; see §0.5.
+- **`Radio.Web.Tests.csproj:40` → `Radio.Web.csproj:17` → `Radio.Core`** — the transitive reference
+  §4.1 needed.
+- **`MessageBubbleTests.cs` (58 lines)** and the `Radio.Web.Tests` tree — `Models/`, `Services/` and
+  `Services/ApiClients/` all exist, so every new test file has a home.
+- **`Components/_Imports.razor`** — `Radzen`, `Radzen.Blazor`, `Radio.Web.Models`,
+  `Radio.Web.Services` and `Radio.Web.Services.ApiClients` are **global**, so Task 3's three
+  `@using` lines and Task 4's `NotificationSeverity` need no import.
+- **`docs/HANDOFF-GA-PUNCH-LIST.md`** — `:1066` (already flipped to `Yes`) and `:1346` (**33 open**,
+  not 34).
+- ⛔ **The design handoff and ADR-029 were NOT re-read** — `git diff 6c220461 HEAD` shows neither
+  file changed, so every `:NNN` anchor into them is inherited unverified but unmoved. Stated so it
+  is not mistaken for a fresh reading.
+
 ### 6.2 What could not be verified, and what it costs
 
-1. **Nothing here was built or run.** Every code block is written against read source.
-2. **`EventPlaybackService.cs:222`'s 409 gate being `RemoteMedia`-only** was read from a report of the
-   code, not from the line itself. §0.5 marks it ⚠ **re-verify** because the whole UAT plan assumes
-   Feature B works with `GvMedia:Enabled` false. **If it is wrong, §4.5 needs a config change first.**
-3. **The panel's toast mechanism** (Task 4). `ShowErrorToast` is a placeholder for whatever
-   `PhoneTextsPanel` actually uses; the existing failure path of `RetrySend` was not traced. Builder
-   copies the real one.
-4. **`HeaderNumber`** (Task 4) is likewise a placeholder for the file's real member name.
-5. **Whether `Radio.Web.Tests` references `Radio.Core`** (§4.1's last test). Named rather than
-   assumed.
+1. **Nothing here was built or run.** Every code block is written against read source. ⚠ **Still
+   true after the repair pass** — this was a documentation repair, and no `dotnet build` or
+   `dotnet test` was run.
+2. ✅ **RESOLVED by the repair pass — `EventPlaybackService.cs:222`'s 409 gate IS `RemoteMedia`-only.**
+   Read directly at `656f58e6` rather than from a report of the code. §0.5 carries the line verbatim.
+   **§4.5 needs no config change**, which was the consequence hanging on it.
+3. ✅ **RESOLVED, and the answer was that the premise had been deleted.** `ShowErrorToast` was a
+   placeholder for *"whatever `PhoneTextsPanel` actually uses"*, and the instruction was to copy
+   `RetrySend`'s failure path. **`PHN-4` deleted `RetrySend`, and the panel has no notification
+   route at all.** Task 4c now names the mechanism (Radzen `NotificationService`, with three in-repo
+   precedents) instead of pointing at one that no longer exists. ⭐ **This is the item where "could
+   not verify" was doing real work** — had it been asserted rather than flagged, Builder would have
+   spent the search before discovering there was nothing to find.
+4. ✅ **RESOLVED — `HeaderNumber` is real**, `PhoneTextsPanel.razor:200`, and so is `HeaderName`
+   (`:199`). Not placeholders. ⚠ **But tracing them upstream found a second fallback the guard did
+   not cover** — see `C-108` and §4.3b.
+5. ✅ **RESOLVED — `Radio.Web.Tests` reaches `Radio.Core` transitively.** §4.1 no longer offers the
+   literal-`1000` fallback.
 6. **The emoji ranges are an approximation** and are documented as one in the code. No test can prove
    "all emoji"; the tests prove the handoff's example and the surrogate-pair property.
 7. **Nothing about how the resolved name reaches a thread whose contact resolution is async.**
-   `SpeakableSenderName` reads `ResolveThreadName()` at render time; whether that can transiently
-   return the number and later the name — producing a lead-in that changes between two taps — was
-   **not traced.** It degrades gracefully (worst case: no lead-in) and is worth a UAT glance.
+   ⚠ **REPAIRED — the mechanism is now concrete, and the risk is unchanged.** `SpeakableSenderName`
+   no longer reads a zero-arg `ResolveThreadName()` (which does not exist); it reads `HeaderName`,
+   which `PhoneMessagesPanel.OpenThreadName` (`:321-337`) computes at render time by walking the
+   `Contacts` list. **`Contacts` is a `[Parameter]` the parent fills asynchronously**, so the same
+   question stands: can it transiently yield the number and later the name, producing a lead-in that
+   changes between two taps? **Still not traced.** It degrades gracefully — both guard clauses fail
+   *closed*, so the worst case is a missing lead-in rather than a spoken number — and it is worth a
+   UAT glance (§4.5 item 18).
 
 ### 6.3 Handoff relationship: `follows`, with three deviations and one correction
 
@@ -1136,6 +1478,7 @@ no-change is stated rather than left to inference.
 | **deviates 2** | **`Waiting` added to §B4's state table**, rendering as `Preparing`. `C-107` — the handoff predates `PHN-1f`. |
 | **deviates 3** | **Two new error strings** (`TextTooLong`, `Unreachable`) beyond §Cross-5's one. Flagged to the Designer in §8. |
 | **corrects** | §B4/§B3/Q5's **engine story** — `C-105`. The handoff describes an `espeak-ng` pin the owner reversed and `TTS-9` deleted. Task 7 fixes the document. |
+| ⭐ **unchanged by the `PHN-4` repair** | **The relationship to the handoff did not move.** `PHN-4` touched no handoff section this row follows — it deleted §C's composer, and Feature B lives in §B and §Cross. All three deviations, the one correction, and every `:NNN` anchor into the handoff stand as written. **What the repair changed was the plan's anchors into the *tree*, not its relationship to the *design*.** Stated because "the plan was repaired" reads, wrongly, as "the design drifted". |
 
 ---
 
@@ -1173,3 +1516,61 @@ is a new offline engine.)*
 2. **Q2 is being answered "no hairline bar"** by this plan, on the handoff's own recommendation
    (`:311`). Say if that is wrong.
 3. **Q5 is closed, not open** (`C-105`), and Task 7 marks it so. Confirm.
+
+---
+
+## 9. ⭐ The `PHN-3` queue row needs three corrections — WORDING ONLY, NOT APPLIED HERE
+
+⛔ **`docs/BUILDER_QUEUE.md` was deliberately not edited by the repair pass.** A Builder was working
+the `PHN-5` row in the same file at the same time, and two writers in one queue file is how a row
+gets silently reverted. **The wording below is for whoever next has that file to themselves.** Until
+it is applied, ⚠ **the queue row's `PHN-4` clauses are stale and this plan's §0.0 is the authority.**
+
+The row is `PHN-3` in § Queue. Three cells carry claims `PHN-4` falsified.
+
+**(1) The Dependencies cell — the sequencing instruction is retired.** It currently reads:
+
+> **Not blocked by `PHN-4`** — they touch different regions of `PhoneTextsPanel.razor` (this row
+> edits only the `<MessageBubble>` call in the list branch), but **both edit that one 442-line file,
+> so claim them SEQUENTIALLY, never concurrently** — the same instruction already given for `GV-9`
+> vs `PHN-4`.
+
+**Replace with:**
+
+> ✅ **`PHN-4` has MERGED** ([#578](https://github.com/mmackelprang/RTest/pull/578)), so the
+> sequencing instruction that used to sit here is **retired** — no other row is queued against
+> `PhoneTextsPanel.razor`, and this row can be claimed whenever it reaches the front. ⚠ **The file
+> is now 258 lines, not 442, and `PHN-4` moved essentially every line in it.** The plan was repaired
+> against `656f58e6` — **read [§0.0](../design/plans/PHN-3-the-sms-speak-button.md) before editing
+> that file**, because three of the plan's original edits referenced members `PHN-4` deleted
+> (`StatusFor`, `RetrySend`, and a zero-arg `ResolveThreadName`) and would not have compiled.
+
+**(2) The description cell's scope claim — still true about the region, wrong about the shape.** It
+says this row *"edits only the `<MessageBubble>` call in the list branch"*. That remains the only
+**markup** edit, but it is no longer the only edit to the file: **Task 4c now injects
+`NotificationService` into the panel**, because `PHN-4` deleted `RetrySend` and with it the only
+failure-surfacing path the plan was told to copy. Amend to:
+
+> **In `PhoneTextsPanel.razor` this row edits the `<MessageBubble>` call in the list branch
+> (`:99` — one line, one parameter, since `PHN-4`), adds one computed property, injects
+> `NotificationService` for the §Cross-5 failure toast, and touches nothing else.**
+
+**(3) The description cell's point (4) cites a member that changed signature.** It currently says the
+lead-in *"must be null rather than the raw number, since `ResolveThreadName` falls back to one"*.
+After `PHN-4`, `ResolveThreadName` takes a `SmsThreadDto` and serves the thread list only; the
+conversation's name comes from `HeaderName` ← `PhoneMessagesPanel.OpenThreadName`. Amend to:
+
+> **and it must be null rather than an identifier** — `PhoneMessagesPanel.OpenThreadName` falls back
+> **twice**, to the bare number and then to the raw thread id, and the handoff forbids reading either
+> aloud (14 of 20 live threads have no resolvable name, so this is the common case). **Two guard
+> clauses, not one** — plan `C-108`.
+
+⛔ **Do not change the row's status, estimate, branch name or plan link.** It is still 📋, still
+**1.5–2 d** (§0.6 re-checked it), still `feat/phn-3-speak-a-text`, and the plan is still the same
+file.
+
+⚠ **One thing NOT to add:** the queue banner at the top of the file quotes the punch-list P1 count as
+*"38 listed, 34 open"*. **That is now `33 open`** because `PHN-4` shipped — but the banner is a dated
+historical entry describing the state at the time it was written, and rewriting history in a banner
+is worse than a stale number. **Correct the count only where it is being asserted as current**
+(punch list `:1346`, at merge, `33 → 32`), not in the archived banner. §5.
