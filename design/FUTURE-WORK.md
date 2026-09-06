@@ -1947,9 +1947,26 @@ a matched pair in `Deploy-ToLinux.ps1` and have to stay one here. The work is:
 > after the call and test the first non-zero one. The defect was observed before it was fixed: with
 > `ssh`/`scp` shimmed and the fallback forced, `main` exited **0** on a failed transfer and printed
 > no error at all, while the fixed script exits **1** with `API sync failed!` / `Web sync failed!`.
-> The rsync arm and the ssh-failure case behave identically before and after — only the two
-> scp-failure rows changed. **The `mv` masking this section describes in passing is NOT fixed; it is
-> section 27 below.**
+> ⚠ **"Only the scp" undersold it — there were TWO masked failures on this path, and the row
+> described one.** Measured per-call rather than by failing everything at once:
+>
+> | case | before | after |
+> |---|---|---|
+> | `scp` fails | **exit 0, no message** | exit 1, `API sync failed!` |
+> | prep `ssh` fails, tidy-up succeeds | **exit 0, no message** | exit 1, `API sync failed!` |
+> | tidy-up `ssh` fails | exit 1 | exit 1 — unchanged |
+> | rsync arm, either direction | 1 / 0 | 1 / 0 — unchanged |
+> | everything succeeds | exit 0 | exit 0 — unchanged |
+>
+> The prep `ssh` (`rm -rf … && mkdir -p …`) was masked by exactly the same mechanism and is **not
+> mentioned in the row**: its failure was overwritten first by `scp`'s exit code and then by the
+> tidy-up's. Because `scp -r` creates its own `-tmp` destination, the transfer proceeded, the `mv`
+> into the never-created staging dir failed into `/dev/null`, and the block reported success with
+> the staging directory absent. Making it fatal is intentional; it is a promotion of a
+> previously-ignored exit code of the kind this section's own "verify before tightening" gotcha
+> warns about, so it is called out rather than left for someone to discover.
+>
+> **The `mv` masking this section describes in passing is NOT fixed; it is section 27 below.**
 >
 > ⚠ **CORRECTION — "a path that is rarely taken" is false of the machine this deploy runs from.**
 > This section, and the `OPS-9` row that quoted it, called the fallback latent *because* `rsync` is
@@ -2058,12 +2075,15 @@ the legitimate no-dotfiles case, the way `OPS-7`'s config probe fails closed on 
 
 ### Gotchas
 
-- ⚠ **Reached only when `rsync` is absent from PATH**, same as section 26. It has never bitten and is
-  not urgent; it is filed so the next person to read that line knows the gate above it is narrower
-  than it looks.
+- ⚠ **The code path is NOT rare — read section 26's correction before repeating that.** It is
+  reached whenever `rsync` is absent from PATH, which on the dev box measured there means **every
+  deploy**. What is rare is the *triggering failure*: a genuine `mv` error, as distinct from the
+  ordinary no-dotfiles case that fails on every single run by design. So this line executes
+  constantly and has simply never had anything to hide.
 - ⚠ **`OPS-9` did not exercise this against a real target.** Its verification shimmed `ssh`/`scp` to
   prove the PowerShell exit-code sequencing, which says nothing about remote `mv` semantics. Anyone
   fixing this needs the fallback driven against an actual box.
 
-**Priority: low.** Latent behind a rare path, and the worst outcome is now partly covered by
-`OPS-7`'s `$moveExit` check.
+**Priority: low** — but on frequency of *failure*, not of the code path, which runs on every deploy
+from a machine without `rsync`. The worst outcome may also be partly covered by `OPS-7`'s
+`$moveExit` check, depending on the unmeasured rsync question above.

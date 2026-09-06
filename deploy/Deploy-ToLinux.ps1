@@ -193,6 +193,13 @@ try {
 # directory was there. So the message said "API sync failed!" while the value it read
 # came from the tidy-up, and a scp that transferred nothing reported success.
 #
+# TWO calls were masked that way, not one. A failing prep ssh was hidden the same way,
+# and OPS-9's row does not mention it: scp -r creates its own -tmp destination, so the
+# transfer went ahead, the mv into the staging dir that was never created failed into
+# /dev/null, and the block reported success with the staging dir absent. Its failure is
+# now fatal here. That is a deliberate tightening of a previously-ignored exit code, so
+# a deploy that used to limp past a broken prep step will now stop at it.
+#
 # The script-level $ErrorActionPreference = "Stop" does not cover this: whether a
 # failing native command throws is governed by $PSNativeCommandUseErrorActionPreference,
 # measured $false here on PowerShell 7.6.5. Setting it $true would make every native
