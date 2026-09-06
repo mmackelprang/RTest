@@ -195,12 +195,13 @@ try {
 #
 # The script-level $ErrorActionPreference = "Stop" does not cover this: whether a
 # failing native command throws is governed by $PSNativeCommandUseErrorActionPreference,
-# measured $false here on PowerShell 7.6.5. Setting it $true would change every other
-# $LASTEXITCODE check in this file, so the capture is done per call instead.
+# measured $false here on PowerShell 7.6.5. Setting it $true would make every native
+# call in this file throw on failure instead of falling through to its own check, so
+# it is not a local fix. The capture is done per call instead.
 #
 # Only the scp fallback was ever wrong — on the rsync path the rsync IS the last native
-# call before the check. It is captured the same way so this file has one idiom and not
-# two, which is the reason OPS-7 gave for capturing $moveExit at its call site below.
+# call before the check. It is captured the same way regardless, so this file has one
+# idiom rather than two; $moveExit below is the same shape.
 #
 # NOT CAUGHT HERE: the two `mv`s in the final ssh send stderr to /dev/null and are
 # chained with `;`, so that command's exit code is `rm -rf`'s no matter how the moves
