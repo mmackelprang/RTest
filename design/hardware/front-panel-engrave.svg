@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Front panel 16 x 6 in. User units are px at 72 dpi, so 72 units = 1 inch. -->
+<!-- Layers are separated by colour: reference=#0000ff, cut/engrave outlines=#000000, drill crosshairs=#000000, labels=#000000. -->
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="1152" height="432" viewBox="0 0 1152 432">
+<g id="reference-guides">
+  <rect id="lcd-reference" x="197.1" y="46.08" width="878.4" height="339.84" fill="none" stroke="#0000ff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect id="VESA-75-2-guide" x="530.0008" y="109.7008" width="212.5984" height="212.5984" fill="none" stroke="#0000ff" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="outlines">
+  <circle id="Panel-mounting-holes-1-1" cx="36" cy="36" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Panel-mounting-holes-1-2" cx="1116" cy="36" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Panel-mounting-holes-1-3" cx="36" cy="396" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Panel-mounting-holes-1-4" cx="1116" cy="396" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="VESA-75-2-1" cx="530.0008" cy="109.7008" r="6.75" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="VESA-75-2-2" cx="742.5992" cy="109.7008" r="6.75" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="VESA-75-2-3" cx="530.0008" cy="322.2992" r="6.75" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="VESA-75-2-4" cx="742.5992" cy="322.2992" r="6.75" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Volume-knob-hole-3" cx="90" cy="72" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Source-knob-hole-4" cx="90" cy="156.0024" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Presets-knob-hole-5" cx="90" cy="239.9976" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle id="Tuning-knob-hole-6" cx="90" cy="324" r="9" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect id="USB-cable-opening-7" x="164.7" y="226.08" width="25.2" height="36" rx="5.04" ry="5.04" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+<g id="drill-crosshairs">
+  <path id="Panel-mounting-holes-1-1-xh" d="M 22.68 36 L 49.32 36 M 36 22.68 L 36 49.32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Panel-mounting-holes-1-2-xh" d="M 1102.68 36 L 1129.32 36 M 1116 22.68 L 1116 49.32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Panel-mounting-holes-1-3-xh" d="M 22.68 396 L 49.32 396 M 36 382.68 L 36 409.32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Panel-mounting-holes-1-4-xh" d="M 1102.68 396 L 1129.32 396 M 1116 382.68 L 1116 409.32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="VESA-75-2-1-xh" d="M 518.9308 109.7008 L 541.0708 109.7008 M 530.0008 98.6308 L 530.0008 120.7708" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="VESA-75-2-2-xh" d="M 731.5292 109.7008 L 753.6692 109.7008 M 742.5992 98.6308 L 742.5992 120.7708" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="VESA-75-2-3-xh" d="M 518.9308 322.2992 L 541.0708 322.2992 M 530.0008 311.2292 L 530.0008 333.3692" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="VESA-75-2-4-xh" d="M 731.5292 322.2992 L 753.6692 322.2992 M 742.5992 311.2292 L 742.5992 333.3692" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Volume-knob-hole-3-xh" d="M 76.68 72 L 103.32 72 M 90 58.68 L 90 85.32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Source-knob-hole-4-xh" d="M 76.68 156.0024 L 103.32 156.0024 M 90 142.6824 L 90 169.3224" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Presets-knob-hole-5-xh" d="M 76.68 239.9976 L 103.32 239.9976 M 90 226.6776 L 90 253.3176" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+  <path id="Tuning-knob-hole-6-xh" d="M 76.68 324 L 103.32 324 M 90 310.68 L 90 337.32" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</g>
+</svg>
