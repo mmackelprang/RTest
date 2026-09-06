@@ -71,8 +71,18 @@ grep -E "Passed!|Failed!|error" /tmp/test.log
 
 Read the **per-project summary lines** (`Passed! - Failed: 0, Passed: 141, ...`), one per test
 project — a single missed `Failed: 4` is the whole point of the gate. Known-failing on Windows and
-not a regression: four `SrcVariableResamplerTests` (`libsamplerate.so.0`, `TEST-5`) and
-`NwsObservationIntegrationTests.RealNwsCall_*` (live network, `Category=Integration`, CI-excluded).
+not a regression: four `SrcVariableResamplerTests` (`libsamplerate.so.0`, `TEST-5`),
+`NwsObservationIntegrationTests.RealNwsCall_*` (live network, `Category=Integration`, CI-excluded),
+and `CoverArtPipelineIntegrationTests.CoverArtArchive_ReturnsValidUrl_ForKnownRecording` (added
+2026-09-06 — same shape: `Category=Integration`, live Cover Art Archive API, fails on a 15 s HTTP
+timeout, passes on re-run, and excluded by `build.yml:58`'s `Category!=Integration` filter, so CI
+never runs it).
+
+⚠ **The Release build baseline is 47 warnings, 0 errors** — measured on `main` 2026-09-06 while
+shipping `OPS-2`, with an identical warning histogram (all `IDE0011`) before and after the change.
+Earlier notes citing **53** are stale. The number matters because the gate is *equality with the
+baseline*, not an absolute: a Builder holding the wrong figure either waves through four new
+warnings or chases four that were never there.
 
 ## Solution Structure
 
