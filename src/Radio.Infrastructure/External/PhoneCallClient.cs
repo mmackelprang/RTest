@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.External;
+using Radio.Core.Utilities;
 
 namespace Radio.Infrastructure.External;
 
@@ -118,15 +119,22 @@ public class PhoneCallClient : IPhoneIntegrationService
     OnCallStateChangedWithName(state, phoneNumber, callerName: null);
   }
 
-  private void OnCallStateChangedWithName(string state, string phoneNumber, string? callerName)
+  /// <summary>
+  /// Handles a hub "CallStateChanged" with a caller name. <c>internal</c> rather than
+  /// <c>private</c> so <c>PhoneCallClientLogSafetyTests</c> can drive this method itself instead
+  /// of a copy of it — <c>Radio.Infrastructure.Tests</c> already has <c>InternalsVisibleTo</c>.
+  /// It is still registered as a method group on <c>_hubConnection.On&lt;string, string,
+  /// string&gt;("CallStateChanged", …)</c>, so the live path and the pinned path are one method.
+  /// </summary>
+  internal void OnCallStateChangedWithName(string state, string phoneNumber, string? callerName)
   {
     var parsedState = ParseCallState(state);
     _currentState = parsedState;
     _callerNumber = phoneNumber;
     _callerName = callerName;
 
-    _logger.LogInformation("Phone call state: {State}, Number: {Number}, Name: {Name}",
-      parsedState, phoneNumber, callerName ?? "(unknown)");
+    _logger.LogInformation("Phone call state: {State}, Number: {Number}, NameResolved: {NameResolved}",
+      parsedState, LogSafeText.ForPhone(phoneNumber), !string.IsNullOrWhiteSpace(callerName));
 
     CallStateChanged?.Invoke(this, new PhoneCallStateChangedEventArgs
     {

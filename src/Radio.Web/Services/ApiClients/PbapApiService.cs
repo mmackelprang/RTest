@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Radio.Core.Utilities;
 using Radio.Web.Models;
 
 namespace Radio.Web.Services.ApiClients;
@@ -101,7 +102,7 @@ public class PbapApiService
     }
     catch (Exception ex)
     {
-      _logger.LogDebug(ex, "PBAP number lookup failed for {Number}", phoneNumber);
+      _logger.LogDebug(ex, "PBAP number lookup failed for {Number}", LogSafeText.ForPhone(phoneNumber));
       return (ContactLookupOutcome.Unavailable, null);   // transient: retry later
     }
   }

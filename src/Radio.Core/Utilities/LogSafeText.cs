@@ -4,7 +4,8 @@ using System.Text;
 namespace Radio.Core.Utilities;
 
 /// <summary>
-/// Renders user-supplied text as a log-safe token: a stable hash prefix plus a character count.
+/// Renders a user-supplied value — free text, or a phone number — as a log-safe token: a stable
+/// hash prefix, plus a character count for text.
 /// </summary>
 /// <remarks>
 /// The shape deliberately mirrors <c>GvMediaCache.MaskFor</c> — a short literal prefix plus the
@@ -66,8 +67,65 @@ public static class LogSafeText
       return Empty;
     }
 
-    var hash = SHA256.HashData(Encoding.UTF8.GetBytes(text));
-    return string.Concat(
-      "txt:", Convert.ToHexString(hash, 0, 4).ToLowerInvariant(), "/", text.Length.ToString());
+    return Token("txt:", text, withLength: true);
+  }
+
+  /// <summary>The token for a null, empty, or digitless phone number.</summary>
+  public const string EmptyPhone = "phn:empty";
+
+  /// <summary>
+  /// Returns <c>phn:{8 hex}</c> for <paramref name="phoneNumber"/>, or <see cref="EmptyPhone"/>
+  /// when it is null, empty, or contains no digits.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ THE NUMBER IS NORMALISED BEFORE HASHING, and that is the whole reason this is a method
+  /// rather than a call to <see cref="For"/>. The same subscriber reaches these log lines in at
+  /// least three spellings — "+1 (555) 123-4567" from the hub, "15551234567" from PBAP,
+  /// "5551234567" after normalisation — and hashing the raw string would give one caller three
+  /// different tokens, which is strictly worse than the "***4567" form this replaced. Normalising
+  /// first is what makes the token answer "is this the same caller?", which is the only question
+  /// these lines are ever used for. See plan PHN-5 C-98.
+  ///
+  /// ⚠ NO LENGTH SUFFIX, unlike <see cref="For"/>, and the omission is deliberate. A phone
+  /// number's length is near-constant so it answers no triage question, and it would separate
+  /// national from E.164 format for free. GvMediaCache.MaskFor is the in-tree precedent for the
+  /// no-length variant; For's length is kept because "was this empty or absurd" is a real question
+  /// about an utterance and not about a number.
+  ///
+  /// ⚠ A non-empty input with no digits — "unknown", "Anonymous", "(withheld)" — normalises to
+  /// empty and returns EmptyPhone, the same token as null. That is the intended answer: both mean
+  /// "no usable number". It is documented because it is otherwise indistinguishable from a bug.
+  ///
+  /// ⚠ THIS IS A CORRELATION TOKEN, NOT A CONFIDENTIALITY BOUNDARY, and the caveat is STRONGER
+  /// here than on For. A NANP number is ten digits: the entire candidate space can be hashed in
+  /// minutes. What this defends against is a person READING the log — the family member or
+  /// technician who opens Settings → Logs — which is the exposure PHN-5 was filed for. It is not
+  /// anonymisation and must never be described as such.
+  /// </remarks>
+  public static string ForPhone(string? phoneNumber)
+  {
+    var normalized = PhoneNumberNormalizer.Normalize(phoneNumber ?? string.Empty);
+    return normalized.Length == 0 ? EmptyPhone : Token("phn:", normalized, withLength: false);
+  }
+
+  /// <summary>
+  /// The one hash the tokens in this class are built from: SHA-256 over the UTF-8 bytes, first
+  /// four bytes as lowercase hex.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Extracted so there is provably ONE algorithm behind every prefix this class emits, which is
+  /// the property PHN-5 §1.2 argues for. The shape it produces — a short literal prefix plus 8 hex
+  /// — is also GvMediaCache.MaskFor's, so a reader who knows one form recognises the others.
+  /// ⚠ Encoding.UTF8 and SHA256 are both load-bearing and both pinned by exact-value tests. Do not
+  /// substitute string.GetHashCode(): .NET randomises it per process, and TTSFactory already
+  /// builds a cache key with it, so the "consistency" edit is one keystroke away.
+  /// </remarks>
+  private static string Token(string prefix, string value, bool withLength)
+  {
+    var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+    var hex = Convert.ToHexString(hash, 0, 4).ToLowerInvariant();
+    return withLength
+      ? string.Concat(prefix, hex, "/", value.Length.ToString())
+      : string.Concat(prefix, hex);
   }
 }

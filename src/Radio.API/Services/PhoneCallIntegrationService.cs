@@ -4,6 +4,7 @@ using Radio.API.Hubs;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Interfaces.External;
+using Radio.Core.Utilities;
 using Radio.Infrastructure.External;
 
 namespace Radio.API.Services;
@@ -110,7 +111,22 @@ public class PhoneCallIntegrationService : BackgroundService
     }
   }
 
-  private async Task HandleIncomingCallAsync(PhoneCallStateChangedEventArgs e)
+  /// <summary>
+  /// Resolves the caller name, logs the masked ringing line, and speaks the announcement.
+  /// <c>internal</c> rather than <c>private</c> so <c>PhoneCallIntegrationLogSafetyTests</c> can
+  /// drive this method itself instead of a copy of it — <c>Radio.API.csproj</c> already has
+  /// <c>InternalsVisibleTo</c> for <c>Radio.API.Tests</c>. It is still called only from
+  /// <see cref="OnCallStateChanged"/>'s <c>Ringing</c> arm, so the live path and the pinned path
+  /// are one method.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The log-safety pin on this method is doing work no lint can do. <c>LogSafetyLintTests</c>
+  /// keys on identifier spellings, and the shape this site leaked through originally was
+  /// <c>LogInformation("Phone ringing: {Announcement}", announcement)</c> — a raw number and a
+  /// contact name travelling under the name <c>announcement</c>, which is far too generic to write
+  /// a rule for. If this method stops being reachable from a test, that coverage is gone.
+  /// </remarks>
+  internal async Task HandleIncomingCallAsync(PhoneCallStateChangedEventArgs e)
   {
     var opts = _options.Value;
 
@@ -124,7 +140,17 @@ public class PhoneCallIntegrationService : BackgroundService
     callerName ??= "Unknown caller";
 
     var announcement = $"Incoming call from {callerName}";
-    _logger.LogInformation("Phone ringing: {Announcement}", announcement);
+
+    // ⭐ TWO tokens, and each of them joins this line to something it could not reach before.
+    // {Number} is the same phn: token PhoneContactLookupService prints on the lookup lines that
+    // produced callerName, so a failed resolution and the announcement it degraded into are now
+    // one traceable chain. {Announcement} is the SAME txt: token AnnouncementService prints for
+    // this identical string on whichever arm below runs — PlaySoundWithAnnouncementAsync and
+    // AnnounceAsync both log their `message` as LogSafeText.For(message). Before PHN-5 the caller
+    // printed it in clear and the callee hashed it, which is what a per-row masking rule produces
+    // (plan PHN-5 C-95).
+    _logger.LogInformation("Phone ringing: announcing to {Number}, announcement {Announcement}",
+      LogSafeText.ForPhone(e.PhoneNumber), LogSafeText.For(announcement));
 
     try
     {

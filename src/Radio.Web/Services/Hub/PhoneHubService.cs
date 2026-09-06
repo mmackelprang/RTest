@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR.Client;
+using Radio.Core.Utilities;
 
 namespace Radio.Web.Services.Hub;
 
@@ -77,11 +78,9 @@ public class PhoneHubService : IAsyncDisposable
         CallStateChanged?.Invoke(phoneId, state);
       });
 
-      _hubConnection.On<string, string>("IncomingCall", (phoneId, phoneNumber) =>
-      {
-        _logger.LogInformation("Incoming call from {PhoneNumber}", phoneNumber);
-        IncomingCall?.Invoke(phoneId, phoneNumber);
-      });
+      // PHN-5 (P8): the masking lives in RaiseIncomingCallForTest so the live handler + the unit
+      // test share one source of truth, the same arrangement as ReadStateChanged below.
+      _hubConnection.On<string, string>("IncomingCall", RaiseIncomingCallForTest);
 
       _hubConnection.On("CallHistoryUpdated", () =>
       {
@@ -144,6 +143,25 @@ public class PhoneHubService : IAsyncDisposable
     {
       _connectionLock.Release();
     }
+  }
+
+  /// <summary>
+  /// Masks the number for the log and raises <see cref="IncomingCall"/>. The live /hub
+  /// <c>.On&lt;string, string&gt;("IncomingCall", …)</c> handler is wired directly to this method,
+  /// so the masking is the single source of truth and a test that drives it drives production —
+  /// the same seam, and the same reason, as <see cref="RaiseReadStateChangedForTest"/>.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <paramref name="phoneNumber"/> is still passed RAW to <see cref="IncomingCall"/>
+  /// subscribers, and that is correct: the UI displays it. PHN-5 masks what is written to a sink
+  /// that persists, not what is handed to the caller. This line was the highest-value one in that
+  /// row — Radio.Web's Console sink carries no <c>restrictedToMinimumLevel</c>, so an Information
+  /// line here reaches <c>journalctl -u radio-web</c> on every incoming call, on a stock box.
+  /// </remarks>
+  internal void RaiseIncomingCallForTest(string phoneId, string phoneNumber)
+  {
+    _logger.LogInformation("Incoming call from {PhoneNumber}", LogSafeText.ForPhone(phoneNumber));
+    IncomingCall?.Invoke(phoneId, phoneNumber);
   }
 
   /// <summary>

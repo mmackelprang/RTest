@@ -4,12 +4,14 @@ using System.Text.RegularExpressions;
 namespace Radio.Core.Tests;
 
 /// <summary>
-/// <c>TTS-11</c> <c>T7</c>: a regression lint over <c>src/**/*.cs</c> that fails if one of the
-/// twelve log statements this row fixed is written again.
+/// A regression lint over <c>src/**/*.cs</c> that fails if one of the log statements
+/// <c>TTS-11</c> (twelve, user text) or <c>PHN-5</c> (eleven, phone numbers) fixed is written
+/// again — with one documented exception, <c>P7</c>, of whose original shape the rules here can
+/// see only half. The last bullet in the remarks says which half, and what pins the other.
 /// </summary>
 /// <remarks>
 /// ⚠⚠ <b>WHAT THIS TEST CANNOT DO, AND IT MATTERS MORE THAN WHAT IT CAN.</b>
-/// <b>This is a regression lint over twelve known shapes. It is NOT a proof of the property.</b>
+/// <b>This is a regression lint over known shapes. It is NOT a proof of the property.</b>
 /// It knows the exact identifier spellings that leaked once — <c>_text</c>, <c>request.Text</c>,
 /// <c>request.Message</c>, and the rest below. A NEW leak through a differently-named variable
 /// sails straight past it: <c>LogInformation("{Body}", body)</c> is invisible here, and so is any
@@ -30,9 +32,9 @@ namespace Radio.Core.Tests;
 /// <c>AnnouncementServiceLogSafetyTests</c> (all in <c>Radio.Infrastructure.Tests</c>) and the
 /// three controller pins in <c>Radio.API.Tests</c>.
 ///
-/// ⚠ <b>Two shapes from the plan's list are NOT enforced globally, and one is not enforced at
-/// all.</b> Every one of those decisions is recorded here rather than made silently, because a
-/// lint tuned until it is green can be tuned until it is worthless.
+/// ⚠ <b>Some shapes are NOT enforced globally, and one class of leak is not enforceable at all.</b>
+/// Every one of those decisions is recorded here rather than made silently, because a lint tuned
+/// until it is green can be tuned until it is worthless.
 ///
 /// <list type="bullet">
 /// <item><b><c>source.Name</c> is scoped to the mixer, and the reason is cost, not safety.</b>
@@ -59,12 +61,47 @@ namespace Radio.Core.Tests;
 /// <item><b>Bare <c>message</c> and bare <c>text</c> are scoped to the files that leaked them.</b>
 /// They are ordinary parameter names; <c>WarnQuietly(Exception, string message)</c> in
 /// <c>Radio.Web</c> logs a literal through one and is entirely correct.</item>
-/// <item><b><c>phoneNumber</c> is NOT enforced, deliberately.</b> Every occurrence in the tree is a
-/// real leak of a real phone number, and every one belongs to the separate, deliberately-unfixed
-/// row the TTS-11 plan files at §6.1 — so a rule over it would be all exemption and no coverage.
-/// An allowlist naming every file that already leaks is not a lint; it is a place for the next
-/// person to add a file instead of fixing a leak. It is left out, and the sites are left visible in
-/// the plan where a human owner has to decide about them.</item>
+/// <item><b><c>phoneNumber</c> IS enforced now, globally and with no per-file exemption —
+/// <c>PHN-5</c> retired the argument for leaving it out by retiring the exemptions.</b> The
+/// argument itself is preserved, because it is the standing case against ever adding an allowlist
+/// here: <i>"Every occurrence in the tree is a real leak of a real phone number… so a rule over it
+/// would be all exemption and no coverage. An allowlist naming every file that already leaks is
+/// not a lint; it is a place for the next person to add a file instead of fixing a leak."</i> That
+/// was true when it was written and it stopped being true when the eleven sites were fixed: the
+/// rule was turned on and the tree was clean on the first run, with nothing to exempt.
+/// ⚠ <b>So if this rule ever needs an exemption, the exemption is the bug.</b> A new file matching
+/// it is a new leak, not a false positive.</item>
+/// <item>⚠⚠ <b>THE RULE ABOVE COVERS PHONE NUMBERS. IT DOES NOT COVER CONTACT NAMES, AND THERE IS
+/// NO PLAUSIBLE RULE THAT WOULD.</b> <c>Name</c> is far too common an identifier to key on —
+/// <c>source.Name</c> alone has twenty-nine live sites, per the first bullet — so
+/// <c>PHN-5</c> deleted contact names from log lines rather than masking them, and nothing here
+/// can tell whether one comes back. That property is pinned only by the behavioural tests that
+/// drive the real types (<c>PhoneContactLookupServiceLogSafetyTests</c> and
+/// <c>PhoneCallClientLogSafetyTests</c> in <c>Radio.Infrastructure.Tests</c>). <b>Anyone reading a
+/// green run here as "no phone PII is logged anywhere" is reading it wrong</b>, in exactly the way
+/// the top of these remarks warns about for user text.</item>
+/// <item>⚠⚠ <b><c>P7</c> IS COVERED BY HALF A RULE, AND IT IS THE ONE PLACE THE SUMMARY ABOVE
+/// NEEDS QUALIFYING.</b> Two separate things are true of that site.
+///
+/// <b>The half that IS covered was covered late.</b> <c>P7</c> passes <c>e.PhoneNumber</c> — the
+/// PascalCase PROPERTY spelling — and every rule in this file is built with
+/// <c>RegexOptions.Compiled</c> and never <c>IgnoreCase</c>, so the <c>phoneNumber</c> rule does
+/// not reach it. For as long as that was the only spelling enforced, this lint covered TEN of the
+/// row's eleven sites while its own summary claimed eleven. The <c>PhoneNumber</c> rule beside it
+/// closes that, and was added in review for exactly this reason.
+///
+/// <b>The half that is NOT covered cannot be.</b> The ORIGINAL <c>P7</c> leak was
+/// <c>LogInformation("Phone ringing: {Announcement}", announcement)</c>, where <c>announcement</c>
+/// interpolates a <c>callerName</c> that falls back to the raw number when no contact resolves. A
+/// regression to THAT shape carries a phone number and a contact name through an identifier
+/// spelled <c>announcement</c> — which matches no rule here and never will, for the same reason
+/// <c>Name</c> cannot be keyed on. So the rules catch a regression of the line as it stands and
+/// would sail straight past a revert to the line it replaced.
+///
+/// <c>PhoneCallIntegrationLogSafetyTests</c> in <c>Radio.API.Tests</c> is what pins that second
+/// half: it drives the real <c>HandleIncomingCallAsync</c> through the <c>internal</c> seam and
+/// asserts the contact name is absent from every message. <b>That test, not this lint, is what
+/// makes <c>P7</c> a fixed site.</b></item>
 /// </list>
 /// </remarks>
 public class LogSafetyLintTests
@@ -74,8 +111,15 @@ public class LogSafetyLintTests
   private static readonly Regex LogCall = new(
     @"\.Log(?:" + string.Join("|", Levels) + @")\s*\(", RegexOptions.Compiled);
 
-  /// <summary>Matches the helper whose whole job is to make a forbidden argument safe.</summary>
-  private static readonly Regex SafeCall = new(@"\bLogSafeText\s*\.\s*For\s*\(", RegexOptions.Compiled);
+  /// <summary>Matches the helpers whose whole job is to make a forbidden argument safe.</summary>
+  /// <remarks>
+  /// ⚠ <c>For(?:Phone)?</c>, not <c>For</c>. The original required an open paren immediately after
+  /// <c>For</c>, so <c>LogSafeText.ForPhone(phoneNumber)</c> was NOT stripped by
+  /// <see cref="RemoveSafeCalls"/> — which would have made the <c>phoneNumber</c> rule below report
+  /// a violation at every line PHN-5 fixed. The lint would have failed BECAUSE the row succeeded.
+  /// </remarks>
+  private static readonly Regex SafeCall = new(
+    @"\bLogSafeText\s*\.\s*For(?:Phone)?\s*\(", RegexOptions.Compiled);
 
   /// <summary>
   /// A forbidden identifier is harmless when only its SIZE is taken —
@@ -118,6 +162,23 @@ public class LogSafetyLintTests
     // global and spelling-independent. It is deliberately loose about what sits between the two:
     // `.Select(s => s.Name)`, `.First().Name` and `.Where(...).Select(x => x.Name)` all match.
     Of(@"GetActiveSources\s*\(\s*\)[^;]*?\.\s*Name\b", "Name over GetActiveSources()"),
+    // P1-P11 — PHN-5. Enforced GLOBALLY and with no per-file exemption, which is only possible
+    // because PHN-5 fixed every occurrence in the tree. This file's own remarks explain why the
+    // rule was left out before that: "a rule over it would be all exemption and no coverage… an
+    // allowlist naming every file that already leaks is not a lint; it is a place for the next
+    // person to add a file instead of fixing a leak." There is now nothing to exempt.
+    Of(@"\bphoneNumber\b" + NotASizeRead, "phoneNumber"),
+    // P7 passes `e.PhoneNumber` — the PascalCase PROPERTY spelling. Every rule here is
+    // case-sensitive (RegexOptions.Compiled, never IgnoreCase), so the `phoneNumber` rule above
+    // does not reach it, and before this rule the lint covered ten of the row's eleven sites while
+    // its own summary claimed eleven. Global, and it also catches `dto.PhoneNumber` /
+    // `args.PhoneNumber` in code nobody has written yet.
+    Of(@"\bPhoneNumber\b" + NotASizeRead, "PhoneNumber"),
+    // The other spellings the same value travels under in this subsystem. `number` is bare and
+    // therefore scoped, like `message` and `text` above: it is an ordinary parameter name.
+    Of(@"\bcallerNumber\b" + NotASizeRead, "callerNumber"),
+    Of(@"(?<![\w.])number\b" + NotASizeRead, "bare number", "GvTrunkApiService.cs"),
+    Of(@"(?<![\w.])number\b" + NotASizeRead, "bare number", "ContactResolutionService.cs"),
   ];
 
   [Fact]
@@ -179,8 +240,9 @@ public class LogSafetyLintTests
     // wrong tree reads exactly like a real finding. See FindRepositoryRoot: this has happened.
     Assert.True(
       violations.Count == 0,
-      $"TTS-11: user text must not be passed to a log call. Scanned '{src}'. Wrap it in " +
-      "LogSafeText.For(...), or log the source's Type and Id instead of its Name.\n  " +
+      $"TTS-11 / PHN-5: user text and phone numbers must not be passed to a log call. " +
+      $"Scanned '{src}'. Wrap text in LogSafeText.For(...) and a number in " +
+      "LogSafeText.ForPhone(...), or log the source's Type and Id instead of its Name.\n  " +
       string.Join("\n  ", violations));
   }
 
@@ -210,10 +272,20 @@ public class LogSafetyLintTests
   /// real violation, which is the exact failure class this row exists to guard against: a test
   /// reporting confidently about something it did not look at.
   ///
-  /// The rule is therefore "outermost, and never under a worktree directory", not "first hit":
-  /// a nested checkout's ancestor chain passes through the enclosing repository, so continuing the
-  /// walk lands on the real root. A worktree checked out somewhere else entirely is its own
-  /// outermost match and is scanned normally, which is correct — there is nothing stale about it.
+  /// The rule is therefore "outermost, preferring a directory that is not under a worktree", not
+  /// "first hit": a nested checkout's ancestor chain passes through the enclosing repository, so
+  /// continuing the walk lands on the real root.
+  ///
+  /// ⚠ <b>The preference is a preference and NOT a filter, and an earlier revision of this comment
+  /// got that wrong in a way that made the test fail.</b> It claimed "a worktree checked out
+  /// somewhere else entirely is its own outermost match and is scanned normally, which is correct".
+  /// That holds only while the path does not contain the segment — and
+  /// <c>D:/prj/RTest/worktrees/…</c> is the convention this repository actually uses, so such a
+  /// checkout was its own only candidate AND matched the exclusion, the filter emptied the list,
+  /// and the assertion fired with "could not settle on a repository root". Measured on <c>main</c>
+  /// at <c>6c220461</c>, and repaired in PHN-5 by falling back to the outermost candidate when
+  /// every candidate looks nested. The case the guard was written for still wins: with two
+  /// candidates, the non-worktree ancestor is preferred.
   /// </remarks>
   private static string FindRepositoryRoot()
   {
@@ -233,7 +305,12 @@ public class LogSafetyLintTests
     }
 
     // Last found = outermost, because the walk goes upwards.
-    var root = candidates.LastOrDefault(c => !IsInsideAWorktree(c));
+    // Prefer a root that is not a nested checkout; but if EVERY candidate looks like one, the
+    // outermost is still the right answer and is certainly better than no root at all. Before
+    // PHN-5 this was LastOrDefault(...) with no fallback, so a worktree parked under a directory
+    // literally named "worktrees" — the convention this repo uses — filtered out its own only
+    // candidate and the lint failed with "could not settle on a repository root". Measured.
+    var root = candidates.LastOrDefault(c => !IsInsideAWorktree(c)) ?? candidates.LastOrDefault();
 
     Assert.True(
       root is not null,
@@ -382,9 +459,14 @@ public class LogSafetyLintTests
   }
 
   /// <summary>
-  /// Removes every <c>LogSafeText.For(...)</c> sub-expression, argument and all — that call is the
-  /// fix, so an identifier inside one is not a violation.
+  /// Removes every <c>LogSafeText.For(...)</c> AND <c>LogSafeText.ForPhone(...)</c> sub-expression,
+  /// argument and all — those calls are the fix, so an identifier inside one is not a violation.
   /// </summary>
+  /// <remarks>
+  /// Both spellings, because <see cref="SafeCall"/> matches <c>For(?:Phone)?</c>. See that field's
+  /// remarks for what it costs to strip only <c>For</c>: the <c>phoneNumber</c> rule would then
+  /// report a violation at every line PHN-5 fixed.
+  /// </remarks>
   private static string RemoveSafeCalls(string arguments)
   {
     while (true)
