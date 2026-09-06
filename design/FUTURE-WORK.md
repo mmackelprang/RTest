@@ -2039,9 +2039,15 @@ both load-bearing for the ordinary case. A correct fix has to distinguish "no do
 
 **What it would cost if it bit.** The staging dir feeds
 `sudo rsync -a --delete /tmp/radio-deploy-api/ $TargetPath/api/`. An empty staging dir plus
-`--delete` is an emptied install directory. The `$moveExit` check `OPS-7` added does catch the rsync
-itself failing, and rsync does fail on a missing source — so the current exposure is the narrower
-case where staging exists but is short of files, not the total-wipe case.
+`--delete` is an emptied install directory.
+
+⚠ **How bad that actually is was NOT measured, and the difference matters.** If `rsync` errors on a
+missing source directory, `OPS-7`'s `$moveExit` check catches it and the exposure is only the
+narrower case — staging exists but is short of files. If it treats an empty or missing source as
+"nothing to send" and succeeds, the exposure is a wiped install directory. `rsync` is not installed
+on the dev box, so this was not tested either way; **assume the worse case until someone checks it
+on a target that has `rsync`.** Note the prep `ssh` does `mkdir -p` the staging dir, so "exists but
+empty" is the more likely shape than "missing".
 
 ### What is needed
 
