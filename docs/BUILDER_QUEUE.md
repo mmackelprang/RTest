@@ -62,9 +62,19 @@ These three sections were measured against the index's size budget and moved rat
 
 | Section | Size | Now at |
 |---|---|---|
-| Dependency / ordering notes — claim order, and why each ordering is load-bearing | 48 KB | [`queue/ORDERING-NOTES.md`](queue/ORDERING-NOTES.md) |
-| Cross-repo handoffs (RotaryPhone — NOT claimable here) | 14 KB | [`queue/CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) |
-| Documented fast-follows (NOT in these PRs) | 8 KB | [`queue/FAST-FOLLOWS.md`](queue/FAST-FOLLOWS.md) |
+| Dependency / ordering notes — claim order, and why each ordering is load-bearing | 48.5 KB | [`queue/ORDERING-NOTES.md`](queue/ORDERING-NOTES.md) |
+| Cross-repo handoffs (RotaryPhone — NOT claimable here) | 14.3 KB | [`queue/CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) |
+| Documented fast-follows (NOT in these PRs) | 9.0 KB | [`queue/FAST-FOLLOWS.md`](queue/FAST-FOLLOWS.md) |
 
 ⚠ **Read `ORDERING-NOTES.md` before claiming.** Several rows have a mandatory claim order (`AUD-2` before `AUD-4`, `AUD-6` before `AUD-7`) that this index does not restate.
+
+---
+
+## ⚠ Citations of this file from elsewhere are now wrong
+
+The restructure moved content this file's own readers cite. Nothing below was fixed — re-siting anchors is a separate reviewed pass, and doing it blind is how anchors drift in the first place. Recorded so the next reader knows the citations are stale by construction rather than by neglect:
+
+- **14 line anchors** of the form `docs/BUILDER_QUEUE.md:NNN` across `design/plans/*` and `docs/design-handoffs/*` were **correct before the restructure and are not any more** (e.g. `GV-6`'s plan cites `:118`, `OPS-2`'s cites `:132` and `:447`). Three further anchors were already stale beforehand and remain so.
+- **21 citations by section name** — `§ Dependency / ordering notes`, `§ Cross-repo handoffs`, `§ Documented fast-follows` — now name sections that live in [`queue/`](queue/), not here.
+- **Directional words inside row prose** (*above*, *below*, *this file*) were written when every row shared one document, and were left verbatim. Some now point across files.
 

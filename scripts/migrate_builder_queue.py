@@ -343,7 +343,12 @@ def dossier(row: Row, deltas: dict[str, Delta]) -> str:
         f"# {row.rid} — {heading_title(row)}\n\n"
         f"> Queue dossier for row **`{row.rid}`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).\n"
         f"> The detail below was moved verbatim out of that row's Item cell on {TODAY}; only\n"
-        f"> whitespace, the table's `\\|` escapes and docs-relative link prefixes changed.\n\n"
+        f"> whitespace, the table's `\\|` escapes and docs-relative link prefixes changed.\n"
+        f">\n"
+        f"> ⚠ **Directional words in the prose were written when every row shared one file.**\n"
+        f"> *above*, *below* and *this file* may now point across files — most often at\n"
+        f"> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this\n"
+        f"> directory. They were left verbatim rather than reworded, which would be a content edit.\n\n"
         f"{meta_table(row, True, deltas)}\n"
         f"## Detail\n\n"
         f"{body}\n"
@@ -413,12 +418,31 @@ def build_index(rows: list[Row], legend: str, risks: str, sizes: dict[str, int])
         "",
         "| Section | Size | Now at |",
         "|---|---|---|",
-        f"| Dependency / ordering notes — claim order, and why each ordering is load-bearing | {sizes['ordering'] // 1024} KB | [`queue/ORDERING-NOTES.md`](queue/ORDERING-NOTES.md) |",
-        f"| Cross-repo handoffs (RotaryPhone — NOT claimable here) | {sizes['crossrepo'] // 1024} KB | [`queue/CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) |",
-        f"| Documented fast-follows (NOT in these PRs) | {sizes['fastfollows'] // 1024} KB | [`queue/FAST-FOLLOWS.md`](queue/FAST-FOLLOWS.md) |",
+        f"| Dependency / ordering notes — claim order, and why each ordering is load-bearing | {sizes['ordering'] / 1024:.1f} KB | [`queue/ORDERING-NOTES.md`](queue/ORDERING-NOTES.md) |",
+        f"| Cross-repo handoffs (RotaryPhone — NOT claimable here) | {sizes['crossrepo'] / 1024:.1f} KB | [`queue/CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) |",
+        f"| Documented fast-follows (NOT in these PRs) | {sizes['fastfollows'] / 1024:.1f} KB | [`queue/FAST-FOLLOWS.md`](queue/FAST-FOLLOWS.md) |",
         "",
         "⚠ **Read `ORDERING-NOTES.md` before claiming.** Several rows have a mandatory claim order "
         "(`AUD-2` before `AUD-4`, `AUD-6` before `AUD-7`) that this index does not restate.",
+        "",
+        "---",
+        "",
+        "## ⚠ Citations of this file from elsewhere are now wrong",
+        "",
+        "The restructure moved content this file's own readers cite. Nothing below was fixed — "
+        "re-siting anchors is a separate reviewed pass, and doing it blind is how anchors drift in "
+        "the first place. Recorded so the next reader knows the citations are stale by construction "
+        "rather than by neglect:",
+        "",
+        "- **14 line anchors** of the form `docs/BUILDER_QUEUE.md:NNN` across `design/plans/*` and "
+        "`docs/design-handoffs/*` were **correct before the restructure and are not any more** "
+        "(e.g. `GV-6`'s plan cites `:118`, `OPS-2`'s cites `:132` and `:447`). Three further "
+        "anchors were already stale beforehand and remain so.",
+        "- **21 citations by section name** — `§ Dependency / ordering notes`, "
+        "`§ Cross-repo handoffs`, `§ Documented fast-follows` — now name sections that live in "
+        "[`queue/`](queue/), not here.",
+        "- **Directional words inside row prose** (*above*, *below*, *this file*) were written when "
+        "every row shared one document, and were left verbatim. Some now point across files.",
         "",
     ]
     return "\n".join(out) + "\n"
@@ -435,6 +459,15 @@ def build_archive(rows: list[Row], banner: str, narrative: str, deltas: dict[str
         "> four-mark vocabulary and nothing else was.",
         ">",
         "> This file is an archive, not a queue. Nothing in it is claimable.",
+        ">",
+        "> ⚠ **Two kinds of reference below no longer resolve where they say.** The prose cites",
+        "> `§ Dependency / ordering notes`, `§ Cross-repo handoffs` and `§ Documented fast-follows`",
+        "> as if they were in the same file; they moved in the same commit to",
+        "> [`queue/ORDERING-NOTES.md`](queue/ORDERING-NOTES.md),",
+        "> [`queue/CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) and",
+        "> [`queue/FAST-FOLLOWS.md`](queue/FAST-FOLLOWS.md). And *above* / *below* / *this file* were",
+        "> written when every row shared one document. Both were left verbatim rather than reworded,",
+        "> which would be a content edit.",
         "",
         "---",
         "",

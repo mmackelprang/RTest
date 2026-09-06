@@ -6,6 +6,15 @@
 > four-mark vocabulary and nothing else was.
 >
 > This file is an archive, not a queue. Nothing in it is claimable.
+>
+> ⚠ **Two kinds of reference below no longer resolve where they say.** The prose cites
+> `§ Dependency / ordering notes`, `§ Cross-repo handoffs` and `§ Documented fast-follows`
+> as if they were in the same file; they moved in the same commit to
+> [`queue/ORDERING-NOTES.md`](queue/ORDERING-NOTES.md),
+> [`queue/CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) and
+> [`queue/FAST-FOLLOWS.md`](queue/FAST-FOLLOWS.md). And *above* / *below* / *this file* were
+> written when every row shared one document. Both were left verbatim rather than reworded,
+> which would be a content edit.
 
 ---
 
