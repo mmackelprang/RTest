@@ -111,13 +111,59 @@ rsync -avz --delete "$WEB_PUBLISH_DIR/" "$SSH_TARGET:/tmp/radio-deploy-web/"
 
 ssh "$SSH_TARGET" "
   sudo mkdir -p $PI_PATH/api $PI_PATH/web $PI_PATH/data $PI_PATH/logs &&
-  sudo rsync -a --delete /tmp/radio-deploy-api/ $PI_PATH/api/ &&
-  sudo rsync -a --delete /tmp/radio-deploy-web/ $PI_PATH/web/ &&
+  sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-api/ $PI_PATH/api/ &&
+  sudo rsync -a --delete --exclude='appsettings.Production.json' /tmp/radio-deploy-web/ $PI_PATH/web/ &&
   sudo chown -R radio:radio $PI_PATH &&
   sudo chmod +x $PI_PATH/api/Radio.API $PI_PATH/web/Radio.Web &&
   rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-web
 "
 echo "  Files synced"
+
+# Seed the Production config into each service directory that does not already have one.
+# The two --exclude flags above stop rsync touching an overlay that exists; this block is
+# what puts the file there on a box that has none.
+#
+# DECIDED PER DESTINATION. A single presence test on api/ gating a copy into both
+# directories would seed over a web overlay on a box that has one and no api overlay.
+#
+# THE PROBE ASKS ONCE AND FAILS CLOSED. `ssh` reports its own transport errors as exit
+# 255, which a per-destination `test -f` cannot tell apart from "file absent" (exit 1) —
+# so a dropped connection would read as "nothing there" and seed over a present overlay.
+# The remote script always `exit 0`s and reports presence on stdout, leaving a non-zero
+# `ssh` exit to mean only "the question could not be asked", which we abort on.
+SEED_CONFIG="$REPO_ROOT/deploy/raspberry-pi/appsettings.Production.json"
+if [ -f "$SEED_CONFIG" ]; then
+  # Measured under `bash 5.2` with `set -euo pipefail`: a failing command substitution in
+  # a plain assignment DOES abort the script. It aborts silently, though, carrying only
+  # ssh's exit code — so the failure is handled explicitly to say why we stopped.
+  PRESENT_CONFIGS="$(ssh "$SSH_TARGET" \
+    "for d in api web; do [ -f $PI_PATH/\$d/appsettings.Production.json ] && echo \$d; done; exit 0")" || {
+    echo "Could not determine which Production configs are present — aborting rather than risk overwriting one." >&2
+    exit 1
+  }
+
+  SEED_STAGED=false
+  for dest in api web; do
+    if printf '%s\n' "$PRESENT_CONFIGS" | grep -qx "$dest"; then
+      echo "  $dest/appsettings.Production.json present — left alone"
+      continue
+    fi
+
+    if [ "$SEED_STAGED" = false ]; then
+      scp "$SEED_CONFIG" "$SSH_TARGET:/tmp/appsettings.Production.json"
+      SEED_STAGED=true
+    fi
+
+    # Named per destination: the skip and the seed are separate decisions, and a single
+    # un-suffixed line cannot distinguish seeding api/ from seeding web/.
+    echo "  $dest/appsettings.Production.json absent — seeding from deploy/raspberry-pi/"
+    ssh "$SSH_TARGET" "sudo cp /tmp/appsettings.Production.json $PI_PATH/$dest/ && sudo chown radio:radio $PI_PATH/$dest/appsettings.Production.json"
+  done
+
+  if [ "$SEED_STAGED" = true ]; then
+    ssh "$SSH_TARGET" "rm -f /tmp/appsettings.Production.json"
+  fi
+fi
 
 # Step 4: Restart
 if [ "$RESTART" = true ]; then
