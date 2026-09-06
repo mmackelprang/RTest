@@ -211,11 +211,14 @@ def extract_title(row: Row) -> None:
         return
     row.title_prefix = m.group(1).strip()
     row.title = m.group(2).replace("\n", " ").strip()
-    if row.title_prefix and any(e in row.title_prefix for e in "✅🚫🚧") and row.live:
+    # Flag only a genuine DISAGREEMENT: a marker in the prose that contradicts the row's status.
+    # GV-5 opens with 🚫 and is 🚫 — that agrees, and is not worth anyone's attention.
+    conflicting = [e for e in "✅🚫🚧" if e in row.title_prefix and e not in row.norm_status]
+    if conflicting and row.live:
         # e.g. GV-6 opens "✅ **ASSESSED AGAINST D31 ... claim it as written.**" while its status
         # is 📋. Faithful to the source, but it reads as shipped in a one-line index cell.
         row.flags.append(
-            f"prose opens with {row.title_prefix!r} but the row's status is {row.norm_status} — "
+            f"prose opens with {''.join(conflicting)!r} but the row's status is {row.norm_status} — "
             "left verbatim; reads as shipped in the index"
         )
     if len(row.title) > TITLE_TOO_LONG:
