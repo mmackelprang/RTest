@@ -629,4 +629,4 @@ section is the authority on what ships.
 and are being brought under version control in that repo right now. Radio Console **invokes and
 probes only** — it must not own, reimplement or edit bridge startup. The Change Log note for
 `RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md` is a commit in `D:\prj\RotaryPhone`, so it is tracked as
-§ Cross-repo handoffs **#8** in `docs/BUILDER_QUEUE.md` rather than as a claimable row here.
+§ Cross-repo handoffs **#8** in [`CROSS-REPO-HANDOFFS.md`](../queue/CROSS-REPO-HANDOFFS.md) rather than as a claimable row here.

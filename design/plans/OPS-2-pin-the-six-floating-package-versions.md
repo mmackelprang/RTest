@@ -1,6 +1,6 @@
 # PLAN — `OPS-2` · Pin the six floating package versions
 
-> **Row:** `OPS-2`, `docs/BUILDER_QUEUE.md:132`. 📋 queued, no dependency, claimable now.
+> **Row:** `OPS-2`, [`docs/queue/OPS-2.md`](../../docs/queue/OPS-2.md). 📋 queued, no dependency, claimable now.
 > **Branch:** `chore/pin-floating-package-versions` (the row names it).
 > **Estimate:** **0.5 d.** §0.6 says why, and what would push it to 1 d.
 > **Planned against** `main` at **`656f58e6`**. Every line number below was read out of `main` at that
@@ -25,7 +25,7 @@ have an assets file — which includes **every CI run** (`.github/workflows/buil
 that a given build compiles against is a function of *when* it ran, not of what is in the
 repository. This row replaces the six wildcards with the six exact versions they resolve to today.
 It fixes no defect. **It must not be described as fixing one** (**C-135**) — the queue's own
-ordering note at `docs/BUILDER_QUEUE.md:447` records that a floating-version theory was investigated
+ordering note at [`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md) records that a floating-version theory was investigated
 on 2026-08-10 as the cause of a CI failure and **disproved**.
 
 ### 0.2 ✅ The row's count is exactly right — six packages, seven lines, three files
@@ -299,7 +299,7 @@ already exact — is named in §0.5 item 2 so a reviewer does not have to find i
 ---
 
 **`C-135` — this row fixes no defect, and the queue says so in its own voice.**
-`docs/BUILDER_QUEUE.md:447`: *"A floating-package-version theory was investigated on 2026-08-10 as
+[`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md): *"A floating-package-version theory was investigated on 2026-08-10 as
 the cause of a CI failure and was **disproved**. Pinning is worth doing for reproducibility; it fixes
 no known defect, and citing it as the root cause of that CI failure would be wrong."* ⛔ **The PR body
 must not claim a fix.** The honest framing is in §7.3.
@@ -565,7 +565,7 @@ stop.
 
 **None.** This row changes no runtime behaviour and produces byte-comparable binaries from the same
 package graph. A deploy is not part of the merge gate. ⚠ **`OPS-2` is not exempt from the
-auto-merge-on-green policy** — the queue's `docs/BUILDER_QUEUE.md:448` exemption names `OPS-3`, not
+auto-merge-on-green policy** — the queue's [`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md) exemption names `OPS-3`, not
 this row.
 
 ---
@@ -676,7 +676,7 @@ Two specific over-claims to avoid, and the honest version of each:
 
 | ❌ Do not write | ✅ Write |
 |---|---|
-| *"Fixes non-deterministic builds / the CI flake."* | *"Reproducibility hygiene. Fixes no known defect; the floating-version theory for the 2026-08-10 CI failure was investigated and disproved (`BUILDER_QUEUE.md:447`)."* |
+| *"Fixes non-deterministic builds / the CI flake."* | *"Reproducibility hygiene. Fixes no known defect; the floating-version theory for the 2026-08-10 CI failure was investigated and disproved ([`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md))."* |
 | *"The build is now reproducible."* | *"Direct package references are now pinned. The transitive graph is still resolved fresh on each clean restore — lock files would be the change that closes that, and it is filed as a follow-up (§6.2)."* |
 
 ⭐ This is the `CLAUDE.md` § *Pre-Merge Review* discipline applied to a PR body rather than a code

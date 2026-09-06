@@ -1,6 +1,6 @@
 # PLAN — `AUD-4` · Unify the source-removal layers, and stop calling the registry a mixer
 
-> **Row:** `AUD-4`, `docs/BUILDER_QUEUE.md:135`. 📋, owner-protected tranche (near the end).
+> **Row:** `AUD-4`, [`docs/queue/AUD-4.md`](../../docs/queue/AUD-4.md). 📋, owner-protected tranche (near the end).
 > **Branch:** `refactor/unify-source-removal-and-rename-mixer`
 > **Estimate:** **2 d** for the minimal shape, **3 d** for the recommended split. §0.8.
 > **Planned against** `main` at **`35e4ed5a`**. Every line number below was read out of the tree at
@@ -120,7 +120,7 @@ move is to re-price it now. §0.8 prices both shapes.
 
 ### 0.4 ⚠ The `AUD-2` dependency is false. This row does not wait.
 
-`BUILDER_QUEUE.md:437` asserts `AUD-2` and `AUD-4` are *"two symptoms of ONE root cause"*, that
+[`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md) asserts `AUD-2` and `AUD-4` are *"two symptoms of ONE root cause"*, that
 `AUD-4` sees the mismatch *"from the teardown side — a sweep that would miss the SDR component"*,
 and that `AUD-2` must be claimed first because *"it decides the key."* Verified at `35e4ed5a`, all
 three are wrong (`C-148`):
@@ -1059,7 +1059,7 @@ to apply.
 **Replace the row's dependency cell** — currently *"no hard row dependency. **Prefer AUD-2 first**…"*:
 
 > — _(**no dependency. ⚠ The "prefer `AUD-2` first" note that stood here was FALSIFIED 2026-09-06
-> and is removed, not softened.** `BUILDER_QUEUE.md:437`'s claim that `AUD-2` and `AUD-4` are "two
+> and is removed, not softened.** [`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md)'s claim that `AUD-2` and `AUD-4` are "two
 > symptoms of ONE root cause" and that `AUD-2` "decides the key" is **false**: per-source teardown is
 > key-symmetric — `SDRRadioAudioSource.cs:915` mints `_playbackId` and `:1027`/`:1059` stop with the
 > same field — and this row's roster is keyed by **object reference**, not by string, so there is no

@@ -3577,7 +3577,7 @@ C-30 clarifies a boundary the breakdown left implicit; it moves nothing between 
 - Remove `VoicemailPlayer.razor`'s `<audio>` element, `wwwroot/js/voicemail-player.js` and
   `GvBridgeApiService.GetVoicemailAudioUrl` **together** — removing the builder first would break voicemail
   playback.
-- **Withdraw the cross-repo ask** in `docs/BUILDER_QUEUE.md` § Cross-repo handoffs #3 in the same PR. ADR
+- **Withdraw the cross-repo ask** in [`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same PR. ADR
   §10.1 makes it a deliverable; PR 6 is the first moment it is true.
 - ⚠ **Pre-flight before flipping `GvMedia:Enabled` on the box:** check whether RotaryPhone's
   `InterServiceAuthKey` is set. It ships default-off, but if it has been set then **every** fetch returns

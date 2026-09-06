@@ -1,7 +1,7 @@
 # PLAN — `TEST-7` · A `TimeProvider` seam for `NowPlayingPanel`'s two debounce timers
 
-> **Row:** `TEST-7`, `docs/BUILDER_QUEUE.md:152`. 🟠 **P1**, [punch list §4.6 `:1095`](../../docs/HANDOFF-GA-PUNCH-LIST.md).
-> Promoted 2026-09-03 from a note in § *Documented fast-follows* (`docs/BUILDER_QUEUE.md:518`) on that
+> **Row:** `TEST-7`, [`docs/queue/TEST-7.md`](../../docs/queue/TEST-7.md). 🟠 **P1**, [punch list §4.6 `:1095`](../../docs/HANDOFF-GA-PUNCH-LIST.md).
+> Promoted 2026-09-03 from a note in § *Documented fast-follows* ([`FAST-FOLLOWS.md`](../../docs/queue/FAST-FOLLOWS.md)) on that
 > note's own instruction. **No dependencies; claimable now.**
 > **Branch:** `fix/test-7-nowplayingpanel-timeprovider-seam`
 > **Estimate:** **0.5 d**, as the punch list scoped it. §0.6 says what survives that and what pushes it to 1 d.

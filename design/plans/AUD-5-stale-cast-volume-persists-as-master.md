@@ -1,6 +1,6 @@
 # PLAN — `AUD-5` · A superseded Cast connection stops writing (and persisting) the console's master volume
 
-> **Row:** `AUD-5`, `docs/BUILDER_QUEUE.md:130`. No spec doc — the diagnosis is in the row, and the
+> **Row:** `AUD-5`, [`docs/queue/AUD-5.md`](../../docs/queue/AUD-5.md). No spec doc — the diagnosis is in the row, and the
 > row is correct. **Provenance:** PR #473's pre-merge review.
 > **Branch:** `fix/cast-initial-volume-sync-generation-check` (as the row names it).
 > **Estimate:** **0.5 d.** §0.8 says what would push it to 1 d.

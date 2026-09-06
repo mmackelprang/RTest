@@ -70,11 +70,16 @@ These three sections were measured against the index's size budget and moved rat
 
 ---
 
-## ⚠ Citations of this file from elsewhere are now wrong
+## How other documents cite this one
 
-The restructure moved content this file's own readers cite. Nothing below was fixed — re-siting anchors is a separate reviewed pass, and doing it blind is how anchors drift in the first place. Recorded so the next reader knows the citations are stale by construction rather than by neglect:
+The restructure moved content that other documents cite. Those citations were re-pointed in the same PR, **at the file rather than at a line number** — a line anchor cannot survive the next edit, a dossier path can. `design/plans/*`, `design/decisions/*`, `docs/design-handoffs/*`, `docs/superpowers/plans/*`, `ROADMAP.md`, `FUTURE-WORK.md`, `INTEGRATIONS.md` and `HANDOFF-GA-PUNCH-LIST.md` now link to `queue/<ID>.md`, `queue/ORDERING-NOTES.md`, `queue/CROSS-REPO-HANDOFFS.md`, `queue/FAST-FOLLOWS.md` or `BUILDER_QUEUE_ARCHIVE.md` as appropriate.
 
-- **14 line anchors** of the form `docs/BUILDER_QUEUE.md:NNN` across `design/plans/*` and `docs/design-handoffs/*` were **correct before the restructure and are not any more** (e.g. `GV-6`'s plan cites `:118`, `OPS-2`'s cites `:132` and `:447`). Three further anchors were already stale beforehand and remain so.
-- **21 citations by section name** — `§ Dependency / ordering notes`, `§ Cross-repo handoffs`, `§ Documented fast-follows` — now name sections that live in [`queue/`](queue/), not here.
-- **Directional words inside row prose** (*above*, *below*, *this file*) were written when every row shared one document, and were left verbatim. Some now point across files.
+⚠ **Cite a row as `queue/<ID>.md`, not as `BUILDER_QUEUE.md:<line>`.** The old form is what the restructure had to go back and repair in 21 files.
+
+Two citations were deliberately left alone, both recorded rather than guessed:
+
+- **`design/plans/AUD-2-one-key-per-source.md:3`** — its sentence is *about* line numbers (*"`:129` on `main`, `:131` in this working tree"*), so re-pointing it needs a rewrite, not a path swap. It was **already wrong before this change** — `:129` was `AUD-7`'s row.
+- **`src/Radio.Web/Services/ApiClients/GvResult.cs:41`** — an XML doc comment citing `§ Dependency / ordering notes`. Correcting it means touching `src/`, which this documentation change deliberately does not.
+
+**Directional words inside row prose** (*above*, *below*, *this file*) were written when every row shared one document and were left verbatim; some now point across files.
 

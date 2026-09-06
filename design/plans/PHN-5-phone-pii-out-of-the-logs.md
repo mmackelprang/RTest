@@ -1,6 +1,6 @@
 # PLAN — `PHN-5` · Phone numbers and contact names stop being written to disk
 
-> **Row:** `PHN-5`, `docs/BUILDER_QUEUE.md:139`. 🟠 **P1.** No punch-list row — it was minted straight
+> **Row:** `PHN-5`, [`BUILDER_QUEUE_ARCHIVE.md`](../../docs/BUILDER_QUEUE_ARCHIVE.md). 🟠 **P1.** No punch-list row — it was minted straight
 > into the queue by `PHN-1b` (punch list `:1441` records that).
 > **Branch:** `fix/phn-5-phone-pii-out-of-the-logs`
 > **Estimate:** **1 d**, as the owner scoped it. §0.5 says why one day survives a widening from four
