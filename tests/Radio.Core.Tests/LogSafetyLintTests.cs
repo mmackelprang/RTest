@@ -6,7 +6,8 @@ namespace Radio.Core.Tests;
 /// <summary>
 /// A regression lint over <c>src/**/*.cs</c> that fails if one of the log statements
 /// <c>TTS-11</c> (twelve, user text) or <c>PHN-5</c> (eleven, phone numbers) fixed is written
-/// again.
+/// again — with one documented exception, <c>P7</c>, of whose original shape the rules here can
+/// see only half. The last bullet in the remarks says which half, and what pins the other.
 /// </summary>
 /// <remarks>
 /// ⚠⚠ <b>WHAT THIS TEST CANNOT DO, AND IT MATTERS MORE THAN WHAT IT CAN.</b>
@@ -79,6 +80,28 @@ namespace Radio.Core.Tests;
 /// <c>PhoneCallClientLogSafetyTests</c> in <c>Radio.Infrastructure.Tests</c>). <b>Anyone reading a
 /// green run here as "no phone PII is logged anywhere" is reading it wrong</b>, in exactly the way
 /// the top of these remarks warns about for user text.</item>
+/// <item>⚠⚠ <b><c>P7</c> IS COVERED BY HALF A RULE, AND IT IS THE ONE PLACE THE SUMMARY ABOVE
+/// NEEDS QUALIFYING.</b> Two separate things are true of that site.
+///
+/// <b>The half that IS covered was covered late.</b> <c>P7</c> passes <c>e.PhoneNumber</c> — the
+/// PascalCase PROPERTY spelling — and every rule in this file is built with
+/// <c>RegexOptions.Compiled</c> and never <c>IgnoreCase</c>, so the <c>phoneNumber</c> rule does
+/// not reach it. For as long as that was the only spelling enforced, this lint covered TEN of the
+/// row's eleven sites while its own summary claimed eleven. The <c>PhoneNumber</c> rule beside it
+/// closes that, and was added in review for exactly this reason.
+///
+/// <b>The half that is NOT covered cannot be.</b> The ORIGINAL <c>P7</c> leak was
+/// <c>LogInformation("Phone ringing: {Announcement}", announcement)</c>, where <c>announcement</c>
+/// interpolates a <c>callerName</c> that falls back to the raw number when no contact resolves. A
+/// regression to THAT shape carries a phone number and a contact name through an identifier
+/// spelled <c>announcement</c> — which matches no rule here and never will, for the same reason
+/// <c>Name</c> cannot be keyed on. So the rules catch a regression of the line as it stands and
+/// would sail straight past a revert to the line it replaced.
+///
+/// <c>PhoneCallIntegrationLogSafetyTests</c> in <c>Radio.API.Tests</c> is what pins that second
+/// half: it drives the real <c>HandleIncomingCallAsync</c> through the <c>internal</c> seam and
+/// asserts the contact name is absent from every message. <b>That test, not this lint, is what
+/// makes <c>P7</c> a fixed site.</b></item>
 /// </list>
 /// </remarks>
 public class LogSafetyLintTests
@@ -145,6 +168,12 @@ public class LogSafetyLintTests
     // allowlist naming every file that already leaks is not a lint; it is a place for the next
     // person to add a file instead of fixing a leak." There is now nothing to exempt.
     Of(@"\bphoneNumber\b" + NotASizeRead, "phoneNumber"),
+    // P7 passes `e.PhoneNumber` — the PascalCase PROPERTY spelling. Every rule here is
+    // case-sensitive (RegexOptions.Compiled, never IgnoreCase), so the `phoneNumber` rule above
+    // does not reach it, and before this rule the lint covered ten of the row's eleven sites while
+    // its own summary claimed eleven. Global, and it also catches `dto.PhoneNumber` /
+    // `args.PhoneNumber` in code nobody has written yet.
+    Of(@"\bPhoneNumber\b" + NotASizeRead, "PhoneNumber"),
     // The other spellings the same value travels under in this subsystem. `number` is bare and
     // therefore scoped, like `message` and `text` above: it is an ordinary parameter name.
     Of(@"\bcallerNumber\b" + NotASizeRead, "callerNumber"),
@@ -430,9 +459,14 @@ public class LogSafetyLintTests
   }
 
   /// <summary>
-  /// Removes every <c>LogSafeText.For(...)</c> sub-expression, argument and all — that call is the
-  /// fix, so an identifier inside one is not a violation.
+  /// Removes every <c>LogSafeText.For(...)</c> AND <c>LogSafeText.ForPhone(...)</c> sub-expression,
+  /// argument and all — those calls are the fix, so an identifier inside one is not a violation.
   /// </summary>
+  /// <remarks>
+  /// Both spellings, because <see cref="SafeCall"/> matches <c>For(?:Phone)?</c>. See that field's
+  /// remarks for what it costs to strip only <c>For</c>: the <c>phoneNumber</c> rule would then
+  /// report a violation at every line PHN-5 fixed.
+  /// </remarks>
   private static string RemoveSafeCalls(string arguments)
   {
     while (true)
