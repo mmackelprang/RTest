@@ -11,7 +11,7 @@
 
 | Field | Value |
 |---|---|
-| Status | 📋 |
+| Status | 🚧 |
 | Plan | [design/plans/OPS-2-pin-the-six-floating-package-versions.md](../../design/plans/OPS-2-pin-the-six-floating-package-versions.md) |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ |
 | Depends on | — _(no dependency; claimable now. Best sequenced **after TEST-1**, because its only real gate is a green full-suite run and TEST-1 is what makes that signal trustworthy.)_ |
