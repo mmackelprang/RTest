@@ -431,8 +431,76 @@ the fix is a harness that can, not a name that sounds like one.**
 
 ## Phone-number logging — seven sites log full numbers and contact names, filed and NOT fixed
 
-**Status:** open. Found by the `TTS-11` sweep, 2026-09-04/05, and **deliberately not folded into it.**
-Recommended tier: **P2 with a hard gate** — argued below.
+**Status:** ✅ **CLOSED by `PHN-5`, 2026-09-05.** Every site below is masked with
+`LogSafeText.ForPhone`, every contact name is deleted from its log line, and
+`LogSafetyLintTests` now enforces `phoneNumber` **globally with no per-file exemption** — which is
+possible only because there is nothing left to exempt. The heading, the table and the tier argument
+are **preserved verbatim below** rather than rewritten, in this section's own house style: a reader
+arriving from the `TTS-11` PR should land on the correction, not on a figure that quietly moved.
+Found by the `TTS-11` sweep, 2026-09-04/05, and deliberately not folded into it; recommended tier at
+the time was **P2 with a hard gate**.
+
+⚠ **THE COUNT WAS WRONG TWICE, AND BOTH ERRORS ARE THE SAME ERROR.** The heading says *seven sites*
+and the last bullet corrects it to *nine*. **The real figure is eleven, across seven files and three
+assemblies.** The arithmetic, done against the table as it stands:
+
+- The table has **seven rows but names eight sites** — row three is `PhoneContactLookupService.cs:78,
+  96`, which is two lines in one cell. So *"seven"* counted rows, not sites.
+- The *"nine"* correction then added the two later finds (`GvTrunkApiService.cs:94`,
+  `ContactResolutionService.cs:173`) to the **row** count rather than the site count. 8 + 2 = **ten**,
+  not nine — the correction inherited the very miscount it was correcting.
+- The eleventh is **`PhoneContactLookupService.cs:90`**, which this section discusses in prose (point
+  2 below: *"`:87-90` already masks"*) and never counts. That line masked the **number** and printed
+  `contact.Name` **in clear**, so calling it "already masks" is what kept it out of the inventory. It
+  was a leak, and it is the one a test checking only the number would have passed straight over.
+- ⚠ **`PhoneCallIntegrationService.cs:127` was NOT missing** — it is row four. It is named here only
+  because a later hand-off listed it as one of the two uncounted sites; the table is right and that
+  claim was wrong.
+- **Seven files, not six**: `PhoneContactLookupService.cs`, `PhoneCallClient.cs`,
+  `PhoneCallIntegrationService.cs`, `PhoneHubService.cs`, `GvTrunkApiService.cs`,
+  `PbapApiService.cs`, `ContactResolutionService.cs`. The `PHN-5` plan says *"six files"* throughout
+  and that figure is wrong in the same direction as the two above. The section's own *"seven files"*
+  at the last bullet was correct; only its site count was not.
+
+⚠ **The `Radio.Web` question this section could not settle is now settled, and the answer is worse
+than its cautious reading.** The tier argument says of `PhoneHubService.cs:82` that *"whether it
+pushes one is NOT VERIFIABLE FROM THIS REPO"*, and proposes checking
+`/opt/radio-console/logs/radio-*.txt`. **That path could never have found it**: `radio-*.txt` is
+`Radio.API`'s file sink, and `:82` is a `Radio.Web` line, which writes to `logs/web-*.txt`. The
+sink that actually mattered was neither — `src/Radio.Web/appsettings.json`'s Console sink carries
+**no `restrictedToMinimumLevel`** while `Radio.API`'s is restricted to Warning in code
+(`Radio.API/Program.cs:48-53`), so under systemd every `Information` line in `Radio.Web` reaches
+`journalctl -u radio-web`. `CLAUDE.md`'s *"the journal carries Warning and above"* is a statement
+about `Radio.API` only. The note now lives beside the sink it describes, in
+`src/Radio.Web/appsettings.json`'s `Serilog` comment.
+
+**Two things `PHN-5` deliberately did NOT fix, filed here with their evidence:**
+
+1. **The `PhoneIntegration:Enabled` asymmetry — verified, and worse than previously claimed.**
+   `PhoneIntegrationOptions.Enabled` (`src/Radio.Core/Configuration/PhoneIntegrationOptions.cs`,
+   default `false`) has **exactly one reader in all of `src/`**: `PhoneCallIntegrationService`'s
+   `ExecuteAsync`, which returns early on `if (!opts.Enabled)`. `PhoneContactLookupService` and
+   `PhoneCallClient` both inject `IOptionsMonitor<PhoneIntegrationOptions>` and read only
+   `ContactsApiBaseUrl` / `HubUrl` and the reconnect delays. **`Radio.Web` never binds the section at
+   all** — the only `PhoneIntegration*` symbols in that project are its own `…StatusDto` /
+   `…ConfigDto` API models — and `PhoneHubService.StartAsync()` is called unconditionally from
+   `Radio.Web/Program.cs` as a top-level statement inside no `if`. Fixing it means choosing between
+   binding a second options section into `Radio.Web`, minting a `RotaryPhone:Enabled`, or gating that
+   unconditional hub start. All three are **behavioural** — they change whether `radio-web` connects
+   to the RotaryPhone hub at boot — and the choice is a config-surface decision belonging to the
+   owner, not to a logging fix. ⭐ The order is right this way round: once nothing leaks, whether an
+   ungated path runs is a *functionality* question rather than a *privacy* one.
+2. **`src/Radio.API/Controllers/IntegrationsController.cs:215-223` reports `Enabled = true`
+   unconditionally.** Verified: the `Ok(new { Enabled = true, … })` fires whenever
+   `IPhoneIntegrationService` resolves from DI, which it always does — `AddPhoneIntegration` is
+   registered unconditionally at `AudioServiceExtensions.cs:257`. The method already holds
+   `IOptions<PhoneIntegrationOptions>` two lines above (`:212-213`) and uses it **only** for
+   `HubUrl`, so reading `.Enabled` from it is a one-word fix. Not done here: a wrong answer in a
+   status endpoint is its own defect class, not a PII leak.
+
+---
+
+**⬇ Everything below this line is the original filing, preserved as written.**
 
 | Site | Level | Leaks |
 |---|---|---|
