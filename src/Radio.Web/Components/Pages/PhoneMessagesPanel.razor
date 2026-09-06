@@ -179,8 +179,9 @@
     <div class="phone-messages-detail">
       @if (_openThreadId != null)
       {
-        @* PR3 — open SMS conversation. Compose + new-inbound append handled by
-           PhoneTextsPanel; the parent feeds OpenThreadMessages + reconciles. *@
+        @* PR3 — open SMS conversation, read-only since PHN-4 (D31): PhoneTextsPanel
+           renders the bubbles and the reply-gate pill, and owns no write path. The
+           parent feeds OpenThreadMessages and reconciles inbound arrivals. *@
         <PhoneTextsPanel OpenThreadId="_openThreadId"
                          Threads="Threads"
                          Contacts="Contacts"

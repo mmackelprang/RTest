@@ -14,11 +14,15 @@ namespace Radio.Web.Tests.Components;
 
 public class PhoneTextsPanelTests : TestContext
 {
-  // PHN-4: the panel no longer injects GvBridgeSendService or GvBridgeStatusService
-  // — it is a read surface and neither the send flag nor GV availability changes
-  // what it renders. The `available` parameter is kept only to register a status
-  // service for the components that still read one; it must not influence the
-  // reply gate, and ReplyPill_ShowsRegardlessOfGvAvailability proves it doesn't.
+  // PHN-4: the panel injects only IJSRuntime now — GvBridgeSendService is deleted
+  // and GvBridgeStatusService is no longer read here, because neither the send flag
+  // nor GV availability changes what a read surface renders.
+  // The status service is still registered, and `available` still varied, on
+  // purpose: it is the seam a reintroduced availability branch would consume, so
+  // ReplyPill_ShowsRegardlessOfGvAvailability fails the moment one comes back.
+  // Note what that does and does not prove — with nothing reading the service today
+  // the assertion cannot fail for the current code; it is a guard against
+  // regression, not evidence of a live gate.
   private void Register(bool available)
   {
     JSInterop.Mode = JSRuntimeMode.Loose;
