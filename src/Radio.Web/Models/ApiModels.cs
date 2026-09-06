@@ -1182,9 +1182,10 @@ public record ReadStateChangedDto(
   bool IsRead,
   DateTime ChangedAtUtc);
 
-// ── Send (flagged; wired in PR3, endpoint ships later) ─────────
-public record SendSmsRequest(string ThreadId, string Text);
-public record SendSmsResponse(SmsMessageDto? Message, string? Error);  // shape provisional
+// No send DTOs: D31 / PHN-4 removed the SMS write path. SendSmsRequest and
+// SendSmsResponse lived here for GvBridgeSendService, which is gone. ADR-028
+// holds the wire contract if it is ever rebuilt — and records that the shape
+// shipped here was wrong anyway (it omitted the server's required ToNumber).
 
 // Defensive direction mapping: anything not exactly "Outbound" → Inbound.
 // Never throw on an unrecognized value (ADR §4.2 provisional-data rule).

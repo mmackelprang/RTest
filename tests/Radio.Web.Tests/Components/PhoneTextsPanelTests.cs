@@ -14,24 +14,28 @@ namespace Radio.Web.Tests.Components;
 
 public class PhoneTextsPanelTests : TestContext
 {
-  private void Register(bool sendEnabled, bool available)
+  // PHN-4: the panel injects only IJSRuntime now — GvBridgeSendService is deleted
+  // and GvBridgeStatusService is no longer read here, because neither the send flag
+  // nor GV availability changes what a read surface renders.
+  // The status service is still registered, and `available` still varied, on
+  // purpose: it is the seam a reintroduced availability branch would consume, so
+  // ReplyPill_ShowsRegardlessOfGvAvailability fails the moment one comes back.
+  // Note what that does and does not prove — with nothing reading the service today
+  // the assertion cannot fail for the current code; it is a guard against
+  // regression, not evidence of a live gate.
+  private void Register(bool available)
   {
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
-    var client = new HttpClient(new MockHttpHandler("{}")) { BaseAddress = new Uri("http://radio:5004") };
-    var config = new ConfigurationBuilder().AddInMemoryCollection(
-      new Dictionary<string, string?> { ["RotaryPhone:Gv:SendEnabled"] = sendEnabled.ToString() }).Build();
     var status = new GvBridgeStatusService(null!, NullLogger<GvBridgeStatusService>.Instance, 10);
     status.ApplyStatusForTest(available ? new GvBridgeStatusDto { Available = true } : null);
     Services.AddSingleton(status);
-    Services.AddSingleton(new GvBridgeSendService(client,
-      NullLogger<GvBridgeSendService>.Instance, config, status));
   }
 
   [Fact]
   public void EmptyThreads_ShowsEmptyState()
   {
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, new List<SmsThreadDto>()));
     Assert.Contains("No conversations yet", cut.Markup);
@@ -44,30 +48,71 @@ public class PhoneTextsPanelTests : TestContext
     // even when the rows were empty static grey bands with zero shimmer — assert the
     // shimmer primitive itself, at the exact count the ×6 loop implies
     // (chip + 2 text bars per row).
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, (List<SmsThreadDto>?)null)
       .Add(x => x.Loading, true));
     Assert.Equal(18, cut.FindAll(".skeleton-loading").Count);
   }
 
+  // ── PHN-4 / D31: replies are off permanently, so the gate is not a branch ────
+
   [Fact]
-  public void ComposeHidden_WhenFlagOff()
+  public void Conversation_ShowsReplyPill_AndNoComposer()
   {
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, new List<SmsThreadDto>
         { new("t1","+15551234567","Mom",DateTime.UtcNow,false,"hi") })
       .Add(x => x.OpenThreadId, "t1")
       .Add(x => x.Messages, new List<SmsMessageDto>()));
-    // Compose bar is not interactive when send is disabled — Send button absent/disabled.
+
+    // Handoff §C4 tier 3a. Assert both halves: the reason is stated AND no
+    // composer survives to reproduce UAT F-3 (an input disabled without a reason).
+    Assert.Contains("Replies are turned off.", cut.Markup);
+    Assert.Empty(cut.FindAll(".texts-compose-input"));
     Assert.DoesNotContain("compose-send-enabled", cut.Markup);
+    Assert.DoesNotContain("Type a message", cut.Markup);
+    // §C4: the slot itself is never hidden — an absent composer reads as a bug.
+    // Assert on the slot's contents rather than on the string "Send", which would
+    // also match unrelated markup and make this gate lie about what it proves.
+    var slot = cut.Find(".texts-compose");
+    Assert.Empty(slot.QuerySelectorAll("input"));
+    Assert.Empty(slot.QuerySelectorAll("button"));
+  }
+
+  [Fact]
+  public void ReplyPill_ShowsRegardlessOfGvAvailability()
+  {
+    // The regression gate for the one judgement PHN-4 made. The old compose bar
+    // fell back to "Texting unavailable" when GV was reconnecting. Under D31 that
+    // string would promise replies resume on reconnect, which is false — so the
+    // tier-3a pill must win even in the degraded state.
+    Register(available: false);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, "Mom")
+      .Add(x => x.Messages, new List<SmsMessageDto>()));
+
+    Assert.Contains("Replies are turned off.", cut.Markup);
+    Assert.DoesNotContain("Texting unavailable", cut.Markup);
+  }
+
+  [Fact]
+  public void EmptyThreadList_OffersNoNewMessageAffordance()
+  {
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>()));
+
+    Assert.Contains("No conversations yet", cut.Markup);
+    Assert.DoesNotContain("New message", cut.Markup);
   }
 
   [Fact]
   public void LoadedThreads_RenderRows()
   {
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, new List<SmsThreadDto>
         { new("t1","+15551234567","Mom",DateTime.UtcNow,true,"see you soon") }));
@@ -77,46 +122,12 @@ public class PhoneTextsPanelTests : TestContext
     Assert.NotEmpty(cut.FindAll(".unread-dot"));
   }
 
-  [Fact]
-  public void Degraded_ShowsTextingUnavailable_WhenThreadOpen()
-  {
-    Register(sendEnabled: true, available: false);
-    var cut = RenderComponent<PhoneTextsPanel>(p => p
-      .Add(x => x.OpenThreadId, "t1")
-      .Add(x => x.HeaderName, "Mom")
-      .Add(x => x.Messages, new List<SmsMessageDto>()));
-    Assert.Contains("Texting unavailable", cut.Markup);
-    Assert.DoesNotContain("compose-send-enabled", cut.Markup);
-    // Degraded branch replaces the whole compose bar with the pill — no message
-    // input and no Send path are rendered.
-    Assert.Empty(cut.FindAll(".texts-compose-input"));
-  }
-
-  [Fact]
-  public void Degraded_HidesComposeInput_EvenWhenFlagOn()
-  {
-    // Send flag ON but GV unavailable: the degraded gate must still win — the
-    // "Texting unavailable" pill shows and the compose input is absent.
-    Register(sendEnabled: true, available: false);
-    var cut = RenderComponent<PhoneTextsPanel>(p => p
-      .Add(x => x.OpenThreadId, "t1")
-      .Add(x => x.HeaderName, "Mom")
-      .Add(x => x.Messages, new List<SmsMessageDto>()));
-    Assert.Contains("Texting unavailable", cut.Markup);
-    Assert.Empty(cut.FindAll(".texts-compose-input"));
-    Assert.DoesNotContain("compose-send-enabled", cut.Markup);
-  }
-
-  [Fact]
-  public void ComposeEnabled_WhenFlagOnAndAvailable()
-  {
-    Register(sendEnabled: true, available: true);
-    var cut = RenderComponent<PhoneTextsPanel>(p => p
-      .Add(x => x.OpenThreadId, "t1")
-      .Add(x => x.HeaderName, "Mom")
-      .Add(x => x.Messages, new List<SmsMessageDto>()));
-    Assert.Contains("compose-send-enabled", cut.Markup);
-  }
+  // Three tests were deleted here by PHN-4, not ported: Degraded_ShowsTexting-
+  // Unavailable_WhenThreadOpen, Degraded_HidesComposeInput_EvenWhenFlagOn and
+  // ComposeEnabled_WhenFlagOnAndAvailable. All three asserted how the compose bar
+  // reacted to RotaryPhone:Gv:SendEnabled and GV availability; there is no compose
+  // bar and the flag no longer changes what renders. ReplyPill_ShowsRegardlessOf-
+  // GvAvailability above covers what replaced them.
 
   // ── GV-8 / UAT F-1: the conversation pane must be able to say "failed" ──────
 
@@ -124,8 +135,9 @@ public class PhoneTextsPanelTests : TestContext
   public void Conversation_ShowsErrorState_NotEmptyState_WhenErrorSet()
   {
     // THE regression gate. Assert both halves: the error is present AND the lie is
-    // absent. Before GV-8 this rendered "Start the conversation below." for a 502.
-    Register(sendEnabled: false, available: true);
+    // absent. Before GV-8 this rendered the empty-state copy for a 502 (that copy
+    // read "Start the conversation below." then; PHN-4 restated it).
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.OpenThreadId, "t1")
       .Add(x => x.HeaderName, "Mom")
@@ -133,7 +145,7 @@ public class PhoneTextsPanelTests : TestContext
       .Add(x => x.Error, true));
 
     Assert.Contains("Couldn't load messages.", cut.Markup);
-    Assert.DoesNotContain("Start the conversation below.", cut.Markup);
+    Assert.DoesNotContain("No messages in this conversation.", cut.Markup);
     Assert.Contains("Retry", cut.Markup);
   }
 
@@ -144,7 +156,7 @@ public class PhoneTextsPanelTests : TestContext
     // for an open-but-failed thread (PhonePage.OnGvSmsReceived appends while
     // _openThreadError is still set) — once Messages has content, show it instead of
     // keeping the error state until Retry or Back.
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.OpenThreadId, "t1")
       .Add(x => x.HeaderName, "Mom")
@@ -161,14 +173,14 @@ public class PhoneTextsPanelTests : TestContext
   {
     // The other side of the same coin: a real 200-with-zero-messages (which is also what
     // a group thread returns today, RotaryPhone Defect B) still reads as empty.
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.OpenThreadId, "t1")
       .Add(x => x.HeaderName, "Mom")
       .Add(x => x.Messages, new List<SmsMessageDto>())
       .Add(x => x.Error, false));
 
-    Assert.Contains("Start the conversation below.", cut.Markup);
+    Assert.Contains("No messages in this conversation.", cut.Markup);
     Assert.DoesNotContain("Couldn't load messages.", cut.Markup);
   }
 
@@ -181,7 +193,7 @@ public class PhoneTextsPanelTests : TestContext
     // even when the rows were empty static grey bands with zero shimmer — assert the
     // shimmer primitive itself, at the exact count the ×5 loop implies
     // (chip + 2 text bars per row).
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.OpenThreadId, "t1")
       .Add(x => x.HeaderName, "Mom")
@@ -189,14 +201,14 @@ public class PhoneTextsPanelTests : TestContext
       .Add(x => x.Loading, true));
 
     Assert.Equal(15, cut.FindAll(".skeleton-loading").Count);
-    Assert.DoesNotContain("Start the conversation below.", cut.Markup);
+    Assert.DoesNotContain("No messages in this conversation.", cut.Markup);
     Assert.DoesNotContain("Couldn't load messages.", cut.Markup);
   }
 
   [Fact]
   public void Conversation_RetryButton_InvokesOnRetry()
   {
-    Register(sendEnabled: false, available: true);
+    Register(available: true);
     var retries = 0;
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.OpenThreadId, "t1")

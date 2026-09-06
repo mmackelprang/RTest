@@ -179,8 +179,9 @@
     <div class="phone-messages-detail">
       @if (_openThreadId != null)
       {
-        @* PR3 — open SMS conversation. Compose + new-inbound append handled by
-           PhoneTextsPanel; the parent feeds OpenThreadMessages + reconciles. *@
+        @* PR3 — open SMS conversation, read-only since PHN-4 (D31): PhoneTextsPanel
+           renders the bubbles and the reply-gate pill, and owns no write path. The
+           parent feeds OpenThreadMessages and reconciles inbound arrivals. *@
         <PhoneTextsPanel OpenThreadId="_openThreadId"
                          Threads="Threads"
                          Contacts="Contacts"
@@ -190,8 +191,7 @@
                          OnRetry="OnRetryOpenThread"
                          HeaderName="@OpenThreadName"
                          HeaderNumber="@OpenThreadNumber"
-                         OnBack="CloseThread"
-                         OnOptimisticAppend="OnOptimisticAppend" />
+                         OnBack="CloseThread" />
       }
       else if (_selectedCall == null)
       {
@@ -277,7 +277,6 @@
   [Parameter] public EventCallback OnRetryThreads { get; set; }
   [Parameter] public EventCallback<string> OnOpenThread { get; set; }   // threadId → parent loads messages + marks read
   [Parameter] public EventCallback OnCloseThread { get; set; }          // back → parent clears _openThreadId + _openThreadMessages
-  [Parameter] public EventCallback<SmsMessageDto> OnOptimisticAppend { get; set; }
 
   private string _filter = "all";
   private bool _disposed;

@@ -94,12 +94,8 @@ public class PhonePageTests : TestContext
       sp.GetRequiredService<IServiceScopeFactory>(),
       NullLogger<BellHealthService>.Instance, 15));
 
-    // PR3: the Messages feed hosts PhoneTextsPanel, which injects the flagged
-    // send service. Register it (send disabled by default) so the panel renders.
-    Services.AddHttpClient<GvBridgeSendService>(client =>
-    {
-      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
-    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
+    // No send-service registration: PHN-4 deleted GvBridgeSendService, and
+    // PhoneTextsPanel no longer injects anything to render the reply gate.
 
     // Task #6: PhoneMessagesPanel injects the contact-name resolution service.
     Services.AddScoped<ContactResolutionService>();

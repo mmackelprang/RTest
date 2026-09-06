@@ -93,10 +93,7 @@ public class PhonePageThreadLoadErrorTests : TestContext
       sp.GetRequiredService<IServiceScopeFactory>(),
       NullLogger<BellHealthService>.Instance, 15));
 
-    Services.AddHttpClient<GvBridgeSendService>(client =>
-    {
-      client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
-    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
+    // No send-service registration: PHN-4 deleted GvBridgeSendService.
 
     Services.AddScoped<ContactResolutionService>();
   }
