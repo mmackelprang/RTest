@@ -429,7 +429,7 @@ the fix is a harness that can, not a name that sounds like one.**
 
 ---
 
-## Phone-number logging — seven sites log full numbers and contact names, filed and NOT fixed
+## Phone-number logging — CLOSED by PHN-5 (the heading's "seven sites" figure is corrected below)
 
 **Status:** ✅ **CLOSED by `PHN-5`, 2026-09-05.** Every site below is masked with
 `LogSafeText.ForPhone`, every contact name is deleted from its log line, and
