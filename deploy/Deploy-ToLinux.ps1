@@ -185,30 +185,70 @@ try {
 }
 
 # Sync API
+#
+# Each native call's exit code is captured on the line after the call, and the first
+# non-zero one is what the check below reads. Before OPS-9 this block ran ssh, scp and
+# ssh in sequence and then tested $LASTEXITCODE, which by then belonged to the LAST
+# ssh — whose remote compound ends in `rm -rf`, and that returns 0 whether or not the
+# directory was there. So the message said "API sync failed!" while the value it read
+# came from the tidy-up, and a scp that transferred nothing reported success.
+#
+# The script-level $ErrorActionPreference = "Stop" does not cover this: whether a
+# failing native command throws is governed by $PSNativeCommandUseErrorActionPreference,
+# measured $false here on PowerShell 7.6.5. Setting it $true would change every other
+# $LASTEXITCODE check in this file, so the capture is done per call instead.
+#
+# Only the scp fallback was ever wrong — on the rsync path the rsync IS the last native
+# call before the check. It is captured the same way so this file has one idiom and not
+# two, which is the reason OPS-7 gave for capturing $moveExit at its call site below.
+#
+# NOT CAUGHT HERE: the two `mv`s in the final ssh send stderr to /dev/null and are
+# chained with `;`, so that command's exit code is `rm -rf`'s no matter how the moves
+# went. A move that relocated nothing still reports 0. Narrowing that needs the fallback
+# driven against a real target, which OPS-9 did not do; it is recorded as
+# design/FUTURE-WORK.md section 27 rather than guessed at here.
 Write-Host "  Syncing API..." -ForegroundColor DarkGray
 if ($useRsync) {
   rsync -avz --delete "${ApiPublishDir}/" "${SshTarget}:/tmp/radio-deploy-api/"
+  $apiSyncExit = $LASTEXITCODE
 } else {
   Write-Host "  (rsync not found, using scp)" -ForegroundColor DarkGray
   ssh $SshTarget "rm -rf /tmp/radio-deploy-api && mkdir -p /tmp/radio-deploy-api"
-  scp -r $ApiPublishDir "${SshTarget}:/tmp/radio-deploy-api-tmp"
-  ssh $SshTarget "mv /tmp/radio-deploy-api-tmp/* /tmp/radio-deploy-api/ 2>/dev/null; mv /tmp/radio-deploy-api-tmp/.[!.]* /tmp/radio-deploy-api/ 2>/dev/null; rm -rf /tmp/radio-deploy-api-tmp"
+  $apiSyncExit = $LASTEXITCODE
+  if ($apiSyncExit -eq 0) {
+    scp -r $ApiPublishDir "${SshTarget}:/tmp/radio-deploy-api-tmp"
+    $apiSyncExit = $LASTEXITCODE
+  }
+  if ($apiSyncExit -eq 0) {
+    ssh $SshTarget "mv /tmp/radio-deploy-api-tmp/* /tmp/radio-deploy-api/ 2>/dev/null; mv /tmp/radio-deploy-api-tmp/.[!.]* /tmp/radio-deploy-api/ 2>/dev/null; rm -rf /tmp/radio-deploy-api-tmp"
+    $apiSyncExit = $LASTEXITCODE
+  }
 }
-if ($LASTEXITCODE -ne 0) {
+if ($apiSyncExit -ne 0) {
   Write-Host "API sync failed!" -ForegroundColor Red
   exit 1
 }
 
-# Sync Web
+# Sync Web — same shape and same reasoning as the API block above, which carries the
+# explanation. Kept as two blocks rather than one helper because that is how the file
+# already reads; if a third service is ever added, extract it instead of copying again.
 Write-Host "  Syncing Web..." -ForegroundColor DarkGray
 if ($useRsync) {
   rsync -avz --delete "${WebPublishDir}/" "${SshTarget}:/tmp/radio-deploy-web/"
+  $webSyncExit = $LASTEXITCODE
 } else {
   ssh $SshTarget "rm -rf /tmp/radio-deploy-web && mkdir -p /tmp/radio-deploy-web"
-  scp -r $WebPublishDir "${SshTarget}:/tmp/radio-deploy-web-tmp"
-  ssh $SshTarget "mv /tmp/radio-deploy-web-tmp/* /tmp/radio-deploy-web/ 2>/dev/null; mv /tmp/radio-deploy-web-tmp/.[!.]* /tmp/radio-deploy-web/ 2>/dev/null; rm -rf /tmp/radio-deploy-web-tmp"
+  $webSyncExit = $LASTEXITCODE
+  if ($webSyncExit -eq 0) {
+    scp -r $WebPublishDir "${SshTarget}:/tmp/radio-deploy-web-tmp"
+    $webSyncExit = $LASTEXITCODE
+  }
+  if ($webSyncExit -eq 0) {
+    ssh $SshTarget "mv /tmp/radio-deploy-web-tmp/* /tmp/radio-deploy-web/ 2>/dev/null; mv /tmp/radio-deploy-web-tmp/.[!.]* /tmp/radio-deploy-web/ 2>/dev/null; rm -rf /tmp/radio-deploy-web-tmp"
+    $webSyncExit = $LASTEXITCODE
+  }
 }
-if ($LASTEXITCODE -ne 0) {
+if ($webSyncExit -ne 0) {
   Write-Host "Web sync failed!" -ForegroundColor Red
   exit 1
 }

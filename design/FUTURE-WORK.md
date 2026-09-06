@@ -1943,6 +1943,29 @@ a matched pair in `Deploy-ToLinux.ps1` and have to stay one here. The work is:
 
 ## 26. A failed `scp` is masked by the `ssh` on the next line, twice, in `Deploy-ToLinux.ps1`
 
+> ✅ **FIXED by `OPS-9`.** Both sync blocks now capture each native call's exit code on the line
+> after the call and test the first non-zero one. The defect was observed before it was fixed: with
+> `ssh`/`scp` shimmed and the fallback forced, `main` exited **0** on a failed transfer and printed
+> no error at all, while the fixed script exits **1** with `API sync failed!` / `Web sync failed!`.
+> The rsync arm and the ssh-failure case behave identically before and after — only the two
+> scp-failure rows changed. **The `mv` masking this section describes in passing is NOT fixed; it is
+> section 27 below.**
+>
+> ⚠ **CORRECTION — "a path that is rarely taken" is false of the machine this deploy runs from.**
+> This section, and the `OPS-9` row that quoted it, called the fallback latent *because* `rsync` is
+> usually present. Measured 2026-09-05 on the Windows dev box that hosts this repo, three
+> independent ways: `Get-Command rsync` fails in PowerShell 7.6.5 **with and without** the profile
+> loaded, `where.exe rsync` finds nothing, and no `rsync` binary exists in the Git-for-Windows tree.
+> **`rsync` is not installed here at all**, so `$useRsync` is `$false` and *every* deploy launched
+> from this machine takes the scp fallback. The unguarded gate was not a rare path; it was the only
+> path.
+>
+> Note what this does and does not change. **"Rarely taken" was wrong.** *"It has not bitten"* may
+> still be right — masking only costs something when a transfer actually fails, and no such failure
+> is on record. The accurate description is **live but unfired**, not latent — which also means a
+> transfer that did fail would have been reported as a successful deploy, and that is the shape of
+> failure nobody notices. Measured on one machine; other machines are not claimed either way.
+
 **Found by `OPS-7`'s sweep.** The same class as `OPS-7`'s `C-88` (a `$LASTEXITCODE` read further from
 its command than the next line), in the same file, but on the **scp fallback path** rather than the
 config seed — which is why `OPS-7` fixed `C-88` and left these.
@@ -1989,3 +2012,52 @@ $xferExit = $LASTEXITCODE
   temporarily unavailable rather than assuming.
 
 **Priority: medium.** Latent — masks a real failure, but only on a path that is rarely taken.
+
+---
+
+## 27. The staging `mv` in the scp fallback cannot report failure, so an empty staging dir looks like a good transfer
+
+**Found by `OPS-9`, which fixed the layer above it and deliberately stopped there.**
+
+`OPS-9` made the sync gate read the `scp`'s own exit code, so a transfer that fails is now caught.
+It did **not** change what the `ssh` after the transfer can report, and that command still cannot
+fail:
+
+```powershell
+ssh $SshTarget "mv /tmp/radio-deploy-api-tmp/* /tmp/radio-deploy-api/ 2>/dev/null; mv /tmp/radio-deploy-api-tmp/.[!.]* /tmp/radio-deploy-api/ 2>/dev/null; rm -rf /tmp/radio-deploy-api-tmp"
+```
+
+Both `mv`s send stderr to `/dev/null` and are chained with `;` rather than `&&`, and the compound
+ends in `rm -rf`, which returns 0 whether or not the directory was there. So the exit code
+`OPS-9` now captures for this step is `rm -rf`'s, and a `mv` that relocated **nothing** still
+reports success.
+
+**Why this is not simply "add `&&`".** The second `mv` is expected to fail on most deploys: it moves
+dotfiles, and `.[!.]*` stays unexpanded when there are none, so the `2>/dev/null` and the `;` are
+both load-bearing for the ordinary case. A correct fix has to distinguish "no dotfiles to move" from
+"the move failed", which means changing the remote script rather than the operator.
+
+**What it would cost if it bit.** The staging dir feeds
+`sudo rsync -a --delete /tmp/radio-deploy-api/ $TargetPath/api/`. An empty staging dir plus
+`--delete` is an emptied install directory. The `$moveExit` check `OPS-7` added does catch the rsync
+itself failing, and rsync does fail on a missing source — so the current exposure is the narrower
+case where staging exists but is short of files, not the total-wipe case.
+
+### What is needed
+
+Replace the remote compound with one that reports a real result — e.g. enable `dotglob` and use a
+single `mv` whose failure is fatal, or move and then assert the staging directory is non-empty
+before returning. Either way the remote script should `exit` on a genuine failure and `exit 0` on
+the legitimate no-dotfiles case, the way `OPS-7`'s config probe fails closed on purpose.
+
+### Gotchas
+
+- ⚠ **Reached only when `rsync` is absent from PATH**, same as section 26. It has never bitten and is
+  not urgent; it is filed so the next person to read that line knows the gate above it is narrower
+  than it looks.
+- ⚠ **`OPS-9` did not exercise this against a real target.** Its verification shimmed `ssh`/`scp` to
+  prove the PowerShell exit-code sequencing, which says nothing about remote `mv` semantics. Anyone
+  fixing this needs the fallback driven against an actual box.
+
+**Priority: low.** Latent behind a rare path, and the worst outcome is now partly covered by
+`OPS-7`'s `$moveExit` check.
