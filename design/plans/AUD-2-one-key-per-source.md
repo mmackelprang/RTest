@@ -1,7 +1,6 @@
 # PLAN — `AUD-2` · One key per source
 
-> **Row:** `AUD-2`, `docs/BUILDER_QUEUE.md:129` on `main` (`:131` in this working tree — the
-> `fix/phn-5-…` branch adds two lines above it).
+> **Row:** `AUD-2`, [`docs/queue/AUD-2.md`](../../docs/queue/AUD-2.md). 📋 queued, no dependency.
 > **Branch:** `fix/sdr-playback-id-ducking-gain` (the row names it). ⚠ The branch name says `sdr`;
 > the scope is **four source types across three files**. §0.5.
 > **Estimate:** **1 day.** §7 says how it splits and what would push it out.
