@@ -214,7 +214,12 @@ if ($useRsync) {
   $apiSyncExit = $LASTEXITCODE
 } else {
   Write-Host "  (rsync not found, using scp)" -ForegroundColor DarkGray
-  ssh $SshTarget "rm -rf /tmp/radio-deploy-api && mkdir -p /tmp/radio-deploy-api"
+  # Clears the -tmp staging dir as well as the destination. Only the third ssh below
+  # removes -tmp, and since OPS-9 that ssh is skipped when the transfer fails — so a
+  # failed deploy can leave a partial -tmp behind. Clearing it here means the next
+  # attempt cleans up after the previous one, without adding a network call to the
+  # failure path, where the connection is the thing most likely to be broken.
+  ssh $SshTarget "rm -rf /tmp/radio-deploy-api /tmp/radio-deploy-api-tmp && mkdir -p /tmp/radio-deploy-api"
   $apiSyncExit = $LASTEXITCODE
   if ($apiSyncExit -eq 0) {
     scp -r $ApiPublishDir "${SshTarget}:/tmp/radio-deploy-api-tmp"
@@ -238,7 +243,8 @@ if ($useRsync) {
   rsync -avz --delete "${WebPublishDir}/" "${SshTarget}:/tmp/radio-deploy-web/"
   $webSyncExit = $LASTEXITCODE
 } else {
-  ssh $SshTarget "rm -rf /tmp/radio-deploy-web && mkdir -p /tmp/radio-deploy-web"
+  # Clears -tmp too; see the API block above for why.
+  ssh $SshTarget "rm -rf /tmp/radio-deploy-web /tmp/radio-deploy-web-tmp && mkdir -p /tmp/radio-deploy-web"
   $webSyncExit = $LASTEXITCODE
   if ($webSyncExit -eq 0) {
     scp -r $WebPublishDir "${SshTarget}:/tmp/radio-deploy-web-tmp"
