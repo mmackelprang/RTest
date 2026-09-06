@@ -38,8 +38,8 @@ public enum GvCallOutcome
 /// inventing a second mechanism — branch on
 /// <c>Outcome == GvCallOutcome.HttpError &amp;&amp; StatusCode == HttpStatusCode.Conflict
 /// &amp;&amp; ErrorCode == "markread_disabled"</c>. See
-/// <c>docs/BUILDER_QUEUE.md</c> § "Dependency / ordering notes" for why the two rows
-/// share the idiom but not the PR.
+/// <c>docs/queue/ORDERING-NOTES.md</c> for why the two rows share the idiom but not
+/// the PR.
 /// </para>
 /// </summary>
 public sealed class GvResult<T> where T : class
