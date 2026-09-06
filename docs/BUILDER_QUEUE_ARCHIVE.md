@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (36)
+## Shipped rows (37)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1197,6 +1197,49 @@
 ⚠ **Regardless of that call, `SendNotAvailableException`'s message at `GvBridgeSendService.cs:14` — `"Texting send is coming soon."` — must not survive `D31` unchanged**; it promises a feature that is never coming.
 
 **Est. 0.5 d** (add ~1 h if the service is deleted too).
+
+---
+
+### OPS-2 — Pin the six floating package versions.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#585](https://github.com/mmackelprang/RTest/pull/585) |
+| Plan | [`OPS-2-pin-the-six-floating-package-versions.md`](../design/plans/OPS-2-pin-the-six-floating-package-versions.md) |
+| Spec / handoff | _no spec doc — the diagnosis was in the row_ |
+| Depends on | — |
+| Branch | `chore/pin-floating-package-versions` |
+
+**Detail: [`queue/OPS-2.md`](queue/OPS-2.md).**
+
+⚠ **First row to ship after the 2026-09-06 restructure, so it sets a convention that restructure did
+not specify: a shipped row's prose stays in its dossier and is linked from here, rather than being
+inlined.** Every entry above has inline prose because those rows were archived *before* dossiers
+existed. Inlining this one would duplicate a live file and count as a content edit. If the owner
+prefers inlining, this is the row to change while there is only one of them.
+
+Shipped 2026-09-06. Six packages across seven `PackageReference` lines in three files, pinned to the
+versions that already resolved — no upgrades. Verified two independent ways (`dotnet list package`
+and `obj/project.assets.json`), and the entire `libraries` block including every SHA-512 content hash
+is byte-identical before and after in all three projects (48 / 46 / 62 distinct identities).
+
+Per-TFM ambiguity closed by measurement rather than argument: `radio` has .NET 10.0.111 but no `git`,
+so the planned shallow clone was impossible; a minimal `net10.0` probe was restored on the appliance
+itself and deleted, confirming all six resolve identically on the real deployment target.
+
+⚠ **Merged on local gates with CI unavailable.** The self-hosted `appserver-rtest` runner went offline
+~13:32 UTC and every run since is queued. `build.yml:13-15` states CI is **advisory** and names the
+Builder's local `dotnet build` / `dotnet test` as the merge-blocking truth, and the owner authorised
+the merge on that basis.
+
+Two of the plan's own claims did not survive execution, both recorded rather than smoothed over:
+`--outdated --highest-minor` is **not** empty (15 packages listed) — though none of the six floats
+appears, so the substance held — and the stated 53-warning baseline was stale. The real baseline is
+**47**, measured on `main` with an identical `IDE0011` histogram, and is now corrected in `CLAUDE.md`.
+
+**Follow-up worth a row:** three of the wildcards were *capping*, not tracking. `Radzen.Blazor` is now
+pinned at 6.6.4 while 11.3.2 is current — five majors behind — and both Serilog packages sit behind
+10.0.0. The pin records that gap; it did not cause it.
 
 ---
 
