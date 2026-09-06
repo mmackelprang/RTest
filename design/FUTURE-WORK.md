@@ -1879,6 +1879,29 @@ one of:
 
 ## 25. `deploy-to-pi.sh` destroys BOTH Production overlays on every run, and has no seed to restore them
 
+> ✅ **FIXED by `OPS-8`.** Both `sudo rsync --delete` invocations now carry
+> `--exclude='appsettings.Production.json'`, and a per-destination seed block fills the file in
+> from `deploy/raspberry-pi/` on a box that has none. The defect was observed before it was
+> fixed: with `ssh`/`scp` shimmed and **real rsync 3.2.7** doing the transfer, the pre-change
+> region deleted the `api/` overlay outright and replaced the `web/` overlay with the 181-byte
+> tracked stub; the post-change region leaves both byte-identical.
+>
+> ⚠ **Two things the fix does that this section did not ask for, both from pre-merge review.**
+> The probe requires an explicit `PRESENT:<dir>` / `ABSENT:<dir>` verdict per destination rather
+> than inferring absence from a missing line — a remote answering with an unterminated shell
+> banner, CRLF endings, or a masked remote-side error was measured to read as "absent" and
+> would have seeded **over** a present overlay. And every abort in the seed block now tells the
+> operator the services are stopped, because by then Step 2 has stopped both and Step 3 has
+> already replaced the binaries.
+>
+> ⚠ **`Deploy-ToLinux.ps1` still has the weaker probe** (`:316`, `:321`, `:325`) — it infers
+> absence from a name not appearing. Not queued.
+>
+> ⚠ **The `chown radio:radio` on the seeded file is unverified.** The harness shims `chown` to a
+> no-op, so ownership is asserted by inspection, not measured. No ARM target was available and
+> `OPS-7`'s real-`ssh`-at-a-scratch-path route was **not** taken — the transport is shimmed
+> entirely, which is a weaker claim than the queue row asked for.
+
 **Found by `OPS-7`'s sweep, deliberately not fixed there.** `OPS-7` corrected the Production-config
 seed in `Deploy-ToLinux.ps1`, whose defect only bit a box in a divergent state (api overlay absent,
 web overlay present). Its sibling `deploy/deploy-to-pi.sh` carries the same outcome by a different
@@ -2087,3 +2110,67 @@ the legitimate no-dotfiles case, the way `OPS-7`'s config probe fails closed on 
 **Priority: low** — but on frequency of *failure*, not of the code path, which runs on every deploy
 from a machine without `rsync`. The worst outcome may also be partly covered by `OPS-7`'s
 `$moveExit` check, depending on the unmeasured rsync question above.
+
+---
+
+## 28. `Deploy-ToLinux.ps1`'s overlay probe still seeds on silence, and the bash twin no longer does
+
+**Found by `OPS-8`'s pre-merge review, deliberately not fixed there.** `OPS-8` hardened the probe in
+`deploy/deploy-to-pi.sh`. The PowerShell twin was left as it is, so the two scripts now differ, and
+the *weaker* one is the script that deploys the cabinet.
+
+### What exists
+
+`deploy/Deploy-ToLinux.ps1:316,321,325`:
+
+```powershell
+$probe = ssh $SshTarget "for d in api web; do if [ -f $TargetPath/`$d/appsettings.Production.json ]; then echo `$d; fi; done; exit 0"
+...
+$present = @($probe | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+foreach ($dest in @('api', 'web')) {
+  if ($present -contains $dest) { ...left alone... ; continue }
+```
+
+**Presence is a line; absence is that line's omission.** So anything that empties or corrupts the
+probe's stdout reads as *"absent"* and seeds **over** a present overlay — the exact outcome `OPS-7`
+and `OPS-8` both exist to prevent. The trailing `exit 0` that makes the transport check work also
+erases the remote's ability to say *"I could not look"*.
+
+Three ways in, all **measured** during `OPS-8`'s review against the equivalent bash form:
+
+1. **An unterminated banner from a remote login profile.** `ssh host cmd` still sources `~/.bashrc`.
+   A `printf "Welcome to piradio"` with no newline yields `Welcome to piradioapi`, the `api` line no
+   longer matches, and the api overlay is seeded over. A newline-terminated banner is harmless.
+2. **CRLF on the wire** — `api\r\nweb\r\n`. `.Trim()` happens to save the PowerShell here where it
+   did not save the bash form; this one is the least likely of the three to bite.
+3. **A remote-side shell error that empties stdout**, masked by `exit 0`. Reproduced with a
+   `TargetPath` containing a space, where the unquoted remote `[` fails with *"binary operator
+   expected"* on stderr and prints nothing on stdout — read as *"both overlays absent"*.
+
+⚠ **This is not theoretical, and `OPS-8` has the receipt.** The identical omission-form probe in the
+bash script was measured destroying a live overlay: harness case F, variant `head`, api went
+`3a49d9f5388e → 68ba7537fa82` with **exit 0 and no complaint**.
+
+### What is needed
+
+Port `deploy-to-pi.sh`'s shape back. The remote emits exactly one of `PRESENT:<dest>` /
+`ABSENT:<dest>` per destination; seed only on a matched `ABSENT:`; abort when a destination yields
+neither, because that is *"the answer was not intelligible"* rather than *"the file is absent"*.
+Strip `\r` before matching so CRLF is understood rather than rejected. Quote the remote path inside
+the remote `[`.
+
+### Gotchas
+
+- ⚠ **The residual is worth stating rather than papering over.** No probe can distinguish a true
+  `ABSENT:api` about the *wrong* directory (a typo'd `TargetPath`, a `TargetUser` landing in another
+  home) from a true one about the right box. `deploy-to-pi.sh` says so in a comment; say it here too
+  rather than implying the verdict form closes it.
+- The two scripts also disagree on the seeded file's owner — `radio:radio` in the bash script,
+  `${TargetUser}:${TargetUser}` (default `mmack`) in the PowerShell, aimed at the same Pi. Pre-dates
+  both rows; worth settling in the same pass.
+- `deploy/DEPLOYMENT.md` § *appsettings.Production.json* already documents the asymmetry, so that
+  note must be revised when this is fixed — not left describing a difference that no longer exists.
+
+**Priority: medium.** It is latent rather than firing, and the failure needs a contaminated or broken
+probe answer. But the blast radius is an unreconstructible operator file on the box the whole punch
+list's claims rest on, and the fix is a dozen lines already written and measured next door.

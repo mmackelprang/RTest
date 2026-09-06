@@ -138,10 +138,18 @@ cd deploy/common
 ./publish.sh arm64
 
 # Copy to Pi
-rsync -avz --delete publish/linux-arm64/api/ mmack@piradio:/opt/radio-console/api/
-rsync -avz --delete publish/linux-arm64/web/ mmack@piradio:/opt/radio-console/web/
+# The --exclude is not optional. Without it, --delete removes api/appsettings.Production.json
+# (nothing in the publish output replaces it) and overwrites web/appsettings.Production.json
+# with the tracked stub from src/Radio.Web/. Both deploy scripts pass it; so must you.
+rsync -avz --delete --exclude='appsettings.Production.json' publish/linux-arm64/api/ mmack@piradio:/opt/radio-console/api/
+rsync -avz --delete --exclude='appsettings.Production.json' publish/linux-arm64/web/ mmack@piradio:/opt/radio-console/web/
 ssh mmack@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/api/Radio.API /opt/radio-console/web/Radio.Web"
 ```
+
+⚠ **This manual route has no seed step.** The scripts pair the `--exclude` with a block that
+creates the overlay when a directory has none; the commands above only *preserve* one that
+already exists. On a freshly provisioned Pi, copy
+`deploy/raspberry-pi/appsettings.Production.json` into `api/` and `web/` yourself.
 
 #### How files reach the target, and what happens when that fails
 
@@ -553,25 +561,63 @@ The API settings are the primary configuration; the Web settings mainly configur
 API connection URL.
 
 **Seeding is per service directory, and an existing overlay is never overwritten.** When
-`Deploy-ToLinux.ps1` finds no `appsettings.Production.json` in `api/` or in `web/`, it seeds
-that directory from `deploy/<target>/appsettings.Production.json`; a directory that already
-has one is left byte-for-byte alone, and the deploy prints `present — left alone` for it.
-The two directories are decided independently, so provisioning a box by hand-placing only
-one of the two overlays is safe.
+`Deploy-ToLinux.ps1` or `deploy-to-pi.sh` finds no `appsettings.Production.json` in `api/` or
+in `web/`, it seeds that directory from `deploy/<target>/appsettings.Production.json`; a
+directory that already has one is left byte-for-byte alone, and the deploy prints
+`present — left alone` for it. The two directories are decided independently, so provisioning
+a box by hand-placing only one of the two overlays is safe.
 
-If the presence check itself cannot be completed — an `ssh` transport failure rather than an
-answer — the deploy **aborts instead of seeding**. `ssh` reports its own errors as exit 255,
-which a bare `test -f` cannot tell apart from "file absent", so guessing would risk
-overwriting the very file this guard protects.
+Both scripts also pass `--exclude='appsettings.Production.json'` to the `rsync --delete` that
+moves the binaries into place. The exclude and the seed are a **matched pair**: the exclude
+preserves an overlay that exists, the seed creates one that does not. A script carrying only
+the exclude would leave a fresh box with no overlay at all.
+
+> `deploy-to-pi.sh` gained both halves in `OPS-8`. Before that it had **neither**, and
+> destroyed the operator's config on *every* run: `api/`'s overlay was deleted outright
+> (nothing in the publish output replaces it) and `web/`'s was silently overwritten by the
+> tracked stub in `src/Radio.Web/`. The deletion was the louder half; the replacement was the
+> one that survived a casual look, because the file was still present and still well-formed.
+
+If the presence check itself cannot be completed, the deploy **aborts instead of seeding** —
+guessing would risk overwriting the very file this guard protects. `ssh` reports its own
+transport errors as exit 255, which a bare `test -f` cannot tell apart from "file absent".
+
+> The two scripts are **not** equally strict here, and `deploy-to-pi.sh` is the stricter one.
+> `Deploy-ToLinux.ps1` infers absence from a destination's *name not appearing* in the probe's
+> output, so a remote that answers with contaminated or empty stdout — an unterminated shell
+> banner, CRLF line endings, a remote-side error masked by the probe's own `exit 0` — reads as
+> "absent" and seeds over a present overlay. `deploy-to-pi.sh` requires an explicit
+> `PRESENT:<dir>` or `ABSENT:<dir>` verdict per destination and aborts when it gets neither.
+> Not theoretical: the bash script's own omission-form probe was measured destroying a live
+> overlay before `OPS-8` replaced it. Porting the verdict form back to the PowerShell is filed
+> as `design/FUTURE-WORK.md` §28, not yet queued.
 
 > ⚠ **One seed file serves both directories.** `deploy/debian-x64/appsettings.Production.json`
-> holds only API-shaped keys (`AudioOutput`, `Devices`, `FilePlayer`, `Diagnostics`,
-> `Fingerprinting`), so a `web/` directory seeded from it receives keys `Radio.Web` does not
-> bind, and no `ApiBaseUrl` or `Kestrel`. That is inert today, and it is what you will find if
-> you open a freshly seeded `web/` overlay to add `RotaryPhone:Gv:AuthKey`. It also means the
-> seeded file now counts as "present" forever, so that path will not be seeded again. Adding a
-> web-bound key to the shared seed would silently start landing it in `api/` too — splitting
-> the seed per service is the fix if that day comes.
+> holds API-shaped keys (`AudioOutput`, `Devices`, `FilePlayer`, `Diagnostics`,
+> `Fingerprinting`), and no `ApiBaseUrl` or `Kestrel`. A `web/` directory seeded from it is
+> inert today — but note *why*, because the obvious reason is wrong: `Radio.Web` **does** bind
+> `Devices` (`Program.cs:565` → `DevicesOptions.SectionName`). It is inert because
+> `DevicesOptions` reads only `Devices:Aliases`, which the seed does not supply, and per-key
+> merge leaves the base `Aliases` map intact. `AudioOutput` is the section `Radio.Web` genuinely
+> does not bind. This is what you will find if you open a freshly seeded `web/` overlay to add
+> `RotaryPhone:Gv:AuthKey`. It also means the seeded file now counts as "present" forever, so
+> that path will not be seeded again. Adding a web-bound key to the shared seed would silently
+> start landing it in `api/` too — splitting the seed per service is the fix if that day comes.
+
+> ⚠ **The Pi's seed is a different file with a much smaller surface.**
+> `deploy/raspberry-pi/appsettings.Production.json` holds a **single** top-level key,
+> `AudioOutput` — Pi-specific device-display patterns plus `Local.PreferredDeviceId:
+> "playback-12"` and `GoogleCast.StreamingMode: "DirectChannel"`. It has no `Devices`,
+> `Kestrel`, `Logging`, `Fingerprinting`, and **no `RotaryPhone` section**, so nothing seeded
+> from it ever writes an empty `AuthKey`.
+>
+> ⚠ **Since `OPS-8`, a fresh Pi deployed by `deploy-to-pi.sh` gets an `api/` overlay where it
+> previously had none** — and that overlay pins `PreferredDeviceId` to `playback-12` and the
+> Cast mode to `DirectChannel`, where the built-in defaults are `""` (auto-select) and
+> `HttpMp3`. If `playback-12` is not the intended output on that particular Pi, audio will
+> route to the wrong device until the overlay is edited. This is convergent rather than novel:
+> `Deploy-ToPi.ps1` → `Deploy-ToLinux.ps1 -Runtime linux-arm64` already resolves `$configDir`
+> to `raspberry-pi` and seeds the same file. The bash script is catching up to its twin.
 
 > Before `OPS-7` it was not. A single `test -f` on `api/` gated the copy into **both**
 > directories, so a box with a `web/` overlay and no `api/` one had its web file
