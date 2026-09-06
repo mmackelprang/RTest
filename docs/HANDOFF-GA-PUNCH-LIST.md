@@ -916,7 +916,26 @@ the wrong value. Nothing validates that the voice belongs to the selected engine
 > write handler (`ConfigurationController.cs:306`) upserts only the keys posted rather than replacing the
 > section, so a single-key POST left `tts:googleAPIKey` intact — **verify this before any future
 > section-level write.** Confirmed working end to end from the Serilog file sink: engine `Google`, no
-> `Google TTS API error`, ducking engaged at 20% `FadeSmooth` and released to 100%, source removed cleanly.
+> `Google TTS API error`, source removed cleanly.
+>
+> ⚠ **CORRECTED 2026-09-06 (`AUD-2`): the ducking clause was withdrawn. It read "ducking engaged at
+> 20% `FadeSmooth` and released to 100%", and those log lines could not support it.** They are emitted
+> before the ducking multiplier is applied, or without checking whether it was: `DuckingService` only
+> raises events and never touches the mixer (`DuckingService.cs:521-525`); `AudioManager`'s
+> "Ducking level:" line is `Debug` (`AudioManager.cs:481`) and `Radio.API`'s Serilog `Radio` override
+> floors at `Information`, so it was written to neither sink; and "Ducking ended: volume restored"
+> (`AudioManager.cs:557-559`) was `Information` but **unconditional** — printed identically whether the
+> multiplier landed, missed, or had no active source at all. So the entry recorded that the lines
+> appeared, which they would have either way. **This is NOT a claim that ducking was broken on
+> 2026-08-19 — it is a statement that the evidence cited does not decide it**, and the TTS findings
+> either side of it are unaffected. `AUD-2` separately found that four primary sources registered
+> under a key `AudioManager` never addressed, which is a real mechanism by which ducking could have
+> been silently dead here; `Bluetooth` was not affected (`2bbd0eb5`).
+>
+> **Since `AUD-2` these lines can be trusted again:** "Ducking ended" now reports
+> `volumeRestored={Restored}` from `ClearDuckingMultiplier`'s actual result, and a miss on a playing
+> source emits a `did NOT reach` **warning**. A log excerpt showing `volumeRestored=True` IS evidence;
+> one showing the old unconditional wording is not, and dates it to before this fix.
 > **Ducking was never broken on the notifications path** — it simply was never reached, because TTS threw
 > on the invalid voice first. That closes the owner's ducking complaint as a duplicate of this row.
 >

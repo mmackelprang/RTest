@@ -12,10 +12,10 @@
 | Field | Value |
 |---|---|
 | Status | 📋 |
-| Plan | — |
+| Plan | [`design/plans/TEST-7-timeprovider-seam-for-nowplayingpanel.md`](../../design/plans/TEST-7-timeprovider-seam-for-nowplayingpanel.md) |
 | Spec / handoff | [punch list §4.6 `TEST-7`](../HANDOFF-GA-PUNCH-LIST.md) |
 | Depends on | — |
-| Branch | — |
+| Branch | `fix/test-7-nowplayingpanel-timeprovider-seam` |
 
 ## Detail
 
@@ -34,3 +34,5 @@
 ⚠ **Advancing a fake clock is NOT sufficient on its own** — the callback is `async void` over two awaited HTTP hops, so the fix still needs a completion rendezvous before asserting on the write count.
 
 **Also pull in the panel's second hardcoded timer** (`_gainDebounceTimer`, 200 ms, `:891-909`) — same exposure, same seam. Sibling `VolumeDrag_StillAppliesEveryTickToTheAudioEngine` (`:150`) is genuinely safe and needs no change.
+
+⚠ **PLANNED 2026-09-05, and the seam is NOT the one the row assumed.** `EncoderHudService`'s idiom is an optional **constructor** parameter, and a Blazor component has no constructor — the renderer activates it parameterlessly. `@inject TimeProvider` is the obvious substitute and is wrong twice: it is a *required* resolve against a container that registers `TimeProvider` **nowhere, in either host, deliberately** (`AudioServiceExtensions.cs:414-415`, `:458-459`, `:494-496`, with a standing check at `EncoderHudServiceTests.cs:466-485`), and it leaves `Clock` **null on a bare `new NowPlayingPanel()`** — which is exactly how this row's own test file builds the panel (`:78`). The plan lands `internal TimeProvider Clock { get; set; } = TimeProvider.System;` instead: zero DI change, zero fixture change, and `Radio.Web.csproj:31` already grants the test project `InternalsVisibleTo` under a comment blessing this use. Plan §6.3 carries the `@inject` variant verbatim if the owner prefers it. ⚠ **A THIRD raw timer in the same file is deliberately out of scope** — `_nowPlayingPollTimer` (`:507`, created `:542-546`, 60 s/60 s) is armed in `OnInitializedAsync`, the one path all **45** bUnit renders of the panel and of `Home` traverse; filed in `design/FUTURE-WORK.md`. ⚠ **The gain timer has NO tests today** — a repo-wide grep for `OnGainSliderChanged` / `SetSourceGainAsync` under `tests/` returns nothing — so its six tests are new coverage, not a repair. **Found while planning and NOT fixed here:** `AudioApiService.cs:236` (`{gain:F2}`) and `:96` build URLs with **current-culture** number formatting, so a comma-decimal locale emits `/api/audio/sourcegain/FilePlayer/0,25`; the gain tests therefore assert on `_pendingGainValue`, never on the request path. **Measurable outcome for the PR body:** the three racing tests sleep **6.0 s** today (1.5 + 1.5 + 3.0) and none after, and the determinism gate is `TEST-4`'s — 200/200 under CPU saturation, not one green run.

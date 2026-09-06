@@ -12,9 +12,9 @@
 | Field | Value |
 |---|---|
 | Status | 📋 |
-| Plan | _plan TBD (medium; the rename dominates the diff, the layer-unification dominates the risk — **and the first task is now the three-layer reconciliation above, not code**)_ |
+| Plan | [`design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md`](../../design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md) · **2 d** minimal / **3 d** split · **not auto-mergeable — Task 4 changes engine-stop behaviour on the live audio path** |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ · commit `03a6fea` is the provenance for the "one layer too high" trap · **PR #468 (`8b1ce0a`) is the provenance for the third layer** |
-| Depends on | — _(no hard row dependency. **Prefer AUD-2 first** — it decides the key identity this row's sweep must use, and doing them in the other order risks building the sweep around a mismatch that AUD-2 then removes. **Also rebase past #468**, which changed `AudioSourceBase.StopAsync`'s teardown gate — see the ⚠ above.)_ |
+| Depends on | — _(**no dependency. ⚠ The "prefer `AUD-2` first" note that stood here was FALSIFIED 2026-09-06 and is removed, not softened.** [`ORDERING-NOTES.md`](ORDERING-NOTES.md)'s claim that `AUD-2` and `AUD-4` are "two symptoms of ONE root cause" and that `AUD-2` "decides the key" is **false**: per-source teardown is key-symmetric — `SDRRadioAudioSource.cs:915` mints `_playbackId` and `:1027`/`:1059` stop with the same field — and this row's roster is keyed by **object reference**, not by string, so there is no key here to decide. The row's prescribed "sweep `_activeComponents` instead" is unnecessary and also points at dead code: `SoundFlowPlaybackService.StopAll()` has **zero callers in the tree**. Plan: `design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md` §0.4, `C-148`, `C-150`. **Still rebase past #468.**)_ |
 | Branch | `refactor/unify-source-removal-and-rename-mixer` |
 
 ## Detail
@@ -41,6 +41,21 @@
 
 **Sweep `SoundFlowPlaybackService._activeComponents` (`:25`) instead**, which is keyed by whatever each source actually registered.
 
-**Coordinate with AUD-2 — it is the same key-identity problem seen from the ducking side.** If AUD-2 confirms and lands first, adopt its single-key answer here rather than coding around the mismatch a second time.
+⚠ **BOTH PARAGRAPHS ABOVE WERE FALSIFIED 2026-09-06 while planning this row, and are corrected rather than deleted because the reasoning is the asset.** This row's roster is a `List<IAudioSource>` mutated by **object reference** — there is no string key here for an `Id`-keyed sweep to get wrong, so the trap does not apply to `AUD-4` and the prescribed `_activeComponents` sweep is unnecessary. It also points at dead code: `SoundFlowPlaybackService.StopAll()` has **zero callers in the tree** (plan `C-150`). The live defect is elsewhere — see the revised scope below.
+
+⚠ **"Coordinate with `AUD-2` — it is the same key-identity problem seen from the ducking side" is FALSE and is withdrawn.** `AUD-2` is a key-identity defect in a *third party* (`AudioManager` addressing a source by `Id` when the source registered under a key it minted); per-source teardown is key-symmetric, so this row has no key problem to wait on. **Either row may be claimed first** (plan §0.4, `C-148`).
+
+**Scope, revised by the plan:** (a) the unification now has a **named live defect** under it —
+`SoundFlowAudioEngine.StopAsync:700` clears the roster and never stops the audio, while the sweep
+written for exactly that (`StopAll`) has no callers (`C-151`, `C-150`); (b) the rename is
+**recommended as a split into `AudioSourceRegistry` + `MasterOutputState`**, because the two halves
+of the type share no state and no single honest name covers both (`C-154`) — and the class has no
+SoundFlow dependency at all, so the prefix goes with the suffix (`C-153`); (c) log/comment honesty
+as filed. **⚠ The row's claim that "the rename is the durable half — it is what stops the bug
+recurring" did not survive planning (`C-147`): the rename would not have prevented `03a6fea`, and
+the actual recurrence-preventer shipped in #468. The rename is justified as log honesty and
+detection latency. Re-price the row if that was what bought its priority.**
+_plan: `design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md` · **2 d** minimal / **3 d**
+split · **not auto-mergeable — Task 4 changes engine-stop behaviour on the live audio path**_
 
 **Budget note:** renaming the interface touches DI wiring and any test doubles, so this is a larger diff than the behaviour change suggests. _**Anchors re-verified 2026-08-11 against `main` @ `8b1ce0a`** and all are byte-exact and unchanged: `SoundFlowMasterMixer.cs:10`/`:13`/`:109-121`/`:118`, `SoundFlowPlaybackService.cs:25`/`:494`/`:526`/`:548`, `AudioManager.cs:214-217`, `SDRRadioAudioSource.cs:908`, and `AudioSourceBase.cs:28` — that last one checked specifically because #468 **did** touch the file, but its hunk starts at `:97`, well below the `Id` derivation._
