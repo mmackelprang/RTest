@@ -27,7 +27,14 @@ only evidence anything is wrong is that the room is quiet.
 
 ## Mechanism — the likely cause is already documented in this repo
 
-`MEMORY.md` records the design decision this behaviour follows from:
+⚠ **Corrected 2026-09-06 after the plan was written — the paragraph below was the filer's first
+guess and is only half right.** The real mechanism is `node.autoconnect`, not `PW_ID_ANY`; see the
+correction after the quote. Kept rather than deleted because the wrong guess is the one a reader
+arrives with.
+
+The project's auto-memory (`~/.claude/projects/…/memory/MEMORY.md` — **not a file in this repo**,
+despite earlier revisions of this dossier citing it as one) records the design decision this
+behaviour was first attributed to:
 
 > **Use PW_ID_ANY (0xffffffff)** as targetId in `pw_stream_connect` — let PipeWire resolve via
 > `target.object` property
@@ -36,12 +43,31 @@ With `PW_ID_ANY`, PipeWire is free to resolve the stream to **whatever the defau
 the intended target is absent. On this box the default input is
 `alsa_input.pci-0000_00_1f.3.analog-stereo`, which is exactly where it landed.
 
-⚠ **`PW_ID_ANY` was a deliberate fix, not an accident** — `MEMORY.md` records it as the resolution
-to an earlier targeting problem in the PipeWire native interop work (PR #262). **Do not simply
-revert it.** The plan must find a form that keeps whatever `PW_ID_ANY` bought while refusing to
-bind to a node that is not the intended BT device. Verify the claim above against
-`PipeWireNativeStream.cs` / `PipeWireNative.cs` before building on it; it is a memory note, not a
-code reading.
+### ⚠ The correction — `PW_ID_ANY` is not the mechanism, and there is no trade-off
+
+Established by [the plan](../../design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md) by
+reading the code rather than the memory note:
+
+**The fallback decision is not in this repo at all.** `PipeWireNativeStream.cs:204` sets
+`node.autoconnect = true` alongside `target.object`. Per `pipewire-props(7)`, `node.autoconnect`
+*"instructs the session manager to automatically connect this node to some other node"* — an
+instruction with **no failure mode** — while `target.object` is only a **preference**. An
+unresolvable preference plus an outstanding instruction yields the default source.
+
+**`PW_ID_ANY` bought no binding guarantee.** It removed a *competing* numeric target that was being
+fed an `object.serial` into a parameter meaning node **id**. That is the whole purchase. So it is
+not a constraint on the fix: **`PW_ID_ANY` stays untouched and the fix is additive** —
+`node.dont-reconnect = true`, documented as *"also inhibits that the node is moved to another
+sink/source."* The one move genuinely unavailable is passing `_targetNodeId` as `targetId` again.
+
+**This repo already knew, and the defence was lost in a migration.** `LinuxBluetoothService.cs:1985-1987`
+documents the same behaviour for the old `pw-record` path, which guarded it **twice**
+(`-P node.autoconnect=false` plus an explicit re-link). The native path that replaced it in #262
+inherited neither. This is a regression, not a novel defect.
+
+**A second route the symptom description misses:** `LinuxBluetoothService.cs:1814` converts "could
+not read `object.serial`" into the literal target `0` — reachable on a cold connect with nothing
+having disappeared.
 
 ## Why this outranks its own severity
 
