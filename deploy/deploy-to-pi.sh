@@ -126,43 +126,97 @@ echo "  Files synced"
 # DECIDED PER DESTINATION. A single presence test on api/ gating a copy into both
 # directories would seed over a web overlay on a box that has one and no api overlay.
 #
-# THE PROBE ASKS ONCE AND FAILS CLOSED. `ssh` reports its own transport errors as exit
-# 255, which a per-destination `test -f` cannot tell apart from "file absent" (exit 1) —
-# so a dropped connection would read as "nothing there" and seed over a present overlay.
-# The remote script always `exit 0`s and reports presence on stdout, leaving a non-zero
-# `ssh` exit to mean only "the question could not be asked", which we abort on.
+# THE PROBE DEMANDS A POSITIVE VERDICT AND WILL NOT GUESS. The remote emits exactly one of
+# `PRESENT:<dest>` or `ABSENT:<dest>` per destination, and a seed happens only on a matched
+# `ABSENT:`. That closes the four ways the earlier form — presence is a line, absence is
+# that line's omission — read "absent" from output that meant nothing of the sort:
+#   * an `ssh` transport error (exit 255, which a per-destination `test -f` cannot tell
+#     apart from "file absent", exit 1) — a dropped connection seeded over both overlays;
+#   * a remote login profile writing an unterminated banner to stdout, gluing itself to the
+#     first verdict ("Welcome to piradioapi") so that line no longer matched;
+#   * CRLF on the wire, which made every line miss an anchored match;
+#   * a remote-side shell error that empties stdout while the trailing `exit 0` masks it —
+#     reproduced with a PI_PATH containing a space, where the unquoted `[` failed.
+# The first now aborts on ssh's exit code; the rest yield neither marker for a destination,
+# which is "the answer was not intelligible" and aborts too. CRLF alone is a well-formed
+# answer in another dialect, so it is stripped and understood rather than rejected.
+#
+# WHAT IT STILL CANNOT CATCH: a remote that reads a directory successfully and answers
+# honestly about the wrong one — a typo'd PI_PATH, or a PI_USER whose sudo lands somewhere
+# other than the operator's box. `ABSENT:api` is then a true statement about a directory
+# nobody cares about, and the seed goes there. Nothing in this block can distinguish that
+# from the real thing; only the target being right makes the answer mean anything.
+#
+# Deploy-ToLinux.ps1:316,321,325 still uses the omission form, so this is deliberately
+# stricter than the PowerShell twin rather than a port of it.
 SEED_CONFIG="$REPO_ROOT/deploy/raspberry-pi/appsettings.Production.json"
 if [ -f "$SEED_CONFIG" ]; then
-  # Measured under `bash 5.2` with `set -euo pipefail`: a failing command substitution in
-  # a plain assignment DOES abort the script. It aborts silently, though, carrying only
-  # ssh's exit code — so the failure is handled explicitly to say why we stopped.
-  PRESENT_CONFIGS="$(ssh "$SSH_TARGET" \
-    "for d in api web; do [ -f $PI_PATH/\$d/appsettings.Production.json ] && echo \$d; done; exit 0")" || {
-    echo "Could not determine which Production configs are present — aborting rather than risk overwriting one." >&2
+  SEED_STAGED=false
+
+  # By the time this block runs, Step 2 has stopped both services and Step 3 has replaced
+  # both binaries — so every abort below leaves the radio off. One helper, so the recovery
+  # instructions cannot drift between the four exits that need them.
+  #
+  # Cleanup lives here rather than in a `trap ... EXIT` because the trap would shell out to
+  # the Pi on the one failure most likely to have killed the connection, and hang there.
+  # Guarding on SEED_STAGED also means it only runs after an scp that actually succeeded.
+  seed_abort() {
+    echo "$1" >&2
+    if [ "$SEED_STAGED" = true ]; then
+      ssh "$SSH_TARGET" "rm -f /tmp/appsettings.Production.json" || true
+    fi
+    echo "Services are stopped and the binaries are already updated. Re-run the deploy, or start them manually: ssh $SSH_TARGET 'sudo systemctl start radio-api radio-web'" >&2
     exit 1
   }
 
-  SEED_STAGED=false
+  # Measured under bash 5.1.16 (WSL — the shape a Linux deploy actually runs in) and bash
+  # 5.2.15 (Git-Bash), both with `set -euo pipefail`, both exit 42: a failing command
+  # substitution in a plain assignment DOES abort the script. It aborts silently, though,
+  # carrying only ssh's exit code — so the failure is handled explicitly to say why.
+  #
+  # The remote path is quoted inside the remote `[`, so a PI_PATH containing a space now
+  # produces a correct verdict instead of "[: /opt/radio: binary operator expected" on
+  # stderr and an empty stdout that read as "both overlays absent". That fixes the PROBE
+  # only — the rsync command string at :113 and the seed `cp`/`chown` below both still
+  # interpolate PI_PATH unquoted, so a spaced PI_PATH remains broken elsewhere here.
+  PROBE_RAW="$(ssh "$SSH_TARGET" \
+    "for d in api web; do if [ -f \"$PI_PATH/\$d/appsettings.Production.json\" ]; then echo \"PRESENT:\$d\"; else echo \"ABSENT:\$d\"; fi; done; exit 0")" || {
+    seed_abort "Could not determine which Production configs are present — aborting rather than risk overwriting one."
+  }
+  PROBE="$(printf '%s' "$PROBE_RAW" | tr -d '\r')"
+
   for dest in api web; do
-    if printf '%s\n' "$PRESENT_CONFIGS" | grep -qx "$dest"; then
+    if grep -qx "PRESENT:$dest" <<<"$PROBE"; then
       echo "  $dest/appsettings.Production.json present — left alone"
       continue
     fi
 
-    if [ "$SEED_STAGED" = false ]; then
-      scp "$SEED_CONFIG" "$SSH_TARGET:/tmp/appsettings.Production.json"
-      SEED_STAGED=true
+    if ! grep -qx "ABSENT:$dest" <<<"$PROBE"; then
+      seed_abort "The Pi answered about $dest/ with neither PRESENT:$dest nor ABSENT:$dest — aborting rather than guess at presence. Probe said: $(tr '\n' '|' <<<"$PROBE")"
     fi
 
     # Named per destination: the skip and the seed are separate decisions, and a single
     # un-suffixed line cannot distinguish seeding api/ from seeding web/.
     echo "  $dest/appsettings.Production.json absent — seeding from deploy/raspberry-pi/"
-    ssh "$SSH_TARGET" "sudo cp /tmp/appsettings.Production.json $PI_PATH/$dest/ && sudo chown radio:radio $PI_PATH/$dest/appsettings.Production.json"
+
+    if [ "$SEED_STAGED" = false ]; then
+      scp "$SEED_CONFIG" "$SSH_TARGET:/tmp/appsettings.Production.json" \
+        || seed_abort "Production config upload to $SSH_TARGET:/tmp failed — $dest/ was not seeded. A partial /tmp/appsettings.Production.json may be left on the box; the upload failing is usually the transport, so this does not try to reach back and remove it."
+      SEED_STAGED=true
+    fi
+
+    ssh "$SSH_TARGET" "sudo cp /tmp/appsettings.Production.json $PI_PATH/$dest/ && sudo chown radio:radio $PI_PATH/$dest/appsettings.Production.json" \
+      || seed_abort "Production config seed into $dest/ failed — the copy or the chown did not complete, so $PI_PATH/$dest/appsettings.Production.json may be missing or owned by root."
   done
 
   if [ "$SEED_STAGED" = true ]; then
     ssh "$SSH_TARGET" "rm -f /tmp/appsettings.Production.json"
   fi
+else
+  echo "WARNING: $SEED_CONFIG is missing — nothing was seeded." >&2
+  echo "         The rsync --exclude flags above are still in force, so a box with no" >&2
+  echo "         Production overlay now has none at all and both services fall back to" >&2
+  echo "         appsettings.json defaults. Restore the file from the repo and re-deploy." >&2
 fi
 
 # Step 4: Restart
