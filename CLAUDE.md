@@ -289,10 +289,22 @@ button work"* rather than *"what does it look like"*. It needs the graphical ses
 **`--window-position` is a no-op under Wayland.** Windows described elsewhere as "off-screen" are not;
 what makes one visible is stacking order, i.e. whichever browser restarted most recently.
 
-**⚠ Since `LOG-11` (2026-09-02), `journalctl` only carries WARNING and above.** The API's console sink
-is level-restricted, and under systemd the console *is* the journal — so `Information` lines no longer
-appear there. They go to the file sink instead. This changes how the box gets triaged: a startup sequence
-you expect to see in `journalctl -u radio-api` will look like it never happened.
+**⚠ Since `LOG-11` (2026-09-02), `journalctl -u radio-api` only carries WARNING and above. ⚠ This is
+true of `radio-api` ONLY — read the `radio-web` note below before concluding an `Information` line is
+safe from the journal.** The API's console sink is level-restricted, and under systemd the console *is*
+the journal — so its `Information` lines no longer appear there. They go to the file sink instead. This
+changes how the box gets triaged: a startup sequence you expect to see in `journalctl -u radio-api` will
+look like it never happened.
+
+⚠ **`radio-web` did NOT get the same treatment, and the asymmetry is documented nowhere else.**
+`src/Radio.Web/appsettings.json`'s `Serilog` block sets `MinimumLevel.Default: "Information"`, and its
+Console sink carries **no `restrictedToMinimumLevel`** — that string appears nowhere in the file. So
+**every `Information` line in `Radio.Web` is a journald line**, on a box where log volume correlates with
+audible audio distortion. Measured 2026-09-05 while planning `PHN-5`, the row that found it:
+`src/Radio.Web/Services/Hub/PhoneHubService.cs:82` logs
+`LogInformation("Incoming call from {PhoneNumber}", …)`, so a raw phone number reaches
+`journalctl -u radio-web` on every incoming call, on a stock box. **Treat any `Information` line you add
+to `Radio.Web` as public and persistent until that sink is restricted.**
 
 ```bash
 # Warnings and errors — journald
