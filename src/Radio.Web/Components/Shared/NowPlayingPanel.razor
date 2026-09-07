@@ -408,7 +408,7 @@
   /// <c>internal</c> rather than <c>private</c> so <c>Radio.Web.Tests</c> can substitute a
   /// <c>FakeTimeProvider</c> through the <c>InternalsVisibleTo</c> the csproj already declares for
   /// exactly this purpose — and so the seam is greppable rather than reachable only by reflection.
-  /// See TEST-7 in <c>docs/BUILDER_QUEUE.md</c>.
+  /// See TEST-7 in <c>docs/queue/TEST-7.md</c>.
   /// </para>
   /// </summary>
   internal TimeProvider Clock { get; set; } = TimeProvider.System;
@@ -1087,6 +1087,14 @@
   private ITimer? _volumePrefDebounceTimer;
   private double _pendingVolumePreference;
 
+  // The null-check-then-create below is not atomic, and it is safe only because every path into
+  // this method arrives on Blazor's renderer synchronization context, which serialises them:
+  // QueueVolumePreferenceSave has exactly one caller (HandleVolumeChangeAsync), which has exactly
+  // one caller (OnVolumeChanged), which is bound only to the RadzenSlider Change event. That is the
+  // precondition, stated because it is load-bearing — two concurrent entries would each see a null
+  // timer, create two, leak one past DisposeAsync, and produce the very write fan-out this debounce
+  // exists to prevent. If a second caller is ever added from a timer or hub callback, this needs a
+  // lock. (Found by TEST-7's pre-merge review; the property was already true and already unstated.)
   private void QueueVolumePreferenceSave(double newVolume)
   {
     _pendingVolumePreference = newVolume;
@@ -1105,7 +1113,10 @@
   private async void OnVolumePreferenceDebounceElapsed(object? _)
   {
     // SavePreferenceAsync owns its own try/catch, which is what keeps this async void
-    // callback from being able to throw onto a timer thread.
+    // callback from being able to throw onto a timer thread. Precisely: that holds because the
+    // catch is total (catch (Exception)) AND Logger is non-null inside it — a bare
+    // `new NowPlayingPanel()` leaves Logger null, so narrowing the catch, or logging before the
+    // null-check a DI-activated panel makes unnecessary, would reopen this.
     await SavePreferenceAsync("volume", _pendingVolumePreference);
   }
 

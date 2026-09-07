@@ -20,7 +20,7 @@ namespace Radio.Web.Tests.Components.Shared;
 /// <remarks>
 /// Same discipline as its volume sibling: advance a <c>FakeTimeProvider</c>, then rendezvous on the
 /// request itself. No test here waits on wall-clock time, and the "nothing written yet" assertions
-/// are exact rather than bounded. See TEST-7 in <c>docs/BUILDER_QUEUE.md</c>.
+/// are exact rather than bounded. See TEST-7 in <c>docs/queue/TEST-7.md</c>.
 /// </remarks>
 public class NowPlayingPanelGainDebounceTests
 {
