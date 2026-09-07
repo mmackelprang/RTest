@@ -1,0 +1,144 @@
+name: LLM Review (local)
+
+# A SECOND OPINION, NOT A GATE.
+#
+# Why this exists: GitHub Copilot's PR reviewer has been silently returning
+# "unable to review — quota limit" on every PR (verified across #584/#586/#587/
+# #588/#590 on 2026-09-07). That left a reviewer entry on each PR that reads as
+# though a review happened, which is worse than having none at all.
+#
+# What this is NOT: a replacement for the Builder's pre-merge Claude reviewer,
+# which is stronger than this model and which caught a real defect in OPS-2 on
+# 2026-09-06. This restores INDEPENDENCE — a different model, outside the session
+# that wrote the code. A shared wrong assumption is precisely what survives a
+# same-session review.
+#
+# The model (qwen2.5-coder:14b, local on appserver) is materially weaker than
+# Claude or Copilot at open-ended review, so it is given a narrow, checkable job.
+# See .github/scripts/llm_review.py for the prompt and why it is shaped that way.
+#
+# This job never blocks a merge: continue-on-error, and CI here is advisory
+# anyway (build.yml:13-15).
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: llm-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  llm-review:
+    runs-on: [self-hosted, linux, x64, appserver]
+    continue-on-error: true
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # The runner is containerized and is NOT in the host's default docker
+      # daemon, so localhost may or may not reach the host's ollama. Ollama does
+      # listen on *:11434 (all interfaces), so several addresses could work.
+      # Probe instead of guessing, and print the winner — the first real run is
+      # what settles it, and that answer belongs in the log.
+      - name: Locate ollama
+        id: ollama
+        env:
+          OLLAMA_URL_VAR: ${{ vars.OLLAMA_URL }}
+        run: |
+          set -u
+          for u in "$OLLAMA_URL_VAR" http://localhost:11434 http://172.17.0.1:11434 http://host.docker.internal:11434 http://192.168.86.167:11434; do
+            [ -z "$u" ] && continue
+            if curl -sf -m 5 "$u/api/tags" >/dev/null 2>&1; then
+              echo "url=$u" >> "$GITHUB_OUTPUT"
+              echo "ollama reachable at: $u"
+              exit 0
+            fi
+            echo "not reachable: $u"
+          done
+          echo "ollama unreachable from this runner - set the OLLAMA_URL repo variable"
+          exit 1
+
+      - name: Collect the diff
+        id: diff
+        run: |
+          set -u
+          # Source only. Docs and plans here are long and prose-heavy; feeding
+          # them to a 14b model spends the context window for no signal.
+          git diff --unified=3 \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" -- \
+            'src/**/*.cs' 'src/**/*.razor' 'tests/**/*.cs' > /tmp/pr.diff || true
+          BYTES=$(wc -c < /tmp/pr.diff)
+          echo "diff is ${BYTES} bytes"
+          if [ "$BYTES" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "no source changes - nothing to review"
+            exit 0
+          fi
+          # Hard cap against the 32k context. A truncated review is only honest
+          # if it says so, so record the fact for the comment.
+          if [ "$BYTES" -gt 60000 ]; then
+            head -c 60000 /tmp/pr.diff > /tmp/pr.cut && mv /tmp/pr.cut /tmp/pr.diff
+            echo "truncated=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "truncated=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Ask the model
+        if: steps.diff.outputs.skip != 'true'
+        env:
+          OLLAMA_URL: ${{ steps.ollama.outputs.url }}
+        run: |
+          set -u
+          python3 .github/scripts/llm_review.py /tmp/pr.diff > /tmp/review.txt
+          echo "--- model output ---"
+          cat /tmp/review.txt
+
+      - name: Post the findings
+        if: steps.diff.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRUNCATED: ${{ steps.diff.outputs.truncated }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          {
+            echo "### Local LLM review - \`qwen2.5-coder:14b\` on appserver"
+            echo
+            echo "> **A second opinion, not a gate.** This model is materially weaker than"
+            echo "> Claude or Copilot at review, and is deliberately pointed at a narrow set"
+            echo "> of failure modes rather than asked for open judgement."
+            echo "> **Verify every finding before acting on it - expect false positives.**"
+            echo "> Its value is being a *different* model, not a better one."
+            echo
+            echo "> Known quirks, measured 2026-09-07 against a diff with three planted"
+            echo "> defects (it found all three): **line numbers are approximate** - locate"
+            echo "> findings by the quoted code, not the number - and it tends to **report"
+            echo "> one defect two or three times** from different angles. Six findings may"
+            echo "> be three problems."
+            echo
+            if [ "$TRUNCATED" = "true" ]; then
+              echo "**The diff was truncated to 60 KB.** Findings cover only the first part"
+              echo "of the change - treat silence about the rest as no signal, not as clean."
+              echo
+            fi
+            echo '```'
+            cat /tmp/review.txt
+            echo '```'
+          } > /tmp/comment.md
+          python3 -c 'import json;print(json.dumps({"body":open("/tmp/comment.md",encoding="utf-8").read()}))' > /tmp/comment.json
+          curl -sf -X POST \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --data-binary @/tmp/comment.json > /dev/null
+          echo "posted review comment to PR #${PR_NUMBER}"
