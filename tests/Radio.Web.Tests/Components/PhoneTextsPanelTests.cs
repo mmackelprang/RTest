@@ -311,6 +311,49 @@ public class PhoneTextsPanelTests : TestContext
   }
 
   [Fact]
+  public async Task SenderName_IsNullWhenTheNameIsTheNumberInADifferentFormat()
+  {
+    // ⭐⭐ THE CLAUSE A STRING COMPARE DOES NOT COVER, and the highest-consequence miss in this row.
+    // PhoneMessagesPanel.OpenThreadName returns CounterpartyName (:327) and a contact's match.Name
+    // (:333) VERBATIM, and neither is guaranteed non-numeric. A CounterpartyName of "(555)
+    // 123-4567" against a CounterpartyNumber of "+15551234567" makes `==` answer FALSE, the guard
+    // passes, and the console reads a phone number to the room — handoff :386.
+    //
+    // PhoneNumberNormalizer.Normalize keeps ASCII digits only and drops the leading "1" of an
+    // 11-digit US number, so both sides reduce to "5551234567".
+    Register(available: true);
+    var cut = OpenConversation(headerName: "(555) 123-4567", headerNumber: Number);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal(Body, posted.GetProperty("text").GetString());
+    Assert.Equal("a message", posted.GetProperty("label").GetString());
+    Assert.DoesNotContain("555", posted.GetProperty("text").GetString());
+  }
+
+  [Theory]
+  // A name with digits in it that are NOT the thread's number: suppression must key on the digits
+  // BEING the number, never on the name merely having some.
+  [InlineData("Pizza 4 U", Number)]
+  // ⭐ And the case that pins the `nameDigits.Length > 0` test in front of the comparison.
+  // Normalize("Mom") is "" and so is Normalize("GOOGLE") — two strings with no ASCII digits between
+  // them — so WITHOUT that length test they compare equal and an ordinary name is thrown away. A
+  // non-numeric CounterpartyNumber is what reaches HeaderNumber for an alias-style short code.
+  [InlineData("Mom", "GOOGLE")]
+  public async Task SenderName_StillPassesAnOrdinaryName(string headerName, string headerNumber)
+  {
+    // ⚠ The regression guard that keeps the normalised comparison STRICTLY STRONGER than the `==`
+    // it replaced, rather than merely different from it.
+    Register(available: true);
+    var cut = OpenConversation(headerName, headerNumber);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal($"Message from {headerName}. {Body}", posted.GetProperty("text").GetString());
+    Assert.Equal($"a message from {headerName}", posted.GetProperty("label").GetString());
+  }
+
+  [Fact]
   public async Task SenderName_IsNullWhenNoNumberResolved()
   {
     // ⭐⭐ THE clause an equality test alone does not cover, and the one whose absence is audible.

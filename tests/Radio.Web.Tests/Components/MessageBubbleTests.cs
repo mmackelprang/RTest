@@ -50,7 +50,13 @@ public class MessageBubbleTests : TestContext
     new("m1", "t1", direction, "+15551234567", text, DateTime.UtcNow, false);
 
   /// <summary>Registers everything MessageBubble now injects. Idempotent per test.</summary>
-  private void Register(HttpStatusCode status = HttpStatusCode.Accepted, TaskCompletionSource? gate = null)
+  /// <param name="status">The status every POST answers with.</param>
+  /// <param name="gate">Parks every POST until released — the start-arm re-entrancy window.</param>
+  /// <param name="deleteGate">Parks every DELETE until released — the stop-arm window.</param>
+  private void Register(
+    HttpStatusCode status = HttpStatusCode.Accepted,
+    TaskCompletionSource? gate = null,
+    TaskCompletionSource? deleteGate = null)
   {
     JSInterop.Mode = JSRuntimeMode.Loose;   // project memory: required for Radzen/JS-interop
     Services.AddRadzenComponents();
@@ -67,7 +73,7 @@ public class MessageBubbleTests : TestContext
     _console = new ConsolePlaybackState(_store, NullLogger<ConsolePlaybackState>.Instance);
     Services.AddSingleton(_console);
 
-    _handler = new StubEventsHandler(status, gate);
+    _handler = new StubEventsHandler(status, gate, deleteGate);
     Services.AddSingleton(new EventPlaybackApiService(
       new HttpClient(_handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
       NullLogger<EventPlaybackApiService>.Instance));
@@ -91,9 +97,10 @@ public class MessageBubbleTests : TestContext
   private Task BroadcastAsync(IRenderedComponent<MessageBubble> cut, EventPlaybackSnapshotDto snapshot) =>
     cut.InvokeAsync(() => _store.OnHubEventPlaybackChanged(snapshot));
 
-  private static EventPlaybackSnapshotDto Snapshot(string state, string id = SpeechId) =>
+  private static EventPlaybackSnapshotDto Snapshot(
+    string state, string id = SpeechId, string? failureReason = null) =>
     new(id, "Speech", "a message from Jane", state, null,
-      TimeSpan.Zero, DateTimeOffset.UtcNow, null);
+      TimeSpan.Zero, DateTimeOffset.UtcNow, failureReason);
 
   // ── the pre-PHN-3 row, unchanged apart from Register() ───────────────────────────────────────
 
@@ -239,6 +246,76 @@ public class MessageBubbleTests : TestContext
   }
 
   [Fact]
+  public async Task ASecondTapWhileStopping_DoesNotStartANewPlayback()
+  {
+    // ⭐⭐ THE OTHER HALF OF THE DOUBLE-TAP, AND _starting NEVER COVERED IT. The stop arm used to
+    // null _playbackId BEFORE awaiting the DELETE. ComponentBase re-renders at that await, so the
+    // button flipped to play_arrow while the console was still speaking — actively inviting the
+    // second tap — and that tap found Mine null, fell through every "is this mine" predicate into
+    // the START arm, and POSTed a new playback: the message began reading again from the top.
+    // Measured against the original code: Deletes == 1, Posts == 2.
+    //
+    // The fix is to RETAIN the handle and let the server's Stopped broadcast return the button to
+    // rest, which is what VoicemailPlayer.razor:394-395 has always done and what
+    // MainLayout.razor:1415-1417 states as the rule for this same control ("No optimistic hide").
+    //
+    // ⚠ NO SLEEP — CLAUDE.md § Test Timing. The stub parks the DELETE on a TaskCompletionSource the
+    // test owns, so the second tap is issued while the stop is provably still in flight.
+    var stopGate = new TaskCompletionSource();
+    Register(deleteGate: stopGate);
+    var cut = RenderBubble(Msg("Inbound", "Dinner at 7?"));
+
+    await cut.Find(".msg-speak-btn").ClickAsync(new MouseEventArgs());
+    await BroadcastAsync(cut, Snapshot("Playing"));      // now live: the button is the stop control
+
+    var button = cut.Find(".msg-speak-btn");
+    var firstStop = button.ClickAsync(new MouseEventArgs());
+    var secondStop = button.ClickAsync(new MouseEventArgs());
+
+    stopGate.SetResult();
+    await firstStop;
+    await secondStop;
+
+    // ONE post, for the one playback that was ever started. A second is the bug.
+    Assert.Single(_handler.Bodies);
+
+    // Two stops is fine and is what a retained handle produces — the server owns idempotence here.
+    Assert.InRange(_handler.Deletes, 1, 2);
+  }
+
+  [Fact]
+  public async Task AFailedSnapshot_RaisesTheSpeakFailedCallbackExactlyOnce()
+  {
+    // ⭐⭐ THE FAILURE THAT ACTUALLY HAPPENS. OnSpeakFailed used to fire only for a SYNCHRONOUS
+    // refusal, but the API answers 202 Accepted and then broadcasts a Failed snapshot carrying
+    // FailureReason "SpeechSynthesisFailed" — driven live three times during PHN-3's UAT, where the
+    // button spun, returned to rest, and the user was told nothing at all. Handoff §B4's Engine
+    // error row specifies "back to Rest PLUS a toast", and plan §0.3 consequence 2 calls that toast
+    // "the whole of the UX" now that synthesis is a cloud round trip.
+    //
+    // ⚠ EXACTLY ONCE. ConsolePlaybackState.cs:66-71 RETAINS a terminal snapshot until a new
+    // playback replaces it, deliberately — so the same Failed snapshot arrives again on every later
+    // broadcast, and without _failureReportedFor the room gets a fresh toast each time.
+    Register();
+    var reasons = new List<string?>();
+    var cut = RenderBubble(Msg("Inbound", "Dinner at 7?"), onSpeakFailed: reasons.Add);
+
+    await cut.Find(".msg-speak-btn").ClickAsync(new MouseEventArgs());
+    await BroadcastAsync(cut, Snapshot("Failed", failureReason: "SpeechSynthesisFailed"));
+
+    Assert.Equal("SpeechSynthesisFailed", Assert.Single(reasons));
+
+    // The retained snapshot, re-delivered. Still one toast.
+    await BroadcastAsync(cut, Snapshot("Failed", failureReason: "SpeechSynthesisFailed"));
+
+    Assert.Single(reasons);
+
+    // And the button is back at rest, which is the other half of the §B4 row.
+    Assert.DoesNotContain("speaking", cut.Find(".msg-speak-btn").ClassList);
+    Assert.Contains("Read this message aloud", cut.Markup);
+  }
+
+  [Fact]
   public async Task WhenTheAmbientSnapshotIsAnotherId_TheButtonIsAtRest()
   {
     // C-110 / handoff §B4's "Replaced" row. There is ONE attended playback by construction, so
@@ -318,14 +395,32 @@ public class MessageBubbleTests : TestContext
   /// Answers every POST /api/audio/events with a fixed status, recording the request bodies, and
   /// optionally parks until the test releases it.
   /// </summary>
-  private sealed class StubEventsHandler(HttpStatusCode status, TaskCompletionSource? gate)
+  private sealed class StubEventsHandler(
+    HttpStatusCode status, TaskCompletionSource? gate, TaskCompletionSource? deleteGate = null)
     : HttpMessageHandler
   {
+    private int _deletes;
+
+    /// <summary>POST bodies only — a DELETE carries none, so a count is the only thing to record.</summary>
     public List<string> Bodies { get; } = [];
+
+    /// <summary>How many stops were issued. Interlocked because two can be in flight at once.</summary>
+    public int Deletes => Volatile.Read(ref _deletes);
 
     protected override async Task<HttpResponseMessage> SendAsync(
       HttpRequestMessage request, CancellationToken cancellationToken)
     {
+      if (request.Method == HttpMethod.Delete)
+      {
+        Interlocked.Increment(ref _deletes);
+        if (deleteGate is not null)
+        {
+          await deleteGate.Task;
+        }
+
+        return new HttpResponseMessage(HttpStatusCode.NoContent);
+      }
+
       if (request.Content is not null)
       {
         Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));

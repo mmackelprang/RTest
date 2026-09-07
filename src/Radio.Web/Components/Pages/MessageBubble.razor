@@ -12,8 +12,17 @@
    play button in the gutter, which speaks the message through the console. The
    button sits OUTSIDE .msg-bubble, in the .msg-row-inbound wrapper — handoff :325
    ("inside .msg-meta a 44px control would nearly double a one-line bubble's height
-   and put a touch target in an 11px text row"). The outbound path is untouched:
-   handoff :323 puts the button on inbound bubbles only. *@
+   and put a touch target in an 11px text row").
+
+   ⚠ The outbound MARKUP is untouched — handoff :323 puts the button on inbound
+   bubbles only, so no outbound bubble grows a wrapper, a gutter or a control, and
+   its rendered output is what it was before PHN-3. The outbound COMPONENT is not
+   untouched, and saying otherwise would be false: every bubble, outbound included,
+   now injects ConsolePlaybackState and EventPlaybackApiService, subscribes to a
+   process-wide singleton event on init, unsubscribes on dispose, and evaluates
+   IsMineAndLive on every render. The plan accepted that fan-out deliberately
+   (C-111 — forty bubbles, forty subscribers) rather than gating the subscription
+   on direction. *@
 
 @if (CanSpeak)
 {
@@ -67,6 +76,14 @@ else
   private string? _playbackId;    // the handle THIS bubble started, or null
   private bool _starting;         // a StartSpeechAsync is in flight; see ToggleSpeakAsync
 
+  // ⚠ The playback id whose Failed snapshot has ALREADY raised OnSpeakFailed, so §B4's Engine-error
+  // toast fires exactly once per playback. ConsolePlaybackState.cs:66-71 is the reason it needs a
+  // field at all: a terminal snapshot — Completed, Stopped or Failed — is RETAINED until a new
+  // playback replaces it, deliberately, so the Failed snapshot is re-delivered on every subsequent
+  // broadcast. Without this the room gets a fresh toast each time anything else changes. Reset when
+  // a new start assigns _playbackId; see ToggleSpeakAsync.
+  private string? _failureReportedFor;
+
   // ⚠ NO _startReason FIELD, unlike VoicemailPlayer. The plan's Task 3 sketch carried one, copied
   // from that component — but VoicemailPlayer RENDERS its refusal (ShowFailure / FailurePrimary /
   // FailureSubline) and this button does not: handoff §Cross-5 :174 says a bubble has no room beside
@@ -75,10 +92,15 @@ else
   // future reader would take it as evidence of a failure state that does not exist here.
 
   /// <summary>
-  /// The bubble exactly as it rendered before PHN-3. ⚠ Extracted UNCHANGED — the outbound render
-  /// path must not move, per handoff :323 ("leaves the entire outbound render path untouched").
-  /// The only edit inside it is the `speaking` class, which can only ever be true on an inbound
-  /// bubble because CanSpeak gates the wrapper and nothing else can set _playbackId.
+  /// The bubble exactly as it rendered before PHN-3. ⚠ Extracted with its MARKUP unchanged — the
+  /// outbound render OUTPUT must not move, per handoff :323 (the component around it did change;
+  /// the file header says how). The only edit inside it is the `speaking` class, which can only
+  /// ever be true on an inbound bubble, and that now rests on two things rather than one:
+  /// `_playbackId` is assigned only in ToggleSpeakAsync, whose only caller is the button that
+  /// CanSpeak (`!IsOutbound`) gates — AND the call site keys each bubble on Message.Id
+  /// (PhoneTextsPanel), so an instance holding a `_playbackId` can never be re-parameterised onto a
+  /// different message. Before that `@key` it could: Blazor matches children positionally, so a
+  /// non-tail insert or a re-sort moved this state onto whatever bubble took the slot.
   /// </summary>
   private RenderFragment BubbleMarkup => @<div class="msg-bubble @DirectionClass @StatusClass @(IsMineAndLive ? "speaking" : null)"
      @onclick="OnFailedClick" role="@(IsFailed ? "button" : null)">
@@ -131,7 +153,43 @@ else
   /// </summary>
   private bool CanSpeak => !IsOutbound && Utterance is not null;
 
-  private string? Utterance => GvSpeechText.ForMessage(Message.Text, SenderName);
+  /// <summary>The composed utterance, or null. Cached — see <see cref="OnParametersSet"/>.</summary>
+  private string? Utterance => _utterance;
+
+  private string? _utterance;
+  private string? _utteranceForText;
+  private string? _utteranceForSender;
+  private bool _utteranceComputed;
+
+  /// <summary>
+  /// Recomposes the utterance only when the inputs it is derived from actually changed.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ NOT a micro-optimisation on this surface. ForMessage runs three regexes and a rune pass, and
+  /// CanSpeak calls it on EVERY render — while MainLayout's 1 Hz tick cascades through @Body and no
+  /// component on the /phone path overrides ShouldRender, so the measured render rate is ~1.2/sec
+  /// per bubble. A forty-message conversation is ~48 compositions a second and ~180 KB/s of Gen0
+  /// garbage, on an N100 where churn is audible.
+  ///
+  /// ⚠ Keyed on the two inputs rather than computed unconditionally, because Blazor runs
+  /// OnParametersSet on every parent render whether or not a value changed — which is exactly the
+  /// 1 Hz cascade this is here to absorb. _utteranceComputed exists because both keys are legally
+  /// null, so "the keys match" is not on its own evidence that a composition ever happened.
+  /// </remarks>
+  protected override void OnParametersSet()
+  {
+    if (_utteranceComputed
+        && string.Equals(_utteranceForText, Message.Text, StringComparison.Ordinal)
+        && string.Equals(_utteranceForSender, SenderName, StringComparison.Ordinal))
+    {
+      return;
+    }
+
+    _utteranceForText = Message.Text;
+    _utteranceForSender = SenderName;
+    _utterance = GvSpeechText.ForMessage(_utteranceForText, _utteranceForSender);
+    _utteranceComputed = true;
+  }
 
   // ⚠ Mine, not the ambient snapshot. VoicemailPlayer.razor:178-181 is the original; the reason is
   // that every state this button renders must first be gated on the playback THIS bubble started.
@@ -170,16 +228,56 @@ else
   // runs for weeks, is a real leak.
   public void Dispose() => ConsolePlayback.Changed -= OnPlaybackChangedAsync;
 
-  private Task OnPlaybackChangedAsync() => InvokeAsync(StateHasChanged);
+  /// <summary>
+  /// Re-renders on every ambient change — and raises §B4's "Engine error" toast for the arm that
+  /// actually happens.
+  /// </summary>
+  /// <remarks>
+  /// ⚠⚠ THE SYNCHRONOUS REFUSAL IN ToggleSpeakAsync IS THE RARE ARM. The common synthesis failure
+  /// is asynchronous: the API answers 202 Accepted, then broadcasts a Failed snapshot carrying
+  /// FailureReason "SpeechSynthesisFailed". Driven live three times during PHN-3's UAT, and before
+  /// this branch existed the button spun briefly, returned to rest, and the user was told NOTHING
+  /// AT ALL. Handoff §B4's Engine-error row specifies "back to Rest PLUS a toast", and plan PHN-3
+  /// §0.3 consequence 2 says the toast "is the whole of the UX" when cloud synthesis fails —
+  /// offline is a failure mode now that the engine is not on-box. The plan's Task 3 sketch had no
+  /// Failed handling either; this is a plan gap, not a stray addition.
+  ///
+  /// ⚠ EXACTLY ONCE per playback id, via _failureReportedFor. ConsolePlaybackState.cs:66-71 retains
+  /// a terminal snapshot deliberately, so this same Failed snapshot arrives again on every later
+  /// broadcast; without the guard the room gets a fresh toast for a failure it already dismissed.
+  ///
+  /// ⚠ StateHasChanged runs FIRST so the button reaches rest even if the parent's toast throws.
+  /// </remarks>
+  private Task OnPlaybackChangedAsync() => InvokeAsync(async () =>
+  {
+    StateHasChanged();
+
+    if (Mine is { State: "Failed" } failed && _failureReportedFor != failed.Id)
+    {
+      _failureReportedFor = failed.Id;
+      await OnSpeakFailed.InvokeAsync(failed.FailureReason);
+    }
+  });
 
   private async Task ToggleSpeakAsync()
   {
-    // ⚠ THE RE-ENTRANCY GUARD IS MANDATORY, and VoicemailPlayer.razor:323-345 explains why in its
-    // own words: _playbackId is cleared before the awaited POST, so a second tap arriving while the
-    // first is in flight sees a null id and starts a SECOND playback — which EventPlaybackService's
-    // replacement arm honours by tearing the first one down mid-sentence. A double-tap is the
-    // default gesture on a wall panel. The button cannot be disabled instead: there is no snapshot
-    // to render Preparing from until the 202 comes back, which is the whole window this guards.
+    // ⚠ THE RE-ENTRANCY GUARD COVERS THE START ARM, AND ONLY THE START ARM. VoicemailPlayer.razor:
+    // 323-345 explains that window in its own words: _playbackId is cleared before the awaited
+    // POST, so a second tap arriving while the first is in flight sees a null id and starts a
+    // SECOND playback — which EventPlaybackService's replacement arm honours by tearing the first
+    // one down mid-sentence. A double-tap is the default gesture on a wall panel. The button cannot
+    // be disabled instead: there is no snapshot to render Preparing from until the 202 comes back,
+    // which is the whole window this guards.
+    //
+    // ⚠⚠ THE STOP ARM IS SAFE BECAUSE THE HANDLE IS RETAINED — NOT because of _starting, which does
+    // not cover it. It used to null _playbackId BEFORE awaiting the DELETE, and ComponentBase
+    // re-renders at that await: the button flipped to play_arrow while the console was still
+    // speaking, actively inviting the second tap, and that tap found Mine null, fell through to the
+    // START arm, and posted a new playback — the message began reading again from the top. Measured
+    // Deletes == 1, Posts == 2. Retaining the handle matches VoicemailPlayer.razor:394-395, which
+    // never had this window for the same reason, and MainLayout.razor:1415-1417's stated rule for
+    // this same stop control: "No optimistic hide. The chip disappears when the SERVER says so."
+    // The button returns to rest on the Stopped broadcast, not on the tap.
     if (_starting)
     {
       return;
@@ -187,13 +285,8 @@ else
 
     if (IsMineAndLive)
     {
-      var id = _playbackId;
-      _playbackId = null;
-      if (id is not null)
-      {
-        await EventPlayback.StopAsync(id);
-      }
-
+      // IsMineAndLive implies Mine is non-null, which implies _playbackId is non-null.
+      await EventPlayback.StopAsync(_playbackId!);
       return;
     }
 
@@ -204,9 +297,12 @@ else
       var (snapshot, reason) = await EventPlayback.StartSpeechAsync(Utterance!, SpeakLabel);
       if (snapshot is null)
       {
-        // A refusal answered synchronously — 400 or 409 — never reaches a Failed snapshot, so the
-        // reason has to leave HERE or it is lost. It goes up to the panel's toast (handoff
-        // §Cross-5) and the button stays at rest, which is §B4's "Engine error" row.
+        // A refusal answered synchronously — 400 (409 is the RemoteMedia arm's:
+        // EventPlaybackService.cs:222 guards that throw with `Kind == RemoteMedia`, so a Speech
+        // request never reaches it) — never reaches a Failed snapshot, so the reason has to leave
+        // HERE or it is lost. It goes up to the panel's toast (handoff §Cross-5) and the button
+        // stays at rest, which is §B4's "Engine error" row. The ASYNCHRONOUS arm of that same row —
+        // 202 then a Failed broadcast, which is the common one — is in OnPlaybackChangedAsync.
         await OnSpeakFailed.InvokeAsync(reason);
         return;
       }
@@ -214,6 +310,9 @@ else
       // ⚠ 202 means ACCEPTED, not speaking (EventPlaybackController.cs:17-22). Do not render Playing
       // here — the state arrives on the next broadcast.
       _playbackId = snapshot.Id;
+
+      // A new playback may fail on its own account; the previous one's report must not suppress it.
+      _failureReportedFor = null;
     }
     finally
     {
@@ -235,7 +334,21 @@ else
         ? "a message"
         : $"a message from {SenderName.Trim()}";
 
-      return label.Length <= 128 ? label : label[..128];
+      if (label.Length <= 128)
+      {
+        return label;
+      }
+
+      // ⚠ Never cut a surrogate pair. Same silent failure as GvSpeechText's cap, and the same
+      // reason: System.Text.Json substitutes U+FFFD for a lone surrogate rather than throwing, so
+      // an over-long name would ship a replacement character with nothing anywhere to say so.
+      var cut = 128;
+      if (char.IsHighSurrogate(label[cut - 1]))
+      {
+        cut--;
+      }
+
+      return label[..cut];
     }
   }
 }

@@ -99,10 +99,21 @@
              phone itself. *@
           @* PHN-3: SenderName is the thread's RESOLVED name or null — never an identifier
              (SpeakableSenderName below). OnSpeakFailed is the §Cross-5 toast, which the
-             panel owns because a bubble has no room beside it. *@
-          <MessageBubble Message="captured"
+             panel owns because a bubble has no room beside it.
+
+             ⚠⚠ @key IS LOAD-BEARING SINCE PHN-3 AND WAS NOT BEFORE IT. MessageBubble used
+             to be a pure function of its parameters, so Blazor's positional child
+             matching was harmless. It now carries identity-bearing state (_playbackId),
+             and this list is not append-only: PhonePage appends an inbound arrival,
+             Ordered() re-sorts by SentAt so an out-of-order GV delivery lands MID-LIST,
+             and PhonePage replaces the list wholesale on refresh. Without the key, any
+             of those re-parameterises existing instances and the cyan `speaking` marks
+             and the Stop affordance land on the WRONG bubble while the console reads the
+             original — the exact thing the mark exists to answer. *@
+          <MessageBubble @key="captured.Id"
+                         Message="captured"
                          SenderName="@SpeakableSenderName"
-                         OnSpeakFailed="OnSpeakFailedAsync" />
+                         OnSpeakFailed="OnSpeakFailed" />
         }
       }
     </div>
@@ -269,6 +280,21 @@ else
   /// "" when the thread is missing — exactly the case where HeaderName holds the thread id. An
   /// equality test alone answers false there and speaks the id.
   ///
+  /// ⚠⚠ THE THIRD CLAUSE COMPARES NORMALISED DIGITS, NOT STRINGS, AND A STRING COMPARE WAS NOT
+  /// ENOUGH. OpenThreadName returns CounterpartyName (:327) and a contact's match.Name (:333)
+  /// VERBATIM, and neither is guaranteed non-numeric. A CounterpartyName of "(555) 123-4567"
+  /// against a CounterpartyNumber of "+15551234567" makes `==` answer false, the guard passes, and
+  /// the console reads a phone number to the room — the highest-consequence outcome in this row
+  /// (handoff :386). PhoneNumberNormalizer.Normalize keeps ASCII digits only and drops the leading
+  /// "1" of an 11-digit US number, so both of those reduce to "5551234567" and compare equal.
+  ///
+  /// ⚠ The digit-length test in front of it is what keeps this STRICTLY stronger than the old `==`
+  /// rather than merely different. Normalize("Mom") is "", and so is Normalize of any name with no
+  /// ASCII digits in it — so without `nameDigits.Length > 0` an ordinary name would compare equal
+  /// to any HeaderNumber that also normalises to "" and be suppressed. The literal `==` is kept
+  /// alongside it for the non-numeric identical case ("unknown" / "unknown"), which digits cannot
+  /// see.
+  ///
   /// ⛔ Do NOT route this through ResolveThreadName. Since PHN-4 its signature is
   /// ResolveThreadName(SmsThreadDto) and its only caller is the thread-list branch; conversation
   /// mode holds no SmsThreadDto for the open thread, and reconstructing one would duplicate
@@ -286,6 +312,14 @@ else
 
       // No number resolved => the thread itself did not resolve, so HeaderName is an identifier.
       if (string.IsNullOrWhiteSpace(HeaderNumber))
+      {
+        return null;
+      }
+
+      // The same number written two ways is still the number. See the remarks above.
+      var nameDigits = PhoneNumberNormalizer.Normalize(name!);
+      if (nameDigits.Length > 0
+          && nameDigits == PhoneNumberNormalizer.Normalize(HeaderNumber!))
       {
         return null;
       }
@@ -312,9 +346,15 @@ else
   /// server configured below the client's cap (plan C-106).
   ///
   /// ⚠ Notify returns void and nothing here is awaited: a toast must not delay the button returning
-  /// to rest.
+  /// to rest. The name says so — it was OnSpeakFailedAsync, which promised a Task this method has
+  /// never returned, and MessageBubble's own doc comment already called it OnSpeakFailed.
+  ///
+  /// ⚠ Reached by TWO arms of §B4's Engine-error row, not one: MessageBubble raises it for a
+  /// synchronous refusal (400) and again for an asynchronous Failed broadcast, which is the common
+  /// case. The "_ =>" default already produces the handoff's exact copy for SpeechSynthesisFailed,
+  /// so the second arm needed no new switch case.
   /// </remarks>
-  private void OnSpeakFailedAsync(string? reason) => NotificationService.Notify(
+  private void OnSpeakFailed(string? reason) => NotificationService.Notify(
     NotificationSeverity.Warning,
     "Couldn't read that message.",
     reason switch
