@@ -9,16 +9,21 @@ namespace Radio.Web.Services.ApiClients;
 /// <para>
 /// SINGLETON BY NECESSITY. <c>AddHttpClient&lt;GvBridgeApiService&gt;</c> (Program.cs) registers a
 /// TRANSIENT typed client, so every Blazor component in every circuit resolves its own service
-/// instance — a field on the service could never suppress a second call. Registered
-/// <c>AddSingleton</c> beside that client.
+/// instance — a field on the service could not suppress a call from a different component or
+/// circuit, i.e. almost all of them. Registered <c>AddSingleton</c> beside that client.
 /// </para>
 /// <para>
 /// NOTHING CLEARS IT IN-PROCESS, deliberately. <c>GvBridgeStatusDto</c> carries no mark-read
-/// capability field, so the 10s status poll cannot observe RotaryPhone re-enabling the feature,
-/// and our own flag cannot change without a restart. If RotaryPhone enables mark-read while this
-/// is latched, <c>radio-web</c> must be restarted to pick it up — see design/INTEGRATIONS.md
-/// § "Two-flag distinction". ADR-024's rollout order (theirs first, then ours) never reaches
-/// that state.
+/// capability field, so the 10s status poll cannot observe RotaryPhone re-enabling the feature.
+/// Our own flag CAN change without a restart — <c>appsettings*.json</c> is registered with
+/// <c>reloadOnChange: true</c> and Program.cs adds the SQLite config store with a change
+/// notifier — but clearing the latch is deliberately NOT wired to it: the latch records what
+/// RotaryPhone ANSWERED, not what we asked for, and our flag says nothing about theirs.
+/// If RotaryPhone enables mark-read while this is latched, <c>radio-web</c> must be restarted to
+/// pick it up — see design/INTEGRATIONS.md § "Two-flag distinction".
+/// ADR-024's recommended rollout order (theirs first, then ours) avoids that state — but GV-6
+/// exists precisely for when it is not followed, which is the only way this latch is ever set.
+/// Treat the restart as a real operational step; design/INTEGRATIONS.md records it as one.
 /// </para>
 /// </summary>
 public sealed class GvMarkReadDarkLatch

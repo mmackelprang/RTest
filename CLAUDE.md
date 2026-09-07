@@ -344,7 +344,10 @@ audible audio distortion. Measured 2026-09-05 while planning `PHN-5`, the row th
 to `Radio.Web` as public and persistent until that sink is restricted.** `radio-web.service` also sets no
 `SyslogLevelPrefix`/`SyslogLevel` (unlike `radio-api.service`, which sets both and pairs them with
 `SystemdConsoleFormatter`), so **every `radio-web` journal line is priority `info` whatever its Serilog
-level** — `journalctl -p warning -u radio-web` returns nothing. Grep for a substring instead.
+level** — `journalctl -p warning -u radio-web` returns **none of `radio-web`'s own lines**. It is not
+necessarily empty: `-u <unit>` also matches systemd's own messages *about* the unit (`Main process
+exited…`, `Failed with result 'exit-code'`), which PID 1 emits at warning/err, so on a box that has had a
+crash you will see those and nothing from the app. Grep for a substring instead.
 
 ```bash
 # Warnings and errors — journald

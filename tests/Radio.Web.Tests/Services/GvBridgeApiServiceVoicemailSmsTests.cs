@@ -281,8 +281,12 @@ public class GvBridgeApiServiceVoicemailSmsTests
     Assert.Equal(1, handler.RequestCount);
   }
 
+  // ⚠ What this does NOT prove: calls 2 and 3 return at the IsLatched short-circuit and never
+  // reach HandledAsMarkReadDark, so the once-ness shown here is the LATCH's, not TryLatch()'s
+  // return value's. That guard is covered by
+  // Dark409_TwoCircuitsRacingTheFirstPost_StillLogOneWarningTotal below.
   [Fact]
-  public async Task Dark409_LogsExactlyOnce_AtWarning_AcrossBothMethods()
+  public async Task Dark409_LogsOneWarning_ThenTheLatchSilencesBothMethods()
   {
     var entries = new List<(LogLevel Level, string Message)>();
     var handler = new MockHttpHandler(DarkBody, HttpStatusCode.Conflict);
@@ -355,5 +359,154 @@ public class GvBridgeApiServiceVoicemailSmsTests
 
     Assert.False(latch.IsLatched);
     Assert.Equal(0, handler.RequestCount);
+  }
+
+  // The mirror of MarkSmsThreadReadAsync_SharesTheLatch_WithVoicemail. Worth its own case because
+  // the SMS route has its own ReadErrorCodeAsync + HandledAsMarkReadDark call site, and until this
+  // test that site had no direct coverage for the dark 409 — only for being suppressed BY one.
+  [Fact]
+  public async Task MarkVoicemailReadAsync_SharesTheLatch_WithSms()
+  {
+    var handler = new MockHttpHandler(DarkBody, HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch);
+
+    Assert.Null(await svc.MarkSmsThreadReadAsync("t1"));    // latches, via the SMS route
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));   // must not POST
+
+    Assert.True(latch.IsLatched);
+    Assert.Equal(1, handler.RequestCount);
+  }
+
+  // ReadErrorCodeAsync tries error/Error/code/Code (JSON property lookup is case-sensitive), and
+  // HandledAsMarkReadDark's remarks promise `error`/`code`. All four must latch.
+  // ⚠ The VALUE comparison is NOT case-insensitive — HandledAsMarkReadDark tests
+  // `errorCode != "markread_disabled"` with ordinal equality, so "MarkRead_Disabled" would NOT
+  // latch. That is correct (ADR-024 §3.3 defines one literal code), so there is deliberately no
+  // case-variant of the value here.
+  [Theory]
+  [InlineData("error")]
+  [InlineData("Error")]
+  [InlineData("code")]
+  [InlineData("Code")]
+  public async Task Dark409_Latches_WhateverPropertyCarriesTheCode(string propertyName)
+  {
+    var body = "{\"" + propertyName + "\":\"markread_disabled\"}";
+    var handler = new MockHttpHandler(body, HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch);
+
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));
+
+    Assert.True(latch.IsLatched);
+    Assert.Equal(1, handler.RequestCount);
+  }
+
+  // GV-6: the only state where TryLatch()'s RETURN VALUE is live — two callers inside
+  // HandledAsMarkReadDark at once, which is exactly the "concurrent Blazor circuits over one
+  // singleton latch" case GvMarkReadDarkLatch's remarks describe. Dark409_LogsOneWarning_... above
+  // cannot reach it: its calls 2-3 short-circuit at IsLatched and never enter the method, so it
+  // would still pass if the TryLatch() guard around the LogWarning were deleted.
+  //
+  // The rendezvous reaching N=2 IS the proof this test is meaningful rather than incidental:
+  // SendAsync does not answer until BOTH requests have arrived, so neither caller can have seen a
+  // 409 — and therefore latched — before the other cleared its own IsLatched check. Without the
+  // gate the two POSTs would serialise and this would be another IsLatched test in a costume.
+  //
+  // ⚠ The 30s wait inside Rendezvous is the ONE bounded wait in this test, and it is a deadlock
+  // guard rather than a synchronisation device: a regression that stops one caller reaching the
+  // handler turns an infinite hang into a failed assertion. It can never turn a pass into a
+  // spurious failure — a saturated runner only makes the gate open later, and every assertion
+  // below runs after both calls have already completed, against no clock at all. That is the
+  // direction CLAUDE.md § Test Timing asks a timing dependency to fail in: this one can only fail.
+  //
+  // Two sinks, not one: the services log from different threads and CapturingLogger appends to a
+  // bare List<T> with no lock, so a shared sink would be an unsynchronised race in the test itself.
+  [Fact]
+  public async Task Dark409_TwoCircuitsRacingTheFirstPost_StillLogOneWarningTotal()
+  {
+    var gate = new Rendezvous(participants: 2);
+    var latch = new GvMarkReadDarkLatch();
+    var entriesA = new List<(LogLevel Level, string Message)>();
+    var entriesB = new List<(LogLevel Level, string Message)>();
+
+    var a = BuildSvcOver(new GatedHandler(gate, DarkBody, HttpStatusCode.Conflict), latch,
+      new CapturingLogger<GvBridgeApiService>(entriesA));
+    var b = BuildSvcOver(new GatedHandler(gate, DarkBody, HttpStatusCode.Conflict), latch,
+      new CapturingLogger<GvBridgeApiService>(entriesB));
+
+    await Task.WhenAll(a.MarkVoicemailReadAsync("vm1"), b.MarkSmsThreadReadAsync("t1"));
+
+    Assert.True(gate.AllArrived,
+      "both callers must have been inside the handler together, or this test proves nothing");
+    var dark = entriesA.Concat(entriesB)
+      .Where(e => e.Message.Contains("GV mark-read is dark", StringComparison.Ordinal))
+      .ToList();
+    Assert.Single(dark);
+    Assert.Equal(LogLevel.Warning, dark[0].Level);
+    Assert.True(latch.IsLatched);
+  }
+
+  // Flag-on service over a caller-supplied handler. BuildSvc above takes MockHttpHandler
+  // concretely (its callers assert on RequestCount); this one widens to HttpMessageHandler for
+  // GatedHandler rather than changing the shared helper's signature.
+  private static GvBridgeApiService BuildSvcOver(HttpMessageHandler handler,
+    GvMarkReadDarkLatch latch, ILogger<GvBridgeApiService> logger)
+  {
+    var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
+    var config = new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?>
+        { ["RotaryPhone:Gv:MarkReadEnabled"] = "true" })
+      .Build();
+    return new GvBridgeApiService(client, logger, config, latch);
+  }
+
+  /// <summary>
+  /// Releases every participant only once ALL of them have arrived. No clock, no sleep and no
+  /// polling: an Interlocked arrival count plus one TaskCompletionSource. The continuations are
+  /// forced asynchronous so the last arrival does not run the others inline on its own stack,
+  /// which would serialise the very race this exists to create.
+  /// </summary>
+  private sealed class Rendezvous(int participants)
+  {
+    // Deadlock guard only — see the racing test's comment. Never a synchronisation window.
+    private static readonly TimeSpan DeadlockGuard = TimeSpan.FromSeconds(30);
+
+    private readonly TaskCompletionSource _all =
+      new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private int _arrived;
+
+    /// <summary>True once every participant arrived; false means the guard fired instead.</summary>
+    public bool AllArrived => _all.Task.IsCompletedSuccessfully;
+
+    public Task ArriveAndWaitAsync()
+    {
+      if (Interlocked.Increment(ref _arrived) == participants)
+      {
+        _all.TrySetResult();
+      }
+      return _all.Task.WaitAsync(DeadlockGuard);
+    }
+  }
+
+  /// <summary>
+  /// Fixed-response handler that parks each request on a shared <see cref="Rendezvous"/> before
+  /// answering, so N callers are guaranteed to be inside the service at the same moment. Private
+  /// and nested on purpose: the assembly-shared MockHttpHandler gains nothing from a gate only
+  /// this row needs.
+  /// </summary>
+  private sealed class GatedHandler(Rendezvous gate, string body, HttpStatusCode statusCode)
+    : HttpMessageHandler
+  {
+    protected override async Task<HttpResponseMessage> SendAsync(
+      HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+      await gate.ArriveAndWaitAsync();
+      return new HttpResponseMessage(statusCode)
+      {
+        Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+      };
+    }
   }
 }

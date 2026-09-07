@@ -337,15 +337,18 @@ public class GvBridgeApiService
   /// If so, latch (suppressing every later mark-read POST for this process) and log ONCE.
   /// Returns <c>true</c> when it handled the response, so the caller skips its generic error log.
   /// <para>
-  /// The discriminator is the triple GvResult documents for this row: 409 + an <c>error</c>/
-  /// <c>code</c> of <c>markread_disabled</c>. A 409 carrying anything else is NOT latched — it
+  /// The discriminator is the rule GvResult documents for this row: 409 plus an <c>error</c>/
+  /// <c>code</c> of <c>markread_disabled</c> — this method branches on that pair directly, not
+  /// through GvResult (see that type's remarks). A 409 carrying anything else is NOT latched — it
   /// falls through to the generic failure path, because ADR-024 §3.3 defines this one code and
   /// says nothing about a future second meaning for the status.
   /// </para>
   /// <para>
   /// ONE latch covers BOTH routes: a single server flag (GVBridge:EnableMarkRead) gates both and
-  /// is checked at step 0 of each (ADR-024 §3.3), so a per-route latch would model a state
-  /// RotaryPhone cannot be in.
+  /// is checked at step 0 of each (ADR-024 §3.3), so a per-route latch would model a split their
+  /// contract does not currently express.
+  /// ⚠ Falsifier: if RotaryPhone ever splits that flag per route, this one latch over-suppresses
+  /// the still-live route. The thing to re-read is their contract, not this code.
   /// </para>
   /// </summary>
   private bool HandledAsMarkReadDark(HttpStatusCode statusCode, string? errorCode)
@@ -361,7 +364,8 @@ public class GvBridgeApiService
       // `journalctl -u radio-web` on a stock box — Radio.Web's Console sink carries no
       // restrictedToMinimumLevel (appsettings.json:58-71), unlike Radio.API's (LOG-11).
       // KEEP the literal "GV mark-read is dark" substring: it is the documented probe, and
-      // `journalctl -p warning -u radio-web` finds NOTHING because radio-web.service sets no
+      // `journalctl -p warning -u radio-web` finds none of radio-web's OWN lines (only systemd's
+      // unit-level messages about the service, if any) because radio-web.service sets no
       // SyslogLevelPrefix, so every line it writes is journald priority `info`.
       // The second sentence REPORTS their contract; it does not assert their config, which this
       // process cannot observe.

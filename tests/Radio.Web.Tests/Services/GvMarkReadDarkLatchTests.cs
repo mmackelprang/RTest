@@ -21,12 +21,16 @@ public class GvMarkReadDarkLatchTests
     Assert.True(latch.IsLatched);
   }
 
-  // ⚠ This is NOT a timing test and cannot be weakened by a slow or saturated runner
-  // (CLAUDE.md § Test Timing). There is no clock and no sleep: Interlocked.Exchange guarantees
-  // exactly one caller observes the 0→1 transition under EVERY interleaving, so starvation can
-  // only reorder the winners, never produce two of them. It exists because the property the row
-  // asks for — "log once" — is a concurrency claim, and a check-then-set implementation would
-  // pass every test above while failing this one.
+  // This test can never FAIL spuriously (CLAUDE.md § Test Timing): no clock, no sleep, and
+  // Interlocked.Exchange guarantees exactly one caller observes the 0→1 transition under every
+  // interleaving, so a saturated runner can only reorder the winners, never produce two.
+  // ⚠ It is a REGRESSION GUARD for a documented property, NOT a detector. It does not reliably
+  // catch a check-then-set implementation: measured against a naive `if (_b) return false;
+  // _b = true;` latch, this exact body found two winners 0 times in 500 runs on a 32-core box
+  // (a Barrier-gated 16-thread variant: 4 in 200). Nothing here forces the callers into the
+  // nanosecond race window together. The property is guaranteed by Interlocked, not demonstrated
+  // by this assertion — the service-level guard is covered by
+  // Dark409_TwoCircuitsRacingTheFirstPost_StillLogOneWarningTotal.
   [Fact]
   public void TryLatch_GrantsExactlyOneWinner_UnderParallelCallers()
   {
