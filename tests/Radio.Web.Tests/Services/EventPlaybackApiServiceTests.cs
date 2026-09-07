@@ -125,6 +125,111 @@ public class EventPlaybackApiServiceTests
     Assert.Equal("/api/audio/events/evp%20abc%2Fdef", uri.AbsolutePath);
   }
 
+  // ── PHN-3 T3: the Speech arm ─────────────────────────────────────────────────────────────────
+
+  [Fact]
+  public async Task StartSpeech_PostsTheSpeechArmAndNeitherMediaNorDuration()
+  {
+    // ⭐ The arm test. EventPlaybackRequest.Validate rejects ArmMismatch if a Speech request carries
+    // MediaKind, MediaId or DurationSeconds, so any one of them reaching the wire is a 400 on a live
+    // surface. Asserting their ABSENCE from the JSON is stricter than the server's own check — see
+    // the mutation note on StartSpeechAsync's remarks — and deliberately so: the anonymous body is
+    // the only thing standing between a copy-paste from StartVoicemailAsync and that 400.
+    string? captured = null;
+    var handler = new CapturingHandler(request =>
+    {
+      captured = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+      return new HttpResponseMessage(HttpStatusCode.Accepted)
+      {
+        Content = new StringContent(SpeechSnapshotJson, Encoding.UTF8, "application/json")
+      };
+    });
+
+    await ServiceOver(handler).StartSpeechAsync("Message from Jane. Dinner at 7?", "a message from Jane");
+
+    Assert.NotNull(captured);
+    using var document = System.Text.Json.JsonDocument.Parse(captured);
+    var root = document.RootElement;
+
+    Assert.Equal("Speech", root.GetProperty("kind").GetString());
+    Assert.Equal("Message from Jane. Dinner at 7?", root.GetProperty("text").GetString());
+    Assert.Equal("a message from Jane", root.GetProperty("label").GetString());
+    Assert.False(root.TryGetProperty("mediaKind", out _));
+    Assert.False(root.TryGetProperty("mediaId", out _));
+    Assert.False(root.TryGetProperty("durationSeconds", out _));
+
+    var uri = Assert.Single(handler.Requests).RequestUri;
+    Assert.NotNull(uri);
+    Assert.Equal("/api/audio/events", uri.AbsolutePath);
+  }
+
+  [Fact]
+  public async Task StartSpeech_ReturnsTheReason_OnARefusal()
+  {
+    // A 400 answers SYNCHRONOUSLY and never reaches a Failed snapshot, so the reason string is the
+    // only thing the caller can say anything from. TextTooLong is the backstop reason for a box
+    // configured below GvSpeechText.MaxChars (plan C-106) — unreachable on a stock box, which is
+    // exactly why it needs a test rather than a live sighting.
+    var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest)
+    {
+      Content = new StringContent(
+        """{"error":"Invalid request","reason":"TextTooLong"}""", Encoding.UTF8, "application/json")
+    });
+
+    var (snapshot, reason) = await ServiceOver(handler).StartSpeechAsync("aaa", "a message");
+
+    Assert.Null(snapshot);
+    Assert.Equal("TextTooLong", reason);
+  }
+
+  [Fact]
+  public async Task StartSpeech_ReturnsTheSnapshot_OnAccepted()
+  {
+    // ⚠ 202 means ACCEPTED, not speaking. A non-null return is a handle to gate on, never evidence
+    // that a word has been said — the state arrives on the next hub broadcast.
+    var handler = new CapturingHandler(_ => new HttpResponseMessage(HttpStatusCode.Accepted)
+    {
+      Content = new StringContent(SpeechSnapshotJson, Encoding.UTF8, "application/json")
+    });
+
+    var (snapshot, reason) = await ServiceOver(handler).StartSpeechAsync("hi", "a message");
+
+    Assert.Null(reason);
+    Assert.NotNull(snapshot);
+    Assert.Equal("evp-speech-1", snapshot.Id);
+    Assert.Equal("Speech", snapshot.Kind);
+    Assert.Equal("Preparing", snapshot.State);
+  }
+
+  [Fact]
+  public async Task StartSpeech_ReturnsTransport_WhenTheCallThrows()
+  {
+    // ⚠ "Transport", NOT "Unreachable". StartVoicemailAsync answers "Transport" for the identical
+    // condition and VoicemailPlayer already maps it; the caller's toast maps the same token. Plan
+    // PHN-3's Task 1 sketch said "Unreachable" and was overruled by its own "match the surrounding
+    // file's idioms" instruction.
+    var handler = new CapturingHandler(_ => throw new HttpRequestException("no route to host"));
+
+    var (snapshot, reason) = await ServiceOver(handler).StartSpeechAsync("hi", "a message");
+
+    Assert.Null(snapshot);
+    Assert.Equal("Transport", reason);
+  }
+
+  private const string SpeechSnapshotJson =
+    """
+    {
+      "id": "evp-speech-1",
+      "kind": "Speech",
+      "label": "a message from Jane",
+      "state": "Preparing",
+      "duration": null,
+      "positionAtBroadcast": "00:00:00",
+      "broadcastAtUtc": "2026-09-05T00:00:00+00:00",
+      "failureReason": null
+    }
+    """;
+
   private static HttpResponseMessage Json(string body) =>
     new(HttpStatusCode.OK)
     {
