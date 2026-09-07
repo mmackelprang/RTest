@@ -248,4 +248,112 @@ public class GvBridgeApiServiceVoicemailSmsTests
     Assert.Null(await svc.MarkSmsThreadReadAsync("t1"));
     Assert.Equal(0, handler.RequestCount);
   }
+
+  // ── GV-6: a dark mark-read feature is not a failure ──────────────
+
+  private const string DarkBody = """{"error":"markread_disabled"}""";
+
+  [Fact]
+  public async Task MarkVoicemailReadAsync_Dark409_ReturnsNull_AndSuppressesTheSecondPost()
+  {
+    var handler = new MockHttpHandler(DarkBody, HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch);
+
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm2"));
+
+    Assert.True(latch.IsLatched);
+    Assert.Equal(1, handler.RequestCount);   // the second call never reached the network
+  }
+
+  [Fact]
+  public async Task MarkSmsThreadReadAsync_SharesTheLatch_WithVoicemail()
+  {
+    // One server flag gates both routes (ADR-024 §3.3), so a 409 on either must silence both.
+    var handler = new MockHttpHandler(DarkBody, HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch);
+
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));   // latches
+    Assert.Null(await svc.MarkSmsThreadReadAsync("t1"));    // must not POST
+
+    Assert.Equal(1, handler.RequestCount);
+  }
+
+  [Fact]
+  public async Task Dark409_LogsExactlyOnce_AtWarning_AcrossBothMethods()
+  {
+    var entries = new List<(LogLevel Level, string Message)>();
+    var handler = new MockHttpHandler(DarkBody, HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch,
+      new CapturingLogger<GvBridgeApiService>(entries));
+
+    await svc.MarkVoicemailReadAsync("vm1");
+    await svc.MarkVoicemailReadAsync("vm2");
+    await svc.MarkSmsThreadReadAsync("t1");
+
+    // The documented grep anchor — if this substring changes, INTEGRATIONS.md's probe breaks.
+    var dark = entries.Where(e => e.Message.Contains("GV mark-read is dark",
+      StringComparison.Ordinal)).ToList();
+    Assert.Single(dark);
+    Assert.Equal(LogLevel.Warning, dark[0].Level);
+    // No per-call Error noise once the feature is known to be dark.
+    Assert.DoesNotContain(entries, e => e.Level == LogLevel.Error);
+  }
+
+  [Fact]
+  public async Task Conflict_WithADifferentErrorCode_IsAGenuineFailure_AndDoesNotLatch()
+  {
+    // ADR-024 §3.3 defines ONE meaning for 409 on these routes. Anything else is unknown, and an
+    // unknown failure must not silence a feature the operator asked for.
+    var entries = new List<(LogLevel Level, string Message)>();
+    var handler = new MockHttpHandler("""{"error":"something_else"}""", HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch,
+      new CapturingLogger<GvBridgeApiService>(entries));
+
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm2"));
+
+    Assert.False(latch.IsLatched);
+    Assert.Equal(2, handler.RequestCount);           // still trying, correctly
+    Assert.Equal(2, entries.Count(e => e.Level == LogLevel.Error));
+    Assert.Contains(entries, e => e.Message.Contains("something_else", StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public async Task BadGateway_DoesNotLatch_AndKeepsReportingEachFailure()
+  {
+    var entries = new List<(LogLevel Level, string Message)>();
+    var handler = new MockHttpHandler(statusCode: HttpStatusCode.BadGateway);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: true, latch,
+      new CapturingLogger<GvBridgeApiService>(entries));
+
+    Assert.Null(await svc.MarkSmsThreadReadAsync("t1"));
+    Assert.Null(await svc.MarkSmsThreadReadAsync("t2"));
+
+    Assert.False(latch.IsLatched);
+    Assert.Equal(2, handler.RequestCount);
+    Assert.Equal(2, entries.Count(e => e.Level == LogLevel.Error));
+    Assert.DoesNotContain(entries,
+      e => e.Message.Contains("GV mark-read is dark", StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public async Task FlagOff_NeverLatches_EvenIfTheServerWouldReject()
+  {
+    // The two guards are independent: our flag is the reason we do not call, and their 409 is
+    // the reason we stop calling. With ours off, theirs is never observed.
+    var handler = new MockHttpHandler(DarkBody, HttpStatusCode.Conflict);
+    var latch = new GvMarkReadDarkLatch();
+    var svc = BuildSvc(handler, markReadEnabled: false, latch);
+
+    Assert.Null(await svc.MarkVoicemailReadAsync("vm1"));
+
+    Assert.False(latch.IsLatched);
+    Assert.Equal(0, handler.RequestCount);
+  }
 }

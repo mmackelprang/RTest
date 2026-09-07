@@ -56,6 +56,11 @@ public class PhonePageTests : TestContext
       client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler());
 
+    // GV-6: this rig stands in for Program.cs's container, so it must register what
+    // Program.cs registers — GvBridgeApiService takes the dark-mark-read latch and the
+    // typed client above is activated through DI, not constructed by hand.
+    Services.AddSingleton<GvMarkReadDarkLatch>();
+
     // Register GvTrunkApiService with mock handler
     Services.AddHttpClient<GvTrunkApiService>(client =>
     {
