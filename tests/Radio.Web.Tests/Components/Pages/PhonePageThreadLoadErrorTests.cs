@@ -66,6 +66,10 @@ public class PhonePageThreadLoadErrorTests : TestContext
       client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
     }).ConfigurePrimaryHttpMessageHandler(() => new ThreadLoadErrorHandler());
 
+    // GV-6: as in PhonePageTests — the typed client above is activated through DI, so this
+    // rig must register the latch Program.cs registers.
+    Services.AddSingleton<GvMarkReadDarkLatch>();
+
     Services.AddHttpClient<GvTrunkApiService>(client =>
     {
       client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);

@@ -18,17 +18,20 @@ public class GvBridgeApiService
   private readonly HttpClient _httpClient;
   private readonly ILogger<GvBridgeApiService> _logger;
   private readonly IConfiguration _configuration;
+  private readonly GvMarkReadDarkLatch _markReadDark;
   private static readonly JsonSerializerOptions JsonOptions = new()
   {
     PropertyNameCaseInsensitive = true
   };
 
   public GvBridgeApiService(HttpClient httpClient,
-    ILogger<GvBridgeApiService> logger, IConfiguration configuration)
+    ILogger<GvBridgeApiService> logger, IConfiguration configuration,
+    GvMarkReadDarkLatch markReadDark)
   {
     _httpClient = httpClient;
     _logger = logger;
     _configuration = configuration;
+    _markReadDark = markReadDark;
   }
 
   public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
@@ -131,8 +134,11 @@ public class GvBridgeApiService
   /// from it. Gated on RotaryPhone:Gv:MarkReadEnabled (in-tree consumer flag; distinct
   /// from RotaryPhone's server-side EnableMarkRead build flag). Flag off → silent no-op
   /// returning null (the caller has ALREADY flipped the row read optimistically; a no-op
-  /// must never disturb that). 200 → DTO; 404 → null (item gone); 502/non-2xx → null but
-  /// the caller KEEPS the optimistic flip and reconciles on the next list/poll/push.
+  /// must never disturb that).
+  /// 200 → DTO; 404 → null (item gone); 409 markread_disabled → null, latched: their feature is
+  /// dark, so this and MarkSmsThreadReadAsync stop POSTing until radio-web restarts (GV-6,
+  /// ADR-024 §3.3); any other non-2xx → null but the caller KEEPS the optimistic flip and
+  /// reconciles on the next list/poll/push.
   /// NEVER auto-retries — one attempt per user action (a UI-driven retry is the right place).
   /// v1 callers pass isRead: true only (§6 — unread may 400 unread_unsupported).
   /// </summary>
@@ -142,6 +148,13 @@ public class GvBridgeApiService
     if (!_configuration.GetValue("RotaryPhone:Gv:MarkReadEnabled", false))
     {
       return null;  // UI-local optimistic flip already applied by the caller
+    }
+    // GV-6: RotaryPhone has already told us the feature is dark. Behave exactly as the flag-off
+    // path above — same null, same kept optimistic flip — and spend no LAN round-trip on a POST
+    // whose only possible answer is another 409.
+    if (_markReadDark.IsLatched)
+    {
+      return null;
     }
     try
     {
@@ -157,8 +170,16 @@ public class GvBridgeApiService
       }
       if (!response.IsSuccessStatusCode)
       {
+        var errorCode = await ReadErrorCodeAsync(response, ct);
+        if (HandledAsMarkReadDark(response.StatusCode, errorCode))
+        {
+          return null;
+        }
         // 502 = GV unreachable. Keep the optimistic flip; reconcile later. No retry.
-        _logger.LogError("Mark-read voicemail {Id} failed: {Status}", id, (int)response.StatusCode);
+        // The error code is logged too (GV-6): a 409 that is NOT markread_disabled reaches here,
+        // and the status alone would not say which 409 it was.
+        _logger.LogError("Mark-read voicemail {Id} failed: {Status} {ErrorCode}",
+          id, (int)response.StatusCode, errorCode ?? "-");
         return null;
       }
       return await response.Content.ReadFromJsonAsync<VoicemailItemDto>(JsonOptions, ct);
@@ -312,14 +333,67 @@ public class GvBridgeApiService
   }
 
   /// <summary>
+  /// Was this mark-read failure RotaryPhone's dark-feature rejection rather than a real failure?
+  /// If so, latch (suppressing every later mark-read POST for this process) and log ONCE.
+  /// Returns <c>true</c> when it handled the response, so the caller skips its generic error log.
+  /// <para>
+  /// The discriminator is the rule GvResult documents for this row: 409 plus an <c>error</c>/
+  /// <c>code</c> of <c>markread_disabled</c> — this method branches on that pair directly, not
+  /// through GvResult (see that type's remarks). A 409 carrying anything else is NOT latched — it
+  /// falls through to the generic failure path, because ADR-024 §3.3 defines this one code and
+  /// says nothing about a future second meaning for the status.
+  /// </para>
+  /// <para>
+  /// ONE latch covers BOTH routes: a single server flag (GVBridge:EnableMarkRead) gates both and
+  /// is checked at step 0 of each (ADR-024 §3.3), so a per-route latch would model a split their
+  /// contract does not currently express.
+  /// ⚠ Falsifier: if RotaryPhone ever splits that flag per route, this one latch over-suppresses
+  /// the still-live route. The thing to re-read is their contract, not this code.
+  /// </para>
+  /// </summary>
+  private bool HandledAsMarkReadDark(HttpStatusCode statusCode, string? errorCode)
+  {
+    if (statusCode != HttpStatusCode.Conflict || errorCode != "markread_disabled")
+    {
+      return false;
+    }
+
+    if (_markReadDark.TryLatch())
+    {
+      // NO message parameters, deliberately: nothing here is per-item, and this line reaches
+      // `journalctl -u radio-web` on a stock box — Radio.Web's Console sink carries no
+      // restrictedToMinimumLevel (appsettings.json:58-71), unlike Radio.API's (LOG-11).
+      // KEEP the literal "GV mark-read is dark" substring: it is the documented probe, and
+      // `journalctl -p warning -u radio-web` finds none of radio-web's OWN lines (only systemd's
+      // unit-level messages about the service, if any) because radio-web.service sets no
+      // SyslogLevelPrefix, so every line it writes is journald priority `info`.
+      // The second sentence REPORTS their contract; it does not assert their config, which this
+      // process cannot observe.
+      _logger.LogWarning(
+        "GV mark-read is dark: RotaryPhone answered 409 markread_disabled, which their contract "
+        + "defines as their GVBridge:EnableMarkRead being false (ADR-024 §3.3), while our "
+        + "RotaryPhone:Gv:MarkReadEnabled is true. Read-state stays UI-local and reverts on the "
+        + "next list load. Suppressing further mark-read POSTs until radio-web restarts.");
+    }
+
+    return true;
+  }
+
+  /// <summary>
   /// Mark a whole SMS thread read via GV write-through (ADR-024 §3.2 / §5). Per-thread
-  /// grain → hasUnread=false. Same posture as MarkVoicemailReadAsync: flag-gated,
-  /// 200→DTO, 404→null, 502/non-2xx→null (keep optimistic flip), no auto-retry.
+  /// grain → hasUnread=false. Same posture as MarkVoicemailReadAsync: flag-gated, 200→DTO,
+  /// 404→null, 502/non-2xx→null (keep optimistic flip), no auto-retry — and it SHARES that
+  /// method's dark-feature latch, because one server flag gates both routes (GV-6).
   /// </summary>
   public async Task<SmsThreadDto?> MarkSmsThreadReadAsync(
     string threadId, bool isRead = true, CancellationToken ct = default)
   {
     if (!_configuration.GetValue("RotaryPhone:Gv:MarkReadEnabled", false))
+    {
+      return null;
+    }
+    // GV-6: same latch as the voicemail route — one server flag gates both (ADR-024 §3.3).
+    if (_markReadDark.IsLatched)
     {
       return null;
     }
@@ -336,7 +410,13 @@ public class GvBridgeApiService
       }
       if (!response.IsSuccessStatusCode)
       {
-        _logger.LogError("Mark-read thread {ThreadId} failed: {Status}", threadId, (int)response.StatusCode);
+        var errorCode = await ReadErrorCodeAsync(response, ct);
+        if (HandledAsMarkReadDark(response.StatusCode, errorCode))
+        {
+          return null;
+        }
+        _logger.LogError("Mark-read thread {ThreadId} failed: {Status} {ErrorCode}",
+          threadId, (int)response.StatusCode, errorCode ?? "-");
         return null;
       }
       return await response.Content.ReadFromJsonAsync<SmsThreadDto>(JsonOptions, ct);

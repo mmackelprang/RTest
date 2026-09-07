@@ -363,6 +363,12 @@ builder.Services.AddHttpClient<GvBridgeApiService>(client =>
   return handler;
 });
 
+// GV-6: the dark-mark-read latch. SINGLETON on purpose — the typed client above is TRANSIENT,
+// so a field on GvBridgeApiService would be re-created per component per circuit and could not
+// suppress a POST from a different component or circuit, i.e. almost all of them. Nothing clears
+// it: see the type's remarks.
+builder.Services.AddSingleton<GvMarkReadDarkLatch>();
+
 // There is no GV Bridge SMS *send* client. Owner decision D31 (2026-09-05) made
 // /phone a read-only surface, and PHN-4 deleted GvBridgeSendService along with
 // the composer that was its only consumer. The read client above stays; ADR-028

@@ -11,7 +11,7 @@
 
 | Field | Value |
 |---|---|
-| Status | 📋 |
+| Status | ✅ [#594](https://github.com/mmackelprang/RTest/pull/594) — shipped 2026-09-07, archived in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) |
 | Plan | [`design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md`](../../design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md) |
 | Spec / handoff | [ADR-024 §3.3](../../design/decisions/2026-06-20-gv-mark-read-durable-readstate.md) |
 | Depends on | **GV-4** |

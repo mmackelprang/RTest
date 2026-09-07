@@ -33,13 +33,16 @@ public enum GvCallOutcome
 /// Outcome of a GV Bridge call: the value on success, and enough shape on failure for a
 /// caller to decide what the user should see and for an operator to read the log.
 /// <para>
-/// REUSABLE BY DESIGN. GV-6 (distinguish <c>409 markread_disabled</c> from a genuine
-/// mark-read failure) adopts this same type for the two mark-read methods rather than
-/// inventing a second mechanism — branch on
-/// <c>Outcome == GvCallOutcome.HttpError &amp;&amp; StatusCode == HttpStatusCode.Conflict
-/// &amp;&amp; ErrorCode == "markread_disabled"</c>. See
-/// <c>docs/queue/ORDERING-NOTES.md</c> for why the two rows share the idiom but not
-/// the PR.
+/// GV-6 (distinguish <c>409 markread_disabled</c> from a genuine mark-read failure) reuses this
+/// type's DISCRIMINATION RULE — <c>409</c> plus an <c>error</c>/<c>code</c> of
+/// <c>markread_disabled</c>, read by <c>GvBridgeApiService.ReadErrorCodeAsync</c> — but NOT this
+/// type. The two mark-read methods still return <c>Task&lt;VoicemailItemDto?&gt;</c> /
+/// <c>Task&lt;SmsThreadDto?&gt;</c> and branch on the raw (status, errorCode) pair in
+/// <c>GvBridgeApiService.HandledAsMarkReadDark</c>: mark-read has no user-visible error
+/// affordance (ADR-024 §6), so a caller has nothing to do with a richer result, and widening the
+/// return type would be a caller change GV-6's plan forbids (C-142). This type is consumed by
+/// <c>GetSmsThreadMessagesAsync</c> only. See <c>docs/queue/ORDERING-NOTES.md</c> for why the two
+/// rows share the idiom but not the PR.
 /// </para>
 /// </summary>
 public sealed class GvResult<T> where T : class

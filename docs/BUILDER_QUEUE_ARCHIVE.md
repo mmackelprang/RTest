@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (38)
+## Shipped rows (39)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1320,6 +1320,76 @@ it was never counted, and decrementing would have made a correct number wrong. F
 
 **First code change merged with a real CI signal since the `appserver-rtest` runner recovered** —
 `build` SUCCESS on #592, where the preceding rows merged on local gates alone.
+
+---
+
+### GV-6 — Distinguish `409 markread_disabled` from a genuine mark-read failure.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#594](https://github.com/mmackelprang/RTest/pull/594) |
+| Plan | [`GV-6-distinguish-markread-disabled-from-a-real-failure.md`](../design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md) |
+| Spec / handoff | [ADR-024 §3.3](../design/decisions/2026-06-20-gv-mark-read-durable-readstate.md) |
+| Depends on | **GV-4** ✅ (#441) |
+| Branch | `fix/gv-markread-dark-409` |
+
+**Detail: [`queue/GV-6.md`](queue/GV-6.md).**
+
+Shipped 2026-09-07. An `AddSingleton` `GvMarkReadDarkLatch` (one `int`, `Interlocked.Exchange`
+one-shot), one `LogWarning` carrying the grep anchor `GV mark-read is dark`, and both mark methods
+short-circuiting afterwards exactly as they do when our own flag is off. No UI change, no caller
+change, no `.razor` file in the diff. **`D31` did not touch it** — mark-read is a different feature
+behind a different flag from the parked `GV-5`, and the row was claimed as written.
+
+⭐ **The plan's own survey was wrong, and the way it was wrong is the carry-forward.** `C-143`
+claimed the new constructor parameter broke exactly two call sites, derived from
+`grep 'new GvBridgeApiService('`. **That grep cannot see DI activation.** Two bUnit rigs register
+the typed client and let the container build it, so the solution **compiled clean at 47/0** and then
+failed 15 `PhonePage` tests at runtime with `Unable to resolve service for type
+'GvMarkReadDarkLatch'`. A constructor-signature survey done by grepping for `new X(` is structurally
+blind to typed-client construction, and the build gate will not catch the gap.
+
+⚠ **The "log once" property was untested, and the test that claimed to cover it was vacuous.**
+`Dark409_LogsExactlyOnce_AtWarning_AcrossBothMethods` made calls 2 and 3 return at the `IsLatched`
+short-circuit, never reaching the logging method — so it proved the *latch* silences both routes,
+not that `TryLatch()` logs once. Replacing the `if (_markReadDark.TryLatch())` guard with an
+unconditional log left **every test in the PR passing**. Closed with a two-circuit racing test
+(`Interlocked` arrival count + `TaskCompletionSource` rendezvous, no clock and no sleep; the gate
+opening at N=2 is itself the proof both callers cleared `IsLatched` first) and **verified by
+mutation** — under that guard-removal the new test fails and only it fails, and it re-ran 20/20.
+
+⚠ **A test comment claimed a detection power the reviewer disproved by measurement.** The
+`Parallel.For(0, 256)` latch case said a check-then-set implementation "would pass every test above
+while failing this one." Against a naive `if (_b) return false; _b = true;` latch it found two
+winners **0 times in 500 runs** on a 32-core box (a Barrier-gated 16-thread variant: 4 in 200).
+Thread-pool ramp-up dwarfs the nanosecond race window. The test is kept unchanged as an honest
+regression guard — it can never fail spuriously — but it is no longer described as a detector.
+
+**Three of the row's own claims were corrected rather than shipped as written:** the status code was
+**already** logged at `:161`/`:339`, so `409` vs `502` was never wholly indistinguishable (what was
+missing is the error code, the meaning, and the once-ness); in `Radio.Web` the log **level** does not
+decide journald exposure, so the **latch** and not the level is what removes volume, and this is
+**not** an audio-distortion fix — nothing polls mark-read and the ceiling is human tapping speed; and
+suppressing the POST saves one LAN round-trip, not any Google calls.
+
+⚠ **UAT was not performed and could not be.** The dark path needs our flag on *and* RotaryPhone's off
+simultaneously — the state ADR-024's rollout order exists to prevent — and manufacturing it means
+editing RotaryPhone's config on the shared box. Unit suite plus review stood in, per the auto-merge
+policy. Whether the path is reachable on `radio` today is unanswerable from the checkout; one
+read-only command is recorded in the plan §4.6 for a human.
+
+**An unrelated documentation correction rode along, named rather than slipped in:** `CLAUDE.md` now
+records that `radio-web.service` sets no `SyslogLevelPrefix`/`SyslogLevel`, so **every `radio-web`
+journal line is priority `info` whatever its Serilog level** and `journalctl -p warning -u radio-web`
+returns none of the application's lines. This row's probe depends on it, which is why it is a
+substring grep.
+
+**Pre-merge review: 1 HIGH, 5 MEDIUM, 3 LOW, no functional defect.** Every finding was a comment
+asserting more than its code — including `GvResult`'s own doc-comment, which said GV-6 "adopts this
+same **type**" when this PR deliberately reuses only the discrimination rule (widening the return
+types would be the caller change `C-142` forbids), and the latch's claim that "our own flag cannot
+change without a restart", falsified by `reloadOnChange: true` plus the SQLite config store's change
+notifier.
 
 ---
 
