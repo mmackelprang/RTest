@@ -2349,3 +2349,59 @@ culture so the fix is pinned rather than asserted.
 
 **Priority: medium.** It is a correctness bug rather than a style one, and it surfaces as a failed
 route bind on a user's locale rather than as anything diagnosable from the UI.
+
+---
+
+## 31. The §Ph speak button has no progress bar, and the chip's verb is a two-arm switch
+
+Both deferred deliberately by `PHN-3` (2026-09-07). Recorded together because they are the row's two
+"deliberately not done" items that are genuine *deferrals* rather than refusals — the rest of that
+plan's §7 list (no reply path, no `GV-10` workaround, no `UI-6` fix, no seek/pause/restart) are
+positions, not backlog.
+
+### What exists
+
+**(a) No progress affordance on a spoken message.** The design handoff makes a 3px hairline bar under
+the bubble explicitly **optional** (`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md:311`,
+Q2) and recommends skipping it unless the owner wants maximum fidelity with the voicemail transport.
+`PHN-3` skipped it. So a spoken message shows a spinner while `Preparing`/`Waiting`, then a cyan
+`stop` button, and nothing about how far through it is.
+
+**(b) `MainLayout`'s chip verb is a two-arm switch, not a property of the kind.**
+`MainLayout.razor`'s `ConsolePlaybackTitle` / `ConsolePlaybackAriaLabel` each carry a
+`{ Kind: "Speech", … }` arm and a fall-through, because handoff §Cross-3 (`:145`, `:147`) specifies
+"Reading a message …" for speech and "Playing …" for a voicemail, and one kind-agnostic format string
+cannot produce both. `ConsolePlaybackState.KindLabel` already maps the *noun* (`"Speech" => "Message"`)
+in one place; the *verb* is duplicated across two switches in the layout.
+
+### What is needed
+
+**(a)** `TTSEventSource` is constructed with a known `TimeSpan`, so the length **is** knowable once
+synthesis finishes — the bar is renderable, just not until `Preparing` completes. Reuse
+`.now-playing-dock-progress` at 3px, full bubble width, directly under the bubble.
+
+**(b)** A `KindVerb` (or a `(Verb, Noun)` pair) on `ConsolePlaybackState` beside `KindLabel`, leaving
+`MainLayout` with one format string per surface instead of a switch per string.
+
+### Gotchas
+
+- ⛔ **(a) is what keeps `PHN-3` free of any clock, and that is the expensive property to give up.**
+  `VoicemailPlayer.razor:196-205` records that it deliberately has **no timer** — its position moves
+  because `MainLayout`'s 1 Hz tick re-renders through `@Body` — and warns *"⛔ Do NOT answer that by
+  adding a timer here… every expanded row would carry one."* A conversation renders **forty bubbles**.
+  A per-bubble clock is forty timers on an N100 where render churn is audible. If the bar ships, it
+  must ride the existing layout tick, never its own timer.
+- ⚠ **(a) also has an honest-copy problem the voicemail transport does not.** A synthesized utterance
+  has **no duration known before it starts**, which is the same reason the handoff drops the
+  `0:14 / 0:42` readout (`:302-307`). A bar that appears *after* the spinner is its own small jolt —
+  the handoff says so at `:311`, and it is the reason it is optional rather than specified.
+- ⚠ **(b) is not worth doing for two kinds.** `PHN-3` §7 says so explicitly: *"A third kind would be
+  the moment to generalise; two arms in a switch is not."* Do this when a third `EventPlaybackKind`
+  arrives, not before — generalising early would move the verb away from the copy it has to agree
+  with.
+- ⛔ **Do not touch the chip's VISIBLE label while doing (b).** It renders `KindLabel`, and the queue
+  records a `PHN-2` review defect about exactly that label; it is guarded by a test
+  (`ConsolePlaybackChipTests`).
+
+**Priority: low.** (a) is a design nicety the handoff itself recommends skipping; (b) is a
+refactor with no user-visible effect. Neither is a correctness gap.

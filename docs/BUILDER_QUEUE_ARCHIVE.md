@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (40)
+## Shipped rows (41)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1428,6 +1428,53 @@ is Planner's artifact.
 `PhoneUnreadState.cs:23`. Most have one subscriber today, where the shape is harmless; the hub
 service is the one worth a row, because `AudioStateStore` being its sole subscriber is a fact rather
 than an enforced invariant.
+
+---
+
+### PHN-3 — Feature B: a text message gets a play button that reads it to the room.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#598](https://github.com/mmackelprang/RTest/pull/598) |
+| Plan | [`PHN-3-the-sms-speak-button.md`](../design/plans/PHN-3-the-sms-speak-button.md) |
+| Spec / handoff | [handoff §B `:297-430` + §Cross-1…5 `:79-181`](design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) · [ADR-029](../design/decisions/2026-08-03-gv-audio-through-engine.md) §4.2 / §9 (the amendment) |
+| Depends on | **`O6`** ✅ — `PHN-1a`…`PHN-1f` and `PHN-2` [#566](https://github.com/mmackelprang/RTest/pull/566) |
+| Branch | `feat/phn-3-speak-a-text` |
+
+**Detail: [`queue/PHN-3.md`](queue/PHN-3.md).**
+
+Shipped 2026-09-07. **The eighth and last PR of the ADR-029 arc.** `GvSpeechText.ForMessage` (the
+eight content rules), `EventPlaybackApiService.StartSpeechAsync`, the 44px gutter button and its
+`Mine`-gated state machine, the handoff's §Ph CSS verbatim, and a kind-aware topbar chip that reads
+*"Reading a message from…"*. Not gated by `SendEnabled` or repliability — `D31` strengthens this row
+rather than touching it.
+
+**Three HIGH findings before merge, and the most valuable one came from UAT rather than review.**
+(1) The Stop button *restarted* the reading: the stop arm cleared `_playbackId` before awaiting the
+DELETE, so a second tap fell through to the start arm — measured `Deletes == 1, Posts == 2`. The
+handle is now retained and the button rests on the server's broadcast. (2) An emoji in a contact name
+was spoken aloud, because the lead-in was concatenated *after* `StripEmoji` ran. (3) **A synthesis
+failure was completely silent** — the common failure is asynchronous (202, then a `Failed`
+broadcast), and `OnSpeakFailed` fired only on the rare synchronous refusal, so the user was told
+nothing. Handoff §B4 specifies a toast there; the plan's Task 3 sketch had no `Failed` handling
+either, so this was a **plan gap**, not an implementation slip.
+
+⚠ **The plan's own headline mutation was vacuous.** `C-109`'s test fixture —
+`"77971 is your Facebook confirmation code"` — is a **five**-digit code, so the prescribed loosening
+to `^\+?\d{7,15}\s+` cannot match it on length, and the row's single most important test would have
+passed against the broken guard. A seven-digit fixture was added; it is what actually pins the rule.
+**The lesson generalises past this row: a mutation named in a plan is a hypothesis, not a result.**
+
+⚠ **Also found: `PhoneTextsPanel`'s `@foreach` had no `@key`.** Inert until this row, because
+`MessageBubble` was a pure function of its parameters; `_playbackId` made it identity-bearing, and
+the list is not append-only. Anything that renders per-instance state into a re-sortable list wants
+the same audit.
+
+⚠ **UAT could not reach audio.** No TTS credentials off-box, so `Playing`, the cyan speaking border,
+the chip, one-voice-at-a-time and mid-speech re-attach were never observed live — they are covered by
+bUnit tests driving the snapshot directly. Handoff items 17 and 20 (an opinion on the voice; a digit
+run intelligible at kiosk distance) are inherently on-box and **remain open**. The appliance was
+deliberately left untouched.
 
 ---
 

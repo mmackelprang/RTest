@@ -7,6 +7,7 @@ using Radzen;
 using Radio.Web.Models;
 using Radio.Web.Services;
 using Radio.Web.Services.ApiClients;
+using Radio.Web.Services.Hub;
 using Radio.Web.Components.Pages;
 using Radio.Web.Tests.TestHelpers;
 
@@ -23,13 +24,41 @@ public class PhoneTextsPanelTests : TestContext
   // Note what that does and does not prove — with nothing reading the service today
   // the assertion cannot fail for the current code; it is a guard against
   // regression, not evidence of a live gate.
-  private void Register(bool available)
+  // PHN-3: MessageBubble now injects ConsolePlaybackState and EventPlaybackApiService, and the
+  // panel injects NotificationService. Every test that renders conversation mode with a message in
+  // it therefore needs the whole graph — a setup requirement, not a regression.
+  //
+  // ⚠ NotificationService is NOT registered separately here. AddRadzenComponents() already
+  // registers it (which is why NowPlayingPanel, which injects it, renders in its own tests over
+  // nothing but that call). Adding a second registration would put two lifetimes on one service
+  // for no benefit; the plan's "add Services.AddSingleton<NotificationService>()" was written
+  // before that was checked.
+  private AudioStateStore _store = default!;
+  private SpeakEventsHandler _speak = default!;
+
+  private void Register(bool available, bool speakFails = false)
   {
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
+    Services.AddHermeticTestRig();
     var status = new GvBridgeStatusService(null!, NullLogger<GvBridgeStatusService>.Instance, 10);
     status.ApplyStatusForTest(available ? new GvBridgeStatusDto { Available = true } : null);
     Services.AddSingleton(status);
+
+    _store = new AudioStateStore(
+      NullLogger<AudioStateStore>.Instance,
+      new AudioStateHubService(
+        NullLogger<AudioStateHubService>.Instance,
+        new ConfigurationBuilder().Build(),
+        transport: new OfflineHubTransport()));
+    Services.AddSingleton(_store);
+    Services.AddSingleton(sp => new ConsolePlaybackState(
+      sp.GetRequiredService<AudioStateStore>(), NullLogger<ConsolePlaybackState>.Instance));
+
+    _speak = new SpeakEventsHandler(speakFails);
+    Services.AddSingleton(new EventPlaybackApiService(
+      new HttpClient(_speak) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      NullLogger<EventPlaybackApiService>.Instance));
   }
 
   [Fact]
@@ -223,5 +252,217 @@ public class PhoneTextsPanelTests : TestContext
     retry.Click();
 
     Assert.Equal(1, retries);
+  }
+
+  // ── PHN-3 T4: what the console is allowed to say the message is FROM ────────
+  //
+  // ⚠ SenderName is not visible in the markup — it only shapes the utterance and the label. So
+  // every test below drives the real path: tap the speak button, then read what was POSTed. That
+  // is deliberate; asserting on a parameter the component received would pass against a
+  // MessageBubble that then ignored it.
+
+  private const string Body = "Dinner at 7?";
+  private const string Number = "+15551234567";
+
+  private IRenderedComponent<PhoneTextsPanel> OpenConversation(
+    string? headerName, string? headerNumber) =>
+    RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.OpenThreadId, "t1")
+      .Add(x => x.HeaderName, headerName)
+      .Add(x => x.HeaderNumber, headerNumber)
+      .Add(x => x.Messages, new List<SmsMessageDto>
+        { new("m1", "t1", "Inbound", Number, Body, DateTime.UtcNow, false) }));
+
+  private async Task<System.Text.Json.JsonElement> TapSpeakAsync(
+    IRenderedComponent<PhoneTextsPanel> cut)
+  {
+    await cut.Find(".msg-speak-btn").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+    var posted = Assert.Single(_speak.Bodies);
+    return System.Text.Json.JsonDocument.Parse(posted).RootElement.Clone();
+  }
+
+  [Fact]
+  public async Task SenderName_IsPassedWhenAContactNameResolved()
+  {
+    Register(available: true);
+    var cut = OpenConversation(headerName: "Jane", headerNumber: Number);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal($"Message from Jane. {Body}", posted.GetProperty("text").GetString());
+    Assert.Equal("a message from Jane", posted.GetProperty("label").GetString());
+  }
+
+  [Fact]
+  public async Task SenderName_IsNullWhenTheNameIsJustTheNumber()
+  {
+    // ⭐ PhoneMessagesPanel.OpenThreadName falls back to the bare CounterpartyNumber when no
+    // contact matches — 14 of 20 live threads. Handoff :386: "Do not read the identifier aloud."
+    // "Message from plus one five five five one two three four five six seven" costs ~6 seconds
+    // and conveys nothing the user is not already looking at.
+    Register(available: true);
+    var cut = OpenConversation(headerName: Number, headerNumber: Number);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal(Body, posted.GetProperty("text").GetString());
+    Assert.Equal("a message", posted.GetProperty("label").GetString());
+    Assert.DoesNotContain(Number, posted.GetProperty("text").GetString());
+  }
+
+  [Fact]
+  public async Task SenderName_IsNullWhenTheNameIsTheNumberInADifferentFormat()
+  {
+    // ⭐⭐ THE CLAUSE A STRING COMPARE DOES NOT COVER, and the highest-consequence miss in this row.
+    // PhoneMessagesPanel.OpenThreadName returns CounterpartyName (:327) and a contact's match.Name
+    // (:333) VERBATIM, and neither is guaranteed non-numeric. A CounterpartyName of "(555)
+    // 123-4567" against a CounterpartyNumber of "+15551234567" makes `==` answer FALSE, the guard
+    // passes, and the console reads a phone number to the room — handoff :386.
+    //
+    // PhoneNumberNormalizer.Normalize keeps ASCII digits only and drops the leading "1" of an
+    // 11-digit US number, so both sides reduce to "5551234567".
+    Register(available: true);
+    var cut = OpenConversation(headerName: "(555) 123-4567", headerNumber: Number);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal(Body, posted.GetProperty("text").GetString());
+    Assert.Equal("a message", posted.GetProperty("label").GetString());
+    Assert.DoesNotContain("555", posted.GetProperty("text").GetString());
+  }
+
+  [Theory]
+  // A name with digits in it that are NOT the thread's number: suppression must key on the digits
+  // BEING the number, never on the name merely having some.
+  [InlineData("Pizza 4 U", Number)]
+  // ⭐ And the case that pins the `nameDigits.Length > 0` test in front of the comparison.
+  // Normalize("Mom") is "" and so is Normalize("GOOGLE") — two strings with no ASCII digits between
+  // them — so WITHOUT that length test they compare equal and an ordinary name is thrown away. A
+  // non-numeric CounterpartyNumber is what reaches HeaderNumber for an alias-style short code.
+  [InlineData("Mom", "GOOGLE")]
+  public async Task SenderName_StillPassesAnOrdinaryName(string headerName, string headerNumber)
+  {
+    // ⚠ The regression guard that keeps the normalised comparison STRICTLY STRONGER than the `==`
+    // it replaced, rather than merely different from it.
+    Register(available: true);
+    var cut = OpenConversation(headerName, headerNumber);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal($"Message from {headerName}. {Body}", posted.GetProperty("text").GetString());
+    Assert.Equal($"a message from {headerName}", posted.GetProperty("label").GetString());
+  }
+
+  [Fact]
+  public async Task SenderName_IsNullWhenNoNumberResolved()
+  {
+    // ⭐⭐ THE clause an equality test alone does not cover, and the one whose absence is audible.
+    // PhoneMessagesPanel.OpenThreadName:326 returns the RAW THREAD ID when the open thread is not
+    // in Threads at all, while OpenThreadNumber (:339) answers "". A guard of the form "if the name
+    // equals the number, pass null" answers FALSE there — and a Google Voice thread identifier gets
+    // read out to the room. See plan PHN-3 C-108.
+    Register(available: true);
+    var cut = OpenConversation(headerName: "t_abc123", headerNumber: "");
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal(Body, posted.GetProperty("text").GetString());
+    Assert.Equal("a message", posted.GetProperty("label").GetString());
+    Assert.DoesNotContain("t_abc123", posted.GetProperty("text").GetString());
+    Assert.DoesNotContain("t_abc123", posted.GetProperty("label").GetString());
+  }
+
+  /// <summary>
+  /// ⚠ THIS TEST PINS THE CONTRACT, NOT THE CLAUSE, AND THE DIFFERENCE WAS MEASURED.
+  /// </summary>
+  /// <remarks>
+  /// Plan PHN-3 §4.3b names "delete the first clause" as this row's mutation. It was run, and the
+  /// suite stayed GREEN — so the assertion below cannot be cited as evidence that
+  /// SpeakableSenderName's <c>IsNullOrWhiteSpace(name)</c> guard is load-bearing. It is not:
+  /// GvSpeechText.ForMessage and MessageBubble.SpeakLabel each re-check IsNullOrWhiteSpace on the
+  /// name they are given, so an empty or whitespace SenderName produces no lead-in and the generic
+  /// "a message" label whether the panel filters it or the helpers do. The clause is defence in
+  /// depth at the panel boundary, deliberately kept — it is what makes the property's contract
+  /// readable in one place — but it is not observable through this surface.
+  ///
+  /// What this test DOES pin is the contract itself: an empty header name never puts anything
+  /// name-shaped into the utterance or the label. That would fail the moment either downstream
+  /// guard was removed, which is the regression worth catching. Recorded rather than quietly
+  /// passing, because this repository's standing hazard is a test read as proof of something it
+  /// never exercised.
+  /// </remarks>
+  [Theory]
+  [InlineData(null)]
+  [InlineData("")]
+  public async Task SenderName_IsNullWhenHeaderNameIsEmpty(string? headerName)
+  {
+    Register(available: true);
+    var cut = OpenConversation(headerName, headerNumber: Number);
+
+    var posted = await TapSpeakAsync(cut);
+
+    Assert.Equal(Body, posted.GetProperty("text").GetString());
+    Assert.Equal("a message", posted.GetProperty("label").GetString());
+  }
+
+  [Fact]
+  public async Task SpeakFailure_RaisesAWarningToastAndNoMessageContent()
+  {
+    // Handoff §Cross-5 :174 — a synthesis failure is a TOAST, because there is no room beside a
+    // bubble. Warning, not Error: the message is still on screen and still readable by eye.
+    //
+    // ⭐ The second half of this test is the point. These toasts render on a kiosk in a family room
+    // and this row's subject matter is private SMS. The reason CODE is all that may cross that
+    // boundary — never the body, the sender, the number, or the raw token itself.
+    Register(available: true, speakFails: true);
+    var cut = OpenConversation(headerName: "Jane", headerNumber: Number);
+
+    await cut.Find(".msg-speak-btn").ClickAsync(new Microsoft.AspNetCore.Components.Web.MouseEventArgs());
+
+    var toast = Assert.Single(Services.GetRequiredService<NotificationService>().Messages);
+    Assert.Equal(NotificationSeverity.Warning, toast.Severity);
+    Assert.Equal("Couldn't read that message.", toast.Summary?.ToString());
+    Assert.Equal("The console isn't responding. Try again.", toast.Detail?.ToString());
+
+    var rendered = $"{toast.Summary} {toast.Detail}";
+    Assert.DoesNotContain(Body, rendered);
+    Assert.DoesNotContain(Number, rendered);
+    Assert.DoesNotContain("Jane", rendered);
+    Assert.DoesNotContain("Transport", rendered);
+  }
+
+  /// <summary>
+  /// Answers POST /api/audio/events, recording the bodies — or throws, to drive the failure toast.
+  /// </summary>
+  private sealed class SpeakEventsHandler(bool fails) : HttpMessageHandler
+  {
+    public List<string> Bodies { get; } = [];
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+      HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+      if (request.Content is not null)
+      {
+        Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+      }
+
+      if (fails)
+      {
+        // A transport failure, which StartSpeechAsync answers as "Transport" — the same token
+        // StartVoicemailAsync uses and the one the panel's switch maps.
+        throw new HttpRequestException("no route to host");
+      }
+
+      const string body = """
+        {"id":"evp-speech-1","kind":"Speech","label":"a message","state":"Preparing",
+         "duration":null,"positionAtBroadcast":"00:00:00",
+         "broadcastAtUtc":"2026-09-05T00:00:00+00:00","failureReason":null}
+        """;
+
+      return new HttpResponseMessage(System.Net.HttpStatusCode.Accepted)
+      {
+        Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+      };
+    }
   }
 }

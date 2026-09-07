@@ -107,8 +107,9 @@ public class EventPlaybackApiService
   /// rather than a transport verb that can repeat, and a refused start with no line anywhere is a
   /// button that did nothing for a reason nobody can recover afterwards.
   ///
-  /// ⚠ Voicemail only. The Speech arm has no caller until PHN-3, and this file's own history is the
-  /// argument for not adding one before it does.
+  /// ⚠ Voicemail only. The Speech arm is <see cref="StartSpeechAsync"/>, added by PHN-3 — which is
+  /// when it acquired a caller, and this file's own history is the argument for not having added one
+  /// before it did.
   /// </remarks>
   public async Task<(EventPlaybackSnapshotDto? Snapshot, string? Reason)> StartVoicemailAsync(
     string mediaId, int durationSeconds, string? label,
@@ -147,6 +148,72 @@ public class EventPlaybackApiService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to start attended playback");
+      return (null, "Transport");
+    }
+  }
+
+  /// <summary>
+  /// Starts a Speech (TTS) attended playback and returns its first snapshot, or a rejection reason.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The sibling of <see cref="StartVoicemailAsync"/>, and the caller PHN-3 was named for at that
+  /// method's own doc comment. The two arms are mutually exclusive by validation
+  /// (EventPlaybackRequest.Validate rejects ArmMismatch if a Speech request carries MediaKind,
+  /// MediaId or DurationSeconds), so this body sends NEITHER — an anonymous object with a Speech
+  /// kind, the text and a label, and nothing else.
+  ///
+  /// ⚠ Radio.Web has no copy of EventPlaybackRequestDto and must not grow one. The body is anonymous
+  /// for the same reason StartVoicemailAsync's is.
+  ///
+  /// ⚠ TEXT MUST ALREADY BE CAPPED by the caller. The server REJECTS over-length text as TextTooLong
+  /// rather than truncating it (GvMediaOptions.cs:79-88), so GvSpeechText.ForMessage does the capping
+  /// and this method does not second-guess it. The TextTooLong branch in the caller's failure mapping
+  /// is a backstop for a server configured below the client's cap, not the normal path. See plan
+  /// PHN-3 C-106.
+  ///
+  /// ⚠ No engine and no voice are sent. ADR-029 §9 Amendment: message speech uses the CURRENTLY
+  /// SELECTED engine (TTSOptions.DefaultEngine, deployed "Google"), resolved server-side. Sending one
+  /// here would reintroduce the per-feature engine override the amendment deleted.
+  ///
+  /// ⚠ THE TRANSPORT-FAILURE REASON IS "Transport", NOT "Unreachable". Plan PHN-3's Task 1 sketch
+  /// said "Unreachable"; the plan also says to match this file's established idioms wherever the
+  /// sketch differs, and StartVoicemailAsync already answers "Transport" for the identical condition
+  /// — a token VoicemailPlayer.razor:282-283/:290-291 already maps. A second spelling for one
+  /// condition in one file would be gratuitous divergence, so the caller's toast maps "Transport".
+  /// </remarks>
+  public async Task<(EventPlaybackSnapshotDto? Snapshot, string? Reason)> StartSpeechAsync(
+    string text, string? label, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      // ⛔ NEVER LOG text — it is an SMS body. EventPlaybackService.cs:720-721 carries the same
+      // instruction server-side, and TTS-11 is the row that established it. Nothing below, on either
+      // the refusal or the exception path, may interpolate it.
+      var body = new
+      {
+        kind = "Speech",
+        text,
+        label
+      };
+
+      using var response =
+        await _httpClient.PostAsJsonAsync("/api/audio/events", body, cancellationToken);
+
+      if (response.IsSuccessStatusCode)
+      {
+        var snapshot = await response.Content.ReadFromJsonAsync<EventPlaybackSnapshotDto>(
+          cancellationToken: cancellationToken);
+        return (snapshot, null);
+      }
+
+      var reason = await ReadReasonAsync(response, cancellationToken);
+      _logger.LogWarning(
+        "Attended playback refused: {Status} {Reason}", (int)response.StatusCode, reason);
+      return (null, reason);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to start speech playback");
       return (null, "Transport");
     }
   }

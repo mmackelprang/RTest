@@ -1,6 +1,7 @@
 @using Radio.Web.Models
 @using Radio.Core.Utilities
 @inject IJSRuntime JS
+@inject NotificationService NotificationService
 
 @* §Ph Texts surface (Screen C). One component, two render modes selected by host
    state:
@@ -96,7 +97,23 @@
              one; MessageBubble keeps the parameters (and defaults Status to None)
              because outbound bubbles still render for messages sent from the
              phone itself. *@
-          <MessageBubble Message="captured" />
+          @* PHN-3: SenderName is the thread's RESOLVED name or null — never an identifier
+             (SpeakableSenderName below). OnSpeakFailed is the §Cross-5 toast, which the
+             panel owns because a bubble has no room beside it.
+
+             ⚠⚠ @key IS LOAD-BEARING SINCE PHN-3 AND WAS NOT BEFORE IT. MessageBubble used
+             to be a pure function of its parameters, so Blazor's positional child
+             matching was harmless. It now carries identity-bearing state (_playbackId),
+             and this list is not append-only: PhonePage appends an inbound arrival,
+             Ordered() re-sorts by SentAt so an out-of-order GV delivery lands MID-LIST,
+             and PhonePage replaces the list wholesale on refresh. Without the key, any
+             of those re-parameterises existing instances and the cyan `speaking` marks
+             and the Stop affordance land on the WRONG bubble while the console reads the
+             original — the exact thing the mark exists to answer. *@
+          <MessageBubble @key="captured.Id"
+                         Message="captured"
+                         SenderName="@SpeakableSenderName"
+                         OnSpeakFailed="OnSpeakFailed" />
         }
       }
     </div>
@@ -244,6 +261,108 @@ else
     }
     return t.CounterpartyNumber;
   }
+
+  // ── PHN-3: what the console is allowed to say the message is FROM ────────────
+
+  /// <summary>
+  /// The resolved contact name for this thread, or null when only an identifier is known.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ NULL RATHER THAN THE NAME PARAMETER AS-IS, and that is the whole reason this is not just
+  /// HeaderName. PhoneMessagesPanel.OpenThreadName (:321-337) is what feeds HeaderName, and it
+  /// falls back TWICE: to the bare CounterpartyNumber (:335) when no contact matches, and to the
+  /// raw thread id (:326) when the open thread is not in Threads at all. Handoff :386 says "Do not
+  /// read the identifier aloud", and 14 of the 20 live threads have no resolvable name — so this is
+  /// the COMMON case, not an edge. Either identifier leaking through here would be read out to the
+  /// room. See plan PHN-3 C-108.
+  ///
+  /// ⚠ THE SECOND CLAUSE IS NOT BELT-AND-BRACES. HeaderNumber is OpenThreadNumber (:339), which is
+  /// "" when the thread is missing — exactly the case where HeaderName holds the thread id. An
+  /// equality test alone answers false there and speaks the id.
+  ///
+  /// ⚠⚠ THE THIRD CLAUSE COMPARES NORMALISED DIGITS, NOT STRINGS, AND A STRING COMPARE WAS NOT
+  /// ENOUGH. OpenThreadName returns CounterpartyName (:327) and a contact's match.Name (:333)
+  /// VERBATIM, and neither is guaranteed non-numeric. A CounterpartyName of "(555) 123-4567"
+  /// against a CounterpartyNumber of "+15551234567" makes `==` answer false, the guard passes, and
+  /// the console reads a phone number to the room — the highest-consequence outcome in this row
+  /// (handoff :386). PhoneNumberNormalizer.Normalize keeps ASCII digits only and drops the leading
+  /// "1" of an 11-digit US number, so both of those reduce to "5551234567" and compare equal.
+  ///
+  /// ⚠ The digit-length test in front of it is what keeps this STRICTLY stronger than the old `==`
+  /// rather than merely different. Normalize("Mom") is "", and so is Normalize of any name with no
+  /// ASCII digits in it — so without `nameDigits.Length > 0` an ordinary name would compare equal
+  /// to any HeaderNumber that also normalises to "" and be suppressed. The literal `==` is kept
+  /// alongside it for the non-numeric identical case ("unknown" / "unknown"), which digits cannot
+  /// see.
+  ///
+  /// ⛔ Do NOT route this through ResolveThreadName. Since PHN-4 its signature is
+  /// ResolveThreadName(SmsThreadDto) and its only caller is the thread-list branch; conversation
+  /// mode holds no SmsThreadDto for the open thread, and reconstructing one would duplicate
+  /// PhoneMessagesPanel.OpenThreadData and give the name two resolution paths that can disagree.
+  /// </remarks>
+  private string? SpeakableSenderName
+  {
+    get
+    {
+      var name = HeaderName;
+      if (string.IsNullOrWhiteSpace(name))
+      {
+        return null;
+      }
+
+      // No number resolved => the thread itself did not resolve, so HeaderName is an identifier.
+      if (string.IsNullOrWhiteSpace(HeaderNumber))
+      {
+        return null;
+      }
+
+      // The same number written two ways is still the number. See the remarks above.
+      var nameDigits = PhoneNumberNormalizer.Normalize(name!);
+      if (nameDigits.Length > 0
+          && nameDigits == PhoneNumberNormalizer.Normalize(HeaderNumber!))
+      {
+        return null;
+      }
+
+      return name == HeaderNumber ? null : name;
+    }
+  }
+
+  /// <summary>Handoff §Cross-5 :174 — a synthesis failure is a TOAST, not an inline state.</summary>
+  /// <remarks>
+  /// ⚠ Warning, not Error: the message is still on screen and still readable by eye — nothing was
+  /// lost, one affordance did not work. PhonePage.razor uses the same severity for the same shape of
+  /// failure ("Couldn't refresh" / "Showing the last update").
+  ///
+  /// ⚠ NEVER put the message body, the sender or the number in a toast argument. Radzen toasts are
+  /// rendered on the kiosk in a family room and this row's whole subject matter is private SMS
+  /// content. The reason code is all that crosses this boundary, and it is mapped to fixed copy
+  /// rather than shown. Same instruction as EventPlaybackApiService.StartSpeechAsync's "never log
+  /// text".
+  ///
+  /// ⚠ "Transport", not "Unreachable" — that is the token StartSpeechAsync actually returns, matching
+  /// StartVoicemailAsync. The plan's Task 4c sketch said "Unreachable"; see that method's remarks.
+  /// TextTooLong should be unreachable (GvSpeechText caps at the same number) and is a backstop for a
+  /// server configured below the client's cap (plan C-106).
+  ///
+  /// ⚠ Notify returns void and nothing here is awaited: a toast must not delay the button returning
+  /// to rest. The name says so — it was OnSpeakFailedAsync, which promised a Task this method has
+  /// never returned, and MessageBubble's own doc comment already called it OnSpeakFailed.
+  ///
+  /// ⚠ Reached by TWO arms of §B4's Engine-error row, not one: MessageBubble raises it for a
+  /// synchronous refusal (400) and again for an asynchronous Failed broadcast, which is the common
+  /// case. The "_ =>" default already produces the handoff's exact copy for SpeechSynthesisFailed,
+  /// so the second arm needed no new switch case.
+  /// </remarks>
+  private void OnSpeakFailed(string? reason) => NotificationService.Notify(
+    NotificationSeverity.Warning,
+    "Couldn't read that message.",
+    reason switch
+    {
+      "TextTooLong" => "That message is too long for the console to read.",
+      "Transport" => "The console isn't responding. Try again.",
+      _ => "The console couldn't read this one. Try again."
+    });
 
   private static string PreviewText(SmsThreadDto t) =>
     string.IsNullOrEmpty(t.LastMessagePreview) ? "" : t.LastMessagePreview!;

@@ -370,7 +370,7 @@ Transcript states are **unchanged** — `Transcript` / `Transcript pending — G
 .msg-bubble.speaking { border-color: rgba(92, 212, 232, 0.45); }
 ```
 
-`--touch-compact` (44px) is used rather than `--touch-min` (48px) to match the established 44px chip spine (`.vm-chip`, `.feed-chip`) and because the global `button { min-height: 44px }` at `:1292` already sets that floor.
+`--touch-compact` (44px) is used rather than `--touch-min` (48px) to match the established 44px chip spine (`.vm-chip`, `.feed-chip`) and because the global button floor already sets it. ⭐ **That floor is `button, .rz-button { min-width: var(--touch-compact); min-height: var(--touch-compact); }` at `design-system.css:1330`, corrected 2026-09-07 from `:1292`, which is inside `.checkmark-icon` and has nothing to do with touch targets.** Note also that the floor is expressed as the *token*, not a literal `44px`, so it tracks `--touch-compact` automatically.
 
 ### B3 — What actually gets spoken
 
@@ -397,6 +397,25 @@ Do **not** read the identifier aloud. `"Message from plus one nine one nine five
 
 **7. Hard cap at 1000 characters** (ADR-029 §12 item 7). Typical SMS is 160, so this is a safety valve rather than a routine truncation, and it needs **no UI indication** — the Stop button is the real control for a long read. Recorded because it is a contract constraint, not a preference.
 
+> ⚠ **ADDED 2026-09-07 by `PHN-3`: "no UI indication" is only achievable because the CLIENT truncates.**
+> `GvMedia:MaxSpeechChars` **rejects**; it does not truncate. Over-length text comes back as
+> `EventPlaybackRejection.TextTooLong` and a 400 (`GvMediaOptions.cs:79-88` says so in as many words,
+> and ADR-029 §4.2's *"truncated with a spoken tail"* is explicitly overridden). So without a client
+> cap the same message yields a silent failure — the exact opposite of no-indication. `GvSpeechText`
+> caps at 1000 before sending, and it caps the **whole** utterance including the `Message from {Name}.`
+> lead-in, because the server measures what it receives.
+
+> ⚠ **IMPLEMENTATION NOTE ON RULE 7 — NOT A RULE — added 2026-09-07 by `PHN-3`: the cap runs LAST,
+> and the whole rule order is part of the spec.** Strip the MMS prefix **first** — it is anchored to
+> the start of the raw body, so anything that shifts the string must not run before it — then the
+> URL and emoji rules, then **normalise whitespace** (rules 3, 4 and 6 all leave doubled or leading
+> spaces where they removed something), then the lead-in, then the cap. Capping before the lead-in
+> produces an over-length string on exactly the messages that have a resolved sender.
+>
+> ⚠ Deliberately **not** numbered `7b`, as an earlier draft of this note was. A new numbered rule in
+> an approved spec is an implementer authoring spec, and it shifts the numbering other documents
+> cite. The content is that draft's, with the whitespace step it omitted added.
+
 **Composition happens in `Radio.Web`, not the audio layer** (ADR-029 §4.2): Radio.API speaks a finished string. So every rule above is a `Radio.Web` concern and belongs in the pure static helper named in §Component/file impact.
 
 **8. Speak the literal body, not the list preview.** UAT **F-5** observed a bubble ending in a literal `...`, suggesting the conversation may render the truncated list snippet for some messages. If GV-10 confirms that, feature B would read an ellipsis aloud. **Dependency noted, not owned here.**
@@ -411,11 +430,58 @@ Do **not** read the identifier aloud. `"Message from plus one nine one nine five
 | **Ended** | back to Rest, silently | normal | absent |
 | **Replaced** (Cross-1) | back to Rest, silently | normal | moves to the new item |
 | **Engine error** | back to Rest | normal | absent | + toast `Error` / `Couldn't read that message.` / `The console couldn't read this one. Try again.` |
+| **Waiting** ⭐ † | `.spinner` (exactly as Pending) | normal | `Message` ‡ |
 | **Muted** | proceeds | normal | shown | + `.phone-pill.amber` `The console is muted.` + `Unmute`, beside the compose area |
 
-**On synthesis latency.** ADR-029 §9 pins message speech to the **local `espeak-ng`** engine, so synthesis is on-box and there is no network round trip — but it is still not instant, and unlike voicemail there is **no cache hit path**: every play re-synthesizes. So `Preparing` is the normal opening state for feature B, every time. If it persists past ~2s the button's `title` and `aria-label` become `Preparing…`.
+† **`Waiting`'s `title` and `aria-label` become `Waiting for the announcement to finish…`.** Carried
+as a footnote rather than as a fifth cell in the row: the table header has four columns, so a fifth
+cell is dropped by the renderer — and that cell was the entire reason `C-107` asked for the row.
 
-**On voice quality — raised because ADR-029 §12 item 8 invites it.** The local engine sounds noticeably more robotic than the Google voice used for announcements. **The design's position: keep the local default.** Three reasons, plus one caveat, in §Answers item 8.
+‡ **The neighbouring pre-existing `Pending / preparing` row says Chip = `absent`, and that cell is
+inaccurate.** `EventPlaybackSnapshotDto.IsLive` is a deny-list — `State is not ("Completed" or
+"Stopped" or "Failed")` — so `Preparing` counts as **live** and its chip shows, exactly as `Waiting`'s
+does. The `Waiting` row is the correct one. The pre-existing row is left as written (`PHN-3`'s remit
+here is corrections plus this one added row, not a rewrite of rows it did not author); this note
+exists so the two are not read as disagreeing about the mechanism.
+
+⭐ **`Waiting` was added to this table by `PHN-3` (2026-09-07); the seven-row original predates it**
+(Rest, Pending / preparing, Speaking, Ended, Replaced, Engine error, Muted — an earlier revision of
+this sentence said "four-row", which was simply miscounted).
+`PHN-1f` (owner decision `D28`) introduced `EventPlaybackState.Waiting`, and
+`EventPlaybackService.cs:493` applies `WaitForClearAirAsync` on the Speech arm too — so tapping a
+speak button while an announcement is sounding parks the playback for up to
+`GvMedia:MaxQueuedWaitSeconds` (30 s). It needs **no new visual**: it renders exactly as Pending, one
+spinner, and differs only in the copy, which takes `VoicemailPlayer`'s already-shipped string. A
+bubble gutter has no room for a sub-line and this handoff is right that it should not grow one.
+`EventPlaybackSnapshotDto.IsLive` is a deny-list, so `Waiting` already counts as live and the chip
+and Stop affordance come for free.
+
+**On synthesis latency.** ⚠⚠ **CORRECTED 2026-09-07 by `PHN-3`. This paragraph asserted the reverse
+and was stale.** It read: *"ADR-029 §9 pins message speech to the local `espeak-ng` engine, so
+synthesis is on-box and there is no network round trip."* **The owner reversed that pin**, and
+ADR-029 §9's amendment (`design/decisions/2026-08-03-gv-audio-through-engine.md:491-511`) records
+it: *"the TTS engine in the radio console supports both Google and Azure TTS, so make sure the text
+messaging uses the currently selected TTS engine."* `GvMedia:SpeechEngine` is **deleted, not
+redefined** (`:602`), and `TTS-9` (#548) removed eSpeak from the codebase entirely — so the local
+option **no longer exists to choose**. The shipped code follows the ADR:
+`EventPlaybackService.AcquireSpeechAsync:714` resolves `ResolveEngine(request.Engine,
+tts.DefaultEngine)`, and `TTSOptions.DefaultEngine` deploys as `"Google"`.
+
+**What that changes for this design, and it is not cosmetic:** synthesis is a **cloud round trip**,
+not on-box, so `Preparing` has a real and variable duration and this section's *"if it persists past
+~2s"* copy is load-bearing rather than defensive. There is still **no cache hit path** — every play
+re-synthesizes — so `Preparing` remains the normal opening state, every time. And **offline is now a
+failure mode**: with no network there is no speech at all, and the §Cross-5 error toast is the whole
+of the UX for it. The accepted trade is recorded at ADR `:509`: *"private SMS bodies reach Google's
+TTS API on each play."*
+
+**On voice quality — raised because ADR-029 §12 item 8 invites it.** ⚠ **CORRECTED 2026-09-07 by
+`PHN-3`.** This read *"The local engine sounds noticeably more robotic than the Google voice used for
+announcements. The design's position: keep the local default."* **There is no local default to keep.**
+Message speech uses the same currently-selected engine as announcements, so the voice is the *same*
+voice rather than a more robotic one — which retires the concern rather than answering it. The live
+listen is still worth doing (verification item 17), but as a judgement on the shipped voice, not as a
+choice between two.
 
 ### B5 — The speak button is NOT gated by reply-ability
 
@@ -739,13 +805,30 @@ The three stop paths in your §7 all remain: explicit stop (now reachable from a
 
 **§12.7 Utterance copy — owned, delivered in §B3.** Your two constraints are honoured verbatim (1000-char cap, URLs → `a link`, emoji dropped). §B3 adds four rules from the live UAT data that the ADR could not have known: **no lead-in when no name resolves** (70% of threads), **strip the MMS `+1XXXXXXXXXX - ` prefix** (finding G-8), **never speak the timestamp**, and **keep digit runs verbatim** (verification codes are the single most valuable thing this feature reads).
 
-**§12.8 Robotic voice — raised, and the design's answer is: keep the local default.**
+**§12.8 Robotic voice — ⚠⚠ THIS ITEM IS SUPERSEDED. Corrected 2026-09-07 by `PHN-3`.**
 
-1. **A different voice is a feature, not a defect.** A system announcement and "the console is reading you a text" are different kinds of event; a different voice makes that legible with zero UI. The mismatch is doing useful work.
-2. **The dominant real use case is digit strings.** Per live data the repliable-adjacent traffic is heavy with verification codes (`77971 is your Facebook confirmation code`). A flat, over-articulated engine is *better* at that than a naturalistic one.
-3. **Privacy should not be something the owner has to trade away for polish**, especially not silently by inheriting a config default.
+**The premise is gone.** This item argued for keeping a *local* engine against a *cloud* one. The
+owner reversed that choice in ADR-029 §9's amendment (*"make sure the text messaging uses the
+currently selected TTS engine"*, `design/decisions/2026-08-03-gv-audio-through-engine.md:491-511`),
+`GvMedia:SpeechEngine` was deleted rather than redefined (`:602`), and `TTS-9` (#548) removed eSpeak
+from the codebase. There is no local engine to prefer, so there is no trade to argue.
 
-**Caveat, and it is a real one:** none of that is worth much against an actual listening test with an older listener in a room with music ducked underneath. Recommend a **30-second UAT step — play one real message on the box and listen** — rather than settling it on argument. Folded into the verification list (item 16b) and left as owner **Q5**.
+The original three reasons are kept below, struck, because two of them are worth knowing were
+*considered* — and one of them inverts:
+
+1. ~~**A different voice is a feature, not a defect.**~~ **Inverted.** Message speech now uses the
+   same engine as announcements, so the voice is the *same* voice. Whatever legibility the mismatch
+   was doing, it is not being done.
+2. ~~**The dominant real use case is digit strings.**~~ **Still true as an observation, no longer an
+   argument for an engine.** It survives as §B3 rule 5 (*keep digit runs verbatim*) and as
+   verification item 20, which is where it now does its work.
+3. ~~**Privacy should not be something the owner has to trade away for polish.**~~ **The owner made
+   that trade explicitly**, and ADR `:509` records it: *"private SMS bodies reach Google's TTS API on
+   each play."*
+
+**The caveat survives and is the only live part of this item:** none of the above is worth much
+against an actual listening test with an older listener in a room with music ducked underneath. It is
+verification item 17, and it asks for **an opinion on the shipped voice**, not a choice between two.
 
 **§12.9 Reply-ability — consumed.** §C4 tier 1 gates the reply affordance with the existing `.phone-pill` + `You can't reply to this sender.` treatment, not hidden, per ADR-028 §8.5. **One clarification back:** feature B's play button is deliberately **not** gated by reply-ability (§B5) — a short-code thread cannot be replied to but can absolutely be read aloud, and that is the strongest argument for feature B on this device.
 
@@ -763,7 +846,25 @@ The three stop paths in your §7 all remain: explicit stop (now reachable from a
 
 **Q4 — Emoji in spoken messages (§B3.6).** Stripping is now required by ADR-029 §12 item 7, so this is no longer a design choice — but the *result* is still worth one live listen, since per-engine emoji handling varies. Rolls into Q5's listening test.
 
-**Q5 — Robotic-but-private, or better-but-cloud (§B4, ADR-029 §14 Q2).** Message speech defaults to local `espeak-ng` so SMS bodies never leave the box; the alternative is one config key (`GvMedia:SpeechEngine = "Google"`) and sending private message bodies to Google. **The design's recommendation is to keep the local default** — reasoning in §Answers item 8 — but settle it by **playing one real message on the box and listening**, not by argument. Verification item 16b.
+**Q5 — Robotic-but-private, or better-but-cloud (§B4, ADR-029 §14 Q2). ✅ ANSWERED AND CLOSED — not an open question. Marked 2026-09-07 by `PHN-3`.**
+
+**The owner settled it, and the ADR records the answer in his own words:** *"the TTS engine in the
+radio console supports both Google and Azure TTS, so make sure the text messaging uses the currently
+selected TTS engine."* — ADR-029 §9 Amendment,
+[`design/decisions/2026-08-03-gv-audio-through-engine.md:491-511`](../../design/decisions/2026-08-03-gv-audio-through-engine.md).
+`:507` — *"The answer is: use the selected engine."* `:509` records the accepted consequence:
+*"private SMS bodies reach Google's TTS API on each play."* `:602` deletes `GvMedia:SpeechEngine`
+rather than redefining it.
+
+⛔ **Do not re-open this.** Both halves of the question's premise are gone from the tree: there is no
+`GvMedia:SpeechEngine` key, and `TTS-9` (#548) removed eSpeak entirely — so *"keep it local"* is no
+longer one config key, it is a new offline engine nobody has written. `PHN-3` is the row where the
+recorded trade starts actually happening, and it surfaced that to the owner rather than letting it
+arrive as a side effect.
+
+~~Message speech defaults to local `espeak-ng` so SMS bodies never leave the box; the alternative is one config key (`GvMedia:SpeechEngine = "Google"`) and sending private message bodies to Google. **The design's recommendation is to keep the local default** — reasoning in §Answers item 8 — but settle it by **playing one real message on the box and listening**, not by argument. Verification item 16b.~~
+
+**What survives:** the listening test, as verification item 17 — an opinion on the shipped voice.
 
 **Q6 — Six canned replies, or four, or eight (§C3).** Six is the recommendation and the arithmetic is shown so it can be checked rather than trusted. The chain (`.panel-header` + `.phone-mode-selector` heights) **must be measured in the live app** before the count is fixed. Four is the comfortable fallback; eight only if the measurement comes back kinder than estimated.
 

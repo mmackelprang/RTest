@@ -1386,13 +1386,27 @@
   // Handoff §Cross-3: the chip's LABEL is the kind; the SENDER goes in title and aria-label, which
   // have room. The seam's Label is already "Voicemail from Jane" and is capped at 128 chars server
   // side (PHN-1b §0.3), so it is safe to interpolate.
-  private string ConsolePlaybackTitle => ConsolePlayback.Snapshot?.Label is { Length: > 0 } label
-    ? $"Playing {label} on the console. Tap to stop."
-    : "Playing on the console. Tap to stop.";
+  // ⚠ The RemoteMedia arm is UNCHANGED, byte for byte — PHN-2 shipped it and it has a test.
+  // The Speech arm is new (PHN-3) and exists because handoff §Cross-3 :145/:147 specifies
+  // "Reading a message from {sender} on the console." and one kind-agnostic "Playing {label}"
+  // string cannot produce it. The sender arrives inside Label, shaped by MessageBubble.SpeakLabel
+  // as "a message from Jane" so this reads as a sentence.
+  private string ConsolePlaybackTitle => ConsolePlayback.Snapshot switch
+  {
+    { Kind: "Speech", Label: { Length: > 0 } label } =>
+      $"Reading {label} on the console. Tap to stop.",
+    { Kind: "Speech" } => "Reading a message on the console. Tap to stop.",
+    { Label: { Length: > 0 } label } => $"Playing {label} on the console. Tap to stop.",
+    _ => "Playing on the console. Tap to stop."
+  };
 
-  private string ConsolePlaybackAriaLabel => ConsolePlayback.Snapshot?.Label is { Length: > 0 } label
-    ? $"Stop playing {label}"
-    : "Stop playing on the console";
+  private string ConsolePlaybackAriaLabel => ConsolePlayback.Snapshot switch
+  {
+    { Kind: "Speech", Label: { Length: > 0 } label } => $"Stop reading {label}",
+    { Kind: "Speech" } => "Stop reading message",
+    { Label: { Length: > 0 } label } => $"Stop playing {label}",
+    _ => "Stop playing on the console"
+  };
 
   /// <remarks>
   /// ⚠ One tap, no confirm. Stopping playback is not destructive, and a confirm dialog on a wall panel
