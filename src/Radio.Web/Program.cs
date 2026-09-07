@@ -457,7 +457,10 @@ builder.Services.AddSingleton<AudioStateStore>();
 
 // ADR-029 PR 6 — the ONE subscriber to AudioStateStore.EventPlaybackChanged. See the class remarks:
 // it caches nothing, and it exists so the chip and the voicemail transport do not each become a
-// subscriber to a singleton event whose NotifyAsync awaits only the last handler (UI-6).
+// subscriber to a singleton event — once per circuit each, so four handlers with two browsers open.
+// ⚠ The reason given here used to be "whose NotifyAsync awaits only the last handler (UI-6)". UI-6
+// has SHIPPED, so that correctness reason is retired; the fan-out cost is what still argues for this
+// class, and ConsolePlaybackState's own remarks carry the current version of the argument.
 builder.Services.AddSingleton<Radio.Web.Services.ConsolePlaybackState>();
 
 // ADR-029 D7 §7.3 — the last-circuit-closed backstop for attended playback. Registered concretely

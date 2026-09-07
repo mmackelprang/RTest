@@ -25,15 +25,25 @@ namespace Radio.Web.Services;
 /// ⚠ WHY IT EXISTS AT ALL, since the store already has the data. AudioStateStore is a SINGLETON, so a
 /// component subscribing to it subscribes once PER CIRCUIT. The chip lives in MainLayout (every route)
 /// and the transport in VoicemailPlayer, so subscribing both directly would put two handlers per
-/// circuit — four with two browsers open — on AudioStateStore.EventPlaybackChanged, whose NotifyAsync
-/// awaits only the LAST of them (queue row UI-6). This class subscribes ONCE, in its constructor, for
-/// the life of the process, and fans out itself.
+/// circuit — four with two browsers open — on AudioStateStore.EventPlaybackChanged. This class
+/// subscribes ONCE, in its constructor, for the life of the process, and fans out itself.
+///
+/// ⚠ THE CORRECTNESS HALF OF THAT ARGUMENT IS NOW RETIRED, and is corrected rather than left
+/// standing. This used to read "whose NotifyAsync awaits only the LAST of them (queue row UI-6)".
+/// UI-6 has SHIPPED: the store's NotifyAsync now walks GetInvocationList() and isolates each handler,
+/// so subscribing N components to it directly would no longer be UNSOUND. What survives is the cost
+/// argument — N handlers per circuit is N renders per broadcast, and this class collapses that to one
+/// subscription and one fan-out it controls.
 ///
 /// ⚠ AND ITS OWN FAN-OUT IS NOT A COPY OF THE DEFECT. The design handoff says to build this "exactly
 /// like PhoneUnreadState"; PhoneUnreadState.Set is Changed?.Invoke(_count) — a plain multicast invoke
 /// in which one subscriber throwing SYNCHRONOUSLY starves every subscriber registered after it. This
-/// class walks GetInvocationList() and isolates each handler instead. That is NOT a fix for UI-6: the
-/// store's own three sites are untouched and still queued. It is a refusal to add a fourth.
+/// class walks GetInvocationList() and isolates each handler instead. When this was written that was
+/// a refusal to add a FOURTH copy of the defect rather than a fix for the store's own three sites;
+/// UI-6 has since fixed those three, and this loop is the shape they were fixed INTO.
+/// ⚠ PhoneUnreadState.Set still carries the plain invoke (PhoneUnreadState.cs:23) and is NOT in
+/// UI-6's scope. Only the STARVATION half can bite there: its Changed is an Action&lt;int&gt;, so
+/// Invoke really does run every handler and there is no discarded Task to lose.
 /// </remarks>
 public sealed class ConsolePlaybackState : IDisposable
 {

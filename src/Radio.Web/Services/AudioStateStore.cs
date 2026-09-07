@@ -67,8 +67,15 @@ public class AudioStateStore : IAsyncDisposable
   /// decision rather than an accident (PHN-2 §0.6). This store is a singleton, so a component
   /// subscribing here subscribes once PER CIRCUIT; the topbar chip and the voicemail transport both
   /// need the snapshot, so subscribing them directly would put two handlers per circuit — four with
-  /// two browsers open — on an event whose NotifyAsync awaits only the LAST of them (queue row
-  /// UI-6). A row that adds a second subscriber here expires that argument with it.
+  /// two browsers open — on this event.
+  ///
+  /// ⚠ ONE OF THE TWO REASONS THAT ARGUMENT GAVE IS NOW RETIRED, and it is corrected here rather than
+  /// left standing. This remark used to end "on an event whose NotifyAsync awaits only the LAST of
+  /// them (queue row UI-6)". `UI-6` has shipped: NotifyAsync now awaits every subscriber and catches
+  /// each one separately, so fanning out to N handlers is no longer unsound. What is NOT retired is
+  /// the cost argument — N handlers per circuit is still N renders per broadcast — and that is PHN-2
+  /// §0.6's call to make, not this row's. A row that adds a second subscriber here now owes that
+  /// argument only, and no longer owes a correctness one.
   /// </remarks>
   public event Func<Task>? EventPlaybackChanged;
 
@@ -220,28 +227,32 @@ public class AudioStateStore : IAsyncDisposable
     await NotifyAsync(FingerprintStatusChanged);
   }
 
-  private async Task OnHubRadioStateChanged(RadioStateDto dto)
+  /// <summary>Applies one "RadioStateChanged" broadcast. Subscribed to the hub client in the constructor.</summary>
+  /// <remarks>
+  /// ⚠ internal rather than private, and only for the test seam — the same argument
+  /// <see cref="OnHubVolumeChanged"/> and <see cref="OnHubEventPlaybackChanged"/> already make, and
+  /// Radio.Web.csproj already declares InternalsVisibleTo("Radio.Web.Tests"). A field-like event
+  /// cannot be raised from outside the type that declares it, so a test holding an
+  /// AudioStateHubService cannot make RadioStateChanged fire, and this handler has no public twin the
+  /// way PlaybackState has UpdatePlaybackStateAsync.
+  /// </remarks>
+  internal async Task OnHubRadioStateChanged(RadioStateDto dto)
   {
     RadioState = dto;
-    if (RadioStateChanged != null)
-    {
-      try
-      {
-        await RadioStateChanged.Invoke(dto);
-      }
-      catch (Exception ex)
-      {
-        _logger.LogWarning(ex, "Error notifying AudioStateStore subscriber");
-      }
-    }
+    await NotifyAsync(RadioStateChanged, dto);
   }
 
-  private async Task OnHubSleepStateChanged(bool isSleeping)
+  /// <summary>Applies one "SleepStateChanged" broadcast. Subscribed to the hub client in the constructor.</summary>
+  /// <remarks>
+  /// ⚠ internal for the test seam, as <see cref="OnHubRadioStateChanged"/> above.
+  ///
+  /// ⚠ This is the site that carried NO try/catch at all before `UI-6`: a sleep subscriber that threw
+  /// propagated out of here into the hub's dispatch. Routing it through the shared
+  /// <see cref="NotifyAsync{T}"/> is what makes it behave like every other event on this store.
+  /// </remarks>
+  internal async Task OnHubSleepStateChanged(bool isSleeping)
   {
-    if (SleepStateChanged != null)
-    {
-      await SleepStateChanged.Invoke(isSleeping);
-    }
+    await NotifyAsync(SleepStateChanged, isSleeping);
   }
 
   private async Task OnHubEncoderConnectionChanged(EncoderConnectionDto dto)
@@ -403,13 +414,77 @@ public class AudioStateStore : IAsyncDisposable
     }
   }
 
+  /// <summary>
+  /// Awaits every subscriber of a parameterless change event in registration order, catching and
+  /// logging each one's exception separately.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The <see cref="Delegate.GetInvocationList"/> loop is the whole point of this method, and the
+  /// obvious one-liner it replaces was wrong in two independent ways (queue row `UI-6`).
+  ///
+  /// <c>await handler.Invoke()</c> on a multicast <c>Func&lt;Task&gt;</c> RUNS every subscriber but
+  /// returns only the LAST one's <see cref="Task"/>. So every earlier subscriber ran to its first
+  /// <c>await</c> and its continuation was never observed: the caller's <c>await</c> completed while
+  /// N−1 handlers were still in flight, and their exceptions faulted tasks nobody held — reaching no
+  /// log, not even this one. The single try/catch protected exactly one of N.
+  ///
+  /// ⚠ The sharper half, and the reason the loop body rather than the loop is what matters: a
+  /// subscriber that throws SYNCHRONOUSLY — before its first <c>await</c> — threw out of
+  /// <c>Invoke</c> itself, so every handler registered AFTER it never ran at all. That is starvation,
+  /// not a lost log line. Catching inside the loop is what resumes the list.
+  /// <see cref="Radio.Infrastructure.Audio.Services.DuckingService"/> documents the same shape as a
+  /// known, accepted limitation for two subscribers, and says a third would want exactly this loop.
+  ///
+  /// ⚠ Subscribers now run SEQUENTIALLY rather than being started back-to-back. This store is a
+  /// singleton, so one handler per subscribing component PER CIRCUIT is registered here; the handlers
+  /// are Blazor <c>InvokeAsync(StateHasChanged)</c> dispatches, which queue onto their own circuit's
+  /// renderer and return, so serializing them costs a dispatch each rather than a render each. It is
+  /// also the semantic the callers already believed they had.
+  /// </remarks>
   private async Task NotifyAsync(Func<Task>? handler)
   {
-    if (handler != null)
+    if (handler == null)
+    {
+      return;
+    }
+
+    foreach (var subscriber in handler.GetInvocationList())
     {
       try
       {
-        await handler.Invoke();
+        // Inside the try, so a synchronous throw is caught and the NEXT subscriber still runs.
+        await ((Func<Task>)subscriber).Invoke();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error notifying AudioStateStore subscriber");
+      }
+    }
+  }
+
+  /// <summary>
+  /// Awaits every subscriber of a change event that carries a payload, in registration order,
+  /// catching and logging each one's exception separately.
+  /// </summary>
+  /// <remarks>
+  /// The generic twin of the parameterless overload above — see its remarks for why the loop exists.
+  /// It is generic rather than duplicated per event because the two call sites that used to hand-roll
+  /// this had already DRIFTED APART: <c>OnHubRadioStateChanged</c> carried a try/catch and
+  /// <c>OnHubSleepStateChanged</c> carried none, so a sleep subscriber that threw took the exception
+  /// out into the hub dispatch. One implementation is what stops that happening again.
+  /// </remarks>
+  private async Task NotifyAsync<T>(Func<T, Task>? handler, T arg)
+  {
+    if (handler == null)
+    {
+      return;
+    }
+
+    foreach (var subscriber in handler.GetInvocationList())
+    {
+      try
+      {
+        await ((Func<T, Task>)subscriber).Invoke(arg);
       }
       catch (Exception ex)
       {
