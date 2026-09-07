@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
@@ -15,18 +16,23 @@ public class GvBridgeApiServiceVoicemailSmsTests
 
   private static GvBridgeApiService CreateService(HttpClient client) =>
     new(client, NullLogger<GvBridgeApiService>.Instance,
-      new ConfigurationBuilder().Build());
+      new ConfigurationBuilder().Build(), new GvMarkReadDarkLatch());
 
   // GV-4: mark-read routes are gated on RotaryPhone:Gv:MarkReadEnabled; this builds
   // a service with that flag set so the flag-on/flag-off paths are both exercised.
-  private static GvBridgeApiService BuildSvc(MockHttpHandler handler, bool markReadEnabled)
+  // GV-6: `latch` and `logger` default to FRESH instances so every existing case stays isolated
+  // — a shared default would let one test's latch decide another test's outcome and make the
+  // class order-dependent. Pass them explicitly only when the case is about sharing or logging.
+  private static GvBridgeApiService BuildSvc(MockHttpHandler handler, bool markReadEnabled,
+    GvMarkReadDarkLatch? latch = null, ILogger<GvBridgeApiService>? logger = null)
   {
     var client = new HttpClient(handler) { BaseAddress = new Uri("http://radio:5004") };
     var config = new ConfigurationBuilder()
       .AddInMemoryCollection(new Dictionary<string, string?>
         { ["RotaryPhone:Gv:MarkReadEnabled"] = markReadEnabled.ToString() })
       .Build();
-    return new GvBridgeApiService(client, NullLogger<GvBridgeApiService>.Instance, config);
+    return new GvBridgeApiService(client, logger ?? NullLogger<GvBridgeApiService>.Instance,
+      config, latch ?? new GvMarkReadDarkLatch());
   }
 
   [Fact]

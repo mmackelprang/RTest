@@ -18,17 +18,20 @@ public class GvBridgeApiService
   private readonly HttpClient _httpClient;
   private readonly ILogger<GvBridgeApiService> _logger;
   private readonly IConfiguration _configuration;
+  private readonly GvMarkReadDarkLatch _markReadDark;
   private static readonly JsonSerializerOptions JsonOptions = new()
   {
     PropertyNameCaseInsensitive = true
   };
 
   public GvBridgeApiService(HttpClient httpClient,
-    ILogger<GvBridgeApiService> logger, IConfiguration configuration)
+    ILogger<GvBridgeApiService> logger, IConfiguration configuration,
+    GvMarkReadDarkLatch markReadDark)
   {
     _httpClient = httpClient;
     _logger = logger;
     _configuration = configuration;
+    _markReadDark = markReadDark;
   }
 
   public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
