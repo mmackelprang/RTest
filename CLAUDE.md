@@ -202,9 +202,36 @@ would have started shipping ARM64 binaries to this x64 box, which is worse than 
 *Previously:* the default was `linux-arm64` against an x86_64 appliance, so the literal documented
 invocation shipped ARM binaries here.
 
-⚠ **The box is resource-constrained and on WiFi.** Heavy `journalctl` reads correlate with audio
-distortion — always bound queries (`--since '-30min'`) and never tail. `enp1s0` is unavailable, so
-WiFi is the only link; do not restart anything that could drop it while nobody is physically present.
+⚠ **The box is resource-constrained, and WiFi is its only route off the LAN.** Heavy `journalctl`
+reads correlate with audio distortion — always bound queries (`--since '-30min'`) and never tail.
+**`wlp0s20f3` (`192.168.86.50/24`) is the sole management link**; do not restart anything that could
+drop it while nobody is physically present.
+
+⚠ **`enp1s0` is NOT unavailable — an earlier revision of this file said so and it was wrong.** Since
+2026-09-06 it carries a **point-to-point link to the Grandstream HT801 ATA**, which is what makes the
+rotary phone work. Link is up at 100 Mb/s full duplex; no crossover cable is needed or wanted.
+
+The addressing is deliberately unusual, so do not "tidy" it:
+
+| | |
+|---|---|
+| HT801 | `192.168.86.240` static, configured on the device itself |
+| `enp1s0` | `192.168.86.50/32` + host route `192.168.86.240/32 dev enp1s0` |
+| Persistence | NetworkManager profile **`ht801-direct`**, `autoconnect yes` |
+
+**`192.168.86.50` is intentionally on TWO interfaces.** The `/32` host route beats WiFi's `/24` by
+longest-prefix match, which is the only reason traffic to the HT801 takes the cable. This is safe
+**only because that cable is a dead end with one device on it** — ARP replies on `enp1s0` cannot
+reach the house LAN. ⚠ **If anything else is ever plugged into `enp1s0`, you get address conflicts
+on the LAN.** The profile also sets `ipv4.never-default yes` (so the cable never steals the default
+route from WiFi) and `ipv4.dad-timeout 0` (duplicate-address detection would otherwise refuse to
+activate a deliberately duplicated address).
+
+**The HT801's NET LED flashes permanently and that is expected, not a fault.** Its configured
+gateway is `192.168.86.1`, which does not exist on a point-to-point cable, so it ARPs and gets
+nothing. Dial tone, inbound and outbound calls all verified working 2026-09-06 regardless — the
+device only needs to reach the box. Pointing its gateway at `192.168.86.50` would make the LED go
+solid; it was left alone rather than change a working configuration.
 
 ### Services
 
