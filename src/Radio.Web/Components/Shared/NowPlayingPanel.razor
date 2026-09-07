@@ -388,7 +388,39 @@
   private string? _nowPlayingSourceType;
   private bool _showGainPopover;
   private Dictionary<string, float> _sourceGainOffsets = new();
-  private System.Threading.Timer? _gainDebounceTimer;
+
+  /// <summary>
+  /// The clock both debounce timers are armed against. Production never writes this; the default
+  /// <em>is</em> the production behaviour.
+  ///
+  /// <para>
+  /// <b>Why a settable property and not <c>@inject</c>.</b> The house idiom for a clock seam is an
+  /// optional constructor parameter falling back to <see cref="TimeProvider.System"/>
+  /// (<c>EncoderHudService</c>), and a Blazor component has no constructor to hang one on — the
+  /// renderer activates it parameterlessly. <c>@inject</c> is the obvious substitute and is the
+  /// wrong one twice over: it is a <em>required</em> resolve against a container that registers no
+  /// <see cref="TimeProvider"/> in either host, deliberately (see the three comments saying so in
+  /// <c>AudioServiceExtensions</c>), and it would leave this null on a bare
+  /// <c>new NowPlayingPanel()</c> — which is exactly how the debounce tests build this panel.
+  /// </para>
+  ///
+  /// <para>
+  /// <c>internal</c> rather than <c>private</c> so <c>Radio.Web.Tests</c> can substitute a
+  /// <c>FakeTimeProvider</c> through the <c>InternalsVisibleTo</c> the csproj already declares for
+  /// exactly this purpose — and so the seam is greppable rather than reachable only by reflection.
+  /// See TEST-7 in <c>docs/queue/TEST-7.md</c>.
+  /// </para>
+  /// </summary>
+  internal TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  /// <summary>
+  /// Trailing-edge debounce for the source-gain slider. <c>internal</c> so the tests advance the
+  /// fake clock by the production value instead of by a copied literal: a test that hardcodes
+  /// 200 ms stops testing this the moment the number changes.
+  /// </summary>
+  internal static readonly TimeSpan SourceGainDebounce = TimeSpan.FromMilliseconds(200);
+
+  private ITimer? _gainDebounceTimer;
 
   // PR 4 — convenience predicates for the status strip / match badge. Computed
   // off the cached _nowPlayingSourceType so the template stays readable.
@@ -895,13 +927,13 @@
     _pendingGainValue = newGain;
     if (_gainDebounceTimer != null)
     {
-      _gainDebounceTimer.Change(TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+      _gainDebounceTimer.Change(SourceGainDebounce, Timeout.InfiniteTimeSpan);
     }
     else
     {
-      _gainDebounceTimer = new System.Threading.Timer(
+      _gainDebounceTimer = Clock.CreateTimer(
         OnGainDebounceElapsed, null,
-        TimeSpan.FromMilliseconds(200), Timeout.InfiniteTimeSpan);
+        SourceGainDebounce, Timeout.InfiniteTimeSpan);
     }
   }
 
@@ -1051,10 +1083,18 @@
   // non-thread-safe PulseAudio main loop and aborted radio-api on 2026-08-10.
   // NativeAudioDeviceGate makes that safe on the server; this removes the fan-out at
   // its source so the gate is not the only thing standing between a drag and a crash.
-  private static readonly TimeSpan VolumePreferenceDebounce = TimeSpan.FromMilliseconds(300);
-  private System.Threading.Timer? _volumePrefDebounceTimer;
+  internal static readonly TimeSpan VolumePreferenceDebounce = TimeSpan.FromMilliseconds(300);
+  private ITimer? _volumePrefDebounceTimer;
   private double _pendingVolumePreference;
 
+  // The null-check-then-create below is not atomic, and it is safe only because every path into
+  // this method arrives on Blazor's renderer synchronization context, which serialises them:
+  // QueueVolumePreferenceSave has exactly one caller (HandleVolumeChangeAsync), which has exactly
+  // one caller (OnVolumeChanged), which is bound only to the RadzenSlider Change event. That is the
+  // precondition, stated because it is load-bearing — two concurrent entries would each see a null
+  // timer, create two, leak one past DisposeAsync, and produce the very write fan-out this debounce
+  // exists to prevent. If a second caller is ever added from a timer or hub callback, this needs a
+  // lock. (Found by TEST-7's pre-merge review; the property was already true and already unstated.)
   private void QueueVolumePreferenceSave(double newVolume)
   {
     _pendingVolumePreference = newVolume;
@@ -1064,7 +1104,7 @@
     }
     else
     {
-      _volumePrefDebounceTimer = new System.Threading.Timer(
+      _volumePrefDebounceTimer = Clock.CreateTimer(
         OnVolumePreferenceDebounceElapsed, null,
         VolumePreferenceDebounce, Timeout.InfiniteTimeSpan);
     }
@@ -1073,7 +1113,10 @@
   private async void OnVolumePreferenceDebounceElapsed(object? _)
   {
     // SavePreferenceAsync owns its own try/catch, which is what keeps this async void
-    // callback from being able to throw onto a timer thread.
+    // callback from being able to throw onto a timer thread. Precisely: that holds because the
+    // catch is total (catch (Exception)) AND Logger is non-null inside it — a bare
+    // `new NowPlayingPanel()` leaves Logger null, so narrowing the catch, or logging before the
+    // null-check a DI-activated panel makes unnecessary, would reopen this.
     await SavePreferenceAsync("volume", _pendingVolumePreference);
   }
 

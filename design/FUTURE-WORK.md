@@ -2255,3 +2255,97 @@ the remote `[`.
 **Priority: medium.** It is latent rather than firing, and the failure needs a contaminated or broken
 probe answer. But the blast radius is an unreconstructible operator file on the box the whole punch
 list's claims rest on, and the fix is a dozen lines already written and measured next door.
+
+---
+
+## 29. `NowPlayingPanel._nowPlayingPollTimer` still arms against the system clock
+
+**Found by `TEST-7`, deliberately not converted there.** `TEST-7` gave `NowPlayingPanel` an
+`internal TimeProvider Clock` seam and routed its two *debounce* timers through it. The panel's
+third timer was left on `new System.Threading.Timer(...)` on purpose.
+
+### What exists
+
+`src/Radio.Web/Components/Shared/NowPlayingPanel.razor:539` declares
+`private System.Threading.Timer? _nowPlayingPollTimer;`, created at `:574-578` with a 60 s due time
+*and* a 60 s period — a repeating fallback poll for missed `NowPlayingChanged` SignalR events, not
+a trailing-edge debounce.
+
+The seam it would need is already in the file: `Clock` sits at `:414` and defaults to
+`TimeProvider.System`.
+
+### What is needed
+
+Three lines. Change the field's type to `ITimer?` and the construction to `Clock.CreateTimer(...)`.
+`ITimer` implements `IDisposable`, so the existing `DisposeAsync` (`:1162`) needs no change — the
+same property `TEST-7` already relied on for the other two timers.
+
+### Gotchas
+
+- ⚠ **The reason to wait is blast radius, not difficulty.** Unlike the two debounce timers — armed
+  only when a user drags a slider — this one is armed inside `OnInitializedAsync`, the single path
+  that **all 45** bUnit renders of `NowPlayingPanel` (33, `NowPlayingPanelTests.cs`) and of `Home`
+  (12, `HomePageTests.cs`) traverse. Changing an initialization path every render touches, for no
+  test-determinism gain, is a worse trade than leaving it.
+- It is a **repeating** timer, where both converted timers are one-shot
+  (`Timeout.InfiniteTimeSpan` period). A `FakeTimeProvider` advanced past several periods fires it
+  more than once, so a future test driving it must expect that rather than assume a single tick.
+- Its callback is `async _ => await OnNowPlayingPollAsync()` — an `async void` lambda over awaited
+  HTTP, so a test would need the same completion rendezvous `TEST-7` added
+  (`RecordingHandler.WaitForAsync`), not merely a clock advance.
+- Do it when a test actually wants to drive the fallback poll. Converting it speculatively buys
+  nothing and puts the 45-render path at risk for no assertion.
+
+**Priority: low.** No defect and no flake — only an unconverted seam, and the seam it depends on
+already exists.
+
+---
+
+## 30. `AudioApiService` builds two URLs with current-culture number formatting
+
+**Found by `TEST-7` while writing the source-gain tests, and deliberately not fixed there** — it is
+an API-client correctness bug with its own blast radius, not a timer bug, and it should not ride in
+on a test-determinism PR.
+
+### What exists
+
+Two `float` values are interpolated straight into a route, so both format with
+`CultureInfo.CurrentCulture`:
+
+```csharp
+// src/Radio.Web/Services/ApiClients/AudioApiService.cs:96  — SetVolumeAsync(float volume, ...)
+var response = await _httpClient.PostAsync($"/api/audio/volume/{volume}", null, cancellationToken);
+
+// src/Radio.Web/Services/ApiClients/AudioApiService.cs:236 — SetSourceGainAsync(string sourceType, float gain, ...)
+var response = await _httpClient.PostAsync($"/api/audio/sourcegain/{sourceType}/{gain:F2}", null, cancellationToken);
+```
+
+On any comma-decimal locale those emit `/api/audio/volume/0,5` and
+`/api/audio/sourcegain/FilePlayer/0,25`, which will not bind to a `float` route parameter.
+**Latent today only because the box's locale is dot-decimal** — nothing in the code prevents it.
+
+### What is needed
+
+`CultureInfo.InvariantCulture` on both interpolations, plus a test that runs under a comma-decimal
+culture so the fix is pinned rather than asserted.
+
+### Gotchas
+
+- ⚠ **The sweep this fix wants has already been done — keep the result rather than re-deriving it.**
+  Confirmed 2026-09-07: every *other* interpolated route parameter under
+  `src/Radio.Web/Services/ApiClients/` is an `int`, a `string` or a `Guid` (`index`, `id`,
+  `section`, `property`), none of which carry a decimal separator. **These two `float` sites are the
+  only culture-sensitive ones in the directory.** `CultureInfo` and `InvariantCulture` appear
+  nowhere in that directory at all, so there is no existing convention to follow — which is the
+  argument for the fix establishing one.
+- **Do not pin this with an assertion on the request path.** `TEST-7`'s
+  `NowPlayingPanelGainDebounceTests.GainDrag_WritesTheFinalValue` deliberately asserts on the
+  panel's `_pendingGainValue` rather than on the recorded URL, precisely so the suite does not bake
+  the runner's locale into a passing test. A path assertion added before this is fixed would pass
+  here and fail on a German machine.
+- The **server** side of the contract was not audited. Fixing only the client leaves the pair
+  self-consistent, but whether the `Radio.API` route binds invariantly under a non-invariant culture
+  is unverified — check it in the same pass rather than assuming the client is the whole bug.
+
+**Priority: medium.** It is a correctness bug rather than a style one, and it surfaces as a failed
+route bind on a user's locale rather than as anything diagnosable from the UI.

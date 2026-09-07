@@ -11,7 +11,7 @@
 
 | Field | Value |
 |---|---|
-| Status | 📋 |
+| Status | ✅ [#592](https://github.com/mmackelprang/RTest/pull/592) |
 | Plan | [`design/plans/TEST-7-timeprovider-seam-for-nowplayingpanel.md`](../../design/plans/TEST-7-timeprovider-seam-for-nowplayingpanel.md) |
 | Spec / handoff | [punch list §4.6 `TEST-7`](../HANDOFF-GA-PUNCH-LIST.md) |
 | Depends on | — |
