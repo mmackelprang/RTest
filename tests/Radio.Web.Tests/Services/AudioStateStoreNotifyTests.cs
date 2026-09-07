@@ -155,11 +155,29 @@ public class AudioStateStoreNotifyTests
     Assert.True(laterRan);
   }
 
-  /// <summary>The same, for a subscriber that faults after an await rather than before one.</summary>
+  /// <summary>
+  /// The OTHER half of the defect — the one the row leads with. A subscriber that faults
+  /// ASYNCHRONOUSLY, after its first await, faulted a Task nobody held, so its exception reached no
+  /// log at all.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ THE LOG ASSERTION IS THE DISCRIMINATOR HERE, and an earlier draft of this test got that wrong
+  /// in a way worth recording. It asserted only that the LATER subscriber still ran, under the name
+  /// "...DoesNotStarveTheOnesAfterIt" — but an asynchronous fault never starved anything: the old
+  /// <c>Invoke</c> had already moved on to the next subscriber by the time this one faulted, so that
+  /// assertion held against the BUG too. It passed the mutation check for the wrong reason, and its
+  /// name and summary claimed a property it did not test. Starvation is the SYNCHRONOUS case, which
+  /// <see cref="ASubscriberThrowingSynchronouslyDoesNotStarveTheOnesAfterIt"/> covers.
+  ///
+  /// What actually distinguishes fixed from unfixed for an async fault is whether anyone was holding
+  /// the Task when it faulted — i.e. whether the exception was logged. That is asserted below, and it
+  /// is what makes this test fail against the unfixed code.
+  /// </remarks>
   [Fact]
-  public async Task ASubscriberFaultingAsynchronouslyDoesNotStarveTheOnesAfterIt()
+  public async Task AnAsynchronousFaultIsLoggedRatherThanDiscardedUnobserved()
   {
-    var store = NewStore();
+    var sink = new List<(LogLevel Level, string Message)>();
+    var store = NewStore(sink);
     var laterRan = false;
 
     store.VolumeChanged += async () =>
@@ -172,6 +190,7 @@ public class AudioStateStoreNotifyTests
     await store.OnHubVolumeChanged(Volume());
 
     Assert.True(laterRan);
+    Assert.Equal(1, sink.Count(e => e.Level == LogLevel.Warning));
   }
 
   [Fact]
