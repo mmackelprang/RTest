@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (37)
+## Shipped rows (38)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1240,6 +1240,86 @@ appears, so the substance held — and the stated 53-warning baseline was stale.
 **Follow-up worth a row:** three of the wildcards were *capping*, not tracking. `Radzen.Blazor` is now
 pinned at 6.6.4 while 11.3.2 is current — five majors behind — and both Serilog packages sit behind
 10.0.0. The pin records that gap; it did not cause it.
+
+---
+
+### TEST-7 — A `TimeProvider` seam for `NowPlayingPanel`'s two hardcoded debounce timers.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#592](https://github.com/mmackelprang/RTest/pull/592) |
+| Plan | [`TEST-7-timeprovider-seam-for-nowplayingpanel.md`](../design/plans/TEST-7-timeprovider-seam-for-nowplayingpanel.md) |
+| Spec / handoff | [punch list §4.6 `TEST-7`](HANDOFF-GA-PUNCH-LIST.md) |
+| Depends on | — |
+| Branch | `fix/test-7-nowplayingpanel-timeprovider-seam` |
+
+**Detail: [`queue/TEST-7.md`](queue/TEST-7.md).**
+
+Shipped 2026-09-07. `TEST-4`'s defect, one layer out and in production code: three tests slept
+`Task.Delay(1500)` against the panel's own 300 ms timer with no rendezvous, failing in **both**
+directions — undershoot to 0 writes if the callback's two HTTP hops missed the window, overshoot to
+2 if a stall inserted >300 ms between the un-slept setup invokes.
+
+⭐ **The determinism gate: 200/200, 0 failures, 2,052 s wall.** 200 sequential runs of both debounce
+classes — 11 tests each, **2,200 test executions** — against 32 concurrent busy loops on a 32-core
+box. Every iteration reported `Total: 11, Skipped: 0`, checked explicitly because an iteration that
+ran *zero* tests would also exit 0 and read as a pass. Per-iteration duration **55–144 ms, median
+81 ms**, against 45 ms unloaded: the contention was real, not nominal. That is the figure this row
+exists for, and it is why a single green run was not accepted as the gate. The three racing tests
+slept **6.0 s** between them and now sleep none.
+
+⚠ **The house idiom did not transfer, and that is the finding worth carrying forward.**
+`EncoderHudService`'s clock seam is an optional *constructor* parameter, and a Blazor component has
+no constructor — the renderer's `ComponentFactory` activates it parameterlessly. `@inject` was
+rejected as the substitute for two reasons: it is a *required* resolve against a container that
+registers `TimeProvider` in **neither host, deliberately**, and it would leave `Clock` **null on a
+bare `new NowPlayingPanel()`**, which is exactly how the debounce tests build the panel. Shipped as
+`internal TimeProvider Clock { get; set; } = TimeProvider.System;` — zero DI change, zero fixture
+change. **The next component that needs a clock seam should read plan §0.4 before reaching for
+`@inject`.**
+
+⚠ **Two mechanisms, because the two failure directions need two.** A fake clock alone is half a fix
+when the callback is `async void` over awaited HTTP: the clock makes an *extra* callback structurally
+impossible (it cannot advance on its own), and only a completion rendezvous makes a *missing* one
+impossible. `RecordingHandler.WaitForAsync` is that rendezvous, and it synchronises on the request
+being **recorded** rather than on elapsed time.
+
+⚠ **The plan says six gain tests; the source has FIVE, and five is correct.** §4.7's "eleven tests"
+reconciles as 6 volume + 5 gain, and the runner agrees (`Total: 11`). Recorded here because the row
+outlives the plan and the next reader should not add a sixth test to match the prose.
+
+**Pre-merge review found no HIGH issues and the concurrency held** — the count snapshot and waiter
+registration share one lock acquisition, `TrySetResult` is outside the lock, and every "exact, not
+bounded" claim survived falsification. But four comments claimed more than the code did, which is
+this repo's signature defect. `WaitForAsync`'s docstring said its job was to bound *how* a broken
+test fails while it threw a bare `The operation has timed out.`; it now names the mismatch and dumps
+the request log, verified by driving the failure path rather than reading it. The rendezvous
+docstring said a caller "is asserting on state already written" without saying *whose* — it is the
+handler's, not the component's, whose `async void` runs on. And this harness only **observes** where
+`TEST-4`'s **parks** the component: same motivation, materially weaker guarantee, and the original
+comment borrowed `TEST-4`'s authority for it.
+
+⭐ **One finding no gate could reach, and the most valuable thing the review produced.**
+`QueueVolumePreferenceSave`'s null-check-then-create is **not atomic**. It is safe — but only because
+every path in arrives on Blazor's renderer synchronization context, established by walking the call
+graph rather than by any test: one caller, whose one caller is bound solely to the slider's `Change`
+event, with the SignalR handler `OnVolumeChangedEvent` deliberately never reaching it. Two concurrent
+entries would each see a null timer, create two, leak one past `DisposeAsync`, and produce the very
+write fan-out the debounce exists to prevent. The precondition is now stated in the code where a
+future second caller will meet it.
+
+**Deferred and filed rather than dropped:** `design/FUTURE-WORK.md` §29 (`_nowPlayingPollTimer` stays
+on the system clock — it is armed in `OnInitializedAsync`, the one path all 45 bUnit renders
+traverse) and §30 (`AudioApiService` builds two URLs with **current-culture** number formatting, so a
+comma-decimal locale emits `/api/audio/sourcegain/FilePlayer/0,25` — latent only because the box is
+dot-decimal).
+
+⚠ **The plan's instruction to decrement §9's P1 open count was NOT followed, deliberately.** That
+cell reads "38 listed, 33 open" and names `TEST-7` among eight §4 rows "this cell never names" — so
+it was never counted, and decrementing would have made a correct number wrong. Flagged for Planner.
+
+**First code change merged with a real CI signal since the `appserver-rtest` runner recovered** —
+`build` SUCCESS on #592, where the preceding rows merged on local gates alone.
 
 ---
 
