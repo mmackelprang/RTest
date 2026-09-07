@@ -5886,6 +5886,60 @@ body {
   letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-low);
 }
 
+/* §Ph — spoken-message row (feature B). Wraps INBOUND bubbles ONLY, so .msg-bubble
+   and the entire outbound path are untouched. .msg-bubble.inbound already carries
+   align-self: flex-start, which agrees with the row's align-items — no conflict. */
+.msg-row-inbound {
+  align-self: flex-start;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  min-width: 0;
+  /* Preserves the bubble at EXACTLY its current 72% of the list width. */
+  max-width: calc(72% + var(--touch-compact) + var(--sp-2));
+}
+.msg-row-inbound > .msg-bubble { max-width: none; min-width: 0; }
+
+.msg-speak-btn {
+  width: var(--touch-compact); height: var(--touch-compact);   /* 44px */
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  appearance: none; -webkit-appearance: none;
+  background: transparent;
+  border: 1px solid var(--surface-separator);
+  color: var(--text-low);
+  flex-shrink: 0;
+  margin-top: 2px;                     /* optically centres on the first text line */
+  cursor: pointer;
+  transition: color 100ms ease, border-color 100ms ease, transform 80ms ease;
+}
+.msg-speak-btn:hover  { color: var(--text-medium); border-color: rgba(255, 255, 255, 0.10); }
+.msg-speak-btn:active { transform: scale(0.92); }
+.msg-speak-btn:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-primary); }
+
+/* Active — the .phone-mode-btn.active recipe again. */
+.msg-speak-btn.speaking {
+  background: var(--accent-dim);
+  border-color: rgba(92, 212, 232, 0.22);
+  color: var(--accent-primary);
+}
+/* Which message the room is reading, at a glance. */
+.msg-bubble.speaking { border-color: rgba(92, 212, 232, 0.45); }
+
+/* --touch-compact (44px) is used rather than --touch-min (48px) to match the
+   established 44px chip spine (.vm-chip, .feed-chip) and because the global button
+   floor already sets it. ⚠ CORRECTED while copying: the handoff cites that floor at
+   :1292, which is inside .checkmark-icon and has nothing to do with touch targets.
+   The real floor is `button, .rz-button { min-width: var(--touch-compact);
+   min-height: var(--touch-compact); }` at design-system.css:1330 — expressed as the
+   TOKEN, not a literal 44px, so it tracks --touch-compact automatically.
+
+   ⚠ .msg-bubble.speaking sets border-color ONLY, so it composes with
+   .msg-bubble.inbound's own `1px solid var(--surface-separator)` above rather than
+   replacing it. And .msg-speak-btn:focus-visible uses an OUTSET ring where the
+   transport buttons use inset — deliberate: this button sits in empty gutter space,
+   where an inset ring would be invisible against the background. */
+
 /* -- §Ph  Texts: thread list, conversation, compose (PR3) ------------------ */
 .texts-thread-list { display: flex; flex-direction: column; }
 
