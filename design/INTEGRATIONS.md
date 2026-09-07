@@ -1005,6 +1005,66 @@ is not — but note that Radio.API cannot normally see Radio.Web's overlay, for 
 above, so that branch fires only when the key has also been placed in Radio.API's own configuration
 or environment (`RotaryPhone__Gv__AuthKey`).
 
+### Reading a text message aloud — the Speech arm (`PHN-3`)
+
+Every **inbound** SMS bubble on `/phone` carries a 44px play button in its gutter that speaks the
+message through the console — the same speakers, the same ducking, the same topbar Stop chip as a
+voicemail. Outbound bubbles have no button (design handoff §B2), and the button is **not** gated by
+whether the thread can be replied to (§B5) — that is the point of it, since ~70% of live threads are
+short codes nobody can reply to.
+
+**What it calls.** `MessageBubble` → `EventPlaybackApiService.StartSpeechAsync` →
+`POST /api/audio/events` with `{ kind: "Speech", text, label }` and **nothing else** — no
+`mediaKind`, no `mediaId`, no `durationSeconds`, because `EventPlaybackRequest.Validate` rejects a
+Speech request carrying any of them (`ArmMismatch` → 400). Stop is the same
+`DELETE /api/audio/events/{id}` the voicemail transport uses. The server owns the state; the client
+holds only the returned id.
+
+⭐ **Feature B does not need `GvMedia:Enabled`.** `EventPlaybackService.cs:222`'s 409 gate reads
+`request.Kind == EventPlaybackKind.RemoteMedia && !gv.Enabled`, so the `Kind` test is a conjunct and a
+Speech playback runs with the flag off — unlike voicemail playback.
+
+**Which engine resolves.** ⚠ **The currently-selected TTS engine, resolved server-side — not a
+per-feature override.** `EventPlaybackService.AcquireSpeechAsync` calls
+`ResolveEngine(request.Engine, tts.DefaultEngine)`, and `Radio.Web` deliberately sends **no engine and
+no voice**. This follows ADR-029 §9's **amendment**
+([`design/decisions/2026-08-03-gv-audio-through-engine.md:491-511`](decisions/2026-08-03-gv-audio-through-engine.md)),
+which reversed the original pin to local `espeak-ng` on the owner's instruction: *"the TTS engine in
+the radio console supports both Google and Azure TTS, so make sure the text messaging uses the
+currently selected TTS engine."* `GvMedia:SpeechEngine` was **deleted, not redefined**, and `TTS-9`
+(#548) removed eSpeak from the codebase — so there is no on-box engine to fall back to. Deployed
+value: `TTS:DefaultEngine = "Google"` (`src/Radio.API/appsettings.json`).
+
+⚠ **PRIVACY, stated plainly because this is where it starts happening.** Every tap sends the message
+body to the configured cloud TTS provider. ADR `:509` records the owner accepting that: *"private SMS
+bodies reach Google's TTS API on each play."* Two operational consequences follow:
+
+- **Latency is a network round trip**, and there is no cache — every play re-synthesizes. `Preparing`
+  is the normal opening state, every time.
+- **Offline means no speech at all.** The button fails with an amber toast
+  (`The console isn't responding. Try again.`) and the message stays readable on screen.
+
+⛔ **The body is never logged, on either side.** `StartSpeechAsync` logs a status and a reason code and
+never the text; `EventPlaybackService` carries the same instruction server-side (`TTS-11`). The
+failure toast carries the reason-derived copy only — never the body, the sender, or the number.
+
+**What gets spoken is composed in `Radio.Web`, not the audio layer** (ADR-029 §4.2 — `Radio.API`
+speaks a finished string). `Radio.Web/Models/GvSpeechText.cs` applies the handoff's eight content
+rules in a fixed order: strip an MMS `+1XXXXXXXXXX - ` sender prefix, replace URLs with the words
+`a link`, drop emoji, never add the timestamp, add `Message from {Name}. ` **only when a name actually
+resolved**, and cap the whole utterance at 1000 characters.
+
+- ⚠ **A leading digit run is NOT a prefix unless ` - ` follows it.** `77971 is your Facebook
+  confirmation code` must survive intact — verification codes are the most valuable thing this feature
+  reads.
+- ⚠ **The name is never an identifier.** `PhoneMessagesPanel.OpenThreadName` falls back twice — to the
+  bare number, then to the raw GV thread id — so `PhoneTextsPanel.SpeakableSenderName` passes `null`
+  rather than either. Handoff `:386`: *"Do not read the identifier aloud."*
+- ⚠ **The cap is a client concern because the server REJECTS rather than truncates.**
+  `GvMedia:MaxSpeechChars` (default 1000) answers `TextTooLong` + 400 for over-length text
+  (`GvMediaOptions.cs:79-88`), so lowering it below the client's constant turns a long message into a
+  toast instead of a shorter read.
+
 ---
 
 ## 3. Notification / Announcement API
