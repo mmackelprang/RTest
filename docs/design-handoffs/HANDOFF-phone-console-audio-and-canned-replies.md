@@ -370,7 +370,7 @@ Transcript states are **unchanged** — `Transcript` / `Transcript pending — G
 .msg-bubble.speaking { border-color: rgba(92, 212, 232, 0.45); }
 ```
 
-`--touch-compact` (44px) is used rather than `--touch-min` (48px) to match the established 44px chip spine (`.vm-chip`, `.feed-chip`) and because the global `button { min-height: 44px }` at `:1292` already sets that floor.
+`--touch-compact` (44px) is used rather than `--touch-min` (48px) to match the established 44px chip spine (`.vm-chip`, `.feed-chip`) and because the global button floor already sets it. ⭐ **That floor is `button, .rz-button { min-width: var(--touch-compact); min-height: var(--touch-compact); }` at `design-system.css:1330`, corrected 2026-09-07 from `:1292`, which is inside `.checkmark-icon` and has nothing to do with touch targets.** Note also that the floor is expressed as the *token*, not a literal `44px`, so it tracks `--touch-compact` automatically.
 
 ### B3 — What actually gets spoken
 
@@ -405,10 +405,16 @@ Do **not** read the identifier aloud. `"Message from plus one nine one nine five
 > caps at 1000 before sending, and it caps the **whole** utterance including the `Message from {Name}.`
 > lead-in, because the server measures what it receives.
 
-**7b. ⚠ The cap runs LAST, and the whole rule order is part of the spec** (added by `PHN-3`). Strip the
-MMS prefix **first** — it is anchored to the start of the raw body, so anything that shifts the string
-must not run before it — then the URL and emoji rules, then the lead-in, then the cap. Capping before
-the lead-in produces an over-length string on exactly the messages that have a resolved sender.
+> ⚠ **IMPLEMENTATION NOTE ON RULE 7 — NOT A RULE — added 2026-09-07 by `PHN-3`: the cap runs LAST,
+> and the whole rule order is part of the spec.** Strip the MMS prefix **first** — it is anchored to
+> the start of the raw body, so anything that shifts the string must not run before it — then the
+> URL and emoji rules, then **normalise whitespace** (rules 3, 4 and 6 all leave doubled or leading
+> spaces where they removed something), then the lead-in, then the cap. Capping before the lead-in
+> produces an over-length string on exactly the messages that have a resolved sender.
+>
+> ⚠ Deliberately **not** numbered `7b`, as an earlier draft of this note was. A new numbered rule in
+> an approved spec is an implementer authoring spec, and it shifts the numbering other documents
+> cite. The content is that draft's, with the whitespace step it omitted added.
 
 **Composition happens in `Radio.Web`, not the audio layer** (ADR-029 §4.2): Radio.API speaks a finished string. So every rule above is a `Radio.Web` concern and belongs in the pure static helper named in §Component/file impact.
 
@@ -424,10 +430,23 @@ the lead-in produces an over-length string on exactly the messages that have a r
 | **Ended** | back to Rest, silently | normal | absent |
 | **Replaced** (Cross-1) | back to Rest, silently | normal | moves to the new item |
 | **Engine error** | back to Rest | normal | absent | + toast `Error` / `Couldn't read that message.` / `The console couldn't read this one. Try again.` |
-| **Waiting** ⭐ | `.spinner` (exactly as Pending) | normal | `Message` | title / `aria-label` become `Waiting for the announcement to finish…` |
+| **Waiting** ⭐ † | `.spinner` (exactly as Pending) | normal | `Message` ‡ |
 | **Muted** | proceeds | normal | shown | + `.phone-pill.amber` `The console is muted.` + `Unmute`, beside the compose area |
 
-⭐ **`Waiting` was added to this table by `PHN-3` (2026-09-07); the four-row original predates it.**
+† **`Waiting`'s `title` and `aria-label` become `Waiting for the announcement to finish…`.** Carried
+as a footnote rather than as a fifth cell in the row: the table header has four columns, so a fifth
+cell is dropped by the renderer — and that cell was the entire reason `C-107` asked for the row.
+
+‡ **The neighbouring pre-existing `Pending / preparing` row says Chip = `absent`, and that cell is
+inaccurate.** `EventPlaybackSnapshotDto.IsLive` is a deny-list — `State is not ("Completed" or
+"Stopped" or "Failed")` — so `Preparing` counts as **live** and its chip shows, exactly as `Waiting`'s
+does. The `Waiting` row is the correct one. The pre-existing row is left as written (`PHN-3`'s remit
+here is corrections plus this one added row, not a rewrite of rows it did not author); this note
+exists so the two are not read as disagreeing about the mechanism.
+
+⭐ **`Waiting` was added to this table by `PHN-3` (2026-09-07); the seven-row original predates it**
+(Rest, Pending / preparing, Speaking, Ended, Replaced, Engine error, Muted — an earlier revision of
+this sentence said "four-row", which was simply miscounted).
 `PHN-1f` (owner decision `D28`) introduced `EventPlaybackState.Waiting`, and
 `EventPlaybackService.cs:493` applies `WaitForClearAirAsync` on the Speech arm too — so tapping a
 speak button while an announcement is sounding parks the playback for up to

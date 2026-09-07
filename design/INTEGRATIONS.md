@@ -1057,9 +1057,14 @@ resolved**, and cap the whole utterance at 1000 characters.
 - ⚠ **A leading digit run is NOT a prefix unless ` - ` follows it.** `77971 is your Facebook
   confirmation code` must survive intact — verification codes are the most valuable thing this feature
   reads.
-- ⚠ **The name is never an identifier.** `PhoneMessagesPanel.OpenThreadName` falls back twice — to the
-  bare number, then to the raw GV thread id — so `PhoneTextsPanel.SpeakableSenderName` passes `null`
-  rather than either. Handoff `:386`: *"Do not read the identifier aloud."*
+- ⚠ **The name is never an identifier.** `PhoneMessagesPanel.OpenThreadName` falls back twice, and in
+  this order: **first** to the raw GV thread id (`if (t == null) return _openThreadId ?? "";`, which
+  fires when the open thread is absent from `Threads` at all), and **then**, further down the resolved
+  chain, to the bare `CounterpartyNumber` when a thread resolved but no contact matched.
+  `PhoneTextsPanel.SpeakableSenderName` passes `null` rather than either. Handoff `:386`: *"Do not read
+  the identifier aloud."* ⚠ The number comparison is on **normalised digits**
+  (`PhoneNumberNormalizer.Normalize`), not on strings — `"(555) 123-4567"` and `"+15551234567"` are the
+  same identifier written two ways and a `==` test answers `false` on them.
 - ⚠ **The cap is a client concern because the server REJECTS rather than truncates.**
   `GvMedia:MaxSpeechChars` (default 1000) answers `TextTooLong` + 400 for over-length text
   (`GvMediaOptions.cs:79-88`), so lowering it below the client's constant turns a long message into a
