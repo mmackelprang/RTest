@@ -1,34 +1,44 @@
 @using Radio.Web.Models
+@implements IDisposable
+@inject ConsolePlaybackState ConsolePlayback
+@inject EventPlaybackApiService EventPlayback
 
 @* §Ph text bubble — inbound left (raised) / outbound right (accent tint), with an
    outbound status glyph (sending spinner / sent check / failed ⚠). Defensive:
    null text → "(no text)" placeholder; direction not exactly "Outbound" → inbound.
-   A failed bubble is the whole-bubble retry target (≥48px via .msg-bubble.failed). *@
+   A failed bubble is the whole-bubble retry target (≥48px via .msg-bubble.failed).
 
-<div class="msg-bubble @DirectionClass @StatusClass"
-     @onclick="OnFailedClick" role="@(IsFailed ? "button" : null)">
-  <span class="msg-text">@DisplayText</span>
-  <span class="msg-meta">
-    <span class="msg-time">@Message.SentAt.ToLocalTime().ToString("h:mm tt")</span>
-    @if (IsOutbound)
-    {
-      @switch (Status)
+   PHN-3 (feature B): an INBOUND bubble with something to say also gets a 44px
+   play button in the gutter, which speaks the message through the console. The
+   button sits OUTSIDE .msg-bubble, in the .msg-row-inbound wrapper — handoff :325
+   ("inside .msg-meta a 44px control would nearly double a one-line bubble's height
+   and put a touch target in an 11px text row"). The outbound path is untouched:
+   handoff :323 puts the button on inbound bubbles only. *@
+
+@if (CanSpeak)
+{
+  <div class="msg-row-inbound">
+    @BubbleMarkup
+    <button type="button"
+            class="msg-speak-btn @(IsMineAndLive ? "speaking" : null)"
+            title="@SpeakTitle"
+            aria-label="@SpeakAriaLabel"
+            @onclick="ToggleSpeakAsync">
+      @if (IsMinePreparing)
       {
-        case SendStatus.Sending:
-          <span class="spinner"></span>
-          break;
-        case SendStatus.Sent:
-          <RadzenIcon Icon="done" class="msg-status-sent" />
-          break;
-        case SendStatus.Failed:
-          <span class="msg-status-fail">
-            <RadzenIcon Icon="error_outline" /> Failed to send
-          </span>
-          break;
+        <span class="spinner"></span>
       }
-    }
-  </span>
-</div>
+      else
+      {
+        <RadzenIcon Icon="@(IsMineAndLive ? "stop" : "play_arrow")" />
+      }
+    </button>
+  </div>
+}
+else
+{
+  @BubbleMarkup
+}
 
 @code {
   public enum SendStatus { None, Sending, Sent, Failed }
@@ -36,6 +46,64 @@
   [Parameter, EditorRequired] public SmsMessageDto Message { get; set; } = default!;
   [Parameter] public SendStatus Status { get; set; } = SendStatus.None;
   [Parameter] public EventCallback OnRetry { get; set; }
+
+  /// <summary>A resolved contact name for the thread, or null. Never a phone number (C-108).</summary>
+  /// <remarks>
+  /// ⚠ The caller passes null rather than an identifier. Handoff :386 forbids reading the identifier
+  /// aloud, and PhoneTextsPanel.SpeakableSenderName is where that is enforced — this component takes
+  /// whatever it is handed and does not second-guess it, because it has no contact list to check
+  /// against and resolving one here would give the name two paths that can disagree.
+  /// </remarks>
+  [Parameter] public string? SenderName { get; set; }
+
+  /// <summary>Raised with the rejection reason when a speak could not be started.</summary>
+  /// <remarks>
+  /// ⚠ An EventCallback, not a toast raised here. Handoff §Cross-5 :174 puts a synthesis failure in a
+  /// TOAST — "there is no room beside a bubble" — and a presentational bubble should not own a toast
+  /// host. The panel owns it (PhoneTextsPanel.OnSpeakFailed).
+  /// </remarks>
+  [Parameter] public EventCallback<string?> OnSpeakFailed { get; set; }
+
+  private string? _playbackId;    // the handle THIS bubble started, or null
+  private bool _starting;         // a StartSpeechAsync is in flight; see ToggleSpeakAsync
+
+  // ⚠ NO _startReason FIELD, unlike VoicemailPlayer. The plan's Task 3 sketch carried one, copied
+  // from that component — but VoicemailPlayer RENDERS its refusal (ShowFailure / FailurePrimary /
+  // FailureSubline) and this button does not: handoff §Cross-5 :174 says a bubble has no room beside
+  // it, so the reason leaves via OnSpeakFailed and the button returns to rest. A field written on
+  // every failure and read by nothing is dead weight the compiler would flag (CS0414), and worse, a
+  // future reader would take it as evidence of a failure state that does not exist here.
+
+  /// <summary>
+  /// The bubble exactly as it rendered before PHN-3. ⚠ Extracted UNCHANGED — the outbound render
+  /// path must not move, per handoff :323 ("leaves the entire outbound render path untouched").
+  /// The only edit inside it is the `speaking` class, which can only ever be true on an inbound
+  /// bubble because CanSpeak gates the wrapper and nothing else can set _playbackId.
+  /// </summary>
+  private RenderFragment BubbleMarkup => @<div class="msg-bubble @DirectionClass @StatusClass @(IsMineAndLive ? "speaking" : null)"
+     @onclick="OnFailedClick" role="@(IsFailed ? "button" : null)">
+    <span class="msg-text">@DisplayText</span>
+    <span class="msg-meta">
+      <span class="msg-time">@Message.SentAt.ToLocalTime().ToString("h:mm tt")</span>
+      @if (IsOutbound)
+      {
+        @switch (Status)
+        {
+          case SendStatus.Sending:
+            <span class="spinner"></span>
+            break;
+          case SendStatus.Sent:
+            <RadzenIcon Icon="done" class="msg-status-sent" />
+            break;
+          case SendStatus.Failed:
+            <span class="msg-status-fail">
+              <RadzenIcon Icon="error_outline" /> Failed to send
+            </span>
+            break;
+        }
+      }
+    </span>
+  </div>;
 
   private bool IsOutbound => GvDirection.IsOutbound(Message.Direction);  // unknown → inbound
   private bool IsFailed => Status == SendStatus.Failed;
@@ -52,5 +120,122 @@
   private async Task OnFailedClick()
   {
     if (IsFailed) await OnRetry.InvokeAsync();
+  }
+
+  // ── the speak button (PHN-3) ─────────────────────────────────────────────────────────────────
+
+  /// <summary>
+  /// ⚠ Inbound only, and only when there is something to say. C-114: Utterance reads Message.Text,
+  /// not DisplayText — a null-text bubble renders "(no text)" and must not offer to speak those two
+  /// words aloud. The button is ABSENT there, not present-and-disabled.
+  /// </summary>
+  private bool CanSpeak => !IsOutbound && Utterance is not null;
+
+  private string? Utterance => GvSpeechText.ForMessage(Message.Text, SenderName);
+
+  // ⚠ Mine, not the ambient snapshot. VoicemailPlayer.razor:178-181 is the original; the reason is
+  // that every state this button renders must first be gated on the playback THIS bubble started.
+  // It is also what gives §A4b's single-selection group for free: when another item starts, the
+  // ambient Id changes, Mine goes null here, and this button returns to rest silently — which is
+  // §B4's "Replaced" row, with no client bookkeeping at all. See plan PHN-3 C-110.
+  private EventPlaybackSnapshotDto? Mine =>
+    _playbackId is not null && ConsolePlayback.Snapshot?.Id == _playbackId
+      ? ConsolePlayback.Snapshot
+      : null;
+
+  private bool IsMineAndLive => Mine?.IsLive == true;
+
+  // ⚠ Waiting renders exactly as Preparing — one spinner, two titles. PHN-1f's D28 queue means a
+  // Speech playback can legitimately sit in Waiting for up to GvMedia:MaxQueuedWaitSeconds while an
+  // announcement finishes, and the handoff's §B4 table predates that state. See C-107.
+  private bool IsMinePreparing => Mine?.State is "Preparing" or "Waiting";
+
+  private string SpeakTitle => Mine?.State switch
+  {
+    "Waiting" => "Waiting for the announcement to finish…",
+    "Preparing" => "Preparing…",
+    not null when IsMineAndLive => "Stop reading this message.",
+    _ => "Read this message aloud."
+  };
+
+  private string SpeakAriaLabel =>
+    IsMineAndLive ? "Stop reading this message" : "Read this message aloud";
+
+  // ⚠ C-111 — ConsolePlaybackState.Changed, never AudioStateStore.EventPlaybackChanged. The store is
+  // a singleton and this component is per-bubble: a conversation with forty messages mounts forty
+  // subscribers, the largest fan-out this event has ever had.
+  protected override void OnInitialized() => ConsolePlayback.Changed += OnPlaybackChangedAsync;
+
+  // ⚠ And every bubble must come off again. Forty leaked handlers per opened thread, on a kiosk that
+  // runs for weeks, is a real leak.
+  public void Dispose() => ConsolePlayback.Changed -= OnPlaybackChangedAsync;
+
+  private Task OnPlaybackChangedAsync() => InvokeAsync(StateHasChanged);
+
+  private async Task ToggleSpeakAsync()
+  {
+    // ⚠ THE RE-ENTRANCY GUARD IS MANDATORY, and VoicemailPlayer.razor:323-345 explains why in its
+    // own words: _playbackId is cleared before the awaited POST, so a second tap arriving while the
+    // first is in flight sees a null id and starts a SECOND playback — which EventPlaybackService's
+    // replacement arm honours by tearing the first one down mid-sentence. A double-tap is the
+    // default gesture on a wall panel. The button cannot be disabled instead: there is no snapshot
+    // to render Preparing from until the 202 comes back, which is the whole window this guards.
+    if (_starting)
+    {
+      return;
+    }
+
+    if (IsMineAndLive)
+    {
+      var id = _playbackId;
+      _playbackId = null;
+      if (id is not null)
+      {
+        await EventPlayback.StopAsync(id);
+      }
+
+      return;
+    }
+
+    _starting = true;
+    try
+    {
+      _playbackId = null;
+      var (snapshot, reason) = await EventPlayback.StartSpeechAsync(Utterance!, SpeakLabel);
+      if (snapshot is null)
+      {
+        // A refusal answered synchronously — 400 or 409 — never reaches a Failed snapshot, so the
+        // reason has to leave HERE or it is lost. It goes up to the panel's toast (handoff
+        // §Cross-5) and the button stays at rest, which is §B4's "Engine error" row.
+        await OnSpeakFailed.InvokeAsync(reason);
+        return;
+      }
+
+      // ⚠ 202 means ACCEPTED, not speaking (EventPlaybackController.cs:17-22). Do not render Playing
+      // here — the state arrives on the next broadcast.
+      _playbackId = snapshot.Id;
+    }
+    finally
+    {
+      _starting = false;
+    }
+  }
+
+  /// <summary>
+  /// The chip's title text, via EventPlaybackSnapshot.Label. ⚠ Shaped so MainLayout's Speech arm
+  /// reads "Reading a message from Jane on the console." — see MainLayout.razor and plan PHN-3
+  /// C-112. EventPlaybackRequest.MaxLabelChars is 128; a resolved contact name cannot approach it,
+  /// but the server rejects LabelTooLong rather than truncating, so it is clamped here.
+  /// </summary>
+  private string SpeakLabel
+  {
+    get
+    {
+      var label = string.IsNullOrWhiteSpace(SenderName)
+        ? "a message"
+        : $"a message from {SenderName.Trim()}";
+
+      return label.Length <= 128 ? label : label[..128];
+    }
   }
 }
