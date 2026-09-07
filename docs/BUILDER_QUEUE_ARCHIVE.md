@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (39)
+## Shipped rows (40)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1390,6 +1390,44 @@ same **type**" when this PR deliberately reuses only the discrimination rule (wi
 types would be the caller change `C-142` forbids), and the latch's claim that "our own flag cannot
 change without a restart", falsified by `reloadOnChange: true` plus the SQLite config store's change
 notifier.
+
+---
+
+### UI-6 — `AudioStateStore` notifies N subscribers and awaits one.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#596](https://github.com/mmackelprang/RTest/pull/596) |
+| Plan | *plan-in-the-row — the dossier's § Detail was the handoff, as the row allowed* |
+| Spec / handoff | [`PHN-1f` plan §6.2](../design/plans/PHN-1f-the-wait-then-play-queue.md) · § *`UI-6` — the tiering argument, and the two counts the deferral note got wrong* below |
+| Depends on | — |
+| Branch | `fix/audio-state-store-multicast-notify` |
+
+**Detail: [`queue/UI-6.md`](queue/UI-6.md).**
+
+Shipped 2026-09-07. All three sites — `NotifyAsync` and the two that hand-rolled it,
+`OnHubRadioStateChanged` and `OnHubSleepStateChanged` — now route through a shared
+`GetInvocationList()` loop that awaits each subscriber and catches **inside** the loop, so a
+synchronous throw resumes the list instead of ending it. The two hand-rolled sites had already
+drifted apart (one had a `try`/`catch`, one had none), which is what argued for one implementation
+rather than three. The shape is not new: `ConsolePlaybackState.cs:88-100` already used it, and
+`DuckingService.cs:550-552` predicted it.
+
+**Pre-merge review: no functional defect in the fix.** What it did surface was **three in-tree
+comments the fix itself falsified** — `Program.cs:460` and `ConsolePlaybackState.cs:29`/`:35` all
+cited this defect as live to justify keeping `EventPlaybackChanged` at one subscriber. Each was
+corrected rather than deleted: the correctness half of the argument is retired, the cost half (N
+handlers per circuit is N renders per broadcast) still stands and remains `PHN-2` §0.6's call.
+
+⚠ **The dossier's `DuckingService.cs:481-483` anchor is stale** — those lines are fade-parameter
+arithmetic. The precedent it means is `:550-552`. Left in the dossier rather than edited, since that
+is Planner's artifact.
+
+⚠ **~17 further sites carry the same `await X.Invoke()` shape and were deliberately left alone** —
+`AudioStateHubService` (14), `RadioPanelToggleService.cs:64`, `DeviceDisplayStateService.cs:22`,
+`PhoneUnreadState.cs:23`. Most have one subscriber today, where the shape is harmless; the hub
+service is the one worth a row, because `AudioStateStore` being its sole subscriber is a fact rather
+than an enforced invariant.
 
 ---
 
