@@ -38,3 +38,44 @@
 **⚠ RE-VERIFIED 2026-08-11 against `main` @ `8b1ce0a` (post-#468), and TWO ANCHORS IN THIS ROW WERE STALE AND ARE NOW CORRECTED: `FilePlayerAudioSource.cs:1968 → :1988` and `:2092 → :2112`.** #468 touched that file (`StopCoreAsync` / `DisposeAsync` resume-position handling, nothing to do with fingerprinting) and pushed everything below `:872` down **+20 lines**.
 
 **Everything else in this row re-verified byte-exact and unchanged:** `FingerprintingOptions.cs:19`, `appsettings.json:91` (**checked specifically — #468 added a line to that file and it landed below `:91`, so the citation survives**), `ApiModels.cs:788`, `BluetoothAudioSource.cs:837`/`:845`/`:867-891`/`:893-905` (#468 did not touch that file at all), and `BackgroundIdentificationService.cs:260`.
+
+---
+
+## ⭐ OWNER DECISION, 2026-09-08 — per-field precedence, and it resolves the FilePlayer question
+
+> "When metadata is available from the audio source, use the source metadata (song name, album name,
+> album art). When one or more of these is missing, use fingerprinting to augment the missing data."
+
+**This is a stronger and simpler rule than the F1/F2 split the plan posed, and it applies uniformly
+to both sources.** It answers the blocked question — **FilePlayer follows Bluetooth (F1)** — but by
+making the *same* rule true everywhere rather than by making one source imitate the other.
+
+### What it means concretely
+
+- **Precedence is per FIELD, not per track.** Title, artist, album and art are decided independently.
+  A track whose AVRCP gives title and artist but no art keeps both, and gets *only* art from
+  fingerprinting. This is exactly the behaviour already sitting on the unreachable preserve branch at
+  `BluetoothAudioSource.cs:893-905`.
+- **The always-fingerprint gate at `:837` stays.** Fingerprinting must still run, or there is nothing
+  to fill gaps with. It is the *overwrite* at `:867-891` that goes.
+- **Same rule for FilePlayer.** ID3 tags are source metadata. `:2126-2128` currently replaces embedded
+  art unconditionally; under this rule it may only fill art that is absent. The measured harm it
+  prevents: **44 of 52 file plays had their tags overwritten**, including a fabricated title and a
+  U+2010 hyphen corrupting `blink‐182`.
+- **A field the source supplies as an empty string counts as missing**, not as an authoritative blank.
+  Say so in the plan; it is the obvious edge and it decides real cases.
+
+### ⚠ Interaction with `AUD-17` — this rule is what makes BT album art work at all
+
+`AUD-17` established that **AVRCP on this box never supplies art**: `LinuxBluetoothService.cs:2761-2765`
+reads the MPRIS names off an `org.bluez.MediaPlayer1` proxy, which publishes `ImgHandle`, so
+`CacheAvrcpArtAsync` has never executed. Under the owner's rule that is **fine and self-correcting** —
+art is always "missing" on Bluetooth, so fingerprinting always fills it, which is precisely today's
+working behaviour and the reason ~99% of rows carry SongRec art.
+
+**So the rule preserves BT album art without depending on the flag's old meaning.** Title and artist
+stop being overwritten; art keeps arriving. That is the whole point of the row.
+
+⚠⚠ **The flag still must not be renamed** — see the row above. The SQLite store already holds
+`fingerprinting:useShazamForAllSources|true`, and a rename orphans it, falls through to a `false`
+default, and kills BT art. The decision above changes *behaviour*, not the *key*.

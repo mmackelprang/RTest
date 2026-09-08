@@ -167,3 +167,33 @@ The selected message row (x≈158–1399, y≈363–425) is **also** animating b
 skeleton's own 3*. The UAT's static control sat ~5 px below it and correctly read 0%, so its
 conclusion stands — but anyone re-running a whole-frame diff on these files will find a large diff≥4
 population that has nothing to do with the skeleton.
+
+---
+
+## ⚠ OWNER SITTING ABORTED 2026-09-08 — and it changed the row's verification
+
+The five-variant harness was built and shown on the console. The owner stopped the test:
+
+> "the graphics are very dark on the touchscreen (although I'm looking at it in the daylight) we
+> should probably defer this test until nighttime."
+
+Console restored, server stopped, nothing changed on the box. Harness and full write-up:
+[`docs/uat/2026-09-08-ux1-shimmer-variants/`](../uat/2026-09-08-ux1-shimmer-variants/REPORT.md).
+
+**⭐ The plan's deciding gate is incomplete as written.** It specifies the owner's eye on the panel
+**in a dark room**. This console is *also used in daylight*, and in daylight the skeleton surface
+reads as very dark — which is precisely the condition where a low-amplitude shimmer vanishes hardest.
+
+Three consequences for the plan:
+
+1. **Run the A/B in BOTH conditions, or the winner is proven for only one.** A value chosen at night
+   that disappears at midday is this row's own defect, relocated rather than fixed.
+2. **It leans toward the brighter candidates** — if one value must serve both, V1 (26) and V2 (31) are
+   the least likely to survive daylight. ⚠ **Hypothesis, not a result.** Nobody has compared any
+   variant in daylight, and reasoning about these amplitudes has already been wrong twice.
+3. **There may be a bigger question underneath.** "Very dark on the touchscreen in daylight" is an
+   observation about the *theme*, not just the skeleton. Out of scope here; worth its own row if the
+   owner sees it again.
+
+**No variant has been judged.** The sitting ended before any comparison was made, so every open
+question in this row is still open.

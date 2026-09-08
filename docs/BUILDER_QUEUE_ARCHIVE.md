@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (41)
+## Shipped rows (42)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1199,6 +1199,44 @@
 **Est. 0.5 d** (add ~1 h if the service is deleted too).
 
 ---
+
+### GV-9 — Texts surface polish: an overflow, a 20px jump, and a guard the dead copy never got.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#608](https://github.com/mmackelprang/RTest/pull/608) |
+| Plan | [`GV-9-texts-surface-polish.md`](../design/plans/GV-9-texts-surface-polish.md) |
+| Spec / handoff | [UAT F-4/F-7](uat/2026-07-31-gv-live-data/REPORT.md) · [GV-8 UAT](uat/2026-07-31-gv8-error-state/REPORT.md) · [handoff](design-handoffs/HANDOFF-phone-dark-theme-and-scrollbars.md) |
+| Depends on | **GV-3** ✅ |
+| Branch | `fix/gv-texts-polish-overflow-unread-align` |
+
+**Detail: [`queue/GV-9.md`](queue/GV-9.md).**
+
+Shipped 2026-09-08, 11 commits. F-4 overflow on `.texts-conv-number` (wrapped to 2 lines before, 1
+line with a real ellipsis after), the F-7 alignment so read and unread rows share a left edge
+(measured x=91 vs x=111 before, all five at 111 after), and the structural guard the dead-thread copy
+had but the live rows did not.
+
+⭐ **The merge was held for the owner, and correctly.** Every gate was green; what was held was a
+*visible, unrequested* change — read rows move 20 px right. Approved by the owner 2026-09-08.
+
+⚠ **The pre-merge reviewer's HIGH finding is the one worth remembering.** The structural tripwire
+covered only the **dead** copy, while the three **live** rows — the only place F-7 is reachable — had
+zero coverage, and plan §5 designates that test the tripwire against `GV-7`, which restructures
+exactly the live surface. Fixed with three live-site tests; the fixer then *demonstrated* the premise
+by showing the pre-existing test stayed green under both mutations.
+
+All four mutations failed exactly their specified test: reverting to a bare `else if (Error)`, deleting
+the branch, always emitting the dot, and nesting dot/identity deeper. ⚠ **F-4 is only observable at the
+real 520 px pane width** — a wider harness column gives an ellipsis nowhere to engage, before or after.
+
+**Copilot was quota-blocked**, so the dispatched reviewer plus the `llm-review` CI workflow
+(`qwen2.5-coder:14b`, `NO FINDINGS`) were the review. ⚠ The Builder reported finding *no* local LLM
+reviewer — it looked for a hook rather than the CI workflow shipped in
+[#591](https://github.com/mmackelprang/RTest/pull/591), which did run on this PR.
+
+⚠ **`GV-7` shares this surface and must not run concurrently**; its planner must not delete the four
+structural tests as "odd assertions".
 
 ### OPS-2 — Pin the six floating package versions.
 

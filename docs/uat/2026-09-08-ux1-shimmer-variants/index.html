@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UX-1 shimmer variants</title>
+<style>
+  /* Real tokens, lifted from src/Radio.Web/wwwroot/css/design-system.css */
+  :root{
+    --surface-base:#0D0D0F;      /* page ground */
+    --surface-raised:#141416;    /* skeleton base — 20,20,22 */
+    --surface-overlay:#1A1A1D;   /* today's highlight — 26,26,29 */
+    --surface-separator:#1F1F22; /* 31,31,34 */
+    --text-high:#E8EAED; --text-low:#4B5563; --text-med:#B5BCC9;
+    --accent:#5CD4E8;
+    color-scheme:dark;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--surface-base);color:var(--text-high);
+    font-family:system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-font-smoothing:antialiased}
+  body{padding:14px 18px 18px;min-height:100vh}
+
+  .bar{display:flex;align-items:center;gap:16px;margin-bottom:12px;flex-wrap:wrap}
+  h1{font-size:15px;font-weight:600;margin:0;letter-spacing:.01em}
+  .hint{font-size:13px;color:var(--text-med);margin:0}
+  .spacer{flex:1}
+  button{background:#17171a;color:var(--text-high);border:1px solid #2a2a30;
+    border-radius:4px;padding:7px 14px;font-size:13px;font-family:inherit;cursor:pointer}
+  button:hover{border-color:#3a3a44}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  button.on{border-color:var(--accent);color:var(--accent)}
+
+  .grid{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;align-items:start}
+  .col{background:var(--surface-base);border:1px solid #17171a;border-radius:6px;padding:14px}
+  .tag{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--text-med);margin-bottom:3px;font-variant-numeric:tabular-nums}
+  .meta{font-size:11px;color:var(--text-low);margin-bottom:12px;min-height:15px;
+    font-family:ui-monospace,Menlo,monospace}
+  .hide .tag{color:var(--text-low)}
+  .hide .meta{visibility:hidden}
+
+  /* realistic skeleton furniture */
+  .row{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .sk{border-radius:4px}
+  .circle{width:40px;height:40px;border-radius:50%;flex:none}
+  .stack{flex:1;display:flex;flex-direction:column;gap:7px}
+  .t16{height:16px}
+  .t12{height:12px}
+  .w70{width:70%}.w45{width:45%}.w90{width:90%}
+  .card{height:96px;border-radius:8px;margin-top:4px}
+
+  /* ── V0: exactly what ships today ── */
+  .v0 .sk{
+    background:linear-gradient(90deg,
+      var(--surface-raised) 0%, var(--surface-overlay) 50%, var(--surface-raised) 100%);
+    background-size:200% 100%;
+    animation:shimmer 1.5s infinite;
+  }
+  /* ── V1–V4: same sweep, highlight concentrated into a narrow band ── */
+  .vN .sk{
+    background-size:200% 100%;
+    animation:shimmer 1.5s infinite;
+  }
+  .v1 .sk{background:linear-gradient(90deg,var(--surface-raised) 0%,var(--surface-raised) 42%,
+    #1A1A1D 50%,var(--surface-raised) 58%,var(--surface-raised) 100%)}
+  .v2 .sk{background:linear-gradient(90deg,var(--surface-raised) 0%,var(--surface-raised) 42%,
+    #1F1F22 50%,var(--surface-raised) 58%,var(--surface-raised) 100%)}
+  .v3 .sk{background:linear-gradient(90deg,var(--surface-raised) 0%,var(--surface-raised) 42%,
+    #242429 50%,var(--surface-raised) 58%,var(--surface-raised) 100%)}
+  .v4 .sk{background:linear-gradient(90deg,var(--surface-raised) 0%,var(--surface-raised) 42%,
+    #282830 50%,var(--surface-raised) 58%,var(--surface-raised) 100%)}
+
+  @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+
+  .foot{margin-top:14px;font-size:12px;color:var(--text-low);line-height:1.55}
+  .foot code{font-family:ui-monospace,Menlo,monospace;color:var(--text-med)}
+</style>
+</head>
+<body>
+  <div class="bar">
+    <h1>UX-1 — skeleton shimmer</h1>
+    <p class="hint">All five animate in step. Two questions: <strong>can you tell it moves?</strong>
+      and <strong>does it stay calm when you're not looking at it?</strong></p>
+    <span class="spacer"></span>
+    <button id="blind" class="on">Labels hidden</button>
+    <button id="shuffle">Shuffle order</button>
+  </div>
+
+  <div class="grid hide" id="grid">
+    <div class="col v0"  data-id="V0" data-note="ships today · 6 levels, full width · 0.034/px">
+      <div class="tag">V0</div><div class="meta"></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w70"></div><div class="sk t12 w45"></div></div></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w90"></div><div class="sk t12 w45"></div></div></div>
+      <div class="sk t16 w90"></div><div class="sk card"></div>
+    </div>
+    <div class="col vN v1" data-id="V1" data-note="geometry only · highlight 26 · ~0.13/px">
+      <div class="tag">V1</div><div class="meta"></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w70"></div><div class="sk t12 w45"></div></div></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w90"></div><div class="sk t12 w45"></div></div></div>
+      <div class="sk t16 w90"></div><div class="sk card"></div>
+    </div>
+    <div class="col vN v2" data-id="V2" data-note="highlight 31 · collides with --surface-separator">
+      <div class="tag">V2</div><div class="meta"></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w70"></div><div class="sk t12 w45"></div></div></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w90"></div><div class="sk t12 w45"></div></div></div>
+      <div class="sk t16 w90"></div><div class="sk card"></div>
+    </div>
+    <div class="col vN v3" data-id="V3" data-note="highlight 36 · the Designer's seed · ~0.33/px">
+      <div class="tag">V3</div><div class="meta"></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w70"></div><div class="sk t12 w45"></div></div></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w90"></div><div class="sk t12 w45"></div></div></div>
+      <div class="sk t16 w90"></div><div class="sk card"></div>
+    </div>
+    <div class="col vN v4" data-id="V4" data-note="highlight 40 · brightest candidate">
+      <div class="tag">V4</div><div class="meta"></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w70"></div><div class="sk t12 w45"></div></div></div>
+      <div class="row"><div class="sk circle"></div><div class="stack"><div class="sk t16 w90"></div><div class="sk t12 w45"></div></div></div>
+      <div class="sk t16 w90"></div><div class="sk card"></div>
+    </div>
+  </div>
+
+  <p class="foot">Real tokens: base <code>#0D0D0F</code>, skeleton <code>#141416</code> (20,20,22).
+    V0 is the shipping gradient byte-for-byte. V1–V4 keep the same 1.5&nbsp;s sweep and only
+    concentrate the highlight into a narrow band — so V1 vs V0 shows what <em>geometry alone</em>
+    buys, and V2–V4 vary only the new token's value.</p>
+
+<script>
+  const grid = document.getElementById('grid');
+  const blind = document.getElementById('blind');
+  const shuffle = document.getElementById('shuffle');
+  const cols = Array.from(grid.children);
+
+  function paintLabels(){
+    const hidden = grid.classList.contains('hide');
+    cols.forEach((c,i)=>{
+      c.querySelector('.tag').textContent = hidden ? String.fromCharCode(65+i) : c.dataset.id;
+      c.querySelector('.meta').textContent = hidden ? '' : c.dataset.note;
+    });
+  }
+  blind.addEventListener('click', ()=>{
+    const hidden = grid.classList.toggle('hide');
+    blind.textContent = hidden ? 'Labels hidden' : 'Labels shown';
+    blind.classList.toggle('on', hidden);
+    paintLabels();
+  });
+  shuffle.addEventListener('click', ()=>{
+    const order = cols.slice().sort(()=>Math.random()-0.5);
+    order.forEach(c=>grid.appendChild(c));
+    // restart every animation in step so the comparison stays fair
+    cols.forEach(c=>c.querySelectorAll('.sk').forEach(s=>{
+      s.style.animation='none'; void s.offsetWidth; s.style.animation='';
+    }));
+    paintLabels();
+  });
+  paintLabels();
+</script>
+</body>
+</html>
