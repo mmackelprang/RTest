@@ -151,6 +151,104 @@ public class PhoneTextsPanelTests : TestContext
     Assert.NotEmpty(cut.FindAll(".unread-dot"));
   }
 
+  // ── GV-9: the thread-list branch's missing == null guard ───────────────────
+  //
+  // ⚠ These are the FIRST tests to set Error in thread-list mode in either
+  // direction. Before GV-9 the four tests that set Error (Conversation_Shows-
+  // ErrorState_NotEmptyState_WhenErrorSet, Conversation_ShowsMessages_When-
+  // ErrorSetButMessagesArrived, Conversation_ShowsEmptyState_WhenGenuinelyEmpty
+  // — which sets it false — and Conversation_RetryButton_InvokesOnRetry) all
+  // set OpenThreadId too, and the four thread-list-mode tests
+  // (EmptyThreads_ShowsEmptyState, Loading_ShowsSkeleton, EmptyThreadList_Offers-
+  // NoNewMessageAffordance, LoadedThreads_RenderRows) never set Error — so the
+  // branch was unasserted, not covered. The row's deferral note said otherwise;
+  // the code says this.
+
+  [Fact]
+  public void ThreadList_ShowsThreads_WhenErrorSetButThreadsArrived()
+  {
+    // ⭐ THE headline gate for this row, and the one to run the mutation against.
+    // Mutation: revert the thread-list `else if (Error && Threads == null)` to
+    // a bare `else if (Error)`. BOTH assertions below must then fail — the
+    // error copy appears and the row content does not.
+    // Same shape as GV-8's Conversation_ShowsMessages_WhenErrorSetButMessages-
+    // Arrived, one level up: a stale error flag must not outrank content
+    // that has actually arrived.
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>
+        { new("t1", "+15551234567", "Mom", DateTime.UtcNow, true, "see you soon") })
+      .Add(x => x.Error, true));
+
+    Assert.Contains("Mom", cut.Markup);
+    Assert.Contains("see you soon", cut.Markup);
+    Assert.DoesNotContain("Couldn't load conversations.", cut.Markup);
+  }
+
+  [Fact]
+  public void ThreadList_ShowsError_WhenErrorSetAndNothingLoaded()
+  {
+    // The other side of the coin, and the reason the fix is a GUARD and not a
+    // deletion. Mutation: delete that same thread-list error branch entirely —
+    // this fails while the test above still passes, which is what
+    // distinguishes the two.
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, (List<SmsThreadDto>?)null)
+      .Add(x => x.Error, true));
+
+    Assert.Contains("Couldn't load conversations.", cut.Markup);
+    Assert.Contains("Retry", cut.Markup);
+    Assert.DoesNotContain("No conversations yet", cut.Markup);
+  }
+
+  // ── GV-9 / F-7: the structure the unread-gutter CSS rule depends on ────────
+
+  [Fact]
+  public void ThreadRow_OmitsTheDot_WhenRead()
+  {
+    // ⚠ The invariant the F-7 rule is built on: .unread-dot present <=> unread.
+    // LoadedThreads_RenderRows already asserts the positive; without this
+    // negative, an implementation that always emitted the span would make BOTH
+    // that assertion and VoicemailRowTests.Unheard_ShowsUnreadDot vacuous while
+    // VoicemailRowTests.Heard_NoUnreadDot failed at runtime on a green build
+    // (plan C-206).
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>
+        { new("t1", "+15551234567", "Mom", DateTime.UtcNow, false, "see you soon") }));
+
+    Assert.Empty(cut.FindAll(".unread-dot"));
+    Assert.Contains("Mom", cut.Markup);
+  }
+
+  [Fact]
+  public void ThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn()
+  {
+    // ⚠ bUnit evaluates no CSS (plan C-209), so this does NOT prove the 20px
+    // gutter works — nothing in this repository can. What it pins is the two
+    // structural facts the selector needs, which is what makes a silent
+    // regression loud:
+    //   .texts-thread-list .list-item-touch:not(:has(> .unread-dot))
+    //     > .list-item-identity
+    // Nest the dot or the identity column one level deeper and the rule stops
+    // matching with every test still green.
+    // ⚠ Scope, stated so nobody mistakes this for the whole gate: this panel
+    // renders inside .texts-thread-list, so this test exercises the rule's
+    // SECOND selector line only — the DEAD copy (plan §0.5). The first line,
+    // .phone-messages-feed, is what every production row matches, and it is
+    // covered by PhoneMessagesFeedRowTests.CallRow_/UnreadTextThreadRow_ and
+    // VoicemailRowTests.UnreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn.
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>
+        { new("t1", "+15551234567", "Mom", DateTime.UtcNow, true, "see you soon") }));
+
+    var row = cut.Find(".list-item-touch");
+    Assert.NotNull(row.QuerySelector(":scope > .unread-dot"));
+    Assert.NotNull(row.QuerySelector(":scope > .list-item-identity"));
+  }
+
   // Three tests were deleted here by PHN-4, not ported: Degraded_ShowsTexting-
   // Unavailable_WhenThreadOpen, Degraded_HidesComposeInput_EvenWhenFlagOn and
   // ComposeEnabled_WhenFlagOnAndAvailable. All three asserted how the compose bar

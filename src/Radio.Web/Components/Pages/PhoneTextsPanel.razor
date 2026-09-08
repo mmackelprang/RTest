@@ -150,7 +150,16 @@ else
         </div>
       }
     }
-    else if (Error)
+    @* GV-9: content outranks a stale error flag — the canonical shape on this
+       surface is XError && X == null (PhoneMessagesPanel.razor:78 voicemail,
+       :110 threads), and GV-8's M-1 shipped exactly this one branch in
+       conversation mode at :59. The thread list was the hold-out. Without the
+       Threads == null guard a stale Error would outrank rows that had actually
+       arrived — the same lie GV-8 removed, one level up.
+       Dead in production today (this panel is only ever hosted in conversation
+       mode, PhoneMessagesPanel.razor:180/185), fixed under the file's own
+       stated policy for this branch at :139-141. *@
+    else if (Error && Threads == null)
     {
       <div class="empty-state">
         <RadzenIcon Icon="cloud_off" class="empty-state-icon" />
@@ -175,14 +184,23 @@ else
         <button type="button"
                 class="list-item-touch @(captured.ThreadId == SelectedThreadId ? "list-item-active" : "")"
                 @onclick="@(() => OnOpenThread.InvokeAsync(captured.ThreadId))">
+          @* GV-9: dot AFTER the chip, matching both live sites
+             (PhoneMessagesPanel.razor:660-663, VoicemailRow.razor:8-11) — it used to
+             precede the chip here, which is a third layout for the same row. Dead in
+             production (this panel is only ever hosted in conversation mode) but kept
+             in sync so it isn't the next thing someone copies. *@
+          <span class="phone-pill cyan" aria-hidden="true">
+            <RadzenIcon Icon="chat_bubble" />
+          </span>
           @if (captured.HasUnread)
           {
             <span class="unread-dot" aria-hidden="true"></span>
           }
-          <span class="phone-pill cyan" aria-hidden="true">
-            <RadzenIcon Icon="chat_bubble" />
-          </span>
-          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+          @* GV-9: .list-item-identity replaces an inline style that duplicated it
+             verbatim (design-system.css:5838, which also adds gap: 1px). The class is
+             load-bearing, not tidying: the F-7 gutter rule selects the identity column
+             by class, and an unclassed div is unreachable by any selector. *@
+          <div class="list-item-identity">
             <span class="list-item-title">@ResolveThreadName(captured)</span>
             <span class="list-item-subtitle">@PreviewText(captured)</span>
           </div>

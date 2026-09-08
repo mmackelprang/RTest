@@ -17,6 +17,26 @@
 | Depends on | **GV-3** (texts surface). _No external dependency; claimable now. GV-8 is merged, so the guard's canonical form (`PhoneTextsPanel.razor:61`) is on `main` to copy from — read it before writing the thread-list version rather than re-deriving it. Same surface as GV-7: if both are in flight expect `PhoneTextsPanel` and the thread-list row markup to have moved._ |
 | Branch | `fix/gv-texts-polish-overflow-unread-align` |
 
+> ✅ **PLANNED 2026-09-08 against `main` `084a6bbd`.** ⚠ **Only three of this row's twelve line
+> anchors are still correct — eight moved under `PHN-3` (#598) and `PHN-4` (#578), and a ninth
+> points at deleted code** — the plan's §0.3 carries the corrected set; do not work from the
+> numbers in the Detail below. Three corrections to the row's own framing: (1) the `PHN-4`
+> ordering note is **discharged** — the "New message" button was deleted by #578 and there is no
+> remaining constraint; (2) `F-7` is **not** "pure CSS" on the obvious implementation — always
+> rendering the dot breaks `VoicemailRowTests.cs:38` and makes two other assertions vacuous, so
+> the plan uses a `:has()` gutter plus one markup sync in the dead copy; (3) `F-7`'s fix moves
+> **every** feed row 20px right, call rows included — a deliberate consequence the owner should
+> see in the PR. `GV-7` shares this surface: **prefer `GV-9` first**, for the same reason this
+> row's neighbour already prefers `GV-8` first.
+>
+> 🚧 **IN FLIGHT 2026-09-08 (Builder).** Branch `fix/gv-texts-polish-overflow-unread-align`; all
+> six plan tasks implemented, gates green (47 warnings / 0 errors; suite green but for the six
+> documented known-failures). **The PR is deliberately held unmerged at the owner's instruction**
+> — not on a failing gate, but on the §4.6 consequence: the `F-7` fix also moves read **call**
+> rows 20px right, which is deliberate and well-argued but is a visible, unrequested change to
+> the appliance UI that `C-210` means nobody can verify in the real app. Before/after harness
+> screenshots are in [`docs/uat/2026-09-08-gv9-texts-polish/`](../uat/2026-09-08-gv9-texts-polish/).
+
 ## Detail
 
 ✅ **ASSESSED AGAINST `D31` 2026-09-05 AND UNAFFECTED — all three items survive.** CSS overflow on a *displayed* identifier, a 20px *list* alignment jump made visible by `GV-4`'s mark-read, and a `== null` guard on the **thread-list** branch — a different collection from the conversation-mode branch the send path touched. None of it is send.
