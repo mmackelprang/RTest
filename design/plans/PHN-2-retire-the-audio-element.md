@@ -1989,6 +1989,7 @@ that window a **first** play of a voicemail fails and the panel says
   ```bash
   curl -s http://radio:5004/api/gvbridge/status
   ```
+  ⛔ **RETRACTED 2026-09-08 — see `design/INTEGRATIONS.md` and `docs/queue/inbound/2026-09-08-rotaryphone-psidts-field-is-not-honest.md`.** `psidtsAgeSeconds` is an age-of-last-*load* clock, not a PSIDTS clock: it read **608** (inside the "healthy" band) while the bridge was dead for 83 minutes on 2026-09-08. **This UAT step would have PASSED against a dead bridge.** Use `lastApiSuccessAt` and `cookiesValid` instead — the full predicate is in `INTEGRATIONS.md`. _Superseded text:_
   Read **`psidtsAgeSeconds`** and **ignore every other field in that payload** — `available`,
   `cookiesValid` and `degraded` have all been observed reporting healthy during a hard outage.
   - **under 660** → healthy, go ahead

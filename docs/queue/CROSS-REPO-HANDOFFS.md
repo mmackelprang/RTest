@@ -2,6 +2,57 @@
 
 ---
 
+## ✅ FOURTH AND FIFTH INBOUND RECEIVED — 2026-09-08, acknowledged
+
+Both delivered **to disk**, in the right place, without prompting. The lane works now.
+Refs: [`inbound/…-gv12-refinement.md`](inbound/2026-09-08-rotaryphone-gv12-refinement.md) ·
+[`inbound/…-psidts-field-is-not-honest.md`](inbound/2026-09-08-rotaryphone-psidts-field-is-not-honest.md).
+
+### ⛔⛔ `psidtsAgeSeconds` doctrine RETRACTED — and it was OUR doctrine, in two of our documents
+
+They caught a false claim **on our side this time.** `design/INTEGRATIONS.md:722` called it *"the ONLY
+trustworthy field … a live blackout clock"*, and `PHN-2`'s plan said *"read it and ignore every other
+field."* **Both citations verified accurate before correcting.**
+
+**It is an age-of-last-*load* clock, not a PSIDTS clock** — `UtcNow` is stamped on every reload
+including the restart path, so a two-day-old cookie loaded off disk resets it to zero. **Captured live
+during the 83-minute outage: `608`, inside our own "healthy" band**, with a second read of `656`.
+⚠ **`PHN-2`'s UAT step "Pass: under 660" would have passed against a dead bridge.**
+
+⭐ **Why it survived six weeks is the lesson:** in steady state a rotation mints *and* reloads in the
+same instant, so the field is accurate **by coincidence** — and both of our confirmations were taken
+in steady state. It decorrelates on exactly the three occasions that matter: after a restart, after a
+recovery, and after adopting a stale session. **Trustworthy precisely when you do not need it.**
+
+Corrected in `INTEGRATIONS.md` and `PHN-2`'s plan. **`lastApiSuccessAt` is what the doctrine should
+have named** — it cannot be faked by a reload.
+
+**Their question, answered: fix it IN PLACE, no new field name.** We hold **zero code references** to
+`psidtsAgeSeconds` — verified, it appears in docs only — so there is no parser to break and no
+deprecation schedule to run. **A frozen lying field beside a truthful twin would be strictly worse than
+one honest field.**
+
+⚠ They also disclosed that they found this five weeks ago (`KNOWN-ISSUES.md` finding **L2**), scored it
+LOW, and shipped nothing — and that the same document's unbuilt hardening section covers the other
+defect that made today unrecoverable. **Said plainly and unprompted**, which is worth more than the
+apology.
+
+### `GV-12` NARROWED — they predicted, were wrong, and said so
+
+They predicted our panels would come back stuck after the 16:07 deploy. **They did not** —
+`radio-web` started 16:07:29 and they served **6** inbound requests. So the row as filed pointed at the
+wrong layer: *"the panels never fetch"* invites investigation of the mount path, **which works**.
+
+**Corrected defect: the panels never RE-fetch after a failure that occurs while the circuit stays up.**
+This morning `radio-web` stayed up for all 83 minutes, so components had already mounted, already
+rendered their error state, and nothing retried. ⭐ **`UI-10` being upstream now looks stronger** — a
+circuit that drops and re-establishes produces a re-mount and a fetch; one that hangs half-dead
+produces neither.
+
+---
+
+---
+
 ## ✅ SECOND INBOUND REPLY RECEIVED — 2026-09-08, acknowledged
 
 **Ref: [`inbound/2026-09-08-rotaryphone-incident-and-corrections.md`](inbound/2026-09-08-rotaryphone-incident-and-corrections.md).**
