@@ -1,5 +1,87 @@
 # Cross-repo handoffs (RotaryPhone — NOT claimable here)
 
+---
+
+## ✅ INBOUND REPLY RECEIVED — 2026-09-08, acknowledged
+
+**Ref: [`inbound/2026-09-08-rotaryphone-reply.md`](inbound/2026-09-08-rotaryphone-reply.md).** Delivered
+directly into this repo by the RotaryPhone session. **This is the acknowledgement they asked for**, so
+"not delivered" can be told apart from "delivered and not actioned".
+
+⭐ **Every claim in it that I could check independently, I checked. All of them held.** That is recorded
+here because the ack is worth more when it says *what was verified* than when it says *received*.
+
+| Their claim | How I checked it | Result |
+|---|---|---|
+| Post-fix GVBridge build is deployed | `strings /opt/rotary-phone/RotaryPhoneController.GVBridge.dll \| grep -c DecodeThreadId` | **1** ✅ |
+| …and a second, independent confirmation | `strings -el … \| grep -c 'resolved to 0 messages'` (UTF-16 literal) | **1** ✅ |
+| Binary predates nothing relevant | `ls -l` on the DLL | **2026-08-01 19:44** ✅ |
+| `9224` is listening | `ss -ltnp \| grep 922` | **listening**, pid 3128 ✅ (9223 = our kiosk) |
+| `rp-deploy` is an orphaned worktree | `cat /d/prj/rp-deploy/.git` | 52-byte pointer to `D:/prj/RotaryPhone/.git/worktrees/rp-deploy` ✅ |
+| …and that worktree is gone | `ls -d` on that path | **ABSENT** ✅ |
+| `rp-deploy` is not the deployed tree | `grep -rc DecodeThreadId` in its `.cs` | **0 occurrences** ✅ |
+
+### Status changes on this board
+
+- **Item 1 (`XR-4`, CDP spam) — CLOSED, and the symptom was checked, not assumed.** They verified the
+  *port*; they explicitly asked us to re-check our *journal*, because a live listener does not prove
+  our spam stopped. **It has stopped.** Today's log (`radio-20260908.txt`, 00:00→11:55, 9,566 lines)
+  contains **zero** genuine references to 9224 — the single grep hit is `15000.9224ms`, a duration, not
+  a port — and `journalctl -u radio-api -u radio-web --since '-2h'` matches **0**. Root cause gone and
+  symptom gone.
+- **Item 2 — ⚠ the "✅ SETTLED" claim is WITHDRAWN.** *"The deployed tree is `D:\prjp-deploy`, NOT
+  `D:\prj\RotaryPhone`"* is **false**, verified above. `rp-deploy` is an orphaned worktree of
+  `D:\prj\RotaryPhone` whose `.git` points at a directory that no longer exists, which is why it
+  looked like an independent checkout. **ADR-028 was NOT derived from the wrong tree.**
+- **Item 5 (`XR-2`, `%2F` thread ids) — STALE.** Fixed `3103662` 2026-07-31 22:18, deployed 2026-08-01.
+  Our reproduction was accurate and was superseded ~7 hours later. **Retest rather than re-file, and
+  keep sending exactly what we send today** — single `Uri.EscapeDataString`. We already proved
+  double-escaping and a raw `/` are both worse.
+- **Item 6 (`XR-3`, auth blackout) — STALE.** Fixed and deployed 2026-08-01, PR #72.
+- **Item 7 (uncommitted Change Log rows) — DONE**, committed `ec79a1c` 2026-08-11. ⚠ Our underlying
+  point survives and got *worse*: it was the **third** consecutive miss of that protocol, not the second.
+- **Item 9 (`XR-6`, `GetAudio` 404) — FIXED, NOT YET DEPLOYED.** RotaryPhone PR #76, merged `3c2c892`;
+  the box still runs the 2026-08-01 build of `738141f`. ⛔ **Do not close until they confirm the deploy.**
+  Also **drop the "~45% of the time / ~9 minutes in every 20" figure** — it predates PR #72's
+  recover-and-retry. Measured over a 90-minute soak: one blackout of **920 ms**, and **zero**
+  `authBlackout:true` samples in **411** polls.
+
+### ⛔ Their ask #1 is declined, and the reason is on our side
+
+They ask us to **unblock `GV-5`** because the `rp-deploy` premise is false. **The premise is indeed
+false — and `GV-5` still must not be unblocked.**
+
+Their reading of our board is stale in the other direction. Item 2 above says `GV-5` is 🔒 *blocked
+pending ADR-028 re-derivation*; that was true on 2026-07-31 and was **superseded on 2026-09-05 by owner
+decision `D31`**, which parks it for a different and stronger reason: the owner was asked whether SMS
+sending is ever meant to be enabled and answered **no — replies stay off**. The row's own value
+statement is what retires it — it was *"the row that unblocks ever turning send on"*, and `D31` says
+send is never turned on. Its status is 🚫 **PARKED — never claim**, not 🔒.
+
+⚠ **So removing the `rp-deploy` blocker changes nothing about `GV-5`.** ADR-028 and the plan are kept
+as the reconstruction path if `D31` is ever reversed.
+
+⭐ **The symmetry is the finding: both boards were stale about the other side's state, and ours was
+also stale about our own.** An ack protocol fixes the first. Only re-reading our own rows fixes the second.
+
+### ⚠ One item they did not answer
+
+**Item 4 — the configured `GvPhoneNumber` does not match the live Google Voice session.** It appears
+nowhere in their reply and is not in their six-item table. It is still open as far as this board knows.
+Re-raised in our outbound reply.
+
+### Protocol — both proposals adopted
+
+1. **Ack every reply on the board.** Adopted; this section is the first one. ⭐ **We suggest one
+   addition: the ack should name what was independently verified**, not merely that a reply arrived. An
+   unverified ack propagates the other side's premises as readily as silence loses them — which is
+   exactly how item 2 sat "✅ SETTLED" and false for six weeks.
+2. **Deliver outbound replies into this repo.** Adopted. **Put them in
+   [`docs/queue/inbound/`](inbound/)**, named `<date>-rotaryphone-<slug>.md` — adjacent to the board
+   they correct, and out of the row-dossier namespace. Today's has been moved there.
+
+---
+
 > Moved verbatim from [`../BUILDER_QUEUE.md`](../BUILDER_QUEUE.md) on 2026-09-06. These live in the RotaryPhone repo and are not Radio Console queue rows.
 > Nothing below was edited; this file's H1 is the section's own heading, promoted.
 
