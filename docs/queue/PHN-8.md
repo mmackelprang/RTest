@@ -79,3 +79,49 @@ heard. **Do not claim otherwise in the PR body.**
 ⚠ **And check `AUD-2` before judging it by ear**: the owner reported 2026-09-08 that **ducking does not
 work when playing a voicemail**, which likely means music does not duck under event playback either.
 A speak test judged by listening, over un-ducked music, will read as broken when it is not.
+
+---
+
+## ⭐ OWNER DECISIONS 2026-09-08 — the design gate is DISCHARGED, both questions answered
+
+The owner saw the deployed `PHN-3` button and said:
+
+> "I can see the button now, but I agree that the play button would be much better to be on the
+> 'main' tab rather than in the individual text / message."
+
+Two follow-up questions were put and both answered.
+
+### 1. **ADD, do not move — the per-message button stays.**
+
+Despite the word *"rather than"*, the decision is that **both** affordances exist: the main tab gains
+one, and `PHN-3`'s per-message gutter button survives for when you are already reading a thread.
+
+⛔ **Nothing shipped in `PHN-3` gets reverted.** No bubble markup removed, no `Mine`-gating removed, no
+tests deleted.
+
+⚠ **The cost of this choice is stated so the plan handles it rather than discovers it: two places can
+now start speech.** The stop/state handling must be coherent across both — pressing play on a row while
+a bubble is already speaking, and vice versa, are real cases. `PHN-3`'s state machine already models
+"speaking" for a single origin; **it now needs to model which origin.**
+
+⚠ **Two speak affordances on one surface is exactly the drift a Polisher pass exists to catch.** Run
+one before merge, and make the two read as one idiom rather than two.
+
+### 2. **Speak ALL UNREAD in that thread, oldest first.**
+
+Not just the latest, and not across all threads.
+
+- **Falls back to the latest message when nothing is unread** — a row with no unread should still do
+  something sensible rather than nothing.
+- **Needs a queue and a stop control.** Speaking three messages back-to-back is the common case (they
+  arrive together), and there must be a way to stop partway.
+- ⚠ **"Unread" must mean the same thing here as it does to the unread dot.** `GV-4`/`GV-6` already own
+  mark-read semantics and a `409 markread_disabled` path; **do not mint a second definition of unread.**
+  Check what the dot binds to and bind to that.
+- ⚠ **Does speaking mark them read?** Not decided, and the plan must ask rather than assume. There is a
+  real argument each way, and mark-read is gated by `RotaryPhone:Gv:MarkReadEnabled` on a flag that can
+  be dark — so the answer interacts with `GV-6`.
+
+**The Designer gate is discharged for scope.** A Designer is still worth consulting on the affordance's
+*appearance* on a conversation row — `PHN-3`'s handoff set the visual language and this should extend
+it, not invent a second idiom — but the row is no longer blocked on a decision.
