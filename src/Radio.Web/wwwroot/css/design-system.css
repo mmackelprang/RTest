@@ -5789,6 +5789,36 @@ body {
   flex-shrink: 0;
 }
 
+/* GV-9 / UAT F-7 — reserved unread gutter.
+   The dot is a real in-flow flex child rendered inside an @if, so on a READ row
+   it does not exist and neither does the space it occupied: every row's text
+   slid 20px sideways the moment it was marked read (measured 251px unread vs
+   231px read, at 1920x720). Since no CSS can style an absent element, the
+   dotless row reserves the space instead.
+
+   The 20px is not a magic number — it is the dot's own width plus the row's
+   flex gap, and it must track BOTH of these if either changes:
+     .unread-dot   { width: 8px }   design-system.css:5786
+     .list-item-touch { gap: 12px } design-system.css:598
+   ⚠ Deliberately NOT var(--sp-2) + var(--sp-3). Those tokens hold 8px and 12px
+   today, but neither source declaration uses them, so retokenising --sp-* would
+   move this gutter without moving the dot (plan C-213).
+
+   Scoped to the two phone containers on purpose: .list-item-touch is also used
+   by FileBrowserDialog and QueueHistoryPanel, which have no dots and must not
+   gain a gutter.
+
+   ⚠ This rule is invisible to the test suite — bUnit renders a DOM, not a
+   layout (plan C-209). Its two structural preconditions ARE tested: the dot is
+   a direct child of the row, and the identity column is a direct child that
+   carries a class. If a future change nests either one deeper, this rule stops
+   matching SILENTLY and the 20px jump returns with a green suite. See
+   PhoneTextsPanelTests.ThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn. */
+.phone-messages-feed .list-item-touch:not(:has(> .unread-dot)) > :is(.list-item-identity, .vm-row-main),
+.texts-thread-list   .list-item-touch:not(:has(> .unread-dot)) > .list-item-identity {
+  margin-left: calc(8px + 12px);
+}
+
 /* §Ph — Unified feed row polish (phone dark-theme handoff §Issue 4 + Task #6).
    A shared 44px identity chip gives calls the same left spine as voicemail
    (.vm-chip) / texts; direction tints reuse the exact --signal-* / --accent-primary
@@ -5960,10 +5990,10 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* GV-9 / UAT F-4 — the three declarations its two siblings already carry
-   (.texts-conv-name :5958-5961, .list-item-title :649-656). Without them this
+   (.texts-conv-name :5988-5991, .list-item-title :649-656). Without them this
    line inherits white-space: normal / overflow: visible / text-overflow: clip
    and a long identifier spills instead of ellipsizing. The ellipsis works
-   without touching the parent because .texts-conv-title (:5957) already sets
+   without touching the parent because .texts-conv-title (:5987) already sets
    min-width: 0 — the precondition it needs inside a flex column.
    ⚠ This is a DISPLAY truncation of the header identifier only. It renders
    U+2026 and does not alter any string; nothing reads this element. Do not
