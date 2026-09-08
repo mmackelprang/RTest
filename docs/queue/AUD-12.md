@@ -95,3 +95,65 @@ build.
 
 ⚠ Do not use `AUD-10`'s reconnect dance as part of the test without noting it: a full reconnect is
 currently required to restore audio at all, which can mask this row's transition.
+
+---
+
+## Plan
+
+[`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](../../design/plans/AUD-12-the-source-that-stalled-at-ready.md),
+written 2026-09-06 against `main` at `066a0d5c`, **repaired 2026-09-08 against `c9ebd824`**.
+**0.5 d.** ⛔ **Not auto-mergeable.**
+
+✅ **The `TEST-2` collision note at the top of this dossier is DISCHARGED.** All three anchors it
+named are re-pointed: `ApplyDeferredCaptureState` is `private` at `:457-463`; no test calls it; and
+`C-177` now pins `DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady` and
+`DeviceConnectedEvent_WhenPlatformManaged_LandsReadyWithoutAcquiring` instead of the deleted
+`ApplyDeferredCaptureState_WhenNotPlaying_SetsReady`. **`TEST-2` also made the row smaller** — its
+Task 4 is deleted, so the row touches `BluetoothAudioSource.cs` and nothing else.
+
+**The § *Check the prior art* instruction is DISCHARGED.** Verdict: **sibling path, not a recurrence
+of #469.** The handler that swallows the transition (`OnPlaybackStatusChanged`) was last edited
+`b717314b`, 2026-03-10 — five months before #469, which never touched it.
+
+**The three scope questions, answered:**
+
+1. *Why `Stopped -> Ready`, and what drives `Ready -> Playing`?* `ApplyDeferredCaptureState` writes
+   `Ready`; **nothing** drove it back out. The only exit is an AVRCP edge, and BlueZ emits
+   `PropertiesChanged` only on change — the phone is already playing, so no edge is coming. A second
+   predicate compounds it: the `Playing` arm discarded an AVRCP `Playing` arriving while `Stopped`,
+   which `AUD-10` makes routine.
+2. *Is `isPlaying:false` the same defect?* **The same defect.** `AudioController.cs:576` is a pure
+   projection of `primarySource.State == Playing`. Not a second mapping bug.
+3. *What else gates on `Playing`?* Fifteen sites, enumerated in the plan's §0.4 — including
+   **Sleep**, where `_wasPlayingBeforeSleep` stays false and the phone streams through the night,
+   and the **SignalR push path** this dossier's own list missed. ⚠ **Ducking is NOT among them** —
+   `DuckingService.cs` has zero `AudioSourceState` references, recorded so nobody looks there.
+
+---
+
+## Build status
+
+**PR #623**, branch `fix/aud-12-bt-source-stalled-at-ready`. ⛔ **Open, NOT merged, and the row is
+NOT ✅.**
+
+⛔ **UAT is DEFERRED — it needs the owner's phone.** A real A2DP source is required to reproduce a
+`Ready` stall: without one there is no AVRCP stream, no transport, and nothing to pause. The plan's
+§5 carries the exact steps, in the order they must be run. **This is a documented deferral, not a
+hand-off** — the automated evidence that stands in the meantime is a RED-then-green run plus seven
+falsifying mutations, recorded in the PR body.
+
+⚠⚠ **Whoever runs §5 must read its four-way vacuity table first.** Three of the four make the UAT
+lie in the *dangerous* direction:
+
+| # | Condition | Effect |
+|---|---|---|
+| 1 | `AUD-10` | A reconnect between the pause and the check re-runs `InitializeAsync`, whose catch-up predates this row — **a broken build passes** |
+| 2 | `AUD-18` | A dead fingerprint tap (11½ h of zero bytes on 09-07/08) makes **a correct build fail**. Step 0b baselines `grep -c "No audio data captured"` at **0** before anything else |
+| 3 | `AUD-1` | Album art is **not** a clean criterion — `UseShazamForAllSources: true` on the box can leave the placeholder after a correct fix |
+| 4 | The UAT itself | **Pressing the transport button clears the stall** (`AudioSourceBase.cs:96` writes `Playing` unconditionally). §5 step 4 is ordered non-destructive-first: read the label, then the SongRec line, and only then press |
+
+⭐ **Album art is DEMOTED from headline criterion.** This row was *filed* on the missing art, so that
+demotion is worth stating plainly rather than leaving implicit: the art is a symptom two layers
+downstream, and `AUD-1` can suppress it independently. **The unambiguous pass criteria are step 3's
+`isPlaying: true` and step 4b's `SongRec recognized` line** — that fingerprinting resumes is what
+this row promises.

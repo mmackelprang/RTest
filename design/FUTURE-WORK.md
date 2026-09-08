@@ -6,6 +6,59 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
+## The source metadata bag is an unsynchronized `Dictionary` shared across threads (`AUD-12` `C-175`)
+
+**Filed 2026-09-08 by `AUD-12`, which deliberately did NOT make it load-bearing rather than fix it.**
+
+`USBAudioSourceBase` holds its metadata in a plain, unsynchronized dictionary:
+
+```csharp
+  private readonly Dictionary<string, object> _metadata = new();          // :26
+  public override IReadOnlyDictionary<string, object> Metadata => _metadata;   // :83
+  protected Dictionary<string, object> MetadataInternal => _metadata;          // :98
+```
+
+⚠ **`:83` and `:98` are the SAME object**, not a copy and not a snapshot — the public read-only
+view and the mutable internal handle alias one dictionary.
+
+**It is written from D-Bus callback threads** — `BluetoothAudioSource.OnPlaybackStatusChanged` and
+`OnMetadataChanged`, both invoked from BlueZ property-change signals — **and enumerated on ASP.NET
+request threads** by `AudioDtoMapper.ExtractMetadataToNowPlaying`
+(`src/Radio.API/Mappers/AudioDtoMapper.cs`):
+
+```csharp
+  var extendedKeys = metadata.Keys.Except(new[] { "Title", "Artist", "Album", "AlbumArtUrl" });  // :148
+  foreach (var key in extendedKeys)                                                              // :152
+  {
+    nowPlaying.ExtendedMetadata[key] = metadata[key];                                            // :154
+  }
+```
+
+`Except` is lazy, so the enumeration actually runs inside the `foreach`. **A concurrent write during
+it throws `InvalidOperationException`** ("Collection was modified"), on the `/api/audio/nowplaying`
+request thread. The window is small — a phone must change AVRCP status or track in the microseconds
+a request is projecting the bag — which is why it has not been observed rather than why it cannot
+happen.
+
+**What's needed.** One of: a `ConcurrentDictionary`, a lock around both write and enumeration, or an
+immutable snapshot taken on read. All three are viable; the choice is a real trade-off, because this
+is a resource-constrained Intel N100 and the bag is projected on every `nowplaying` poll, so an
+allocation-per-read snapshot is not obviously the cheap option it looks like.
+
+**Blast radius: every source class deriving from `USBAudioSourceBase`**, not just Bluetooth. That is
+why it wants its own row rather than a drive-by.
+
+⛔ **Why `AUD-12` did not fix it, and the part worth carrying forward.** `AUD-12`'s suggested shape
+was to re-derive the source's playback state by reading `MetadataInternal["PlaybackStatus"]` back
+out. That would have made this hazard **load-bearing for audio-path recovery** — and it would have
+done so through the existing unguarded `(string)pbStatus` cast, an `InvalidCastException` the day
+anything writes a non-string under that key. `AUD-12` instead recorded the same fact in a dedicated
+`volatile bool` field on the source and left the dictionary alone. **The metadata key itself is
+still written and must stay written**: it is a shipped API observable, pinned by
+`BluetoothAudioSourceTests.PlaybackStatusChanged_UpdatesMetadata` and read by `AUD-12`'s own UAT.
+
+---
+
 ## Async event fan-out (`UI-7`) — five things filed and deliberately NOT fixed
 
 `UI-7` routed all 15 of `AudioStateHubService`'s raise sites through a mandatory `GetInvocationList()`
