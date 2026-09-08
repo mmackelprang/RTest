@@ -288,7 +288,8 @@ mockRepository.Verify(r => r.SaveAsync(It.IsAny<Entity>()), Times.Once);
 ## Test Seams — when `internal` + `InternalsVisibleTo` is acceptable
 
 A **test seam** is any member made more visible, or any branch added to production code, whose
-justification is a test. This repository has a dozen-odd and will grow more. They are not banned —
+justification is a test. `TestSeamLabelLintTests`' scan finds **23** of them in `src/` — plus at least
+two more in `.razor`, which it cannot read — and there will be more. They are not banned —
 some reach a path that hardware or a network genuinely makes unreachable — but an unlabelled seam is
 indistinguishable from coverage, and that is how a gap hides.
 

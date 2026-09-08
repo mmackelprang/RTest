@@ -558,11 +558,17 @@ The args also now carry `TriggeringSourcePriority`, **captured inside the lock t
 
 ### Context
 
-Four rows bought test coverage with an `internal` + `InternalsVisibleTo` seam because a native or
+**Three** `internal` + `InternalsVisibleTo` seams were shipped, across **two** PRs, because a native or
 network dependency was believed to make the real path unreachable: `ApplyDeferredCaptureState` (#469),
-`ConnectRaceHookForTests` and `ConnectTransportOverrideForTests` (#468), and
-`CastStatusReadOverrideForTests` (planned by `AUD-5`). `AUD-3` recorded the second and third as design
-debt and folded them into `TEST-2` "as a pattern rather than an incident".
+and `ConnectRaceHookForTests` + `ConnectTransportOverrideForTests` (#468). A fourth,
+`CastStatusReadOverrideForTests`, is **planned by `AUD-5` and does not exist in `src/`** — it has
+bought nothing yet, and is named here only because it will need the same treatment when it ships.
+`AUD-3` recorded #468's two as design debt and folded them into `TEST-2` "as a pattern rather than an
+incident".
+
+⚠ _The count is spelled out because `TEST-2`'s own row asserted **four seams** and that was wrong — the
+fourth was only ever in a plan. An argument from a recurrence count is worth exactly as much as the
+count, so this one is stated as three-shipped-plus-one-planned rather than rounded up._
 
 `TEST-2` asked whether a native SoundFlow `AudioEngine` could be constructed in a unit test so the
 seams could be retired. **It cannot** — `MiniAudioEngine`'s constructor enters native code, CI is a
@@ -600,8 +606,10 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
   offline; removing it would delete real coverage.
 - **Build a native test harness.** Rejected: infeasible on this CI, and — the more useful finding —
   unnecessary, since the types under test are mockable without an engine.
-- **A single "avoid `InternalsVisibleTo`" guideline.** Rejected: it would be ignored for the ~13
-  harmless Kind-A/B seams, and a rule ignored in the common case is unavailable in the rare one.
+- **A single "avoid `InternalsVisibleTo`" guideline.** Rejected: `TestSeamLabelLintTests`' own scan
+  finds **23** seam members in `src/`, of which **21** are ordinary visibility widenings and test-only
+  writers, and a rule ignored in the common case is unavailable in the rare one. (Counted, not
+  estimated — an earlier draft of this line said "~13".)
 - **A naming convention (`*ForTests`) plus a name-based lint.** Rejected, and this is the load-bearing
   rejection: all nine suffixed members are Kinds A–C. `ApplyDeferredCaptureState` carried no suffix, so
   a name-keyed lint would have missed **the exact seam that motivated the decision**. The lint keys on
@@ -610,8 +618,12 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
 ### Consequences
 
 - Two shipped Cast seams retrofitted; `AUD-5` applies the label to its own when it ships.
-- The Kind-D seam is **retired**, not labelled: `ApplyDeferredCaptureState` returns to `private` and its
-  three tests are rewritten to enter through the real dispatch.
+- The Kind-D seam is **retired**, not labelled: `ApplyDeferredCaptureState` returns to `private`. Of the
+  three tests that entered through it, **two are superseded and deleted**
+  (`DeferredCaptureAcquisition_AfterPlay_LeavesSourcePlaying` and
+  `ApplyDeferredCaptureState_WhenNotPlaying_SetsReady`) and **one is rewritten**
+  to reach the same state through the real dispatch, keeping its `SoundFlowAudioTap`
+  assertion — the only one of the three whose assertion was irreplaceable.
 - All three `capture is …` dispatch sites gain end-to-end coverage with no seam and no hardware.
 - The over-claiming comment at `BluetoothAudioSource.cs:447-452` (its span *before* this change; the
   replacement runs `:447-455`) is corrected, and is added to
