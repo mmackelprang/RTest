@@ -184,14 +184,23 @@ else
         <button type="button"
                 class="list-item-touch @(captured.ThreadId == SelectedThreadId ? "list-item-active" : "")"
                 @onclick="@(() => OnOpenThread.InvokeAsync(captured.ThreadId))">
+          @* GV-9: dot AFTER the chip, matching both live sites
+             (PhoneMessagesPanel.razor:660-663, VoicemailRow.razor:8-11) — it used to
+             precede the chip here, which is a third layout for the same row. Dead in
+             production (this panel is only ever hosted in conversation mode) but kept
+             in sync so it isn't the next thing someone copies. *@
+          <span class="phone-pill cyan" aria-hidden="true">
+            <RadzenIcon Icon="chat_bubble" />
+          </span>
           @if (captured.HasUnread)
           {
             <span class="unread-dot" aria-hidden="true"></span>
           }
-          <span class="phone-pill cyan" aria-hidden="true">
-            <RadzenIcon Icon="chat_bubble" />
-          </span>
-          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column;">
+          @* GV-9: .list-item-identity replaces an inline style that duplicated it
+             verbatim (design-system.css:5808, which also adds gap: 1px). The class is
+             load-bearing, not tidying: the F-7 gutter rule selects the identity column
+             by class, and an unclassed div is unreachable by any selector. *@
+          <div class="list-item-identity">
             <span class="list-item-title">@ResolveThreadName(captured)</span>
             <span class="list-item-subtitle">@PreviewText(captured)</span>
           </div>
