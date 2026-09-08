@@ -166,8 +166,9 @@ public class PhoneTextsPanelTests : TestContext
   public void ThreadList_ShowsThreads_WhenErrorSetButThreadsArrived()
   {
     // ⭐ THE headline gate for this row, and the one to run the mutation against.
-    // Mutation: revert :153 to a bare `else if (Error)`. BOTH assertions below
-    // must then fail — the error copy appears and the row content does not.
+    // Mutation: revert the thread-list `else if (Error && Threads == null)` to
+    // a bare `else if (Error)`. BOTH assertions below must then fail — the
+    // error copy appears and the row content does not.
     // Same shape as GV-8's Conversation_ShowsMessages_WhenErrorSetButMessages-
     // Arrived, one level up: a stale error flag must not outrank content
     // that has actually arrived.
@@ -186,8 +187,9 @@ public class PhoneTextsPanelTests : TestContext
   public void ThreadList_ShowsError_WhenErrorSetAndNothingLoaded()
   {
     // The other side of the coin, and the reason the fix is a GUARD and not a
-    // deletion. Mutation: delete the :153 branch entirely — this fails while the
-    // test above still passes, which is what distinguishes the two.
+    // deletion. Mutation: delete that same thread-list error branch entirely —
+    // this fails while the test above still passes, which is what
+    // distinguishes the two.
     Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, (List<SmsThreadDto>?)null)
