@@ -36,3 +36,134 @@
 **Constraint any fix must honour:** the `prefers-reduced-motion: reduce` override at `design-system.css:1683` sets `animation: none`, so reduced-motion users see the **static** gradient — widening the amplitude must not make that state worse.
 
 **Judge it on the kiosk panel, not a laptop LCD:** the numbers above came from frames rendered on the box, and a 6/255 delta is exactly the range where two displays will not agree.
+
+---
+
+## ⭐ Designer answer, 2026-09-07 — the gate is discharged; this row can be planned
+
+**Verdict: a new token, `--skeleton-shimmer` — but amplitude is the SMALLER half of the defect.**
+
+### What was measured (reproducing the UAT's numbers exactly)
+
+| Quantity | Value |
+|---|---|
+| Skeleton body → highlight (spatial, one frame) | (20,20,22) → (26,26,29) = **6/255** R·G, 7 B |
+| Temporal delta over 116 ms | **max 3/255** — matches the row |
+| Block vs. page behind it | 7–13/255 |
+| **Local gradient steepness, real 178 px `.skeleton-text`** | **0.034 levels/px** |
+
+### The finding that reframes the row
+
+**6/255 near black is not a trivial contrast.** Linear luminance goes 0.00699 → 0.01033 — a 1.48×
+step, **48% Weber contrast**. A hard *edge* at that contrast would be visible.
+
+The problem is that `background-size: 200% 100%` stretches the raised→highlight ramp across **one
+full element width**. A full-resolution scanline in frame A is a *monotonic* 20→26 ramp with no peak
+and no edge anywhere; frame B shows the peak just inside the right edge, turning over. So it does
+animate — and nobody sees it because there is nothing to detect. An edgeless wash is the single
+hardest stimulus for human vision, which is the same reason smooth gradients hide banding.
+
+**Amplitude and geometry multiply, and the geometry is doing most of the damage — and it is free to
+fix.**
+
+### Why not the alternatives
+
+- **Not "retune the existing pair":** `--surface-overlay` is referenced by **19 other rules** —
+  `.surface-overlay` with `backdrop-filter: blur(20px)`, modals, bubbles, hover states, and two
+  `color-mix` recipes. It is a *surface* token; the shimmer highlight is a *motion* value. Moving it
+  repaints half the app. **The row's instinct here was right.**
+- **Not "leave it":** an infinite animation on up to ~65 nodes that is provably below threshold is a
+  cost with no benefit, on a box with documented load-sensitivity in the audio path. The honest
+  positions are *make it visible* or *stop paying for it* — not *keep invisible motion*.
+- ⭐ **A fourth option the row did not list: delete the animation and keep a flat block.** Not
+  recommended — the shimmer is the right affordance and the fix is cheap — but it is defensible and
+  it beats the status quo.
+
+### The change
+
+Add beside the surface block at `design-system.css:65-70`:
+
+```
+--skeleton-shimmer: #242429;   /* (36,36,41) */
+```
+
+Delta becomes **16/255 R·G, 19 B**. 36 is **2.5× the linear luminance** of `--surface-raised`, chosen
+on a luminance-ratio ladder (26 = 1.48×, 31 = 2.0×, 36 = 2.5×, 40 = 3.0×) rather than a code-value
+one, which is what keeps the pick defensible on a panel whose gamma is unmeasured. Hue keeps the
+family's cool lean (B−R: +2 raised, +3 overlay, +5 here).
+
+⚠ **Do not land on 31** despite it being the clean 2.0× rung — `(31,31,34)` is *identical* to
+`--surface-separator` `#1F1F22`, and two tokens at one value is how a system starts looking
+accidental.
+
+**And the geometry, which is the bigger half and costs nothing:**
+
+```
+background: linear-gradient(90deg,
+  var(--surface-raised)    0%,
+  var(--surface-raised)   35%,
+  var(--skeleton-shimmer) 50%,
+  var(--surface-raised)   65%,
+  var(--surface-raised)  100%);
+background-size: 200% 100%;   /* unchanged */
+```
+
+Ramp narrows from 50% of the tile to 15% — **3.3× steeper** — while the tile stays 2W so exactly one
+band is on screen (no barber-pole). Combined with amplitude: **0.034 → ~0.30 levels/px, roughly 9×.**
+Keyframes, the `1.5s`, and the one-pass-per-750 ms cadence are unchanged.
+
+**Do not split the token per shape.** `background-size` is a percentage, so geometry is relative to
+each element: every shape completes a pass in 750 ms but the moving *area* scales. `.skeleton-art`
+(min-height 180 px) will be far more assertive than `.skeleton-progress` (**4 px tall**, where it
+stays near-invisible — acceptable, that shape communicates by presence). If `.skeleton-art` reads as
+too much, the lever is a **fixed-px** `background-size` on that one shape, not a second colour token.
+
+### ⚠ The row's reduced-motion premise is outdated — nothing to do
+
+`design-system.css:1713-1724` (the row cites `:1683`) does not merely set `animation: none`; it
+replaces the background entirely with `rgba(255,255,255,0.05)`, a flat fill. The gradient never
+renders in that state, so widening the amplitude **cannot** make it worse.
+
+### How to verify on the panel — order matters
+
+**Test the free geometry change before the token change**, so "leave the tokens alone" stays a live
+outcome.
+
+1. ⭐ **A pre-check that can moot this row: measure real skeleton dwell time.** One pass is 750 ms. If
+   thread-open latency is typically <500 ms, no shape completes a pass and the block looks static at
+   *any* amplitude — which would argue for "leave it" or for removal.
+2. One throwaway comparison page, five rows animating **simultaneously**: today · geometry-only at
+   today's 6/255 · 2.0× · 2.5× · 3.0×. Sequential A/B across deploys is useless for a 10-level
+   judgement.
+3. In the kiosk at **1920×720, on the box** — not a laptop, not a scaled window.
+4. From the **actual chair**: real distance, cabinet height, off-axis angle. Then again **in the dark
+   room**, the console's dominant condition.
+5. **Score two separate questions:** (a) looking at it, can you tell it moves? (b) *not* looking at
+   it, does it stay calm or pull the eye? **(b) is what kills an over-tuned value**, and it is the
+   question a designer at a desk never asks.
+6. Check both extremes in one view — if the winner makes `.skeleton-art` assertive while
+   `.skeleton-progress` still looks dead, that is the signal for the fixed-px fallback.
+7. Photograph from the viewing position with **manual, locked exposure on a tripod**. Auto-exposure
+   lifts near-blacks and will lie; use it only to compare variants within one shot.
+8. Confirm no N100 regression with a skeleton-heavy page up — paint-only, animation count unchanged,
+   so it should be load-neutral, but the audio-distortion correlation makes it worth a glance.
+
+### What could NOT be determined off-box
+
+⚠ **The panel's actual transfer function at code values 20–40 is the crux, and it is unmeasured.** If
+the panel crushes near-black, today's 20-vs-26 may deliver *literally zero* difference rather than
+6/255 — meaning the problem is understated. A raised black floor cuts the other way.
+
+**Confidence: HIGH that 6/255 is too low. LOW-TO-MODERATE that 36 is the right landing value.** The
+number is a seed for the A/B, not an answer. Also unknown: off-axis gamma (cabinet mount implies a
+vertical angle, which shifts near-black most), ambient light and usage hours, real dwell time, and —
+no captured evidence of a *wide* shape shimmering, since the frames contain only ~178 px bars and
+small chips. The `.skeleton-art` claims are derived from CSS geometry, not observed.
+
+### Loose thread, flagged not chased
+
+The selected message row (x≈158–1399, y≈363–425) is **also** animating between the two frames —
+(17,24,27)→(18,28,31), a **4–5/255** G·B change across 99.1% of that region, i.e. *larger than the
+skeleton's own 3*. The UAT's static control sat ~5 px below it and correctly read 0%, so its
+conclusion stands — but anyone re-running a whole-frame diff on these files will find a large diff≥4
+population that has nothing to do with the skeleton.
