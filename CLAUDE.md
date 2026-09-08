@@ -110,6 +110,20 @@ whose anchors moved three times while it measured them.
 - ⚠ **A verification run proves the tree it ran in.** After any concurrent-session incident, re-check
   `main` from a *fresh* checkout rather than the working tree you happen to be holding — that is how
   the 2026-09-08 red state was confirmed cleared.
+- ⛔ **A quiet `git status` is NOT "the agent has finished", and neither is a completion
+  notification.** This rule was violated a **fourth** time on 2026-09-08 — while it was being written
+  — by exactly this reasoning: the coordinator saw a clean-looking tree, took a `completed`
+  notification at face value, and branched. **The agent's own report had ended *"PR #623 is open.
+  Waiting on CI before I close out the cycle."*** It said in words that it was not done, and the
+  status field was believed over the sentence.
+  **The signal is the agent's stated intent, not the tree's appearance and not the notification's
+  status field.** An agent stops and resumes for many reasons — waiting on CI, waiting on a review,
+  waiting on a subagent. **If its last report names something it is still waiting for, it is not
+  finished.** When in doubt, ask it; a one-line message costs nothing next to yanking the branch out
+  from under a Builder mid-push.
+  ⭐ The Builder's own handling of the collision is the model: on finding the tree switched under it,
+  it **deliberately did not switch it back**, on the grounds that doing so *"would yank the tree out
+  from under the other session, which is the same mistake in reverse."*
 
 ## Solution Structure
 
