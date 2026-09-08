@@ -955,4 +955,230 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     Assert.Equal(AudioSourceState.Ready, _source.State);
   }
+
+  // -----------------------------------------------------------------------
+  // Branch-dispatch coverage (TEST-2). These enter through the real event path
+  // — DeviceConnected -> OnDeviceConnected (:361) -> TryAcquireAudioCaptureAsync
+  // (:370) -> the real `capture is ...` arms at :483 / :494 — rather than by
+  // calling ApplyDeferredCaptureState directly. That distinction is the point of
+  // the row: entering at the method executes the state decision without executing
+  // the dispatch, which reads as coverage and is not. design/TESTING.md § Test Seams.
+  //
+  // RouteCaptureThroughMixerAsync (:521) is reached and no-ops because
+  // _playbackService is null (an optional ctor parameter this fixture does not
+  // pass), so both of its arms fall through. That is load-bearing: if a future
+  // change makes routing unconditional, these break loudly rather than silently
+  // stopping short of the branch. Nothing is ever called on the capture mock.
+  //
+  // ⚠ The arms are told apart by GetSoundComponent(), not by state alone. Only
+  // the :494 arm assigns SoundComponent, so :483 leaves GetSoundComponent()
+  // throwing and :494 leaves it returning the exact object the mock handed over.
+  // State alone would not distinguish the two arms from each other, and would not
+  // distinguish either from the `else` at :505 landing the source in Ready by a
+  // different route — which is precisely the vacuous shape this row exists to
+  // prevent. Every assertion below therefore pins WHICH arm ran, not just that
+  // something did.
+  //
+  // These sources are built with a Mock<IBluetoothService> rather than the
+  // fixture's MockBluetoothService, whose GetAudioCaptureDeviceAsync returns a
+  // bare string and so can only ever reach the `else`. They are NOT the fixture's
+  // _source and DisposeAsync does not cover them — each test disposes its own.
+  // -----------------------------------------------------------------------
+
+  /// <summary>
+  /// Counts calls into <c>GetAudioCaptureDeviceAsync</c> so a test can synchronize on
+  /// the acquisition having been observed rather than on elapsed time, and so the
+  /// first (pre-connect) acquisition can be told from the deferred one.
+  /// </summary>
+  private sealed class CaptureAcquisitionProbe
+  {
+    private int _calls;
+    public int Calls => Volatile.Read(ref _calls);
+    /// <summary>Records a call and returns its 1-based ordinal.</summary>
+    public int Record() => Interlocked.Increment(ref _calls);
+  }
+
+  /// <summary>
+  /// Builds a Bluetooth service mock whose capture acquisition returns
+  /// <paramref name="capture"/>.
+  /// <para>
+  /// The first <paramref name="nullAcquisitions"/> calls answer null instead. That is not
+  /// a convenience — it is what makes the "already Playing" test mean anything.
+  /// <c>PlayAsync</c> on a Created source runs <c>InitializeAsync</c>, which consumes the
+  /// capture through the OTHER dispatch at :159/:166 and assigns
+  /// <c>_captureDevice</c>/<c>SoundComponent</c>; a <c>DeviceConnected</c> raised after
+  /// that returns at the "already acquired" guard (:476) and never reaches :483/:494.
+  /// Answering null first leaves the source Playing with no capture — the real
+  /// scenario #469 is about, a source activated before the phone's A2DP stream existed.
+  /// </para>
+  /// <para>
+  /// ⚠ Two, not one. <c>PlayAsync</c> acquires TWICE on a Created source:
+  /// <c>AudioSourceBase.PlayAsync</c> calls <c>InitializeAsync</c> because the state is
+  /// Created (<c>:84-87</c>), and <c>PlayCoreAsync</c> then calls it AGAIN because no
+  /// capture was established (<c>BluetoothAudioSource.cs:206-209</c>). Deferring only the
+  /// first leaves the second one acquiring, and the test silently degrades back into the
+  /// vacuous shape described above. Measured, not assumed — the count is asserted below.
+  /// </para>
+  /// </summary>
+  private static Mock<IBluetoothService> BuildBtMock(
+    object? capture,
+    CaptureAcquisitionProbe probe,
+    int nullAcquisitions = 0,
+    bool platformManaged = false)
+  {
+    var btMock = new Mock<IBluetoothService>();
+    btMock.Setup(b => b.IsAudioManagedByPlatform).Returns(platformManaged);
+    btMock.Setup(b => b.StartAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(true);
+    btMock.Setup(b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()))
+      .Returns(() =>
+      {
+        var ordinal = probe.Record();
+        return Task.FromResult(ordinal <= nullAcquisitions ? null : capture);
+      });
+    btMock.Setup(b => b.ConnectedDevice).Returns(new BluetoothDeviceInfo
+    {
+      Address = "AA:BB:CC:DD:EE:FF",
+      Name = "Test Phone",
+      IsPaired = true,
+      IsConnected = true
+    });
+    return btMock;
+  }
+
+  private BluetoothAudioSource BuildSource(Mock<IBluetoothService> btMock) =>
+    new(_loggerMock.Object,
+        _deviceManagerMock.Object,
+        btMock.Object,
+        _options,
+        identificationService: null,
+        metricsCollector: _metricsMock.Object);
+
+  private static void RaiseDeviceConnected(Mock<IBluetoothService> btMock) =>
+    btMock.Raise(
+      b => b.DeviceConnected += null,
+      new BluetoothDeviceConnectedEventArgs { Device = btMock.Object.ConnectedDevice! });
+
+  private static object NewCaptureDeviceMock() =>
+    new Mock<global::SoundFlow.Abstracts.Devices.AudioCaptureDevice>(
+      MockBehavior.Loose, null!, default(global::SoundFlow.Structs.AudioFormat), null!).Object;
+
+  private static object NewSoundComponentMock() =>
+    new Mock<global::SoundFlow.Abstracts.SoundComponent>(
+      MockBehavior.Loose, null!, default(global::SoundFlow.Structs.AudioFormat)).Object;
+
+  public static TheoryData<string> CaptureKinds => new() { "AudioCaptureDevice", "SoundComponent" };
+
+  private static object NewCaptureMock(string kind) =>
+    kind == "AudioCaptureDevice" ? NewCaptureDeviceMock() : NewSoundComponentMock();
+
+  /// <summary>
+  /// Asserts that the arm matching <paramref name="kind"/> — and not the other one,
+  /// and not the `else` at :505 — is the one that ran. Only :494 assigns
+  /// SoundComponent, so GetSoundComponent() is the discriminator.
+  /// </summary>
+  private static void AssertArmTaken(string kind, BluetoothAudioSource source, object capture)
+  {
+    if (kind == "AudioCaptureDevice")
+    {
+      var ex = Assert.Throws<InvalidOperationException>(() => source.GetSoundComponent());
+      Assert.Contains("not initialized", ex.Message);
+    }
+    else
+    {
+      Assert.Same(capture, source.GetSoundComponent());
+    }
+  }
+
+  [Theory]
+  [MemberData(nameof(CaptureKinds))]
+  public async Task DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady(string kind)
+  {
+    var capture = NewCaptureMock(kind);
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    await using var source = BuildSource(btMock);
+
+    // Not played, so ApplyDeferredCaptureState — reached at :486 or :497 from its REAL
+    // call site inside the arm under test — must land the source in Ready. Created is
+    // the pre-state, so a Ready here cannot have come from InitializeAsync.
+    Assert.Equal(AudioSourceState.Created, source.State);
+
+    RaiseDeviceConnected(btMock);
+
+    // TryAcquireAudioCaptureAsync is fire-and-forget from :370, so synchronize on the
+    // observation rather than on elapsed time (CLAUDE.md § Test Timing).
+    await WaitForAsync(() => source.State == AudioSourceState.Ready);
+
+    Assert.Equal(AudioSourceState.Ready, source.State);
+    Assert.Equal(1, probe.Calls);
+    AssertArmTaken(kind, source, capture);
+  }
+
+  [Theory]
+  [MemberData(nameof(CaptureKinds))]
+  public async Task DeviceConnectedEvent_WhilePlaying_TakesTheBranchAndStaysPlaying(string kind)
+  {
+    // The #469 invariant, driven through the real dispatch instead of the seam: a source
+    // already Playing must survive deferred acquisition, because SoundFlowAudioTap.IsActive
+    // gates fingerprinting on Playing and a demotion silently kills song recognition.
+    var capture = NewCaptureMock(kind);
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 2);
+    await using var source = BuildSource(btMock);
+
+    // Both of PlayAsync's acquisitions answer null, so PlayCoreAsync takes the production
+    // "no capture device yet, starting background retry" path (:220) and the source
+    // reaches Playing with nothing acquired — the state the deferred arm exists for.
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Equal(2, probe.Calls);
+    Assert.Throws<InvalidOperationException>(() => source.GetSoundComponent());
+
+    RaiseDeviceConnected(btMock);
+
+    await WaitForAsync(() => probe.Calls >= 3);
+
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    AssertArmTaken(kind, source, capture);
+  }
+
+  [Fact]
+  public async Task DeviceConnectedEvent_WhenPlatformManaged_LandsReadyWithoutAcquiring()
+  {
+    // The third ApplyDeferredCaptureState call site (:469), which no dispatch test
+    // reaches: when the platform owns audio routing the method short-circuits before
+    // the `capture is ...` arms. Retiring the seam without this would trade one
+    // uncovered branch for another.
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture: null, probe, platformManaged: true);
+    await using var source = BuildSource(btMock);
+
+    Assert.Equal(AudioSourceState.Created, source.State);
+
+    RaiseDeviceConnected(btMock);
+
+    await WaitForAsync(() => source.State == AudioSourceState.Ready);
+
+    Assert.Equal(AudioSourceState.Ready, source.State);
+    Assert.Equal(0, probe.Calls);
+    btMock.Verify(
+      b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  /// <summary>
+  /// Polls a condition to a deadline. Used instead of a fixed Task.Delay because
+  /// TryAcquireAudioCaptureAsync is fire-and-forget — there is no handle to await, so the
+  /// test must synchronize on the observation. Per CLAUDE.md § Test Timing this is the safe
+  /// direction: starvation can only slow it, never flip a pass to a fail, because every
+  /// assertion re-checks after the wait returns.
+  /// </summary>
+  private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 5000)
+  {
+    var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
+    while (!condition() && DateTime.UtcNow < deadline)
+    {
+      await Task.Delay(10);
+    }
+  }
 }
