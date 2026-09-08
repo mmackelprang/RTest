@@ -136,6 +136,24 @@ of #469.** The handler that swallows the transition (`OnPlaybackStatusChanged`) 
 **PR #623**, branch `fix/aud-12-bt-source-stalled-at-ready`. ⛔ **Open, NOT merged, and the row is
 NOT ✅.**
 
+### ⭐ Owner decision 2026-09-08 — `_avrcpReportsPlaying` is cleared on disconnect
+
+Applied in `1ff6070f`. The pre-merge review found that nothing reset the field, while `AudioManager`
+caches one `BluetoothAudioSource` per source type for the whole process — and that **this row adds a
+promotion on the reconnect path** (`ApplyDeferredCaptureState`, reached from both `OnDeviceConnected`
+and `OnCaptureStreamRecovered`). A phone that disconnected while playing therefore made the *next*
+session claim `Playing` the moment capture landed, however idle it was: `isPlaying:true` with
+fingerprinting running against silence. Demonstrated, not argued — the regression test reads
+`Expected: Ready, Actual: Playing` against the unfixed code.
+
+⚠ **What the decision accepts, and it is a choice rather than an oversight.** Clearing means a phone
+that **keeps playing across a re-attach at the same D-Bus object path** gets no corrective `Status`
+read — `AttachMediaPlayerAsync` returns at its dedup first — so that source parks in `Ready`, which is
+`AUD-12`'s own symptom on the reconnect path. **That hole is `C-174`, filed as `AUD-14`, and closes
+there. The hole on the other side had no row and no owner.** Recorded in the field's remarks, at the
+reset site, and in the test's `<remarks>` so it cannot be reversed by a reader who thinks it was
+missed.
+
 ⛔ **UAT is DEFERRED — it needs the owner's phone.** A real A2DP source is required to reproduce a
 `Ready` stall: without one there is no AVRCP stream, no transport, and nothing to pause. The plan's
 §5 carries the exact steps, in the order they must be run. **This is a documented deferral, not a
