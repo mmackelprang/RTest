@@ -111,20 +111,29 @@ public class GoogleCastOutput : AudioOutputBase
   private int _connectionGeneration;
 
   /// <summary>
-  /// Test seam: awaited inside <see cref="ConnectAsync"/> after the receiver has
-  /// been resolved but before the network connect, which is precisely where the
-  /// connect/teardown race used to corrupt state. Lets a test interleave a
-  /// teardown at that exact point deterministically instead of hoping a stress
-  /// loop lands on it. Null (and therefore free) in production.
+  /// <b>Test seam (kind C — substitution).</b> Awaited inside <see cref="ConnectAsync"/>
+  /// after the receiver has been resolved but before the network connect, which is
+  /// precisely where the connect/teardown race used to corrupt state. Set by
+  /// <c>GoogleCastOutputConcurrencyTests</c> (<c>:51</c>, <c>:116</c>).
+  /// <b>Why the real path is unreachable:</b> the window is microseconds wide, so a stress
+  /// loop lands on it only by luck; the hook makes the interleaving deterministic.
+  /// <b>NOT covered by this seam:</b> nothing — it inserts a pause, it does not replace a
+  /// collaborator. The connect either side of it is the real one.
+  /// Null (and therefore free) in production.
   /// </summary>
   internal Func<Task>? ConnectRaceHookForTests { get; set; }
 
   /// <summary>
-  /// Test seam: substitutes the SharpCaster transport connect. Without it the
-  /// supersede-after-a-SUCCESSFUL-connect path is unreachable offline — a fake
-  /// socket can never complete a Cast handshake, so the connect always throws
-  /// and diverts into the error handler instead. That path is the whole point of
-  /// the generation check, so it needs to be exercisable without hardware.
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the SharpCaster transport
+  /// connect. Set by <c>GoogleCastOutputConcurrencyTests:121</c>.
+  /// <b>Why the real path is unreachable:</b> a fake socket can never complete a Cast
+  /// handshake, so offline the connect always throws and diverts into the error handler —
+  /// making the supersede-after-a-SUCCESSFUL-connect path, which is the whole point of the
+  /// generation check, unreachable without hardware.
+  /// <b>NOT covered by this seam:</b> the real SharpCaster handshake and everything its
+  /// failure modes imply. The generation check, the publish and the teardown either side
+  /// are real; the socket is not. Only hardware UAT covers the transport itself — and per
+  /// <c>AUD-3</c> residue (a), that UAT has never been performed.
   /// Null (and therefore free) in production.
   /// </summary>
   internal Func<ChromecastReceiver, Task>? ConnectTransportOverrideForTests { get; set; }
