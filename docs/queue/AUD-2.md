@@ -60,3 +60,36 @@ Unchanged and re-verified at `656f58e6`: `SDRRadioAudioSource.cs:204`,
 row also under-scopes the fix: a second half, not in this row, corrects the log lines that assert
 success after a lookup that matched nothing (`SoundFlowPlaybackService.cs:666`,
 `AudioManager.cs:557-559`) — see the plan §2.**_
+
+---
+
+## ⭐ LIVE OWNER OBSERVATION 2026-09-08 — ducking does not work when playing a voicemail
+
+> "ducking does **not** work when playing a voicemail"
+
+**This is very likely this row's user-visible symptom, and it upgrades the row's evidence from
+code-reading to a heard failure.** Until now `AUD-2` was CONFIRMED by reading the key mismatch; nobody
+had reported the consequence out loud.
+
+**Why it fits:** the event side is wired correctly. `EventPlaybackService` takes `IDuckingService`
+(`:48`, `:150`, `:159`), subscribes to `DuckingStateChanged` (`:186`), and `DuckingService` registers
+the event in `_activeEvents` keyed by `eventSource.Id` (`:147`). So **the duck starts.** What this row
+says fails is the other half — the four primary source types register under a *minted* key and are
+addressed by `IAudioSource.Id`, so **the attenuation targets a key that matches nothing and the music
+never gets quieter.** SDR radio and everything on `USBAudioSourceBase` (vinyl, USB) are both in scope,
+which covers whatever the owner was listening to.
+
+⚠ **NOT PROVEN, and the plan must distinguish these before fixing anything:**
+
+1. **This row's key mismatch** — duck requested, attenuation misses. *(Predicted by the row.)*
+2. **An event-side gap** — the voicemail source never requests ducking, or requests it at a priority
+   that resolves to no attenuation. `EventPlaybackService` wires ducking, but wiring is not the same as
+   *this path* invoking it.
+3. **Both.**
+
+**Cheapest discriminator:** `DuckingService` logs *"Added event source '{SourceId}' to ducking queue"*
+at `:175`. Play a voicemail and look. **If that line appears, the event side is fine and this row owns
+the failure**; if it does not, there is a second defect and this row is not the whole story.
+
+⚠ **Do not let the fix be judged by ear alone.** "It ducks now" is exactly the kind of claim that has
+gone wrong repeatedly this week — pair the listening test with the log line and a measured gain value.
