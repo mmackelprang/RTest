@@ -198,6 +198,46 @@ public class PhoneTextsPanelTests : TestContext
     Assert.DoesNotContain("No conversations yet", cut.Markup);
   }
 
+  // ── GV-9 / F-7: the structure the unread-gutter CSS rule depends on ────────
+
+  [Fact]
+  public void ThreadRow_OmitsTheDot_WhenRead()
+  {
+    // ⚠ The invariant the F-7 rule is built on: .unread-dot present <=> unread.
+    // LoadedThreads_RenderRows (:141) already asserts the positive; without this
+    // negative, an implementation that always emitted the span would make BOTH
+    // that assertion and VoicemailRowTests.cs:29 vacuous while VoicemailRow-
+    // Tests.cs:38 failed at runtime on a green build (plan C-206).
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>
+        { new("t1", "+15551234567", "Mom", DateTime.UtcNow, false, "see you soon") }));
+
+    Assert.Empty(cut.FindAll(".unread-dot"));
+    Assert.Contains("Mom", cut.Markup);
+  }
+
+  [Fact]
+  public void ThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn()
+  {
+    // ⚠ bUnit evaluates no CSS (plan C-209), so this does NOT prove the 20px
+    // gutter works — nothing in this repository can. What it pins is the two
+    // structural facts the selector needs, which is what makes a silent
+    // regression loud:
+    //   .phone-messages-feed .list-item-touch:not(:has(> .unread-dot))
+    //     > :is(.list-item-identity, .vm-row-main)
+    // Nest the dot or the identity column one level deeper and the rule stops
+    // matching with every test still green.
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>
+        { new("t1", "+15551234567", "Mom", DateTime.UtcNow, true, "see you soon") }));
+
+    var row = cut.Find(".list-item-touch");
+    Assert.NotNull(row.QuerySelector(":scope > .unread-dot"));
+    Assert.NotNull(row.QuerySelector(":scope > .list-item-identity"));
+  }
+
   // Three tests were deleted here by PHN-4, not ported: Degraded_ShowsTexting-
   // Unavailable_WhenThreadOpen, Degraded_HidesComposeInput_EvenWhenFlagOn and
   // ComposeEnabled_WhenFlagOnAndAvailable. All three asserted how the compose bar
