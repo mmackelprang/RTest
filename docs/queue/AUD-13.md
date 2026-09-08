@@ -82,3 +82,48 @@ Unit-testable without hardware: the selection logic takes a device list and a po
 empty port against a multi-device list is a pure function test. The behavioural half — which device
 is actually bound on the appliance — needs the box and should be checked against whichever semantic
 the owner picks.
+
+---
+
+## ⭐ Owner input, 2026-09-07 — this narrows the row considerably
+
+Two facts from the owner that the row did not have, and that change what the fix should be:
+
+1. **The Vinyl source will ALWAYS have a USB port connector. All of its audio arrives over USB.**
+2. **The Radio USB connection is DEPRECATED.** `SDRRadioAudioSource` (RTL-SDR) is the only supported
+   radio path.
+
+### What that means for the two shipped `USBPort: ""` entries
+
+They are not two instances of one problem. They need opposite treatments:
+
+| Entry | Treatment |
+|---|---|
+| `Devices/Vinyl` (`appsettings.json:54`) | **Must name a real device.** Vinyl is USB-only, so an empty port is never correct — it is a missing configuration, not a permissive default. |
+| `Devices/Radio` (`:51`) | **Vestigial.** It configures a deprecated path. The question is whether the entry — and `RadioAudioSource`'s USB capture route — should be removed rather than fixed. |
+
+### Why this makes the current behaviour worse than the row states
+
+The row says an empty port binds to whatever enumerates first. With both entries empty, **`Radio` and
+`Vinyl` match the same first non-`"Monitor of"` device** — they are aliases, not merely
+unconfigured. On the appliance the candidates are the USB Microphone and the built-in analog input,
+and enumeration order is not stable across reboots or hot-plug.
+
+So today, **Vinyl is capturing whichever of those two enumerates first**, and it is masked only
+because nobody has played a record. The moment the turntable is used, it is selected by ordering
+rather than by configuration — and the warning written to catch exactly that case is unreachable,
+because `Contains("")` guarantees `targetDevice != null` before the fallback runs.
+
+### The decision this row was waiting on, now answerable
+
+**Empty `USBPort` should be a configuration fault, not a match.** `ENC-12`'s tiered config-fault
+surfacing is the established in-repo pattern for making that visible rather than silent.
+
+That answer is safe *because* of fact 1: Vinyl always has a port, so refusing to bind on empty
+cannot break a legitimate configuration — there is no legitimate configuration in which Vinyl's port
+is empty.
+
+⚠ **The plan should decide `Devices/Radio` separately and deliberately.** Applying the same fault to
+a deprecated path would surface a fault for a source nobody uses. Removing the entry and its capture
+route is probably right, but that is a deprecation, not a bug fix, and it deserves its own
+justification rather than riding along with the Vinyl fix.
