@@ -1221,6 +1221,272 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     Assert.True(tap.IsActive, "Fingerprinting must stay active after deferred capture lands");
   }
 
+  // -----------------------------------------------------------------------
+  // AUD-12 — the source that stalled at Ready while the audio kept playing.
+  //
+  // Measured on the box 2026-09-06: Playing -> Paused -> Stopped -> Ready at
+  // 10:18:19, then nothing for ten-plus minutes while the PipeWire graph was
+  // [active] and audible. Two predicates put the source there and neither could
+  // get it out:
+  //
+  //   * ApplyDeferredCaptureState (:457) PRESERVES Playing but never RE-DERIVES
+  //     it, so a source arriving in any other state lands in Ready; and
+  //   * OnPlaybackStatusChanged's Playing arm (:1136) accepted an AVRCP Playing
+  //     edge only from Ready or Paused, so one arriving while Stopped — which
+  //     AUD-10 makes routine — was written to metadata at :1128 and then
+  //     silently discarded.
+  //
+  // Ready then has no exit, because the only route out is an AVRCP edge and
+  // BlueZ raises PropertiesChanged ONLY ON CHANGE: the phone is already playing,
+  // so no further edge is coming.
+  //
+  // ⚠ Neither half fixes the measured sequence alone, which is why they ship
+  // together and why T1 exercises both. At the moment the swallowed edge arrived
+  // the source held no capture path, so the widened predicate would have refused
+  // the promotion anyway (HasCapturePath, AUD-12 C-170); the catch-up inside
+  // ApplyDeferredCaptureState is the load-bearing half.
+  //
+  // ⛔ These tests add NO seam. Every one of them reaches its state through
+  // IBluetoothService — the deferred path by raising DeviceConnected on a
+  // Mock<IBluetoothService> whose GetAudioCaptureDeviceAsync hands back a mocked
+  // capture, exactly as TEST-2's DeviceConnectedEvent_* tests do. They reuse
+  // TEST-2's harness above rather than building a second one
+  // (design/TESTING.md § Test Seams rules 1 and 5).
+  //
+  // ⚠ Two background tasks exist on these paths and NEITHER can affect an
+  // assertion — recorded so a later reader does not add a wait "to be safe":
+  //   (a) the Playing arm fires `_ = TryReacquireCaptureAsync()` (:1144) when the
+  //       source is Playing with no _playbackId; it returns at its :681 guard the
+  //       moment a capture is held, and its own summary says it "does not alter
+  //       the source state";
+  //   (b) PlayCoreAsync starts RetryCaptureInBackgroundAsync, whose first act is
+  //       a 10 s Task.Delay (:641); DisposeAsyncCore cancels it via
+  //       StopCaptureRetryLoop() long before it ticks.
+  // -----------------------------------------------------------------------
+
+  /// <summary>
+  /// AUD-12's measured stall, replayed end to end. This is the regression pin.
+  /// </summary>
+  [Theory]
+  [MemberData(nameof(CaptureKinds))]
+  public async Task StalledAtReady_WhenPhoneResumed_IsPromotedWhenDeferredCaptureLands(string kind)
+  {
+    // nullAcquisitions: 2 because PlayAsync acquires TWICE on a Created source
+    // (AudioSourceBase.cs:84-87 via InitializeAsync, then BluetoothAudioSource.cs:206-209
+    // from PlayCoreAsync). Both must answer null, or the capture is consumed by the
+    // OTHER dispatch at :159/:166 and DeviceConnected returns at the "already
+    // acquired" guard (:479) without ever reaching :486/:497. TEST-2 measured this.
+    var capture = NewCaptureMock(kind);
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 2);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Equal(2, probe.Calls);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Paused);
+    Assert.Equal(AudioSourceState.Paused, source.State);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    // The phone resumes. This edge is still refused — the source holds no capture
+    // path at this point, which is exactly what HasCapturePath guards (C-170) —
+    // but the fact that the phone reported Playing is now recorded.
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    // The deferred-capture retry lands, through the REAL dispatch. Before AUD-12
+    // this parked the source in Ready permanently.
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => source.State == AudioSourceState.Playing);
+
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Equal(3, probe.Calls);
+    AssertArmTaken(kind, source, capture);
+  }
+
+  /// <summary>
+  /// The fast path: an AVRCP Playing arriving while Stopped is accepted when the
+  /// source still holds a capture path. This is the arm that is live on the box —
+  /// radio is Linux, where IsAudioManagedByPlatform is false.
+  /// </summary>
+  [Theory]
+  [MemberData(nameof(CaptureKinds))]
+  public async Task PlaybackStatusPlaying_WhileStopped_PromotesWhenCapturePathIsIntact(string kind)
+  {
+    // nullAcquisitions defaults to 0, so InitializeAsync's OWN dispatch (:159/:166)
+    // consumes the capture and assigns _captureDevice or SoundComponent. That is
+    // the HasCapturePath arm under test.
+    var capture = NewCaptureMock(kind);
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    AssertArmTaken(kind, source, capture);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  /// <summary>
+  /// The third HasCapturePath arm: the platform owns the routing, so the source
+  /// reaches Playing holding no capture object at all — and the guard is still
+  /// true, which is the point.
+  /// </summary>
+  [Fact]
+  public async Task PlaybackStatusPlaying_WhileStopped_PromotesWhenPlatformOwnsRouting()
+  {
+    // The Windows arm. InitializeAsync short-circuits at :141-155 and PlayCoreAsync
+    // at :200-204, so nothing is ever acquired.
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture: null, probe, platformManaged: true);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Equal(0, probe.Calls);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  /// <summary>
+  /// The guard actually guards: with no capture path at all, an AVRCP Playing
+  /// arriving while Stopped must NOT promote.
+  /// </summary>
+  [Fact]
+  public async Task PlaybackStatusPlaying_WhileStopped_DoesNotPromoteWithNoCapturePath()
+  {
+    // capture: null, so nothing can ever be acquired and every HasCapturePath arm
+    // is false for the whole test.
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture: null, probe);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Throws<InvalidOperationException>(() => source.GetSoundComponent());
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+
+    // No playback id, no capture device, no generator, no platform routing.
+    // Claiming Playing here would assert audio is flowing from a phone that may
+    // have disconnected — OnDeviceDisconnected (:742) assigns Stopped only after
+    // tearing the capture out of the mixer (:717-738). AUD-12 C-170.
+    //
+    // ⛔ This test is the ONLY one that fails if `&& HasCapturePath` is deleted
+    // from :1136. T1, T2 and T2b all stay green without it. That asymmetry is the
+    // whole value of this test — without it a future simplification could drop the
+    // guard and nothing would notice.
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+  }
+
+  /// <summary>
+  /// The near-miss that must not promote: the phone's last report was Paused, so
+  /// the deferred capture landing leaves the source in Ready.
+  /// </summary>
+  [Fact]
+  public async Task DeferredCapture_WhenPhoneReportsPaused_StaysReady()
+  {
+    var capture = NewCaptureDeviceMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe);
+    await using var source = BuildSource(btMock);
+
+    // Created, so the Paused arm's `when State == Playing` guard refuses the
+    // transition and the source stays Created — but the phone's last reported
+    // status is recorded regardless, which is what this test is about.
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Paused);
+    Assert.Equal(AudioSourceState.Created, source.State);
+
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => source.State == AudioSourceState.Ready);
+
+    // ⚠ This is the only test that catches a catch-up which promotes on ANY seen
+    // status rather than on Playing. DeviceConnectedEvent_TakesTheMatchingBranch_
+    // AndLandsReady stays green against that mutation, because it raises no AVRCP
+    // event at all.
+    Assert.Equal(AudioSourceState.Ready, source.State);
+  }
+
+  /// <summary>
+  /// InitializeAsync's own catch-up still works after it was moved into the shared
+  /// helper. This behaviour predates AUD-12; the test pins that the move did not
+  /// change it.
+  /// </summary>
+  [Fact]
+  public async Task InitializeAsync_WhenPhoneAlreadyPlaying_TransitionsToPlaying()
+  {
+    // The race the :184 comment describes: the AVRCP edge lands before the source
+    // is Ready, so the switch discards it (Created is not an accept state) and the
+    // catch-up recovers it.
+    //
+    // The fixture's MockBluetoothService is correct HERE and wrong everywhere else
+    // in this block: its GetAudioCaptureDeviceAsync returns a boxed string, so the
+    // source reaches Ready through the `else` at :508 holding no capture — which is
+    // exactly the shape InitializeAsync's catch-up exists for.
+    _mockBluetooth.SimulatePlaybackStatusChange(BluetoothPlaybackStatus.Playing);
+    Assert.Equal(AudioSourceState.Created, _source.State);
+
+    await _source.InitializeAsync(CancellationToken.None);
+
+    Assert.Equal(AudioSourceState.Playing, _source.State);
+  }
+
+  /// <summary>
+  /// The downstream invariant, reached BY PROMOTION. Fingerprinting is gated on
+  /// Playing (SoundFlowAudioTap.cs:135), which is why AUD-12 surfaced as album art
+  /// that never resolved.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Distinct from <c>DeferredCaptureAcquisition_ThroughDispatch_KeepsAudioTapActive</c>,
+  /// which reaches <c>Playing</c> by never leaving it and pins the #469 invariant.
+  /// This one reaches <c>Playing</c> by promotion out of <c>Ready</c> — the transition
+  /// AUD-12 creates, which nothing else covers.
+  /// </remarks>
+  [Fact]
+  public async Task PromotedSource_KeepsAudioTapActive()
+  {
+    var capture = NewCaptureDeviceMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 2);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => source.State == AudioSourceState.Playing);
+
+    var engineMock = new Mock<IAudioEngine>();
+    engineMock.Setup(e => e.State).Returns(AudioEngineState.Running);
+
+    var managerMock = new Mock<IAudioManager>();
+    managerMock.Setup(m => m.ActiveSource).Returns(source);
+
+    var tap = new SoundFlowAudioTap(
+      new Mock<ILogger<SoundFlowAudioTap>>().Object,
+      engineMock.Object,
+      managerMock.Object);
+
+    Assert.True(tap.IsActive, "Fingerprinting must be active once the source is promoted");
+  }
+
   /// <summary>
   /// Polls a condition to a deadline. Used instead of a fixed Task.Delay because
   /// TryAcquireAudioCaptureAsync is fire-and-forget (:370) — there is no handle to await, so
