@@ -6,6 +6,52 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
+## Async event fan-out (`UI-7`) — five things filed and deliberately NOT fixed
+
+`UI-7` routed all 15 of `AudioStateHubService`'s raise sites through a mandatory `GetInvocationList()`
+seam and added `AsyncEventFanOutLintTests` to keep them there. Five adjacent problems were found while
+doing it and left alone on purpose, because each one's review has nothing to do with a fan-out diff.
+
+**1. `SystemConfigPage.razor` leaks three handlers per navigation — `UI-9`, and arguably outranks the
+row that found it.** `:2219`, `:2229` and `:2239` subscribe `SourceChanged`, `EncoderConnectionChanged`
+and `PhoneCallStateChanged` with **anonymous lambdas**, and there is no `-=` anywhere in the file. An
+anonymous lambda cannot be unsubscribed even in principle without keeping the delegate. So every visit
+to `/system` permanently adds three handlers to a process-lifetime singleton, each closing over a
+disposed component's `InvokeAsync`/`StateHasChanged`. ⚠ It interacts with `UI-7` and is still not part
+of it: unbounded list growth makes the now-sequential fan-out slower over process lifetime, and it is
+the mechanism by which `PhoneCallStateChanged` — a one-subscriber event by census — becomes an
+N-subscriber event after N navigations. But it is a **lifecycle** defect, not a fan-out one; the fix is
+three named handlers and an `IDisposable` on a 2,000-line page. **Read from source, not observed** — no
+growing invocation list was measured.
+
+**2. `PhoneUnreadState.cs:23`'s starvation exposure.** `event Action<int>?` — void-returning, so
+`Delegate.Invoke` really does run every handler and there is no discarded `Task`. The dropped-`Task`
+half of the `UI-6`/`UI-7` defect **cannot** apply, which is why it was excluded from both rows and from
+the lint's rule (`ConsolePlaybackState.cs:44-46` documented the exclusion before `UI-7` existed). The
+**starvation** half can still bite: one subscriber throwing synchronously starves the rest. ⭐ And it is
+the one site of the three the row grouped together that is **genuinely multicast** — singleton, one
+`MainLayout` handler per circuit, 15 publishers in `PhonePage.razor`. Wants a row about synchronous
+multicast events, which would also cover `Radio.Infrastructure`'s `EventHandler<T>` events and
+`DuckingService`'s own documented limitation at `:550-552`.
+
+**3. The lint does not scan `tests/`.** `UI-7` `C-213` found the defect in the test harness itself:
+twelve sites across five files fired hub events with `await del.Invoke(dto)` on a reflected backing
+field. All twelve were repaired by hand into `HubEventFire`, but nothing automated stops a thirteenth.
+Extending the lint there would have to model the reflection that produces the delegate, which a regex
+cannot — the guard is `HubEventFire` being the only way tests fire a hub event.
+
+**4. `ConfigChanged` is dead.** `AudioStateHubService` declares it and raises it; **nothing subscribes**,
+in `src/` or `tests/` (`C-208`). Its only live effect is `_configStoreNotifier?.NotifyReload()`, which is
+not the event. **Not deleted:** it is public API, `VisualizerPanelTests` pins this class's event set by
+name, and a dead-code deletion inside a defect-class PR muddies a diff whose value is that it is
+mechanical. `UI-7` corrected the comment that described a subscriber which has never existed; deleting
+the event is a separate decision.
+
+**5. `Home.razor:4` injects `AudioStateHubService HubService` and never uses it**, and
+`HomePageTests.cs:61` constructs a hub solely to satisfy it. One line each. Same argument as 4.
+
+---
+
 ## Encoder HUD (ENC-4) — three seams left open on purpose, of which ONE is still open
 
 > Seam **1** was closed by `ENC-7`, seam **3** by the owner's decision `D27`, and the `ENC-5`/`ENC-7`

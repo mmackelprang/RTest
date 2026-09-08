@@ -114,3 +114,52 @@ class.
   at one subscriber and awaits only the last at two. **A naive test would therefore pass against an
   unfixed implementation.** Fix the harness before writing the assertion, and prove the test is RED
   against `main` first.
+
+---
+
+## Merged — 2026-09-08, [#620](https://github.com/mmackelprang/RTest/pull/620)
+
+⚠ **Merged, not shipped.** The appliance was deployed to `e740b94` earlier the same day; this row is
+**not** in that build. The plan's §4.5 live check (panel paints; a source switch updates both
+`NowPlayingPanel` and the topbar, which are two different `SourceChanged` subscribers) is **deferred
+and was not performed**.
+
+**What shipped:** all **15** raise sites through two private `NotifyAsync` helpers that walk
+`GetInvocationList()`, await each subscriber and catch per subscriber; the same loop inline in
+`RadioPanelToggleService` and `DeviceDisplayStateService`; and `AsyncEventFanOutLintTests` making the
+seam mandatory. The lint reported **17 violations before, 0 after**.
+
+**The `C-213` harness fix came first, and it is what makes the green run mean anything.** Twelve sites
+across five test files — not the six this dossier named, nor the eight the plan's anchor list implied;
+nine on `AudioStateHubService` (two share one field lookup) plus three on `AudioVisualizationHubService`,
+which no row mentioned — fired hub events with `await del.Invoke(dto)` on a reflected backing field.
+Repaired into `HubEventFire` before the assertion depending on them was written. The headline tests
+additionally drive the real production method (`NotifySourceChangedAsync`), so they do not rest on the
+repair. **Shown RED against the unfixed implementation first: 4 failed / 3 passed, the four being
+exactly the discriminating ones. After the fix: 7/7.**
+
+### Three corrections to the plan, all measured rather than argued
+
+1. ⭐ **The plan's §4.1 headline test design would not have discriminated.** It specified three
+   subscribers each completing after `await Task.Yield()`. `UI-6`'s `AudioStateStoreNotifyTests`
+   already records why that fails — on unfixed code the discarded continuations usually complete
+   anyway, so it *"would have passed against the bug most of the time"*. The gate /
+   `TaskCompletionSource` pattern was used instead. **The sixth instrument-of-this-family failure in
+   three days, and the first where the vacuous instrument was specified by the plan being executed.**
+2. **The predicted 17 violations first measured 18.** The extra was `ConsolePlaybackState.cs:39` — a
+   `///` line correctly *describing* another class's defect, in a file declaring its own event named
+   `Changed`. Fixed by blanking comments and string literals (offsets preserved) rather than by
+   exempting the file: a lint whose first casualty is the documentation of the defect it forbids is
+   worse than no lint.
+3. **The direct-call arm predicted to false-positive produced zero hits** against the unfixed tree.
+   Kept rather than deleted; the measurement replaces the prediction.
+
+### One process failure, recorded because it cost real time
+
+Another session checked out its own branch **in the shared working tree between two of this cycle's
+commits**. A deliberately-RED lint commit landed on `docs/owner-input-ducking-tts` and reached `main`
+through [#617](https://github.com/mmackelprang/RTest/pull/617)'s squash, leaving `main`'s suite red
+until this merge. The cycle was finished in an isolated worktree outside the repository. **Two agents
+sharing one checkout is not safe** — and note the worktree must live *outside* the repo, since
+`RepositoryRoot.Find()` prefers the outermost non-worktree checkout and a nested one would make both
+lints scan the wrong tree.
