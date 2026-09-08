@@ -125,6 +125,26 @@ whose anchors moved three times while it measured them.
   it **deliberately did not switch it back**, on the grounds that doing so *"would yank the tree out
   from under the other session, which is the same mistake in reverse."*
 
+### ⛔ Commit before any destructive revert — especially between mutation runs
+
+The symmetrical twin of the rule above, and it cost real work on the same day. A Builder running
+mutation tests reverted a mutation with `git checkout -- <source file>` — **but had not yet committed
+the fix and the comment rewrite it had just written**, so both were discarded. It recovered fully and
+nothing reached the remote badly, but only because it noticed.
+
+⚠ **The interesting part is why it happened.** The same technique had been safe in an earlier mutation
+round *because the work was committed first*. It was reused without re-establishing that precondition.
+
+**The rule: `git checkout -- <path>`, `git restore`, `git reset --hard` and `git stash drop` are all
+unrecoverable for uncommitted work. Commit — or at minimum `git stash` — before reaching for any of
+them.** During mutation testing specifically, **commit the real change first, then mutate, then
+revert**; the revert is only safe when the thing you would lose is already in an object.
+
+⭐ **Both of that day's tree failures reduce to one sentence, and it is worth carrying beyond git:
+state that *looks* settled isn't.** A quiet `git status`, a `completed` notification, a green gate, a
+technique that worked last time — each is a *proxy* for the fact you want, and each was believed in
+place of checking it.
+
 ## Solution Structure
 
 ```
