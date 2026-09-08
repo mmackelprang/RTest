@@ -165,8 +165,15 @@ public class AudioStateHubServiceNotifyTests
   /// survivors still run.
   /// </summary>
   /// <remarks>
-  /// ⚠ The count is the point. The pre-UI-7 shape had no try/catch at all on fourteen of the fifteen
-  /// raise sites, and the one that did wrapped the whole invoke — which protects exactly one of N.
+  /// ⚠ The count is the point. NONE of the fifteen pre-UI-7 raise sites carried a try/catch — all
+  /// fifteen were a bare <c>await X.Invoke(...)</c> inside a SignalR <c>On&lt;…&gt;</c> lambda, so a
+  /// throwing subscriber faulted a task nobody held. (An earlier revision of this comment said
+  /// "fourteen of the fifteen, and the one that did wrapped the whole invoke". That was false and
+  /// pre-merge review caught it: the site that wrapped the whole invoke is
+  /// <c>AudioStateStore</c>'s, one directory away, fixed by UI-6. <c>StartAsync</c>'s outer
+  /// <c>try</c> encloses the REGISTRATION calls, not the lambda bodies, which run later on a
+  /// callback. Exactly the CLAUDE.md § Pre-Merge Review failure mode, in the file that certifies
+  /// the fix.)
   /// </remarks>
   [Fact]
   public async Task NotifySourceChangedIsolatesEachSubscribersException()

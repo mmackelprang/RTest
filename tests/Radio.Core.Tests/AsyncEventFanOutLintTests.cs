@@ -29,9 +29,12 @@ namespace Radio.Core.Tests;
 /// ⚠ AND IT DOES NOT SCAN <c>tests/</c>, WHICH IS WHERE AN INSTANCE STILL LIVED WHEN THIS WAS
 /// WRITTEN. UI-7 <c>C-213</c>: several test fixtures fire hub events by reflecting the compiler's
 /// backing field and calling <c>await del.Invoke(dto)</c> on it — the very shape this rule forbids,
-/// in the harness that would be used to test the fix. UI-7 repaired those six sites by hand; nothing
-/// automated stops a seventh, because widening the scan to <c>tests/</c> would also have to model
-/// the reflection that produces the delegate, which a regex cannot.
+/// in the harness that would be used to test the fix. UI-7 repaired those TWELVE sites by hand —
+/// nine on <c>AudioStateHubService</c> and three on <c>AudioVisualizationHubService</c>; the row
+/// said six and the plan's anchor list implied eight, and both undercounted. Nothing automated
+/// stops a thirteenth, because widening the scan to <c>tests/</c> would also have to model the
+/// reflection that produces the delegate, which a regex cannot. <c>HubEventFire</c> being the only
+/// way tests fire a hub event is the guard.
 ///
 /// ⚠ IF THIS RULE EVER NEEDS AN EXEMPTION, THE EXEMPTION IS THE BUG. There is no allowlist and there
 /// must not be one; <c>LogSafetyLintTests</c> makes the same argument about <c>phoneNumber</c> at its
@@ -76,10 +79,18 @@ public class AsyncEventFanOutLintTests
     foreach (var file in files)
     {
       var text = File.ReadAllText(file);
-      fanOutSites += Regex.Matches(text, @"\bGetInvocationList\s*\(\s*\)").Count;
+
+      // ⚠ The floors are counted on CODE, not on prose about code. Pre-merge review found them
+      // running against the raw text while the rule itself ran against the blanked text, so a
+      // guard whose entire job is proving the scan is alive could be satisfied by comments
+      // DESCRIBING a fan-out. Measured at the time: 11 raw GetInvocationList() matches against 8
+      // real ones, the other three being prose in MainLayout.razor and ConsolePlaybackState.cs.
+      // In a repository this comment-heavy that is not a rounding error, it is the whole hazard.
+      var code = BlankNonCode(text);
+      fanOutSites += Regex.Matches(code, @"\bGetInvocationList\s*\(\s*\)").Count;
 
       var found = Violations(text).ToList();
-      if (AsyncEventDeclaration.IsMatch(text))
+      if (AsyncEventDeclaration.IsMatch(code))
       {
         declaringFiles++;
       }
@@ -102,8 +113,8 @@ public class AsyncEventFanOutLintTests
       + "this was written, so the declaration regex is probably broken.");
     Assert.True(
       fanOutSites >= 5,
-      $"Only {fanOutSites} GetInvocationList() fan-out sites found under '{src}' — there were 6 "
-      + "after UI-7, so either a fix was reverted or the scan is looking at the wrong tree.");
+      $"Only {fanOutSites} GetInvocationList() fan-out sites found under '{src}' — there were 8 in "
+      + "code after UI-7, so either a fix was reverted or the scan is looking at the wrong tree.");
 
     Assert.True(
       violations.Count == 0,
@@ -174,8 +185,27 @@ public class AsyncEventFanOutLintTests
             _logger.LogWarning("do not write Changed.Invoke() here");
       """;
 
+    // ⭐ THE BARE PARAMETERLESS RAISE, and pre-merge review is why this fixture exists. A
+    // Func<Task> can be invoked as `SomeEvent()` with no `.Invoke` at all, and for the SIX
+    // parameterless events on AudioStateHubService that is the most natural way to write the
+    // defect. The direct-call arm originally carried a `(?!\s*\))` lookahead, so `X(dto)` matched
+    // and `X()` did not — which falsified AudioStateHubService's own class comment claiming the
+    // seam is enforced. The lookahead is gone; this is what stops it coming back.
+    const string BareParameterlessRaise = """
+      public event Func<Task>? SourceChanged;
+            await SourceChanged();
+      """;
+
+    // The payload-carrying spelling of the same thing.
+    const string BareRaiseWithPayload = """
+      public event Func<NowPlayingDto?, Task>? NowPlayingChanged;
+            await NowPlayingChanged(dto);
+      """;
+
     Assert.Single(Violations(DirectRaise));
     Assert.Single(Violations(AliasedRaise));
+    Assert.Single(Violations(BareParameterlessRaise));
+    Assert.Single(Violations(BareRaiseWithPayload));
     Assert.Empty(Violations(Corrected));
     Assert.Empty(Violations(DescribedInAComment));
     Assert.Empty(Violations(QuotedInAString));
@@ -240,7 +270,7 @@ public class AsyncEventFanOutLintTests
       }
 
       foreach (Match m in Regex.Matches(
-        text, @"(?<![\w.])" + Regex.Escape(receiver) + @"\s*\((?!\s*\))"))
+        text, @"(?<![\w.])" + Regex.Escape(receiver) + @"\s*\("))
       {
         yield return (m.Index, receiver + "(...)");
       }
@@ -305,6 +335,19 @@ public class AsyncEventFanOutLintTests
       if (c == '/' && i + 1 < text.Length && text[i + 1] == '*')
       {
         var end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+        end = end < 0 ? text.Length : end + 2;
+        Blank(i, end);
+        i = end;
+        continue;
+      }
+
+      // Razor comment: @* … *@. The scan includes .razor files, so this is the same hazard as the
+      // C# comment above — prose about the defect must not be read as the defect. Inert today
+      // because all six files declaring an `event Func<>` are .cs, but the rule's own remarks
+      // argue that an exemption is the bug, and a latent false positive is a future exemption.
+      if (c == '@' && i + 1 < text.Length && text[i + 1] == '*')
+      {
+        var end = text.IndexOf("*@", i + 2, StringComparison.Ordinal);
         end = end < 0 ? text.Length : end + 2;
         Blank(i, end);
         i = end;

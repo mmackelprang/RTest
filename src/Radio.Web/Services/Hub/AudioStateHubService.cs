@@ -18,13 +18,17 @@ namespace Radio.Web.Services.Hub;
 /// ⚠ EVERY event on this class is raised through <see cref="NotifyAsync(Func{Task})"/> or its
 /// generic twin, and a new one must be too — see those methods' remarks for what the direct
 /// <c>await SomeEvent.Invoke()</c> form does wrong (queue row `UI-7`). This is enforced, not
-/// requested: <c>AsyncEventFanOutLintTests</c> in <c>Radio.Core.Tests</c> fails the build if any
-/// event declared in this file is invoked directly.
+/// requested: <c>AsyncEventFanOutLintTests</c> in <c>Radio.Core.Tests</c> fails the TEST step if an
+/// event declared in this file is raised by <c>X.Invoke(…)</c>, through a one-level local alias, or
+/// by a bare <c>X(…)</c> call. ⚠ It is a regex over source text, not a proof: an event declared here
+/// and raised from another part of a partial type would pass, and it does not scan <c>tests/</c>.
 ///
 /// ⚠ This is a SINGLETON (Program.cs:411) and its component subscribers are PER CIRCUIT, so the
 /// invocation list grows with open browsers. Ten production types subscribe; `UI-7` §0.2 has the
 /// census. Anything reasoning about "the subscriber" of this class is reasoning about a class that
-/// does not exist.
+/// does not exist. (`UI-7`'s dossier says two browsers puts NINE handlers on NowPlayingChanged;
+/// pre-merge review narrowed that — Sleep.razor uses EmptyLayout, so it and MainLayout cannot both
+/// render on one circuit, and the reachable ceiling is nearer seven. The argument needs only ≥2.)
 /// </remarks>
 public class AudioStateHubService : IAsyncDisposable
 {
@@ -91,10 +95,14 @@ public class AudioStateHubService : IAsyncDisposable
   // ConfigChanged push is _configStoreNotifier?.NotifyReload() in the handler
   // below; this event is not that, and the topbar / sleep clocks repaint on
   // their own 1 s timers regardless.
-  // ⛔ RETAINED DELIBERATELY, not overlooked. It is public API, VisualizerPanelTests
-  // pins this class's event set by name, and a dead-code deletion inside a
-  // defect-class PR muddies a diff whose value is that it is mechanical. Deleting
-  // it is a separate decision; UI-7 §6.1 files it.
+  // ⛔ RETAINED DELIBERATELY, not overlooked: it is public API, and a dead-code
+  // deletion inside a defect-class PR muddies a diff whose value is that it is
+  // mechanical. Deleting it is a separate decision; UI-7 §6.1 files it.
+  // ⚠ An earlier revision of this comment also claimed "VisualizerPanelTests pins
+  // this class's event set by name" as a third reason. Pre-merge review falsified
+  // it: that test reflects GetEvents() but asserts only Contain("EncoderConfigStatusChanged")
+  // and NotContain("VisualizationModeChanged"), so deleting ConfigChanged would NOT
+  // fail it. The two reasons above carry the decision on their own.
   public event Func<Task>? ConfigChanged;
 
   // Throttle disconnect log messages to avoid spam when API is down
@@ -186,6 +194,15 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<RadioStateDto>("RadioStateChanged", async (dto) =>
       {
         _logger.LogDebug("Received RadioStateChanged event");
+        // ⚠ ASYMMETRY, PRE-EXISTING AND DELIBERATELY PRESERVED. RadioStateChanged is
+        // Func<RadioStateDto, Task> — a NON-nullable payload, like the three Encoder events below
+        // — but unlike them it has never carried a `dto != null` guard, on `main` or here. UI-7
+        // changed only the fan-out and did not add one, because adding a guard would silently drop
+        // a broadcast the panel currently receives, which is a behaviour change this row has no
+        // mandate for. Pre-merge review raised it: the guard comment below indicts this site by its
+        // own logic. Mitigating, and the reason it is safe to leave: the new per-subscriber catch
+        // means a resulting NullReferenceException is now logged rather than faulting a task nobody
+        // holds. Worth its own row, not a rider here.
         await NotifyAsync(RadioStateChanged, dto);
       });
 
@@ -541,10 +558,12 @@ public class AudioStateHubService : IAsyncDisposable
   /// </summary>
   /// <remarks>
   /// The generic twin of the parameterless overload above — see its remarks for why the loop exists.
-  /// Generic rather than duplicated per event because there are THIRTEEN events between the two
-  /// overloads here; thirteen hand-rolled loops is thirteen chances to drift, which is precisely what
-  /// UI-6 found when AudioStateStore's two hand-rolled sites had already diverged (one carried a
-  /// try/catch and the other carried none).
+  /// Generic rather than duplicated per event, because a hand-rolled loop per event is one chance to
+  /// drift per event — which is precisely what UI-6 found when AudioStateStore's two hand-rolled
+  /// sites had already diverged (one carried a try/catch and the other carried none).
+  /// (An earlier revision said "THIRTEEN events between the two overloads". There are FOURTEEN, and
+  /// pre-merge review caught it. The number is now absent rather than corrected — the constructor
+  /// comment above makes the same point about the "~9" it used to carry.)
   /// </remarks>
   private async Task NotifyAsync<T>(Func<T, Task>? handler, T arg)
   {

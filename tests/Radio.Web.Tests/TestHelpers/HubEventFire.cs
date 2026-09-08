@@ -99,9 +99,23 @@ public static class HubEventFire
         + "converted, this helper and its callers must change with it.");
     }
 
-    if (field.GetValue(target) is not TDelegate handler)
+    var value = field.GetValue(target);
+    if (value is null)
     {
       return [];
+    }
+
+    // ⚠ A WRONG TDelegate IS A THIRD STATE and must not be routed into the normal one. Pre-merge
+    // review found this returning [] when the type test failed, which is the residual form of the
+    // hazard this whole helper exists to remove: FireAsync(hub, "RadioStateChanged", aNowPlayingDto)
+    // would find the field, fail the cast, fire NOTHING, and let the test pass on whatever it
+    // asserted next. "No subscribers" is a normal state; "you named the wrong event, or its
+    // signature changed under you" is a broken test, and silence cannot be the answer to both.
+    if (value is not TDelegate handler)
+    {
+      throw new InvalidOperationException(
+        $"Event '{eventName}' on {target.GetType().Name} is {value.GetType()}, not "
+        + $"{typeof(TDelegate)}. The event name and the payload type must match the declaration.");
     }
 
     return handler.GetInvocationList().Cast<TDelegate>().ToArray();
