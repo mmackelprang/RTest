@@ -47,6 +47,20 @@ public class PhoneMessagesFeedRowTests : TestContext
       .Add(x => x.Contacts, contacts ?? new List<MergedContact>()));
   }
 
+  // The feed's default segment is "all" (PhoneMessagesPanel.razor:281), and both
+  // FeedLoading and FeedError require ALL THREE source lists to be null (:386-391),
+  // so a one-element Threads with no CallHistory falls straight through to the
+  // RenderTextThreadRow loop. No filter click or extra parameter is needed.
+  private IRenderedComponent<PhoneMessagesPanel> RenderThread(SmsThreadDto thread)
+  {
+    return RenderComponent<PhoneMessagesPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto> { thread })
+      .Add(x => x.Contacts, new List<MergedContact>()));
+  }
+
+  private static SmsThreadDto TextThread(bool hasUnread = true) =>
+    new("t1", "+15551234567", "Mom", DateTime.Now, hasUnread, "see you soon");
+
   private static CallHistoryEntryDto Call(
     string number = "9193718044",
     string? callerName = null,
@@ -162,5 +176,57 @@ public class PhoneMessagesFeedRowTests : TestContext
       duration: null));
 
     Assert.Empty(cut.FindAll(".phone-pill"));
+  }
+
+  // ── GV-9 / F-7: the structure the unread-gutter CSS rule depends on ────────
+  //
+  // ⚠ bUnit evaluates no CSS (GV-9 plan C-209), so nothing below proves the 20px
+  // gutter renders. What these pin is the structural precondition the rule's
+  // FIRST selector line needs —
+  //   .phone-messages-feed .list-item-touch:not(:has(> .unread-dot))
+  //     > :is(.list-item-identity, .vm-row-main)
+  // — at the two live sites this file renders. That line is the one every
+  // production row matches; PhoneTextsPanelTests.ThreadRow_KeepsTheStructureThe-
+  // UnreadGutterRuleDependsOn covers only the .texts-thread-list line, i.e. the
+  // dead PhoneTextsPanel copy, so before these tests the live surface had no
+  // structural coverage at all. VoicemailRowTests.UnreadRow_KeepsTheStructureThe-
+  // UnreadGutterRuleDependsOn is the third live site.
+  //
+  // Nest the dot or the identity column one level deeper and the selector stops
+  // matching SILENTLY: green build, green suite, and the 20px jump is back. That
+  // is the GV-7 regression these exist to make loud (plan §5).
+
+  [Fact]
+  public void CallRow_KeepsTheStructureTheUnreadGutterRuleDependsOn()
+  {
+    Register();
+    var cut = RenderCall(Call(callerName: "Bob Smith"));
+
+    // Positive first — proves the row actually rendered, so the :scope
+    // assertions below cannot be satisfied by an unreached branch.
+    Assert.Contains("Bob Smith", cut.Find(".list-item-title").TextContent);
+
+    var row = cut.Find(".list-item-touch");
+    // A call row never carries a dot, so it is permanently on the
+    // :not(:has(> .unread-dot)) side of the rule — the branch that actually
+    // receives the margin. Its identity column must be a DIRECT child.
+    Assert.Empty(row.QuerySelectorAll(":scope > .unread-dot"));
+    Assert.NotNull(row.QuerySelector(":scope > .list-item-identity"));
+  }
+
+  [Fact]
+  public void UnreadTextThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn()
+  {
+    Register();
+    var cut = RenderThread(TextThread(hasUnread: true));
+
+    // Positive first, for the same reason as above: RenderTextThreadRow sits
+    // behind three state gates, and a NotNull on an unrendered row would be
+    // vacuous rather than passing.
+    Assert.Contains("Mom", cut.Find(".list-item-title").TextContent);
+
+    var row = cut.Find(".list-item-touch");
+    Assert.NotNull(row.QuerySelector(":scope > .unread-dot"));
+    Assert.NotNull(row.QuerySelector(":scope > .list-item-identity"));
   }
 }

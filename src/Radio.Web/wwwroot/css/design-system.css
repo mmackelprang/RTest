@@ -5809,11 +5809,18 @@ body {
    gain a gutter.
 
    ⚠ This rule is invisible to the test suite — bUnit renders a DOM, not a
-   layout (plan C-209). Its two structural preconditions ARE tested: the dot is
-   a direct child of the row, and the identity column is a direct child that
-   carries a class. If a future change nests either one deeper, this rule stops
-   matching SILENTLY and the 20px jump returns with a green suite. See
-   PhoneTextsPanelTests.ThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn. */
+   layout (plan C-209). NOTHING tests the margin-left. What IS tested, at every
+   render site of BOTH selector lines, is the structure the selectors depend on:
+   the dot and the identity column are DIRECT children of .list-item-touch, and
+   the identity column carries a class. If a future change nests either one
+   deeper, this rule stops matching SILENTLY and the 20px jump returns with a
+   green build and a green suite. The four tests, grouped by selector line:
+     line 1, .phone-messages-feed — the three LIVE rows:
+       PhoneMessagesFeedRowTests.CallRow_KeepsTheStructureTheUnreadGutterRuleDependsOn
+       PhoneMessagesFeedRowTests.UnreadTextThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn
+       VoicemailRowTests.UnreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn
+     line 2, .texts-thread-list — the dead PhoneTextsPanel copy:
+       PhoneTextsPanelTests.ThreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn */
 .phone-messages-feed .list-item-touch:not(:has(> .unread-dot)) > :is(.list-item-identity, .vm-row-main),
 .texts-thread-list   .list-item-touch:not(:has(> .unread-dot)) > .list-item-identity {
   margin-left: calc(8px + 12px);
@@ -5990,11 +5997,13 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 /* GV-9 / UAT F-4 — the three declarations its two siblings already carry
-   (.texts-conv-name :5988-5991, .list-item-title :649-656). Without them this
-   line inherits white-space: normal / overflow: visible / text-overflow: clip
-   and a long identifier spills instead of ellipsizing. The ellipsis works
-   without touching the parent because .texts-conv-title (:5987) already sets
-   min-width: 0 — the precondition it needs inside a flex column.
+   (.texts-conv-name directly above, .list-item-title :649-656). Without them
+   this line inherits white-space: normal and takes the INITIAL overflow:
+   visible / text-overflow: clip — only white-space is an inherited property, so
+   setting overflow on .texts-conv-title would NOT propagate down here — and a
+   long identifier spills instead of ellipsizing. The ellipsis works without
+   touching the parent because .texts-conv-title already sets min-width: 0 —
+   the precondition it needs inside a flex column.
    ⚠ This is a DISPLAY truncation of the header identifier only. It renders
    U+2026 and does not alter any string; nothing reads this element. Do not
    extend the same treatment to .msg-bubble / .msg-text — since PHN-3 that text

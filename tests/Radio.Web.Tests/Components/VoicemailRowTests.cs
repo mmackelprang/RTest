@@ -39,6 +39,29 @@ public class VoicemailRowTests : TestContext
   }
 
   [Fact]
+  public void UnreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn()
+  {
+    // ⚠ bUnit evaluates no CSS (GV-9 plan C-209), so this does NOT prove the 20px
+    // unread gutter renders. It pins the structural precondition the rule's first
+    // selector line needs at this — the third — live render site:
+    //   .phone-messages-feed .list-item-touch:not(:has(> .unread-dot))
+    //     > :is(.list-item-identity, .vm-row-main)
+    // The voicemail row is the only site that contributes .vm-row-main to that
+    // :is(), so it is the only test that can catch it being nested or renamed.
+    // See PhoneMessagesFeedRowTests for the call and text-thread sites.
+    var cut = RenderComponent<VoicemailRow>(p => p
+      .Add(x => x.Item, Vm(isRead: false))
+      .Add(x => x.Expanded, false));
+
+    // Positive first, so the :scope assertions cannot pass on an unrendered row.
+    Assert.Contains("Jane", cut.Find(".vm-row-title").TextContent);
+
+    var row = cut.Find(".list-item-touch");
+    Assert.NotNull(row.QuerySelector(":scope > .unread-dot"));
+    Assert.NotNull(row.QuerySelector(":scope > .vm-row-main"));
+  }
+
+  [Fact]
   public void ZeroDuration_RendersEmDash()
   {
     var cut = RenderComponent<VoicemailRow>(p => p

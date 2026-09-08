@@ -159,8 +159,10 @@ public class PhoneTextsPanelTests : TestContext
   // ErrorSetButMessagesArrived, Conversation_ShowsEmptyState_WhenGenuinelyEmpty
   // — which sets it false — and Conversation_RetryButton_InvokesOnRetry) all
   // set OpenThreadId too, and the four thread-list-mode tests
-  // (:64, :73, :130, :141) never set Error — so the branch was unasserted, not
-  // covered. The row's deferral note said otherwise; the code says this.
+  // (EmptyThreads_ShowsEmptyState, Loading_ShowsSkeleton, EmptyThreadList_Offers-
+  // NoNewMessageAffordance, LoadedThreads_RenderRows) never set Error — so the
+  // branch was unasserted, not covered. The row's deferral note said otherwise;
+  // the code says this.
 
   [Fact]
   public void ThreadList_ShowsThreads_WhenErrorSetButThreadsArrived()
@@ -206,10 +208,11 @@ public class PhoneTextsPanelTests : TestContext
   public void ThreadRow_OmitsTheDot_WhenRead()
   {
     // ⚠ The invariant the F-7 rule is built on: .unread-dot present <=> unread.
-    // LoadedThreads_RenderRows (:141) already asserts the positive; without this
+    // LoadedThreads_RenderRows already asserts the positive; without this
     // negative, an implementation that always emitted the span would make BOTH
-    // that assertion and VoicemailRowTests.cs:29 vacuous while VoicemailRow-
-    // Tests.cs:38 failed at runtime on a green build (plan C-206).
+    // that assertion and VoicemailRowTests.Unheard_ShowsUnreadDot vacuous while
+    // VoicemailRowTests.Heard_NoUnreadDot failed at runtime on a green build
+    // (plan C-206).
     Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, new List<SmsThreadDto>
@@ -226,10 +229,16 @@ public class PhoneTextsPanelTests : TestContext
     // gutter works — nothing in this repository can. What it pins is the two
     // structural facts the selector needs, which is what makes a silent
     // regression loud:
-    //   .phone-messages-feed .list-item-touch:not(:has(> .unread-dot))
-    //     > :is(.list-item-identity, .vm-row-main)
+    //   .texts-thread-list .list-item-touch:not(:has(> .unread-dot))
+    //     > .list-item-identity
     // Nest the dot or the identity column one level deeper and the rule stops
     // matching with every test still green.
+    // ⚠ Scope, stated so nobody mistakes this for the whole gate: this panel
+    // renders inside .texts-thread-list, so this test exercises the rule's
+    // SECOND selector line only — the DEAD copy (plan §0.5). The first line,
+    // .phone-messages-feed, is what every production row matches, and it is
+    // covered by PhoneMessagesFeedRowTests.CallRow_/UnreadTextThreadRow_ and
+    // VoicemailRowTests.UnreadRow_KeepsTheStructureTheUnreadGutterRuleDependsOn.
     Register(available: true);
     var cut = RenderComponent<PhoneTextsPanel>(p => p
       .Add(x => x.Threads, new List<SmsThreadDto>
