@@ -1387,10 +1387,18 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     // have disconnected — OnDeviceDisconnected (:742) assigns Stopped only after
     // tearing the capture out of the mixer (:717-738). AUD-12 C-170.
     //
-    // ⛔ This test is the ONLY one that fails if `&& HasCapturePath` is deleted
-    // from :1136. T1, T2 and T2b all stay green without it. That asymmetry is the
-    // whole value of this test — without it a future simplification could drop the
-    // guard and nothing would notice.
+    // ⚠ MEASURED, and it corrects what AUD-12's plan §4.3 predicted. The plan said
+    // deleting `&& HasCapturePath` from the Playing arm would fail THIS test "while
+    // T1, T2 and T2b still pass", and offered that asymmetry as the whole value of
+    // this test. Run 2026-09-08, the mutation fails FOUR cases: this test, both
+    // StalledAtReady_ theory cases, and PromotedSource_KeepsAudioTapActive — because
+    // each of those also asserts the source stays Stopped across the resume edge,
+    // which is exactly the guard's doing. T2 and T2b do pass, as predicted.
+    //
+    // The guard is therefore better covered than the plan claimed, not worse. What
+    // is NOT true is that this test uniquely closes the gap — do not delete the
+    // others believing this one stands in for them, and do not "restore" the
+    // asymmetry by weakening their assertions.
     Assert.Equal(AudioSourceState.Stopped, source.State);
   }
 
