@@ -579,7 +579,9 @@ constraint that did not exist.
 That surfaced the sharper problem: the seams are **not one thing**. Most are harmless visibility
 widenings. Two put a live branch in shipped code. One was a real production method entered directly by
 tests, **bypassing the branch dispatch that selects it**, and such a test is indistinguishable from
-real coverage in any coverage report. The gap left at `BluetoothAudioSource.cs:483`/`:494` went
+real coverage in any coverage report. The gap left at `BluetoothAudioSource.cs:483`/`:494` (those
+line numbers as they stood when this ADR was written; the same two arms are `:486`/`:497` after the
+seam retirement below lengthened the doc comment above them) went
 unnoticed for exactly that reason.
 
 ### Decision
@@ -611,7 +613,8 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
 - The Kind-D seam is **retired**, not labelled: `ApplyDeferredCaptureState` returns to `private` and its
   three tests are rewritten to enter through the real dispatch.
 - All three `capture is …` dispatch sites gain end-to-end coverage with no seam and no hardware.
-- The over-claiming comment at `BluetoothAudioSource.cs:447-452` is corrected, and is added to
+- The over-claiming comment at `BluetoothAudioSource.cs:447-452` (its span *before* this change; the
+  replacement runs `:447-455`) is corrected, and is added to
   `CLAUDE.md` § *Pre-Merge Review* as a fourth worked example — the first whose victim was a queue row
   rather than a code change.
 
