@@ -83,3 +83,36 @@ or the affordance stops looking permanent. ⚠ **That is a Designer question, no
 current copy implies permanence — check before writing the task.
 
 RotaryPhone has been told not to build persistence on spec.
+
+---
+
+## ⛔ SUPERSEDED 2026-09-08 — `acknowledged` WILL be persisted. The session-scoped decision above is REVERSED.
+
+**The owner decision recorded above ("treat the bell note as session-scoped") is no longer current.**
+RotaryPhone's third handoff of 2026-09-08 reports the owner chose **persistence**, and the owner has
+confirmed to this session that **their reading is the current one**.
+
+⚠ **This was a genuine conflict between two repos, not a misreading.** This session recorded
+session-scoped and told RotaryPhone not to build persistence on spec; RotaryPhone recorded persistence
+and dispatched the work. Both were acting on what the owner had said to them. **It was caught because
+the inbound reply stated its decision explicitly rather than assuming ours matched** — which is the ack
+protocol earning its keep in the direction nobody designed it for.
+
+### What this row must now do
+
+- **Write the copy for a note that survives a restart.** ⛔ **Do NOT add session-scoped wording** — the
+  correction above told this row to do exactly that, and it is now wrong.
+- `BellFailureTracker` becomes durable on RotaryPhone's side: a dismissal will hold across the nightly
+  restart, a crash **and** a deploy. **Work is dispatched on their side but has NOT shipped — do not
+  build against it until they confirm.**
+- Their six-week-old bell reply §5 claimed this was *already* true. It was not. **After their change
+  ships the claim becomes right** — but it was wrong when we read it, and our `Q4` was the correct
+  question to have asked.
+
+### Still true and unchanged
+
+The transport defect in this row's headline is untouched by any of the above. **`BellHealthService`
+still polls the REST path, which returns `now()` and pings the configured address**, and their
+REST→SignalR convergence is dispatched but not shipped. ⛔ **Do not build the predictive-degrade rule
+until that lands** — they agree: *"your predictive-degrade rule becomes safe to build the moment this
+lands, and not before."*
