@@ -37,7 +37,11 @@ namespace Radio.Core.Tests;
 /// holds a Kind-C seam this file never reads — <c>Clock</c> (<c>:414</c>), read by production at
 /// <c>:934</c> and <c>:1107</c> — alongside the Kind-A <c>SourceGainDebounce</c> (<c>:421</c>).
 /// Razor is not parsed here, so the one member in that file the convention says needs a FULL label
-/// is the one member the lint cannot see.</item>
+/// is the one member the lint cannot see. ⚠ To be explicit, because "cannot see" invites the wrong
+/// inference: <c>Clock</c> carries <b>no</b> label today — not an unread one. Its kind is C on the
+/// substitution limb (set by a test, it replaces <c>TimeProvider.System</c>), not the frequency limb;
+/// both reads are lazy timer creations, so it is read at most once per timer per component instance
+/// rather than on every pass.</item>
 /// <item><b>It parses C# by line shape, not with a lexer.</b> A member declaration is recognised by
 /// its leading modifiers; the doc block is whatever contiguous run of <c>///</c> lines sits above it,
 /// past any attributes. A declaration split so that <c>internal</c> and the member name land on
