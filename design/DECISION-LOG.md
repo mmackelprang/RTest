@@ -551,4 +551,72 @@ The args also now carry `TriggeringSourcePriority`, **captured inside the lock t
 
 ---
 
+## ADR-030: Test seams are classified and labelled, not banned
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+Four rows bought test coverage with an `internal` + `InternalsVisibleTo` seam because a native or
+network dependency was believed to make the real path unreachable: `ApplyDeferredCaptureState` (#469),
+`ConnectRaceHookForTests` and `ConnectTransportOverrideForTests` (#468), and
+`CastStatusReadOverrideForTests` (planned by `AUD-5`). `AUD-3` recorded the second and third as design
+debt and folded them into `TEST-2` "as a pattern rather than an incident".
+
+`TEST-2` asked whether a native SoundFlow `AudioEngine` could be constructed in a unit test so the
+seams could be retired. **It cannot** — `MiniAudioEngine`'s constructor enters native code, CI is a
+headless container with no audio device, and the repo separately forbids raw `MiniAudioEngine`
+construction in `src/` (`NoRawMiniAudioEngineConstructionTests`).
+
+**Planning the row established that the native engine was never the requirement.** `SoundComponent`
+and `AudioCaptureDevice` are abstract types whose constructors store the engine reference without
+dereferencing it, so Moq subclasses either with a null engine — which the suite had already been doing
+for `SoundComponent` in CI since before the row was filed. The seam at `ApplyDeferredCaptureState` was
+therefore never necessary, and its doc comment — cited by the row as its authority — asserted a
+constraint that did not exist.
+
+That surfaced the sharper problem: the seams are **not one thing**. Most are harmless visibility
+widenings. Two put a live branch in shipped code. One was a real production method entered directly by
+tests, **bypassing the branch dispatch that selects it**, and such a test is indistinguishable from
+real coverage in any coverage report. The gap left at `BluetoothAudioSource.cs:483`/`:494` went
+unnoticed for exactly that reason.
+
+### Decision
+
+Seams are **classified into four kinds by what they displace**. Kind C (substitution) and Kind D
+(entry point) must carry a label naming the mechanism that makes the real path unreachable **and what
+the seam consequently does not cover**. Kinds A (visibility) and B (injection) need only a line. The
+convention lives in `design/TESTING.md` § *Test Seams* and is enforced by `TestSeamLabelLintTests`.
+
+Its first rule is **prefer no seam, and check reachability before assuming** — because the failure this
+ADR is written from was not a bad seam, it was an unchecked sentence.
+
+### Alternatives considered
+
+- **Ban the seams.** Rejected: `ConnectTransportOverrideForTests` reaches a path genuinely unreachable
+  offline; removing it would delete real coverage.
+- **Build a native test harness.** Rejected: infeasible on this CI, and — the more useful finding —
+  unnecessary, since the types under test are mockable without an engine.
+- **A single "avoid `InternalsVisibleTo`" guideline.** Rejected: it would be ignored for the ~13
+  harmless Kind-A/B seams, and a rule ignored in the common case is unavailable in the rare one.
+- **A naming convention (`*ForTests`) plus a name-based lint.** Rejected, and this is the load-bearing
+  rejection: all nine suffixed members are Kinds A–C. `ApplyDeferredCaptureState` carried no suffix, so
+  a name-keyed lint would have missed **the exact seam that motivated the decision**. The lint keys on
+  the label.
+
+### Consequences
+
+- Two shipped Cast seams retrofitted; `AUD-5` applies the label to its own when it ships.
+- The Kind-D seam is **retired**, not labelled: `ApplyDeferredCaptureState` returns to `private` and its
+  three tests are rewritten to enter through the real dispatch.
+- All three `capture is …` dispatch sites gain end-to-end coverage with no seam and no hardware.
+- The over-claiming comment at `BluetoothAudioSource.cs:447-452` is corrected, and is added to
+  `CLAUDE.md` § *Pre-Merge Review* as a fourth worked example — the first whose victim was a queue row
+  rather than a code change.
+
+**Plan of record:** [`design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
