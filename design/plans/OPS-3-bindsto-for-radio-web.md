@@ -33,6 +33,30 @@
 
 ---
 
+> ## ⭐⭐ AMENDED AGAIN — 2026-09-08, second amendment: the owner decided on readiness, and one premise underneath that decision is false
+>
+> **Re-derived against `main` at `ec4f1490`** (was `084a6bbd`; **7 commits / 6 PRs** have landed since). ⭐ **`git log 084a6bbd..ec4f1490 -- deploy/` is EMPTY** — nothing under `deploy/` moved, and all twelve `Deploy-ToLinux.ps1` anchors, both unit files' anchors, all four `setup.sh` heredoc anchors, `DEPLOYMENT.md:30`/`:731-732`, `ORDERING-NOTES.md:28` and `HANDOFF-GA-PUNCH-LIST.md:1110` were **re-read on the working tree and every one still resolves**. §9.4 lists them.
+>
+> **The owner decision** (`docs/queue/OPS-3.md` § *OWNER DECISION, 2026-09-08*): **keep `BindsTo=` on web and `Upholds=` on api, AND give `radio-api` real readiness.** `C-200`'s blocking status is discharged; the row is buildable. This amendment adds the readiness work — **§0.7b** (analysis), **§1.4** (the mechanism decision), **Task 7** (the diff), **§4.11** (`S12`–`S15`), and `C-203`–`C-207`.
+>
+> ### The mechanism: **`ExecStartPost=`, not `Type=notify`** — and the reason is not a preference
+>
+> ⛔ **`Type=notify` does not deliver the stated goal, and this is measurable from the source rather than arguable.** .NET's `UseSystemd()` sends `READY=1` on **`ApplicationStarted`**, which `IHost.StartAsync` raises only after **every** `IHostedService.StartAsync` has returned. `AudioEngineInitializationService` (`src/Radio.API/Services/AudioEngineInitializationService.cs:19`) is a **raw `IHostedService`, not a `BackgroundService`**, so its `StartAsync` (`:107-187`) blocks the host on audio-engine init (`:127`, `:130`), **two** device enumerations (`:142`, `:143`), source activation (`:171`), Bluetooth pre-warm (`:176`) and BlueZ adapter bring-up (`:180`→`:458`) — with no timeout on any of them, and registered at `Program.cs:128`, near-last. **So `Type=notify` would report readiness strictly LATER than "the hub answers", by an unbounded margin gated on hardware**, against an **absent `TimeoutStartSec`** (default **90 s**) and `StartLimitBurst=5`. A slow BT adapter on a cold boot would not delay the console — it would **latch `radio-api` in `failed`**, which is the exact wedge this row is trying to stop creating.
+>
+> ⚠ **And it destroys `C-191`** — the property that merging and deploying are both inert on the box, which is the only reason merging this row on green gates is defensible. `Type=notify` splits the change across two rollout mechanisms with different timings, and creates a new half-installed state (`Type=notify` in the unit, a binary that never notifies) that hangs 90 s and then crash-loops. ⚠ That trap is **already latent in the tree** at `deploy/debian-x64/setup.sh:172` and `deploy/raspberry-pi/setup.sh:281`. §1.4 states what the rejected option gives up.
+>
+> ### ⚠⚠ `C-202`'s stated harm is WRONG, and every document in this chain repeats it
+>
+> This plan (§0.7), `docs/queue/OPS-3.md`, `docs/BUILDER_QUEUE.md:36`, the owner decision and the brief that commissioned this amendment all say `Upholds=` starting `radio-web` early would *"reintroduce the pre-Fix-A dead-visualization-hub bug"*, leaving the hub **"dead for the lifetime of the radio-web process"**. **It would not.** "Fix A" was **two** fixes in one commit (`c1fba27a`, #386): the deploy poll *and* a client-side background retry loop, and the second one is still on `main` and still works. §0.7b.1 has the citations. **`C-202` is a few seconds of missing visualization that self-heals — not a permanent regression.** It is re-graded, not deleted.
+>
+> ⭐ **The readiness work survives that correction** — §0.7b.2 gives four reasons that do not depend on the false premise, including one nothing in this chain credits it with: **at boot there is no deploy poll at all.** But the owner decided while believing the harm was permanent, and it is not. §1.4 says what that does and does not change.
+>
+> ### Everything else this amendment touches
+>
+> §0.4.6's residual-cost table (the dark window grows — §0.7b.4), §0.8 (**0.75 d → 1.25 d**, box session 30 → 45 min), §0.9, §2/§3 (a seventh task), §4.10/§4.11, §5.2/§5.3, §6.2/§6.3 (a **third** directive to install and to roll back), §8.5 (its third option already shipped), §9.2, §9.4 and §10.
+
+---
+
 ## 0. Read this before Task 1
 
 ### 0.1 What this row is, in one paragraph
@@ -322,6 +346,12 @@ the appliance no longer asserting an availability it does not have. It is a *sma
 owner accepted on 2026-09-07 — which was "dark until a human intervenes, every time" — but it is not zero,
 and the PR body must say so in these words rather than presenting `Upholds=` as having made the row free.
 
+⚠ **SUPERSEDED IN PART by the second amendment: readiness makes this table's numbers LONGER.** The console
+now waits for a backend that works instead of returning to one that does not, so the first row becomes
+~16–18 s typical and the second up to ~150 s worst case. **§0.7b.4 carries the replacement table**, and
+`S14` plus §5.3 step B measure the real figures. ⛔ **Do not quote the 10–50 s from this table in the PR
+body or in `DEPLOYMENT.md`** — it describes a shape that is not what ships.
+
 ### 0.5 ⚠ The `StartLimit*` interaction — can the pair wedge? **No, and here is the derivation**
 
 PR #467 put `StartLimitIntervalSec=300` / `StartLimitBurst=5` in `[Unit]` on **both** units
@@ -493,16 +523,19 @@ early, not the listener-bound moment the poll waits for.** So on a box with the 
 eliminated. The trailing `&& sudo systemctl start radio-web` would then be a no-op on an already-running
 unit, and the poll would be decorative.
 
-**This is a regression in a fix the repository already paid for**, it is invisible on a fast box, and it
-resurfaces as a dead visualization hub after a deploy — a symptom nobody would connect to a unit-file
-change. Recorded as `C-202`. ⛔ **It is not hypothetical in the way §0.4.5 is**: it follows from
-`Upholds=`'s documented trigger, and the only open part is how wide the window is. `S10` measures it.
+⚠⚠ **RE-GRADED 2026-09-08 (second amendment). The paragraph above is right about the mechanism and WRONG
+about the harm, and the error propagated into four other documents.** The claim *"every deploy would
+reintroduce the pre-Fix-A dead-visualization-hub bug"* rests on the comment's own words — *"the visualization
+hub stayed dead for the lifetime of the radio-web process"* — being **still true of the code**. It is not.
+**§0.7b.1 has the citations**: `c1fba27a` (#386) shipped the deploy poll **and** a client-side background
+retry loop in the same commit, and the loop is still on `main`. `C-202`'s real cost is **seconds of missing
+visualization that self-heals**, not a dead hub. The trailing clause of the comment quoted above —
+*"regardless of hub-service code resilience"* — is the tell, and this plan read past it twice.
 
-**The candidate fix, for the owner's call rather than a Builder's:** keep the poll, and remove the deploy's
-dependence on start *ordering* by having `radio-web` wait for the API itself — but that is a new readiness
-mechanism, not a unit-file line, and it belongs in its own row. §8.5 files it. **For this row, `S10`
-determines whether the window is wide enough to matter on this hardware**, and the answer goes to the owner
-with the PR.
+⭐ **The readiness fix is still the right change**, for four reasons that do not depend on the false premise
+(§0.7b.2). But it is a *correctness and boot-ordering* fix, not the rescue of a blocking regression, and the
+PR body must describe it that way. **`S10` is superseded by `S12`** (§4.11): its job changes from *sizing a
+regression* to *proving the fix works*, and its expected result inverts.
 
 ⚠ **`daemon-reload` is on the *start* path, not the stop path.** That is worth knowing for §5: a deploy run
 after the new unit is installed picks it up at `:452`, mid-deploy, at a moment when `radio-api` is stopped
@@ -514,32 +547,164 @@ by this row. Its closing hint, `Start manually: sudo systemctl start radio-api r
 correct: naming both is redundant under `BindsTo=` but not wrong. **No change needed, and none should be
 made** — §8.4.
 
-### 0.8 The estimate — **0.75 d**, re-priced 2026-09-08, and a supervised session that is not part of it
+### 0.7b ⭐ NEW 2026-09-08 (second amendment) — readiness: what it fixes, what it does not, and what it costs
 
-⚠ **The old number was 0.5 d and it no longer holds.** The re-scope adds a second unit file, doubles the
-heredoc count, folds in what was an optional task, and adds three rehearsal scenarios of which two are new
-open questions rather than re-runs.
+#### 0.7b.1 ⚠⚠ First, the correction: "Fix A" was TWO fixes, and the second one is still working
 
-| Work | Cost | Δ |
+`Deploy-ToLinux.ps1:445-451`'s comment is the sole evidence behind `C-202`, behind the owner decision's
+framing, and behind this plan's §0.7. Its load-bearing sentence is that a failed initial negotiate left the
+visualization hub *"dead for the lifetime of the radio-web process (pre-Fix A behavior)"*.
+
+**"Fix A" is `c1fba27a` — PR #386, *"fix(web/deploy): Radzen dark theme, viz hub startup race,
+sleep-clock anti-burn-in"* — and it changed SIX files, not one.** Alongside the 20-line change to
+`Deploy-ToLinux.ps1` it rewrote both hub clients:
+
+| Evidence | Where |
+|---|---|
+| *"Background retry loop activated when the initial StartAsync fails (radio-api not yet listening at deploy time, network blip, etc.). The loop polls until the hub is reachable, then replays any subscriptions the UI recorded while we were offline."* | `src/Radio.Web/Services/Hub/AudioVisualizationHubService.cs:20-23` |
+| The catch that arms it: *"Initial connect failed — typically because radio-api hasn't bound port 5000 yet during a fresh deploy … kick off a background retry loop and leave the connection object intact"* → `StartRetryLoop(hubUrl)` | `AudioVisualizationHubService.cs:187-193` |
+| The loop itself, back-off `{2, 5, 10, 30}` s, replaying subscriptions on success | `AudioVisualizationHubService.cs:208-218` |
+| The same treatment on the **audio-state** hub — *"Without this guard a failed initial StartAsync would leave `_hubConnection` non-null and every subsequent call would skip silently"* | `AudioStateHubService.cs:31-34`, `:104-110`, `:355-356`, `:390` |
+| `git log -S 'StartRetryLoop'` on the visualization service returns **exactly one commit**: `c1fba27a` | — |
+
+⭐ **So the comment describes behaviour its own commit fixed.** Its final clause even says so — *"eliminates
+the race regardless of hub-service code resilience"* — which only makes sense written by someone who had
+just added that resilience. This plan quoted that clause twice (§0.7, §8.5) and read past it both times.
+
+**What `Upholds=` starting `radio-web` early actually costs today:** one `LogWarning` per hub, and no
+visualization or live audio-state until the retry loop connects — typically **2 s**, worst case **30 s** on
+the back-off ladder, self-healing without intervention. ⚠ **Not nothing** — the console is visibly inert
+while it lasts — **but not a dead hub, and not permanent.**
+
+⚠ **Two further corrections to the record while in this neighbourhood**, both from reading `:452` rather
+than its comment:
+
+1. **The deploy's poll is advisory, not enforcing.** `for i in $(seq 1 20); do curl … && break || sleep 0.5;
+   done` **exits 0 whether or not the endpoint ever answered**, and the `&&` chain then starts `radio-web`
+   regardless. So "keep the poll — belt and braces" (the owner decision's words, and this plan's) is keeping
+   a **soft wait**, not a gate. That is still worth keeping, and it is not the safety net the phrase implies.
+2. **`Deploy-ToLinux.ps1:459-460` already concedes the whole premise in one line:** *"Poll because the
+   service takes a few seconds to bind its HTTP listener after start."* The repository has known since
+   `OPS-1` that `is-active` precedes listener-bound; nothing had made the unit say so.
+
+#### 0.7b.2 ⭐ Why readiness is still worth doing — four reasons that survive §0.7b.1
+
+1. ⭐ **At boot there is no poll at all, and nothing in this chain has said so.** `radio-web` is
+   `After=radio-api.service` and `WantedBy=multi-user.target`; on a cold boot systemd starts web as soon as
+   api's start job completes, which for `Type=simple` is at exec. `Deploy-ToLinux.ps1` is not running. **The
+   ordering the poll exists to enforce has never been enforced outside a deploy** — which makes readiness a
+   fix for a path that is exercised on every power cycle, not just a defence of the deploy path.
+   ⚠ Stated as *structurally present and unmeasured*: nobody has observed the boot race losing. It is the
+   same shape the comment describes, on a path with no mitigation but the client retry loop.
+2. **`Upholds=` turns a rare race into a routine one.** Today `radio-web` restarts on deploy and boot only.
+   After this row it restarts on **every transient `radio-api` crash**, and each restart re-runs the initial
+   connect. The retry loop absorbs it, but the console is inert for 2–30 s *on top of* the dark window each
+   time. Truthful readiness removes the race rather than absorbing it.
+3. **It makes `active` true for every consumer, not just this one.** `After=`, `Upholds=`, any future unit,
+   and the deploy's own `is-active` check at `:455-458` all currently read a value that means "exec'd".
+4. **It is the option the owner chose**, and §1.4's mechanism keeps it inside the unit file, so it costs
+   nothing that `C-191` was buying.
+
+#### 0.7b.3 ⭐ What "ready" means here — the narrowest definition that fixes the problem
+
+> **Ready ≡ `POST /hubs/visualization/negotiate?negotiateVersion=1` returns 2xx.**
+> That is Kestrel bound **and** the hub mapped **and** the endpoint answering — and it is *exactly* the
+> condition `Deploy-ToLinux.ps1:452` already polls for in production.
+
+⛔ **Ready does NOT mean "the audio engine is up".** Resist widening it, and here is the measurement that
+says why. `Program.cs:182-183` map the hubs before `app.Run()` at `:218`, and Kestrel
+(`GenericWebHostService`, implicit at `Program.cs:15`) is the **first** hosted service — so the hub answers
+early. `AudioEngineInitializationService.StartAsync` (`:107-187`) then blocks the *host* on hardware for an
+unbounded time. **A readiness definition that waited for the audio engine would delay `active` behind a BT
+adapter**, which is how `Type=notify` fails (§1.4) — and `radio-web` does not need the audio engine to
+serve its UI, only the HTTP/SignalR surface.
+
+**Narrower is safer here, and it is also the only definition with production evidence behind it.**
+
+#### 0.7b.4 ⚠ What readiness COSTS — the dark window grows, and the ceiling is bounded by the limiter
+
+**`ExecStartPost=` runs on every start, including every `Restart=always` auto-restart.** So `radio-api`
+holds `activating` for the readiness wait before going `active`, and `Upholds=` cannot return the console
+until then. §0.4.6's table gains time:
+
+| Window | Before this amendment | With readiness |
+|---|---|---|
+| One transient crash | dark ~15 s | dark ~**16–18 s** typical (`RestartSec=10` + a 1–3 s bind), up to **~30 s** worst case |
+| Up to 5 retries | dark up to ~50 s | dark up to **~150 s** worst case |
+
+⭐ **The typical number barely moves** — `AudioVisualizationHubService.cs:216` records the observed bind as
+*"the typical case is a 1–3 second startup race"*, and the deploy's 10 s poll has been sufficient in
+production since #386. The worst case is what grows, and it grows **because the console now waits for a
+backend that works instead of returning to one that does not.** That is the intended trade; say it in the
+PR body in those words.
+
+⚠⚠ **The poll ceiling is bounded ABOVE by the start limiter, not by patience — this is the constraint a
+Builder will otherwise miss.** A failure that occurs *after* `ExecStartPost` has run costs
+`RestartSec + t_ready` per cycle, and the limiter only latches if 5 attempts land inside
+`StartLimitIntervalSec=300`. Attempts fall at `0, T, 2T, 3T, 4T` where `T = 10 + t_ready`, so latching needs
+`4T ≤ 300`, i.e. **`t_ready ≤ 65 s`**. Past that, `radio-api` **never comes to rest** — it crash-loops
+forever and the console flaps dark/light indefinitely, which is strictly worse than the wedge #467's limiter
+exists to produce.
+
+**Chosen ceiling: 20 s** (40 × 0.5 s). Derived, not invented — it is **2× the deploy's own 10 s poll**
+(`seq 1 20` × `sleep 0.5` at `:452`), which is the only figure in the tree with production standing. It sits
+**3× under** the 65 s limiter bound and **4.5× under** the 90 s `DefaultTimeoutStartSec` that applies
+because `TimeoutStartSec=` is absent from every unit in this repository. `S15` tests the limiter still
+latches with it in place.
+
+#### 0.7b.5 ⛔ What CANNOT be verified without the appliance — stated here, not buried
+
+⭐ **Read this before writing any task that assumes otherwise.** The brief for this amendment asked for it
+explicitly, and the honest answer is that **one number this design depends on does not exist in the
+repository.**
+
+| # | Unverifiable from the repo | Consequence of being wrong | Cheapest way to settle it |
+|---|---|---|---|
+| 1 | ⚠⚠ **How long `radio-api` actually takes from exec to `negotiate` answering, on this box, on a cold boot.** The 20 s ceiling is sized from the deploy's 10 s poll, and **nobody has recorded whether that poll has ever reached its 20th iteration.** | Too small: the poll gives up, `active` is asserted early, and readiness silently does nothing on exactly the slow boot it was written for. Too large: §0.7b.4's limiter bound. | ⭐ **The §5.3 box session measures it** — one number, no risk, and it is now a required step rather than an optional one. Until then the ceiling is a *defensible default*, not a measured one. |
+| 2 | Whether `curl` is present on the appliance. Both `setup.sh` install it (`debian-x64:45`, `raspberry-pi:45`) and every deploy already runs it at `:452` — but **`deploy/provision/packages.sh` does NOT**, though its header comment at `:7` claims curl is covered. | `ExecStartPost` fails to exec → but it is written to exit 0, so the unit still starts. Degrades to today's behaviour, loudly. | `command -v curl` in the §5.2 install, one line, no risk. `C-206`. |
+| 3 | Whether `ExecStartPost=` actually holds `ActiveState=activating` until it completes. **The entire option rests on this**, and it is the class of claim §0.4.4 caught this plan getting wrong by reasoning from names. | ⛔ **The option collapses** and `Type=notify` becomes forced despite §1.4. | ⛔ **`S12a` measures it FIRST, in the container, before anything else in §4.11.** Not derived here on purpose. |
+| 4 | Whether the appliance's real startup ever exceeds the ceiling. | Readiness gives up and the boot race (§0.7b.2.1) stays unfixed — no worse than today, but the row would not have delivered. | Same measurement as #1. |
+
+⛔ **No task in this plan may be written as though #1 has been answered.** The value ships as 20 s, the box
+session records the truth, and a follow-up adjusts it if the truth disagrees. **Nothing here is a reason to
+touch the box before §5.**
+
+### 0.8 The estimate — **1.25 d**, re-priced twice on 2026-09-08, and a supervised session that is not part of it
+
+⚠⚠ **RE-PRICED AGAIN (second amendment): 0.75 d → 1.25 d, box session 30 → 45 min.** The readiness work adds
+a third directive, a seventh task, four rehearsal scenarios, and — the largest single item — a **rebuilt
+fixture**, because the existing stand-in `ops3-api` binds nothing and therefore cannot express readiness at
+all (§4.11).
+
+⚠ *The first amendment's 0.5 d → 0.75 d still stands and is folded in below.* It added a second unit file,
+doubled the heredoc count, and folded in the previously-optional touch-icon task.
+
+| Work | Cost | Δ (2nd amendment) |
 |---|---|---|
 | Task 1 — `radio-web.service`: `BindsTo=` + comment rewrite | 0.75 h | — |
-| Task 2 — `radio-api.service`: `Upholds=` + comment | 0.75 h | **new** |
-| Task 3 — **four** heredocs (both units × both `setup.sh`) | 0.25 h | was two |
-| Task 4 — `deploy/DEPLOYMENT.md`, now including the wait-before-acting guidance and a two-file rollback | 0.75 h | wider |
-| Task 5 — `Deploy-ToLinux.ps1`, comment **or** stop-order change depending on `S8` | 0.25 h | conditional |
-| Task 6 — `radio-console-open` (`reset-failed`) | 0.5 h | **folded in** — was optional |
-| §4 the systemd rehearsal — rebuild the fixture, re-run `S1`–`S7` and `S11` as regression, run the new `S8`/`S9`/`S10` | **2 h** | same total, different content |
-| PR, review, merge — two units, a re-scope to explain | 0.75 h | +0.25 h |
-| | **6 h ≈ 0.75 d** | |
+| Task 2 — `radio-api.service`: `Upholds=` + comment | 0.75 h | — |
+| **Task 7 — `radio-api.service`: `ExecStartPost=` + `TimeoutStartSec=` + comment** | **0.5 h** | ⭐ **new** |
+| Task 3 — **four** heredocs, **plus the two `Type=notify` corrections** | 0.5 h | +0.25 h |
+| Task 4 — `deploy/DEPLOYMENT.md`: wait-before-acting, two-file rollback, **the readiness section and the "`start radio-api` now blocks" note** | 1.0 h | +0.25 h |
+| Task 5 — `Deploy-ToLinux.ps1`, comment **or** stop-order change per `S8`, **plus the two comments this change makes stale (`:445-451`, `:459-460`)** | 0.5 h | +0.25 h |
+| Task 6 — `radio-console-open` (`reset-failed`) | 0.5 h | — |
+| §4 the systemd rehearsal — **rebuild the fixture for readiness**, re-run `S1`/`S6`/`S7`/`S8`/`S9`/`S11` as regression, run the new `S12`–`S15` | **3.5 h** | **+1.5 h** |
+| PR, review, merge — three directives, a re-scope **and a corrected premise** to explain | 1.0 h | +0.25 h |
+| | **9 h ≈ 1.25 d** | **+3 h** |
 
-**Why the rehearsal did not get more expensive even though it gained three scenarios:** `S1`, `S6` and `S7`
-are now *recorded results* being re-confirmed rather than open questions being investigated, and the fixture
-is specified rather than designed. The 2 h moves from `S1` to `S8`/`S9`/`S10`.
+**Where the extra 1.5 h of rehearsal goes.** ⭐ **`S12a` is the expensive one and it is not optional** — the
+whole `ExecStartPost=` option rests on `ExecStartPost` holding `ActiveState=activating` until it completes,
+and §0.4.4 is this plan's own standing evidence that such a question must not be settled by reasoning from a
+directive's name. The rest is fixture work: `ops3-api` gains a late-published readiness marker and the unit
+gains a real `ExecStartPost=`, which means `S1`/`S6`/`S7` are re-run against a **changed** fixture rather
+than a preserved one — so their re-runs stop being nearly free.
 
-⚠ **What is not in the number, and must not be folded into it: the box session.** It has grown from ~20 min
-to **~30 min** because it now installs two units, verifies four loaded properties rather than three, and
-must confirm the `Upholds=` return direction on the appliance's own systemd version (`C-199`). It needs the
-owner physically present and costs a brief interruption to whatever is playing. It is his to schedule.
+⚠ **What is not in the number, and must not be folded into it: the box session, now ~45 min.** It installs
+two units carrying three directives, verifies five loaded properties, confirms the `Upholds=` return
+direction on the appliance's own systemd version (`C-199`), **and now carries a measurement step that is the
+only available source of a number this design depends on** (§0.7b.5 #1 — the real exec→ready duration). It
+needs the owner physically present and costs a brief interruption to whatever is playing. It is his to
+schedule.
 
 📌 **`docs/HANDOFF-GA-PUNCH-LIST.md:1110` prices this row at 2–3 h.** That was right for a one-word diff and
 did not price the rehearsal, which did not exist when it was written — and the rehearsal is the only reason
@@ -573,14 +738,40 @@ transient blip, forever) or different (`BindsTo=` + `Upholds=`: dark for 10–50
   defeated). **If `S8`, `S9` or `S10` comes back badly, the answer is not to proceed on the 2026-09-07
   approval** — it is a new tradeoff, and it goes back to him.
 
+⭐ **A SECOND owner decision was taken on 2026-09-08** (`docs/queue/OPS-3.md` § *OWNER DECISION*): keep both
+directives **and** give `radio-api` real readiness. That covers the readiness work in principle. ⚠⚠ **But it
+was taken on a premise this amendment has since falsified** — that a defeated deploy poll leaves the
+visualization hub *"dead for the lifetime of the radio-web process"*. §0.7b.1: the client-side retry loop
+that shipped in the same commit as the poll makes the real cost **2–30 s of inert console that self-heals**.
+
+**The position this plan takes, and the Builder must state it in the PR body rather than assume it:**
+
+- ✅ **The decision stands.** Readiness is still the right change — §0.7b.2 gives four reasons that do not
+  rely on the false premise, and one of them (**the boot path has no poll at all**) is a benefit nobody had
+  credited it with. Nothing about the shape changes.
+- ⚠ **What changes is the urgency, and therefore how much cost is proportionate.** `C-202` was described to
+  the owner as a *blocking regression on the appliance's most frequent operation*. It is not. If he would
+  rather ship `BindsTo=` + `Upholds=` now and file readiness as its own row, **that is a defensible reading
+  of the corrected facts and this plan should not talk him out of it** — say so on the PR and let him
+  choose. ⛔ **A Builder must not make that call.**
+- ⛔ **It does not cover `Type=notify`.** The decision names it first of two candidates; §1.4 rejects it on
+  evidence the decision did not have (`AudioEngineInitializationService` blocks the host on hardware, so
+  `READY=1` would mean something much later and unbounded). **If a Builder is tempted back toward
+  `Type=notify`, that is a new tradeoff and it goes to the owner**, because it also forfeits `C-191`.
+
 ⚠ **The reason the exemption existed has not gone away, and the approval is not a substitute for it.** It
 existed because *no gate this repository can run observes what this change does* — there is no unit test
 for systemd propagation, CI has no systemd, and a green suite is exactly as green with `Requires=` as with
 `BindsTo=`. What the approval means is that the owner has accepted that risk **on the strength of this
 plan** — a plan whose central prediction has now been measured wrong once. So:
 
-**A Builder may:** merge the PR on green gates once §4's rehearsal has run and its `S1`/`S6`/`S7`/`S8`/`S9`
-results are pasted into the PR body, **and** `S8`/`S9`/`S10` came back clean.
+**A Builder may:** merge the PR on green gates once §4's rehearsal has run and its
+`S1`/`S6`/`S7`/`S8`/`S9`/**`S12`**/**`S13`**/**`S14`**/**`S15`** results are pasted into the PR body,
+**and** `S8`, `S9`, `S12a` and `S15` all came back clean.
+
+⛔ **`S12a` is the new hard gate and it precedes every other readiness result.** If `ExecStartPost=` does not
+hold `ActiveState=activating` until it completes, the chosen mechanism does not work at all and nothing
+downstream of it means anything (§0.7b.5 #3). **Run it first; stop if it fails.**
 
 **A Builder must NOT, unattended, even with the merge approved:**
 
@@ -600,15 +791,45 @@ results are pasted into the PR body, **and** `S8`/`S9`/`S10` came back clean.
 - ⛔ **Write "verified on the box" for anything.** Per §0.6 a deploy does not install the units, so a
   post-merge deploy proves the change is *absent*, not present.
 
-### 0.10 ⚠ Twelve constraints — numbering continues from `C-190` (`AUD-15`)
+⭐ **Five more, all from the readiness work (second amendment):**
+
+- ⛔ **Do not switch `radio-api` to `Type=notify`**, do not add `Microsoft.Extensions.Hosting.Systemd`, and
+  do not call `UseSystemd()`. §1.4 rejects it on measured grounds. ⚠ It is the option the owner decision
+  names *first*, so this prohibition will look like a deviation — the PR body must explain it rather than
+  leave it to be discovered.
+- ⛔ **Do not delete or weaken `Deploy-ToLinux.ps1:452`'s poll**, even though readiness makes it redundant.
+  The owner decision is explicit, and the reason is attribution: removing it in the same change would make
+  any regression impossible to assign. ⚠ **And note it is a soft wait, not a gate** (§0.7b.1) — do not
+  "tidy" it into one either; that is a behaviour change wearing a cleanup's clothes.
+- ⛔ **Do not size the `ExecStartPost=` ceiling by feel, and do not raise it past 50 s.** §0.7b.4 derives a
+  hard bound of ~65 s from `StartLimitIntervalSec` — past it `radio-api` never latches and crash-loops
+  forever, which is worse than the wedge #467 exists to produce. 20 s is the shipping value.
+- ⛔ **Do not make `ExecStartPost=` fail on timeout.** It must `exit 0` unconditionally (Task 7). A failing
+  `ExecStartPost` fails the *start*, which converts "the API is slow" into "the API is failed" and feeds the
+  limiter — the exact conversion this row is trying to avoid.
+- ⛔ **Do not use `NRestarts` in any readiness measurement.** `Upholds=` issues `start`, not `restart`
+  (§4.8's instrument correction), so it reads 0 either way. §4.11 uses `ActiveEnterTimestamp` and journal
+  timestamps instead, **and validates that instrument against a known cycle before trusting it** — which is
+  precisely the step whose absence made the earlier `NRestarts` derivation vacuous.
+
+### 0.10 ⚠ Seventeen constraints — `C-191` … `C-207`, numbering continues from `C-190` (`AUD-15`)
+
+⚠ **This heading said "Twelve" until the second amendment; the count is now 17.** `C-203`–`C-207` are
+defined at the end of §8.2 alongside `C-199`–`C-202`, not here — a layout this plan inherited and did not
+reorganise, so **grep for `` `C-2 `` rather than assuming they are all in one place.**
 
 **`C-191` and `C-192` change the work. `C-193` and `C-197` are traps a Builder will otherwise walk into.
 `C-195` is a claim in the row's own tracking documents that does not survive reading the code. `C-194`,
 `C-196` and `C-198` are findings recorded so they are not rediscovered.**
 
-⭐ **`C-199`–`C-202` are new on 2026-09-08 and all four come from the re-scope.** `C-200` and `C-202` are
-the two that could still stop the row; `C-199` is the reason the box session is no longer optional; `C-201`
-is the new rollback hazard.
+⭐ **`C-199`–`C-202` are new on 2026-09-08 and all four come from the `Upholds=` re-scope.** `C-200` was one
+of the two that could stop the row; `C-199` is closed; `C-201` is the rollback hazard; **`C-202` is
+re-graded — its mechanism holds, its severity was overstated in four documents** (§0.7b.1).
+
+⭐ **`C-203`–`C-207` are new on the second amendment and all five come from readiness.** `C-203` is the
+partial state that looks fine and is not; `C-204` is why `Type=notify` is rejected although the owner
+decision names it first; `C-205` is the ceiling's hard upper bound; `C-206` and `C-207` are recorded so they
+are not rediscovered or "fixed" mid-row.
 
 ---
 
@@ -819,6 +1040,71 @@ consequence is what stops a deletion. ⚠ **Neither comment may claim the pair i
 §0.5.1 and `C-202` are open at the time of writing, and a unit-file comment asserting more certainty than
 the plan has is the exact defect `CLAUDE.md` § *Pre-Merge Review* enumerates three shipped examples of.
 
+### 1.4 ⭐ NEW — the readiness mechanism: **`ExecStartPost=`**, and what rejecting `Type=notify` gives up
+
+The owner decision names two candidates and leaves the choice open. **Taken: `ExecStartPost=`.**
+
+| Option | Verdict |
+|---|---|
+| ⭐ **`ExecStartPost=` polling `POST /hubs/visualization/negotiate?negotiateVersion=1` until it answers, bounded at 20 s, always exiting 0** ✅ | **TAKEN.** It expresses *exactly* the stated readiness condition (§0.7b.3), it is the same probe `Deploy-ToLinux.ps1:452` already runs in production so the two cannot drift, it is **unit-file-only** so `C-191` survives intact, and it has an in-repo precedent — `deploy/provision/systemd/radio-api-restart.service:7`, the repository's only existing `ExecStartPost=`, written as `/usr/bin/bash -c '…'`. ⚠ Conditional on `S12a`. |
+| `Type=notify` + `sd_notify` (`Microsoft.Extensions.Hosting.Systemd` / `UseSystemd()`) | ⛔ **REJECTED — and not on taste.** Three independent reasons below. |
+| `radio-api-ready.target` | **Rejected.** A target does not *produce* readiness; something still has to decide when to reach it, so this is `ExecStartPost=` with an extra unit. |
+| Fix the client instead (make `Radio.Web`'s SignalR resilient) | ⭐ **Already done — see §0.7b.1.** `c1fba27a` shipped it. This is why §8.5's third option is struck rather than deferred. |
+
+#### Why `Type=notify` is rejected
+
+1. ⛔ **It does not signal what we need it to signal, and the gap is unbounded.** .NET sends `READY=1` on
+   `ApplicationStarted`, i.e. after **every** `IHostedService.StartAsync` has returned.
+   `AudioEngineInitializationService` is a raw `IHostedService`
+   (`src/Radio.API/Services/AudioEngineInitializationService.cs:19` — *not* a `BackgroundService`, which is
+   the whole difference) and its `StartAsync` awaits, inline and in order: play-history cleanup (`:113`),
+   `_audioEngine.InitializeAsync` (`:127`), `_audioEngine.StartAsync` (`:130`), output **and** input device
+   enumeration (`:142`, `:143`), startup preferences including a third enumeration (`:162`→`:339`),
+   `_audioManager.InitializeAsync` (`:167`), source activation (`:171`), `PreWarmBluetoothAsync` (`:176`)
+   and BlueZ adapter bring-up (`:180`→`:458`). **None has a timeout.** Kestrel binds *first* (implicit at
+   `Program.cs:15`), so `READY=1` would arrive strictly later than "the hub answers" by however long the
+   hardware takes.
+2. ⛔ **On this box that is not a delay, it is a wedge.** `TimeoutStartSec=` is **absent from every unit in
+   this repository**, so the 90 s default applies. A cold boot where the BT adapter is slow exceeds it,
+   systemd kills the start, `Restart=always` retries, and `StartLimitBurst=5` lands `radio-api` in `failed`
+   — with `BindsTo=` now taking the console down with it. **The readiness fix would have manufactured the
+   exact failure the row exists to make rarer.** Fixing this properly means moving
+   `AudioEngineInitializationService` off the start path *and* setting `TimeoutStartSec=`, which is a second
+   row's worth of work on the live audio path.
+3. ⛔ **It forfeits `C-191`, which is the row's main safety property.** `Type=notify` puts half the change in
+   the application binary, which reaches the box via `Deploy-ToLinux.ps1` on a *different schedule* from the
+   unit files (which the deploy does not install at all). That creates a new half-installed state —
+   `Type=notify` in the unit, a binary that never notifies — which hangs for 90 s and then crash-loops.
+   ⚠ **That trap is already latent in the tree**: `deploy/debian-x64/setup.sh:172` and
+   `deploy/raspberry-pi/setup.sh:281` already declare `Type=notify` for a binary with no `sd_notify`.
+   Task 3 corrects them either way.
+   ⚠ Adding the package is also not free: there is **no `Directory.Packages.props`** (pinning is inline in
+   `src/Radio.API/Radio.API.csproj:21-36`) and `Directory.Build.props:3` sets `TreatWarningsAsErrors=true`,
+   so a package that trips an advisory breaks the Release build rather than warning.
+
+#### ⭐ What the rejected option gives up — stated, because the rejected option is what disappears from a record
+
+- **The systemd-native answer.** `Type=notify` is how this is *supposed* to be done, and a reviewer who knows
+  systemd will ask. `ExecStartPost=` is a poll: a second process, on `CPUAffinity=2 3` at `Nice=-5` with the
+  rest of the service, running up to 40 `curl` invocations at 0.5 s spacing on a resource-constrained N100.
+  Bounded and one-shot per start, but real.
+- **A readiness signal that cannot lie.** `sd_notify` is the application asserting its own state.
+  `ExecStartPost=` infers it from outside, and because it must `exit 0` on timeout (§0.11), **a `radio-api`
+  that never becomes ready is still eventually reported `active`** — truthful in the common case, back to
+  today's untruth in the pathological one. `S13` measures that path; the give-up is logged at warning
+  (`<4>`, via `SyslogLevelPrefix=true` at `radio-api.service:96`) precisely so it is not silent.
+- **One meaning of `active` for all time.** With `ExecStartPost=`, `active` means "the *visualization hub*
+  answers" — not "the API is fully up". Anything that later needs a different readiness notion has to add
+  its own probe rather than reuse this one.
+- **Deleting the deploy poll one day.** Under `Type=notify` the poll would be provably redundant. Under
+  `ExecStartPost=` it is redundant in the good case and a genuine second chance in the give-up case, so it
+  should stay indefinitely — which the owner decision independently asked for.
+
+⭐ **The deciding asymmetry:** if `ExecStartPost=` is wrong, the console is no worse than today and a warning
+says so. If `Type=notify` is wrong, `radio-api` latches `failed` and — post-`BindsTo=` — takes the console
+with it. **Pick the option whose failure mode is the one the row is trying to eliminate, not the one it is
+trying to create.**
+
 ---
 
 ## 2. Tasks
@@ -827,14 +1113,24 @@ the plan has is the exact defect `CLAUDE.md` § *Pre-Merge Review* enumerates th
 task doubles (Task 3), and what was the optional Task 5 is now the approved Task 6. **Tasks 1 and 2 must
 land together or not at all** (`C-201`).
 
+⭐ **Second amendment 2026-09-08: SEVEN tasks.** Task 7 adds the readiness directive to `radio-api.service`,
+and Tasks 3, 4 and 5 each widen. **Tasks 1, 2 and 7 must land together or not at all** — `C-201` now spans
+three directives across two files, and `C-203` records why `Upholds=` without readiness is the worst of the
+partial states.
+
 | | Task | File | Status |
 |---|---|---|---|
 | 1 | `BindsTo=` + comment | `deploy/common/radio-web.service` | amended |
-| 2 | `Upholds=` + comment | `deploy/common/radio-api.service` | **new** |
-| 3 | four heredocs | both `setup.sh` | widened from two |
-| 4 | docs + runbook | `deploy/DEPLOYMENT.md` | widened |
-| 5 | stop-order comment **or** change | `deploy/Deploy-ToLinux.ps1` | ⚠ conditional on `S8` |
+| 2 | `Upholds=` + comment | `deploy/common/radio-api.service` | **new** (1st amendment) |
+| **7** | **`ExecStartPost=` readiness + `TimeoutStartSec=` + comment** | `deploy/common/radio-api.service` | ⭐ **new** (2nd amendment) |
+| 3 | four heredocs **+ the two `Type=notify` corrections** | both `setup.sh` | widened again |
+| 4 | docs + runbook **+ the readiness section** | `deploy/DEPLOYMENT.md` | widened again |
+| 5 | stop-order comment **or** change, **+ two stale comments** | `deploy/Deploy-ToLinux.ps1` | ⚠ conditional on `S8` |
 | 6 | `reset-failed` before `start` | `radio-console-open` | ✅ approved, folded in |
+
+⚠ **Task 7 is numbered last and executed second.** It edits the same file as Task 2 and the same `[Service]`
+block region; §3 puts it immediately after Task 2 so the api unit is touched once, coherently. The number is
+7 only because renumbering the others would break every cross-reference in this plan.
 
 ### Task 1 — the web unit, and the comment that must change with it
 
@@ -993,10 +1289,35 @@ Upholds=radio-web.service
 # rationale in common/radio-api.service.
 ```
 
-⚠ **Do not modernise the rest of these heredocs** — they still say `User=radio`, `Type=notify` for a
-`Type=simple` service, and carry none of the affinity or memory blocks (`C-198`). Fixing that is §8.2, not
-this row. **The point of touching them at all is that leaving four copies of the old dependency shape in
-the tree guarantees the next person greps, finds one, and concludes the change did not land.**
+**3c — ⭐ NEW (2nd amendment): the `Type=notify` lines must be corrected, and this is the one exception to
+"do not modernise".** `deploy/debian-x64/setup.sh:172` and `deploy/raspberry-pi/setup.sh:281` both read
+`Type=notify` for a binary that has never called `sd_notify` — confirmed by grep: `UseSystemd`,
+`AddSystemd`, `Extensions.Hosting.Systemd`, `sd_notify` and `NOTIFY_SOCKET` return **zero hits across all
+C# in the solution**. In each, replace with:
+
+```
+Type=simple
+# OPS-3: was Type=notify, which was always wrong — Radio.API does not call sd_notify,
+# so systemd would hold the start job until TimeoutStartSec (90s default) and then fail
+# the unit. Readiness is expressed by ExecStartPost= in common/radio-api.service, which
+# is what actually gets installed; this heredoc is the fallback for a checkout missing
+# that file.
+```
+
+⚠ **Why this line and no other.** §8.2 still holds for `User=radio`, the missing affinity and memory blocks,
+and the sandboxing mismatch — those are latent and belong in their own row. **`Type=notify` is different
+because this row makes it actively misleading**: a plan whose central question was `Type=notify` versus
+`ExecStartPost=` must not leave two files in the tree that appear to have chosen `Type=notify`. Anyone
+grepping for `notify` while reviewing this PR finds them, and the wrong conclusion is one grep away.
+
+⚠ **Do not modernise the rest of these heredocs** — they still say `User=radio` and carry none of the
+affinity or memory blocks (`C-198`). Fixing that is §8.2, not this row. **The point of touching them at all
+is that leaving stale copies of the old dependency shape in the tree guarantees the next person greps, finds
+one, and concludes the change did not land.**
+
+⛔ **Do not add `ExecStartPost=` to the heredocs.** They are unreachable fallbacks (`C-198`) that already
+disagree with the canonical units on user, sandboxing and resource limits; adding a readiness poll to a unit
+that would not otherwise start correctly buys nothing and widens the divergence Task 3 is trying to contain.
 
 ---
 
@@ -1076,6 +1397,35 @@ in progress and the old text would have had the operator interrupt it; and the c
 `systemctl start radio-api` works is **new since the re-scope** — it was false under `BindsTo=` alone
 (`C-192`), which is why the previous version of this runbook entry warned against it.
 
+**4b — ⭐ NEW (2nd amendment): two operator-facing consequences of readiness.**
+
+⚠ **The first one will otherwise be reported as a hang.** Add to the § *Service Management* section, beside
+the start commands:
+
+```markdown
+⚠ **`sudo systemctl start radio-api` now blocks until the API is actually serving** — normally a second or
+two, up to 20 s at worst. That is `ExecStartPost=` (OPS-3) holding the start job open until
+`/hubs/visualization/negotiate` answers, so that `active` means "the console has something to talk to"
+rather than "the process was launched". **It is not a hang.** The same wait applies to
+`systemctl restart radio-api` and to every automatic restart, which is why a dark console now takes a few
+seconds longer to come back than it did before OPS-3.
+
+If it ever *does* take the full 20 s, the API did not answer and systemd gave up waiting rather than
+failing the unit — deliberately, so a slow API cannot feed the restart limiter. Look for
+`readiness poll gave up` in `journalctl -u radio-api -p warning --since '-30min'`.
+```
+
+**And amend the wait-first paragraph inserted above:** its "~15 s" becomes **"~15–20 s"**, and the "wait
+~30 s" threshold stays. ⛔ **Do not ship a specific number here that `S14` has not produced.** `S14` measures
+the real dark window in the container and §5.3 step B measures it on the box; if either lands above ~25 s,
+raise the 30 s threshold with it, because an operator told to wait 30 s who is actually facing 40 s will
+conclude the recovery failed and interrupt it — which is the precise failure the wait-first instruction was
+added to prevent.
+
+⚠ **`DEPLOYMENT.md` must NOT claim that the deploy's poll is now redundant.** It is redundant in the good
+case and a genuine second chance in the give-up case (§0.7b.1: it is a *soft* wait that exits 0 regardless,
+not a gate). Saying "redundant" invites the next person to delete it.
+
 ---
 
 ### Task 5 — ⚠ CONDITIONAL ON `S8`: the deploy's stop order
@@ -1113,8 +1463,46 @@ change. Replace the two `stop` calls at `:170` with a single job:
 ⚠ **Branch B contradicts §0.11's standing prohibition on collapsing those calls**, which was written for
 the `BindsTo=`-only world. The prohibition is amended there; taking Branch B is not a violation of it.
 
-⛔ **Neither branch changes anything else in this file.** In particular the start path at `:452` is not
-touched by this task — see `C-202` and §8.5 for why it may nonetheless need a follow-up row.
+⛔ **Neither branch changes the start COMMAND at `:452`.** The poll stays exactly as it is (§0.11).
+
+**5c — ⭐ NEW (2nd amendment): two comments this change makes false, and they must be fixed in this PR.**
+Both are the `CLAUDE.md` § *Pre-Merge Review* defect — a comment asserting behaviour the code no longer has
+— and this row is personally responsible for one of them and has just discovered the other.
+
+**`:445-451`** — the poll's rationale. Two errors: it describes the hub as staying *"dead for the lifetime
+of the radio-web process"*, which its own commit (`c1fba27a`, #386) fixed by adding the client retry loop in
+`AudioVisualizationHubService.cs:187-193`; and after Task 7 the ordering it enforces is enforced by systemd
+anyway. Replace the body with:
+
+```powershell
+  # Start radio-api, then radio-web. Since OPS-3 radio-api carries an ExecStartPost=
+  # readiness poll, so `systemctl start radio-api` does not return until the visualization
+  # hub answers — the ordering this loop was written to enforce is now enforced by systemd,
+  # for boots and crash-recoveries too, not only for deploys.
+  #
+  # The loop below is KEPT DELIBERATELY. It is belt and braces: it costs one curl on the
+  # happy path (the endpoint already answers, so it breaks on the first iteration), and it
+  # is a real second chance in the case where ExecStartPost gives up at its 20s ceiling and
+  # reports `active` anyway. Removing it in the same change as adding readiness would also
+  # make any regression impossible to attribute.
+  #
+  # ⚠ Note what it is NOT: a gate. The loop exits 0 whether or not the endpoint ever
+  # answered, so `start radio-web` runs regardless. It always worked that way.
+  #
+  # Historical note, corrected 2026-09-08: this comment used to say a failed initial
+  # negotiate left the hub "dead for the lifetime of the radio-web process". That was true
+  # when written and was fixed in the SAME commit (c1fba27a) by the background retry loop
+  # in AudioVisualizationHubService.StartRetryLoop — back-off {2,5,10,30}s, replaying
+  # subscriptions on success. AudioStateHubService got the same treatment. A hub that fails
+  # its initial connect now recovers in 2-30s on its own.
+```
+
+**`:459-460`** — *"Poll because the service takes a few seconds to bind its HTTP listener after start."*
+After Task 7 that is no longer why, because `is-active` no longer precedes the listener. Amend it to say the
+poll now covers the give-up case and process startup of `Radio.Web` itself, not the API's bind.
+
+⚠ **Both are comment-only edits.** ⛔ Do not let "while I'm here" turn into changing the poll, the retry
+counts, or the `is-active` checks at `:455-458`.
 
 ---
 
@@ -1158,6 +1546,92 @@ make every start look successful.
 
 ---
 
+### Task 7 — ⭐ NEW (2nd amendment): make `radio-api`'s `active` mean "the hub answers"
+
+**File:** `deploy/common/radio-api.service` — the same file as Task 2, executed immediately after it.
+
+⛔ **Do not write this task until `S12a` has run.** If `ExecStartPost=` does not hold
+`ActiveState=activating` until it completes, this mechanism does not work and the row goes back to the owner
+(§0.7b.5 #3, §1.4).
+
+**7a — the directive.** Insert immediately after `ExecStart=` at `:81`, above `Restart=always` at `:82`:
+
+```diff
+ ExecStart=/opt/radio-console/api/Radio.API
++
++# === Readiness (OPS-3, 2026-09-08) — read this before deleting or shortening it ===
++# Type=simple means systemd calls this unit `active` the moment ExecStart is FORKED,
++# not when it is useful. Deploy-ToLinux.ps1:459-460 has conceded that in a comment for
++# a while ("the service takes a few seconds to bind its HTTP listener after start"),
++# and :445-451 records the race it caused. That was harmless while nothing acted on
++# `active` — but radio-api now carries Upholds=radio-web.service (above), and Upholds=
++# fires on `active`. Without the line below, systemd would start the console against an
++# API that has not opened port 5000 yet, on every crash-recovery and every boot.
++#
++# So: hold the start job open until the visualization hub actually answers. After this,
++# `active` means "POST /hubs/visualization/negotiate returns 2xx" — Kestrel bound AND
++# the hub mapped AND replying. It deliberately does NOT mean "the audio engine is up":
++# that would wait on hardware, unbounded, and radio-web needs the HTTP surface, not the
++# audio engine. The probe is character-for-character the one Deploy-ToLinux.ps1:452
++# already runs in production, so the two cannot drift apart.
++#
++# ⛔ IT MUST EXIT 0 WHATEVER HAPPENS, and the trailing `exit 0` is what guarantees it.
++# A failing ExecStartPost fails the START, which would turn "the API is slow" into "the
++# API is failed" and feed StartLimitBurst=5 — manufacturing the wedge this row exists to
++# make rarer. On timeout we log and proceed: no worse than the behaviour before OPS-3.
++#
++# ⚠ 20s (40 x 0.5s) is a CEILING, not a delay — the observed bind is 1-3s, so the usual
++# cost is a second or two. Do not raise it past ~50s: 5 start attempts must fit inside
++# StartLimitIntervalSec=300 for the limiter to latch, and at 4 x (RestartSec + ceiling)
++# a ceiling over ~65s means radio-api NEVER comes to rest and crash-loops forever, which
++# is worse than the wedge. 20s is 2x the deploy poll's own 10s, which is the only figure
++# with production standing behind it.
++#
++# ⚠ The <4> prefix makes the give-up a WARNING, via SyslogLevelPrefix=true below. An
++# unprefixed echo would land at SyslogLevel=debug and be invisible in journalctl.
++ExecStartPost=/usr/bin/bash -c 'timeout 20 bash -c "until curl -sf -o /dev/null -X POST http://localhost:5000/hubs/visualization/negotiate?negotiateVersion=1; do sleep 0.5; done" || echo "<4>OPS-3: radio-api readiness poll gave up after 20s - /hubs/visualization/negotiate did not answer. radio-web may be started by Upholds= against a hub that is not listening yet."; exit 0'
++
++# TimeoutStartSec is absent from every other unit in this repo, so all of them inherit
++# systemd's 90s default. Stated explicitly here only because the ExecStartPost= ceiling
++# above now consumes part of it and the relationship should be visible in the file rather
++# than inherited invisibly. On a stock box this is a no-op — §5.2 records the effective
++# value BEFORE installing, so a box with a lowered DefaultTimeoutStartSec is caught.
++TimeoutStartSec=90
++# === end readiness ===
+ Restart=always
+```
+
+⚠ **Four details in that one line are load-bearing and must not be "simplified":**
+
+1. **`/usr/bin/bash -c` with an absolute path on the interpreter and bare names inside.** That is the
+   established idiom in this tree — `deploy/provision/systemd/radio-api-restart.service:7`, the only other
+   `ExecStartPost=` in the repository, is written exactly that way. ⚠ Note `radio-performance.service:7`
+   uses `/bin/bash`; both work under usrmerge, and `C-207` records the inconsistency rather than fixing it
+   here.
+2. **No `$` anywhere.** systemd expands `$VAR` and `${VAR}` in `Exec*` lines before the shell ever sees
+   them, so a loop counter would be substituted away to an empty string. `timeout` + `until` avoids shell
+   variables entirely; this is why the obvious `for i in $(seq …)` shape is *not* used, even though `:452`
+   uses it — `:452` runs through `ssh`, not through systemd.
+3. **`timeout … || echo` then `exit 0`**, in that order. `timeout` returns 124 on expiry, which fires the
+   `echo`; the unconditional `exit 0` then discards every exit status. Reordering these makes the unit
+   failable.
+4. **`ExecStartPost=` inherits `User=mmack` (`:35`), `CPUAffinity=2 3` (`:42`) and `Nice=-5` (`:47`)** — it
+   runs on the audio cores at elevated priority. Acceptable because it is bounded and one-shot per start;
+   named here so nobody discovers it while chasing an audio glitch.
+
+**7b — do NOT touch these while in the file:** `Type=simple` (`:32`) stays; `Restart=always` /
+`RestartSec=10` (`:82-83`) stay; the `StartLimit*` block (`:28-29`) stays. ⛔ **And do not add
+`WatchdogSec=`** — it is absent from every unit here, it needs `sd_notify` keepalives the application does
+not send, and a `WatchdogSec` with no keepalive kills the service on a timer.
+
+**7c — one stale comment to fix while adjacent.** `deploy/common/radio-web.service:105` says the
+`ReadWritePaths` idiom *"matches radio-api.service line 81"*. `radio-api.service:81` is `ExecStart=`; the
+`ReadWritePaths=` it means is at `:126`. Task 7 inserts directly at `:81`, so leaving it drifts it further.
+Correct the number. ⚠ **Nothing else in `radio-web.service` beyond Task 1's block** — this is a one-token
+fix to a comment this task is personally responsible for invalidating.
+
+---
+
 ## 3. Ordering
 
 **§4's rehearsal runs FIRST, before any file is edited.** That was true before 2026-09-08 and it is the
@@ -1165,15 +1639,27 @@ reason this plan is not currently shipping a regression — `S1` falsified the r
 plan was written and before anything was built. Two of its scenarios are still open questions with
 row-stopping answers (`S8`, `S9`), and one more (`S10`) can force a follow-up row.
 
-Then: Task 1 → Task 2 → Task 3 → Task 4 → Task 5 → Task 6.
+⭐ **Second amendment: `S12a` runs before everything, including the rest of §4.** It decides whether the
+chosen readiness mechanism exists at all (§0.7b.5 #3). A failed `S12a` stops the row here.
 
-⚠ **Tasks 1 and 2 are a unit of work, not two tasks that happen to be adjacent.** Landing one without the
-other produces a defined bad state (`C-201`): web-only is the shape §0.4.4 rejected, api-only is cost with
-no benefit. Do not split them across commits in a way that leaves an intermediate commit shipping either
-half alone.
+Then: Task 1 → Task 2 → **Task 7** → Task 3 → Task 4 → Task 5 → Task 6.
+
+⚠ **Tasks 1, 2 and 7 are ONE unit of work, not three adjacent ones.** ⭐ Widened by the second amendment
+from two to three. Landing a subset produces a defined bad state:
+
+| Shipped | Result |
+|---|---|
+| Task 1 only (`BindsTo=`) | The shape §0.4.4 measured and rejected — dark on any transient crash, never returns. |
+| Task 2 only (`Upholds=`) | Cost with no benefit; `radio-web` may become unstoppable while api runs (§0.4.5). |
+| ⚠⚠ Tasks 1 + 2, **no Task 7** | The console returns on every crash — **against an API that may not be listening yet.** The client retry loop absorbs it (§0.7b.1), so it looks fine and is inert for 2–30 s each time. `C-203`. |
+| Task 7 only | Harmless and pointless: `active` becomes truthful, nothing consumes it. |
+
+**Do not split them across commits in a way that leaves an intermediate commit shipping any of those.**
 
 ⚠ **Task 5 cannot be written until `S8` has run** — it has two mutually exclusive branches and the
-rehearsal picks one. Task 4's `DEPLOYMENT.md` stop-note has the same dependency.
+rehearsal picks one. Task 4's `DEPLOYMENT.md` stop-note has the same dependency. ⚠ **Task 7 cannot be
+written until `S12a` has run**, for the stronger reason that a failed `S12a` means it cannot be written at
+all.
 
 ---
 
@@ -1209,10 +1695,13 @@ kinds, and they are not interchangeable:
 reproducible, and destroyed afterwards. **Alternatives:** WSL2 with systemd enabled (`/etc/wsl.conf` →
 `[boot]` `systemd=true`), or any disposable Ubuntu VM.
 
-⚠ **`C-199`: run at least `S7` on a systemd 255 base as well** — `ubuntu:24.04`, matching the appliance.
-The recorded `Upholds=` result is from **249**, the version that *introduced* the directive, and the
-appliance runs **255**. That is a cheap gap to close in a container and an expensive one to discover at the
-appliance.
+⚠ ~~**`C-199`: run at least `S7` on a systemd 255 base as well.**~~ ✅ **DONE — `C-199` is closed.** The
+second rehearsal ran on `jrei/systemd-ubuntu:24.04`, systemd **255.4-1ubuntu8.16**, the appliance's exact
+version, and the 249 result transferred unchanged.
+
+⭐ **Second amendment: run the WHOLE of §4 on the 255.4 base now, not just `S7`.** Readiness (§4.11) is
+unmeasured on any version, and there is no reason left to prefer the 249 image for anything — matching the
+appliance costs nothing and removes a variable from every result at once.
 
 ⛔ **Not `radio`** — the rehearsal deliberately drives a unit into a tripped limiter. ⛔ **Not the
 self-hosted CI runner** (`[self-hosted, linux, x64, appserver]`) — it is shared, and leaving a latched
@@ -1450,7 +1939,15 @@ sudo systemctl start ops3-web    # ← the probe: is web's limiter latched?
 | `start ops3-web` succeeds; web `active` | Web's budget survived five api cycles. | ✅ §0.5's no-wedge conclusion extends to the new shape. Record the observed start count. |
 | *"start request repeated too quickly"* | ⛔ `Upholds=` consumed web's budget and the pair CAN wedge. | ⛔ **Stop and take it to the owner.** §0.5.1's arithmetic says the margin is zero, so this is the expected-bad answer. The fix touches `StartLimit*` values PR #467 chose deliberately — **not a Builder's call.** |
 
-**`S10` — ⚠ does `Upholds=` start web before the api's listener is bound? (`C-202`)**
+**~~`S10`~~ — ⛔ SUPERSEDED by `S12` (§4.11.2). DO NOT RUN IT.**
+
+⭐ **It was written to *size a regression*; `S12` *tests the fix*, on the same fixture question, with the
+opposite expected answer.** Running `S10` against a unit that now carries `ExecStartPost=` would report
+"`web=active` after `ready=yes`" as a **failure** against the expectation below, when that is precisely the
+result the row wants. ⚠ **And `C-202`, which `S10` exists to size, has been re-graded** — its harm was
+overstated (§0.7b.1). *Kept below for the record; its expectation paragraph is now wrong on purpose.*
+
+**~~`S10` (original) — does `Upholds=` start web before the api's listener is bound? (`C-202`)~~**
 
 The fixture's `ops3-api` binds nothing, so it cannot answer this directly. Approximate it: make `ops3-api`
 slow to become *useful* while becoming *active* immediately, and measure the gap between `ops3-api` going
@@ -1486,11 +1983,18 @@ so when reporting it, and do not present the number as a production measurement.
 ```bash
 sudo mkdir -p /etc/systemd/system/ops3-web.service.d /etc/systemd/system/ops3-api.service.d
 printf '[Unit]\nBindsTo=\nRequires=ops3-api.service\n' | sudo tee /etc/systemd/system/ops3-web.service.d/99-ops3-rollback.conf
-printf '[Unit]\nUpholds=\n' | sudo tee /etc/systemd/system/ops3-api.service.d/99-ops3-rollback.conf
+printf '[Unit]\nUpholds=\n[Service]\nExecStartPost=\n' | sudo tee /etc/systemd/system/ops3-api.service.d/99-ops3-rollback.conf
 sudo systemctl daemon-reload
 systemctl show ops3-web -p BindsTo -p Requires -p UpheldBy  # expect: BindsTo= empty, Requires=ops3-api.service, UpheldBy= empty
-systemctl show ops3-api -p Upholds                          # expect: empty
+systemctl show ops3-api -p Upholds -p ExecStartPost         # expect: BOTH empty
 ```
+
+⭐ **Widened again by the second amendment: the api drop-in must clear `ExecStartPost=` too, and that lives
+in `[Service]`, not `[Unit]`.** So this scenario now also tests that a **two-section** drop-in resets both —
+a materially different claim from resetting one list in one section. ⚠ **Also confirm the reset takes effect
+on the next start**, not merely in `show`: `sudo systemctl restart ops3-api` and check it no longer passes
+through `start-post`. A `show` that reports empty while the unit still runs the command would make §6.3 and
+§6.3b advice that does not work.
 
 Then re-run `S1` and confirm `ops3-web` survives. **If the empty-assignment reset does not clear `BindsTo=`
 or `Upholds=`, §6.3's no-backup fallback does not work** and §6 must say so rather than offering it.
@@ -1509,22 +2013,201 @@ sudo rm -rf /etc/systemd/system/ops3-web.service.d /etc/systemd/system/ops3-api.
 sudo systemctl daemon-reload && sudo systemctl reset-failed
 ```
 
+### 4.11 ⭐ NEW (2nd amendment) — `S12`–`S15`, the readiness scenarios
+
+*(Numbered 11 and placed here on purpose: §4.10's gates table stays last, and renumbering would break every
+cross-reference in this plan.)*
+
+#### 4.11.0 ⚠ The fixture must CHANGE, and that changes what re-running `S1`/`S6`/`S7` means
+
+§4.3's `ops3-api` binds nothing and publishes nothing, so it cannot express readiness at all. It gains a
+**late marker**, and the unit gains a **real `ExecStartPost=` of the same structural shape as Task 7's** —
+same wrapper, same `timeout`, same `|| echo`, same trailing `exit 0`, differing only in the probe (a file
+instead of a `curl`). ⚠ **Keep that shape identical.** A fixture that tests a *simpler* command validates a
+different thing and would miss, for example, a quoting bug in the real line.
+
+```bash
+sudo tee /usr/local/bin/ops3-api >/dev/null <<'SH'
+#!/bin/sh
+# Fails on demand: create /run/ops3-crash to make every start exit non-zero.
+[ -f /run/ops3-crash ] && exit 1
+# Readiness marker, published LATE — mimics a listener that binds after the process
+# launches. /run/ops3-slow suppresses it entirely; that is S13's give-up path.
+rm -f /run/ops3-ready
+if [ ! -f /run/ops3-slow ]; then ( sleep 8 ; touch /run/ops3-ready ) & fi
+exec sleep infinity
+SH
+sudo chmod +x /usr/local/bin/ops3-api
+```
+
+Add to `[Service]` in `/etc/systemd/system/ops3-api.service`, immediately after `ExecStart=`:
+
+```
+ExecStartPost=/usr/bin/bash -c 'timeout 20 bash -c "until [ -f /run/ops3-ready ]; do sleep 0.5; done" || echo "<4>ops3: readiness poll gave up after 20s"; exit 0'
+TimeoutStartSec=90
+```
+
+```bash
+sudo systemctl daemon-reload
+systemctl show ops3-api -p ExecStartPost -p TimeoutStartUSec   # both must be non-empty
+sudo systemd-analyze verify /etc/systemd/system/ops3-api.service /etc/systemd/system/ops3-web.service
+```
+
+⚠⚠ **`S1`, `S6` and `S7` must be RE-RUN on this changed fixture, and their recorded timestamps will move.**
+The 2026-09-08 numbers (`t=1`, `t=2`, `t=15`, `t=16`) were measured with no `ExecStartPost=`; adding ~8 s of
+activation shifts every recovery timestamp later by roughly that much. **What must survive is the ORDER and
+the ENDPOINT, not the seconds** — `S6` web never stops, `S1` web stops and stays stopped, `S7` web stops and
+returns. ⛔ **Do not report a shifted timestamp as a regression, and do not quote the old numbers as if they
+were re-measured.**
+
+#### 4.11.1 ⛔ `S12a` — THE GATE. Does `ExecStartPost=` actually hold `active` open?
+
+⭐ **Run this before anything else in §4, and stop the row if it fails.** §1.4's entire decision rests on it,
+and §0.4.4 is this plan's own evidence that a systemd behaviour must not be settled by reasoning from a
+directive's name — that error has already cost this row one full re-scope.
+
+```bash
+sudo rm -f /run/ops3-crash /run/ops3-slow /run/ops3-ready
+sudo systemctl stop ops3-web ops3-api
+sudo systemctl start ops3-api &          # background: sample while the start job is open
+for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
+  printf '%2s %s\n' "$i" "$(systemctl show ops3-api -p ActiveState -p SubState --value | tr '\n' ' ')"
+  sleep 1
+done
+```
+
+| Observation | Meaning | Verdict |
+|---|---|---|
+| ⭐ `activating start-post` for ~8 samples, then `active running` | `ExecStartPost=` holds the start job open and `active` is deferred until it returns. | ✅ **The mechanism exists. Proceed.** |
+| `active running` from the very first sample | `ExecStartPost=` runs but does not gate `active`. | ⛔ **THE OPTION IS DEAD.** Task 7 cannot work. Stop, and take §1.4 back to the owner — `Type=notify` becomes the only candidate and its three costs (§1.4) must be re-priced, including the loss of `C-191`. |
+| `activating start` and never `start-post` | The `ExecStartPost=` line was not parsed. | ⚠ Fixture bug — quoting, or `daemon-reload` not run. `systemd-analyze verify` first. |
+
+#### 4.11.2 `S12` — does `ops3-web` now start only AFTER readiness? *(supersedes `S10`)*
+
+⭐ **`S10`'s expected result INVERTS.** `S10` expected `web=active` well *before* `ready=yes`, confirming
+`C-202`. `S12` expects the opposite, confirming the fix. **Same fixture question, opposite correct answer.**
+
+```bash
+sudo systemctl stop ops3-web ops3-api ; sudo rm -f /run/ops3-ready /run/ops3-slow
+sudo systemctl start ops3-api &
+for i in $(seq 1 25); do
+  printf '%2s api=%-10s sub=%-10s web=%-8s ready=%s\n' "$i" \
+    "$(systemctl is-active ops3-api)" "$(systemctl show ops3-api -p SubState --value)" \
+    "$(systemctl is-active ops3-web)" "$([ -f /run/ops3-ready ] && echo yes || echo no)"
+  sleep 1
+done
+```
+
+**The assertion is a negative and it is the whole scenario: `web=active` must NEVER appear on a line whose
+`ready=no`.** Record the gap in seconds between `ready=yes` and `web=active` — it should be under a second.
+⛔ A single `web=active` / `ready=no` line means `Upholds=` is still firing early and Task 7 has not worked;
+that is merge-blocking.
+
+#### 4.11.3 `S13` — the give-up path: readiness never arrives
+
+The `exit 0` discipline (§0.11, Task 7a) is what stops a slow API becoming a failed one. Measure it.
+
+```bash
+sudo systemctl stop ops3-web ops3-api
+sudo touch /run/ops3-slow                     # the marker will never appear
+date -u +%T ; sudo systemctl start ops3-api ; echo "exit=$? at $(date -u +%T)"
+systemctl show ops3-api -p ActiveState -p SubState -p Result --value
+journalctl -u ops3-api --since '-3min' -o short-precise --no-pager | grep -i 'gave up'
+sudo rm -f /run/ops3-slow
+```
+
+| Expected | Why it matters |
+|---|---|
+| `start` blocks ~20 s, then **exit 0** | The ceiling is real and bounded. |
+| `active` / `running` / **`success`** | ⛔ Any `failed` here means `exit 0` was not honoured, and a slow API would feed `StartLimitBurst=5`. **Merge-stopper.** |
+| The `gave up` line appears in the journal **at warning priority** | Without the `<4>` prefix it lands at `SyslogLevel=debug` and the give-up is silent. Confirm it survives `journalctl -p warning`. |
+| `ops3-web` comes up anyway, after the ceiling | Degrades to pre-`OPS-3` behaviour rather than to a dark console. As designed. |
+
+#### 4.11.4 `S14` — the crash-recovery dark window, measured rather than estimated
+
+⚠ **Instrument: `ActiveEnterTimestamp`, and validate it before trusting it.** `NRestarts` cannot see any of
+this (§4.8) — `Upholds=` issues `start`, not `restart` — and an earlier derivation resting on it was
+vacuous. `ActiveEnterTimestamp` moves on *every* entry into active regardless of mechanism, which is exactly
+the property `NRestarts` lacks. **Record it before the kill and confirm it has MOVED afterwards; if it has
+not, the instrument is not seeing the cycle and every number below is worthless.** That is the same
+discipline `S6` supplies for `S1`.
+
+```bash
+sudo rm -f /run/ops3-crash /run/ops3-slow
+sudo systemctl start ops3-web ; sleep 12
+systemctl show ops3-web -p ActiveEnterTimestamp --value      # BASELINE — write it down
+sudo systemctl kill --signal=SIGKILL ops3-api
+for i in $(seq 1 40); do
+  printf '%2s api=%-10s web=%s\n' "$i" "$(systemctl is-active ops3-api)" "$(systemctl is-active ops3-web)"
+  sleep 1
+done
+systemctl show ops3-web -p ActiveEnterTimestamp --value      # must DIFFER from the baseline
+```
+
+**Record the dark window** — first sample where `web=inactive` to first sample where `web=active`. Expect
+roughly `RestartSec=10` + the ~8 s readiness delay ≈ **18 s**, against ~15 s without readiness. ⭐ **That
+number goes into §0.4.6's table, into the PR body and into `DEPLOYMENT.md`'s "wait ~30 s" guidance** — if it
+lands above ~25 s the runbook's wait threshold needs raising with it, because an operator told to wait 30 s
+who is actually facing 40 s will conclude the recovery failed and intervene in it.
+
+#### 4.11.5 `S15` — ⚠ does the limiter still latch with a longer start? *(§0.7b.4's bound, tested)*
+
+⛔ **This is the scenario that can invalidate the chosen ceiling.** If 5 start attempts no longer fit inside
+`StartLimitIntervalSec=300`, `ops3-api` never reaches `failed` and crash-loops indefinitely — the console
+flapping dark and light forever, which is **worse** than the wedge #467's limiter exists to produce.
+
+⚠ **Kill only once the unit is `active`.** Killing during activation, or with `/run/ops3-crash` set, makes
+`ExecStart` exit before `ExecStartPost` ever runs — that is the *cheap* cycle shape and it is not the one
+under test.
+
+```bash
+sudo systemctl reset-failed ops3-api ops3-web
+sudo rm -f /run/ops3-crash /run/ops3-slow
+for i in 1 2 3 4 5 6; do
+  timeout 90 bash -c 'until [ "$(systemctl is-active ops3-api)" = active ]; do sleep 0.5; done' \
+    || { echo "cycle $i: never reached active — STOP"; break; }
+  echo "cycle $i: api active at $(date -u +%T)"
+  sudo systemctl kill --signal=SIGKILL ops3-api
+  sleep 1
+done
+systemctl show ops3-api -p ActiveState -p SubState -p Result --value
+systemctl is-active ops3-api ops3-web
+```
+
+| Result | Meaning | Consequence |
+|---|---|---|
+| `ops3-api` reaches **`failed`** by cycle 5–6, and cycle 1 → cycle 5 spans **< 300 s** | The limiter still latches with readiness in the loop. | ✅ §0.7b.4's arithmetic holds at a 20 s ceiling. Record the measured span. |
+| `ops3-api` **never** reaches `failed` | Each cycle now costs more than 300 s ÷ 4. | ⛔ **Merge-stopper.** Lower the ceiling until the span fits, re-run, and **report both numbers to the owner** — do not silently pick a number. |
+| `ops3-web` reaches `failed` first | `Upholds=`'s starts exhausted web's own budget (§0.5.1's zero margin), now with readiness stretching the window. | ⛔ **Stop.** This is `S9`'s bad answer arriving by a second route; the fix touches `StartLimit*` values #467 chose and is **not a Builder's call.** |
+
+⚠ **Run `S9` again after `S15`, not instead of it.** They ask different questions — `S9` is about web's
+budget across api recoveries, `S15` is about api's own budget across longer starts — and the readiness
+change moves the ground under both.
+
+**Teardown addition:** `sudo rm -f /run/ops3-ready /run/ops3-slow` alongside §4.9's existing removals.
+
 ### 4.10 Gates
 
 | Gate | Requirement |
 |---|---|
-| `dotnet build --configuration Release` | 0 warnings. (Proves nothing about this row — §4.1.) |
-| `dotnet test --configuration Release` | Green, minus the known-failing set `CLAUDE.md` names. (Same caveat.) |
+| `dotnet build --configuration Release` | ⚠ **CORRECTED 2nd amendment — this row used to say "0 warnings", which is wrong and would have sent a Builder chasing 47 phantom warnings.** `CLAUDE.md` records the baseline as **47 warnings, 0 errors** (measured on `main` 2026-09-06, all `IDE0011`), and **the gate is equality with that baseline, not an absolute.** ⭐ This row touches no C# at all, so the expected delta is exactly zero either way. (Proves nothing about this row — §4.1.) |
+| `dotnet test --configuration Release` | Green, minus the known-failing set `CLAUDE.md` names. ⚠ **Do not pipe it into `tail`** — `CLAUDE.md` records a measured case where that reported `exit=0` with five tests failing. Redirect to a file, then read the per-project summary lines. (Same caveat: proves nothing about this row.) |
+| **`S12a`** | ⛔ **THE gate, and it runs first.** `ExecStartPost=` must hold `ActiveState=activating`/`start-post`. A failure kills the chosen mechanism and stops the row (§4.11.1, §1.4). |
+| **`S12`** | ⭐ **Merge-blocking.** `ops3-web` must never be `active` while readiness is absent. Supersedes `S10`, whose expected result inverts. |
+| **`S13`** | ⭐ **Merge-blocking.** The give-up path must leave the unit `active`/`success`, never `failed`, and must log at warning. |
+| **`S15`** | ⭐ **Merge-blocking.** `ops3-api` must still latch `failed` inside 300 s with the readiness ceiling in the loop. A never-latching crash loop is worse than the wedge. |
+| `S14` | Run and reported with the measured dark window. ⚠ Not merge-blocking, but the number sets `DEPLOYMENT.md`'s wait threshold and §0.4.6's table. |
+| **`S1` / `S6` / `S7` re-run** | ⭐ **On the CHANGED fixture** (§4.11.0). Order and endpoint must hold; timestamps will shift and that is expected, not a regression. |
 | **`S7`** | ⭐ **Merge-blocking.** The re-scoped shape returns the console. Result pasted into the PR body verbatim with timestamps. |
 | **`S1` + `S6`** | ⭐ **Merge-blocking as a pair.** The control next to the measurement is what makes either one evidence. Both pasted verbatim. |
 | **`S8`** | ⭐ **Merge-blocking.** Selects Task 5's branch and Task 4's `DEPLOYMENT.md` wording. Neither can be written without it. |
 | **`S9`** | ⭐ **Merge-blocking.** A latched `radio-web` after five api cycles stops the row and goes to the owner (§0.5.1). |
-| `S10` | Run and reported with the measured gap. ⚠ Does not block the merge — it sizes `C-202` and feeds §8.5's follow-up row. |
-| `S7` on **systemd 255** | ⚠ **`C-199`.** Either this, or the §5.3 box confirmation, before the row is called done. Both is better. |
-| `S2`–`S5`, `S11` | Run and reported. A surprise in `S2`, `S4` or `S11` changes the plan text before merge. |
+| ~~`S10`~~ | ⭐ **SUPERSEDED by `S12`** (§4.11.2). It was written to *size* `C-202`; `S12` *tests the fix*, and its expected result is the inverse. Do not run both and do not quote `S10`'s framing. |
+| ~~`S7` on systemd 255~~ | ✅ **`C-199` CLOSED** by the second rehearsal (`jrei/systemd-ubuntu:24.04`, systemd **255.4-1ubuntu8.16** — the appliance's exact version). ⚠ **But readiness is unmeasured on any version**, so run the **whole of §4.11 on the 255.4 base**, not on 249. §5.3 still confirms on the box. |
+| `S2`–`S5`, `S9`, `S11` | Run and reported. A surprise in `S2`, `S4` or `S11` changes the plan text before merge. ⚠ **`S9` must be re-run after `S15`** — readiness moves the ground under it (§4.11.5). |
 | Shell syntax (Task 6) | `bash -n deploy/debian-x64/kiosk/bin/radio-console-open` |
-| Unit-file syntax | `systemd-analyze verify` on both units, in the rehearsal container — catches a typo'd directive that would otherwise be silently ignored. |
-| Box verification | ⛔ **None, and none is claimed.** §0.6 / §0.9. |
+| Unit-file syntax | `systemd-analyze verify` on both units, in the rehearsal container. ⭐ **Now load-bearing rather than a formality:** Task 7 adds a long nested-quoting `ExecStartPost=` line, and a quoting error there is **silently ignored or silently mis-split** — the exact failure `S12a`'s third row catches. Also confirm `systemctl show ops3-api -p ExecStartPost` echoes the line back non-empty. |
+| Box verification | ⛔ **None, and none is claimed.** §0.6 / §0.9. ⚠ **And one number this design uses has no repository source at all** — §0.7b.5 #1, the real exec→ready duration. It is measured in §5.3 and nowhere earlier. |
 
 ---
 
@@ -1545,7 +2228,19 @@ it and do not rush the two together.
 bad state, and the worst of them (`Requires=` on web with `Upholds=` still on api) is an appliance where
 `systemctl stop radio-web` is silently undone with nothing to explain it.
 
+⭐ **Second amendment: THREE directives now, not two** — `BindsTo=` on web, `Upholds=` **and**
+`ExecStartPost=` on api — plus two read-only pre-checks that cost nothing and each close one of §0.7b.5's
+unverifiable items.
+
 ```bash
+# 0. PRE-CHECKS. Read-only, and both settle something the repository could not.
+command -v curl || echo "⛔ STOP: curl absent — Task 7's ExecStartPost cannot run (C-206)"
+systemctl show radio-api -p TimeoutStartUSec --value
+#    Record this. Expect 1min 30s (the systemd default; TimeoutStartSec= is absent from
+#    every unit in the repo). Task 7 sets it explicitly to 90s, so a DIFFERENT value here
+#    means the box has a non-default DefaultTimeoutStartSec and installing is a behaviour
+#    change rather than a no-op. Stop and say so if it differs.
+
 # 1. THE BACKUPS — BOTH of them. Do this first. Section 6.2's rollback depends on both existing.
 sudo cp /etc/systemd/system/radio-web.service /etc/systemd/system/radio-web.service.pre-ops3
 sudo cp /etc/systemd/system/radio-api.service /etc/systemd/system/radio-api.service.pre-ops3
@@ -1557,16 +2252,28 @@ sudo cp deploy/common/radio-api.service /etc/systemd/system/radio-api.service
 # 3. Apply them together. This does NOT restart anything.
 sudo systemctl daemon-reload
 
-# 4. Confirm what systemd actually loaded — not what the files say.
+# 4. Confirm what systemd actually loaded — not what the files say. FIVE properties now.
 systemctl show radio-web -p BindsTo -p Requires -p After -p UpheldBy
 #    expect: BindsTo=radio-api.service / Requires= (empty) / After=... radio-api.service ... /
 #            UpheldBy=radio-api.service
-systemctl show radio-api -p Upholds
+systemctl show radio-api -p Upholds -p ExecStartPost -p TimeoutStartUSec
 #    expect: Upholds=radio-web.service
+#            ExecStartPost={ path=/usr/bin/bash ; argv[]=... }  ← must be NON-EMPTY
+#            TimeoutStartUSec=1min 30s
 
 # 5. Confirm nothing moved.
 systemctl is-active radio-api radio-web    # expect: active / active
 ```
+
+⚠⚠ **Step 4's `ExecStartPost` check is not decoration.** systemd **silently drops** an `Exec*` line it
+cannot parse, and Task 7's line is long, nested-quoted, and the only one of its kind in the repository. **An
+empty `ExecStartPost=` here means readiness is absent while everything else looks installed** — which is
+`C-203`'s bad state (`Upholds=` firing at exec, exactly as before the fix) with nothing on screen to say so.
+This is the only place that failure is visible.
+
+⚠ **Step 3 remains safe against two running units**, and readiness does not change that: `daemon-reload`
+re-evaluates dependencies, it does not re-run `ExecStartPost=`. The new directive takes effect on the next
+start of `radio-api`, which is §5.3's kill or the next deploy — **not now.**
 
 ⭐ **Step 4 checks `UpheldBy=` on the web unit as well as `Upholds=` on the api unit.** `UpheldBy=` is the
 automatic reverse dependency systemd derives; seeing it is how you know the two files are actually talking
@@ -1591,22 +2298,61 @@ whatever is playing.
 was measured on **systemd 249** and the appliance runs **255**. This is where that gap closes on the real
 hardware — so record the intermediate states, not just the endpoint.
 
+⭐⭐ **Second amendment: this drill now carries a MEASUREMENT, and it is the only source of a number this
+design depends on.** §0.7b.5 #1 — how long `radio-api` really takes from exec to the hub answering, on this
+hardware. The 20 s ceiling was sized at 2× the deploy's 10 s poll because nothing in the repository records
+the real figure. **Do step A even if nothing else in this drill runs.**
+
+⚠ **Two-point sampling is no longer adequate.** `sleep 2` / `sleep 14` worked when recovery was
+`RestartSec` alone; readiness adds a variable delay on top, so a point check can land in the gap and report
+a false `active / inactive`. Sample every second.
+
 ```bash
 systemd-analyze --version | head -1     # record it: expect systemd 255 on this box
 
-# One kill. radio-api's Restart=always brings it back in ~10s.
+# ---- STEP A: the measurement. Read-only, no kill, nothing restarts. -------------------
+# How long does the hub take to answer from a cold start of the process? Time the probe
+# the unit will now run, against the CURRENTLY RUNNING api — this is a lower bound (the
+# service is already warm) but it costs nothing and a slow answer here is decisive.
+time curl -sf -o /dev/null -X POST \
+  http://localhost:5000/hubs/visualization/negotiate?negotiateVersion=1 && echo READY
+
+# ---- STEP B: the acceptance test. ONE kill. -------------------------------------------
+systemctl show radio-web -p ActiveEnterTimestamp --value   # BASELINE — write it down
 sudo systemctl kill -s KILL radio-api
-sleep 2  ; systemctl is-active radio-api radio-web   # expect: activating / inactive  ← BindsTo= fired
-sleep 14 ; systemctl is-active radio-api radio-web   # expect: active / active        ← Upholds= returned it
-systemctl show radio-web -p NRestarts                # expect: NRestarts=0
+for i in $(seq 1 40); do
+  printf '%2s api=%-10s sub=%-12s web=%s\n' "$i" \
+    "$(systemctl is-active radio-api)" \
+    "$(systemctl show radio-api -p SubState --value)" \
+    "$(systemctl is-active radio-web)"
+  sleep 1
+done
+systemctl show radio-web -p ActiveEnterTimestamp --value   # must DIFFER from the baseline
 ```
+
+⭐ **What step B is actually measuring, and it is three things at once:**
+
+1. **`BindsTo=` fires** — `web=inactive` within a second or two of the kill.
+2. **Readiness is real on the box** — `radio-api` should pass through `sub=start-post` before reaching
+   `active`. ⚠ **If `start-post` never appears in 40 samples, `ExecStartPost=` is not running**, and §5.2
+   step 4's check was misread. That is `C-203`'s state, live.
+3. ⭐ **The real exec→ready duration** — count the samples spent in `start-post`. **That is the number
+   §0.7b.5 #1 asks for.** Write it down; it decides whether 20 s was a good ceiling and it belongs in the
+   row's record whatever else happens.
+
+⚠⚠ **`NRestarts` is NOT part of this drill any more, and an earlier revision of this section told you to
+check it.** `Upholds=` issues `start`, not `restart`, so it reads 0 whether or not `radio-web` was cycled —
+§4.8 records that a no-wedge derivation resting on it was **vacuous**. `ActiveEnterTimestamp` moving is the
+instrument, and the baseline/after pair is what makes it one rather than a number to nod at.
 
 | Result | Meaning |
 |---|---|
-| `activating / inactive` then **`active / active`** | ✅ **The expected pass**, and it reproduces `S7` on systemd 255. The console blinked out for ~15 s and came back by itself. `C-199` is closed. |
-| `activating / inactive` then **`active / inactive`** | ⛔ **`Upholds=` did not fire on 255.** The container result did not transfer. The box now has the shape §0.4.4 rejected. Recover with §6.1, **roll back both units** (§6.2), and take the version difference to the owner — this is exactly the risk `C-199` names. |
-| `active / active` at **both** checks | ⚠ Propagation never fired at all. Either the units did not load (re-check §5.2 step 4) or 255 behaves differently from 249 in the other direction. Do not read this as a pass — it means the coupling is absent, which is today's behaviour, not the row's. |
-| `NRestarts` > 0 | ⚠ `radio-web` came back via its own `Restart=`, not via `Upholds=`. Different mechanism, and it means §0.5.1's budget question is live on the box. Record it. |
+| `web=inactive` early, **`sub=start-post` appears**, then `api=active` / `web=active` | ✅ **The expected pass.** All three directives are live on 255. The console blinked out and came back by itself. `C-199` closed on the box; readiness confirmed on the box. **Record the dark window and the `start-post` duration.** |
+| `web=inactive` early, then **`api=active` / `web=inactive`** and it stays | ⛔ **`Upholds=` did not fire.** The box now has the shape §0.4.4 rejected. Recover with §6.1, **roll back all three directives** (§6.2), and take it to the owner — the risk `C-199` names. |
+| `api=active` / `web=active` throughout, no transition | ⚠ Propagation never fired at all. Either the units did not load (re-check §5.2 step 4) or `daemon-reload` was skipped. **Not a pass** — it means the coupling is absent, i.e. today's behaviour, not the row's. |
+| ⭐ **`sub=start-post` NEVER appears** | ⚠⚠ **Readiness is not running**, though `BindsTo=`/`Upholds=` may be fine. `C-203`'s state, live on the box: the console returns against a possibly-unready API. Not an emergency (the client retry loop absorbs it — §0.7b.1) but the row has **not** delivered. Re-check `systemctl show radio-api -p ExecStartPost`; a silently-dropped line is the likely cause. |
+| ⭐ **`start-post` lasts longer than ~18 s** | ⚠ The 20 s ceiling is close to being hit on real hardware. §0.7b.5 #1's number is worse than assumed. **Do not adjust anything at the panel** — record it and take it to the owner; the ceiling has a hard upper bound of ~50 s (§0.7b.4) and raising it is a judgement, not a tweak. |
+| `ActiveEnterTimestamp` unchanged | ⚠ **The instrument did not see the cycle**, so every timing above is unsupported. Do not report the run as a pass; repeat it. |
 
 ⚠ **Expect the audio to stop for the duration** — this kills the audio service. One kill, at a time the
 owner chooses.
@@ -1671,13 +2417,16 @@ Exit the kiosk (§6.1 step 1), open a terminal from the GNOME desktop, then:
 sudo cp /etc/systemd/system/radio-web.service.pre-ops3 /etc/systemd/system/radio-web.service \
   && sudo cp /etc/systemd/system/radio-api.service.pre-ops3 /etc/systemd/system/radio-api.service \
   && sudo systemctl daemon-reload \
-  && systemctl show radio-api -p Upholds \
+  && systemctl show radio-api -p Upholds -p ExecStartPost \
   && sudo systemctl reset-failed radio-api radio-web \
   && sudo systemctl start radio-web
 ```
 
-The `systemctl show` in the middle is there to be *read*: it must print an empty `Upholds=`. If it names
-`radio-web.service`, the api unit did not get restored and the rollback is half-done.
+The `systemctl show` in the middle is there to be *read*: it must print an empty `Upholds=` **and an empty
+`ExecStartPost=`**. If either names anything, the api unit did not get restored and the rollback is
+half-done. ⭐ **Restoring the file covers all three directives at once** — that is the advantage of having
+kept readiness inside the unit file (§1.4), and it is what `Type=notify` would have cost: a binary rollback
+on a different schedule.
 
 **That is the whole rollback**, and it is one paste precisely because §5.2 step 1 took both backups. The box
 is back to pre-`OPS-3` behaviour — `radio-web` will once again survive a dead `radio-api`.
@@ -1690,13 +2439,42 @@ is back to pre-`OPS-3` behaviour — `radio-web` will once again survive a dead 
 sudo mkdir -p /etc/systemd/system/radio-web.service.d /etc/systemd/system/radio-api.service.d
 printf '[Unit]\nBindsTo=\nRequires=radio-api.service\n' \
   | sudo tee /etc/systemd/system/radio-web.service.d/99-ops3-rollback.conf
-printf '[Unit]\nUpholds=\n' \
+printf '[Unit]\nUpholds=\n[Service]\nExecStartPost=\n' \
   | sudo tee /etc/systemd/system/radio-api.service.d/99-ops3-rollback.conf
 sudo systemctl daemon-reload
 systemctl show radio-web -p BindsTo -p Requires -p UpheldBy   # BindsTo= and UpheldBy= must be EMPTY
-systemctl show radio-api -p Upholds                           # must be EMPTY
+systemctl show radio-api -p Upholds -p ExecStartPost          # BOTH must be EMPTY
 sudo systemctl reset-failed radio-api radio-web && sudo systemctl start radio-web
 ```
+
+⚠ **Note the api drop-in now spans TWO sections.** `Upholds=` is a `[Unit]` key and `ExecStartPost=` is a
+`[Service]` key, so a drop-in carrying only `[Unit]` silently leaves readiness in place — which is the
+partial state §6.3b describes, reached by accident instead of on purpose.
+
+#### 6.3b ⭐ NEW — the ONE partial rollback that is allowed: readiness only
+
+⛔ Every other partial state is forbidden (`C-201`, `C-203`, §3's table). **This one is not**, and it exists
+because readiness is the newest and least-measured of the three directives.
+
+**When:** `radio-api` is taking a long time to reach `active`, or `sub=start-post` is hanging, and the
+coupling itself is behaving. Dropping readiness returns the box to the shape the first amendment measured
+and the owner approved — `BindsTo=` + `Upholds=`, console returning against a possibly-unready API — which
+the client retry loop absorbs in 2–30 s (§0.7b.1). **Degraded, understood, and not dark.**
+
+```bash
+sudo mkdir -p /etc/systemd/system/radio-api.service.d
+printf '[Service]\nExecStartPost=\n' \
+  | sudo tee /etc/systemd/system/radio-api.service.d/98-ops3-no-readiness.conf
+sudo systemctl daemon-reload
+systemctl show radio-api -p ExecStartPost -p Upholds   # ExecStartPost EMPTY, Upholds still set
+```
+
+⚠ **It takes effect on the next start of `radio-api`, not immediately** — a start job already in `start-post`
+is not interrupted by a `daemon-reload`. If one is stuck, `sudo systemctl stop radio-api` first, which also
+takes the console down via `BindsTo=`; then start again.
+
+⚠ **Record it and tell the owner.** A `98-` drop-in silently disabling half a shipped row is exactly the
+kind of box-only divergence `C-191` warns is invisible from the repository. It is a stopgap, not a decision.
 
 An empty assignment resets a list in systemd, so `BindsTo=` on its own clears the binding, `Upholds=` on
 its own clears the return direction, and the `Requires=` line reinstates the old dependency. ⚠ **This plan
@@ -1724,9 +2502,10 @@ make visible rather than one it caused.
 
 ## 7. Docs and queue
 
-- `deploy/common/radio-web.service` — Task 1.
-- `deploy/common/radio-api.service` — **Task 2, new.**
-- `deploy/debian-x64/setup.sh`, `deploy/raspberry-pi/setup.sh` — Task 3, **four heredocs**.
+- `deploy/common/radio-web.service` — Task 1, **plus Task 7c's one-token comment fix at `:105`.**
+- `deploy/common/radio-api.service` — **Task 2 and Task 7.**
+- `deploy/debian-x64/setup.sh`, `deploy/raspberry-pi/setup.sh` — Task 3, **four heredocs plus the two
+  `Type=notify` corrections (`debian-x64:172`, `raspberry-pi:281`)**.
 - `deploy/DEPLOYMENT.md` — Task 4 (`:30`, `:731-732`, and the new *A dark console: wait first, then
   recover* subsection).
 - `deploy/Deploy-ToLinux.ps1` — Task 5, comment **or** stop-order change per `S8`.
@@ -1738,14 +2517,42 @@ make visible rather than one it caused.
   - the residual cost in §0.4.6's words — **a transient crash now blinks the console out for 10–50 s** —
     rather than presenting `Upholds=` as having made the row free;
   - Task 6's tension with #467 (§1.2): the limiter no longer guarantees a crash loop comes to rest;
-  - `C-199` — the `Upholds=` result is measured on systemd **249** and the appliance runs **255**;
+  - ~~`C-199`~~ — ✅ **closed**: the second rehearsal reproduced the `Upholds=` result on systemd **255.4**,
+    the appliance's exact version. ⚠ **Readiness, however, is unmeasured on any version until §4.11 runs;**
   - that **nothing was verified on `radio`**.
+
+⭐ **The PR body must ALSO carry these five, added by the second amendment. The first two are corrections to
+things the PR's own reviewers will have read elsewhere and believe:**
+
+  - ⚠⚠ **`C-202`'s harm was overstated in four documents, this plan included.** The visualization hub does
+    **not** stay dead for the process lifetime — `c1fba27a` (#386) shipped a client retry loop in the same
+    commit as the deploy poll, and it is still on `main`. The real cost of starting web early is **2–30 s
+    of inert console that self-heals**. Readiness is a correctness fix, not a rescue. §0.7b.1.
+  - ⚠ **`Type=notify` is rejected although the owner decision names it first**, and the reason is
+    `AudioEngineInitializationService` blocking the host on hardware (`C-204`, §1.4). **Say what the
+    rejected option gives up** — the systemd-native answer, a readiness signal that cannot lie, and one
+    meaning of `active` for all consumers.
+  - **What readiness costs the operator:** `systemctl start radio-api` now blocks (≤20 s), and the dark
+    window after a crash grows from ~15 s to ~16–18 s typical. §0.7b.4, measured by `S14`.
+  - **`C-205` — the ceiling has a hard upper bound of ~50 s**, above which `radio-api` never latches and
+    crash-loops forever. 20 s ships; `S15` is the gate.
+  - ⛔ **One number this design depends on has no repository source** — the real exec→ready duration on the
+    appliance (§0.7b.5 #1, §9.2 #12). It is measured in §5.3 step A and nowhere earlier. **Say so, rather
+    than presenting 20 s as measured.**
 - `docs/BUILDER_QUEUE.md`, `docs/queue/OPS-3.md`, `docs/queue/ORDERING-NOTES.md`, `docs/ROADMAP.md`,
   `docs/HANDOFF-GA-PUNCH-LIST.md` — ⛔ **not edited by this plan.** §10 carries the wording.
-- `design/FUTURE-WORK.md` — add **§8.2, §8.3 and §8.5** as entries, per the project rule that stubbed and
-  deferred work is documented rather than dropped. ⚠ **§8.1 is no longer a deferred item** — `Upholds=` was
-  promoted into this row on 2026-09-08 and must not be filed as future work. **§8.5 (`C-202`, the deploy
-  health-poll `Upholds=` may defeat) is the one that should become a real row**, not just a note.
+- `design/FUTURE-WORK.md` — add **§8.2, §8.3, `C-206` and `C-207`** as entries, per the project rule that
+  stubbed and deferred work is documented rather than dropped.
+  ⚠ **§8.1 is not a deferred item** — `Upholds=` was promoted into this row and must not be filed as future
+  work. ⚠⚠ **§8.5 is no longer one either, and this changed on the second amendment** — readiness is Task 7,
+  option 3 already shipped in `c1fba27a`, and `Type=notify` is rejected rather than deferred (`C-204`).
+  ⛔ **Do not file §8.5 as a follow-up row; an earlier revision of this section told you to.**
+  ⭐ **One genuinely new candidate row instead, and it is the honest residue of `C-204`:**
+  *"`AudioEngineInitializationService` should be a `BackgroundService`, not a raw `IHostedService`."* It
+  blocks the whole host on audio-engine init, three device enumerations, BT pre-warm and BlueZ bring-up
+  (`:107-187`), with no timeout and every exception swallowed at `:182-186`. That is why `Type=notify` is
+  unavailable here, and it makes the host's own `ApplicationStarted` mean nothing useful. **Live audio path,
+  so it is not a drive-by** — its own row, its own UAT.
 
 ---
 
@@ -1851,6 +2658,77 @@ poll decorative. **This is a regression in a fix that was already paid for, invi
 surfaces as a symptom nobody would attribute to a unit file.** `S10` measures the window; §8.5 files the
 durable fix.
 
+⚠⚠ **RE-GRADED 2026-09-08 (2nd amendment) — the mechanism above is right, the SEVERITY is wrong, and it is
+wrong in four documents.** §0.7b.1: `c1fba27a` (#386) shipped the deploy poll **and** a client-side
+background retry loop in one commit. `AudioVisualizationHubService.cs:187-193` catches a failed initial
+connect and arms `StartRetryLoop` (`:208`, back-off `{2,5,10,30}` s, replaying subscriptions on success);
+`AudioStateHubService.cs:355-356` does the same. `git log -S 'StartRetryLoop'` returns that one commit.
+**So the hub is not "dead for the lifetime of the process" — it self-heals in 2–30 s.** `C-202` is a
+transient degradation, **not a blocking regression**, and the readiness fix is a correctness improvement
+rather than a rescue. ⭐ **The comment's own trailing clause said so** — *"regardless of hub-service code
+resilience"* — and this plan quoted it twice without reading it.
+
+---
+
+**`C-203` — ⚠⚠ CHANGES THE ORDERING AND THE ROLLOUT. `Upholds=` without readiness is the worst partial
+state, and it is the one that looks fine.**
+
+Tasks 1 + 2 without Task 7 gives a console that returns on every crash **against an API that may not be
+listening yet**. Nothing errors, nothing is dark, and the client retry loop hides it — the console is simply
+inert for 2–30 s each time and then works. §3's table forbids it as an intermediate commit; §5.2 step 4's
+`ExecStartPost` check is the only place it is visible on the box; §5.3's `sub=start-post` row is how the
+supervised session detects it. ⭐ **It is the state a silently-dropped `ExecStartPost=` line produces**, and
+systemd drops unparseable `Exec*` lines without complaint.
+
+---
+
+**`C-204` — ⚠ CHANGES THE WORK. `Type=notify` is rejected on measured grounds, and the owner decision names
+it first.**
+
+§1.4. `AudioEngineInitializationService` (`src/Radio.API/Services/AudioEngineInitializationService.cs:19`)
+is a raw `IHostedService` whose `StartAsync` (`:107-187`) blocks the host on audio-engine init, three device
+enumerations, BT pre-warm and BlueZ bring-up, none of them bounded. .NET sends `READY=1` on
+`ApplicationStarted`, i.e. after all of that — so `Type=notify` would mean something far later and less
+predictable than "the hub answers", against an absent `TimeoutStartSec` (90 s default) and
+`StartLimitBurst=5`. **It would manufacture the wedge this row exists to make rarer**, and it forfeits
+`C-191`. ⚠ **A Builder reading only the queue row or the owner decision will reach for `Type=notify`** —
+they name it first and this plan rejects it. The PR body must explain the deviation.
+
+---
+
+**`C-205` — ⚠ THE READINESS CEILING IS BOUNDED ABOVE BY THE START LIMITER, not by patience.**
+
+§0.7b.4. Five start attempts must fit inside `StartLimitIntervalSec=300` for `radio-api` to latch; with each
+cycle costing `RestartSec=10` plus the readiness wait, a ceiling above ~65 s means **it never latches and
+crash-loops forever** — the console flapping dark and light indefinitely, which is worse than the wedge #467
+deliberately produces. 20 s ships (2× the deploy poll's 10 s, the only figure with production standing);
+`S15` tests that the limiter still latches with it in place. ⛔ **Never raise it past 50 s, and never adjust
+it without re-running `S15`.**
+
+---
+
+**`C-206` — `curl` is installed by both `setup.sh` and by neither provisioning script, and the header
+comment claims otherwise.**
+
+`deploy/debian-x64/setup.sh:45` and `deploy/raspberry-pi/setup.sh:45` both `apt-get install` it.
+`deploy/provision/packages.sh` does **not** — its three arrays (`:77`, `:80`, `:89-98`) omit it, though the
+header at `:7` claims *"curl/wget/unzip"* are covered (it scopes them to the setup scripts). In practice
+curl is certain: both setup scripts pipe `curl` to install .NET, `Deploy-ToLinux.ps1:452` runs it every
+deploy, and it is `Priority: standard` on Ubuntu. **But every one of those call sites is a login shell, and
+none is a systemd `Exec*` line.** §5.2 step 0 checks it once; Task 7's `exit 0` means its absence degrades
+rather than breaks. ⚠ **Not fixed here** — adding curl to `FEATURE_PKGS` is a provisioning change and
+belongs in its own row.
+
+---
+
+**`C-207` — cosmetic, recorded so it is not "fixed" mid-row: the repo uses both `/bin/bash` and
+`/usr/bin/bash` in `Exec*` lines.**
+
+`deploy/common/radio-performance.service:7` uses `/bin/bash`;
+`deploy/provision/systemd/radio-api-restart.service:7` uses `/usr/bin/bash`. Both resolve under usrmerge.
+Task 7 follows the **`ExecStartPost=` precedent** (`/usr/bin/bash`) because that is the closer analogue.
+⛔ **Do not normalise the other one in this PR.**
+
 ### 8.3 `deploy/DEPLOYMENT.md:45`'s `LimitNICE` mismatch
 
 Noticed while reading. The doc says `LimitNICE=-5:0`; `radio-api.service:48` says `LimitNICE=0:-5`, with a
@@ -1863,7 +2741,34 @@ unrelated PR is how the stale counts in `docs/BUILDER_QUEUE.md`'s banner got tha
 Naming both units is redundant under `BindsTo=` but not wrong, and it is correct for a box that has not had
 the new units installed yet — which per `C-191` is every box, until someone does §5. Leave it.
 
-### 8.5 ⚠ NEW — `radio-web` should wait for the API's *readiness*, not its *launch* (`C-202`)
+### 8.5 ~~`radio-web` should wait for the API's readiness~~ — ✅ **PROMOTED INTO SCOPE 2026-09-08 (2nd amendment). This section is history.**
+
+⚠ **Kept rather than deleted, in the same spirit as §8.1, because it listed three candidate fixes and one of
+them had ALREADY SHIPPED — which nobody noticed for the length of two amendments.**
+
+- **Option 1 (`Type=notify`) is now REJECTED on measurement, not deferred.** §1.4 and `C-204`:
+  `AudioEngineInitializationService` blocks the host on hardware, so `READY=1` would mean something much
+  later and unbounded than "the hub answers". The original text below calls it *"the systemd-native answer"*
+  that *"makes `active` mean ready for every consumer"*. **That is true of `Type=notify` in general and
+  false of it here**, and the difference is one `IHostedService` that should have been a `BackgroundService`.
+- **Option 2 (`ExecStartPost=`) is TAKEN** — Task 7. The original text priced it as *"bigger than a
+  unit-file line"*. It is one unit-file line.
+- ⭐⭐ **Option 3 (client resilience) WAS ALREADY DONE, in the same commit as the poll.** The original text
+  says it *"the existing comment hints was considered"*. It was not merely considered:
+  `AudioVisualizationHubService.StartRetryLoop` and its twin in `AudioStateHubService` shipped in
+  `c1fba27a` (#386) — the very commit the comment calls "Fix A". §0.7b.1. **The comment's trailing clause
+  was the evidence and this plan quoted it twice while reading it as the opposite.**
+
+⭐ **The generalisable lesson, and it is the third instance of this family in this row:** a comment describing
+the bug its own commit fixed reads exactly like a live bug report. §0.4.4 caught reasoning from a directive's
+*name*; §4.8 caught an instrument that read 0 either way; this one is **reasoning from a comment instead of
+from the code it sits next to** — which is precisely the defect class `CLAUDE.md` § *Pre-Merge Review*
+enumerates three shipped examples of. **Check the comment against the code, then check `git log -S` on the
+thing the comment says is missing.**
+
+*The original text follows, unedited.*
+
+#### ~~8.5 (original) — `radio-web` should wait for the API's *readiness*, not its *launch* (`C-202`)~~
 
 `Deploy-ToLinux.ps1:445-451` documents a race that "Fix A" solved by polling
 `/hubs/visualization/negotiate` between starting `radio-api` and starting `radio-web`. **`Upholds=` fires
@@ -1966,9 +2871,35 @@ behaviours, and none of them was covered by the rehearsal that prompted the re-s
    triggering on `active`, which `Deploy-ToLinux.ps1:445-451` documents is the launch moment rather than the
    ready moment. `S10` sizes it. **Cost of getting it wrong: a fix the repository already paid for is
    silently undone**, surfacing as a dead visualization hub nobody attributes to a unit file.
-8. ⚠ **That the `Upholds=` result transfers from systemd 249 to systemd 255** (`C-199`). The directive was
-   introduced in the version that was measured; the appliance runs six releases later. `S7` on a 24.04 base
-   closes it cheaply, §5.3 closes it authoritatively.
+8. ✅ **RESOLVED 2026-09-08 by the second rehearsal.** *That the `Upholds=` result transfers from systemd
+   249 to 255* (`C-199`). Re-run on `jrei/systemd-ubuntu:24.04`, systemd **255.4-1ubuntu8.16** — the
+   appliance's exact version — and it transferred unchanged. §5.3 still confirms on the hardware.
+   ⚠ **The readiness work is unmeasured on any version**, which is what §4.11 exists for.
+
+⭐ **New on 2026-09-08 (second amendment) — four more, all from the readiness work. Item 12 is the one that
+cannot be closed anywhere but the appliance.**
+
+9. ⛔⛔ **Whether `ExecStartPost=` holds `ActiveState=activating` until it completes.** ⭐ **The entire
+    mechanism rests on it, and it is deliberately NOT derived here.** §0.4.4 is this plan's own record of
+    reasoning from a directive's name and getting a confident wrong answer; §4.8 is its record of trusting
+    an instrument that could not see the phenomenon. **`S12a` measures it before anything else.** Cost of
+    getting it wrong: Task 7 does nothing, `C-203`'s state ships, and §1.4 must reopen with `Type=notify`
+    as the only candidate.
+10. ⚠ **Whether the `<4>` prefix actually reaches the journal at warning priority.** Derived from
+    `radio-api.service:96-97` (`SyslogLevelPrefix=true`, `SyslogLevel=debug`) — plausible, standard, and
+    unverified here. If it does not, the readiness give-up is **silent** on a box whose journal is already
+    filtered to WARNING and above (`LOG-11`). `S13` checks it with `journalctl -p warning`.
+11. ⚠ **Whether Task 7's `ExecStartPost=` line survives systemd's own quoting rules.** It nests double
+    quotes inside single quotes inside a systemd `Exec*` value, and systemd **silently drops** what it
+    cannot parse. `systemd-analyze verify` plus a non-empty `systemctl show -p ExecStartPost` is the check;
+    §5.2 step 4 repeats it on the box because a drop is invisible everywhere else.
+12. ⛔⛔ **How long `radio-api` actually takes from exec to `/hubs/visualization/negotiate` answering, on
+    this appliance, on a cold boot.** ⭐ **This number does not exist in the repository and cannot be
+    obtained from it.** The 20 s ceiling is sized at 2× the deploy poll's 10 s — the only figure with
+    production standing — and **nobody has recorded whether that poll has ever reached its 20th
+    iteration.** §0.7b.5 #1. **§5.3 step A is the only way to get it, and that is a supervised box session,
+    not a Builder action.** Cost of getting it wrong: too small and readiness silently no-ops on exactly the
+    slow boot it was written for; too large and `C-205`'s crash-loop bound is approached.
 
 ### 9.3 What would falsify this plan's central decision
 
@@ -1990,6 +2921,63 @@ record.
 follow-up row) without undermining the decision. Do not let a `S8` surprise be read as a reason to abandon
 the shape.
 
+⭐ **Added by the second amendment — two more falsifiers, and one non-falsifier that will look like one:**
+
+- ⛔ **`S12a` showing that `ExecStartPost=` does not gate `active`.** It falsifies §1.4's *mechanism*, not
+  the row: `BindsTo=` + `Upholds=` still works and was still approved. The row would ship without readiness
+  (`C-203`'s state, understood and accepted) or wait for a `Type=notify` row. **Take it to the owner.**
+- ⛔ **`S15` showing `radio-api` never latches `failed`.** A service that crash-loops forever is worse than
+  one that wedges visibly, so this falsifies the *ceiling*, and possibly the whole readiness approach if no
+  ceiling both fits the limiter and covers the real bind time. `C-205`.
+- ⚠ **§0.7b.1's correction is NOT a falsifier**, and it will be mistaken for one. Finding that `C-202`'s
+  harm was overstated is a reason to re-price the row's urgency, not to abandon readiness — §0.7b.2 lists
+  four reasons that never depended on it, including the boot path, which has no poll at all. ⭐ **Do not
+  let a corrected premise become a retracted decision.** This repository has already recorded two cases
+  where a correction over-corrected (`docs/BUILDER_QUEUE.md`'s banner on `AUD-17`, and the "thirteen
+  months" figure it repeated three times).
+
+### 9.4 ⭐ NEW — anchors re-derived at `main` = `ec4f1490` (2nd amendment)
+
+The plan was written against `278beefa`, re-scoped against `084a6bbd`. **`main` has since moved 7 commits
+across 6 PRs to `ec4f1490`** (`fcca3d63`, `a529ccf7`, `6601ac15`, `a67c00ae`, `25dc7af4`, `57253256`,
+`ec4f1490`).
+
+⭐ **`git log 084a6bbd..ec4f1490 -- deploy/` is EMPTY.** Nothing under `deploy/` moved, which is why every
+line number in this plan still resolves. Of the six PRs, only three touched anything this row cites, and all
+three were docs: `a529ccf7` wrote this plan's first amendment; `6601ac15` and `57253256` edited
+`docs/queue/OPS-3.md`.
+
+**Re-read on the working tree and confirmed accurate, not inferred from the empty diff:**
+
+| Anchor | Status |
+|---|---|
+| `radio-web.service:3` `After=`, `:4` `Requires=`, `:12-22` comment, `:23-24` `StartLimit*` | ✅ all exact |
+| `radio-api.service:3` `After=`, `:4` `Wants=`, `:6-29` limiter block, `:28-29` `StartLimit*`, `:32` `Type=simple`, `:81` `ExecStart=`, `:82-83` `Restart=`/`RestartSec=`, `:96-97` `SyslogLevelPrefix`/`SyslogLevel` | ✅ all exact |
+| `Deploy-ToLinux.ps1` — all **twelve** cited anchors (`:145`, `:170`, `:271`, `:314-353`, `:373-425`, `:443`, `:445-451`, `:452`, `:455-458`, `:584-585`, `:605`, `:607-611`) | ✅ **none moved** (file is 619 lines) |
+| `setup.sh` heredocs — `debian-x64:165`/`:209`, `raspberry-pi:274`/`:318`, and the block extents `:205-245` / `:314-354` | ✅ all exact |
+| `DEPLOYMENT.md:30`, `:731-732` | ✅ both exact |
+| `ORDERING-NOTES.md:28` | ✅ exact — ⚠ **and still carries the ORIGINAL pre-approval, pre-re-scope text.** §10.3 has never been applied. |
+| `HANDOFF-GA-PUNCH-LIST.md:1110` | ✅ exact |
+| `ROADMAP.md:144` | ✅ exact |
+
+⚠⚠ **NEW anchors this amendment introduces, all outside `deploy/` and therefore NOT covered by the empty
+`deploy/` diff — a Builder rebasing must re-check these specifically:**
+`src/Radio.API/Program.cs:15`, `:128`, `:182-183`, `:218`;
+`src/Radio.API/Services/AudioEngineInitializationService.cs:19`, `:107-187`, `:127`, `:130`, `:142-143`,
+`:162`, `:167`, `:171`, `:176`, `:180`, `:458`;
+`src/Radio.Web/Services/Hub/AudioVisualizationHubService.cs:20-23`, `:187-193`, `:208-218`;
+`src/Radio.Web/Services/Hub/AudioStateHubService.cs:31-34`, `:104-110`, `:355-356`, `:390`;
+`src/Radio.Core/Constants/ApiPaths.cs:13`;
+`src/Radio.API/Radio.API.csproj:21-36`; `Directory.Build.props:3`;
+`deploy/debian-x64/setup.sh:45`, `:172`; `deploy/raspberry-pi/setup.sh:45`, `:281`;
+`deploy/provision/packages.sh:7`, `:77`, `:80`, `:89-98`;
+`deploy/provision/systemd/radio-api-restart.service:7`; `deploy/common/radio-performance.service:7`;
+`deploy/common/radio-web.service:105`.
+
+⚠ **`src/` moves on almost every PR**, and `AUD-1`, `AUD-12` and `TEST-2` all claim files in
+`src/Radio.Infrastructure` and `src/Radio.Web`. **Re-derive the `src/` anchors at claim time**; the `deploy/`
+ones have been stable across three amendments and two `main` advances.
+
 ---
 
 ## 10. Queue row wording
@@ -2001,11 +2989,44 @@ they were updated at `084a6bbd` and `43120eb8`. **§10.2 below is therefore a *f
 what is already there, not a replacement for it**, and §10.1 assumes the queue's own banner already says the
 row was re-scoped. Read both files before applying anything here.
 
+⭐ **Status of each target, checked on the working tree at `main` = `ec4f1490` (2nd amendment).** ⚠ **Two of
+the five have never been applied, and one of them still asserts something the owner reversed.**
+
+| Target | State | Action |
+|---|---|---|
+| `docs/BUILDER_QUEUE.md:6` (banner) | ✅ carries the owner decision, both rehearsals and the `NRestarts` correction | Add the readiness mechanism + the re-price when this amendment lands |
+| `docs/BUILDER_QUEUE.md:36` (`OPS-3` row) | ⚠ carries the owner decision but the Plan cell still reads **"0.5 d + ~20 min supervised box session"** — two re-prices stale | §10.1 |
+| `docs/queue/OPS-3.md` | ✅ carries both rehearsals and the owner decision | §10.2 |
+| `docs/queue/ORDERING-NOTES.md:28` | ⛔ **NEVER APPLIED.** Still the original text: *"the only row exempt from the auto-merge-on-green policy… the owner confirms the tradeoff on the PR itself"*, and it still describes the row as *"switching `Requires=` to `BindsTo=`"* — the shape that was measured and rejected | §10.3, still pending |
+| `docs/ROADMAP.md:144` | ⛔ **NEVER APPLIED.** | §10.4, still pending |
+| `docs/HANDOFF-GA-PUNCH-LIST.md:1110` | ⛔ **NEVER APPLIED.** | §10.5, still pending |
+
+⚠⚠ **`HANDOFF-GA-PUNCH-LIST.md` states the auto-merge exemption in TWO places and §10.5 addresses only
+one.** `:1110` (the row's cell) and **`:1519`** — *"`OPS-3` does not auto-merge. It is the single row in the
+queue exempt from the auto-merge policy."* ⭐ **Correcting one and leaving the other is the exact failure
+`docs/BUILDER_QUEUE.md`'s banner records twice** — *"one corrected number beside one stale number is not
+better than two stale ones, because it looks authoritative."* **Grep for every copy before declaring it
+done.** §10.6 carries `:1519`.
+
 ### 10.1 `docs/BUILDER_QUEUE.md` § Queue — replacement for the `OPS-3` Plan cell
 
-> [`OPS-3-bindsto-for-radio-web.md`](../design/plans/OPS-3-bindsto-for-radio-web.md) · **0.75 d + a ~30 min
-> supervised box session** *(re-priced 2026-09-08: two unit files, four heredocs, the touch-icon task folded
-> in, and three new rehearsal scenarios)* · ⭐ **RE-SCOPED — `BindsTo=` alone is measured to make the
+> [`OPS-3-bindsto-for-radio-web.md`](../design/plans/OPS-3-bindsto-for-radio-web.md) · **1.25 d + a ~45 min
+> supervised box session** *(re-priced twice on 2026-09-08: first to 0.75 d for two unit files, four
+> heredocs and the touch-icon task; then to 1.25 d for the readiness work — a third directive, a seventh
+> task, four new rehearsal scenarios and a rebuilt fixture)* · ⭐ **READINESS: the mechanism is
+> `ExecStartPost=` polling the negotiate endpoint, NOT `Type=notify`.** `Type=notify` sends `READY=1` on
+> `ApplicationStarted`, which `AudioEngineInitializationService` (a raw `IHostedService`) blocks on audio
+> engine + device enumeration + BlueZ bring-up — so it would report readiness far LATER than "the hub
+> answers", unbounded, against a 90 s default `TimeoutStartSec` and `StartLimitBurst=5`. **It would
+> manufacture the wedge the row exists to reduce, and it forfeits `C-191`.** ⚠ The owner decision names
+> `Type=notify` first; the plan's §1.4 explains the deviation · ⚠⚠ **`C-202`'s harm was OVERSTATED in this
+> row, in the dossier and in the owner decision.** `c1fba27a` (#386) shipped a client-side SignalR retry
+> loop in the **same commit** as the deploy poll, and it is still on `main` — so a hub that loses the start
+> race self-heals in **2–30 s** rather than staying *"dead for the lifetime of the radio-web process"*.
+> Readiness is a correctness and boot-ordering fix, **not the rescue of a blocking regression** — the row is
+> worth less than it looked, and is still right · ⚠ **The deploy's poll is a SOFT wait, not a gate**: the
+> loop exits 0 whether or not the endpoint answered, so "belt and braces" means a second chance, not a
+> guarantee · ⭐ **RE-SCOPED — `BindsTo=` alone is measured to make the
 > appliance WORSE and does not ship.** It fires during `radio-api`'s ordinary 10 s back-off and never
 > returns, so a transient crash darkens the console permanently. The shape that ships is **`BindsTo=` on
 > `radio-web` + `Upholds=radio-web.service` on `radio-api`** — measured to fail jointly *and* return
@@ -2084,13 +3105,27 @@ scope to widen. The cell was describing a benefit the row did not yet buy.
 > ⭐ **So this cell's original claim is now true, but it was not true of the change as filed**: self-healing
 > is bought by the second directive, not by correcting the first. A latched restart limiter still needs a
 > person (the plan's §6 gives the touch-panel, keyboard and power-cycle routes).
-> **Merge approved 2026-09-07; exemption discharged.** Estimate **0.75 d + a ~30 min supervised box
+> **Merge approved 2026-09-07; exemption discharged.** Estimate **1.25 d + a ~45 min supervised box
 > session** — the earlier 2–3 h priced a one-word diff, not the systemd rehearsal that is now the merge
-> gate and that is the only reason this row is not shipping a regression.
+> gate and that is the only reason this row is not shipping a regression, and not the readiness work the
+> owner added on 2026-09-08.
+
+### 10.6 ⭐ NEW — `docs/HANDOFF-GA-PUNCH-LIST.md:1519`, the SECOND copy of the exemption
+
+⚠ **§10.5 corrects `:1110` and misses this one.** The file says it twice; correcting one and leaving the
+other reads as authoritative and is worse than leaving both.
+
+> - **`OPS-3` no longer carries an auto-merge exemption — the owner reviewed and approved the merge on
+>   2026-09-07, and unblocked the readiness question on 2026-09-08.** ⚠ **The reason the exemption existed
+>   has not gone away, it has become a plan section:** no gate this repository can run observes unit-file
+>   propagation, so the merge gate is the plan's §4 systemd rehearsal — `S1`, `S6`, `S7`, `S8`, `S9`,
+>   `S12a`, `S12`, `S13`, `S15` — and not the suite. ⭐ What makes merging genuinely low-risk is that it
+>   changes nothing on the box: `Deploy-ToLinux.ps1` installs no unit files, so `radio` keeps `Requires=`
+>   until a human runs the plan's §5.
 
 ---
 
-## Planned — 2026-09-07 · Amended — 2026-09-08
+## Planned — 2026-09-07 · Amended — 2026-09-08 (twice)
 
 **2026-09-08 amendment, in one paragraph.** The plan's §0.4.4 named one unmeasured behaviour as
 merge-gating. It was rehearsed, and the answer disproved the row as specified: `BindsTo=` propagation fires
@@ -2104,3 +3139,69 @@ questions — whether `Upholds=` reverses a deliberate stop (`C-200`), whether i
 a two-file rollback hazard (`C-201`) and a version gap between the container that was measured and the
 appliance that will run it (`C-199`). ⭐ **The rehearsal is the reason this row is not currently shipping a regression, and it caught it
 before a single line was built.**
+
+**Second 2026-09-08 amendment, in one paragraph.** A second rehearsal on the appliance's own systemd
+(255.4) closed `C-199` and confirmed `C-200`, re-diagnosing it onto the *start* path, where it blocked the
+row until the owner decided: keep both directives **and** give `radio-api` real readiness. This amendment
+builds that — **`ExecStartPost=` polling `/hubs/visualization/negotiate`, not `Type=notify`**, because
+`AudioEngineInitializationService` is a raw `IHostedService` that blocks the host on audio-engine init,
+three device enumerations and BlueZ bring-up, so `READY=1` would arrive unbounded-ly later than "the hub
+answers" and would manufacture the very wedge the row is trying to reduce (`C-204`). It adds Task 7, `S12`–
+`S15`, `C-203`–`C-207`, a third directive to install and roll back, and re-prices the row to **1.25 d + a
+~45 min box session**. ⚠⚠ **And it corrects the premise the whole readiness question was argued from:
+`C-202`'s harm was overstated in four documents, including this plan.** `c1fba27a` shipped a client-side
+SignalR retry loop in the *same commit* as the deploy poll it is named for, so a hub that loses the start
+race self-heals in 2–30 s — it does not stay dead for the process lifetime. **Readiness is still right, for
+four reasons that never depended on that claim** (§0.7b.2), one of which nobody had noticed: **the boot path
+runs no poll at all.** ⭐ **Three times now this row has been rescued by refusing to trust something that
+looked settled — a directive's name (§0.4.4), an instrument that read 0 either way (§4.8), and a comment
+describing the bug its own commit fixed (§0.7b.1). None of the three was caught by reading more carefully;
+each was caught by going to the source that the thing was a summary of.**
+
+---
+
+# ⛔ SCOPE NARROWED BY OWNER DECISION, 2026-09-08 — readiness is SPLIT OUT to `OPS-10`
+
+**This row now ships `BindsTo=` on web + `Upholds=` on api, and nothing else.** Every readiness task
+in this plan — `ExecStartPost=`, the `S12`/`S12a`/`S13`/`S14` rehearsals, the 20 s ceiling derivation
+— **moves to `OPS-10`** ([`queue/OPS-10.md`](../../docs/queue/OPS-10.md)). The analysis is deliberately
+left in place here rather than deleted, because it is the reasoning `OPS-10` inherits.
+
+## Why the scope changed: `C-202`'s harm was false
+
+⚠ **The premise that made readiness urgent does not hold.** This plan, its brief, the queue row and
+two other documents all asserted that `Upholds=` starting `radio-web` early leaves the SignalR hub
+*"dead for the lifetime of the radio-web process"*, quoting `Deploy-ToLinux.ps1:445-451`.
+
+**That comment describes half of what shipped.** "Fix A" (`c1fba27a`, #386) was **two** fixes: the
+deploy poll *and* a client-side retry loop. **The loop is still on `main`** —
+`AudioVisualizationHubService.cs:20-23`, `:187-193`, `:208-218`, back-off `{2,5,10,30}`s, replaying
+subscriptions, with a twin at `AudioStateHubService.cs:355-356`. `git log -S 'StartRetryLoop'` returns
+exactly that one commit.
+
+**So an early start costs 2–30 s of inert console that self-heals**, not a permanent outage. The
+comment's own trailing clause said so — *"regardless of hub-service code resilience"* — and it was
+quoted twice while being read backwards.
+
+Readiness keeps four justifications that never depended on `C-202` (see §0.7b.2), **including one
+nobody had noticed: the boot path runs no ordering poll at all**, so this has never been enforced
+outside a deploy. But those make it a **worthwhile improvement, not a blocker** — which is why it is
+its own row rather than a condition on this one.
+
+## What this row must still carry
+
+- ⚠ **`NRestarts` cannot instrument any of this** — `Upholds=` issues `start`, not `restart`, so it
+  reads 0 whether or not web is cycled. §5.3's box drill **reintroduced it** and has been corrected to
+  `ActiveEnterTimestamp` with a baseline/after pair. Do not put it back.
+- **The wedge and its runbook command.** 5 API failures inside `StartLimitIntervalSec=300` latch
+  `radio-api` and take web with it:
+  `sudo systemctl reset-failed radio-api.service && sudo systemctl start radio-api.service`
+- **Merging is inert** — `Deploy-ToLinux.ps1` does not install unit files (`C-191`). ⭐ **Narrowing to
+  the unit files preserves that**, which is most of why this split is cheap.
+- **Re-rehearse on the 255.4 image.** `C-199` is closed; there is no reason left to prefer 249.
+- ⚠ **`ORDERING-NOTES.md:28` still says *"switching `Requires=` to `BindsTo=`"*** — the shape that was
+  measured and rejected. §10.3–§10.5 were never applied. Fix as part of this row.
+- **Build gate is 47 warnings / 0 errors**, equality with baseline — not zero, as an earlier draft said.
+
+**Estimate returns to ~0.5 d + ~20 min supervised**, since the rehearsal rebuild and the readiness
+tasks leave with `OPS-10`.
