@@ -66,3 +66,20 @@ confirm the test is RED against the live endpoint before trusting it.
 
 The predictive-degrade half **cannot be verified here** — it needs a stale-registrar condition only
 RotaryPhone can produce. Say so in the plan rather than writing a task that quietly assumes otherwise.
+
+---
+
+## ⭐ OWNER DECISION 2026-09-08 — the bell note is SESSION-SCOPED
+
+> "treat the bell note as session-scoped"
+
+**Do not ask RotaryPhone to persist `acknowledged`.** Their `BellFailureTracker` is in-memory and
+deliberately not persisted; that behaviour stands as-is.
+
+**What this row must now do instead:** make the UI copy honest about it. A dismissed bell note
+**reappears after a restart**, and this box restarts nightly — so a note that says or implies
+"dismissed for good" is asserting something untrue. Either the copy says the note is for this session,
+or the affordance stops looking permanent. ⚠ **That is a Designer question, not a Builder one** if the
+current copy implies permanence — check before writing the task.
+
+RotaryPhone has been told not to build persistence on spec.
