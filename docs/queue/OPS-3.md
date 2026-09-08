@@ -235,3 +235,46 @@ regression. The wedge is quantified and is the row's stated trade rather than a 
 
 **`OPS-3` is not buildable as scoped.** It needs a decision on readiness (the three options above)
 before the unit change can ship. Recorded rather than acted on.
+
+---
+
+## ⭐ OWNER DECISION, 2026-09-08 — fix the API's readiness, then keep both directions
+
+**Decision: `BindsTo=` on web + `Upholds=` on api, AND give `radio-api` real readiness.** The row is
+unblocked and buildable on that basis.
+
+The owner's first instinct was to **drop `Upholds=`**, and it was reversed once the measured cost was
+put beside it: `BindsTo=` alone fires during `radio-api`'s *ordinary* 10 s `RestartSec` back-off and
+the console **never returns** (`inactive / dead / success` — a clean stop, so `Restart=` will not act
+on it). That turns a transient crash, which `Restart=always` absorbs invisibly today, into a
+permanently dark console. It is worse than the bug the row exists to fix.
+
+### What "real readiness" means, and why it is the fix rather than a workaround
+
+The blocking problem measured on systemd 255.4 was that **`Upholds=` starts `radio-web` the moment
+`radio-api` is *active*, which for a `Type=simple` unit is at exec — not when port 5000 is bound.**
+That bypasses the deploy's hub-readiness poll at `Deploy-ToLinux.ps1:452`, whose comment at
+`:445-451` records why it exists: starting web early leaves the SignalR visualization hub *"dead for
+the lifetime of the radio-web process."*
+
+Making the API's readiness truthful fixes the cause rather than working around it:
+
+- **`Type=notify` with `sd_notify`** once the hub is listening, or
+- **`ExecStartPost=`** polling `/hubs/visualization/negotiate` until it answers.
+
+Then "api is active" *means* "the hub answers", `Upholds=` is safe by construction, and the deploy's
+poll becomes **redundant rather than defeated**. ⚠ Keep the deploy poll anyway — belt and braces, and
+removing it in the same change would make a regression impossible to attribute.
+
+### Still true, and still part of this row
+
+- ⚠ **The wedge cliff is 5 API failures in 300 s.** Past it, both services are down and stay down
+  until `sudo systemctl reset-failed radio-api.service && sudo systemctl start radio-api.service`.
+  That command must land in the runbook as part of this row — it becomes reachable exactly when
+  things are already going wrong.
+- ⚠ **`NRestarts` cannot instrument any of this** (`Upholds=` issues `start`, not `restart`). Do not
+  reintroduce it as evidence.
+- **Merging is inert on its own** — `Deploy-ToLinux.ps1` does not install unit files (`C-191`), so
+  rollout is a separate, supervised step.
+- Re-rehearse the readiness change before it ships. The container fixture is cheap and it has now
+  caught two things the reasoning missed.

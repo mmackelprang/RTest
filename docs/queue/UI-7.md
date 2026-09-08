@@ -77,3 +77,40 @@ accidentally. Synchronize on the observation.
 `UI-6`'s dossier cites `DuckingService.cs:481-483` as the precedent for this shape being a known,
 accepted limitation. **That anchor is stale — the real precedent is `:550-552`.** Use the corrected
 one; the argument it carries is still sound.
+
+---
+
+## ⭐ OWNER DECISION, 2026-09-08 — one mandatory fan-out seam, plus the lint. §1.1 is DISCHARGED.
+
+**The row is unblocked and buildable.** The originally-approved approach — *"enforce the single
+subscriber"* — **cannot be built**, because the census (confirmed three times independently) found
+**ten production subscriber types**, with **eight rendered components subscribing per circuit**. There
+is no single subscriber to enforce, and both mechanisms proposed for enforcing one fail:
+
+- **throw at registration** throws inside `MainLayout.OnInitializedAsync` on the very first circuit,
+  ⚠ **with every deploy gate still green** — including the kiosk connection check, because a circuit
+  that connects and *then* faults has still established a connection;
+- **a plain single delegate** is worse: it silently *replaces* the first subscriber, so `MainLayout`
+  would evict `AudioStateStore` from its own events with no error anywhere.
+
+### What ships instead
+
+Route **all 15 raise sites** through **two private `NotifyAsync` helpers** that iterate
+`GetInvocationList()`, `await` each handler, and `catch` per subscriber — the same shape `UI-6`
+already shipped and proved at `AudioStateStore.cs:444-494`. **A lint makes the seam mandatory**, so
+raise site 16 cannot reintroduce the shape. That is what turned this from a fixed bug into a closed
+class.
+
+### Carried into the build, from the plan
+
+- **15 sites, not 14.** `SourceChanged` is raised twice, and `:432` sits ~140 lines from the others.
+- **`PhoneUnreadState.cs:23` is NOT this bug** — it is `event Action<int>`, synchronous, and must not
+  be swept in.
+- **Two of the "three singletons" are `AddScoped`.** Check the registration, not the row.
+- ⛔ **Do not fix `SystemConfigPage.razor`'s handler leak here** — that is `UI-9`, deliberately kept
+  separate so it is not held up by this row's decision.
+- ⚠ **`C-213` — the test harness contains the defect under test.** `SleepTests.cs:503-511` and five
+  siblings fire hub events with `await del.Invoke(dto)` on a reflected backing field, which is correct
+  at one subscriber and awaits only the last at two. **A naive test would therefore pass against an
+  unfixed implementation.** Fix the harness before writing the assertion, and prove the test is RED
+  against `main` first.
