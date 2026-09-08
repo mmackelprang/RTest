@@ -897,84 +897,24 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   // -----------------------------------------------------------------------
-  // Deferred capture acquisition tests — a BT source activated before the
-  // phone's A2DP stream exists starts a background retry loop. When that retry
-  // later lands, the source must NOT be demoted out of Playing: audio keeps
-  // flowing through the mixer, but SoundFlowAudioTap.IsActive gates on Playing
-  // and would silently stop fingerprinting.
-  // -----------------------------------------------------------------------
-
-  [Fact]
-  public async Task DeferredCaptureAcquisition_AfterPlay_LeavesSourcePlaying()
-  {
-    // MockBluetoothService.GetAudioCaptureDeviceAsync returns a plain string, so
-    // no capture is acquired and PlayCoreAsync takes the production
-    // "no capture device yet, starting background retry" path.
-    await _source.PlayAsync(CancellationToken.None);
-    Assert.Equal(AudioSourceState.Playing, _source.State);
-
-    // The background retry later succeeds and applies the deferred state.
-    _source.ApplyDeferredCaptureState();
-
-    // The source is routed through the mixer and audible — it must stay Playing.
-    Assert.Equal(AudioSourceState.Playing, _source.State);
-  }
-
-  [Fact]
-  public async Task DeferredCaptureAcquisition_AfterPlay_KeepsAudioTapActive()
-  {
-    // The downstream invariant that actually matters: fingerprinting keeps
-    // running. SoundFlowAudioTap.IsActive requires the active source to be
-    // in Playing, so a demotion to Ready here kills song recognition.
-    await _source.PlayAsync(CancellationToken.None);
-    _source.ApplyDeferredCaptureState();
-
-    var engineMock = new Mock<IAudioEngine>();
-    engineMock.Setup(e => e.State).Returns(AudioEngineState.Running);
-
-    var managerMock = new Mock<IAudioManager>();
-    managerMock.Setup(m => m.ActiveSource).Returns(_source);
-
-    var tap = new SoundFlowAudioTap(
-      new Mock<ILogger<SoundFlowAudioTap>>().Object,
-      engineMock.Object,
-      managerMock.Object);
-
-    Assert.True(tap.IsActive, "Fingerprinting must stay active after deferred capture lands");
-  }
-
-  [Fact]
-  public void ApplyDeferredCaptureState_WhenNotPlaying_SetsReady()
-  {
-    // The other half of the invariant: a source that was NOT already playing
-    // (capture acquired via a DeviceConnected event before activation) becomes
-    // Ready, exactly as before.
-    Assert.Equal(AudioSourceState.Created, _source.State);
-
-    _source.ApplyDeferredCaptureState();
-
-    Assert.Equal(AudioSourceState.Ready, _source.State);
-  }
-
-  // -----------------------------------------------------------------------
   // Branch-dispatch coverage (TEST-2). These enter through the real event path
   // — DeviceConnected -> OnDeviceConnected (:361) -> TryAcquireAudioCaptureAsync
-  // (:370) -> the real `capture is ...` arms at :483 / :494 — rather than by
+  // (:370) -> the real `capture is ...` arms at :486 / :497 — rather than by
   // calling ApplyDeferredCaptureState directly. That distinction is the point of
   // the row: entering at the method executes the state decision without executing
   // the dispatch, which reads as coverage and is not. design/TESTING.md § Test Seams.
   //
-  // RouteCaptureThroughMixerAsync (:521) is reached and no-ops because
+  // RouteCaptureThroughMixerAsync (:524) is reached and no-ops because
   // _playbackService is null (an optional ctor parameter this fixture does not
-  // pass), so both of its arms fall through. That is load-bearing: if a future
-  // change makes routing unconditional, these break loudly rather than silently
-  // stopping short of the branch. Nothing is ever called on the capture mock.
+  // pass), so both of its arms fall through (:538, :579). That is load-bearing: if
+  // a future change makes routing unconditional, these break loudly rather than
+  // silently stopping short of the branch. Nothing is called on the capture mock.
   //
   // ⚠ The arms are told apart by GetSoundComponent(), not by state alone. Only
-  // the :494 arm assigns SoundComponent, so :483 leaves GetSoundComponent()
-  // throwing and :494 leaves it returning the exact object the mock handed over.
+  // the :497 arm assigns SoundComponent, so :486 leaves GetSoundComponent()
+  // throwing and :497 leaves it returning the exact object the mock handed over.
   // State alone would not distinguish the two arms from each other, and would not
-  // distinguish either from the `else` at :505 landing the source in Ready by a
+  // distinguish either from the `else` at :508 landing the source in Ready by a
   // different route — which is precisely the vacuous shape this row exists to
   // prevent. Every assertion below therefore pins WHICH arm ran, not just that
   // something did.
@@ -1007,7 +947,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   /// <c>PlayAsync</c> on a Created source runs <c>InitializeAsync</c>, which consumes the
   /// capture through the OTHER dispatch at :159/:166 and assigns
   /// <c>_captureDevice</c>/<c>SoundComponent</c>; a <c>DeviceConnected</c> raised after
-  /// that returns at the "already acquired" guard (:476) and never reaches :483/:494.
+  /// that returns at the "already acquired" guard (:479) and never reaches :486/:497.
   /// Answering null first leaves the source Playing with no capture — the real
   /// scenario #469 is about, a source activated before the phone's A2DP stream existed.
   /// </para>
@@ -1074,7 +1014,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
   /// <summary>
   /// Asserts that the arm matching <paramref name="kind"/> — and not the other one,
-  /// and not the `else` at :505 — is the one that ran. Only :494 assigns
+  /// and not the `else` at :508 — is the one that ran. Only :497 assigns
   /// SoundComponent, so GetSoundComponent() is the discriminator.
   /// </summary>
   private static void AssertArmTaken(string kind, BluetoothAudioSource source, object capture)
@@ -1099,7 +1039,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     var btMock = BuildBtMock(capture, probe);
     await using var source = BuildSource(btMock);
 
-    // Not played, so ApplyDeferredCaptureState — reached at :486 or :497 from its REAL
+    // Not played, so ApplyDeferredCaptureState — reached at :489 or :500 from its REAL
     // call site inside the arm under test — must land the source in Ready. Created is
     // the pre-state, so a Ready here cannot have come from InitializeAsync.
     Assert.Equal(AudioSourceState.Created, source.State);
@@ -1146,7 +1086,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   [Fact]
   public async Task DeviceConnectedEvent_WhenPlatformManaged_LandsReadyWithoutAcquiring()
   {
-    // The third ApplyDeferredCaptureState call site (:469), which no dispatch test
+    // The third ApplyDeferredCaptureState call site (:472), which no dispatch test
     // reaches: when the platform owns audio routing the method short-circuits before
     // the `capture is ...` arms. Retiring the seam without this would trade one
     // uncovered branch for another.
@@ -1164,6 +1104,49 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     Assert.Equal(0, probe.Calls);
     btMock.Verify(
       b => b.GetAudioCaptureDeviceAsync(It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  /// <summary>
+  /// The downstream invariant that actually matters: fingerprinting keeps running.
+  /// <c>SoundFlowAudioTap.IsActive</c> requires the active source to be in <c>Playing</c>,
+  /// so a demotion to <c>Ready</c> when the deferred capture lands kills song recognition.
+  /// <para>
+  /// ⚠ <c>TEST-2</c> rewrote how this test gets there, and kept the assertion untouched.
+  /// It used to reach the state by calling <c>ApplyDeferredCaptureState()</c> directly
+  /// through an <c>internal</c> seam — which executed the state decision without executing
+  /// the dispatch that selects it, and so read as coverage of a branch it never entered.
+  /// It now plays, then lands the deferred acquisition through the real
+  /// <c>DeviceConnected</c> path. This is the one test of the three whose assertion was
+  /// irreplaceable; the other two are superseded by <c>DeviceConnectedEvent_*</c>.
+  /// </para>
+  /// </summary>
+  [Fact]
+  public async Task DeferredCaptureAcquisition_ThroughDispatch_KeepsAudioTapActive()
+  {
+    var capture = NewCaptureDeviceMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 2);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => probe.Calls >= 3);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+
+    var engineMock = new Mock<IAudioEngine>();
+    engineMock.Setup(e => e.State).Returns(AudioEngineState.Running);
+
+    var managerMock = new Mock<IAudioManager>();
+    managerMock.Setup(m => m.ActiveSource).Returns(source);
+
+    var tap = new SoundFlowAudioTap(
+      new Mock<ILogger<SoundFlowAudioTap>>().Object,
+      engineMock.Object,
+      managerMock.Object);
+
+    Assert.True(tap.IsActive, "Fingerprinting must stay active after deferred capture lands");
   }
 
   /// <summary>
