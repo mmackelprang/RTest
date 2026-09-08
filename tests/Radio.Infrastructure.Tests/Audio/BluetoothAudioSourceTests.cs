@@ -1159,6 +1159,17 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   /// <c>DeviceConnected</c> path. This is the one test of the three whose assertion was
   /// irreplaceable; the other two are superseded by <c>DeviceConnectedEvent_*</c>.
   /// </para>
+  /// <para>
+  /// ⚠ <b>It ROUTES through the dispatch; it does not PIN it, and must not be described as
+  /// if it did.</b> Measured, not assumed: with the <c>:486</c> arm disabled this test still
+  /// passes, because the capture then falls to the <c>else</c> at <c>:508</c>, the source is
+  /// left Playing either way, and <c>IsActive</c> only reads that state. The assertion here
+  /// is the downstream INVARIANT. Pinning which arm ran is
+  /// <c>DeviceConnectedEvent_*</c>'s job — and those do fail when an arm is disabled. This
+  /// distinction is <c>design/TESTING.md</c> § <i>Test Seams</i> rule 4 applied to a test
+  /// that uses no seam at all: entering by the real path is necessary for dispatch coverage
+  /// and is not sufficient for it.
+  /// </para>
   /// </summary>
   [Fact]
   public async Task DeferredCaptureAcquisition_ThroughDispatch_KeepsAudioTapActive()

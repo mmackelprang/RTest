@@ -302,7 +302,7 @@ Classify a seam before adding one. The kind determines what you owe the reader.
 |---|---|---|
 | **A · Visibility** | Widens access (`private` → `internal`) to a value or method the production path already computes and reaches unchanged. | One line saying it is test-only. |
 | **B · Injection** | A test-only method that writes state the test could not otherwise establish. Production path unchanged. | One line, plus why the state is otherwise unreachable. |
-| **C · Substitution** | A field or property that production code **reads on every run** and that, when set, replaces a real collaborator. | The full label below. It adds a live branch to shipped code. |
+| **C · Substitution** | A field or property **production code itself reads on its own path** and that, when set, replaces a real collaborator. | The full label below. It adds a live branch to shipped code. |
 | **D · Entry-point** | A real production method made `internal` so a test can call it **directly**, bypassing the dispatch that normally selects it. | The full label below. **This is the deceptive one.** |
 
 **Kinds A and B are cheap and need no ceremony.** They change nothing about what runs in production;
@@ -368,7 +368,8 @@ Three parts, and the third earns the label:
 asserting that the real call sites *"require a native SoundFlow `AudioEngine` … and cannot be exercised
 directly in a unit test."* **That was never true.** A test mocking `SoundComponent` with a null engine
 was already green in CI at the time. The comment was then cited as authority by queue row `TEST-2`,
-which sat open for four weeks (2026-08-11 to 2026-09-08) waiting for a native harness nobody needed.
+which sat open for four weeks (filed 2026-08-10, shipped 2026-09-08) waiting for a native harness
+nobody needed.
 
 The lesson is not "seams are bad". It is that **the sentence justifying a seam is a technical claim and
 gets checked like one** — see `CLAUDE.md` § *Pre-Merge Review*.
