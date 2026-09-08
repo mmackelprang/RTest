@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (42)
+## Shipped rows (43)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1515,6 +1515,55 @@ the chip, one-voice-at-a-time and mid-speech re-attach were never observed live 
 bUnit tests driving the snapshot directly. Handoff items 17 and 20 (an opinion on the voice; a digit
 run intelligible at kiosk distance) are inherently on-box and **remain open**. The appliance was
 deliberately left untouched.
+
+---
+
+### TEST-2 — Close the deferred-capture branch-dispatch coverage gap left by PR #469. The harness it waited for was never needed.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#614](https://github.com/mmackelprang/RTest/pull/614) |
+| Plan | [`TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](../design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md) |
+| Spec / handoff | _no spec doc — the diagnosis was in the row_ · #469 (the seam) · #468 (`8b1ce0a`, the two Cast seams) |
+| Depends on | — |
+| Branch | `test/bt-capture-branch-dispatch-coverage` |
+
+**Detail: [`queue/TEST-2.md`](queue/TEST-2.md)** — which carries a correction block, because **this
+row's central premise was false.**
+
+Shipped 2026-09-08, 10 commits. The feasibility question the row asked is answered **NO** — a native
+`AudioEngine` cannot be built on this CI. **But it was the wrong question.** `SoundComponent` and
+`AudioCaptureDevice` are both abstract and their constructors *store* the engine reference without
+dereferencing it, so Moq subclasses either with `null!` — which the suite had been doing for
+`SoundComponent`, in CI, since before the row was filed. So the row closed by **building** the
+coverage: all three `capture is …` dispatch sites driven through the real path by raising
+`IBluetoothService.DeviceConnected`, the Kind-D seam `ApplyDeferredCaptureState` **retired**
+(`internal` → `private`) rather than labelled, and the convention written anyway as
+`design/TESTING.md` § *Test Seams* + `ADR-030` for the two Cast seams that remain justified.
+`TestSeamLabelLintTests` enforces the label with a positive control.
+
+⚠ **Three of the row's own claims did not survive checking**, all recorded in the dossier: the native-engine
+premise (false); *"none is covered end-to-end"* (`:159`/`:166` was already covered, proven by mutation);
+and *"four seams"* (three — the fourth is only in `AUD-5`'s plan). The doc comment the row cited as its
+**authority** was itself over-claiming — `CLAUDE.md` § *Pre-Merge Review*'s named failure mode, with a
+queue row as the victim rather than a code change, now its fourth worked example.
+
+⭐ **The §4.1 falsification gate ran, and the plan's prescribed form of it was vacuous.** The plan said
+to *swap* the two dispatch arms; `AudioCaptureDevice` and `SoundComponent` are disjoint types
+(`IsAssignableFrom` false both ways, verified by reflection), so reordering two mutually exclusive `is`
+tests is a no-op that would have certified the tests without testing them. Replaced with arm-disabling:
+four mutations across all three sites, each producing a **disjoint, correctly-attributed** failure set,
+each reverted. That is what shows the tests discriminate the arms rather than merely executing them.
+
+⚠ **The row sat open four weeks (filed 2026-08-10), not thirteen months.** The plan still carries the
+old figure — Planner's artifact, not corrected by this row.
+
+✅ **`AUD-3` residue (c) DISCHARGED** — labelled per ADR-030, and the third seam retired outright.
+⚠ **(a) and (b) remain open.** ⭐ **Creates one obligation on `AUD-5`:** its
+`CastStatusReadOverrideForTests` must carry the kind-C label and join the lint's control list.
+
+⚠ **No live Kind-D seam remains in the tree**, so the lint's `kind D` branch is exercised by nothing in
+`src/` — verified by planting one temporarily. Green does not cover it.
 
 ---
 
