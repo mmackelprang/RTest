@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+
 namespace Radio.Web.Services;
 
 /// <summary>
@@ -12,8 +14,10 @@ namespace Radio.Web.Services;
 /// <see cref="VisualizerTelemetryService"/> in Arc 1 PR 4.
 /// </para>
 /// </summary>
-public class RadioPanelToggleService
+public class RadioPanelToggleService(ILogger<RadioPanelToggleService> logger)
 {
+  private readonly ILogger<RadioPanelToggleService> _logger = logger;
+
   /// <summary>
   /// Fired when the radio panel visibility state changes. Not invoked on
   /// idempotent set-to-same-value calls.
@@ -59,9 +63,29 @@ public class RadioPanelToggleService
     }
 
     IsRadioPanelVisible = value;
-    if (RadioPanelToggled != null)
+
+    // UI-7. `await RadioPanelToggled.Invoke()` on a multicast Func<Task> runs every subscriber but
+    // returns only the LAST one's Task, and a subscriber throwing synchronously starves every
+    // handler after it. This service is AddScoped (Program.cs:476) with one subscriber today
+    // (Home.razor:36), so the list is length 1 and the defect was latent here — but "one
+    // subscriber" is a fact about today, not a constraint, which is exactly the reasoning UI-7
+    // C-203 found to be false about AudioStateHubService. The canonical version of this loop, with
+    // the full argument, is AudioStateStore.NotifyAsync.
+    if (RadioPanelToggled == null)
     {
-      await RadioPanelToggled.Invoke();
+      return;
+    }
+
+    foreach (var subscriber in RadioPanelToggled.GetInvocationList())
+    {
+      try
+      {
+        await ((Func<Task>)subscriber).Invoke();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error notifying RadioPanelToggled subscriber");
+      }
     }
   }
 }

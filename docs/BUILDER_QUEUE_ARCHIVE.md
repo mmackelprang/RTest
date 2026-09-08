@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (43)
+## Shipped rows (44)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1575,6 +1575,70 @@ old figure — Planner's artifact, not corrected by this row.
 
 ⚠ **No live Kind-D seam remains in the tree**, so the lint's `kind D` branch is exercised by nothing in
 `src/` — verified by planting one temporarily. Green does not cover it.
+
+---
+
+
+### UI-7 — The multicast-await shape survives in ~17 more places. The row called the worst of them dormant; it was live.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#620](https://github.com/mmackelprang/RTest/pull/620) |
+| Plan | [`UI-7-close-the-multicast-await-class.md`](../design/plans/UI-7-close-the-multicast-await-class.md) |
+| Spec / handoff | _no spec doc — the diagnosis was in the row_ · [#596](https://github.com/mmackelprang/RTest/pull/596) (`UI-6`, the shipped implementation this copies) |
+| Depends on | — |
+| Branch | `fix/ui-7-close-the-multicast-await-class` |
+
+**Detail: [`queue/UI-7.md`](queue/UI-7.md)** — which carries the owner decision of 2026-09-08 and the
+census that forced it, because **this row's central premise was false.**
+
+Merged 2026-09-08. ⚠ **Merged, not shipped** — the appliance was deployed to `e740b94` earlier the
+same day and this row is not in that build; its live check is deferred and was not performed.
+
+**What the row asked for could not be built.** It called the defect *dormant* on the grounds that
+`AudioStateStore` is `AudioStateHubService`'s only subscriber. A census, confirmed three times
+independently, found **ten production subscriber types** — the store, `EncoderHudService`, and eight
+rendered components — on a service registered `AddSingleton` whose component subscribers register
+**per circuit**. Two open browsers is nine handlers on `NowPlayingChanged`. Twelve of the fourteen
+events have a subscriber that is not the store; the store does not subscribe to two of them at all.
+**So the bug was live, and this class carried the worst exposure in the tree**, not the least.
+
+Both proposed enforcement mechanisms fail on contact with that: a guard throwing on the second
+registration throws inside `MainLayout.OnInitializedAsync` on the first circuit — ⚠ **with every
+deploy gate still green**, because a circuit that connects and *then* faults has still established a
+connection — and a plain single delegate is worse, silently *replacing* the first subscriber. The
+owner substituted **one mandatory fan-out seam plus the lint**, and that is what shipped: all **15**
+raise sites (not 14 — `SourceChanged` is raised twice) through two `NotifyAsync` helpers that walk
+`GetInvocationList()`, await each subscriber and catch per subscriber, with
+`AsyncEventFanOutLintTests` making the seam mandatory so raise site 16 cannot reintroduce the shape.
+
+⭐ **The test harness contained the defect under test, and that is the reusable lesson** (`C-213`).
+Twelve sites across five test files fired hub events with `await del.Invoke(dto)` on a reflected
+backing field — correct at one subscriber, awaiting only the last at two. **A naive multi-subscriber
+test would have passed against a completely unfixed implementation.** The harness was repaired
+(`HubEventFire`) *before* the assertion depending on it was written, and the headline tests drive the
+real production method so they cannot rest on the repair. Shown RED against the unfixed code first —
+4 failed / 3 passed, the four being exactly the discriminating ones — then 7/7 green.
+
+⭐ **And the plan's own headline test design would not have discriminated.** §4.1 specified three
+subscribers each completing after `await Task.Yield()`. `UI-6`'s `AudioStateStoreNotifyTests` already
+records why that fails: on unfixed code the discarded continuations usually complete anyway, so such
+a test *"would have passed against the bug most of the time"*. The gate pattern was used instead.
+**That is the sixth instrument-of-this-family failure in three days**, and the first where the
+vacuous instrument was specified by the plan being executed.
+
+Two further corrections to the plan, both measured rather than argued: the lint's predicted 17
+violations first came out as **18**, the extra being a `///` comment correctly *describing* another
+class's defect — fixed by blanking comments and strings rather than by exempting the file, because a
+lint whose first casualty is the documentation of the defect it forbids is worse than no lint; and
+the direct-call arm the plan expected to false-positive produced **zero** hits and was kept.
+
+⛔ Excluded deliberately: `PhoneUnreadState` (`event Action<int>`, void-returning — not this defect,
+and `ConsolePlaybackState.cs:44-46` already said so); `SystemConfigPage.razor`'s per-navigation
+handler leak (`UI-9`); deleting the dead `ConfigChanged` event. All filed in `design/FUTURE-WORK.md`.
+⚠ **The severities in the row's own table are inverted:** the two sites it called singletons are
+`AddScoped` with one subscriber each and were genuinely latent; the one that is genuinely multicast
+is not this bug.
 
 ---
 

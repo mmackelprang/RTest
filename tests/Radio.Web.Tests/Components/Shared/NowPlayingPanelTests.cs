@@ -449,15 +449,9 @@ public class NowPlayingPanelTests : TestContext
     Assert.Empty(cut.FindAll(".np-recognition-row-current"));
 
     // Now drive the typed hub event. The hub service is a real instance in DI;
-    // we reach into its compiler-generated backing field and invoke directly,
-    // mirroring what SignalR would do on a live wire push.
+    // we reach into its compiler-generated backing field and await every
+    // subscriber, mirroring what SignalR would do on a live wire push.
     var hubService = Services.GetRequiredService<AudioStateHubService>();
-    var eventField = typeof(AudioStateHubService).GetField(
-      nameof(AudioStateHubService.RadioStateChanged),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    Assert.NotNull(eventField);
-    var handler = (Func<RadioStateDto, Task>?)eventField!.GetValue(hubService);
-    Assert.NotNull(handler);
 
     var dto = new RadioStateDto(
       Frequency: 92.5e6, Band: "FM", Step: 100e3,
@@ -466,7 +460,8 @@ public class NowPlayingPanelTests : TestContext
       Equalizer: "Flat", DeviceVolume: 70,
       NowPlayingMatchId: "m-target");
 
-    await cut.InvokeAsync(() => handler!.Invoke(dto));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hubService, nameof(AudioStateHubService.RadioStateChanged), dto));
 
     // The NOW row now anchors to the target match — proving the typed payload
     // reached the panel without a REST refetch.
@@ -841,12 +836,6 @@ public class NowPlayingPanelTests : TestContext
     cut.Render();
 
     var hubService = Services.GetRequiredService<AudioStateHubService>();
-    var eventField = typeof(AudioStateHubService).GetField(
-      nameof(AudioStateHubService.RadioStateChanged),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    Assert.NotNull(eventField);
-    var handler = (Func<RadioStateDto, Task>?)eventField!.GetValue(hubService);
-    Assert.NotNull(handler);
 
     var dto = new RadioStateDto(
       Frequency: 88.1e6, Band: "FM", Step: 100e3,
@@ -856,7 +845,8 @@ public class NowPlayingPanelTests : TestContext
       RdsStationName: "KFOG",
       AppliedGain: 24.0);
 
-    await cut.InvokeAsync(() => handler!.Invoke(dto));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hubService, nameof(AudioStateHubService.RadioStateChanged), dto));
 
     // The frequency cell still updates live off the RadioStateChanged hub push
     // (it binds to _radioState, which is refreshed every tick). The duplicate
@@ -969,12 +959,6 @@ public class NowPlayingPanelTests : TestContext
     var cut = RenderComponent<NowPlayingPanel>();
 
     var hub = Services.GetRequiredService<AudioStateHubService>();
-    var field = typeof(AudioStateHubService).GetField(
-      nameof(AudioStateHubService.NowPlayingChanged),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    Assert.NotNull(field);
-    var handler = (Func<NowPlayingDto?, Task>?)field!.GetValue(hub);
-    Assert.NotNull(handler);
 
     // Generic "Track N" title — the kind the metadata reader emits before it
     // resolves real tags. With a populated FilePath the panel's projection
@@ -989,7 +973,8 @@ public class NowPlayingPanelTests : TestContext
       SourceName = "File Player",
     };
 
-    await cut.InvokeAsync(() => handler!.Invoke(dto));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync<NowPlayingDto?>(
+      hub, nameof(AudioStateHubService.NowPlayingChanged), dto));
 
     // The DisplayNames.Track projection rewrites the generic "Track 8" to the
     // parsed file-name. The rendered title block carries the cleaned name —
@@ -1038,11 +1023,6 @@ public class NowPlayingPanelTests : TestContext
     cut.Render();
 
     var hub = Services.GetRequiredService<AudioStateHubService>();
-    var eventField = typeof(AudioStateHubService).GetField(
-      nameof(AudioStateHubService.RadioStateChanged),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    var handler = (Func<RadioStateDto, Task>?)eventField!.GetValue(hub);
-    Assert.NotNull(handler);
 
     // First push: anchor on m-first.
     var firstState = new RadioStateDto(
@@ -1051,7 +1031,8 @@ public class NowPlayingPanelTests : TestContext
       ScanStopThreshold: -18.0, Gain: 28, AutoGain: true,
       Equalizer: "Flat", DeviceVolume: 70,
       NowPlayingMatchId: "m-first");
-    await cut.InvokeAsync(() => handler!.Invoke(firstState));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hub, nameof(AudioStateHubService.RadioStateChanged), firstState));
 
     var currentBefore = cut.FindAll(".np-recognition-row-current");
     Assert.Single(currentBefore);
@@ -1060,7 +1041,8 @@ public class NowPlayingPanelTests : TestContext
     // Second push: anchor on m-second. The current-row class must migrate —
     // m-second now carries it; m-first drops back to a plain EARLIER row.
     var secondState = firstState with { NowPlayingMatchId = "m-second" };
-    await cut.InvokeAsync(() => handler!.Invoke(secondState));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hub, nameof(AudioStateHubService.RadioStateChanged), secondState));
 
     var currentAfter = cut.FindAll(".np-recognition-row-current");
     Assert.Single(currentAfter);

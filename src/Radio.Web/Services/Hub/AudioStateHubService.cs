@@ -14,6 +14,22 @@ namespace Radio.Web.Services.Hub;
 /// EncoderConfigStatusChanged, EncoderHudChanged, SleepStateChanged, EventPlaybackChanged,
 /// ConfigChanged
 /// </summary>
+/// <remarks>
+/// ⚠ EVERY event on this class is raised through <see cref="NotifyAsync(Func{Task})"/> or its
+/// generic twin, and a new one must be too — see those methods' remarks for what the direct
+/// <c>await SomeEvent.Invoke()</c> form does wrong (queue row `UI-7`). This is enforced, not
+/// requested: <c>AsyncEventFanOutLintTests</c> in <c>Radio.Core.Tests</c> fails the TEST step if an
+/// event declared in this file is raised by <c>X.Invoke(…)</c>, through a one-level local alias, or
+/// by a bare <c>X(…)</c> call. ⚠ It is a regex over source text, not a proof: an event declared here
+/// and raised from another part of a partial type would pass, and it does not scan <c>tests/</c>.
+///
+/// ⚠ This is a SINGLETON (Program.cs:411) and its component subscribers are PER CIRCUIT, so the
+/// invocation list grows with open browsers. Ten production types subscribe; `UI-7` §0.2 has the
+/// census. Anything reasoning about "the subscriber" of this class is reasoning about a class that
+/// does not exist. (`UI-7`'s dossier says two browsers puts NINE handlers on NowPlayingChanged;
+/// pre-merge review narrowed that — Sleep.razor uses EmptyLayout, so it and MainLayout cannot both
+/// render on one circuit, and the reachable ceiling is nearer seven. The argument needs only ≥2.)
+/// </remarks>
 public class AudioStateHubService : IAsyncDisposable
 {
   private readonly ILogger<AudioStateHubService> _logger;
@@ -21,8 +37,11 @@ public class AudioStateHubService : IAsyncDisposable
   // Web-process instance of the SQLite-config reload notifier. Calling
   // NotifyReload() forces this process's SqliteConfigurationProvider to re-read
   // the shared config DB — the cross-process half of the ConfigChanged bridge.
-  // Optional so the ~9 test fixtures that new this service up directly keep
+  // Optional so the test fixtures that new this service up directly keep
   // compiling; production always injects the registered singleton.
+  // (This said "~9" until UI-7. The real count was ~20 within days of it being
+  // written, which is why it now carries no number: the sentence never needed
+  // one, and a number nobody re-counts is a comment that goes quietly false.)
   private readonly ConfigStoreChangeNotifier? _configStoreNotifier;
   private readonly IHubConnectionTransport? _transport;
   private HubConnection? _hubConnection;
@@ -69,8 +88,21 @@ public class AudioStateHubService : IAsyncDisposable
   /// </summary>
   public event Func<EventPlaybackSnapshotDto?, Task>? EventPlaybackChanged;
   // Fired after a cross-process ConfigChanged push has reloaded this process's
-  // config snapshot. Optional for subscribers that want an immediate re-render;
-  // the topbar / sleep clocks don't need it (their 1 s timers repaint anyway).
+  // config snapshot.
+  // ⚠ IT HAS ZERO SUBSCRIBERS, in src/ and in tests/ (UI-7 C-208). The previous
+  // wording here — "Optional for subscribers that want an immediate re-render" —
+  // described a subscriber that has never existed. The live effect of the
+  // ConfigChanged push is _configStoreNotifier?.NotifyReload() in the handler
+  // below; this event is not that, and the topbar / sleep clocks repaint on
+  // their own 1 s timers regardless.
+  // ⛔ RETAINED DELIBERATELY, not overlooked: it is public API, and a dead-code
+  // deletion inside a defect-class PR muddies a diff whose value is that it is
+  // mechanical. Deleting it is a separate decision; UI-7 §6.1 files it.
+  // ⚠ An earlier revision of this comment also claimed "VisualizerPanelTests pins
+  // this class's event set by name" as a third reason. Pre-merge review falsified
+  // it: that test reflects GetEvents() but asserts only Contain("EncoderConfigStatusChanged")
+  // and NotContain("VisualizationModeChanged"), so deleting ConfigChanged would NOT
+  // fail it. The two reasons above carry the decision on their own.
   public event Func<Task>? ConfigChanged;
 
   // Throttle disconnect log messages to avoid spam when API is down
@@ -135,10 +167,7 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<object>("PlaybackStateChanged", async (_) =>
       {
         _logger.LogDebug("Received PlaybackStateChanged event");
-        if (PlaybackStateChanged != null)
-        {
-          await PlaybackStateChanged.Invoke();
-        }
+        await NotifyAsync(PlaybackStateChanged);
       });
 
       // Server sends NowPlayingChanged with a NowPlayingDto payload —
@@ -146,10 +175,7 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<NowPlayingDto?>("NowPlayingChanged", async (dto) =>
       {
         _logger.LogDebug("Received NowPlayingChanged event");
-        if (NowPlayingChanged != null)
-        {
-          await NowPlayingChanged.Invoke(dto);
-        }
+        await NotifyAsync(NowPlayingChanged, dto);
       });
 
       // Server sends QueueChanged with a list payload —
@@ -157,10 +183,7 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<object>("QueueChanged", async (_) =>
       {
         _logger.LogDebug("Received QueueChanged event");
-        if (QueueChanged != null)
-        {
-          await QueueChanged.Invoke();
-        }
+        await NotifyAsync(QueueChanged);
       });
 
       // Server sends RadioStateChanged with a RadioStateDto payload —
@@ -171,10 +194,16 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<RadioStateDto>("RadioStateChanged", async (dto) =>
       {
         _logger.LogDebug("Received RadioStateChanged event");
-        if (RadioStateChanged != null)
-        {
-          await RadioStateChanged.Invoke(dto);
-        }
+        // ⚠ ASYMMETRY, PRE-EXISTING AND DELIBERATELY PRESERVED. RadioStateChanged is
+        // Func<RadioStateDto, Task> — a NON-nullable payload, like the three Encoder events below
+        // — but unlike them it has never carried a `dto != null` guard, on `main` or here. UI-7
+        // changed only the fan-out and did not add one, because adding a guard would silently drop
+        // a broadcast the panel currently receives, which is a behaviour change this row has no
+        // mandate for. Pre-merge review raised it: the guard comment below indicts this site by its
+        // own logic. Mitigating, and the reason it is safe to leave: the new per-subscriber catch
+        // means a resulting NullReferenceException is now logged rather than faulting a task nobody
+        // holds. Worth its own row, not a rider here.
+        await NotifyAsync(RadioStateChanged, dto);
       });
 
       // Server sends VolumeChanged with a VolumeDto payload —
@@ -182,19 +211,13 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<VolumeDto?>("VolumeChanged", async (dto) =>
       {
         _logger.LogDebug("Received VolumeChanged event");
-        if (VolumeChanged != null)
-        {
-          await VolumeChanged.Invoke(dto);
-        }
+        await NotifyAsync(VolumeChanged, dto);
       });
 
       _hubConnection.On("SourceChanged", async () =>
       {
         _logger.LogDebug("Received SourceChanged event");
-        if (SourceChanged != null)
-        {
-          await SourceChanged.Invoke();
-        }
+        await NotifyAsync(SourceChanged);
       });
 
       // Server sends FingerprintStatusChanged with a FingerprintStatusDto payload —
@@ -202,20 +225,14 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<object>("FingerprintStatusChanged", async (_) =>
       {
         _logger.LogDebug("Received FingerprintStatusChanged event");
-        if (FingerprintStatusChanged != null)
-        {
-          await FingerprintStatusChanged.Invoke();
-        }
+        await NotifyAsync(FingerprintStatusChanged);
       });
 
       // Server sends PhoneCallStateChanged with state payload
       _hubConnection.On<object>("PhoneCallStateChanged", async (_) =>
       {
         _logger.LogDebug("Received PhoneCallStateChanged event");
-        if (PhoneCallStateChanged != null)
-        {
-          await PhoneCallStateChanged.Invoke();
-        }
+        await NotifyAsync(PhoneCallStateChanged);
       });
 
       // Server sends EncoderConnectionChanged when encoder device connects/disconnects
@@ -224,9 +241,13 @@ public class AudioStateHubService : IAsyncDisposable
         _logger.LogDebug(
           "Received EncoderConnectionChanged: IsConnected={IsConnected}, WasEverConnected={WasEver}",
           dto?.IsConnected, dto?.WasEverConnected);
-        if (EncoderConnectionChanged != null && dto != null)
+        // The payload guard is NOT a subscriber guard and must survive: this delegate is
+        // Func<{Dto}, Task> with a NON-nullable payload, so handing it null would give
+        // subscribers a null they are typed to never receive. NotifyAsync only replaces the
+        // `EncoderConnectionChanged != null` half.
+        if (dto != null)
         {
-          await EncoderConnectionChanged.Invoke(dto);
+          await NotifyAsync(EncoderConnectionChanged, dto);
         }
       });
 
@@ -234,9 +255,13 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<EncoderConfigStatusDto>("EncoderConfigStatusChanged", async (dto) =>
       {
         _logger.LogDebug("Received EncoderConfigStatusChanged: {Status}", dto?.Status);
-        if (EncoderConfigStatusChanged != null && dto != null)
+        // The payload guard is NOT a subscriber guard and must survive: this delegate is
+        // Func<{Dto}, Task> with a NON-nullable payload, so handing it null would give
+        // subscribers a null they are typed to never receive. NotifyAsync only replaces the
+        // `EncoderConfigStatusChanged != null` half.
+        if (dto != null)
         {
-          await EncoderConfigStatusChanged.Invoke(dto);
+          await NotifyAsync(EncoderConfigStatusChanged, dto);
         }
       });
 
@@ -244,9 +269,13 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<EncoderHudDto>("EncoderHudChanged", async (dto) =>
       {
         // No log line per message. This arrives at up to 20 Hz while a knob is moving.
-        if (EncoderHudChanged != null && dto != null)
+        // The payload guard is NOT a subscriber guard and must survive: this delegate is
+        // Func<{Dto}, Task> with a NON-nullable payload, so handing it null would give
+        // subscribers a null they are typed to never receive. NotifyAsync only replaces the
+        // `EncoderHudChanged != null` half.
+        if (dto != null)
         {
-          await EncoderHudChanged.Invoke(dto);
+          await NotifyAsync(EncoderHudChanged, dto);
         }
       });
 
@@ -254,10 +283,7 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<bool>("SleepStateChanged", async (isSleeping) =>
       {
         _logger.LogDebug("Received SleepStateChanged event: IsSleeping={IsSleeping}", isSleeping);
-        if (SleepStateChanged != null)
-        {
-          await SleepStateChanged.Invoke(isSleeping);
-        }
+        await NotifyAsync(SleepStateChanged, isSleeping);
       });
 
       // Server sends EventPlaybackChanged on every attended-playback transition (ADR-029 D6 §8.1).
@@ -265,10 +291,7 @@ public class AudioStateHubService : IAsyncDisposable
       _hubConnection.On<EventPlaybackSnapshotDto?>("EventPlaybackChanged", async (dto) =>
       {
         _logger.LogDebug("Received EventPlaybackChanged event");
-        if (EventPlaybackChanged != null)
-        {
-          await EventPlaybackChanged.Invoke(dto);
-        }
+        await NotifyAsync(EventPlaybackChanged, dto);
       });
 
       // Server sends ConfigChanged (section name) when a config write lands in the
@@ -281,11 +304,7 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received ConfigChanged event for section {Section}", section);
         _configStoreNotifier?.NotifyReload();
-        var handler = ConfigChanged;
-        if (handler != null)
-        {
-          await handler.Invoke();
-        }
+        await NotifyAsync(ConfigChanged);
       });
 
       // Connection lifecycle events — throttled to avoid log spam when API is down
@@ -427,10 +446,7 @@ public class AudioStateHubService : IAsyncDisposable
   /// </summary>
   public async Task NotifySourceChangedAsync()
   {
-    if (SourceChanged != null)
-    {
-      await SourceChanged.Invoke();
-    }
+    await NotifyAsync(SourceChanged);
   }
 
   public async Task StopAsync(CancellationToken cancellationToken = default)
@@ -479,6 +495,94 @@ public class AudioStateHubService : IAsyncDisposable
 
     _connectionLock.Dispose();
     GC.SuppressFinalize(this);
+  }
+
+  /// <summary>
+  /// Awaits every subscriber of a parameterless hub event in registration order, catching and
+  /// logging each one's exception separately.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The <see cref="Delegate.GetInvocationList"/> loop is the whole point of this method, and the
+  /// one-liner it replaces was wrong in two independent ways (queue row `UI-7`, and `UI-6` before it
+  /// for the same shape in <see cref="Radio.Web.Services.AudioStateStore"/>).
+  ///
+  /// <c>await SomeEvent.Invoke()</c> on a multicast <c>Func&lt;Task&gt;</c> RUNS every subscriber but
+  /// returns only the LAST one's <see cref="Task"/>. Every earlier subscriber ran to its first
+  /// <c>await</c> and its continuation was never observed, so the caller's <c>await</c> completed
+  /// while N−1 handlers were still in flight and their exceptions faulted tasks nobody held.
+  ///
+  /// ⚠ The sharper half: a subscriber that throws SYNCHRONOUSLY — before its first <c>await</c> —
+  /// threw out of <c>Invoke</c> itself, so every handler registered AFTER it never ran at all. That
+  /// is starvation, not a lost log line, and catching INSIDE the loop is what resumes the list.
+  /// <see cref="Radio.Infrastructure.Audio.Services.DuckingService"/> documents the same shape as a
+  /// known, accepted limitation for two subscribers and says a third would want exactly this loop —
+  /// note that its event is a synchronous EventHandler&lt;T&gt;, so it precedents the starvation half
+  /// only (plan UI-7 C-209).
+  ///
+  /// ⚠⚠ THIS CLASS IS NOT THE DORMANT CASE, AND THE ROW THAT FILED IT SAID IT WAS. `UI-7` C-203:
+  /// AudioStateStore is NOT the only subscriber. Ten production types subscribe — the store,
+  /// EncoderHudService, and eight rendered components — and this service is registered AddSingleton
+  /// (Program.cs:411) while the components subscribe PER CIRCUIT. Two open browsers already puts nine
+  /// handlers on NowPlayingChanged. Every consequence above was happening on the appliance.
+  /// ⛔ Do NOT "simplify" this back to a null check and an Invoke.
+  ///
+  /// ⚠ Subscribers now run SEQUENTIALLY rather than being started back-to-back, and the invocation
+  /// list here is longer than the store's. The handlers are Blazor InvokeAsync(StateHasChanged)
+  /// dispatches, which queue onto their own circuit's renderer and return, so serializing them costs
+  /// a dispatch each rather than a render each — AudioStateStore.cs:438-442 makes the same argument.
+  /// </remarks>
+  private async Task NotifyAsync(Func<Task>? handler)
+  {
+    if (handler == null)
+    {
+      return;
+    }
+
+    foreach (var subscriber in handler.GetInvocationList())
+    {
+      try
+      {
+        // Inside the try, so a synchronous throw is caught and the NEXT subscriber still runs.
+        await ((Func<Task>)subscriber).Invoke();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error notifying AudioStateHubService subscriber");
+      }
+    }
+  }
+
+  /// <summary>
+  /// Awaits every subscriber of a hub event that carries a payload, in registration order, catching
+  /// and logging each one's exception separately.
+  /// </summary>
+  /// <remarks>
+  /// The generic twin of the parameterless overload above — see its remarks for why the loop exists.
+  /// Generic rather than duplicated per event, because a hand-rolled loop per event is one chance to
+  /// drift per event — which is precisely what UI-6 found when AudioStateStore's two hand-rolled
+  /// sites had already diverged (one carried a try/catch and the other carried none).
+  /// (An earlier revision said "THIRTEEN events between the two overloads". There are FOURTEEN, and
+  /// pre-merge review caught it. The number is now absent rather than corrected — the constructor
+  /// comment above makes the same point about the "~9" it used to carry.)
+  /// </remarks>
+  private async Task NotifyAsync<T>(Func<T, Task>? handler, T arg)
+  {
+    if (handler == null)
+    {
+      return;
+    }
+
+    foreach (var subscriber in handler.GetInvocationList())
+    {
+      try
+      {
+        await ((Func<T, Task>)subscriber).Invoke(arg);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Error notifying AudioStateHubService subscriber");
+      }
+    }
   }
 
   private static bool IsConnectionRefused(Exception ex)

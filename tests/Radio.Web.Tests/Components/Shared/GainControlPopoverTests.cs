@@ -1,4 +1,3 @@
-using System.Reflection;
 using Bunit;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -325,12 +324,6 @@ public class GainControlPopoverTests : TestContext
     Assert.Empty(cut.FindAll(".gain-popover-peak-segment.is-lit"));
 
     var hub = Services.GetRequiredService<AudioVisualizationHubService>();
-    var eventField = typeof(AudioVisualizationHubService).GetField(
-      nameof(AudioVisualizationHubService.OnLevelData),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    Assert.NotNull(eventField);
-    var handler = (Func<LevelDataDto, Task>?)eventField!.GetValue(hub);
-    Assert.NotNull(handler);
 
     // -12 dBFS → (−12 + 60) / 60 × 20 = 16 segments lit.
     var data = new LevelDataDto
@@ -340,7 +333,8 @@ public class GainControlPopoverTests : TestContext
       IsClipping = false
     };
 
-    await cut.InvokeAsync(() => handler!.Invoke(data));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hub, nameof(AudioVisualizationHubService.OnLevelData), data));
 
     var lit = cut.FindAll(".gain-popover-peak-segment.is-lit");
     Assert.Equal(16, lit.Count);
@@ -355,11 +349,6 @@ public class GainControlPopoverTests : TestContext
       .Add(p => p.SegmentCount, 20));
 
     var hub = Services.GetRequiredService<AudioVisualizationHubService>();
-    var eventField = typeof(AudioVisualizationHubService).GetField(
-      nameof(AudioVisualizationHubService.OnLevelData),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    var handler = (Func<LevelDataDto, Task>?)eventField!.GetValue(hub);
-    Assert.NotNull(handler);
 
     // Right channel hotter than left — meter should follow right.
     var data = new LevelDataDto
@@ -369,7 +358,8 @@ public class GainControlPopoverTests : TestContext
       IsClipping = false
     };
 
-    await cut.InvokeAsync(() => handler!.Invoke(data));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hub, nameof(AudioVisualizationHubService.OnLevelData), data));
 
     var lit = cut.FindAll(".gain-popover-peak-segment.is-lit");
     Assert.Equal(18, lit.Count);
@@ -384,11 +374,6 @@ public class GainControlPopoverTests : TestContext
       .Add(p => p.SegmentCount, 20));
 
     var hub = Services.GetRequiredService<AudioVisualizationHubService>();
-    var eventField = typeof(AudioVisualizationHubService).GetField(
-      nameof(AudioVisualizationHubService.OnLevelData),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    var handler = (Func<LevelDataDto, Task>?)eventField!.GetValue(hub);
-    Assert.NotNull(handler);
 
     var data = new LevelDataDto
     {
@@ -397,7 +382,8 @@ public class GainControlPopoverTests : TestContext
       IsClipping = true
     };
 
-    await cut.InvokeAsync(() => handler!.Invoke(data));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hub, nameof(AudioVisualizationHubService.OnLevelData), data));
 
     var lit = cut.FindAll(".gain-popover-peak-segment.is-lit");
     Assert.Equal(20, lit.Count);
