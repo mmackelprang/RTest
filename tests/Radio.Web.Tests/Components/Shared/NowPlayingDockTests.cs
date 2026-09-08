@@ -1,4 +1,3 @@
-using System.Reflection;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
@@ -209,24 +208,18 @@ public class NowPlayingDockTests : TestContext
   // ─── State-handling regressions (PR 5 polisher L2 + tester nit #1) ─────────
   // The hub service exposes NowPlayingChanged as a typed event. To exercise the
   // dock's OnNowPlayingChanged handler from a unit test we reach in via
-  // reflection and invoke the multicast delegate directly — the same approach
-  // a SignalR-style fake would use, just inlined.
+  // reflection and await every subscriber — the same approach a SignalR-style
+  // fake would use, just inlined.
 
   /// <summary>
-  /// Pull the dock's subscribed handler off <see cref="AudioStateHubService"/>'s
-  /// <c>NowPlayingChanged</c> event via reflection and invoke it with the supplied
-  /// payload. Lets us simulate a hub push without standing up a real connection.
+  /// Pull the dock's subscribed handlers off <see cref="AudioStateHubService"/>'s
+  /// <c>NowPlayingChanged</c> event via <see cref="HubEventFire"/> and await each
+  /// with the supplied payload. Lets us simulate a hub push without standing up a
+  /// real connection.
   /// </summary>
   private static async Task FireNowPlayingChangedAsync(AudioStateHubService hub, NowPlayingDto? dto)
   {
-    var field = typeof(AudioStateHubService).GetField("NowPlayingChanged",
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    field.Should().NotBeNull("NowPlayingChanged backing field must exist");
-    var del = (Func<NowPlayingDto?, Task>?)field!.GetValue(hub);
-    if (del != null)
-    {
-      await del.Invoke(dto);
-    }
+    await HubEventFire.FireAsync(hub, "NowPlayingChanged", dto);
   }
 
   [Fact]

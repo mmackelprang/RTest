@@ -168,15 +168,8 @@ public class RadioControlPanelBandSyncTests : TestContext
     IRenderedComponent<RadioControlPanel> cut, RadioStateDto dto)
   {
     var hub = Services.GetRequiredService<AudioStateHubService>();
-    var field = typeof(AudioStateHubService).GetField(
-      nameof(AudioStateHubService.RadioStateChanged),
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    Assert.NotNull(field);
-
-    var handler = (Func<RadioStateDto, Task>?)field!.GetValue(hub);
-    Assert.NotNull(handler);
-
-    await cut.InvokeAsync(() => handler!.Invoke(dto));
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      hub, nameof(AudioStateHubService.RadioStateChanged), dto));
   }
 
   /// <summary>

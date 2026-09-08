@@ -495,30 +495,17 @@ public class SleepTests : TestContext
 
   /// <summary>
   /// Reach into <see cref="AudioStateHubService"/>'s NowPlayingChanged event
-  /// via reflection and invoke its multicast delegate. This mirrors the
-  /// approach used in NowPlayingDockTests so we don't need a fake hub.
+  /// via <see cref="HubEventFire"/>, which awaits every subscriber rather than
+  /// only the last. This mirrors the approach used in NowPlayingDockTests so we
+  /// don't need a fake hub.
   /// </summary>
   private static async Task FireNowPlayingChangedAsync(AudioStateHubService hub, NowPlayingDto? dto)
   {
-    var field = typeof(AudioStateHubService).GetField("NowPlayingChanged",
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    field.Should().NotBeNull("NowPlayingChanged backing field must exist");
-    var del = (Func<NowPlayingDto?, Task>?)field!.GetValue(hub);
-    if (del != null)
-    {
-      await del.Invoke(dto);
-    }
+    await HubEventFire.FireAsync(hub, "NowPlayingChanged", dto);
   }
 
   private static async Task FireSleepStateChangedAsync(AudioStateHubService hub, bool isSleeping)
   {
-    var field = typeof(AudioStateHubService).GetField("SleepStateChanged",
-      BindingFlags.NonPublic | BindingFlags.Instance);
-    field.Should().NotBeNull("SleepStateChanged backing field must exist");
-    var del = (Func<bool, Task>?)field!.GetValue(hub);
-    if (del != null)
-    {
-      await del.Invoke(isSleeping);
-    }
+    await HubEventFire.FireAsync(hub, "SleepStateChanged", isSleeping);
   }
 }
