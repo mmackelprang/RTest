@@ -19,6 +19,20 @@ name: LLM Review (local)
 #
 # This job never blocks a merge: continue-on-error, and CI here is advisory
 # anyway (build.yml:13-15).
+#
+# ⚠ CALIBRATION, measured 2026-09-08 on AUD-12 (#623) — read this before
+# treating a green result as meaningful. On a substantive production commit
+# it returned NO FINDINGS, on a run confirmed to have actually seen that
+# commit (the 13s run was a docs-only push; both were checked). The Builder's
+# separately dispatched adversarial reviewer found TEN issues on the same
+# diff — including the one that had to be escalated to the owner for a
+# decision, an uncleared flag that made a phone reconnecting while idle claim
+# Playing over silence.
+#
+# So: NO FINDINGS from this job is ONE WEAK MODEL'S SILENCE, not a clean bill,
+# and it is not a substitute for the dispatched pre-merge reviewer. Keep the
+# adversarial pass regardless of what this reports. Its value is being a
+# DIFFERENT model on a narrow job, not a cheaper one.
 
 on:
   pull_request:
