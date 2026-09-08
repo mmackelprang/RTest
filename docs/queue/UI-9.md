@@ -18,7 +18,7 @@ An anonymous lambda has no stable reference, so **there is no `-=` that can ever
 the page has no matching unsubscribe. `AudioStateHubService` is registered `AddSingleton`
 (`Program.cs:411`), so it lives for the process.
 
-**Therefore every navigation to `/system-config` permanently adds three handlers to a
+**Therefore every navigation to `/system` permanently adds three handlers to a
 process-lifetime object.** They are never collected: the singleton holds the delegate, the delegate
 holds the component, and the component holds its render tree. Ten visits is thirty handlers and ten
 retained component graphs; the appliance runs for weeks between restarts.
@@ -39,18 +39,46 @@ not — the fix here is unambiguous. Do not let this wait on that.
 Store each handler in a field and unsubscribe in `IDisposable.Dispose()` / `DisposeAsync`, the
 pattern the other components already use — find and match one rather than inventing a shape.
 
-⚠ **Check whether the page implements disposal at all.** A Blazor component only gets `Dispose` if
-it declares `IDisposable`/`IAsyncDisposable`; adding the interface to a 2,000-line page is a bigger
-change than adding three fields, and the page may have other subscriptions with the same problem.
-**Enumerate every `+=` in the file before fixing three of them** — `UI-7`'s census found that a
-grep shaped around one receiver name misses subscriptions by construction.
+⚠ **Corrected 2026-09-08 — this row originally warned that the page might not implement disposal at
+all, and that adding the interface to a "~2,000-line page" would be the hard part. Both were wrong.**
+The page **already** declares `@implements IDisposable` at `:15` and has a live `Dispose()` at
+`:4192-4197` disposing three timers. There is no interface to add and no lifecycle to negotiate — the
+fix is three named methods and three `-=` in the existing `Dispose()`. (The file is **4,214** lines,
+not ~2,000.) **The row is smaller than filed: ~1.5–2 h.**
+
+**Enumerate every `+=` in the file before fixing three of them** — `UI-7`'s census found that a grep
+shaped around one receiver name misses subscriptions by construction. ✅ **Done 2026-09-08: the true
+count is exactly 3**, confirmed by searching the operator rather than a receiver name and then
+sweeping the mechanisms that census was blind to (`.On<`, `LocationChanged`, `.Subscribe(`,
+`PropertyChanged`, `CancellationToken.Register`, `EventCallback`) — all zero.
+
+⭐ **And this row closes the class.** A repo-wide sweep found `SystemConfigPage` is the **only**
+component in `Radio.Web` that subscribes to a singleton service event without a matching `-=`; the
+other 22 all unsubscribe correctly.
 
 ## Verification
 
-Unit-testable without hardware and **must fail first**: render the page twice against a shared
-service, count the invocation list, assert it does not grow. ⚠ Against today's code that count
-grows by three per render, so the test discriminates — confirm it actually does by running it
-before the fix, not only after.
+Unit-testable without hardware and **must fail first**.
+
+⛔ **The verification this row originally specified does not discriminate, and would have been RED
+against correct code.** It said: *"render the page twice against a shared service, count the
+invocation list, assert it does not grow."* **That fails after the fix too** — two simultaneously
+live components legitimately hold two sets of handlers. That is correct multicast behaviour, not a
+leak.
+
+**The leak is that disposal does not shrink the list.** Assert **render → dispose returns the
+invocation list to its baseline**, and confirm it is RED against `main` before trusting it.
+
+⚠ **A test cannot read these invocation lists directly.** They are field-like events, so
+`hub.SourceChanged.GetInvocationList()` is CS0070 from outside the declaring type, and
+`InternalsVisibleTo` does not help because the backing field is compiler-generated private.
+Reflection is the only route; eight existing test files already use that seam
+(`SleepTests.cs:501-523` is the idiom).
+
+⭐ **Note what happened here**: a row about a resource leak specified an instrument that could not
+tell the fixed state from the broken one. That is the same failure recorded three other times this
+session — see the banner in [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md). **Prove the instrument can
+see the unfixed state before trusting it on the fixed one.**
 
 `CLAUDE.md` § *Test Timing* applies if the handlers are `async`: synchronize on the observation,
 never on elapsed time.

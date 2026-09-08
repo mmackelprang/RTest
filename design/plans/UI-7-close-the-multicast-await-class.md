@@ -409,7 +409,7 @@ singleton on every navigation.**
 `:2219`, `:2229`, `:2239` subscribe `SourceChanged`, `EncoderConnectionChanged` and
 `PhoneCallStateChanged` with **anonymous lambdas**, and there is no `-=` anywhere in the file. An
 anonymous lambda cannot be unsubscribed even in principle without keeping the delegate. So every visit
-to `/system-config` permanently adds three handlers to a singleton, each closing over a disposed
+to `/system` permanently adds three handlers to a singleton, each closing over a disposed
 component's `InvokeAsync`/`StateHasChanged`.
 
 ⚠ **It interacts with this row and is still not part of it.** Unbounded list growth makes the
@@ -1414,7 +1414,7 @@ retire the correctness half of `PHN-2` §0.6's argument, correctly, and neither 
 5. **Whether any of the ~20 test fixtures depends on an exception propagating** out of a raise. Task 1
    changes that from propagate to catch-and-log. §4.6 expects churn in `Radio.Web.Tests` and requires
    each case to be understood; the plan could not enumerate which.
-6. **`C-212`'s leak is read from source, not observed.** That every `/system-config` visit adds three
+6. **`C-212`'s leak is read from source, not observed.** That every `/system` visit adds three
    permanent handlers follows from three `+=` with no `-=` on a singleton; no growing invocation list
    was measured.
 
@@ -1533,7 +1533,7 @@ never the dropped-`Task` half. `AudioStateStore.cs:435-436` already cites it cor
 wording. `C-209`.
 
 ⚠ **Filed, not fixed — and one of them may outrank this row.** `SystemConfigPage.razor:2219/2229/2239`
-subscribe with **anonymous lambdas and no `-=`**, so every navigation to `/system-config` permanently
+subscribe with **anonymous lambdas and no `-=`**, so every navigation to `/system` permanently
 adds three handlers to a process-lifetime singleton. Unbounded growth on the same object this row is
 about, and the mechanism by which a one-subscriber event becomes an N-subscriber one. `C-212`, plan §6.1.
 ```
