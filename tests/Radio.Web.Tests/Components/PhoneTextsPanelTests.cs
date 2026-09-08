@@ -151,6 +151,53 @@ public class PhoneTextsPanelTests : TestContext
     Assert.NotEmpty(cut.FindAll(".unread-dot"));
   }
 
+  // ── GV-9: the thread-list branch's missing == null guard ───────────────────
+  //
+  // ⚠ These are the FIRST tests to set Error in thread-list mode in either
+  // direction. Before GV-9 the four tests that set Error (Conversation_Shows-
+  // ErrorState_NotEmptyState_WhenErrorSet, Conversation_ShowsMessages_When-
+  // ErrorSetButMessagesArrived, Conversation_ShowsEmptyState_WhenGenuinelyEmpty
+  // — which sets it false — and Conversation_RetryButton_InvokesOnRetry) all
+  // set OpenThreadId too, and the four thread-list-mode tests
+  // (:64, :73, :130, :141) never set Error — so the branch was unasserted, not
+  // covered. The row's deferral note said otherwise; the code says this.
+
+  [Fact]
+  public void ThreadList_ShowsThreads_WhenErrorSetButThreadsArrived()
+  {
+    // ⭐ THE headline gate for this row, and the one to run the mutation against.
+    // Mutation: revert :153 to a bare `else if (Error)`. BOTH assertions below
+    // must then fail — the error copy appears and the row content does not.
+    // Same shape as GV-8's Conversation_ShowsMessages_WhenErrorSetButMessages-
+    // Arrived, one level up: a stale error flag must not outrank content
+    // that has actually arrived.
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, new List<SmsThreadDto>
+        { new("t1", "+15551234567", "Mom", DateTime.UtcNow, true, "see you soon") })
+      .Add(x => x.Error, true));
+
+    Assert.Contains("Mom", cut.Markup);
+    Assert.Contains("see you soon", cut.Markup);
+    Assert.DoesNotContain("Couldn't load conversations.", cut.Markup);
+  }
+
+  [Fact]
+  public void ThreadList_ShowsError_WhenErrorSetAndNothingLoaded()
+  {
+    // The other side of the coin, and the reason the fix is a GUARD and not a
+    // deletion. Mutation: delete the :153 branch entirely — this fails while the
+    // test above still passes, which is what distinguishes the two.
+    Register(available: true);
+    var cut = RenderComponent<PhoneTextsPanel>(p => p
+      .Add(x => x.Threads, (List<SmsThreadDto>?)null)
+      .Add(x => x.Error, true));
+
+    Assert.Contains("Couldn't load conversations.", cut.Markup);
+    Assert.Contains("Retry", cut.Markup);
+    Assert.DoesNotContain("No conversations yet", cut.Markup);
+  }
+
   // Three tests were deleted here by PHN-4, not ported: Degraded_ShowsTexting-
   // Unavailable_WhenThreadOpen, Degraded_HidesComposeInput_EvenWhenFlagOn and
   // ComposeEnabled_WhenFlagOnAndAvailable. All three asserted how the compose bar
