@@ -445,13 +445,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// lands in <c>Ready</c>.
   /// </para>
   /// <para>
-  /// <c>internal</c> for unit testing via <c>InternalsVisibleTo</c>: the real
-  /// call sites require a native SoundFlow <c>AudioEngine</c> to produce an
-  /// <c>AudioCaptureDevice</c>/<c>SoundComponent</c> and cannot be exercised
-  /// directly in a unit test.
+  /// <c>private</c>. This was <c>internal</c> for tests until <c>TEST-2</c> (ADR-030) showed
+  /// the constraint that justified it did not exist: the real call sites are drivable from a
+  /// unit test by raising <c>IBluetoothService.DeviceConnected</c> with a mocked capture
+  /// object, because <c>SoundComponent</c> and <c>AudioCaptureDevice</c> are abstract types
+  /// whose constructors store the engine without dereferencing it. Only the engine is native.
+  /// The dispatch that reaches this method is covered by
+  /// <c>BluetoothAudioSourceTests.DeviceConnectedEvent_*</c>; do not re-widen this to reach it.
   /// </para>
   /// </summary>
-  internal void ApplyDeferredCaptureState()
+  private void ApplyDeferredCaptureState()
   {
     if (State != AudioSourceState.Playing)
     {

@@ -9,9 +9,60 @@
 > [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
+---
+
+## ⚠⚠ CORRECTION 2026-09-08 — THIS ROW'S CENTRAL PREMISE WAS FALSE. Read this before the Detail below.
+
+**Shipped by `TEST-2` (ADR-030). The prose in § Detail is preserved as filed and is WRONG in three
+specific places**, each corrected here rather than edited in place, so the reasoning that produced the
+error stays legible:
+
+⚠ _Line numbers below are as this file stands NOW. They were first written as `:26`/`:30`/`:42` — the positions in the file as filed — and inserting this block moved every one of them down 40 lines, so the citations pointed at the correction rather than at what it corrects. Caught in pre-merge review. **A block that renumbers the thing it cites has to be numbered last**, which is the same lesson as the Cast anchors this row re-derived before its own diff moved them again._
+
+
+1. ⛔ **`:66`'s "constructing either type needs a native SoundFlow `AudioEngine`" is FALSE.** Neither
+   `SoundComponent` nor `AudioCaptureDevice` needs one. Both are **abstract**, and their constructors
+   *store* the engine reference without ever dereferencing it, so Moq subclasses either with `null!`.
+   The row cited the method's own doc comment as its authority — and **that comment was itself
+   asserting something untrue**, which is the failure mode `CLAUDE.md` § *Pre-Merge Review* exists to
+   catch, here with a queue row as the victim rather than a code change. Only the **engine** is native.
+2. ⛔ **`:70`'s "Three places make the same `capture is …` decision and none is covered end-to-end" was
+   untrue when written.** `:159`/`:166` was **already covered** by
+   `WasapiLoopbackTests.InitializeAsync_WithSoundComponent_SetsReadyState`, which has mocked
+   `SoundComponent` with a null engine and run in CI on every push since before this row was filed.
+   Confirmed by mutation: disabling that arm turns that test red.
+3. ⛔ **`:82`'s "Four seams" is THREE.** `GoogleCastOutput.CastStatusReadOverrideForTests` exists only
+   inside `AUD-5`'s *plan*, not in `src/`. The row's conclusion survives the recount; the count does not.
+
+**What the row asked and what it got.** The literal feasibility question — *can a native `AudioEngine`
+be stood up in a unit test?* — is answered **NO** (native constructor, headless CI, and
+`NoRawMiniAudioEngineConstructionTests` forbids it in `src/` anyway). But the engine was never the
+requirement, so the row closed by **building** the coverage rather than recording its absence: **two of
+the three `capture is …` dispatch pairs** (`:159`/`:166` and `:486`/`:497`) and **all three
+`ApplyDeferredCaptureState` call sites** (`:472`, `:489`, `:500`) now covered through the real path, the
+Kind-D seam at `ApplyDeferredCaptureState` **retired** (`internal` → `private`) rather than labelled,
+and the convention written as `design/TESTING.md` § *Test Seams* + `ADR-030`.
+
+⚠ **The third dispatch pair — `TryReacquireCaptureAsync` (`:687`/`:692`) — is NOT covered**, per the
+plan's §6.1: it is reachable only from a 10 s background retry loop, and with `_playbackService` null
+neither arm has an observable consequence to assert, so a test would execute a branch and assert
+nothing. **Recorded, not closed.** ⚠ Watch for the two different "threes" here — three
+`ApplyDeferredCaptureState` call sites (all covered) and three `capture is …` pairs (two covered); an
+earlier draft of this block merged them and claimed all three.
+
+⚠ **The row sat open FOUR WEEKS, not thirteen months** — filed 2026-08-10, shipped 2026-09-08. The
+"thirteen months" figure came from the planning report and was repeated three times before anyone
+subtracted the two dates. `design/plans/TEST-2-*.md` still carries it (Planner's artifact, not
+corrected here).
+
+✅ **`AUD-3` residue (c) is DISCHARGED** by this row. ⚠ **(a) and (b) are NOT** — (a) is the
+never-performed hardware UAT of the Cast race, (b) the untested service-level epoch commit. Both live.
+
+---
+
 | Field | Value |
 |---|---|
-| Status | 📋 |
+| Status | ✅ |
 | Plan | _plan TBD — **feasibility check first**: if a native SoundFlow test harness is not practical, close the row and say so — **and if so, prefer closing it with the seam convention described above rather than with nothing**_ |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ · PR #469 (merged) is where the seam and its tests landed · **PR #468 (`8b1ce0a`) is where the second and third seams landed** |
 | Depends on | — _(no dependency. **Touches the same file as AUD-1** (`BluetoothAudioSource.cs`); if both are in flight, expect line anchors to move.)_ |
