@@ -1,62 +1,123 @@
-# `AUD-17` — AVRCP album art stopped working around 2026-07-19, and a false premise hid it
+# `AUD-17` — AVRCP album art has never worked: we read the wrong attribute from the wrong interface
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🟠 **P1.** Filed 2026-09-08 by the `AUD-1` Planner, which found it while checking — rather than
-assuming — a claim that row had been asserting for a month.
+🟡 **P2.** Filed 2026-09-08, then **substantially rewritten the same night after both of its original
+claims were measured and found false.** The retraction is kept in full at the bottom, because the way
+it went wrong is the useful part.
 
-## What was found
+## The defect
 
-The fingerprint DB on the appliance holds **66 successfully-cached AVRCP-sourced album arts between
-2026-03-05 and 2026-07-19**, with real `/api/albumart/<hash>` paths — not rejected `file://` URLs,
-not placeholders. **Since 2026-08-01 the count is 0 of 31.** Shazam over the same later window is
-9,517 of 9,577.
+`src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs:2761-2765`:
 
-So AVRCP art worked on this box for four and a half months and then stopped.
+```csharp
+// MPRIS/BlueZ exposes album art via "ArtUrl" or "mpris:artUrl"
+var artUrl = GetString(track, "ArtUrl");
+if (string.IsNullOrEmpty(artUrl)) artUrl = GetString(track, "mpris:artUrl");
+```
 
-## ⚠ Why nobody noticed — this is the part worth reading
+The `track` dictionary comes from a proxy created at `:2545` against **`org.bluez.MediaPlayer1`**
+(`Linux/BluezInterfaces.cs:49`, `:102`). **BlueZ publishes the cover-art attribute on that interface
+as `ImgHandle`.** `ArtUrl` and `mpris:artUrl` are *MPRIS* names — synthesised by BlueZ's separate
+`tools/mpris-proxy`, which resolves `ImgHandle` over OBEX BIP and republishes it. **We do not run
+mpris-proxy.**
 
-`AUD-1`'s row asserts, and `docs/ROADMAP.md:133` repeats, that **BlueZ 5.72 ships no BIP/cover-art
-implementation, so AVRCP can never supply album art on this box.** Under that premise a zero is not
-a symptom — it is the expected reading. The measurement that should have raised an alarm was
-interpreted as confirmation.
+So both reads always return empty, `BluetoothPlaybackMetadata.AlbumArtUrl` is always null, the branch
+at `BluetoothAudioSource.cs:814` never fires, and **`CacheAvrcpArtAsync` (`:926`) has never
+executed.** This is dead-on-arrival code, not a regression.
 
-**The premise is false**, and the 66 cached arts are the disproof. `AUD-1`'s *count* was honest for
-the 7-day window it sampled; the *mechanism* it inferred from that count was not.
+⚠ **The comment is the defect.** It conflates MPRIS with BlueZ, and the whole file does — `:339` and
+`:358` log *"No MPRIS media player attached"* about a BlueZ interface. This is exactly the
+over-claiming-comment failure mode `CLAUDE.md` § *Pre-Merge Review* exists for: it made a dead path
+look live for months and sent two separate rows chasing the wrong mechanism.
 
-⚠ **Correct both documents as part of this row** — `docs/queue/AUD-1.md:26` and
-`docs/ROADMAP.md:133`. A false claim that makes a regression look like a design limit is worse than
-no claim, and this one has been shaping decisions: it is the stated reason `UseShazamForAllSources`
-is `true` in production, which is in turn the cause of the metadata-overwrite defect `AUD-1` exists
-to fix.
+## The measurement, taken read-only on `radio` 2026-09-08
 
-## Deliberately not assumed
+`/opt/radio-console/data/fingerprints/fingerprints.db`, `sqlite3 -readonly`:
 
-- **Not established: what changed.** The date range brackets it but nothing here names a cause. A
-  BlueZ or WirePlumber package upgrade, a deploy, the dual-adapter split, or a phone-side change are
-  all candidates. **Find out before proposing a fix.**
-- **Not established: that it is ours.** It may be an upstream regression, in which case the honest
-  close is a documented finding plus whatever detection prevents the next silent stop.
-- **Not the same as `AUD-1`.** That row splits one flag into two decisions and is unaffected by
-  this: its design holds either way. This row is about art that used to arrive and no longer does.
-- **Not the same as `AUD-15` or `AUD-12`.** Different subsystems; do not conflate.
+| Source | rows | `/api/albumart/` | `file://` | `http` |
+|---|---|---|---|---|
+| Shazam | 43,405 | 43,013 | **0** | 69 |
+| Manual | 818 | 69 | **0** | 8 |
+| Avrcp | 713 | 66 | **0** | 0 |
+| FileTag | 162 | 146 | **0** | 0 |
+| AcoustID | 112 | 0 | **0** | 93 |
+
+⭐ **`file://` is zero across all 45,210 rows, every source.** `PlayHistoryTracker.cs:733-737` writes
+the raw `e.AlbumArtUrl` unfiltered at row creation, so if AVRCP had ever supplied *any* URL it would
+appear here. It never has. That is the empirical confirmation, independent of reading the code.
+
+## ⚠ `Source` records the TITLE's provenance, not the art's
+
+`TrackMetadata.Source` is set from title/artist provenance.
+`BluetoothAudioSource.UpdateRecentPlayHistoryCoverArtAsync` (`:1070-1112`) writes `CoverArtUrl` via
+`Track with { CoverArtUrl = … }` and **never touches `Source`**. Its only live caller is the SongRec
+path (`CacheAndSetCoverArtUrlAsync:1056` ← `OnTrackIdentified:884`).
+
+Of the 66 `Avrcp` rows carrying art: **26 share a filename with a `Shazam` row**, 1 with `Manual`,
+39 appear only on `Avrcp` rows. Filenames are content-addressed — `AlbumArtCacheService.cs:46`/`:80`
+compute `ComputeHash(imageData)` — so **a shared filename means byte-identical image data.** The 39
+are consistent with SongRec art landing on the AVRCP-titled row without a separate `Shazam` row ever
+being created.
 
 ## Scope questions for the plan
 
-1. **When exactly, and against what?** Correlate the last successful AVRCP art with `git log`,
-   the deploy history, and `/var/log/apt/history.log` on the box. The 2026-07-19 boundary is precise
-   enough to be checkable.
-2. **Is the code path still reached at all**, or is it failing further down? Distinguish "BlueZ
-   never offers art" from "we ask and discard the answer" — they look identical in the DB.
-3. **What would have caught this?** A silent drop from 66 to 0 over six weeks, on a metric already
-   being written to a database, is a monitoring gap as much as a defect.
+1. **Is fixing it even wanted?** `ImgHandle` is an OBEX BIP handle, not a URL. Resolving it needs a
+   BIP client and **BlueZ 5.72 ships none** — the AVRCP cover-art patches landed upstream ~Sept 2024.
+   So the options are (a) implement BIP retrieval, (b) **delete the dead path** and document that BT
+   art comes from fingerprinting, or (c) upgrade BlueZ. **(b) is probably right**: SongRec already
+   supplies art on ~99% of rows, and dead code that looks live has now cost two rows.
+2. **Whatever is chosen, fix the comment and the log strings.** A path that stays must stop claiming
+   MPRIS; a path that goes must not leave `:339`/`:358` describing a player that was never attached.
+3. **Does anything else read MPRIS names off a BlueZ interface?** The conflation is file-wide; check
+   before assuming this is the only site.
 
 ## Verification
 
-The DB query that found it is the regression test: AVRCP-sourced art count over a window must be
-non-zero while a phone is connected and playing tagged media. ⚠ Note the trap — **`AUD-12`'s `Ready`
-stall gates fingerprinting off entirely**, and `AUD-1`'s overwrite can replace AVRCP art with
-Shazam art, so both can make this row's measurement read zero for reasons that are not this bug.
-Establish which sources a given row came from, not just that a row exists.
+Mostly static — the claim is about which string is read from which interface. To confirm live, with
+the phone connected and playing:
 
-⚠ Live audio path and needs the owner's phone. **Not auto-mergeable.**
+```
+busctl --system introspect org.bluez /org/bluez/hci0/dev_<MAC>/player0
+```
+
+Expect **`ImgHandle` present and `ArtUrl` absent** in the `Track` dict. ⚠ Use `bluetoothctl select
+78:20:51:F5:FB:A7` first — `hci0` is the music adapter and the default may be wrong with two
+adapters.
+
+⚠ Needs the owner's phone. **Not auto-mergeable** if the path is changed rather than deleted.
+
+---
+
+## ⛔ Retracted: the original row claimed a July regression. Both claims were false.
+
+Filed 2026-09-08 asserting *"AVRCP album art worked for four and a half months and stopped around
+2026-07-19."* Measured the same night; neither half survived.
+
+**Claim 1 — "66 successfully-cached AVRCP arts."** False. `Source` is the title's provenance, not the
+art's (above). 26 of the 66 are provably byte-identical SongRec images.
+
+**Claim 2 — "stopped around 2026-07-19."** Not supported. The monthly rate declines smoothly:
+
+| Month | rows | with art | rate |
+|---|---|---|---|
+| 2026-03 | 522 | 58 | 11.1% |
+| 2026-05 | 115 | 6 | 5.2% |
+| 2026-07 | 45 | 2 | 4.4% |
+| 2026-08 | 16 | 0 | — |
+| 2026-09 | 15 | 0 | — |
+
+**0-of-16 against a 4.4% base rate is p ≈ 0.49.** ⚠ **And the boundary was post hoc** — chosen as the
+date of the *last success*, then tested for "zeros after it". Every series has a last success
+followed only by zeros; that construction cannot fail.
+
+⛔ **Consequence: do NOT "correct" `docs/queue/AUD-1.md:26` or `docs/ROADMAP.md:133` as the original
+row instructed.** Their *conclusion* — AVRCP cannot supply album art on this box — is **right**. Only
+their stated *mechanism* (BlueZ 5.72 ships no BIP) is incomplete: the binding constraint is our own
+attribute name, and BIP is a second blocker behind it. Amend the mechanism; do not reverse the
+conclusion.
+
+⭐ **The lesson, and it cuts both ways.** A measurement read through a false premise **confirms the
+premise instead of contradicting it.** `AUD-1` said "AVRCP can never supply art", so a zero looked
+expected. This row then said "66 arts disprove that", so a decline looked like a regression. Both
+readings came from not checking what the column actually records.
