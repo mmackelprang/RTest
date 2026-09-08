@@ -908,7 +908,10 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   // _playbackService is null (an optional ctor parameter this fixture does not
   // pass), so both of its arms fall through (:538, :579). That is load-bearing: if
   // a future change makes routing unconditional, these break loudly rather than
-  // silently stopping short of the branch. Nothing is called on the capture mock.
+  // silently stopping short of the branch. The DISPATCH therefore calls nothing on
+  // the capture mock — but the mock is not untouched: `await using` runs
+  // DisposeAsyncCore (:291-296), which unsubscribes OnAudioProcessed and Disposes an
+  // AudioCaptureDevice, and _WhilePlaying_ calls Stop() on one deliberately (below).
   //
   // ⚠ The arms are told apart by GetSoundComponent(), not by state alone. Only
   // the :497 arm assigns SoundComponent, so :486 leaves GetSoundComponent()
@@ -916,8 +919,19 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   // State alone would not distinguish the two arms from each other, and would not
   // distinguish either from the `else` at :508 landing the source in Ready by a
   // different route — which is precisely the vacuous shape this row exists to
-  // prevent. Every assertion below therefore pins WHICH arm ran, not just that
-  // something did.
+  // prevent.
+  //
+  // ⚠⚠ GetSoundComponent() is a COMPLETE discriminator for :497 and only HALF a
+  // discriminator for :486, and the difference is what this row is about. For :497,
+  // the exact object coming back is conclusive — no other path could produce it. For
+  // :486, a throwing GetSoundComponent() rules out :497 but is equally true of the
+  // `else` at :508, which assigns nothing at all. So ruling out the `else` for the
+  // AudioCaptureDevice case is each test's own job, and each does it differently:
+  // _AndLandsReady by the Ready state (the `else` never calls
+  // ApplyDeferredCaptureState, so a source that entered Created would still be
+  // Created), and _WhilePlaying_ — where the state is Playing before and after
+  // either way — by pausing and verifying Stop() reached the assigned _captureDevice.
+  // Only with both halves does every assertion below pin WHICH arm ran.
   //
   // These sources are built with a Mock<IBluetoothService> rather than the
   // fixture's MockBluetoothService, whose GetAudioCaptureDeviceAsync returns a
@@ -1013,10 +1027,18 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     kind == "AudioCaptureDevice" ? NewCaptureDeviceMock() : NewSoundComponentMock();
 
   /// <summary>
-  /// Asserts that the arm matching <paramref name="kind"/> — and not the other one,
-  /// and not the `else` at :508 — is the one that ran. Only :497 assigns
-  /// SoundComponent, so GetSoundComponent() is the discriminator.
+  /// Asserts that the arm matching <paramref name="kind"/> ran and the OTHER arm did not.
+  /// Only :497 assigns SoundComponent, so GetSoundComponent() is the discriminator between
+  /// the two arms.
   /// </summary>
+  /// <remarks>
+  /// ⚠ <b>It does not, by itself, rule out the <c>else</c> at :508 for the
+  /// <c>AudioCaptureDevice</c> case</b> — the <c>else</c> assigns nothing, so
+  /// <c>GetSoundComponent()</c> throws there too, and this helper cannot tell the two apart.
+  /// Callers must exclude the <c>else</c> themselves; see the block comment above these tests
+  /// for how each one does it. For the <c>SoundComponent</c> case the helper IS conclusive,
+  /// because no other path hands back that exact object.
+  /// </remarks>
   private static void AssertArmTaken(string kind, BluetoothAudioSource source, object capture)
   {
     if (kind == "AudioCaptureDevice")
@@ -1081,6 +1103,24 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     Assert.Equal(AudioSourceState.Playing, source.State);
     AssertArmTaken(kind, source, capture);
+
+    // ⚠ For "AudioCaptureDevice" this step is the ONLY thing that makes the case mean
+    // anything, and without it the test's name is a false claim. Every other assertion here
+    // survives the :486 arm being dead: the state is Playing before and after, and
+    // AssertArmTaken's ACD branch only asserts GetSoundComponent() throws — equally true of
+    // the `else` at :508. Measured, not assumed: with :486 disabled this case still passed.
+    //
+    // Only :486 assigns _captureDevice, and PauseCoreAsync (:228) is the one place that
+    // observably touches it. PauseAsync (PrimaryAudioSourceBase.cs:109) requires Playing —
+    // asserted immediately above — and then calls _captureDevice?.Stop(). Times.Once, not
+    // AtLeastOnce, because nothing else in this test can call Stop(): routing no-ops with a
+    // null _playbackService, so neither :560's Start() nor any paired Stop() happens.
+    if (kind == "AudioCaptureDevice")
+    {
+      await source.PauseAsync(CancellationToken.None);
+      Mock.Get((global::SoundFlow.Abstracts.Devices.AudioCaptureDevice)capture)
+        .Verify(d => d.Stop(), Times.Once);
+    }
   }
 
   [Fact]
@@ -1151,11 +1191,35 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
   /// <summary>
   /// Polls a condition to a deadline. Used instead of a fixed Task.Delay because
-  /// TryAcquireAudioCaptureAsync is fire-and-forget — there is no handle to await, so the
-  /// test must synchronize on the observation. Per CLAUDE.md § Test Timing this is the safe
-  /// direction: starvation can only slow it, never flip a pass to a fail, because every
-  /// assertion re-checks after the wait returns.
+  /// TryAcquireAudioCaptureAsync is fire-and-forget (:370) — there is no handle to await, so
+  /// the test must synchronize on the observation rather than on elapsed time
+  /// (CLAUDE.md § Test Timing).
   /// </summary>
+  /// <remarks>
+  /// ⚠ <b>A deadline is a wall clock, so this helper is NOT starvation-proof on its own.</b>
+  /// It returns once <paramref name="timeoutMs"/> elapses whether the condition came true or
+  /// not, and the caller's next assertion then fails. An earlier revision of this comment
+  /// claimed starvation could only slow these tests and never flip a pass to a fail; that was
+  /// wrong, and it was measured wrong — disabling a dispatch arm made a caller sit here for
+  /// the full 5 s and then fail.
+  ///
+  /// <para>
+  /// What actually makes these tests deterministic is upstream, and it is not patience: the
+  /// handler runs to completion SYNCHRONOUSLY inside <c>btMock.Raise</c>.
+  /// <c>OnDeviceConnected</c> starts <c>TryAcquireAudioCaptureAsync</c> by direct invocation
+  /// rather than <c>Task.Run</c>, <c>GetAudioCaptureDeviceAsync</c> is set up to return
+  /// <c>Task.FromResult</c>, and <c>_routeLock.WaitAsync()</c> is uncontended (the background
+  /// retry loop sleeps 10 s before its first attempt), so there is no incomplete await
+  /// anywhere on that path. The condition is therefore already true on its first evaluation
+  /// and this helper never actually awaits. <b>Add a real await point to that path and these
+  /// tests become timing races — the deadline is not the safety net.</b>
+  /// </para>
+  ///
+  /// <para>
+  /// The closing assertion exists so a starved or genuinely broken run fails HERE, naming the
+  /// timeout, instead of downstream on a confusing state mismatch.
+  /// </para>
+  /// </remarks>
   private static async Task WaitForAsync(Func<bool> condition, int timeoutMs = 5000)
   {
     var deadline = DateTime.UtcNow.AddMilliseconds(timeoutMs);
@@ -1163,5 +1227,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     {
       await Task.Delay(10);
     }
+
+    Assert.True(condition(), $"WaitForAsync timed out after {timeoutMs} ms — condition never became true.");
   }
 }

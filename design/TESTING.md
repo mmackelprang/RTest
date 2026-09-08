@@ -368,7 +368,7 @@ Three parts, and the third earns the label:
 asserting that the real call sites *"require a native SoundFlow `AudioEngine` … and cannot be exercised
 directly in a unit test."* **That was never true.** A test mocking `SoundComponent` with a null engine
 was already green in CI at the time. The comment was then cited as authority by queue row `TEST-2`,
-which sat open for thirteen months waiting for a native harness nobody needed.
+which sat open for four weeks (2026-08-11 to 2026-09-08) waiting for a native harness nobody needed.
 
 The lesson is not "seams are bad". It is that **the sentence justifying a seam is a technical claim and
 gets checked like one** — see `CLAUDE.md` § *Pre-Merge Review*.

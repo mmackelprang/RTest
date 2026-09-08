@@ -22,8 +22,22 @@ namespace Radio.Core.Tests;
 /// defect is what <c>TEST-2</c> was filed on top of. So, precisely:
 ///
 /// <list type="bullet">
+/// <item>⚠⚠ <b>THE REAL ESCAPE HATCH IS OMITTING THE LABEL, NOT EVADING THE SCANNER.</b> A member
+/// this file DOES match but whose doc block carries no kind letter is skipped outright — the
+/// <c>kind is not ('C' or 'D')</c> test at the top of the loop <c>continue</c>s on <c>'?'</c> exactly
+/// as it does on <c>'A'</c>. So an author who writes <i>"test seam"</i> and stops has silently opted
+/// out, in one line, with no name change and no missing doc. <b>This is the common state, not a
+/// corner case: 21 of the 23 members currently matched carry no kind letter</b> — every one except
+/// the two labelled Cast seams. Verified by re-planting <c>ApplyDeferredCaptureState</c> with its
+/// original doc comment: the scanner found it (that comment says <i>"for unit testing"</i> and
+/// <i>"InternalsVisibleTo"</i>) and the lint stayed GREEN, against the very seam ADR-030 was written
+/// about. Closing that would mean classifying seams rather than reading a label, which ADR-030
+/// deliberately leaves to the author; the enforcement is code review.</item>
 /// <item><b>It scans <c>.cs</c> only.</b> <c>src/Radio.Web/Components/Shared/NowPlayingPanel.razor</c>
-/// holds a Kind-A seam this file never reads. Razor is not parsed here.</item>
+/// holds a Kind-C seam this file never reads — <c>Clock</c> (<c>:414</c>), read by production at
+/// <c>:934</c> and <c>:1107</c> — alongside the Kind-A <c>SourceGainDebounce</c> (<c>:421</c>).
+/// Razor is not parsed here, so the one member in that file the convention says needs a FULL label
+/// is the one member the lint cannot see.</item>
 /// <item><b>It parses C# by line shape, not with a lexer.</b> A member declaration is recognised by
 /// its leading modifiers; the doc block is whatever contiguous run of <c>///</c> lines sits above it,
 /// past any attributes. A declaration split so that <c>internal</c> and the member name land on
@@ -31,7 +45,7 @@ namespace Radio.Core.Tests;
 /// <item><b>It does not check that a label is TRUE.</b> It checks that the two clauses are present.
 /// "Why the real path is unreachable" is a claim about a mechanism and only a reviewer can falsify
 /// it — see <c>CLAUDE.md</c> § <i>Pre-Merge Review</i>, whose fourth worked example is a seam
-/// justification that was false for thirteen months while looking entirely plausible.</item>
+/// justification that was false for four weeks while looking entirely plausible.</item>
 /// <item><b>It does not classify.</b> A Kind-C seam mislabelled <c>kind A</c> passes, because the
 /// kind is read from the label rather than derived from the code. Picking the kind is the author's
 /// job; the lint only holds them to what the kind they picked requires.</item>

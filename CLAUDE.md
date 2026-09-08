@@ -493,11 +493,12 @@ failure modes this repo actually ships, not a general-purpose rubric.
      (*"never a null one"* — the field is in fact null before the first `InitializeAsync`), and
      only a reviewer briefed to actively **falsify** it caught that. Reviewing a comment for
      plausibility is not the same as checking it against the code.
-  4. `BluetoothAudioSource.ApplyDeferredCaptureState`'s doc comment (`:447-452`) justified an
+  4. `BluetoothAudioSource.ApplyDeferredCaptureState`'s doc comment (`:447-452` pre-`TEST-2`; those
+     lines now hold the corrected comment) justified an
      `internal` seam by asserting the real call sites *"require a native SoundFlow `AudioEngine`
      … and cannot be exercised directly in a unit test"* — untrue when written, and refuted by a
      `Mock<SoundComponent>` test that was already green in CI. Queue row `TEST-2` cited it as
-     authority and sat open for thirteen months waiting for a harness nobody needed; the first
+     authority and sat open for four weeks waiting for a harness nobody needed; the first
      victim here was a queue row rather than a code change (fixed by `TEST-2`, ADR-030).
 
   A wrong comment is worse than no comment: it survives the code it described, and the next
