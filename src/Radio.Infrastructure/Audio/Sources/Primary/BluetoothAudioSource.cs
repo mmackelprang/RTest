@@ -74,20 +74,32 @@ public class BluetoothAudioSource : USBAudioSourceBase
   // fixed because a lock here is a change to the live audio path that AUD-12 could
   // not UAT. It self-corrects on the next real Playing edge.
   //
-  // ⛔ AND IT IS NEVER CLEARED. Nothing resets it — not OnDeviceDisconnected, not
-  // StopCoreAsync, not DisposeAsyncCore — while AudioManager caches one
-  // BluetoothAudioSource per AudioSourceType for the whole process lifetime, so the
-  // bit outlives every device session. A phone that disconnects while playing leaves
-  // it true, and BOTH post-disconnect paths that re-acquire capture —
-  // OnDeviceConnected and OnCaptureStreamRecovered, the latter of which describes
-  // itself as "a fresh post-disconnect session" — now run the promotion above.
-  // Reconnect idle and the source claims Playing with nothing playing.
+  // ⛔⛔ IT IS CLEARED ON DISCONNECT, AND THAT IS AN OWNER DECISION WITH A KNOWN COST.
+  // Do not "simplify" the reset out of OnDeviceDisconnected; read this first.
   //
-  // ⚠ This is a KNOWN, DELIBERATE residual awaiting an owner decision, not an
-  // oversight: AUD-12's plan never considered it, and clearing it is not free either
-  // — a phone that keeps playing across a re-attach at the same D-Bus path gets no
-  // corrective Status read (C-174 / AUD-14 swallows it), so a cleared bit would park
-  // that source in Ready, which is AUD-12 itself. See the PR body for both options.
+  // Why it must be cleared: AudioManager caches one BluetoothAudioSource per
+  // AudioSourceType for the whole process lifetime, so an uncleared bit outlives every
+  // device session — and AUD-12 ADDED a promotion on the reconnect path
+  // (ApplyDeferredCaptureState, reached from BOTH OnDeviceConnected and
+  // OnCaptureStreamRecovered, the latter of which describes itself as "a fresh
+  // post-disconnect session"). A phone that disconnected while playing would then make
+  // the NEXT session claim Playing the moment capture landed, however idle that phone
+  // actually was — silently, with fingerprinting running against nothing, until the user
+  // pressed play. Measured, not argued:
+  // BluetoothAudioSourceTests.DeferredCapture_AfterDisconnect_DoesNotPromoteOnStaleAvrcpStatus
+  // observes Playing where it should see Ready when this reset is removed.
+  //
+  // ⚠ WHAT CLEARING ACCEPTS, so a future reader does not mistake a deliberate trade for
+  // an oversight and reverse it: a phone that KEEPS PLAYING across a re-attach at the
+  // same D-Bus object path gets no corrective Status read — AttachMediaPlayerAsync
+  // returns at its dedup before the re-read — so that source parks in Ready, which is
+  // AUD-12's own symptom returning on the reconnect path.
+  //
+  // That hole is C-174, it is filed as queue row AUD-14, and it closes there. The hole
+  // on the other side had no row and no owner. A known hole with a scheduled fix beat an
+  // unknown one with neither — which is the whole of the reasoning, and it is the
+  // owner's call, made 2026-09-08 on AUD-12's PR after its pre-merge review surfaced the
+  // choice. AUD-12's plan never considered the field's lifetime at all.
   private volatile bool _avrcpReportsPlaying;
 
   private CancellationTokenSource? _captureRetryCts;
@@ -836,6 +848,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
       StopCaptureRetryLoop();
       NeedsFingerprintingLookup = false;
       _hasMediaPlayer = false;
+
+      // ⚠ AUD-12, by owner decision. The media player is gone one line above, so its
+      // last reported transport status is no longer a statement about anything live —
+      // and without this the bit outlives the session and decides the NEXT one, because
+      // AudioManager caches one BluetoothAudioSource per source type for the whole
+      // process. Cleared HERE, beside _hasMediaPlayer and before the first await below,
+      // so it runs even if the teardown that follows throws. See the field's remarks for
+      // the trade this accepts.
+      _avrcpReportsPlaying = false;
+
       _btPosition = TimeSpan.Zero;
       _btDuration = null;
 

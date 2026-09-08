@@ -1026,6 +1026,16 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       b => b.DeviceConnected += null,
       new BluetoothDeviceConnectedEventArgs { Device = btMock.Object.ConnectedDevice! });
 
+  /// <summary>
+  /// Ends the device session. Added by AUD-12 for
+  /// <c>DeferredCapture_AfterDisconnect_DoesNotPromoteOnStaleAvrcpStatus</c>; nothing
+  /// before that needed to drive a disconnect.
+  /// </summary>
+  private static void RaiseDeviceDisconnected(Mock<IBluetoothService> btMock) =>
+    btMock.Raise(
+      b => b.DeviceDisconnected += null,
+      new BluetoothDeviceDisconnectedEventArgs { Device = btMock.Object.ConnectedDevice! });
+
   private static object NewCaptureDeviceMock() =>
     new Mock<global::SoundFlow.Abstracts.Devices.AudioCaptureDevice>(
       MockBehavior.Loose, null!, default(global::SoundFlow.Structs.AudioFormat), null!).Object;
@@ -1482,6 +1492,65 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     await _source.InitializeAsync(CancellationToken.None);
 
     Assert.Equal(AudioSourceState.Playing, _source.State);
+  }
+
+  /// <summary>
+  /// A disconnect ends the device session, so the phone's last reported transport
+  /// status must not survive it and promote the NEXT session.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>This pins an owner decision, not a derivation, and the trade it made is
+  /// deliberate.</b> AUD-12's plan never considered the lifetime of
+  /// <c>_avrcpReportsPlaying</c>; its pre-merge review found that nothing cleared it
+  /// while <c>AudioManager</c> caches one source per type for the whole process, and
+  /// that this row ADDS a promotion on the reconnect path
+  /// (<c>ApplyDeferredCaptureState</c>, reached from both <c>OnDeviceConnected</c> and
+  /// <c>OnCaptureStreamRecovered</c>). Both options had a silent failure mode; the owner
+  /// chose to clear.
+  /// <para>
+  /// ⛔ <b>What that CHOSE to accept, so a later reader does not "fix" it back:</b> a
+  /// phone that keeps playing across a re-attach at the same D-Bus object path gets no
+  /// corrective <c>Status</c> read — <c>AttachMediaPlayerAsync</c> returns at its dedup
+  /// before the re-read — so that source parks in <c>Ready</c>, which is AUD-12's own
+  /// symptom. That hole is <b>C-174, queue row AUD-14</b>, and it closes there. The
+  /// alternative hole — a phone reconnecting IDLE while the source claims
+  /// <c>Playing</c>, with fingerprinting running against silence — had no row and no
+  /// owner. A known hole with a scheduled fix beat an unknown one with neither.
+  /// </para>
+  /// </remarks>
+  [Fact]
+  public async Task DeferredCapture_AfterDisconnect_DoesNotPromoteOnStaleAvrcpStatus()
+  {
+    // nullAcquisitions: 3 — two for PlayAsync, and a third for the reacquire that the
+    // Playing arm fires below. Without the third, that reacquire consumes the capture
+    // and the source is no longer capture-less when DeviceConnected lands, which would
+    // route the test through the "already acquired" guard instead of the arm under test.
+    var capture = NewCaptureDeviceMock();
+    var probe = new CaptureAcquisitionProbe();
+    var btMock = BuildBtMock(capture, probe, nullAcquisitions: 3);
+    await using var source = BuildSource(btMock);
+
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Equal(2, probe.Calls);
+
+    // The phone is playing, and the source records that fact.
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+    Assert.Equal(3, probe.Calls);
+
+    // Now it goes away WHILE still reporting Playing — the case that leaves a stale bit.
+    RaiseDeviceDisconnected(btMock);
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+
+    // It comes back idle and the deferred capture lands. The capture acquisition is
+    // real and succeeds; the only question is whether the PREVIOUS session's transport
+    // status is allowed to decide this one's state.
+    RaiseDeviceConnected(btMock);
+    await WaitForAsync(() => probe.Calls >= 4);
+
+    // Ready, not Playing. Nothing has said this phone is playing.
+    Assert.Equal(AudioSourceState.Ready, source.State);
   }
 
   /// <summary>
