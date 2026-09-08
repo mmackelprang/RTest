@@ -2,6 +2,27 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+> ⛔ **PLAN COLLISION — added 2026-09-08 by `TEST-2` ([#614](https://github.com/mmackelprang/RTest/pull/614)), which invalidated part of this row's plan. READ BEFORE CLAIMING.**
+>
+> `TEST-2` **retired** `BluetoothAudioSource.ApplyDeferredCaptureState` from `internal` to `private`
+> and deleted the tests that entered through it, because the constraint that justified the seam
+> turned out not to exist. `design/plans/AUD-12-the-source-that-stalled-at-ready.md` was written
+> against the old shape and **no longer compiles as written**:
+>
+> - `:528` prescribes `internal void ApplyDeferredCaptureState()` — it is now `private`, and the
+>   method's own doc says *"do not re-widen this to reach it."*
+> - `:699` and `:765` call `_source.ApplyDeferredCaptureState()` from a test — no longer accessible.
+> - `:299` and `:834` pin `ApplyDeferredCaptureState_WhenNotPlaying_SetsReady` as
+>   `⛔ C-177 MUST NOT BE INVERTED` — **that test no longer exists**; it was superseded by
+>   `BluetoothAudioSourceTests.DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady`, which
+>   asserts the same Created→Ready invariant through the real dispatch. **`C-177`'s invariant
+>   survives; only its test name and entry point changed.**
+>
+> ⚠ **This is a note, not a re-plan** — Builder does not reshuffle another row's plan. Planner should
+> re-point those anchors. The pattern to follow is in `design/TESTING.md` § *Test Seams*: reach the
+> state by raising `IBluetoothService.DeviceConnected` on a `Mock<IBluetoothService>` with a mocked
+> capture object, not by widening a method.
+
 🟠 **P1.** **Observed live on `radio` 2026-09-06**, not inferred. Rank this **first** of the three
 BT rows filed that day: it is the one with a user-visible consequence, and it has prior art to
 check against.

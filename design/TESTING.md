@@ -316,6 +316,27 @@ coverage in every coverage report** — the method really executes, the assertio
 dispatch that would have selected it is untested. Nothing distinguishes the two from outside. The
 label is the only thing that does.
 
+### ⚠ The value-override shape, and an honest limit found on day one
+
+The commonest seam in this repo is neither cleanly A, B nor C: a **nullable test override that
+production reads with a fallback** — `internal TimeSpan? XOverride { get; set; }`, consumed as
+`XOverride ?? theRealValue`. Production *does* read it every run (so it is not A or B), but what it
+replaces is a **value**, not a collaborator (so the Kind-C wording fits awkwardly).
+
+**Classify these as Kind C.** They match rule 3 exactly — null-checked, defaulting to the real value,
+never set from production — and they put a live read in shipped code, which is the property the label
+exists to disclose. Their *"Why the real path is unreachable"* is usually a real mechanism (a 30 s
+production timeout a test cannot wait out), not the forbidden *"it is hard"*.
+
+⚠ **Three such members exist unlabelled as this convention ships, and that is stated rather than
+quietly left:** `AudioEngineInitializationService.CastDiscoverySettleDelay` and
+`.CastConnectTimeoutOverride`, and `SystemLogsController.OverrideLogsDirectory` (which the lint does
+not even match — no suffix, no doc trigger). **`TEST-2` deliberately did not relabel them**: they are
+API-layer code unrelated to that row, and relabelling three members blind, in a PR about Bluetooth
+dispatch, is the kind of drive-by this repo has been bitten by. They want their own pass.
+**So a green lint on the day this shipped did not mean the tree was compliant** — it meant no
+*labelled* seam had decayed. § *Enforcement* below spells out why those are different statements.
+
 ### The label
 
 Every Kind-C and Kind-D seam carries this block in its XML doc, verbatim in shape:
@@ -377,10 +398,23 @@ gets checked like one** — see `CLAUDE.md` § *Pre-Merge Review*.
 
 ### Enforcement
 
-`TestSeamLabelLintTests` (`tests/Radio.Core.Tests/TestSeamLabelLintTests.cs`) asserts that every Kind-C
-and Kind-D seam carries a complete label. It is a **regression lint over the seams that exist**, not a
-proof that no unlabelled seam can be added — a new seam in a shape it does not recognise passes. Read
-its class remarks before trusting a green run.
+`TestSeamLabelLintTests` (`tests/Radio.Core.Tests/TestSeamLabelLintTests.cs`) asserts that every seam
+**already labelled** kind C or kind D carries both required clauses. It is a **regression lint over the
+labels that exist**, not a proof that every seam is labelled.
+
+⚠ **Two holes, and the bigger one is not the obvious one.**
+
+- The small hole: a new seam in a shape the scanner does not recognise — no `*ForTests` suffix, no
+  doc comment — matches no trigger and passes.
+- ⚠⚠ **The real escape hatch is omitting the label, not evading the scanner.** A member the lint
+  *does* find, but whose doc carries no kind letter, is skipped exactly as a kind A is. So writing
+  *"test seam"* and stopping opts out in one line, with no rename and no missing doc. **This is the
+  common state, not a corner case: 21 of the 23 members the scan currently finds are in it.**
+  Closing it would mean classifying seams rather than reading a label, which ADR-030 deliberately
+  leaves to the author.
+
+**So the lint stops labels from decaying; it does not make anyone write one.** That is a code-review
+responsibility. Read the class remarks before trusting a green run.
 
 ---
 

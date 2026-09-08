@@ -1533,12 +1533,13 @@ deliberately left untouched.
 **Detail: [`queue/TEST-2.md`](queue/TEST-2.md)** — which carries a correction block, because **this
 row's central premise was false.**
 
-Shipped 2026-09-08, 10 commits. The feasibility question the row asked is answered **NO** — a native
+Shipped 2026-09-08. The feasibility question the row asked is answered **NO** — a native
 `AudioEngine` cannot be built on this CI. **But it was the wrong question.** `SoundComponent` and
 `AudioCaptureDevice` are both abstract and their constructors *store* the engine reference without
 dereferencing it, so Moq subclasses either with `null!` — which the suite had been doing for
 `SoundComponent`, in CI, since before the row was filed. So the row closed by **building** the
-coverage: all three `capture is …` dispatch sites driven through the real path by raising
+coverage: two of the three `capture is …` dispatch pairs — and all three
+`ApplyDeferredCaptureState` call sites — driven through the real path by raising
 `IBluetoothService.DeviceConnected`, the Kind-D seam `ApplyDeferredCaptureState` **retired**
 (`internal` → `private`) rather than labelled, and the convention written anyway as
 `design/TESTING.md` § *Test Seams* + `ADR-030` for the two Cast seams that remain justified.
@@ -1554,8 +1555,16 @@ queue row as the victim rather than a code change, now its fourth worked example
 to *swap* the two dispatch arms; `AudioCaptureDevice` and `SoundComponent` are disjoint types
 (`IsAssignableFrom` false both ways, verified by reflection), so reordering two mutually exclusive `is`
 tests is a no-op that would have certified the tests without testing them. Replaced with arm-disabling:
-four mutations across all three sites, each producing a **disjoint, correctly-attributed** failure set,
-each reverted. That is what shows the tests discriminate the arms rather than merely executing them.
+four mutations across the **two covered** dispatch sites (all four arms), each producing a **disjoint,
+correctly-attributed** failure set, each reverted. That is what shows the tests discriminate the arms
+rather than merely executing them.
+
+⚠ **The third `capture is …` pair, `TryReacquireCaptureAsync` (`:687`/`:692`), is NOT covered** — the
+plan says so deliberately (§6.1: reachable only from a 10 s retry loop, and with `_playbackService`
+null neither arm has an observable consequence to assert). It is recorded, not closed. ⚠ **An earlier
+draft of this entry, the ADR and the dossier all said "all three dispatch sites covered", merging the
+three `ApplyDeferredCaptureState` call sites (all covered) with the three `capture is …` pairs (two
+covered).** Caught in pre-merge review — on the row whose entire subject is claims that outrun the code.
 
 ⚠ **The row sat open four weeks (filed 2026-08-10), not thirteen months.** The plan still carries the
 old figure — Planner's artifact, not corrected by this row.

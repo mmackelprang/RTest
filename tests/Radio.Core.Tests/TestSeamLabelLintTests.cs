@@ -55,14 +55,26 @@ namespace Radio.Core.Tests;
 /// job; the lint only holds them to what the kind they picked requires.</item>
 /// <item>⚠ <b>Type declarations are skipped</b> — <c>internal class</c>, <c>record</c>, <c>struct</c>,
 /// <c>interface</c>, <c>enum</c> and <c>delegate</c>. An internal test-support TYPE would not be
-/// found.</item>
+/// found. ⚠ The exclusion is a substring test over the WHOLE declaration line, not a parse, so it also
+/// skips any member whose line merely contains one of those words — a parameter named <c>record</c>, a
+/// same-line <c>where T : class</c> constraint. Nothing in the tree hits that today, but the rule the
+/// code implements is wider than "type declarations".</item>
 /// </list>
 ///
 /// ⭐ <b>How a zero-violations lint proves it is looking.</b> Two assertions that fail in opposite
 /// directions, because "no violations found" is otherwise indistinguishable from "scanned nothing":
 /// numeric floors on the files and members reached, and a POSITIVE CONTROL naming real seams and the
-/// kind letter each must be found with. No single breakage — wrong root, broken extractor, changed
-/// doc format, renamed member — leaves this test green.
+/// kind letter each must be found with. A broken extractor, a changed doc format or a renamed member
+/// cannot leave this test green.
+///
+/// ⚠ <b>A wrong ROOT can, and an earlier revision of this list wrongly claimed otherwise.</b> If the
+/// root resolves to a <i>different checkout of this same repository</i>, every guard above still
+/// passes — the tree has a <c>src</c>, it holds 450-odd files, the seam members are all there and both
+/// controls resolve, because paths relative to <c>src</c> are identical in every checkout. Only a root
+/// with no <c>src/</c> at all is caught. That is precisely why the resolved root is printed in the
+/// failure message (see the final assertion) and why <see cref="FindRepositoryRoot"/> carries the
+/// worktree remarks it does: <b>the instrument cannot tell you it looked at the wrong tree, so read the
+/// path it names before believing either a violation or a green run.</b>
 ///
 /// ⚠⚠ <b>THERE IS NO LIVE KIND-D SEAM IN THE TREE, AND THE CONTROL LIST DOES NOT PRETEND OTHERWISE.</b>
 /// <c>TEST-2</c> retired the only one (<c>BluetoothAudioSource.ApplyDeferredCaptureState</c>) rather
@@ -219,7 +231,18 @@ public class TestSeamLabelLintTests
                ("ConnectTransportOverrideForTests", 'C'),
              })
     {
-      var hit = found.SingleOrDefault(f => f.Member == member);
+      // FirstOrDefault, not SingleOrDefault: if a control name ever appears on two members,
+      // Single throws a bare InvalidOperationException and the crafted message below — the
+      // one that tells the reader every green run since the change was meaningless — never
+      // renders. The duplicate is caught by its own assertion instead.
+      var matches = found.Where(f => f.Member == member).ToList();
+      Assert.True(
+        matches.Count <= 1,
+        $"Positive control '{member}' matched {matches.Count} members "
+        + $"({string.Join(", ", matches.Select(m => $"{m.File}:{m.Line}"))}). A control must name "
+        + "exactly one seam, or it is not pinning the one it claims to.");
+
+      var hit = matches.FirstOrDefault();
       Assert.True(hit is not null,
         $"Positive control '{member}' was not found under '{src}'. Either it was renamed or removed "
         + "(update this control and design/TESTING.md), or the scanner no longer recognises "
@@ -332,9 +355,24 @@ public class TestSeamLabelLintTests
   /// its own <c>RadioConsole.sln</c>, and paths relative to <c>src</c> are identical in every one.
   ///
   /// The rule is "outermost, preferring a directory that is not under a worktree", not "first hit".
-  /// ⚠ The preference is a preference and NOT a filter: this repository parks worktrees under a
-  /// directory literally named <c>worktrees</c>, so such a checkout is its own only candidate AND
-  /// matches the exclusion, and a filter would empty the list and fail the run.
+  ///
+  /// ⚠ <b>Two worktree layouts exist and the rule behaves DIFFERENTLY in each. An earlier revision of
+  /// this comment carried only the sibling's rationale, which describes the other one.</b>
+  /// <list type="bullet">
+  /// <item><b>Outside the repo</b> (<c>D:/prj/RTest/worktrees/x</c>, the layout
+  /// <see cref="LogSafetyLintTests"/> names): such a checkout is its own <i>only</i> candidate AND
+  /// matches the exclusion, so a filter would empty the list and fail the run. That is why the
+  /// preference is a preference and NOT a filter — the <c>?? candidates.LastOrDefault()</c> fallback
+  /// fires and the worktree is scanned, which is right.</item>
+  /// <item><b>Inside the repo</b> (<c>.claude/worktrees/x</c>, the layout THIS repository uses and
+  /// the one named above): there are <b>two</b> candidates, because the nested checkout's ancestor
+  /// chain passes through the enclosing repository. The fallback never fires, and the preference
+  /// selects the <b>enclosing main checkout</b>. ⚠ So running this lint from inside a
+  /// <c>.claude/worktrees/</c> checkout scans the OUTER tree, not the worktree you are editing —
+  /// deliberate, per the sibling's stated intent of always landing on the real root, but a trap if
+  /// you expected the opposite. The resolved root is printed in every failure message for exactly
+  /// this reason; read it before believing a violation.</item>
+  /// </list>
   /// </remarks>
   private static string FindRepositoryRoot()
   {

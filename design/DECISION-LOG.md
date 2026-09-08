@@ -624,7 +624,18 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
   `ApplyDeferredCaptureState_WhenNotPlaying_SetsReady`) and **one is rewritten**
   to reach the same state through the real dispatch, keeping its `SoundFlowAudioTap`
   assertion — the only one of the three whose assertion was irreplaceable.
-- All three `capture is …` dispatch sites gain end-to-end coverage with no seam and no hardware.
+- **Two of the three `capture is …` dispatch sites** gain end-to-end coverage with no seam and no
+  hardware: `InitializeAsync`'s pair (`:159`/`:166`) and `TryAcquireAudioCaptureAsync`'s
+  (`:486`/`:497`). All three `ApplyDeferredCaptureState` call sites (`:472`, `:489`, `:500`) are
+  covered.
+- ⚠ **The third dispatch pair, `TryReacquireCaptureAsync` (`:687`/`:692`), is NOT covered and is
+  recorded rather than closed.** Its only caller sits behind a 10 s delay in the background retry
+  loop, and neither arm has an observable consequence to assert with `_playbackService` null — a test
+  that executed it and asserted nothing would be the coverage theatre this ADR exists to name.
+  ⚠ **There are two different "threes" in this row and they must not be merged:** three
+  `ApplyDeferredCaptureState` call sites (all covered) and three `capture is …` dispatch pairs (two
+  covered). An earlier draft of this bullet said "all three dispatch sites", which was false — on a
+  row whose entire subject is claims that outrun the code.
 - The over-claiming comment at `BluetoothAudioSource.cs:447-452` (its span *before* this change; the
   replacement runs `:447-455`) is corrected, and is added to
   `CLAUDE.md` § *Pre-Merge Review* as a fourth worked example — the first whose victim was a queue row

@@ -906,9 +906,22 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   //
   // RouteCaptureThroughMixerAsync (:524) is reached and no-ops because
   // _playbackService is null (an optional ctor parameter this fixture does not
-  // pass), so both of its arms fall through (:538, :579). That is load-bearing: if
-  // a future change makes routing unconditional, these break loudly rather than
-  // silently stopping short of the branch. The DISPATCH therefore calls nothing on
+  // pass), so both of its arms fall through (:538, :579).
+  //
+  // ⚠⚠ THIS IS NOT A TRIPWIRE, and an earlier revision of this comment claimed it
+  // was — that a change making routing unconditional would "break loudly" here.
+  // It would not, and the claim is refuted by two facts in the code. First,
+  // ApplyDeferredCaptureState runs BEFORE routing in both arms (:489 then :495,
+  // :500 then :506), so the state and the capture assignment every assertion below
+  // reads are already committed by the time routing runs. Second,
+  // TryAcquireAudioCaptureAsync wraps its whole body in a catch-all that only logs
+  // (:513-516), so anything routing throws — an NRE on a null _playbackService
+  // included — is swallowed. Both together mean such a change fails SILENTLY here
+  // and every assertion still passes. NOTHING IN THESE TESTS PINS ROUTING. Said
+  // plainly because a comment asserting a guard the code does not enforce is the
+  // defect class this row was filed on top of.
+  //
+  // The DISPATCH therefore calls nothing on
   // the capture mock — but the mock is not untouched: `await using` runs
   // DisposeAsyncCore (:291-296), which unsubscribes OnAudioProcessed and Disposes an
   // AudioCaptureDevice, and _WhilePlaying_ calls Stop() on one deliberately (below).
@@ -1110,11 +1123,19 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     // AssertArmTaken's ACD branch only asserts GetSoundComponent() throws — equally true of
     // the `else` at :508. Measured, not assumed: with :486 disabled this case still passed.
     //
-    // Only :486 assigns _captureDevice, and PauseCoreAsync (:228) is the one place that
-    // observably touches it. PauseAsync (PrimaryAudioSourceBase.cs:109) requires Playing —
-    // asserted immediately above — and then calls _captureDevice?.Stop(). Times.Once, not
-    // AtLeastOnce, because nothing else in this test can call Stop(): routing no-ops with a
-    // null _playbackService, so neither :560's Start() nor any paired Stop() happens.
+    // Only :486 assigns _captureDevice. Seven sites then touch it — :228 (Pause), :234
+    // (Resume), :244-245 (Stop), :293-294 (Dispose), :547, :559-560 (routing) and :733-734
+    // (reacquire) — and PauseCoreAsync (:228) is the only one of them REACHABLE BEFORE the
+    // Verify below. (An earlier revision of this comment called it "the one place that
+    // observably touches it", which is false and is contradicted by the block comment above
+    // these tests, which names the Dispose path. The conclusion was right and the reason was
+    // not; per CLAUDE.md the reason is the claim.)
+    //
+    // PauseAsync (PrimaryAudioSourceBase.cs:109) requires Playing — asserted immediately
+    // above — and then calls _captureDevice?.Stop(). Times.Once, not AtLeastOnce, because
+    // nothing else in this test reaches Stop() first: routing no-ops with a null
+    // _playbackService so :559-560 never runs, the retry loop returns at its :479/:681
+    // guards, and :293-294's Dispose happens on `await using` AFTER this Verify.
     if (kind == "AudioCaptureDevice")
     {
       await source.PauseAsync(CancellationToken.None);
@@ -1208,11 +1229,14 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   /// </summary>
   /// <remarks>
   /// ⚠ <b>A deadline is a wall clock, so this helper is NOT starvation-proof on its own.</b>
-  /// It returns once <paramref name="timeoutMs"/> elapses whether the condition came true or
-  /// not, and the caller's next assertion then fails. An earlier revision of this comment
-  /// claimed starvation could only slow these tests and never flip a pass to a fail; that was
-  /// wrong, and it was measured wrong — disabling a dispatch arm made a caller sit here for
-  /// the full 5 s and then fail.
+  /// It gives up once <paramref name="timeoutMs"/> elapses whether the condition came true or
+  /// not, and then fails <b>here</b>, on the closing assertion below, naming the timeout — it
+  /// does NOT return a false condition to the caller. (An earlier revision of this remark said
+  /// it returns and "the caller's next assertion then fails", which contradicted its own third
+  /// paragraph and the code directly beneath it.) An earlier revision still claimed starvation
+  /// could only slow these tests and never flip a pass to a fail; that was wrong too, and it was
+  /// measured wrong — disabling a dispatch arm made a caller sit here for the full 5 s and then
+  /// fail, which is exactly what §4.1's mutation A produced.
   ///
   /// <para>
   /// What actually makes these tests deterministic is upstream, and it is not patience: the
