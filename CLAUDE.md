@@ -84,6 +84,33 @@ Earlier notes citing **53** are stale. The number matters because the gate is *e
 baseline*, not an absolute: a Builder holding the wrong figure either waves through four new
 warnings or chases four that were never there.
 
+### ⚠ Two agents must never share one working tree — it put a red commit on `main` on 2026-09-08
+
+**Measured, not hypothetical.** A Builder was mid-cycle on `UI-7` with a *deliberately red* lint commit
+staged between two of its own commits, when a second session ran `git checkout -b` in the same
+checkout. The red commit landed on the other session's branch and reached `main` through that branch's
+squash merge. **`main` was red until the Builder's own PR closed it**, and nobody noticed at the time
+because each session's own gates were green — they were gating different trees.
+
+`git checkout` is **global to the checkout, not to the agent.** A branch switch by any participant
+silently re-points every other participant's working files, mid-edit. It has cost three collisions in
+one day: this one, a Builder halted when a coordinator's commit landed on its branch, and a Planner
+whose anchors moved three times while it measured them.
+
+**The rules that follow:**
+
+- **One agent commits at a time.** Reading, grepping, editing and running tests concurrently are all
+  fine. **It is branch switching and committing that must be serialized.** A Planner writing one new
+  file alongside a Builder is safe; two agents that both `git checkout` are not.
+- **Tell every dispatched agent what else is live in the tree**, and forbid `git add -A` / `git add .`
+  / `git commit -a` so a stray file cannot ride along on someone else's PR.
+- **If you need real parallelism, use a git worktree** — but ⚠ **it must sit OUTSIDE the repository
+  directory.** `.claude/worktrees/` is *inside* it, so any tree-scanning test (the seam lint, the
+  `NoRawMiniAudioEngineConstruction` scan) resolves to the wrong root and silently scans a copy.
+- ⚠ **A verification run proves the tree it ran in.** After any concurrent-session incident, re-check
+  `main` from a *fresh* checkout rather than the working tree you happen to be holding — that is how
+  the 2026-09-08 red state was confirmed cleared.
+
 ## Solution Structure
 
 ```
