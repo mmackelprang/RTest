@@ -79,3 +79,48 @@ stop being overwritten; art keeps arriving. That is the whole point of the row.
 ⚠⚠ **The flag still must not be renamed** — see the row above. The SQLite store already holds
 `fingerprinting:useShazamForAllSources|true`, and a rename orphans it, falls through to a `false`
 default, and kills BT art. The decision above changes *behaviour*, not the *key*.
+
+---
+
+## ⛔ CORRECTION 2026-09-08 — the "preserve branch is already the wanted behaviour" claim is FALSE
+
+**The owner-decision section above, and the queue index row, both said the fix is to replace the
+overwrite at `:867-891` with *"the fill-if-missing behaviour already sitting on the unreachable
+preserve branch at `:893-905`."* That is wrong, and building on it would have shipped a regression.**
+
+**`BluetoothAudioSource.cs:893-905` fills cover art and nothing else.** It never touches
+Title/Artist/Album. So today, a phone reporting an **empty AVRCP title** gets its title from SongRec
+*only because the overwrite branch runs*. Point `:867` at a default-off flag and that track gets **no
+title at all, forever.**
+
+⚠ **The old plan's three new tests all arranged populated AVRCP metadata, so none of them would have
+failed.** Under the owner's rule the preserve path must **gain** per-field text fill — that is *new
+behaviour*, not behaviour that merely becomes reachable.
+
+## ⭐ Two further owner decisions, 2026-09-08
+
+**1. Placeholders count as MISSING.** `"--"` (`DefaultArtist` / `DefaultAlbum`), empty, whitespace and
+the fallback art path are all "missing", so fingerprinting fills them.
+
+⚠ This is an **extension** of the rule as literally stated, and it is load-bearing rather than an edge
+case. `BluetoothPlaybackMetadata.Title/Artist/Album` all default to `string.Empty`
+(`IBluetoothService.cs:23-25`) and `OnMetadataChanged` writes them through unguarded (`:770-772`) — so
+a predicate testing `ContainsKey` or a sentinel would do **nothing at all on Bluetooth**. FilePlayer is
+the mirror image: it guards its tag reads with `!IsNullOrEmpty` (`:1951`), so there "missing" is *only*
+ever the sentinel. **One shared predicate must cover null, empty, whitespace, sentinel and absent key**,
+or it serves one source and not the other.
+
+**2. The History panel divergence is a SEPARATE row** — filed as `AUD-19`, documented in
+`design/FUTURE-WORK.md` and to be named in this row's PR body **before** merge. `PlayHistoryTracker`
+re-points its rows at the fingerprint record regardless of which branch the source took, so after this
+row ships, now-playing obeys the rule and history does not. **Left undocumented, that reads as a failed
+fix.**
+
+## ⚠ One piece of this row's evidence is weaker than it was quoted as
+
+The **"44 of 52 file plays had their tags overwritten"** figure rests on the same column-provenance
+error `AUD-17` was retracted for. `PlayHistoryTracker` sets `MetadataSource = Fingerprinting` on *any*
+landed identification (`:563-573`, `:631-641`) without consulting which branch the source took. **So
+the count proves the play-history RECORD carries SongRec's titles** — it does **not**, on its own,
+prove the source's metadata was overwritten. That is true too, but it is established by reading the
+code, not by this count. Both facts survive; only the inference from one to the other does not.
