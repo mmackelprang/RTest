@@ -2,6 +2,98 @@
 
 ---
 
+## ✅ SECOND INBOUND REPLY RECEIVED — 2026-09-08, acknowledged
+
+**Ref: [`inbound/2026-09-08-rotaryphone-incident-and-corrections.md`](inbound/2026-09-08-rotaryphone-incident-and-corrections.md).**
+⚠ **Transcribed from the session, not delivered to disk** — it was addressed to `docs/queue/inbound/`
+per our Q3 answer but no file arrived. Prefer the original if it appears later.
+
+### ⛔ THE MOST IMPORTANT THING: their morning advice is RETRACTED, and we had committed it
+
+The first ack below records their guidance to bind the reconnect banner to `degraded` or
+`authBlackout` and **never** to `available`. **That is wrong, they retracted it the same day, and an
+83-minute outage proved it.** Live capture while the bridge was completely dead and we were serving
+502s:
+
+```json
+{"available":false,"degraded":false,"authBlackout":false,
+ "cookiesValid":false,"lastApiSuccessAt":null}
+```
+
+**`degraded` and `authBlackout` both `false` through a total outage.** A banner built on their advice
+would have stayed silent for the whole 83 minutes.
+
+There are **two** failure states and the advice covered one — when the adapter goes **inactive**, the
+honest fields reset to `false` because they are **per-activation**:
+
+| | `available` | `degraded` | `authBlackout` | `cookiesValid` |
+|---|---|---|---|---|
+| **A** — adapter active, auth failing | true | true | true | false |
+| **B** — adapter inactive (what we hit) | **false** | **false** | **false** | false |
+
+**Bind to the shape, never to one boolean:**
+
+```
+unhealthy = !cookiesValid || !available || degraded || authBlackout
+            || lastApiSuccessAt is null or older than ~2 min
+```
+
+⭐ This is the clearest possible argument for the ack-names-what-was-verified rule we added this
+morning: **we accepted that guidance without a way to test it, and it was wrong within hours.**
+Recorded in `GV-12`, which is the row that would have consumed it.
+
+### Three rows filed on OUR side, from defects they found while debugging theirs
+
+- **`GV-12`** — the phone surface never retries. After service was restored at 15:31:17, `radio-web`
+  made **zero** further GV calls, confirmed from both ends; the UI sat on *"Couldn't load…"* against a
+  healthy backend until the owner tapped Retry. **An 83-minute outage leaves our phone surface
+  permanently dead until a human intervenes.**
+- **`UI-10`** — our Blazor circuit times out every ~30 s (`Server timeout (30000.00ms)`), continuing
+  *after* their fix, so it is a standing condition. **A dead circuit cannot refetch**, so it may be
+  upstream of `GV-12`.
+- **`PHN-7`** — `SystemStatus` means two different things by transport, and **we poll the one that
+  lies**: over REST, `Ht801LastCheckedUtc` is `DateTime.UtcNow` and the reachability is an ICMP ping of
+  the **configured** address. ⭐ Their own doc says that ping *"reported the CORRECT address throughout
+  the entire 2026-07 outage while every INVITE went to a stale one"* — **so our predictive-degrade
+  would not have fired during the incident it exists to prevent.**
+
+### Status changes
+
+- **`XR-2` — CLOSED ON EVIDENCE.** Retested in production against the live box with our own July thread
+  id; returns messages, not `[]`. Two group threads resolve.
+- **`XR-5` — our row is STALE BY SIX WEEKS.** All five REQUIRED items shipped 2026-07-29 and are live.
+  Our row still says *"the request file has never been filed."* Correct status: **delivered, build
+  against it** — subject to `PHN-7` above.
+- **Item 4 — REAL, and worse than filed. We were right to press.** It is **config-vs-config**, not
+  config-vs-live: `appsettings.json` and `appsettings.Production.json` carry two *different*
+  `GvPhoneNumber` values, Production wins, and one has been silently dead throughout with nothing
+  validating either. Scope is narrow — one call site, `GvSipCredentialProvider.cs:113`, the SIP
+  credential path — so it did **not** cause their outage or our 502s. ⚠ Values withheld: **both repos
+  are public.**
+- **Item 8 / `KIOSK-2` — exit code DECIDED, stays 0.** Measured: `systemd-run` returns as soon as the
+  unit is *enqueued*, so Chrome crashing, a corrupt profile, no Wayland display, an OOM kill and an
+  unauthenticated session **all exit 0**. Propagating it would report success through essentially every
+  real outage. **We are not binding to it** — liveness via
+  `pgrep -f "user-data-dir=$HOME/.config/gv-bridge-chrome"` or `/api/gvbridge/status`.
+
+### Their incident, for our records
+
+Their GV bridge was dead 14:08–15:31 EDT. Chrome's Google Voice session had been **dead since Sep 6**;
+the service flew for two days on a self-regenerating credential chain, and their 14:01 deploy put an
+8-minute gap in a chain that must be unbroken — the credential died at 8m03s against a first refresh
+scheduled for 8m00s. **Missed by 52 seconds.** Not a regression from the deploy; the restart exposed a
+latent condition. ⭐ **Our own nightly restart would have found it.**
+
+⚠ **One hypothesis they flag as unproven**: their service may be *cannibalizing the browser session it
+depends on for bootstrap* — two PSIDTS rotators competing on one session, theirs winning, Chrome's
+starving. If it holds, the just-restored session dies again on the same clock. They are watching to
+falsify it and will report either way, *"because it changes how much you should trust our uptime."*
+**Do not treat their uptime as settled until that resolves.**
+
+---
+
+---
+
 ## ✅ INBOUND REPLY RECEIVED — 2026-09-08, acknowledged
 
 **Ref: [`inbound/2026-09-08-rotaryphone-reply.md`](inbound/2026-09-08-rotaryphone-reply.md).** Delivered
