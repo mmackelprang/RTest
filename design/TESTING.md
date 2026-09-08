@@ -285,6 +285,103 @@ mockRepository.Verify(r => r.SaveAsync(It.IsAny<Entity>()), Times.Once);
 
 ---
 
+## Test Seams — when `internal` + `InternalsVisibleTo` is acceptable
+
+A **test seam** is any member made more visible, or any branch added to production code, whose
+justification is a test. This repository has a dozen-odd and will grow more. They are not banned —
+some reach a path that hardware or a network genuinely makes unreachable — but an unlabelled seam is
+indistinguishable from coverage, and that is how a gap hides.
+
+**The rule is one sentence: a seam must say what it displaces.**
+
+### The four kinds
+
+Classify a seam before adding one. The kind determines what you owe the reader.
+
+| Kind | Definition | What you owe |
+|---|---|---|
+| **A · Visibility** | Widens access (`private` → `internal`) to a value or method the production path already computes and reaches unchanged. | One line saying it is test-only. |
+| **B · Injection** | A test-only method that writes state the test could not otherwise establish. Production path unchanged. | One line, plus why the state is otherwise unreachable. |
+| **C · Substitution** | A field or property that production code **reads on every run** and that, when set, replaces a real collaborator. | The full label below. It adds a live branch to shipped code. |
+| **D · Entry-point** | A real production method made `internal` so a test can call it **directly**, bypassing the dispatch that normally selects it. | The full label below. **This is the deceptive one.** |
+
+**Kinds A and B are cheap and need no ceremony.** They change nothing about what runs in production;
+the seam is an observation post. Prefer them — if a Kind-C or Kind-D seam can be restated as an A or B,
+restate it.
+
+**Kinds C and D are debt and must be labelled.** Kind C puts a branch in shipped code that exists only
+for tests. Kind D is worse in one specific way: **a test entering through a Kind-D seam looks like
+coverage in every coverage report** — the method really executes, the assertion is real — while the
+dispatch that would have selected it is untested. Nothing distinguishes the two from outside. The
+label is the only thing that does.
+
+### The label
+
+Every Kind-C and Kind-D seam carries this block in its XML doc, verbatim in shape:
+
+```csharp
+/// <para>
+/// <b>Test seam (kind D — entry point).</b> Reached directly from
+/// <c>SomeTests.SomeTest</c> via <c>InternalsVisibleTo</c>.
+/// <b>Why the real path is unreachable:</b> &lt;the concrete blocker — a device, a
+/// socket, a handshake; not "it is hard"&gt;.
+/// <b>NOT covered by this seam:</b> &lt;the specific dispatch, branch or collaborator
+/// the seam bypasses, with file:line&gt;.
+/// </para>
+```
+
+Three parts, and the third earns the label:
+
+- **kind** — `A`, `B`, `C` or `D`, with its word. An author who cannot pick a kind usually has two seams.
+- **Why the real path is unreachable** — a *mechanism*, not a difficulty. "A fake socket cannot
+  complete a Cast handshake" is a mechanism. "Hard to set up" is not, and is a sign the seam is
+  unnecessary.
+- **NOT covered by this seam** — the gap, in the file, beside the thing that caused it. This is the
+  clause the convention exists for. If the answer is "nothing — it only observes", the seam is Kind A
+  or B and does not need this block.
+
+### Rules
+
+1. **Prefer no seam. Check whether the real path is reachable before assuming it is not.** It very
+   often is, and this repository has already been wrong about it once, expensively:
+   - `Mock<T>` can subclass an abstract SoundFlow type **with a null engine** — both `SoundComponent`
+     and `AudioCaptureDevice` store the engine reference without dereferencing it. Only the *engine*
+     is native.
+   - A `private` method reached by an interface event is drivable by raising that event on the mock
+     (`IBluetoothService.DeviceConnected`).
+   - A collaborator held in an **optional nullable constructor parameter** is often absent in tests,
+     making the code it guards a safe no-op.
+2. **Prefer Kind A or B over C or D.** Observe rather than substitute wherever the assertion allows.
+3. **A Kind-C seam must be inert in production** — null-checked, defaulting to the real collaborator,
+   never settable from production code.
+4. **A Kind-D seam does not close a branch-dispatch gap**, and a test using one must not be described
+   as if it did. Pin the dispatch separately, or record that it is unpinned.
+5. **Never close a coverage gap with a second seam that re-asserts the first from another angle.** That
+   adds a test without adding coverage and makes the gap harder to see.
+6. **A labelled seam is a standing invitation to delete it.** When the blocker goes away, the seam and
+   its label go with it. `ApplyDeferredCaptureState` was a Kind-D seam from PR #469 until `TEST-2`
+   showed the blocker never existed; it was retired rather than labelled.
+
+### ⚠ The reason rule 1 leads
+
+`BluetoothAudioSource.ApplyDeferredCaptureState` was made `internal` in PR #469 with a doc comment
+asserting that the real call sites *"require a native SoundFlow `AudioEngine` … and cannot be exercised
+directly in a unit test."* **That was never true.** A test mocking `SoundComponent` with a null engine
+was already green in CI at the time. The comment was then cited as authority by queue row `TEST-2`,
+which sat open for thirteen months waiting for a native harness nobody needed.
+
+The lesson is not "seams are bad". It is that **the sentence justifying a seam is a technical claim and
+gets checked like one** — see `CLAUDE.md` § *Pre-Merge Review*.
+
+### Enforcement
+
+`TestSeamLabelLintTests` (`tests/Radio.Core.Tests/TestSeamLabelLintTests.cs`) asserts that every Kind-C
+and Kind-D seam carries a complete label. It is a **regression lint over the seams that exist**, not a
+proof that no unlabelled seam can be added — a new seam in a shape it does not recognise passes. Read
+its class remarks before trusting a green run.
+
+---
+
 ## Test Configuration
 
 ### appsettings.IntegrationTests.json
