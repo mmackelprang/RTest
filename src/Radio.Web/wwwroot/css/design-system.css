@@ -5959,9 +5959,21 @@ body {
   font-size: 16px; font-weight: 600; color: var(--text-high);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* GV-9 / UAT F-4 — the three declarations its two siblings already carry
+   (.texts-conv-name :5958-5961, .list-item-title :649-656). Without them this
+   line inherits white-space: normal / overflow: visible / text-overflow: clip
+   and a long identifier spills instead of ellipsizing. The ellipsis works
+   without touching the parent because .texts-conv-title (:5957) already sets
+   min-width: 0 — the precondition it needs inside a flex column.
+   ⚠ This is a DISPLAY truncation of the header identifier only. It renders
+   U+2026 and does not alter any string; nothing reads this element. Do not
+   extend the same treatment to .msg-bubble / .msg-text — since PHN-3 that text
+   is spoken, and a display truncation there would diverge from the utterance
+   (plan C-211). */
 .texts-conv-number {
   font-family: var(--font-mono); font-size: 12px; color: var(--text-medium);
   letter-spacing: 0.04em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 
 /* The conversation's msg-list fills the space between header and compose. */
