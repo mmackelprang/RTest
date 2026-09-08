@@ -1,6 +1,33 @@
 name: TODO to Issues
 
-# Runner placement (since 2026-05-22, RTest CI appserver migration):
+# ⚠ Runner placement — THIS WORKFLOW IS THE EXCEPTION. It runs on
+# ubuntu-latest, NOT on the self-hosted appserver runner, and that is
+# deliberate. The other three migrated workflows stay on appserver.
+#
+# Why (2026-09-07): alstr/todo-to-issue-action is a CONTAINER action, so
+# the runner must be able to reach a Docker daemon. The appserver runner
+# is itself containerized and /var/run/docker.sock is not mounted into
+# it, so every run failed at the image pull with:
+#
+#     failed to connect to the docker API at unix:///var/run/docker.sock
+#     ... no such file or directory
+#
+# The host's daemon is healthy and the socket exists — the runner simply
+# cannot see it. This was never caught during the 2026-05-22 migration
+# because, as the note below records, this file does not trigger on PRs:
+# its first real exercise was a Monday cron, long after the migration PR
+# was green. The other three workflows use JS/composite actions and need
+# no daemon, which is why only this one broke.
+#
+# ⚠ Do NOT "fix" this by mounting /var/run/docker.sock into the runner
+# container. That grants the runner root-equivalent access to the host,
+# on a machine that executes code from pull requests — a large and
+# permanent increase in blast radius to serve a TODO scanner. The
+# migration's stated rationale was GH Actions monthly quota, and this
+# job's quota cost is negligible against build.yml, which is the heavy
+# one the migration actually existed for.
+#
+# Original migration note, still true of the other three workflows:
 #   - Jobs run on the self-hosted appserver runner (labels:
 #     [self-hosted, linux, x64, appserver]) — eliminates the GH Actions
 #     monthly-quota dependency that surfaced during the cast/BT research
@@ -29,7 +56,9 @@ permissions:
 
 jobs:
   todo-issues:
-    runs-on: [self-hosted, linux, x64, appserver]
+    # ubuntu-latest, not appserver — this is a container action and needs a
+    # Docker daemon the self-hosted runner cannot reach. See the header.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
