@@ -432,6 +432,31 @@ curl -s http://radio:5000/api/health/version   # API  — gitSha, assemblyName "
 curl -s http://radio:5002/api/health/version   # Web  — gitSha, assemblyName "Radio.Web"
 ```
 
+**An unmatched path under `/api/` on either service returns 404, and since `UI-11` `Radio.Web` says so
+in JSON.** ⚠ **`Radio.Web` has no SPA fallback and never had one** — it is a Blazor Web App, so
+`MapRazorComponents` registers one endpoint per `@page` route and **no catch-all**, and a mistyped API
+path has therefore always 404'd rather than returning an app shell. There is no `index.html` in the
+project and `git log -S "MapFallback" --all -- src/` is empty. **The `200`-with-`index.html` symptom
+that `UI-11` was filed against came from RotaryPhone's service on `:5004`, not from ours** — the row
+survived only because our 404 was *bodyless*: zero bytes and no `Content-Type` at all, which is what
+cost the other repo a probe on a box where both services expose `/api/*`. `Radio.API` returns a bare
+404 and was already locked (`ApiTests.cs:32-43`). ⚠ **The body is a compile-time constant and echoes
+nothing from the request** — no path, no query, no route values, no trace id — and the handler logs
+nothing at any level, because the paths people mistype here carry phone numbers and `Radio.Web`'s
+Console sink is unrestricted (see the `radio-web` note above, and `PHN-5`).
+
+⛔ **Do not add `UseStatusCodePagesWithReExecute("/not-found")`.** It is what the .NET 10 Blazor Web App
+template ships and what current Microsoft docs steer you to, and it would give every `/api/*` 404 an
+**HTML body** — most of `UI-11`'s originally-reported bug arriving through the front door. Since
+`UI-11` gave `/api/*` a body of its own, status-code pages can no longer claim those responses; that
+protection is the reason the body exists rather than a nice-to-have.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5002/api/nope   # 404 application/problem+json
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5000/api/nope   # 404
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5002/phone      # 200 text/html
+```
+
 *Previously:* `radio-web` was checked only with `systemctl is-active`, which is exactly as true of a
 stale binary as a fresh one, and the interim gate was grepping the deployed binary for a branch-only
 symbol (`grep -ac <symbol> /opt/radio-console/web/Radio.Web`). That workaround is no longer needed.
