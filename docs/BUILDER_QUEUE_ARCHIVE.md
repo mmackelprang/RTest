@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (53)
+## Shipped rows (54)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2092,6 +2092,38 @@ Merged 2026-09-09, on the owner's explicit authorisation. ⚠ **Merged, not depl
 ⚠ **An incremental Release build reported `0 Warning(s)` and that is NOT the gate passing.** No C# project recompiled, because only CSS and markdown changed — the figure is *unmeasured*, not *better*. `--no-incremental` restored the real **47 / 0** equality. ⭐ *A gate that reads better than baseline for free is measuring nothing.* Suite: **3,863 passed / 5 failed**, all documented Windows-known-failing — the four `SrcVariableResamplerTests` plus `CoverArtArchive_ReturnsValidUrl_ForKnownRecording` at 18 s against its documented 15 s live-network timeout, which **passed** in an earlier run the same cycle.
 
 ⚠ **Merged, not deployed** — explicitly out of scope. Nothing reaches the appliance until someone deploys, and the stale `publish/` copy still holds the old references.
+
+---
+
+### UX-1 — Skeleton shimmer amplitude: a 6/255 gradient delta nobody could see, and the owner picked 56.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#641](https://github.com/mmackelprang/RTest/pull/641) |
+| Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and now carries banners saying so** |
+| Spec / handoff | [GV-8 UAT `L-1`](uat/2026-07-31-gv8-error-state/REPORT.md) · Designer answer 2026-09-07 · [night sitting](uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) |
+| Depends on | — _(no code dependency; it was gated on a design answer, then on two owner sittings)_ |
+| Branch | `fix/ux-1-shimmer-amplitude` _(the row named `feat/ux-skeleton-shimmer-amplitude`)_ |
+
+**Detail: [`queue/UX-1.md`](queue/UX-1.md)** — the Designer answer, the aborted morning sitting, both owner sittings, and the shipped note.
+
+⭐ **THE OWNER'S EYE OVERTURNED THE DESIGNER'S CENTRAL CLAIM, AND THE ROW GOT CHEAPER FOR IT.** The design answer that discharged the gate said **amplitude is the smaller half and geometry is the key lever**; the owner could see only the full-width shipping ramp and found even that *"very dim and not easy to see in a dark room."* **Geometry did not help; amplitude was the whole problem**, and the Designer's seed of 36 sat **below** the dark-room visibility threshold. ⭐ To its credit the Designer explicitly refused to endorse a landing value — *"a seed for the A/B, not an answer"* — which is exactly why this was A/B'd rather than built. **`56` (`#38383F`, delta 36, 6× the shipping delta) is the dimmest value clearly visible in a dark room AND in daylight**, so the expensive branch — *"the shimmer must adapt to ambient light"* — **did not fire**, and `66` never needs a night evaluation.
+
+⛔ **THE ROW'S WHOLE RISK WAS ONE SHARED TOKEN, AND THE CENSUS EVERYONE QUOTED WAS SCOPED TOO NARROWLY.** `.skeleton-loading` took its middle stop from `var(--surface-overlay)`, a **surface** token. The row, the plan, the Designer and the daylight record all say *"20 consumers in `design-system.css`"* — **true, and three short of the app.** Re-derived on `main` @ `143d678e`: 22 textual occurrences in that file = 1 declaration + 1 prose mention in a comment + **20 consumers**, one of them the shimmer → 19 others; **plus three inline `style=` consumers at `PlayHistoryPage.razor:207,272,296`.** **Real blast radius: 22 other consumers.** ⭐ *A count is only as good as the tree it was taken over* — the fourth time this repo has been bitten by a search scoped to one file or one directory.
+
+⭐ **THE GATE WAS A DEMONSTRATED DIFFERENCE PAIRED WITH A CONTROL, AND THE CONTROL IS THE HALF THAT MATTERS.** Computed middle stop `rgb(26,26,29)` → **`rgb(56,56,63)`**; **`.surface-overlay` and `.rz-dialog`, two *direct* consumers of the shared token, both held `rgb(26,26,29)` across the change.** A gate checking only the subject would pass just as happily on the re-theme this row exists to avoid. ⭐ **The instrument was validated before the result was believed** — 859 rules actually loaded (not UA defaults), `prefers-reduced-motion` **false** (so the flat-fill override was not silently answering instead), and ⭐ **the reading was proven animation-invariant rather than assumed**: sampled 420 ms apart while running, `background-position` moved `-136.261%` → `84.8031%` while `background-image` was byte-identical. **The animated property and the measured property are different properties**, which is what makes `UI-8`'s mid-`transition` trap inapplicable here — established, not hoped.
+
+⭐ **Measured in the framebuffer too, and it calibrates on the published baseline exactly:** amplitude **6.0 → 35.83 levels**, min 20.0 both sides, max 26.0 → 55.83. ⭐ **`C-221`'s trap was DEMONSTRATED rather than cited** — naive adjacent-pixel differencing moves only **0.5 → 0.667** where the real change is 6×, i.e. nearly blind. ⚠ **And the plan's own §4.2 gate is internally inconsistent**: it defines `S` as a *peak* windowed slope but calibrates V0 against **0.034**, which is the *average* slope (`6/178`); the measured peak on the unfixed sheet is **0.052**, so Task 3's *"do not proceed past a V0 that disagrees"* **would have halted a correct instrument.**
+
+⛔ **THE GEOMETRY HALF OF THE PLAN WAS NOT SHIPPED, AND THAT IS A DECISION.** Task 5b's narrowed `35%/65%` ramp was rated the larger half of the fix, but **the only experiment ever run on it was the `v1` harness, later found unable to measure what it claimed** — its band sat on the element only **~0.49 s of each 1.5 s cycle**, so two-thirds of every cycle those columns were flat `#141416` and the owner read them as static **because they were**. `56` was chosen on the `v2` ladder at the **shipping** geometry. Shipping the narrowed ramp would have put an unvalidated change underneath a validated one. The plan now carries banners at the top and at both tasks.
+
+⛔ **A LIVE FALSE CLAIM WAS FOUND IN THE ROW'S OWN EVIDENCE DIRECTORY.** `uat/2026-09-08-ux1-shimmer-variants/REPORT.md` still read *"The harness works and is reusable; the conditions were wrong"* — **the night sitting falsified the first half the next day.** `NIGHT-SITTING.md` recorded the flaw; `REPORT.md` was never corrected and `index.html` carried **no warning at all**, so **the one file someone would open in a browser was the one with nothing on it.** Struck, and `index.html` now opens with a banner kept deliberately **dim** — that page is judged in a dark room and a bright warning would wreck dark adaptation.
+
+⚠ **THREE DEFECTS IN THE BUILDER'S OWN COMMENT, FOUND BY RE-DERIVING IT RATHER THAN RE-READING IT.** *"two `color-mix` recipes"* is **three** (the Designer said two, the plan said three, the Builder inherited the wrong one); *"56 answers yes and yes in both conditions"* **overclaimed** — visibility was asked in both, **calmness only at night**, and the daylight record *argues* rather than establishes that it does not bind; and *"was measured below the threshold"* became *"was judged below"*, because nothing was measured — an owner looked at a ladder. ⚠ **A commit message was wrong too**: `62549d87` said all four new tests fail on the pre-UX-1 stylesheet; **three do**, and the fourth correctly passes on both sides, being a guard against a future edit rather than a regression gate for this one. Corrected in the test's own remarks.
+
+⚠ **TWO THINGS ARE OPEN AND THE PR SAYS SO.** Whether a steeper ramp would allow a *lower* amplitude is unknown; and **the plan's Task 0 dwell-time pre-check was never run** — one pass is 750 ms, so if production skeletons dwell for less, no shape completes a pass **at any amplitude**, and the owner judged a harness that animates continuously and cannot answer it. **The amplitude is now right; whether skeletons are on screen long enough to show it is not established.** Both filed in `design/FUTURE-WORK.md`, where the remedies are cadence or removal, not more amplitude.
+
+⚠ **No test in this repository can see this change** — the four new tests assert CSS **source text**; neither the factory nor bUnit rasterises anything. **A green suite is not UAT for this row.** Measured in both directions: reverting the stylesheet to `main` gives **3 failed / 5 passed**. Gates: **47 warnings / 0 errors** (`--no-incremental`; an incremental Release build reports `0 Warning(s)`, which is *unmeasured*, not better) and **3,868 passed / 4 failed**, the four being the documented Windows-known-failing `SrcVariableResamplerTests`. ⚠ **Merged, NOT deployed** — explicitly out of scope; the coordinator deploys so the owner can see it.
 
 ---
 
