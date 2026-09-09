@@ -24,6 +24,27 @@ the plans in [`../design/plans/`](../design/plans/) · [`BUILDER_QUEUE_ARCHIVE.m
 
 ## 0. The shape, in six sentences
 
+> ⛔ **STALE IN PLACES — READ THIS FIRST, 2026-09-09 (Coordinator).** Several items below were completed
+> the same day this document was written, and **nothing pointed the new facts back at it.** That is the
+> failure mode this repo has been cataloguing all week: *a claim falsified by evidence its own author
+> later produced, and never re-run.* Corrections, rather than a rewrite, so the drift stays legible:
+>
+> | Item below | Says | Actually |
+> |---|---|---|
+> | §C.2 #6 **"Deploy the Radio side"** | 8 rows merged-but-undeployed | ✅ **DONE** — deployed twice 2026-09-09, verified at `f4d71b28` on both services |
+> | §C.2 #4 **"Run `PHN-2`'s owner UAT"** | 9 `SOUND` items unverified | ✅ **DONE** — 6 pass / 2 fail / 1 deferred, [record](uat/2026-09-09-phn2-sound-uat/RESULT.md) |
+> | §F #1 **"Merge `UI-8` and `UI-15`"** | both open | ⚠ **HALF** — `UI-8` shipped (#640); `UI-15` still live |
+> | §F #5 **"let a Builder take `UX-1`, `AUD-5`, `AUD-2`, `PHN-9`"** | all four open | ⚠ **`UX-1` shipped TWICE** (#641 at 56, then #644 reversing to 36) and **`AUD-2` shipped** (#642) and is **confirmed by ear**. `AUD-5` and `PHN-9` still open |
+> | §A.3 **"the tier map — all 26 live rows"** | 26 rows | ⚠ **30 rows** — `OPS-12`, `TEST-10`, `AUD-24`, `AUD-25`, `AUD-26`, `UX-2` filed since; `UI-8`, `UX-1`, `AUD-2` archived |
+> | §G.1 **"the punch list carries eleven shipped items as open"** | 11 | ⚠ **unre-counted since** — more have shipped; the finding stands, the number does not |
+>
+> ⭐ **`PHN-10` has been PLANNED SINCE, and the plan overturned three of its own row's premises** —
+> including that `PHN-1f` was never structurally in scope, and that the verification criterion this
+> coordinator supplied (*"assert the second voicemail waits, then plays"*) **contradicts ADR-029 §6.2
+> rule 1** and would have gated on the wrong behaviour. See `design/plans/PHN-10-nothing-can-stop-a-voicemail.md`.
+> **The defect is not "two voicemails" — nothing can stop a voicemail**, and every one played leaks a
+> `SoundPlayer` plus a mixer component permanently. ⛔ **Re-tier before using §A.3's map to sequence.**
+
 1. **The GA punch list has no open P0 items.** Its banner still says *"P0 remaining: 2"*; both — `PHN-1`
    and `PHN-2` — shipped on 2026-09-04/05. §A.1.
 2. **The punch list carries eleven items as open that have already shipped**, across all three tiers.
