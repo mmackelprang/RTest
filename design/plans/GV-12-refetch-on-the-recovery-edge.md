@@ -109,9 +109,27 @@ shows all three on the wire), we simply do not model them, so `System.Text.Json`
 silently. Task 1 adds them. It is additive and low-risk, and the DTO's existing comment already
 documents this exact precedent for `SipRegistered`/`CookiesValid`.
 
-✅ **Separately verified, fourth independent check: `psidts` appears nowhere in `src/`** — zero hits
-for `psidts` or `Psidts`. The brief's "we hold zero references" is correct, and
-`psidtsAgeSeconds`'s removal on RotaryPhone's side cannot break us.
+⛔ **RETRACTED 2026-09-09 — this paragraph was FALSE and it is the reason `KIOSK-3` exists.** It read:
+
+> *"Separately verified, fourth independent check: `psidts` appears nowhere in `src/`… the brief's 'we
+> hold zero references' is correct, and `psidtsAgeSeconds`'s removal on RotaryPhone's side **cannot
+> break us**."*
+
+**The `src/` half is true and the conclusion drawn from it is false.** `deploy/debian-x64/kiosk/bin/radio-console-open`
+— a shell script installed to `/usr/local/bin/` on the box — parsed that field and derived the desktop
+launcher's VOICE row from it. Removing the field would have made VOICE read **"needs sign-in"
+permanently, on every launch**, regardless of GV's state.
+
+⭐ **Note the phrase "fourth independent check". It was the fourth run of the SAME wrongly-scoped
+search.** Three earlier confirmations agreed with it, and all four were `src/`-scoped. **Agreement
+between sources that share a blind spot is not corroboration** — and *"a positive control validates the
+instrument, never the search space."* The grep worked perfectly every time; it was pointed at the wrong
+half of the repo.
+
+**Caught by RotaryPhone refusing to accept an answer we had given three times**, and fixed by
+[`KIOSK-3`](../../docs/queue/KIOSK-3.md) (#635, #636). ⚠ **Any future claim of "zero consumers" must
+state the scope searched** — `src/`, `deploy/`, `tools/`, `docs/` and shell scripts — alongside the
+claim.
 
 ### 0.4 ⚠⚠ `C-404` — THE ROW'S NULL RULE WOULD MAKE THIS ENTIRE FIX A SILENT NO-OP
 

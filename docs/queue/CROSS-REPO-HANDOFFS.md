@@ -18,7 +18,7 @@ flagging it rather than burying it."* **We do not consume it.**
 |---|---|
 | `gvbridge/cookies` or `refresh-from-browser` in `src/` | **0 hits** |
 | a `saved` field read anywhere in `src/` | **0 hits** |
-| `psidtsAgeSeconds` consumers | **0** (third independent confirmation) |
+| `psidtsAgeSeconds` consumers | ⛔ **FALSE — retracted 2026-09-09. There was ONE**, `deploy/debian-x64/kiosk/bin/radio-console-open`, installed to `/usr/local/bin/` and driving the launcher's VOICE row. This cell read *"**0** (third independent confirmation)"* — ⭐ **but three confirmations of a `src/`-scoped search are not independence, they are the same mistake three times.** Fixed by `KIOSK-3` (#635, #636) |
 | ⭐ **positive control** — `gvbridge/status`, `GvBridgeApiService`, `api/gvbridge` | **2 / 8 / 5 hits** — the grep works |
 
 **Every `gvbridge` route we actually call:** `adapter/mode`, `audio`, `sms/`, `sms/threads`,

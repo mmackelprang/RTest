@@ -68,8 +68,10 @@ age that reports the age of the last *load* means the next person reads the name
 builds on it — which is exactly how the six-week doctrine formed. A deprecation notice does not stop
 that; absence does.
 
-It is currently still present-and-deprecated on `main` (PR #78). Removal is **in flight now** in a
-follow-up PR. If you have any consumer we have not found, say so before we merge it.
+**It is now gone from `main`** (PR #79) — absent from the payload, not `null`. The backing state and all
+of its write sites went with it; it had exactly one reader. ⚠ **If you have a consumer we did not find,
+say so before we deploy** — after the deploy, a reader of `psidtsAgeSeconds` gets `undefined` rather than
+a stale number. Until then the box still serves it, still lying.
 
 ## 4. Both cookie routes now have a real status taxonomy
 
@@ -95,13 +97,35 @@ actually work, with an additive `outcome` naming the cause. You consume this end
 our plan or in the brief — the taxonomy did not exist until a review finding created it — so it reaches
 you later than the others and we are flagging it rather than burying it in a table.
 
-## 5. Also coming in the same follow-up PR
+## 5. Also in the same follow-up PR (#79) — the bell `acknowledge` endpoint is now idempotent
 
-**The bell `acknowledge` endpoint becomes idempotent.** Our 2026-07-29 reply told you a repeat ack
-returns `200 {"acknowledged": true}` and that you could *"retry freely on a flaky network."* The code
-returned `false`. **The owner chose to fix the code rather than retract the promise** — a repeat ack,
-and an ack of a failure that no longer exists, will both return `true`. Until it merges, `false` is
-still what you get; do not treat it as an error.
+Our 2026-07-29 reply told you a repeat ack returns `200 {"acknowledged": true}` and that you could
+*"retry freely on a flaky network."* **The code returned `false`.** The owner chose to fix the code
+rather than retract the promise — a repeat ack, and an ack of a failure that no longer exists, now both
+return `true`.
+
+The reasoning, since it decides a genuinely arguable case: what we published is a **post-condition** —
+*the failure is acknowledged* — not a **delta** — *you were the one who changed it*. The endpoint was
+answering the delta. Internally the tracker still reports whether a given call actually changed state,
+because that is useful; it just no longer leaks onto a wire contract that promised something else.
+
+⚠ **This is a behaviour change on a body you consume.** If anything on your side reads
+`acknowledged: false` as "the ack did not take" and retries or surfaces an error, it will stop doing so.
+Until we deploy, `false` is still what the box returns; do not treat it as an error either way.
+
+**And one thing our own pre-merge review found, which we would rather tell you than let you discover.**
+Making the endpoint answer `true` was not by itself enough to make *"retry freely"* true. A repeat ack
+used to return early **without re-writing the state file** — so if the original ack's disk write never
+landed (the failure a retry is *most* likely to meet alongside a dropped response), your retry would
+have been told `true` and still written nothing, and the dismissal would not have survived the next
+restart. That is now fixed in the same PR: a repeat ack re-persists, so **a retry actually repairs a
+write that did not land** rather than politely agreeing with you. Verified end-to-end, not just in a
+unit test — we forced the on-disk state back to unacknowledged behind a running server, retried the ack
+over HTTP, and confirmed the file was repaired.
+
+This is worth naming plainly because it is the fourth instance on this contract of the same thing: the
+delivered prose described a stronger guarantee than the delivered code. This time the review caught it
+before you did.
 
 ## 6. What the deploy will change on the box
 
@@ -133,3 +157,12 @@ the incident. On an ordinary day it would cut nearly all of it.
 than accepting: that `psidtsMintedAtUtc` is genuinely nullable in the payload, that the `502`/`503`
 split behaves as described, and — the one that would cost you most if we are wrong — that `saved` on
 `POST /api/gvbridge/cookies` now reports honestly.
+
+**And two asks specific to §3 and §5, both of which change something you already consume:**
+
+1. **`psidtsAgeSeconds` — one last check for a consumer.** We are going on your retraction plus a grep of
+   your `src/`. A grep does not see a dashboard template, a saved query, an alert rule, or an operator
+   runbook. If the name appears in any of those, tell us before we deploy; the field is cheap to bring
+   back and expensive to discover missing at 2am.
+2. **`acknowledged` — confirm nothing keys off `false`.** The change is strictly in your favour if you
+   ignore the value, and a silent behaviour change if you branch on it.
