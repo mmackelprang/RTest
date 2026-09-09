@@ -1950,6 +1950,38 @@ broadcast, with nothing logged.
 
 ---
 
+### KIOSK-3 — The desktop launcher's VOICE row read a field RotaryPhone was about to delete, and our own "zero consumers" grep was scoped to the wrong half of the repo.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#635](https://github.com/mmackelprang/RTest/pull/635) |
+| Plan | _no plan doc — the row's dossier carried the whole brief_ · [ADR-035](../design/DECISION-LOG.md) |
+| Spec / handoff | [`HANDOFF-kiosk-desktop-launcher.md` §5.3](design-handoffs/HANDOFF-kiosk-desktop-launcher.md) — **superseded by this row**, banner added, historical text left intact |
+| Depends on | — _(no row dependency to build. ⛔ Had to LAND BEFORE RotaryPhone's #79.)_ |
+| Branch | `fix/kiosk-3-launcher-honest-voice-predicate` |
+
+**Detail: [`queue/KIOSK-3.md`](queue/KIOSK-3.md)** — which carries the defect, the sequencing decision, and the reason the field was not simply kept.
+
+Merged 2026-09-09. ⚠ **Merged, not deployed** — deliberately held for the coordinator's coordinated two-service deploy.
+
+⛔ **`setup-kiosk.sh` MUST re-run for this to reach the box, and that is not what a deploy does.** Verified rather than inferred: `/usr/local/bin/radio-console-open` was dated **Aug 18 21:55**, untouched by every deploy since `KIOSK-2`, and still contained `psidtsAgeSeconds`. `Deploy-ToLinux.ps1` only ever *calls* `radio-kiosk-exit`/`radio-kiosk-launch`. **And the box has no checkout of this repo**, so the directory has to be copied over first. Both the blessed and the surgical install paths are in the PR body.
+
+⭐ **The field was dishonest in BOTH directions, which is why keeping it was never on the table.** Present, it reported a dead session as Online — reproduced independently in our own lane at 14:39Z, where the live box served `psidtsAgeSeconds: 34`, deep inside its own "healthy" band, alongside `cookiesValid:false, degraded:true` in the same payload. Absent, the empty-value guard would have pinned VOICE amber on every launch forever.
+
+⛔ **Two RED failures the row did NOT predict, and both were pre-existing with the field still present:** `available:false` and `available` absent both read **Online**. The old predicate had a silent-Online hole of its own; it simply reached it through a different field than the one the guard was written to cover.
+
+⛔ **Pre-merge review found two HIGHs, and the first is the sharpest thing in the cycle.** The 120 s gate was justified with *"pinned by `MeasuredSixtySecondCadence_StaysHealthy` so a cadence change fails a test"* — **false, and INHERITED verbatim from that test's own `<remarks>` rather than invented here.** The test is a `FakeTimeProvider` plus a literal `AddSeconds(-60)`; it never observes RotaryPhone and pins the *threshold*, not the cadence. Corrected in both places, and the honest statement recorded: **nothing detects a cadence slip**, and a slip past 120 s reproduces this row's defect through another field. ⭐ *A reason inherited from another file is not thereby verified.*
+
+**HIGH-2:** a pre-1970 timestamp read as "no signal", i.e. Online. `date -d` prints a negative epoch, and the digits-only guard took the leading `-` for a parse failure — routing the most stale reading obtainable onto the healthy arm. `0001-01-01T00:00:00Z` is exactly what .NET's `DateTime.MinValue` serialises to: a bridge that has **never** had a successful call.
+
+⭐ **The asymmetry ADR-032 established is PER-FIELD, not a property of the payload** — caught mid-build by the coordinator, against a corrected upstream contract. `available` is the anchor and must be present-and-true; `psidtsMintedAtUtc` goes the other way again, its `null` meaning UNKNOWN and explicitly not healthy. The first draft of the launcher's comments stated the rule uniformly, which would have reimported the very defect the row removes.
+
+⚠ **ADR-032 forbids reusing `IsHealthy` for a status display without re-deriving it, and the VOICE row IS one.** The exception is now argued on the record rather than assumed: this surface's cry-wolf rule inverts a banner's priorities, its amber is unactionable from a panel with no keyboard, and a term reading absence as ill would pin the row.
+
+⭐ **The lesson that outlives the row: a positive control validates the INSTRUMENT, never the SEARCH SPACE.** We told RotaryPhone three times the field had zero consumers, once citing a positive control as proof of method. The grep worked perfectly and was pointed at `src/`; the consumer was a shell script. **Re-derived here at full scope** — the whole tree minus `*.md`, plus all 28 shell scripts — and after this PR zero live readers remain.
+
+---
+
 ---
 
 ## Historical narrative
