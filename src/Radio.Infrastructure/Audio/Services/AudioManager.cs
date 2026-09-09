@@ -118,10 +118,35 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     // If this source is currently active, update the live playback component gain
     if (_activeSource != null && _activeSource.Type == sourceType && _playbackService != null)
     {
-      _playbackService.SetGainOffset(_activeSource.Id, gain);
-      _logger.LogInformation(
-        "Applied live gain offset {Gain:F2} to active source {SourceName}",
-        gain, _activeSource.Name);
+      var applied = _playbackService.SetGainOffset(_activeSource.Id, gain);
+
+      if (applied)
+      {
+        _logger.LogInformation(
+          "Applied live gain offset {Gain:F2} to active source {SourceName}",
+          gain, _activeSource.Name);
+      }
+      else if (_activeSource.State == AudioSourceState.Playing)
+      {
+        // ⚠ THE AUD-2 SIGNATURE. The source reports Playing, yet nothing is registered under its
+        // Id — the two layers disagree about this source's key, and the user's gain slider is
+        // moving nothing. Warning, not Information: since LOG-11 radio-api's journal carries
+        // Warning and above, and Radio.API's Serilog "Radio" override floors at Information, so
+        // Debug would be written nowhere at all. This is rare and user-visible; it should be loud.
+        _logger.LogWarning(
+          "Gain offset {Gain:F2} did NOT reach {SourceName}: no player or component is registered " +
+          "under SourceId={SourceId} while the source reports Playing. The source's playback key " +
+          "and its IAudioSource.Id have diverged.",
+          gain, _activeSource.Name, _activeSource.Id);
+      }
+      else
+      {
+        // Not a failure. AudioManager stores a gain offset for a source that is not playing on
+        // purpose, and SoundFlowPlaybackService reads it back at registration time.
+        _logger.LogDebug(
+          "Stored gain offset {Gain:F2} for {SourceName} (State={State}); it applies when playback starts.",
+          gain, _activeSource.Name, _activeSource.State);
+      }
     }
   }
 
@@ -289,9 +314,25 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       if (_playbackService != null && _preferencePersistence != null)
       {
         var gain = _preferencePersistence.GetSourceGain(source.Type);
-        _playbackService.SetGainOffset(source.Id, gain);
-        _logger.LogDebug("Applied gain offset {Gain:F2} for source {SourceName} ({SourceType})",
-          gain, source.Name, source.Type);
+        var applied = _playbackService.SetGainOffset(source.Id, gain);
+
+        if (!applied && source.State == AudioSourceState.Playing)
+        {
+          _logger.LogWarning(
+            "Gain offset {Gain:F2} did NOT reach {SourceName} ({SourceType}): nothing is registered " +
+            "under SourceId={SourceId} while the source reports Playing.",
+            gain, source.Name, source.Type, source.Id);
+        }
+        else
+        {
+          // applied=false with a non-Playing source is the NORMAL case here, not a failure:
+          // FilePlayer has canAutoPlay=false (:261), so a switch to it stores the offset with
+          // nothing yet registered, and PlayFileAsync picks it up at SoundFlowPlaybackService.cs:148.
+          // Reporting `applied` rather than asserting success is the whole point of this change.
+          _logger.LogDebug(
+            "Gain offset {Gain:F2} for source {SourceName} ({SourceType}), applied={Applied}",
+            gain, source.Name, source.Type, applied);
+        }
       }
 
       // Persist the source selection
@@ -476,11 +517,34 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     // Convert duck level percentage (0-100) to multiplier (0.0-1.0)
     var multiplier = e.NewLevel / 100f;
-    _playbackService.SetDuckingMultiplier(_activeSource.Id, multiplier);
+    var applied = _playbackService.SetDuckingMultiplier(_activeSource.Id, multiplier);
 
     _logger.LogDebug(
-      "Ducking level: {PrevLevel:F0}% -> {NewLevel:F0}% (multiplier={Mult:F2}, source={Source})",
-      e.PreviousLevel, e.NewLevel, multiplier, _activeSource.Name);
+      "Ducking level: {PrevLevel:F0}% -> {NewLevel:F0}% (multiplier={Mult:F2}, source={Source}, applied={Applied})",
+      e.PreviousLevel, e.NewLevel, multiplier, _activeSource.Name, applied);
+
+    // ⚠ THE TransitionComplete GATE IS LOAD-BEARING AND MUST NOT BE REMOVED AS REDUNDANT.
+    // This handler runs once per fade STEP, and DuckingService.CalculateFadeParameters gives
+    // FadeSmooth Math.Max(5, requestedDurationMs / 16) steps (DuckingService.cs:491-495) — ~18 for a
+    // 300 ms fade, and attack plus release is ~36 calls per duck cycle. Warning on every step would
+    // put dozens of lines into journald per TTS announcement, on a box where log volume correlates
+    // with audible audio distortion (CLAUDE.md § Deployment). TransitionComplete is raised at most
+    // once per transition — on the final fade step, or on the instant/single-step early returns
+    // (DuckingService.cs:417/:426/:455) — which bounds this at one line per transition, so two per
+    // attack-and-release cycle.
+    //
+    // ⚠ A CANCELLED fade breaks out of the step loop and raises NO completing event
+    // (DuckingService.cs:438-442), so a duck that is preempted mid-fade emits nothing here. That is
+    // acceptable and is the reason the gate is safe rather than lossy: key divergence is a property
+    // of the source, not of one transition, so the next transition that does complete reports it.
+    // Do NOT "fix" the gap by warning on every step.
+    if (!applied && e.TransitionComplete && _activeSource.State == AudioSourceState.Playing)
+    {
+      _logger.LogWarning(
+        "Ducking multiplier {Mult:F2} did NOT reach {SourceName}: nothing is registered under " +
+        "SourceId={SourceId} while the source reports Playing. Event audio is not ducking this source.",
+        multiplier, _activeSource.Name, _activeSource.Id);
+    }
   }
 
   /// <summary>
@@ -549,14 +613,28 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     // came out of an `else` and now sits behind an early `return`, two spaces to the left — and an
     // earlier revision of this comment said "byte for byte", which is the kind of claim a diff
     // falsifies at a glance.
+    var restored = false;
     if (_activeSource != null)
     {
-      _playbackService.ClearDuckingMultiplier(_activeSource.Id);
+      restored = _playbackService.ClearDuckingMultiplier(_activeSource.Id);
+
+      if (!restored && _activeSource.State == AudioSourceState.Playing)
+      {
+        _logger.LogWarning(
+          "Ducking release did NOT reach {SourceName}: nothing is registered under SourceId={SourceId} " +
+          "while the source reports Playing. The source may be left at its ducked volume.",
+          _activeSource.Name, _activeSource.Id);
+      }
     }
 
+    // ⚠ "volumeRestored" is REPORTED, not ASSERTED. The wording this replaces — "Ducking ended:
+    // volume restored, activeEvents={EventCount}" — was printed unconditionally: with a null
+    // _activeSource (nothing to restore) and with a missed key (nothing restored) it said exactly
+    // what it says on success. docs/HANDOFF-GA-PUNCH-LIST.md cites this family of lines as evidence
+    // that ducking works end to end; it never was such evidence, and AUD-2 corrects that entry.
     _logger.LogInformation(
-      "Ducking ended: volume restored, activeEvents={EventCount}",
-      e.ActiveEventCount);
+      "Ducking ended: activeEvents={EventCount}, volumeRestored={Restored}",
+      e.ActiveEventCount, restored);
   }
 
   /// <inheritdoc/>
