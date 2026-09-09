@@ -969,4 +969,86 @@ path. A UAT report claiming it demonstrated pass-through would be wrong.
 
 ---
 
+## ADR-034: A SignalR broadcast in this API cannot fault, so cache-advance ordering is precautionary — and a backplane is what would make it load-bearing
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`UI-13`. Six change-detection caches in `AudioStateUpdateService` were assigned **before** the
+`await SendAsync` that broadcast them. The row was filed on the premise that a failed broadcast
+strands the cache, so the delta is never re-sent.
+
+⛔ **The premise is false, and establishing that took more work than the fix.** `SendAsync` does not
+throw on a failed broadcast. Verified two independent ways: by reading `dotnet/aspnetcore`
+`release/10.0`, and by running a real Kestrel host with real WebSocket clients against
+`Microsoft.AspNetCore.App` 10.0.11.
+
+- With no connection matching the send, `DefaultHubLifetimeManager` returns `Task.CompletedTask`
+  **without inspecting the token at all**.
+- Every other failure is charged to the **connection**, not the caller: `HubConnectionContext`
+  catches it, logs `Failed writing message`, aborts the connection, and hands back a **successful**
+  `FlushResult`. Measured: **129 consecutive sends to a hard-killed socket faulted none**; an
+  unserializable payload dropped the client while the caller saw success in 8–10 ms.
+- The single escape is an `OperationCanceledException` raised while the **caller's** token is
+  cancelled — the filter at `HubConnectionContext.cs:361` deliberately does not catch that one, and
+  both `WriteSlowAsync` overloads additionally await `_writeLock.WaitAsync(cancellationToken)`
+  *outside* their `try`, where a cancelled token escapes unfiltered.
+
+⭐ **And the only exception `SendAsync` can produce is the one `ExecuteAsync` treats as "stop and
+exit."** That token is always `ExecuteAsync`'s `stoppingToken`, which `BackgroundService` cancels only
+at host shutdown, and `ExecuteAsync`'s own `OperationCanceledException` filter catches exactly that and
+breaks. `Program.cs:134` registers the service `AddHostedService` only, so nothing else holds the
+instance. **The stranded cache dies with the process.**
+
+### Decision
+
+**Advance a change-detection cache only after the send that broadcasts it — and record why that is
+currently unobservable, as a precondition rather than as a guarantee.**
+
+The ordering is **precautionary today**. What makes it safe is not a property of this file; it is a
+property of the default in-process lifetime manager plus the fact that one token reaches these call
+sites. **Both can change silently.** A Redis or Azure SignalR backplane swaps in a lifetime manager
+whose send genuinely faults on a backplane outage; passing any token other than `stoppingToken` makes
+cancellation reachable *while the service keeps running*. Neither would raise an error at the call
+site — both would produce panels that quietly stop updating, the `AUD-12` / `GV-12` failure family.
+
+### ⚠ What a completed send does not prove, and why the obvious justification is wrong
+
+The natural way to justify this ordering is *"don't record that the clients have it until they do."*
+**That reason is false and the evidence against it is the same evidence above:** a completed
+`SendAsync` means only that the call did not fault. It has never meant delivery. The honest statement
+is narrower — the cache holds *the last state whose broadcast returned without faulting*, which is the
+strongest fact this path can hold. Advancing it before the `await` weakens even that, to *the last
+state we intended to send*.
+
+This distinction matters beyond the comment: a future reader who believes the send confirms delivery
+will design retry or acknowledgement on a foundation that does not exist.
+
+### The trade this buys, stated rather than implied
+
+On a **transient** fault the new ordering is strictly better and is the only version that recovers.
+On a **persistent** one it retries every ~500 ms, logs every tick, and **starves every check ordered
+behind the failing one** — `CheckSourceChangedAsync` runs first, so a permanent fault there means the
+other five never run again. On `main` the service instead went completely silent after one pass and
+never recovered even after the fault cleared. The trade is accepted; bounded retry/backoff is out of
+scope and was deliberately not filed, because the fault is unreachable today.
+
+### Consequences
+
+- The ordering is uniform across all six sites. Repairing one and leaving five would make the class
+  look handled, which is worse than leaving it alone.
+- Six per-site tests pin the ordering, and **five per-site guards** pin that the caches are still
+  advanced at all — a distinction that was measured, not assumed: with one guard, mutating a
+  different site's assignment to `null` left the whole suite green.
+- No `TimeProvider` seam was added. The service is timer-driven; the **defect is not**. The
+  `Check*Async` bodies read no clock, and the tests drive them directly.
+- No lock and no `volatile`. There is one writer per field, and adding synchronisation would imply a
+  concurrency that does not exist.
+
+**Plan of record:** [`design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->

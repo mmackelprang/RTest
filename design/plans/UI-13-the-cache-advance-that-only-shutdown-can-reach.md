@@ -167,9 +167,26 @@ Two corrections:
    counts `:453-454` as one site; it is one live site and one dead field. Task 1d moves both so the
    block stays internally consistent, but **only `:453` carries the behaviour.**
 
-⚠ **Deleting `_lastQueue` is out of scope.** It is not currently flagged (the 47-warning baseline is
+~~⚠ **Deleting `_lastQueue` is out of scope.** It is not currently flagged (the 47-warning baseline is
 all `IDE0011`), and a dead-code deletion inside a mechanical diff is the thing `UI-12` §7 declined for
-`ConfigChanged`. **File it; do not fold it in.**
+`ConfigChanged`. **File it; do not fold it in.**~~
+
+⛔ **STRUCK 2026-09-09 BY THE BUILDER — `_lastQueue` WAS DELETED, and the plan's stated reason did not
+survive contact with `git log`.** This plan classed it as ambiguous dead code. It is not ambiguous:
+`_lastQueue` was the **original** queue change-detection cache, read by
+`HasQueueChanged(_lastQueue, currentQueue)`. Commit **`d465cdd2`** replaced that comparison with the
+cheaper `HasQueueSnapshotChanged(_lastQueueSnapshot, snapshot)` **and deleted `HasQueueChanged`
+itself**, leaving the write orphaned in the same commit. It is a completed-refactor leftover, not a
+half-finished feature — the distinction the "file it separately" instruction existed to protect.
+
+Three things decided it:
+1. **The deletion is compiler-verified.** Removing the declaration means any missed reader fails the
+   build loudly. It did not; and the pre-merge reviewer independently confirmed no reader in `src/`
+   or `tests/`.
+2. **Keeping it cost more than removing it.** Task 1d's own replacement block below shipped a
+   three-line comment whose entire content was *"this line does nothing"*, inside the very block this
+   PR rewrites — and that comment would itself need deleting when the follow-up row landed.
+3. ⛔ **Do NOT file the follow-up 🔵 row §6 asks for. The work is done.**
 
 ### 0.4 `C-504` — no site is deliberately ordered that way. The shape is copied, and was never reasoned about
 
@@ -373,6 +390,18 @@ about that even though it is wrong about the trigger.
 for a broadcast that did not land.
 
 **1d.** In `CheckQueueAsync`, replace `:453-457` with:
+
+⛔ **AMENDED 2026-09-09 — this block is NOT what shipped.** `_lastQueue` was deleted rather than
+moved (§0.3, struck note). What shipped is:
+
+```csharp
+    await _hubContext.Clients.Group("Queue")
+      .SendAsync("QueueChanged", currentQueue, cancellationToken);
+    _lastQueueSnapshot = snapshot;
+    _logger.LogDebug("Broadcast QueueChanged with {Count} items", currentQueue.Count);
+```
+
+~~Superseded original:~~
 
 ```csharp
     await _hubContext.Clients.Group("Queue")
@@ -839,7 +868,8 @@ A control must hold the **behaviour** fixed and vary only the **shape** (`UI-12`
 | `M1` | Revert **only** Task 1f (`_lastVolume` back above the send) | `VolumeDeltaIsReSentAfterACancelledBroadcast` — **and nothing else** | the other five site tests + both regression tests |
 | `M1'` | Repeat `M1` independently for each of 1a–1e | that site's test only | all others |
 | `M2` | Revert all of Task 1 | all six site tests | both regression tests |
-| `M3` | Delete the assignment entirely at one site (never advance the cache) | `AnUnchangedWorldIsBroadcastExactlyOnceWhenNothingFails` | the six site tests |
+| ~~`M3`~~ | ~~Delete the assignment entirely at one site (never advance the cache)~~ ⛔ **CANNOT BE RUN — see below** | — | — |
+| `M3'` | **The compilable replacement.** Assign `null` instead of the value at one site | that site's `AnUnchanged…IsBroadcastExactlyOnce` | everything else |
 | ⭐ `C1` | **THE CONTROL.** Keep the assignment after the send but move it *below* the `_logger.LogDebug` line at each site | ⛔ **nothing** — 8/8 green | all |
 
 ⚠ **`M1'` is the one that must not be skipped**, and it is the whole reason there are six tests rather
@@ -850,6 +880,37 @@ an illusion.
 ⭐ **`C1` is what makes these behavioural rather than positional.** If `C1` reds, the tests are pinning
 "the assignment is on the line immediately after the send" — a shape — instead of "the assignment
 happens after the send" — the behaviour.
+
+---
+
+### ⛔ 3.3 CORRECTIONS FROM THE BUILDER'S ACTUAL RUN, 2026-09-09
+
+**1. `M3` as written cannot be performed — the compiler stops it before any test does.** Deleting
+`_lastVolume = currentVolume;` leaves the field read (`HasVolumeChanged(_lastVolume, …)`) but never
+written, which is **`CS0649`**, and Release treats warnings as errors:
+
+```
+error CS0649: Field 'AudioStateUpdateService._lastVolume' is never assigned to, and will always have
+its default value null
+```
+
+`M3'` (assign `null`) is the compilable equivalent and was run instead: **1 failed, 7 passed**,
+failing exactly `AnUnchangedWorldIsBroadcastExactlyOnceWhenNothingFails`. Same class of finding as
+`UI-14`, whose two non-compiling mutations were reported as measured rather than adjusted to fit.
+
+**2. `C1` does not apply to site 1a**, and saying "at each site" implied six. `CheckSourceChangedAsync`'s
+assignment already sits below its `LogInformation` — it trails the whole `if (!isFirstRun)` block — so
+there is no distinct "below the log" position for it. `C1` was run on the five sites where the
+distinction exists: **8/8 green**, so the tests are behavioural, not positional.
+
+**3. ⭐ `M3` as scoped was too weak, and the gap it left was MEASURED.** One regression guard covered
+`CheckVolumeAsync` alone. Setting `_lastPlaybackState = null` in place of its assignment left **all 8
+tests GREEN** while re-broadcasting an unchanged state twice a second forever — a client storm on a
+box where `CLAUDE.md` records CPU churn as audible. **Four more per-site guards were added**
+(playback, now-playing, queue, radio state), each verified to fail on exactly its own mutation and
+nothing else. `CheckSourceChangedAsync` needs none: never advancing `_lastActiveSourceType` keeps
+`isFirstRun` true, so its own cancellation test stops throwing and fails unaided. Found by the
+pre-merge reviewer, not by the plan.
 
 ---
 
@@ -921,7 +982,8 @@ distortion on this box.
   *"SignalR broadcasts in the API cannot fault except by caller-token cancellation; cache-advance
   ordering in `AudioStateUpdateService` is therefore precautionary, and adding a backplane makes it
   load-bearing."*
-- **File the `_lastQueue` dead-field removal** as a new 🔵 row (§0.3). Not folded in.
+- ~~**File the `_lastQueue` dead-field removal** as a new 🔵 row (§0.3). Not folded in.~~
+  ⛔ **STRUCK — folded in and shipped. Do not file the row** (§0.3, struck note).
 - No `design/FUTURE-WORK.md` or `design/INTEGRATIONS.md` change — nothing is stubbed and no integration
   surface moves.
 
@@ -943,4 +1005,4 @@ distortion on this box.
   `CLAUDE.md` § *Pre-Merge Review* exists to catch.
 - ⛔ **Does not change `VisualizationBroadcastService`.** It was checked: `:106-130` broadcasts
   unconditionally with no change-detection cache, so it does not have this shape.
-- **Does not delete `_lastQueue`.** §0.3.
+- ~~**Does not delete `_lastQueue`.** §0.3.~~ ⛔ **STRUCK — it does. See §0.3's struck note.**
