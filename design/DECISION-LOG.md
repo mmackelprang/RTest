@@ -1051,4 +1051,148 @@ scope and was deliberately not filed, because the fault is unreachable today.
 
 ---
 
+## ADR-035: The asymmetry that lets a predicate survive a deleted field is PER-FIELD, and the anchor must be a field that is always sent
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`KIOSK-3`. The desktop launcher (`deploy/debian-x64/kiosk/bin/radio-console-open`, installed to
+`/usr/local/bin/`) derived its `VOICE` row from `psidtsAgeSeconds` on RotaryPhone's
+`/api/gvbridge/status`. Their PR #79 **removes** that field. With it absent, the launcher's
+empty-value guard fired on every launch and `VOICE` would have read *"Needs sign-in"* permanently,
+whatever Google Voice was doing.
+
+⭐ **The field was dishonest in BOTH directions, which is why keeping it was never an option.**
+RotaryPhone proved it is an age-of-last-**load** clock rather than a credential clock: it read
+**608** — inside the band the launcher called healthy — while their bridge had been dead for 83
+minutes on 2026-09-08. Reproduced independently in our lane on 2026-09-09T14:39Z, where the live box
+served `psidtsAgeSeconds: 34` alongside `cookiesValid: false` and `degraded: true` in the same
+payload. Present, it reported a dead session as `Online`; absent, it pinned the row amber forever.
+
+⛔ **How it was found is the part that outlives the row.** We told RotaryPhone three times that
+`psidtsAgeSeconds` had zero consumers, once citing a positive control as proof of method. **The grep
+was scoped to `src/`. The consumer is a shell script.** ⭐ *A positive control validates the
+INSTRUMENT, never the SEARCH SPACE.* Every future cross-repo consumer claim must search `deploy/`,
+`tools/`, `docs/` and all shell scripts, and **state the scope searched alongside the claim.**
+
+### Decision
+
+Port `GvBridgeHealth.IsHealthy` (`GV-12`, ADR-032) into `classify_voice()` term for term rather than
+invent a second predicate, and **share one threshold**: `GV_STALE_AFTER=120` is identical by intent
+to `LastSuccessStaleAfter`. Two consumers of one field disagreeing about what "healthy" means can
+contradict each other about the same box at the same instant, on a panel whose entire job is to be
+believed.
+
+### The three rules that earned their place
+
+**1. ⛔ THE ASYMMETRY IS PER-FIELD, NOT A PROPERTY OF THE PAYLOAD.** ADR-032's rule — *present-and-bad
+is unhealthy, ABSENT contributes nothing* — holds for `cookiesValid`, `degraded`, `authBlackout` and
+`lastApiSuccessAt`. It does **not** generalise:
+
+- `available` is the **anchor** and the inverse case: it must be **present and true**.
+- `psidtsMintedAtUtc`, which RotaryPhone add in the same release, goes the other way again — their
+  contract states its `null` means **UNKNOWN, which is not healthy** (CDP-extracted cookies carry no
+  readable issue time), and it has no upper bound. Absent there is *"I cannot tell you"*, not an
+  absence of bad news. This file does not read it; anything that later does must treat null as
+  "cannot assert healthy".
+
+⚠ **The first draft of the launcher's comments stated the asymmetry as a general rule about the
+payload and named `available` as "the single exception".** That was caught mid-build, not by review.
+Applying the rule uniformly would have reimported the exact defect the row exists to remove — and a
+comment claiming a uniform invariant the payload does not have is `CLAUDE.md` § *Pre-Merge Review*'s
+named failure mode verbatim.
+
+**2. A safety property has to MOVE when its input is deleted — preserving the code is not preserving
+the property.** The old guard existed so an unreadable value could not report a dead session as
+`Online`, and it hung off the field being removed. It now hangs off `available`: RotaryPhone always
+send it, and it read `available:false` for all 83 minutes of the outage. That single move is what
+keeps an empty, truncated or non-JSON body unhealthy — **and it closed a hole the old guard never
+covered**, since `available:false` previously read as `Online`.
+
+**3. A timestamp without a zone is REFUSED, not guessed.** Measured on the box: `date -d
+"2026-09-09T14:30:50"` → 1788978650 and the same instant with a `Z` → 1788964250 — **four hours
+apart**, because GNU date reads an unzoned value as *local* and the box runs EDT. Either guess is
+permanently past a 120 s gate, which would pin the row. So an uninterpretable timestamp is treated as
+**no signal**, the same answer as a value we did not receive, for ADR-032's reason: a term that can
+never clear pins the state. Nothing is lost, because the safety property is carried by the anchor
+rather than by this term.
+
+### ⛔ Two things pre-merge review caught that the build had got wrong
+
+**1. A comment's stated reason was false, and it had been INHERITED rather than invented.** The
+120 s gate was justified with *"pinned on the C# side by `MeasuredSixtySecondCadence_StaysHealthy`
+so a cadence change fails a test instead of silently turning this row amber."* That test
+(`GvBridgeStatusServiceTests.cs:99`) is a `FakeTimeProvider` plus a literal `AddSeconds(-60)`: it
+never contacts the box and never observes RotaryPhone, so it **cannot fail when the cadence
+changes.** It pins the THRESHOLD against being lowered. ⭐ **The false claim was copied from that
+test's own `<remarks>`, which said the same thing** — so the fix was made in both places. The honest
+statement is that **nothing detects a cadence slip**, and if RotaryPhone's cadence ever exceeds
+120 s the launcher goes amber on every tap with a green suite: the `KIOSK-3` defect through a
+different field. A known, unmonitored assumption, now labelled as one.
+
+**2. A pre-1970 timestamp read as "no signal", i.e. healthy.** `date -d` prints a NEGATIVE epoch for
+a pre-1970 instant, and the digits-only guard treated the leading `-` as a parse failure — routing
+the *most stale reading obtainable* onto the no-signal arm. `date -d "0001-01-01T00:00:00Z" +%s`
+gives `-62135596800`, and `0001-01-01T00:00:00Z` is exactly what .NET's `DateTime.MinValue`
+serialises to: **what a bridge that has never had a successful API call would report.**
+`GvBridgeHealth.IsHealthy` calls that same body unhealthy, so the two consumers disagreed on it and
+the "identical by intent" comment was untrue across that input class. Signed values are now accepted
+so the subtraction yields the huge positive age it is.
+
+⭐ **Both are the same lesson as rule 1 above, one level down: the reason a comment offers is the
+claim to check, and a reason inherited from another file is not thereby verified.** This is the
+fifth entry in this log to record that shape.
+
+### Verification
+
+**RED measured first, as its own commit: 12 passed / 9 failed**, the headline case being a post-#79
+payload with `psidtsAgeSeconds` deleted reading `needsignin`. **GREEN 32/32** after the review fixes,
+both on Windows and on the box under its own `bash` 5.2.21, `grep`, `sed` and coreutils 9.4.
+
+The harness pins the sourcing seam in the **executed** direction too, which nothing did before — its
+failure mode is the desktop icon silently becoming a no-op — and it now refuses to run without GNU
+`date`, because without that check eight of its nine `expect online` cases would have passed for the
+wrong reason on a BSD `date`.
+
+⚠ **Two divergences from `System.Text.Json` are accepted rather than fixed, and pinned by tests so a
+change to them is deliberate:** duplicate keys (this parser takes the first, JSON the last) and
+nested objects (read here as top-level, ignored there). Closing either needs a real JSON parser, and
+`:106-108` is why this file does not take that dependency. Neither shape occurs in any observed
+payload — but RotaryPhone are adding four `browserSession*` fields, so a nested object would want a
+re-check.
+
+Two of the nine RED failures were **not predicted by the queue row** and were pre-existing with the
+field still present: `available:false` and `available` absent both read **`Online`**. The old
+predicate had a silent-`Online` hole of its own — it simply reached it through a different field than
+the one the guard was written to cover.
+
+`date -d` parses the **real** wire format including its 7-digit fractional seconds
+(`2026-09-09T14:30:50.7537656Z` → 1788964250). ⚠ The queue row and its dossier both quoted the field
+as a bare `...T14:12:40Z`; the served value carries the fraction, and the fixture is a verbatim
+capture rather than a retyped one precisely so that cannot drift.
+
+Live on the box, both scripts' `--print-status` seconds apart agreed (`VOICE=online`, `TIER=silent`),
+and **68 consecutive samples** of the new predicate against the live bridge (14:44–14:53Z) returned
+**68 online / 0 amber**, max `lastApiSuccessAt` age **59 s** — an independent re-measurement of the
+60 s cadence rather than an inherited one, and the cry-wolf check §5.3 requires.
+
+⚠ **That check is nine minutes long and the §5.3 rule wants twenty-five** (plan step T15, rewritten
+for the new terms in this PR). And the four added terms are not equally evidenced: `authBlackout` has
+its 920 ms / 0-in-411 measurement, but **`cookiesValid:false` and `degraded:true` have no measured
+false-dialog rate at all.** A flap of exactly those two was seen once by hand at 14:39Z and cleared
+inside ~60 s. RotaryPhone say the 20-minute unvalidated-cookie churn behind it stops when their #78
+deploys, so the 68/68 is an upper bound taken *before* their fix — not a steady-state rate.
+
+⛔ **What is NOT proven, and must not be claimed:** that the post-#79 payload has the shape assumed
+here. #79 is merged and parked, not deployed, and our copy of RotaryPhone's wire-changes contract was
+a superseded draft all day. The minimal claim — *deleting `psidtsAgeSeconds` from a verbatim live
+capture must not turn the row amber* — does not depend on the rest of that shape being right, which
+is why it is the case the harness leads with.
+
+**Dossier:** [`docs/queue/KIOSK-3.md`](../docs/queue/KIOSK-3.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
