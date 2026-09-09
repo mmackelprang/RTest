@@ -68,6 +68,32 @@
   --surface-separator:      #1F1F22;
   --border-subtle:          var(--surface-separator);  /* alias for "subtle hairline" borders (PR A follow-up #1) */
 
+  /* ── Motion values (not surfaces) ──
+     UX-1. The skeleton shimmer's highlight stop, consumed by .skeleton-loading
+     and by nothing else. It sits here rather than in the group above because it
+     is a MOTION value: it exists to be swept across an element, not to be a
+     surface anything rests on.
+
+     ⛔ It is deliberately NOT --surface-overlay, which it borrowed until now.
+     That token has 22 other consumers (19 further rules in this file, plus three
+     inline styles in PlayHistoryPage.razor) including .surface-overlay's
+     backdrop-filter blur(20px), .rz-dialog, modals, bubbles, hover states and
+     two color-mix recipes — so raising it to a visible shimmer amplitude would
+     lighten twenty-odd unrelated surfaces. Count re-derived on main @143d678e.
+
+     56 (#38383F) is the OWNER'S value, not a derived one. It was chosen at the
+     panel on a five-value ladder (26 / 36 / 46 / 56 / 66) in a dark room on
+     2026-09-08 and again in daylight on 2026-09-09, against the two questions
+     "can you tell it moves" and "does it stay calm": 56 is the dimmest value
+     that answers yes and yes in both conditions. Delta against --surface-raised
+     is 36 on R·G (41 on B), six times the 6/255 that shipped before.
+     ⚠ The Designer's seed of 36/#242429 was measured BELOW the owner's
+     dark-room threshold and must not be restored.
+     ⛔ Do not add this token to the prefers-reduced-motion block below: that
+     rule replaces `background` wholesale with a flat rgba(255,255,255,0.05), so
+     the gradient never renders there and a reference would re-introduce one. */
+  --skeleton-shimmer-highlight: #38383F;
+
   /* ── Accent: Electric Cyan ── */
   --accent-primary:         #5CD4E8;
   --accent-hover:           #7EDDF0;
@@ -1101,10 +1127,30 @@ html, body {
 .page-transition-enter { animation: fadeIn var(--anim-duration-normal) var(--anim-ease-standard); }
 .page-transition-exit  { animation: fadeOut var(--anim-duration-normal) var(--anim-ease-standard); }
 
+/* UX-1. The shimmer was never broken — GV-8's UAT proved it runs three
+   independent ways — it was UNDETECTABLE, which is a different defect. The
+   highlight stop was --surface-overlay, 6/255 above the base, and the owner
+   reported that even in a dark room it was "very dim and not easy to see".
+   The middle stop is now its own token at 56, six times that delta.
+
+   ⚠ THE GEOMETRY IS DELIBERATELY UNCHANGED, and that is a decision, not an
+   omission. The Designer proposed also narrowing the ramp from 50% of the tile
+   to 15% (stops at 35%/65%) and rated it the larger half of the fix. The
+   harness that tested that geometry was afterwards found unable to measure it:
+   its highlight band sat on the element only ~0.49 s of each 1.5 s cycle, so
+   two-thirds of every cycle was static and the owner correctly read those
+   columns as not moving. The amplitude below was then chosen against THIS
+   geometry, in both lighting conditions. Shipping the narrowed ramp would ship
+   an unvalidated change underneath a validated one; whether it would allow a
+   lower amplitude is recorded as unknown in design/FUTURE-WORK.md.
+
+   background-size stays 200%: the tile is wider than the element, so exactly
+   one band is on screen (no barber-pole) and the 4W of travel per 1.5 s still
+   yields one pass per 750 ms. Keyframes and duration are untouched. */
 .skeleton-loading {
   background: linear-gradient(90deg,
     var(--surface-raised) 0%,
-    var(--surface-overlay) 50%,
+    var(--skeleton-shimmer-highlight) 50%,
     var(--surface-raised) 100%
   );
   background-size: 200% 100%;
