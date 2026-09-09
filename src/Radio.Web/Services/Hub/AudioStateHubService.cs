@@ -644,10 +644,26 @@ public class AudioStateHubService : IAsyncDisposable
   /// anyway; <c>MainLayout.OnNowPlayingChanged</c> discards the payload and re-renders.</item>
   /// </list>
   ///
-  /// ⚠ A dropped null is PERMANENT, which is what separates this from the guarded four. Nothing
-  /// re-sends it: AudioStateUpdateService only broadcasts on a CHANGE, so once its own
-  /// <c>_lastNowPlaying</c> records the silence, the intervening "nothing is playing" is gone and the
-  /// dock and sleep screen strand on the previous track until the next real track arrives.
+  /// ⚠ A dropped null STRANDS, and ⛔ NOT for the reason `UI-14`'s row and plan both gave. They said
+  /// "once <c>_lastNowPlaying</c> records the silence, the intervening 'nothing is playing' is gone
+  /// for good". That is backwards twice over, and pre-merge review caught it:
+  /// <c>_lastNowPlaying</c> is assigned from <c>AudioStateUpdateService.BuildNowPlayingDto</c>, which
+  /// cannot return null — and if it ever DID hold one, <c>HasNowPlayingChanged</c> returns true
+  /// unconditionally whenever either side is null (AudioStateUpdateService.cs:537-540), so the server
+  /// would re-broadcast on its next 500 ms poll. A cached null is the one thing that would NOT be
+  /// permanent.
+  ///
+  /// ⭐ The real mechanism lives in the only scenario where a null is reachable at all — one off the
+  /// untyped wire, never from the server's own state. The SERVER caches the NON-NULL "nothing is
+  /// playing" DTO it just sent; the CLIENT is what received a null and dropped it. Every later poll
+  /// compares against that cached snapshot, finds no change, and sends nothing. The dock and the
+  /// sleep screen strand on the previous track until a genuinely different track arrives.
+  ///
+  /// ⚠ Scoped to THIS event deliberately. "AudioStateUpdateService only broadcasts on a change" is
+  /// NOT true of the service as a whole — EventPlaybackChanged carries no change comparison anywhere
+  /// in its path. And what separates this from the four guarded events is not that their nulls are
+  /// re-sent, but how fast a wrong state self-corrects: RadioStateChanged re-broadcasts on the next
+  /// RDS change, where this one waits for a new track.
   ///
   /// 📌 No producer can send one today — <c>AudioStateUpdateService.BuildNowPlayingDto</c> returns a
   /// non-nullable type and always builds a <c>new NowPlayingDto { … }</c>. That is a property of the
@@ -676,8 +692,11 @@ public class AudioStateHubService : IAsyncDisposable
   /// notifies its own subscribers regardless.</item>
   /// <item><c>MainLayout.OnVolumeChanged</c> — early-returns; the mute chip is unchanged.</item>
   /// </list>
-  /// So the cost of dropping one is precisely: the panel's volume/mute readout stays stale until the
-  /// next non-null broadcast. Stated at that size on purpose.
+  /// So the cost of dropping one is: the panel's volume/mute readout stays stale until the next
+  /// non-null broadcast. Stated at that size on purpose. ⚠ Not "precisely" that, and pre-merge review
+  /// caught the overclaim — <c>OnVolumeChangedEvent</c> also stamps <c>_lastSignalREventUtc</c> before
+  /// it branches, which suppresses the panel's 30 s liveness poll, so dropping the null leaves that
+  /// poll un-suppressed and it can correct the readout early on a title change.
   ///
   /// 📌 No producer can send one — the sole sender builds a <c>new VolumeDto { … }</c>.
   /// </remarks>

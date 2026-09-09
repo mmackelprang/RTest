@@ -61,10 +61,18 @@ public class AudioStateHubServicePassThroughTests
   /// </summary>
   /// <remarks>
   /// ⚠ TWO subscribers, and the `seen` slots are SEEDED WITH NON-NULL SENTINELS. Both are deliberate.
-  /// Two subscribers means a regression to a direct `Event.Invoke(dto)` — which runs every handler but
-  /// returns only the LAST one's Task (`UI-7`) — is still observed here. The sentinels make
-  /// Assert.Null non-vacuous: without them a handler that never ran and a handler that ran with null
-  /// leave the same value behind, and the assertion would pass against a dropped payload.
+  ///
+  /// Two subscribers is what catches a fan-out that stops after the first handler, drops one, or
+  /// reorders them. ⛔ It does NOT catch a regression to a direct `Event.Invoke(dto)`, and an earlier
+  /// revision of this remark claimed it did — pre-merge review falsified that. Both handlers here are
+  /// SYNCHRONOUS, so `Invoke` on the multicast delegate runs both bodies to completion and leaves
+  /// `order` and `seen` in exactly the state the fan-out leaves them; observing the un-awaited
+  /// continuation (`UI-7`) needs a handler that actually suspends. `AsyncEventFanOutLintTests` in
+  /// Radio.Core.Tests is what gates that shape, not this file.
+  ///
+  /// The sentinels make Assert.Null non-vacuous: without them a handler that never ran and a handler
+  /// that ran with null leave the same value behind, and the assertion would pass against a dropped
+  /// payload.
   /// </remarks>
   [Fact]
   public async Task NullNowPlayingPayloadReachesEverySubscriberAsNull()
@@ -191,8 +199,11 @@ public class AudioStateHubServicePassThroughTests
   /// WORDING. That narrowing was right for a test that runs a real dispatch with subscribers attached,
   /// where an unrelated legitimate warning could appear later and fail the test for the wrong reason.
   /// Here no subscribers are attached and each seam's whole body is one LogDebug plus one NotifyAsync
-  /// over an empty invocation list — there is no legitimate Warning these three lines can emit. If a
-  /// future edit adds one, this test failing IS the intended conversation, not a false positive:
+  /// over an empty invocation list — there is no legitimate INFORMATION-OR-ABOVE line these three
+  /// lines can emit. ⚠ The threshold is Information, not Warning, and the Information half is the more
+  /// consequential one (see the sink note below); an earlier revision of this remark justified only
+  /// the Warning half. If a future edit adds either, this test failing IS the intended conversation,
+  /// not a false positive:
   /// src/Radio.Web/appsettings.json leaves the Console sink unrestricted, so under systemd every
   /// Warning from this process reaches `journalctl -u radio-web`, and NowPlayingChanged fires on every
   /// metadata change (`CLAUDE.md` § Deployment — log volume correlates with audible distortion).
@@ -207,6 +218,11 @@ public class AudioStateHubServicePassThroughTests
     await hub.OnVolumeMessageAsync(null);
     await hub.OnEventPlaybackMessageAsync(null);
 
+    // ⭐ PROVE THE INSTRUMENT BEFORE TRUSTING ITS SILENCE. This is the one assertion in this file an
+    // EMPTY sink would satisfy, so confirm the sink is wired before reading its quiet as news — the
+    // same standard AudioStateHubServiceEventDeclarationCensusTests states above its own verdict.
+    // The three seams each emit one LogDebug, so a live sink cannot be empty here.
+    Assert.Contains(sink, e => e.Level == LogLevel.Debug);
     Assert.DoesNotContain(sink, e => e.Level >= LogLevel.Information);
   }
 }

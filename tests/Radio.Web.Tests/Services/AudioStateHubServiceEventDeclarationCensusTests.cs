@@ -77,9 +77,16 @@ public class AudioStateHubServiceEventDeclarationCensusTests
       .Select(e => (e.Name, Info: context.Create(e.Field!)))
       // Func<T, Task> has two type arguments; Func<Task> has one.
       .Where(e => e.Info.GenericTypeArguments.Length == 2)
-      // SleepStateChanged is Func<bool, Task> — a value type cannot be null and ADR-033 does not
-      // reach it.
-      .Where(e => !e.Info.GenericTypeArguments[0].Type.IsValueType)
+      // SleepStateChanged is Func<bool, Task>, and a bool cannot be null.
+      // ⚠ NOT "a value type cannot be null" — an earlier revision said exactly that and pre-merge
+      // review falsified it: typeof(int?).IsValueType is TRUE. A bare IsValueType filter would
+      // silently drop a future Func<TimeSpan?, Task>, whose null IS representable and IS in ADR-033's
+      // pass-through half — the census would stay green while the eighth event landed ungated, which
+      // is the one failure this file exists to prevent. None exists today; the filter is written so
+      // that one would be SEEN rather than skipped.
+      // 📌 ADR-033's REJECT half genuinely cannot reach a value type: AcceptPayload<T> is where T : class.
+      .Where(e => !e.Info.GenericTypeArguments[0].Type.IsValueType
+        || Nullable.GetUnderlyingType(e.Info.GenericTypeArguments[0].Type) is not null)
       .ToList();
 
     // ⭐ PROVE THE INSTRUMENT BEFORE TRUSTING ITS VERDICT. If NullabilityInfoContext reported
