@@ -827,4 +827,92 @@ their uptime is unsettled and a restart risks causing the incident this fixes.
 
 ---
 
+## ADR-033: A delegate's declared nullability decides whether null is a contract violation or data, and the check must live where that is still known
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`UI-12`. `AudioStateHubService` raises fourteen events from SignalR `On<T>` lambdas. Four are
+declared `Func<T, Task>` with a **non-nullable** payload; three are declared `Func<T?, Task>` where
+null is **meaningful data**. Three of the four non-nullable ones carried an inline `dto != null`
+guard; `RadioStateChanged` did not, and the asymmetry was invisible without reading all fifteen raise
+sites together.
+
+⛔ **The guards were not evidence of intent.** `git log -S` on their original text traces every copy
+to `2cc41567` (`ENC-9a`, #491), which wrote one on `VisualizationModeChanged` — **an event
+`01220d0c` has since deleted.** `ENC-0`, `ENC-4` and `ENC-12` copied it verbatim. No commit message
+states a reason, and PR #491's thread never mentions null. Decisively, `db132192` performed the
+*identical* parameterless→typed-DTO transformation on `RadioStateChanged`, in the same file, and
+added no guard. **Same problem shape, opposite outcome, no incident either way — neither shape was
+reasoned about.** Boilerplate origin makes a guard unjustified by history; it does not make it wrong.
+
+### Decision
+
+**The declaration is the specification.**
+
+> An event declared `Func<T, Task>` cannot represent null, so a null payload is a contract violation
+> and must be **rejected at the boundary and logged**. An event declared `Func<T?, Task>` treats null
+> as **data** and must **pass it through**.
+
+All four non-nullable events now route through one shared `AcceptPayload<T>` helper that rejects and
+logs at Warning; the `_hubConnection.On<T>` type arguments became nullable, because the payload
+arrives from a **JSON deserializer across a process boundary where C# nullable annotations are
+erased.** A JSON `null` binds to `default(T)` whatever the file annotates. Declaring it non-nullable
+never prevented a null — it only hid that one was representable.
+
+⭐ **What makes the null unreachable today is a property of `radio-api`'s current source, not a
+property the type system enforces.** That distinction is the whole reason to guard a null that
+provably cannot arrive.
+
+### ⛔ The unification that would have caused the defect it was preventing
+
+`NotifyAsync<T>` already fans out all seven payload-carrying events. Putting `if (arg is null)
+return;` there unifies four guards in one line and deletes three copies. **It would also silently
+drop every `NowPlayingChanged(null)` — which means "nothing is playing" — stranding the now-playing
+dock on the previous track forever.**
+
+`NotifyAsync<T>`'s `T` is erased to a type parameter; it **cannot tell a contract violation from
+data, and must not try.** So the guard belongs **above the fan-out**, in the per-event handler, where
+the declared nullability is still visible. The obvious deduplication is the defect.
+
+### Why the row's own stated reason was false, and why the conclusion survived anyway
+
+The row refused a guard because one *"would silently drop a broadcast the panel receives today … the
+UI handles it."* **The UI does not handle it.** `RadioControlPanel.razor:1053` (`if
+(dto.RdsRelevantChanged)`) throws a `NullReferenceException`, which since `UI-7` is swallowed
+per-subscriber, while `NowPlayingPanel`, `RadioPage` and `AudioStateStore` each wipe their cached
+radio state and repaint. **A swallowed exception plus a three-surface state wipe is precisely the
+"failure wearing the costume of correct handling" the row invoked that principle against.**
+
+⭐ **The conclusion — "do not just add the guard" — was right; the reason was not.** A plan that
+inherited the reasoning would have reached the right shape by luck and defended it with an argument
+that collapses on first contact with one line of a subscriber.
+
+### Verification, and the honest limit of it
+
+The guard lives inside an `On<T>` lambda that needs a **started** `HubConnection`; every fixture runs
+on `OfflineHubTransport`. And `HubEventFire` fires the **event**, which is downstream of the guard —
+**a test through it passes whether the guard is present, absent or inverted.** So the `internal
+On…MessageAsync` seam is the substance of this row, not scaffolding; it mirrors `AudioStateStore`'s
+own extraction at `:230-243`.
+
+Because the tests could not exist before the seam, RED was shown by mutation. Recorded results:
+deleting the guard fails 2; downgrading the rejection log fails 4; inverting the helper fails 8/8.
+
+⚠ **The plan's control mutation was mis-specified and this is worth carrying.** It said restoring the
+old inline guard while dropping the shared helper must stay **green** — it cannot, because this row
+deliberately *adds* audible rejection and the tests pin that too. The corrected control — inline
+guard **plus** inline log — is green, which is what actually proves the tests pin **behaviour rather
+than the refactor's shape.** A control that cannot pass is not a control; it is a second mutation.
+
+📌 **Unobservable in production, and the PR says so.** A null cannot arrive, so no UAT can
+demonstrate this guard. The unit tests are its only evidence, and a UAT report claiming otherwise
+would be wrong.
+
+**Plan of record:** [`design/plans/UI-12-the-null-that-cannot-arrive.md`](plans/UI-12-the-null-that-cannot-arrive.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
