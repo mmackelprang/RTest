@@ -169,6 +169,43 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
     Assert.Contains("gitSha", body, StringComparison.OrdinalIgnoreCase);
   }
 
+  /// <summary>
+  /// The <em>other</em> real Web-side API route is not shadowed either.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// There are exactly two real <c>/api/*</c> routes on this service, and the whole risk of the
+  /// terminal rule is shadowing one of them. <c>RealApiRoute_StillWins…</c> covers
+  /// <c>/api/health/version</c>; this covers <c>/api/albumart/{filename}</c>, which the plan left
+  /// untested on the grounds that it proxies outward to Radio.API and its status therefore depends on
+  /// whether a Radio.API happens to be listening — an unstable oracle.
+  /// </para>
+  /// <para>
+  /// ⭐ <b>That reasoning is right about the status and wrong about this assertion.</b> The oracle here
+  /// is not "what status did it return" but "did the terminal rule claim this path", and that is
+  /// stable across all three reachable outcomes: Radio.API up with the file (<c>200</c> + image),
+  /// up without it (<c>404</c>, no content type, via <c>Results.NotFound()</c>), or absent entirely
+  /// (connection refused → the same <c>catch</c> → the same <c>Results.NotFound()</c>). None of them
+  /// is <c>application/problem+json</c>. Asserting the negative of the terminal rule is therefore
+  /// deterministic where asserting a status code would not be.
+  /// </para>
+  /// </remarks>
+  [Fact]
+  public async Task RealAlbumArtRoute_IsNotShadowedByTheTerminalRule()
+  {
+    var client = _factory.CreateClient();
+
+    // Non-vacuity guard, as above: prove the terminal rule is live before asserting it stayed away.
+    var apiResponse = await client.GetAsync("/api/definitely-not-a-route");
+    Assert.Equal("application/problem+json", apiResponse.Content.Headers.ContentType?.MediaType);
+
+    var response = await client.GetAsync("/api/albumart/whatever.jpg");
+    var body = await response.Content.ReadAsStringAsync();
+
+    Assert.NotEqual("application/problem+json", response.Content.Headers.ContentType?.MediaType);
+    Assert.DoesNotContain("No API route on this service", body);
+  }
+
   [Theory]
   [MemberData(nameof(SpaDeepLinks))]
   public async Task SpaDeepLink_StillServesTheAppShell(string path)
