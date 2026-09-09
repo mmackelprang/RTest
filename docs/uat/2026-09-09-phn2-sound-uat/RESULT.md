@@ -66,3 +66,47 @@ observation. ⛔ **And the suite was green throughout** — it asserts nothing a
   by silence; it is the only check that exercises preemption *and* ducking release together, and
   ducking is now known broken.
 - ✅ Five checks are genuinely discharged and need not be re-run unless the audio path changes.
+
+---
+
+## ✅ RE-RUN 2026-09-09, after `AUD-2` deployed — **now 6 pass / 2 fail / 1 deferred**
+
+`AUD-2` shipped as [#642](https://github.com/mmackelprang/RTest/pull/642) (`f4d71b28`) and was
+deployed to the box. The owner re-ran the affected checks at the cabinet. Verbatim:
+
+> *"Ducking now works, but I'm still able to play two voicemails simultaneously. TTS also ducks and
+> the second TTS cancels the first one. **I think this behavior is the correct one.** Shimmer 36
+> looks good."*
+
+| # | Check | Was | Now |
+|---|---|---|---|
+| 6 | A fetched voicemail **ducks the radio** | ⛔ FAIL | ✅ **PASS** — confirmed by ear on **two** paths (voicemail and TTS) |
+| 11 | The room never carries **two voices** | ⛔ FAIL | ⛔ **STILL FAIL** — but **halved**, see below |
+
+### ⭐ `AUD-2` is closed by the same method that opened it
+
+It was a code-read inference for weeks, sitting 📋 with a finished plan and no dependencies. The
+owner's first sitting promoted it to an **observation**; this sitting closes it. ⛔ **No automated
+check participated in either direction** — the suite was green throughout, by design.
+
+### ⭐ Check #11 HALVES — the owner ruled on the ambiguous behaviour
+
+This record filed #11 with an explicit warning that it contained **two behaviours and only one was
+certainly wrong**. The owner has now ruled:
+
+- **Two voicemails simultaneously** — ⛔ still wrong, still reproduced, now the *whole* of
+  [`PHN-10`](../../queue/PHN-10.md).
+- **A second TTS interrupting the first** — ✅ **correct behaviour, not a defect.** ⛔ **A fix for
+  `PHN-10` must PRESERVE TTS preemption**, not suppress it.
+
+⭐ **The warning in this record and in `PHN-10` held exactly:** *"do not let a post-`AUD-2` re-listen
+be read as evidence this is fixed."* The owner listened with ducking audibly working and the
+simultaneity was still there. **The trap was named in advance and the check walked past it.**
+
+### What still remains
+
+- ⛔ **#1 (seek)** — untouched. [`AUD-24`](../../queue/AUD-24.md) is still open; nothing in `AUD-2`
+  went near it.
+- ⚠ **#10 (doorbell)** — still **DEFERRED**, not passed. It needs a doorbell configured, and it is
+  the only check exercising preemption *and* ducking release together. ⭐ **Ducking is now known
+  WORKING, which makes this check meaningfully runnable for the first time.**
