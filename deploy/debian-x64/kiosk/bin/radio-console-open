@@ -30,6 +30,28 @@
 #   at "Needs sign-in" forever regardless of what Google Voice was doing (KIOSK-3). There is no
 #   version of trusting that field which works.
 #
+#   ⚠ ADR-032 FORBIDS THIS REUSE BY DEFAULT, AND THE EXCEPTION HAS TO BE ARGUED RATHER THAN
+#   ASSUMED. Its words, echoed in GvBridgeHealth.cs's own remarks: "⛔ Do not reuse this for a
+#   status BANNER without re-deriving it. A banner wants the opposite failure direction: unknown
+#   should read as wrong, loudly." The VOICE row IS a status display, so that ⛔ points straight
+#   at this file. The derivation, on the record:
+#
+#     1. ADR-032's banner rule assumes a banner whose job is to WARN, where a false alarm costs
+#        almost nothing. The rule governing THIS surface is the opposite priority and predates it
+#        — design §5.3: a dialog that cries wolf gets dismissed unread, so a false alarm costs the
+#        dialog's credibility on the day something is genuinely broken.
+#     2. The amber this predicate can produce is UNACTIONABLE from here. `needsignin` is
+#        deliberately excluded from needs_start(), and the only remedy is a keyboard the panel
+#        does not have. "Unknown reads as wrong, loudly" would therefore raise a modal dialog, on
+#        a screen with no keyboard, about a thing nobody present can act on.
+#     3. A term that reads absence as ill PINS this row — and a permanently amber VOICE row is
+#        precisely the KIOSK-3 defect this change exists to remove. The banner direction would
+#        reintroduce it by construction.
+#
+#   So this display wants the EDGE direction, and takes the predicate unchanged. ⛔ That argument
+#   is about THIS surface only; it does not license reusing IsHealthy for the in-app /phone
+#   banner, which owns transient auth decay and should still derive its own.
+#
 #   VOICE now uses the predicate GV-12 shipped and ADR-032 records — `GvBridgeHealth.IsHealthy`,
 #   ported term for term, over the five fields that predicate names and no others. Four of those
 #   five — cookiesValid, degraded, authBlackout, lastApiSuccessAt — are read ASYMMETRICALLY:
@@ -45,10 +67,19 @@
 #   on this endpoint are already known NOT to obey it, in opposite directions:
 #
 #     - `available` — the fifth term, the ANCHOR, and the inverse case: it must be PRESENT and
-#       true. RotaryPhone always send it, it read `available:false` for all 83 minutes of the
-#       outage, and requiring it is what stops an empty or non-JSON body reading as Online — the
-#       safety property the old empty-value guard provided, moved onto a field that is always
-#       there instead of onto one that was about to be deleted.
+#       true. It read `available:false` in the captures taken during the 2026-09-08 outage, which
+#       is what makes it the right anchor; requiring it is what stops a body with no parsable
+#       `available` reading as Online.
+#       ⚠ Two things this does NOT claim, both narrowed after review. (a) "RotaryPhone ALWAYS send
+#       it" is an ASSUMPTION, not a contract they have given us — it rests on its presence in
+#       every capture in this repo, and the only direct statement they ever made about the field
+#       was a since-retracted "never bind to `available`". If they ever drop it, this anchor pins
+#       the row amber forever, which is the KIOSK-3 failure again; that is the cost of having an
+#       anchor at all, and it is why the anchor is the field with the most evidence behind it
+#       rather than the most convenient one. (b) It does NOT make a TRUNCATED body safe:
+#       `available` is the first key in every observed payload, so a body cut off after ~20 bytes
+#       still carries it. Empty bodies and bodies with no `available` are covered; truncation is
+#       covered by `curl -fsS` failing the request, which routes around this function entirely.
 #
 #     - `psidtsMintedAtUtc` — NOT read by this file, deliberately. RotaryPhone state that its
 #       `null` means UNKNOWN rather than fine (CDP-extracted cookies carry no readable issue time
@@ -69,10 +100,24 @@
 #   ⚠ On rule 2 above, stated honestly rather than quietly dropped: this file used to say GV auth
 #   "is dead roughly 9 minutes in every 20" and that reporting it would fire the dialog on ~45%
 #   of taps. That duty cycle was read off the psidts trough, so it retires with the field and is
-#   NOT evidence about anything here. The honest blackout term, `authBlackout`, was measured at
-#   920 ms with ZERO true-samples across 411 polls, so including it costs essentially no false
-#   dialogs — rule 2 now stands on that measurement rather than on a band nobody can measure any
-#   more. ⛔ Do NOT latch it: latching is right for a banner and wrong here (ADR-032).
+#   NOT evidence about anything here.
+#
+#   What replaces it, and the gaps in it, because four terms were added and they are not equally
+#   evidenced:
+#     - `authBlackout` — measured at 920 ms with ZERO true-samples across 411 polls. Strong.
+#       ⛔ Do NOT latch it: latching is right for a banner and wrong here (ADR-032).
+#     - all four terms together — 68 consecutive samples of this predicate against the live
+#       bridge (2026-09-09T14:44-14:53Z) returned 68 online, 0 amber, max lastApiSuccessAt age
+#       59 s. That is the only measurement covering the whole predicate, and it is nine minutes
+#       long.
+#     - `cookiesValid:false` and `degraded:true` — ⚠ NO measured false-dialog rate exists for
+#       either, in this repo or anywhere we have been told about. They are included because
+#       GvBridgeHealth carries them and divergence between the two consumers is worse; the
+#       cry-wolf risk from them specifically is UNQUANTIFIED. A flap was observed once by hand at
+#       14:39Z (cookiesValid false, degraded true, recovered inside ~60 s) and did not recur in
+#       the 68-sample run. RotaryPhone say the 20-minute unvalidated-cookie churn behind it stops
+#       when their #78 deploys, so the honest read is that this is an upper bound taken before
+#       their fix, not a steady-state rate.
 #
 # Not `set -e`: a failed probe is DATA, not a crash. Every probe failure below is a state this
 # script knows how to report.
@@ -149,8 +194,17 @@ fetch_gv_status() { GV_BODY="$(curl -fsS --max-time 2 "$PHONE_URL" 2>/dev/null)"
 # The leading `"` in each pattern is what anchors a match to a whole KEY. `"available"` cannot
 # match inside `"notAvailable"`, and it cannot match a string VALUE such as
 # `"throttleReason":"available"`, because a key match needs the quote-name-quote-colon shape.
-# `head -1` on a repeat is the same choice the psidts parser made before it; the payload has no
-# nested objects today.
+# ⚠ TWO KNOWN DIVERGENCES FROM System.Text.Json, i.e. from GvBridgeHealth reading the same body.
+# Both are accepted rather than fixed, because fixing either means a real JSON parser and the
+# paragraph above is why this file does not take that dependency. Both are pinned by cases in
+# tests/test-classify-voice.sh so a future change to them is deliberate:
+#   1. DUPLICATE KEYS: `head -1` takes the FIRST, System.Text.Json takes the LAST. On
+#      `{"available":true,"available":false}` this says online and the console says unhealthy.
+#   2. NESTED OBJECTS: a nested `{"inner":{"degraded":true}}` is read here as though it were
+#      top-level; System.Text.Json ignores it.
+# Neither occurs in any observed payload — it is flat, with unique keys. ⚠ But RotaryPhone are
+# adding four `browserSession*` fields in #78/#79, so if a `browserSession` OBJECT ever appears,
+# re-check case 2 before assuming this still holds.
 
 # Prints `true`, `false`, or NOTHING. Nothing covers absent, null and non-boolean alike. This is
 # a PARSER and carries no health policy: it reports that a field was not readable as a boolean and
@@ -176,9 +230,23 @@ gv_string() {   # $1 = field name
 # because they can then contradict each other about the same box at the same instant, on a panel
 # whose whole job is to be believed. Change both or neither.
 #
-# 120 is a 2x margin over a MEASURED 60 s cadence (radio, 2026-09-09T01:58-02:02Z), pinned on the
-# C# side by MeasuredSixtySecondCadence_StaysHealthy so a cadence change fails a test instead of
-# silently turning this row amber.
+# 120 is a 2x margin over a MEASURED 60 s cadence — `radio`, 2026-09-09T01:58-02:02Z, five polls;
+# and re-measured independently while shipping KIOSK-3, 68 samples over 14:44-14:53Z with a max
+# observed age of 59 s.
+#
+# ⛔ NOTHING DETECTS A CADENCE SLIP. An earlier draft of this comment said
+# `MeasuredSixtySecondCadence_StaysHealthy` pins the cadence "so a cadence change fails a test
+# instead of silently turning this row amber". That is backwards, and the test's own <remarks>
+# says the same wrong thing (GvBridgeStatusServiceTests.cs:91-96 — corrected in the KIOSK-3 PR).
+# The test builds a FakeTimeProvider and a literal `AddSeconds(-60)`: it never contacts the box
+# and never observes RotaryPhone, so it pins the THRESHOLD against being lowered below the
+# measured worst case. It cannot fail when the cadence changes.
+#
+# ⚠ So say what actually happens: if RotaryPhone's cadence ever exceeds 120 s, a perfectly healthy
+# bridge reports amber on EVERY tap of the desktop icon, with a green suite and no error anywhere
+# — which is the KIOSK-3 defect reproduced through a different field. The margin is 2x, not large,
+# and it is RotaryPhone's to change without telling us. That is a known, unmonitored assumption,
+# not a covered one.
 GV_STALE_AFTER=120
 
 # Seconds since `lastApiSuccessAt`, or NOTHING when there is no usable reading.
@@ -208,8 +276,26 @@ gv_last_success_age() {
   [ -n "$ts" ] || return 0
   printf '%s' "$ts" | grep -qE '([Zz]|[+-][0-9]{2}:?[0-9]{2})$' || return 0
   secs="$(date -d "$ts" +%s 2>/dev/null)" || return 0
-  case "$secs" in ''|*[!0-9]*) return 0 ;; esac
+  # ⚠⚠ A LEADING `-` IS NOT A PARSE FAILURE — IT IS A PRE-1970 INSTANT, AND CONFLATING THE TWO PUT
+  # A REAL HOLE HERE. `date -d "0001-01-01T00:00:00Z" +%s` prints -62135596800, and
+  # `0001-01-01T00:00:00Z` is exactly what .NET's `DateTime.MinValue` serialises to — the canonical
+  # "there has never been a successful call", which is the single state most worth catching. A
+  # digits-only guard rejected it as unreadable and routed the MOST stale reading available onto
+  # the no-signal arm, reporting a dead bridge as Online. `GvBridgeHealth.IsHealthy` calls the
+  # identical body unhealthy, so the two consumers disagreed on it. Signed values are accepted
+  # here, and the subtraction below turns a pre-epoch instant into the huge positive age it is.
+  case "$secs" in
+    ''|-)        return 0 ;;                                        # empty, or a bare sign
+    -*)          case "${secs#-}" in *[!0-9]*) return 0 ;; esac ;;  # signed: digits after it
+    *[!0-9]*)    return 0 ;;                                        # unsigned: digits only
+  esac
   now="$(date -u +%s)"
+  # Guarded like every other `date` call in this function rather than trusted. An empty `now`
+  # would make `[ "$secs" -gt "" ]` an error (so the clamp silently would not apply) and would
+  # then read as 0 inside $(( )), printing a large negative age that the caller reads as
+  # "uninterpretable" — i.e. Online. Unreachable in practice; guarded because the cost is one line
+  # and the failure is silent and in the unsafe direction.
+  case "$now" in ''|*[!0-9]*) return 0 ;; esac
   # A timestamp in OUR future means the two clocks disagree, which is not evidence of staleness.
   # Clamped rather than printed as a negative, so the caller's numeric guard keeps its single
   # meaning of "uninterpretable" instead of quietly acquiring a second one.
@@ -232,10 +318,15 @@ classify_voice() {
   probe_voice_process || { echo offline; return; }
 
   # `available` is the ANCHOR, and the one term read non-defensively. It does two jobs. First it
-  # mirrors the C# predicate, where Available is the sole non-nullable term because RotaryPhone
-  # always send it and it read false throughout the 2026-09-08 outage. Second, it is what makes
-  # an empty, truncated or non-JSON body unhealthy: no `available` parses out of such a body, so
-  # the answer cannot be Online.
+  # mirrors the C# predicate, where Available is the sole non-nullable term, and it read false in
+  # the captures taken during the 2026-09-08 outage. Second, it is what makes a body carrying no
+  # parsable `available` — empty, or not this endpoint's JSON — unhealthy.
+  # ⚠ SCOPE: that is a property of THIS FUNCTION, not of the launcher. When :5004 is unreachable
+  # the body is empty, but run_probes never gets here — PHONE goes `down` and VOICE falls back to
+  # the bare process check, which reports Online on the strength of a Chrome process existing.
+  # That fallback is pre-existing and deliberate (§5.3's last table row: an unreachable :5004 is
+  # PHONE's problem, not VOICE's). It is named here so the guarantee below is not read as wider
+  # than it is.
   [ "$(gv_bool available)" = true ] || { echo needsignin; return; }
 
   # PRESENT AND BAD. Each of these is skipped when absent or null, deliberately — see the header.
@@ -774,7 +865,14 @@ USAGE
 #
 # `return` outside a function is an ERROR in an executed script and legal only in a sourced one,
 # so the guard has to be conditional rather than a bare `return`. When this file is executed,
-# BASH_SOURCE[0] and $0 are the same path, the condition is false, and nothing is skipped.
+# BASH_SOURCE[0] and $0 are the same path, the condition is false, and nothing is skipped — for
+# every invocation form, including a symlink and a PATH lookup, because the kernel's script
+# handler builds argv from the filename it was handed rather than from the caller's argv[0].
+#
+# ⚠ Sourcing is SIDE-EFFECT-FREE ONLY IN THE SENSE THAT NOTHING ACTS — it is not inert. It sets
+# `-u` and `pipefail` in the calling shell, may `export LC_ALL=C.UTF-8`, and forks `id -u` for
+# LOCKFILE. The harness sets the same shell options itself, so this costs it nothing; any other
+# sourcer should know before it is surprised.
 if [ "${BASH_SOURCE[0]}" != "${0}" ]; then return 0; fi
 
 # ---------------------------------------------------------------------------------------------

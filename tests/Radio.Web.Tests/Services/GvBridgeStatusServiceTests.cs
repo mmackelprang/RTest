@@ -91,9 +91,20 @@ public class GvBridgeStatusServiceTests
   /// ⚠ WHAT BREAKS IF ROTARYPHONE EVER SLOWS THAT CADENCE PAST 120 s: a perfectly healthy
   /// bridge reports a timestamp older than the threshold on every poll, IsHealthy is pinned
   /// false, the unhealthy→healthy edge never occurs, and GV-12 silently stops refetching — the
-  /// stuck-panel incident returns with a green suite and no error anywhere. This test is the
-  /// gate on that assumption: if the cadence changes, this fails and LastSuccessStaleAfter must
-  /// be re-derived from the new measurement rather than nudged until the test passes.
+  /// stuck-panel incident returns with a green suite and no error anywhere.
+  ///
+  /// ⛔ AND THIS TEST DOES NOT DETECT THAT — an earlier version of this remark claimed *"if the
+  /// cadence changes, this fails"*, which is FALSE and was corrected by `KIOSK-3` after a
+  /// reviewer read the body against the claim. There is no clock and no box here: just a
+  /// FakeTimeProvider and a literal AddSeconds(-60). Nothing in it observes RotaryPhone, so a
+  /// cadence slip cannot fail it. What it actually pins is the THRESHOLD — lower
+  /// LastSuccessStaleAfter below the measured worst case and this goes red. That is worth
+  /// having, and it is not the same guarantee.
+  ///
+  /// ⚠ A cadence slip past 120 s is therefore an UNMONITORED assumption, in this consumer and in
+  /// the kiosk launcher that now shares the threshold (`radio-console-open`, GV_STALE_AFTER).
+  /// If it ever slips, re-derive the threshold from the new measurement rather than nudging it
+  /// until something passes.
   /// </remarks>
   [Fact]
   public void MeasuredSixtySecondCadence_StaysHealthy()

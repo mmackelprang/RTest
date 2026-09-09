@@ -25,7 +25,10 @@
 # ⚠ ON CLOCKS — read CLAUDE.md § Test Timing before adding a case.
 # The staleness cases use wall-clock timestamps, and the direction they fail in is stated rather
 # than implied. `fresh_ts` is 30 s old against a 120 s gate (90 s of margin) and the stale case
-# is a VERBATIM capture from the box on 2026-09-09, hours old by construction and getting older.
+# is a VERBATIM capture from the box at 2026-09-09T14:30:50Z, which only gets older.
+# ⚠ NOT "old by construction" — it is old because time has passed since it was captured, and the
+# distinction is real: that case would have FAILED had this suite been run before ~14:32:50Z on
+# 2026-09-09 itself. From any later run it is safe, and it is now well past that.
 # A starved runner can only make a "fresh" reading older, i.e. move it TOWARD the gate — it would
 # have to stall for 90 seconds inside one `classify_voice` call to flip an assertion. There is no
 # case here whose PASS depends on something happening quickly.
@@ -36,6 +39,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="$SCRIPT_DIR/../bin/radio-console-open"
 
 [ -r "$LAUNCHER" ] || { echo "cannot read $LAUNCHER" >&2; exit 2; }
+
+# ⛔ GNU date is a PRECONDITION, not an optional nicety, and without this check the suite goes
+# quietly vacuous instead of failing honestly. On a BSD/macOS `date`, `date -d '30 seconds ago'`
+# fails, `fresh_ts` returns empty, every fixture gets `"lastApiSuccessAt":""`, the staleness term
+# degrades to no-signal — and EIGHT of the nine `expect online` cases then pass for entirely the
+# wrong reason. The run would still go red (on §4's stale case alone), but it would name the
+# wrong thing and bury it under eight meaningless PASS lines.
+date -d '30 seconds ago' >/dev/null 2>&1 || {
+  echo "this harness needs GNU date (coreutils) for -d; found something else" >&2; exit 2; }
 
 # source-path=SCRIPTDIR is what lets shellcheck resolve the relative path from THIS file's
 # directory rather than from the caller's cwd. Without it the source is unfollowed, and the
@@ -138,7 +150,7 @@ echo ""
 
 # ── 4. Staleness. The capture is deterministic and hours old. ────────────────────────────────
 echo "lastApiSuccessAt staleness (gate = ${GV_STALE_AFTER:-?}s)"
-expect needsignin "  the 2026-09-09T14:30Z capture, replayed (stale by construction)" \
+expect needsignin "  the 2026-09-09T14:30Z capture, replayed (stale by elapsed time)" \
   "$LIVE_CAPTURE"
 expect online     "  59s old — inside the gate, one measured cadence tick" \
   "$(live_fresh | sed -E "s/\"lastApiSuccessAt\":\"[^\"]*\"/\"lastApiSuccessAt\":\"$(date -u -d '59 seconds ago' +%Y-%m-%dT%H:%M:%S.0000000Z)\"/")"
@@ -190,6 +202,33 @@ echo ""
 
 # ── 6. An uninterpretable timestamp is NO SIGNAL, not a verdict. ─────────────────────────────
 # Documented in the launcher next to the code. Stated here so the choice is visible as a choice.
+# ── 6b. Pre-epoch instants are MAXIMALLY STALE, not uninterpretable. ─────────────────────────
+# Caught in pre-merge review. `date -d` prints a NEGATIVE epoch for a pre-1970 instant, and a
+# digits-only guard read that leading `-` as a parse failure — routing the most stale reading
+# obtainable onto the no-signal arm and reporting a dead bridge as Online. `0001-01-01T00:00:00Z`
+# is exactly what .NET's DateTime.MinValue serialises to, i.e. what a bridge that has NEVER had a
+# successful API call would report, and GvBridgeHealth.IsHealthy calls that body unhealthy.
+echo "pre-epoch timestamps"
+expect needsignin "  0001-01-01Z — .NET DateTime.MinValue, 'never succeeded'" \
+  '{"available":true,"lastApiSuccessAt":"0001-01-01T00:00:00Z"}'
+expect needsignin "  1960-01-01Z — pre-epoch, passes the zone check" \
+  '{"available":true,"lastApiSuccessAt":"1960-01-01T00:00:00Z"}'
+expect needsignin "  1970-01-01Z — the epoch itself, no sign involved" \
+  '{"available":true,"lastApiSuccessAt":"1970-01-01T00:00:00Z"}'
+echo ""
+
+# ── 6c. Known divergences from System.Text.Json, pinned so a change is deliberate. ───────────
+# ⚠ These assert what this parser DOES, not what is correct. GvBridgeHealth reading the same two
+# bodies answers unhealthy for both: System.Text.Json takes the LAST duplicate key and ignores a
+# nested object. Accepted because closing either needs a real JSON parser, which the launcher
+# deliberately does not depend on. Neither shape occurs in any observed payload.
+echo "known parser divergences from System.Text.Json (accepted, not correct)"
+expect online "  duplicate key: first wins here, last wins in JSON" \
+  '{"available":true,"available":false}'
+expect needsignin "  nested degraded is read as top-level; JSON would ignore it" \
+  '{"available":true,"upstream":{"degraded":true}}'
+echo ""
+
 echo "uninterpretable lastApiSuccessAt"
 expect online "  naive, no zone — refused rather than guessed" \
   "$(live_fresh | sed -E 's/"lastApiSuccessAt":"[^"]*"/"lastApiSuccessAt":"2026-09-09T14:30:50"/')"
@@ -200,7 +239,12 @@ echo ""
 # ── 7. The safety property the old guard had, preserved through the change. ──────────────────
 # `:118-123` of the launcher wrote a guard specifically so an unreadable value could not report a
 # dead session as Online. The input changed; the property must not.
-echo "malformed and empty bodies must never read as online"
+# ⚠ SCOPE: this is a property of classify_voice, NOT of the launcher. When :5004 is unreachable
+# the body is empty, but run_probes never calls this function — PHONE goes `down` and VOICE falls
+# back to the bare process check, which reports Online on the strength of a Chrome process
+# existing. That fallback is pre-existing and deliberate (§5.3's last table row). The heading
+# below says "must never read as online" about the FUNCTION, and that is all it can say.
+echo "malformed and empty bodies must never read as online (within classify_voice)"
 expect_not online "  empty body"          ""
 expect_not online "  not JSON"            "<html>502 Bad Gateway</html>"
 expect_not online "  JSON, but not this"  '{"error":"nope"}'
@@ -234,6 +278,24 @@ echo "bridge Chrome not running"
 STUB_VOICE_PROCESS_RC=1
 expect offline "  offline regardless of a healthy body" "$(live_fresh)"
 unset STUB_VOICE_PROCESS_RC
+echo ""
+
+# ── 9. The sourcing seam must NOT fire when the launcher is EXECUTED. ─────────────────────────
+# Everything above this point proves the SOURCED direction, because it sources. Nothing proved
+# the executed one — and that is the direction whose failure mode is the worst in this file: the
+# desktop icon silently becomes a no-op, on a panel with no keyboard, with nothing logged. So run
+# it for real with a bad argument, which reaches the dispatch BELOW the seam and must print usage
+# and exit 2. If the seam ever fired on execution this returns 0 and prints nothing.
+echo "sourcing seam does not fire when executed"
+seam_out="$(bash "$LAUNCHER" --a-deliberately-bad-argument 2>&1)"; seam_rc=$?
+if [ "$seam_rc" = 2 ] && printf '%s' "$seam_out" | grep -q '^usage: radio-console-open'; then
+  printf '  PASS  %-56s -> rc=2, usage printed\n' "  executed path still reaches the dispatch"
+  PASS=$(( PASS + 1 ))
+else
+  printf '  FAIL  %-56s -> rc=%s, output %s\n' \
+    "  executed path still reaches the dispatch" "$seam_rc" "${seam_out:-(empty)}"
+  FAIL=$(( FAIL + 1 ))
+fi
 echo ""
 
 printf '%d passed, %d failed\n' "$PASS" "$FAIL"
