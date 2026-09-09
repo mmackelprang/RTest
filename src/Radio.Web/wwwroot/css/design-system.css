@@ -78,17 +78,19 @@
      That token has 22 other consumers (19 further rules in this file, plus three
      inline styles in PlayHistoryPage.razor) including .surface-overlay's
      backdrop-filter blur(20px), .rz-dialog, modals, bubbles, hover states and
-     two color-mix recipes — so raising it to a visible shimmer amplitude would
+     three color-mix recipes — so raising it to a visible shimmer amplitude would
      lighten twenty-odd unrelated surfaces. Count re-derived on main @143d678e.
 
-     56 (#38383F) is the OWNER'S value, not a derived one. It was chosen at the
-     panel on a five-value ladder (26 / 36 / 46 / 56 / 66) in a dark room on
-     2026-09-08 and again in daylight on 2026-09-09, against the two questions
-     "can you tell it moves" and "does it stay calm": 56 is the dimmest value
-     that answers yes and yes in both conditions. Delta against --surface-raised
-     is 36 on R·G (41 on B), six times the 6/255 that shipped before.
-     ⚠ The Designer's seed of 36/#242429 was measured BELOW the owner's
-     dark-room threshold and must not be restored.
+     56 (#38383F) is the OWNER'S value, not a derived one, chosen at the panel on
+     a five-value ladder (26 / 36 / 46 / 56 / 66) in a dark room on 2026-09-08
+     and again in daylight on 2026-09-09: it is the dimmest value the owner can
+     clearly see in BOTH conditions. It was also judged to stay calm rather than
+     pull the eye — ⚠ that second question was put only at night; the daylight
+     record argues rather than measures that it does not bind, on the grounds
+     that ambient light dominates. Delta against --surface-raised is 36 on R·G
+     (41 on B), six times the 6/255 that shipped before.
+     ⚠ The Designer's seed of 36/#242429 was on the same ladder and was JUDGED
+     below the owner's dark-room visibility threshold; do not restore it.
      ⛔ Do not add this token to the prefers-reduced-motion block below: that
      rule replaces `background` wholesale with a flat rgba(255,255,255,0.05), so
      the gradient never renders there and a reference would re-introduce one. */
