@@ -37,8 +37,11 @@ LAUNCHER="$SCRIPT_DIR/../bin/radio-console-open"
 
 [ -r "$LAUNCHER" ] || { echo "cannot read $LAUNCHER" >&2; exit 2; }
 
+# source-path=SCRIPTDIR is what lets shellcheck resolve the relative path from THIS file's
+# directory rather than from the caller's cwd. Without it the source is unfollowed, and the
+# knock-on is a false SC2034 on GV_BODY — which is read by the sourced classify_voice().
+# shellcheck source-path=SCRIPTDIR
 # shellcheck source=../bin/radio-console-open
-# shellcheck disable=SC1090
 . "$LAUNCHER"
 
 # The ONLY stub. classify_voice's first act is the bridge-Chrome process check, which is a real
@@ -141,10 +144,17 @@ expect online     "  59s old — inside the gate, one measured cadence tick" \
   "$(live_fresh | sed -E "s/\"lastApiSuccessAt\":\"[^\"]*\"/\"lastApiSuccessAt\":\"$(date -u -d '59 seconds ago' +%Y-%m-%dT%H:%M:%S.0000000Z)\"/")"
 echo ""
 
-# ── 5. ABSENT CONTRIBUTES NOTHING (ADR-032). ─────────────────────────────────────────────────
+# ── 5. ABSENT CONTRIBUTES NOTHING — for these four fields (ADR-032). ─────────────────────────
 # The half of the asymmetry that makes this predicate survive a field being deleted. If any of
 # these ever reads needsignin, the predicate has acquired a term that can never clear, and the
 # VOICE row is pinned again — which is this row's entire defect, wearing a different field name.
+#
+# ⛔ Before adding a case here for a NEW field, check that the field actually obeys this rule.
+# It is a property of cookiesValid / degraded / authBlackout / lastApiSuccessAt, NOT of the
+# payload. `available` is the anchor and must be present (§7 below). `psidtsMintedAtUtc`, which
+# RotaryPhone add in the same release that removes psidtsAgeSeconds, goes the other way again:
+# its `null` means UNKNOWN and is explicitly NOT healthy. This file does not read it, and a case
+# asserting `online` for its absence would be asserting the opposite of their contract.
 echo "absent / null optional terms contribute nothing"
 expect online "  lastApiSuccessAt absent" \
   "$(live_fresh | sed -E 's/,"lastApiSuccessAt":"[^"]*"//')"
@@ -156,6 +166,26 @@ expect online "  degraded and authBlackout both absent" \
   "$(live_fresh | sed -E 's/"degraded":false,//; s/"authBlackout":false,//')"
 expect online "  every optional term absent — degrades to available alone" \
   "{\"available\":true,\"activeMode\":\"GVApi\"}"
+echo ""
+
+# ── 5b. psidtsMintedAtUtc is NOT a term here, and this pins that. ─────────────────────────────
+# RotaryPhone add this field in the same release that removes psidtsAgeSeconds. classify_voice
+# deliberately does not read it: GV-12's predicate does not name it, and adopting a field that
+# GvBridgeHealth.IsHealthy does not carry would put the launcher and the console into
+# disagreement about the same box.
+#
+# ⚠ This case asserts "we do not read this field", NOT "null there is healthy" — RotaryPhone are
+# explicit that its null means UNKNOWN and is not healthy. If someone later adds it as a term
+# they must treat null as "cannot assert healthy", and this case going RED is how they find out
+# they are changing a decision rather than filling a gap.
+#
+# ⚠ The shape below is UNVERIFIED: it comes from a contract document our lane held as a
+# superseded draft, and the live box still serves the pre-#78 build, so it could not be checked
+# against the wire. The §1 fixture — the live capture with the field simply deleted — is the
+# minimal claim and does not depend on this being right.
+echo "psidtsMintedAtUtc is not read (announced post-#79 additions, shape unverified)"
+expect online "  present and null — ignored, not consulted" \
+  "$(live_fresh_post79 | sed -E 's/\{/{"psidtsMintedAtUtc":null,"browserSessionStale":false,/')"
 echo ""
 
 # ── 6. An uninterpretable timestamp is NO SIGNAL, not a verdict. ─────────────────────────────

@@ -14,26 +14,65 @@
 #     never triggers the report. Its FAILURE is still worth saying — that is kiosk_failed() —
 #     but its routine cold start is invisible, by design.
 #
-#  2. Google Voice auth is dead roughly 9 minutes in every 20, by design, and that blackout is
-#     NEVER reported (design §5.3). This script checks LIVENESS, never auth. Reporting the
-#     routine blackout would fire the dialog on ~45% of taps, for a condition that clears itself
-#     within ten minutes and that nothing here can act on — and a dialog that cries wolf gets
-#     dismissed unread on the day something is actually broken.
+#  2. A routine Google Voice condition that clears itself is NEVER reported (design §5.3) — a
+#     dialog that cries wolf gets dismissed unread on the day something is actually broken.
+#     ⚠ KIOSK-3 changed the MECHANISM behind this rule and not the rule. See below.
 #
 # The Google Voice reading in full, because it is the least obvious thing in this file:
-#   `available`, `degraded` and `cookiesValid` on GET :5004/api/gvbridge/status ARE LIARS.
-#   {"available":true,"degraded":false,"cookiesValid":true,"psidtsAgeSeconds":707} was captured
-#   while both SMS endpoints were returning hard 502s. `psidtsAgeSeconds` is the only honest
-#   field, and it is a live blackout clock:
-#       < 660        healthy window                         -> Online, silent
-#       660 - 1200   routine blackout trough                -> Online, SILENT. The appliance
-#                                                              working as designed. Never
-#                                                              reported.
-#       > 1200       the refresh cycle itself never fired   -> Needs sign-in (amber)
-#       absent/null  same reading as > 1200
-#   The counter resets at ~1200 in every healthy cycle, so a value beyond it is the one reading
-#   that means a genuinely dead session — which is what makes a single stateless probe enough,
-#   with no timestamp file and no history.
+#
+#   ⛔ `psidtsAgeSeconds` IS GONE, AND IT WAS NEVER HONEST. This file used to derive VOICE from
+#   that field alone, on the strength of a comment here calling it "the only honest field".
+#   RotaryPhone have since proved it is an age-of-last-LOAD clock rather than a credential clock:
+#   it read 608 — comfortably inside the band this file called healthy — while their bridge had
+#   been dead for 83 minutes on 2026-09-08. Their PR #79 REMOVES it. Both halves of that matter,
+#   and they fail in opposite directions: while PRESENT it could report a dead session as Online,
+#   and once ABSENT the `case "$age" in ''` guard would have fired on every launch, pinning VOICE
+#   at "Needs sign-in" forever regardless of what Google Voice was doing (KIOSK-3). There is no
+#   version of trusting that field which works.
+#
+#   VOICE now uses the predicate GV-12 shipped and ADR-032 records — `GvBridgeHealth.IsHealthy`,
+#   ported term for term, over the five fields that predicate names and no others. Four of those
+#   five — cookiesValid, degraded, authBlackout, lastApiSuccessAt — are read ASYMMETRICALLY:
+#
+#       present AND bad   ->  not healthy
+#       ABSENT            ->  contributes NOTHING
+#
+#   That second line is exactly the property the old predicate lacked, and it is the reason
+#   deleting one of those four cannot do this to us again.
+#
+#   ⛔ THE ASYMMETRY IS A PROPERTY OF THOSE FOUR FIELDS, NOT OF THIS PAYLOAD. It is not a general
+#   rule about /api/gvbridge/status and must not be extended to a new field by default. Two fields
+#   on this endpoint are already known NOT to obey it, in opposite directions:
+#
+#     - `available` — the fifth term, the ANCHOR, and the inverse case: it must be PRESENT and
+#       true. RotaryPhone always send it, it read `available:false` for all 83 minutes of the
+#       outage, and requiring it is what stops an empty or non-JSON body reading as Online — the
+#       safety property the old empty-value guard provided, moved onto a field that is always
+#       there instead of onto one that was about to be deleted.
+#
+#     - `psidtsMintedAtUtc` — NOT read by this file, deliberately. RotaryPhone state that its
+#       `null` means UNKNOWN rather than fine (CDP-extracted cookies carry no readable issue time
+#       and report null until the first genuine rotation) and that it has no upper bound. Absent
+#       there is "I cannot tell you", which is not the same as an absence of bad news. Anything
+#       that later reaches for it must treat null as "cannot assert healthy" — the OPPOSITE of the
+#       rule above. Applying the rule uniformly would reimport the very class of defect this file
+#       has just been fixed for.
+#
+#   ⚠ `available`, `degraded` and `cookiesValid` are still individually INSUFFICIENT, and the
+#   capture this file made that point with still stands:
+#   {"available":true,"degraded":false,"cookiesValid":true} was taken while both SMS endpoints
+#   were returning hard 502s. What changed is the conclusion drawn from it. The answer is a
+#   CONJUNCTION that includes a term which actually moves (`lastApiSuccessAt`, checked for
+#   staleness), not a single substitute oracle. Reaching for one oracle is how this file came to
+#   trust `psidtsAgeSeconds` in the first place.
+#
+#   ⚠ On rule 2 above, stated honestly rather than quietly dropped: this file used to say GV auth
+#   "is dead roughly 9 minutes in every 20" and that reporting it would fire the dialog on ~45%
+#   of taps. That duty cycle was read off the psidts trough, so it retires with the field and is
+#   NOT evidence about anything here. The honest blackout term, `authBlackout`, was measured at
+#   920 ms with ZERO true-samples across 411 polls, so including it costs essentially no false
+#   dialogs — rule 2 now stands on that measurement rather than on a band nobody can measure any
+#   more. ⛔ Do NOT latch it: latching is right for a banner and wrong here (ADR-032).
 #
 # Not `set -e`: a failed probe is DATA, not a crash. Every probe failure below is a state this
 # script knows how to report.
@@ -106,24 +145,112 @@ fetch_gv_status() { GV_BODY="$(curl -fsS --max-time 2 "$PHONE_URL" 2>/dev/null)"
 # jq IS installed on the box (measured 2026-08-18), and this still parses with grep: the
 # launcher is the thing that runs when the appliance is already unwell, so every dependency it
 # does not need is one fewer way for it to fail for a new reason.
-gv_psidts_age() {
+#
+# The leading `"` in each pattern is what anchors a match to a whole KEY. `"available"` cannot
+# match inside `"notAvailable"`, and it cannot match a string VALUE such as
+# `"throttleReason":"available"`, because a key match needs the quote-name-quote-colon shape.
+# `head -1` on a repeat is the same choice the psidts parser made before it; the payload has no
+# nested objects today.
+
+# Prints `true`, `false`, or NOTHING. Nothing covers absent, null and non-boolean alike. This is
+# a PARSER and carries no health policy: it reports that a field was not readable as a boolean and
+# says nothing about whether that is good news. What an absence MEANS is per-field, and the caller
+# decides it — see the header, which names two fields on this endpoint that decide it oppositely.
+gv_bool() {   # $1 = field name
   printf '%s' "$GV_BODY" \
-    | grep -oE '"psidtsAgeSeconds"[[:space:]]*:[[:space:]]*[0-9]+' \
-    | grep -oE '[0-9]+$' | head -1
+    | grep -oE "\"$1\"[[:space:]]*:[[:space:]]*(true|false)" \
+    | head -1 | grep -oE '(true|false)$'
 }
 
+# Prints a string field's value, or nothing. `null` is unquoted on the wire, so it does not match
+# here and correctly reads as absent rather than as an empty string.
+gv_string() {   # $1 = field name
+  printf '%s' "$GV_BODY" \
+    | grep -oE "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" \
+    | head -1 | sed -E 's/^"[^"]*"[[:space:]]*:[[:space:]]*"//; s/"$//'
+}
+
+# The staleness gate on `lastApiSuccessAt`, in seconds. IDENTICAL BY INTENT to
+# GvBridgeHealth.LastSuccessStaleAfter (src/Radio.Web/Services/GvBridgeHealth.cs). Two consumers
+# of one field disagreeing about what "healthy" means is worse than either threshold on its own,
+# because they can then contradict each other about the same box at the same instant, on a panel
+# whose whole job is to be believed. Change both or neither.
+#
+# 120 is a 2x margin over a MEASURED 60 s cadence (radio, 2026-09-09T01:58-02:02Z), pinned on the
+# C# side by MeasuredSixtySecondCadence_StaysHealthy so a cadence change fails a test instead of
+# silently turning this row amber.
+GV_STALE_AFTER=120
+
+# Seconds since `lastApiSuccessAt`, or NOTHING when there is no usable reading.
+#
+# ⚠ AN UNINTERPRETABLE TIMESTAMP IS "NO SIGNAL", NOT "UNHEALTHY", AND THAT IS A DELIBERATE CHOICE.
+# The reason is the one ADR-032 gives for the C# predicate skipping an unmarked DateTimeKind: a
+# term that can never clear PINS the state, and a permanently-amber VOICE row is this row's own
+# defect wearing a different field name. So a value we cannot interpret gets the same answer as a
+# value we did not get. Nothing is lost by being permissive here, because the safety property —
+# an unreadable body must never read as Online — is carried by the `available` anchor in
+# classify_voice rather than by this term.
+#
+# ⚠ AN EXPLICIT ZONE IS REQUIRED; A NAIVE TIMESTAMP IS REFUSED RATHER THAN GUESSED. Measured on
+# the box: `date -d "2026-09-09T14:30:50"` gives 1788978650 and the same instant with a `Z` gives
+# 1788964250 — four hours apart, because GNU date reads an unzoned value as LOCAL and the box runs
+# EDT. Either guess is a 4-hour error, and a 4-hour error is permanently past the gate above.
+#
+# `date -d` is GNU coreutils. Verified on the box 2026-09-09: coreutils 9.4, parsing the REAL wire
+# format including its 7-digit fractional seconds — `2026-09-09T14:30:50.7537656Z` -> 1788964250.
+# (The queue row and its dossier both quoted a bare `...T14:12:40Z`; the served field carries the
+# fraction.) If `date` were ever absent or non-GNU the command simply fails, this prints nothing,
+# and the term degrades to no-signal instead of taking the launcher down — the same trade the rest
+# of this file makes.
+gv_last_success_age() {
+  local ts secs now
+  ts="$(gv_string lastApiSuccessAt)"
+  [ -n "$ts" ] || return 0
+  printf '%s' "$ts" | grep -qE '([Zz]|[+-][0-9]{2}:?[0-9]{2})$' || return 0
+  secs="$(date -d "$ts" +%s 2>/dev/null)" || return 0
+  case "$secs" in ''|*[!0-9]*) return 0 ;; esac
+  now="$(date -u +%s)"
+  # A timestamp in OUR future means the two clocks disagree, which is not evidence of staleness.
+  # Clamped rather than printed as a negative, so the caller's numeric guard keeps its single
+  # meaning of "uninterpretable" instead of quietly acquiring a second one.
+  [ "$secs" -gt "$now" ] && { printf '0'; return 0; }
+  printf '%s' $(( now - secs ))
+}
+
+# The GvBridgeHealth.IsHealthy port (ADR-032). Read the header block before changing a line of it.
+#
+# ⚠ ONE unhealthy verdict, `needsignin`, for every branch below — a vocabulary constraint rather
+# than sloppiness. `failed` and `offline` are RED, and `offline` is also STARTABLE (needs_start),
+# so using either would run the ensure script against a bridge Chrome that is demonstrably
+# already running — that is how the psidts rule got read at all — wait_for would pass instantly
+# on the process that was there the whole time, and the row would be rewritten to "started just
+# now". That is precisely the lie the comment at needs_start() exists to prevent. `needsignin` is
+# the only amber, non-startable pill in the approved vocabulary, and its copy ("You'll need a
+# keyboard") is the right advice for a dead session, which is the dominant cause of these
+# branches.
 classify_voice() {
   probe_voice_process || { echo offline; return; }
-  local age; age="$(gv_psidts_age)"
-  # Absent, null and unparseable all read the same way: the refresh cycle has stopped
-  # reporting. This guard is also what keeps a failed probe DATA rather than an error — with
-  # the value empty, `[ "$age" -gt 1200 ]` prints "integer expression expected" and evaluates
-  # FALSE, which would report a dead session as Online. The parse above emits digits or
-  # nothing, so the non-numeric arm cannot fire today; it is here so that a later change to
-  # that pipeline cannot quietly reintroduce the silent-Online failure.
-  case "$age" in ''|*[!0-9]*) echo needsignin; return ;; esac
-  [ "$age" -gt 1200 ] && { echo needsignin; return; }
-  echo online   # BOTH the < 660 window and the 660-1200 trough are silent. See the header.
+
+  # `available` is the ANCHOR, and the one term read non-defensively. It does two jobs. First it
+  # mirrors the C# predicate, where Available is the sole non-nullable term because RotaryPhone
+  # always send it and it read false throughout the 2026-09-08 outage. Second, it is what makes
+  # an empty, truncated or non-JSON body unhealthy: no `available` parses out of such a body, so
+  # the answer cannot be Online.
+  [ "$(gv_bool available)" = true ] || { echo needsignin; return; }
+
+  # PRESENT AND BAD. Each of these is skipped when absent or null, deliberately — see the header.
+  [ "$(gv_bool cookiesValid)" = false ] && { echo needsignin; return; }
+  [ "$(gv_bool degraded)"     = true  ] && { echo needsignin; return; }
+  [ "$(gv_bool authBlackout)" = true  ] && { echo needsignin; return; }
+
+  # Reported AND interpretable: only then does staleness get a vote.
+  local age; age="$(gv_last_success_age)"
+  case "$age" in
+    ''|*[!0-9]*) ;;   # no usable reading -> no signal, per gv_last_success_age's remarks
+    *) [ "$age" -gt "$GV_STALE_AFTER" ] && { echo needsignin; return; } ;;
+  esac
+
+  echo online
 }
 
 run_probes() {
@@ -628,7 +755,9 @@ usage() {
   cat >&2 <<'USAGE'
 usage: radio-console-open [--print-status | --dry-run | --dialog-demo A|B1|B2|C]
   (no arguments)   probe, start what is down, then open the kiosk
-  --print-status   probe only; print each component's state, the psidts age, and the tier
+  --print-status   probe only; print each component's state, the GV health terms, and the tier.
+                   An EMPTY GV_* value means the field was absent or null. For every term except
+                   GV_AVAILABLE that means it contributed nothing, not that it read badly.
   --dry-run        probe only; print what a real run WOULD start. Starts nothing.
   --dialog-demo    render one canned report dialog. Probes nothing, starts nothing.
 USAGE
@@ -661,7 +790,14 @@ case "${1:-}" in
   --print-status)
     run_probes
     for c in "${LABELS[@]}"; do printf '%s=%s\n' "$c" "${STATE[$c]}"; done
-    printf 'PSIDTS=%s\n' "$(gv_psidts_age)"
+    # The GV terms individually, because `VOICE=needsignin` on its own does not say WHICH term
+    # fired, and this affordance exists to tell the truth about a run on a box that cannot be
+    # screenshotted. It replaces `PSIDTS=`, whose field RotaryPhone's #79 deletes.
+    printf 'GV_AVAILABLE=%s\n'       "$(gv_bool available)"
+    printf 'GV_COOKIESVALID=%s\n'    "$(gv_bool cookiesValid)"
+    printf 'GV_DEGRADED=%s\n'        "$(gv_bool degraded)"
+    printf 'GV_AUTHBLACKOUT=%s\n'    "$(gv_bool authBlackout)"
+    printf 'GV_LASTSUCCESS_AGE=%s\n' "$(gv_last_success_age)"
     printf 'TIER=%s\n' "$(compute_tier)"
     exit 0 ;;
   --dry-run)
