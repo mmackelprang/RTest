@@ -39,6 +39,79 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private TimeSpan _btPosition;
   private TimeSpan? _btDuration;
   private bool _hasMediaPlayer;
+
+  // The phone's last reported AVRCP transport status, reduced to the one bit
+  // anything asks of it.
+  //
+  // ⚠ This exists instead of reading MetadataInternal["PlaybackStatus"] back out,
+  // even though the two are written on the same event. That dictionary is a
+  // DISPLAY projection — a plain Dictionary shared with the public Metadata
+  // property, written from D-Bus callback threads and enumerated on ASP.NET
+  // request threads by AudioDtoMapper — and reading a state-machine input out of
+  // it also requires an unguarded (string) cast. See plan AUD-12 C-169 / C-175.
+  //
+  // ⚠ A bool rather than a BluetoothPlaybackStatus? because a nullable enum is two
+  // fields and can tear; the false default is also the right answer for "no AVRCP
+  // status seen yet", which is what keeps
+  // BluetoothAudioSourceTests.DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady
+  // and _WhenPlatformManaged_LandsReadyWithoutAcquiring green.
+  //
+  // ⛔⛔ WHAT `volatile` DOES NOT BUY, stated because the obvious reading is wrong.
+  // It makes the single read and the single write of THIS FIELD atomic and ordered.
+  // It does NOT make TryPromoteToPlayingFromLastAvrcpStatus atomic: that method is a
+  // check-then-act across TWO unsynchronized locations, this field and State — and
+  // State (AudioSourceBase) is a plain non-volatile field whose setter is itself an
+  // unguarded `if (_state == value) return;`.
+  //
+  // The reachable lost update, found in AUD-12's pre-merge review rather than by
+  // measurement: ApplyDeferredCaptureState writes Ready; TryPromoteToPlayingFromLastAvrcpStatus
+  // reads a true here; a D-Bus Paused then lands, writes false here and is DISCARDED by the
+  // switch (the `case Paused when State == Playing` arm sees Ready); the helper resumes and
+  // writes Playing off the value it already read. Net: the phone says Paused and the source
+  // says Playing, with no further edge coming to correct it until the user resumes. The
+  // window is the few instructions between the helper's read and its write.
+  //
+  // ⚠ NOTE THE ORDER, because the obvious narration of this is wrong and an earlier draft of
+  // this comment had it. It is NOT "the Paused is discarded and the helper then reads a stale
+  // true" — OnPlaybackStatusChanged records this field BEFORE the switch, so by the time a
+  // Paused reaches the switch this field is already false, and a volatile read after a
+  // completed volatile write cannot return the old value (which is exactly what the paragraph
+  // above claims volatile DOES buy). The hazard is the helper's own read-then-act, not a stale
+  // read. Same net result; the mechanism is the claim, per CLAUDE.md § Pre-Merge Review.
+  //
+  // Before AUD-12 the same interleaving left the source in Ready, which was inert — so this is
+  // a narrow NEW residual, and it is recorded rather than fixed because a lock here is a change
+  // to the live audio path that AUD-12 could not UAT. It self-corrects on the next real
+  // Playing edge.
+  //
+  // ⛔⛔ IT IS CLEARED ON DISCONNECT, AND THAT IS AN OWNER DECISION WITH A KNOWN COST.
+  // Do not "simplify" the reset out of OnDeviceDisconnected; read this first.
+  //
+  // Why it must be cleared: AudioManager caches one BluetoothAudioSource per
+  // AudioSourceType for the whole process lifetime, so an uncleared bit outlives every
+  // device session — and AUD-12 ADDED a promotion on the reconnect path
+  // (ApplyDeferredCaptureState, reached from BOTH OnDeviceConnected and
+  // OnCaptureStreamRecovered, the latter of which describes itself as "a fresh
+  // post-disconnect session"). A phone that disconnected while playing would then make
+  // the NEXT session claim Playing the moment capture landed, however idle that phone
+  // actually was — silently, with fingerprinting running against nothing, until the user
+  // pressed play. Measured, not argued:
+  // BluetoothAudioSourceTests.DeferredCapture_AfterDisconnect_DoesNotPromoteOnStaleAvrcpStatus
+  // observes Playing where it should see Ready when this reset is removed.
+  //
+  // ⚠ WHAT CLEARING ACCEPTS, so a future reader does not mistake a deliberate trade for
+  // an oversight and reverse it: a phone that KEEPS PLAYING across a re-attach at the
+  // same D-Bus object path gets no corrective Status read — AttachMediaPlayerAsync
+  // returns at its dedup before the re-read — so that source parks in Ready, which is
+  // AUD-12's own symptom returning on the reconnect path.
+  //
+  // That hole is C-174, it is filed as queue row AUD-14, and it closes there. The hole
+  // on the other side had no row and no owner. A known hole with a scheduled fix beat an
+  // unknown one with neither — which is the whole of the reasoning, and it is the
+  // owner's call, made 2026-09-08 on AUD-12's PR after its pre-merge review surfaced the
+  // choice. AUD-12's plan never considered the field's lifetime at all.
+  private volatile bool _avrcpReportsPlaying;
+
   private CancellationTokenSource? _captureRetryCts;
   private int _recoveryInProgress;
 
@@ -183,15 +256,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     // Fix race: PlaybackStatusChanged may fire during StartAsync() (D-Bus sends
     // current status immediately) before State is set to Ready. The event handler
-    // writes "PlaybackStatus" metadata but skips the state transition because
-    // State wasn't Ready yet. Check if we missed a Playing transition.
-    if (State == AudioSourceState.Ready &&
-        MetadataInternal.TryGetValue("PlaybackStatus", out var pbStatus) &&
-        (string)pbStatus == "Playing")
-    {
-      Logger.LogInformation("BluetoothAudioSource: phone already playing, transitioning to Playing state");
-      State = AudioSourceState.Playing;
-    }
+    // records the status but skips its own transition because State wasn't Ready
+    // yet.
+    //
+    // ⚠ AUD-12: this catch-up was correct and was the ONLY one. The deferred-capture
+    // path lands in the identical Ready state by a different route and had no way
+    // back out, so both now call the one helper. Do not re-inline this.
+    TryPromoteToPlayingFromLastAvrcpStatus();
   }
 
   protected override async Task PlayCoreAsync(CancellationToken cancellationToken)
@@ -453,13 +524,94 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// The dispatch that reaches this method is covered by
   /// <c>BluetoothAudioSourceTests.DeviceConnectedEvent_*</c>; do not re-widen this to reach it.
   /// </para>
+  /// <para>
+  /// ⚠ AUD-12: preserving <c>Playing</c> is only half the invariant this method's
+  /// first paragraph states. A source that arrives here in any other state lands in
+  /// <c>Ready</c>, which is terminal — see
+  /// <see cref="TryPromoteToPlayingFromLastAvrcpStatus"/>. So it also RE-DERIVES
+  /// <c>Playing</c> when the phone's last AVRCP report says the phone is playing.
+  /// Measured stall: <c>Stopped -&gt; Ready</c> at 10:18:19 on 2026-09-06, then
+  /// nothing, for ten-plus minutes, while the graph was audible and fully connected.
+  /// </para>
   /// </summary>
   private void ApplyDeferredCaptureState()
   {
-    if (State != AudioSourceState.Playing)
+    if (State == AudioSourceState.Playing)
     {
-      State = AudioSourceState.Ready;
+      return;
     }
+
+    State = AudioSourceState.Ready;
+    TryPromoteToPlayingFromLastAvrcpStatus();
+  }
+
+  /// <summary>
+  /// Promotes a source sitting in <see cref="AudioSourceState.Ready"/> to
+  /// <see cref="AudioSourceState.Playing"/> when the phone's last reported AVRCP
+  /// transport status was <c>Playing</c>.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ WITHOUT THIS, Ready IS EFFECTIVELY TERMINAL FOR A PLAYING PHONE, and that is
+  /// AUD-12. Measured on the box 2026-09-06: the source reached Ready at 10:18:19 and
+  /// never left it, while the mixer stayed audible for ten-plus minutes.
+  ///
+  /// ⚠ "Effectively", and the precision matters — an earlier draft of this remark said
+  /// Ready's ONLY exit is an AVRCP edge, and that is simply false. AudioSourceBase
+  /// leaves Ready from PlayAsync (which writes Playing unconditionally), StopAsync and
+  /// DisposeAsync. (It also writes Initializing in InitializeAsync, which does not
+  /// reach THIS type — BluetoothAudioSource overrides InitializeAsync without calling
+  /// base — but the sentence is scoped to AudioSourceBase, so name it rather than
+  /// leave the enumeration looking complete.) What is true is narrower: no exit fires
+  /// ON ITS OWN. Every one of those needs a user or a caller to act, so an untouched
+  /// source stays put.
+  ///
+  /// ⚠ The AVRCP half of that is narrower still, and the reason usually given for it is
+  /// also wrong. BlueZ raising PropertiesChanged only on CHANGE
+  /// (LinuxBluetoothService.OnPlayerPropertiesChanged) is not the whole story, because
+  /// AttachMediaPlayerAsync explicitly RE-READS Status on attach and pushes it through
+  /// UpdatePlaybackStatus, which raises PlaybackStatusChanged unconditionally. So a
+  /// FRESH attach does deliver a corrective edge. The silence AUD-12 measured belongs to
+  /// a RE-attach at the same object path, which returns at AttachMediaPlayerAsync's
+  /// dedup before that re-read — i.e. it is C-174 / queue row AUD-14, not BlueZ's
+  /// change-only semantics. Conclusion unchanged; the reason is not, and in this repo
+  /// the reason is the claim (CLAUDE.md § Pre-Merge Review).
+  ///
+  /// ⚠ It reads _avrcpReportsPlaying and NOT MetadataInternal["PlaybackStatus"],
+  /// even though both are written by the same handler. See that field's remarks
+  /// and plan AUD-12 C-169 / C-175 — including what that field does NOT guarantee.
+  ///
+  /// ⚠ A source that has never seen an AVRCP Playing — including a freshly
+  /// constructed one — is NOT promoted. That is deliberate and is pinned by
+  /// BluetoothAudioSourceTests.DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady
+  /// and _WhenPlatformManaged_LandsReadyWithoutAcquiring, both of which drive a
+  /// Created source to Ready through the real DeviceConnected dispatch (AUD-12 C-177).
+  ///
+  /// ⚠ void, not bool. It returned "true if it promoted" until AUD-12's pre-merge
+  /// review pointed out that both call sites discard it, so the doc was advertising an
+  /// affordance nothing consumed.
+  /// </remarks>
+  /// <param name="via">
+  /// Supplied by the compiler. Names which of the two recovery routes promoted — see the
+  /// log line below for why that is worth a parameter.
+  /// </param>
+  private void TryPromoteToPlayingFromLastAvrcpStatus(
+    [System.Runtime.CompilerServices.CallerMemberName] string? via = null)
+  {
+    if (State != AudioSourceState.Ready || !_avrcpReportsPlaying)
+    {
+      return;
+    }
+
+    // ⚠ The ROUTE is logged, not just the state, because this line is box-triage
+    // evidence and AUD-12 was found by reading exactly this log. Both callers reach
+    // here with State == Ready, so the state alone cannot tell a deferred capture
+    // landing (ApplyDeferredCaptureState — the AUD-12 stall) from InitializeAsync's
+    // long-standing startup catch-up. The plan's §5 step 5 greps for "promoting to
+    // Playing" and then has to say WHICH path fired; this is that answer.
+    Logger.LogInformation(
+      "BluetoothAudioSource: phone reports Playing but the source is Ready — promoting to Playing (via {Route})",
+      via);
+    State = AudioSourceState.Playing;
   }
 
   private async Task TryAcquireAudioCaptureAsync()
@@ -710,6 +862,34 @@ public class BluetoothAudioSource : USBAudioSourceBase
       StopCaptureRetryLoop();
       NeedsFingerprintingLookup = false;
       _hasMediaPlayer = false;
+
+      // ⚠ AUD-12, by owner decision. The media player is gone one line above, so its
+      // last reported transport status is no longer a statement about anything live —
+      // and without this the bit outlives the session and decides the NEXT one, because
+      // AudioManager caches one BluetoothAudioSource per source type for the whole
+      // process. Cleared HERE, beside _hasMediaPlayer and before the first await below,
+      // so it runs even if the teardown that follows throws. See the field's remarks for
+      // the trade this accepts.
+      //
+      // ⚠ WHAT THIS PLACEMENT DOES NOT BUY, and the trade is two-sided rather than free.
+      // Clearing early guarantees the clear RUNS; it does not guarantee the bit STAYS
+      // clear for the rest of the teardown. This method is `async void` on a D-Bus
+      // callback thread and awaits below before assigning Stopped, so a late
+      // PlaybackStatusChanged(Playing) arriving in that window re-arms the bit, and
+      // nothing clears it again — the Stopped assignment writes State only. A later
+      // OnCaptureStreamRecovered -> ApplyDeferredCaptureState would then promote off it,
+      // which is the very outcome this clear exists to prevent.
+      //
+      // ⛔ NOT fixed here, and the reason is that the window is C-174's to close, not
+      // this row's. Those late edges are reachable only because LinuxBluetoothService
+      // never nulls _mediaPlayer/_mediaPlayerPath and never disposes the player
+      // properties watcher outside a fresh attach — the stale-watcher leak filed as
+      // queue row AUD-14. Close AUD-14 and the window closes with it. A second clear
+      // beside the Stopped assignment would also close it, but that is a live-audio-path
+      // change AUD-12 could not UAT, and it would trade away the throw-robustness this
+      // placement was chosen for. Recorded, deliberately, rather than half-fixed.
+      _avrcpReportsPlaying = false;
+
       _btPosition = TimeSpan.Zero;
       _btDuration = null;
 
@@ -1123,8 +1303,64 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _captureGenerator?.AddSamples(samples);
   }
 
+  /// <summary>
+  /// True while this source still holds a route from the phone's A2DP stream to the
+  /// mixer — a routed playback id, a capture device, an attached
+  /// <see cref="USBAudioSourceBase.SoundComponent"/>, or a platform that owns the
+  /// routing itself.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ This exists for exactly one caller: the Stopped arm of
+  /// OnPlaybackStatusChanged. Stopped has THREE provenances and only one of them is
+  /// safe to promote out of — see the comment there and plan AUD-12 C-170.
+  ///
+  /// ⛔ THE DISCRIMINATION ONLY HOLDS ON THE NON-PLATFORM-MANAGED PATH, and the first
+  /// disjunct is why. IsAudioManagedByPlatform is a CONFIGURATION, not a connection:
+  /// LinuxBluetoothService hard-codes false, and WindowsBluetoothService computes
+  /// `_a2dpSinkManager != null &amp;&amp; !_options.EnableLoopbackCapture`. OnDeviceDisconnected
+  /// nulls the other three and cannot touch that one, so wherever it is true this
+  /// property is UNCONDITIONALLY true and separates neither provenance. The deployed
+  /// appliance is Linux, where it is false, so the guard is real there — but do not read
+  /// the Stopped-arm comment as an invariant that holds on every platform. AUD-12's plan
+  /// C-170 states it unqualified; that is the plan being loose, not this code.
+  ///
+  /// ⚠ private, and it stays private. Three of its four arms are reachable from a
+  /// unit test through IBluetoothService alone — see design/TESTING.md § Test Seams
+  /// rule 1 and plan AUD-12 C-184. The fourth (_playbackId) is not, and that gap is
+  /// recorded in the plan's §4.8 rather than closed with a seam.
+  /// </remarks>
+  private bool HasCapturePath =>
+    _bluetoothService.IsAudioManagedByPlatform
+    || _playbackId != null
+    || _captureDevice != null
+    || SoundComponent != null;
+
   private void OnPlaybackStatusChanged(object? sender, BluetoothPlaybackStatus e)
   {
+    // ⚠ Recorded BEFORE the switch below, because the switch DISCARDS transitions
+    // it does not accept and the fact that the phone reported Playing must survive
+    // that. That discard is exactly what AUD-12 was.
+    //
+    // ⚠ ForwardSeek / ReverseSeek are excluded on purpose: they are transient and
+    // BlueZ returns to "playing" or "paused" when the seek ends, so letting one
+    // clear a known-Playing status would open a window in which the catch-up in
+    // TryPromoteToPlayingFromLastAvrcpStatus refuses a promotion it should make.
+    //
+    // ⚠ Stopped IS recorded, and must be — otherwise a legitimately stopped phone
+    // would keep a stale true here and the catch-up would promote out of a state it
+    // should not. But note what that costs upstream, because this handler cannot see
+    // it: LinuxBluetoothService.UpdatePlaybackStatus maps EVERY unrecognised status
+    // string to Stopped via its `_ =>` arm, so an unknown or transient AVRCP value
+    // clears this bit while the phone is still playing, and the catch-up then refuses
+    // a promotion it should make. Same failure shape as AUD-12 itself, self-correcting
+    // on the next real Playing edge. The fix belongs in that switch — distinguishing
+    // "stopped" from "unparseable" — not here, and it is out of AUD-12's scope.
+    if (e is BluetoothPlaybackStatus.Playing or BluetoothPlaybackStatus.Paused
+        or BluetoothPlaybackStatus.Stopped or BluetoothPlaybackStatus.Error)
+    {
+      _avrcpReportsPlaying = e == BluetoothPlaybackStatus.Playing;
+    }
+
     MetadataInternal["PlaybackStatus"] = e.ToString();
     Logger.LogDebug("Bluetooth playback status: {Status}", e);
 
@@ -1133,7 +1369,44 @@ public class BluetoothAudioSource : USBAudioSourceBase
     switch (e)
     {
       case BluetoothPlaybackStatus.Playing:
-        if (State == AudioSourceState.Ready || State == AudioSourceState.Paused)
+        // ⚠ Stopped joined this accept set in AUD-12, and the guard on it is not
+        // decoration. AUD-10 (the A2DP transport dies on pause) drives this source
+        // to Stopped routinely, and before AUD-12 an AVRCP Playing arriving in that
+        // state was written to metadata a few lines up and then silently dropped
+        // here — Stopped was absorbing.
+        //
+        // ⛔ Stopped has THREE provenances, and only the first is safe to promote out
+        // of. (1) The Stopped case below — the phone's transport stopping while our
+        // pipeline stays intact; promoting back is correct. (2) OnDeviceDisconnected,
+        // which by the time it assigns Stopped has already pulled the generator out of
+        // the mixer and nulled _captureDevice / SoundComponent. (3) AudioSourceBase's
+        // StopAsync, i.e. the user or a caller stopping this source — StopCoreAsync
+        // nulls _captureDevice, _playbackId and SoundComponent BEFORE the base class
+        // assigns Stopped, so it is refused by the same guard and for the same reason.
+        //
+        // ⚠ (3) was missing from this comment until AUD-12's post-rebase review, and
+        // the omission is the interesting part: the census read as complete, and the
+        // guard happened to refuse the un-named case anyway. A comment that says "TWO"
+        // is a claim about the whole program, not about the two it names.
+        //
+        // Promoting (2) or (3) to Playing would assert audio is flowing from a phone
+        // that is not connected, and (2) would then fire TryReacquireCaptureAsync below
+        // at a device that is gone. HasCapturePath is false in both cases ON THIS BOX.
+        //
+        // ⛔ It is NOT false there when the platform owns routing: that disjunct is a
+        // configuration flag OnDeviceDisconnected cannot clear, so on Windows this
+        // guard refuses nothing. See HasCapturePath's own remarks. Linux hard-codes
+        // the flag false, which is why the guard is real where this ships — and the
+        // reacquire below is separately gated on !IsAudioManagedByPlatform, so the
+        // "fires at a device that is gone" consequence does not follow on that path
+        // either. Plan AUD-12 C-170 states the invariant unqualified; that is the
+        // plan being loose, not this code.
+        //
+        // C-174 — now queue row AUD-14 — records the BlueZ watcher leak that makes the
+        // unsafe provenance reachable rather than theoretical.
+        if (State == AudioSourceState.Ready
+            || State == AudioSourceState.Paused
+            || (State == AudioSourceState.Stopped && HasCapturePath))
         {
           State = AudioSourceState.Playing;
         }
