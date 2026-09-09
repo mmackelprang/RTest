@@ -39,7 +39,7 @@ public static class GvBridgeHealth
     if (status is null)
     {
       return false;                       // the poll itself failed — GvBridgeStatusService
-    }                                     // maps that to a null status (GvBridgeStatusService.cs:118)
+    }                                     // .PollOnceAsync's catch block maps that to a null status
 
     if (!status.Available)
     {
@@ -51,14 +51,22 @@ public static class GvBridgeHealth
       return false;                       // present AND bad. `== ` against bool? is deliberate:
     }                                     // null must not satisfy any of these.
 
-    if (status.LastApiSuccessAt is DateTime last)
+    // Reported AND interpretable. Treat a stale success as unhealthy; treat ABSENT as no signal
+    // (see remarks) — and treat an UNSPECIFIED DateTimeKind as no signal too, for the same
+    // reason.
+    //
+    // ⚠⚠ UNSPECIFIED IS SKIPPED, NOT ASSUMED UTC, AND THE DIFFERENCE IS A SILENT NO-OP.
+    // An unmarked timestamp is one that arrived without a `Z`, which means we do not know what
+    // clock produced it. RotaryPhone runs in EDT, so reading such a value as UTC would place it
+    // 4 hours in the past — permanently beyond LastSuccessStaleAfter, pinning this predicate at
+    // unhealthy, so the unhealthy→healthy edge never fires and GV-12 stops working with a green
+    // suite and no error anywhere. Guessing a kind is exactly the "a field we did not receive is
+    // evidence of ill health" mistake §0.4 exists to prevent; a value we cannot interpret gets
+    // the same answer as a value we did not get. Only Utc (no-op) and Local (converted) are
+    // trusted enough to gate on.
+    if (status.LastApiSuccessAt is DateTime last && last.Kind != DateTimeKind.Unspecified)
     {
-      // Reported. Treat a stale success as unhealthy; treat ABSENT as no signal (see remarks).
-      // DateTimeKind is not guaranteed on a deserialized value, so compare in UTC explicitly
-      // rather than trusting the kind RotaryPhone happened to serialize.
-      var lastUtc = last.Kind == DateTimeKind.Unspecified
-        ? DateTime.SpecifyKind(last, DateTimeKind.Utc)
-        : last.ToUniversalTime();
+      var lastUtc = last.ToUniversalTime();
       if (now.UtcDateTime - lastUtc > LastSuccessStaleAfter)
       {
         return false;

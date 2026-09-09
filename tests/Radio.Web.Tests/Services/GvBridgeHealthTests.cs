@@ -24,6 +24,9 @@ public class GvBridgeHealthTests
     // The live capture from docs/queue/GV-12.md:33-36, verbatim. degraded and authBlackout
     // both false through a TOTAL outage — this is the case the retracted morning guidance
     // would have missed, and the reason Available is a term at all.
+    // ⚠ `Available = false` alone already satisfies this, and that is the POINT rather than a
+    // weakness: the test documents that the one field RotaryPhone always sends was sufficient
+    // to catch the real incident, with every other term contributing nothing.
     var status = new GvBridgeStatusDto
     {
       Available = false,
@@ -79,5 +82,35 @@ public class GvBridgeHealthTests
     // Absent — deliberately healthy, departing from docs/queue/GV-12.md:46. Plan §0.4.
     var absent = new GvBridgeStatusDto { Available = true, LastApiSuccessAt = null };
     Assert.True(GvBridgeHealth.IsHealthy(absent, Now));
+  }
+
+  [Fact]
+  public void UnspecifiedKindLastSuccess_IsNoSignal_WhereUtcIsStale()
+  {
+    // Same instant, four hours in the past, differing ONLY in DateTimeKind — and the two must
+    // land on opposite answers.
+    var fourHoursAgo = Now.UtcDateTime.AddHours(-4);
+
+    // Unspecified = a timestamp that arrived without a `Z`, so we do not know which clock
+    // produced it. An earlier version assumed UTC. RotaryPhone runs in EDT, so if it ever
+    // serializes a local time unmarked, that assumption places the value 4 hours in the past,
+    // it reads permanently stale, the predicate pins unhealthy, the unhealthy→healthy edge
+    // never fires, and GV-12 becomes a silent no-op with this suite still green. An
+    // uninterpretable value therefore gets the same answer as an absent one: no signal.
+    var unspecified = new GvBridgeStatusDto
+    {
+      Available = true,
+      LastApiSuccessAt = DateTime.SpecifyKind(fourHoursAgo, DateTimeKind.Unspecified)
+    };
+    Assert.True(GvBridgeHealth.IsHealthy(unspecified, Now));
+
+    // Utc = RotaryPhone told us the clock. Now the staleness gate applies, and must bite —
+    // otherwise skipping Unspecified would have quietly disabled the term altogether.
+    var utc = new GvBridgeStatusDto
+    {
+      Available = true,
+      LastApiSuccessAt = DateTime.SpecifyKind(fourHoursAgo, DateTimeKind.Utc)
+    };
+    Assert.False(GvBridgeHealth.IsHealthy(utc, Now));
   }
 }

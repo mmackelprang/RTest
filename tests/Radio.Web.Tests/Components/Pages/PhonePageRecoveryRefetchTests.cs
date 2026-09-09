@@ -126,10 +126,18 @@ public class PhonePageRecoveryRefetchTests : TestContext
       () => Assert.Contains(ContactName, cut.Markup),
       timeout: TimeSpan.FromSeconds(5));
 
-    // ⚠ EXACTLY 2 — one mount fetch, one recovery fetch — and the exactness is the point.
-    // The FIRST status delivery must never refetch (the mount already did, and a refetch there
-    // would double every page open); _gvHealthyLast starting null is what guarantees it. A
-    // spurious refetch on the unhealthy delivery would make this 3.
+    // ⚠ EXACTLY 2 — one mount fetch, one recovery fetch — and the exactness is the point: it
+    // pins the recovery to ONE fetch, so a trigger that fired on every delivery rather than on
+    // the edge would overshoot and fail here.
+    //
+    // What it does NOT prove is the first-delivery property, and the earlier claim that "a
+    // spurious refetch on the unhealthy delivery would make this 3" is not guaranteed: a
+    // refetch on the first delivery would set _gvRefetching, the healthy delivery would then
+    // return early on that guard, and the total would land on 2 anyway. The first-delivery
+    // property is instead guaranteed by construction — _gvHealthyLast starts null, and
+    // `null == false` is false in C#, so `_gvHealthyLast == false && healthy` cannot be true on
+    // the first status the page ever sees. That matters because the mount fetch already ran;
+    // refetching there would double every page open.
     Assert.Equal(2, _gv.ThreadListCalls);
   }
 
@@ -157,10 +165,24 @@ public class PhonePageRecoveryRefetchTests : TestContext
       status.ApplyStatusForTest(Healthy());
     }
 
-    // Still 2. No edge, no fetch.
+    // ⚠ DO NOT "SIMPLIFY" THIS BACK TO A WaitForAssertion(() => Assert.Equal(2, …)) HERE.
+    // WaitForAssertion returns the instant its assertion first passes, and the wait above has
+    // already established the count is 2 — so that call would return on its first evaluation,
+    // before any of the five deliveries could possibly have landed a fetch. It asserted
+    // nothing, and the test passed against an implementation with the edge check removed
+    // (`var recovered = healthy;`), which is the one thing it exists to prevent.
+    //
+    // Driving one MORE real edge is what makes the five in between observable. The second edge
+    // is guaranteed to refetch, so the count must reach exactly 3: every one of the five
+    // repeated healthy deliveries contributed nothing. Had any of them fetched, this would be
+    // 4 or more and the plain Assert below fails.
+    status.ApplyStatusForTest(Unhealthy());
+    status.ApplyStatusForTest(Healthy());
+
     cut.WaitForAssertion(
-      () => Assert.Equal(2, _gv.ThreadListCalls),
-      timeout: TimeSpan.FromSeconds(2));
+      () => Assert.Equal(3, _gv.ThreadListCalls),
+      timeout: TimeSpan.FromSeconds(5));
+    Assert.Equal(3, _gv.ThreadListCalls);
   }
 
   /// <summary>

@@ -161,21 +161,30 @@
 
   // ── GV-12: the recovery edge ──────────────────────────────────
   // ⚠⚠ _gvHealthyLast IS SEPARATE FROM _gvBridgeAvailable ON PURPOSE, AND MERGING THEM
-  // REINTRODUCES THE BUG SILENTLY. _gvBridgeAvailable has three writers — OnInitializedAsync
-  // (:221), RefreshGvStatusAsync (:351, reached every 6th 5 s poll = 30 s), and
-  // OnGvStatusChanged (:456) — because this page runs its OWN status poll alongside the
+  // REINTRODUCES THE BUG SILENTLY. _gvBridgeAvailable takes four assignments across three
+  // methods — OnInitializedAsync (twice: once from its own GvBridgeApi.GetStatusAsync, once
+  // from GvBridgeStatus.IsAvailable), RefreshGvStatusAsync (reached every 6th 5 s poll = 30 s),
+  // and OnGvStatusChanged — because this page runs its OWN status poll alongside the
   // singleton's. If RefreshGvStatusAsync lands the recovery first, the field is already true
   // when OnGvStatusChanged runs, the comparison reads true→true, the edge is swallowed and the
   // panels stay stuck. Intermittently, on a timer alignment nobody can reproduce on demand.
   // This field is written by OnGvStatusChanged and by NOTHING else. Plan GV-12 §0.7.
   //
   // null = no status seen yet. The FIRST delivery must never refetch: OnInitializedAsync has
-  // already fired LoadVoicemailsAsync/LoadThreadsAsync (:258-259) and a refetch here would
-  // duplicate the mount fetch on every page open.
+  // already fired LoadVoicemailsAsync/LoadThreadsAsync and a refetch here would duplicate the
+  // mount fetch on every page open.
   private bool? _gvHealthyLast;
 
-  // Re-entrancy guard. The status poll is 10 s and a refetch is two upstream list calls
-  // through RotaryPhone to Google; a slow one must not stack behind the next edge.
+  // Re-entrancy guard shared by BOTH unattended refetch paths — the recovery edge
+  // (RefetchAfterRecoveryAsync) and the poll backstop (BackstopRefetchAsync). The status poll
+  // is 10 s and a refetch is two upstream list calls through RotaryPhone to Google; a slow one
+  // must not stack behind the next edge, and the two paths must not stack on each other.
+  //
+  // ⚠ Plain bool with no barrier, and that is sound ONLY because every read and every write
+  // happens on the Blazor sync context: both writers are reached exclusively through
+  // InvokeAsync. Reading or setting it from the timer thread — as the backstop originally did
+  // — makes it an unsynchronized cross-thread field and half a guard: it would stop the
+  // backstop starting during an edge, but not an edge starting during the backstop.
   private bool _gvRefetching;
 
   // _messagesPanel is captured so the inbound SMS handler can ask which thread is
@@ -410,28 +419,10 @@
         {
           await RefreshGvStatusAsync();
 
-          // GV-12 backstop. The recovery edge in OnGvStatusChanged handles the case the row
-          // was filed for — the bridge went down and came back. It CANNOT handle a list fetch
-          // that failed while the bridge stayed healthy: GetSmsThreadsAsync returns null on any
-          // exception (a one-off timeout, a reset connection, a 500 on that route alone), the
-          // shared status poll never leaves healthy, and no edge ever occurs. Same stuck panel,
-          // no trigger. Plan GV-12 §0.5.
-          //
-          // ⚠ ERROR-GATED, NOT UNCONDITIONAL, and that is the difference between this and the
-          // backoff loop §0.6 rejected. It runs only while a surface is actually showing
-          // "Couldn't load…", so a healthy console adds zero calls, and a console stuck against
-          // a dead upstream adds two calls per 30 s rather than per 5 s. RotaryPhone's uptime is
-          // not settled — a confirmed session-starvation issue — so retry volume into them is a
-          // real cost, not a rounding error.
-          //
-          // ⚠ The error flags are only ever set when the corresponding list is null
-          // (LoadThreadsAsync :613-615, LoadVoicemailsAsync :527-530), so this cannot fire for a
-          // surface that has content and is merely stale.
-          if (!_gvRefetching && (_threadsError || _voicemailError))
-          {
-            if (_voicemailError) await LoadVoicemailsAsync();
-            if (_threadsError) await LoadThreadsAsync();
-          }
+          // GV-12 backstop, on this poll's 30 s cadence. Marshalled onto the Blazor sync
+          // context, and deliberately NOT awaited — BackstopRefetchAsync's remarks give both
+          // reasons, and both are load-bearing.
+          _ = InvokeAsync(BackstopRefetchAsync);
         }
         if (!_disposed) await InvokeAsync(StateHasChanged);
       }
@@ -495,7 +486,14 @@
   //
   // GV-12 — this is also the refetch trigger. The unhealthy→healthy transition of the shared
   // poll is precisely the instant a "Couldn't load…" panel becomes WRONG rather than merely
-  // unlucky, and it is the instant the banner above the panel clears. One trigger, one clock.
+  // unlucky. One trigger, one clock.
+  //
+  // ⚠ The trigger is the HEALTH edge (GvBridgeStatus.IsHealthy), which is NOT the banner. The
+  // banner above the panel is gated on GvAvailable → _gvBridgeAvailable →
+  // GvBridgeStatus.IsAvailable, a single field; IsHealthy is the fuller shape and is the
+  // stricter of the two — GvBridgeStatusService's own remarks say IsAvailable is allowed to be
+  // true while IsHealthy is false. So this can fire while the banner is already clear, and that
+  // ordering is intended: the stricter signal is the one worth spending upstream calls on.
   //
   // ⚠⚠ THIS IS THE ONLY MECHANISM BY WHICH A LONG-LIVED CIRCUIT EVER RECOVERS. A Blazor Server
   // circuit that drops and reconnects resumes the SAME component instances with the SAME
@@ -521,8 +519,8 @@
     }
 
     // Fired on the status service's poll thread, not the Blazor sync context. Marshal the
-    // WHOLE body before touching component state — the same rule OnReadStateChanged (:473)
-    // and OnGvSmsReceived (:776) already follow on this page.
+    // WHOLE body before touching component state — the same rule OnReadStateChanged and
+    // OnGvSmsReceived already follow on this page.
     _ = InvokeAsync(RefetchAfterRecoveryAsync);
   }
 
@@ -532,20 +530,28 @@
   /// <remarks>
   /// ⚠ The open conversation is refetched ONLY when it is currently showing its error state.
   /// A successfully-loaded conversation is left alone: re-opening one costs 2-3 upstream Google
-  /// calls (see RetryOpenThreadAsync's remarks at :727-732) and would re-run the mark-read
-  /// write-through for a thread whose read state is already settled. The lists are cheap by
-  /// comparison — one call each — and are refreshed unconditionally, because a list that
-  /// succeeded before the outage is stale rather than wrong and the badge sum depends on it.
+  /// calls (see RetryOpenThreadAsync's remarks) and would re-run the mark-read write-through for
+  /// a thread whose read state is already settled. The lists are cheap by comparison — one call
+  /// each — and are refreshed unconditionally, because a list that succeeded before the outage
+  /// is stale rather than wrong and the badge sum depends on it.
   ///
-  /// ⚠ RetryOpenThreadAsync is reused rather than LoadOpenThreadMessagesAsync directly: on
-  /// success the user is finally looking at the conversation, so it must carry the read-marking
-  /// the failed open skipped. That logic already lives in RetryOpenThreadAsync and must not be
-  /// duplicated here.
+  /// ⚠⚠ LoadOpenThreadMessagesAsync IS CALLED DIRECTLY, AND RetryOpenThreadAsync MUST NOT BE
+  /// REUSED HERE. RetryOpenThreadAsync ends in MarkOpenThreadReadAsync — a DURABLE write to
+  /// Google that clears the unread marker across every one of the owner's devices. That is
+  /// correct for the Retry BUTTON, where a human is looking at the conversation the instant it
+  /// renders. It is wrong here: this runs unattended, possibly hours after the user walked away
+  /// from the kiosk, and would silently mark a conversation read that nobody has seen. It is
+  /// also the direct inverse of the rule OpenThreadAsync states for exactly this situation —
+  /// "the conversation never rendered, do NOT tell Google it was read". So the pane recovers its
+  /// bodies and the unread marker is left for the human to clear by actually opening it.
   ///
-  /// ⚠ Failures are swallowed. This is an unattended background refresh; a toast for it would
-  /// fire on a kiosk in a family room for something nobody asked for. LoadThreadsAsync and
-  /// LoadVoicemailsAsync already keep their last good list and already raise their own calm
-  /// "Couldn't refresh" warning when they have one to keep.
+  /// ⚠ The catch is a backstop against an UNEXPECTED throw, not the failure path. A failed list
+  /// fetch does not throw — GvBridgeApiService swallows and returns null — so on the ordinary
+  /// failure path this catch sees nothing. What that path does do, when a prior good list
+  /// exists, is raise the page's existing calm "Couldn't refresh" warning toast from inside
+  /// LoadThreadsAsync/LoadVoicemailsAsync, and keep the last good list. That is the page's
+  /// established behaviour for a refresh that failed, and it is deliberately not suppressed
+  /// here.
   /// </remarks>
   private async Task RefetchAfterRecoveryAsync()
   {
@@ -560,10 +566,81 @@
 
       if (_openThreadError && _openThreadId != null)
       {
-        await RetryOpenThreadAsync();
+        await LoadOpenThreadMessagesAsync(_openThreadId);
       }
     }
-    catch { /* unattended refresh — the next edge or the Task 4 backstop retries */ }
+    catch { /* unattended refresh — the next edge or the poll backstop retries */ }
+    finally
+    {
+      _gvRefetching = false;
+      if (!_disposed) await InvokeAsync(StateHasChanged);
+    }
+  }
+
+  /// <summary>
+  /// GV-12 backstop — re-run whichever Messages list is currently rendering its hard error,
+  /// on the 30 s cadence of this page's own status poll, without user input.
+  /// </summary>
+  /// <remarks>
+  /// The recovery edge in OnGvStatusChanged handles the case the row was filed for — the bridge
+  /// went down and came back. It CANNOT handle a list fetch that failed while the bridge stayed
+  /// healthy: GetSmsThreadsAsync returns null on any exception (a one-off timeout, a reset
+  /// connection, a 500 on that route alone), the shared status poll never leaves healthy, and no
+  /// edge ever occurs. Same stuck panel, no trigger. Plan GV-12 §0.5.
+  ///
+  /// ⚠ ERROR-GATED, NOT UNCONDITIONAL, and that is the difference between this and the backoff
+  /// loop §0.6 rejected. It runs only while a surface is actually showing "Couldn't load…", so a
+  /// healthy console adds zero calls, and a console stuck against a dead upstream adds two calls
+  /// per 30 s rather than per 5 s. RotaryPhone's uptime is not settled — a confirmed
+  /// session-starvation issue — so retry volume into them is a real cost, not a rounding error.
+  ///
+  /// ⚠⚠ THE GATE IS (error AND list == null), MIRRORING PhoneMessagesPanel'S OWN ERROR-RENDER
+  /// CONDITION (ThreadsError &amp;&amp; Threads == null), AND THE SECOND HALF IS NOT REDUNDANT. An
+  /// earlier version gated on the error flag alone, reasoning that the flag is only ever set
+  /// when the list is null. That reasoning is false: BumpThread does `_threads ??= new()` and
+  /// OnGvVoicemailReceived does `_voicemails ??= new()`, so a single inbound SignalR push during
+  /// an outage leaves a NON-NULL list with the error flag still set. In that state the panel
+  /// renders content, not an error — and the flag-only gate called it stuck. Two consequences,
+  /// both bad: LoadThreadsAsync took its "keep the last good list" branch and fired an
+  /// unrequested "Couldn't refresh" toast on an unattended kiosk, and it cleared the error flag
+  /// on entry without re-setting it, permanently disarming this backstop for the rest of the
+  /// circuit.
+  ///
+  /// ⚠ Dispatched via InvokeAsync from PollStatusAsync, which is what makes _gvRefetching,
+  /// _threads and _voicemails dispatcher-only here. Running this body inline on the
+  /// System.Timers.Timer thread mutated the lists off the Blazor sync context, against the rule
+  /// this page states at OnReadStateChanged and OnGvSmsReceived.
+  ///
+  /// ⚠ And it is NOT awaited by PollStatusAsync, deliberately. Two list fetches are up to 20 s
+  /// of HttpClient timeout; awaiting them inside the poll degrades the 5 s call-state and bell
+  /// poll to ~25 s during precisely the window GV is broken — on an appliance whose primary job
+  /// is answering the phone. The refetch is the lower-priority of the two and must not stall the
+  /// higher.
+  /// </remarks>
+  private async Task BackstopRefetchAsync()
+  {
+    // Both early returns sit BEFORE the flag is set: an early return must never clear an
+    // in-flight call's guard.
+    if (_disposed || _gvRefetching) return;
+    if (!((_threadsError && _threads == null) || (_voicemailError && _voicemails == null)))
+    {
+      return;
+    }
+
+    _gvRefetching = true;
+    try
+    {
+      if (_voicemailError && _voicemails == null)
+      {
+        await LoadVoicemailsAsync();
+        if (_disposed) return;
+      }
+      if (_threadsError && _threads == null)
+      {
+        await LoadThreadsAsync();
+      }
+    }
+    catch { /* unattended refresh — the next poll or a recovery edge retries */ }
     finally
     {
       _gvRefetching = false;
