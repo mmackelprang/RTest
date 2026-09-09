@@ -21,10 +21,18 @@ the plan called for did **not** ship, and both are recorded here so they are not
 > [`docs/queue/UX-1.md`](../docs/queue/UX-1.md).
 >
 > ⛔ **This makes item 2 below load-bearing in a way it was not before.** The disagreement is
-> tolerable only because the shimmer is **never on screen** — so if dwell is ever fixed, **the value
-> must be re-judged at that point**, because that is the first time anyone will actually see it.
-> ⭐ **The two deferred items below are otherwise unaffected by which value wins** — geometry and
-> dwell are orthogonal to amplitude.
+> tolerable only because the shimmer is not on screen on the panels measured — so if dwell is ever
+> fixed, **the value must be re-judged at that point**, because that is the first time anyone will
+> actually see it. **Dwell is orthogonal to amplitude; it is the *stakes* of the value choice that
+> changed, not the value.**
+>
+> ⛔ **Item 1 (geometry) is NOT orthogonal, and an earlier draft of this banner wrongly said it was.**
+> The Designer's finding is that *"amplitude and geometry **multiply**"* — factors that multiply are
+> not independent. More concretely, **item 1 below says in its own words that it "becomes live again
+> only if someone wants the shimmer calmer without losing visibility"** — and moving from delta 36 to
+> delta 16 is exactly that. If the dark-room question is ever pressed against `#24242B`, Task 5b's
+> 3.3×-steeper ramp is **the** lever that could rescue delta 16. Item 1 is the most affected thing in
+> this file, not the least.
 
 ### 1. The narrowed gradient geometry — proposed, never validated, not shipped
 
@@ -61,22 +69,34 @@ work is still unknown."* It is moot for `UX-1` because 56 is acceptable in both 
 shipped; it becomes live again only if someone wants the shimmer calmer without losing visibility.
 Answering it needs a harness whose band is on the element continuously, and an owner sitting.
 
+> ⚠ **The "moot" clause above is superseded — 2026-09-09, kept legible.** It was written when 56 had
+> shipped. **The value has since moved to 36 (`#24242B`), which IS "the shimmer calmer"** — the exact
+> trigger this paragraph names for the question becoming live again. ⛔ So this item is **no longer
+> moot**: if the dark-room disagreement is ever pressed against `#24242B`, a steeper ramp is the one
+> lever that could rescue delta 16 without going back up in amplitude. **It still has not been
+> tested**, and it still needs the same continuous-band harness and an owner sitting.
+
 ### 2. Real skeleton dwell time — the plan's own pre-check, never run
 
 > ## ⭐ PARTLY ANSWERED 2026-09-09 — and the answer is that the shimmer is effectively never on screen
 >
 > **Measured on the box:** `/api/playhistory` returns in **0.0030–0.0051 s** and `/api/queue` in
-> **0.0051–0.0067 s**. One animation cycle is **1500 ms**, of which the first **~390 ms** is the
-> `ease` dead pause. **The skeleton is on screen for roughly 0.3% of one cycle, so no sweep is ever
-> painted at any highlight value** — which is the outcome §1.3 named as gating.
+> **0.0051–0.0067 s**, against a **1500 ms** cycle — **under 0.5% of one cycle at the slowest time
+> measured** (an earlier draft said "roughly 0.3%", which is the mean presented as a bound). **On
+> those two panels, in warm steady state, no sweep is painted at any highlight value** — the outcome
+> §1.3 named as gating. ⛔ **Scope:** two panels of the 27+ call sites; **Devices, Radio and the phone
+> thread are unmeasured**, and a cold or slow path dwells longer, where a sweep *is* painted.
+> ⭐ Corroborated by a live kiosk sample over CDP: **zero `.skeleton-loading` nodes** on the home page.
 >
 > **Reduced motion was falsified as a cause**, not assumed: `enable-animations: true`, and the
 > `prefers-reduced-motion` block that overrides `.skeleton-loading` — which would kill the animation
 > outright — is **not firing**. ⚠ **Cited by selector, not by line.** `design-system.css` holds
-> **six** `@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real
-> disambiguating work and is also the thing most likely to rot: it is `:1779` on `main`
-> @ `f4d71b28`, and **no branch line number is quoted on purpose** — the token's comment block sits
-> above it, so it shifted twice (`:1805`, then `:1817`) during the single change that reopened this.
+> **five** `@media (prefers-reduced-motion: reduce)` blocks (a `grep` for the bare string returns
+> seven — two are prose), so a bare line number is doing real disambiguating work and is also the
+> thing most likely to rot: it is `:1779` on `main` @ `f4d71b28`, and **no branch line number is
+> quoted as the citation** — the token's comment block sits above it, so it shifted twice (`:1805`,
+> then `:1817`) during the single change that reopened this. ⛔ **This said "six" until pre-merge
+> review counted it**, and the count was the whole justification for the citation change.
 >
 > ⚠ **This is a bound, not the plan's measurement.** What was timed is the **data fetch** for two
 > panels, which bounds how long their skeletons *can* be up; it is not a `MutationObserver` on

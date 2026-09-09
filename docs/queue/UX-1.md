@@ -49,7 +49,9 @@
 > the next deploy.
 >
 > ⭐ **WHAT ACTUALLY DEFUSES THIS — it changes the stakes, not the evidence.** The shimmer is on
-> screen for **~3–7 ms against a 1500 ms cycle**, so **no sweep is painted at any value** (see the
+> screen for **~3–7 ms against a 1500 ms cycle** on the two panels measured, so **on those, in warm
+> steady state, no sweep is painted at any value** (⚠ two panels of 27+ call sites; Devices, Radio and
+> the phone thread are unmeasured, and a cold or slow path would dwell longer — see the
 > final section). If 36 *is* too dim in a dark room, the consequence is that **an invisible element
 > is marginally more invisible.** The value choice is **very low stakes until the dwell question is
 > answered** — which is the honest reason this can proceed on an unresolved disagreement.
@@ -60,7 +62,8 @@
 > not settled-forever; it is settled-for-now, on a surface nobody can currently see.**
 >
 > ⚠ **The value being shipped is NOT literally the Designer's seed, though it sits on that rung.**
-> The seed of record is **`#242429` = rgb(36,36,41)** (`:87` below, and the v2 ladder in
+> The seed of record is **`#242429` = rgb(36,36,41)** (the Designer answer's *"The change"* block
+> below — `:151`, moved from `:87` by this banner — and the v2 ladder in
 > [`NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md)). What the owner
 > actually looked at this afternoon was **`#24242B` = rgb(36,36,43)** — **+2 on blue**, hue lean
 > B−R **+7** rather than the Designer's **+5**. Two levels on one channel near black cannot have
@@ -77,7 +80,7 @@
 |---|---|
 | Status | ⚠ **REOPENED 2026-09-09** — [#641](https://github.com/mmackelprang/RTest/pull/641) shipped `56`/`#38383F` and is merged and deployed; a follow-up PR changing it to `36`/`#24242B` is **open and deliberately unmerged**, gated on the owner's dark-room re-check. See the banner above and the two new sections at the foot of this file. _Original cell: "✅ [#641](https://github.com/mmackelprang/RTest/pull/641) — shipped 2026-09-09; see the note at the foot of this file"_ |
 | Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and carries banners saying so**. _Original cell: "plan TBD — do not write one until the Designer has answered; scope depends entirely on whether the answer is 'new token,' 'retune the existing pair,' or 'leave it'"_ |
-| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) |
+| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) · ⭐ [**third + fourth sittings, with the harness**](../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md) |
 | Depends on | — _(no code dependency; it is gated on a design answer, not on a row)_ |
 | Branch | `fix/ux-1-shimmer-amplitude` _(this row named `feat/ux-skeleton-shimmer-amplitude`; the coordinator's name was used)_ |
 
@@ -393,7 +396,9 @@ declaration and one consumer of the new token.
 
 ### ⚠ Line anchors: this row's, and the plan's, are all stale
 
-`.skeleton-loading` is at **`:1104-1112`** on `main` — not `:1099-1104` as this row (`:260`) and
+`.skeleton-loading` is at **`:1104-1112`** on `main` — not `:1099-1104` as this row (the *"⛔ The
+implementation trap"* subsection, `:353`; this citation said `:260`, which was already wrong on `main`
+and which this row's supersede banner has since pushed further out) and
 [`DAYLIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) (`:72-73`) both
 say, and the rule is **9 lines, not 6**. The plan's `:1099-1107`, `@keyframes shimmer` `:977-980` and
 reduced-motion `:1713-1724` are likewise stale (`:982-985`, `:1726-1729`). ⚠ On the merged branch
@@ -482,6 +487,15 @@ as UAT for this row.
 is my choice."** That is the opposite of what the night sitting concluded about the same rung. **A
 fourth sitting later the same day confirmed it on a better instrument** — see below.
 
+⭐ **Full record, including the harness itself:**
+[`../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md`](../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md).
+⚠ **That directory was filed retroactively, on a pre-merge review finding.** These two sittings
+existed only as prose here, while the two they supersede had a full evidence directory — and the
+harness that produced them lived as **one file on one box**, in a directory `Deploy-ToLinux.ps1:271`
+wipes with `rsync --delete`. It is now committed (`md5 6969e58ed9de5ae3fda5ab17f39a3057`, verified
+identical to the box's copy). ⭐ **This row's whole history is instruments found broken after the
+fact; an unreproducible one is that failure waiting to happen.**
+
 ### How it was judged — this matters more than the number
 
 **The owner did not pick a number off a list.** A static demo page was built on the live box that
@@ -501,8 +515,10 @@ problem.
 
 ### ⛔ The conflict, stated without resolving it
 
-`:217` of this file (the night-sitting section, still legible above) records **"36 is below the
-owner's dark-room visibility threshold."** The owner rejected 36 **in a dark room** and has now
+The night-sitting section above (still legible, under *"The Designer's central claim is contradicted
+by the owner's eye"*) records **"36 is below the owner's dark-room visibility threshold."** ⚠ That
+sentence was `:217` on `main` @ `f4d71b28` and is **`:287`** here — this row's supersede banner moved
+it, so it is cited by section rather than by number. The owner rejected 36 **in a dark room** and has now
 chosen it **in afternoon light**. **Both judgements are the owner's and they contradict each other
 on the same value.**
 
@@ -519,7 +535,9 @@ on the same value.**
    the reason a dark-room re-check is required before this merges.
 
 ⛔ **Do not write that 36 is "correct", and do not write that the earlier finding was "wrong".** The
-two sittings disagree; the merge is gated on a third condition that has not been run.
+sittings disagree and the ambient condition that would separate them was never recorded. ⚠ **This
+paragraph previously ended "the merge is gated on a third condition that has not been run" — that
+sentence is superseded by the fourth sitting below and by the stakes argument that follows it.**
 
 ### ⭐ FOURTH SITTING, later the same day — 36 confirmed on a better instrument
 
@@ -556,7 +574,8 @@ directory with `rsync --delete`; it is not in this repo and will not survive the
 
 ### ⚠ The shipped hex is not the Designer's seed, and the record should not round them together
 
-The seed of record is **`#242429` = rgb(36,36,41)** — `:87` of this file, the plan's Task 5a, and the
+The seed of record is **`#242429` = rgb(36,36,41)** — the Designer answer's *"The change"* block
+above (`:151`; it was `:87` before this row's supersede banner), the plan's Task 5a, and the
 five-value ladder in [`NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md).
 The panel the owner looked at this afternoon painted **`#24242B` = rgb(36,36,43)**: **+2 on blue**,
 hue lean B−R **+7** rather than the Designer's **+5**. Two levels on one channel near black cannot
@@ -568,10 +587,21 @@ row has already been bitten twice by a label drifting from the quantity it named
 
 ## ⭐ 2026-09-09 — the shimmer is effectively invisible in normal operation. Measured, not argued.
 
-**This was never measured before, and it reframes the row.** The plan's Task 0 called for a
-dwell-time pre-check — *"if thread-open latency is typically <500 ms, no shape completes a pass and
-the block looks static at any amplitude"* — and it was **never run**, which this file already noted
-under `design/FUTURE-WORK.md`. It has now been run.
+**This was never measured before, and it reframes the row.** ⛔ **Task 0 itself is still unrun — what
+follows is a BOUND on it**, and an earlier draft of this section wrongly said *"it has now been
+run."*
+
+Two different thresholds are in play and they have been conflated before, so both are attributed
+here:
+
+| Source | Threshold | Method |
+|---|---|---|
+| **This row**, the Designer-answer verification list above | *"if thread-open latency is typically **<500 ms**, no shape completes a pass"* | informal |
+| **The plan**, §1.3 / Task 0 | *"if real dwell time is materially under **750 ms**…"* | a `MutationObserver` on `.skeleton-loading` **DOM presence**, driven over CDP, with a three-band decision table |
+
+⚠ **The `<500 ms` sentence is this file's, not the plan's** — an earlier draft attributed it to Task 0.
+What was actually measured below is **endpoint latency**, which bounds how long those skeletons *can*
+be up. It is **not** the `MutationObserver` Task 0 specifies.
 
 **Measured on the box:**
 
@@ -580,30 +610,74 @@ under `design/FUTURE-WORK.md`. It has now been run.
 | `/api/playhistory` | **0.0030 – 0.0051 s** |
 | `/api/queue` | **0.0051 – 0.0067 s** |
 
-**The panels the skeleton decorates load their data in 3–7 ms.** One animation cycle is **1500 ms**,
-and the first **~390 ms** of it is the `ease` dead pause already documented in this file. So the
-skeleton is on screen for **roughly 0.3% of one cycle** — **no sweep is ever painted, at ANY
-highlight value.**
+**Those two panels load their data in 3–7 ms** against a **1500 ms** cycle. Taking the *slowest* time
+measured, that is **under 0.5% of one cycle** (6.7/1500 = 0.45%; the fastest is 0.20%, the mean
+0.32%). ⚠ **An earlier draft quoted "roughly 0.3%", which is the MEAN presented as a bound** — a page
+rendering both panels is bounded by the slower one.
 
-⭐ **This is why the third sitting needed a static demo page at all**: the real thing cannot be
-looked at.
+⛔ **On those two panels, in warm steady state, no sweep is painted at any highlight value.**
 
-**Reduced motion was falsified as a cause**, not assumed: `enable-animations: true`, and the
-`prefers-reduced-motion` block that overrides `.skeleton-loading` — which would kill the animation
-outright — **is not firing**.
+⚠ **THAT SENTENCE IS SCOPED ON PURPOSE, AND AN EARLIER DRAFT WAS NOT.** It said *"no sweep is **ever**
+painted, at **ANY** highlight value"* — universal quantifiers over every surface and every condition,
+asserted from **two warm endpoints, on one box, on one afternoon**, covering **2 of the 27 call sites
+across 6 pages plus the 38 raw `.skeleton-loading` nodes** this row enumerates above. **Devices, Radio
+and the phone thread are unmeasured, and a cold start or a genuinely slow query would dwell longer** —
+in which case a sweep *is* painted and the highlight value does matter. The same paragraphs that made
+the universal claim also listed the conditions that falsify it.
 
-⚠ **Cited by selector, not by line, and here is why.** `design-system.css` holds **six**
+⭐ **Corroborated independently in the live kiosk**, over CDP on `:9223`:
+
+```
+{"url":"http://localhost:5002/","reduce":false,"noPref":true,"skeletons":0}
+```
+
+**Zero `.skeleton-loading` nodes on the home page** at the moment of sampling — a direct observation
+of absence rather than an inference from latency.
+
+⭐ **This is why sittings 3 and 4 needed a static demo page at all**: in the product the thing cannot
+be looked at.
+
+**Reduced motion was falsified as a cause**, not assumed — and falsified **directly**, which an
+earlier draft did not do. It cited only `enable-animations: true`, the GNOME setting Chromium
+*derives* the media query from: a reasonable proxy, but a proxy, and this row has been bitten by
+proxies twice. The direct read, in the kiosk itself over CDP, is in the block above:
+**`reduce:false`, `no-preference:true`.** So the `prefers-reduced-motion` block that overrides
+`.skeleton-loading` — which would kill the animation outright — **is genuinely not firing**, and the
+shimmer's absence is dwell, not the override.
+
+⚠ **Cited by selector, not by line, and here is why.** `design-system.css` holds **five**
 `@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real disambiguating
 work — and it is also the first thing to rot. It is **`:1779` on `main` @ `f4d71b28`**. ⛔ **No branch
-line number is quoted here on purpose:** the token's comment block sits above it, so every edit to
-that comment shifts it. ⭐ **It moved twice while this paragraph was being written** — `:1805`, then
-`:1817` — which is the same trap this file already records twice under "Line anchors: this row's, and
-the plan's, are all stale." **A number that changes each time you touch the thing it documents should
-not be written down at all.**
+line number is quoted here as the citation:** the token's comment block sits above it, so every edit
+to that comment shifts it, and it moved twice while this paragraph was being written (`:1805`, then
+`:1817`). Same trap this file already records under "Line anchors: this row's, and the plan's, are all
+stale." **A number that changes each time you touch the thing it documents should not be the
+citation.**
+
+> ⛔ **This paragraph said "six" until pre-merge review counted it. It is five.** `grep -c` for the
+> bare string `prefers-reduced-motion` returns **seven** — five `@media` blocks plus two prose
+> mentions (the token comment, and a scrollbar comment). ⭐ **The count was the entire stated reason
+> for changing the citation style, and it was wrong** — a commit written to fix an unverified claim
+> shipped a new one. Exactly the `GoogleCastOutput._lifecycleLock` shape `CLAUDE.md` § Pre-Merge
+> Review warns about: *"the corrected comment's own first draft overclaimed in turn."*
 
 ⚠ **What this does and does not mean.** The value change is **cosmetically real** — it is the right
 value for whenever a skeleton *is* on screen, e.g. a cold start, a slow network, or a genuinely slow
-query. It is **operationally moot** until the dwell question is answered. ⛔ **Dwell is NOT being
-fixed in the follow-up PR**, and the amplitude change must not be described as fixing it. The honest
-options — a minimum-display floor, or removing the skeleton from panels this fast — are a separate
-row.
+query. It is **operationally moot** on the two panels measured. ⛔ **Dwell is NOT being fixed in the
+follow-up PR**, and the amplitude change must not be described as fixing it.
+
+### ⛔ This trips the plan's §1.3 stop-gate, and the gate says report rather than choose
+
+`design/plans/UX-1-the-shimmer-nobody-can-see.md` §1.3:
+
+> If real dwell time is materially under 750 ms … the honest outcomes then are the two the Designer
+> named — **make it visible** (by shortening the 1.5 s cycle …) or **stop paying for it** (delete the
+> animation …). **Builder must stop and report in that case, not pick one.**
+
+**3–7 ms is three orders of magnitude under 750 ms, so the gate is tripped.** ⭐ **This section is the
+report §1.3 asks for; no remedy is being picked.**
+
+⚠ **An earlier draft offered "a minimum-display floor, or removing the skeleton from panels this
+fast" as "the honest options" — neither is one of the two §1.3 names**, and the first is a third
+remedy invented here while citing §1.3's authority. It is recorded as an idea, not as a choice, and
+**no follow-up row is filed by this change.**

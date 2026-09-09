@@ -20,8 +20,9 @@
 > conditions of both recent sittings are unrecorded**, so neither directly answers the dark room the
 > night sitting was judged in; and the night sitting ran on the **v1 harness later found broken**, so
 > it is weak evidence the other way. **Unresolved, not settled.** ⭐ What allows it to proceed is the
-> **stakes, not the evidence**: the shimmer is on screen ~3–7 ms per 1500 ms cycle, so no sweep is
-> painted at any value. ⚠ **If dwell is ever fixed, the value must be re-judged then.**
+> **stakes, not the evidence**: on the two panels measured the shimmer is on screen ~3–7 ms per
+> 1500 ms cycle, so no sweep is painted there at any value (⚠ two panels of 27+ call sites; a cold or
+> slow path dwells longer). ⚠ **If dwell is ever fixed, the value must be re-judged then.**
 >
 > Full argument and both instruments: [`../../queue/UX-1.md`](../../queue/UX-1.md).
 

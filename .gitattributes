@@ -28,3 +28,10 @@ deploy/debian-x64/kiosk/icons/* -text
 # so this is consistency rather than a live defect — but every other file in this directory tree
 # is pinned to LF for the same reason, and one unpinned file is how the next one gets missed.
 deploy/debian-x64/kiosk/gtk-touch/* text eol=lf
+
+# A preserved UAT harness is the INSTRUMENT a recorded owner sighting was made on, and its REPORT.md
+# quotes an md5 captured from the box. `* text=auto` normalizes to LF in the repository but hands a
+# Windows working tree a CRLF copy — which changes that hash and makes the committed artifact no
+# longer byte-identical to the thing that was actually run. Same reasoning as the kiosk icons above.
+# This row's whole history is instruments found broken after the fact; a preserved one must be exact.
+docs/uat/**/harness.html -text
