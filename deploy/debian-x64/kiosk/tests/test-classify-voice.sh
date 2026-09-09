@@ -205,6 +205,25 @@ expect_not online "  empty body"          ""
 expect_not online "  not JSON"            "<html>502 Bad Gateway</html>"
 expect_not online "  JSON, but not this"  '{"error":"nope"}'
 expect_not online "  available absent"    "$(live_fresh | sed -E 's/"available":true,//')"
+expect_not online "  available is a STRING, not a bool"  '{"available":"true"}'
+expect_not online "  truncated mid-token"                '{"available":tru'
+echo ""
+
+# ── 7b. Parser shape robustness. ─────────────────────────────────────────────────────────────
+# The grep patterns anchor on the quote-name-quote-colon shape, which is what stops a key's text
+# inside a string VALUE from being read as the key. In VALID JSON an inner `"` is always escaped,
+# so the backslash always intervenes — that is why this holds rather than luck.
+#
+# ⚠ KNOWN AND ACCEPTED: a NESTED object carrying one of these key names would be read as though
+# it were top-level. The payload is flat today (verified against the live body), the pre-existing
+# psidts parser had the identical property, and the failure direction is safe — it can only make
+# the row amber, never falsely Online. Documented rather than fixed, because fixing it means a
+# real JSON parser and `:106-108` explains why this file does not take that dependency.
+echo "parser shape"
+expect online     "  whitespace around every colon still parses" \
+  '{ "available" : true , "degraded" : false }'
+expect needsignin "  a key's text inside a string value is not read as the key" \
+  '{"note":"\"available\": true","available":false}'
 echo ""
 
 # ── 8. The process arm still short-circuits everything above it. ─────────────────────────────
