@@ -110,27 +110,27 @@ public class PhonePageRecoveryRefetchTests : TestContext
       () => Assert.Equal(1, _gv.ThreadListCalls),
       timeout: TimeSpan.FromSeconds(5));
 
-    // Seed the unhealthy side of the edge. The FIRST delivery must never refetch: the mount
-    // already fetched, and a refetch here would double every page open.
+    // Seed the unhealthy side of the edge. No wait here: WaitForAssertion returns the moment
+    // the assertion passes, and the count is already 1, so an immediate `Assert.Equal(1, …)`
+    // would return before an erroneous first-delivery refetch could land — it would assert
+    // nothing. The exact-count check after the recovery is what makes this testable.
     status.ApplyStatusForTest(Unhealthy());
-    cut.WaitForAssertion(
-      () => Assert.Equal(1, _gv.ThreadListCalls),
-      timeout: TimeSpan.FromSeconds(2));
 
     // 15:31:17 — the bridge comes back. Nothing else happens. No click, no keystroke.
     _gv.FailThreadList = false;
     status.ApplyStatusForTest(Healthy());
 
-    // ⚠ THE ASSERTION THE ROW EXISTS FOR. RED on main: today this stays at 1 forever.
-    cut.WaitForAssertion(
-      () => Assert.True(_gv.ThreadListCalls >= 2,
-        $"expected a refetch after recovery; thread-list calls = {_gv.ThreadListCalls}"),
-      timeout: TimeSpan.FromSeconds(5));
-
-    // And the recovered content actually landed, not just a request.
+    // ⚠ THE ASSERTION THE ROW EXISTS FOR. Measured RED on fb3cba9d: without the trigger this
+    // stays at 1 forever and the recovered content never appears.
     cut.WaitForAssertion(
       () => Assert.Contains(ContactName, cut.Markup),
       timeout: TimeSpan.FromSeconds(5));
+
+    // ⚠ EXACTLY 2 — one mount fetch, one recovery fetch — and the exactness is the point.
+    // The FIRST status delivery must never refetch (the mount already did, and a refetch there
+    // would double every page open); _gvHealthyLast starting null is what guarantees it. A
+    // spurious refetch on the unhealthy delivery would make this 3.
+    Assert.Equal(2, _gv.ThreadListCalls);
   }
 
   [Fact]
