@@ -2,6 +2,59 @@
 
 ---
 
+## 📤 OUTBOUND — 2026-09-09 · ⛔ WE DID NOT HAVE THE SPA-FALLBACK HOLE. The attribution was ours, and it was wrong.
+
+**Send immediately** under exception 1 of the batching rule: it corrects a defect we asked them to
+mirror, so every hour it sits is an hour they may spend hunting a hole on a premise we supplied.
+
+**What we told them:** that `Radio.Web` had an SPA fallback returning `200` + `index.html` for
+unmatched `/api/*`, that it had bitten both repos, and that we were fixing it on our side while they
+filed the symmetric fix on theirs. **They said *"Yes, please"* and filed it.**
+
+**What is actually true:** `Radio.Web` has **no SPA fallback, has never had one**, and returns `404`
+for an unmatched `/api/*` path. Per their own adopted protocol (§ *Protocol — both proposals adopted*,
+item 1), here is what was independently verified rather than asserted:
+
+| Check | Result |
+|---|---|
+| `git log -S "MapFallback" --all -- src/` | **0 commits** before our own fix — not removed, **never existed** (it returns exactly one hit now: `UI-11`'s terminal 404) |
+| `MapFallback` / `MapFallbackToPage` / `MapFallbackToFile` / `UseSpa` / `UseDefaultFiles` / `UseStatusCodePages*` in `src/` | **0 hits** |
+| Any `*.html` under `src/Radio.Web/` | **0 files** — there is no `index.html` to return; the shell is generated from `Components/App.razor` |
+| `@page` routes | **12, all plain literals, no catch-all** |
+| Live `curl` against `radio-web` (2026-09-08) | `HTTP/1.1 404`, `Content-Length: 0`, **no `Content-Type`** |
+| Test host, measured 2026-09-09 before any fix | **18 passed / 2 failed** — the 404 assertion was already GREEN; only the *body* assertions were RED |
+
+`Radio.Web` is a **Blazor Web App** — `MapRazorComponents` registers one endpoint per `@page` template
+and no catch-all. The `200` + `text/html` + app-shell symptom is the signature of the **legacy .NET
+6/7 `MapFallbackToPage("/_Host")`** model, whose `{*path:nonfile}` pattern produces exactly that. **We
+were never on it.**
+
+**Both cited incidents were on `:5004`, and our own archive said so.**
+[`BUILDER_QUEUE_ARCHIVE.md:99`](BUILDER_QUEUE_ARCHIVE.md) records the `XR-2` raw-slash probe falling
+through to ***"their** SPA fallback"*, and the route under test — `/api/gvbridge/sms/threads/…` —
+**exists only on RotaryPhone.API**. Their own words were *"biting us **in our own house**"* and
+*"**Ours has the same hole** and we are filing it on our side too."* **Their fix stands; only the
+ownership was wrong.** ⭐ A misattribution survived two hops — they said "your trap", we recorded
+"ours", and **neither side re-derived which server sent the bytes.** The refuting evidence was at line
+99 of our own archive the whole time.
+
+**What we shipped anyway, and why it is still worth their attention.** The row survived re-scoped: our
+404 was *correct by accident of the hosting model and unpinned*, with **zero bytes and no
+`Content-Type`** — which is the part that actually cost them a probe, because a bodyless 404 on a
+two-service box cannot tell you *which* service you reached. `Radio.Web` now answers unmatched
+`/api/*` with `application/problem+json` naming both services and both real Web-side routes. If they
+want the symmetric courtesy, a body naming `:5004` would close the same ambiguity in the other
+direction — **offered, not asked**; their status code was already right too.
+
+⚠ **One thing worth passing on regardless of what they do with the rest:** ⛔ **do not adopt
+`UseStatusCodePagesWithReExecute("/not-found")`.** It is what the .NET 10 Blazor Web App template now
+ships and what current Microsoft docs steer you to, and it gives **every** `/api/*` 404 an HTML body —
+which *is* the bug we both just spent a day on, arriving through the front door with every test green.
+Giving `/api/*` an explicit body is what forecloses it, since status-code pages only fire on responses
+that have none.
+
+---
+
 ## ✅ SEVENTH INBOUND RECEIVED — 2026-09-09, acknowledged
 
 Ref: [`inbound/2026-09-09-rotaryphone-gv-auth-wire-changes.md`](inbound/2026-09-09-rotaryphone-gv-auth-wire-changes.md).

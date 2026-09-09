@@ -800,7 +800,50 @@ cheap.
 
 The row asks for `/api/`-only and that is right. `/stream/audio` and `/stream/audio/mp3` are
 `Radio.API` routes (§0.6) and unreachable from here — but the eleven non-`/api/` page routes on *this*
-service are very reachable, and a wider pattern is how the console goes black.
+service are very reachable, and **a wider pattern is how the console goes black**.
+
+> ### ✅ CONFIRMED — 2026-09-09 (Builder, `UI-11`). Measured, and the mechanism is NOT the one you would guess.
+>
+> ⛔ **This section was briefly struck as false during the `UI-11` cycle, and the strike was wrong.**
+> It is restored, and the retraction is left visible below because *how* it went wrong is the useful
+> part. **§6.3 is TRUE.** Widening the pattern to `/{**rest}` and running the **whole test project**:
+> **7 failed / 1,197 passed** — the four `StaticAssetPipelineTests` cases go RED, `/css/design-system.css`
+> returning `NotFound` instead of `OK`.
+>
+> **The mechanism, since it is not obvious and §0.6 does not cover it. The asymmetry is the crux:
+> page routes are endpoints, static files are not.** A real `@page` endpoint *competes* with the
+> fallback and wins — on **route precedence first** (a literal segment beats a catch-all, settling it
+> before `Order` is consulted at all) and on `Order` second. ⚠ **Do not read `Order = int.MaxValue` as
+> the thing protecting those routes** — precedence already did, so a change touching only `Order`
+> would look safe on that reading and would not be. **Static files never enter that competition.**
+> `WebApplicationBuilder` inserts the automatic `UseRouting()` *before* all user middleware, so routing
+> selects the fallback endpoint; then `StaticFileMiddleware` — user middleware at `Program.cs:599` —
+> **stands down purely because *some* endpoint is already selected**. And `{**rest}` carries no
+> `:nonfile` constraint (that lives only in `MapFallback`'s *default* pattern, which this plan does
+> not use).
+>
+> **Measured vs derived, because §7.2 keeps that distinction for a reason.** `/css/design-system.css`,
+> `/js/idle-dimmer.js` and the DSEG font are **measured** 404s — they are the three `InlineData` cases.
+> That the Radzen theme and **`_framework/blazor.web.js`** go the same way, and that the circuit
+> therefore never starts — an unstyled, non-interactive shell on a 1920x720 wall panel — is
+> **derived**: nothing in the suite fetches either. The derivation is sound (one `UseStaticFiles` call
+> serves them all), but it is a derivation. **On that derivation, the console goes black literally.**
+>
+> ⭐ **Why the Builder got this wrong, recorded because the error is more reusable than the fact.** The
+> mutation was run as `dotnet test --filter "FullyQualifiedName~ApiNotFoundPipelineTests"` and came
+> back 20/20 green — then reported as *"the entire suite"*. **20 is exactly that one class's case
+> count.** The guard was in the same project the whole time, in `StaticAssetPipelineTests` — the very
+> file this row's Task 1 had *itself moved* an hour earlier. Same shape as `KIOSK-3`'s *"our 'zero
+> consumers' grep was scoped to `src/`; the consumer is a shell script."*
+> ⚠ **Two earlier mutations had each failed exactly their own test, and that is what made the third
+> feel safe. A positive control validates the INSTRUMENT, never the SEARCH SPACE.**
+>
+> ✅ **One genuine addition survives the retraction: the narrow scope has a *second* reason nobody had
+> written down — truthfulness.** `/some-typo` is a mistyped *page*, and a `/{**rest}` rule answers it
+> *"No API route on this service matches the request path"* — a well-formed body carrying a wrong
+> answer. Both reasons hold, and they are independent: **availability** (static assets die) and
+> **truthfulness** (a page miss gets an API answer). `UnmatchedNonApiPath_DoesNotGetTheApiProblemBody`
+> pins the second; `StaticAssetPipelineTests` already pinned the first.
 
 ### 6.4 No `instance` member, no `traceId`, no logging
 
