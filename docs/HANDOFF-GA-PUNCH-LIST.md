@@ -21,7 +21,7 @@
 > | `AUD-12` | **`AUD-23`** | PipeWire event subscription in place of polling |
 >
 > ⚠ **`AUD-21`, `AUD-22`, `AUD-22a` and `AUD-23` are now RESERVED and must not be reused by a queue
-> row.** The next free `AUD` number is **`AUD-24`** — the queue reached `AUD-20` on 2026-09-09.
+> row.** ⛔ **CORRECTED 2026-09-09 (was: "the next free `AUD` number is `AUD-24` — the queue reached `AUD-20`"). THAT WENT STALE THE SAME DAY IT WAS WRITTEN**: the queue subsequently filed `AUD-24` (seek), `AUD-25` (phantom BT Turntable) and `AUD-26` (duck lost on source switch). **The next free `AUD` number is `AUD-27`.** ⚠ **Re-derive this from BOTH documents before claiming a number — do not trust this sentence either**, since its predecessor was falsified by its own author within hours: `grep -ohE 'AUD-[0-9]+' docs/BUILDER_QUEUE.md docs/BUILDER_QUEUE_ARCHIVE.md docs/HANDOFF-GA-PUNCH-LIST.md | sort -t- -k2 -n -u | tail -1`
 >
 > ⭐ **The same hazard exists for every other prefix here** (`GV-*`, `UI-*`, `TEST-*`, `OPS-*`,
 > `PHN-*`, `ENC-*`). Only `AUD` was audited. **If you add a row to either document, take the next free
