@@ -1,5 +1,31 @@
 # UX-1 — the daylight sitting, 2026-09-09
 
+> ## ⚠ ANNOTATED 2026-09-09 — **this record is accurate and is NOT being rewritten.** A later sitting the same day reached a different answer.
+>
+> **Everything below correctly records what happened at this sitting.** It is left exactly as
+> written. What has changed is only that it is no longer the last word:
+>
+> **A THIRD sitting, later on 2026-09-09 in afternoon light**, showed the owner three panels side by
+> side on the real console — delta 6 (`#1A1A1D`), delta 16 (`#24242B`), delta 36 (`#38383F`) — and
+> the owner chose **36 (`#24242B`)**. That contradicts the night sitting's finding that *"36 is below
+> the owner's dark-room visibility threshold"*, and it means the sentence below — *"The row lands on
+> 56 and is done"* — **no longer holds**, though it was a fair reading of the evidence available when
+> it was written.
+>
+> **A FOURTH sitting the same day confirmed 36 on a better instrument** — a one-at-a-time harness
+> showing a single value with no reference beside it — where the owner said *"Shimmer 36 looks
+> good."*
+>
+> ⛔ **Neither sitting is being called wrong, and this is NOT a 2-to-1 verdict.** The **ambient
+> conditions of both recent sittings are unrecorded**, so neither directly answers the dark room the
+> night sitting was judged in; and the night sitting ran on the **v1 harness later found broken**, so
+> it is weak evidence the other way. **Unresolved, not settled.** ⭐ What allows it to proceed is the
+> **stakes, not the evidence**: on the two panels measured the shimmer is on screen ~3–7 ms per
+> 1500 ms cycle, so no sweep is painted there at any value (⚠ two panels of 27+ call sites; a cold or
+> slow path dwells longer). ⚠ **If dwell is ever fixed, the value must be re-judged then.**
+>
+> Full argument and both instruments: [`../../queue/UX-1.md`](../../queue/UX-1.md).
+
 **Result: `56` (`#38383F`, delta 36). Same value as the dark room. The row lands on 56 and is done.**
 
 ⭐ **The expensive branch did NOT fire.** The night record set the decision rule in advance:
@@ -70,6 +96,10 @@ coordinator which state it had been in when the owner looked.**
   acceptable in both conditions at the shipping geometry.
 
 ## The change this authorises
+
+> ⚠ **This is what THIS sitting authorised, and it shipped as #641.** A later sitting the same day
+> chose `#24242B` instead — see the banner at the top of this file. The `--surface-overlay` warning
+> below is **unaffected** and still binding.
 
 One token value: the skeleton shimmer's middle stop, `#1A1A1D` → **`#38383F`**.
 

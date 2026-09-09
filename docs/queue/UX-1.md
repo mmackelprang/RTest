@@ -9,11 +9,79 @@
 > [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
+> ## ⛔ SUPERSEDED IN PART, 2026-09-09 — **this row's landing value is REOPENED and the two owner sittings disagree.** Read this before believing any "56" or "DECIDED" below.
+>
+> **Everything below that says the value is `56` / `#38383F` / "DECIDED" records what was true when
+> it was written, and is kept legible for that reason.** A third sitting has since chosen a
+> different value, and the disagreement is not resolved. **Nothing below is retracted; it is
+> superseded pending one more sighting.**
+>
+> | Sitting | Condition | Instrument | Value chosen |
+> |---|---|---|---|
+> | 2026-09-08 night | dark room | **v1 harness — recorded in this file as BROKEN** (band off the element for part of every cycle; geometry never fairly tested) | rejected 36 as *"below the dark-room visibility threshold"*; chose **56** |
+> | 2026-09-09 midday | daylight | v2 harness, shipping geometry, blind five-value ladder | **56** — confirmed, shipped as [#641](https://github.com/mmackelprang/RTest/pull/641) |
+> | **2026-09-09 afternoon** | ⚠ **unrecorded** | **three-panel static demo on the real console at 1920×720, rendering the deployed stylesheet** — delta 6 / delta 16 / delta 36 side by side | **36** (`#24242B`) |
+> | **2026-09-09 later** | ⚠ **unrecorded** | ⭐ **one-at-a-time harness** — a single value revealed on a button press, so the side-by-side reference is removed. **A better instrument than the row above** | **36** (`#24242B`) — *"Shimmer 36 looks good."* |
+>
+> **Tally: two sittings chose 36, one earlier sitting rejected it.** ⛔ **That is NOT a 2-to-1 verdict,
+> and this file does not treat it as one.** The ambient conditions of **both** recent sittings are
+> **unrecorded** — nobody established whether either was a dark room — so they do not directly answer
+> the condition the earlier sitting was judged in. And the earlier sitting used the **v1 harness the
+> plan itself calls broken**, so it is weak evidence in the other direction. ⭐ **Unresolved, not
+> settled.** This file does not pick a winner, and neither does the PR that implements 36.
+>
+> **Two confounds, both live:**
+> 1. ⛔ **The dark-room sitting's instrument is suspect** — it ran on the **v1** harness, which the
+>    section *"The first harness was flawed, and the flaw is the instructive part"* below records as
+>    unable to measure what it claimed. So the earlier dark-room conclusion is questionable **on
+>    instrument grounds**, independent of anyone's eye.
+> 2. ⚠ **Side-by-side viewing may bias toward the dimmest acceptable value.** With delta 36 on
+>    screen next to it as a reference, delta 16 reads as sufficient; alone in the dark it may not.
+>    This is a real perceptual effect. ⛔ **It is NOT evidence that the owner was wrong this
+>    afternoon** — it is the reason the re-check is required before anything merges.
+>
+> **The one-at-a-time re-check has now happened and 36 held** — the harness at
+> `http://radio:5002/shimmer-demo.html` reveals a single value on a button press, which removes the
+> side-by-side bias in confound 2. ⚠ **What it does NOT do is establish the ambient condition**;
+> nobody recorded whether the room was dark. So confound 2 is answered and **confound 1's
+> disagreement is not.** ⚠ The harness lives in `/opt/radio-console/web/wwwroot/`, which
+> `Deploy-ToLinux.ps1:271` wipes with `rsync --delete` — it is not in this repo and will not survive
+> the next deploy.
+>
+> ⭐ **WHAT ACTUALLY DEFUSES THIS — it changes the stakes, not the evidence.** The shimmer is on
+> screen for **~3–7 ms against a 1500 ms cycle** on the two panels measured, so **on those, in warm
+> steady state, no sweep is painted at any value** (⚠ two panels of 27+ call sites; Devices, Radio and
+> the phone thread are unmeasured, and a cold or slow path would dwell longer — see the
+> final section). If 36 *is* too dim in a dark room, the consequence is that **an invisible element
+> is marginally more invisible.** The value choice is **very low stakes until the dwell question is
+> answered** — which is the honest reason this can proceed on an unresolved disagreement.
+>
+> ⛔ **AND THE COROLLARY, WHICH MUST NOT BE LOST: if dwell is ever fixed, THE VALUE MUST BE RE-JUDGED
+> AT THAT POINT** — that will be the first time anyone actually sees the shimmer in the product, and
+> the only sightings on record were made on a harness that holds it on screen artificially. **36 is
+> not settled-forever; it is settled-for-now, on a surface nobody can currently see.**
+>
+> ⚠ **The value being shipped is NOT literally the Designer's seed, though it sits on that rung.**
+> The seed of record is **`#242429` = rgb(36,36,41)** (the Designer answer's *"The change"* block
+> below (it was `:87` on `main` @ `f4d71b28`; this banner moved it and **no current-line number is
+> quoted, because it keeps moving** — see the note under the dwell section) and the v2 ladder in
+> [`NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md)). What the owner
+> actually looked at this afternoon was **`#24242B` = rgb(36,36,43)** — **+2 on blue**, hue lean
+> B−R **+7** rather than the Designer's **+5**. Two levels on one channel near black cannot have
+> driven the judgement, but the ladder sighted at night and the panel sighted this afternoon were
+> **not painting the same colour**, and rounding them together would be the kind of label-drift this
+> row has already been bitten by twice.
+>
+> ⭐ **And a finding that reframes the whole row** — see the final section of this file, *"The
+> shimmer is effectively invisible in normal operation"*. **The skeleton is on screen for roughly
+> 0.3% of one animation cycle**, so no sweep is painted at *any* highlight value. The amplitude
+> question is cosmetically real and operationally moot until dwell is answered.
+
 | Field | Value |
 |---|---|
-| Status | ✅ [#641](https://github.com/mmackelprang/RTest/pull/641) — shipped 2026-09-09; see the note at the foot of this file |
+| Status | ⚠ **REOPENED 2026-09-09** — [#641](https://github.com/mmackelprang/RTest/pull/641) shipped `56`/`#38383F` and is merged and deployed; a follow-up PR changing it to `36`/`#24242B` is **open and deliberately unmerged**, gated on the owner's dark-room re-check. See the banner above and the two new sections at the foot of this file. _Original cell: "✅ [#641](https://github.com/mmackelprang/RTest/pull/641) — shipped 2026-09-09; see the note at the foot of this file"_ |
 | Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and carries banners saying so**. _Original cell: "plan TBD — do not write one until the Designer has answered; scope depends entirely on whether the answer is 'new token,' 'retune the existing pair,' or 'leave it'"_ |
-| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) |
+| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) · ⭐ [**third + fourth sittings, with the harness**](../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md) |
 | Depends on | — _(no code dependency; it is gated on a design answer, not on a row)_ |
 | Branch | `fix/ux-1-shimmer-amplitude` _(this row named `feat/ux-skeleton-shimmer-amplitude`; the coordinator's name was used)_ |
 
@@ -202,6 +270,12 @@ question in this row is still open.
 
 ## ⭐ NIGHT SITTING 2026-09-08 — the value is **56**, and two premises died
 
+> ⛔ **SUPERSEDED IN PART 2026-09-09 — kept as written.** This sitting's rejection of 36 is the half
+> of the record now in dispute: the owner chose 36 in afternoon light on 2026-09-09. ⚠ **And this
+> sitting ran on the v1 harness that the very next subsection declares broken**, which is the
+> strongest argument against its own conclusion. Nothing here is retracted; a dark-room re-check of
+> `#24242B` alone decides it. See the banner at the top of this file.
+
 Full record: [`../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md).
 
 **Result: `56` (`#38383F`, delta 36 against the `#141416` base) is the dimmest value the owner can
@@ -215,6 +289,14 @@ The answer that discharged this row's gate said **amplitude is the SMALLER half 
 lever.** The owner could see only the *full-width shipping ramp* and found even that *"very dim and not
 easy to see in a dark room."* **Geometry did not help; amplitude is the whole problem.** The seed of
 **36 is below the owner's dark-room visibility threshold.**
+
+> ⛔ **THAT LAST SENTENCE IS THE ONE NOW IN DISPUTE. Superseded 2026-09-09; kept legible.** On
+> 2026-09-09 the owner viewed delta 6 / 16 / 36 side by side on the real console in afternoon light
+> and said **"Designer seed 36 is my choice."** ⚠ **Two of the owner's own judgements, on the same
+> rung, in opposite directions.** Neither is being called wrong here. The two confounds — this
+> sitting's **broken v1 instrument**, and the **side-by-side bias** that can make the dimmest
+> acceptable value look sufficient — are set out in the banner at the top of this file, and the
+> merge of the follow-up PR is gated on a **dark-room re-check of `#24242B` on its own**.
 
 ⭐ To its credit the Designer explicitly refused to endorse a landing value — *"a seed for the A/B, not
 an answer."* That caution was well placed and is why this was A/B'd rather than built.
@@ -250,6 +332,13 @@ because it only matters in that branch.
 
 ## ✅ DECIDED 2026-09-09 — **56 (`#38383F`, delta 36)**. Both conditions agree. The expensive branch does NOT fire.
 
+> ⛔ **"DECIDED" NO LONGER HOLDS — superseded the same day, kept as written.** A third sitting on
+> 2026-09-09, in afternoon light against a three-panel comparison on the real console, chose
+> **36 (`#24242B`, delta 16)** instead. ⚠ **"Both conditions agree" was true of the two sittings
+> this section had; it is not true of the three that now exist.** The heading's other claim — that
+> the ambient-light-adaptation branch does not fire — is **untouched** by the new sitting: nobody
+> has asked for a value that varies with light. See the banner at the top of this file.
+
 Full record: [`../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md).
 
 The night record set the decision rule in advance, and daylight met it:
@@ -283,6 +372,13 @@ re-querying the live page. **Ask for the VALUE, not the position.**
 
 ## ✅ SHIPPED 2026-09-09 as [#641](https://github.com/mmackelprang/RTest/pull/641) — the token only; the geometry deliberately did NOT ship
 
+> ⚠ **Still accurate as history, but the VALUE it names is superseded — kept as written.** #641
+> merged and was **subsequently deployed** (the box served `#38383F` when checked on 2026-09-09, so
+> the "NOT deployed" note below is stale). A follow-up PR changes the value to **`#24242B`** and is
+> **open and unmerged**, gated on a dark-room re-check. ⭐ **Everything else in this section still
+> stands** — the token's existence, its single consumer, the untouched `--surface-overlay`, the
+> 22-consumer blast radius, and the stale-anchor warnings are all unaffected by the value change.
+
 `--skeleton-shimmer-highlight: #38383F` declared beside the surface block and consumed by
 `.skeleton-loading` alone. `--surface-overlay` is untouched. ⛔ **Merged, NOT deployed** — the
 coordinator deploys so the owner can see it.
@@ -301,7 +397,9 @@ declaration and one consumer of the new token.
 
 ### ⚠ Line anchors: this row's, and the plan's, are all stale
 
-`.skeleton-loading` is at **`:1104-1112`** on `main` — not `:1099-1104` as this row (`:260`) and
+`.skeleton-loading` is at **`:1104-1112`** on `main` — not `:1099-1104` as this row (the *"⛔ The
+implementation trap"* subsection, `:353`; this citation said `:260`, which was already wrong on `main`
+and which this row's supersede banner has since pushed further out) and
 [`DAYLIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) (`:72-73`) both
 say, and the rule is **9 lines, not 6**. The plan's `:1099-1107`, `@keyframes shimmer` `:977-980` and
 reduced-motion `:1713-1724` are likewise stale (`:982-985`, `:1726-1729`). ⚠ On the merged branch
@@ -381,3 +479,228 @@ is a guard against a future edit.
 the documented Windows-known-failing `SrcVariableResamplerTests`. ⚠ **No test in this repository can
 see this change** — the four new tests assert CSS source text, and a green suite must never be cited
 as UAT for this row.
+
+---
+
+## ⚠ SITTINGS THREE AND FOUR, 2026-09-09 — the owner chose **36 (`#24242B`)** twice, and the row is reopened
+
+**Result: the owner viewed three panels side by side on the real console and said "Designer seed 36
+is my choice."** That is the opposite of what the night sitting concluded about the same rung. **A
+fourth sitting later the same day confirmed it on a better instrument** — see below.
+
+⭐ **Full record, including the harness itself:**
+[`../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md`](../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md).
+⚠ **That directory was filed retroactively, on a pre-merge review finding.** These two sittings
+existed only as prose here, while the two they supersede had a full evidence directory — and the
+harness that produced them lived as **one file on one box**, in a directory `Deploy-ToLinux.ps1:271`
+wipes with `rsync --delete`. It is now committed (`md5 6969e58ed9de5ae3fda5ab17f39a3057`, verified
+identical to the box's copy). ⭐ **This row's whole history is instruments found broken after the
+fact; an unreproducible one is that failure waiting to happen.**
+
+### How it was judged — this matters more than the number
+
+**The owner did not pick a number off a list.** A static demo page was built on the live box that
+**held the skeleton on screen permanently** — necessary because, as the next section records, the
+skeleton is otherwise on screen for a few milliseconds and cannot be looked at at all. It rendered
+**three panels side by side using the real deployed stylesheet** at 1920×720:
+
+| Panel | Value | Delta vs `#141416` |
+|---|---|---|
+| old (pre-`UX-1`) | `#1A1A1D` | 6 |
+| "Designer seed 36" | **`#24242B`** | **16** |
+| shipped by #641 | `#38383F` | 36 |
+
+**The owner judged rendered pixels, not labels.** That is the strongest form of evidence this row
+has ever had for any value — and it is also true of the night sitting, which is precisely the
+problem.
+
+### ⛔ The conflict, stated without resolving it
+
+The night-sitting section above (still legible, under *"The Designer's central claim is contradicted
+by the owner's eye"*) records **"36 is below the owner's dark-room visibility threshold."** ⚠ That
+sentence was `:217` on `main` @ `f4d71b28`; this row's supersede banner moved it, so it is cited by
+section rather than by number. ⛔ **No current-line number is quoted, deliberately** — see the note
+under the dwell section. The owner rejected 36 **in a dark room** and has now
+chosen it **in afternoon light**. **Both judgements are the owner's and they contradict each other
+on the same value.**
+
+**Two confounds. Neither is being used to declare a winner:**
+
+1. ⛔ **The earlier sitting's instrument was broken.** The night sitting ran on the **v1** harness,
+   which this file already records as unable to measure what it claimed — its highlight band was off
+   the element for a large part of every cycle, so the geometry was never fairly tested. The old
+   dark-room conclusion is therefore suspect **on instrument grounds**, before anyone's eye is
+   questioned.
+2. ⚠ **Side-by-side viewing may bias toward the dimmest acceptable value.** With delta 36 on screen
+   beside it as a reference, delta 16 reads as sufficient; alone in the dark it may not. This is a
+   real perceptual effect. ⛔ **It is NOT evidence that the owner was wrong this afternoon** — it is
+   the reason a dark-room re-check is required before this merges.
+
+⛔ **Do not write that 36 is "correct", and do not write that the earlier finding was "wrong".** The
+sittings disagree and the ambient condition that would separate them was never recorded. ⚠ **This
+paragraph previously ended "the merge is gated on a third condition that has not been run" — that
+sentence is superseded by the fourth sitting below and by the stakes argument that follows it.**
+
+### ⭐ FOURTH SITTING, later the same day — 36 confirmed on a better instrument
+
+The owner viewed `#24242B` again on the **one-at-a-time** harness at
+`http://radio:5002/shimmer-demo.html` — a single value revealed on a button press, nothing else on
+screen — and said **"Shimmer 36 looks good."**
+
+⭐ **That is a better instrument than the third sitting**, because it removes the side-by-side
+reference and therefore **answers confound 2 directly**: 36 was judged sufficient with no brighter
+value beside it to anchor against.
+
+⛔ **It does NOT answer confound 1, and must not be written up as though it did.** Nobody recorded
+the **ambient conditions** of either recent sitting. The earlier judgement — *"36 is below the
+owner's dark-room visibility threshold"* — was made specifically **in a dark room**, and neither
+recent sitting is known to have been. **Two sittings chose 36; one rejected it; the conditions of
+the two are unrecorded and the instrument of the one was broken. Unresolved, not settled.**
+
+### ⭐ Why this can proceed anyway — the stakes, not the evidence
+
+**The shimmer is on screen for ~3–7 ms against a 1500 ms cycle, so no sweep is painted at any
+value** (see the next section). **If 36 is too dim in a dark room, the consequence is that an
+invisible element is marginally more invisible.** That is the honest reason a live disagreement
+between two owner judgements does not need to block a one-token change: **the choice is very low
+stakes until dwell is answered.**
+
+⛔ **THE COROLLARY IS LOAD-BEARING AND MUST NOT BE LOST.** ⚠ **If dwell is ever fixed, the value must
+be RE-JUDGED at that point.** That will be the first time anyone sees this shimmer in the product
+rather than on a harness that holds it on screen artificially — and every sighting on record was made
+on such a harness. **36 is settled-for-now on a surface nobody can currently see. It is not
+settled-forever.** Any future row that changes skeleton dwell inherits this re-judgement.
+
+⚠ The harness lives in `/opt/radio-console/web/wwwroot/` and `Deploy-ToLinux.ps1:271` wipes that
+directory with `rsync --delete`; it is not in this repo and will not survive the next deploy.
+
+### ⚠ The shipped hex is not the Designer's seed, and the record should not round them together
+
+The seed of record is **`#242429` = rgb(36,36,41)** — the Designer answer's *"The change"* block
+above (`:87` on `main` @ `f4d71b28`; moved since, and not re-quoted), the plan's Task 5a, and the
+five-value ladder in [`NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md).
+The panel the owner looked at this afternoon painted **`#24242B` = rgb(36,36,43)**: **+2 on blue**,
+hue lean B−R **+7** rather than the Designer's **+5**. Two levels on one channel near black cannot
+have changed the judgement — but **the night ladder and the afternoon panel were not the same
+colour**, and the value being shipped is the one that was actually sighted. ⭐ Recorded because this
+row has already been bitten twice by a label drifting from the quantity it named.
+
+---
+
+## ⭐ 2026-09-09 — the shimmer is effectively invisible in normal operation. Measured, not argued.
+
+**This was never measured before, and it reframes the row.** ⛔ **Task 0 itself is still unrun — what
+follows is a BOUND on it**, and an earlier draft of this section wrongly said *"it has now been
+run."*
+
+Two different thresholds are in play and they have been conflated before, so both are attributed
+here:
+
+| Source | Threshold | Method |
+|---|---|---|
+| **This row**, the Designer-answer verification list above | *"if thread-open latency is typically **<500 ms**, no shape completes a pass"* | informal |
+| **The plan**, §1.3 / Task 0 | *"if real dwell time is materially under **750 ms**…"* | a `MutationObserver` on `.skeleton-loading` **DOM presence**, driven over CDP, with a three-band decision table |
+
+⚠ **The `<500 ms` sentence is this file's, not the plan's** — an earlier draft attributed it to Task 0.
+What was actually measured below is **endpoint latency**, which bounds how long those skeletons *can*
+be up. It is **not** the `MutationObserver` Task 0 specifies.
+
+**Measured on the box:**
+
+| Endpoint | Response time |
+|---|---|
+| `/api/playhistory` | **0.0030 – 0.0051 s** |
+| `/api/queue` | **0.0051 – 0.0067 s** |
+
+**Those two panels load their data in 3–7 ms** against a **1500 ms** cycle. Taking the *slowest* time
+measured, that is **under 0.5% of one cycle** (6.7/1500 = 0.45%; the fastest is 0.20%, the mean
+0.32%). ⚠ **An earlier draft quoted "roughly 0.3%", which is the MEAN presented as a bound** — a page
+rendering both panels is bounded by the slower one.
+
+⛔ **On those two panels, in warm steady state, no sweep is painted at any highlight value.**
+
+⚠ **THAT SENTENCE IS SCOPED ON PURPOSE, AND AN EARLIER DRAFT WAS NOT.** It said *"no sweep is **ever**
+painted, at **ANY** highlight value"* — universal quantifiers over every surface and every condition,
+asserted from **two warm endpoints, on one box, on one afternoon**, covering **2 of the 27 call sites
+across 6 pages plus the 38 raw `.skeleton-loading` nodes** this row enumerates above. **Devices, Radio
+and the phone thread are unmeasured, and a cold start or a genuinely slow query would dwell longer** —
+in which case a sweep *is* painted and the highlight value does matter. The same paragraphs that made
+the universal claim also listed the conditions that falsify it.
+
+⭐ **Corroborated independently in the live kiosk**, over CDP on `:9223`:
+
+```
+{"url":"http://localhost:5002/","reduce":false,"noPref":true,"skeletons":0}
+```
+
+**Zero `.skeleton-loading` nodes on the home page** at the moment of sampling — a direct observation
+of absence rather than an inference from latency.
+
+⭐ **This is why sittings 3 and 4 needed a static demo page at all**: in the product the thing cannot
+be looked at.
+
+**Reduced motion was falsified as a cause**, not assumed — and falsified **directly**, which an
+earlier draft did not do. It cited only `enable-animations: true`, the GNOME setting Chromium
+*derives* the media query from: a reasonable proxy, but a proxy, and this row has been bitten by
+proxies twice. The direct read, in the kiosk itself over CDP, is in the block above:
+**`reduce:false`, `no-preference:true`.** So the `prefers-reduced-motion` block that overrides
+`.skeleton-loading` — which would kill the animation outright — **is genuinely not firing**, and the
+shimmer's absence is dwell, not the override.
+
+⚠ **Cited by selector, not by line, and here is why.** `design-system.css` holds **five**
+`@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real disambiguating
+work — and it is also the first thing to rot. It is **`:1779` on `main` @ `f4d71b28`**. ⛔ **No branch
+line number is quoted here as the citation:** the token's comment block sits above it, so every edit
+to that comment shifts it, and it moved twice while this paragraph was being written (`:1805`, then
+`:1817`). Same trap this file already records under "Line anchors: this row's, and the plan's, are all
+stale." **A number that changes each time you touch the thing it documents should not be the
+citation.**
+
+> ⛔ **This paragraph said "six" until pre-merge review counted it. It is five.** `grep -c` for the
+> bare string `prefers-reduced-motion` returns **seven** — five `@media` blocks plus two prose
+> mentions (the token comment, and a scrollbar comment). ⭐ **The count was the entire stated reason
+> for changing the citation style, and it was wrong** — a commit written to fix an unverified claim
+> shipped a new one. Exactly the `GoogleCastOutput._lifecycleLock` shape `CLAUDE.md` § Pre-Merge
+> Review warns about: *"the corrected comment's own first draft overclaimed in turn."*
+
+### ⛔ THE RULE THIS ROW EARNED: in a file that is still being edited, cite a section, not a line
+
+**Measured across this one change.** Every `file:line` anchor written into this row moved *while the
+row was being written*, because the supersede banner and the new sections all insert above the things
+they cite:
+
+| Anchor | Written as | Then | Then | Now |
+|---|---|---|---|---|
+| reduced-motion block (`design-system.css`) | `:1779` | `:1805` | `:1817` | — |
+| Designer's seed (`UX-1.md`) | `:87` | `:151` | `:154` | — |
+| dark-room threshold (`UX-1.md`) | `:217` | `:287` | `:290` | — |
+
+⭐ **Three anchors, moved three times, all self-inflicted, and pre-merge review caught the second
+round after the first round had already been "fixed."** The fix that kept failing was *re-measuring
+the number*; the fix that works is **not quoting a moving number at all.**
+
+**So: quote only `main`'s anchor, which is stable and checkable, and otherwise cite by section title
+or quoted phrase.** This file already carried a section titled *"Line anchors: this row's, and the
+plan's, are all stale"* before any of this — the lesson had been written down and was still not
+followed, which is why it is now a rule with its own heading.
+
+⚠ **What this does and does not mean.** The value change is **cosmetically real** — it is the right
+value for whenever a skeleton *is* on screen, e.g. a cold start, a slow network, or a genuinely slow
+query. It is **operationally moot** on the two panels measured. ⛔ **Dwell is NOT being fixed in the
+follow-up PR**, and the amplitude change must not be described as fixing it.
+
+### ⛔ This trips the plan's §1.3 stop-gate, and the gate says report rather than choose
+
+`design/plans/UX-1-the-shimmer-nobody-can-see.md` §1.3:
+
+> If real dwell time is materially under 750 ms … the honest outcomes then are the two the Designer
+> named — **make it visible** (by shortening the 1.5 s cycle …) or **stop paying for it** (delete the
+> animation …). **Builder must stop and report in that case, not pick one.**
+
+**3–7 ms is three orders of magnitude under 750 ms, so the gate is tripped.** ⭐ **This section is the
+report §1.3 asks for; no remedy is being picked.**
+
+⚠ **An earlier draft offered "a minimum-display floor, or removing the skeleton from panels this
+fast" as "the honest options" — neither is one of the two §1.3 names**, and the first is a third
+remedy invented here while citing §1.3's authority. It is recorded as an idea, not as a choice, and
+**no follow-up row is filed by this change.**

@@ -1,0 +1,37 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Shimmer - dark room check</title>
+<link rel="stylesheet" href="/css/design-system.css">
+<style>
+  body{background:#0B0B0D;color:#E8E8EA;font-family:system-ui,sans-serif;margin:0;padding:14px 18px}
+  a.btn,button{background:#2A2A30;color:#E8E8EA;border:1px solid #3A3A42;text-decoration:none;padding:12px 18px;border-radius:8px;font-size:15px;font-weight:600;min-height:44px;cursor:pointer}
+  button.on{background:#1E4D33;border-color:#2E7D50}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+  .stage{background:#141416;border:1px solid #232327;border-radius:8px;padding:22px;max-width:760px}
+  .meta{font-size:11px;color:#7E7E85;margin:10px 0 0;font-variant-numeric:tabular-nums}
+  h1{font-size:15px;margin:0 0 2px}
+  .sub{font-size:11px;color:#8A8A90;margin:0 0 12px;line-height:1.5}
+  .warn{margin-top:16px;font-size:11px;color:#C9A227;line-height:1.5;border-top:1px solid #232327;padding-top:10px;max-width:760px}
+</style></head><body>
+<div class="bar"><a class="btn" href="/">&larr; Back to console</a>
+  <button onclick="setv('#1A1A1D',6,this)">Old &mdash; delta 6</button>
+  <button onclick="setv('#24242B',16,this)">Seed 36 &mdash; delta 16</button>
+  <button onclick="setv('#38383F',36,this)">Shipped 56 &mdash; delta 36</button>
+</div>
+<h1>Shimmer &mdash; one at a time, for the dark room</h1>
+<p class="sub">Deliberately NOT side by side. Judging a value next to a brighter reference makes the dimmer one look sufficient &mdash; that may be why 36 won in daylight and lost in the dark. Start with the room dark and <strong>no button pressed</strong>, then reveal one.</p>
+<div class="stage" id="stage">
+  <div class="skeleton-list-row"><div class="skeleton-loading skeleton-thumb"></div>
+    <div class="skeleton-list-row-text"><div class="skeleton-loading skeleton-text" style="width:75%"></div>
+    <div class="skeleton-loading skeleton-text" style="width:45%"></div></div></div>
+  <div class="skeleton-loading skeleton-heading"></div>
+  <div class="skeleton-loading skeleton-card"></div>
+  <p class="meta" id="meta">Nothing selected &mdash; this is the CURRENT deployed token.</p>
+</div>
+<p class="warn">&#9888; The earlier dark-room sitting recorded <strong>"36 is below the owner's dark-room visibility threshold"</strong> (UX-1.md:217). Today's daylight sitting chose 36. Both are your judgements and they disagree. The PR is built but <strong>held unmerged</strong> until this check settles it.</p>
+<script>
+function setv(hex,d,btn){document.getElementById('stage').style.setProperty('--skeleton-shimmer-highlight',hex);
+document.getElementById('meta').textContent=hex+'  ·  delta '+d+' against base #141416';
+document.querySelectorAll('button').forEach(function(b){b.classList.remove('on')});btn.classList.add('on');}
+</script>
+</body></html>

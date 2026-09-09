@@ -81,20 +81,68 @@
      three color-mix recipes — so raising it to a visible shimmer amplitude would
      lighten twenty-odd unrelated surfaces. Count re-derived on main @143d678e.
 
-     56 (#38383F) is the OWNER'S value, not a derived one, chosen at the panel on
-     a five-value ladder (26 / 36 / 46 / 56 / 66) in a dark room on 2026-09-08
-     and again in daylight on 2026-09-09: it is the dimmest value the owner can
-     clearly see in BOTH conditions. It was also judged to stay calm rather than
-     pull the eye — ⚠ that second question was put only at night; the daylight
-     record argues rather than measures that it does not bind, on the grounds
-     that ambient light dominates. Delta against --surface-raised is 36 on R·G
-     (41 on B), six times the 6/255 that shipped before.
-     ⚠ The Designer's seed of 36/#242429 was on the same ladder and was JUDGED
-     below the owner's dark-room visibility threshold; do not restore it.
+     ⚠ THE OWNER'S SITTINGS DISAGREE ON THIS VALUE. Chosen twice, rejected once.
+     #24242B is rgb(36,36,43): delta 16 on R·G (21 on B) against --surface-raised
+     #141416. Chosen by the owner on 2026-09-09 from a three-panel comparison on
+     the real console at 1920x720 rendering this stylesheet at delta 6 (#1A1A1D,
+     the pre-UX-1 value), delta 16, and delta 36 (#38383F) — then CONFIRMED later
+     the same day on a one-at-a-time harness showing a single value with nothing
+     beside it ("Shimmer 36 looks good"). The owner judged rendered pixels.
+
+     ⛔ The DARK-ROOM sitting of 2026-09-08 concluded the OPPOSITE about this
+     rung — docs/queue/UX-1.md recorded "36 is below the owner's dark-room
+     visibility threshold", and #38383F shipped as #641 on that basis. Both
+     judgements are the owner's; neither is retracted here, and this is NOT a
+     2-to-1 verdict. Two confounds, only one of which is answered:
+       1. ⛔ UNANSWERED. The dark-room sitting ran on the v1 harness, which the
+          plan itself records as BROKEN (band off the element for part of every
+          cycle), so that geometry was never fairly tested. And the AMBIENT
+          CONDITIONS OF BOTH RECENT SITTINGS ARE UNRECORDED — nobody established
+          whether either was a dark room, which is the condition in dispute.
+       2. ✅ ANSWERED. Side-by-side viewing can bias toward the dimmest
+          acceptable value; the one-at-a-time harness removed the reference and
+          36 still read as good.
+     Unresolved, not settled. Full argument: docs/queue/UX-1.md.
+
+     ⭐ WHY THAT DISAGREEMENT DOES NOT BLOCK THIS — the stakes, not the evidence.
+     Per the dwell note below, no sweep is painted at any value ON THE TWO PANELS
+     MEASURED, so if 36 is too dim in a dark room the consequence is that an
+     element nobody sees anyway is marginally less visible.
+     ⛔ THE COROLLARY IS LOAD-BEARING: IF DWELL IS EVER FIXED, THIS VALUE MUST BE
+     RE-JUDGED AT THAT POINT. That will be the first time anyone sees this
+     shimmer in the product rather than on a harness holding it on screen
+     artificially, and every sighting on record was made on such a harness.
+     36 is settled-for-now on a surface nobody can currently see, NOT forever.
+
+     ⚠ Close to the Designer's seed but NOT identical with it. The seed of record
+     is #242429 = rgb(36,36,41) — see the Designer answer's "The change" block in
+     docs/queue/UX-1.md, and the v2 ladder in NIGHT-SITTING.md. (Cited by section.
+     It was :87 on main @ f4d71b28; the supersede banner moved it, and no current
+     line is quoted because that number moved three times in one change.)
+     This value is +2 on BLUE, so B−R is +7
+     rather than the Designer's +5. Two levels on one channel near black cannot
+     have driven the owner's judgement — but the ladder sighted at night and the
+     panel sighted this afternoon were not painting the same colour, and the
+     record should say so rather than round them together.
+
+     ⚠ In normal operation this is very nearly never on screen. Measured on the
+     box 2026-09-09: /api/playhistory returns in 3.0-5.1 ms and /api/queue in
+     5.1-6.7 ms, against a 1500 ms cycle — under 0.5% of one cycle at the slowest
+     time measured. So on THOSE TWO PANELS, in warm steady state, no sweep is
+     painted at any highlight value; corroborated by a live kiosk sample showing
+     zero .skeleton-loading nodes on the home page.
+     ⛔ SCOPE, because an earlier draft of this comment said "no sweep is EVER
+     painted at ANY value" and that was a universal drawn from two warm endpoints:
+     two panels of the 27+ call sites, on one box, on one afternoon. Devices,
+     Radio and the phone thread are UNMEASURED, and a cold start or a genuinely
+     slow query dwells longer — there a sweep IS painted and this value matters.
+     Cosmetically real; operationally moot on what was measured. Dwell is filed in
+     design/FUTURE-WORK.md and is NOT touched here.
+
      ⛔ Do not add this token to the prefers-reduced-motion block below: that
      rule replaces `background` wholesale with a flat rgba(255,255,255,0.05), so
      the gradient never renders there and a reference would re-introduce one. */
-  --skeleton-shimmer-highlight: #38383F;
+  --skeleton-shimmer-highlight: #24242B;
 
   /* ── Accent: Electric Cyan ── */
   --accent-primary:         #5CD4E8;
