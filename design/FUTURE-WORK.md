@@ -21,11 +21,22 @@ the tile to 15% (stops at `35% / 50% / 65%` instead of `0% / 50% / 100%`), and t
 
 ⛔ **It was not shipped, and reviving it needs a new sighting, not a re-read of the plan.** The only
 experiment ever run on that geometry was the `v1` harness of 2026-09-08, and that harness was
-afterwards found unable to measure what it claimed to: its highlight band spanned ~0.32 of the
-element width and, with the sweep travelling 4 element-widths in 1.5 s, sat on the element only
-~0.49 s per cycle. **Two-thirds of every cycle those columns were flat, unmoving `#141416`** — the
-owner read them as static because they were. See
-`docs/uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md` § *"My v1 harness was flawed"*.
+afterwards found unable to measure what it claimed to. The owner read its columns as static.
+
+⚠ **But the published explanation for WHY is wrong, and it was corrected by measurement while `UX-1`
+shipped.** `NIGHT-SITTING.md` § *"My v1 harness was flawed"* says the band *"is on the element only
+~0.49 s per 1.5 s cycle"* and that *"two-thirds of every cycle"* was static. **The two figures are
+swapped.** That arithmetic counts a single tile, but the harness sets `background` as a shorthand,
+which resets `background-repeat` to its initial `repeat` — so the 2W tile recurs and the band crosses
+the element **twice** per cycle. Sampled in Chromium at wall-clock intervals over two cycles: the
+band is on the element **~1.01 s** and off it **~0.49 s** (duty cycle 0.63–0.67).
+
+⭐ **The real mechanism is the timing function, and it is a better explanation than a duty cycle.**
+`animation: shimmer 1.5s infinite` declares none, so `ease` applies. Measured sweep speed falls to
+**2.1 %/s against a median of 221.7 %/s** — a ~100× stall — at each cycle boundary, giving off-element
+gaps of **~390 ms** at the boundary and **~110 ms** mid-cycle. A narrow band spends those pauses off
+the element entirely; the shipping full-width ramp never leaves it. **The conclusion is unchanged —
+that harness could not fairly test geometry — but the reason now survives being checked.**
 
 The `56` that shipped was chosen on the **`v2` harness, at the shipping geometry**, in both lighting
 conditions. Shipping the narrowed ramp on top of it would have put an unvalidated change underneath

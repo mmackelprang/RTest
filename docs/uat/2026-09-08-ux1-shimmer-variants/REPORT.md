@@ -4,10 +4,17 @@
 > it is the one sentence in this file a reader would act on.** ~~"The harness works and is reusable;
 > the *conditions* were wrong."~~ **Both halves failed.** The conditions were indeed wrong, but the
 > harness was *also* broken: its V1–V4 concentrate the highlight into a band spanning ~0.32 of the
-> element width, which — against a sweep travelling 4 element-widths in 1.5 s — sits on the element
-> only **~0.49 s per cycle**, leaving those columns flat and unmoving for two-thirds of every cycle.
+> element width, and that band is **absent from the element for a substantial part of every cycle**.
 > It could not compare geometry against amplitude; it compared a faint-but-continuous shimmer against
-> a brighter-but-mostly-absent one. ⛔ **Do not reuse `index.html` as an instrument** — it now carries
+> an intermittent one. ⚠ **The duty-cycle figures in [`NIGHT-SITTING.md`](NIGHT-SITTING.md) § 2 are
+> swapped and their arithmetic is wrong** — it counts one tile, but `background-repeat` defaults to
+> `repeat`, so the 2W tile recurs and the band crosses **twice** per cycle. Measured in Chromium
+> while `UX-1` shipped: the band is on the element **~1.01 s** and off it **~0.49 s**, not the other
+> way round. ⭐ **The real mechanism is `ease`** — the animation declares no timing function, so the
+> sweep decelerates to **2.1 %/s against a median of 221.7 %/s** (a ~100× stall), producing a
+> **~390 ms** dead pause at each cycle boundary and **~110 ms** mid-cycle, which a narrow band sits
+> out entirely and the shipping full-width ramp does not.
+> ⛔ **Do not reuse `index.html` as an instrument** — it now carries
 > a banner saying so. `UX-1` was decided on the **v2** ladder (shipping geometry, five highlight
 > values), reconstructible from [`NIGHT-SITTING.md`](NIGHT-SITTING.md) § *"The v2 harness"*.
 > Everything else in this file — the aborted sitting, and the finding that the plan's dark-room-only

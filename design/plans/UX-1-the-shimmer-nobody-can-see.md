@@ -16,9 +16,17 @@
 > This plan's §7.5 named the falsifying outcome in advance — *"If V1 (geometry only) is invisible
 > while V3 is obvious, the premise is wrong"* — and that is what the owner reported. Worse, the only
 > experiment ever run on the narrowed geometry was the **`v1` harness, which was afterwards found
-> unable to measure what it claimed**: its band sat on the element only ~0.49 s of each 1.5 s cycle,
-> so two-thirds of every cycle those columns were static. **Geometry was never fairly tested, and
-> `56` was chosen at the SHIPPING geometry, in a dark room and in daylight.**
+> unable to measure what it claimed.** **Geometry was never fairly tested, and `56` was chosen at the
+> SHIPPING geometry, in a dark room and in daylight.**
+>
+> ⚠ **The published reason that harness failed is wrong and was corrected by measurement.**
+> `NIGHT-SITTING.md` says the band was *"on the element only ~0.49 s"* and *"two-thirds of every
+> cycle"* static; **the two figures are swapped** — that arithmetic counts one tile, but
+> `background-repeat` defaults to `repeat`, so the 2W tile recurs and the band crosses twice per
+> cycle. Measured in Chromium: **~1.01 s on, ~0.49 s off.** The real mechanism is `ease` — the
+> animation declares no timing function, and the sweep decelerates to **2.1 %/s against a median of
+> 221.7 %/s**, a ~390 ms dead stall at each cycle boundary plus ~110 ms mid-cycle, which a narrow
+> band sits out entirely.
 >
 > ⚠ **Whether a steeper ramp would allow a *lower* amplitude is genuinely unknown** and is filed in
 > [`design/FUTURE-WORK.md`](../FUTURE-WORK.md) § *Skeleton shimmer (`UX-1`)*, together with the

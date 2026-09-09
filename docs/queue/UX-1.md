@@ -11,11 +11,11 @@
 
 | Field | Value |
 |---|---|
-| Status | 📋 |
-| Plan | _plan TBD — **do not write one until the Designer has answered**; scope depends entirely on whether the answer is "new token," "retune the existing pair," or "leave it"_ |
-| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` |
+| Status | ✅ [#641](https://github.com/mmackelprang/RTest/pull/641) — shipped 2026-09-09; see the note at the foot of this file |
+| Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and carries banners saying so**. _Original cell: "plan TBD — do not write one until the Designer has answered; scope depends entirely on whether the answer is 'new token,' 'retune the existing pair,' or 'leave it'"_ |
+| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) |
 | Depends on | — _(no code dependency; it is gated on a design answer, not on a row)_ |
-| Branch | `feat/ux-skeleton-shimmer-amplitude` |
+| Branch | `fix/ux-1-shimmer-amplitude` _(this row named `feat/ux-skeleton-shimmer-amplitude`; the coordinator's name was used)_ |
 
 ## Detail
 
@@ -221,6 +221,11 @@ an answer."* That caution was well placed and is why this was A/B'd rather than 
 
 ### ⛔ The first harness was flawed, and the flaw is the instructive part
 
+> ⛔ **The two figures in this paragraph are SWAPPED and its arithmetic is wrong — corrected
+> 2026-09-09 by measurement; see the shipped note at the foot of this file.** Kept as written because
+> it is what was concluded at the time. Measured: **ON ~1.01 s, OFF ~0.49 s**, and the mechanism is
+> `ease`, not a duty cycle.
+
 Its V1–V4 concentrated the highlight into a band spanning ~**0.32 of the element width**. With the
 sweep travelling 4 element-widths in 1.5 s, that band is on the element only ~**0.49 s per cycle** —
 **so for two-thirds of every cycle those columns were flat, unmoving `#141416`.** The owner read them
@@ -306,10 +311,25 @@ they have moved again — the token block is 46 lines and pushed everything belo
 
 Plan Task 5b narrows the ramp to `35% / 50% / 65%` and the Designer rated it **the larger half of the
 fix**. It did not ship. **The only experiment ever run on that geometry was the `v1` harness, which
-was afterwards found unable to measure what it claimed** — its band sat on the element only ~0.49 s of
-each 1.5 s cycle. `56` was chosen on the **`v2`** ladder at the **shipping** geometry, in both
-conditions. Shipping the narrowed ramp would have put an unvalidated change underneath a validated
-one. ⚠ **Whether a steeper ramp would allow a *lower* amplitude is still unknown** and is filed in
+was afterwards found unable to measure what it claimed.** `56` was chosen on the **`v2`** ladder at
+the **shipping** geometry, in both conditions. Shipping the narrowed ramp would have put an
+unvalidated change underneath a validated one.
+
+⛔ **The published reason that harness failed is WRONG, and the Builder propagated it before pre-merge
+review caught it.** The night record's *"band on the element only ~0.49 s per 1.5 s cycle, two-thirds
+static"* has **both figures swapped**: the arithmetic counts one tile, but each `.vN .sk` sets
+`background` as a **shorthand**, which resets `background-repeat` to `repeat`, so the 2W tile recurs
+and the band crosses **twice** per cycle. ⭐ **The Builder's own comment contradicted itself eight
+lines later**, correctly deriving *"4W of travel per 1.5 s yields one pass per 750 ms"* — true only
+because of the tiling the duty-cycle figure ignored. **Sampled in Chromium over two cycles: ON
+~1.01 s, OFF ~0.49 s** (duty 0.63–0.67). ⭐ **The real mechanism is `ease`**, which the animation gets
+by declaring no timing function: measured sweep speed drops to **2.1 %/s against a median of
+221.7 %/s**, a **~390 ms dead pause at every cycle boundary** plus **~110 ms** mid-cycle. A narrow
+band sits those out; a full-width ramp never leaves the element. ⭐ *Right conclusion, wrong reason* —
+corrected in nine artifacts including `NIGHT-SITTING.md` itself, **before** it reached the on-page
+banner a human opens in a browser.
+
+⚠ **Whether a steeper ramp would allow a *lower* amplitude is still unknown** and is filed in
 `design/FUTURE-WORK.md`, along with **the plan's Task 0 dwell-time pre-check, which was never run** —
 one pass is 750 ms, so if production skeletons dwell for less, no shape completes a pass **at any
 amplitude**. The amplitude is now right; whether skeletons are on screen long enough to show it is
