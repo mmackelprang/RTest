@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (44)
+## Shipped rows (45)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1639,6 +1639,48 @@ handler leak (`UI-9`); deleting the dead `ConfigChanged` event. All filed in `de
 ⚠ **The severities in the row's own table are inverted:** the two sites it called singletons are
 `AddScoped` with one subscriber each and were genuinely latent; the one that is genuinely multicast
 is not this bug.
+
+---
+
+
+### UI-9 — Every visit to `/system` permanently leaked three event handlers into a process-lifetime singleton.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#628](https://github.com/mmackelprang/RTest/pull/628) |
+| Plan | [`UI-9-the-config-page-that-never-unsubscribes.md`](../design/plans/UI-9-the-config-page-that-never-unsubscribes.md) |
+| Spec / handoff | _no spec doc — the diagnosis was in the row_ · [ADR-031](../design/DECISION-LOG.md) |
+| Depends on | — |
+| Branch | `fix/ui-9-config-page-handler-leak` |
+
+**Detail: [`queue/UI-9.md`](queue/UI-9.md)** — which carries the census and the corrected verification.
+
+Merged 2026-09-08. ⚠ **Merged, not shipped** — not confirmed on the appliance.
+
+`SystemConfigPage.razor` subscribed to three `AudioStateHubService` events with anonymous lambdas,
+which have no stable reference, so no `-=` could remove them. The hub is `AddSingleton`, so the
+handlers outlived every circuit that added them. Fixed with three named methods and three `-=` in
+the `Dispose()` the page already had.
+
+⭐ **This closes the class in `Radio.Web`** — `SystemConfigPage` was the only component subscribing
+to a singleton service event without a matching `-=`. ⚠ **The row's "the other 22 all unsubscribe
+correctly" does NOT reproduce and the number was dropped**: an independent sweep counted 16 other
+components plus 3 subscribing services. The substantive claim survived — every other site has a
+matching `-=`, the two exceptions being component-owned timers that are stopped and disposed.
+
+⛔ **The row's original verification could not tell the fixed state from the broken one**, and that
+is the transferable part. It asked to *render twice and assert the invocation list does not grow* —
+which is **RED against correct code**, because two simultaneously-live components legitimately hold
+two handler sets. The leak is that disposal does not *shrink* the list, so the shipped assertion is
+*render → dispose → back to baseline*. **Measured RED first: 1 handler per event per visit, five
+visits leaving five.** Exactly 3 per visit, so the plan's open question about a child component also
+subscribing is answered — none does.
+
+⚠ **Three of this row's own inherited citations were stale and are corrected in the dossier**: the
+reflection idiom it named (`SleepTests.cs:501-523`) no longer exists — that file is 511 lines and
+`UI-7` replaced its raw `GetField` with the shared `HubEventFire` helper — and the claim that *eight
+test files use that seam* is now **one**, the helper itself. The new test therefore counts handlers
+through `HubEventFire.InvocationListOf<TDelegate>` rather than hand-rolling a thirteenth copy.
 
 ---
 

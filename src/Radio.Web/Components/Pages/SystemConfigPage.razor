@@ -1935,6 +1935,20 @@
   private const int IntegrationsTabIndex = 7;
   private const int RotaryEncoderSubTabIndex = 0;
   private int _integrationsSubTab = 0;
+  /// <summary>Set in <see cref="Dispose"/>; gates the hub subscriptions against a teardown that
+  /// beats them.</summary>
+  /// <remarks>
+  /// ⚠ UI-9: this closes the SECOND half of the leak, and it is the half a symmetric `-=` alone
+  /// does not reach. InitializeSignalRAsync is awaited from OnInitializedAsync only AFTER a chain
+  /// of API round-trips, so a navigation away during that window disposes the component FIRST —
+  /// the three `-=` run against an empty event and no-op correctly — and the pending continuation
+  /// then resumes and subscribes to the process-lifetime singleton with nothing left to remove it.
+  /// That is the row's own defect in a narrower window. HttpClient's default timeout is 100 s and
+  /// this appliance has documented API outages, so the window is seconds to minutes, not
+  /// microseconds. Idiom copied from PhonePage.razor:146.
+  /// </remarks>
+  private bool _disposed;
+
   private System.Threading.Timer? _statsTimer;
 
   // System Stats
@@ -2215,35 +2229,29 @@
   {
     try
     {
-      // Subscribe to source changes to catch event source updates
-      HubService.SourceChanged += async () =>
+      // ⚠ UI-9: NAMED METHODS, NEVER LAMBDAS. An anonymous delegate has no stable reference, so no
+      // `-=` can remove it — and HubService is AddSingleton (Program.cs:411), so a handler that
+      // cannot be removed outlives every circuit that added it: the singleton holds the delegate,
+      // the delegate holds this component, and the component holds its whole render tree. Measured
+      // before the fix: one handler per event per visit, five visits leaving five, without bound.
+      // The invariant is the SYMMETRY, not the naming — every `+=` here has a matching `-=` in
+      // Dispose(). Shape copied from NowPlayingPanel.razor's subscribe/unsubscribe pair — the
+      // PAIR, not the disposal interface: that component is IAsyncDisposable and unsubscribes in
+      // DisposeAsync, while this page is IDisposable. Copy the symmetry, not the interface.
+      //
+      // ⚠ The _disposed gate is the other half of the fix. Everything above this line in
+      // OnInitializedAsync is awaited API work, so teardown can beat us here; without the gate we
+      // would subscribe to a process-lifetime singleton AFTER Dispose() had already run its `-=`,
+      // leaving three handlers nothing can remove. One check covers all three because no await
+      // separates them.
+      if (_disposed)
       {
-        await InvokeAsync(async () =>
-        {
-          await LoadEventSourcesAsync();
-          StateHasChanged();
-        });
-      };
+        return;
+      }
 
-      // Subscribe to encoder connection changes
-      HubService.EncoderConnectionChanged += async (_) =>
-      {
-        await InvokeAsync(async () =>
-        {
-          _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
-          StateHasChanged();
-        });
-      };
-
-      // Subscribe to phone call state changes
-      HubService.PhoneCallStateChanged += async () =>
-      {
-        await InvokeAsync(async () =>
-        {
-          _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
-          StateHasChanged();
-        });
-      };
+      HubService.SourceChanged += OnHubSourceChangedAsync;
+      HubService.EncoderConnectionChanged += OnHubEncoderConnectionChangedAsync;
+      HubService.PhoneCallStateChanged += OnHubPhoneCallStateChangedAsync;
 
       // Start the hub connection if not already connected
       if (!HubService.IsConnected)
@@ -2256,6 +2264,39 @@
       Logger.LogWarning(ex, "Failed to initialize SignalR for event source updates, falling back to manual refresh");
       // Silently fail - fallback to manual refresh
     }
+  }
+
+  /// <summary>Reloads the event-source list when the hub reports a source change.</summary>
+  private async Task OnHubSourceChangedAsync()
+  {
+    await InvokeAsync(async () =>
+    {
+      await LoadEventSourcesAsync();
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>Refreshes the encoder status card when the encoder connects or drops.</summary>
+  /// <remarks>The payload is deliberately unused — this handler re-pulls the full status over REST
+  /// rather than trusting the transition DTO, which is the behaviour the lambda it replaced had.
+  /// </remarks>
+  private async Task OnHubEncoderConnectionChangedAsync(EncoderConnectionDto _)
+  {
+    await InvokeAsync(async () =>
+    {
+      _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>Refreshes the phone status card when a call changes state.</summary>
+  private async Task OnHubPhoneCallStateChangedAsync()
+  {
+    await InvokeAsync(async () =>
+    {
+      _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
+      StateHasChanged();
+    });
   }
 
   private async Task LoadSystemStatsAsync()
@@ -4191,6 +4232,30 @@
 
   public void Dispose()
   {
+    // ⚠ UI-9: symmetric with InitializeSignalRAsync. HubService is a process-lifetime singleton
+    // (Program.cs:411); without these three lines every visit to /system leaves three handlers
+    // behind, each retaining this component and its whole render tree, on an appliance that runs
+    // for weeks between restarts.
+    //
+    // These three run unconditionally, and need no null or "did we subscribe" check: if
+    // OnInitializedAsync threw before reaching InitializeSignalRAsync, they remove handlers that
+    // were never added, and Delegate.Remove against a delegate not in the list — including
+    // against a null event — is a defined no-op rather than an exception.
+    //
+    // ⚠ That covers teardown AFTER subscription. Teardown BEFORE it is the _disposed flag's job,
+    // set below and read in InitializeSignalRAsync: unsubscribing first and subscribing second
+    // would otherwise leave exactly the handlers this row exists to remove.
+    //
+    // Order is deliberate: the unsubscribes precede the timer disposals because they are the only
+    // statements here that CANNOT throw (HubService is injected, and event removal is an
+    // interlocked Delegate.Remove), while StopEncoderPolling can. Leak-critical and throw-free
+    // goes first, so a failure in the rest cannot strand a handler on the singleton.
+    HubService.SourceChanged -= OnHubSourceChangedAsync;
+    HubService.EncoderConnectionChanged -= OnHubEncoderConnectionChangedAsync;
+    HubService.PhoneCallStateChanged -= OnHubPhoneCallStateChangedAsync;
+
+    _disposed = true;
+
     _statsTimer?.Dispose();
     _sourceGainDebounceTimer?.Dispose();
     StopEncoderPolling();

@@ -53,8 +53,15 @@ sweeping the mechanisms that census was blind to (`.On<`, `LocationChanged`, `.S
 `PropertyChanged`, `CancellationToken.Register`, `EventCallback`) — all zero.
 
 ⭐ **And this row closes the class.** A repo-wide sweep found `SystemConfigPage` is the **only**
-component in `Radio.Web` that subscribes to a singleton service event without a matching `-=`; the
-other 22 all unsubscribe correctly.
+component in `Radio.Web` that subscribes to a singleton service event without a matching `-=`.
+
+⚠ **Corrected 2026-09-08 in pre-merge review — "the other 22 all unsubscribe correctly" does NOT
+reproduce, and the number is dropped rather than restated.** An independent sweep counted **16**
+other subscribing components, plus 3 subscribing *services* (`AudioStateStore`,
+`EncoderHudService`, `ConsolePlaybackState`) which are not components at all. **The substantive
+claim survived falsification** — every other subscription site has a matching `-=` in the same
+file; the only two without one are `MainLayout._timer.Elapsed` and `PhonePage._pollTimer.Elapsed`,
+both component-owned timers stopped and disposed, so the delegate dies with the component.
 
 ## Verification
 
@@ -69,11 +76,35 @@ leak.
 **The leak is that disposal does not shrink the list.** Assert **render → dispose returns the
 invocation list to its baseline**, and confirm it is RED against `main` before trusting it.
 
+✅ **Done 2026-09-08, and the numbers are the record.** Against the unfixed page: baseline **0**,
+and after render *and* dispose **1 per event** — 3 handlers surviving teardown. Five render/dispose
+cycles left **5 per event**, 15 in total. Linear, unbounded, and **exactly 3 per visit**, which
+settles the plan's open §5.1 question: no child component subscribes to these events as well, so
+the delta is the page's own three and nothing more. After the fix both counts return to baseline.
+⭐ **The instrument check passed before either assertion ran**, so the page demonstrably reaches
+`InitializeSignalRAsync` under the hermetic rig and the tests could see the unfixed state.
+
 ⚠ **A test cannot read these invocation lists directly.** They are field-like events, so
 `hub.SourceChanged.GetInvocationList()` is CS0070 from outside the declaring type, and
 `InternalsVisibleTo` does not help because the backing field is compiler-generated private.
-Reflection is the only route; eight existing test files already use that seam
-(`SleepTests.cs:501-523` is the idiom).
+Reflection is the only route.
+
+⛔ **Corrected 2026-09-08 during the build — the seam citation was already stale when it was
+written.** This row said *"eight existing test files already use that seam (`SleepTests.cs:501-523`
+is the idiom)"*. **Both halves are wrong now**, because `UI-7` merged hours before this row was
+built and its `C-213` repaired twelve hand-rolled reflection sites:
+
+- `SleepTests.cs` is **511 lines**, so `:523` is past EOF. Its raw `GetField` is **gone**, replaced
+  by two one-line wrappers over the shared helper.
+- **Exactly one** raw `GetField` on a hub event backing field remains in the whole repo, and it is
+  inside `tests/Radio.Web.Tests/TestHelpers/HubEventFire.cs:91-92`. "Eight test files" is now one.
+
+**The shipped test therefore counts through `HubEventFire.InvocationListOf<TDelegate>`** — public,
+shared, and hardened — rather than hand-rolling a thirteenth copy. That is not merely tidier: the
+helper **throws** on a missing backing field instead of counting zero (so a renamed or
+accessor-converted event fails loudly rather than making every assertion vacuously true), and
+**throws** on a wrong payload type instead of silently widening to `Delegate`. `nameof` moves an
+event rename one step earlier still, from a runtime throw to a compile error.
 
 ⭐ **Note what happened here**: a row about a resource leak specified an instrument that could not
 tell the fixed state from the broken one. That is the same failure recorded three other times this

@@ -645,4 +645,91 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
 
 ---
 
+## ADR-031: A component's subscription to a singleton service event is proved by teardown, not by growth
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+`SystemConfigPage.razor` subscribed to three `AudioStateHubService` events with anonymous lambdas.
+An anonymous delegate has no stable reference, so no `-=` can remove it, and the page never tried.
+`AudioStateHubService` is `AddSingleton` (`Program.cs:411`), so **every visit to `/system`
+permanently added three handlers to a process-lifetime object** — each retaining the component and
+its whole render tree, on an appliance that runs for weeks between restarts.
+
+⚠ **The route is `/system`.** The row said `/system-config` five times and `UI-7`'s plan inherits the
+same wrong string in two places. `@page "/system"` is the file's only `@page`; there is no alias and
+no redirect, so `/system-config` is not a route this application serves. Nothing in the fix depends
+on it — it matters because every prose description of the defect named a URL nobody could visit.
+
+### Decision
+
+Named instance methods, and a matching `-=` for every `+=` in the disposal method the page already
+had. **The naming is a means; the symmetry is the property.** No new interface, field, flag or
+lifecycle — the page has declared `@implements IDisposable` with a live `Dispose()` throughout.
+
+⭐ **This closes the class in `Radio.Web`.** A repo-wide sweep found `SystemConfigPage` was the only
+component subscribing to a singleton service event without a matching `-=`. This was a one-off
+outlier, not the first instance of a pattern.
+
+⚠ **The row and the plan both said "the other 22 all unsubscribe correctly"; that number does not
+reproduce and has been dropped rather than restated.** An independent pre-merge sweep counted
+**16 other components** subscribing to service events, plus 3 subscribing services
+(`AudioStateStore`, `EncoderHudService`, `ConsolePlaybackState`) — which are not components and do
+not carry a component disposal interface. **The substantive claim survived falsification**: every
+other subscription site has a matching `-=` in the same file, the only two exceptions being
+`MainLayout._timer.Elapsed` and `PhonePage._pollTimer.Elapsed`, both component-owned timers that
+are stopped and disposed, so the delegate dies with the component. ⭐ **A specific count that does
+not reproduce is what teaches the next reader to distrust the claim that does** — this repo has now
+been burned by that four times, so the claim is kept and the number is not.
+
+### ⛔ The instrument, which is the part worth keeping
+
+**The verification the row originally specified could not tell the fixed state from the broken one.**
+It said: *render the page twice against a shared service, assert the invocation list does not grow.*
+**That is RED against correct code.** Two simultaneously-live components legitimately hold two sets
+of handlers — ordinary multicast behaviour, not a leak. Implemented as written, a row about a
+resource leak would have shipped a test that was worthless in the direction that mattered.
+
+**The leak is that disposal does not SHRINK the list.** The discriminating assertion is therefore
+*render → dispose → the count returns to its pre-render baseline*, plus *five render/dispose cycles
+leave the singleton in the same state as one*.
+
+Measured before the fix, and the numbers are the record: **1 handler per event per visit; five
+visits leaving five.** Linear, unbounded, and exactly 3 per visit — so no child component subscribes
+to these events as well, which the plan had flagged as an open question rather than a fact.
+
+Two supporting rules, both of which earned their place here:
+
+- **An instrument check is not optional.** Both tests first require the counts to *move* off
+  baseline. Without that, a page that subscribes nothing — an early throw in `OnInitializedAsync`,
+  a renamed event — satisfies every assertion vacuously. It is the same "prove the instrument can
+  see the unfixed state" discipline recorded against `TEST-2`, `UX-1`, `OPS-3` and `UI-7`, and this
+  is its sixth outing in three days.
+- **Reflection goes through the shared seam.** The test counts handlers via
+  `HubEventFire.InvocationListOf<TDelegate>`, which `UI-7` (`C-213`) extracted hours earlier
+  precisely so tests stop hand-rolling `GetField`. A private copy here would have been the
+  thirteenth such site and a worse one: the helper throws on a missing backing field instead of
+  counting zero, and on a wrong payload type instead of silently widening to `Delegate`.
+
+### Alternatives considered
+
+- **`IAsyncDisposable`** — rejected. Unsubscribing is synchronous; a second disposal interface would
+  be strictly more code for no behaviour.
+- **Routing these events through `AudioStateStore`** so the store is the hub's sole subscriber —
+  not available. The store re-exposes 11 of the hub's 14 events and `PhoneCallStateChanged` is one
+  of the three it omits, which is *why* this page reaches past it to the hub directly.
+
+### Consequences
+
+The test joins the set that depends on these events remaining **field-like**. `UI-7`'s `C-207`
+examined converting them to explicit `add`/`remove` accessors, which would delete the compiler-
+generated backing fields; it rejected that route, so the seam survives. If it is ever revisited,
+this test changes with it — `HubEventFire` already throws a message saying so.
+
+**Plan of record:** [`design/plans/UI-9-the-config-page-that-never-unsubscribes.md`](plans/UI-9-the-config-page-that-never-unsubscribes.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->
