@@ -99,3 +99,105 @@ walked past it. ⚠ **Keep that warning in force** — it applies equally to any
 ✅ **`AUD-2` is CLOSED and CONFIRMED BY EAR** on both paths (voicemail and TTS ducking), deployed as
 `f4d71b28`. **`PHN-2` check #6 flips FAIL → PASS.** The ducking half of the original report is done;
 what remains here is *how many voicemails play at once*, and nothing else.
+
+---
+
+## ✅ DIAGNOSIS 2026-09-09 (Builder) — **three of this row's own premises were wrong, and the severity was understated**
+
+Shipped on `fix/phn-10-two-voices-at-once`. Plan:
+[`PHN-10-nothing-can-stop-a-voicemail.md`](../../design/plans/PHN-10-nothing-can-stop-a-voicemail.md).
+
+⛔ **The wrong framing below is CORRECTED, not deleted.** The `PHN-1f` premise sent the investigation
+at the wrong file, and the record of that is worth more than a tidy page.
+
+### ⛔ Correction 1 — `PHN-1f` was never in scope, and structurally could not have been
+
+This row's headline says *"`PHN-1f` SHIPPED the queue that was supposed to prevent it"*, and its body
+calls that *"a queue that exists and did not cover this path, which is a different and more serious
+thing to diagnose."* **Two independent facts falsify it.**
+
+1. **The queue's predicate can never see a voicemail as a blocker.**
+   `EventPlaybackService.IsBlockedByAHigherPrioritySource` tests
+   `_duckingService.GetPriority(s) >= threshold`, where the threshold is `GvMedia:PreemptAtPriority`
+   = **8**. `EventPlaybackRequest.Priority` defaults to **6** and the Web client never overrides it.
+   **6 < 8**, for both arms, always — and deliberately: ADR-029 §6.1 sets voicemail and text-TTS at
+   the same 6 because *"They are the same class of thing."*
+2. **Even at equal priorities the wait could not run.** `StartAsync`'s replacement arm tears the first
+   playback down **inside `_gate`, before the second playback's acquisition task is started**;
+   `WaitForClearAirAsync` runs later, after acquisition, by which time the first voicemail has already
+   left the ducking set.
+
+⭐ **`PHN-1f` shipped the mirror of ADR-029 §6.2 rule 2** (a playback starting under an *announcement*
+at ≥ 8). Attended-vs-attended is **rule 1**, and rule 1 shipped with the single-slot replacement arm.
+**The replacement arm works.** The failure was two layers below it, in the source.
+
+### ⛔ Correction 2 — the "Verification" section above asks for the WRONG assertion
+
+This row says *"⭐ **Assert the PRESENCE of serialisation** — the second waits and then plays."*
+**For this path that is the opposite of the contract.** ADR-029 §6.2 rule 1 says attended-vs-attended
+→ **replace**, and rejects queueing in as many words: *"queueing behind 40 seconds of voicemail would
+be baffling."*
+
+⛔ **A build in which the second voicemail waits satisfies this row's stated assertion and violates
+the ADR.** The correct assertion is: **the second voicemail starts promptly and the first goes
+silent.** ("Waiting, then playing" remains right for `PHN-1f`'s case — a voicemail behind a
+*doorbell*. The two are different rules and this row conflated them.)
+
+### ⛔ Correction 3 — the two reported behaviours are ONE behaviour
+
+This row splits the report into two table rows and warns that *"simultaneity and preemption are
+opposite failures and a fix for one can create the other."* Sound in general; **not applicable here.**
+Both arms enter the same method (`EventPlaybackService.StartAsync`), take the same single slot, carry
+the same priority, and are governed by the same ADR rule. ⭐ **So the owner's TTS ruling is the
+SPECIFICATION, not a constraint to design around** — *"make voicemail do what TTS already does"* is
+the whole fix.
+
+### ⭐ The mechanism
+
+`TearDownAsync`'s **first** statement disarms the guard its **last** statements depend on.
+
+| # | What happens |
+|---|---|
+| 1 | The replacement arm claims voicemail A terminal and calls `TearDownAsync(A)` |
+| 2 | **`TearDownAsync`'s FIRST line is `playback.Cancel()`** |
+| 3 | `AudioFileEventSource._playbackCts` is linked over that token, so it is now cancelled |
+| 4 | `AwaitCompletionAsync`'s filter is `when (!cancellationToken.IsCancellationRequested)` — **false** — so the exception propagates |
+| 5 | ⛔ **`PlayWithSoundFlowAsync`'s `catch (OperationCanceledException)` sets `_isPlaybackActive = false` and does nothing else**, under a comment reading `// Playback was stopped`. **Nothing stopped it.** |
+| 6 | `ReleaseSourceAsync` awaits `StopDuckingAsync` — a **500 ms** `Audio:DuckingReleaseMs` fade |
+| 7 | `StopCoreAsync` reads `_isPlaybackActive` — **false** — and skips `SoundFlowPlaybackService.StopAsync` |
+| 8 | `DisposeAsyncCore` — **identical guard, identical skip** |
+| 9 | The `SoundPlayer` is never stopped, never `MasterMixer.RemoveComponent`ed, never disposed |
+
+⭐ **Step 6 makes this deterministic, not a race.** ⭐ **And step 8 was provably dead even without it**,
+because `StopCoreAsync` awaits `_playbackTask` to completion, by which point step 5 has definitively
+run. **The voicemail arm had no working backstop at any layer.**
+
+### ⛔ THE SEVERITY WAS UNDERSTATED — this is not "two voicemails"
+
+| Stop path | Consequence before the fix |
+|---|---|
+| A second attended playback | **The observed defect.** Two voices. |
+| The **user's own Stop button** | ⛔ The voicemail keeps playing; `Stopped` is published and the room disagrees. |
+| **Doorbell preemption** (§6.2 rule 2) | ⛔ The announcement talks over it. **`PHN-2` check #10, DEFERRED — predicted to FAIL.** |
+| **`GvMedia:MaxPlaybackSeconds`** | ⛔ ADR-029 §7.1 calls this *"THE guarantee"*. It did not stop voicemail audio. |
+| **The `/sleep` edges** (§16.5) | ⛔ Audio continues on a dark panel with no stop control on screen. |
+| **The last-circuit backstop** (`D30`) | ⛔ A browser reload does not silence it. |
+| **Natural end of content** | Audio ends (the file ran out), but **the player and its mixer component are never removed** — one leak per voicemail, for the life of the process. |
+
+⚠ The leak is a standing one on an appliance with weeks of uptime. Whether it interacts with the known
+long-running capture-device degradation is a **hypothesis only** — nothing here measures it.
+
+### ⭐ Why every test in the suite was blind to it
+
+`AudioFileEventSourceTests`' 27 tests all construct the source **with no playback service**, so
+`PlayCoreAsync` takes the silent-simulation branch and `_isPlaybackActive` is never true in any test.
+And `EventPlaybackServiceTests.ASecondStartReplacesTheFirst_AndTheFirstIsTornDown` — **the only
+replacement test in the tree** — asserts `first.StopCalls == 1` / `first.DisposeCalls == 1`, **both
+true today, with the bug live.** The service half was always correct; the fake then does what the fake
+does. ⛔ **Do not cite it as evidence.**
+
+### ⛔ Not closable by a green suite
+
+The cabinet gate is: start one voicemail, start a second, confirm **the first goes silent while the
+second plays** — **plus a TTS control in the same sitting**, because the whole risk of the fix is
+buying the first by breaking the preemption the owner ruled correct.

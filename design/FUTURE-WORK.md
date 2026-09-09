@@ -2770,3 +2770,72 @@ content.
 
 **Priority: low.** The behaviour is verified live and by inspection; this buys regression safety,
 not a fix.
+
+---
+
+## 35. `TTSEventSource.DisposeAsyncCore` gates its stop on `IsPlaying`, so a **paused** source is never detached
+
+**Found by `PHN-10`, 2026-09-09.** Deliberately left out of that PR: it is the narrower twin of the
+defect on the arm the owner had just confirmed works, and widening the diff into `TTSEventSource`
+would have put the one behaviour he endorsed at risk for a bug nobody has hit.
+
+### What exists
+
+`src/Radio.Infrastructure/Audio/Sources/Events/TTSEventSource.cs`'s `DisposeAsyncCore` reads
+`if (_playbackService != null && _playbackService.IsPlaying(Id))`. `SoundFlowPlaybackService.IsPlaying`
+answers `player.State == PlaybackState.Playing`, so a **paused** player answers `false` and the source
+is left registered in `_activePlayers` and still attached to the SoundFlow mixer.
+
+### What is needed
+
+The same change `PHN-10` made to `AudioFileEventSource.DisposeAsyncCore`: call
+`_playbackService.StopAsync(Id)` unconditionally inside the existing `try`/`catch`. `StopAsync` is a
+safe no-op on an unregistered id (`TryGetValue` on both dictionaries, all work behind
+`if (player != null)`), so the unconditional form costs a dictionary miss and has no hole.
+
+### Gotchas
+
+- ⚠ **Much narrower than `PHN-10`, and the reason is worth keeping.** `TTSEventSource.StopCoreAsync`
+  is already unconditional, so this only bites on a **dispose that no stop preceded**. On the normal
+  path `EventPlaybackService.ReleaseSourceAsync` calls `source.StopAsync()` immediately before
+  `source.DisposeAsync()`, and that first call clears the registration — so the dispose guard is
+  reached with nothing left to do anyway.
+- ⛔ **Do not "harmonise" the two sources by copying the `IsPlaying` form the other way.** That is the
+  direction `PHN-10` explicitly rejected: it would reintroduce the paused-source hole in
+  `AudioFileEventSource`, which is the file that had the P0.
+- ⚠ `EventSourceStopIsNotActivityGuardedLintTests` does **not** catch this shape and is not supposed
+  to — `IsPlaying(Id)` is a live query on the service, not a cached private `bool`. The lint forbids
+  the stale-mirror shape specifically, and this is a different (much milder) mistake.
+
+**Priority: low.** Unreached on the normal path; worth a row rather than a hotfix.
+
+---
+
+## 36. `SoundFlowMasterMixer.RemoveSource` logs a removal it does not perform
+
+**Re-confirmed by `PHN-10`, 2026-09-09**, and deliberately not swept into that diff. `CLAUDE.md`
+§ Pre-Merge Review already records it as instance 1 of this repository's signature failure class; this
+entry exists so the code side has a home for it too.
+
+### What exists
+
+`src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowMasterMixer.cs`'s `RemoveSource` logs
+*"Removed audio source … from mixer"* while only mutating a `List<IAudioSource>`. The real detach is
+`AudioPlaybackDevice.MasterMixer.RemoveComponent` — SoundFlow's own mixer, **a different object**.
+
+### What is needed
+
+Either make the log line describe what the method actually does (bookkeeping, not detaching), or move
+the detach into it. The first is the smaller change and probably the right one — every real caller
+already performs the detach through `SoundFlowPlaybackService`.
+
+### Gotchas
+
+- ⚠ **It has already cost one wrong fix.** Commit `03a6fea` trusted the wording, landed one layer too
+  high, and silently did nothing for months.
+- ⛔ **It is NOT related to `PHN-10`**, and that was checked rather than assumed: the event-source path
+  never touches `IMasterMixer` at all, and `EventPlaybackService`'s own class doc says it never calls
+  `AddSource` — accurately.
+
+**Priority: low.** A wrong comment on a live audio class, with a demonstrated history of misleading a
+fix. Cheap to correct; not urgent.
