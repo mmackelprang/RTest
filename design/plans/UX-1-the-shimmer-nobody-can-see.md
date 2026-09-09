@@ -2,6 +2,16 @@
 
 > ## ✅ SHIPPED 2026-09-09 — but **NOT as this plan specifies**. Read this box before Task 5.
 >
+> > ⚠ **AND THE VALUE IS NOW REOPENED — 2026-09-09, later the same day.** A third owner sitting, in
+> > afternoon light against a three-panel comparison on the real console, chose **36 (`#24242B`)** —
+> > i.e. **back to this plan's own rung**, though *not* to its exact hex: the plan's seed is
+> > `#242429` = rgb(36,36,41) and what was sighted is `#24242B` = rgb(36,36,43), **+2 on blue**. A
+> > follow-up PR implements it and is **held unmerged**, gated on a dark-room re-check. ⛔ **This
+> > does NOT vindicate the plan's Task 5a** — the night sitting that rejected 36 and the afternoon
+> > sitting that chose it contradict each other, and neither is being called wrong. ⛔ **It says
+> > nothing at all about Task 5b's geometry**, which remains unvalidated and unshipped. Full
+> > argument: [`../../docs/queue/UX-1.md`](../../docs/queue/UX-1.md).
+>
 > **Phase A is complete and its outcome contradicted this plan's central premise.** What shipped is
 > the **token change only**, at the **owner's** value of **`56` / `#38383F`** (delta 36), under the
 > name `--skeleton-shimmer-highlight`.

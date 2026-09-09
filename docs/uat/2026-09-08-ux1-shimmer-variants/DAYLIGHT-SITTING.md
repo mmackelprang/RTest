@@ -1,5 +1,24 @@
 # UX-1 — the daylight sitting, 2026-09-09
 
+> ## ⚠ ANNOTATED 2026-09-09 — **this record is accurate and is NOT being rewritten.** A later sitting the same day reached a different answer.
+>
+> **Everything below correctly records what happened at this sitting.** It is left exactly as
+> written. What has changed is only that it is no longer the last word:
+>
+> **A THIRD sitting, later on 2026-09-09 in afternoon light**, showed the owner three panels side by
+> side on the real console — delta 6 (`#1A1A1D`), delta 16 (`#24242B`), delta 36 (`#38383F`) — and
+> the owner chose **36 (`#24242B`)**. That contradicts the night sitting's finding that *"36 is below
+> the owner's dark-room visibility threshold"*, and it means the sentence below — *"The row lands on
+> 56 and is done"* — **no longer holds**, though it was a fair reading of the evidence available when
+> it was written.
+>
+> ⛔ **Neither sitting is being called wrong.** Two confounds are live: the night sitting ran on the
+> **v1 harness that was later found broken**, and **side-by-side viewing may bias toward the dimmest
+> acceptable value**. A follow-up PR implements `#24242B` and is **held unmerged**, gated on a
+> **dark-room re-check of that value alone**.
+>
+> Full argument and both instruments: [`../../queue/UX-1.md`](../../queue/UX-1.md).
+
 **Result: `56` (`#38383F`, delta 36). Same value as the dark room. The row lands on 56 and is done.**
 
 ⭐ **The expensive branch did NOT fire.** The night record set the decision rule in advance:
@@ -70,6 +89,10 @@ coordinator which state it had been in when the owner looked.**
   acceptable in both conditions at the shipping geometry.
 
 ## The change this authorises
+
+> ⚠ **This is what THIS sitting authorised, and it shipped as #641.** A later sitting the same day
+> chose `#24242B` instead — see the banner at the top of this file. The `--surface-overlay` warning
+> below is **unaffected** and still binding.
 
 One token value: the skeleton shimmer's middle stop, `#1A1A1D` → **`#38383F`**.
 

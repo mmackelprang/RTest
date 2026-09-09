@@ -13,6 +13,13 @@ highlight from `--surface-overlay` (26) to its own `--skeleton-shimmer-highlight
 (`#38383F`), the value the owner chose at the panel in a dark room and again in daylight. Two things
 the plan called for did **not** ship, and both are recorded here so they are not re-derived.
 
+> ⚠ **The value in that paragraph is REOPENED — 2026-09-09, later the same day.** A third sitting in
+> afternoon light chose **36 (`#24242B`)** instead, contradicting the dark-room sitting on the same
+> rung. A follow-up PR implements it and is **held unmerged**, gated on a dark-room re-check.
+> **Neither sitting is being called wrong**; both confounds are set out in
+> [`docs/queue/UX-1.md`](../docs/queue/UX-1.md). ⭐ **The two deferred items below are unaffected by
+> which value wins** — geometry and dwell are orthogonal to amplitude.
+
 ### 1. The narrowed gradient geometry — proposed, never validated, not shipped
 
 `design/plans/UX-1-the-shimmer-nobody-can-see.md` Task 5b specifies narrowing the ramp from 50% of
@@ -49,6 +56,25 @@ shipped; it becomes live again only if someone wants the shimmer calmer without 
 Answering it needs a harness whose band is on the element continuously, and an owner sitting.
 
 ### 2. Real skeleton dwell time — the plan's own pre-check, never run
+
+> ## ⭐ PARTLY ANSWERED 2026-09-09 — and the answer is that the shimmer is effectively never on screen
+>
+> **Measured on the box:** `/api/playhistory` returns in **0.0030–0.0051 s** and `/api/queue` in
+> **0.0051–0.0067 s**. One animation cycle is **1500 ms**, of which the first **~390 ms** is the
+> `ease` dead pause. **The skeleton is on screen for roughly 0.3% of one cycle, so no sweep is ever
+> painted at any highlight value** — which is the outcome §1.3 named as gating.
+>
+> **Reduced motion was falsified as a cause**, not assumed: `enable-animations: true`, and the
+> `prefers-reduced-motion` block at `design-system.css:1779` — which would kill the animation
+> outright — is **not firing**.
+>
+> ⚠ **This is a bound, not the plan's measurement.** What was timed is the **data fetch** for two
+> panels, which bounds how long their skeletons *can* be up; it is not a `MutationObserver` on
+> actual DOM presence, and it covers **Play History and Queue only**. **Devices, Radio and the phone
+> thread are still unmeasured**, and a slow or cold path on any surface would dwell longer. The
+> `MutationObserver` run below is still the right way to close this properly.
+>
+> ⛔ **Nothing about this was fixed.** The amplitude work did not and must not address dwell.
 
 Plan Task 0 measures how long a `.skeleton-loading` node actually stays in the DOM, and §1.3 makes it
 gating: **one shimmer pass is 750 ms**, so if typical dwell is materially under that, no shape
