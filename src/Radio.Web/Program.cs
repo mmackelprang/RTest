@@ -615,6 +615,10 @@ app.MapGet("/api/health/version", () =>
 // Proxy album art requests to the API server.
 // Album art URLs from SignalR are relative (/api/albumart/{file}) and resolve against
 // the Web server origin. The API server owns the file cache, so we proxy to it.
+//
+// ⚠ UI-11: ApiNotFound.Body names this route by hand. If you add, rename or remove an /api/ route on
+// this service, update that constant in the same commit or the 404 body starts telling callers
+// something untrue.
 app.MapGet("/api/albumart/{filename}", async (string filename, IHttpClientFactory httpClientFactory) =>
 {
   // Sanitize: prevent path traversal

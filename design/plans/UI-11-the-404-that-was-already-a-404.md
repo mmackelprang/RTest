@@ -810,16 +810,24 @@ service are very reachable, and **a wider pattern is how the console goes black*
 > **7 failed / 1,197 passed** — the four `StaticAssetPipelineTests` cases go RED, `/css/design-system.css`
 > returning `NotFound` instead of `OK`.
 >
-> **The mechanism, since it is not obvious and §0.6 does not cover it.** `Order = int.MaxValue` makes
-> the fallback lose to real *endpoints*, which is why the twelve `@page` routes survive — that part of
-> §0.6 is right. **Static files are not endpoints.** `WebApplicationBuilder` inserts the automatic
-> `UseRouting()` *before* all user middleware, so routing selects the fallback endpoint first; then
-> `StaticFileMiddleware` — which is user middleware at `Program.cs:599` — **stands down whenever an
-> endpoint is already selected**. And `{**rest}` carries no `:nonfile` constraint (that lives only in
-> `MapFallback`'s *default* pattern, which this plan does not use). So the CSS, the JS, the fonts, the
-> Radzen theme and **`_framework/blazor.web.js`** all 404. Lose `blazor.web.js` and the circuit never
-> starts: an unstyled, non-interactive shell on a 1920x720 wall panel. **The console goes black,
-> literally.**
+> **The mechanism, since it is not obvious and §0.6 does not cover it. The asymmetry is the crux:
+> page routes are endpoints, static files are not.** A real `@page` endpoint *competes* with the
+> fallback and wins — on **route precedence first** (a literal segment beats a catch-all, settling it
+> before `Order` is consulted at all) and on `Order` second. ⚠ **Do not read `Order = int.MaxValue` as
+> the thing protecting those routes** — precedence already did, so a change touching only `Order`
+> would look safe on that reading and would not be. **Static files never enter that competition.**
+> `WebApplicationBuilder` inserts the automatic `UseRouting()` *before* all user middleware, so routing
+> selects the fallback endpoint; then `StaticFileMiddleware` — user middleware at `Program.cs:599` —
+> **stands down purely because *some* endpoint is already selected**. And `{**rest}` carries no
+> `:nonfile` constraint (that lives only in `MapFallback`'s *default* pattern, which this plan does
+> not use).
+>
+> **Measured vs derived, because §7.2 keeps that distinction for a reason.** `/css/design-system.css`,
+> `/js/idle-dimmer.js` and the DSEG font are **measured** 404s — they are the three `InlineData` cases.
+> That the Radzen theme and **`_framework/blazor.web.js`** go the same way, and that the circuit
+> therefore never starts — an unstyled, non-interactive shell on a 1920x720 wall panel — is
+> **derived**: nothing in the suite fetches either. The derivation is sound (one `UseStaticFiles` call
+> serves them all), but it is a derivation. **On that derivation, the console goes black literally.**
 >
 > ⭐ **Why the Builder got this wrong, recorded because the error is more reusable than the fact.** The
 > mutation was run as `dotnet test --filter "FullyQualifiedName~ApiNotFoundPipelineTests"` and came

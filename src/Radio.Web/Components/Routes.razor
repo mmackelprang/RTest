@@ -2,9 +2,10 @@
 
    Precisely, because "removed" and "deprecated" are different claims and only one is true:
    Router.NotFound still EXISTS on .NET 10 and still compiles - the ref assembly carries
-   [Obsolete("NotFound is deprecated. Use NotFoundPage instead.")]. What it no longer does is work.
-   It was retained inert for back-compat in .NET 8/9, and Microsoft's .NET 10 routing documentation
-   states the render fragment "isn't supported in .NET 10 or later". So deleting it also removes an
+   [Obsolete("NotFound is deprecated. Use NotFoundPage instead.")]. What it does not do - and in this
+   hosting model never did - is take effect. The fragment still functions in other Blazor hosting
+   models; it was retained inert for Blazor Web Apps in .NET 8/9, and Microsoft's .NET 10 routing
+   documentation states it "isn't supported in .NET 10 or later". So deleting it also removes an
    obsolete-API use, not just dead markup.
 
    The markup that used to sit here promised "Sorry, there's nothing at this address." for an unknown

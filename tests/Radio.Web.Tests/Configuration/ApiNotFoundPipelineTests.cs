@@ -111,14 +111,27 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
   /// <para>
   /// <b>1. Availability</b> — already covered by <see cref="StaticAssetPipelineTests"/>, which goes RED
   /// under the widening (measured: 7 failed / 1,197 passed across this project, with
-  /// <c>/css/design-system.css</c> returning <c>NotFound</c>). The mechanism is worth knowing because
-  /// it is not the one <c>Order = int.MaxValue</c> would suggest: that only makes the fallback lose to
-  /// real <em>endpoints</em>, which is why the twelve <c>@page</c> routes survive. <b>Static files are
-  /// not endpoints.</b> The automatic <c>UseRouting()</c> runs before all user middleware, so routing
-  /// selects the fallback first; <c>StaticFileMiddleware</c> then stands down because an endpoint is
-  /// already selected. And <c>{**rest}</c> has no <c>:nonfile</c> constraint — that lives only in
-  /// <c>MapFallback</c>'s <em>default</em> pattern, which this app does not use. So the CSS, JS, fonts
-  /// and <c>_framework/blazor.web.js</c> all 404, and the circuit never starts.
+  /// <c>/css/design-system.css</c> returning <c>NotFound</c>).
+  /// </para>
+  /// <para>
+  /// <b>The asymmetry is the crux: page routes are endpoints, static files are not.</b> A real
+  /// <c>@page</c> endpoint <em>competes</em> with the fallback and wins — on route precedence first
+  /// (a literal segment beats a catch-all, which settles it before <c>Order</c> is consulted at all)
+  /// and on <c>Order</c> second. ⚠ Do not read <c>Order = int.MaxValue</c> as the thing protecting
+  /// those routes: precedence already did, so a change touching only <c>Order</c> would look safe on
+  /// that reading and would not be. <b>Static files never enter that competition.</b> The automatic
+  /// <c>UseRouting()</c> runs before all user middleware, so routing selects the fallback; then
+  /// <c>StaticFileMiddleware</c> — user middleware — stands down purely because <em>some</em> endpoint
+  /// is already selected. And <c>{**rest}</c> has no <c>:nonfile</c> constraint; that lives only in
+  /// <c>MapFallback</c>'s <em>default</em> pattern, which this app does not use.
+  /// </para>
+  /// <para>
+  /// Which half is measured: <c>/css/design-system.css</c>, <c>/js/idle-dimmer.js</c> and the DSEG font
+  /// are <b>measured</b> 404s — they are literally the three <c>InlineData</c> cases in
+  /// <see cref="StaticAssetPipelineTests"/>. That the Radzen theme and <c>_framework/blazor.web.js</c>
+  /// go the same way, and that the circuit therefore never starts, is <b>derived</b>: nothing in this
+  /// suite fetches either. The derivation is sound — one <c>UseStaticFiles</c> call serves them all —
+  /// but it is a derivation, and this is the sentence people will quote.
   /// </para>
   /// <para>
   /// <b>2. Truthfulness</b> — what this test pins, and what nothing covered before. <c>/some-typo</c>
