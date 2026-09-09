@@ -198,6 +198,19 @@ Two independent reasons, both fatal to a naive test:
 1. **The guard lives inside the `_hubConnection.On<T>(…)` lambda.** Reaching it needs a *started*
    `HubConnection` delivering a message. Every fixture uses `OfflineHubTransport`
    (`HermeticTestRig.cs:91-97`), which fails every request synchronously and by design.
+
+   ⛔ **CORRECTION 2026-09-09 (Builder): "every fixture" is FALSE.**
+   `tests/Radio.Web.Tests/Services/EncoderHudServiceTests.cs:473-481` builds an
+   `AudioStateHubService` from a bare `ServiceCollection` registering **no
+   `IHubConnectionTransport`**, so `transport` takes its compile-time default of `null` — not
+   `OfflineHubTransport`. ⭐ **The conclusion survives**: that fixture never *starts* the connection,
+   so the `On<T>` lambda stays unreachable. The verified form is narrower, and is what shipped in the
+   code comment: *every fixture that **starts** this service runs it over `OfflineHubTransport`* —
+   checked across all four start paths (`AudioStateHubServiceTests.cs:173`/`:228`, plus the three
+   components calling `HubService.StartAsync()` at `MainLayout.razor:378`, `RadioPage.razor:255` and
+   `SystemConfigPage.razor:2259`, whose fixtures all use `AddHermeticTestRig`).
+   ⚠ `AudioStateHubServiceTests.cs:148-158` carries the same loose wording. Pre-existing and out of
+   scope, but it is the sentence this plan quoted as authority.
 2. ⭐ **`HubEventFire` fires the EVENT, which is downstream of the guard.**
    `HubEventFire.FireAsync(hub, "RadioStateChanged", dto)` reflects the compiler-generated backing
    field and invokes subscribers directly (`HubEventFire.cs:54-61`). **It never executes the `On<>`
@@ -641,11 +654,50 @@ named test fails:
 | `M1` — delete `if (!AcceptPayload(…)) return;` from `OnRadioStateMessageAsync` | `NullRadioStatePayloadIsNotDispatchedToSubscribers` | the two Encoder null tests |
 | `M2` — delete the `LogWarning` from `AcceptPayload` | both `…IsLoggedAsAWarning…` and the three Encoder tests' log assertions | `…IsNotDispatchedToSubscribers` |
 | `M3` — invert `AcceptPayload` to `return payload is null` | `NonNullRadioStatePayloadIsDispatchedUnchanged` | — |
-| `M4` — restore the pre-`UI-12` inline `if (dto != null)` for the Encoders and drop the shared helper | nothing — ⭐ **this is the control.** It must stay GREEN, proving the Encoder tests pin *behaviour*, not the refactor |
+| ~~`M4`~~ — restore the pre-`UI-12` inline `if (dto != null)` for the Encoders and drop the shared helper | ⛔ **MIS-SPECIFIED — see the correction below. Do not run this as written.** |
 
 ⚠ `M4` is the one that matters most and is easiest to skip. Without it the Encoder tests could be
 asserting the shape of Task 1 rather than the behaviour `UI-7` shipped, which is exactly the
 "asserts the guard exists" trap the row forbids.
+
+### ⛔ CORRECTION 2026-09-09 (Builder) — `M4` as written CANNOT stay green, and `M2` already said so
+
+**Measured, not reasoned: `M4` fails 3 tests.** The matrix above is self-contradictory. `M2` concedes
+that the three Encoder tests carry log assertions; `M4` then deletes the logging (the pre-`UI-12`
+inline guard never logged) while claiming *"nothing must fail."* Both cannot be true.
+
+⭐ **The deeper error is what a control is for.** A control must hold the **behaviour contract fixed**
+and vary only the **implementation shape**. `M4` varied both — it restores the *pre-`UI-12` shape*,
+but `UI-12` deliberately **adds** behaviour (audible rejection), so pre-`UI-12` is not
+behaviour-equivalent to post-`UI-12`. **A control that cannot pass is not a control; it is a second
+mutation.**
+
+The matrix that was actually run, all against the committed code:
+
+| Mutation | Result | Verdict |
+|---|---|---|
+| baseline | 8/8 pass | — |
+| `M1` — delete the guard from `OnRadioStateMessageAsync` | **2 fail** (`…IsNotDispatchedToSubscribers`, `…IsLoggedAsAWarning…`); the three Encoder null tests still pass | ✅ discriminating |
+| `M2` — rejection log `LogWarning` → `LogDebug` | **4 fail** (radio log test + all three Encoder tests); `…IsNotDispatchedToSubscribers` still passes | ✅ as planned |
+| `M3` — invert `AcceptPayload` to `return payload is null` | **8/8 fail** | ✅ |
+| `M4a` — the literal `M4` above | **3 fail.** ⭐ **All three are the `Assert.Contains(… Warning …)` log assertion; NOT ONE is `Assert.False(received)`** | ⛔ plan wrong, row sound |
+| ⭐ **`M4b` — THE REAL CONTROL:** inline `if (dto != null)` **plus an inline `LogWarning`** for the Encoders, shared helper gone | **8/8 GREEN** | ✅ tests pin behaviour |
+
+⚠ **`M2` was run as a downgrade to `LogDebug` rather than a deletion**, because deleting the
+statement orphans `eventName` and `typeof(T)` and Release builds treat warnings as errors. The
+downgrade isolates the assertion more precisely anyway.
+
+⭐ **`M4b` is the demonstration §3.1 wanted: a completely different implementation — no shared helper
+at all — passes.** That is what "pins behaviour, not shape" means. And `M4a`'s failure mode is the
+evidence, not a problem: every failure is the *log* assertion and none is the *dispatch* assertion,
+so suppression is preserved exactly as `UI-7` shipped it and only the newly-added audibility is
+missing.
+
+📌 **Keep the Encoder tests' log assertions — they do more work than they look like.** They constrain
+nothing about the helper's existence, wording, parameter order or call shape (`M4b` proves that). But
+they **do** constrain *where the guard can live*: `NotifyAsync<T>` has `T` erased and cannot name the
+event, so the ⛔ `C-404` refactor fails those assertions. The event-name substring is the cheapest
+available proxy for **"the guard is above the fan-out."**
 
 ---
 
@@ -653,13 +705,33 @@ asserting the shape of Task 1 rather than the behaviour `UI-7` shipped, which is
 
 ```bash
 dotnet build RadioConsole.sln -c Release > /tmp/build.log 2>&1; echo "exit=$?"
-grep -cE "warning" /tmp/build.log     # must equal the 47 baseline
+grep -E "Warning\(s\)|Error\(s\)" /tmp/build.log   # "47 Warning(s) / 0 Error(s)" — equality, not zero
 dotnet test RadioConsole.sln -c Release > /tmp/test.log 2>&1; echo "exit=$?"
 grep -E "Passed!|Failed!|error" /tmp/test.log
 ```
 
 ⛔ **Never pipe `dotnet test` into `tail`** — `CLAUDE.md` records a measured run that exited `0` with
 five failing tests.
+
+⚠ **CORRECTION 2026-09-09 (Builder): the warning-count line above used to read `grep -cE "warning"`,
+and it returns 94 on a clean build, not 47.** MSBuild prints each warning once per project-graph
+pass, so the raw line count is exactly double. A Builder following the old recipe literally sees 94
+against a 47 baseline and concludes the change doubled the warnings. The `Warning(s)` summary line is
+the reliable source.
+
+⚠ **This is not confined to this plan.** `design/plans/OPS-2-pin-the-six-floating-package-versions.md:536`
+uses the variant `grep -cE 'warning [A-Z]+[0-9]+'`, which **also returns 94** on the same log —
+measured, not inferred. Any plan that counts warning *lines* rather than reading MSBuild's
+`Warning(s)` summary has the same defect.
+
+⚠ **A second, separate hazard: build CLEAN before quoting a number.** An up-to-date project skips
+`CoreCompile` and re-emits none of its warnings, so a warm incremental build can under-report. The
+`UI-12` fixer measured **30 Warning(s)** on a warm tree against the 47 baseline — which read
+literally says the change *removed* 17 warnings. ⚠ **Reported honestly: the Builder could NOT
+reproduce that** — a warm `dotnet build` run immediately afterwards reported 47. So the magnitude is
+unconfirmed and evidently depends on what happened to be dirty. The rule is unaffected either way and
+`CLAUDE.md` already gives it: **`dotnet clean` (or `-t:Rebuild`) before the number you report.**
+Every warning figure in this row's PR came from a clean rebuild.
 
 Known-failing on Windows and not a regression: four `SrcVariableResamplerTests`,
 `NwsObservationIntegrationTests.RealNwsCall_*`, and

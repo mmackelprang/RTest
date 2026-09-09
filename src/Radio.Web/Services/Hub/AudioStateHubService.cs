@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Sockets;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.Logging;
@@ -109,6 +110,19 @@ public class AudioStateHubService : IAsyncDisposable
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
   private static readonly TimeSpan DisconnectLogInterval = TimeSpan.FromSeconds(10);
 
+  // Throttle for AcceptPayload's rejection warning — see ShouldLogRejection for why it is throttled.
+  // ⚠ INSTANCE, not static, and unlike _lastDisconnectLogUtc directly above. That is load-bearing for
+  // test isolation: AudioStateHubServiceNullPayloadTests has two tests that each build a fresh hub and
+  // reject a null RadioStateChanged (:46 and :65), and one of them asserts the warning was logged. A
+  // static throttle would suppress whichever ran second and fail on execution order alone.
+  // Keyed by event name so a flood of one event cannot mask the first rejection of another.
+  private readonly Dictionary<string, DateTime> _lastNullPayloadLogUtc = [];
+  // ⚠ Locked, where _lastDisconnectLogUtc is not, and the difference is not fussiness: a torn read of
+  // a Dictionary during a concurrent write corrupts it, where a torn DateTime read only costs a stale
+  // throttle decision.
+  private readonly object _nullPayloadLogLock = new();
+  private static readonly TimeSpan NullPayloadLogInterval = TimeSpan.FromSeconds(10);
+
   public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
   public HubConnectionState ConnectionState => _hubConnection?.State ?? HubConnectionState.Disconnected;
 
@@ -191,20 +205,12 @@ public class AudioStateHubService : IAsyncDisposable
       // directly. (Previously the payload was discarded and subscribers
       // re-fetched via REST, which strips NowPlayingMatchId and silently
       // broke the recognition stream's NOW-row anchor.)
-      _hubConnection.On<RadioStateDto>("RadioStateChanged", async (dto) =>
-      {
-        _logger.LogDebug("Received RadioStateChanged event");
-        // ⚠ ASYMMETRY, PRE-EXISTING AND DELIBERATELY PRESERVED. RadioStateChanged is
-        // Func<RadioStateDto, Task> — a NON-nullable payload, like the three Encoder events below
-        // — but unlike them it has never carried a `dto != null` guard, on `main` or here. UI-7
-        // changed only the fan-out and did not add one, because adding a guard would silently drop
-        // a broadcast the panel currently receives, which is a behaviour change this row has no
-        // mandate for. Pre-merge review raised it: the guard comment below indicts this site by its
-        // own logic. Mitigating, and the reason it is safe to leave: the new per-subscriber catch
-        // means a resulting NullReferenceException is now logged rather than faulting a task nobody
-        // holds. Worth its own row, not a rider here.
-        await NotifyAsync(RadioStateChanged, dto);
-      });
+      //
+      // ⚠ The type argument is RadioStateDto? — NULLABLE — and that is deliberate. The payload
+      // arrives from a JSON deserializer across a process boundary, where C# nullable annotations
+      // are erased. A JSON `null` binds to default(T) whatever this file annotates. Declaring it
+      // non-nullable did not prevent a null; it only hid that one was representable (UI-12 §0.2).
+      _hubConnection.On<RadioStateDto?>("RadioStateChanged", OnRadioStateMessageAsync);
 
       // Server sends VolumeChanged with a VolumeDto payload —
       // deserialize and pass through so subscribers can update directly.
@@ -236,48 +242,13 @@ public class AudioStateHubService : IAsyncDisposable
       });
 
       // Server sends EncoderConnectionChanged when encoder device connects/disconnects
-      _hubConnection.On<EncoderConnectionDto>("EncoderConnectionChanged", async (dto) =>
-      {
-        _logger.LogDebug(
-          "Received EncoderConnectionChanged: IsConnected={IsConnected}, WasEverConnected={WasEver}",
-          dto?.IsConnected, dto?.WasEverConnected);
-        // The payload guard is NOT a subscriber guard and must survive: this delegate is
-        // Func<{Dto}, Task> with a NON-nullable payload, so handing it null would give
-        // subscribers a null they are typed to never receive. NotifyAsync only replaces the
-        // `EncoderConnectionChanged != null` half.
-        if (dto != null)
-        {
-          await NotifyAsync(EncoderConnectionChanged, dto);
-        }
-      });
+      _hubConnection.On<EncoderConnectionDto?>("EncoderConnectionChanged", OnEncoderConnectionMessageAsync);
 
       // Server sends EncoderConfigStatusChanged when the configuration tier changes (ENC-12).
-      _hubConnection.On<EncoderConfigStatusDto>("EncoderConfigStatusChanged", async (dto) =>
-      {
-        _logger.LogDebug("Received EncoderConfigStatusChanged: {Status}", dto?.Status);
-        // The payload guard is NOT a subscriber guard and must survive: this delegate is
-        // Func<{Dto}, Task> with a NON-nullable payload, so handing it null would give
-        // subscribers a null they are typed to never receive. NotifyAsync only replaces the
-        // `EncoderConfigStatusChanged != null` half.
-        if (dto != null)
-        {
-          await NotifyAsync(EncoderConfigStatusChanged, dto);
-        }
-      });
+      _hubConnection.On<EncoderConfigStatusDto?>("EncoderConfigStatusChanged", OnEncoderConfigStatusMessageAsync);
 
       // Server sends EncoderHudChanged when a knob acts (ENC-4).
-      _hubConnection.On<EncoderHudDto>("EncoderHudChanged", async (dto) =>
-      {
-        // No log line per message. This arrives at up to 20 Hz while a knob is moving.
-        // The payload guard is NOT a subscriber guard and must survive: this delegate is
-        // Func<{Dto}, Task> with a NON-nullable payload, so handing it null would give
-        // subscribers a null they are typed to never receive. NotifyAsync only replaces the
-        // `EncoderHudChanged != null` half.
-        if (dto != null)
-        {
-          await NotifyAsync(EncoderHudChanged, dto);
-        }
-      });
+      _hubConnection.On<EncoderHudDto?>("EncoderHudChanged", OnEncoderHudMessageAsync);
 
       // Server sends SleepStateChanged with bool payload (true=sleeping, false=awake)
       _hubConnection.On<bool>("SleepStateChanged", async (isSleeping) =>
@@ -495,6 +466,171 @@ public class AudioStateHubService : IAsyncDisposable
 
     _connectionLock.Dispose();
     GC.SuppressFinalize(this);
+  }
+
+  /// <summary>
+  /// Rejects a null payload for an event whose delegate cannot represent one, logging the rejection.
+  /// Returns true when the payload may be dispatched.
+  /// </summary>
+  /// <remarks>
+  /// ⚠⚠ THIS BELONGS HERE AND NOT IN <see cref="NotifyAsync{T}"/>, AND THE DIFFERENCE IS A REAL
+  /// DEFECT, NOT A STYLE PREFERENCE (queue row `UI-12` §0.5). Three events on this class are TYPED to
+  /// accept null — NowPlayingChanged (:60), VolumeChanged (:68) and EventPlaybackChanged (:90) — and
+  /// none of the three may be dropped. NotifyAsync&lt;T&gt;'s T is erased to a type parameter and
+  /// cannot tell them apart from the four non-nullable ones this guard serves, so a null check there
+  /// would silently drop a working broadcast: the exact defect `UI-12` was filed to avoid causing.
+  ///
+  /// ⚠ The three are NOT equivalent, and an earlier revision of this comment said they were
+  /// ("VolumeChanged and EventPlaybackChanged likewise"). What a null actually does:
+  /// <list type="bullet">
+  /// <item>NowPlayingChanged — meaningful data: it clears the dock. Demonstrated rather than assumed,
+  /// at NowPlayingDockTests.cs:248 and SleepTests.cs:309, which fire null and assert on the result.</item>
+  /// <item>VolumeChanged — NOT "an absent snapshot". AudioStateStore.cs:204-213 DISCARDS the payload
+  /// and notifies anyway; NowPlayingPanel.razor:617-631 treats null as a REST RE-FETCH TRIGGER
+  /// (RefreshPlaybackStateAsync); MainLayout.razor:1544-1549 early-returns. Dropping it in the fan-out
+  /// would suppress that re-fetch and strand the panel's volume/mute readout.</item>
+  /// <item>EventPlaybackChanged — AudioStateStore.cs:327-332 assigns it, so a null would clear the
+  /// cached snapshot. No producer sends one: AudioStateUpdateService.cs:1087 always builds a
+  /// <c>new { … }</c>. Nullable by declaration, unexercised in practice.</item>
+  /// </list>
+  ///
+  /// ⛔ Do NOT "simplify" this by moving the check down into the fan-out.
+  ///
+  /// ⚠ IT IS NOT SILENT, and that is the point rather than a nicety. The row objected to a silent
+  /// drop. Had a null RadioStateDto ever arrived it would have reached RadioControlPanel.razor:1053
+  /// (`if (dto.RdsRelevantChanged)`) and thrown a NullReferenceException that NotifyAsync swallows per
+  /// subscriber; the other three subscribers — NowPlayingPanel.razor:646, RadioPage.razor:337 and
+  /// AudioStateStore.cs:241 — assign it and repaint, blanking the readout WITHOUT throwing. One
+  /// greppable line replaces that. ⚠ SUBJUNCTIVE ON PURPOSE: no null has arrived, nothing was thrown
+  /// and nothing was wiped. An earlier revision wrote it as history, which invites a hunt through
+  /// journalctl for an NRE that was never logged.
+  ///
+  /// 📌 No known producer can trigger this on ANY of the four events the guard serves, and the
+  /// evidence lives here so no caller has to re-derive it. Every sender is in
+  /// Radio.API/Services/AudioStateUpdateService.cs. RadioStateChanged at :478-479 sends the result of
+  /// RadioStateMapper.cs:48, which returns a <c>new RadioStateDto { … }</c>; EncoderConnectionChanged
+  /// (:1002), EncoderConfigStatusChanged (:1028) and EncoderHudChanged (:1115) each build an anonymous
+  /// object inline with <c>new { … }</c>. None of the four can be null. The guard is against the
+  /// untyped WIRE; it is not a claim that the current server is wrong.
+  /// </remarks>
+  private bool AcceptPayload<T>(string eventName, [NotNullWhen(true)] T? payload) where T : class
+  {
+    if (payload is not null)
+    {
+      return true;
+    }
+
+    if (ShouldLogRejection(eventName))
+    {
+      _logger.LogWarning(
+        "Discarded a {EventName} broadcast with a null payload — its subscribers are typed to receive "
+        + "a non-null {PayloadType}. The sender violated the hub contract.",
+        eventName, typeof(T).Name);
+    }
+
+    return false;
+  }
+
+  /// <summary>
+  /// True the first time <paramref name="eventName"/> is rejected, and at most once per
+  /// <see cref="NullPayloadLogInterval"/> for that same event thereafter.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The rejection path sits on a documented 20 Hz route, which is why it is throttled at all.
+  /// EncoderHudChanged reaches this at up to 20 Hz while a knob is moving (its declaration at :79-82;
+  /// the server sends it at AudioStateUpdateService.cs:1114-1115). And src/Radio.Web/appsettings.json
+  /// puts MinimumLevel.Default at Information (:50-51) with NO restrictedToMinimumLevel on the Console
+  /// sink (:64-68) — unlike Radio.API since LOG-11 — so under systemd every Warning from this process
+  /// lands in `journalctl -u radio-web`, on a box where log volume correlates with audible audio
+  /// distortion (CLAUDE.md § Deployment).
+  ///
+  /// ⭐ The FIRST rejection of each event name always logs. The throttle suppresses the repeat, never
+  /// the news, which is what keeps <see cref="AcceptPayload{T}"/>'s "it is not silent" property true.
+  /// Same shape as _lastDisconnectLogUtc / DisconnectLogInterval at :109-111, used at :287-292.
+  /// </remarks>
+  private bool ShouldLogRejection(string eventName)
+  {
+    var now = DateTime.UtcNow;
+    lock (_nullPayloadLogLock)
+    {
+      if (_lastNullPayloadLogUtc.TryGetValue(eventName, out var last)
+        && now - last < NullPayloadLogInterval)
+      {
+        return false;
+      }
+
+      _lastNullPayloadLogUtc[eventName] = now;
+      return true;
+    }
+  }
+
+  /// <summary>Applies one "RadioStateChanged" broadcast.</summary>
+  /// <remarks>
+  /// ⚠ internal for the test seam — but NOT because the event cannot be raised, which is the reason
+  /// this comment used to give. <c>HubEventFire</c> reflects the compiler-generated backing field
+  /// (HubEventFire.cs:91-92), and RadioControlPanelBandSyncTests.cs:167-173 fires RadioStateChanged
+  /// on a hub instance today, green.
+  ///
+  /// ⭐ That fires the EVENT, which is DOWNSTREAM of the guard below, so a test written that way
+  /// passes whether the guard is present, absent or inverted — it proves nothing about this method.
+  /// The real obstacle is that the SignalR On&lt;T&gt; lambda which used to hold this body needs a
+  /// STARTED HubConnection, and no fixture in Radio.Web.Tests has one: every fixture that starts this
+  /// service runs it over OfflineHubTransport (HermeticTestRig.cs:91-97), which fails the connection.
+  /// Radio.Web.csproj:31 already declares InternalsVisibleTo("Radio.Web.Tests").
+  /// </remarks>
+  internal async Task OnRadioStateMessageAsync(RadioStateDto? dto)
+  {
+    _logger.LogDebug("Received RadioStateChanged event");
+    if (!AcceptPayload(nameof(RadioStateChanged), dto))
+    {
+      return;
+    }
+
+    await NotifyAsync(RadioStateChanged, dto);
+  }
+
+  /// <summary>Applies one "EncoderConnectionChanged" broadcast. ⚠ internal for the test seam.</summary>
+  internal async Task OnEncoderConnectionMessageAsync(EncoderConnectionDto? dto)
+  {
+    _logger.LogDebug(
+      "Received EncoderConnectionChanged: IsConnected={IsConnected}, WasEverConnected={WasEver}",
+      dto?.IsConnected, dto?.WasEverConnected);
+    if (!AcceptPayload(nameof(EncoderConnectionChanged), dto))
+    {
+      return;
+    }
+
+    await NotifyAsync(EncoderConnectionChanged, dto);
+  }
+
+  /// <summary>Applies one "EncoderConfigStatusChanged" broadcast. ⚠ internal for the test seam.</summary>
+  internal async Task OnEncoderConfigStatusMessageAsync(EncoderConfigStatusDto? dto)
+  {
+    _logger.LogDebug("Received EncoderConfigStatusChanged: {Status}", dto?.Status);
+    if (!AcceptPayload(nameof(EncoderConfigStatusChanged), dto))
+    {
+      return;
+    }
+
+    await NotifyAsync(EncoderConfigStatusChanged, dto);
+  }
+
+  /// <summary>Applies one "EncoderHudChanged" broadcast. ⚠ internal for the test seam.</summary>
+  /// <remarks>
+  /// No log line per message — this arrives at up to 20 Hz while a knob is moving (ENC-4; the server
+  /// coalesces to ≥ 50 ms before sending, AudioStateUpdateService.cs:1114-1115). The rejection path in
+  /// <see cref="AcceptPayload{T}"/> does log, on a payload that sender cannot produce — :1115 builds
+  /// its anonymous object inline — and is throttled per event name so that an untyped wire which DOES
+  /// produce one cannot flood the journal at 20 Hz.
+  /// </remarks>
+  internal async Task OnEncoderHudMessageAsync(EncoderHudDto? dto)
+  {
+    if (!AcceptPayload(nameof(EncoderHudChanged), dto))
+    {
+      return;
+    }
+
+    await NotifyAsync(EncoderHudChanged, dto);
   }
 
   /// <summary>
