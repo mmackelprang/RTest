@@ -79,3 +79,31 @@ prove vinyl-sourced audio fingerprints as reliably.** Surface noise, the RIAA cu
 belt running 1–3% off can defeat a match on even a famous record. **The decisive test is playing a
 well-known record**: if that matches, an unmatched obscure album is correct behaviour and there is
 nothing to fix.
+
+## ✅ RESOLVED 2026-09-09 — the famous-record test PASSED. Vinyl fingerprinting works end to end.
+
+The owner played a **Boston** LP on the turntable. **Artist and album art both appeared.**
+
+⭐ **So the chain is validated on VINYL-SOURCED AUDIO, not just on a clean digital file** — cartridge,
+RIAA curve, surface noise, turntable speed and all. The earlier positive control proved SongRec plus
+the network plus Shazam worked *on an MP3*; this proves the **actual analogue path** fingerprints
+successfully.
+
+**The obscure album that started this was simply not in the catalogue. There is no defect, and no row
+was filed.**
+
+### ⭐ Why the test was worth one record
+
+Before it, *"no art on vinyl"* was **indistinguishable** between two states with opposite
+consequences:
+
+| | |
+|---|---|
+| Working correctly on an out-of-catalogue album | nothing to do |
+| Silently broken for **every** record | a live defect nobody would find |
+
+⛔ **A single unmatched album could never separate those**, and neither could any amount of code
+reading. One well-known LP did it in under a minute. ⚠ **If art ever stops appearing again, re-run
+this exact test before investigating anything** — and suspect **turntable speed** first, since
+Shazam's fingerprints are pitch-sensitive and a stretched belt running 1-3% fast or slow will defeat
+matching on records that are definitely in the catalogue.

@@ -2,7 +2,7 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🟠 **P1.** Filed 2026-09-09 from the owner's `PHN-2` UAT at the cabinet
+🔴 **P0 — RE-TIERED 2026-09-09 by the owner**, up from P1, once the plan established the scope. ⛔ **Every voicemail played leaks a `SoundPlayer` plus a mixer component PERMANENTLY**; the Stop button, doorbell preemption, ADR §7.1's `MaxPlaybackSeconds` "THE guarantee", the `/sleep` edges and the last-circuit backstop all funnel through one disarmed guard. **"Two voicemails at once" was only the cheapest way to hear it.** Originally filed P1 from the owner's `PHN-2` UAT at the cabinet
 ([record](../uat/2026-09-09-phn2-sound-uat/RESULT.md), check #11 / §3 U8).
 
 ## What was observed
