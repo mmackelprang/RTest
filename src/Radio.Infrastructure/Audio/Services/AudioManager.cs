@@ -128,15 +128,28 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       }
       else if (_activeSource.State == AudioSourceState.Playing)
       {
-        // ⚠ THE AUD-2 SIGNATURE. The source reports Playing, yet nothing is registered under its
-        // Id — the two layers disagree about this source's key, and the user's gain slider is
-        // moving nothing. Warning, not Information: since LOG-11 radio-api's journal carries
-        // Warning and above, and Radio.API's Serilog "Radio" override floors at Information, so
-        // Debug would be written nowhere at all. This is rare and user-visible; it should be loud.
+        // The source reports Playing, yet nothing is registered under its Id, so the user's gain
+        // slider is moving nothing. Warning, not Information: since LOG-11 radio-api's journal
+        // carries Warning and above, and Radio.API's Serilog "Radio" override floors at
+        // Information, so Debug would be written nowhere at all. This is user-visible; it should
+        // be loud.
+        //
+        // ⚠ THE MESSAGE NAMES CANDIDATES, NOT A CAUSE, AND THAT IS DELIBERATE. An earlier draft
+        // ended "The source's playback key and its IAudioSource.Id have diverged" — which this
+        // condition does not establish. AudioSourceBase.PlayAsync sets State = Playing
+        // unconditionally once PlayCoreAsync returns (AudioSourceBase.cs:95-96), and at least four
+        // paths reach Playing with nothing registered and nothing diverged:
+        // USBAudioSourceBase.cs:350-352 (engine null), :344-345 (PlayComponentAsync returned
+        // false — no playback device), BluetoothAudioSource.cs:293 (capture not acquired yet, so
+        // StartCaptureRetryLoop runs — a normal state on this box for minutes at a time), and
+        // BluetoothAudioSource.cs:271-274 (IsAudioManagedByPlatform — registers nothing, by
+        // design, forever). Asserting AUD-2 here would be the same defect this change exists to
+        // remove, in the code that removes it.
         _logger.LogWarning(
           "Gain offset {Gain:F2} did NOT reach {SourceName}: no player or component is registered " +
-          "under SourceId={SourceId} while the source reports Playing. The source's playback key " +
-          "and its IAudioSource.Id have diverged.",
+          "under SourceId={SourceId} while the source reports Playing. Either the source's " +
+          "playback key has diverged from its Id (AUD-2), or it never registered — no playback " +
+          "device, or a capture source still waiting to acquire.",
           gain, _activeSource.Name, _activeSource.Id);
       }
       else
@@ -325,9 +338,12 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         }
         else
         {
-          // applied=false with a non-Playing source is the NORMAL case here, not a failure:
-          // FilePlayer has canAutoPlay=false (:261), so a switch to it stores the offset with
-          // nothing yet registered, and PlayFileAsync picks it up at SoundFlowPlaybackService.cs:148.
+          // Covers BOTH remaining cases — applied=true, and applied=false on a source that is not
+          // playing — which is why the line reports applied={Applied} rather than describing
+          // either one. The second is the NORMAL case here, not a failure: FilePlayer is the one
+          // type with canAutoPlay=false in the switch above, so a switch to it stores the offset
+          // with nothing yet registered, and SoundFlowPlaybackService.PlayFileAsync picks it up
+          // from _gainOffsets at registration time.
           // Reporting `applied` rather than asserting success is the whole point of this change.
           _logger.LogDebug(
             "Gain offset {Gain:F2} for source {SourceName} ({SourceType}), applied={Applied}",
@@ -525,10 +541,12 @@ public class AudioManager : IAudioManager, IAsyncDisposable
 
     // ⚠ THE TransitionComplete GATE IS LOAD-BEARING AND MUST NOT BE REMOVED AS REDUNDANT.
     // This handler runs once per fade STEP, and DuckingService.CalculateFadeParameters gives
-    // FadeSmooth Math.Max(5, requestedDurationMs / 16) steps (DuckingService.cs:491-495) — ~18 for a
-    // 300 ms fade, and attack plus release is ~36 calls per duck cycle. Warning on every step would
-    // put dozens of lines into journald per TTS announcement, on a box where log volume correlates
-    // with audible audio distortion (CLAUDE.md § Deployment). TransitionComplete is raised at most
+    // FadeSmooth Math.Max(5, requestedDurationMs / 16) steps (DuckingService.cs:491-495). At the
+    // SHIPPED defaults — DuckingAttackMs 100 and DuckingReleaseMs 500 (AudioOptions.cs:32,:37) —
+    // that is Max(5, 6) = 6 on the attack and Max(5, 31) = 31 on the release, so 37 calls per duck
+    // cycle, very unevenly split. Warning on every step would put dozens of lines into journald per
+    // TTS announcement, on a box where log volume correlates with audible audio distortion
+    // (CLAUDE.md § Deployment). TransitionComplete is raised at most
     // once per transition — on the final fade step, or on the instant/single-step early returns
     // (DuckingService.cs:417/:426/:455) — which bounds this at one line per transition, so two per
     // attack-and-release cycle.

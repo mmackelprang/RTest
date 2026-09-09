@@ -101,8 +101,9 @@ public class SoundFlowPlaybackServiceVolumeReportingTests
   {
     // ⚠ AUD-2's queue row proposed GetDiagnostics as the way to compare live playback keys against
     // the IAudioSource.Id AudioManager holds. It returned _activePlayers.Keys ONLY, and every source
-    // the row is about except FilePlayer registers as a COMPONENT — so that check came back empty
-    // and proved nothing. This pins the half that was missing.
+    // the row is about except FilePlayer registers as a COMPONENT — SDR radio, the three USB
+    // sources, Bluetooth and TestTone — so that check came back empty and proved nothing. This pins
+    // the half that was missing.
     var service = DeviceLessPlaybackService.Create();
     service.RegisterComponentForTests("Radio-abc", NewComponent());
 

@@ -8,9 +8,12 @@ namespace Radio.Core.Tests;
 /// every <c>Play*Async</c> / <c>StopAsync</c> call must be <c>Id</c> or <c>_playbackId</c>.
 /// </summary>
 /// <remarks>
-/// <b>What it pins (AUD-2).</b> Four primary source types registered their SoundFlow component under
-/// a minted key — <c>$"sdr-radio-{Guid.NewGuid():N}"</c>, <c>$"usb-capture-{Id:N}"</c>,
-/// <c>$"file-player-{Guid.NewGuid():N}"</c> — while AudioManager addressed them by
+/// <b>What it pins (AUD-2).</b> Four <c>AudioSourceType</c>s — Radio, Vinyl, GenericUSB, FilePlayer
+/// — across <b>five concrete classes</b> registered their SoundFlow component under a minted key:
+/// <c>$"sdr-radio-{Guid.NewGuid():N}"</c>, <c>$"usb-capture-{Id:N}"</c>,
+/// <c>$"file-player-{Guid.NewGuid():N}"</c>. (The two units differ because
+/// <c>SDRRadioAudioSource.Type</c> is also <c>Radio</c>, <c>:204</c> — say which one is meant.)
+/// AudioManager addressed them by
 /// <c>IAudioSource.Id</c>. SoundFlowPlaybackService's dictionaries carry no StringComparer
 /// (<c>SoundFlowPlaybackService.cs:24-28</c>), so lookups are ordinal, the two keys were never equal,
 /// and every gain and ducking lookup missed — silently, for months. Bluetooth had the identical bug
@@ -58,11 +61,13 @@ public class PlaybackKeyLintTests
   /// <c>_playbackId = &lt;rhs&gt;;</c> — captures the right-hand side up to the semicolon.
   /// </summary>
   /// <remarks>
-  /// ⚠ The <c>(?!=)</c> is load-bearing and is not in the plan's draft. Without it the pattern also
-  /// matches the four <c>_playbackId == null</c> comparisons in this directory
-  /// (<c>BluetoothAudioSource.cs:808</c>, <c>:1334</c>, <c>:1415</c>), whose captured "right-hand
-  /// side" is <c>= null</c> — neither <c>Id</c> nor <c>null</c>, so the lint would fail on three
-  /// correct comparisons and the natural repair would be to loosen the rule.
+  /// ⚠ The <c>(?!=)</c> is DEFENSIVE, not load-bearing, and an earlier revision of this comment
+  /// claimed otherwise — wrongly, and in a PR whose whole second half is about comments that
+  /// overclaim. The two <c>_playbackId ==</c> comparisons in this directory
+  /// (<c>BluetoothAudioSource.cs:808</c> and <c>:1415</c>) could not match with or without it: rule 1
+  /// matches per LINE and the pattern requires a trailing <c>;</c>, which an <c>if</c> condition
+  /// ending in <c>)</c> does not have. It is kept so the rule stays correct if either comparison
+  /// ever moves onto a statement line — e.g. <c>var stale = _playbackId == null;</c>.
   /// </remarks>
   private static readonly Regex Assignment = new(
     @"_playbackId\s*=(?!=)\s*([^;]+);", RegexOptions.Compiled);
@@ -130,8 +135,8 @@ public class PlaybackKeyLintTests
     //
     // ⚠ WHOLE-FILE TEXT, NOT LINE BY LINE, AND THAT IS NOT A STYLE CHOICE. Five of the eighteen
     // playback-service call sites in this directory put the key argument on the line AFTER the open
-    // paren (SDRRadioAudioSource.cs:963-964, FilePlayerAudioSource.cs:739-740,
-    // BluetoothAudioSource.cs:717-718 and :736-737, USBAudioSourceBase.cs:326-327). A per-line match
+    // paren (SDRRadioAudioSource.cs:967-968, FilePlayerAudioSource.cs:742-743,
+    // BluetoothAudioSource.cs:717-718 and :736-737, USBAudioSourceBase.cs:333-334). A per-line match
     // finds no argument on the opening line and SKIPS those calls silently — i.e. it would pass
     // happily on three of the four sources AUD-2 is about. `\s` matches newlines in .NET by default,
     // so matching over the full text handles both shapes with no extra options.

@@ -669,7 +669,11 @@ public class SoundFlowPlaybackService : IDisposable
   /// Sets the gain offset for a specific source. The effective volume is base volume * gain offset.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
-  /// <param name="gainOffset">Gain offset (0.0 to 2.0, where 1.0 = unity/0dB).</param>
+  /// <param name="gainOffset">
+  /// Gain offset, clamped to <c>AudioPreferencePersistence.MinGain</c>..<c>MaxGain</c> — currently
+  /// <b>0.0 to 5.0</b>, where 1.0 = unity/0dB. (This doc said "0.0 to 2.0" until AUD-2; the constant
+  /// has been 5.0f since the migration note at AudioPreferencePersistence.cs:264.)
+  /// </param>
   /// <returns>
   /// True if a live player or component received the new gain. See <see cref="ApplyEffectiveVolume"/>
   /// for why a false return is not by itself a defect.
@@ -687,8 +691,13 @@ public class SoundFlowPlaybackService : IDisposable
       // ⚠ TWO OUTCOMES, TWO MESSAGES. The single line this replaces — "Applied gain offset {Gain:F2}
       // to source (SourceId={SourceId})" — was printed on BOTH paths, including the one where the
       // dictionary lookup matched nothing and no volume moved. It asserted a success it never
-      // checked, which is the class CLAUDE.md § Pre-Merge Review names, and it is what made AUD-2
-      // invisible for months: the only instrument anyone had reported success either way.
+      // checked, which is the class CLAUDE.md § Pre-Merge Review names.
+      //
+      // ⚠ It was NOT, however, the instrument that misled anyone, and an earlier draft of this
+      // comment said it was. It is LogDebug, and by the reasoning three paragraphs down that means
+      // it never reached the box at all — a line nobody could read cannot mislead a reader. The
+      // operator-visible overclaim was AudioManager's "Applied live gain offset …" at Information,
+      // corrected in the same change.
       //
       // Both arms stay at Debug, and that is deliberate rather than an oversight: neither is an
       // error at THIS layer (a stopped source legitimately carries a stored offset), and Radio.API's
@@ -705,7 +714,7 @@ public class SoundFlowPlaybackService : IDisposable
       {
         _logger.LogDebug(
           "Stored gain offset {Gain:F2} for SourceId={SourceId}; nothing is registered under that " +
-          "key, so no volume changed. It applies when the source next starts.",
+          "key, so no volume changed. It will apply if something registers under that key again.",
           gainOffset, sourceId);
       }
 
@@ -722,9 +731,10 @@ public class SoundFlowPlaybackService : IDisposable
   /// <param name="sourceId">The source identifier.</param>
   /// <param name="multiplier">Ducking multiplier (0.0 to 1.0, where 1.0 = no ducking).</param>
   /// <returns>
-  /// True if a live player or component had its volume attenuated. <b>False means the duck reached
-  /// nothing</b> — the caller must not report that event audio is ducking this source. See
-  /// <see cref="ApplyEffectiveVolume"/>.
+  /// True if a live player or component had its effective volume recomputed and written.
+  /// <b>False means the duck reached nothing</b> — the caller must not report that event audio is
+  /// ducking this source. ⚠ True does not mean the volume went DOWN: a multiplier of 1.0f writes
+  /// the unducked value and still returns true. See <see cref="ApplyEffectiveVolume"/>.
   /// </returns>
   public bool SetDuckingMultiplier(string sourceId, float multiplier)
   {
@@ -743,9 +753,16 @@ public class SoundFlowPlaybackService : IDisposable
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
   /// <returns>
-  /// True if a live player or component had its volume restored. False means nothing was registered
-  /// under this id — which on the ducking-ended path means no volume was restored, and the caller
-  /// must not claim otherwise. See <c>AudioManager.OnDuckingStateChanged</c>.
+  /// True if a live player or component had its effective volume recomputed and written. False
+  /// means nothing was registered under this id — which on the ducking-ended path means no volume
+  /// was restored, and the caller must not claim otherwise.
+  /// <para>
+  /// ⚠ True is a statement about the KEY matching, not about a duck having been in effect. Clearing
+  /// a multiplier that was never set returns true and writes the same value the component already
+  /// had. <c>AudioManager.OnDuckingStateChanged</c>'s <c>volumeRestored={Restored}</c> inherits
+  /// exactly that meaning: read it as "the release reached the source", not as "the source had been
+  /// ducked".
+  /// </para>
   /// </returns>
   public bool ClearDuckingMultiplier(string sourceId)
   {
@@ -768,9 +785,10 @@ public class SoundFlowPlaybackService : IDisposable
   /// volume was set; false if the id matched nothing.
   /// <para>
   /// ⚠ A false return is NOT by itself a defect, and no caller may treat it as one. A source can
-  /// legitimately carry a stored gain offset while stopped — AudioManager applies the stored offset
-  /// on every source switch (AudioManager.cs:288-295) and FilePlayer does not auto-play
-  /// (AudioManager.cs:261) — and the offset is picked up at registration time by the
+  /// legitimately carry a stored gain offset while stopped — <c>AudioManager.SwitchSourceAsync</c>
+  /// applies the stored offset on every source switch and FilePlayer is the one type with
+  /// <c>canAutoPlay = false</c> in that method's switch — and the offset is picked up at
+  /// registration time by the
   /// <c>_gainOffsets.GetValueOrDefault</c> reads in PlayFileAsync (:148), PlayStreamAsync (:277),
   /// PlayDataProviderAsync (:343) and PlayComponentAsync (:407). This class cannot distinguish that
   /// from a key mismatch, because it knows its dictionaries and not whether the source was supposed
@@ -803,8 +821,8 @@ public class SoundFlowPlaybackService : IDisposable
 
   /// <summary>
   /// Registers <paramref name="component"/> under <paramref name="sourceId"/> and applies the
-  /// effective volume, exactly as <see cref="PlayComponentAsync"/> would, but without a playback
-  /// device.
+  /// effective volume by the same arithmetic as <see cref="PlayComponentAsync"/>, but without a
+  /// playback device. It is NOT that method with the device removed — see what it skips, below.
   /// </summary>
   /// <remarks>
   /// <b>Test seam (kind B — injection).</b> Called only from
@@ -814,18 +832,20 @@ public class SoundFlowPlaybackService : IDisposable
   /// <b>Why the state is otherwise unreachable:</b> the only production path into
   /// <c>_activeComponents</c> is <see cref="PlayComponentAsync"/>, which returns early unless
   /// <c>SoundFlowAudioEngine.GetPlaybackDevice()</c> is non-null — and that is a MiniAudio
-  /// <c>AudioPlaybackDevice</c>, created only by <c>InitializeAsync</c> against real hardware. The
+  /// <c>AudioPlaybackDevice</c>, created only once <c>InitializeAsync</c> has stood up the MiniAudio
+  /// engine against real hardware. (It is assigned at three sites, not one, but all three are
+  /// unreachable without that engine, which only <c>InitializeAsync</c> creates.) The
   /// method is <c>internal</c> and non-virtual on a concrete class, so it cannot be substituted
   /// either. Without this seam the populated-dictionary half of <see cref="ApplyEffectiveVolume"/> is
   /// unreachable in a unit test, and AUD-2's tests could assert only that a call did not throw —
   /// which is exactly the shape of assertion that let AUD-2 survive for months.
   ///
   /// <b>What it does not cover:</b> everything <see cref="PlayComponentAsync"/> does either side of
-  /// the dictionary write — <c>StopAsync</c> of any prior registration, the
-  /// <c>MasterMixer.AddComponent</c> that actually makes the component audible, and the two
-  /// AUDIO ROUTING log lines. A test using this seam proves that a key which matches moves a
-  /// component's Volume; it proves nothing about whether that component is connected to a speaker.
-  /// That remains UAT.
+  /// the dictionary write — the <c>ThrowIfDisposed</c> guard, so this seam succeeds quietly on a
+  /// disposed service where the production path throws; <c>StopAsync</c> of any prior registration;
+  /// the <c>MasterMixer.AddComponent</c> that actually makes the component audible; and its three
+  /// log lines. A test using this seam proves that a key which matches moves a component's Volume;
+  /// it proves nothing about whether that component is connected to a speaker. That remains UAT.
   /// </remarks>
   /// <param name="sourceId">The playback key to register under.</param>
   /// <param name="component">The component to register.</param>
@@ -882,8 +902,9 @@ public class SoundFlowPlaybackService : IDisposable
   /// <remarks>
   /// ⚠ <c>ComponentIds</c> was added by AUD-2, and its absence was a real gap rather than an
   /// omission of convenience. This method returned <c>_activePlayers.Keys</c> ONLY, so every source
-  /// that registers via <see cref="PlayComponentAsync"/> — SDR radio, the three USB sources and
-  /// Bluetooth, i.e. everything AUD-2 was about except FilePlayer — was invisible here. AUD-2's own
+  /// that registers via <see cref="PlayComponentAsync"/> — SDR radio, the three USB sources,
+  /// Bluetooth and TestTone, i.e. everything AUD-2 was about except FilePlayer — was invisible
+  /// here. AUD-2's own
   /// queue row proposed this method as the way to compare live playback keys against the
   /// <c>IAudioSource.Id</c> AudioManager holds; that check would have come back EMPTY and proved
   /// nothing. Both key spaces are now reported, so the comparison the row wanted actually works:

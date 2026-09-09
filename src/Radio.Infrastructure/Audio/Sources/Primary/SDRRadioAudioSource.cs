@@ -912,7 +912,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _totalSamplesReceived = 0;
 
     // Register under the source's own Id — NOT a minted key. AudioManager addresses this source's
-    // gain and ducking by IAudioSource.Id (AudioManager.cs:121/:292/:479/:554), and
+    // gain and ducking by IAudioSource.Id — SetSourceGain, SwitchSourceAsync, OnDuckingLevelChanged
+    // and OnDuckingStateChanged, named rather than numbered because the commit that wrote this
+    // comment also moved those lines — and
     // SoundFlowPlaybackService's dictionaries carry no StringComparer (:24-28) so lookups are
     // ordinal — a minted key missed every one of them, silently. Same fix and same reason as
     // BluetoothAudioSource (2bbd0eb5). AUD-2.

@@ -24,7 +24,12 @@ namespace Radio.Infrastructure.Tests.Audio.Services;
 /// that <c>SetDuckingMultiplier</c> did not throw passes on the broken code</b>, and so does one
 /// asserting that the dictionary now contains the key. The only assertion that can tell the two
 /// apart is on the EFFECT: the registered component's <c>Volume</c> field, read back after the duck.
-/// Every test below does that, and each carries the mutation that turns it red.
+///
+/// ⚠ <b>Every test in the FIRST section does that; the tests after the "signal a miss now produces"
+/// divider assert on the logger instead, because the log IS their subject.</b> Two tests carry an
+/// explicit <c>MUTATION:</c> note naming the edit that turns them red — not all of them. Both
+/// statements were overclaimed in an earlier revision of this remark, which is the same defect this
+/// file exists to catch, so they are stated exactly here.
 ///
 /// ⚠ <b>WHAT THIS FILE DOES NOT PROVE.</b> Registration happens through
 /// <c>SoundFlowPlaybackService.RegisterComponentForTests</c> — the kind-B seam AUD-2 added — because
