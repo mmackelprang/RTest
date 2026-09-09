@@ -131,13 +131,16 @@ public class PhonePageRecoveryRefetchTests : TestContext
     // the edge would overshoot and fail here.
     //
     // What it does NOT prove is the first-delivery property, and the earlier claim that "a
-    // spurious refetch on the unhealthy delivery would make this 3" is not guaranteed: a
-    // refetch on the first delivery would set _gvRefetching, the healthy delivery would then
-    // return early on that guard, and the total would land on 2 anyway. The first-delivery
-    // property is instead guaranteed by construction — _gvHealthyLast starts null, and
-    // `null == false` is false in C#, so `_gvHealthyLast == false && healthy` cannot be true on
-    // the first status the page ever sees. That matters because the mount fetch already ran;
-    // refetching there would double every page open.
+    // spurious refetch on the unhealthy delivery would make this 3" is not guaranteed. Under
+    // that bug the unhealthy delivery starts a refetch and takes _gvRefetching; whether the
+    // healthy delivery that follows then fetches depends entirely on whether the first one has
+    // finished — so the count lands on 3 OR on 2, by timing. A number that can be either is not
+    // evidence, which is why this assertion is not the place that property is established.
+    //
+    // It is guaranteed by construction instead: _gvHealthyLast starts null, and `null == false`
+    // is false in C#, so `_gvHealthyLast == false && healthy` cannot be true on the first status
+    // the page ever sees. That matters because the mount fetch already ran; refetching there
+    // would double every page open.
     Assert.Equal(2, _gv.ThreadListCalls);
   }
 
