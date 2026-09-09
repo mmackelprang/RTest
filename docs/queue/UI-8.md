@@ -79,3 +79,93 @@ reference whose target was renamed or never created.
 - ⚠ **No theme-parity work.** This app has exactly one `:root`, `color-scheme: dark` at `:57`, and
   Radzen pinned to `material-dark-base.css`. A light-theme variant would be **unreachable CSS** —
   which is the same defect class as the one this row is fixing.
+
+---
+
+## ⭐ DESIGN GATE DISCHARGED 2026-09-08 — and the question dissolved rather than being answered
+
+**Decision: DECLARE both tokens, RESTORE the two reachable glows, DELETE the third site.**
+Handoff: [`../design-handoffs/UI-8-signal-glow-tokens.md`](../design-handoffs/UI-8-signal-glow-tokens.md).
+
+### ⛔ This was never an open design question — it is a transcription defect
+
+`docs/design-handoffs/design_handoff_phone_page/styles.css` is the **approved source the whole `§Ph`
+block was ported from.** It declares **all four** signal glow tokens at `:28-34` — amber, green, red,
+blue, every one at `0.25` — and puts `0 0 24px var(--signal-green-glow)` / `0 0 24px
+var(--signal-red-glow)` on **exactly these two buttons** at `:485`/`:492`.
+
+**The consumers ported byte-for-byte, hovers included. Only the token block was transcribed short:
+amber survived, three declarations were dropped.**
+
+⭐ **So today's flat buttons are not a position that survived review — they are residue.** Restoring is
+not a visible *change*; it is `.btn-answer` and `.btn-hangup` returning to their own approved
+appearance. That is the argument for restoring rather than deleting, and it is stronger than either
+option this row originally posed.
+
+### Values, and the durable rule underneath
+
+```css
+--signal-green-glow: rgba(74, 222, 128, 0.25);
+--signal-red-glow:   rgba(248, 113, 113, 0.25);
+```
+
+**Amber's alpha exactly** — the handoff already decided the family at one alpha, and amber is the
+shipped proof it works on this panel.
+
+⭐ **The rule, currently only implicit and worth writing down: the TOKEN carries the alpha, the
+CONSUMER carries the blur.** Amber ships at 6/8/12 px off one token; green and red join at 24 px
+because the emitter is a 56 px pill, not an 8 px badge. ⚠ **If it reads hot at night, cut the blur at
+the site — never the alpha, which is shared.**
+
+### ⚠ Three corrections to this row as originally filed
+
+1. **It is TWO glows, not three, and `:5186` must be DELETED rather than fixed.**
+   `PhoneStatusHero.razor:14-16` writes an inline `style` setting both `background` and `box-shadow` on
+   that dot **on every render**, and inline beats any selector without `!important` — so `:5185-5186`
+   are overridden unconditionally and **the dot already glows today**, in the state hue. Worse, the
+   rule's hard-coded `--signal-green` is a **mockup fossil** predating the component's four-state colour
+   logic: making it reachable would paint the dot **green during an amber `Ringing` state.**
+2. **The "pair" never renders as a pair.** `Ringing` is the only state with both on screen, and there
+   the red button is `disabled` and labelled **Reject**; `.phone-btn:disabled { opacity: 0.35 }`
+   composites the shadow too, landing it at ~**0.09 effective alpha**. Red is live and glowing only in
+   `InCall`/`Dialing`, where it is the *sole* live control. **So the affirmative-vs-alarm question never
+   has to be answered.**
+3. **There is no permanent glow to worry about.** `PhoneStatusHero.razor:102-156` renders **neither**
+   button at `Idle`, so the component already scopes this to "a call is happening."
+
+### Hover: no change, deliberately
+
+**It is a touchscreen.** Chrome applies `:hover` on tap and leaves it stuck until the next touch
+elsewhere, so a hover-brightened glow would persist *after* the call is answered and the button has
+been replaced. `:active { transform: scale(0.96) }` already gives unambiguous press feedback, and a
+brighter halo would need `*-strong` variants — four new tokens for a state this hardware barely has.
+
+### On the `ENC-12` deferral
+
+**Its facts are right and its conclusion is not.** *"Declaring it here would silently change an
+unrelated shipped component"* — it is not unrelated, and it is not a change. The deferral was still
+correct **for that PR**; the reason to record was *"wrong PR"*, not *"unwanted appearance."*
+
+### ⚠ What is NOT established — this gates the merge
+
+**No green or red glow has ever rendered on this panel**, and there is **no shipped precedent for a
+24 px resting glow at any hue** — amber's largest is 12 px, and every `≥20px` box-shadow in the file is
+transient `:active` feedback. Off-box the green edge computes to ~ΔG 25/255, a ~3.8× linear-luminance
+step, and it is **chromatic rather than a neutral near-black ramp**, so daylight should be the *easier*
+condition here — the opposite of `UX-1`.
+
+**Confidence: HIGH on declaring the tokens; MODERATE on 24 px being right in a dark room.** §7 of the
+handoff gates merge on a two-condition sitting and names the failure lever (**cut the blur, not the
+alpha**).
+
+### ⭐ Free finding for the token-declaration lint this row proposed
+
+The Designer ran the proposed scan. **It needs two fixes or it fails on green `main`:**
+
+1. ⚠ **Strip comments first.** The naive version flags a phantom consumer at `:5378` — which is the
+   `ENC-12` prose *describing the bug*. **A lint that flags its own documentation gets disabled.**
+2. **Allowlist six properties legitimately set at runtime** — `--phone-hero-*` (×5, inline),
+   `--encoder-band-y`, `--row-accent`, `--sleep-shift-x/y`, and `--rz-danger` from the Radzen theme.
+
+With both handled the scan returns **exactly the two tokens** — this row is the only violation on
+`main`, and **the six runtime properties are the must-not-fire half of the positive control.**

@@ -2,6 +2,73 @@
 
 ---
 
+## ✅ SEVENTH INBOUND RECEIVED — 2026-09-09, acknowledged
+
+Ref: [`inbound/2026-09-09-rotaryphone-gv-auth-wire-changes.md`](inbound/2026-09-09-rotaryphone-gv-auth-wire-changes.md).
+Sent immediately under **exception 2** of the batching rule (a wire change before it deploys) — correctly.
+
+### ⛔ Their claim "You consume this endpoint" is WRONG, and it is the one they flagged as costliest
+
+They wrote, of `POST /api/gvbridge/cookies`'s `saved` field: *"You consume this endpoint … we are
+flagging it rather than burying it."* **We do not consume it.**
+
+**Verified, with the instrument proven first** — an empty grep is a null result until shown otherwise:
+
+| Check | Result |
+|---|---|
+| `gvbridge/cookies` or `refresh-from-browser` in `src/` | **0 hits** |
+| a `saved` field read anywhere in `src/` | **0 hits** |
+| `psidtsAgeSeconds` consumers | **0** (third independent confirmation) |
+| ⭐ **positive control** — `gvbridge/status`, `GvBridgeApiService`, `api/gvbridge` | **2 / 8 / 5 hits** — the grep works |
+
+**Every `gvbridge` route we actually call:** `adapter/mode`, `audio`, `sms/`, `sms/threads`,
+`sms/threads/`, `status`, `voicemail`, `voicemail/`, `voicemail/audio`. **`cookies` is not among them.**
+
+So the `saved`-field correction costs us nothing, and the `502`/`503` taxonomy on the refresh route is
+information rather than an integration change. **Good news, but they should know their model of our
+consumers is stale.**
+
+### `psidtsAgeSeconds` is being REMOVED, not deprecated — and they asked for consumers before merging
+
+**We have none.** Confirmed a third time above. **Removal is safe from our side; they can merge it.**
+
+⭐ **Our argument carried the decision**, and they added the sharper form of it we had not said:
+*"an age computed from a lying clock is indistinguishable on the wire from one computed from a truthful
+one."* They also took the `psidtsMintedAtUtc` counter-proposal.
+
+### New fields, and one trap worth writing down before we bind anything
+
+`psidtsMintedAtUtc` · `browserSessionValidatedAt` · `browserSessionAgeSeconds` · `browserSessionStale`.
+
+⚠ **`psidtsMintedAtUtc` is nullable and `null` means UNKNOWN — which is NOT healthy.** CDP-extracted
+cookies carry no readable issue time, so they report `null` until the first genuine rotation. **It also
+has no upper bound** — a restarted process can legitimately report a very old timestamp. Both states
+were impossible for the old field to express, **which is part of why the old field lied.**
+
+### Still true
+
+⛔ **MERGED, NOT DEPLOYED.** All of the above is on their `main`; the box runs `3c2c892`. `PHN-7` stays
+untrue in production until they deploy, and `ht801LastCheckedUtc` moving on every call **is expected,
+not a bug.**
+
+⭐ Worth recording what they volunteered: review caught **two HIGH regressions the outage-fix PR itself
+introduced**, both on the recovery path it exists to fix — one of them defeating *the exact invariant
+the PR establishes*, through a window the PR opened. They reported those alongside the fixes, on the
+grounds that *"we fixed the thing that broke you" is worth less than "here is what nearly broke you
+again."*
+
+### Batching rule — adopted on their side, and scored honestly
+
+Committed to their boundary doc (`52b65dc`) with the three habits and the keep-sessions-separate
+reasoning. **They scored their own six files from 2026-09-08: five earned immediate delivery, one did
+not** — the `GV-12` refinement, *"a genuine finding delivered with false urgency"*, caught by our own
+first-sentence test. Scoring themselves against a rule on the day they adopt it is the behaviour worth
+having.
+
+---
+
+---
+
 ## 📬 The batching rule — adopted 2026-09-08, after eleven files in one day
 
 **Default: cross-repo traffic is batched into ONE file per side per day.** Immediate delivery is the
