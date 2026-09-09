@@ -65,7 +65,7 @@ public class StaticAssetPipelineTests : IClassFixture<RadioWebFactory>
   /// <para>
   /// ⚠ That surviving comment is exactly why the declaration is matched with an anchored regex
   /// rather than <c>Contains</c>. A plain substring check is satisfied by a COMMENT: delete the
-  /// declaration, leave <c>/* --skeleton-shimmer-highlight: #38383F removed by &lt;row&gt;; */</c>
+  /// declaration, leave <c>/* --skeleton-shimmer-highlight: #24242B removed by &lt;row&gt;; */</c>
   /// behind, and a <c>Contains</c>-based version of this test stays green while the shimmer renders
   /// flat — the precise bug the summary above says it prevents. This repo demonstrably writes that
   /// kind of comment, so the regex requires the declaration to be alone on its own line.
@@ -77,11 +77,11 @@ public class StaticAssetPipelineTests : IClassFixture<RadioWebFactory>
     var css = await _factory.CreateClient().GetStringAsync("/css/design-system.css");
 
     // Anchored to a whole line, so a mention inside a /* comment */ cannot satisfy it.
-    Assert.Matches(new Regex(@"^\s*--skeleton-shimmer-highlight:\s*#38383F;\s*$", RegexOptions.Multiline), css);
+    Assert.Matches(new Regex(@"^\s*--skeleton-shimmer-highlight:\s*#24242B;\s*$", RegexOptions.Multiline), css);
 
     Assert.Contains("var(--skeleton-shimmer-highlight)", SkeletonLoadingPrimitive(css));
 
-    // No fallback: var(--skeleton-shimmer-highlight, #38383F) would paper over a missing or
+    // No fallback: var(--skeleton-shimmer-highlight, #24242B) would paper over a missing or
     // misspelled declaration and make the assertion above unfalsifiable. Scoped to the RULE, not
     // the file: a comment elsewhere warning "never write var(--skeleton-shimmer-highlight, …)"
     // would otherwise turn this red against a perfectly correct stylesheet.
@@ -94,8 +94,13 @@ public class StaticAssetPipelineTests : IClassFixture<RadioWebFactory>
   /// </summary>
   /// <remarks>
   /// ⚠ This asserts the CSS SOURCE TEXT. Neither this factory nor bUnit rasterises anything, so no
-  /// test in this repository can show that the shimmer is visible — the evidence for that is the
-  /// owner's two sittings at the panel, recorded under docs/uat/2026-09-08-ux1-shimmer-variants/.
+  /// test in this repository can show that the shimmer is visible — the only evidence for that is
+  /// the owner's eye at the panel. There have now been THREE sittings, and they do not agree: two
+  /// under docs/uat/2026-09-08-ux1-shimmer-variants/ (dark room, then daylight) chose 56/#38383F,
+  /// and a third on 2026-09-09 in afternoon light chose 36/#24242B, which is what this now pins. A
+  /// dark-room re-check is outstanding and the change is gated on it; see docs/queue/UX-1.md. ⛔ A
+  /// green run of this class is therefore not evidence that the shipped value is the right one — it
+  /// only proves the stylesheet says what the last sitting said.
   /// What it does do is fail on the pre-UX-1 stylesheet (whose middle stop was
   /// <c>var(--surface-overlay)</c>), which makes it a real regression gate rather than a tautology.
   /// The <c>background-size</c> assertion is load-bearing for a reason unrelated to colour. At 200%
@@ -146,8 +151,9 @@ public class StaticAssetPipelineTests : IClassFixture<RadioWebFactory>
   /// </para>
   /// <para>
   /// <c>--surface-raised</c> is pinned for a different reason: the owner did not approve a colour,
-  /// they approved a <em>delta of 36 against <c>#141416</c></em>. Moving the base silently changes
-  /// the quantity that was sighted, so both ends of that delta are held, not just the new one.
+  /// they approved a <em>delta against <c>#141416</c></em> — 36 at the first two sittings, 16 at the
+  /// third. Moving the base silently changes the quantity that was sighted, so both ends of that
+  /// delta are held, not just the new one.
   /// </para>
   /// </remarks>
   [Fact]

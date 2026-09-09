@@ -81,20 +81,46 @@
      three color-mix recipes — so raising it to a visible shimmer amplitude would
      lighten twenty-odd unrelated surfaces. Count re-derived on main @143d678e.
 
-     56 (#38383F) is the OWNER'S value, not a derived one, chosen at the panel on
-     a five-value ladder (26 / 36 / 46 / 56 / 66) in a dark room on 2026-09-08
-     and again in daylight on 2026-09-09: it is the dimmest value the owner can
-     clearly see in BOTH conditions. It was also judged to stay calm rather than
-     pull the eye — ⚠ that second question was put only at night; the daylight
-     record argues rather than measures that it does not bind, on the grounds
-     that ambient light dominates. Delta against --surface-raised is 36 on R·G
-     (41 on B), six times the 6/255 that shipped before.
-     ⚠ The Designer's seed of 36/#242429 was on the same ladder and was JUDGED
-     below the owner's dark-room visibility threshold; do not restore it.
+     ⚠ THE VALUE BELOW IS PROVISIONAL — THE OWNER'S TWO SITTINGS DISAGREE ON IT.
+     #24242B is rgb(36,36,43): delta 16 on R·G (21 on B) against --surface-raised
+     #141416. Chosen by the owner on 2026-09-09 in AFTERNOON LIGHT, from a
+     three-panel comparison on the real console at 1920x720 rendering this
+     stylesheet at delta 6 (#1A1A1D, the pre-UX-1 value), delta 16, and delta 36
+     (#38383F). The owner judged rendered pixels, not labels.
+
+     ⛔ The DARK-ROOM sitting of 2026-09-08 concluded the OPPOSITE about this
+     rung — docs/queue/UX-1.md recorded "36 is below the owner's dark-room
+     visibility threshold", and #38383F shipped as #641 on that basis. Both
+     judgements are the owner's; neither is retracted here. Two confounds are
+     live, and deciding between them is exactly what has NOT been done:
+       1. the dark-room sitting ran on the v1 harness, which the plan itself
+          records as BROKEN (band off the element for part of every cycle), so
+          that geometry was never fairly tested;
+       2. side-by-side viewing may bias toward the dimmest acceptable value —
+          with delta 36 beside it as a reference, delta 16 reads as sufficient;
+          alone in the dark it may not. That is a reason the dark-room re-check
+          is required, NOT evidence that either sitting was wrong.
+     Full argument, both sittings' instruments named: docs/queue/UX-1.md.
+
+     ⚠ Close to the Designer's seed but NOT identical with it. The seed of record
+     is #242429 = rgb(36,36,41) (docs/queue/UX-1.md:87, and the v2 ladder in
+     NIGHT-SITTING.md). This value is +2 on BLUE, so its hue lean is B−R +7
+     rather than the Designer's +5. Two levels on one channel near black cannot
+     have driven the owner's judgement — but the ladder sighted at night and the
+     panel sighted this afternoon were not painting the same colour, and the
+     record should say so rather than round them together.
+
+     ⚠ In normal operation this is very nearly never on screen. Measured on the
+     box 2026-09-09: the panels it decorates fetch in 3-7 ms (/api/playhistory
+     3.0-5.1, /api/queue 5.1-6.7) against a 1500 ms cycle whose first ~390 ms is
+     the `ease` dead pause — roughly 0.3% of one cycle, so NO sweep is painted at
+     ANY highlight value. Cosmetically real, operationally moot until dwell is
+     answered. Dwell is filed in design/FUTURE-WORK.md and is NOT touched here.
+
      ⛔ Do not add this token to the prefers-reduced-motion block below: that
      rule replaces `background` wholesale with a flat rgba(255,255,255,0.05), so
      the gradient never renders there and a reference would re-introduce one. */
-  --skeleton-shimmer-highlight: #38383F;
+  --skeleton-shimmer-highlight: #24242B;
 
   /* ── Accent: Electric Cyan ── */
   --accent-primary:         #5CD4E8;
