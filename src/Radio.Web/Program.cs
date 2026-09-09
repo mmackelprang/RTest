@@ -644,6 +644,19 @@ app.MapGet("/api/albumart/{filename}", async (string filename, IHttpClientFactor
 app.MapRazorComponents<Radio.Web.Components.App>()
   .AddInteractiveServerRenderMode();
 
+// UI-11 - a terminal 404 with a JSON problem body for any unmatched path under /api/.
+//
+// This is NOT an ordering fix for a SPA fallback: there is no SPA fallback in this app, and there
+// never has been (`git log -S MapFallback -- src/` is empty). MapRazorComponents above registers one
+// endpoint per @page template and no catch-all, so an unmatched path already 404'd - it just did so
+// with zero bytes and no Content-Type, which is what sent a caller off to file a defect against the
+// wrong service. See ApiNotFound's remarks, and the plan at
+// design/plans/UI-11-the-404-that-was-already-a-404.md.
+//
+// MapFallback stamps Order = int.MaxValue, so every endpoint above wins on order as well as on
+// precedence. The line's POSITION in this file is readability only - moving it changes nothing.
+app.MapFallback("/api/{**rest}", ApiNotFound.Handler);
+
 // Start RotaryPhone hub connections (non-blocking — logs warning if unavailable)
 var phoneHub = app.Services.GetRequiredService<PhoneHubService>();
 _ = phoneHub.StartAsync();
