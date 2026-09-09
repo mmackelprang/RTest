@@ -1890,6 +1890,66 @@ gate, before any test.
 
 ---
 
+### UI-13 — A failed broadcast still advances the change-detection cache — except the broadcast cannot fail, so the row's deliverable is the precondition.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#634](https://github.com/mmackelprang/RTest/pull/634) |
+| Plan | [`UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](../design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md) |
+| Spec / handoff | _no spec doc — filed by the `UI-12` Planner while enumerating senders_ · [ADR-034](../design/DECISION-LOG.md) |
+| Depends on | — _(no row dependency)_ |
+| Branch | `fix/ui-13-cache-advance-before-send` |
+
+**Detail: [`queue/UI-13.md`](queue/UI-13.md)** — which carries the verbatim RED measurement, the full
+mutation matrix, and the premises this cycle falsified.
+
+Merged 2026-09-09. ⚠ **Merged, not shipped** — deliberately not deployed, as `UI-12` and `UI-14` were
+not.
+
+⛔ **The row's headline was FALSE and was falsified during planning, not during the build.**
+`SendAsync` cannot throw on a failed broadcast: `HubConnectionContext.cs:361` catches everything that
+is not a cancellation of the caller's own token, aborts the **connection**, and returns a
+**successful** `FlushResult` — 129 consecutive sends to a hard-killed socket faulted none. Only
+cancellation escapes, that token is always `ExecuteAsync`'s `stoppingToken`, and `ExecuteAsync`
+catches exactly that as normal shutdown and breaks. **The stranded cache dies with the process.**
+
+⭐ **So the deliverable is the written-down precondition, not the fix** — recorded in the code above
+the cache-field block, in [ADR-034](../design/DECISION-LOG.md), and in the test file's remarks. A
+backplane, or any call site passing a different token, makes the defect live **and silent**.
+
+⭐ **RED was 6 failed / 2 passed**, every one on `Expected: 2 / Actual: 1` — the defect stated
+numerically. `M1'`, six independent per-site reverts, each failed **exactly** its own test, which is
+what proves *"fix the shape, not the instance"* rather than asserting it. `C1` (assignment below the
+log line) stayed **8/8 green**, so the tests pin behaviour, not line position.
+
+⛔ **`M3` as planned CANNOT BE RUN** — deleting an assignment is `CS0649` plus warnings-as-errors, so
+the **compiler** is the gate before any test. Same shape as `UI-14`'s two non-compiling mutations, one
+cycle later. `M3'` (assign `null`) was run instead.
+
+⭐ **The pre-merge review found a MEASURED four-site test gap, and it is the sharpest thing in the
+cycle.** One regression guard covered `CheckVolumeAsync` alone; mutating `_lastPlaybackState` to
+`null` left **all 8 tests green** while re-broadcasting an unchanged state twice a second forever.
+Four more per-site guards added, each verified to fail on exactly its own mutation. ⚠ **A site's
+cancellation test structurally cannot detect a never-advanced cache** — it only invokes twice.
+
+⛔ **The precondition comment invalidated its own line citation in the commit that wrote it** (`:196`
+→ `:223`, moved by its own 27-line insertion), and **"records *the clients have this* as a fact before
+it is one" was refuted by the evidence eleven lines below it** — a completed `SendAsync` is not proof
+of delivery. Both fixed. ⛔ **"The eight `async void` handlers" is nine**, traceable to an in-tree
+comment that correctly says *"eight siblings"* being read as the total.
+
+**`_lastQueue` was DELETED, not moved** — against the plan, which said file it separately (now struck
+in three places). `d465cdd2` deleted its only reader in the same commit that orphaned the write, so it
+is a completed-refactor leftover rather than a half-finished feature. ⛔ **Do not file the follow-up
+row; the work is done.**
+
+⭐ **Filed `UI-15` out of the review's `L5` — and unlike this row, it is a LIVE defect.**
+`CheckSourceChangedAsync` treats `null` as both "never observed" and "no source", so every
+`null → non-null` transition is suppressed as a first poll and a real source change is never
+broadcast, with nothing logged.
+
+---
+
 ---
 
 ## Historical narrative
