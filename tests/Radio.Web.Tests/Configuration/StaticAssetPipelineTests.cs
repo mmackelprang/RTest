@@ -128,6 +128,14 @@ public class StaticAssetPipelineTests : IClassFixture<RadioWebFactory>
   /// because the tempting "keep it in sync" edit — adding the shimmer token here — would
   /// re-introduce a gradient into the one state deliberately built without one.
   /// </summary>
+  /// <remarks>
+  /// ⚠ Unlike the three tests above, this one PASSES on the pre-UX-1 stylesheet, and that is not a
+  /// defect — it pins a pre-existing invariant that this change must not disturb. It is a guard
+  /// against a future edit, not a regression gate for this one. Measured, not assumed: reverting
+  /// design-system.css to main and re-running this class gives 3 failed / 5 passed, and this is one
+  /// of the five. The commit that introduced these tests said "four tests, all of which fail on the
+  /// pre-UX-1 stylesheet"; that was wrong about this one.
+  /// </remarks>
   [Fact]
   public async Task ReducedMotion_StillReplacesTheShimmerWithAFlatFill()
   {
