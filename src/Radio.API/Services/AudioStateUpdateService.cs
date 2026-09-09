@@ -49,10 +49,51 @@ public class AudioStateUpdateService : BackgroundService
   private DateTime _lastFingerprintBroadcast = DateTime.MinValue;
   private static readonly TimeSpan FingerprintBroadcastThrottle = TimeSpan.FromSeconds(3);
 
+  // ⚠⚠ THE CHANGE-DETECTION CACHES BELOW ARE ADVANCED **AFTER** THE SEND, NEVER BEFORE (queue row
+  // UI-13). Each _last* field is the baseline its Has*Changed comparison runs against. Advancing one
+  // before the await records the send as complete before it has returned: if the send does not
+  // complete, the next comparison sees "no change" against a state the clients never received, and
+  // that delta is never re-broadcast. There is no retry, and the evidence that a broadcast was missed
+  // is destroyed by the same statement that misses it.
+  //
+  // ⚠ WHAT A COMPLETED SEND DOES AND DOES NOT PROVE — because the ordering is often justified with a
+  // claim that is false. It does NOT prove delivery: the evidence below shows a write failure being
+  // converted into a SUCCESSFUL FlushResult and charged to the connection, with 129 consecutive sends
+  // to a hard-killed socket all returning success while the client received nothing. So the strongest
+  // fact available on this path is "the last state whose broadcast returned without faulting", and
+  // that is what these caches hold. Advancing one before the await weakens even that, to "the last
+  // state we intended to send".
+  //
+  // 📌 WHY THIS IS CURRENTLY UNOBSERVABLE — a PRECONDITION, not a property of this file. Established
+  // 2026-09-09 by reading dotnet/aspnetcore release/10.0 and by running a real Kestrel host with real
+  // WebSocket clients on Microsoft.AspNetCore.App 10.0.11:
+  //   • With no connection matching the send, DefaultHubLifetimeManager returns Task.CompletedTask
+  //     without inspecting the token at all (DefaultHubLifetimeManager.cs:136-139 for Clients.All,
+  //     :206-221 for an absent or empty group).
+  //   • Every other failure is charged to the CONNECTION, not the caller: HubConnectionContext.cs
+  //     :341-349 catches it, logs "Failed writing message", aborts the connection, and returns a
+  //     SUCCESSFUL FlushResult. Measured: 129 consecutive sends to a hard-killed socket faulted none;
+  //     an unserializable payload dropped the client while the caller saw success in 8-10 ms.
+  //   • The single escape is an OperationCanceledException raised while the CALLER's token is
+  //     cancelled. The filter at HubConnectionContext.cs:361 deliberately does not catch that one,
+  //     and both WriteSlowAsync overloads additionally await _writeLock.WaitAsync(cancellationToken)
+  //     OUTSIDE their try, where a cancelled token escapes with no filter at all.
+  // In production that token is always ExecuteAsync's stoppingToken, which BackgroundService cancels
+  // only at host shutdown — and ExecuteAsync's own
+  // `catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)` catches exactly
+  // that and breaks, so the caches die with the process. (Named rather than cited by line: this
+  // comment's own insertion moved that catch once already. The tests reach these methods by
+  // reflection and DO pass a different token, which is why "in production" is load-bearing above.)
+  //
+  // ⚠ SO THIS ORDERING BECOMES LOAD-BEARING ONLY IF THAT PRECONDITION CHANGES, AND IT WOULD CHANGE
+  // SILENTLY. A Redis or Azure SignalR backplane swaps in a lifetime manager whose send really does
+  // fault on a backplane outage; passing any token other than stoppingToken makes cancellation
+  // reachable while the service keeps running. Neither would raise an error at these call sites —
+  // both would produce panels that quietly stop updating, the AUD-12 / GV-12 failure family.
+  // Keep every send above its assignment.
   // Cached state to detect changes
   private PlaybackStateDto? _lastPlaybackState;
   private NowPlayingDto? _lastNowPlaying;
-  private List<QueueItemDto>? _lastQueue;
   // Lightweight queue snapshot for cheap change detection (avoids building full DTOs every 500ms)
   private List<(string Id, int Index, bool IsCurrent, string State)>? _lastQueueSnapshot;
   private RadioStateDto? _lastRadioState;
@@ -246,7 +287,6 @@ public class AudioStateUpdateService : BackgroundService
     {
       // Skip broadcast on first poll (null → initial value) to avoid spurious SourceChanged
       var isFirstRun = _lastActiveSourceType == null;
-      _lastActiveSourceType = currentSourceType;
 
       if (!isFirstRun)
       {
@@ -254,6 +294,11 @@ public class AudioStateUpdateService : BackgroundService
           .SendAsync("SourceChanged", cancellationToken);
         _logger.LogInformation("Broadcast SourceChanged: {SourceType}", currentSourceType ?? "None");
       }
+
+      // ⚠ AFTER the send — see the ordering remark on the cache fields above (UI-13). On the
+      // first poll there is no send, so this still runs and establishes the baseline; that
+      // asymmetry is why this site could not be moved by the same mechanical edit as the others.
+      _lastActiveSourceType = currentSourceType;
     }
   }
 
@@ -263,9 +308,9 @@ public class AudioStateUpdateService : BackgroundService
 
     if (HasPlaybackStateChanged(_lastPlaybackState, currentState))
     {
-      _lastPlaybackState = currentState;
       await _hubContext.Clients.All
         .SendAsync("PlaybackStateChanged", currentState, cancellationToken);
+      _lastPlaybackState = currentState;
       _logger.LogDebug("Broadcast PlaybackStateChanged");
     }
   }
@@ -276,9 +321,9 @@ public class AudioStateUpdateService : BackgroundService
 
     if (HasNowPlayingChanged(_lastNowPlaying, currentNowPlaying))
     {
-      _lastNowPlaying = currentNowPlaying;
       await _hubContext.Clients.All
         .SendAsync("NowPlayingChanged", currentNowPlaying, cancellationToken);
+      _lastNowPlaying = currentNowPlaying;
       _logger.LogDebug("Broadcast NowPlayingChanged: Title={Title}, Artist={Artist}, Album={Album}, AlbumArt={AlbumArtUrl}, Source={Source}",
         currentNowPlaying.Title, currentNowPlaying.Artist, currentNowPlaying.Album, currentNowPlaying.AlbumArtUrl, currentNowPlaying.SourceName);
 
@@ -450,10 +495,9 @@ public class AudioStateUpdateService : BackgroundService
       .Select(MapToQueueItemDto)
       .ToList();
 
-    _lastQueueSnapshot = snapshot;
-    _lastQueue = currentQueue;
     await _hubContext.Clients.Group("Queue")
       .SendAsync("QueueChanged", currentQueue, cancellationToken);
+    _lastQueueSnapshot = snapshot;
     _logger.LogDebug("Broadcast QueueChanged with {Count} items", currentQueue.Count);
   }
 
@@ -472,11 +516,15 @@ public class AudioStateUpdateService : BackgroundService
       // Web RDS path can skip its accumulator append on telemetry-only ticks.
       // Computed against the PREVIOUS state (the same baseline HasRadioStateChanged
       // used), so the very first broadcast (_lastRadioState == null) is RDS-relevant.
+      //
+      // ⚠ THIS STATEMENT MUST STAY ABOVE THE SEND — it writes a field of the payload. Only the
+      // _lastRadioState assignment moved below it (UI-13). Both read the pre-send value of
+      // _lastRadioState, so the stamp is unaffected by the move.
       currentRadioState.RdsRelevantChanged = HasRdsRelevantChanged(_lastRadioState, currentRadioState);
 
-      _lastRadioState = currentRadioState;
       await _hubContext.Clients.Group("RadioState")
         .SendAsync("RadioStateChanged", currentRadioState, cancellationToken);
+      _lastRadioState = currentRadioState;
       _logger.LogDebug("Broadcast RadioStateChanged: {Frequency} {Band} RdsRelevant={Rds}",
         currentRadioState.Frequency, currentRadioState.Band, currentRadioState.RdsRelevantChanged);
     }
@@ -499,9 +547,9 @@ public class AudioStateUpdateService : BackgroundService
 
     if (HasVolumeChanged(_lastVolume, currentVolume))
     {
-      _lastVolume = currentVolume;
       await _hubContext.Clients.All
         .SendAsync("VolumeChanged", currentVolume, cancellationToken);
+      _lastVolume = currentVolume;
       _logger.LogDebug("Broadcast VolumeChanged: {Volume}, Muted: {IsMuted}", currentVolume.Volume, currentVolume.IsMuted);
 
       // BT AVRCP volume is independent of master volume — no sync needed.
