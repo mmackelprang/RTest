@@ -37,8 +37,22 @@ PRs and archive entries. Its `AUD-10`/`11`/`11a`/`12` became **`AUD-21`/`22`/`22
 ⚠ **`AUD-21`, `AUD-22`, `AUD-22a` and `AUD-23` are RESERVED by the punch list. The next free `AUD`
 number is `AUD-24`.**
 
-⭐ **Only `AUD` was audited.** `GV-*`, `UI-*`, `TEST-*`, `OPS-*`, `PHN-*` and `ENC-*` are unaudited and
-may carry the same collision. **A number is not free because one file has not used it** — check both.
+✅ **AUDITED 2026-09-09 — `AUD` was the only collision.** `GV`, `UI`, `TEST`, `OPS`, `PHN`, `ENC` and
+`KIOSK` were each checked by comparing the subject both documents give every shared ID, run twice
+independently. **No other prefix diverges.**
+
+**Next free number in each namespace** — take these, and update this line when you do:
+`AUD-24` · `GV-13` · `UI-16` · `TEST-9` · `OPS-11` · `PHN-10` · `ENC-22` · `KIOSK-4`.
+⚠ `GV-11` and `PHN-6` were **rejected candidates, never minted** — they are genuinely free, not gaps
+that mean something.
+
+⭐ **Why `AUD` drifted and the others did not, because the mechanism is reusable:** the archive rows
+cite the punch list by section for their own IDs, and the punch list cites back. **`AUD` was the one
+prefix where neither document ever referenced the other's numbering.** The collision was *the absence
+of a cross-citation*, not bad luck — so **a new row that cites its counterpart section is a row that
+cannot silently diverge.**
+
+⚠ **A number is still not free because one file has not used it.** Check both.
 
 ## Queue
 

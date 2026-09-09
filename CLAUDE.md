@@ -84,6 +84,21 @@ Earlier notes citing **53** are stale. The number matters because the gate is *e
 baseline*, not an absolute: a Builder holding the wrong figure either waves through four new
 warnings or chases four that were never there.
 
+⛔ **AND YOU MUST BUILD `--no-incremental` TO MEASURE IT. An incremental Release build reports
+`0 Warning(s)`.** Measured 2026-09-09 while shipping `UI-8`: the incremental run said zero, and
+`--no-incremental` restored the true **47/0**. MSBuild does not re-emit warnings for projects it did
+not rebuild, so an unchanged project contributes nothing to the count.
+
+⚠ **This is worse than an ordinary wrong number, because zero looks like success.** The gate is
+*equality with the baseline*, so a Builder seeing `0 Warning(s)` does not think "my instrument is
+cold" — it thinks the baseline improved, and every real warning after that is invisible against a
+floor of zero. **A clean-looking gate is exactly what a broken one looks like here.**
+
+```bash
+dotnet build RadioConsole.sln -c Release --no-incremental > /tmp/build.log 2>&1; echo "exit=$?"
+grep -E "^\s+[0-9]+ Warning\(s\)" /tmp/build.log   # the per-project summary lines
+```
+
 ### ⚠ Two agents must never share one working tree — it put a red commit on `main` on 2026-09-08
 
 **Measured, not hypothetical.** A Builder was mid-cycle on `UI-7` with a *deliberately red* lint commit
