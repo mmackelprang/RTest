@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (47)
+## Shipped rows (51)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1979,6 +1979,46 @@ Merged 2026-09-09. ⚠ **Merged, not deployed** — deliberately held for the co
 ⚠ **ADR-032 forbids reusing `IsHealthy` for a status display without re-deriving it, and the VOICE row IS one.** The exception is now argued on the record rather than assumed: this surface's cry-wolf rule inverts a banner's priorities, its amber is unactionable from a panel with no keyboard, and a term reading absence as ill would pin the row.
 
 ⭐ **The lesson that outlives the row: a positive control validates the INSTRUMENT, never the SEARCH SPACE.** We told RotaryPhone three times the field had zero consumers, once citing a positive control as proof of method. The grep worked perfectly and was pointed at `src/`; the consumer was a shell script. **Re-derived here at full scope** — the whole tree minus `*.md`, plus all 28 shell scripts — and after this PR zero live readers remain.
+---
+
+### UI-11 — The unmatched `/api/*` path was already a 404. The row's premise was false, and so was the Builder's own correction to it.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#637](https://github.com/mmackelprang/RTest/pull/637) |
+| Plan | [`UI-11-the-404-that-was-already-a-404.md`](../design/plans/UI-11-the-404-that-was-already-a-404.md) — §6.3 struck mid-cycle and **restored**; the failed strike left visible |
+| Spec / handoff | _no spec doc — the dossier carries the defect, the retraction and the owner decision_ |
+| Depends on | — _(no row dependency)_ |
+| Branch | `fix/ui-11-the-404-that-was-already-a-404` |
+
+**Detail: [`queue/UI-11.md`](queue/UI-11.md)** — the retraction, the measured RED/GREEN split, the mutation table, and all four false claims.
+
+Merged 2026-09-09. ⚠ **Merged, not deployed** — deliberately out of scope for the cycle.
+
+⛔ **THE ROW'S HEADLINE WAS FALSE, AND SO WAS THE PLAN'S — but the row still had something in it.** `Radio.Web` has **no SPA fallback and never had one**: zero hits for `MapFallback`/`UseSpa`/`UseStatusCodePages*` in `src/`, `git log -S "MapFallback" --all -- src/` **0 commits**, no `index.html`, twelve plain `@page` routes and no catch-all. The `200`-with-`index.html` symptom came from **RotaryPhone's `:5004`** — and **our own [archive line 99](BUILDER_QUEUE_ARCHIVE.md) said so the whole time** (*"falling through to **their** SPA fallback"*), as did their *"in our own house"*. ⭐ **A misattribution surviving two hops: they said "your trap", we recorded "ours", and neither side re-derived which server sent the bytes.** What survived re-scoping is that our 404 was **correct by accident of the hosting model, unpinned, and bodyless** — zero bytes and no `Content-Type` on a two-service box where both services expose `/api/*`, which is what cost the other repo a probe.
+
+⭐ **THE PLAN'S ONE UNMEASURED ASSUMPTION WAS MEASURED AND HELD — 18 passed / 2 failed**, exactly as predicted, so the plan's *stop-and-re-plan* condition did not fire. Two refinements: the RED reason is **one assertion earlier** than predicted (`Content-Type` is `null` outright, so `JsonDocument.Parse("")` is never reached), and **`/Error` renders fine** under `WebApplicationFactory`, so all twelve page routes stayed in the guard.
+
+⛔⛔ **THE SHARPEST THING IN THE CYCLE IS THAT THE BUILDER'S OWN CORRECTION WAS FALSE, AND PRE-MERGE REVIEW CAUGHT IT BEFORE THE PR OPENED.** Mid-cycle the Builder struck the plan's §6.3 (*"a wider pattern is how the console goes black"*) as false on a mutation reading **20/20 green**, and wrote that into **four places** — a test's XML doc, the plan, the dossier and two commit messages. **Re-run over the whole project: 7 failed / 1,197 passed.** All four `StaticAssetPipelineTests` cases go RED, `/css/design-system.css` returning `NotFound`. **§6.3 is TRUE** and the strike was reversed.
+
+⭐ **The mechanism is an asymmetry worth carrying: page routes are endpoints, static files are not.** A real `@page` endpoint *competes* with the fallback and wins — on **precedence first** (a literal beats a catch-all before `Order` is consulted at all), `Order` second. ⚠ **`Order = int.MaxValue` is therefore NOT what protects those routes**, and prose saying so would make an `Order`-only change look safe. **Static files never enter the competition**: the automatic `UseRouting()` precedes all user middleware, so routing selects the fallback, and `StaticFileMiddleware` stands down purely because *some* endpoint was selected. `{**rest}` carries no `:nonfile` constraint — that lives only in `MapFallback`'s **default** pattern. Measured: CSS, JS and the DSEG font. Derived: the Radzen theme, `_framework/blazor.web.js`, and the circuit never starting.
+
+⛔ **The cause was scope, not method — one row after `KIOSK-3` recorded the identical lesson.** The mutation ran under `dotnet test --filter "FullyQualifiedName~ApiNotFoundPipelineTests"` and was reported as *"the entire suite"*. **20 is exactly that one class's case count.** The guard existed the whole time in the same project — in `StaticAssetPipelineTests`, **the very file this row's own Task 1 had moved an hour earlier.** Two earlier mutations had each failed exactly their own test, and that is what made the third feel safe. ⭐ **`KIOSK-3`'s closing sentence, verbatim and re-earned: a positive control validates the INSTRUMENT, never the SEARCH SPACE.**
+
+✅ **One genuine finding survived the retraction**: the `/api/` scope has a **second, independent** reason nobody had written down — **truthfulness**. `/some-typo` is a mistyped *page*, and a wide rule answers it *"No API route on this service matches"*: a well-formed body carrying a wrong answer, the row's own thesis one layer along. Newly pinned by `UnmatchedNonApiPath_DoesNotGetTheApiProblemBody`; `StaticAssetPipelineTests` already pinned availability.
+
+⭐ **`UseStatusCodePages` — §6.1's trap — measured in BOTH directions, and it is why Option B beat Option A.** With the terminal rule present, adding the middleware left the response alone (`application/problem+json`, 24/24 green). With it removed, the same middleware injected `404 text/plain` / `Status Code: 404; Not Found` into a response the API contract owns. `StatusCodePagesMiddleware` fires **only on a response with no body and no content type**, so giving `/api/*` a body forecloses it. Point it at a Razor page — **what the .NET 10 Blazor Web App template ships** — and that becomes `text/html`: the originally-reported bug through the front door, with every pre-`UI-11` test green.
+
+⚠ **Pre-merge review also found the test host had been dialling the live appliance for the whole of `OPS-5` and this row.** `RadioWebFactory` claimed *"hosted services removed so no background poll outlives the test"*; `PhoneHubService`/`GvTrunkHubService` are `AddSingleton` started fire-and-forget **outside** that mechanism, and at their `appsettings` defaults they open real SignalR connections to **`radio:5004`**, retrying 10/30/60 s for the host's lifetime. Both endpoints now point at `127.0.0.1:1`. **A comment gave a reason a thing was safe, and the reason was the thing that failed** — `CLAUDE.md` § *Pre-Merge Review* verbatim.
+
+⚠ **`git log -S "MapFallback" -- src/` is falsified by the commit that writes it** — empty on `main`, one hit after. Corrected in four places to *"was empty before this commit"*. **A citation can be true when written and false when merged.**
+
+⭐ **Verification that earned its place, twice.** The wire check caught what the assertion could not: `Content-Type` carries **no `charset`**, and `.MediaType` strips parameters, so a `; charset=utf-8` would have passed silently. And the `PHN-5` no-logging claim was **falsified rather than trusted** — four requests carrying a phone number and a token produced **zero** log lines.
+
+✅ **`Radio.API` checked and unaffected** — no static files, no fallback, and already regression-locked at `ApiTests.cs:32-43`. **Both services checked; there are exactly two.** Outbound correction sent to RotaryPhone: **we did not have the hole we asked them to mirror**; their fix stands, only the ownership was wrong.
+
+⚠ **`llm-review` and `build` both PASSED (2m49s / 1m32s)** — no self-hosted-runner stall this cycle, twice in a row.
+
 
 ---
 
