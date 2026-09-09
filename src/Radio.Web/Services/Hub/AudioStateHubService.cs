@@ -186,11 +186,8 @@ public class AudioStateHubService : IAsyncDisposable
 
       // Server sends NowPlayingChanged with a NowPlayingDto payload —
       // deserialize and pass through so subscribers can use it directly.
-      _hubConnection.On<NowPlayingDto?>("NowPlayingChanged", async (dto) =>
-      {
-        _logger.LogDebug("Received NowPlayingChanged event");
-        await NotifyAsync(NowPlayingChanged, dto);
-      });
+      // ⛔ A null here is DATA, not a contract violation (ADR-033). See OnNowPlayingMessageAsync.
+      _hubConnection.On<NowPlayingDto?>("NowPlayingChanged", OnNowPlayingMessageAsync);
 
       // Server sends QueueChanged with a list payload —
       // accept and discard it so SignalR dispatches the message.
@@ -214,11 +211,8 @@ public class AudioStateHubService : IAsyncDisposable
 
       // Server sends VolumeChanged with a VolumeDto payload —
       // deserialize and pass through so subscribers can update directly.
-      _hubConnection.On<VolumeDto?>("VolumeChanged", async (dto) =>
-      {
-        _logger.LogDebug("Received VolumeChanged event");
-        await NotifyAsync(VolumeChanged, dto);
-      });
+      // ⛔ A null here is DATA, not a contract violation (ADR-033). See OnVolumeMessageAsync.
+      _hubConnection.On<VolumeDto?>("VolumeChanged", OnVolumeMessageAsync);
 
       _hubConnection.On("SourceChanged", async () =>
       {
@@ -259,11 +253,8 @@ public class AudioStateHubService : IAsyncDisposable
 
       // Server sends EventPlaybackChanged on every attended-playback transition (ADR-029 D6 §8.1).
       // Transitions only — there is no position tick, and §8.2 refuses one outright.
-      _hubConnection.On<EventPlaybackSnapshotDto?>("EventPlaybackChanged", async (dto) =>
-      {
-        _logger.LogDebug("Received EventPlaybackChanged event");
-        await NotifyAsync(EventPlaybackChanged, dto);
-      });
+      // ⛔ A null here is DATA, not a contract violation (ADR-033). See OnEventPlaybackMessageAsync.
+      _hubConnection.On<EventPlaybackSnapshotDto?>("EventPlaybackChanged", OnEventPlaybackMessageAsync);
 
       // Server sends ConfigChanged (section name) when a config write lands in the
       // API process. radio-web is a SEPARATE process, so the in-process
@@ -631,6 +622,99 @@ public class AudioStateHubService : IAsyncDisposable
     }
 
     await NotifyAsync(EncoderHudChanged, dto);
+  }
+
+  // ---------------------------------------------------------------------------------------------
+  // The three events where NULL IS DATA. ⛔ None of these may grow an AcceptPayload call, and
+  // NotifyAsync<T> below must never grow a null check — that is the `UI-12` §0.5 / ADR-033 defect,
+  // and `UI-14` exists because the realistic form of it passed the entire suite until these seams
+  // made it observable.
+  // ---------------------------------------------------------------------------------------------
+
+  /// <summary>Applies one "NowPlayingChanged" broadcast. ⚠ internal for the test seam.</summary>
+  /// <remarks>
+  /// ⛔ A NULL PAYLOAD IS DATA AND MUST REACH EVERY SUBSCRIBER. The event is declared
+  /// <c>Func&lt;NowPlayingDto?, Task&gt;</c>, and under ADR-033 the declaration is the specification.
+  ///
+  /// ⚠ It does not mean one thing. FIVE production types subscribe to this event and a null means
+  /// three different things to them:
+  /// <list type="bullet">
+  /// <item><c>NowPlayingDock.OnNowPlayingChanged</c> calls <c>ClearDockState()</c> — the dock resets
+  /// to "No Track Playing". Demonstrated, not assumed:
+  /// <c>NowPlayingDockTests.Dock_NullNowPlayingDto_ClearsState</c>.</item>
+  /// <item><c>Sleep.OnNowPlayingChanged</c> calls <c>ApplyNowPlaying(null)</c> — the sleep screen's
+  /// track block and art disappear. <c>SleepTests.Sleep_NullNowPlayingDto_ClearsTrackBlock</c>, whose
+  /// own comment gives the cost: stale metadata "for hours". (Sleep.razor injects THIS service under
+  /// the alias <c>AudioState</c>; it is a direct subscriber, not an AudioStateStore one.)</item>
+  /// <item><c>NowPlayingPanel.OnNowPlayingChanged</c> treats it as a REST RE-FETCH TRIGGER
+  /// (<c>RefreshPlaybackStateAsync</c>) — not as a clear.</item>
+  /// <item><c>AudioStateStore.OnHubNowPlayingChanged</c> KEEPS its cached NowPlaying and notifies
+  /// anyway; <c>MainLayout.OnNowPlayingChanged</c> discards the payload and re-renders.</item>
+  /// </list>
+  ///
+  /// ⚠ A dropped null is PERMANENT, which is what separates this from the guarded four. Nothing
+  /// re-sends it: AudioStateUpdateService only broadcasts on a CHANGE, so once its own
+  /// <c>_lastNowPlaying</c> records the silence, the intervening "nothing is playing" is gone and the
+  /// dock and sleep screen strand on the previous track until the next real track arrives.
+  ///
+  /// 📌 No producer can send one today — <c>AudioStateUpdateService.BuildNowPlayingDto</c> returns a
+  /// non-nullable type and always builds a <c>new NowPlayingDto { … }</c>. That is a property of the
+  /// current server source, not of the type system: the payload arrives from a JSON deserializer
+  /// across a process boundary where nullable annotations are erased. Same argument as
+  /// <see cref="AcceptPayload{T}"/>'s, pointed the other way.
+  /// </remarks>
+  internal async Task OnNowPlayingMessageAsync(NowPlayingDto? dto)
+  {
+    _logger.LogDebug("Received NowPlayingChanged event");
+    await NotifyAsync(NowPlayingChanged, dto);
+  }
+
+  /// <summary>Applies one "VolumeChanged" broadcast. ⚠ internal for the test seam.</summary>
+  /// <remarks>
+  /// ⛔ A NULL PAYLOAD IS DATA AND MUST REACH EVERY SUBSCRIBER — declared
+  /// <c>Func&lt;VolumeDto?, Task&gt;</c> (ADR-033).
+  ///
+  /// ⚠ IT IS NOT "AN ABSENT SNAPSHOT", and an earlier revision of the AcceptPayload remark said the
+  /// three nullable events behaved alike. They do not. Of the three subscribers:
+  /// <list type="bullet">
+  /// <item><c>NowPlayingPanel.OnVolumeChangedEvent</c> — a REST RE-FETCH TRIGGER
+  /// (<c>RefreshPlaybackStateAsync</c>). This is the only subscriber that does real work on a null,
+  /// and it is the one that goes to the network.</item>
+  /// <item><c>AudioStateStore.OnHubVolumeChanged</c> — DISCARDS the payload, keeps Volume/IsMuted, and
+  /// notifies its own subscribers regardless.</item>
+  /// <item><c>MainLayout.OnVolumeChanged</c> — early-returns; the mute chip is unchanged.</item>
+  /// </list>
+  /// So the cost of dropping one is precisely: the panel's volume/mute readout stays stale until the
+  /// next non-null broadcast. Stated at that size on purpose.
+  ///
+  /// 📌 No producer can send one — the sole sender builds a <c>new VolumeDto { … }</c>.
+  /// </remarks>
+  internal async Task OnVolumeMessageAsync(VolumeDto? dto)
+  {
+    _logger.LogDebug("Received VolumeChanged event");
+    await NotifyAsync(VolumeChanged, dto);
+  }
+
+  /// <summary>Applies one "EventPlaybackChanged" broadcast. ⚠ internal for the test seam.</summary>
+  /// <remarks>
+  /// ⛔ A NULL PAYLOAD IS DATA BY DECLARATION — <c>Func&lt;EventPlaybackSnapshotDto?, Task&gt;</c> —
+  /// ⚠ AND UNEVIDENCED IN PRACTICE. No producer sends one: the sole sender,
+  /// <c>AudioStateUpdateService.OnEventPlaybackChanged</c>, always builds an anonymous
+  /// <c>new { … }</c>. ⛔ Do NOT write a contract for it that the code does not have. This seam exists
+  /// so the declaration and the dispatch cannot silently disagree, NOT because a null is expected.
+  ///
+  /// 📌 What one WOULD do, since it is cheap to state and expensive to re-derive. There is ONE
+  /// subscriber — <c>AudioStateStore.OnHubEventPlaybackChanged</c> — and it does TWO things: it
+  /// assigns <c>EventPlayback = dto</c> (a null clears the cached snapshot) AND it sets
+  /// <c>_eventPlaybackBroadcastSeen</c>. The second is the non-obvious half: that flag is what makes a
+  /// broadcast beat the one-shot REST seed (the ENC-12 broadcast-wins ordering that
+  /// <c>AudioStateStore.EnsureEventPlaybackSeededAsync</c> documents). Dropping a null would therefore
+  /// not merely fail to clear a snapshot — it would leave a later, staler seed free to win.
+  /// </remarks>
+  internal async Task OnEventPlaybackMessageAsync(EventPlaybackSnapshotDto? dto)
+  {
+    _logger.LogDebug("Received EventPlaybackChanged event");
+    await NotifyAsync(EventPlaybackChanged, dto);
   }
 
   /// <summary>
