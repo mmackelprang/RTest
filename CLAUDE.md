@@ -528,6 +528,33 @@ the assertion to *fail*. A bounded negative check that starvation can merely wea
 arrived within 200 ms" — is safe, and sometimes unavoidable. Say which one a test is, as
 `DisabledByZeroThreshold_DoesNotRaise` does, rather than implying a determinism it does not have.
 
+## The merge gate — CI is advisory, your local gates are the truth
+
+**`main` branch protection is OFF. CI does not block a merge and is not supposed to.** The
+merge-blocking truth is the Builder's own local gates: `dotnet build -c Release` at the **47-warning,
+0-error** baseline, and `dotnet test` green apart from the known-failing set named above.
+
+This is stated in five workflow files — `build.yml:13`, `audit-configuration.yml:13`,
+`pages-docs.yml:11`, `todo-to-issues.yml:39`, and `llm-review.yml:20` — and **until 2026-09-09 it was
+stated nowhere else.**
+
+⚠ **That gap caused a false belief, which is why this section exists.** A Builder went looking for
+merge policy in this file, found none, and concluded `CLAUDE.md` **permits an admin merge**. It does
+not, and never did: the words `admin`, `--admin`, `bypass` and `branch protection` appeared **zero
+times** in this file. The Builder was not being careless — **it read the only document it was pointed
+at, and the policy was not in it.** A rule that lives only in comments on files nobody is told to read
+is a rule that will be reinvented.
+
+⛔ **There is no admin-merge provision to invoke, and none is needed** — protection is off, so an
+ordinary merge already works. If you find yourself reaching for `--admin`, the question to ask is not
+"am I allowed" but **"why do I think something is blocking me"**; the answer is usually that a gate is
+genuinely red.
+
+⭐ **A red or pending CI run is therefore not a reason to stop — and not a reason to merge, either.**
+It is a second opinion on a build you have already gated locally. Read it, and if it disagrees with
+your local result, **find out which one is lying before merging.** Waiting on CI is a legitimate
+choice; treating a green CI as permission you did not otherwise have is not.
+
 ## Pre-Merge Review
 
 Checks the reviewer runs on every PR, on top of the generic pass. Short list — these are the
