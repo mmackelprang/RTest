@@ -65,8 +65,12 @@ Answering it needs a harness whose band is on the element continuously, and an o
 > painted at any highlight value** — which is the outcome §1.3 named as gating.
 >
 > **Reduced motion was falsified as a cause**, not assumed: `enable-animations: true`, and the
-> `prefers-reduced-motion` block at `design-system.css:1779` — which would kill the animation
-> outright — is **not firing**.
+> `prefers-reduced-motion` block that overrides `.skeleton-loading` — which would kill the animation
+> outright — is **not firing**. ⚠ **Cited by selector, not by line.** `design-system.css` holds
+> **six** `@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real
+> disambiguating work and is also the thing most likely to rot: this one is `:1779` on `main`
+> @ `f4d71b28` and `:1805` on the branch that changes the value, because the token's comment block
+> sits above it and pushes everything below down.
 >
 > ⚠ **This is a bound, not the plan's measurement.** What was timed is the **data fetch** for two
 > panels, which bounds how long their skeletons *can* be up; it is not a `MutationObserver` on

@@ -544,8 +544,16 @@ highlight value.**
 looked at.
 
 **Reduced motion was falsified as a cause**, not assumed: `enable-animations: true`, and the
-`prefers-reduced-motion` block at `design-system.css:1779` — which would kill the animation outright
-— **is not firing**.
+`prefers-reduced-motion` block that overrides `.skeleton-loading` — which would kill the animation
+outright — **is not firing**.
+
+⚠ **Cited by selector, not by line, and here is why.** `design-system.css` holds **six**
+`@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real disambiguating
+work — and it is also the first thing to rot. This one is **`:1779` on `main` @ `f4d71b28`** and
+**`:1805` on the branch that changes the token**, because the token's comment block sits above it and
+pushes everything below down. ⭐ **That shift happened to this very paragraph while it was being
+written**, which is the same trap this file already records twice under "Line anchors: this row's,
+and the plan's, are all stale."
 
 ⚠ **What this does and does not mean.** The value change is **cosmetically real** — it is the right
 value for whenever a skeleton *is* on screen, e.g. a cold start, a slow network, or a genuinely slow
