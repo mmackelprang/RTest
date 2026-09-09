@@ -27,6 +27,15 @@ with the cause sitting in our config file and no error anywhere pointing at it.
 | **rsync** (`Deploy-ToLinux.ps1:89`) | ✅ Safe | Passes `--exclude 'appsettings.Production.json'` |
 | **tar-pipe fallback** (`:126-129`) | 🔴 **Clobbers** | Relies on a backup/restore *around* the extract. On Linux `--unlink-first` errors on directories, `tar` exits **2**, and under `set -e -o pipefail` the chain aborts **before** the restore `mv` runs |
 
+> ⛔ **CORRECTION 2026-09-09 (Coordinator), added after this document was received — the row above is FALSE and is left in place so the correction is legible.**
+> The claim *"under `set -e -o pipefail` the chain aborts **before** the restore `mv` runs"* does not hold, on two independent grounds established by RotaryPhone's own planner against their `main`:
+> 1. **The `pipefail` is in the local PowerShell script, not the remote bash chain**, so it governs nothing on the far side.
+> 2. **The remote chain is `;`-separated and ends in `chmod`**, so `ssh` returns **chmod's** status. `tar` exits 2, `chmod` exits 0, `ssh` returns 0 — the deploy **succeeds while printing the `Cannot unlink` line**, and the backup/restore `mv` **does** run. Measured: config preservation worked in production despite the tar errors.
+>
+> ⭐ **The failure this row actually describes is the opposite of the one it claims**: not a loud abort that skips the restore, but a **silent success on a tree that may not have changed** — a stale-deploy path masked by chmod. RotaryPhone's PR #84 fixes it by running the remote chain under `set -e`.
+>
+> ⚠ **Recorded as a shape, not just a fix:** this claim was falsified by evidence that reached this session and was never pointed back at the document. Neither stale nor unread nor unrun — **no mechanism revisits old claims when new evidence arrives.**
+
 The backup survives at `/tmp/rp-prod.bak` — but nothing puts it back. **The box's copy is
 authoritative** (`docs/HT801-ADDRESS.md`); the repo's template is not.
 

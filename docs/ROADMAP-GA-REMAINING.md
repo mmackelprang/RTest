@@ -6,7 +6,7 @@ file is the only thing it added.
 **Derived from**, in this order: [`BUILDER_QUEUE.md`](BUILDER_QUEUE.md) (26 live rows) ·
 [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) · the per-row dossiers in [`queue/`](queue/) ·
 the plans in [`../design/plans/`](../design/plans/) · [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md)
-(52 shipped rows) · [`queue/inbound/`](queue/inbound/).
+(55 shipped rows — ⚠ figure re-derived from the instrument 2026-09-09; the previous **52** was stale and was flagged by `AUD-2`'s Builder) · [`queue/inbound/`](queue/inbound/).
 
 > ⚠ **This is a decision aid, not an inventory.** It answers three questions and nothing else:
 > **what is left before GA · what can proceed without you · what is waiting on you specifically.**
