@@ -1105,7 +1105,64 @@ public class GvBridgeStatusDto
   public bool Available { get; set; }
   public string ActiveMode { get; set; } = "";
   public bool SipRegistered { get; set; }
-  public bool CookiesValid { get; set; }
+
+  // ── GV-12 health terms ──────────────────────────────────────────────────────
+  // ⚠⚠ EVERY ONE OF THESE IS NULLABLE, AND THAT IS LOAD-BEARING, NOT TIDINESS.
+  // These feed GvBridgeHealth.IsHealthy, whose job is to detect RECOVERY — an
+  // unhealthy→healthy EDGE. A term that can never become healthy pins the state and the
+  // edge never fires, so the fix ships, goes green, and does nothing. A field we did not
+  // receive must therefore read as "no signal", never as "ill". See plan GV-12 §0.4.
+  //
+  // Available deliberately stays non-nullable: it is the field RotaryPhone always sends,
+  // and the 2026-09-08 outage capture read `available:false` for all 83 minutes, so it
+  // alone is sufficient to catch that incident.
+
+  /// <summary>
+  /// Whether RotaryPhone currently holds valid GV cookies. Null = not reported.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ WIDENED bool → bool? BY GV-12, deliberately. As a non-nullable bool it defaulted to
+  /// false on any response omitting the field, which made `!CookiesValid` permanently true
+  /// and would have pinned the health predicate at unhealthy forever. Verified 2026-09-08:
+  /// the property had ZERO readers in src/ — it was declared here and consumed nowhere — so
+  /// widening it changes no call site.
+  /// </remarks>
+  public bool? CookiesValid { get; set; }
+
+  /// <summary>
+  /// RotaryPhone is reachable but impaired. Null = not reported.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Do NOT treat this as the primary outage signal. It is PER-ACTIVATION and resets to
+  /// false when the adapter goes inactive, which is why the live capture during the total
+  /// 83-minute outage read `degraded:false` throughout. A banner bound to it would have
+  /// stayed silent for the entire incident. It is one term here, never the test.
+  /// </remarks>
+  public bool? Degraded { get; set; }
+
+  /// <summary>
+  /// A GV auth blackout is in progress. Null = not reported.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Measured at 920 ms, with zero true-samples across 411 polls — a 10 s poll will
+  /// essentially never observe it, so this term almost never fires and that is expected.
+  /// ⛔ It is deliberately NOT latched with a minimum display window here. Latching is the
+  /// right answer for a BANNER and the wrong answer for a recovery trigger: it would hold
+  /// the state unhealthy past the moment health returns and delay the edge this row exists
+  /// to detect. Plan GV-12 §0.6.
+  /// </remarks>
+  public bool? AuthBlackout { get; set; }
+
+  /// <summary>
+  /// UTC timestamp of RotaryPhone's last successful upstream GV call. Null = never, or not
+  /// reported.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ NULL IS NOT TREATED AS UNHEALTHY, which deliberately departs from the wording in
+  /// docs/queue/GV-12.md:46. That wording is correct for a banner (fail visible) and would
+  /// be fatal here (fail silent) — see the block comment above and plan GV-12 §0.4.
+  /// </remarks>
+  public DateTime? LastApiSuccessAt { get; set; }
 }
 
 // ─────────────────────────────────────────────────────────────────────
