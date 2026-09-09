@@ -731,15 +731,25 @@ the result **either way** — a deferred check must not decay into a pass by sil
 
 ### **U5 — the long-running check, optional but valuable**
 
-Play six or seven voicemails to their natural end over a few minutes, then:
+⚠ **There is no GET for this.** `SoundFlowPlaybackService.GetDiagnostics()` has exactly one caller —
+`AudioController.ReportDistortionMarker`, a **POST** — and it writes the snapshot to the **log**, not
+to the response body. So the check is: take a baseline, play, take it again, and read the log.
 
 ```bash
-curl -s http://radio:5000/api/audio/debug/players    # or whatever the diagnostics route is named
+# 1. Baseline, with nothing playing.
+curl -X POST http://radio:5000/api/audio/debug/distortion-marker
+
+# 2. Play six or seven voicemails to their NATURAL end over a few minutes. Then:
+curl -X POST http://radio:5000/api/audio/debug/distortion-marker
+
+# 3. Compare activePlayers / playerIds between the two markers.
+ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep -i "distortion" -A 20 $F | tail -60'
 ```
 
 ⭐ Per §0.4's last row, every voicemail played used to leak one `SoundPlayer` and one mixer
-component permanently. After this fix the count should return to its idle baseline. ⚠ **A
-non-baseline count here is a finding, not a failure of U1** — report it and let it be filed.
+component permanently, so `activePlayers` should have climbed by one per voicemail and never come
+back down. After this fix the second marker should match the first. ⚠ **A non-baseline count here is
+a finding, not a failure of U1** — report it and let it be filed.
 
 ### **If anything fails**
 
