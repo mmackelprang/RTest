@@ -446,10 +446,16 @@ nothing at any level, because the paths people mistype here carry phone numbers 
 Console sink is unrestricted (see the `radio-web` note above, and `PHN-5`).
 
 ⛔ **Do not add `UseStatusCodePagesWithReExecute("/not-found")`.** It is what the .NET 10 Blazor Web App
-template ships and what current Microsoft docs steer you to, and it would give every `/api/*` 404 an
-**HTML body** — most of `UI-11`'s originally-reported bug arriving through the front door. Since
-`UI-11` gave `/api/*` a body of its own, status-code pages can no longer claim those responses; that
-protection is the reason the body exists rather than a nice-to-have.
+template ships and what current Microsoft docs steer you to, and it would give every `/api/*` 404 a
+**body it did not write** — most of `UI-11`'s originally-reported bug arriving through the front door.
+⭐ **Both halves of that were measured during `UI-11`, not argued:** with `UseStatusCodePages()` added
+*and* the terminal `/api/` rule removed, an unmatched `/api/*` path came back
+`404 Content-Type: text/plain` with the body `Status Code: 404; Not Found` — a body injected by
+middleware into a response the API contract owns (point it at a Razor page and that becomes
+`text/html`). With the terminal rule **in place**, the same middleware left the response alone and it
+stayed `application/problem+json`, suite 24/24 green. **Status-code pages only fire on responses that
+have no body and no content type**, so giving `/api/*` a body of its own is what forecloses this —
+that protection is the reason the body exists, not a nice-to-have.
 
 ```bash
 curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5002/api/nope   # 404 application/problem+json
