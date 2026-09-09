@@ -20,9 +20,21 @@ to `/system` permanently adds three handlers to a process-lifetime singleton, ea
 disposed component's `InvokeAsync`/`StateHasChanged`. ⚠ It interacts with `UI-7` and is still not part
 of it: unbounded list growth makes the now-sequential fan-out slower over process lifetime, and it is
 the mechanism by which `PhoneCallStateChanged` — a one-subscriber event by census — becomes an
-N-subscriber event after N navigations. But it is a **lifecycle** defect, not a fan-out one; the fix is
-three named handlers and an `IDisposable` on a 2,000-line page. **Read from source, not observed** — no
-growing invocation list was measured.
+N-subscriber event after N navigations. But it is a **lifecycle** defect, not a fan-out one.
+
+✅ **SHIPPED 2026-09-08 as `UI-9` ([#628](https://github.com/mmackelprang/RTest/pull/628)); see
+[ADR-031](DECISION-LOG.md).** Two claims in the paragraph above were wrong and are left standing
+only so the correction is visible:
+
+- *"the fix is three named handlers and an `IDisposable` on a 2,000-line page"* — **the page already
+  declared `@implements IDisposable`** (`:15`) with a live `Dispose()` (`:4192`), so there was no
+  interface to add and no lifecycle to introduce. And it is **4,213** lines, not 2,000.
+- *"Read from source, not observed — no growing invocation list was measured."* — **it is measured
+  now.** Against the unfixed page: 1 handler per event per visit, and five visits leaving five, i.e.
+  15 retained handlers. Exactly 3 per visit, so no child component contributes.
+
+⭐ It also **closed the class**: a repo-wide sweep found `SystemConfigPage` was the only component in
+`Radio.Web` subscribing to a singleton service event without a matching `-=`.
 
 **2. `PhoneUnreadState.cs:23`'s starvation exposure.** `event Action<int>?` — void-returning, so
 `Delegate.Invoke` really does run every handler and there is no discarded `Task`. The dropped-`Task`
