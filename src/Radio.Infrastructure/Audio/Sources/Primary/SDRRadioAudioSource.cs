@@ -911,8 +911,14 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _hasLoggedFirstAudioData = false;
     _totalSamplesReceived = 0;
 
-    // Generate a playback ID for this session
-    _playbackId = $"sdr-radio-{Guid.NewGuid():N}";
+    // Register under the source's own Id — NOT a minted key. AudioManager addresses this source's
+    // gain and ducking by IAudioSource.Id — SetSourceGain, SwitchSourceAsync, OnDuckingLevelChanged
+    // and OnDuckingStateChanged, named rather than numbered because the commit that wrote this
+    // comment also moved those lines — and
+    // SoundFlowPlaybackService's dictionaries carry no StringComparer (:24-28) so lookups are
+    // ordinal — a minted key missed every one of them, silently. Same fix and same reason as
+    // BluetoothAudioSource (2bbd0eb5). AUD-2.
+    _playbackId = Id;
 
     // On first play, restore persisted band/frequency/step from the config store.
     // This runs once per source lifetime so subsequent play/resume cycles don't re-read.

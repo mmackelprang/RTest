@@ -314,7 +314,14 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
       if (engine != null)
       {
         var format = _playbackService.GetAudioFormat();
-        _playbackId = $"usb-capture-{Id:N}";
+        // Id itself, not a prefixed derivative. `$"usb-capture-{Id:N}"` CONTAINED the Id but was not
+        // EQUAL to it — Id is a string, so the `:N` specifier was silently ignored — and
+        // SoundFlowPlaybackService keys on ordinal equality, so AudioManager's gain and ducking
+        // lookups missed. AUD-2. This one line covers the three concrete sources that reach it:
+        // RadioAudioSource, VinylAudioSource and GenericUSBAudioSource. BluetoothAudioSource also
+        // derives from this class but overrides PlayCoreAsync without calling base (:268), so it
+        // does not reach this line and was fixed separately by 2bbd0eb5.
+        _playbackId = Id;
 
         // Always create a fresh generator. The previous one was disposed by
         // PlaybackService.StopAsync (called at the top of PlayComponentAsync).

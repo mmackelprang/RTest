@@ -757,6 +757,10 @@ public class AudioController : ControllerBase
           activePlayers = diag.ActivePlayers,
           activeComponents = diag.ActiveComponents,
           playerIds = diag.PlayerIds,
+          // AUD-2: componentIds is the half that was missing. Every capture-based primary source
+          // registers as a COMPONENT, so playerIds alone showed none of them, and a reader comparing
+          // live playback keys against IAudioSource.Id saw an empty array and learned nothing.
+          componentIds = diag.ComponentIds,
           sampleRate = format.SampleRate,
           channels = format.Channels,
         };

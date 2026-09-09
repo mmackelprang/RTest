@@ -509,7 +509,20 @@ public class SoundFlowPlaybackService : IDisposable
       }
       _baseVolumes.Remove(sourceId);
       _duckingMultipliers.Remove(sourceId);
-      // Keep _gainOffsets — they persist across stop/start for the same source
+      // Keep _gainOffsets: they persist across a stop/start cycle for the same source.
+      //
+      // ⚠ This is true only because the playback key is the source's IAudioSource.Id, which
+      // AudioSourceBase caches in _id on first read (AudioSourceBase.cs:28) and is therefore stable
+      // for the lifetime of the source INSTANCE. Before AUD-2 the claim was FALSE for SDR and
+      // FilePlayer, which minted a fresh GUID on every PlayCoreAsync: the retained offset was never
+      // found again after a restart, AND every cycle leaked one entry here that nothing would ever
+      // read or remove. If a future source registers under anything other than Id, this line stops
+      // being true again — PlaybackKeyLintTests is what keeps that from happening quietly.
+      //
+      // ⚠ Per INSTANCE, not per source TYPE, and the distinction is not pedantry: _id is an instance
+      // field, so disposing and recreating a source (a device re-enumeration, say) mints a new Id
+      // and orphans the old instance's entry here. That orphan is pre-existing, is bounded by the
+      // number of source instances ever created, and is NOT fixed by AUD-2.
     }
 
     var playbackDevice = _audioEngine.GetPlaybackDevice();
@@ -637,14 +650,18 @@ public class SoundFlowPlaybackService : IDisposable
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
   /// <param name="volume">Volume level (0.0 to 1.0).</param>
-  public void SetVolume(string sourceId, float volume)
+  /// <returns>
+  /// True if a live player or component received the new volume. See <see cref="ApplyEffectiveVolume"/>
+  /// for why a false return is not by itself a defect.
+  /// </returns>
+  public bool SetVolume(string sourceId, float volume)
   {
     ThrowIfDisposed();
 
     lock (_playersLock)
     {
       _baseVolumes[sourceId] = Math.Clamp(volume, 0f, 1f);
-      ApplyEffectiveVolume(sourceId);
+      return ApplyEffectiveVolume(sourceId);
     }
   }
 
@@ -652,8 +669,16 @@ public class SoundFlowPlaybackService : IDisposable
   /// Sets the gain offset for a specific source. The effective volume is base volume * gain offset.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
-  /// <param name="gainOffset">Gain offset (0.0 to 2.0, where 1.0 = unity/0dB).</param>
-  public void SetGainOffset(string sourceId, float gainOffset)
+  /// <param name="gainOffset">
+  /// Gain offset, clamped to <c>AudioPreferencePersistence.MinGain</c>..<c>MaxGain</c> — currently
+  /// <b>0.0 to 5.0</b>, where 1.0 = unity/0dB. (This doc said "0.0 to 2.0" until AUD-2; the constant
+  /// has been 5.0f since the migration note at AudioPreferencePersistence.cs:264.)
+  /// </param>
+  /// <returns>
+  /// True if a live player or component received the new gain. See <see cref="ApplyEffectiveVolume"/>
+  /// for why a false return is not by itself a defect.
+  /// </returns>
+  public bool SetGainOffset(string sourceId, float gainOffset)
   {
     ThrowIfDisposed();
 
@@ -661,10 +686,39 @@ public class SoundFlowPlaybackService : IDisposable
     {
       gainOffset = Math.Clamp(gainOffset, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _gainOffsets[sourceId] = gainOffset;
-      ApplyEffectiveVolume(sourceId);
+      var applied = ApplyEffectiveVolume(sourceId);
 
-      _logger.LogDebug("Applied gain offset {Gain:F2} to source (SourceId={SourceId})",
-        gainOffset, sourceId);
+      // ⚠ TWO OUTCOMES, TWO MESSAGES. The single line this replaces — "Applied gain offset {Gain:F2}
+      // to source (SourceId={SourceId})" — was printed on BOTH paths, including the one where the
+      // dictionary lookup matched nothing and no volume moved. It asserted a success it never
+      // checked, which is the class CLAUDE.md § Pre-Merge Review names.
+      //
+      // ⚠ It was NOT, however, the instrument that misled anyone, and an earlier draft of this
+      // comment said it was. It is LogDebug, and by the reasoning three paragraphs down that means
+      // it never reached the box at all — a line nobody could read cannot mislead a reader. The
+      // operator-visible overclaim was AudioManager's "Applied live gain offset …" at Information,
+      // corrected in the same change.
+      //
+      // Both arms stay at Debug, and that is deliberate rather than an oversight: neither is an
+      // error at THIS layer (a stopped source legitimately carries a stored offset), and Radio.API's
+      // Serilog "Radio" override floors at Information, so neither reaches the box at all. The
+      // operator-visible signal is AudioManager's warning, which is the only layer that can tell a
+      // stored offset from a broken key.
+      if (applied)
+      {
+        _logger.LogDebug(
+          "Applied gain offset {Gain:F2} to live playback (SourceId={SourceId})",
+          gainOffset, sourceId);
+      }
+      else
+      {
+        _logger.LogDebug(
+          "Stored gain offset {Gain:F2} for SourceId={SourceId}; nothing is registered under that " +
+          "key, so no volume changed. It will apply if something registers under that key again.",
+          gainOffset, sourceId);
+      }
+
+      return applied;
     }
   }
 
@@ -676,7 +730,13 @@ public class SoundFlowPlaybackService : IDisposable
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
   /// <param name="multiplier">Ducking multiplier (0.0 to 1.0, where 1.0 = no ducking).</param>
-  public void SetDuckingMultiplier(string sourceId, float multiplier)
+  /// <returns>
+  /// True if a live player or component had its effective volume recomputed and written.
+  /// <b>False means the duck reached nothing</b> — the caller must not report that event audio is
+  /// ducking this source. ⚠ True does not mean the volume went DOWN: a multiplier of 1.0f writes
+  /// the unducked value and still returns true. See <see cref="ApplyEffectiveVolume"/>.
+  /// </returns>
+  public bool SetDuckingMultiplier(string sourceId, float multiplier)
   {
     ThrowIfDisposed();
 
@@ -684,7 +744,7 @@ public class SoundFlowPlaybackService : IDisposable
     {
       multiplier = Math.Clamp(multiplier, 0f, 1f);
       _duckingMultipliers[sourceId] = multiplier;
-      ApplyEffectiveVolume(sourceId);
+      return ApplyEffectiveVolume(sourceId);
     }
   }
 
@@ -692,14 +752,26 @@ public class SoundFlowPlaybackService : IDisposable
   /// Clears the ducking multiplier for a specific source, restoring full volume.
   /// </summary>
   /// <param name="sourceId">The source identifier.</param>
-  public void ClearDuckingMultiplier(string sourceId)
+  /// <returns>
+  /// True if a live player or component had its effective volume recomputed and written. False
+  /// means nothing was registered under this id — which on the ducking-ended path means no volume
+  /// was restored, and the caller must not claim otherwise.
+  /// <para>
+  /// ⚠ True is a statement about the KEY matching, not about a duck having been in effect. Clearing
+  /// a multiplier that was never set returns true and writes the same value the component already
+  /// had. <c>AudioManager.OnDuckingStateChanged</c>'s <c>volumeRestored={Restored}</c> inherits
+  /// exactly that meaning: read it as "the release reached the source", not as "the source had been
+  /// ducked".
+  /// </para>
+  /// </returns>
+  public bool ClearDuckingMultiplier(string sourceId)
   {
     ThrowIfDisposed();
 
     lock (_playersLock)
     {
       _duckingMultipliers.Remove(sourceId);
-      ApplyEffectiveVolume(sourceId);
+      return ApplyEffectiveVolume(sourceId);
     }
   }
 
@@ -707,7 +779,23 @@ public class SoundFlowPlaybackService : IDisposable
   /// Recalculates and applies the effective volume for a source.
   /// Must be called under _playersLock.
   /// </summary>
-  private void ApplyEffectiveVolume(string sourceId)
+  /// <param name="sourceId">The playback key to recalculate.</param>
+  /// <returns>
+  /// True if a live player or component was registered under <paramref name="sourceId"/> and its
+  /// volume was set; false if the id matched nothing.
+  /// <para>
+  /// ⚠ A false return is NOT by itself a defect, and no caller may treat it as one. A source can
+  /// legitimately carry a stored gain offset while stopped — <c>AudioManager.SwitchSourceAsync</c>
+  /// applies the stored offset on every source switch and FilePlayer is the one type with
+  /// <c>canAutoPlay = false</c> in that method's switch — and the offset is picked up at
+  /// registration time by the
+  /// <c>_gainOffsets.GetValueOrDefault</c> reads in PlayFileAsync (:148), PlayStreamAsync (:277),
+  /// PlayDataProviderAsync (:343) and PlayComponentAsync (:407). This class cannot distinguish that
+  /// from a key mismatch, because it knows its dictionaries and not whether the source was supposed
+  /// to be live. AudioManager can, and does. AUD-2.
+  /// </para>
+  /// </returns>
+  private bool ApplyEffectiveVolume(string sourceId)
   {
     var baseVol = _baseVolumes.GetValueOrDefault(sourceId, 1.0f);
     var gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
@@ -715,13 +803,61 @@ public class SoundFlowPlaybackService : IDisposable
     var effective = Math.Clamp(baseVol * gainOffset * duckMult,
       AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
+    var applied = false;
+
     if (_activePlayers.TryGetValue(sourceId, out var player))
     {
       player.Volume = effective;
+      applied = true;
     }
     if (_activeComponents.TryGetValue(sourceId, out var component))
     {
       component.Volume = effective;
+      applied = true;
+    }
+
+    return applied;
+  }
+
+  /// <summary>
+  /// Registers <paramref name="component"/> under <paramref name="sourceId"/> and applies the
+  /// effective volume by the same arithmetic as <see cref="PlayComponentAsync"/>, but without a
+  /// playback device. It is NOT that method with the device removed — see what it skips, below.
+  /// </summary>
+  /// <remarks>
+  /// <b>Test seam (kind B — injection).</b> Called only from
+  /// <c>Radio.Infrastructure.Tests</c> via <c>InternalsVisibleTo</c>; production code never calls it
+  /// and no production behaviour branches on it.
+  ///
+  /// <b>Why the state is otherwise unreachable:</b> the only production path into
+  /// <c>_activeComponents</c> is <see cref="PlayComponentAsync"/>, which returns early unless
+  /// <c>SoundFlowAudioEngine.GetPlaybackDevice()</c> is non-null — and that is a MiniAudio
+  /// <c>AudioPlaybackDevice</c>, created only once <c>InitializeAsync</c> has stood up the MiniAudio
+  /// engine against real hardware. (It is assigned at three sites, not one, but all three are
+  /// unreachable without that engine, which only <c>InitializeAsync</c> creates.) The
+  /// method is <c>internal</c> and non-virtual on a concrete class, so it cannot be substituted
+  /// either. Without this seam the populated-dictionary half of <see cref="ApplyEffectiveVolume"/> is
+  /// unreachable in a unit test, and AUD-2's tests could assert only that a call did not throw —
+  /// which is exactly the shape of assertion that let AUD-2 survive for months.
+  ///
+  /// <b>What it does not cover:</b> everything <see cref="PlayComponentAsync"/> does either side of
+  /// the dictionary write — the <c>ThrowIfDisposed</c> guard, so this seam succeeds quietly on a
+  /// disposed service where the production path throws; <c>StopAsync</c> of any prior registration;
+  /// the <c>MasterMixer.AddComponent</c> that actually makes the component audible; and its three
+  /// log lines. A test using this seam proves that a key which matches moves a component's Volume;
+  /// it proves nothing about whether that component is connected to a speaker. That remains UAT.
+  /// </remarks>
+  /// <param name="sourceId">The playback key to register under.</param>
+  /// <param name="component">The component to register.</param>
+  /// <param name="baseVolume">The base volume, as <c>PlayComponentAsync</c>'s <c>volume</c>.</param>
+  internal void RegisterComponentForTests(
+    string sourceId, SoundComponent component, float baseVolume = 1.0f)
+  {
+    lock (_playersLock)
+    {
+      _baseVolumes[sourceId] = baseVolume;
+      _activeComponents[sourceId] = component;
+      ApplyEffectiveVolume(sourceId);
     }
   }
 
@@ -763,11 +899,28 @@ public class SoundFlowPlaybackService : IDisposable
   /// <summary>
   /// Gets diagnostic info about active players and components (for debug markers).
   /// </summary>
-  public (int ActivePlayers, int ActiveComponents, string[] PlayerIds) GetDiagnostics()
+  /// <remarks>
+  /// ⚠ <c>ComponentIds</c> was added by AUD-2, and its absence was a real gap rather than an
+  /// omission of convenience. This method returned <c>_activePlayers.Keys</c> ONLY, so every source
+  /// that registers via <see cref="PlayComponentAsync"/> — SDR radio, the three USB sources,
+  /// Bluetooth and TestTone, i.e. everything AUD-2 was about except FilePlayer — was invisible
+  /// here. AUD-2's own
+  /// queue row proposed this method as the way to compare live playback keys against the
+  /// <c>IAudioSource.Id</c> AudioManager holds; that check would have come back EMPTY and proved
+  /// nothing. Both key spaces are now reported, so the comparison the row wanted actually works:
+  /// <c>curl -s http://radio:5000/api/audio/diagnostics</c> and read <c>playback.componentIds</c> —
+  /// post-AUD-2 they read <c>Radio-&lt;32 hex&gt;</c>, not <c>sdr-radio-&lt;32 hex&gt;</c>.
+  /// </remarks>
+  public (int ActivePlayers, int ActiveComponents, string[] PlayerIds, string[] ComponentIds)
+    GetDiagnostics()
   {
     lock (_playersLock)
     {
-      return (_activePlayers.Count, _activeComponents.Count, _activePlayers.Keys.ToArray());
+      return (
+        _activePlayers.Count,
+        _activeComponents.Count,
+        _activePlayers.Keys.ToArray(),
+        _activeComponents.Keys.ToArray());
     }
   }
 

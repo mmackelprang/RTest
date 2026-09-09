@@ -723,8 +723,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _playbackCts.Dispose();
     }
 
-    // Generate playback ID for this session
-    _playbackId = $"file-player-{Guid.NewGuid():N}";
+    // The source's own Id, which is stable for the lifetime of the source instance. A per-session
+    // GUID was wrong twice over: it missed AudioManager's gain/ducking lookups (AUD-2), and because
+    // StopAsync deliberately KEEPS _gainOffsets (SoundFlowPlaybackService.cs:512), every track
+    // change also left one entry there that nothing would ever read or remove.
+    _playbackId = Id;
     _playbackCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
     var fileName = Path.GetFileName(_currentFile);
