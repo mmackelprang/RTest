@@ -635,6 +635,20 @@ USAGE
 }
 
 # ---------------------------------------------------------------------------------------------
+# Sourcing seam — everything ABOVE this line defines, everything BELOW it acts.
+# ---------------------------------------------------------------------------------------------
+# `. radio-console-open` from tests/test-classify-voice.sh gets the functions and stops here.
+# The seam exists because classify_voice() is the one piece of logic in this file that a change
+# can silently INVERT rather than break — KIOSK-3 is exactly that — and there is no other way to
+# drive it: executing this script probes the real box, takes the single-instance lock, and
+# launches the kiosk.
+#
+# `return` outside a function is an ERROR in an executed script and legal only in a sourced one,
+# so the guard has to be conditional rather than a bare `return`. When this file is executed,
+# BASH_SOURCE[0] and $0 are the same path, the condition is false, and nothing is skipped.
+if [ "${BASH_SOURCE[0]}" != "${0}" ]; then return 0; fi
+
+# ---------------------------------------------------------------------------------------------
 # Argument dispatch. This MUST stay ABOVE the flock guard, and that is not a style choice.
 # ---------------------------------------------------------------------------------------------
 # --print-status / --dry-run / --dialog-demo are what make this box verifiable at all: it cannot
