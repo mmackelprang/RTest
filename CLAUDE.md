@@ -555,6 +555,33 @@ It is a second opinion on a build you have already gated locally. Read it, and i
 your local result, **find out which one is lying before merging.** Waiting on CI is a legitimate
 choice; treating a green CI as permission you did not otherwise have is not.
 
+### ⚠ `git push` fails over HTTP/2 on this box — and its failure output ends `Everything up-to-date`
+
+Measured 2026-09-09 while shipping `UI-14`, reproducibly: `git push` dies with `curl 16`
+(an HTTP/2 framing error). The fix is one config, already set locally on this checkout:
+
+```bash
+git config --local http.version HTTP/1.1
+```
+
+⛔ **The trap is not the failure, it is the message.** The failed push's output **ends with
+`Everything up-to-date`** — the single most reassuring line git emits. A Builder that reads the last
+line and moves on will believe it pushed. It did not: `git ls-remote` showed **no branch at all** on
+the remote.
+
+**So verify a push by asking the remote, not by reading the push's own output:**
+
+```bash
+git ls-remote --heads origin <branch>     # the branch exists remotely, or it does not
+git rev-parse HEAD origin/main            # two identical SHAs, or you have not pushed
+git log origin/main..HEAD --oneline | wc -l   # 0 means synced
+```
+
+⭐ **Same family as the `dotnet test | tail` trap above**, and worth stating as one rule: **a command's
+own summary line is not evidence that the command did what it says.** One reports the exit code of
+`tail`; this one reports a reassuring string on the path where it failed. Both are instruments that
+cannot see the state they claim to measure — which is also, separately, what `UI-14` was about.
+
 ## Pre-Merge Review
 
 Checks the reviewer runs on every PR, on top of the generic pass. Short list — these are the
