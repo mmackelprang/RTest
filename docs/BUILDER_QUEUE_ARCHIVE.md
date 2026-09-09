@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (46)
+## Shipped rows (47)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1745,6 +1745,110 @@ is that test** — do not manufacture one.
 ---
 
 
+
+### UI-12 — `RadioStateChanged` had no null guard while its three `Encoder*` siblings did, and the row's reason for not adding one was false.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#632](https://github.com/mmackelprang/RTest/pull/632) |
+| Plan | [`UI-12-the-null-that-cannot-arrive.md`](../design/plans/UI-12-the-null-that-cannot-arrive.md) |
+| Spec / handoff | _no spec doc — filed by the `UI-7` Builder as its `L-8`_ · [ADR-033](../design/DECISION-LOG.md) |
+| Depends on | — _(builds on `UI-7`'s fan-out seam, merged)_ |
+| Branch | `fix/ui-12-radiostatechanged-guard-shape` |
+
+**Detail: [`queue/UI-12.md`](queue/UI-12.md)** — which carries the correction to the row's own reasoning.
+
+Merged 2026-09-09. ⚠ **Merged, not shipped** — deliberately not deployed, and see below for why that
+is not a gap here.
+
+All four events declared `Func<T, Task>` now reject a null payload in one shared, logged helper
+**above** the fan-out, and the `_hubConnection.On<T>` type arguments became nullable — the type
+finally agreeing with what a JSON deserializer can produce.
+
+⭐ **The rule, and it is derivable from declarations rather than invented: an event declared
+`Func<T, Task>` cannot represent null, so a null is a contract violation and must be rejected at the
+boundary and logged; an event declared `Func<T?, Task>` treats null as DATA and must pass it
+through.** `NowPlayingChanged`, `VolumeChanged` and `EventPlaybackChanged` are the latter — null there
+means *"nothing is playing"* — and are untouched (ADR-033).
+
+⛔ **The obvious unification would have caused the defect the row was filed to avoid.** Putting the
+check in `NotifyAsync<T>` deletes three copies and silently drops every `NowPlayingChanged(null)`,
+stranding the dock on the previous track forever. `T` is erased there and cannot tell a contract
+violation from data.
+
+⚠ **The change is UNOBSERVABLE in production and the PR says so plainly.** A null cannot arrive —
+`AudioStateHubService` is a non-partial class so the language guarantees one raise site, and all four
+server-side senders are provably non-null. **It stays 🔵 P3, and no UAT can demonstrate the guard.**
+What justifies guarding anyway is that the payload crosses a process boundary through a JSON
+deserializer where nullable annotations are erased: null is unreachable because of `radio-api`'s
+current source, **not because the type system enforces it.**
+
+## ⭐ Four premises fell, and the row's own reason was one of them
+
+1. **The row said a guard would drop a broadcast *"the UI handles today."*** It does not: a null
+   throws an NRE at `RadioControlPanel.razor:1053` — swallowed per-subscriber since `UI-7` — while
+   three other surfaces wipe their cached radio state and repaint. **A swallowed exception plus a
+   three-surface wipe is the exact "failure wearing the costume of correct handling" the row invoked
+   that principle against.** ⭐ **The conclusion survived; the reason did not.**
+2. **The `Encoder*` guards cited as precedent were copy-propagated boilerplate** from `2cc41567`
+   (`ENC-9a`) on `VisualizationModeChanged` — an event `01220d0c` has since **deleted**. Decisively,
+   `db132192` did the *identical* typing transformation on `RadioStateChanged` and added **no**
+   guard. Neither shape was ever reasoned about, so neither could be cited as intent.
+3. ⛔ **The plan's control mutation could not pass, and its own `M2` row said why.** `M4` restores the
+   pre-`UI-12` inline guard and claims *"nothing must fail"* — but this row deliberately **adds**
+   audible rejection, which the Encoder tests pin. **Measured: `M4` fails 3.** ⭐ **A control must
+   hold the BEHAVIOUR fixed and vary only the SHAPE; `M4` varied both. A control that cannot pass is
+   not a control, it is a second mutation.** The corrected control `M4b` — inline guard *plus* inline
+   log, no shared helper at all — is **8/8 green**, which is the real demonstration that the tests
+   pin behaviour rather than the refactor. ⭐ And `M4a`'s failures are themselves the evidence: **all
+   three are the log assertion, not one is the dispatch assertion.**
+4. **The plan's *"every fixture uses `OfflineHubTransport`"* is false.**
+   `EncoderHudServiceTests.cs:473-481` builds the service from a bare `ServiceCollection` with no
+   transport registered, so `transport` defaults to `null`. The conclusion survives — that fixture
+   never *starts* the connection — but the shipped comment uses the narrower verified form: every
+   fixture that **starts** this service runs it over `OfflineHubTransport`.
+
+⚠ **Also corrected: the plan's warning-count gate.** `grep -cE "warning"` returns **94**, not 47,
+because MSBuild emits each warning once per project-graph pass. Read the `Warning(s)` summary line
+instead. The same defect is in `OPS-2`'s variant at `:536`, measured.
+
+## Pre-merge review: no HIGH, and every one of the seven findings was in a COMMENT
+
+That is the transferable part. The control flow was right first time; **the defects were all in
+prose asserting more than the code does** — this repo's signature failure mode, and the reason
+`CLAUDE.md` § *Pre-Merge Review* exists.
+
+⭐ **The sharpest: the seam's own justification claimed *"a test holding an `AudioStateHubService`
+cannot make `RadioStateChanged` fire"* — and `RadioControlPanelBandSyncTests.cs:167-173` does exactly
+that, green, today.** That is `CLAUDE.md` item 4 verbatim, the shape that left `TEST-2` open for four
+weeks waiting on a harness nobody needed. ⚠ **And it arrived inside a correction**: the implementer
+had already fixed an over-attribution on that comment and carried a false claim across the split.
+**Reviewing a correction for plausibility is not the same as checking it against the code.**
+
+Also fixed: a counterfactual written in the past indicative (*"a null reached … and threw"*)
+contradicting the paragraph four lines below it; a *"sole server-side sender"* citation covering one
+of the four events the helper serves; a *"cannot occur"* claim inherited for the Encoders rather than
+established; and a claim that `VolumeChanged(null)` means "an absent snapshot" when
+`NowPlayingPanel.razor:617-631` treats it as a **REST re-fetch trigger** — right conclusion, false
+reason, for the second time in one row.
+
+⚠ **The rejection warning is now throttled per event name.** It sat on a path documented at **up to
+20 Hz**, logging into a `Radio.Web` Console sink with no level restriction, on a box where log volume
+correlates with **audible audio distortion**. Either the null cannot occur — so the log is free — or
+it can, and then it can occur at 20 Hz forever. ⚠ The throttle is **instance-scoped, not static**:
+two tests reject a null `RadioStateChanged`, and a static one would suppress whichever ran second and
+fail on execution order alone.
+
+## Deferred, deliberately, as `UI-14`
+
+⭐ **`UI-12` built the test seam for the four events where a regression is UNOBSERVABLE and left the
+three where it is USER-VISIBLE ungated.** The *realistic* form of the forbidden refactor — keeping
+the helper *and* adding a "defensive" null check in `NotifyAsync<T>` — **passes the entire suite**
+while silently dropping every `NowPlayingChanged(null)`. The naive form fails 4 tests, **so the gate
+looks real and is not.** Filed rather than folded in, because it is a scope extension and not a
+defect in what shipped.
+
+---
 
 ## Historical narrative
 
