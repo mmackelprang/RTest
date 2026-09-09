@@ -529,10 +529,16 @@ public class AudioFileEventSource : EventAudioSourceBase
     transport.Cancel();
     transport.Dispose();
 
-    // ⛔ UNCONDITIONAL — see StopCoreAsync. This guard was doubly dead: StopCoreAsync awaits
-    // _playbackTask to completion before returning, so by the time disposal runs, the cancellation
-    // handler that clears _isPlaybackActive has PROVABLY run. The voicemail arm therefore had no
+    // ⛔ UNCONDITIONAL — see StopCoreAsync. This guard was dead for the SAME upstream reason that
+    // one was: EventPlaybackService.ReleaseSourceAsync calls source.StopAsync() and then
+    // source.DisposeAsync(), and TearDownAsync has already cancelled the playback token before
+    // either — so _isPlaybackActive was false on entry to both. The voicemail arm therefore had no
     // working backstop at any layer, where TTSEventSource has one.
+    //
+    // ⚠ It is NOT dead "because StopCoreAsync joins _playbackTask first", and an earlier draft of
+    // this comment said so. That join is `WaitAsync(TimeSpan.FromSeconds(1), cancellationToken)`
+    // with TimeoutException and OperationCanceledException both swallowed, so it does NOT guarantee
+    // the cancellation handler has run — it usually has, which is not the same claim.
     //
     // ⚠ Deliberately NOT the IsPlaying(...) form TTSEventSource uses. IsPlaying answers
     // `player.State == PlaybackState.Playing`, so a PAUSED source would be left registered and still
