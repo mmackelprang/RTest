@@ -197,3 +197,46 @@ Three consequences for the plan:
 
 **No variant has been judged.** The sitting ended before any comparison was made, so every open
 question in this row is still open.
+
+---
+
+## ⭐ NIGHT SITTING 2026-09-08 — the value is **56**, and two premises died
+
+Full record: [`../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md).
+
+**Result: `56` (`#38383F`, delta 36 against the `#141416` base) is the dimmest value the owner can
+clearly see in a dark room, AND it stays calm — no distraction.** Both questions answered.
+
+**That is 6× today's shipping delta of 6, and 2.25× the Designer's seed of 36.**
+
+### ⛔ The Designer's central claim is contradicted by the owner's eye
+
+The answer that discharged this row's gate said **amplitude is the SMALLER half and geometry is the key
+lever.** The owner could see only the *full-width shipping ramp* and found even that *"very dim and not
+easy to see in a dark room."* **Geometry did not help; amplitude is the whole problem.** The seed of
+**36 is below the owner's dark-room visibility threshold.**
+
+⭐ To its credit the Designer explicitly refused to endorse a landing value — *"a seed for the A/B, not
+an answer."* That caution was well placed and is why this was A/B'd rather than built.
+
+### ⛔ The first harness was flawed, and the flaw is the instructive part
+
+Its V1–V4 concentrated the highlight into a band spanning ~**0.32 of the element width**. With the
+sweep travelling 4 element-widths in 1.5 s, that band is on the element only ~**0.49 s per cycle** —
+**so for two-thirds of every cycle those columns were flat, unmoving `#141416`.** The owner read them
+as *static* because they **were** static.
+
+So the first sitting did not test "geometry vs amplitude"; it tested a geometry that traded a
+faint-but-continuous shimmer for a brighter-but-mostly-absent one. ⭐ **Another instrument that could
+not see what it claimed to measure** — same family as `NRestarts=0` and `psidtsAgeSeconds: 608`.
+
+### ⚠ 56 is a FLOOR. Daylight is still untested.
+
+The morning sitting was aborted precisely because the surfaces read as *very dark* in daylight, so
+**the daylight value will not be lower.** One sitting remains, on the same ladder, asking the same two
+questions.
+
+⭐ **If daylight demands more than a night-comfortable maximum, this row changes character entirely** —
+from *"pick a token value"* to *"the shimmer must adapt to ambient light"*, which is materially bigger
+work. **Establish that before anyone builds the cheap version.** 66 was deliberately not evaluated,
+because it only matters in that branch.
