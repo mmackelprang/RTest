@@ -240,3 +240,36 @@ questions.
 from *"pick a token value"* to *"the shimmer must adapt to ambient light"*, which is materially bigger
 work. **Establish that before anyone builds the cheap version.** 66 was deliberately not evaluated,
 because it only matters in that branch.
+
+---
+
+## ✅ DECIDED 2026-09-09 — **56 (`#38383F`, delta 36)**. Both conditions agree. The expensive branch does NOT fire.
+
+Full record: [`../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md).
+
+The night record set the decision rule in advance, and daylight met it:
+
+> *"If 56 also reads as the dimmest clearly visible at midday, the row lands on 56 and is done."*
+
+⭐ **Daylight did not want more than the night-comfortable value.** So this row stays *"pick a token
+value"* and never becomes *"the shimmer must adapt to ambient light"* — the materially bigger work it
+warned about. **`66` was on the ladder, was not chosen, and now never needs a night evaluation.**
+
+### ⛔ The implementation trap — verified, and it is the whole risk in this row
+
+`.skeleton-loading` (`design-system.css:1099-1104`) takes its middle stop from
+**`var(--surface-overlay)`**, and that token has **20 consumers in `design-system.css`**.
+
+**Changing `--surface-overlay` to `#38383F` would lighten twenty unrelated surfaces** — a re-theme
+shipped under a row about skeleton shimmer. ⛔ **Do not touch it.** The shimmer needs **its own token**
+(e.g. `--skeleton-shimmer-highlight`) consumed only by `.skeleton-loading`. ⚠ The Builder must
+re-verify the 20-consumer count itself; it is the entire reason this is a new token rather than a
+one-character edit.
+
+### ⚠ The harness nearly recorded the wrong answer, and the lesson is reusable
+
+Shuffle re-randomises the columns while the answer is given as a **letter**, so a letter-based answer
+is valid only for the arrangement on screen at the moment of judging. The owner's first answer, `"A"`,
+meant **66** under the coordinator's twenty-minute-old mapping and **26** under the live one — *one of
+which would have overturned this row and the other triggered its expensive branch.* Caught by
+re-querying the live page. **Ask for the VALUE, not the position.**

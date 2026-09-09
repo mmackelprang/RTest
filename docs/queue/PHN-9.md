@@ -106,3 +106,31 @@ items, never a total), and `MainLayout` could not hear one if it did.
 
 None. ⚠ **Related but distinct from `PHN-7`** — that row is about `BellHealthService` polling a
 transport that lies; this one is about a badge that polls nothing whatsoever.
+
+---
+
+## ✅ CONFIRMED BY OWNER 2026-09-09 — the row survives its own falsification test
+
+The row shipped with an explicit kill condition: *"tap PHONE, then navigate Home. The badge should
+appear and persist… **If it does not behave that way this row is wrong.**"*
+
+**Owner result: "badge appears and persists."** ⭐ **The mechanism is confirmed, not merely
+consistent** — the count exists *only* because the page it points at was visited.
+
+### Independent corroboration, unplanned
+
+Observed across the same morning without anyone testing for it:
+
+| Time | Badge | Why |
+|---|---|---|
+| Before the 12:11Z deploy | **14** | latched from some earlier `/phone` visit on a process up since 09-08 20:06Z |
+| Immediately after the deploy | **absent** | new process → singleton at `0` → `@if (_phoneUnread > 0)` renders nothing |
+| After the owner tapped PHONE | **15** | `PhonePage` mounted, published, latched again |
+
+⭐ **The middle row is the defect in one observation**: a `radio-web` restart silently zeroed a count
+the owner relies on, and nothing anywhere reported it. **Deploys restart `radio-web`, so this is the
+normal state of the badge, not an edge case.**
+
+⚠ Note the count came back as **15**, not 14 — so the latch is not merely stale, it was **wrong by one
+in the direction that matters** (under-reporting an unread item) for the entire life of the previous
+process.

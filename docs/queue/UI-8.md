@@ -169,3 +169,71 @@ The Designer ran the proposed scan. **It needs two fixes or it fails on green `m
 
 With both handled the scan returns **exactly the two tokens** — this row is the only violation on
 `main`, and **the six runtime properties are the must-not-fire half of the positive control.**
+
+---
+
+## ⭐ OWNER DECISION 2026-09-09 — **no glow.** The Designer's recommendation is OVERRULED.
+
+**Sighted in daylight on the appliance**, on a harness showing both buttons at shipping geometry with
+a blur ladder — `none · 16 · 20 · 24 · 32 px`, alpha fixed at `0.25`. **The owner chose `none`.**
+
+So this row resolves as **delete the dead references**, not *declare the tokens*. The row was filed as
+"enable or remove"; it lands on remove.
+
+### Why this is a strong decision rather than a rejection of the design work
+
+⭐ **The no-glow state is what has been on that panel all along.** The tokens were never declared, so
+every reference already resolves to nothing — an undefined `var()` makes the declaration invalid at
+computed-value time and `box-shadow` falls back to `none`. **The owner has been living with exactly
+this appearance for months and is choosing it from use**, where the handoff was reasoning from a
+design that never shipped.
+
+⛔ **No regression is possible from here**, which is a stronger position than the argument it
+displaces.
+
+### What is overruled, recorded rather than smoothed
+
+The Designer's case was that the glow is a **functional cue, not ornament** — *"the only visual
+separator of interactive from disabled buttons on a panel read from a chair at 1920×720"* — and
+specifically that at **Ringing** the Answer (active) and Hang Up (disabled) buttons render together
+and need separating.
+
+**That argument is not refuted; it is outweighed by lived experience of the actual panel.** If the
+Answer/Hang-Up pair ever does prove hard to separate at Ringing, the fix is a **fill or border**
+change, not a resurrection of these tokens — reopening them would re-import the dual-source problem
+§ *three corrections* describes at `:5186`.
+
+### Implementation — verified 2026-09-09
+
+Exactly **three** live consumers, plus one phantom:
+
+| Line | What | Action |
+|---|---|---|
+| `:5186` | `box-shadow: 0 0 6px var(--signal-green-glow)` — source-tag dot | **delete** (Designer already ruled delete: inline-overridden, enabling creates a dual-source regression) |
+| `:5378` | ⚠ **a COMMENT** — the `ENC-12` prose describing the bug | **leave**; it is not a consumer |
+| `:5425` | `0 0 24px var(--signal-green-glow)` — `.btn-answer` | **delete** |
+| `:5432` | `0 0 24px var(--signal-red-glow)` — `.btn-hangup` | **delete** |
+
+**Zero references in any `.razor` or `.cs`** — confirmed repo-wide. ⛔ **Do NOT declare
+`--signal-green-glow` / `--signal-red-glow`.** After the deletions they have no consumers and must not
+exist.
+
+### ⭐ Three consequences that change this row's shape
+
+1. ⛔ **The two-condition sighting gate is DISCHARGED — and the dark-room half is CANCELLED.** The
+   edit is a **literal zero-visual-change** cleanup: `box-shadow` already computes to `none`, and will
+   continue to. **There is nothing to look at in either lighting condition.** Do not schedule a night
+   sitting for this row; a UAT claiming to have observed the change would be false.
+2. ✅ **Now AUTO-MERGEABLE.** CSS-only, no hardware, no live-audio path, no visual delta. Previously
+   gated on a sighting that no longer has a subject.
+3. ⭐ **The proposed token-declaration lint now passes with ZERO violations** — these two tokens were
+   the file's only ones. ⚠ The lint still needs its two documented fixes before it can be trusted:
+   **strip comments first** (or `:5378` above flags as a phantom consumer — *a lint that flags its own
+   documentation gets disabled*) and **allowlist the six runtime-set properties**.
+
+### Verification
+
+⚠ **A screenshot diff is the honest gate here, and it must show NO change.** Assert the computed
+`box-shadow` on `.btn-answer` / `.btn-hangup` is `none` **both before and after** — that is the whole
+claim. ⛔ **A test asserting the glow is absent proves nothing**, since it is absent today; the
+meaningful assertion is that **no token reference remains** and the lint returns clean.
