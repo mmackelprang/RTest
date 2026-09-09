@@ -644,10 +644,13 @@ This class already fetches `/css/design-system.css` through the real pipeline an
   /// exactly like the bug UX-1 fixed, with a green build and a green suite.
   /// </summary>
   /// <remarks>
-  /// This is not hypothetical in this stylesheet. <c>--signal-red-glow</c> is used in a live
-  /// <c>box-shadow</c> at design-system.css:5432 and is declared nowhere; the comment at :5378-5381
-  /// documents the trap, and that glow renders as nothing today. This test exists so
-  /// <c>--skeleton-shimmer</c> cannot join it.
+  /// ⚠ AMENDED BY UI-8 (2026-09-09) — do not ship the previous wording, which is now false.
+  /// It cited <c>--signal-red-glow</c> as a LIVE dangling consumer at design-system.css:5432.
+  /// UI-8 DELETED that reference (and the two <c>--signal-green-glow</c> ones) rather than
+  /// declaring the tokens, on an owner decision of NO GLOW, so this stylesheet now has no
+  /// surviving example. The hazard is unchanged and so is the reason for this test: an undeclared
+  /// custom property makes the whole declaration invalid at computed-value time, so the value is
+  /// silently dropped. This test exists so <c>--skeleton-shimmer</c> cannot become the next one.
   /// </remarks>
   [Fact]
   public async Task SkeletonShimmerToken_IsBothDeclaredAndConsumed()
@@ -843,6 +846,13 @@ a *wide* shape shimmering at all (the UAT frames contain only ~178 px bars and s
 seen for the first time. Apply only if the owner asks.
 
 ### 5.3 `--signal-red-glow`
+
+> ⚠ **CLOSED BY `UI-8`, 2026-09-09 — and the resolution was DELETE, not declare.** The paragraph
+> below is kept as the record of the find, but every line citation in it is now stale and its
+> "worth its own row" recommendation is discharged. The owner sighted the two call buttons on a
+> blur ladder in daylight and chose **NO GLOW**, so `UI-8` deleted the three dead references and
+> declared neither token. ⛔ **Do not chase, declare, or re-reference `--signal-red-glow` or
+> `--signal-green-glow`** — see `docs/queue/UI-8.md` § *OWNER DECISION 2026-09-09*.
 
 **A live, shipped, silent defect found while planning this row.** It is consumed in a real `box-shadow`
 at `design-system.css:5432` and declared nowhere, so that glow renders as nothing today. Same class as

@@ -187,7 +187,11 @@ the resolution is *delete*, not *declare*.** This entry asked whoever fixed it t
 glow was ever wanted." The owner decided, at the panel, in daylight, against a blur ladder
 (`none · 16 · 20 · 24 · 32`): **no glow.** `UI-8` therefore deleted the three dead references —
 `--signal-green-glow` had two, `--signal-red-glow` one — and **declared neither token.** Both now
-have zero consumers and must not be reintroduced. The edit was a literal zero-visual-change cleanup:
+have **zero consumers in `design-system.css`** and must not be reintroduced. (The non-shipped mockup
+under `docs/design-handoffs/design_handoff_phone_page/` still references them; that is the source the
+port came from and is deliberately left alone.) **Pre-existing and untouched by `ENC-8`**, which was
+forbidden from adding design tokens, and neither `ENC-8` nor `ENC-12` ever referenced it — which is
+why the entry is filed here. The edit was a literal zero-visual-change cleanup:
 an undefined `var()` is invalid at computed-value time, so every one of those `box-shadow`s already
 computed to `none`. See `docs/queue/UI-8.md` § *OWNER DECISION 2026-09-09*.
 

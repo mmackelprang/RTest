@@ -84,6 +84,11 @@
   --source-usb:             #4ADE80;
 
   /* ── Signal Colors ── */
+  /* ⛔ Amber is the ONLY glow token, deliberately. --signal-green-glow / --signal-red-glow do not
+     exist and must not be added here: the owner sighted both call buttons on a blur ladder in
+     daylight on 2026-09-09 and chose NO GLOW, so UI-8 deleted their three dead references rather
+     than declaring them (docs/queue/UI-8.md § "OWNER DECISION 2026-09-09"). If the Answer/Hang-Up
+     pair ever does prove hard to separate at Ringing, change fill or border — not this block. */
   --signal-amber:           #F0A830;
   --signal-amber-glow:      rgba(240, 168, 48, 0.25);
   --signal-green:           #4ADE80;
@@ -5378,14 +5383,13 @@ body {
    record. The obvious flourish would be `0 0 6px var(--signal-red-glow)` to match .nav-badge, but
    --signal-red-glow and --signal-green-glow do not exist: they were never declared in :root, so
    every reference to them was invalid at computed-value time and rendered as nothing while looking
-   correct in the source. UI-8 DELETED the last three such references rather than declaring the
-   tokens, on an owner decision taken at the panel in daylight against a blur ladder — see
-   docs/queue/UI-8.md § "OWNER DECISION 2026-09-09".
+   correct in the source. UI-8 DELETED the last three such references in this file rather than
+   declaring the tokens, on an owner decision taken at the panel in daylight against a blur ladder —
+   see docs/queue/UI-8.md § "OWNER DECISION 2026-09-09".
 
-   ⛔ Do not declare either token to "make this work". No-glow is the chosen appearance, not an
-   oversight, and resurrecting them also re-imports a dual-source bug on the phone hero source-tag
-   dot (that rule hard-codes --signal-green while the component sets the dot inline per state). If
-   these badges ever do prove hard to tell apart, change fill or border instead. */
+   ⛔ Do not declare either token to "make this work" — no-glow is the chosen appearance, not an
+   oversight. There is a matching note beside --signal-amber-glow in :root, which is where someone
+   would actually go to add them. */
 .encoder-nav-fault {
   position: absolute;
   bottom: 4px;
