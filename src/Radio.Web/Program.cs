@@ -606,6 +606,9 @@ app.UseAntiforgery();
 // means the first fix that silently fails to land gets debugged as a code bug instead of a
 // deploy bug. This endpoint is what closes that gap; it is the Web-side twin of the API's
 // /api/health/version and answers on Radio.Web's own port.
+// ⚠ UI-11: ApiNotFound.Body names this route by hand. If you add, rename or remove an /api/ route on
+// this service, update that constant in the same commit or the 404 body starts telling callers
+// something untrue.
 app.MapGet("/api/health/version", () =>
   Results.Ok(Radio.Core.Utilities.AssemblyBuildInfo.For(typeof(Program).Assembly)));
 
@@ -647,7 +650,8 @@ app.MapRazorComponents<Radio.Web.Components.App>()
 // UI-11 - a terminal 404 with a JSON problem body for any unmatched path under /api/.
 //
 // This is NOT an ordering fix for a SPA fallback: there is no SPA fallback in this app, and there
-// never has been (`git log -S MapFallback -- src/` is empty). MapRazorComponents above registers one
+// never has been (`git log -S MapFallback -- src/` was empty before this commit, and now returns
+// only this one). MapRazorComponents above registers one
 // endpoint per @page template and no catch-all, so an unmatched path already 404'd - it just did so
 // with zero bytes and no Content-Type, which is what sent a caller off to file a defect against the
 // wrong service. See ApiNotFound's remarks, and the plan at

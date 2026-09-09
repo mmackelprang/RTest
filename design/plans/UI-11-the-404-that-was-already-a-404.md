@@ -800,27 +800,42 @@ cheap.
 
 The row asks for `/api/`-only and that is right. `/stream/audio` and `/stream/audio/mp3` are
 `Radio.API` routes (§0.6) and unreachable from here — but the eleven non-`/api/` page routes on *this*
-service are very reachable, and ~~a wider pattern is how the console goes black~~.
+service are very reachable, and **a wider pattern is how the console goes black**.
 
-> ### ⛔ CORRECTION — 2026-09-09 (Builder, `UI-11`). The struck clause is FALSE, and this section contradicted §0.6.
+> ### ✅ CONFIRMED — 2026-09-09 (Builder, `UI-11`). Measured, and the mechanism is NOT the one you would guess.
 >
-> **Measured by mutation, not argued.** Widening the pattern to `/{**rest}` and running the suite:
-> **20/20 GREEN**, including all twelve deep-link assertions — the ones §4 nominates as the guard
-> against exactly this. **A wider pattern does not black out the console.**
+> ⛔ **This section was briefly struck as false during the `UI-11` cycle, and the strike was wrong.**
+> It is restored, and the retraction is left visible below because *how* it went wrong is the useful
+> part. **§6.3 is TRUE.** Widening the pattern to `/{**rest}` and running the **whole test project**:
+> **7 failed / 1,197 passed** — the four `StaticAssetPipelineTests` cases go RED, `/css/design-system.css`
+> returning `NotFound` instead of `OK`.
 >
-> **Why, and the plan already knew:** `MapFallback` stamps `Order = int.MaxValue` (§0.6 establishes
-> this and uses it to argue the real `/api/*` routes are safe). That same property protects *every*
-> real endpoint, page routes included — a fallback loses to all of them however wide its pattern is.
-> **§0.6 and §6.3 are both in this document and they contradict each other**; §0.6 is the correct one.
+> **The mechanism, since it is not obvious and §0.6 does not cover it.** `Order = int.MaxValue` makes
+> the fallback lose to real *endpoints*, which is why the twelve `@page` routes survive — that part of
+> §0.6 is right. **Static files are not endpoints.** `WebApplicationBuilder` inserts the automatic
+> `UseRouting()` *before* all user middleware, so routing selects the fallback endpoint first; then
+> `StaticFileMiddleware` — which is user middleware at `Program.cs:599` — **stands down whenever an
+> endpoint is already selected**. And `{**rest}` carries no `:nonfile` constraint (that lives only in
+> `MapFallback`'s *default* pattern, which this plan does not use). So the CSS, the JS, the fonts, the
+> Radzen theme and **`_framework/blazor.web.js`** all 404. Lose `blazor.web.js` and the circuit never
+> starts: an unstyled, non-interactive shell on a 1920x720 wall panel. **The console goes black,
+> literally.**
 >
-> ⭐ **So the narrow scope is still right, for a reason this plan never gave: truthfulness, not
-> availability.** `/some-typo` is a mistyped *page*, and a `/{**rest}` rule answers it with *"No API
-> route on this service matches the request path"* — a well-formed body carrying a wrong answer, which
-> is the defect class this whole row is about. The console stays up; the message becomes a lie.
+> ⭐ **Why the Builder got this wrong, recorded because the error is more reusable than the fact.** The
+> mutation was run as `dotnet test --filter "FullyQualifiedName~ApiNotFoundPipelineTests"` and came
+> back 20/20 green — then reported as *"the entire suite"*. **20 is exactly that one class's case
+> count.** The guard was in the same project the whole time, in `StaticAssetPipelineTests` — the very
+> file this row's Task 1 had *itself moved* an hour earlier. Same shape as `KIOSK-3`'s *"our 'zero
+> consumers' grep was scoped to `src/`; the consumer is a shell script."*
+> ⚠ **Two earlier mutations had each failed exactly their own test, and that is what made the third
+> feel safe. A positive control validates the INSTRUMENT, never the SEARCH SPACE.**
 >
-> ⚠ **And nothing was testing the scope at all.** The claimed guard could not fail. Closed by
-> `UnmatchedNonApiPath_DoesNotGetTheApiProblemBody`, a differential theory that is RED under the
-> widening (3 cases) while the original 20 stay green.
+> ✅ **One genuine addition survives the retraction: the narrow scope has a *second* reason nobody had
+> written down — truthfulness.** `/some-typo` is a mistyped *page*, and a `/{**rest}` rule answers it
+> *"No API route on this service matches the request path"* — a well-formed body carrying a wrong
+> answer. Both reasons hold, and they are independent: **availability** (static assets die) and
+> **truthfulness** (a page miss gets an API answer). `UnmatchedNonApiPath_DoesNotGetTheApiProblemBody`
+> pins the second; `StaticAssetPipelineTests` already pinned the first.
 
 ### 6.4 No `instance` member, no `traceId`, no logging
 

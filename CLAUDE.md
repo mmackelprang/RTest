@@ -436,7 +436,9 @@ curl -s http://radio:5002/api/health/version   # Web  — gitSha, assemblyName "
 in JSON.** ⚠ **`Radio.Web` has no SPA fallback and never had one** — it is a Blazor Web App, so
 `MapRazorComponents` registers one endpoint per `@page` route and **no catch-all**, and a mistyped API
 path has therefore always 404'd rather than returning an app shell. There is no `index.html` in the
-project and `git log -S "MapFallback" --all -- src/` is empty. **The `200`-with-`index.html` symptom
+project, and `git log -S "MapFallback" --all -- src/` returned **nothing at all** until `UI-11`'s own
+commit — so the single hit it returns today is the terminal 404 described here, not a fallback.
+**The `200`-with-`index.html` symptom
 that `UI-11` was filed against came from RotaryPhone's service on `:5004`, not from ours** — the row
 survived only because our 404 was *bodyless*: zero bytes and no `Content-Type` at all, which is what
 cost the other repo a probe on a box where both services expose `/api/*`. `Radio.API` returns a bare

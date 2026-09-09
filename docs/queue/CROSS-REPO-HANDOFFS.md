@@ -17,7 +17,7 @@ item 1), here is what was independently verified rather than asserted:
 
 | Check | Result |
 |---|---|
-| `git log -S "MapFallback" --all -- src/` | **0 commits** — not removed, **never existed** |
+| `git log -S "MapFallback" --all -- src/` | **0 commits** before our own fix — not removed, **never existed** (it returns exactly one hit now: `UI-11`'s terminal 404) |
 | `MapFallback` / `MapFallbackToPage` / `MapFallbackToFile` / `UseSpa` / `UseDefaultFiles` / `UseStatusCodePages*` in `src/` | **0 hits** |
 | Any `*.html` under `src/Radio.Web/` | **0 files** — there is no `index.html` to return; the shell is generated from `Components/App.razor` |
 | `@page` routes | **12, all plain literals, no catch-all** |

@@ -1,9 +1,22 @@
 @* No <NotFound> fragment: this is a Blazor Web App, and the framework does not use one.
-   It was retained for back-compat in .NET 8/9 (present but inert) and is unsupported on .NET 10,
-   which this project targets. The markup that used to sit here promised "Sorry, there's nothing at
-   this address." for an unknown URL; that string has never been served, and an unmatched path is
-   answered by the ASP.NET Core pipeline instead - a bare 404 for a page route, or the JSON problem
-   body in Radio.Web.Configuration.ApiNotFound for anything under /api/ (UI-11). *@
+
+   Precisely, because "removed" and "deprecated" are different claims and only one is true:
+   Router.NotFound still EXISTS on .NET 10 and still compiles - the ref assembly carries
+   [Obsolete("NotFound is deprecated. Use NotFoundPage instead.")]. What it no longer does is work.
+   It was retained inert for back-compat in .NET 8/9, and Microsoft's .NET 10 routing documentation
+   states the render fragment "isn't supported in .NET 10 or later". So deleting it also removes an
+   obsolete-API use, not just dead markup.
+
+   The markup that used to sit here promised "Sorry, there's nothing at this address." for an unknown
+   URL. No reachable caller can trigger it - Router renders the fragment only for non-intercepted
+   (programmatic) navigations, and every NavigationManager.NavigateTo in this project targets one of
+   the twelve real @page routes. An unmatched path is answered by the ASP.NET Core pipeline instead:
+   a bare 404 for a page route, or the JSON problem body in Radio.Web.Configuration.ApiNotFound for
+   anything under /api/ (UI-11).
+
+   The supported replacement is the NotFoundPage parameter (NotFoundPage="typeof(Pages.NotFound)").
+   Deliberately not adopted: this service's unmatched-path behaviour is a pipeline concern, and a
+   friendly HTML 404 for page routes is a separate decision that must exclude /api/. *@
 <Router AppAssembly="typeof(Program).Assembly">
   <Found Context="routeData">
     <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />

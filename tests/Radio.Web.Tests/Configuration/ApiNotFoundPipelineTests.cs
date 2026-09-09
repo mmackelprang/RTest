@@ -105,24 +105,41 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
   /// </summary>
   /// <remarks>
   /// <para>
-  /// ⭐ <b>This test exists because mutation testing found the gap it closes.</b> Widening the route
-  /// pattern from <c>/api/{**rest}</c> to <c>/{**rest}</c> left the entire suite <b>20/20 green</b> —
-  /// including all twelve deep-link assertions, which the plan had nominated as the guard against
-  /// exactly that widening. They cannot detect it: <c>MapFallback</c> stamps
-  /// <c>Order = int.MaxValue</c>, so it loses to every real <c>@page</c> endpoint no matter how wide
-  /// its pattern is. A wider pattern therefore does <em>not</em> "black out the console" — the plan's
-  /// stated reason for the narrow scope is false, and nothing was testing the scope at all.
+  /// <b>Widening the route pattern to <c>/{**rest}</c> breaks this service in two independent ways,
+  /// and this test pins the second one.</b>
   /// </para>
   /// <para>
-  /// What a wider pattern actually breaks is <b>truthfulness</b>. <c>/some-typo</c> is a mistyped
-  /// <em>page</em>, and answering it with "No API route on this service matches the request path"
-  /// tells the caller something untrue about what they asked for — a wrong answer wearing a
-  /// well-formed body, which is this repo's most expensive recurring defect class.
+  /// <b>1. Availability</b> — already covered by <see cref="StaticAssetPipelineTests"/>, which goes RED
+  /// under the widening (measured: 7 failed / 1,197 passed across this project, with
+  /// <c>/css/design-system.css</c> returning <c>NotFound</c>). The mechanism is worth knowing because
+  /// it is not the one <c>Order = int.MaxValue</c> would suggest: that only makes the fallback lose to
+  /// real <em>endpoints</em>, which is why the twelve <c>@page</c> routes survive. <b>Static files are
+  /// not endpoints.</b> The automatic <c>UseRouting()</c> runs before all user middleware, so routing
+  /// selects the fallback first; <c>StaticFileMiddleware</c> then stands down because an endpoint is
+  /// already selected. And <c>{**rest}</c> has no <c>:nonfile</c> constraint — that lives only in
+  /// <c>MapFallback</c>'s <em>default</em> pattern, which this app does not use. So the CSS, JS, fonts
+  /// and <c>_framework/blazor.web.js</c> all 404, and the circuit never starts.
+  /// </para>
+  /// <para>
+  /// <b>2. Truthfulness</b> — what this test pins, and what nothing covered before. <c>/some-typo</c>
+  /// is a mistyped <em>page</em>, and answering it with "No API route on this service matches the
+  /// request path" tells the caller something untrue about what they asked for — a wrong answer
+  /// wearing a well-formed body, which is this repo's most expensive recurring defect class and the
+  /// row's own thesis one layer along.
   /// </para>
   /// <para>
   /// ⚠ The differential is what makes this non-vacuous. The first assertion proves the terminal rule
   /// is live and reachable, so the second is testing the <em>scope</em> rather than passing because
   /// the endpoint was absent. Do not split them into two tests.
+  /// </para>
+  /// <para>
+  /// ⛔ <b>A note on how this test nearly shipped with a false justification.</b> The mutation above was
+  /// first run as <c>dotnet test --filter "FullyQualifiedName~ApiNotFoundPipelineTests"</c>, came back
+  /// 20/20 green, and was written up as "the entire suite" — but 20 is exactly this one class's case
+  /// count, and the guard was in the same project all along. <b>Scope the mutation to the project, not
+  /// to the class you are writing.</b> Two earlier mutations had each failed exactly their own test,
+  /// which is what made the third feel safe: a positive control validates the instrument, never the
+  /// search space.
   /// </para>
   /// </remarks>
   [Theory]
@@ -183,11 +200,17 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
   /// <para>
   /// ⭐ <b>That reasoning is right about the status and wrong about this assertion.</b> The oracle here
   /// is not "what status did it return" but "did the terminal rule claim this path", and that is
-  /// stable across all three reachable outcomes: Radio.API up with the file (<c>200</c> + image),
-  /// up without it (<c>404</c>, no content type, via <c>Results.NotFound()</c>), or absent entirely
-  /// (connection refused → the same <c>catch</c> → the same <c>Results.NotFound()</c>). None of them
-  /// is <c>application/problem+json</c>. Asserting the negative of the terminal rule is therefore
-  /// deterministic where asserting a status code would not be.
+  /// stable across every reachable outcome: Radio.API up with the file (<c>200</c> + image), up
+  /// without it (<c>404</c>, no content type, via <c>Results.NotFound()</c>), absent entirely
+  /// (connection refused → the same <c>catch</c> → the same <c>Results.NotFound()</c>), or up but
+  /// slow (the proxy's 10 s timeout → <c>TaskCanceledException</c> → that same bare <c>catch</c>).
+  /// None of them is <c>application/problem+json</c>. Asserting the negative of the terminal rule is
+  /// therefore deterministic where asserting a status code would not be.
+  /// </para>
+  /// <para>
+  /// ⚠ The fourth outcome is a <em>latency</em> risk, not a correctness one: a Radio.API that is
+  /// listening but wedged costs this test up to 10 s. It cannot make it flake — the assertion holds
+  /// on every branch — but if this test ever becomes the slow one in the suite, that is why.
   /// </para>
   /// </remarks>
   [Fact]

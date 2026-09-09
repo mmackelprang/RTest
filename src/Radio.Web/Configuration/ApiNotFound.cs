@@ -44,6 +44,14 @@ internal static class ApiNotFound
   /// the request this exists to answer is "which of the two services did I just hit?" — the question
   /// RotaryPhone burned a probe on. It names nothing from the request itself.
   /// </summary>
+  /// <remarks>
+  /// ⚠ <b>This string hardcodes two ports and the Web-side route list, and nothing pins them.</b>
+  /// Accurate as written against <c>Program.cs</c>'s <c>/api/health/version</c> and
+  /// <c>/api/albumart/{filename}</c> and the 5000/5002 split. <b>Add a third <c>/api/*</c> route to
+  /// Radio.Web and this body silently becomes wrong</b> — a well-formed document asserting something
+  /// untrue, which is the exact defect class UI-11 is about. If you map another <c>/api/</c> route on
+  /// this service, update this constant in the same commit.
+  /// </remarks>
   internal const string Body =
     """{"type":"about:blank","title":"Not Found","status":404,"detail":"No API route on this service matches the request path. Radio.Web (port 5002) serves only /api/health/version and /api/albumart/{filename}. The audio, radio, bluetooth, queue and configuration API is Radio.API on port 5000."}""";
 
