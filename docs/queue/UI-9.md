@@ -53,8 +53,15 @@ sweeping the mechanisms that census was blind to (`.On<`, `LocationChanged`, `.S
 `PropertyChanged`, `CancellationToken.Register`, `EventCallback`) — all zero.
 
 ⭐ **And this row closes the class.** A repo-wide sweep found `SystemConfigPage` is the **only**
-component in `Radio.Web` that subscribes to a singleton service event without a matching `-=`; the
-other 22 all unsubscribe correctly.
+component in `Radio.Web` that subscribes to a singleton service event without a matching `-=`.
+
+⚠ **Corrected 2026-09-08 in pre-merge review — "the other 22 all unsubscribe correctly" does NOT
+reproduce, and the number is dropped rather than restated.** An independent sweep counted **16**
+other subscribing components, plus 3 subscribing *services* (`AudioStateStore`,
+`EncoderHudService`, `ConsolePlaybackState`) which are not components at all. **The substantive
+claim survived falsification** — every other subscription site has a matching `-=` in the same
+file; the only two without one are `MainLayout._timer.Elapsed` and `PhonePage._pollTimer.Elapsed`,
+both component-owned timers stopped and disposed, so the delegate dies with the component.
 
 ## Verification
 

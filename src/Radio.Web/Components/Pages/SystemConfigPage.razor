@@ -1935,6 +1935,20 @@
   private const int IntegrationsTabIndex = 7;
   private const int RotaryEncoderSubTabIndex = 0;
   private int _integrationsSubTab = 0;
+  /// <summary>Set in <see cref="Dispose"/>; gates the hub subscriptions against a teardown that
+  /// beats them.</summary>
+  /// <remarks>
+  /// ⚠ UI-9: this closes the SECOND half of the leak, and it is the half a symmetric `-=` alone
+  /// does not reach. InitializeSignalRAsync is awaited from OnInitializedAsync only AFTER a chain
+  /// of API round-trips, so a navigation away during that window disposes the component FIRST —
+  /// the three `-=` run against an empty event and no-op correctly — and the pending continuation
+  /// then resumes and subscribes to the process-lifetime singleton with nothing left to remove it.
+  /// That is the row's own defect in a narrower window. HttpClient's default timeout is 100 s and
+  /// this appliance has documented API outages, so the window is seconds to minutes, not
+  /// microseconds. Idiom copied from PhonePage.razor:146.
+  /// </remarks>
+  private bool _disposed;
+
   private System.Threading.Timer? _statsTimer;
 
   // System Stats
@@ -2221,7 +2235,20 @@
       // the delegate holds this component, and the component holds its whole render tree. Measured
       // before the fix: one handler per event per visit, five visits leaving five, without bound.
       // The invariant is the SYMMETRY, not the naming — every `+=` here has a matching `-=` in
-      // Dispose(). Shape copied from NowPlayingPanel.razor's subscribe/unsubscribe pair.
+      // Dispose(). Shape copied from NowPlayingPanel.razor's subscribe/unsubscribe pair — the
+      // PAIR, not the disposal interface: that component is IAsyncDisposable and unsubscribes in
+      // DisposeAsync, while this page is IDisposable. Copy the symmetry, not the interface.
+      //
+      // ⚠ The _disposed gate is the other half of the fix. Everything above this line in
+      // OnInitializedAsync is awaited API work, so teardown can beat us here; without the gate we
+      // would subscribe to a process-lifetime singleton AFTER Dispose() had already run its `-=`,
+      // leaving three handlers nothing can remove. One check covers all three because no await
+      // separates them.
+      if (_disposed)
+      {
+        return;
+      }
+
       HubService.SourceChanged += OnHubSourceChangedAsync;
       HubService.EncoderConnectionChanged += OnHubEncoderConnectionChangedAsync;
       HubService.PhoneCallStateChanged += OnHubPhoneCallStateChangedAsync;
@@ -4210,13 +4237,24 @@
     // behind, each retaining this component and its whole render tree, on an appliance that runs
     // for weeks between restarts.
     //
-    // No guard is needed for the partially-initialized case. If OnInitializedAsync throws before
-    // reaching InitializeSignalRAsync, Blazor still disposes the component and these three `-=`
-    // run against handlers that were never added — Delegate.Remove on a delegate that is not in
-    // the list, including against a null event, is a defined no-op rather than an exception.
+    // These three run unconditionally, and need no null or "did we subscribe" check: if
+    // OnInitializedAsync threw before reaching InitializeSignalRAsync, they remove handlers that
+    // were never added, and Delegate.Remove against a delegate not in the list — including
+    // against a null event — is a defined no-op rather than an exception.
+    //
+    // ⚠ That covers teardown AFTER subscription. Teardown BEFORE it is the _disposed flag's job,
+    // set below and read in InitializeSignalRAsync: unsubscribing first and subscribing second
+    // would otherwise leave exactly the handlers this row exists to remove.
+    //
+    // Order is deliberate: the unsubscribes precede the timer disposals because they are the only
+    // statements here that CANNOT throw (HubService is injected, and event removal is an
+    // interlocked Delegate.Remove), while StopEncoderPolling can. Leak-critical and throw-free
+    // goes first, so a failure in the rest cannot strand a handler on the singleton.
     HubService.SourceChanged -= OnHubSourceChangedAsync;
     HubService.EncoderConnectionChanged -= OnHubEncoderConnectionChangedAsync;
     HubService.PhoneCallStateChanged -= OnHubPhoneCallStateChangedAsync;
+
+    _disposed = true;
 
     _statsTimer?.Dispose();
     _sourceGainDebounceTimer?.Dispose();

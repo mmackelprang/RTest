@@ -483,10 +483,14 @@ public class SystemConfigPageTests : TestContext
   /// The three <see cref="AudioStateHubService"/> events this page subscribes to, counted together.
   /// </summary>
   /// <remarks>
-  /// ⚠ REFLECTION IS NOT A SHORTCUT HERE, IT IS THE ONLY ROUTE. A field-like <c>event</c> can only be
-  /// used with <c>+=</c>/<c>-=</c> from outside its declaring type, so <c>hub.SourceChanged
-  /// .GetInvocationList()</c> is CS0070 and will not compile; <c>InternalsVisibleTo</c> does not help
-  /// because the backing field is compiler-generated and private.
+  /// ⚠ REFLECTION IS THE ONLY ROUTE THAT DOES NOT CHANGE PRODUCTION CODE. A field-like <c>event</c>
+  /// can only be used with <c>+=</c>/<c>-=</c> from outside its declaring type, so
+  /// <c>hub.SourceChanged.GetInvocationList()</c> is CS0070 and will not compile;
+  /// <c>InternalsVisibleTo</c> does not help because the backing field is compiler-generated and
+  /// private. A test-only <c>SubscriberCount</c> accessor on <see cref="AudioStateHubService"/>
+  /// would also work — it is rejected as a production seam bought for a test (ADR-030), not as an
+  /// impossibility, and saying "only route" flatly would be the kind of overclaim CLAUDE.md
+  /// § Pre-Merge Review exists to catch.
   ///
   /// ⭐ It goes through <see cref="HubEventFire.InvocationListOf{TDelegate}"/> — the shared seam UI-7
   /// (`C-213`) extracted precisely so that tests stop hand-rolling this <c>GetField</c> — rather than
@@ -543,6 +547,16 @@ public class SystemConfigPageTests : TestContext
       HubHandlerCounts(hub).Should().NotBeEquivalentTo(baseline,
         "rendering the page must attach hub handlers; if this never becomes true the test is blind"));
 
+    // ⚠ AND THE MOVEMENT MUST BE PER-EVENT, which the check above cannot say: NotBeEquivalentTo
+    // fires when ANY ONE of the three counts moves. Deleting one `+=`/`-=` PAIR outright — which
+    // would silently kill that card's live refresh — leaves the other two moving and the symmetry
+    // below intact, so both tests would stay green. Pinning +1 on each key is what converts the
+    // measured "1 per event per visit" into a guard rather than a note in a commit message.
+    HubHandlerCounts(hub).Should().BeEquivalentTo(
+      baseline.ToDictionary(kv => kv.Key, kv => kv.Value + 1),
+      "the page subscribes to all THREE events, so each must gain exactly one handler — measured "
+      + "at 1 per event per visit before the fix");
+
     DisposeComponents();
 
     HubHandlerCounts(hub).Should().BeEquivalentTo(baseline,
@@ -558,8 +572,28 @@ public class SystemConfigPageTests : TestContext
   public void SystemConfigPage_RepeatedVisits_DoNotAccumulateHubHandlers()
   {
     var hub = Services.GetRequiredService<AudioStateHubService>();
+    var baseline = HubHandlerCounts(hub);
 
-    RenderComponent<SystemConfigPage>();
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // ⚠ THIS TEST NEEDS ITS OWN INSTRUMENT CHECK, and its absence would be worse here than in the
+    // test above, because the starvation failure mode is a false PASS rather than a false fail. If
+    // the page ever stops subscribing — an earlier await throwing, an event renamed, a DI change —
+    // every count is 0 forever, five visits leave 0, and the assertion at the end is satisfied by
+    // a page that does nothing at all. CLAUDE.md § Test Timing tolerates a timing dependency only
+    // when starvation WEAKENS an assertion; one that flips it green is the shape the rule forbids.
+    //
+    // ⚠ IT MUST BE READ WHILE THE COMPONENT IS STILL LIVE. The first draft of this guard compared
+    // the count taken AFTER DisposeComponents() against the baseline and demanded they differ —
+    // which asserts the leak is still present, and went RED against the fixed page. That is the
+    // row's own non-discriminating shape reproduced by the person who had just criticised it; it
+    // is recorded here because reading a subscription count after teardown is evidently an easy
+    // mistake to make twice.
+    cut.WaitForAssertion(() =>
+      HubHandlerCounts(hub).Should().NotBeEquivalentTo(baseline,
+        "one visit must attach handlers while the component is live; if it never does, every "
+        + "assertion below passes vacuously against a page that subscribes to nothing"));
+
     DisposeComponents();
     var afterOneVisit = HubHandlerCounts(hub);
 

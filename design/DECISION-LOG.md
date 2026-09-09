@@ -670,8 +670,19 @@ had. **The naming is a means; the symmetry is the property.** No new interface, 
 lifecycle — the page has declared `@implements IDisposable` with a live `Dispose()` throughout.
 
 ⭐ **This closes the class in `Radio.Web`.** A repo-wide sweep found `SystemConfigPage` was the only
-component subscribing to a singleton service event without a matching `-=`; the other 22 all
-unsubscribe correctly. This was a one-off outlier, not the first instance of a pattern.
+component subscribing to a singleton service event without a matching `-=`. This was a one-off
+outlier, not the first instance of a pattern.
+
+⚠ **The row and the plan both said "the other 22 all unsubscribe correctly"; that number does not
+reproduce and has been dropped rather than restated.** An independent pre-merge sweep counted
+**16 other components** subscribing to service events, plus 3 subscribing services
+(`AudioStateStore`, `EncoderHudService`, `ConsolePlaybackState`) — which are not components and do
+not carry a component disposal interface. **The substantive claim survived falsification**: every
+other subscription site has a matching `-=` in the same file, the only two exceptions being
+`MainLayout._timer.Elapsed` and `PhonePage._pollTimer.Elapsed`, both component-owned timers that
+are stopped and disposed, so the delegate dies with the component. ⭐ **A specific count that does
+not reproduce is what teaches the next reader to distrust the claim that does** — this repo has now
+been burned by that four times, so the claim is kept and the number is not.
 
 ### ⛔ The instrument, which is the part worth keeping
 

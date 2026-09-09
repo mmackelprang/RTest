@@ -1663,7 +1663,10 @@ handlers outlived every circuit that added them. Fixed with three named methods 
 the `Dispose()` the page already had.
 
 ⭐ **This closes the class in `Radio.Web`** — `SystemConfigPage` was the only component subscribing
-to a singleton service event without a matching `-=`; the other 22 all unsubscribe correctly.
+to a singleton service event without a matching `-=`. ⚠ **The row's "the other 22 all unsubscribe
+correctly" does NOT reproduce and the number was dropped**: an independent sweep counted 16 other
+components plus 3 subscribing services. The substantive claim survived — every other site has a
+matching `-=`, the two exceptions being component-owned timers that are stopped and disposed.
 
 ⛔ **The row's original verification could not tell the fixed state from the broken one**, and that
 is the transferable part. It asked to *render twice and assert the invocation list does not grow* —
