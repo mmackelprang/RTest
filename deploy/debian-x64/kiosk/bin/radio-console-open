@@ -106,18 +106,23 @@
 #   evidenced:
 #     - `authBlackout` — measured at 920 ms with ZERO true-samples across 411 polls. Strong.
 #       ⛔ Do NOT latch it: latching is right for a banner and wrong here (ADR-032).
-#     - all four terms together — 68 consecutive samples of this predicate against the live
-#       bridge (2026-09-09T14:44-14:53Z) returned 68 online, 0 amber, max lastApiSuccessAt age
-#       59 s. That is the only measurement covering the whole predicate, and it is nine minutes
-#       long.
-#     - `cookiesValid:false` and `degraded:true` — ⚠ NO measured false-dialog rate exists for
-#       either, in this repo or anywhere we have been told about. They are included because
-#       GvBridgeHealth carries them and divergence between the two consumers is worse; the
-#       cry-wolf risk from them specifically is UNQUANTIFIED. A flap was observed once by hand at
-#       14:39Z (cookiesValid false, degraded true, recovered inside ~60 s) and did not recur in
-#       the 68-sample run. RotaryPhone say the 20-minute unvalidated-cookie churn behind it stops
-#       when their #78 deploys, so the honest read is that this is an upper bound taken before
-#       their fix, not a steady-state rate.
+#     - all four terms together — 160 consecutive samples of this predicate against the live
+#       bridge, 8 s apart, 2026-09-09T14:44:30-15:05:50Z (21 minutes, so it spans one of
+#       RotaryPhone's ~20-minute cookie cycles): 159 online, ONE amber. Max lastApiSuccessAt age
+#       59 s against the 120 s gate, so staleness never came close to firing.
+#     - `cookiesValid:false` / `degraded:true` — the one amber was these two together, at
+#       15:00:04Z, and it was a SINGLE sample wide: healthy at 14:59:56Z, healthy again at
+#       15:00:12Z, so the window was under 16 s. That is a measured false-dialog rate of
+#       1/160 ≈ 0.6% of taps, against the ~45% the retired psidts doctrine feared. ⚠ Taken on the
+#       PRE-#78 box, whose 20-minute unvalidated-cookie churn RotaryPhone say stops when they
+#       deploy — so treat 0.6% as an UPPER bound, not a steady state.
+#
+#   ⭐ AND THAT ONE SAMPLE IS THE BEST EVIDENCE IN THIS FILE THAT THE OLD FIELD HAD TO GO. At the
+#   exact instant `cookiesValid:false, degraded:true` reported an impaired session,
+#   `psidtsAgeSeconds` read **2** — its healthiest possible value, which the retired rule scored
+#   as deep inside the "< 660 healthy window". The mechanism is now plain: psidts timed the last
+#   credential RELOAD, and a reload is precisely what happens when a session breaks and is
+#   re-established. The field read healthiest exactly when the session was worst.
 #
 # Not `set -e`: a failed probe is DATA, not a crash. Every probe failure below is a state this
 # script knows how to report.

@@ -229,13 +229,16 @@ Two rules, both learned the hard way in this repo:
 > be reported, for exactly the cry-wolf reason given below. What changed is the evidence: the "~45% of
 > taps" wolf rate was computed from the psidts trough, so it retires with the field. The honest
 > blackout term, `authBlackout`, was measured at **920 ms with zero true-samples across 411 polls**,
-> and a **68-sample** live run of the new predicate on 2026-09-09 (14:44–14:53Z) returned **68 online
-> / 0 amber**, max `lastApiSuccessAt` age 59 s. The rule now stands on those numbers instead.
+> and a **160-sample** live run of the new predicate on 2026-09-09 (14:44:30–15:05:50Z, 8 s apart —
+> **21 minutes, spanning one of RotaryPhone's ~20-minute cookie cycles**) returned **159 online / 1
+> amber**, max `lastApiSuccessAt` age 59 s. **The cry-wolf rate is measured at 1/160 ≈ 0.6% of taps**,
+> against the ~45% the retired doctrine feared. The single amber was `cookiesValid` + `degraded` and
+> was one sample wide — under 16 s. ⚠ Taken on the pre-#78 box, so 0.6% is an **upper** bound.
 >
-> ⚠ **Honestly: that run is nine minutes and T15 asks for twenty-five, and two of the four new terms
-> — `cookiesValid` and `degraded` — have no measured false-dialog rate at all.** One flap of exactly
-> those two was observed by hand at 14:39Z and cleared inside ~60 s; RotaryPhone say the churn behind
-> it stops when their #78 deploys. Treat 68/0 as an upper bound taken before their fix.
+> ⭐ **And that one sample is the cleanest proof the old field had to go: at the exact instant the
+> honest terms reported an impaired session, `psidtsAgeSeconds` read `2`** — its healthiest possible
+> value, scored by the table below as deep inside the *"< 660 healthy window"*. It timed the last
+> credential **reload**, and a reload is what happens when a session breaks and is re-established.
 >
 > ⚠ **Do not read the paragraph below as a claim that `available` / `degraded` / `cookiesValid` are
 > useless.** They are individually *insufficient* — the 502 capture stands — but the answer is a

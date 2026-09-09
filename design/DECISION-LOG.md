@@ -1174,16 +1174,24 @@ as a bare `...T14:12:40Z`; the served value carries the fraction, and the fixtur
 capture rather than a retyped one precisely so that cannot drift.
 
 Live on the box, both scripts' `--print-status` seconds apart agreed (`VOICE=online`, `TIER=silent`),
-and **68 consecutive samples** of the new predicate against the live bridge (14:44–14:53Z) returned
-**68 online / 0 amber**, max `lastApiSuccessAt` age **59 s** — an independent re-measurement of the
-60 s cadence rather than an inherited one, and the cry-wolf check §5.3 requires.
+and **160 consecutive samples** of the new predicate against the live bridge — 8 s apart,
+14:44:30–15:05:50Z, **21 minutes, spanning one of RotaryPhone's ~20-minute cookie cycles** — returned
+**159 online / 1 amber**, max `lastApiSuccessAt` age **59 s**. That is an independent re-measurement
+of the 60 s cadence rather than an inherited one, and it is the cry-wolf check §5.3 requires.
 
-⚠ **That check is nine minutes long and the §5.3 rule wants twenty-five** (plan step T15, rewritten
-for the new terms in this PR). And the four added terms are not equally evidenced: `authBlackout` has
-its 920 ms / 0-in-411 measurement, but **`cookiesValid:false` and `degraded:true` have no measured
-false-dialog rate at all.** A flap of exactly those two was seen once by hand at 14:39Z and cleared
-inside ~60 s. RotaryPhone say the 20-minute unvalidated-cookie churn behind it stops when their #78
-deploys, so the 68/68 is an upper bound taken *before* their fix — not a steady-state rate.
+**The cry-wolf rate is therefore measured, not unknown: 1/160 ≈ 0.6% of taps**, against the ~45% the
+retired psidts doctrine feared. The single amber was `cookiesValid:false` + `degraded:true` at
+15:00:04Z and was **one sample wide** — healthy at 14:59:56Z, healthy again at 15:00:12Z, so under
+16 s. ⚠ Measured on the **pre-#78** box, whose churn RotaryPhone say stops when they deploy, so 0.6%
+is an **upper** bound.
+
+⭐ **That one sample is also the sharpest evidence in the whole cycle that the old field had to go.**
+At the exact instant the honest terms reported an impaired session, **`psidtsAgeSeconds` read `2`** —
+its healthiest possible value, scored by the retired rule as deep inside the *"< 660 healthy
+window"*. The mechanism is now plain rather than argued: psidts timed the last credential **reload**,
+and a reload is precisely what happens when a session breaks and is re-established. **The field read
+healthiest exactly when the session was worst.** RotaryPhone's `608`-while-dead capture and our `34`
+sighting were the same phenomenon caught less cleanly.
 
 ⛔ **What is NOT proven, and must not be claimed:** that the post-#79 payload has the shape assumed
 here. #79 is merged and parked, not deployed, and our copy of RotaryPhone's wire-changes contract was
