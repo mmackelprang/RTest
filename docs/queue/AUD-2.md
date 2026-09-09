@@ -93,3 +93,41 @@ the failure**; if it does not, there is a second defect and this row is not the 
 
 ⚠ **Do not let the fix be judged by ear alone.** "It ducks now" is exactly the kind of claim that has
 gone wrong repeatedly this week — pair the listening test with the log line and a measured gain value.
+
+---
+
+## ✅ SHIPPED 2026-09-09 — [#642](https://github.com/mmackelprang/RTest/pull/642)
+
+Fixed at three sites — `SDRRadioAudioSource.cs`, `USBAudioSourceBase.cs` (inherited by
+`RadioAudioSource`, `VinylAudioSource`, `GenericUSBAudioSource`) and `FilePlayerAudioSource.cs` —
+each now registering under `IAudioSource.Id`. Plus the half this row did not scope: the four volume
+setters report whether they reached a live player or component, and `AudioManager` turns a miss on a
+`Playing` source into a `Warning`.
+
+⛔ **UAT IS NOT DISCHARGED.** The unit tests assert that a key which matches moves a registered
+component's `Volume` and that a key which diverges does not; `PlaybackKeyLintTests` pins the key.
+**Neither can hear anything.** The audible gate is the owner re-running
+[`PHN-2` §3 U1](../uat/2026-09-09-phn2-sound-uat/RESULT.md) at the cabinet — check #6, the
+one that failed — after a deploy. **This PR did not deploy.**
+
+⚠ **Do not read a `PHN-10` re-listen as evidence.** With ducking broken, two simultaneous
+voicemails arrived at full level over an un-ducked radio. Fixing this row makes `PHN-10`
+**quieter without making it less real.**
+
+### What this row got wrong, recorded rather than quietly corrected
+
+- **The row's suggested corroboration never worked, and now does.** It proposed dumping
+  `GetDiagnostics()` to compare live playback keys against the `IAudioSource.Id` `AudioManager`
+  holds. That method returned `_activePlayers.Keys` **only**, and every source in this row except
+  FilePlayer registers as a *component* — so the check would have come back **empty** and proved
+  nothing. `#642` added `ComponentIds` and surfaced it on `/api/audio/diagnostics`, so the
+  comparison the row wanted is now actually possible.
+- **The plan's §4.3 test draft would have been a decorative gate.** It asserted
+  `Assert.False(service.SetGainOffset("no-such-source", 1.5f))` and, for the store-then-apply path,
+  explicitly "pins the absence of a throw and nothing more" — which passes against the broken
+  tree and against almost any implementation. Replaced with assertions on the component's actual
+  `Volume`, in both directions.
+- **The plan cited `PlayFileAsync` at `SoundFlowPlaybackService.cs:343`.** That line is
+  `PlayDataProviderAsync`; `PlayFileAsync` reads `_gainOffsets` at `:148`.
+- **The plan's §8 and §9 were already applied** to this dossier and to
+  `HANDOFF-GA-PUNCH-LIST.md` before the cycle began — spent, not skipped.

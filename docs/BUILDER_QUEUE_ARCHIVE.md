@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (54)
+## Shipped rows (55)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2489,3 +2489,32 @@ measurement.
 >
 > **RotaryPhone is no longer owner-HELD.** They have since shipped `GvVoicemailController.MarkRead` (`POST /api/gvbridge/voicemail/{id}/read`), `GvSmsController.MarkThreadRead` (`POST /api/gvbridge/sms/threads/{threadId}/read`), `ReadStateChangedDto` + the unconditional `NotifyReadStateChanged` broadcast, **and** `POST /api/gvbridge/sms/send`. Routes verified to match our call sites exactly. **Both sides are now dark by config only** — theirs `GVBridge:EnableMarkRead=false` (+ `EnableSmsSend=false`, `AllowMarkUnread=false`), ours `RotaryPhone:Gv:MarkReadEnabled=false` (+ `SendEnabled=false`). Lighting up mark-read is now a **two-side config flip, no build wait**. SMS **send is unblocked on the endpoint** (was the last external blocker) — but send wiring remains out of scope here; see fast-follows for the response-shape mismatch to resolve first. NU1903 SQLite blocker cleared (ADR-023, PR #438).
 
+---
+
+### AUD-2 — One key per source: four primary sources registered under a minted key and were addressed by `IAudioSource.Id`, so gain and ducking missed silently.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#642](https://github.com/mmackelprang/RTest/pull/642) |
+| Plan | [`AUD-2-one-key-per-source.md`](../design/plans/AUD-2-one-key-per-source.md) |
+| Spec / handoff | _no spec doc — the diagnosis was in the dossier_ · `CLAUDE.md` § Architecture (ducking as a core pattern) · [`PHN-2` SOUND UAT 2026-09-09](uat/2026-09-09-phn2-sound-uat/RESULT.md) |
+| Depends on | — _(none. The "same root as AUD-4 — prefer AUD-2 FIRST" note was FALSIFIED 2026-09-06 and removed, not softened; they were unrelated bugs.)_ |
+| Branch | `fix/sdr-playback-id-ducking-gain` _(the name says SDR; the scope was four source types across three files)_ |
+
+**Detail: [`queue/AUD-2.md`](queue/AUD-2.md)** — the mechanism, the 2026-09-05 `team-debugger` confirmation, and the 2026-09-08 live owner observation.
+
+⭐ **THE ROW WAS CONFIRMED BY THE OWNER'S EAR BEFORE IT WAS BUILT, AND THAT IS WHY IT SHIPPED WHEN IT DID.** It had sat 📋 since 2026-08-11 on a code read plus a single log line. On 2026-09-09 the owner ran `PHN-2`'s nine `SOUND` checks at the cabinet and heard **no ducking on two independent paths** — a voicemail over the radio and a TTS text over the radio — with the radio audibly playing throughout. ⛔ **The suite was green the whole time**, and nine automated checks would have reported nothing.
+
+**The mechanism.** `_duckingMultipliers[sourceId] = multiplier` is an **indexer**: it creates the key it is given and never throws. `AudioManager` wrote to `Radio-<32 hex>` while `SDRRadioAudioSource` had registered under `sdr-radio-<32 hex>`, so the multiplier landed on a key nothing read — no exception, no log, no return value. `$"usb-capture-{Id:N}"` was a miss rather than a near-miss for a second reason: `Id` is a `string`, `string` is not `IFormattable`, so the `:N` was silently ignored and the result *contained* the Id without equalling it.
+
+**Fixed at three sites covering four `AudioSourceType`s across five concrete classes:** `SDRRadioAudioSource.cs`, `USBAudioSourceBase.cs` (inherited by `RadioAudioSource`, `VinylAudioSource`, `GenericUSBAudioSource`) and `FilePlayerAudioSource.cs`. `BluetoothAudioSource` and `TestToneAudioSource` already used `Id`; `AudioFileEventSource` mints its own key and is **correct to**, because `AudioManager` addresses only primary sources.
+
+⭐ **Bluetooth had this exact bug and was fixed alone by `2bbd0eb5` on 2026-03-02 — that fix pinned nothing, so the same shape survived in four more source types for six months.** `PlaybackKeyLintTests` is the pin that fix should have carried: two rules (the assignment, and the call site for sources with no `_playbackId` field) with a vacuity guard on each.
+
+**The second half, which was not in the row.** `SetGainOffset` logged *"Applied gain offset …"* unconditionally, immediately after a lookup that may have matched nothing — the `CLAUDE.md` § *Pre-Merge Review* class. The four setters now return whether they reached a live player or component; `AudioManager` turns a miss on a `Playing` source into a `Warning`, gated on `TransitionComplete` so a duck cycle costs at most two journald lines rather than 37; and *"Ducking ended: volume restored"* became `volumeRestored={Restored}`, reported rather than asserted.
+
+⚠ **UAT WAS NOT DISCHARGED BY THIS PR AND THE PR SAID SO.** The unit tests assert that a key which matches moves a registered component's `Volume` and that a key which diverges does not; the lint pins the key. **Neither can hear anything.** The audible gate is `PHN-2` §3 U1 re-run at the cabinet.
+
+⚠ **Two pre-existing defects were surfaced and deliberately NOT fixed**, both adjacent to the changed lines: switching source during an active duck leaves the new source at full volume (`StopAsync` removes the multiplier before registration reads it back — and this fix makes it *observable* for the first time), and `_duckingMultipliers` is read outside `_playersLock` at four registration sites.
+
+⭐ **Both pre-merge reviewers found the same irony, independently: the PR shipped two overclaiming comments inside the PR about overclaiming comments.** A warning asserted *"the playback key and its Id have diverged"* on a condition that does not establish it — four paths reach `Playing` with nothing registered and nothing diverged — and the lint called a defensive regex guard "load-bearing" while being wrong about the count, the anchors and the mechanism. Both were corrected before merge. **A third instance appeared during the fix itself**: the corrected line-number anchors had already shifted again by the time they were typed, because the same commit was editing those files. The self-referential anchors are now symbol names.
