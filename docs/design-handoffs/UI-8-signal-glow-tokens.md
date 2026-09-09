@@ -4,7 +4,19 @@
 **Files in scope:** `src/Radio.Web/wwwroot/css/design-system.css`,
 `src/Radio.Web/Components/Shared/PhoneStatusHero.razor`
 **Surface:** `/phone` → Phone Status Hero (`.phone-hero`) — state dot and the contextual action row
-**Status:** `[PENDING REVIEW]` — Designer answer; discharges the row's design gate
+**Status:** ⛔ **`[SUPERSEDED 2026-09-09 — DO NOT IMPLEMENT]`**
+
+> ⛔ **The owner OVERRULED this handoff and the row landed on the opposite outcome.** Sighted at the
+> panel in daylight against a blur ladder (`none · 16 · 20 · 24 · 32`, alpha fixed at `0.25`), the
+> owner chose **`none`**. `UI-8` shipped as **delete the three dead references**; `--signal-green-glow`
+> and `--signal-red-glow` were **not** declared and must not be reintroduced.
+>
+> **This document is kept because the reasoning is the asset** — in particular the finding that the
+> flat buttons are *transcription residue* from a byte-for-byte port whose token block was copied
+> short, and the rule that *the token carries the alpha, the consumer carries the blur*. ⚠ **But do
+> not implement its Task table.** The owner's decision and the argument it outweighed are recorded in
+> [`../queue/UI-8.md`](../queue/UI-8.md) § *OWNER DECISION 2026-09-09*. If the Answer/Hang-Up pair
+> ever does prove hard to separate at `Ringing`, the fix is **fill or border**, never these tokens.
 
 **Relationship to existing handoffs:**
 
