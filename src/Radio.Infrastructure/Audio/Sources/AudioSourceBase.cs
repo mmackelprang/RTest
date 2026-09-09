@@ -114,6 +114,13 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   /// and idempotent, so running it from any other state is a no-op when nothing
   /// is attached. (The Disposed arm is belt-and-braces: <see cref="ThrowIfDisposed"/>
   /// runs first, so a disposed source throws rather than reaching it.)
+  ///
+  /// ⚠ "Null-guarded and idempotent" is a CONTRACT ON IMPLEMENTORS, not a description of what the
+  /// base class enforces, and AudioFileEventSource broke it until PHN-10: its StopCoreAsync was
+  /// ACTIVITY-guarded on a private bool that the caller's own cancellation cleared first, so the
+  /// only call that detaches a source from the SoundFlow mixer never ran. That is PR #469's shape
+  /// one layer down — not State, but a private mirror of it, which is worse because this paragraph
+  /// reads as covering it. EventSourceStopIsNotActivityGuardedLintTests is what now checks it.
   /// </summary>
   public virtual async Task StopAsync(CancellationToken cancellationToken = default)
   {

@@ -1323,8 +1323,17 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// would otherwise have ended it — strictly worse than doing nothing, for something the ADR calls
   /// "the guarantee".
   ///
-  /// What actually stops audio is TearDownAsync -> ReleaseSourceAsync, and StopAsync is the public
-  /// door to it. Hence a timer whose callback dispatches a stop.
+  /// What actually stops audio is SoundFlowPlaybackService.StopAsync, reached through
+  /// TearDownAsync -> ReleaseSourceAsync -> source.StopAsync / source.DisposeAsync, and StopAsync is
+  /// the public door to it. Hence a timer whose callback dispatches a stop.
+  ///
+  /// ⚠ Until PHN-10 that chain was BROKEN for AudioFileEventSource, and the paragraph above had
+  /// already identified every ingredient without drawing the conclusion. TearDownAsync's FIRST
+  /// statement is playback.Cancel(), which fires the very OperationCanceledException arm named above
+  /// — so the _isPlaybackActive flag that AudioFileEventSource's StopCoreAsync and DisposeAsyncCore
+  /// then consulted was always false, and neither reached SoundFlowPlaybackService.StopAsync. The
+  /// cap, the Stop button, preemption, the /sleep edges and the circuit backstop were all inert on
+  /// the voicemail path. PHN-10 removed those guards; the reasoning above is what identified them.
   ///
   /// ⚠ DISPATCHED, never awaited, for OnSourceCompleted's reason: StopAsync takes _gate, and the
   /// callback arrives on a timer thread that must not be parked for the length of a teardown
