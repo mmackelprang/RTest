@@ -471,19 +471,11 @@ public class AudioStateHubService : IAsyncDisposable
   /// cannot tell them apart from the four non-nullable ones this guard serves, so a null check there
   /// would silently drop a working broadcast: the exact defect `UI-12` was filed to avoid causing.
   ///
-  /// ⚠ The three are NOT equivalent, and an earlier revision of this comment said they were
-  /// ("VolumeChanged and EventPlaybackChanged likewise"). What a null actually does:
-  /// <list type="bullet">
-  /// <item>NowPlayingChanged — meaningful data: it clears the dock. Demonstrated rather than assumed,
-  /// at NowPlayingDockTests.cs:248 and SleepTests.cs:309, which fire null and assert on the result.</item>
-  /// <item>VolumeChanged — NOT "an absent snapshot". AudioStateStore.cs:204-213 DISCARDS the payload
-  /// and notifies anyway; NowPlayingPanel.razor:617-631 treats null as a REST RE-FETCH TRIGGER
-  /// (RefreshPlaybackStateAsync); MainLayout.razor:1544-1549 early-returns. Dropping it in the fan-out
-  /// would suppress that re-fetch and strand the panel's volume/mute readout.</item>
-  /// <item>EventPlaybackChanged — AudioStateStore.cs:327-332 assigns it, so a null would clear the
-  /// cached snapshot. No producer sends one: AudioStateUpdateService.cs:1087 always builds a
-  /// <c>new { … }</c>. Nullable by declaration, unexercised in practice.</item>
-  /// </list>
+  /// ⚠ The three events declared Func&lt;T?, Task&gt; — NowPlayingChanged, VolumeChanged and
+  /// EventPlaybackChanged — must NOT route through here; their nulls are data. ⚠ AND THE THREE ARE
+  /// NOT EQUIVALENT: each of OnNowPlayingMessageAsync, OnVolumeMessageAsync and
+  /// OnEventPlaybackMessageAsync states what its own null means, beside the code that dispatches it.
+  /// Gated since `UI-14` by AudioStateHubServicePassThroughTests.
   ///
   /// ⛔ Do NOT "simplify" this by moving the check down into the fan-out.
   ///
@@ -784,6 +776,13 @@ public class AudioStateHubService : IAsyncDisposable
   /// (An earlier revision said "THIRTEEN events between the two overloads". There are FOURTEEN, and
   /// pre-merge review caught it. The number is now absent rather than corrected — the constructor
   /// comment above makes the same point about the "~9" it used to carry.)
+  ///
+  /// ⛔ AND IT MUST NEVER GROW A NULL CHECK. T is erased here: this method cannot tell a contract
+  /// violation from data, and three of the seven reference-payload events it fans out treat null as
+  /// data. ⚠ The realistic form of that mistake — keeping AcceptPayload and adding a "defensive"
+  /// check here as well — passed the ENTIRE Radio.Web.Tests assembly on 2026-09-09, measured, while
+  /// silently dropping every NowPlayingChanged(null). It is gated now
+  /// (AudioStateHubServicePassThroughTests), and the gate, not this comment, is what stops it.
   /// </remarks>
   private async Task NotifyAsync<T>(Func<T, Task>? handler, T arg)
   {
