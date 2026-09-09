@@ -2215,35 +2215,16 @@
   {
     try
     {
-      // Subscribe to source changes to catch event source updates
-      HubService.SourceChanged += async () =>
-      {
-        await InvokeAsync(async () =>
-        {
-          await LoadEventSourcesAsync();
-          StateHasChanged();
-        });
-      };
-
-      // Subscribe to encoder connection changes
-      HubService.EncoderConnectionChanged += async (_) =>
-      {
-        await InvokeAsync(async () =>
-        {
-          _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
-          StateHasChanged();
-        });
-      };
-
-      // Subscribe to phone call state changes
-      HubService.PhoneCallStateChanged += async () =>
-      {
-        await InvokeAsync(async () =>
-        {
-          _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
-          StateHasChanged();
-        });
-      };
+      // ⚠ UI-9: NAMED METHODS, NEVER LAMBDAS. An anonymous delegate has no stable reference, so no
+      // `-=` can remove it — and HubService is AddSingleton (Program.cs:411), so a handler that
+      // cannot be removed outlives every circuit that added it: the singleton holds the delegate,
+      // the delegate holds this component, and the component holds its whole render tree. Measured
+      // before the fix: one handler per event per visit, five visits leaving five, without bound.
+      // The invariant is the SYMMETRY, not the naming — every `+=` here has a matching `-=` in
+      // Dispose(). Shape copied from NowPlayingPanel.razor's subscribe/unsubscribe pair.
+      HubService.SourceChanged += OnHubSourceChangedAsync;
+      HubService.EncoderConnectionChanged += OnHubEncoderConnectionChangedAsync;
+      HubService.PhoneCallStateChanged += OnHubPhoneCallStateChangedAsync;
 
       // Start the hub connection if not already connected
       if (!HubService.IsConnected)
@@ -2256,6 +2237,39 @@
       Logger.LogWarning(ex, "Failed to initialize SignalR for event source updates, falling back to manual refresh");
       // Silently fail - fallback to manual refresh
     }
+  }
+
+  /// <summary>Reloads the event-source list when the hub reports a source change.</summary>
+  private async Task OnHubSourceChangedAsync()
+  {
+    await InvokeAsync(async () =>
+    {
+      await LoadEventSourcesAsync();
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>Refreshes the encoder status card when the encoder connects or drops.</summary>
+  /// <remarks>The payload is deliberately unused — this handler re-pulls the full status over REST
+  /// rather than trusting the transition DTO, which is the behaviour the lambda it replaced had.
+  /// </remarks>
+  private async Task OnHubEncoderConnectionChangedAsync(EncoderConnectionDto _)
+  {
+    await InvokeAsync(async () =>
+    {
+      _encoderStatus = await IntegrationsApi.GetEncoderStatusAsync();
+      StateHasChanged();
+    });
+  }
+
+  /// <summary>Refreshes the phone status card when a call changes state.</summary>
+  private async Task OnHubPhoneCallStateChangedAsync()
+  {
+    await InvokeAsync(async () =>
+    {
+      _phoneStatus = await IntegrationsApi.GetPhoneStatusAsync();
+      StateHasChanged();
+    });
   }
 
   private async Task LoadSystemStatsAsync()
@@ -4191,6 +4205,19 @@
 
   public void Dispose()
   {
+    // ⚠ UI-9: symmetric with InitializeSignalRAsync. HubService is a process-lifetime singleton
+    // (Program.cs:411); without these three lines every visit to /system leaves three handlers
+    // behind, each retaining this component and its whole render tree, on an appliance that runs
+    // for weeks between restarts.
+    //
+    // No guard is needed for the partially-initialized case. If OnInitializedAsync throws before
+    // reaching InitializeSignalRAsync, Blazor still disposes the component and these three `-=`
+    // run against handlers that were never added — Delegate.Remove on a delegate that is not in
+    // the list, including against a null event, is a defined no-op rather than an exception.
+    HubService.SourceChanged -= OnHubSourceChangedAsync;
+    HubService.EncoderConnectionChanged -= OnHubEncoderConnectionChangedAsync;
+    HubService.PhoneCallStateChanged -= OnHubPhoneCallStateChangedAsync;
+
     _statsTimer?.Dispose();
     _sourceGainDebounceTimer?.Dispose();
     StopEncoderPolling();
