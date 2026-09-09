@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (52)
+## Shipped rows (53)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2058,6 +2058,40 @@ Merged 2026-09-09, on the owner's explicit authorisation. ⚠ **Merged, not depl
 ⚠ **CI `build` and `llm-review` were both still `queued` on the self-hosted `appserver` runner at merge time and were not waited on** — `main` protection is off and the local gates are the merge-blocking truth (`CLAUDE.md` § *The merge gate*). GitGuardian passed.
 
 
+
+---
+
+### UI-8 — Two glow tokens were consumed and never declared, and the owner chose to delete the references rather than declare them.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#640](https://github.com/mmackelprang/RTest/pull/640) |
+| Plan | _no plan doc — the owner decision in the dossier is the implementation spec; it names the three lines to delete_ |
+| Spec / handoff | [`design-handoffs/UI-8-signal-glow-tokens.md`](design-handoffs/UI-8-signal-glow-tokens.md) — ⛔ **SUPERSEDED**; it recommended the opposite outcome and now carries a do-not-implement banner |
+| Depends on | — _(no row dependency)_ |
+| Branch | `fix/ui-8-delete-the-dead-glow-references` |
+
+**Detail: [`queue/UI-8.md`](queue/UI-8.md)** — the design gate, the Designer's overruled case, and the owner decision of 2026-09-09.
+
+⭐ **THE OWNER OVERRULED THE DESIGNER, AND THE DECISION IS STRONGER THAN THE ARGUMENT IT DISPLACED.** `--signal-green-glow` and `--signal-red-glow` were consumed at `:5186`/`:5425` and `:5432` and declared nowhere, so all three `box-shadow`s were invalid at computed-value time and already resolved to `none`. Sighted at the panel in daylight on a blur ladder (`none · 16 · 20 · 24 · 32`, alpha fixed at `0.25`), the owner chose **`none`** — **choosing from months of use what the handoff was reasoning about from a design that never shipped.** The row flipped from *"declare the tokens"* to *"delete the dead references"*, and **neither token was declared.** The Designer's case — that the glow is a functional cue separating the live Answer button from the disabled Hang Up at `Ringing` — is **recorded as outweighed, not refuted**; if that pair ever does prove hard to separate, the fix is **fill or border**.
+
+⭐ **A ZERO-VISUAL-CHANGE ROW IS A GATE-DESIGN PROBLEM, AND THAT IS THE TRANSFERABLE PART.** ⛔ **A test asserting "the glow is absent" proves nothing — it was absent already**, and a UAT claiming to have observed the change would have been false. **The dark-room sitting was cancelled because it had no subject.** The honest gate is **equality**: computed `box-shadow` on all three sites is `none` **both before and after**, measured in Chromium against the real stylesheet at shipping geometry. ⭐ **The instrument was validated before the result was believed** — `.nav-badge`, which consumes the *declared* `--signal-amber-glow`, holds `rgba(240,168,48,0.25) 0 0 6px` throughout, proving a `box-shadow` from this file does reach computed style; and the backgrounds resolve to `rgb(74,222,128)`/`rgb(248,113,113)`, proving the rules **match** — without which `none` would have been vacuous. On `main` the CSSOM shows the declarations **present and parsed** while computed style is `none`, which is the mechanism stated directly.
+
+⚠ **Two instrument bugs were caught before they became findings** — a CSSOM walker that treated every `CSSStyleRule` as a nesting container (modern Chrome gives style rules a `cssRules` property), and a first reading taken **mid-`transition`** that reported a washed-out background as if it were real. ⭐ *A measurement that disagrees with a known-good control is the instrument, not the result.*
+
+⛔ **PRE-MERGE REVIEW CAUGHT AN OVERCLAIM INSIDE THE BUILDER'S OWN CORRECTION — the fourth time this repo has paid for that exact shape.** The Builder rewrote the `ENC-12` comment at `:5378` (correctly left in place — it is a **comment, not a consumer**, and the naive lint flags it as a phantom) because this diff falsified two of its three clauses. The rewrite then asserted that resurrecting the tokens would *"re-import a dual-source bug"* on the hero source-tag dot. **False on either reading:** the dot rule no longer references either token, and even with the reference restored `PhoneStatusHero.razor:15-16` sets `box-shadow` inline every render, which outranks any normal author declaration. **`StateColors` returns hard-coded `rgba()` literals, so the tokens have no bearing on that dot even in principle.** ⛔ **The dossier's own correction #1 carries the same defect** — it asserts both *"inline overrides unconditionally"* **and** *"making it reachable would paint the dot green during an amber `Ringing` state"*, which cannot both be true. **The Builder inherited the weaker half.** ⭐ *A correction is not exempt from the standard it is enforcing.*
+
+⭐ **The prohibition was moved to where it can actually be disobeyed.** The `⛔ do not declare` note sat **5,300 lines** from the Signal Colors block, which is where anyone adding the tokens would go; a note now sits beside `--signal-amber-glow`. **This is the change most likely to make the decision survive contact with the next engineer.**
+
+⚠ **The token-declaration lint was RUN, not committed, and it corrects the dossier.** With the two documented fixes — strip comments, allowlist runtime-set properties — it returns **exactly 2 violations against `main`** at the three cited lines and **0 against the branch**, so it was exercised in **both** directions rather than trusted on a green. ⛔ **But the dossier's allowlist of six is incomplete: it misses `--bubble-accent`** (9 consumer sites, injected inline by `SourceBubble.razor:15` and `MainLayout.razor:57,71`, with `design-system.css:2021-2022` documenting the injection). *"The scan returns exactly the two tokens"* holds only with a **seventh** entry. Committing the lint was left to Planner as new scope.
+
+⚠ **This commit falsified text destined for another row's source file, and it was repaired here rather than left.** `design/plans/UX-1-the-shimmer-nobody-can-see.md` is still `📋` and held a verbatim XML `<remarks>` block citing `--signal-red-glow` as a **live** dangling consumer at `:5432` — a `UX-1` Builder pasting it would have shipped a false comment. Amended there and at §5.3; **no `UX-1` decision, task or scope was touched**, only citations this diff invalidated. Two further documents were **deliberately left as historical record** (`HANDOFF-phone-console-audio-and-canned-replies.md:756`, `PHN-2-retire-the-audio-element.md:965-966`) — their line sets were already stale and **their conclusions are still right and now stronger.**
+
+⚠ **The reference search was run WITHOUT gitignore filtering**, which is the specific scoping that cost `KIOSK-3`. Survivors: this file's own comment, a **gitignored** `publish/` build artifact, and the non-shipped mockup under `docs/design-handoffs/design_handoff_phone_page/` — which is the *source the port came from* and the evidence for the transcription-residue finding, so it stays. **Zero references in any `.razor` or `.cs`**, and no dynamic construction (`setProperty`/`getPropertyValue` appear nowhere in `Radio.Web`'s JS or components).
+
+⚠ **An incremental Release build reported `0 Warning(s)` and that is NOT the gate passing.** No C# project recompiled, because only CSS and markdown changed — the figure is *unmeasured*, not *better*. `--no-incremental` restored the real **47 / 0** equality. ⭐ *A gate that reads better than baseline for free is measuring nothing.* Suite: **3,863 passed / 5 failed**, all documented Windows-known-failing — the four `SrcVariableResamplerTests` plus `CoverArtArchive_ReturnsValidUrl_ForKnownRecording` at 18 s against its documented 15 s live-network timeout, which **passed** in an earlier run the same cycle.
+
+⚠ **Merged, not deployed** — explicitly out of scope. Nothing reaches the appliance until someone deploys, and the stale `publish/` copy still holds the old references.
 
 ---
 

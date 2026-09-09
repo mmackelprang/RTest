@@ -182,13 +182,18 @@ be misread as the pin having been dropped.
 
 ## Encoder Settings surface (ENC-8) — three things deliberately not built
 
-**1. `--signal-red-glow` is consumed and never declared.** `design-system.css:5364` reads
-`var(--signal-red-glow)`; `:root` declares `--signal-amber-glow` but no red sibling, so that rule
-silently renders no glow. **Pre-existing and untouched by `ENC-8`**, which was forbidden from adding
-design tokens. It cannot be fixed by simply declaring the variable: doing so would change the
-appearance of an already-shipped component as a side effect, so whoever fixes it must look at what
-that rule is for and decide whether the glow was ever wanted. `ENC-8` and `ENC-12` both avoid
-referencing it.
+**1. ~~`--signal-red-glow` is consumed and never declared.~~ RESOLVED by `UI-8` (2026-09-09) — and
+the resolution is *delete*, not *declare*.** This entry asked whoever fixed it to "decide whether the
+glow was ever wanted." The owner decided, at the panel, in daylight, against a blur ladder
+(`none · 16 · 20 · 24 · 32`): **no glow.** `UI-8` therefore deleted the three dead references —
+`--signal-green-glow` had two, `--signal-red-glow` one — and **declared neither token.** Both now
+have **zero consumers in `design-system.css`** and must not be reintroduced. (The non-shipped mockup
+under `docs/design-handoffs/design_handoff_phone_page/` still references them; that is the source the
+port came from and is deliberately left alone.) **Pre-existing and untouched by `ENC-8`**, which was
+forbidden from adding design tokens, and neither `ENC-8` nor `ENC-12` ever referenced it — which is
+why the entry is filed here. The edit was a literal zero-visual-change cleanup:
+an undefined `var()` is invalid at computed-value time, so every one of those `box-shadow`s already
+computed to `none`. See `docs/queue/UI-8.md` § *OWNER DECISION 2026-09-09*.
 
 **2. `Restore designed defaults` is not on the Settings page, and the reason is not oversight.** The
 punch list's `ENC-12` row listed it; handoff Rev 3's action table does not. In Rev 2 the page held 24

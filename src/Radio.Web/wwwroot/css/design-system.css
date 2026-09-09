@@ -84,6 +84,11 @@
   --source-usb:             #4ADE80;
 
   /* ── Signal Colors ── */
+  /* ⛔ Amber is the ONLY glow token, deliberately. --signal-green-glow / --signal-red-glow do not
+     exist and must not be added here: the owner sighted both call buttons on a blur ladder in
+     daylight on 2026-09-09 and chose NO GLOW, so UI-8 deleted their three dead references rather
+     than declaring them (docs/queue/UI-8.md § "OWNER DECISION 2026-09-09"). If the Answer/Hang-Up
+     pair ever does prove hard to separate at Ringing, change fill or border — not this block. */
   --signal-amber:           #F0A830;
   --signal-amber-glow:      rgba(240, 168, 48, 0.25);
   --signal-green:           #4ADE80;
@@ -5183,7 +5188,6 @@ body {
 .phone-hero-source-tag .dot {
   width: 8px; height: 8px; border-radius: 2px;
   background: var(--signal-green);
-  box-shadow: 0 0 6px var(--signal-green-glow);
 }
 
 .phone-hero-state {
@@ -5375,10 +5379,17 @@ body {
    two read as one pattern rather than two. It is a separate class because that one is named for the
    phone and hard-codes --signal-red, while this has an amber tier as well.
 
-   No box-shadow / glow. The obvious flourish would be `0 0 6px var(--signal-red-glow)` to match
-   .nav-badge — that token is CONSUMED further down this file but never DECLARED in :root, so it
-   would render as nothing while looking correct in the source, and declaring it here would silently
-   change an unrelated shipped component. */
+   No box-shadow / glow — and as of UI-8 that is a DECISION, not the deferral this comment used to
+   record. The obvious flourish would be `0 0 6px var(--signal-red-glow)` to match .nav-badge, but
+   --signal-red-glow and --signal-green-glow do not exist: they were never declared in :root, so
+   every reference to them was invalid at computed-value time and rendered as nothing while looking
+   correct in the source. UI-8 DELETED the last three such references in this file rather than
+   declaring the tokens, on an owner decision taken at the panel in daylight against a blur ladder —
+   see docs/queue/UI-8.md § "OWNER DECISION 2026-09-09".
+
+   ⛔ Do not declare either token to "make this work" — no-glow is the chosen appearance, not an
+   oversight. There is a matching note beside --signal-amber-glow in :root, which is where someone
+   would actually go to add them. */
 .encoder-nav-fault {
   position: absolute;
   bottom: 4px;
@@ -5422,14 +5433,12 @@ body {
 .phone-btn.btn-answer {
   background: var(--signal-green);
   color: var(--text-inverse);
-  box-shadow: 0 0 24px var(--signal-green-glow);
 }
 .phone-btn.btn-answer:hover { background: #6ee69a; }
 
 .phone-btn.btn-hangup {
   background: var(--signal-red);
   color: var(--text-inverse);
-  box-shadow: 0 0 24px var(--signal-red-glow);
 }
 .phone-btn.btn-hangup:hover { background: #fa8888; }
 
