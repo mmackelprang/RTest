@@ -30,10 +30,12 @@ namespace Radio.Infrastructure.Tests.Audio.Events;
 /// <c>AudioFileEventSource</c>, these tests go RED rather than quietly stopping proving anything —
 /// which is the property that makes the trick acceptable.
 ///
-/// ⛔ <b>Both tests FAIL on the pre-PHN-10 source</b>, and that is the point of writing them: with
-/// the <c>_isPlaybackActive</c> guard in place, <c>_playbackService.StopAsync</c> is never called on
-/// a source that never reached <c>PlayWithSoundFlowAsync</c>'s success path — so no exception, no
-/// warning, no log line. Verified in that direction, not assumed.
+/// ⛔ <b>All three tests FAIL on the pre-PHN-10 source</b>, and that is the point of writing them:
+/// with the <c>_isPlaybackActive</c> guard in place, <c>_playbackService.StopAsync</c> is never
+/// called on a source that never reached <c>PlayWithSoundFlowAsync</c>'s success path — so no
+/// exception, no warning, no log line. <b>Measured, not assumed</b>: the two stop guards were
+/// temporarily reinstated on this branch and all three went red (3 failed / 0 passed), then green
+/// again (3 passed) when they were removed.
 /// </remarks>
 public class AudioFileEventSourceStopReachesThePlaybackServiceTests
 {
