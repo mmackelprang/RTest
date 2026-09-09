@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (44)
+## Shipped rows (51)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1642,6 +1642,387 @@ is not this bug.
 
 ---
 
+
+### UI-9 — Every visit to `/system` permanently leaked three event handlers into a process-lifetime singleton.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#628](https://github.com/mmackelprang/RTest/pull/628) |
+| Plan | [`UI-9-the-config-page-that-never-unsubscribes.md`](../design/plans/UI-9-the-config-page-that-never-unsubscribes.md) |
+| Spec / handoff | _no spec doc — the diagnosis was in the row_ · [ADR-031](../design/DECISION-LOG.md) |
+| Depends on | — |
+| Branch | `fix/ui-9-config-page-handler-leak` |
+
+**Detail: [`queue/UI-9.md`](queue/UI-9.md)** — which carries the census and the corrected verification.
+
+Merged 2026-09-08. ⚠ **Merged, not shipped** — not confirmed on the appliance.
+
+`SystemConfigPage.razor` subscribed to three `AudioStateHubService` events with anonymous lambdas,
+which have no stable reference, so no `-=` could remove them. The hub is `AddSingleton`, so the
+handlers outlived every circuit that added them. Fixed with three named methods and three `-=` in
+the `Dispose()` the page already had.
+
+⭐ **This closes the class in `Radio.Web`** — `SystemConfigPage` was the only component subscribing
+to a singleton service event without a matching `-=`. ⚠ **The row's "the other 22 all unsubscribe
+correctly" does NOT reproduce and the number was dropped**: an independent sweep counted 16 other
+components plus 3 subscribing services. The substantive claim survived — every other site has a
+matching `-=`, the two exceptions being component-owned timers that are stopped and disposed.
+
+⛔ **The row's original verification could not tell the fixed state from the broken one**, and that
+is the transferable part. It asked to *render twice and assert the invocation list does not grow* —
+which is **RED against correct code**, because two simultaneously-live components legitimately hold
+two handler sets. The leak is that disposal does not *shrink* the list, so the shipped assertion is
+*render → dispose → back to baseline*. **Measured RED first: 1 handler per event per visit, five
+visits leaving five.** Exactly 3 per visit, so the plan's open question about a child component also
+subscribing is answered — none does.
+
+⚠ **Three of this row's own inherited citations were stale and are corrected in the dossier**: the
+reflection idiom it named (`SleepTests.cs:501-523`) no longer exists — that file is 511 lines and
+`UI-7` replaced its raw `GetField` with the shared `HubEventFire` helper — and the claim that *eight
+test files use that seam* is now **one**, the helper itself. The new test therefore counts handlers
+through `HubEventFire.InvocationListOf<TDelegate>` rather than hand-rolling a thirteenth copy.
+
+---
+
+### GV-12 — The phone surface fetches once per circuit and never again, so a transient outage leaves it dead until a human taps Retry.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#631](https://github.com/mmackelprang/RTest/pull/631) |
+| Plan | [`GV-12-refetch-on-the-recovery-edge.md`](../design/plans/GV-12-refetch-on-the-recovery-edge.md) |
+| Spec / handoff | _no spec doc — confirmed from BOTH ends 2026-09-08_ · [ADR-032](../design/DECISION-LOG.md) |
+| Depends on | — _(⛔ NOT `UI-10`, despite the row saying so — see below)_ |
+| Branch | `fix/gv-12-refetch-on-recovery-edge` |
+
+**Detail: [`queue/GV-12.md`](queue/GV-12.md)** — which carries the four falsified row premises and
+the browser-UAT evidence.
+
+Merged 2026-09-08. ⚠ **Merged, not shipped** — the appliance was 13 PRs behind at merge time and
+was deliberately not deployed for this row.
+
+RotaryPhone's GV bridge was dead 14:08–15:31 EDT. After it recovered, `radio-web` made **zero**
+further GV calls and the phone surface sat on "Couldn't load…" against a healthy backend until the
+owner tapped Retry. Fixed by refetching on the unhealthy→healthy **edge** of the shared GV status
+poll, plus an error-gated backstop on the 5 s timer that already existed. No new clock.
+
+⭐ **The reason it is not a mount-path bug is the transferable part: a reconnected Blazor circuit
+does not re-mount.** It resumes the same component instances with the same fields;
+`OnInitializedAsync` runs once per *circuit*, not per *connection*, which is the whole point of
+`DisconnectedCircuitRetentionPeriod`. So reconnection never re-fetches, however clean. **This makes
+the refetch trigger the only recovery mechanism, not a backstop on one that usually copes** — and it
+means `UI-10` is **not** upstream, reversing the row's own instruction.
+
+⛔ **The status contract the row handed us was right for a BANNER and would have made this fix a
+silent no-op.** A recovery edge must be able to *reach* healthy; any permanently-true unhealthy term
+pins the state and the edge never fires — shipping green, doing nothing. `cookiesValid` was a
+non-nullable `bool` defaulting to `false`, so it was live-pinned. The predicate is now deliberately
+asymmetric: **present-and-bad** is unhealthy, **absent** contributes nothing. A banner wants the
+opposite and must derive its own (ADR-032).
+
+⚠ **The plan asserted the three new health fields "could not be verified from this tree"; both that
+and its fallback reasoning were false, and the evidence was in-repo the whole time**
+(`inbound/2026-09-08-rotaryphone-reply.md:87-91`). Because the fields *are* served, the live
+predicate includes the 2-minute staleness gate — so `lastApiSuccessAt` can pin the state unhealthy
+with no outage at all. **Measured rather than assumed:** it advances on a **60 s** cadence against
+that 120 s gate, a 2× margin, now pinned by a test so a cadence change fails loudly.
+
+⭐ **Two HIGH defects were introduced by the first implementation and caught pre-merge**, both from
+comments that asserted more than the code did. The backstop gated on `_threadsError` alone, but a
+SignalR push does `_threads ??= new()` — so an inbound SMS during an outage left a non-null list
+with the flag set, the panel showed content while the backstop called it stuck, fired an unrequested
+toast on an unattended kiosk, and then **permanently disarmed itself**. And the unattended refetch
+reused `RetryOpenThreadAsync`, performing a **durable mark-read to Google** that clears unread across
+the owner's devices for a conversation nobody had looked at — justified by a comment true of the
+Retry button and false of a background refresh, inverting a rule stated twenty lines away.
+
+**Verified RED first as its own commit**, then ⭐ **proven in a real browser with a real Blazor
+circuit** against a stub serving the outage's verbatim body — RotaryPhone untouched. With the
+backstop provably disarmed, thread calls stayed frozen for 46 s with the bridge down and moved
+**exactly once, ~6.2 s after restore, with nobody touching the browser**. ⛔ What is still not proven:
+that RotaryPhone's real recovery path reports the edge the way the stub does. **The next real outage
+is that test** — do not manufacture one.
+
+---
+
+
+
+### UI-12 — `RadioStateChanged` had no null guard while its three `Encoder*` siblings did, and the row's reason for not adding one was false.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#632](https://github.com/mmackelprang/RTest/pull/632) |
+| Plan | [`UI-12-the-null-that-cannot-arrive.md`](../design/plans/UI-12-the-null-that-cannot-arrive.md) |
+| Spec / handoff | _no spec doc — filed by the `UI-7` Builder as its `L-8`_ · [ADR-033](../design/DECISION-LOG.md) |
+| Depends on | — _(builds on `UI-7`'s fan-out seam, merged)_ |
+| Branch | `fix/ui-12-radiostatechanged-guard-shape` |
+
+**Detail: [`queue/UI-12.md`](queue/UI-12.md)** — which carries the correction to the row's own reasoning.
+
+Merged 2026-09-09. ⚠ **Merged, not shipped** — deliberately not deployed, and see below for why that
+is not a gap here.
+
+All four events declared `Func<T, Task>` now reject a null payload in one shared, logged helper
+**above** the fan-out, and the `_hubConnection.On<T>` type arguments became nullable — the type
+finally agreeing with what a JSON deserializer can produce.
+
+⭐ **The rule, and it is derivable from declarations rather than invented: an event declared
+`Func<T, Task>` cannot represent null, so a null is a contract violation and must be rejected at the
+boundary and logged; an event declared `Func<T?, Task>` treats null as DATA and must pass it
+through.** `NowPlayingChanged`, `VolumeChanged` and `EventPlaybackChanged` are the latter — null there
+means *"nothing is playing"* — and are untouched (ADR-033).
+
+⛔ **The obvious unification would have caused the defect the row was filed to avoid.** Putting the
+check in `NotifyAsync<T>` deletes three copies and silently drops every `NowPlayingChanged(null)`,
+stranding the dock on the previous track forever. `T` is erased there and cannot tell a contract
+violation from data.
+
+⚠ **The change is UNOBSERVABLE in production and the PR says so plainly.** A null cannot arrive —
+`AudioStateHubService` is a non-partial class so the language guarantees one raise site, and all four
+server-side senders are provably non-null. **It stays 🔵 P3, and no UAT can demonstrate the guard.**
+What justifies guarding anyway is that the payload crosses a process boundary through a JSON
+deserializer where nullable annotations are erased: null is unreachable because of `radio-api`'s
+current source, **not because the type system enforces it.**
+
+## ⭐ Four premises fell, and the row's own reason was one of them
+
+1. **The row said a guard would drop a broadcast *"the UI handles today."*** It does not: a null
+   throws an NRE at `RadioControlPanel.razor:1053` — swallowed per-subscriber since `UI-7` — while
+   three other surfaces wipe their cached radio state and repaint. **A swallowed exception plus a
+   three-surface wipe is the exact "failure wearing the costume of correct handling" the row invoked
+   that principle against.** ⭐ **The conclusion survived; the reason did not.**
+2. **The `Encoder*` guards cited as precedent were copy-propagated boilerplate** from `2cc41567`
+   (`ENC-9a`) on `VisualizationModeChanged` — an event `01220d0c` has since **deleted**. Decisively,
+   `db132192` did the *identical* typing transformation on `RadioStateChanged` and added **no**
+   guard. Neither shape was ever reasoned about, so neither could be cited as intent.
+3. ⛔ **The plan's control mutation could not pass, and its own `M2` row said why.** `M4` restores the
+   pre-`UI-12` inline guard and claims *"nothing must fail"* — but this row deliberately **adds**
+   audible rejection, which the Encoder tests pin. **Measured: `M4` fails 3.** ⭐ **A control must
+   hold the BEHAVIOUR fixed and vary only the SHAPE; `M4` varied both. A control that cannot pass is
+   not a control, it is a second mutation.** The corrected control `M4b` — inline guard *plus* inline
+   log, no shared helper at all — is **8/8 green**, which is the real demonstration that the tests
+   pin behaviour rather than the refactor. ⭐ And `M4a`'s failures are themselves the evidence: **all
+   three are the log assertion, not one is the dispatch assertion.**
+4. **The plan's *"every fixture uses `OfflineHubTransport`"* is false.**
+   `EncoderHudServiceTests.cs:473-481` builds the service from a bare `ServiceCollection` with no
+   transport registered, so `transport` defaults to `null`. The conclusion survives — that fixture
+   never *starts* the connection — but the shipped comment uses the narrower verified form: every
+   fixture that **starts** this service runs it over `OfflineHubTransport`.
+
+⚠ **Also corrected: the plan's warning-count gate.** `grep -cE "warning"` returns **94**, not 47,
+because MSBuild emits each warning once per project-graph pass. Read the `Warning(s)` summary line
+instead. The same defect is in `OPS-2`'s variant at `:536`, measured.
+
+## Pre-merge review: no HIGH, and every one of the seven findings was in a COMMENT
+
+That is the transferable part. The control flow was right first time; **the defects were all in
+prose asserting more than the code does** — this repo's signature failure mode, and the reason
+`CLAUDE.md` § *Pre-Merge Review* exists.
+
+⭐ **The sharpest: the seam's own justification claimed *"a test holding an `AudioStateHubService`
+cannot make `RadioStateChanged` fire"* — and `RadioControlPanelBandSyncTests.cs:167-173` does exactly
+that, green, today.** That is `CLAUDE.md` item 4 verbatim, the shape that left `TEST-2` open for four
+weeks waiting on a harness nobody needed. ⚠ **And it arrived inside a correction**: the implementer
+had already fixed an over-attribution on that comment and carried a false claim across the split.
+**Reviewing a correction for plausibility is not the same as checking it against the code.**
+
+Also fixed: a counterfactual written in the past indicative (*"a null reached … and threw"*)
+contradicting the paragraph four lines below it; a *"sole server-side sender"* citation covering one
+of the four events the helper serves; a *"cannot occur"* claim inherited for the Encoders rather than
+established; and a claim that `VolumeChanged(null)` means "an absent snapshot" when
+`NowPlayingPanel.razor:617-631` treats it as a **REST re-fetch trigger** — right conclusion, false
+reason, for the second time in one row.
+
+⚠ **The rejection warning is now throttled per event name.** It sat on a path documented at **up to
+20 Hz**, logging into a `Radio.Web` Console sink with no level restriction, on a box where log volume
+correlates with **audible audio distortion**. Either the null cannot occur — so the log is free — or
+it can, and then it can occur at 20 Hz forever. ⚠ The throttle is **instance-scoped, not static**:
+two tests reject a null `RadioStateChanged`, and a static one would suppress whichever ran second and
+fail on execution order alone.
+
+## Deferred, deliberately, as `UI-14`
+
+⭐ **`UI-12` built the test seam for the four events where a regression is UNOBSERVABLE and left the
+three where it is USER-VISIBLE ungated.** The *realistic* form of the forbidden refactor — keeping
+the helper *and* adding a "defensive" null check in `NotifyAsync<T>` — **passes the entire suite**
+while silently dropping every `NowPlayingChanged(null)`. The naive form fails 4 tests, **so the gate
+looks real and is not.** Filed rather than folded in, because it is a scope extension and not a
+defect in what shipped.
+
+### UI-14 — The three hub events where a dropped null is user-visible had no test seam, and the refactor that would break them passed the entire suite.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#633](https://github.com/mmackelprang/RTest/pull/633) |
+| Plan | [`UI-14-the-null-that-must-arrive.md`](../design/plans/UI-14-the-null-that-must-arrive.md) |
+| Spec / handoff | _no spec doc — filed by the `UI-12` Builder as its review finding `M6`_ · [ADR-033](../design/DECISION-LOG.md) (amended) |
+| Depends on | — _(no row dependency; builds on `UI-12`'s seam, merged)_ |
+| Branch | `fix/ui-14-nullable-hub-event-seam` |
+
+**Detail: [`queue/UI-14.md`](queue/UI-14.md)** — which carries the measured mutation matrix and the six
+premises this cycle falsified.
+
+Merged 2026-09-09. ⚠ **Merged, not shipped** — deliberately not deployed, as `UI-12` was not.
+
+⭐ **`M0` is the deliverable, and it is a measurement rather than a claim.** The *realistic* forbidden
+refactor — keep `AcceptPayload` **and** add a "defensive" `if (arg is null) return;` to
+`NotifyAsync<T>` — applied to the tree **before** the fix was **green across the whole solution**
+(`Radio.Web.Tests` 1,172/1,172) while silently dropping every `NowPlayingChanged(null)`. The *naive*
+form fails only 4. **So the existing gate looked real and was not.** `M1`, the identical mutation
+after, is RED on exactly the three new tests — the before/after RED demonstration `UI-12` could not
+produce. `M7`, a shape-only control with the fan-out lint run under it, is 100% green.
+
+⛔ **Six premises fell, including this row's own load-bearing claim.** The PERMANENCE argument said
+*"once `_lastNowPlaying` records the silence… never re-sent"* — refuted by the function it cited:
+`_lastNowPlaying` cannot hold a null, and `HasNowPlayingChanged` returns `true` unconditionally when
+either side is null, so a cached null would re-broadcast on the next 500 ms poll. The real mechanism
+is that the **server** caches a non-null snapshot while the **client** drops a null off the wire.
+⭐ **Right conclusion, wrong reason — the third row running.** Also false: that
+`AudioStateUpdateService` "only broadcasts on a change" (`EventPlaybackChanged` has no comparison at
+all); that `UI-12` made `AudioStateHubServiceTests.cs:148-158` false (it never touched that event, and
+the comment's `HubConnection`-handler-table claim is still true — **this** row falsifies it, by a
+different route); `SeedEventPlaybackAsync`, a member the plan invented; the census's own
+`Assert.Equal` carrying a remedy message it cannot carry; and *"a value type cannot be null"*, which
+would have let a `Func<TimeSpan?, Task>` land ungated.
+
+⚠ **Two of the plan's mutations do not compile as written** (`CS8620`; `CS0067`) — reported as
+measured rather than adjusted to fit. `M5`'s is instructive: for that defect the **compiler** is the
+gate, before any test.
+
+---
+
+### UI-13 — A failed broadcast still advances the change-detection cache — except the broadcast cannot fail, so the row's deliverable is the precondition.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#634](https://github.com/mmackelprang/RTest/pull/634) |
+| Plan | [`UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](../design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md) |
+| Spec / handoff | _no spec doc — filed by the `UI-12` Planner while enumerating senders_ · [ADR-034](../design/DECISION-LOG.md) |
+| Depends on | — _(no row dependency)_ |
+| Branch | `fix/ui-13-cache-advance-before-send` |
+
+**Detail: [`queue/UI-13.md`](queue/UI-13.md)** — which carries the verbatim RED measurement, the full
+mutation matrix, and the premises this cycle falsified.
+
+Merged 2026-09-09. ⚠ **Merged, not shipped** — deliberately not deployed, as `UI-12` and `UI-14` were
+not.
+
+⛔ **The row's headline was FALSE and was falsified during planning, not during the build.**
+`SendAsync` cannot throw on a failed broadcast: `HubConnectionContext.cs:361` catches everything that
+is not a cancellation of the caller's own token, aborts the **connection**, and returns a
+**successful** `FlushResult` — 129 consecutive sends to a hard-killed socket faulted none. Only
+cancellation escapes, that token is always `ExecuteAsync`'s `stoppingToken`, and `ExecuteAsync`
+catches exactly that as normal shutdown and breaks. **The stranded cache dies with the process.**
+
+⭐ **So the deliverable is the written-down precondition, not the fix** — recorded in the code above
+the cache-field block, in [ADR-034](../design/DECISION-LOG.md), and in the test file's remarks. A
+backplane, or any call site passing a different token, makes the defect live **and silent**.
+
+⭐ **RED was 6 failed / 2 passed**, every one on `Expected: 2 / Actual: 1` — the defect stated
+numerically. `M1'`, six independent per-site reverts, each failed **exactly** its own test, which is
+what proves *"fix the shape, not the instance"* rather than asserting it. `C1` (assignment below the
+log line) stayed **8/8 green**, so the tests pin behaviour, not line position.
+
+⛔ **`M3` as planned CANNOT BE RUN** — deleting an assignment is `CS0649` plus warnings-as-errors, so
+the **compiler** is the gate before any test. Same shape as `UI-14`'s two non-compiling mutations, one
+cycle later. `M3'` (assign `null`) was run instead.
+
+⭐ **The pre-merge review found a MEASURED four-site test gap, and it is the sharpest thing in the
+cycle.** One regression guard covered `CheckVolumeAsync` alone; mutating `_lastPlaybackState` to
+`null` left **all 8 tests green** while re-broadcasting an unchanged state twice a second forever.
+Four more per-site guards added, each verified to fail on exactly its own mutation. ⚠ **A site's
+cancellation test structurally cannot detect a never-advanced cache** — it only invokes twice.
+
+⛔ **The precondition comment invalidated its own line citation in the commit that wrote it** (`:196`
+→ `:223`, moved by its own 27-line insertion), and **"records *the clients have this* as a fact before
+it is one" was refuted by the evidence eleven lines below it** — a completed `SendAsync` is not proof
+of delivery. Both fixed. ⛔ **"The eight `async void` handlers" is nine**, traceable to an in-tree
+comment that correctly says *"eight siblings"* being read as the total.
+
+**`_lastQueue` was DELETED, not moved** — against the plan, which said file it separately (now struck
+in three places). `d465cdd2` deleted its only reader in the same commit that orphaned the write, so it
+is a completed-refactor leftover rather than a half-finished feature. ⛔ **Do not file the follow-up
+row; the work is done.**
+
+⭐ **Filed `UI-15` out of the review's `L5` — and unlike this row, it is a LIVE defect.**
+`CheckSourceChangedAsync` treats `null` as both "never observed" and "no source", so every
+`null → non-null` transition is suppressed as a first poll and a real source change is never
+broadcast, with nothing logged.
+
+---
+
+### KIOSK-3 — The desktop launcher's VOICE row read a field RotaryPhone was about to delete, and our own "zero consumers" grep was scoped to the wrong half of the repo.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#635](https://github.com/mmackelprang/RTest/pull/635) |
+| Plan | _no plan doc — the row's dossier carried the whole brief_ · [ADR-035](../design/DECISION-LOG.md) |
+| Spec / handoff | [`HANDOFF-kiosk-desktop-launcher.md` §5.3](design-handoffs/HANDOFF-kiosk-desktop-launcher.md) — **superseded by this row**, banner added, historical text left intact |
+| Depends on | — _(no row dependency to build. ⛔ Had to LAND BEFORE RotaryPhone's #79.)_ |
+| Branch | `fix/kiosk-3-launcher-honest-voice-predicate` |
+
+**Detail: [`queue/KIOSK-3.md`](queue/KIOSK-3.md)** — which carries the defect, the sequencing decision, and the reason the field was not simply kept.
+
+Merged 2026-09-09. ⚠ **Merged, not deployed** — deliberately held for the coordinator's coordinated two-service deploy.
+
+⛔ **`setup-kiosk.sh` MUST re-run for this to reach the box, and that is not what a deploy does.** Verified rather than inferred: `/usr/local/bin/radio-console-open` was dated **Aug 18 21:55**, untouched by every deploy since `KIOSK-2`, and still contained `psidtsAgeSeconds`. `Deploy-ToLinux.ps1` only ever *calls* `radio-kiosk-exit`/`radio-kiosk-launch`. **And the box has no checkout of this repo**, so the directory has to be copied over first. Both the blessed and the surgical install paths are in the PR body.
+
+⭐ **The field was dishonest in BOTH directions, which is why keeping it was never on the table.** Present, it reported a dead session as Online — reproduced independently in our own lane at 14:39Z, where the live box served `psidtsAgeSeconds: 34`, deep inside its own "healthy" band, alongside `cookiesValid:false, degraded:true` in the same payload. Absent, the empty-value guard would have pinned VOICE amber on every launch forever.
+
+⛔ **Two RED failures the row did NOT predict, and both were pre-existing with the field still present:** `available:false` and `available` absent both read **Online**. The old predicate had a silent-Online hole of its own; it simply reached it through a different field than the one the guard was written to cover.
+
+⛔ **Pre-merge review found two HIGHs, and the first is the sharpest thing in the cycle.** The 120 s gate was justified with *"pinned by `MeasuredSixtySecondCadence_StaysHealthy` so a cadence change fails a test"* — **false, and INHERITED verbatim from that test's own `<remarks>` rather than invented here.** The test is a `FakeTimeProvider` plus a literal `AddSeconds(-60)`; it never observes RotaryPhone and pins the *threshold*, not the cadence. Corrected in both places, and the honest statement recorded: **nothing detects a cadence slip**, and a slip past 120 s reproduces this row's defect through another field. ⭐ *A reason inherited from another file is not thereby verified.*
+
+**HIGH-2:** a pre-1970 timestamp read as "no signal", i.e. Online. `date -d` prints a negative epoch, and the digits-only guard took the leading `-` for a parse failure — routing the most stale reading obtainable onto the healthy arm. `0001-01-01T00:00:00Z` is exactly what .NET's `DateTime.MinValue` serialises to: a bridge that has **never** had a successful call.
+
+⭐ **The asymmetry ADR-032 established is PER-FIELD, not a property of the payload** — caught mid-build by the coordinator, against a corrected upstream contract. `available` is the anchor and must be present-and-true; `psidtsMintedAtUtc` goes the other way again, its `null` meaning UNKNOWN and explicitly not healthy. The first draft of the launcher's comments stated the rule uniformly, which would have reimported the very defect the row removes.
+
+⚠ **ADR-032 forbids reusing `IsHealthy` for a status display without re-deriving it, and the VOICE row IS one.** The exception is now argued on the record rather than assumed: this surface's cry-wolf rule inverts a banner's priorities, its amber is unactionable from a panel with no keyboard, and a term reading absence as ill would pin the row.
+
+⭐ **The lesson that outlives the row: a positive control validates the INSTRUMENT, never the SEARCH SPACE.** We told RotaryPhone three times the field had zero consumers, once citing a positive control as proof of method. The grep worked perfectly and was pointed at `src/`; the consumer was a shell script. **Re-derived here at full scope** — the whole tree minus `*.md`, plus all 28 shell scripts — and after this PR zero live readers remain.
+---
+
+### UI-11 — The unmatched `/api/*` path was already a 404. The row's premise was false, and so was the Builder's own correction to it.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#637](https://github.com/mmackelprang/RTest/pull/637) |
+| Plan | [`UI-11-the-404-that-was-already-a-404.md`](../design/plans/UI-11-the-404-that-was-already-a-404.md) — §6.3 struck mid-cycle and **restored**; the failed strike left visible |
+| Spec / handoff | _no spec doc — the dossier carries the defect, the retraction and the owner decision_ |
+| Depends on | — _(no row dependency)_ |
+| Branch | `fix/ui-11-the-404-that-was-already-a-404` |
+
+**Detail: [`queue/UI-11.md`](queue/UI-11.md)** — the retraction, the measured RED/GREEN split, the mutation table, and all four false claims.
+
+Merged 2026-09-09. ⚠ **Merged, not deployed** — deliberately out of scope for the cycle.
+
+⛔ **THE ROW'S HEADLINE WAS FALSE, AND SO WAS THE PLAN'S — but the row still had something in it.** `Radio.Web` has **no SPA fallback and never had one**: zero hits for `MapFallback`/`UseSpa`/`UseStatusCodePages*` in `src/`, `git log -S "MapFallback" --all -- src/` **0 commits**, no `index.html`, twelve plain `@page` routes and no catch-all. The `200`-with-`index.html` symptom came from **RotaryPhone's `:5004`** — and **our own [archive line 99](BUILDER_QUEUE_ARCHIVE.md) said so the whole time** (*"falling through to **their** SPA fallback"*), as did their *"in our own house"*. ⭐ **A misattribution surviving two hops: they said "your trap", we recorded "ours", and neither side re-derived which server sent the bytes.** What survived re-scoping is that our 404 was **correct by accident of the hosting model, unpinned, and bodyless** — zero bytes and no `Content-Type` on a two-service box where both services expose `/api/*`, which is what cost the other repo a probe.
+
+⭐ **THE PLAN'S ONE UNMEASURED ASSUMPTION WAS MEASURED AND HELD — 18 passed / 2 failed**, exactly as predicted, so the plan's *stop-and-re-plan* condition did not fire. Two refinements: the RED reason is **one assertion earlier** than predicted (`Content-Type` is `null` outright, so `JsonDocument.Parse("")` is never reached), and **`/Error` renders fine** under `WebApplicationFactory`, so all twelve page routes stayed in the guard.
+
+⛔⛔ **THE SHARPEST THING IN THE CYCLE IS THAT THE BUILDER'S OWN CORRECTION WAS FALSE, AND PRE-MERGE REVIEW CAUGHT IT BEFORE THE PR OPENED.** Mid-cycle the Builder struck the plan's §6.3 (*"a wider pattern is how the console goes black"*) as false on a mutation reading **20/20 green**, and wrote that into **four places** — a test's XML doc, the plan, the dossier and two commit messages. **Re-run over the whole project: 7 failed / 1,197 passed.** All four `StaticAssetPipelineTests` cases go RED, `/css/design-system.css` returning `NotFound`. **§6.3 is TRUE** and the strike was reversed.
+
+⭐ **The mechanism is an asymmetry worth carrying: page routes are endpoints, static files are not.** A real `@page` endpoint *competes* with the fallback and wins — on **precedence first** (a literal beats a catch-all before `Order` is consulted at all), `Order` second. ⚠ **`Order = int.MaxValue` is therefore NOT what protects those routes**, and prose saying so would make an `Order`-only change look safe. **Static files never enter the competition**: the automatic `UseRouting()` precedes all user middleware, so routing selects the fallback, and `StaticFileMiddleware` stands down purely because *some* endpoint was selected. `{**rest}` carries no `:nonfile` constraint — that lives only in `MapFallback`'s **default** pattern. Measured: CSS, JS and the DSEG font. Derived: the Radzen theme, `_framework/blazor.web.js`, and the circuit never starting.
+
+⛔ **The cause was scope, not method — one row after `KIOSK-3` recorded the identical lesson.** The mutation ran under `dotnet test --filter "FullyQualifiedName~ApiNotFoundPipelineTests"` and was reported as *"the entire suite"*. **20 is exactly that one class's case count.** The guard existed the whole time in the same project — in `StaticAssetPipelineTests`, **the very file this row's own Task 1 had moved an hour earlier.** Two earlier mutations had each failed exactly their own test, and that is what made the third feel safe. ⭐ **`KIOSK-3`'s closing sentence, verbatim and re-earned: a positive control validates the INSTRUMENT, never the SEARCH SPACE.**
+
+✅ **One genuine finding survived the retraction**: the `/api/` scope has a **second, independent** reason nobody had written down — **truthfulness**. `/some-typo` is a mistyped *page*, and a wide rule answers it *"No API route on this service matches"*: a well-formed body carrying a wrong answer, the row's own thesis one layer along. Newly pinned by `UnmatchedNonApiPath_DoesNotGetTheApiProblemBody`; `StaticAssetPipelineTests` already pinned availability.
+
+⭐ **`UseStatusCodePages` — §6.1's trap — measured in BOTH directions, and it is why Option B beat Option A.** With the terminal rule present, adding the middleware left the response alone (`application/problem+json`, 24/24 green). With it removed, the same middleware injected `404 text/plain` / `Status Code: 404; Not Found` into a response the API contract owns. `StatusCodePagesMiddleware` fires **only on a response with no body and no content type**, so giving `/api/*` a body forecloses it. Point it at a Razor page — **what the .NET 10 Blazor Web App template ships** — and that becomes `text/html`: the originally-reported bug through the front door, with every pre-`UI-11` test green.
+
+⚠ **Pre-merge review also found the test host had been dialling the live appliance for the whole of `OPS-5` and this row.** `RadioWebFactory` claimed *"hosted services removed so no background poll outlives the test"*; `PhoneHubService`/`GvTrunkHubService` are `AddSingleton` started fire-and-forget **outside** that mechanism, and at their `appsettings` defaults they open real SignalR connections to **`radio:5004`**, retrying 10/30/60 s for the host's lifetime. Both endpoints now point at `127.0.0.1:1`. **A comment gave a reason a thing was safe, and the reason was the thing that failed** — `CLAUDE.md` § *Pre-Merge Review* verbatim.
+
+⚠ **`git log -S "MapFallback" -- src/` is falsified by the commit that writes it** — empty on `main`, one hit after. Corrected in four places to *"was empty before this commit"*. **A citation can be true when written and false when merged.**
+
+⭐ **Verification that earned its place, twice.** The wire check caught what the assertion could not: `Content-Type` carries **no `charset`**, and `.MediaType` strips parameters, so a `; charset=utf-8` would have passed silently. And the `PHN-5` no-logging claim was **falsified rather than trusted** — four requests carrying a phone number and a token produced **zero** log lines.
+
+✅ **`Radio.API` checked and unaffected** — no static files, no fallback, and already regression-locked at `ApiTests.cs:32-43`. **Both services checked; there are exactly two.** Outbound correction sent to RotaryPhone: **we did not have the hole we asked them to mirror**; their fix stands, only the ownership was wrong.
+
+⚠ **`llm-review` and `build` both PASSED (2m49s / 1m32s)** — no self-hosted-runner stall this cycle, twice in a row.
+
+
+---
+
+---
 
 ## Historical narrative
 

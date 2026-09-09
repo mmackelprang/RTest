@@ -116,3 +116,40 @@ still polls the REST path, which returns `now()` and pings the configured addres
 REST→SignalR convergence is dispatched but not shipped. ⛔ **Do not build the predictive-degrade rule
 until that lands** — they agree: *"your predictive-degrade rule becomes safe to build the moment this
 lands, and not before."*
+
+---
+
+## ⭐ TASK ADDED 2026-09-08 — render a null `Ht801IpAddress` as "Unknown", not `--`
+
+**Time-boxed: this must land BEFORE RotaryPhone deploys PR #77.**
+
+In their PR #77, `SystemStatus.Ht801IpAddress` became **`string?`**. Previously the configured value
+defaulted to `""`, so a null was structurally impossible and our parser has never seen one. It is now
+**null at cold start** until the first background probe resolves an address, and stays null for the
+process lifetime if none ever resolves.
+
+Its **meaning** also changed: it now reports the **resolved** address — the one INVITEs actually go to —
+rather than the **configured** one. That is the whole point of their fix, and it is the difference that
+mattered in the 2026-07 outage, where the configured address was correct throughout while every INVITE
+went somewhere stale.
+
+**Our parser is already safe** — `Radio.Web/Models/ApiModels.cs:983` declares `public string?
+Ht801IpAddress`. Nothing breaks.
+
+⚠ **Our rendering is not.** `PhoneDashboardPanel.razor:63`:
+
+```razor
+HT801 &middot; @(SystemStatus?.Ht801IpAddress ?? "--")
+```
+
+**A null renders as `--`, which reads as absence.** Their doc comment: *render null as "Unknown", never
+as "no HT801 configured."* The distinction matters — **null means we have not yet learned where the bell
+is, not that there is not one.** As it stands, their semantic improvement would arrive on a panel that
+converts "not yet resolved" into "no bell."
+
+⭐ It is the same failure in miniature as everything else this week: **a display asserting a fact it has
+not established.**
+
+**Verification:** render the component with `Ht801IpAddress = null` and assert the visible text is
+`Unknown`. **Must fail first** — today it renders `--`, so the test is RED against `main` by
+construction. Confirm that rather than assuming it.

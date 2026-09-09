@@ -73,9 +73,21 @@ to `/system` permanently adds three handlers to a process-lifetime singleton, ea
 disposed component's `InvokeAsync`/`StateHasChanged`. ⚠ It interacts with `UI-7` and is still not part
 of it: unbounded list growth makes the now-sequential fan-out slower over process lifetime, and it is
 the mechanism by which `PhoneCallStateChanged` — a one-subscriber event by census — becomes an
-N-subscriber event after N navigations. But it is a **lifecycle** defect, not a fan-out one; the fix is
-three named handlers and an `IDisposable` on a 2,000-line page. **Read from source, not observed** — no
-growing invocation list was measured.
+N-subscriber event after N navigations. But it is a **lifecycle** defect, not a fan-out one.
+
+✅ **SHIPPED 2026-09-08 as `UI-9` ([#628](https://github.com/mmackelprang/RTest/pull/628)); see
+[ADR-031](DECISION-LOG.md).** Two claims in the paragraph above were wrong and are left standing
+only so the correction is visible:
+
+- *"the fix is three named handlers and an `IDisposable` on a 2,000-line page"* — **the page already
+  declared `@implements IDisposable`** (`:15`) with a live `Dispose()` (`:4192`), so there was no
+  interface to add and no lifecycle to introduce. And it is **4,213** lines, not 2,000.
+- *"Read from source, not observed — no growing invocation list was measured."* — **it is measured
+  now.** Against the unfixed page: 1 handler per event per visit, and five visits leaving five, i.e.
+  15 retained handlers. Exactly 3 per visit, so no child component contributes.
+
+⭐ It also **closed the class**: a repo-wide sweep found `SystemConfigPage` was the only component in
+`Radio.Web` subscribing to a singleton service event without a matching `-=`.
 
 **2. `PhoneUnreadState.cs:23`'s starvation exposure.** `event Action<int>?` — void-returning, so
 `Delegate.Invoke` really does run every handler and there is no discarded `Task`. The dropped-`Task`
@@ -2504,3 +2516,132 @@ synthesis finishes — the bar is renderable, just not until `Preparing` complet
 
 **Priority: low.** (a) is a design nicety the handoff itself recommends skipping; (b) is a
 refactor with no user-visible effect. Neither is a correctness gap.
+
+---
+
+## 32. `PhoneMessagesPanel`'s "All" tab renders a total GV outage as "No messages yet."
+
+**Found by `GV-12`'s browser UAT, 2026-09-08.** Not introduced by that row and not fixed there —
+it is `PhoneMessagesPanel`'s pre-existing feed logic, and it is the same failure-looks-like-empty
+class as `GV-8` / UAT F-1.
+
+### What exists
+
+`src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor:390-392`:
+
+```csharp
+private bool FeedError =>
+  CallHistory == null && Voicemails == null && Threads == null
+  && (VoicemailError || ThreadsError);
+```
+
+The error branch for the unified feed requires **all three** sources to be null. Call history comes
+from `radio-api`, not from RotaryPhone, so during a GV outage it is typically non-null — often an
+empty list. `FeedError` is then false, `_feed` is empty, and the panel falls through to the
+`_feed is { Count: 0 }` branch at `:151-156`: **"No messages yet."**
+
+Observed live in the `GV-12` UAT: with the GV bridge returning 502 on both list routes and the
+banner correctly shown, the default "All" tab read *"No messages yet."* The honest error copy
+(*"Couldn't load conversations."*) was only reachable after switching to the **Texts** segment.
+
+### What is needed
+
+Decide what "All" should say when some sources failed and others returned genuinely empty. The
+current rule collapses "we could not ask" into "there is nothing", which is exactly what F-1 was
+filed about. A likely shape: keep the feed rendering whatever it has, but surface a non-blocking
+per-source failure affordance rather than choosing between a full error state and a bare empty
+state.
+
+### Gotchas
+
+- ⚠ **The three-way-null condition is deliberate, not an oversight** — the comment above it says
+  *"once any has data we render what we have."* That is the right instinct for a unified feed; the
+  bug is that "no data" and "no answer" are not distinguished.
+- ⚠ **`RetryFeed` re-fetches both GV sources** (`:394-396`) and the comment explains why. Any fix
+  must keep that.
+- ⚠ **This is user-visible copy on the kiosk's default tab.** It wants a Designer answer before a
+  Builder one.
+
+**Priority: medium.** Not a data-loss bug, but it tells the owner "no messages" when the truth is
+"we could not reach Google" — and the whole GV honest-status arc exists to stop doing that.
+
+---
+
+## 33. `BluetoothAutoSwitchServiceTests.NodeArrivesAfterProbe_SwitchesViaEvent` races a wall clock
+
+**Found by `GV-12`'s full-suite run, 2026-09-08.** Unrelated to that row — `Radio.Infrastructure.Tests`
+has no project reference to `Radio.Web`, so the diff could not reach it. Failed once under load,
+passed 10/10 on immediate re-run. **It is not on the known-failing list in `CLAUDE.md`.**
+
+### What exists
+
+`tests/Radio.Infrastructure.Tests/Audio/Services/BluetoothAutoSwitchServiceTests.cs:248-262`:
+
+```csharp
+using var svc = CreateService(bt, audioMock, probeMs: 200, maxWaitMs: 5000);
+bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
+// Wait long enough for the probe window to expire and the event subscription to be active.
+await Task.Delay(500);
+Assert.False(counters.SwitchedToBluetooth);
+Assert.True(bt.CaptureNodeAvailableSubscriberCount >= 1, "Expected event subscription active");
+```
+
+The observed failure was exactly that assertion: `Expected event subscription active`.
+
+### What is needed
+
+The house fix from `CLAUDE.md` § Test Timing: **synchronize on the observation, not on elapsed
+time.** Either park the service on entry to its probe loop until the test grants it (the
+`BluetoothCaptureWatchdogTests` idiom, `TEST-4`), or expose a completion signal the test can await
+instead of a 500 ms sleep against a 200 ms probe.
+
+### Gotchas
+
+- ⚠ **This fails in the dangerous direction.** Starvation flips the assertion to *fail*, which is
+  the case `CLAUDE.md` says must never be left timed. It is not the safe bounded-negative shape.
+- ⚠ **It reproduces under load, not idle** — it fell during a full 1,546-test `Radio.Infrastructure`
+  run with a review agent running concurrently. A quiet re-run passes and proves nothing.
+- ⚠ **Raising the delay is not the fix** — that converts a flaky test into a slow flaky test, which
+  `CLAUDE.md` explicitly rejects.
+
+**Priority: medium.** A flake nobody has attributed will eventually be waved through on a day when
+it is masking something real.
+
+---
+
+## 34. `PhonePage`'s 5 s poll timer has no `TimeProvider` seam, so `BackstopRefetchAsync` is untested
+
+**Found by `GV-12`, 2026-09-08.** The row shipped its recovery edge with two regression tests and
+its backstop with none.
+
+### What exists
+
+`src/Radio.Web/Components/Pages/PhonePage.razor` creates `_pollTimer` as a raw
+`new System.Timers.Timer(5000)` in `OnInitializedAsync`. `BackstopRefetchAsync` fires from that
+timer's 6th tick (30 s), so a bUnit test would have to wait 30 wall-clock seconds to observe it —
+which is exactly the shape `CLAUDE.md` § Test Timing forbids.
+
+The backstop's gate — `(_threadsError && _threads == null) || (_voicemailError && _voicemails == null)`
+— was therefore verified **by reading, and by observing it live in the `GV-12` browser UAT**, not by
+an automated test.
+
+### What is needed
+
+The house idiom: an injectable `TimeProvider` defaulting to `TimeProvider.System`, with
+`FakeTimeProvider` in the test — `EncoderHudService` is the worked example, and
+`GvBridgeStatusService` gained exactly this seam in `GV-12`. Then advance the fake clock 30 s and
+assert the backstop fires once when a surface is showing an error and **not at all** when it has
+content.
+
+### Gotchas
+
+- ⚠ **The gate is the subtle part, not the firing.** An earlier version gated on `_threadsError`
+  alone; because a SignalR push does `_threads ??= new()`, an inbound SMS during an outage produced
+  a non-null list with the flag still set — the panel showed content while the backstop called it
+  stuck, fired an unrequested toast on an unattended kiosk, and then permanently disarmed itself.
+  A test that only proves "it fires" would not have caught that.
+- ⚠ **`PhonePage` is a large component with many timers and subscriptions.** Adding the seam is
+  mechanical; the blast radius is every existing `PhonePage` bUnit fixture.
+
+**Priority: low.** The behaviour is verified live and by inspection; this buys regression safety,
+not a fix.

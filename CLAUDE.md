@@ -110,6 +110,40 @@ whose anchors moved three times while it measured them.
 - ⚠ **A verification run proves the tree it ran in.** After any concurrent-session incident, re-check
   `main` from a *fresh* checkout rather than the working tree you happen to be holding — that is how
   the 2026-09-08 red state was confirmed cleared.
+- ⛔ **A quiet `git status` is NOT "the agent has finished", and neither is a completion
+  notification.** This rule was violated a **fourth** time on 2026-09-08 — while it was being written
+  — by exactly this reasoning: the coordinator saw a clean-looking tree, took a `completed`
+  notification at face value, and branched. **The agent's own report had ended *"PR #623 is open.
+  Waiting on CI before I close out the cycle."*** It said in words that it was not done, and the
+  status field was believed over the sentence.
+  **The signal is the agent's stated intent, not the tree's appearance and not the notification's
+  status field.** An agent stops and resumes for many reasons — waiting on CI, waiting on a review,
+  waiting on a subagent. **If its last report names something it is still waiting for, it is not
+  finished.** When in doubt, ask it; a one-line message costs nothing next to yanking the branch out
+  from under a Builder mid-push.
+  ⭐ The Builder's own handling of the collision is the model: on finding the tree switched under it,
+  it **deliberately did not switch it back**, on the grounds that doing so *"would yank the tree out
+  from under the other session, which is the same mistake in reverse."*
+
+### ⛔ Commit before any destructive revert — especially between mutation runs
+
+The symmetrical twin of the rule above, and it cost real work on the same day. A Builder running
+mutation tests reverted a mutation with `git checkout -- <source file>` — **but had not yet committed
+the fix and the comment rewrite it had just written**, so both were discarded. It recovered fully and
+nothing reached the remote badly, but only because it noticed.
+
+⚠ **The interesting part is why it happened.** The same technique had been safe in an earlier mutation
+round *because the work was committed first*. It was reused without re-establishing that precondition.
+
+**The rule: `git checkout -- <path>`, `git restore`, `git reset --hard` and `git stash drop` are all
+unrecoverable for uncommitted work. Commit — or at minimum `git stash` — before reaching for any of
+them.** During mutation testing specifically, **commit the real change first, then mutate, then
+revert**; the revert is only safe when the thing you would lose is already in an object.
+
+⭐ **Both of that day's tree failures reduce to one sentence, and it is worth carrying beyond git:
+state that *looks* settled isn't.** A quiet `git status`, a `completed` notification, a green gate, a
+technique that worked last time — each is a *proxy* for the fact you want, and each was believed in
+place of checking it.
 
 ## Solution Structure
 
@@ -398,6 +432,39 @@ curl -s http://radio:5000/api/health/version   # API  — gitSha, assemblyName "
 curl -s http://radio:5002/api/health/version   # Web  — gitSha, assemblyName "Radio.Web"
 ```
 
+**An unmatched path under `/api/` on either service returns 404, and since `UI-11` `Radio.Web` says so
+in JSON.** ⚠ **`Radio.Web` has no SPA fallback and never had one** — it is a Blazor Web App, so
+`MapRazorComponents` registers one endpoint per `@page` route and **no catch-all**, and a mistyped API
+path has therefore always 404'd rather than returning an app shell. There is no `index.html` in the
+project, and `git log -S "MapFallback" --all -- src/` returned **nothing at all** until `UI-11`'s own
+commit — so the single hit it returns today is the terminal 404 described here, not a fallback.
+**The `200`-with-`index.html` symptom
+that `UI-11` was filed against came from RotaryPhone's service on `:5004`, not from ours** — the row
+survived only because our 404 was *bodyless*: zero bytes and no `Content-Type` at all, which is what
+cost the other repo a probe on a box where both services expose `/api/*`. `Radio.API` returns a bare
+404 and was already locked (`ApiTests.cs:32-43`). ⚠ **The body is a compile-time constant and echoes
+nothing from the request** — no path, no query, no route values, no trace id — and the handler logs
+nothing at any level, because the paths people mistype here carry phone numbers and `Radio.Web`'s
+Console sink is unrestricted (see the `radio-web` note above, and `PHN-5`).
+
+⛔ **Do not add `UseStatusCodePagesWithReExecute("/not-found")`.** It is what the .NET 10 Blazor Web App
+template ships and what current Microsoft docs steer you to, and it would give every `/api/*` 404 a
+**body it did not write** — most of `UI-11`'s originally-reported bug arriving through the front door.
+⭐ **Both halves of that were measured during `UI-11`, not argued:** with `UseStatusCodePages()` added
+*and* the terminal `/api/` rule removed, an unmatched `/api/*` path came back
+`404 Content-Type: text/plain` with the body `Status Code: 404; Not Found` — a body injected by
+middleware into a response the API contract owns (point it at a Razor page and that becomes
+`text/html`). With the terminal rule **in place**, the same middleware left the response alone and it
+stayed `application/problem+json`, suite 24/24 green. **Status-code pages only fire on responses that
+have no body and no content type**, so giving `/api/*` a body of its own is what forecloses this —
+that protection is the reason the body exists, not a nice-to-have.
+
+```bash
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5002/api/nope   # 404 application/problem+json
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5000/api/nope   # 404
+curl -sS -o /dev/null -w '%{http_code} %{content_type}\n' http://radio:5002/phone      # 200 text/html
+```
+
 *Previously:* `radio-web` was checked only with `systemctl is-active`, which is exactly as true of a
 stale binary as a fresh one, and the interim gate was grepping the deployed binary for a branch-only
 symbol (`grep -ac <symbol> /opt/radio-console/web/Radio.Web`). That workaround is no longer needed.
@@ -493,6 +560,60 @@ asserting on what it wrote.
 the assertion to *fail*. A bounded negative check that starvation can merely weaken — "no event
 arrived within 200 ms" — is safe, and sometimes unavoidable. Say which one a test is, as
 `DisabledByZeroThreshold_DoesNotRaise` does, rather than implying a determinism it does not have.
+
+## The merge gate — CI is advisory, your local gates are the truth
+
+**`main` branch protection is OFF. CI does not block a merge and is not supposed to.** The
+merge-blocking truth is the Builder's own local gates: `dotnet build -c Release` at the **47-warning,
+0-error** baseline, and `dotnet test` green apart from the known-failing set named above.
+
+This is stated in five workflow files — `build.yml:13`, `audit-configuration.yml:13`,
+`pages-docs.yml:11`, `todo-to-issues.yml:39`, and `llm-review.yml:20` — and **until 2026-09-09 it was
+stated nowhere else.**
+
+⚠ **That gap caused a false belief, which is why this section exists.** A Builder went looking for
+merge policy in this file, found none, and concluded `CLAUDE.md` **permits an admin merge**. It does
+not, and never did: the words `admin`, `--admin`, `bypass` and `branch protection` appeared **zero
+times** in this file. The Builder was not being careless — **it read the only document it was pointed
+at, and the policy was not in it.** A rule that lives only in comments on files nobody is told to read
+is a rule that will be reinvented.
+
+⛔ **There is no admin-merge provision to invoke, and none is needed** — protection is off, so an
+ordinary merge already works. If you find yourself reaching for `--admin`, the question to ask is not
+"am I allowed" but **"why do I think something is blocking me"**; the answer is usually that a gate is
+genuinely red.
+
+⭐ **A red or pending CI run is therefore not a reason to stop — and not a reason to merge, either.**
+It is a second opinion on a build you have already gated locally. Read it, and if it disagrees with
+your local result, **find out which one is lying before merging.** Waiting on CI is a legitimate
+choice; treating a green CI as permission you did not otherwise have is not.
+
+### ⚠ `git push` fails over HTTP/2 on this box — and its failure output ends `Everything up-to-date`
+
+Measured 2026-09-09 while shipping `UI-14`, reproducibly: `git push` dies with `curl 16`
+(an HTTP/2 framing error). The fix is one config, already set locally on this checkout:
+
+```bash
+git config --local http.version HTTP/1.1
+```
+
+⛔ **The trap is not the failure, it is the message.** The failed push's output **ends with
+`Everything up-to-date`** — the single most reassuring line git emits. A Builder that reads the last
+line and moves on will believe it pushed. It did not: `git ls-remote` showed **no branch at all** on
+the remote.
+
+**So verify a push by asking the remote, not by reading the push's own output:**
+
+```bash
+git ls-remote --heads origin <branch>     # the branch exists remotely, or it does not
+git rev-parse HEAD origin/main            # two identical SHAs, or you have not pushed
+git log origin/main..HEAD --oneline | wc -l   # 0 means synced
+```
+
+⭐ **Same family as the `dotnet test | tail` trap above**, and worth stating as one rule: **a command's
+own summary line is not evidence that the command did what it says.** One reports the exit code of
+`tail`; this one reports a reassuring string on the path where it failed. Both are instruments that
+cannot see the state they claim to measure — which is also, separately, what `UI-14` was about.
 
 ## Pre-Merge Review
 

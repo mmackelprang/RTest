@@ -645,4 +645,562 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
 
 ---
 
+## ADR-031: A component's subscription to a singleton service event is proved by teardown, not by growth
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+`SystemConfigPage.razor` subscribed to three `AudioStateHubService` events with anonymous lambdas.
+An anonymous delegate has no stable reference, so no `-=` can remove it, and the page never tried.
+`AudioStateHubService` is `AddSingleton` (`Program.cs:411`), so **every visit to `/system`
+permanently added three handlers to a process-lifetime object** — each retaining the component and
+its whole render tree, on an appliance that runs for weeks between restarts.
+
+⚠ **The route is `/system`.** The row said `/system-config` five times and `UI-7`'s plan inherits the
+same wrong string in two places. `@page "/system"` is the file's only `@page`; there is no alias and
+no redirect, so `/system-config` is not a route this application serves. Nothing in the fix depends
+on it — it matters because every prose description of the defect named a URL nobody could visit.
+
+### Decision
+
+Named instance methods, and a matching `-=` for every `+=` in the disposal method the page already
+had. **The naming is a means; the symmetry is the property.** No new interface, field, flag or
+lifecycle — the page has declared `@implements IDisposable` with a live `Dispose()` throughout.
+
+⭐ **This closes the class in `Radio.Web`.** A repo-wide sweep found `SystemConfigPage` was the only
+component subscribing to a singleton service event without a matching `-=`. This was a one-off
+outlier, not the first instance of a pattern.
+
+⚠ **The row and the plan both said "the other 22 all unsubscribe correctly"; that number does not
+reproduce and has been dropped rather than restated.** An independent pre-merge sweep counted
+**16 other components** subscribing to service events, plus 3 subscribing services
+(`AudioStateStore`, `EncoderHudService`, `ConsolePlaybackState`) — which are not components and do
+not carry a component disposal interface. **The substantive claim survived falsification**: every
+other subscription site has a matching `-=` in the same file, the only two exceptions being
+`MainLayout._timer.Elapsed` and `PhonePage._pollTimer.Elapsed`, both component-owned timers that
+are stopped and disposed, so the delegate dies with the component. ⭐ **A specific count that does
+not reproduce is what teaches the next reader to distrust the claim that does** — this repo has now
+been burned by that four times, so the claim is kept and the number is not.
+
+### ⛔ The instrument, which is the part worth keeping
+
+**The verification the row originally specified could not tell the fixed state from the broken one.**
+It said: *render the page twice against a shared service, assert the invocation list does not grow.*
+**That is RED against correct code.** Two simultaneously-live components legitimately hold two sets
+of handlers — ordinary multicast behaviour, not a leak. Implemented as written, a row about a
+resource leak would have shipped a test that was worthless in the direction that mattered.
+
+**The leak is that disposal does not SHRINK the list.** The discriminating assertion is therefore
+*render → dispose → the count returns to its pre-render baseline*, plus *five render/dispose cycles
+leave the singleton in the same state as one*.
+
+Measured before the fix, and the numbers are the record: **1 handler per event per visit; five
+visits leaving five.** Linear, unbounded, and exactly 3 per visit — so no child component subscribes
+to these events as well, which the plan had flagged as an open question rather than a fact.
+
+Two supporting rules, both of which earned their place here:
+
+- **An instrument check is not optional.** Both tests first require the counts to *move* off
+  baseline. Without that, a page that subscribes nothing — an early throw in `OnInitializedAsync`,
+  a renamed event — satisfies every assertion vacuously. It is the same "prove the instrument can
+  see the unfixed state" discipline recorded against `TEST-2`, `UX-1`, `OPS-3` and `UI-7`, and this
+  is its sixth outing in three days.
+- **Reflection goes through the shared seam.** The test counts handlers via
+  `HubEventFire.InvocationListOf<TDelegate>`, which `UI-7` (`C-213`) extracted hours earlier
+  precisely so tests stop hand-rolling `GetField`. A private copy here would have been the
+  thirteenth such site and a worse one: the helper throws on a missing backing field instead of
+  counting zero, and on a wrong payload type instead of silently widening to `Delegate`.
+
+### Alternatives considered
+
+- **`IAsyncDisposable`** — rejected. Unsubscribing is synchronous; a second disposal interface would
+  be strictly more code for no behaviour.
+- **Routing these events through `AudioStateStore`** so the store is the hub's sole subscriber —
+  not available. The store re-exposes 11 of the hub's 14 events and `PhoneCallStateChanged` is one
+  of the three it omits, which is *why* this page reaches past it to the hub directly.
+
+### Consequences
+
+The test joins the set that depends on these events remaining **field-like**. `UI-7`'s `C-207`
+examined converting them to explicit `add`/`remove` accessors, which would delete the compiler-
+generated backing fields; it rejected that route, so the seam survives. If it is ever revisited,
+this test changes with it — `HubEventFire` already throws a message saying so.
+
+**Plan of record:** [`design/plans/UI-9-the-config-page-that-never-unsubscribes.md`](plans/UI-9-the-config-page-that-never-unsubscribes.md)
+
+---
+
+## ADR-032: A recovery predicate and a status banner want opposite failure directions, and must never share one predicate
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+`GV-12`: RotaryPhone's GV bridge was dead 14:08–15:31 EDT. After it recovered, `radio-web` made zero
+further GV calls and the phone surface sat on *"Couldn't load…"* against a healthy backend until the
+owner tapped Retry.
+
+The reason that is not a mount-path bug is the part worth keeping: **a Blazor Server circuit that
+drops and reconnects does not re-mount.** It resumes the same component instances with the same
+fields; `OnInitializedAsync` runs once per *circuit*, not per *connection* — which is the entire
+purpose of `DisconnectedCircuitRetentionPeriod` (`Radio.Web/Program.cs:69`, 10 minutes here,
+commented "without losing circuit state"). So reconnection never re-fetches, however clean it is.
+Only a full page load does. That is why the 16:07 restart cleared every stuck panel and the
+preceding 83 minutes cleared none — same code, both times.
+
+### Decision
+
+Refetch on the **unhealthy→healthy edge** of the existing shared status poll, plus an error-gated
+backstop on the existing 5 s page timer. No new clock.
+
+**The rule this row exists to record: a predicate that gates a RECOVERY EDGE and a predicate that
+gates a STATUS BANNER want opposite failure directions on unknown data, and merging them silently
+breaks one of them.**
+
+- A **banner** fails *visible*: if we do not know, say something is wrong. Unknown reads as ill.
+- A **recovery edge** fails *silent*: it must be able to REACH healthy, because the whole mechanism
+  is a transition. Any term that is permanently true-unhealthy pins the state, the edge never fires,
+  and the fix ships green doing nothing.
+
+So `GvBridgeHealth.IsHealthy` is deliberately asymmetric: a field that is **present and says bad**
+makes it false; a field that is **absent contributes nothing**. `GvBridgeStatusService.IsAvailable`
+(the banner) is left alone and is allowed to be false while `IsHealthy` is true. Two predicates, two
+directions. ⛔ A future banner row must derive its own rather than tightening this one.
+
+### ⛔ The failure mode this nearly shipped with, twice
+
+**First, through absence.** `CookiesValid` was a non-nullable `bool` defaulting to `false`, so any
+response omitting it made `!CookiesValid` permanently true. All four health terms are now nullable,
+and that nullability is load-bearing rather than tidiness.
+
+**Second, through presence — and this one the plan got wrong.** The plan asserted that whether
+RotaryPhone serves `degraded` / `authBlackout` / `lastApiSuccessAt` *"could not be verified from this
+tree"*, and reassured the reader that absent fields would degrade the predicate to `!Available`.
+**Both halves were false, and the evidence was in-repo the whole time**
+(`docs/queue/inbound/2026-09-08-rotaryphone-reply.md:87-91`). Because the fields *are* served, the
+live predicate includes the 2-minute staleness gate — so `LastApiSuccessAt` can pin the state
+unhealthy with no outage at all if RotaryPhone's cadence ever exceeds it. §0.4 had reasoned only
+about absence; presence-and-stale reaches the same silent no-op by a different door.
+
+⭐ **The correction is that an assumption which decides whether the fix does anything must be
+measured, not reasoned about.** Measured on the box: `lastApiSuccessAt` advances on a **60-second**
+cadence against a 120 s threshold — a 2× margin, now pinned by
+`MeasuredSixtySecondCadence_StaysHealthy` so a cadence change fails a test instead of silently
+disabling the row.
+
+### Two supporting rules that earned their place
+
+- **Derive the edge from its own field.** `_gvBridgeAvailable` has four assignments across three
+  methods, because `PhonePage` runs its own 30 s status poll beside the singleton's 10 s one. An
+  edge compared against it is swallowed whenever the page-local poll lands the recovery first —
+  intermittently, on a timer alignment nobody can reproduce. `_gvHealthyLast` is written by
+  `OnGvStatusChanged` and by nothing else.
+- **An unattended refresh must not perform a durable write.** The first implementation reused
+  `RetryOpenThreadAsync`, which marks a thread read on Google — clearing unread across the owner's
+  devices for a conversation nobody had looked at. Its comment justified this with *"the user is
+  finally looking at the conversation"*, which is true of the Retry **button** and false of a
+  background refresh, and which directly inverts the rule `OpenThreadAsync` states twenty lines
+  away. **The reason a comment gives is the claim to check, not the conclusion** — this is the
+  fourth time that has been recorded here.
+
+### Verification
+
+RED measured first, as its own commit: both regression tests failed against the unfixed page
+(*"expected a refetch after recovery; thread-list calls = 1"*). Then the edge was proven **in a real
+browser with a real circuit** — which the bUnit tests structurally cannot do, since they have no
+circuit — against a stub serving the outage's verbatim status body, with RotaryPhone untouched.
+
+⚠ **The isolation matters more than the pass.** The first browser run did not discriminate: the
+refetch landed 7.4 s after restore and a backstop tick was due 1 s later. The second run exploited
+the fix's own gate — a populated list keeps `_threadsError` false, so the backstop is disarmed and
+only the edge can fire — and showed thread calls frozen for 46 s with the bridge down, then moving
+exactly once, ~6.2 s after restore, with nobody touching the browser.
+
+⛔ **What is still not proven, and should not be claimed:** that RotaryPhone's real recovery path
+reports the edge the way the stub does. The next real outage is that test. Do not manufacture one —
+their uptime is unsettled and a restart risks causing the incident this fixes.
+
+**Plan of record:** [`design/plans/GV-12-refetch-on-the-recovery-edge.md`](plans/GV-12-refetch-on-the-recovery-edge.md)
+
+---
+
+## ADR-033: A delegate's declared nullability decides whether null is a contract violation or data, and the check must live where that is still known
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`UI-12`. `AudioStateHubService` raises fourteen events from SignalR `On<T>` lambdas. Four are
+declared `Func<T, Task>` with a **non-nullable** payload; three are declared `Func<T?, Task>` where
+null is **meaningful data**. Three of the four non-nullable ones carried an inline `dto != null`
+guard; `RadioStateChanged` did not, and the asymmetry was invisible without reading all fifteen raise
+sites together.
+
+⛔ **The guards were not evidence of intent.** `git log -S` on their original text traces every copy
+to `2cc41567` (`ENC-9a`, #491), which wrote one on `VisualizationModeChanged` — **an event
+`01220d0c` has since deleted.** `ENC-0`, `ENC-4` and `ENC-12` copied it verbatim. No commit message
+states a reason, and PR #491's thread never mentions null. Decisively, `db132192` performed the
+*identical* parameterless→typed-DTO transformation on `RadioStateChanged`, in the same file, and
+added no guard. **Same problem shape, opposite outcome, no incident either way — neither shape was
+reasoned about.** Boilerplate origin makes a guard unjustified by history; it does not make it wrong.
+
+### Decision
+
+**The declaration is the specification.**
+
+> An event declared `Func<T, Task>` cannot represent null, so a null payload is a contract violation
+> and must be **rejected at the boundary and logged**. An event declared `Func<T?, Task>` treats null
+> as **data** and must **pass it through**.
+
+All four non-nullable events now route through one shared `AcceptPayload<T>` helper that rejects and
+logs at Warning; the `_hubConnection.On<T>` type arguments became nullable, because the payload
+arrives from a **JSON deserializer across a process boundary where C# nullable annotations are
+erased.** A JSON `null` binds to `default(T)` whatever the file annotates. Declaring it non-nullable
+never prevented a null — it only hid that one was representable.
+
+⭐ **What makes the null unreachable today is a property of `radio-api`'s current source, not a
+property the type system enforces.** That distinction is the whole reason to guard a null that
+provably cannot arrive.
+
+### ⛔ The unification that would have caused the defect it was preventing
+
+`NotifyAsync<T>` already fans out all **eight** payload-carrying events — **seven** of them with a
+reference-type payload, `SleepStateChanged` being `Func<bool, Task>`, which this rule does not reach.
+(⚠ This read *"all seven payload-carrying events"* until `UI-14`, the **third** counting slip in this
+file's history; `AudioStateHubServiceEventDeclarationCensusTests` is what now stops a fourth.) Putting
+`if (arg is null) return;` there unifies four guards in one line and deletes three copies. **It would also silently
+drop every `NowPlayingChanged(null)` — which means "nothing is playing" — stranding the now-playing
+dock on the previous track forever.**
+
+`NotifyAsync<T>`'s `T` is erased to a type parameter; it **cannot tell a contract violation from
+data, and must not try.** So the guard belongs **above the fan-out**, in the per-event handler, where
+the declared nullability is still visible. The obvious deduplication is the defect.
+
+### Why the row's own stated reason was false, and why the conclusion survived anyway
+
+The row refused a guard because one *"would silently drop a broadcast the panel receives today … the
+UI handles it."* **The UI does not handle it.** `RadioControlPanel.razor:1053` (`if
+(dto.RdsRelevantChanged)`) throws a `NullReferenceException`, which since `UI-7` is swallowed
+per-subscriber, while `NowPlayingPanel`, `RadioPage` and `AudioStateStore` each wipe their cached
+radio state and repaint. **A swallowed exception plus a three-surface state wipe is precisely the
+"failure wearing the costume of correct handling" the row invoked that principle against.**
+
+⭐ **The conclusion — "do not just add the guard" — was right; the reason was not.** A plan that
+inherited the reasoning would have reached the right shape by luck and defended it with an argument
+that collapses on first contact with one line of a subscriber.
+
+### Verification, and the honest limit of it
+
+The guard lives inside an `On<T>` lambda that needs a **started** `HubConnection`; every fixture runs
+on `OfflineHubTransport`. And `HubEventFire` fires the **event**, which is downstream of the guard —
+**a test through it passes whether the guard is present, absent or inverted.** So the `internal
+On…MessageAsync` seam is the substance of this row, not scaffolding; it mirrors `AudioStateStore`'s
+own extraction at `:230-243`.
+
+Because the tests could not exist before the seam, RED was shown by mutation. Recorded results:
+deleting the guard fails 2; downgrading the rejection log fails 4; inverting the helper fails 8/8.
+
+⚠ **The plan's control mutation was mis-specified and this is worth carrying.** It said restoring the
+old inline guard while dropping the shared helper must stay **green** — it cannot, because this row
+deliberately *adds* audible rejection and the tests pin that too. The corrected control — inline
+guard **plus** inline log — is green, which is what actually proves the tests pin **behaviour rather
+than the refactor's shape.** A control that cannot pass is not a control; it is a second mutation.
+
+📌 **Unobservable in production, and the PR says so.** A null cannot arrive, so no UAT can
+demonstrate this guard. The unit tests are its only evidence, and a UAT report claiming otherwise
+would be wrong.
+
+**Plan of record:** [`design/plans/UI-12-the-null-that-cannot-arrive.md`](plans/UI-12-the-null-that-cannot-arrive.md)
+
+### ⭐ Amendment 2026-09-09 (`UI-14`, [#633](https://github.com/mmackelprang/RTest/pull/633)) — the other half of the rule is now gated, and the reason we gave for prioritising it was wrong
+
+This ADR states the rule in two halves. **Only the first was enforced.** The pass-through half — *an
+event declared `Func<T?, Task>` treats null as data and must pass it through* — had no test anywhere
+in the repository until `UI-14` built the three `internal On…MessageAsync` seams for
+`NowPlayingChanged`, `VolumeChanged` and `EventPlaybackChanged` and gated them with
+`AudioStateHubServicePassThroughTests`.
+
+⛔ **The comment fencing this rule was not a gate, and the realistic form of the forbidden refactor
+defeated it. Measured, not argued.** Applied to the tree *before* `UI-14`, keeping `AcceptPayload`
+**and** adding a "defensive" `if (arg is null) return;` to `NotifyAsync<T>` was **green across the
+entire solution** — `Radio.Web.Tests` 1,172/1,172, every other project unchanged, nothing failing but
+the five known-failing Windows tests — while silently dropping every `NowPlayingChanged(null)`. The
+identical mutation after `UI-14` goes **red on exactly the three new tests**. The *naive* form
+(deleting `AcceptPayload`) failed only four, **so the pre-existing gate looked real and was not.**
+
+⚠ **Two corrections to what this ADR and `UI-14`'s row implied.**
+
+1. ⛔ **There is no producer asymmetry between the two families.** The row contrasted the four guarded
+   events (*"unobservable — no producer can send null"*) with the three ungated ones (*"user-visible"*),
+   which implies a producer can send null on the three. **None can.** Each has exactly one server-side
+   sender (`AudioStateUpdateService.cs:281`, `:504`, `:1087`), all provably non-null, and
+   `AudioStateHub.cs` contains no `SendAsync` and no `Clients.` reference at all. **Both families are
+   identical in reachability**, and this ADR's own justification — *"a property of `radio-api`'s
+   current source, not a property the type system enforces"* — is symmetric. It justifies the
+   pass-through gate exactly as much as it justified the rejection gate.
+2. ⛔ **What distinguishes them is how a wrong state self-corrects — and the mechanism first written
+   down for it was refuted by the function it cited.** `UI-14`'s row and plan both said *"once
+   `_lastNowPlaying` records the silence, the intervening 'nothing is playing' is gone for good"*.
+   That is backwards twice over: `_lastNowPlaying` is assigned from `BuildNowPlayingDto`, which cannot
+   return null, and if it ever held one, `HasNowPlayingChanged` returns true **unconditionally**
+   whenever either side is null (`AudioStateUpdateService.cs:537-540`), so the server would
+   re-broadcast on its next 500 ms poll. **A cached null is the one thing that would not be
+   permanent.** The real mechanism only exists in the scenario that makes a null reachable at all —
+   one off the untyped wire: the **server** caches the non-null "nothing is playing" DTO it just sent,
+   the **client** is what dropped a null, and every later comparison finds no change. ⚠ And *"the
+   service only broadcasts on a change"* is **not** true of `AudioStateUpdateService` as a whole —
+   `EventPlaybackChanged` carries no change comparison anywhere in its path.
+
+⭐ **The pattern is now three rows deep and worth naming: `UI-12`, `UI-14` and this amendment each
+reached the right conclusion through a reason that did not survive contact with the code.** In every
+case the conclusion was defensible on other grounds and the stated reason was not checked. That is
+the failure `CLAUDE.md` § *Pre-Merge Review* item 4 describes, and it is why `UI-14` gates the rule
+rather than restating it.
+
+📌 **Still unobservable in production, and the PR says so.** No producer can send a null on any of the
+seven reference-payload events, so before and after are byte-for-byte identical on every reachable
+path. A UAT report claiming it demonstrated pass-through would be wrong.
+
+**Plan of record:** [`design/plans/UI-14-the-null-that-must-arrive.md`](plans/UI-14-the-null-that-must-arrive.md)
+
+---
+
+## ADR-034: A SignalR broadcast in this API cannot fault, so cache-advance ordering is precautionary — and a backplane is what would make it load-bearing
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`UI-13`. Six change-detection caches in `AudioStateUpdateService` were assigned **before** the
+`await SendAsync` that broadcast them. The row was filed on the premise that a failed broadcast
+strands the cache, so the delta is never re-sent.
+
+⛔ **The premise is false, and establishing that took more work than the fix.** `SendAsync` does not
+throw on a failed broadcast. Verified two independent ways: by reading `dotnet/aspnetcore`
+`release/10.0`, and by running a real Kestrel host with real WebSocket clients against
+`Microsoft.AspNetCore.App` 10.0.11.
+
+- With no connection matching the send, `DefaultHubLifetimeManager` returns `Task.CompletedTask`
+  **without inspecting the token at all**.
+- Every other failure is charged to the **connection**, not the caller: `HubConnectionContext`
+  catches it, logs `Failed writing message`, aborts the connection, and hands back a **successful**
+  `FlushResult`. Measured: **129 consecutive sends to a hard-killed socket faulted none**; an
+  unserializable payload dropped the client while the caller saw success in 8–10 ms.
+- The single escape is an `OperationCanceledException` raised while the **caller's** token is
+  cancelled — the filter at `HubConnectionContext.cs:361` deliberately does not catch that one, and
+  both `WriteSlowAsync` overloads additionally await `_writeLock.WaitAsync(cancellationToken)`
+  *outside* their `try`, where a cancelled token escapes unfiltered.
+
+⭐ **And the only exception `SendAsync` can produce is the one `ExecuteAsync` treats as "stop and
+exit."** That token is always `ExecuteAsync`'s `stoppingToken`, which `BackgroundService` cancels only
+at host shutdown, and `ExecuteAsync`'s own `OperationCanceledException` filter catches exactly that and
+breaks. `Program.cs:134` registers the service `AddHostedService` only, so nothing else holds the
+instance. **The stranded cache dies with the process.**
+
+### Decision
+
+**Advance a change-detection cache only after the send that broadcasts it — and record why that is
+currently unobservable, as a precondition rather than as a guarantee.**
+
+The ordering is **precautionary today**. What makes it safe is not a property of this file; it is a
+property of the default in-process lifetime manager plus the fact that one token reaches these call
+sites. **Both can change silently.** A Redis or Azure SignalR backplane swaps in a lifetime manager
+whose send genuinely faults on a backplane outage; passing any token other than `stoppingToken` makes
+cancellation reachable *while the service keeps running*. Neither would raise an error at the call
+site — both would produce panels that quietly stop updating, the `AUD-12` / `GV-12` failure family.
+
+### ⚠ What a completed send does not prove, and why the obvious justification is wrong
+
+The natural way to justify this ordering is *"don't record that the clients have it until they do."*
+**That reason is false and the evidence against it is the same evidence above:** a completed
+`SendAsync` means only that the call did not fault. It has never meant delivery. The honest statement
+is narrower — the cache holds *the last state whose broadcast returned without faulting*, which is the
+strongest fact this path can hold. Advancing it before the `await` weakens even that, to *the last
+state we intended to send*.
+
+This distinction matters beyond the comment: a future reader who believes the send confirms delivery
+will design retry or acknowledgement on a foundation that does not exist.
+
+### The trade this buys, stated rather than implied
+
+On a **transient** fault the new ordering is strictly better and is the only version that recovers.
+On a **persistent** one it retries every ~500 ms, logs every tick, and **starves every check ordered
+behind the failing one** — `CheckSourceChangedAsync` runs first, so a permanent fault there means the
+other five never run again. On `main` the service instead went completely silent after one pass and
+never recovered even after the fault cleared. The trade is accepted; bounded retry/backoff is out of
+scope and was deliberately not filed, because the fault is unreachable today.
+
+### Consequences
+
+- The ordering is uniform across all six sites. Repairing one and leaving five would make the class
+  look handled, which is worse than leaving it alone.
+- Six per-site tests pin the ordering, and **five per-site guards** pin that the caches are still
+  advanced at all — a distinction that was measured, not assumed: with one guard, mutating a
+  different site's assignment to `null` left the whole suite green.
+- No `TimeProvider` seam was added. The service is timer-driven; the **defect is not**. The
+  `Check*Async` bodies read no clock, and the tests drive them directly.
+- No lock and no `volatile`. There is one writer per field, and adding synchronisation would imply a
+  concurrency that does not exist.
+
+**Plan of record:** [`design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md)
+
+---
+
+## ADR-035: The asymmetry that lets a predicate survive a deleted field is PER-FIELD, and the anchor must be a field that is always sent
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`KIOSK-3`. The desktop launcher (`deploy/debian-x64/kiosk/bin/radio-console-open`, installed to
+`/usr/local/bin/`) derived its `VOICE` row from `psidtsAgeSeconds` on RotaryPhone's
+`/api/gvbridge/status`. Their PR #79 **removes** that field. With it absent, the launcher's
+empty-value guard fired on every launch and `VOICE` would have read *"Needs sign-in"* permanently,
+whatever Google Voice was doing.
+
+⭐ **The field was dishonest in BOTH directions, which is why keeping it was never an option.**
+RotaryPhone proved it is an age-of-last-**load** clock rather than a credential clock: it read
+**608** — inside the band the launcher called healthy — while their bridge had been dead for 83
+minutes on 2026-09-08. Reproduced independently in our lane on 2026-09-09T14:39Z, where the live box
+served `psidtsAgeSeconds: 34` alongside `cookiesValid: false` and `degraded: true` in the same
+payload. Present, it reported a dead session as `Online`; absent, it pinned the row amber forever.
+
+⛔ **How it was found is the part that outlives the row.** We told RotaryPhone three times that
+`psidtsAgeSeconds` had zero consumers, once citing a positive control as proof of method. **The grep
+was scoped to `src/`. The consumer is a shell script.** ⭐ *A positive control validates the
+INSTRUMENT, never the SEARCH SPACE.* Every future cross-repo consumer claim must search `deploy/`,
+`tools/`, `docs/` and all shell scripts, and **state the scope searched alongside the claim.**
+
+### Decision
+
+Port `GvBridgeHealth.IsHealthy` (`GV-12`, ADR-032) into `classify_voice()` term for term rather than
+invent a second predicate, and **share one threshold**: `GV_STALE_AFTER=120` is identical by intent
+to `LastSuccessStaleAfter`. Two consumers of one field disagreeing about what "healthy" means can
+contradict each other about the same box at the same instant, on a panel whose entire job is to be
+believed.
+
+### The three rules that earned their place
+
+**1. ⛔ THE ASYMMETRY IS PER-FIELD, NOT A PROPERTY OF THE PAYLOAD.** ADR-032's rule — *present-and-bad
+is unhealthy, ABSENT contributes nothing* — holds for `cookiesValid`, `degraded`, `authBlackout` and
+`lastApiSuccessAt`. It does **not** generalise:
+
+- `available` is the **anchor** and the inverse case: it must be **present and true**.
+- `psidtsMintedAtUtc`, which RotaryPhone add in the same release, goes the other way again — their
+  contract states its `null` means **UNKNOWN, which is not healthy** (CDP-extracted cookies carry no
+  readable issue time), and it has no upper bound. Absent there is *"I cannot tell you"*, not an
+  absence of bad news. This file does not read it; anything that later does must treat null as
+  "cannot assert healthy".
+
+⚠ **The first draft of the launcher's comments stated the asymmetry as a general rule about the
+payload and named `available` as "the single exception".** That was caught mid-build, not by review.
+Applying the rule uniformly would have reimported the exact defect the row exists to remove — and a
+comment claiming a uniform invariant the payload does not have is `CLAUDE.md` § *Pre-Merge Review*'s
+named failure mode verbatim.
+
+**2. A safety property has to MOVE when its input is deleted — preserving the code is not preserving
+the property.** The old guard existed so an unreadable value could not report a dead session as
+`Online`, and it hung off the field being removed. It now hangs off `available`: RotaryPhone always
+send it, and it read `available:false` for all 83 minutes of the outage. That single move is what
+keeps an empty, truncated or non-JSON body unhealthy — **and it closed a hole the old guard never
+covered**, since `available:false` previously read as `Online`.
+
+**3. A timestamp without a zone is REFUSED, not guessed.** Measured on the box: `date -d
+"2026-09-09T14:30:50"` → 1788978650 and the same instant with a `Z` → 1788964250 — **four hours
+apart**, because GNU date reads an unzoned value as *local* and the box runs EDT. Either guess is
+permanently past a 120 s gate, which would pin the row. So an uninterpretable timestamp is treated as
+**no signal**, the same answer as a value we did not receive, for ADR-032's reason: a term that can
+never clear pins the state. Nothing is lost, because the safety property is carried by the anchor
+rather than by this term.
+
+### ⛔ Two things pre-merge review caught that the build had got wrong
+
+**1. A comment's stated reason was false, and it had been INHERITED rather than invented.** The
+120 s gate was justified with *"pinned on the C# side by `MeasuredSixtySecondCadence_StaysHealthy`
+so a cadence change fails a test instead of silently turning this row amber."* That test
+(`GvBridgeStatusServiceTests.cs:99`) is a `FakeTimeProvider` plus a literal `AddSeconds(-60)`: it
+never contacts the box and never observes RotaryPhone, so it **cannot fail when the cadence
+changes.** It pins the THRESHOLD against being lowered. ⭐ **The false claim was copied from that
+test's own `<remarks>`, which said the same thing** — so the fix was made in both places. The honest
+statement is that **nothing detects a cadence slip**, and if RotaryPhone's cadence ever exceeds
+120 s the launcher goes amber on every tap with a green suite: the `KIOSK-3` defect through a
+different field. A known, unmonitored assumption, now labelled as one.
+
+**2. A pre-1970 timestamp read as "no signal", i.e. healthy.** `date -d` prints a NEGATIVE epoch for
+a pre-1970 instant, and the digits-only guard treated the leading `-` as a parse failure — routing
+the *most stale reading obtainable* onto the no-signal arm. `date -d "0001-01-01T00:00:00Z" +%s`
+gives `-62135596800`, and `0001-01-01T00:00:00Z` is exactly what .NET's `DateTime.MinValue`
+serialises to: **what a bridge that has never had a successful API call would report.**
+`GvBridgeHealth.IsHealthy` calls that same body unhealthy, so the two consumers disagreed on it and
+the "identical by intent" comment was untrue across that input class. Signed values are now accepted
+so the subtraction yields the huge positive age it is.
+
+⭐ **Both are the same lesson as rule 1 above, one level down: the reason a comment offers is the
+claim to check, and a reason inherited from another file is not thereby verified.** This is the
+fifth entry in this log to record that shape.
+
+### Verification
+
+**RED measured first, as its own commit: 12 passed / 9 failed**, the headline case being a post-#79
+payload with `psidtsAgeSeconds` deleted reading `needsignin`. **GREEN 32/32** after the review fixes,
+both on Windows and on the box under its own `bash` 5.2.21, `grep`, `sed` and coreutils 9.4.
+
+The harness pins the sourcing seam in the **executed** direction too, which nothing did before — its
+failure mode is the desktop icon silently becoming a no-op — and it now refuses to run without GNU
+`date`, because without that check eight of its nine `expect online` cases would have passed for the
+wrong reason on a BSD `date`.
+
+⚠ **Two divergences from `System.Text.Json` are accepted rather than fixed, and pinned by tests so a
+change to them is deliberate:** duplicate keys (this parser takes the first, JSON the last) and
+nested objects (read here as top-level, ignored there). Closing either needs a real JSON parser, and
+`:106-108` is why this file does not take that dependency. Neither shape occurs in any observed
+payload — but RotaryPhone are adding four `browserSession*` fields, so a nested object would want a
+re-check.
+
+Two of the nine RED failures were **not predicted by the queue row** and were pre-existing with the
+field still present: `available:false` and `available` absent both read **`Online`**. The old
+predicate had a silent-`Online` hole of its own — it simply reached it through a different field than
+the one the guard was written to cover.
+
+`date -d` parses the **real** wire format including its 7-digit fractional seconds
+(`2026-09-09T14:30:50.7537656Z` → 1788964250). ⚠ The queue row and its dossier both quoted the field
+as a bare `...T14:12:40Z`; the served value carries the fraction, and the fixture is a verbatim
+capture rather than a retyped one precisely so that cannot drift.
+
+Live on the box, both scripts' `--print-status` seconds apart agreed (`VOICE=online`, `TIER=silent`),
+and **160 consecutive samples** of the new predicate against the live bridge — 8 s apart,
+14:44:30–15:05:50Z, **21 minutes, spanning one of RotaryPhone's ~20-minute cookie cycles** — returned
+**159 online / 1 amber**, max `lastApiSuccessAt` age **59 s**. That is an independent re-measurement
+of the 60 s cadence rather than an inherited one, and it is the cry-wolf check §5.3 requires.
+
+**The cry-wolf rate is therefore measured, not unknown: 1/160 ≈ 0.6% of taps**, against the ~45% the
+retired psidts doctrine feared. The single amber was `cookiesValid:false` + `degraded:true` at
+15:00:04Z and was **one sample wide** — healthy at 14:59:56Z, healthy again at 15:00:12Z, so under
+16 s. ⚠ Measured on the **pre-#78** box, whose churn RotaryPhone say stops when they deploy, so 0.6%
+is an **upper** bound.
+
+⭐ **That one sample is also the sharpest evidence in the whole cycle that the old field had to go.**
+At the exact instant the honest terms reported an impaired session, **`psidtsAgeSeconds` read `2`** —
+its healthiest possible value, scored by the retired rule as deep inside the *"< 660 healthy
+window"*. The mechanism is now plain rather than argued: psidts timed the last credential **reload**,
+and a reload is precisely what happens when a session breaks and is re-established. **The field read
+healthiest exactly when the session was worst.** RotaryPhone's `608`-while-dead capture and our `34`
+sighting were the same phenomenon caught less cleanly.
+
+⛔ **What is NOT proven, and must not be claimed:** that the post-#79 payload has the shape assumed
+here. #79 is merged and parked, not deployed, and our copy of RotaryPhone's wire-changes contract was
+a superseded draft all day. The minimal claim — *deleting `psidtsAgeSeconds` from a verbatim live
+capture must not turn the row amber* — does not depend on the rest of that shape being right, which
+is why it is the case the harness leads with.
+
+**Dossier:** [`docs/queue/KIOSK-3.md`](../docs/queue/KIOSK-3.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->

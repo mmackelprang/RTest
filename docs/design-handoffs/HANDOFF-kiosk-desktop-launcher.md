@@ -199,11 +199,53 @@ Two rules, both learned the hard way in this repo:
 | `AUDIO` | `systemctl is-active radio-api` **and** `GET :5000/api/health/version` | HTTP 200 with a body |
 | `CONSOLE` | `systemctl is-active radio-web` **and** `GET :5002/` | HTTP 200 |
 | `PHONE` | `GET :5004/api/gvbridge/status` | responds at all (any 2xx) |
-| `VOICE` | bridge Chrome process present **and** the `psidts` rule in §5.3 | see §5.3 |
+| `VOICE` | bridge Chrome process present **and** the health predicate in §5.3 | see §5.3 — ⛔ the `psidts` rule it originally specified is SUPERSEDED by `KIOSK-3`; read that section's banner first |
 
 **(b) Probe budget: 2 seconds, all four in parallel.** The healthy path must feel like the icon simply opened the kiosk. Anything slower and the owner taps again.
 
 ### 5.3 The Google Voice check — the single most important constraint in this spec
+
+> ## ⛔ SUPERSEDED 2026-09-09 by `KIOSK-3` — the mechanism below is retired, the RULE survives
+>
+> **Everything in this section that rests on `psidtsAgeSeconds` is retracted.** RotaryPhone proved
+> the field is an age-of-last-**load** clock rather than a credential clock — it read **608**,
+> comfortably inside the "healthy" band defined below, while their bridge had been dead for 83
+> minutes on 2026-09-08 — and their PR #79 **removes it entirely**. Independently reproduced in our
+> own lane on 2026-09-09T14:39Z: the live box served `psidtsAgeSeconds: 34` (deep inside "healthy")
+> while the same payload carried `cookiesValid: false` and `degraded: true`.
+>
+> Both failure directions were real. **Present**, it reported a dead session as `Online`. **Absent**,
+> the `> 1200`-or-null row below would have fired on every launch, pinning `VOICE` at `Needs sign-in`
+> forever — which is the defect `KIOSK-3` exists to prevent, and a permanently-wrong indicator is how
+> an owner learns to ignore an indicator.
+>
+> **What replaces it:** `GvBridgeHealth.IsHealthy` (`GV-12`, ADR-032), ported term for term into
+> `classify_voice()`, and ADR-035 for the port's own decisions. `available` becomes the anchor and
+> must be present-and-true; `cookiesValid`, `degraded`, `authBlackout` and `lastApiSuccessAt` are read
+> asymmetrically — present-and-bad is unhealthy, **absent contributes nothing**, which is the property
+> that makes a deleted field survivable.
+>
+> **THE DESIGN RULE AT `§5.3` IS NOT REPEALED.** A routine, self-clearing condition must still never
+> be reported, for exactly the cry-wolf reason given below. What changed is the evidence: the "~45% of
+> taps" wolf rate was computed from the psidts trough, so it retires with the field. The honest
+> blackout term, `authBlackout`, was measured at **920 ms with zero true-samples across 411 polls**,
+> and a **160-sample** live run of the new predicate on 2026-09-09 (14:44:30–15:05:50Z, 8 s apart —
+> **21 minutes, spanning one of RotaryPhone's ~20-minute cookie cycles**) returned **159 online / 1
+> amber**, max `lastApiSuccessAt` age 59 s. **The cry-wolf rate is measured at 1/160 ≈ 0.6% of taps**,
+> against the ~45% the retired doctrine feared. The single amber was `cookiesValid` + `degraded` and
+> was one sample wide — under 16 s. ⚠ Taken on the pre-#78 box, so 0.6% is an **upper** bound.
+>
+> ⭐ **And that one sample is the cleanest proof the old field had to go: at the exact instant the
+> honest terms reported an impaired session, `psidtsAgeSeconds` read `2`** — its healthiest possible
+> value, scored by the table below as deep inside the *"< 660 healthy window"*. It timed the last
+> credential **reload**, and a reload is what happens when a session breaks and is re-established.
+>
+> ⚠ **Do not read the paragraph below as a claim that `available` / `degraded` / `cookiesValid` are
+> useless.** They are individually *insufficient* — the 502 capture stands — but the answer is a
+> conjunction including a term that actually moves, not a single substitute oracle. Reaching for one
+> oracle is how this spec came to trust `psidtsAgeSeconds`.
+
+*Historical record from the 2026-08-18 design pass follows, left intact:*
 
 `design/INTEGRATIONS.md` and two independent UAT passes established, and `HANDOFF-phone-console-audio-and-canned-replies.md` §Cross-5 encodes as a design rule:
 
@@ -604,7 +646,7 @@ section is the authority on what ships.
 |---|---|---|
 | **Q1** — rename `Exit Browser` → `Exit to Desktop` | **APPROVED** | Sort key preserved (`E… < R… < S…`), so the §2.1 safety ordering holds. |
 | **Q2** — replace GNOME's auto-proceeding shutdown confirm | **APPROVED** | Overrides the earlier "Shutdown stays as-is". The §8 dialog ships and **waits indefinitely** for an explicit tap. |
-| **Q3** — stateless `psidtsAgeSeconds > 1200` probe | **APPROVED**, no Architect escalation | Owner confirmed the field is real and populated on the live box: `psidtsAgeSeconds: 310`, `authBlackout: false`, `degraded: false`. |
+| **Q3** — stateless `psidtsAgeSeconds > 1200` probe | ⛔ **APPROVED 2026-08-18, then SUPERSEDED 2026-09-09 by `KIOSK-3`** | Owner confirmed the field was real and populated on the live box: `psidtsAgeSeconds: 310`, `authBlackout: false`, `degraded: false`. **That confirmation was true and insufficient** — it established the field EXISTS, never that it MEANS what its name says, and the field was later proved to be an age-of-last-load clock. Q3's own text asked whether the stateless test was "good enough … against a changed refresh cadence upstream"; the upstream change was not a cadence change but the field's deletion. Replaced by the `GvBridgeHealth.IsHealthy` port — see §5.3's banner and ADR-035. |
 | **Q4** — in-app favicon (`App.razor:9`) | **DEFERRED** — Designer's recommendation upheld | `--kiosk` hides the tab strip, address bar and title bar, so that favicon is **never visible on the appliance**. It does not justify carrying the dark-surface and 16–32 px legibility risks inside a launcher cleanup. Picked up later as its own item. **The desktop icon (§4) is unaffected and fully in scope.** |
 | **Q5** — the four reported components | **APPROVED** | `radio-api` · `radio-web` · `rotary-phone` · GV bridge. No fifth row. |
 
