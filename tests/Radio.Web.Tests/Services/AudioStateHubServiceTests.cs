@@ -146,16 +146,26 @@ public class AudioStateHubServiceTests : IAsyncLifetime
     // already carries everything.
     //
     // ⚠ WHAT THIS DOES NOT PROVE, said plainly because the test's name would otherwise imply it.
-    // It does NOT show that a delivered "EventPlaybackChanged" message reaches this event with its
-    // payload intact. No test in this assembly can: the fixture runs on OfflineHubTransport, the
-    // connection is never started, and there is no in-tree precedent for reflecting into
-    // HubConnection's handler table to inject one — writing that harness for a single test would be
-    // testing SignalR rather than testing us. Plan PHN-1e Task 10d asked for the delivery assertion;
-    // this is the honest subset of it, matching AudioStateHubService_SupportsAllEventTypes above.
+    // It does NOT show that SignalR DELIVERS an "EventPlaybackChanged" message: the fixture runs on
+    // OfflineHubTransport and the connection is never started, so nothing here exercises
+    // HubConnection's dispatch. Plan PHN-1e Task 10d asked for the delivery assertion; this is the
+    // honest subset of it, matching AudioStateHubService_SupportsAllEventTypes above.
     //
-    // End-to-end delivery — and with it the C-47 question of whether the payload survives the REAL
-    // JsonHubProtocol — is settled on the appliance instead, per the plan's §2.2 item 1. That is
-    // recorded as U1 and it is not a gap this file can close.
+    // ⚠ THIS PARAGRAPH USED TO SAY "No test in this assembly can" SHOW THE PAYLOAD REACHES THIS EVENT
+    // INTACT. THAT IS NO LONGER TRUE. AudioStateHubServicePassThroughTests drives the internal
+    // OnEventPlaybackMessageAsync seam — the handler body SignalR would invoke — and asserts the
+    // payload arrives unchanged, null included (`UI-14`, mirroring the seam `UI-12` Task 1
+    // introduced for the four non-nullable events).
+    // ⭐ The REASON the old claim gave was wrong, not merely stale: it assumed such a test would have
+    // to reflect into HubConnection's handler table to inject a message. Nothing does that, then or
+    // now — the route was to extract the handler body into an internal seam and call it directly,
+    // which needs no harness at all. A comment that says no test CAN do something outlives the day
+    // one does; `CLAUDE.md` § Pre-Merge Review records the version of this that left TEST-2 open for
+    // four weeks.
+    //
+    // What remains true, and uncovered here, is the WIRE: whether the payload survives the REAL
+    // JsonHubProtocol — the C-47 question. That is settled on the appliance instead, per the plan's
+    // §2.2 item 1. It is recorded as U1 and it is not a gap this file can close.
     Func<EventPlaybackSnapshotDto?, Task> handler = _ => Task.CompletedTask;
 
     _service.EventPlaybackChanged += handler;

@@ -868,8 +868,11 @@ provably cannot arrive.
 
 ### ⛔ The unification that would have caused the defect it was preventing
 
-`NotifyAsync<T>` already fans out all seven payload-carrying events. Putting `if (arg is null)
-return;` there unifies four guards in one line and deletes three copies. **It would also silently
+`NotifyAsync<T>` already fans out all **eight** payload-carrying events — **seven** of them with a
+reference-type payload, `SleepStateChanged` being `Func<bool, Task>`, which this rule does not reach.
+(⚠ This read *"all seven payload-carrying events"* until `UI-14`, the **third** counting slip in this
+file's history; `AudioStateHubServiceEventDeclarationCensusTests` is what now stops a fourth.) Putting
+`if (arg is null) return;` there unifies four guards in one line and deletes three copies. **It would also silently
 drop every `NowPlayingChanged(null)` — which means "nothing is playing" — stranding the now-playing
 dock on the previous track forever.**
 
@@ -912,6 +915,57 @@ demonstrate this guard. The unit tests are its only evidence, and a UAT report c
 would be wrong.
 
 **Plan of record:** [`design/plans/UI-12-the-null-that-cannot-arrive.md`](plans/UI-12-the-null-that-cannot-arrive.md)
+
+### ⭐ Amendment 2026-09-09 (`UI-14`, [#633](https://github.com/mmackelprang/RTest/pull/633)) — the other half of the rule is now gated, and the reason we gave for prioritising it was wrong
+
+This ADR states the rule in two halves. **Only the first was enforced.** The pass-through half — *an
+event declared `Func<T?, Task>` treats null as data and must pass it through* — had no test anywhere
+in the repository until `UI-14` built the three `internal On…MessageAsync` seams for
+`NowPlayingChanged`, `VolumeChanged` and `EventPlaybackChanged` and gated them with
+`AudioStateHubServicePassThroughTests`.
+
+⛔ **The comment fencing this rule was not a gate, and the realistic form of the forbidden refactor
+defeated it. Measured, not argued.** Applied to the tree *before* `UI-14`, keeping `AcceptPayload`
+**and** adding a "defensive" `if (arg is null) return;` to `NotifyAsync<T>` was **green across the
+entire solution** — `Radio.Web.Tests` 1,172/1,172, every other project unchanged, nothing failing but
+the five known-failing Windows tests — while silently dropping every `NowPlayingChanged(null)`. The
+identical mutation after `UI-14` goes **red on exactly the three new tests**. The *naive* form
+(deleting `AcceptPayload`) failed only four, **so the pre-existing gate looked real and was not.**
+
+⚠ **Two corrections to what this ADR and `UI-14`'s row implied.**
+
+1. ⛔ **There is no producer asymmetry between the two families.** The row contrasted the four guarded
+   events (*"unobservable — no producer can send null"*) with the three ungated ones (*"user-visible"*),
+   which implies a producer can send null on the three. **None can.** Each has exactly one server-side
+   sender (`AudioStateUpdateService.cs:281`, `:504`, `:1087`), all provably non-null, and
+   `AudioStateHub.cs` contains no `SendAsync` and no `Clients.` reference at all. **Both families are
+   identical in reachability**, and this ADR's own justification — *"a property of `radio-api`'s
+   current source, not a property the type system enforces"* — is symmetric. It justifies the
+   pass-through gate exactly as much as it justified the rejection gate.
+2. ⛔ **What distinguishes them is how a wrong state self-corrects — and the mechanism first written
+   down for it was refuted by the function it cited.** `UI-14`'s row and plan both said *"once
+   `_lastNowPlaying` records the silence, the intervening 'nothing is playing' is gone for good"*.
+   That is backwards twice over: `_lastNowPlaying` is assigned from `BuildNowPlayingDto`, which cannot
+   return null, and if it ever held one, `HasNowPlayingChanged` returns true **unconditionally**
+   whenever either side is null (`AudioStateUpdateService.cs:537-540`), so the server would
+   re-broadcast on its next 500 ms poll. **A cached null is the one thing that would not be
+   permanent.** The real mechanism only exists in the scenario that makes a null reachable at all —
+   one off the untyped wire: the **server** caches the non-null "nothing is playing" DTO it just sent,
+   the **client** is what dropped a null, and every later comparison finds no change. ⚠ And *"the
+   service only broadcasts on a change"* is **not** true of `AudioStateUpdateService` as a whole —
+   `EventPlaybackChanged` carries no change comparison anywhere in its path.
+
+⭐ **The pattern is now three rows deep and worth naming: `UI-12`, `UI-14` and this amendment each
+reached the right conclusion through a reason that did not survive contact with the code.** In every
+case the conclusion was defensible on other grounds and the stated reason was not checked. That is
+the failure `CLAUDE.md` § *Pre-Merge Review* item 4 describes, and it is why `UI-14` gates the rule
+rather than restating it.
+
+📌 **Still unobservable in production, and the PR says so.** No producer can send a null on any of the
+seven reference-payload events, so before and after are byte-for-byte identical on every reachable
+path. A UAT report claiming it demonstrated pass-through would be wrong.
+
+**Plan of record:** [`design/plans/UI-14-the-null-that-must-arrive.md`](plans/UI-14-the-null-that-must-arrive.md)
 
 ---
 

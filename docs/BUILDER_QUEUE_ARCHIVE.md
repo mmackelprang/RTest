@@ -1848,6 +1848,48 @@ while silently dropping every `NowPlayingChanged(null)`. The naive form fails 4 
 looks real and is not.** Filed rather than folded in, because it is a scope extension and not a
 defect in what shipped.
 
+### UI-14 — The three hub events where a dropped null is user-visible had no test seam, and the refactor that would break them passed the entire suite.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#633](https://github.com/mmackelprang/RTest/pull/633) |
+| Plan | [`UI-14-the-null-that-must-arrive.md`](../design/plans/UI-14-the-null-that-must-arrive.md) |
+| Spec / handoff | _no spec doc — filed by the `UI-12` Builder as its review finding `M6`_ · [ADR-033](../design/DECISION-LOG.md) (amended) |
+| Depends on | — _(no row dependency; builds on `UI-12`'s seam, merged)_ |
+| Branch | `fix/ui-14-nullable-hub-event-seam` |
+
+**Detail: [`queue/UI-14.md`](queue/UI-14.md)** — which carries the measured mutation matrix and the six
+premises this cycle falsified.
+
+Merged 2026-09-09. ⚠ **Merged, not shipped** — deliberately not deployed, as `UI-12` was not.
+
+⭐ **`M0` is the deliverable, and it is a measurement rather than a claim.** The *realistic* forbidden
+refactor — keep `AcceptPayload` **and** add a "defensive" `if (arg is null) return;` to
+`NotifyAsync<T>` — applied to the tree **before** the fix was **green across the whole solution**
+(`Radio.Web.Tests` 1,172/1,172) while silently dropping every `NowPlayingChanged(null)`. The *naive*
+form fails only 4. **So the existing gate looked real and was not.** `M1`, the identical mutation
+after, is RED on exactly the three new tests — the before/after RED demonstration `UI-12` could not
+produce. `M7`, a shape-only control with the fan-out lint run under it, is 100% green.
+
+⛔ **Six premises fell, including this row's own load-bearing claim.** The PERMANENCE argument said
+*"once `_lastNowPlaying` records the silence… never re-sent"* — refuted by the function it cited:
+`_lastNowPlaying` cannot hold a null, and `HasNowPlayingChanged` returns `true` unconditionally when
+either side is null, so a cached null would re-broadcast on the next 500 ms poll. The real mechanism
+is that the **server** caches a non-null snapshot while the **client** drops a null off the wire.
+⭐ **Right conclusion, wrong reason — the third row running.** Also false: that
+`AudioStateUpdateService` "only broadcasts on a change" (`EventPlaybackChanged` has no comparison at
+all); that `UI-12` made `AudioStateHubServiceTests.cs:148-158` false (it never touched that event, and
+the comment's `HubConnection`-handler-table claim is still true — **this** row falsifies it, by a
+different route); `SeedEventPlaybackAsync`, a member the plan invented; the census's own
+`Assert.Equal` carrying a remedy message it cannot carry; and *"a value type cannot be null"*, which
+would have let a `Func<TimeSpan?, Task>` land ungated.
+
+⚠ **Two of the plan's mutations do not compile as written** (`CS8620`; `CS0067`) — reported as
+measured rather than adjusted to fit. `M5`'s is instructive: for that defect the **compiler** is the
+gate, before any test.
+
+---
+
 ---
 
 ## Historical narrative

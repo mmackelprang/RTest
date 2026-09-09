@@ -110,11 +110,17 @@ the mirror image: it guards its tag reads with `!IsNullOrEmpty` (`:1951`), so th
 ever the sentinel. **One shared predicate must cover null, empty, whitespace, sentinel and absent key**,
 or it serves one source and not the other.
 
-**2. The History panel divergence is a SEPARATE row** — filed as `AUD-19`, documented in
-`design/FUTURE-WORK.md` and to be named in this row's PR body **before** merge. `PlayHistoryTracker`
-re-points its rows at the fingerprint record regardless of which branch the source took, so after this
-row ships, now-playing obeys the rule and history does not. **Left undocumented, that reads as a failed
-fix.**
+**2. The History panel divergence is a SEPARATE row** — [`AUD-19`](AUD-19.md), to be named in this
+row's PR body **before** merge. `PlayHistoryTracker` re-points its rows at the fingerprint record
+regardless of which branch the source took, so after this row ships, now-playing obeys the rule and
+history does not. **Left undocumented, that reads as a failed fix.**
+
+> ⛔ **This paragraph was false when written (2026-09-08) and is corrected here (2026-09-09).** It said
+> `AUD-19` was *"filed … documented in `design/FUTURE-WORK.md`"*. **Neither was true** — no row existed
+> and `FUTURE-WORK.md` had no such entry — while this row's Builder was instructed to cite it before
+> merge. It would have had to either stop or invent the reference. **The row exists now**; the
+> `FUTURE-WORK.md` claim is dropped rather than made true, because the queue row is the record.
+> Caught by `UI-12`'s Builder enumerating adjacent rows, not by me.
 
 ## ⚠ One piece of this row's evidence is weaker than it was quoted as
 
