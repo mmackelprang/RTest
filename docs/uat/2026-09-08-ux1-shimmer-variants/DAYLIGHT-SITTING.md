@@ -12,10 +12,16 @@
 > 56 and is done"* — **no longer holds**, though it was a fair reading of the evidence available when
 > it was written.
 >
-> ⛔ **Neither sitting is being called wrong.** Two confounds are live: the night sitting ran on the
-> **v1 harness that was later found broken**, and **side-by-side viewing may bias toward the dimmest
-> acceptable value**. A follow-up PR implements `#24242B` and is **held unmerged**, gated on a
-> **dark-room re-check of that value alone**.
+> **A FOURTH sitting the same day confirmed 36 on a better instrument** — a one-at-a-time harness
+> showing a single value with no reference beside it — where the owner said *"Shimmer 36 looks
+> good."*
+>
+> ⛔ **Neither sitting is being called wrong, and this is NOT a 2-to-1 verdict.** The **ambient
+> conditions of both recent sittings are unrecorded**, so neither directly answers the dark room the
+> night sitting was judged in; and the night sitting ran on the **v1 harness later found broken**, so
+> it is weak evidence the other way. **Unresolved, not settled.** ⭐ What allows it to proceed is the
+> **stakes, not the evidence**: the shimmer is on screen ~3–7 ms per 1500 ms cycle, so no sweep is
+> painted at any value. ⚠ **If dwell is ever fixed, the value must be re-judged then.**
 >
 > Full argument and both instruments: [`../../queue/UX-1.md`](../../queue/UX-1.md).
 

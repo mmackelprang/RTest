@@ -13,12 +13,18 @@ highlight from `--surface-overlay` (26) to its own `--skeleton-shimmer-highlight
 (`#38383F`), the value the owner chose at the panel in a dark room and again in daylight. Two things
 the plan called for did **not** ship, and both are recorded here so they are not re-derived.
 
-> ⚠ **The value in that paragraph is REOPENED — 2026-09-09, later the same day.** A third sitting in
-> afternoon light chose **36 (`#24242B`)** instead, contradicting the dark-room sitting on the same
-> rung. A follow-up PR implements it and is **held unmerged**, gated on a dark-room re-check.
-> **Neither sitting is being called wrong**; both confounds are set out in
-> [`docs/queue/UX-1.md`](../docs/queue/UX-1.md). ⭐ **The two deferred items below are unaffected by
-> which value wins** — geometry and dwell are orthogonal to amplitude.
+> ⚠ **The value in that paragraph is REOPENED — 2026-09-09, later the same day.** Two further
+> sittings chose **36 (`#24242B`)**, contradicting the dark-room sitting on the same rung. **Neither
+> is being called wrong and it is not a 2-to-1 verdict**: the ambient conditions of both recent
+> sittings are unrecorded, and the dark-room one used the v1 harness later found broken.
+> **Unresolved, not settled** — both confounds are set out in
+> [`docs/queue/UX-1.md`](../docs/queue/UX-1.md).
+>
+> ⛔ **This makes item 2 below load-bearing in a way it was not before.** The disagreement is
+> tolerable only because the shimmer is **never on screen** — so if dwell is ever fixed, **the value
+> must be re-judged at that point**, because that is the first time anyone will actually see it.
+> ⭐ **The two deferred items below are otherwise unaffected by which value wins** — geometry and
+> dwell are orthogonal to amplitude.
 
 ### 1. The narrowed gradient geometry — proposed, never validated, not shipped
 
@@ -68,9 +74,9 @@ Answering it needs a harness whose band is on the element continuously, and an o
 > `prefers-reduced-motion` block that overrides `.skeleton-loading` — which would kill the animation
 > outright — is **not firing**. ⚠ **Cited by selector, not by line.** `design-system.css` holds
 > **six** `@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real
-> disambiguating work and is also the thing most likely to rot: this one is `:1779` on `main`
-> @ `f4d71b28` and `:1805` on the branch that changes the value, because the token's comment block
-> sits above it and pushes everything below down.
+> disambiguating work and is also the thing most likely to rot: it is `:1779` on `main`
+> @ `f4d71b28`, and **no branch line number is quoted on purpose** — the token's comment block sits
+> above it, so it shifted twice (`:1805`, then `:1817`) during the single change that reopened this.
 >
 > ⚠ **This is a bound, not the plan's measurement.** What was timed is the **data fetch** for two
 > panels, which bounds how long their skeletons *can* be up; it is not a `MutationObserver` on

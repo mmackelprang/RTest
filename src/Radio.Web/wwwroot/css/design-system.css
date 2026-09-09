@@ -81,26 +81,38 @@
      three color-mix recipes — so raising it to a visible shimmer amplitude would
      lighten twenty-odd unrelated surfaces. Count re-derived on main @143d678e.
 
-     ⚠ THE VALUE BELOW IS PROVISIONAL — THE OWNER'S TWO SITTINGS DISAGREE ON IT.
+     ⚠ THE OWNER'S SITTINGS DISAGREE ON THIS VALUE. Chosen twice, rejected once.
      #24242B is rgb(36,36,43): delta 16 on R·G (21 on B) against --surface-raised
-     #141416. Chosen by the owner on 2026-09-09 in AFTERNOON LIGHT, from a
-     three-panel comparison on the real console at 1920x720 rendering this
-     stylesheet at delta 6 (#1A1A1D, the pre-UX-1 value), delta 16, and delta 36
-     (#38383F). The owner judged rendered pixels, not labels.
+     #141416. Chosen by the owner on 2026-09-09 from a three-panel comparison on
+     the real console at 1920x720 rendering this stylesheet at delta 6 (#1A1A1D,
+     the pre-UX-1 value), delta 16, and delta 36 (#38383F) — then CONFIRMED later
+     the same day on a one-at-a-time harness showing a single value with nothing
+     beside it ("Shimmer 36 looks good"). The owner judged rendered pixels.
 
      ⛔ The DARK-ROOM sitting of 2026-09-08 concluded the OPPOSITE about this
      rung — docs/queue/UX-1.md recorded "36 is below the owner's dark-room
      visibility threshold", and #38383F shipped as #641 on that basis. Both
-     judgements are the owner's; neither is retracted here. Two confounds are
-     live, and deciding between them is exactly what has NOT been done:
-       1. the dark-room sitting ran on the v1 harness, which the plan itself
-          records as BROKEN (band off the element for part of every cycle), so
-          that geometry was never fairly tested;
-       2. side-by-side viewing may bias toward the dimmest acceptable value —
-          with delta 36 beside it as a reference, delta 16 reads as sufficient;
-          alone in the dark it may not. That is a reason the dark-room re-check
-          is required, NOT evidence that either sitting was wrong.
-     Full argument, both sittings' instruments named: docs/queue/UX-1.md.
+     judgements are the owner's; neither is retracted here, and this is NOT a
+     2-to-1 verdict. Two confounds, only one of which is answered:
+       1. ⛔ UNANSWERED. The dark-room sitting ran on the v1 harness, which the
+          plan itself records as BROKEN (band off the element for part of every
+          cycle), so that geometry was never fairly tested. And the AMBIENT
+          CONDITIONS OF BOTH RECENT SITTINGS ARE UNRECORDED — nobody established
+          whether either was a dark room, which is the condition in dispute.
+       2. ✅ ANSWERED. Side-by-side viewing can bias toward the dimmest
+          acceptable value; the one-at-a-time harness removed the reference and
+          36 still read as good.
+     Unresolved, not settled. Full argument: docs/queue/UX-1.md.
+
+     ⭐ WHY THAT DISAGREEMENT DOES NOT BLOCK THIS — the stakes, not the evidence.
+     Per the dwell note below, no sweep is painted at ANY value, so if 36 is too
+     dim in a dark room the consequence is that an invisible element is
+     marginally more invisible.
+     ⛔ THE COROLLARY IS LOAD-BEARING: IF DWELL IS EVER FIXED, THIS VALUE MUST BE
+     RE-JUDGED AT THAT POINT. That will be the first time anyone sees this
+     shimmer in the product rather than on a harness holding it on screen
+     artificially, and every sighting on record was made on such a harness.
+     36 is settled-for-now on a surface nobody can currently see, NOT forever.
 
      ⚠ Close to the Designer's seed but NOT identical with it. The seed of record
      is #242429 = rgb(36,36,41) (docs/queue/UX-1.md:87, and the v2 ladder in

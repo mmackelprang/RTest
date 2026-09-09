@@ -20,10 +20,15 @@
 > |---|---|---|---|
 > | 2026-09-08 night | dark room | **v1 harness — recorded in this file as BROKEN** (band off the element for part of every cycle; geometry never fairly tested) | rejected 36 as *"below the dark-room visibility threshold"*; chose **56** |
 > | 2026-09-09 midday | daylight | v2 harness, shipping geometry, blind five-value ladder | **56** — confirmed, shipped as [#641](https://github.com/mmackelprang/RTest/pull/641) |
-> | **2026-09-09 afternoon** | **afternoon light** | **three-panel static demo on the real console at 1920×720, rendering the deployed stylesheet** — delta 6 / delta 16 / delta 36 side by side | **36** (`#24242B`) |
+> | **2026-09-09 afternoon** | ⚠ **unrecorded** | **three-panel static demo on the real console at 1920×720, rendering the deployed stylesheet** — delta 6 / delta 16 / delta 36 side by side | **36** (`#24242B`) |
+> | **2026-09-09 later** | ⚠ **unrecorded** | ⭐ **one-at-a-time harness** — a single value revealed on a button press, so the side-by-side reference is removed. **A better instrument than the row above** | **36** (`#24242B`) — *"Shimmer 36 looks good."* |
 >
-> **Both judgements are the owner's, on the same rung, and they contradict each other.** This file
-> does not pick a winner, and neither does the PR that implements the third sitting's value.
+> **Tally: two sittings chose 36, one earlier sitting rejected it.** ⛔ **That is NOT a 2-to-1 verdict,
+> and this file does not treat it as one.** The ambient conditions of **both** recent sittings are
+> **unrecorded** — nobody established whether either was a dark room — so they do not directly answer
+> the condition the earlier sitting was judged in. And the earlier sitting used the **v1 harness the
+> plan itself calls broken**, so it is weak evidence in the other direction. ⭐ **Unresolved, not
+> settled.** This file does not pick a winner, and neither does the PR that implements 36.
 >
 > **Two confounds, both live:**
 > 1. ⛔ **The dark-room sitting's instrument is suspect** — it ran on the **v1** harness, which the
@@ -35,11 +40,24 @@
 >    This is a real perceptual effect. ⛔ **It is NOT evidence that the owner was wrong this
 >    afternoon** — it is the reason the re-check is required before anything merges.
 >
-> **⛔ MERGE IS GATED ON A DARK-ROOM RE-CHECK OF `#24242B` ALONE, not side by side.** A harness for
-> exactly that is deployed on the box at `http://radio:5002/shimmer-demo.html` (one value at a time,
-> nothing revealed until a button is pressed). ⚠ It lives in
-> `/opt/radio-console/web/wwwroot/`, which a deploy wipes — it is not in this repo and will not
-> survive the next `Deploy-ToLinux.ps1`.
+> **The one-at-a-time re-check has now happened and 36 held** — the harness at
+> `http://radio:5002/shimmer-demo.html` reveals a single value on a button press, which removes the
+> side-by-side bias in confound 2. ⚠ **What it does NOT do is establish the ambient condition**;
+> nobody recorded whether the room was dark. So confound 2 is answered and **confound 1's
+> disagreement is not.** ⚠ The harness lives in `/opt/radio-console/web/wwwroot/`, which
+> `Deploy-ToLinux.ps1:271` wipes with `rsync --delete` — it is not in this repo and will not survive
+> the next deploy.
+>
+> ⭐ **WHAT ACTUALLY DEFUSES THIS — it changes the stakes, not the evidence.** The shimmer is on
+> screen for **~3–7 ms against a 1500 ms cycle**, so **no sweep is painted at any value** (see the
+> final section). If 36 *is* too dim in a dark room, the consequence is that **an invisible element
+> is marginally more invisible.** The value choice is **very low stakes until the dwell question is
+> answered** — which is the honest reason this can proceed on an unresolved disagreement.
+>
+> ⛔ **AND THE COROLLARY, WHICH MUST NOT BE LOST: if dwell is ever fixed, THE VALUE MUST BE RE-JUDGED
+> AT THAT POINT** — that will be the first time anyone actually sees the shimmer in the product, and
+> the only sightings on record were made on a harness that holds it on screen artificially. **36 is
+> not settled-forever; it is settled-for-now, on a surface nobody can currently see.**
 >
 > ⚠ **The value being shipped is NOT literally the Designer's seed, though it sits on that rung.**
 > The seed of record is **`#242429` = rgb(36,36,41)** (`:87` below, and the v2 ladder in
@@ -458,10 +476,11 @@ as UAT for this row.
 
 ---
 
-## ⚠ THIRD SITTING 2026-09-09, afternoon light — the owner chose **36 (`#24242B`)**, and the row is reopened
+## ⚠ SITTINGS THREE AND FOUR, 2026-09-09 — the owner chose **36 (`#24242B`)** twice, and the row is reopened
 
 **Result: the owner viewed three panels side by side on the real console and said "Designer seed 36
-is my choice."** That is the opposite of what the night sitting concluded about the same rung.
+is my choice."** That is the opposite of what the night sitting concluded about the same rung. **A
+fourth sitting later the same day confirmed it on a better instrument** — see below.
 
 ### How it was judged — this matters more than the number
 
@@ -502,12 +521,38 @@ on the same value.**
 ⛔ **Do not write that 36 is "correct", and do not write that the earlier finding was "wrong".** The
 two sittings disagree; the merge is gated on a third condition that has not been run.
 
-### The gate
+### ⭐ FOURTH SITTING, later the same day — 36 confirmed on a better instrument
 
-**A dark-room re-check of `#24242B` on its own — not side by side.** A harness for exactly that is
-deployed at `http://radio:5002/shimmer-demo.html`: one value at a time, nothing revealed until a
-button is pressed, so the side-by-side bias in confound 2 cannot operate. ⚠ It lives in
-`/opt/radio-console/web/wwwroot/` and **a deploy wipes it**; it is not in this repo.
+The owner viewed `#24242B` again on the **one-at-a-time** harness at
+`http://radio:5002/shimmer-demo.html` — a single value revealed on a button press, nothing else on
+screen — and said **"Shimmer 36 looks good."**
+
+⭐ **That is a better instrument than the third sitting**, because it removes the side-by-side
+reference and therefore **answers confound 2 directly**: 36 was judged sufficient with no brighter
+value beside it to anchor against.
+
+⛔ **It does NOT answer confound 1, and must not be written up as though it did.** Nobody recorded
+the **ambient conditions** of either recent sitting. The earlier judgement — *"36 is below the
+owner's dark-room visibility threshold"* — was made specifically **in a dark room**, and neither
+recent sitting is known to have been. **Two sittings chose 36; one rejected it; the conditions of
+the two are unrecorded and the instrument of the one was broken. Unresolved, not settled.**
+
+### ⭐ Why this can proceed anyway — the stakes, not the evidence
+
+**The shimmer is on screen for ~3–7 ms against a 1500 ms cycle, so no sweep is painted at any
+value** (see the next section). **If 36 is too dim in a dark room, the consequence is that an
+invisible element is marginally more invisible.** That is the honest reason a live disagreement
+between two owner judgements does not need to block a one-token change: **the choice is very low
+stakes until dwell is answered.**
+
+⛔ **THE COROLLARY IS LOAD-BEARING AND MUST NOT BE LOST.** ⚠ **If dwell is ever fixed, the value must
+be RE-JUDGED at that point.** That will be the first time anyone sees this shimmer in the product
+rather than on a harness that holds it on screen artificially — and every sighting on record was made
+on such a harness. **36 is settled-for-now on a surface nobody can currently see. It is not
+settled-forever.** Any future row that changes skeleton dwell inherits this re-judgement.
+
+⚠ The harness lives in `/opt/radio-console/web/wwwroot/` and `Deploy-ToLinux.ps1:271` wipes that
+directory with `rsync --delete`; it is not in this repo and will not survive the next deploy.
 
 ### ⚠ The shipped hex is not the Designer's seed, and the record should not round them together
 
@@ -549,11 +594,12 @@ outright — **is not firing**.
 
 ⚠ **Cited by selector, not by line, and here is why.** `design-system.css` holds **six**
 `@media (prefers-reduced-motion: reduce)` blocks, so a bare line number is doing real disambiguating
-work — and it is also the first thing to rot. This one is **`:1779` on `main` @ `f4d71b28`** and
-**`:1805` on the branch that changes the token**, because the token's comment block sits above it and
-pushes everything below down. ⭐ **That shift happened to this very paragraph while it was being
-written**, which is the same trap this file already records twice under "Line anchors: this row's,
-and the plan's, are all stale."
+work — and it is also the first thing to rot. It is **`:1779` on `main` @ `f4d71b28`**. ⛔ **No branch
+line number is quoted here on purpose:** the token's comment block sits above it, so every edit to
+that comment shifts it. ⭐ **It moved twice while this paragraph was being written** — `:1805`, then
+`:1817` — which is the same trap this file already records twice under "Line anchors: this row's, and
+the plan's, are all stale." **A number that changes each time you touch the thing it documents should
+not be written down at all.**
 
 ⚠ **What this does and does not mean.** The value change is **cosmetically real** — it is the right
 value for whenever a skeleton *is* on screen, e.g. a cold start, a slow network, or a genuinely slow
