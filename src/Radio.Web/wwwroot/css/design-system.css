@@ -116,9 +116,10 @@
 
      ⚠ Close to the Designer's seed but NOT identical with it. The seed of record
      is #242429 = rgb(36,36,41) — see the Designer answer's "The change" block in
-     docs/queue/UX-1.md, and the v2 ladder in NIGHT-SITTING.md. (Cited by section,
-     not by line: the supersede banner moved that anchor from :87 to :151 in the
-     same change that wrote this comment.) This value is +2 on BLUE, so B−R is +7
+     docs/queue/UX-1.md, and the v2 ladder in NIGHT-SITTING.md. (Cited by section.
+     It was :87 on main @ f4d71b28; the supersede banner moved it, and no current
+     line is quoted because that number moved three times in one change.)
+     This value is +2 on BLUE, so B−R is +7
      rather than the Designer's +5. Two levels on one channel near black cannot
      have driven the owner's judgement — but the ladder sighted at night and the
      panel sighted this afternoon were not painting the same colour, and the

@@ -63,7 +63,8 @@
 >
 > ⚠ **The value being shipped is NOT literally the Designer's seed, though it sits on that rung.**
 > The seed of record is **`#242429` = rgb(36,36,41)** (the Designer answer's *"The change"* block
-> below — `:151`, moved from `:87` by this banner — and the v2 ladder in
+> below (it was `:87` on `main` @ `f4d71b28`; this banner moved it and **no current-line number is
+> quoted, because it keeps moving** — see the note under the dwell section) and the v2 ladder in
 > [`NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md)). What the owner
 > actually looked at this afternoon was **`#24242B` = rgb(36,36,43)** — **+2 on blue**, hue lean
 > B−R **+7** rather than the Designer's **+5**. Two levels on one channel near black cannot have
@@ -517,8 +518,9 @@ problem.
 
 The night-sitting section above (still legible, under *"The Designer's central claim is contradicted
 by the owner's eye"*) records **"36 is below the owner's dark-room visibility threshold."** ⚠ That
-sentence was `:217` on `main` @ `f4d71b28` and is **`:287`** here — this row's supersede banner moved
-it, so it is cited by section rather than by number. The owner rejected 36 **in a dark room** and has now
+sentence was `:217` on `main` @ `f4d71b28`; this row's supersede banner moved it, so it is cited by
+section rather than by number. ⛔ **No current-line number is quoted, deliberately** — see the note
+under the dwell section. The owner rejected 36 **in a dark room** and has now
 chosen it **in afternoon light**. **Both judgements are the owner's and they contradict each other
 on the same value.**
 
@@ -575,7 +577,7 @@ directory with `rsync --delete`; it is not in this repo and will not survive the
 ### ⚠ The shipped hex is not the Designer's seed, and the record should not round them together
 
 The seed of record is **`#242429` = rgb(36,36,41)** — the Designer answer's *"The change"* block
-above (`:151`; it was `:87` before this row's supersede banner), the plan's Task 5a, and the
+above (`:87` on `main` @ `f4d71b28`; moved since, and not re-quoted), the plan's Task 5a, and the
 five-value ladder in [`NIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md).
 The panel the owner looked at this afternoon painted **`#24242B` = rgb(36,36,43)**: **+2 on blue**,
 hue lean B−R **+7** rather than the Designer's **+5**. Two levels on one channel near black cannot
@@ -660,6 +662,27 @@ citation.**
 > for changing the citation style, and it was wrong** — a commit written to fix an unverified claim
 > shipped a new one. Exactly the `GoogleCastOutput._lifecycleLock` shape `CLAUDE.md` § Pre-Merge
 > Review warns about: *"the corrected comment's own first draft overclaimed in turn."*
+
+### ⛔ THE RULE THIS ROW EARNED: in a file that is still being edited, cite a section, not a line
+
+**Measured across this one change.** Every `file:line` anchor written into this row moved *while the
+row was being written*, because the supersede banner and the new sections all insert above the things
+they cite:
+
+| Anchor | Written as | Then | Then | Now |
+|---|---|---|---|---|
+| reduced-motion block (`design-system.css`) | `:1779` | `:1805` | `:1817` | — |
+| Designer's seed (`UX-1.md`) | `:87` | `:151` | `:154` | — |
+| dark-room threshold (`UX-1.md`) | `:217` | `:287` | `:290` | — |
+
+⭐ **Three anchors, moved three times, all self-inflicted, and pre-merge review caught the second
+round after the first round had already been "fixed."** The fix that kept failing was *re-measuring
+the number*; the fix that works is **not quoting a moving number at all.**
+
+**So: quote only `main`'s anchor, which is stable and checkable, and otherwise cite by section title
+or quoted phrase.** This file already carried a section titled *"Line anchors: this row's, and the
+plan's, are all stale"* before any of this — the lesson had been written down and was still not
+followed, which is why it is now a rule with its own heading.
 
 ⚠ **What this does and does not mean.** The value change is **cosmetically real** — it is the right
 value for whenever a skeleton *is* on screen, e.g. a cold start, a slow network, or a genuinely slow
