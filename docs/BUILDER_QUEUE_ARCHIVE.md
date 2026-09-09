@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (45)
+## Shipped rows (46)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -1683,6 +1683,67 @@ test files use that seam* is now **one**, the helper itself. The new test theref
 through `HubEventFire.InvocationListOf<TDelegate>` rather than hand-rolling a thirteenth copy.
 
 ---
+
+### GV-12 — The phone surface fetches once per circuit and never again, so a transient outage leaves it dead until a human taps Retry.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#631](https://github.com/mmackelprang/RTest/pull/631) |
+| Plan | [`GV-12-refetch-on-the-recovery-edge.md`](../design/plans/GV-12-refetch-on-the-recovery-edge.md) |
+| Spec / handoff | _no spec doc — confirmed from BOTH ends 2026-09-08_ · [ADR-032](../design/DECISION-LOG.md) |
+| Depends on | — _(⛔ NOT `UI-10`, despite the row saying so — see below)_ |
+| Branch | `fix/gv-12-refetch-on-recovery-edge` |
+
+**Detail: [`queue/GV-12.md`](queue/GV-12.md)** — which carries the four falsified row premises and
+the browser-UAT evidence.
+
+Merged 2026-09-08. ⚠ **Merged, not shipped** — the appliance was 13 PRs behind at merge time and
+was deliberately not deployed for this row.
+
+RotaryPhone's GV bridge was dead 14:08–15:31 EDT. After it recovered, `radio-web` made **zero**
+further GV calls and the phone surface sat on "Couldn't load…" against a healthy backend until the
+owner tapped Retry. Fixed by refetching on the unhealthy→healthy **edge** of the shared GV status
+poll, plus an error-gated backstop on the 5 s timer that already existed. No new clock.
+
+⭐ **The reason it is not a mount-path bug is the transferable part: a reconnected Blazor circuit
+does not re-mount.** It resumes the same component instances with the same fields;
+`OnInitializedAsync` runs once per *circuit*, not per *connection*, which is the whole point of
+`DisconnectedCircuitRetentionPeriod`. So reconnection never re-fetches, however clean. **This makes
+the refetch trigger the only recovery mechanism, not a backstop on one that usually copes** — and it
+means `UI-10` is **not** upstream, reversing the row's own instruction.
+
+⛔ **The status contract the row handed us was right for a BANNER and would have made this fix a
+silent no-op.** A recovery edge must be able to *reach* healthy; any permanently-true unhealthy term
+pins the state and the edge never fires — shipping green, doing nothing. `cookiesValid` was a
+non-nullable `bool` defaulting to `false`, so it was live-pinned. The predicate is now deliberately
+asymmetric: **present-and-bad** is unhealthy, **absent** contributes nothing. A banner wants the
+opposite and must derive its own (ADR-032).
+
+⚠ **The plan asserted the three new health fields "could not be verified from this tree"; both that
+and its fallback reasoning were false, and the evidence was in-repo the whole time**
+(`inbound/2026-09-08-rotaryphone-reply.md:87-91`). Because the fields *are* served, the live
+predicate includes the 2-minute staleness gate — so `lastApiSuccessAt` can pin the state unhealthy
+with no outage at all. **Measured rather than assumed:** it advances on a **60 s** cadence against
+that 120 s gate, a 2× margin, now pinned by a test so a cadence change fails loudly.
+
+⭐ **Two HIGH defects were introduced by the first implementation and caught pre-merge**, both from
+comments that asserted more than the code did. The backstop gated on `_threadsError` alone, but a
+SignalR push does `_threads ??= new()` — so an inbound SMS during an outage left a non-null list
+with the flag set, the panel showed content while the backstop called it stuck, fired an unrequested
+toast on an unattended kiosk, and then **permanently disarmed itself**. And the unattended refetch
+reused `RetryOpenThreadAsync`, performing a **durable mark-read to Google** that clears unread across
+the owner's devices for a conversation nobody had looked at — justified by a comment true of the
+Retry button and false of a background refresh, inverting a rule stated twenty lines away.
+
+**Verified RED first as its own commit**, then ⭐ **proven in a real browser with a real Blazor
+circuit** against a stub serving the outage's verbatim body — RotaryPhone untouched. With the
+backstop provably disarmed, thread calls stayed frozen for 46 s with the bridge down and moved
+**exactly once, ~6.2 s after restore, with nobody touching the browser**. ⛔ What is still not proven:
+that RotaryPhone's real recovery path reports the edge the way the stub does. **The next real outage
+is that test** — do not manufacture one.
+
+---
+
 
 
 ## Historical narrative

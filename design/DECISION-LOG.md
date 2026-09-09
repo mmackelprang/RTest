@@ -732,4 +732,99 @@ this test changes with it — `HubEventFire` already throws a message saying so.
 
 ---
 
+## ADR-032: A recovery predicate and a status banner want opposite failure directions, and must never share one predicate
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+`GV-12`: RotaryPhone's GV bridge was dead 14:08–15:31 EDT. After it recovered, `radio-web` made zero
+further GV calls and the phone surface sat on *"Couldn't load…"* against a healthy backend until the
+owner tapped Retry.
+
+The reason that is not a mount-path bug is the part worth keeping: **a Blazor Server circuit that
+drops and reconnects does not re-mount.** It resumes the same component instances with the same
+fields; `OnInitializedAsync` runs once per *circuit*, not per *connection* — which is the entire
+purpose of `DisconnectedCircuitRetentionPeriod` (`Radio.Web/Program.cs:69`, 10 minutes here,
+commented "without losing circuit state"). So reconnection never re-fetches, however clean it is.
+Only a full page load does. That is why the 16:07 restart cleared every stuck panel and the
+preceding 83 minutes cleared none — same code, both times.
+
+### Decision
+
+Refetch on the **unhealthy→healthy edge** of the existing shared status poll, plus an error-gated
+backstop on the existing 5 s page timer. No new clock.
+
+**The rule this row exists to record: a predicate that gates a RECOVERY EDGE and a predicate that
+gates a STATUS BANNER want opposite failure directions on unknown data, and merging them silently
+breaks one of them.**
+
+- A **banner** fails *visible*: if we do not know, say something is wrong. Unknown reads as ill.
+- A **recovery edge** fails *silent*: it must be able to REACH healthy, because the whole mechanism
+  is a transition. Any term that is permanently true-unhealthy pins the state, the edge never fires,
+  and the fix ships green doing nothing.
+
+So `GvBridgeHealth.IsHealthy` is deliberately asymmetric: a field that is **present and says bad**
+makes it false; a field that is **absent contributes nothing**. `GvBridgeStatusService.IsAvailable`
+(the banner) is left alone and is allowed to be false while `IsHealthy` is true. Two predicates, two
+directions. ⛔ A future banner row must derive its own rather than tightening this one.
+
+### ⛔ The failure mode this nearly shipped with, twice
+
+**First, through absence.** `CookiesValid` was a non-nullable `bool` defaulting to `false`, so any
+response omitting it made `!CookiesValid` permanently true. All four health terms are now nullable,
+and that nullability is load-bearing rather than tidiness.
+
+**Second, through presence — and this one the plan got wrong.** The plan asserted that whether
+RotaryPhone serves `degraded` / `authBlackout` / `lastApiSuccessAt` *"could not be verified from this
+tree"*, and reassured the reader that absent fields would degrade the predicate to `!Available`.
+**Both halves were false, and the evidence was in-repo the whole time**
+(`docs/queue/inbound/2026-09-08-rotaryphone-reply.md:87-91`). Because the fields *are* served, the
+live predicate includes the 2-minute staleness gate — so `LastApiSuccessAt` can pin the state
+unhealthy with no outage at all if RotaryPhone's cadence ever exceeds it. §0.4 had reasoned only
+about absence; presence-and-stale reaches the same silent no-op by a different door.
+
+⭐ **The correction is that an assumption which decides whether the fix does anything must be
+measured, not reasoned about.** Measured on the box: `lastApiSuccessAt` advances on a **60-second**
+cadence against a 120 s threshold — a 2× margin, now pinned by
+`MeasuredSixtySecondCadence_StaysHealthy` so a cadence change fails a test instead of silently
+disabling the row.
+
+### Two supporting rules that earned their place
+
+- **Derive the edge from its own field.** `_gvBridgeAvailable` has four assignments across three
+  methods, because `PhonePage` runs its own 30 s status poll beside the singleton's 10 s one. An
+  edge compared against it is swallowed whenever the page-local poll lands the recovery first —
+  intermittently, on a timer alignment nobody can reproduce. `_gvHealthyLast` is written by
+  `OnGvStatusChanged` and by nothing else.
+- **An unattended refresh must not perform a durable write.** The first implementation reused
+  `RetryOpenThreadAsync`, which marks a thread read on Google — clearing unread across the owner's
+  devices for a conversation nobody had looked at. Its comment justified this with *"the user is
+  finally looking at the conversation"*, which is true of the Retry **button** and false of a
+  background refresh, and which directly inverts the rule `OpenThreadAsync` states twenty lines
+  away. **The reason a comment gives is the claim to check, not the conclusion** — this is the
+  fourth time that has been recorded here.
+
+### Verification
+
+RED measured first, as its own commit: both regression tests failed against the unfixed page
+(*"expected a refetch after recovery; thread-list calls = 1"*). Then the edge was proven **in a real
+browser with a real circuit** — which the bUnit tests structurally cannot do, since they have no
+circuit — against a stub serving the outage's verbatim status body, with RotaryPhone untouched.
+
+⚠ **The isolation matters more than the pass.** The first browser run did not discriminate: the
+refetch landed 7.4 s after restore and a backstop tick was due 1 s later. The second run exploited
+the fix's own gate — a populated list keeps `_threadsError` false, so the backstop is disarmed and
+only the edge can fire — and showed thread calls frozen for 46 s with the bridge down, then moving
+exactly once, ~6.2 s after restore, with nobody touching the browser.
+
+⛔ **What is still not proven, and should not be claimed:** that RotaryPhone's real recovery path
+reports the edge the way the stub does. The next real outage is that test. Do not manufacture one —
+their uptime is unsettled and a restart risks causing the incident this fixes.
+
+**Plan of record:** [`design/plans/GV-12-refetch-on-the-recovery-edge.md`](plans/GV-12-refetch-on-the-recovery-edge.md)
+
+---
+
 <!-- NEW ENTRIES GO ABOVE THIS LINE -->

@@ -77,13 +77,16 @@ public class GvBridgeStatusServiceTests
   /// publishing cadence, so the 2× margin is a gate rather than an assumption.
   /// </summary>
   /// <remarks>
-  /// ⚠ MEASURED ON THE APPLIANCE, NOT DERIVED. On `radio` 2026-09-09, polling
+  /// ⚠ MEASURED ON THE APPLIANCE, NOT DERIVED. On `radio` at 2026-09-09T01:58Z–02:02Z (UTC —
+  /// the box reports UTC; that is the evening of 2026-09-08 in the owner's EDT), polling
   /// http://localhost:5004/api/gvbridge/status, `lastApiSuccessAt` advanced on a clean
   /// 60-second cadence:
   ///
   ///   01:58:08.126  01:59:08.603  02:00:09.517  02:01:09.916  02:02:10.339
   ///
-  /// Max observed age 60 s against a 120 s threshold — a 2× margin.
+  /// Max observed age 60 s against a 120 s threshold — a 2× margin. ⚠ The margin is 2×, not
+  /// large: this is ONE five-minute window on ONE day, and the cadence is RotaryPhone's to
+  /// change without telling us.
   ///
   /// ⚠ WHAT BREAKS IF ROTARYPHONE EVER SLOWS THAT CADENCE PAST 120 s: a perfectly healthy
   /// bridge reports a timestamp older than the threshold on every poll, IsHealthy is pinned

@@ -215,13 +215,30 @@ removing a writer is a behaviour change to the banner, and this row must not tou
 
 ### 0.8 Anchors — verified, and the one that could not be
 
-Every line reference above was read at `56872b55`. **One thing in the row could not be verified from
-this tree and is not relied on by any task:** the claim that RotaryPhone serves `degraded`,
-`authBlackout` and `lastApiSuccessAt` today. The row's live capture is the only evidence, this plan
-did not touch the box, and their new fields are described as merged-not-deployed. Task 1 is written so
-this does not matter — all three are nullable and absence is not ill health (§0.4), so the fix behaves
-correctly whether or not the fields ever arrive. **If they never arrive, the predicate degrades to
-`!Available`, which the outage capture proves is sufficient to have caught this exact incident.**
+Every line reference above was read at `56872b55`.
+
+> ### ⛔ CORRECTED 2026-09-08 BY THE BUILDER CYCLE — THIS SECTION WAS WRONG
+>
+> This section originally said the claim that RotaryPhone serves `degraded`, `authBlackout` and
+> `lastApiSuccessAt` **"could not be verified from this tree"**, and reassured the reader that *"if
+> they never arrive, the predicate degrades to `!Available`."*
+>
+> **Both halves are false, and the first was falsifiable from inside this repo the whole time.**
+> `docs/queue/inbound/2026-09-08-rotaryphone-reply.md:87-91` is a live capture carrying all three,
+> and `docs/uat/2026-08-03-osk-wayland-viability/REPORT.md:437` shows `lastApiSuccessAt` five weeks
+> earlier. Confirmed live on the box during the build: all three are served today.
+>
+> ⚠ **The consequence is the one the plan most wanted to avoid.** Because the fields *are* present,
+> the live predicate is the full one **including the 2-minute staleness gate** — so
+> `LastApiSuccessAt` is a term that can pin the state unhealthy with no outage at all, if
+> RotaryPhone's publishing cadence ever exceeds 120 s. §0.4 reasoned only about *absence*; this is
+> *presence-and-stale*, and it reaches the same silent no-op.
+>
+> **Measured rather than assumed, on `radio` 2026-09-09T01:58Z–02:02Z:** `lastApiSuccessAt` advances
+> on a clean **60-second** cadence — max observed age 60 s against the 120 s threshold, a **2×**
+> margin. So the predicate does reach healthy in steady state and the fix is not a no-op.
+> `GvBridgeStatusServiceTests.MeasuredSixtySecondCadence_StaysHealthy` pins that measurement so the
+> margin is a gate rather than a belief.
 
 ⛔ **Nothing in this plan binds to `psidtsMintedAtUtc`, `browserSessionValidatedAt`,
 `browserSessionAgeSeconds` or `browserSessionStale`.** Those are merged-not-deployed on RotaryPhone's
@@ -1053,6 +1070,27 @@ bridge down to test our retry risks causing the incident we are fixing.
 ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep -n "gvbridge" $F | tail -40'
 ```
 
+### 7.2a ⭐ WHAT THE BUILD ACTUALLY MEASURED — the edge, in a real browser, isolated
+
+§7.2 was right that a green bUnit suite does not prove recovery, and **too pessimistic about what
+could be shown without touching RotaryPhone.** The build ran `Radio.Web` locally against a stub
+serving the outage's verbatim status body, and drove `/phone` in a real browser — a real Blazor
+circuit, the real 10 s singleton poll, the real 5 s page timer. **RotaryPhone was never touched.**
+
+| Step | Observed |
+|---|---|
+| Bridge down, page mounted | banner shown, `Couldn't load conversations.`, mount fetch 502 |
+| 30 s later | one backstop retry per list — the Task 4 path, firing live |
+| Bridge restored | thread list + voicemail refetched **~6.2 s later, one call each, no user input**; banner cleared; recovered row rendered |
+| Next 9 s | counts unchanged — one refetch, not a loop |
+
+⚠ **The first attempt did not discriminate** and is worth recording: the refetch landed 7.4 s after
+restore, but a backstop tick was due 1 s later, so edge and backstop were indistinguishable. The
+isolation run exploits the fix's own gate — once a list is populated, `_threadsError` stays false, so
+**the backstop is disarmed and only the edge can fire.** With the bridge down and content present,
+thread calls stayed frozen at 5 across 46 s (more than a full backstop period); on restore they moved
+exactly once. That is the edge, proven, not inferred.
+
 ⭐ **Interim mitigation, and it is real: restarting `radio-web` clears a stuck panel.** A new process
 forces every client to reload, which mounts fresh components, which fetches. Any deploy does it
 incidentally. Ugly, and worth knowing while this is queued.
@@ -1068,7 +1106,9 @@ incidentally. Ugly, and worth knowing while this is queued.
 | A Blazor reconnect does not re-mount | **Framework behaviour**, corroborated in-tree by `Program.cs:66-69`'s own comment |
 | `Degraded` / `AuthBlackout` / `LastApiSuccessAt` absent from our DTO | **Read from source**, `ApiModels.cs:1100-1109` |
 | `psidts*` has zero references in `src/` | **Grepped**, zero hits (fourth independent check) |
-| RotaryPhone serves the three fields today | **Not verified here.** Their capture only. Task 1 is built so it does not matter — §0.8 |
+| RotaryPhone serves the three fields today | ⛔ **This row said "Not verified here. Their capture only" and was WRONG** — two in-repo captures already showed all three (`docs/queue/inbound/2026-09-08-rotaryphone-reply.md:87-91`, `docs/uat/2026-08-03-osk-wayland-viability/REPORT.md:437`), and the build confirmed it live. **Measured**, and it matters: see the correction box in §0.8 |
+| `lastApiSuccessAt` publishing cadence | **Measured on the box 2026-09-09T01:58Z–02:02Z: 60 s, against a 120 s gate — a 2× margin.** Pinned by `MeasuredSixtySecondCadence_StaysHealthy`. Unmeasured before this cycle, and it decides whether the row does anything at all |
+| The recovery edge actually fires in a real Blazor circuit | **Measured end-to-end in a browser**, with the backstop provably disarmed: refetch ~6.2 s after restore, exactly one call per list, no user input. §7.2a |
 
 ---
 
