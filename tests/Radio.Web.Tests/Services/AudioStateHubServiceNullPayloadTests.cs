@@ -92,7 +92,11 @@ public class AudioStateHubServiceNullPayloadTests
     await hub.OnRadioStateMessageAsync(dto);
 
     Assert.Same(dto, seen);
-    Assert.DoesNotContain(sink, e => e.Level == LogLevel.Warning);
+    // Narrowed to the rejection message rather than "no Warning at all": the broad form would fail
+    // this test for the wrong reason the day an unrelated, legitimate warning is added to the hub
+    // client, and the property under test is only that the guard did not fire.
+    Assert.DoesNotContain(sink, e =>
+      e.Level == LogLevel.Warning && e.Message.Contains("null payload"));
   }
 
   /// <summary>Every subscriber is still awaited — Task 1 must not have bypassed the UI-7 fan-out.</summary>
