@@ -120,7 +120,15 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   /// ACTIVITY-guarded on a private bool that the caller's own cancellation cleared first, so the
   /// only call that detaches a source from the SoundFlow mixer never ran. That is PR #469's shape
   /// one layer down — not State, but a private mirror of it, which is worse because this paragraph
-  /// reads as covering it. EventSourceStopIsNotActivityGuardedLintTests is what now checks it.
+  /// reads as covering it.
+  ///
+  /// ⛔ NOTHING CHECKS THE CONTRACT ABOVE, and this paragraph is not a claim that something now
+  /// does. EventSourceStopIsNotActivityGuardedLintTests reds on the one SHAPE that broke it — a
+  /// playback-service stop gated on a private bool — over a single directory, and it verifies
+  /// neither null-guarding nor idempotency of anything. Read its remarks for what it cannot see
+  /// before treating a green run as cover. An implementor that detaches by some other route, or
+  /// that guards on a stale mirror reached through a local or a property, satisfies the lint and
+  /// still breaks this contract.
   /// </summary>
   public virtual async Task StopAsync(CancellationToken cancellationToken = default)
   {

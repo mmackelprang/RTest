@@ -25,9 +25,20 @@ public class AudioFileEventSource : EventAudioSourceBase
   // it is wrong in BOTH directions: it reads false while audio is live (it is assigned only after
   // PlayFileAsync returns, by which point the player is already in the mixer), and the cancellation
   // handler clears it without stopping anything — which is PHN-10, where it disabled every stop path
-  // in the attended-playback seam. It survives only because the alternative for OnVolumeChanged is
-  // worse: SoundFlowPlaybackService.SetVolume WRITES _baseVolumes[sourceId] before checking
-  // anything, so an unconditional call would orphan an entry for a source that never played.
+  // in the attended-playback seam.
+  //
+  // It survives on ONE reader for a reason that does not go stale: the failure directions are not
+  // comparable. A dropped volume change is a cosmetic miss on a source that is already stopping. A
+  // skipped stop is a voice nothing can silence. PHN-2 UAT check #8 (volume changes voicemail
+  // loudness) PASSED, so this reader works in the case that matters.
+  //
+  // ⚠ NOT because "an unconditional SetVolume would orphan a _baseVolumes entry" — an earlier draft
+  // of this comment gave that as the reason and THIS ROW RETIRED IT. SetVolume does write
+  // _baseVolumes[sourceId] before checking whether a player is registered (after ThrowIfDisposed, so
+  // "before checking anything" would be wrong too), but StopCoreAsync and DisposeAsyncCore now both
+  // reach SoundFlowPlaybackService.StopAsync unconditionally, and that method Removes the key. The
+  // orphan is bounded by the source instance's lifetime, exactly like one from a source that did
+  // play. TTSEventSource.OnVolumeChanged has always called SetVolume unconditionally.
   private bool _isPlaybackActive;
   private CancellationTokenSource _transportCts = new();
   private readonly object _transportLock = new();
@@ -474,6 +485,12 @@ public class AudioFileEventSource : EventAudioSourceBase
     // property AudioSourceBase.StopAsync's contract already assumes of every StopCoreAsync. It also
     // calls ThrowIfDisposed, hence the catch: an escaping ObjectDisposedException here would skip
     // OnPlaybackCompleted(UserStopped) below. TTSEventSource.StopCoreAsync wraps for the same reason.
+    //
+    // ⭐ AND IT IGNORES THE TOKEN ENTIRELY — cancellationToken appears in StopAsync's signature and
+    // nowhere in its body; it is never observed and never forwarded. That is what makes an
+    // ALREADY-CANCELLED token still stop the audio, which is the case on the /sleep edges and the
+    // last-circuit backstop. Forwarding it is kept anyway so a future implementation that honours it
+    // gets the caller's token rather than none.
     if (_playbackService != null && _playbackId != null)
     {
       try
@@ -571,7 +588,13 @@ public class AudioFileEventSource : EventAudioSourceBase
     }
     else
     {
-      Logger.LogDebug("Audio file event volume changed to {Volume} (not yet playing)", volume);
+      // ⚠ Says "not applied", NOT "not yet playing", and the difference is this row's whole subject.
+      // _isPlaybackActive is false both before playback starts AND after a cancellation that stopped
+      // nothing — see the field comment — so a message naming the source's playback state asserts
+      // something this branch cannot know. It knows only that it did not write the volume.
+      Logger.LogDebug(
+        "Audio file event volume changed to {Volume} (not applied - no active playback registered)",
+        volume);
     }
   }
 }

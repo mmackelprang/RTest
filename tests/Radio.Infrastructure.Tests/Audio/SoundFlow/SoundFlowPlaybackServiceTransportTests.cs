@@ -51,6 +51,12 @@ public class SoundFlowPlaybackServiceTransportTests
     var service = CreateService();
 
     await service.StopAsync("no-such-source");
+
+    // ⚠ The property is "does not throw", which an empty body would also express — and an empty body
+    // is indistinguishable from one that was gutted. Asserting the id is still absent afterwards
+    // gives the test something to fail on.
+    Assert.False(service.IsPlaying("no-such-source"));
+    Assert.Null(service.GetPosition("no-such-source"));
   }
 
   private static SoundFlowPlaybackService CreateService() => DeviceFreePlaybackService.Create();

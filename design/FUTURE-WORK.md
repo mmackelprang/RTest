@@ -2839,3 +2839,47 @@ already performs the detach through `SoundFlowPlaybackService`.
 
 **Priority: low.** A wrong comment on a live audio class, with a demonstrated history of misleading a
 fix. Cheap to correct; not urgent.
+
+---
+
+## 37. A stop landing mid-`PlayFileAsync` leaves a player in the mixer that nothing will detach
+
+**Found in `PHN-10`'s pre-merge review, 2026-09-09**, and it is also a **correction to that row's
+plan**: `PHN-10` §`C-911` claims *"Task 1 closes this window as a by-product, because the stop paths
+stop consulting the flag at all."* ⛔ **It does not.** The window is an ordering problem in
+`SoundFlowPlaybackService`, not a flag problem, and removing the flag from the stop paths changes
+nothing about the interleaving.
+
+### What exists
+
+`SoundFlowPlaybackService.PlayFileAsync` (and `PlayStreamAsync`, `PlayDataProviderAsync`,
+`PlayComponentAsync`) attaches the player to the mixer and starts it — `MasterMixer.AddComponent`,
+then `soundPlayer.Play()` — and only **afterwards** registers it: `lock (_playersLock) {
+_activePlayers[sourceId] = soundPlayer; }`.
+
+Between those two points the player is **audible and unregistered**. `StopAsync` resolves purely by
+dictionary lookup, so a stop arriving in that window finds nothing, no-ops, and returns; the
+registration then completes *behind* the stop, leaving a player that is in the mixer, in
+`_activePlayers`, and that nothing will ever come back to detach.
+
+⭐ **`PHN-10` did not create this and does not widen it.** It is the same hazard that made
+`_isPlaybackActive` a bad proxy in the first place, one layer lower.
+
+### What is needed
+
+Register before starting, or make registration and start atomic under `_playersLock` — then a stop is
+either strictly before (nothing to remove, and `Play` must not proceed) or strictly after (found and
+removed). ⚠ The "nothing to remove, and `Play` must not proceed" half is the real work: a claim/cancel
+token per `sourceId` rather than a bare dictionary write.
+
+### Gotchas
+
+- ⚠ **Reachability is unquantified.** Nobody has established whether a real stop can land inside that
+  window — it needs a `StopAsync` concurrent with an in-flight `PlayFileAsync` on the *same*
+  `sourceId`, and `PlayFileAsync` itself opens with `await StopAsync(sourceId)`. **Measure before
+  building.** ⛔ Do not cite this entry as a known live defect; it is a hole in an argument, not an
+  observed failure.
+- ⛔ **It touches `SoundFlowPlaybackService`, a live shared audio class**, which is why `PHN-10`
+  deliberately did not go near it.
+
+**Priority: low.** Records a plan claim that does not hold, so nobody re-derives closure from it.

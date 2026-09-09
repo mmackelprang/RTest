@@ -20,14 +20,27 @@ namespace Radio.Core.Tests;
 /// <c>MaxPlaybackSeconds</c> cap, or by anything else. <c>TTSEventSource</c> calls the same stop
 /// unconditionally, which is why only one of the two event sources had the defect.
 ///
-/// <b>Why a private bool specifically, rather than "any guard".</b> The two shipped forms of guard on
-/// these call sites are a NULL check on a collaborator (<c>_playbackService != null</c>,
-/// <c>_playbackId != null</c>) and a LIVE query on the service itself
-/// (<c>_playbackService.IsPlaying(Id)</c>). Neither is a cached mirror of the service's own state, so
-/// neither can go stale behind the caller's back. A private <c>bool</c> field is exactly the shape that
-/// can — it is a second copy of a fact <c>SoundFlowPlaybackService._activePlayers</c> owns — and it is
-/// the shape that shipped this bug. Forbidding all guards would forbid the null checks that keep these
-/// call sites from throwing; forbidding this one shape is what the defect actually was.
+/// <b>Why a private bool specifically, rather than "any guard".</b> Forbidding all guards would forbid
+/// the null checks that keep these call sites from throwing. A private <c>bool</c> is the shape that
+/// shipped this bug, and it is the shape that can go stale behind the caller's back — a second copy of
+/// a fact <c>SoundFlowPlaybackService._activePlayers</c> owns.
+///
+/// ⚠ There are <b>THREE</b> shipped guard forms on these call sites, not two, and an earlier draft of
+/// this paragraph said two — the third is the interesting one:
+/// <list type="number">
+///   <item>a NULL check on a collaborator (<c>_playbackService != null</c>, <c>_playbackId != null</c>)
+///     — cannot go stale;</item>
+///   <item>a LIVE query on the service (<c>_playbackService.IsPlaying(Id)</c>) — cannot go stale
+///     either, though it answers a narrower question than callers expect (a PAUSED player is not
+///     <c>Playing</c>, which is FUTURE-WORK item 35);</item>
+///   <item>⚠ a check on a private field the source itself owns — <c>TestToneAudioSource</c> guards both
+///     of its stops on <c>_generator != null</c>. That IS a cached mirror, and it is safe only because
+///     of an argument this lint cannot make: the field is assigned before <c>PlayComponentAsync</c> and
+///     cleared only inside the two stop paths, so it cannot read stale-false. It is not a <c>bool</c>,
+///     so the rule below does not reach it — deliberately, but by luck of typing rather than by
+///     principle. <b>A source that mirrored the same fact into a <c>bool</c> would be caught; one that
+///     mirrors it into an object reference would not.</b></item>
+/// </list>
 ///
 /// ⚠⚠ <b>WHAT THIS TEST CANNOT DO.</b> It is a lint over source TEXT. It does not run any audio, does
 /// not construct a source, and proves NOTHING about whether a player is detached from the mixer — that
@@ -41,6 +54,10 @@ namespace Radio.Core.Tests;
 ///     if (live) …</c>), a PROPERTY, or a helper method — the condition text names an identifier the
 ///     lint does not recognise as the field;</item>
 ///   <item>an early <c>return</c> above the call instead of an enclosing <c>if</c>;</item>
+///   <item>a TERNARY or other conditional expression (<c>await (flag ? Stop() : Task.CompletedTask)</c>)
+///     — there is no enclosing <c>if</c> at all;</item>
+///   <item>a mirror held in something other than a <c>bool</c> — see <c>TestToneAudioSource</c>'s
+///     <c>_generator != null</c> in the numbered list above;</item>
 ///   <item>the brace-less body of an <c>else</c> (<c>if (a) x; else Stop();</c>) — see
 ///     <see cref="BracelessIfConditions"/>, which cuts at the <c>;</c>;</item>
 ///   <item>a stop reached through a differently-named playback-service field, or through a local

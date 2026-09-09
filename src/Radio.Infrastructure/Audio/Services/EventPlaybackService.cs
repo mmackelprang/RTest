@@ -1324,8 +1324,9 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
   /// "the guarantee".
   ///
   /// What actually stops audio is SoundFlowPlaybackService.StopAsync, reached through
-  /// TearDownAsync -> ReleaseSourceAsync -> source.StopAsync / source.DisposeAsync, and StopAsync is
-  /// the public door to it. Hence a timer whose callback dispatches a stop.
+  /// TearDownAsync -> ReleaseSourceAsync -> source.StopAsync / source.DisposeAsync. THIS class's own
+  /// StopAsync is the public door to that chain — three different methods share the name in these two
+  /// sentences, so each is qualified. Hence a timer whose callback dispatches a stop.
   ///
   /// ⚠ Until PHN-10 that chain was BROKEN for AudioFileEventSource, and the paragraph above had
   /// already identified every ingredient without drawing the conclusion. TearDownAsync's FIRST

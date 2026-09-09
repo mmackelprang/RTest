@@ -78,10 +78,19 @@ public class AudioFileEventSourceStopReachesThePlaybackServiceTests
   }
 
   /// <summary>
-  /// An initialised source holding a disposed playback service. Initialisation is what mints
-  /// <c>_playbackId</c>, without which the (correct, retained) null guard would skip the call for a
-  /// reason that has nothing to do with PHN-10.
+  /// An initialised source holding a disposed playback service.
   /// </summary>
+  /// <remarks>
+  /// ⚠ <c>InitializeAsync</c> is load-bearing for TWO reasons, and missing either would make these
+  /// tests pass or fail for a reason unrelated to PHN-10:
+  /// <list type="number">
+  ///   <item>it mints <c>_playbackId</c>, without which the (correct, retained) null guard skips the
+  ///     call;</item>
+  ///   <item>it moves <c>State</c> off <c>Created</c>, and <c>AudioSourceBase.StopAsync</c> returns
+  ///     early — without calling <c>StopCoreAsync</c> at all — while the state is <c>Created</c> or
+  ///     <c>Disposed</c>.</item>
+  /// </list>
+  /// </remarks>
   /// <remarks>
   /// ⚠ The stream constructor deliberately, so no file has to exist. Playback is never started: the
   /// whole point is that <c>_isPlaybackActive</c> is false — which is the state every real stop path
