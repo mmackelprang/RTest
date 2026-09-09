@@ -18,6 +18,27 @@ public class AudioFileEventSource : EventAudioSourceBase
   private CancellationTokenSource? _playbackCts;
   private Task? _playbackTask;
   private string? _playbackId;
+
+  // ⛔ ONE READER ONLY: OnVolumeChanged. Do NOT gate a stop, a dispose or a detach on this.
+  //
+  // It is a cached mirror of state SoundFlowPlaybackService._activePlayers owns authoritatively, and
+  // it is wrong in BOTH directions: it reads false while audio is live (it is assigned only after
+  // PlayFileAsync returns, by which point the player is already in the mixer), and the cancellation
+  // handler clears it without stopping anything — which is PHN-10, where it disabled every stop path
+  // in the attended-playback seam.
+  //
+  // It survives on ONE reader for a reason that does not go stale: the failure directions are not
+  // comparable. A dropped volume change is a cosmetic miss on a source that is already stopping. A
+  // skipped stop is a voice nothing can silence. PHN-2 UAT check #8 (volume changes voicemail
+  // loudness) PASSED, so this reader works in the case that matters.
+  //
+  // ⚠ NOT because "an unconditional SetVolume would orphan a _baseVolumes entry" — an earlier draft
+  // of this comment gave that as the reason and THIS ROW RETIRED IT. SetVolume does write
+  // _baseVolumes[sourceId] before checking whether a player is registered (after ThrowIfDisposed, so
+  // "before checking anything" would be wrong too), but StopCoreAsync and DisposeAsyncCore now both
+  // reach SoundFlowPlaybackService.StopAsync unconditionally, and that method Removes the key. The
+  // orphan is bounded by the source instance's lifetime, exactly like one from a source that did
+  // play. TTSEventSource.OnVolumeChanged has always called SetVolume unconditionally.
   private bool _isPlaybackActive;
   private CancellationTokenSource _transportCts = new();
   private readonly object _transportLock = new();
@@ -247,7 +268,15 @@ public class AudioFileEventSource : EventAudioSourceBase
     }
     catch (OperationCanceledException)
     {
-      // Playback was stopped
+      // ⚠ NOTHING HAS BEEN STOPPED HERE, and an earlier version of this comment said "Playback was
+      // stopped", which is the sentence that hid PHN-10. Cancellation unblocks AwaitCompletionAsync
+      // and ends this task; the SoundFlow SoundPlayer is untouched and still attached to the mixer.
+      // Only SoundFlowPlaybackService.StopAsync detaches it, and only StopCoreAsync and
+      // DisposeAsyncCore call that.
+      //
+      // ⚠ This flag is therefore NOT a proxy for "audio is reaching the speakers" and must never be
+      // used to gate a stop again. It is cleared here so that OnVolumeChanged — since PHN-10 its ONE
+      // remaining reader — stops writing volumes for a source that is going away.
       _isPlaybackActive = false;
     }
     catch (Exception ex)
@@ -434,10 +463,45 @@ public class AudioFileEventSource : EventAudioSourceBase
     // instance, and a leftover true would arm an infinite wait on the next playback.
     _transportPaused = false;
 
-    // Stop SoundFlow playback if active
-    if (_playbackService != null && _playbackId != null && _isPlaybackActive)
+    // ⛔ UNCONDITIONAL, and the missing condition is the whole of PHN-10. This used to read
+    // `if (_playbackService != null && _playbackId != null && _isPlaybackActive)`, and
+    // _isPlaybackActive was ALWAYS false by the time control reached here on every real stop path.
+    //
+    // EventPlaybackService.TearDownAsync's FIRST statement is playback.Cancel(); _playbackCts is a
+    // linked source over that token; AwaitCompletionAsync's filter does not swallow it; and
+    // PlayWithSoundFlowAsync's catch (OperationCanceledException) clears the flag while stopping
+    // nothing. TearDownAsync then awaits a ducking release fade (Audio:DuckingReleaseMs, 500 ms
+    // shipped) before it calls us, so the flag is deterministically false rather than racily so.
+    //
+    // The consequence was not "two voicemails" but "nothing can stop a voicemail": the user's Stop
+    // button, doorbell preemption, the GvMedia:MaxPlaybackSeconds guarantee, the /sleep edges and the
+    // last-circuit backstop all funnel through the same disarmed guard.
+    //
+    // ⚠ Kept BEFORE the _playbackTask join below: stop the audio, then reap the task. Reversing them
+    // re-opens the window by up to the join's one-second timeout.
+    //
+    // ⚠ SoundFlowPlaybackService.StopAsync is a safe no-op on an unregistered id — it TryGetValues
+    // and does nothing when the key is absent — which is precisely the "null-guarded and idempotent"
+    // property AudioSourceBase.StopAsync's contract already assumes of every StopCoreAsync. It also
+    // calls ThrowIfDisposed, hence the catch: an escaping ObjectDisposedException here would skip
+    // OnPlaybackCompleted(UserStopped) below. TTSEventSource.StopCoreAsync wraps for the same reason.
+    //
+    // ⭐ AND IT IGNORES THE TOKEN ENTIRELY — cancellationToken appears in StopAsync's signature and
+    // nowhere in its body; it is never observed and never forwarded. That is what makes an
+    // ALREADY-CANCELLED token still stop the audio, which is the case on the /sleep edges and the
+    // last-circuit backstop. Forwarding it is kept anyway so a future implementation that honours it
+    // gets the caller's token rather than none.
+    if (_playbackService != null && _playbackId != null)
     {
-      await _playbackService.StopAsync(_playbackId, cancellationToken);
+      try
+      {
+        await _playbackService.StopAsync(_playbackId, cancellationToken);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error stopping audio file event playback through SoundFlow");
+      }
+
       _isPlaybackActive = false;
     }
 
@@ -482,10 +546,31 @@ public class AudioFileEventSource : EventAudioSourceBase
     transport.Cancel();
     transport.Dispose();
 
-    // Stop SoundFlow playback if active
-    if (_playbackService != null && _playbackId != null && _isPlaybackActive)
+    // ⛔ UNCONDITIONAL — see StopCoreAsync. This guard was dead for the SAME upstream reason that
+    // one was: EventPlaybackService.ReleaseSourceAsync calls source.StopAsync() and then
+    // source.DisposeAsync(), and TearDownAsync has already cancelled the playback token before
+    // either — so _isPlaybackActive was false on entry to both. The voicemail arm therefore had no
+    // working backstop at any layer, where TTSEventSource has one.
+    //
+    // ⚠ It is NOT dead "because StopCoreAsync joins _playbackTask first", and an earlier draft of
+    // this comment said so. That join is `WaitAsync(TimeSpan.FromSeconds(1), cancellationToken)`
+    // with TimeoutException and OperationCanceledException both swallowed, so it does NOT guarantee
+    // the cancellation handler has run — it usually has, which is not the same claim.
+    //
+    // ⚠ Deliberately NOT the IsPlaying(...) form TTSEventSource uses. IsPlaying answers
+    // `player.State == PlaybackState.Playing`, so a PAUSED source would be left registered and still
+    // attached to the SoundFlow mixer. Unconditional has no such hole and costs a dictionary miss.
+    if (_playbackService != null && _playbackId != null)
     {
-      await _playbackService.StopAsync(_playbackId);
+      try
+      {
+        await _playbackService.StopAsync(_playbackId);
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error stopping audio file event playback during disposal");
+      }
+
       _isPlaybackActive = false;
     }
 
@@ -503,7 +588,13 @@ public class AudioFileEventSource : EventAudioSourceBase
     }
     else
     {
-      Logger.LogDebug("Audio file event volume changed to {Volume} (not yet playing)", volume);
+      // ⚠ Says "not applied", NOT "not yet playing", and the difference is this row's whole subject.
+      // _isPlaybackActive is false both before playback starts AND after a cancellation that stopped
+      // nothing — see the field comment — so a message naming the source's playback state asserts
+      // something this branch cannot know. It knows only that it did not write the volume.
+      Logger.LogDebug(
+        "Audio file event volume changed to {Volume} (not applied - no active playback registered)",
+        volume);
     }
   }
 }

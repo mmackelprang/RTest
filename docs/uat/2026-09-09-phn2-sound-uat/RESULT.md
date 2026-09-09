@@ -110,3 +110,64 @@ simultaneity was still there. **The trap was named in advance and the check walk
 - ⚠ **#10 (doorbell)** — still **DEFERRED**, not passed. It needs a doorbell configured, and it is
   the only check exercising preemption *and* ducking release together. ⭐ **Ducking is now known
   WORKING, which makes this check meaningfully runnable for the first time.**
+
+---
+
+## ⭐ `PHN-10` DIAGNOSED AND FIXED — what check #11 was actually detecting, and what it means for #10
+
+Check #11's `FAIL` was one guard in `AudioFileEventSource`, and the fix is on
+`fix/phn-10-two-voices-at-once`. Plan: [`PHN-10-nothing-can-stop-a-voicemail.md`](../../../design/plans/PHN-10-nothing-can-stop-a-voicemail.md).
+
+### Check #11 — the mechanism
+
+`AudioFileEventSource.StopCoreAsync` and `DisposeAsyncCore` both gated the call to
+`SoundFlowPlaybackService.StopAsync` — **the only call that performs `MasterMixer.RemoveComponent`** —
+behind a private `bool _isPlaybackActive`. `EventPlaybackService.TearDownAsync`'s **first** statement
+is `playback.Cancel()`; `AudioFileEventSource`'s `_playbackCts` is linked over that token;
+`AwaitCompletionAsync`'s exception filter does not swallow the cancellation; and
+`PlayWithSoundFlowAsync`'s `catch (OperationCanceledException)` set the flag to `false` **while
+stopping nothing** — under a comment that said `// Playback was stopped`. A 500 ms `DuckingReleaseMs`
+fade then sits between the cancel and the guard read, so the flag was **deterministically** false, not
+racily so. `TTSEventSource` calls the same stop unconditionally, which is the entire reason the TTS
+arm behaved and the voicemail arm did not.
+
+⛔ **The scope is wider than check #11.** Every stop in the attended-playback seam funnels through
+that guard: the **user's own Stop button**, **doorbell preemption**, ADR-029 §7.1's
+`GvMedia:MaxPlaybackSeconds` *"THE guarantee"*, the `/sleep` edges and the last-circuit backstop were
+**all inert on the voicemail path** — and every voicemail played to its natural end leaked a
+`SoundPlayer` plus a mixer component permanently.
+
+⛔ **The correct behaviour is REPLACE, not queue.** This record's original wording for #11 spoke of
+*"the **wait**"*. ADR-029 §6.2 rule 1 is attended-vs-attended → **replace**, and rejects queueing in
+as many words (*"queueing behind 40 seconds of voicemail would be baffling"*). **A build in which the
+second voicemail waits for the first is a FAIL**, even though it also produces one voice. Count
+voices, and check that the *second* one is the one you hear.
+
+### ⚠ Check #10 (doorbell) — a PREDICTION, recorded before it is run
+
+`PHN-10`'s plan predicts **#10 would have FAILED** had it been run before this fix, for the same root
+cause: doorbell preemption reaches the voicemail through `OnDuckingStateChanged` → `StopAsync` →
+the same disarmed guard, so the announcement would have talked **over** the voicemail rather than
+replacing it.
+
+⚠ **It is still `DEFERRED` and must not decay into a pass by silence.** But it is now runnable
+without doorbell hardware — the endpoint is the doorbell:
+
+```bash
+curl -X POST http://radio:5000/api/notifications/announce \
+  -H 'Content-Type: application/json' \
+  -d '{"Message":"Someone is at the door"}'
+```
+
+Start a long voicemail with the radio on, then fire that. **PASS** = the voicemail stops, the
+announcement is intelligible, and the radio returns to full volume afterwards. **Record the result
+either way** — a `DEFERRED` check that is never re-run is indistinguishable from one that passed.
+
+### ⛔ What still cannot be closed from here
+
+A green suite does not close #11. The only replacement test in the tree
+(`EventPlaybackServiceTests.ASecondStartReplacesTheFirst_AndTheFirstIsTornDown`) was **green
+throughout the defect** and would have stayed green — it uses a fake source, and the service half was
+always correct. The cabinet gate is: start one voicemail, start a second, confirm the first goes
+**silent** while the second plays — **plus a TTS control in the same sitting**, because the whole risk
+of the fix is buying #11 by breaking the preemption the owner ruled correct.

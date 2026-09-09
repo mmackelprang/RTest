@@ -2770,3 +2770,116 @@ content.
 
 **Priority: low.** The behaviour is verified live and by inspection; this buys regression safety,
 not a fix.
+
+---
+
+## 35. `TTSEventSource.DisposeAsyncCore` gates its stop on `IsPlaying`, so a **paused** source is never detached
+
+**Found by `PHN-10`, 2026-09-09.** Deliberately left out of that PR: it is the narrower twin of the
+defect on the arm the owner had just confirmed works, and widening the diff into `TTSEventSource`
+would have put the one behaviour he endorsed at risk for a bug nobody has hit.
+
+### What exists
+
+`src/Radio.Infrastructure/Audio/Sources/Events/TTSEventSource.cs`'s `DisposeAsyncCore` reads
+`if (_playbackService != null && _playbackService.IsPlaying(Id))`. `SoundFlowPlaybackService.IsPlaying`
+answers `player.State == PlaybackState.Playing`, so a **paused** player answers `false` and the source
+is left registered in `_activePlayers` and still attached to the SoundFlow mixer.
+
+### What is needed
+
+The same change `PHN-10` made to `AudioFileEventSource.DisposeAsyncCore`: call
+`_playbackService.StopAsync(Id)` unconditionally inside the existing `try`/`catch`. `StopAsync` is a
+safe no-op on an unregistered id (`TryGetValue` on both dictionaries, all work behind
+`if (player != null)`), so the unconditional form costs a dictionary miss and has no hole.
+
+### Gotchas
+
+- ⚠ **Much narrower than `PHN-10`, and the reason is worth keeping.** `TTSEventSource.StopCoreAsync`
+  is already unconditional, so this only bites on a **dispose that no stop preceded**. On the normal
+  path `EventPlaybackService.ReleaseSourceAsync` calls `source.StopAsync()` immediately before
+  `source.DisposeAsync()`, and that first call clears the registration — so the dispose guard is
+  reached with nothing left to do anyway.
+- ⛔ **Do not "harmonise" the two sources by copying the `IsPlaying` form the other way.** That is the
+  direction `PHN-10` explicitly rejected: it would reintroduce the paused-source hole in
+  `AudioFileEventSource`, which is the file that had the P0.
+- ⚠ `EventSourceStopIsNotActivityGuardedLintTests` does **not** catch this shape and is not supposed
+  to — `IsPlaying(Id)` is a live query on the service, not a cached private `bool`. The lint forbids
+  the stale-mirror shape specifically, and this is a different (much milder) mistake.
+
+**Priority: low.** Unreached on the normal path; worth a row rather than a hotfix.
+
+---
+
+## 36. `SoundFlowMasterMixer.RemoveSource` logs a removal it does not perform
+
+**Re-confirmed by `PHN-10`, 2026-09-09**, and deliberately not swept into that diff. `CLAUDE.md`
+§ Pre-Merge Review already records it as instance 1 of this repository's signature failure class; this
+entry exists so the code side has a home for it too.
+
+### What exists
+
+`src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowMasterMixer.cs`'s `RemoveSource` logs
+*"Removed audio source … from mixer"* while only mutating a `List<IAudioSource>`. The real detach is
+`AudioPlaybackDevice.MasterMixer.RemoveComponent` — SoundFlow's own mixer, **a different object**.
+
+### What is needed
+
+Either make the log line describe what the method actually does (bookkeeping, not detaching), or move
+the detach into it. The first is the smaller change and probably the right one — every real caller
+already performs the detach through `SoundFlowPlaybackService`.
+
+### Gotchas
+
+- ⚠ **It has already cost one wrong fix.** Commit `03a6fea` trusted the wording, landed one layer too
+  high, and silently did nothing for months.
+- ⛔ **It is NOT related to `PHN-10`**, and that was checked rather than assumed: the event-source path
+  never touches `IMasterMixer` at all, and `EventPlaybackService`'s own class doc says it never calls
+  `AddSource` — accurately.
+
+**Priority: low.** A wrong comment on a live audio class, with a demonstrated history of misleading a
+fix. Cheap to correct; not urgent.
+
+---
+
+## 37. A stop landing mid-`PlayFileAsync` leaves a player in the mixer that nothing will detach
+
+**Found in `PHN-10`'s pre-merge review, 2026-09-09**, and it is also a **correction to that row's
+plan**: `PHN-10` §`C-911` claims *"Task 1 closes this window as a by-product, because the stop paths
+stop consulting the flag at all."* ⛔ **It does not.** The window is an ordering problem in
+`SoundFlowPlaybackService`, not a flag problem, and removing the flag from the stop paths changes
+nothing about the interleaving.
+
+### What exists
+
+`SoundFlowPlaybackService.PlayFileAsync` (and `PlayStreamAsync`, `PlayDataProviderAsync`,
+`PlayComponentAsync`) attaches the player to the mixer and starts it — `MasterMixer.AddComponent`,
+then `soundPlayer.Play()` — and only **afterwards** registers it: `lock (_playersLock) {
+_activePlayers[sourceId] = soundPlayer; }`.
+
+Between those two points the player is **audible and unregistered**. `StopAsync` resolves purely by
+dictionary lookup, so a stop arriving in that window finds nothing, no-ops, and returns; the
+registration then completes *behind* the stop, leaving a player that is in the mixer, in
+`_activePlayers`, and that nothing will ever come back to detach.
+
+⭐ **`PHN-10` did not create this and does not widen it.** It is the same hazard that made
+`_isPlaybackActive` a bad proxy in the first place, one layer lower.
+
+### What is needed
+
+Register before starting, or make registration and start atomic under `_playersLock` — then a stop is
+either strictly before (nothing to remove, and `Play` must not proceed) or strictly after (found and
+removed). ⚠ The "nothing to remove, and `Play` must not proceed" half is the real work: a claim/cancel
+token per `sourceId` rather than a bare dictionary write.
+
+### Gotchas
+
+- ⚠ **Reachability is unquantified.** Nobody has established whether a real stop can land inside that
+  window — it needs a `StopAsync` concurrent with an in-flight `PlayFileAsync` on the *same*
+  `sourceId`, and `PlayFileAsync` itself opens with `await StopAsync(sourceId)`. **Measure before
+  building.** ⛔ Do not cite this entry as a known live defect; it is a hole in an argument, not an
+  observed failure.
+- ⛔ **It touches `SoundFlowPlaybackService`, a live shared audio class**, which is why `PHN-10`
+  deliberately did not go near it.
+
+**Priority: low.** Records a plan claim that does not hold, so nobody re-derives closure from it.
