@@ -1,16 +1,12 @@
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
-using Radio.Configuration.Abstractions;
-using Radio.Core.Configuration;
 using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
 
 /// <summary>
-/// Covers the no-player-registered contract of the transport methods added by ADR-029 PR 1.
-/// The populated-dictionary paths need a real device and are exercised by UAT (see the plan
-/// Test Plan §2.2), not here.
+/// Covers the no-player-registered contract of the transport methods added by ADR-029 PR 1, plus the
+/// same contract on <c>StopAsync</c>, which PHN-10 turned from an incidental property into one the
+/// production code depends on. The populated-dictionary paths need a real device and are exercised by
+/// UAT (see the plan Test Plan §2.2), not here.
 /// </summary>
 public class SoundFlowPlaybackServiceTransportTests
 {
@@ -42,40 +38,20 @@ public class SoundFlowPlaybackServiceTransportTests
     Assert.False(service.Seek("no-such-source", TimeSpan.FromSeconds(-1)));
   }
 
-  private static SoundFlowPlaybackService CreateService()
+  [Fact]
+  public async Task StopAsync_IsANoOp_WhenNoPlayerIsRegistered()
   {
-    // The engine is never started; these three assertions never reach a device.
-    // SoundFlowAudioEngine's constructor only stores its collaborators and subscribes to three
-    // of their events (DevicesChanged, MasterVolumeChanged, MuteStateChanged) — the MiniAudio
-    // device is not created until InitializeAsync, which no test here calls. The same
-    // construction is already done by SoundFlowAudioEngineTests.
-    var engineOptions = new Mock<IOptions<AudioEngineOptions>>();
-    engineOptions.Setup(o => o.Value).Returns(new AudioEngineOptions
-    {
-      EnableHotPlugDetection = false
-    });
+    // ⭐ PHN-10 made AudioFileEventSource call this UNCONDITIONALLY, on every stop and again on
+    // every dispose — so "safe on an unknown key" went from incidental to load-bearing. Before that
+    // row the _isPlaybackActive guard meant it was never called with a stale key at all.
+    //
+    // ⚠ It pins a PRECONDITION the fix relies on, and nothing more. It does not exercise the
+    // defect, does not stop any audio, and cannot: no player can be registered on a device-free
+    // service (see DeviceFreePlaybackService's remarks). Do not cite it as coverage of PHN-10.
+    var service = CreateService();
 
-    var audioPreferences = new Mock<IOptionsMonitor<AudioPreferences>>();
-    audioPreferences.Setup(m => m.CurrentValue).Returns(new AudioPreferences());
-
-    var audioOutputOptions = new Mock<IOptionsMonitor<AudioOutputOptions>>();
-    audioOutputOptions.Setup(m => m.CurrentValue).Returns(new AudioOutputOptions());
-
-    var masterMixer = new SoundFlowMasterMixer(Mock.Of<ILogger<SoundFlowMasterMixer>>());
-    var deviceManager = new SoundFlowDeviceManager(
-      Mock.Of<ILogger<SoundFlowDeviceManager>>(),
-      Mock.Of<IConfigurationManager>(),
-      audioPreferences.Object,
-      audioOutputOptions.Object);
-
-    var engine = new SoundFlowAudioEngine(
-      Mock.Of<ILogger<SoundFlowAudioEngine>>(),
-      engineOptions.Object,
-      masterMixer,
-      deviceManager);
-
-    return new SoundFlowPlaybackService(
-      Mock.Of<ILogger<SoundFlowPlaybackService>>(),
-      engine);
+    await service.StopAsync("no-such-source");
   }
+
+  private static SoundFlowPlaybackService CreateService() => DeviceFreePlaybackService.Create();
 }
