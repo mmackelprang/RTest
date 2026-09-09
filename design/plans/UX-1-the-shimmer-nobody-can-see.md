@@ -1,5 +1,56 @@
 # PLAN — `UX-1` · The shimmer nobody can see: a new token, and the geometry that is doing most of the damage
 
+> ## ✅ SHIPPED 2026-09-09 — but **NOT as this plan specifies**. Read this box before Task 5.
+>
+> **Phase A is complete and its outcome contradicted this plan's central premise.** What shipped is
+> the **token change only**, at the **owner's** value of **`56` / `#38383F`** (delta 36), under the
+> name `--skeleton-shimmer-highlight`.
+>
+> | This plan says | What shipped | Why |
+> |---|---|---|
+> | Task 5a: `--skeleton-shimmer: #242429` (36) | **`--skeleton-shimmer-highlight: #38383F`** (56) | 36 was the Designer's *seed*, and the night sitting put it **below the owner's dark-room visibility threshold**. The Designer explicitly declined to endorse a landing value. |
+> | Task 5b: narrow the ramp to `35% / 50% / 65%` | ⛔ **not shipped — geometry unchanged** | See below. |
+> | Task 6, second test: assert the `35%`/`65%` shoulders | ⛔ **not written** | It would pin a geometry that was never validated. |
+>
+> ⛔ **The geometry half is superseded, and re-reading §0.2 / §1.2 / §4.2 will not tell you that.**
+> This plan's §7.5 named the falsifying outcome in advance — *"If V1 (geometry only) is invisible
+> while V3 is obvious, the premise is wrong"* — and that is what the owner reported. Worse, the only
+> experiment ever run on the narrowed geometry was the **`v1` harness, which was afterwards found
+> unable to measure what it claimed.** **Geometry was never fairly tested, and `56` was chosen at the
+> SHIPPING geometry, in a dark room and in daylight.**
+>
+> ⚠ **The published reason that harness failed is wrong and was corrected by measurement.**
+> `NIGHT-SITTING.md` says the band was *"on the element only ~0.49 s"* and *"two-thirds of every
+> cycle"* static; **the two figures are swapped** — that arithmetic counts one tile, but
+> `background-repeat` defaults to `repeat`, so the 2W tile recurs and the band crosses twice per
+> cycle. Measured in Chromium: **~1.01 s on, ~0.49 s off.** The real mechanism is `ease` — the
+> animation declares no timing function, and the sweep decelerates to **2.1 %/s against a median of
+> 221.7 %/s**, a ~390 ms dead stall at each cycle boundary plus ~110 ms mid-cycle, which a narrow
+> band sits out entirely.
+>
+> ⚠ **Whether a steeper ramp would allow a *lower* amplitude is genuinely unknown** and is filed in
+> [`design/FUTURE-WORK.md`](../FUTURE-WORK.md) § *Skeleton shimmer (`UX-1`)*, together with the
+> **Task 0 dwell-time pre-check, which was never run.**
+>
+> ⚠ **Every line anchor in §0.2–§0.3 is stale** on `main` @ `143d678e`: `.skeleton-loading` is
+> `:1104-1112` (not `:1099-1107`), `@keyframes shimmer` `:982-985` (not `:977-980`), the
+> reduced-motion override `:1726-1729` (not `:1713-1724`).
+>
+> ⚠ **§4.2's automated gate is internally inconsistent.** It defines `S` as a *peak* windowed slope
+> but calibrates V0 against **0.034**, which is the *average* slope (`6 / 178`). The peak windowed
+> slope measured on the unfixed stylesheet is **0.052**, so Task 3's *"do not proceed past a V0 that
+> disagrees"* would have halted a correct instrument. Both statistics are reported in the PR.
+>
+> ✅ **What held:** the mechanism in §0.2 (4W of travel per 1.5 s → one pass per 750 ms, no
+> barber-pole), `.skeleton-loading` being defined in exactly one place, the `31` / `--surface-separator`
+> collision, `C-218` (reduced-motion replaces `background` wholesale — untouched), `C-219`/`C-220`
+> (the token is declared, consumed, and given no `var()` fallback), `C-221` (the adjacent-pixel trap,
+> **demonstrated** rather than cited: it moves only 1.3× where the real change is 6×), `C-223`, and
+> §7.3's single-`:root` finding, and `C-215`'s correction of the phone-panel node count (12, not 38 —
+> re-verified: 26 + 8 + 4 across `Skeleton.razor` and the two panels). ⚠ **§0.3's `--surface-overlay`
+> census is right for the stylesheet and incomplete for the app** — `PlayHistoryPage.razor:207,272,296`
+> consume the token inline, so the true blast radius was **22** other consumers, not 19.
+
 > **Row:** `UX-1`, [`docs/queue/UX-1.md`](../../docs/queue/UX-1.md). 📋 queued, `_plan TBD — do not write
 > one until the Designer has answered_`.
 > **Branch:** `feat/ux-skeleton-shimmer-amplitude` (the row names it).
@@ -564,6 +615,11 @@ The deciding gate. Builder sets it up and records the answer; **Builder does not
 
 **File:** `src/Radio.Web/wwwroot/css/design-system.css`
 
+> ⛔ **SUPERSEDED — see the banner at the top of this file.** 5a shipped with a different name and a
+> different value (`--skeleton-shimmer-highlight: #38383F`, the owner's 56, not the Designer's seed of
+> 36). **5b did not ship at all**; the geometry is unchanged. Do not implement either block below as
+> written.
+
 **5a — the token** *(skip entirely if V1 won)*. Insert after `:69` (`--border-subtle`), closing the
 Primary Surfaces group — adjacent to the ladder, labelled as not a surface (`C-217`):
 
@@ -630,6 +686,18 @@ Primary Surfaces group — adjacent to the ladder, labelled as not a surface (`C
 ⛔ **`:1713-1724` is not edited.** `C-218`.
 
 ### Task 6 — the two guard tests
+
+> ⛔ **SUPERSEDED — four tests shipped, not these two.** The first was renamed for the token's real
+> name; **the second was NOT written**, because its `35%` / `65%` assertions would pin a geometry that
+> was never validated (top banner). What shipped instead:
+> `SkeletonShimmerToken_IsBothDeclaredAndConsumed`,
+> `SkeletonShimmer_TakesItsHighlightFromItsOwnTokenAtTheJudgedGeometry`,
+> `SkeletonShimmer_LeavesTheSharedSurfaceOverlayTokenWhereItWas` (the **control** — the shared token
+> is a defect this plan never gated against, only warned about), and
+> `ReducedMotion_StillReplacesTheShimmerWithAFlatFill` (`C-218`).
+> ⚠ The `<remarks>` block below — itself an amendment applied by `UI-8` — was **not** shipped
+> verbatim; the shipped version drops its "do not ship the previous wording" framing, which is an
+> instruction to a Builder rather than a fact about the test.
 
 **File:** `tests/Radio.Web.Tests/Configuration/StaticAssetPipelineTests.cs`
 

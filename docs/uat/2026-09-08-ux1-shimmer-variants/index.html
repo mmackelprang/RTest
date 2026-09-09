@@ -77,6 +77,38 @@
 </style>
 </head>
 <body>
+<!-- ⛔ SUPERSEDED 2026-09-08 (night sitting) — DO NOT REUSE THIS HARNESS AS-IS.
+     V1–V4 below concentrate the highlight into a band spanning ~0.32 of the element
+     width, and that band is absent from the element for a large part of every cycle,
+     so those columns read as "not moving" whatever their amplitude. This page cannot
+     compare "geometry vs amplitude": it compares a faint-but-continuous shimmer
+     against an intermittent one.
+
+     ⚠ NIGHT-SITTING.md § 2 explains this with swapped figures and faulty arithmetic:
+     it says the band is on the element "only ~0.49 s per cycle", counting a single
+     tile — but `background` is set as a shorthand here, which resets background-repeat
+     to `repeat`, so the 2W tile recurs and the band crosses TWICE per cycle. Measured
+     in Chromium while UX-1 shipped: ON ~1.01 s, OFF ~0.49 s — the other way round.
+     The real mechanism is the timing function: `animation: shimmer 1.5s infinite`
+     declares none, so `ease` applies and the sweep decelerates to 2.1%/s against a
+     median of 221.7%/s, a ~390 ms dead pause at each cycle boundary plus ~110 ms
+     mid-cycle. A narrow band sits those pauses out; a full-width ramp does not.
+
+     The value UX-1 shipped (56 / #38383F) was chosen on the v2 ladder instead —
+     the SHIPPING geometry with five highlight values. Rebuild that from
+     NIGHT-SITTING.md § "The v2 harness". -->
+  <div style="background:var(--surface-base);color:var(--text-low);
+              border-bottom:1px solid var(--surface-separator);
+              padding:8px 16px;font-size:12px;line-height:1.5">
+    ⛔ <strong>Superseded — do not judge anything on this page.</strong>
+    V1–V4's highlight band leaves the element for a large part of every cycle, so they read as
+    “not moving” whatever their amplitude — the sweep uses <code>ease</code> and stalls to ~1% of
+    its median speed at each cycle boundary, and a narrow band sits that pause out.
+    <code>UX-1</code> was decided on the <strong>v2</strong> ladder (shipping geometry, five
+    highlight values) — see <code>NIGHT-SITTING.md</code>, whose §2 duty-cycle figures are
+    themselves swapped; <code>REPORT.md</code> carries the measured correction.
+    <em>Kept dim on purpose: this page is judged in a dark room.</em>
+  </div>
   <div class="bar">
     <h1>UX-1 — skeleton shimmer</h1>
     <p class="hint">All five animate in step. Two questions: <strong>can you tell it moves?</strong>

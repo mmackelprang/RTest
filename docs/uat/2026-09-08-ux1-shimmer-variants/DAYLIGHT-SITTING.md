@@ -31,8 +31,12 @@ was never displaced.
 | Distinct middle stops | **5 of 5**, one each ✓ |
 | Motion | `background-position` 79.39% → 165.20% in 350 ms — **continuously moving** ✓ |
 
-That last row is the one v1 failed: its highlight band sat on the element only ~0.49 s per 1.5 s cycle,
-so two-thirds of every cycle was static and the owner correctly read it as not moving.
+That last row is the one v1 failed: its highlight band left the element for a large part of every
+cycle, and the owner correctly read it as not moving. ⚠ **The duty-cycle figures this originally cited
+were wrong — corrected 2026-09-09 by measurement**, see [`REPORT.md`](REPORT.md) and
+[`NIGHT-SITTING.md`](NIGHT-SITTING.md) § 2: the band is on the element **~1.01 s** and off it
+**~0.49 s**, not the reverse, and the mechanism is the `ease` timing function stalling the sweep to
+~1% of its median speed at each cycle boundary — not a duty cycle.
 
 ## ⛔ The harness had a flaw of its own, and it nearly recorded a wrong answer
 

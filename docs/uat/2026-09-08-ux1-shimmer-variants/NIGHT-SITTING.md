@@ -26,10 +26,25 @@ not an answer."* That caution was well placed.
 
 ### 2. ⚠ My v1 harness was flawed, and the flaw is instructive
 
+> ⛔ **CORRECTED 2026-09-09 while `UX-1` shipped — the conclusion below stands, the arithmetic under
+> it does not.** ~~"on the element only ~0.49 s per cycle"~~ and ~~"two-thirds of every cycle"~~ are
+> **swapped**. That calculation counts a single tile, but each `.vN .sk` sets `background` as a
+> **shorthand**, which resets `background-repeat` to its initial `repeat` — so the 2W tile recurs and
+> the band crosses the element **twice** per cycle, not once. Sampled in Chromium at wall-clock
+> intervals across two cycles: **on the element ~1.01 s, off it ~0.49 s** (duty cycle 0.63–0.67).
+> ⭐ **The real mechanism is the timing function, and it explains the observation better than a duty
+> cycle does.** `animation: shimmer 1.5s infinite` declares none, so `ease` applies: measured sweep
+> speed falls to **2.1 %/s against a median of 221.7 %/s** — roughly a hundredfold stall — giving a
+> **~390 ms** dead pause at each cycle boundary and **~110 ms** mid-cycle. A narrow band sits those
+> pauses out entirely; the shipping full-width ramp never leaves the element, so it cannot.
+> ⭐ *The instrument built to condemn an instrument had the same defect it was condemning* — a figure
+> derived rather than measured, which nobody checked until it was about to be written into a
+> permanent banner.
+
 V1–V4 concentrated the highlight into a band spanning 42–58% of a 200%-wide gradient — about **0.32 of
-the element width**. With the sweep travelling 4 element-widths in 1.5 s, that band is on the element
+the element width**. ~~With the sweep travelling 4 element-widths in 1.5 s, that band is on the element
 only ~**0.49 s per 1.5 s cycle**. **For two-thirds of every cycle those columns were a flat, unmoving
-`#141416`.**
+`#141416`.**~~
 
 So v1 did not test "geometry vs amplitude". It tested a geometry that traded a faint-but-continuous
 shimmer for a brighter-but-mostly-absent one — and the owner correctly read the result as *static*.

@@ -6,6 +6,66 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
+## Skeleton shimmer (`UX-1`) — two things measured, or deliberately not measured, and NOT shipped
+
+**Filed 2026-09-09 by `UX-1`, which shipped the amplitude change only.** The row raised the shimmer's
+highlight from `--surface-overlay` (26) to its own `--skeleton-shimmer-highlight` at **56**
+(`#38383F`), the value the owner chose at the panel in a dark room and again in daylight. Two things
+the plan called for did **not** ship, and both are recorded here so they are not re-derived.
+
+### 1. The narrowed gradient geometry — proposed, never validated, not shipped
+
+`design/plans/UX-1-the-shimmer-nobody-can-see.md` Task 5b specifies narrowing the ramp from 50% of
+the tile to 15% (stops at `35% / 50% / 65%` instead of `0% / 50% / 100%`), and the Designer rated it
+**the larger half of the fix** — 3.3× steeper for free.
+
+⛔ **It was not shipped, and reviving it needs a new sighting, not a re-read of the plan.** The only
+experiment ever run on that geometry was the `v1` harness of 2026-09-08, and that harness was
+afterwards found unable to measure what it claimed to. The owner read its columns as static.
+
+⚠ **But the published explanation for WHY is wrong, and it was corrected by measurement while `UX-1`
+shipped.** `NIGHT-SITTING.md` § *"My v1 harness was flawed"* says the band *"is on the element only
+~0.49 s per 1.5 s cycle"* and that *"two-thirds of every cycle"* was static. **The two figures are
+swapped.** That arithmetic counts a single tile, but the harness sets `background` as a shorthand,
+which resets `background-repeat` to its initial `repeat` — so the 2W tile recurs and the band crosses
+the element **twice** per cycle. Sampled in Chromium at wall-clock intervals over two cycles: the
+band is on the element **~1.01 s** and off it **~0.49 s** (duty cycle 0.63–0.67).
+
+⭐ **The real mechanism is the timing function, and it is a better explanation than a duty cycle.**
+`animation: shimmer 1.5s infinite` declares none, so `ease` applies. Measured sweep speed falls to
+**2.1 %/s against a median of 221.7 %/s** — a ~100× stall — at each cycle boundary, giving off-element
+gaps of **~390 ms** at the boundary and **~110 ms** mid-cycle. A narrow band spends those pauses off
+the element entirely; the shipping full-width ramp never leaves it. **The conclusion is unchanged —
+that harness could not fairly test geometry — but the reason now survives being checked.**
+
+The `56` that shipped was chosen on the **`v2` harness, at the shipping geometry**, in both lighting
+conditions. Shipping the narrowed ramp on top of it would have put an unvalidated change underneath
+a validated one.
+
+⚠ **What is genuinely unknown: whether a steeper ramp would let a LOWER amplitude work.** The
+daylight record says so in as many words — *"Whether a better geometry would let a lower amplitude
+work is still unknown."* It is moot for `UX-1` because 56 is acceptable in both conditions as
+shipped; it becomes live again only if someone wants the shimmer calmer without losing visibility.
+Answering it needs a harness whose band is on the element continuously, and an owner sitting.
+
+### 2. Real skeleton dwell time — the plan's own pre-check, never run
+
+Plan Task 0 measures how long a `.skeleton-loading` node actually stays in the DOM, and §1.3 makes it
+gating: **one shimmer pass is 750 ms**, so if typical dwell is materially under that, no shape
+completes a pass and the block looks static **at any amplitude**.
+
+⚠ **That measurement was never taken.** The owner's decision was made on a standalone harness whose
+elements animate continuously, which cannot answer it. So the amplitude is now right and the question
+of whether production skeletons are on screen long enough to show it is **still open**. It needs a
+`MutationObserver` on the box (the plan's Task 0 carries the script) driven through Devices, Play
+History, Radio and a phone thread.
+
+If dwell turns out to be short, the remedies are **not** more amplitude — they are shortening the
+1.5 s cycle (a cadence question, new design input needed) or dropping the animation for a flat block.
+Neither is a `UX-1` follow-up; both are new rows.
+
+---
+
 ## The source metadata bag is an unsynchronized `Dictionary` shared across threads (`AUD-12` `C-175`)
 
 **Filed 2026-09-08 by `AUD-12`, which deliberately did NOT make it load-bearing rather than fix it.**

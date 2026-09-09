@@ -11,11 +11,11 @@
 
 | Field | Value |
 |---|---|
-| Status | 📋 |
-| Plan | _plan TBD — **do not write one until the Designer has answered**; scope depends entirely on whether the answer is "new token," "retune the existing pair," or "leave it"_ |
-| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` |
+| Status | ✅ [#641](https://github.com/mmackelprang/RTest/pull/641) — shipped 2026-09-09; see the note at the foot of this file |
+| Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and carries banners saying so**. _Original cell: "plan TBD — do not write one until the Designer has answered; scope depends entirely on whether the answer is 'new token,' 'retune the existing pair,' or 'leave it'"_ |
+| Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) |
 | Depends on | — _(no code dependency; it is gated on a design answer, not on a row)_ |
-| Branch | `feat/ux-skeleton-shimmer-amplitude` |
+| Branch | `fix/ux-1-shimmer-amplitude` _(this row named `feat/ux-skeleton-shimmer-amplitude`; the coordinator's name was used)_ |
 
 ## Detail
 
@@ -221,6 +221,11 @@ an answer."* That caution was well placed and is why this was A/B'd rather than 
 
 ### ⛔ The first harness was flawed, and the flaw is the instructive part
 
+> ⛔ **The two figures in this paragraph are SWAPPED and its arithmetic is wrong — corrected
+> 2026-09-09 by measurement; see the shipped note at the foot of this file.** Kept as written because
+> it is what was concluded at the time. Measured: **ON ~1.01 s, OFF ~0.49 s**, and the mechanism is
+> `ease`, not a duty cycle.
+
 Its V1–V4 concentrated the highlight into a band spanning ~**0.32 of the element width**. With the
 sweep travelling 4 element-widths in 1.5 s, that band is on the element only ~**0.49 s per cycle** —
 **so for two-thirds of every cycle those columns were flat, unmoving `#141416`.** The owner read them
@@ -273,3 +278,106 @@ is valid only for the arrangement on screen at the moment of judging. The owner'
 meant **66** under the coordinator's twenty-minute-old mapping and **26** under the live one — *one of
 which would have overturned this row and the other triggered its expensive branch.* Caught by
 re-querying the live page. **Ask for the VALUE, not the position.**
+
+---
+
+## ✅ SHIPPED 2026-09-09 as [#641](https://github.com/mmackelprang/RTest/pull/641) — the token only; the geometry deliberately did NOT ship
+
+`--skeleton-shimmer-highlight: #38383F` declared beside the surface block and consumed by
+`.skeleton-loading` alone. `--surface-overlay` is untouched. ⛔ **Merged, NOT deployed** — the
+coordinator deploys so the owner can see it.
+
+### The trap, re-verified by the Builder as the row demanded
+
+**The row's "20 consumers" is right for the file it scoped and understates the app by three.** On
+`main` @ `143d678e`, `design-system.css` holds **22** textual occurrences of `--surface-overlay`: the
+declaration at `:67`, a prose mention inside a comment at `:2867`, and **20 `var(--surface-overlay)`
+consumers** — one of which was the shimmer, leaving **19 others**. ⭐ **But three more consumers live
+outside the stylesheet**: inline `style=` attributes on three modal dialogs at
+`PlayHistoryPage.razor:207,272,296`. **The real blast radius was 22 other consumers, not 19.** The
+row, the plan, the Designer answer and the daylight record all scoped the count to the stylesheet and
+none of them looked past it. After the change the file holds **19** consumers, and exactly one
+declaration and one consumer of the new token.
+
+### ⚠ Line anchors: this row's, and the plan's, are all stale
+
+`.skeleton-loading` is at **`:1104-1112`** on `main` — not `:1099-1104` as this row (`:260`) and
+[`DAYLIGHT-SITTING.md`](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) (`:72-73`) both
+say, and the rule is **9 lines, not 6**. The plan's `:1099-1107`, `@keyframes shimmer` `:977-980` and
+reduced-motion `:1713-1724` are likewise stale (`:982-985`, `:1726-1729`). ⚠ On the merged branch
+they have moved again — the token block is 46 lines and pushed everything below it down.
+
+### ⛔ The geometry half of the plan was NOT shipped, and that is a decision
+
+Plan Task 5b narrows the ramp to `35% / 50% / 65%` and the Designer rated it **the larger half of the
+fix**. It did not ship. **The only experiment ever run on that geometry was the `v1` harness, which
+was afterwards found unable to measure what it claimed.** `56` was chosen on the **`v2`** ladder at
+the **shipping** geometry, in both conditions. Shipping the narrowed ramp would have put an
+unvalidated change underneath a validated one.
+
+⛔ **The published reason that harness failed is WRONG, and the Builder propagated it before pre-merge
+review caught it.** The night record's *"band on the element only ~0.49 s per 1.5 s cycle, two-thirds
+static"* has **both figures swapped**: the arithmetic counts one tile, but each `.vN .sk` sets
+`background` as a **shorthand**, which resets `background-repeat` to `repeat`, so the 2W tile recurs
+and the band crosses **twice** per cycle. ⭐ **The Builder's own comment contradicted itself eight
+lines later**, correctly deriving *"4W of travel per 1.5 s yields one pass per 750 ms"* — true only
+because of the tiling the duty-cycle figure ignored. **Sampled in Chromium over two cycles: ON
+~1.01 s, OFF ~0.49 s** (duty 0.63–0.67). ⭐ **The real mechanism is `ease`**, which the animation gets
+by declaring no timing function: measured sweep speed drops to **2.1 %/s against a median of
+221.7 %/s**, a **~390 ms dead pause at every cycle boundary** plus **~110 ms** mid-cycle. A narrow
+band sits those out; a full-width ramp never leaves the element. ⭐ *Right conclusion, wrong reason* —
+corrected in nine artifacts including `NIGHT-SITTING.md` itself, **before** it reached the on-page
+banner a human opens in a browser.
+
+⚠ **Whether a steeper ramp would allow a *lower* amplitude is still unknown** and is filed in
+`design/FUTURE-WORK.md`, along with **the plan's Task 0 dwell-time pre-check, which was never run** —
+one pass is 750 ms, so if production skeletons dwell for less, no shape completes a pass **at any
+amplitude**. The amplitude is now right; whether skeletons are on screen long enough to show it is
+open.
+
+### ⭐ The gate was a demonstrated DIFFERENCE with a CONTROL, and the control is the half that matters
+
+Measured in Chromium against the real stylesheet, `main`'s copy vs the branch's. Computed middle stop
+on `.skeleton-loading`: **`rgb(26,26,29)` → `rgb(56,56,63)`**. **CONTROL: `.surface-overlay` and
+`.rz-dialog`, two *direct* consumers of the shared token, both held `rgb(26,26,29)` across the
+change** — a gate checking only the subject would pass just as happily on the re-theme this row
+exists to avoid. Instrument validated first: 859 rules loaded (not UA defaults),
+`prefers-reduced-motion` false (so the flat-fill override was not in play), and ⭐ **the reading was
+proven animation-invariant rather than assumed** — sampled 420 ms apart while running,
+`background-position` moved `-136.261%` → `84.8031%` while `background-image` was byte-identical.
+
+In the framebuffer, at a pinned phase: amplitude **6.0 → 35.83 levels**, min 20.0 both sides, max
+26.0 → 55.83. ⭐ **The instrument calibrates on the published 6/255 baseline exactly.** Windowed slope
+0.052 → 0.219; average slope 0.034 → 0.201, clearing the plan's §4.2 bar of 0.20 **at the shipping
+geometry**. ⭐ **`C-221`'s trap was demonstrated, not merely cited**: naive adjacent-pixel differencing
+moves only 0.5 → 0.667 where the real change is 6×.
+
+⚠ **§4.2's gate is internally inconsistent** — it defines `S` as a *peak* windowed slope but
+calibrates V0 against **0.034**, which is the *average* slope (`6/178`). The measured peak on the
+unfixed sheet is **0.052**, so Task 3's *"do not proceed past a V0 that disagrees"* would have halted
+a correct instrument.
+
+### ⛔ A live false claim was found in this row's own evidence directory
+
+[`REPORT.md`](../uat/2026-09-08-ux1-shimmer-variants/REPORT.md)'s second sentence reads *"The harness
+works and is reusable; the conditions were wrong."* **The night sitting falsified the first half the
+next day**, and while `NIGHT-SITTING.md` records the flaw, `REPORT.md` was never corrected and
+`index.html` carried **no warning at all** — so the one file someone would open in a browser was the
+one with nothing on it. Struck in `REPORT.md`; `index.html` now opens with a banner, kept
+deliberately **dim** because that page is judged in a dark room.
+
+### ⚠ Three defects in the Builder's own comment, found by re-deriving it
+
+*"two `color-mix` recipes"* is **three** (`:2145`, `:6252`, `:6502` — the Designer said two, the plan
+said three, the Builder inherited the wrong one); *"56 answers yes and yes in both conditions"*
+overclaimed, because **calmness was asked only at night** and the daylight record *argues* rather than
+establishes that it does not bind; and *"was measured below the threshold"* became *"was judged
+below"* — nothing was measured, an owner looked at a ladder. Commit `62549d87`'s claim that all four
+new tests are RED gates was also wrong: **three are, the fourth correctly passes on both sides** and
+is a guard against a future edit.
+
+**Gates:** Release build **47 warnings / 0 errors** (`--no-incremental`; an incremental build reports
+`0 Warning(s)`, which is unmeasured, not better). Suite **3,868 passed / 4 failed**, the four being
+the documented Windows-known-failing `SrcVariableResamplerTests`. ⚠ **No test in this repository can
+see this change** — the four new tests assert CSS source text, and a green suite must never be cited
+as UAT for this row.
