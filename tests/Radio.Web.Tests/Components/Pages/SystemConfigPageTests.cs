@@ -1,10 +1,12 @@
 using Bunit;
+using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radzen;
 using Radio.Web.Components.Pages;
+using Radio.Web.Models;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
 using Radio.Web.Tests.TestHelpers;
@@ -473,5 +475,102 @@ public class SystemConfigPageTests : TestContext
     // size — one value, one place. The duplicate box was a second source of truth for a number the
     // device also holds.
     Assert.DoesNotContain("Volume Step (%)", cut.Markup);
+  }
+
+  // ══════════ UI-9: handler-leak guards ══════════
+
+  /// <summary>
+  /// The three <see cref="AudioStateHubService"/> events this page subscribes to, counted together.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ REFLECTION IS NOT A SHORTCUT HERE, IT IS THE ONLY ROUTE. A field-like <c>event</c> can only be
+  /// used with <c>+=</c>/<c>-=</c> from outside its declaring type, so <c>hub.SourceChanged
+  /// .GetInvocationList()</c> is CS0070 and will not compile; <c>InternalsVisibleTo</c> does not help
+  /// because the backing field is compiler-generated and private.
+  ///
+  /// ⭐ It goes through <see cref="HubEventFire.InvocationListOf{TDelegate}"/> — the shared seam UI-7
+  /// (`C-213`) extracted precisely so that tests stop hand-rolling this <c>GetField</c> — rather than
+  /// a private copy. UI-7 consolidated TWELVE hand-rolled sites into that helper hours before this
+  /// test was written; a thirteenth here would be regression by copy-paste. It also buys two loud
+  /// failures a local copy would not have: a MISSING backing field throws instead of counting zero
+  /// (an event renamed or converted to explicit add/remove accessors would otherwise make every
+  /// assertion below vacuously true), and a WRONG payload type throws instead of being silently
+  /// widened to <see cref="Delegate"/>.
+  ///
+  /// ⚠ The per-event type arguments are therefore load-bearing, not ceremony: naming the exact
+  /// delegate shape is what makes a signature change fail this test rather than slip past it.
+  /// <c>nameof</c> does the same job one step earlier — it turns a RENAMED event into a compile
+  /// error here, where a string literal would only surface as a runtime throw.
+  /// </remarks>
+  private static Dictionary<string, int> HubHandlerCounts(AudioStateHubService hub) => new()
+  {
+    [nameof(AudioStateHubService.SourceChanged)] =
+      HubEventFire.InvocationListOf<Func<Task>>(
+        hub, nameof(AudioStateHubService.SourceChanged)).Length,
+    [nameof(AudioStateHubService.EncoderConnectionChanged)] =
+      HubEventFire.InvocationListOf<Func<EncoderConnectionDto, Task>>(
+        hub, nameof(AudioStateHubService.EncoderConnectionChanged)).Length,
+    [nameof(AudioStateHubService.PhoneCallStateChanged)] =
+      HubEventFire.InvocationListOf<Func<Task>>(
+        hub, nameof(AudioStateHubService.PhoneCallStateChanged)).Length,
+  };
+
+  /// <summary>
+  /// Disposing the page must remove every hub handler it added.
+  /// </summary>
+  /// <remarks>
+  /// ⛔ THE ASSERTION IS THAT DISPOSAL RETURNS THE COUNT TO BASELINE — not that rendering twice fails
+  /// to grow the list. The row originally specified the latter, and it does not discriminate: two
+  /// simultaneously-live components legitimately hold two sets of handlers, which is correct
+  /// multicast behaviour and is just as true after the fix as before it. A test shaped that way
+  /// would be RED against correct code. The leak is that teardown does not SHRINK the list, so
+  /// teardown is what this measures.
+  /// </remarks>
+  [Fact]
+  public void SystemConfigPage_Dispose_RemovesEveryHubSubscriptionItAdded()
+  {
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    var baseline = HubHandlerCounts(hub);
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // ⚠ INSTRUMENT CHECK, AND IT IS NOT OPTIONAL. If the page never reached InitializeSignalRAsync —
+    // an earlier await in OnInitializedAsync threw, an event was renamed — the counts never move and
+    // every assertion below would pass against a page that subscribes nothing. A leak test that
+    // cannot see the leak is worse than no test. It also supplies the rendezvous: it waits for the
+    // SUBSCRIPTION TO BE OBSERVED rather than for a duration, per CLAUDE.md § Test Timing.
+    cut.WaitForAssertion(() =>
+      HubHandlerCounts(hub).Should().NotBeEquivalentTo(baseline,
+        "rendering the page must attach hub handlers; if this never becomes true the test is blind"));
+
+    DisposeComponents();
+
+    HubHandlerCounts(hub).Should().BeEquivalentTo(baseline,
+      "every handler InitializeSignalRAsync adds must be removed in Dispose — AudioStateHubService "
+      + "is AddSingleton (Program.cs:411), so whatever is left here outlives the circuit for the "
+      + "life of the process");
+  }
+
+  /// <summary>
+  /// Repeated visits to /system must not accumulate handlers on the process-lifetime singleton.
+  /// </summary>
+  [Fact]
+  public void SystemConfigPage_RepeatedVisits_DoNotAccumulateHubHandlers()
+  {
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+
+    RenderComponent<SystemConfigPage>();
+    DisposeComponents();
+    var afterOneVisit = HubHandlerCounts(hub);
+
+    for (var i = 0; i < 4; i++)
+    {
+      RenderComponent<SystemConfigPage>();
+      DisposeComponents();
+    }
+
+    HubHandlerCounts(hub).Should().BeEquivalentTo(afterOneVisit,
+      "five visits to /system must leave the singleton in the same state as one; the appliance runs "
+      + "for weeks between restarts, so per-visit growth is unbounded in practice");
   }
 }
