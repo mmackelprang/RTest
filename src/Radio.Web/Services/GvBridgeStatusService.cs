@@ -23,6 +23,7 @@ public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
 {
   private readonly IServiceScopeFactory _scopeFactory;
   private readonly ILogger<GvBridgeStatusService> _logger;
+  private readonly TimeProvider _timeProvider;
   private readonly int _pollSeconds;
   // Guards Start() idempotency across threads (0 = not started, 1 = started).
   private int _started;
@@ -31,17 +32,37 @@ public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
   private CancellationTokenSource? _cts;
 
   public GvBridgeStatusDto? Current { get; private set; }
+
+  /// <summary>
+  /// Whether the bridge reported <c>available: true</c> on the last poll. Drives the
+  /// reconnecting banner and the Send gate.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ This is NOT <see cref="IsHealthy"/> and GV-12 deliberately did not merge them. This one
+  /// is a single field; that one is the fuller shape and is allowed to be false while this is
+  /// true. Changing what this property means would move the banner, which GV-12 is not
+  /// scoped to touch.
+  /// </remarks>
   public bool IsAvailable { get; private set; }
+
+  /// <summary>
+  /// Whether the bridge looks usable on the fuller shape (GV-12). The unhealthy→healthy
+  /// transition of THIS property is the refetch trigger; see PhonePage.OnGvStatusChanged.
+  /// </summary>
+  public bool IsHealthy { get; private set; }
+
   public event Action<GvBridgeStatusDto?>? StatusChanged;
 
   public GvBridgeStatusService(
     IServiceScopeFactory scopeFactory,
     ILogger<GvBridgeStatusService> logger,
-    int pollSeconds = 10)
+    int pollSeconds = 10,
+    TimeProvider? timeProvider = null)
   {
     _scopeFactory = scopeFactory;
     _logger = logger;
     _pollSeconds = pollSeconds <= 0 ? 10 : pollSeconds;
+    _timeProvider = timeProvider ?? TimeProvider.System;
   }
 
   Task IHostedService.StartAsync(CancellationToken cancellationToken)
@@ -126,6 +147,10 @@ public sealed class GvBridgeStatusService : IHostedService, IAsyncDisposable
   {
     Current = status;
     IsAvailable = status is { Available: true };
+    // ⚠ Assign BEFORE raising StatusChanged: PhonePage.OnGvStatusChanged reads IsHealthy off
+    // this instance rather than off the DTO argument, so a subscriber invoked first would read
+    // the previous poll's value and either miss the recovery edge or fire a spurious one.
+    IsHealthy = GvBridgeHealth.IsHealthy(status, _timeProvider.GetUtcNow());
     StatusChanged?.Invoke(status);
   }
 
