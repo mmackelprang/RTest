@@ -1,11 +1,12 @@
+@* No <NotFound> fragment: this is a Blazor Web App, and the framework does not use one.
+   It was retained for back-compat in .NET 8/9 (present but inert) and is unsupported on .NET 10,
+   which this project targets. The markup that used to sit here promised "Sorry, there's nothing at
+   this address." for an unknown URL; that string has never been served, and an unmatched path is
+   answered by the ASP.NET Core pipeline instead - a bare 404 for a page route, or the JSON problem
+   body in Radio.Web.Configuration.ApiNotFound for anything under /api/ (UI-11). *@
 <Router AppAssembly="typeof(Program).Assembly">
   <Found Context="routeData">
     <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
     <FocusOnNavigate RouteData="routeData" Selector="h1" />
   </Found>
-  <NotFound>
-    <LayoutView Layout="typeof(Layout.MainLayout)">
-      <p role="alert">Sorry, there's nothing at this address.</p>
-    </LayoutView>
-  </NotFound>
 </Router>
