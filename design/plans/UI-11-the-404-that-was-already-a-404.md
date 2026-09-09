@@ -800,7 +800,27 @@ cheap.
 
 The row asks for `/api/`-only and that is right. `/stream/audio` and `/stream/audio/mp3` are
 `Radio.API` routes (§0.6) and unreachable from here — but the eleven non-`/api/` page routes on *this*
-service are very reachable, and a wider pattern is how the console goes black.
+service are very reachable, and ~~a wider pattern is how the console goes black~~.
+
+> ### ⛔ CORRECTION — 2026-09-09 (Builder, `UI-11`). The struck clause is FALSE, and this section contradicted §0.6.
+>
+> **Measured by mutation, not argued.** Widening the pattern to `/{**rest}` and running the suite:
+> **20/20 GREEN**, including all twelve deep-link assertions — the ones §4 nominates as the guard
+> against exactly this. **A wider pattern does not black out the console.**
+>
+> **Why, and the plan already knew:** `MapFallback` stamps `Order = int.MaxValue` (§0.6 establishes
+> this and uses it to argue the real `/api/*` routes are safe). That same property protects *every*
+> real endpoint, page routes included — a fallback loses to all of them however wide its pattern is.
+> **§0.6 and §6.3 are both in this document and they contradict each other**; §0.6 is the correct one.
+>
+> ⭐ **So the narrow scope is still right, for a reason this plan never gave: truthfulness, not
+> availability.** `/some-typo` is a mistyped *page*, and a `/{**rest}` rule answers it with *"No API
+> route on this service matches the request path"* — a well-formed body carrying a wrong answer, which
+> is the defect class this whole row is about. The console stays up; the message becomes a lie.
+>
+> ⚠ **And nothing was testing the scope at all.** The claimed guard could not fail. Closed by
+> `UnmatchedNonApiPath_DoesNotGetTheApiProblemBody`, a differential theory that is RED under the
+> widening (3 cases) while the original 20 stay green.
 
 ### 6.4 No `instance` member, no `traceId`, no logging
 
