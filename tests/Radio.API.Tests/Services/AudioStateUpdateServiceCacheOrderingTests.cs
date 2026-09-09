@@ -22,12 +22,21 @@ namespace Radio.API.Tests.Services;
 /// default in-process DefaultHubLifetimeManager cannot fault a broadcast for a dead client, a dead
 /// circuit, an unserializable payload or an absent group — HubConnectionContext.cs:341-349 converts
 /// every one of those into a successful FlushResult and aborts the CONNECTION instead. The only escape
-/// is an OperationCanceledException while the caller's token is cancelled (the filter at :361), and on
-/// this path that token is ExecuteAsync's stoppingToken, cancelled only at host shutdown — where
-/// AudioStateUpdateService.cs:196 breaks the loop and the caches are discarded anyway.
+/// is an OperationCanceledException while the caller's token is cancelled (the filter at :361), and in
+/// PRODUCTION that token is ExecuteAsync's stoppingToken, cancelled only at host shutdown — where
+/// ExecuteAsync's own OperationCanceledException filter breaks the loop and the caches are discarded
+/// anyway. (These tests pass a different token, by reflection, which is exactly why the production
+/// qualifier matters.)
 ///
-/// These pin the ORDERING, so that the day a backplane or a different token makes the fault reachable,
-/// it is already handled rather than silently live. See `UI-13` §0.1-§0.2.
+/// These pin the ORDERING, so that the day a backplane or a different token makes the fault
+/// reachable, the delta is RETRIED on the next tick rather than silently lost. ⚠ Retried is not
+/// "handled", and the trade is real and unbounded: a persistent fault then re-attempts every ~500 ms,
+/// logs at ExecuteAsync's catch-all on every tick, and starves every check ordered behind the failing
+/// one — CheckSourceChangedAsync runs first, so a permanent fault there means the other five never
+/// run again. That is accepted deliberately. It is strictly better than `main` on a TRANSIENT fault
+/// (where `main` went silent after one pass and never recovered, even after the fault cleared), and
+/// it is the only version that recovers at all. Bounded retry/backoff is explicitly out of scope for
+/// this row. See `UI-13` §0.1-§0.2.
 ///
 /// ⚠ NO ASSERTION HERE USES A WALL CLOCK — CLAUDE.md § *Test Timing*. Each Check*Async is invoked
 /// directly and awaited to completion before anything is asserted, so every observation is a fact
@@ -39,8 +48,11 @@ public class AudioStateUpdateServiceCacheOrderingTests
   // ─── the fake hub ────────────────────────────────────────────────────────────────────────────
 
   /// <summary>
-  /// Records every attempted send and fails exactly the way DefaultHubLifetimeManager can: by
-  /// honouring a cancelled caller token. The attempt is recorded BEFORE the throw, because the
+  /// Records every attempted send and fails the way DefaultHubLifetimeManager can: by honouring a
+  /// cancelled caller token. ⚠ The real manager honours it only when at least one connection is a
+  /// target of the send — with zero connections, or a live connection outside the target group, it
+  /// returns without faulting. This fake throws unconditionally, which is stricter than production
+  /// and harmless for what these tests assert. The attempt is recorded BEFORE the throw, because the
   /// question these tests ask is "was the send attempted and did it fail", not "did it succeed".
   /// </summary>
   private sealed class RecordingClientProxy : IClientProxy
@@ -138,7 +150,7 @@ public class AudioStateUpdateServiceCacheOrderingTests
   // ─── the six sites ───────────────────────────────────────────────────────────────────────────
 
   /// <summary>
-  /// ⭐ THE HEADLINE, and the cheapest of the six. Site :502.
+  /// ⭐ THE HEADLINE, and the cheapest of the six. CheckVolumeAsync — site :502 on `main`.
   /// Tick 1 attempts VolumeChanged and is cancelled. Tick 2 sees an unchanged world; because the
   /// cache was never advanced past the failed send, it must re-broadcast.
   /// On `main` the cache advanced at :502 before the await, so tick 2 compares equal and sends
@@ -159,7 +171,7 @@ public class AudioStateUpdateServiceCacheOrderingTests
     svc.Dispose();
   }
 
-  /// <summary>Site :266.</summary>
+  /// <summary>CheckPlaybackStateAsync — site :266 on `main`.</summary>
   [Fact]
   public async Task PlaybackStateDeltaIsReSentAfterACancelledBroadcast()
   {
@@ -176,7 +188,7 @@ public class AudioStateUpdateServiceCacheOrderingTests
     svc.Dispose();
   }
 
-  /// <summary>Site :279.</summary>
+  /// <summary>CheckNowPlayingAsync — site :279 on `main`.</summary>
   [Fact]
   public async Task NowPlayingDeltaIsReSentAfterACancelledBroadcast()
   {
@@ -194,7 +206,7 @@ public class AudioStateUpdateServiceCacheOrderingTests
   }
 
   /// <summary>
-  /// Site :249 — ⭐ THE ONE THE ROW MISSED, and structurally the odd one out (§0.3).
+  /// CheckSourceChangedAsync — site :249 on `main`. ⭐ THE ONE THE ROW MISSED, and structurally the odd one out (§0.3).
   /// Three calls, not two: the first poll establishes the baseline WITHOUT broadcasting, so the
   /// failed send has to be the second call and the retry the third.
   /// </summary>
@@ -221,7 +233,7 @@ public class AudioStateUpdateServiceCacheOrderingTests
     svc.Dispose();
   }
 
-  /// <summary>Site :453 — the live half of the row's ":453-454" (§0.3).</summary>
+  /// <summary>CheckQueueAsync — site :453 on `main`, the live half of the row's ":453-454" (§0.3).</summary>
   [Fact]
   public async Task QueueDeltaIsReSentAfterACancelledBroadcast()
   {
@@ -245,10 +257,10 @@ public class AudioStateUpdateServiceCacheOrderingTests
   }
 
   /// <summary>
-  /// Site :477 — the row's headline line.
+  /// CheckRadioStateAsync — site :477 on `main`, the row's headline line.
   /// ⭐ The second assertion is the one that would otherwise be missed: the re-sent DTO must carry
   /// RdsRelevantChanged = true, exactly as the send that failed did. That flag is computed against
-  /// _lastRadioState (:475), so an advanced cache would have made the retry — if there were one —
+  /// _lastRadioState (:475 on `main`), so an advanced cache would have made the retry — if there were one —
   /// arrive with the flag FALSE, and the Web RDS accumulator would have skipped it.
   /// </summary>
   [Fact]
@@ -283,10 +295,15 @@ public class AudioStateUpdateServiceCacheOrderingTests
   // ─── the regression half: the happy path must not have been broken ───────────────────────────
 
   /// <summary>
-  /// ⚠ Without this, all six tests above would still pass against an implementation that simply
-  /// never advanced the caches at all — which would re-broadcast every unchanged state twice a
+  /// ⚠ Without a guard of this shape, an implementation that simply never advanced a cache would
+  /// still pass its site's cancellation test — and would re-broadcast every unchanged state twice a
   /// second forever, on a box where CPU churn is audible. Task 1 moves the assignment; it does not
   /// delete it.
+  ///
+  /// ⚠ MEASURED, not assumed: with only the volume guard present, setting _lastPlaybackState = null
+  /// in place of its assignment left all 8 tests green. Hence one guard PER SITE below. Five of the
+  /// six need one; CheckSourceChangedAsync does not, because never advancing _lastActiveSourceType
+  /// keeps isFirstRun true forever, so its cancellation test stops throwing and fails on its own.
   /// </summary>
   [Fact]
   public async Task AnUnchangedWorldIsBroadcastExactlyOnceWhenNothingFails()
@@ -296,6 +313,80 @@ public class AudioStateUpdateServiceCacheOrderingTests
     await InvokeCheck(svc, "CheckVolumeAsync", CancellationToken.None);
     await InvokeCheck(svc, "CheckVolumeAsync", CancellationToken.None);
     await InvokeCheck(svc, "CheckVolumeAsync", CancellationToken.None);
+
+    Assert.Equal(1, proxy.Attempts);
+    svc.Dispose();
+  }
+
+  /// <summary>CheckPlaybackStateAsync — the same guard as above, for site :266 on `main`.</summary>
+  [Fact]
+  public async Task AnUnchangedPlaybackStateIsBroadcastExactlyOnce()
+  {
+    var (svc, proxy) = CreateService();
+    var source = BareSource().Object;
+
+    await InvokeCheck(svc, "CheckPlaybackStateAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckPlaybackStateAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckPlaybackStateAsync", source, CancellationToken.None);
+
+    Assert.Equal(1, proxy.Attempts);
+    svc.Dispose();
+  }
+
+  /// <summary>CheckNowPlayingAsync — the same guard as above, for site :279 on `main`.</summary>
+  [Fact]
+  public async Task AnUnchangedNowPlayingIsBroadcastExactlyOnce()
+  {
+    var (svc, proxy) = CreateService();
+    var source = BareSource().Object;
+
+    await InvokeCheck(svc, "CheckNowPlayingAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckNowPlayingAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckNowPlayingAsync", source, CancellationToken.None);
+
+    Assert.Equal(1, proxy.Attempts);
+    svc.Dispose();
+  }
+
+  /// <summary>CheckQueueAsync — the same guard as above, for site :453 on `main`.</summary>
+  [Fact]
+  public async Task AnUnchangedQueueIsBroadcastExactlyOnce()
+  {
+    var (svc, proxy) = CreateService();
+    var playlist = (IReadOnlyList<QueueItem>)new List<QueueItem> { Item("a", 0), Item("b", 1) };
+
+    var mock = BareSource(AudioSourceType.FilePlayer);
+    mock.As<IPlayQueue>()
+      .Setup(q => q.GetFullPlaylistAsync(It.IsAny<CancellationToken>()))
+      .ReturnsAsync(playlist);
+    var source = mock.Object;
+
+    await InvokeCheck(svc, "CheckQueueAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckQueueAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckQueueAsync", source, CancellationToken.None);
+
+    Assert.Equal(1, proxy.Attempts);
+    svc.Dispose();
+  }
+
+  /// <summary>CheckRadioStateAsync — the same guard as above, for site :477 on `main`.</summary>
+  [Fact]
+  public async Task AnUnchangedRadioStateIsBroadcastExactlyOnce()
+  {
+    var (svc, proxy) = CreateService();
+
+    var mock = BareSource(AudioSourceType.Radio);
+    var radio = mock.As<IRadioControl>();
+    radio.SetupGet(r => r.CurrentFrequency).Returns(Frequency.FromMegahertz(105.1));
+    radio.SetupGet(r => r.CurrentBand).Returns(RadioBand.FM);
+    radio.SetupGet(r => r.FrequencyStep).Returns(Frequency.FromKilohertz(200));
+    radio.SetupGet(r => r.SignalStrength).Returns(60);
+    radio.SetupGet(r => r.RdsRadioText).Returns("Hotel California");
+    var source = mock.Object;
+
+    await InvokeCheck(svc, "CheckRadioStateAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckRadioStateAsync", source, CancellationToken.None);
+    await InvokeCheck(svc, "CheckRadioStateAsync", source, CancellationToken.None);
 
     Assert.Equal(1, proxy.Attempts);
     svc.Dispose();

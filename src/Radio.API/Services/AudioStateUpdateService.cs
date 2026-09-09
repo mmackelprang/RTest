@@ -51,10 +51,18 @@ public class AudioStateUpdateService : BackgroundService
 
   // ⚠⚠ THE CHANGE-DETECTION CACHES BELOW ARE ADVANCED **AFTER** THE SEND, NEVER BEFORE (queue row
   // UI-13). Each _last* field is the baseline its Has*Changed comparison runs against. Advancing one
-  // before the await records "the clients have this" as a fact before it is one: if the send does not
+  // before the await records the send as complete before it has returned: if the send does not
   // complete, the next comparison sees "no change" against a state the clients never received, and
   // that delta is never re-broadcast. There is no retry, and the evidence that a broadcast was missed
   // is destroyed by the same statement that misses it.
+  //
+  // ⚠ WHAT A COMPLETED SEND DOES AND DOES NOT PROVE — because the ordering is often justified with a
+  // claim that is false. It does NOT prove delivery: the evidence below shows a write failure being
+  // converted into a SUCCESSFUL FlushResult and charged to the connection, with 129 consecutive sends
+  // to a hard-killed socket all returning success while the client received nothing. So the strongest
+  // fact available on this path is "the last state whose broadcast returned without faulting", and
+  // that is what these caches hold. Advancing one before the await weakens even that, to "the last
+  // state we intended to send".
   //
   // 📌 WHY THIS IS CURRENTLY UNOBSERVABLE — a PRECONDITION, not a property of this file. Established
   // 2026-09-09 by reading dotnet/aspnetcore release/10.0 and by running a real Kestrel host with real
@@ -65,11 +73,17 @@ public class AudioStateUpdateService : BackgroundService
   //   • Every other failure is charged to the CONNECTION, not the caller: HubConnectionContext.cs
   //     :341-349 catches it, logs "Failed writing message", aborts the connection, and returns a
   //     SUCCESSFUL FlushResult. Measured: 129 consecutive sends to a hard-killed socket faulted none;
-  //     an unserializable payload dropped the client while the caller saw success in 8 ms.
+  //     an unserializable payload dropped the client while the caller saw success in 8-10 ms.
   //   • The single escape is an OperationCanceledException raised while the CALLER's token is
-  //     cancelled — the filter at HubConnectionContext.cs:361 deliberately does not catch that one.
-  // Here that token is always ExecuteAsync's stoppingToken, which BackgroundService cancels only at
-  // host shutdown — and :196 catches exactly that and breaks, so the caches die with the process.
+  //     cancelled. The filter at HubConnectionContext.cs:361 deliberately does not catch that one,
+  //     and both WriteSlowAsync overloads additionally await _writeLock.WaitAsync(cancellationToken)
+  //     OUTSIDE their try, where a cancelled token escapes with no filter at all.
+  // In production that token is always ExecuteAsync's stoppingToken, which BackgroundService cancels
+  // only at host shutdown — and ExecuteAsync's own
+  // `catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)` catches exactly
+  // that and breaks, so the caches die with the process. (Named rather than cited by line: this
+  // comment's own insertion moved that catch once already. The tests reach these methods by
+  // reflection and DO pass a different token, which is why "in production" is load-bearing above.)
   //
   // ⚠ SO THIS ORDERING BECOMES LOAD-BEARING ONLY IF THAT PRECONDITION CHANGES, AND IT WOULD CHANGE
   // SILENTLY. A Redis or Azure SignalR backplane swaps in a lifetime manager whose send really does
