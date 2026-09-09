@@ -22,6 +22,24 @@
 
 ---
 
+## ⛔ ID namespace — check BOTH files before taking a number
+
+**There is ONE `AUD-*` namespace, shared with
+[`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md).** Until 2026-09-09 the two documents numbered
+independently: `AUD-1`–`AUD-9` happened to agree, but **`AUD-10`, `AUD-11` and `AUD-12` meant three
+different things in each**, so *"`AUD-12` shipped"* was true of this file and **false of the punch-list
+item of the same name.** Found by `AUD-12`'s own Builder during Docs Impact; one grep refuted the PR
+body's claim that no punch-list row existed.
+
+**The punch-list renumbered, because this side could not** — these IDs carry dossiers, branches, merged
+PRs and archive entries. Its `AUD-10`/`11`/`11a`/`12` became **`AUD-21`/`22`/`22a`/`23`**.
+
+⚠ **`AUD-21`, `AUD-22`, `AUD-22a` and `AUD-23` are RESERVED by the punch list. The next free `AUD`
+number is `AUD-24`.**
+
+⭐ **Only `AUD` was audited.** `GV-*`, `UI-*`, `TEST-*`, `OPS-*`, `PHN-*` and `ENC-*` are unaudited and
+may carry the same collision. **A number is not free because one file has not used it** — check both.
+
 ## Queue
 
 | # | Item | Status | Plan | Spec / handoff | Depends on | Branch |
