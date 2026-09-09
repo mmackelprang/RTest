@@ -105,7 +105,7 @@ written 2026-09-06 against `main` at `066a0d5c`, **repaired 2026-09-08 against `
 **0.5 d.** ⛔ **Not auto-mergeable.**
 
 ✅ **The `TEST-2` collision note at the top of this dossier is DISCHARGED.** All three anchors it
-named are re-pointed: `ApplyDeferredCaptureState` is `private` at `:457-463`; no test calls it; and
+named are re-pointed: `ApplyDeferredCaptureState` is `private`; no test calls it; and
 `C-177` now pins `DeviceConnectedEvent_TakesTheMatchingBranch_AndLandsReady` and
 `DeviceConnectedEvent_WhenPlatformManaged_LandsReadyWithoutAcquiring` instead of the deleted
 `ApplyDeferredCaptureState_WhenNotPlaying_SetsReady`. **`TEST-2` also made the row smaller** — its
@@ -118,12 +118,25 @@ of #469.** The handler that swallows the transition (`OnPlaybackStatusChanged`) 
 **The three scope questions, answered:**
 
 1. *Why `Stopped -> Ready`, and what drives `Ready -> Playing`?* `ApplyDeferredCaptureState` writes
-   `Ready`; **nothing** drove it back out. The only exit is an AVRCP edge, and BlueZ emits
-   `PropertiesChanged` only on change — the phone is already playing, so no edge is coming. A second
-   predicate compounds it: the `Playing` arm discarded an AVRCP `Playing` arriving while `Stopped`,
-   which `AUD-10` makes routine.
-2. *Is `isPlaying:false` the same defect?* **The same defect.** `AudioController.cs:576` is a pure
-   projection of `primarySource.State == Playing`. Not a second mapping bug.
+   `Ready`; **nothing** drove it back out. ⚠ **Corrected 2026-09-09 — this answer originally read
+   *"the only exit is an AVRCP edge, and BlueZ emits `PropertiesChanged` only on change"*, and both
+   halves are false.** `AudioSourceBase` leaves `Ready` at `:96` (`PlayAsync`, unconditional), `:127`
+   (`StopAsync`) and `:139` (`DisposeAsync`); what is true is narrower — **no exit fires on its
+   own**, so an untouched source stays put. And BlueZ's change-only signalling is not why no edge
+   comes: a **fresh** `AttachMediaPlayerAsync` re-reads `Status` and raises one unconditionally, so
+   the silence belongs to a **re-attach** at the same object path returning at that method's dedup —
+   `C-174`, queue row `AUD-14`. The code comments were corrected during this row's pre-merge review;
+   this prose was not, until the post-rebase pass. **The conclusion survives; the reasons did not.**
+   A second predicate compounds it: the `Playing` arm discarded an AVRCP `Playing` arriving while
+   `Stopped`, which `AUD-10` makes routine.
+2. *Is `isPlaying:false` the same defect?* **The same defect** — not a second mapping bug. ⚠ **The
+   supporting citation was wrong in both halves and is corrected:** the line is
+   `AudioController.cs:575`, not `:576` (`:576` is `IsPaused`), and it is **not a pure projection**
+   of `primarySource.State == Playing` — it is a conjunction,
+   `_audioEngine.State == AudioEngineState.Running && primarySource.State == AudioSourceState.Playing`.
+   The conclusion holds for the measured incident because the engine was `Running` throughout (the
+   mixer was audible), but a reader who trusts "pure projection" would wrongly rule the engine out
+   as a second cause of `isPlaying:false`.
 3. *What else gates on `Playing`?* Fifteen sites, enumerated in the plan's §0.4 — including
    **Sleep**, where `_wasPlayingBeforeSleep` stays false and the phone streams through the night,
    and the **SignalR push path** this dossier's own list missed. ⚠ **Ducking is NOT among them** —
@@ -133,8 +146,43 @@ of #469.** The handler that swallows the transition (`OnPlaybackStatusChanged`) 
 
 ## Build status
 
-**PR #623**, branch `fix/aud-12-bt-source-stalled-at-ready`. ⛔ **Open, NOT merged, and the row is
-NOT ✅.**
+**PR #623**, branch `fix/aud-12-bt-source-stalled-at-ready`. ✅ **Merged 2026-09-09 on the owner's
+explicit authorisation.** ⚠ **Merged, not deployed.**
+
+⛔⛔ **THE UAT BELOW IS DEFERRED, NOT DISCHARGED. The authorisation moved the gate; it did not
+satisfy it.** No phone was connected, no A2DP source was played, no pause/resume was performed, and
+the box was never touched — no SSH, no `curl`, no deploy. **The § *Verification* steps at the top of
+this dossier, and the plan's §5, still have to be run.** Anything that reads this row as
+"UAT complete" is wrong.
+
+### The rebase and the re-gate, 2026-09-09
+
+The PR had been open six days and its gates were green against a `main` **33 commits** older. It was
+integrated by **merge rather than rebase** (one conflict resolution instead of seven; no force-push
+onto a `git push` that fails over HTTP/2 while printing `Everything up-to-date`; the PR body's four
+evidence shas stay resolvable). **One conflict, in `docs/BUILDER_QUEUE.md`'s banner line**, resolved
+to `main`'s side.
+
+**`main` was gated first, so the result would be attributable.** `main` @ `17e56719`: 47 warnings /
+0 errors, 3,854 passed / 4 failed. Merged branch: 47 warnings / 0 errors, **3,864 passed / 4 failed**
+— the same four `SrcVariableResamplerTests` by name, +10 passing cases (this row's eight new test
+methods, two of them two-case `[Theory]`), and per-project equality everywhere else. **Zero
+regressions.** Mutations `M1` and `M8` were re-run **in the merged tree at whole-project scope**
+(1,556 cases, no `--filter`) and killed exactly their predicted tests. A local smoke start of the
+merged build served `/api/health/version` reporting `gitSha ae2bd726`, plus `/api/audio/nowplaying`
+and `/api/sources` at 200 with zero `[ERR]`/`[FTL]` lines — **that is a boot check, not this row's
+UAT.**
+
+⛔⛔ **`AUD-12` IS A COLLIDING ID.** `docs/HANDOFF-GA-PUNCH-LIST.md:1060` carries its own `AUD-12` —
+**"PipeWire event subscription in place of polling"**, plan `pw-event-subscription` (2026-05-22),
+unqueued and **still open** — also named in that file's P1 roll-up (`:1365`) and plan-traceability
+table (`:1431`). It is a different work item, so **"`AUD-12` ✅ shipped" is true of this row and
+false of that one.** ⚠ The two schemes diverged from `AUD-10` onward: punch-list `AUD-10` is *BT
+disconnect-reason surfacing* vs. this queue's *pausing destroys the A2DP transport*; punch-list
+`AUD-11` is *BT codec observability* vs. *the capture that recorded the wrong jack*. `AUD-1`, `AUD-2`,
+`AUD-4` and `AUD-5` still agree. **Three colliding ids. Planner to reconcile — nothing was renumbered
+here.** ⚠ This PR's own body had claimed `AUD-12` *"has no punch-list row"*; the conclusion (no
+punch-list edit needed) was right and the reason was refuted by one grep.
 
 ### ⭐ Owner decision 2026-09-08 — `_avrcpReportsPlaying` is cleared on disconnect
 

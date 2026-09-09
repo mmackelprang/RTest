@@ -51,8 +51,12 @@ why it wants its own row rather than a drive-by.
 ⛔ **Why `AUD-12` did not fix it, and the part worth carrying forward.** `AUD-12`'s suggested shape
 was to re-derive the source's playback state by reading `MetadataInternal["PlaybackStatus"]` back
 out. That would have made this hazard **load-bearing for audio-path recovery** — and it would have
-done so through the existing unguarded `(string)pbStatus` cast, an `InvalidCastException` the day
-anything writes a non-string under that key. `AUD-12` instead recorded the same fact in a dedicated
+done so through the unguarded `(string)pbStatus` cast that stood in `InitializeAsync` at the time —
+an `InvalidCastException` the day anything writes a non-string under that key. ⚠ **Do not go looking
+for that cast: `AUD-12` deleted it**, replacing it with `TryPromoteToPlayingFromLastAvrcpStatus()`,
+so `pbStatus` has zero occurrences under `src/` today. It is quoted here as the shape the rejected
+design would have made load-bearing (it is at `BluetoothAudioSource.cs:190` in `c9ebd824`), not as a
+hazard still present. `AUD-12` instead recorded the same fact in a dedicated
 `volatile bool` field on the source and left the dictionary alone. **The metadata key itself is
 still written and must stay written**: it is a shipped API observable, pinned by
 `BluetoothAudioSourceTests.PlaybackStatusChanged_UpdatesMetadata` and read by `AUD-12`'s own UAT.

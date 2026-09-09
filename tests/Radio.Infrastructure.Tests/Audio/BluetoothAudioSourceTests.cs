@@ -1473,9 +1473,16 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   [Fact]
   public async Task InitializeAsync_WhenPhoneAlreadyPlaying_TransitionsToPlaying()
   {
-    // The race the :184 comment describes: the AVRCP edge lands before the source
-    // is Ready, so the switch discards it (Created is not an accept state) and the
-    // catch-up recovers it.
+    // The race described by the "Fix race: PlaybackStatusChanged may fire during
+    // StartAsync()" comment at the end of BluetoothAudioSource.InitializeAsync: the
+    // AVRCP edge lands before the source is Ready, so the switch discards it (Created
+    // is not an accept state) and the catch-up recovers it.
+    //
+    // ⚠ Cited by method and comment text, not by line. This citation read ":184" until
+    // AUD-12's post-rebase review: correct when written against c9ebd824, stale by the
+    // time it merged, because this row's own +60-line field remark pushed that comment
+    // down. It is the same rot F5 already fixed once in this file — line numbers in
+    // this file's comments have now been invalidated twice by this row's own diff.
     //
     // The fixture's MockBluetoothService is correct HERE and wrong everywhere else in
     // this block: its GetAudioCaptureDeviceAsync returns a boxed string, so the source

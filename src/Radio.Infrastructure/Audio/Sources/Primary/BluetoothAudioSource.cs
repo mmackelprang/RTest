@@ -64,15 +64,25 @@ public class BluetoothAudioSource : USBAudioSourceBase
   // unguarded `if (_state == value) return;`.
   //
   // The reachable lost update, found in AUD-12's pre-merge review rather than by
-  // measurement: ApplyDeferredCaptureState writes Ready; a D-Bus Paused lands and is
-  // DISCARDED, because the `case Paused when State == Playing` arm sees Ready; the
-  // helper then reads a not-yet-updated true here and writes Playing. Net: the phone
-  // says Paused and the source says Playing, with no further edge coming to correct
-  // it until the user resumes. The window is the few instructions between those two
-  // statements. Before AUD-12 the same interleaving left the source in Ready, which
-  // was inert — so this is a narrow NEW residual, and it is recorded rather than
-  // fixed because a lock here is a change to the live audio path that AUD-12 could
-  // not UAT. It self-corrects on the next real Playing edge.
+  // measurement: ApplyDeferredCaptureState writes Ready; TryPromoteToPlayingFromLastAvrcpStatus
+  // reads a true here; a D-Bus Paused then lands, writes false here and is DISCARDED by the
+  // switch (the `case Paused when State == Playing` arm sees Ready); the helper resumes and
+  // writes Playing off the value it already read. Net: the phone says Paused and the source
+  // says Playing, with no further edge coming to correct it until the user resumes. The
+  // window is the few instructions between the helper's read and its write.
+  //
+  // ⚠ NOTE THE ORDER, because the obvious narration of this is wrong and an earlier draft of
+  // this comment had it. It is NOT "the Paused is discarded and the helper then reads a stale
+  // true" — OnPlaybackStatusChanged records this field BEFORE the switch, so by the time a
+  // Paused reaches the switch this field is already false, and a volatile read after a
+  // completed volatile write cannot return the old value (which is exactly what the paragraph
+  // above claims volatile DOES buy). The hazard is the helper's own read-then-act, not a stale
+  // read. Same net result; the mechanism is the claim, per CLAUDE.md § Pre-Merge Review.
+  //
+  // Before AUD-12 the same interleaving left the source in Ready, which was inert — so this is
+  // a narrow NEW residual, and it is recorded rather than fixed because a lock here is a change
+  // to the live audio path that AUD-12 could not UAT. It self-corrects on the next real
+  // Playing edge.
   //
   // ⛔⛔ IT IS CLEARED ON DISCONNECT, AND THAT IS AN OWNER DECISION WITH A KNOWN COST.
   // Do not "simplify" the reset out of OnDeviceDisconnected; read this first.
@@ -548,8 +558,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// ⚠ "Effectively", and the precision matters — an earlier draft of this remark said
   /// Ready's ONLY exit is an AVRCP edge, and that is simply false. AudioSourceBase
   /// leaves Ready from PlayAsync (which writes Playing unconditionally), StopAsync and
-  /// DisposeAsync. What is true is narrower: no exit fires ON ITS OWN. Every one of
-  /// those needs a user or a caller to act, so an untouched source stays put.
+  /// DisposeAsync. (It also writes Initializing in InitializeAsync, which does not
+  /// reach THIS type — BluetoothAudioSource overrides InitializeAsync without calling
+  /// base — but the sentence is scoped to AudioSourceBase, so name it rather than
+  /// leave the enumeration looking complete.) What is true is narrower: no exit fires
+  /// ON ITS OWN. Every one of those needs a user or a caller to act, so an untouched
+  /// source stays put.
   ///
   /// ⚠ The AVRCP half of that is narrower still, and the reason usually given for it is
   /// also wrong. BlueZ raising PropertiesChanged only on CHANGE
@@ -856,6 +870,24 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // process. Cleared HERE, beside _hasMediaPlayer and before the first await below,
       // so it runs even if the teardown that follows throws. See the field's remarks for
       // the trade this accepts.
+      //
+      // ⚠ WHAT THIS PLACEMENT DOES NOT BUY, and the trade is two-sided rather than free.
+      // Clearing early guarantees the clear RUNS; it does not guarantee the bit STAYS
+      // clear for the rest of the teardown. This method is `async void` on a D-Bus
+      // callback thread and awaits below before assigning Stopped, so a late
+      // PlaybackStatusChanged(Playing) arriving in that window re-arms the bit, and
+      // nothing clears it again — the Stopped assignment writes State only. A later
+      // OnCaptureStreamRecovered -> ApplyDeferredCaptureState would then promote off it,
+      // which is the very outcome this clear exists to prevent.
+      //
+      // ⛔ NOT fixed here, and the reason is that the window is C-174's to close, not
+      // this row's. Those late edges are reachable only because LinuxBluetoothService
+      // never nulls _mediaPlayer/_mediaPlayerPath and never disposes the player
+      // properties watcher outside a fresh attach — the stale-watcher leak filed as
+      // queue row AUD-14. Close AUD-14 and the window closes with it. A second clear
+      // beside the Stopped assignment would also close it, but that is a live-audio-path
+      // change AUD-12 could not UAT, and it would trade away the throw-robustness this
+      // placement was chosen for. Recorded, deliberately, rather than half-fixed.
       _avrcpReportsPlaying = false;
 
       _btPosition = TimeSpan.Zero;
@@ -1279,7 +1311,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// </summary>
   /// <remarks>
   /// ⚠ This exists for exactly one caller: the Stopped arm of
-  /// OnPlaybackStatusChanged. Stopped has TWO provenances and only one of them is
+  /// OnPlaybackStatusChanged. Stopped has THREE provenances and only one of them is
   /// safe to promote out of — see the comment there and plan AUD-12 C-170.
   ///
   /// ⛔ THE DISCRIMINATION ONLY HOLDS ON THE NON-PLATFORM-MANAGED PATH, and the first
@@ -1343,14 +1375,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
         // state was written to metadata a few lines up and then silently dropped
         // here — Stopped was absorbing.
         //
-        // ⛔ Stopped has TWO provenances. The Stopped case below is the phone's
-        // transport stopping while our pipeline stays intact — promoting back is
-        // correct. OnDeviceDisconnected is the other, and by the time it assigns
-        // Stopped it has already pulled the generator out of the mixer and nulled
-        // _captureDevice / SoundComponent. Promoting THAT to Playing would assert
-        // audio is flowing from a phone that is not connected, and would then fire
-        // TryReacquireCaptureAsync below at a device that is gone. HasCapturePath is
-        // false in that case ON THIS BOX.
+        // ⛔ Stopped has THREE provenances, and only the first is safe to promote out
+        // of. (1) The Stopped case below — the phone's transport stopping while our
+        // pipeline stays intact; promoting back is correct. (2) OnDeviceDisconnected,
+        // which by the time it assigns Stopped has already pulled the generator out of
+        // the mixer and nulled _captureDevice / SoundComponent. (3) AudioSourceBase's
+        // StopAsync, i.e. the user or a caller stopping this source — StopCoreAsync
+        // nulls _captureDevice, _playbackId and SoundComponent BEFORE the base class
+        // assigns Stopped, so it is refused by the same guard and for the same reason.
+        //
+        // ⚠ (3) was missing from this comment until AUD-12's post-rebase review, and
+        // the omission is the interesting part: the census read as complete, and the
+        // guard happened to refuse the un-named case anyway. A comment that says "TWO"
+        // is a claim about the whole program, not about the two it names.
+        //
+        // Promoting (2) or (3) to Playing would assert audio is flowing from a phone
+        // that is not connected, and (2) would then fire TryReacquireCaptureAsync below
+        // at a device that is gone. HasCapturePath is false in both cases ON THIS BOX.
         //
         // ⛔ It is NOT false there when the platform owns routing: that disjunct is a
         // configuration flag OnDeviceDisconnected cannot clear, so on Windows this
