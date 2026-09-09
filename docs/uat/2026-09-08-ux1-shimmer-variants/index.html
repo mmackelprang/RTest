@@ -77,6 +77,26 @@
 </style>
 </head>
 <body>
+<!-- ⛔ SUPERSEDED 2026-09-08 (night sitting) — DO NOT REUSE THIS HARNESS AS-IS.
+     V1–V4 below concentrate the highlight into a band spanning ~0.32 of the element
+     width. With the sweep travelling 4 element-widths in 1.5 s, that band is on the
+     element only ~0.49 s per cycle, so for two-thirds of every cycle those columns
+     are flat, unmoving #141416. The owner read them as static because they WERE.
+     This page therefore cannot compare "geometry vs amplitude": it compares a
+     faint-but-continuous shimmer against a brighter-but-mostly-absent one.
+     The value UX-1 shipped (56 / #38383F) was chosen on the v2 ladder instead —
+     the SHIPPING geometry with five highlight values. Rebuild that from
+     NIGHT-SITTING.md § "The v2 harness". Full account: NIGHT-SITTING.md § 2. -->
+  <div style="background:var(--surface-base);color:var(--text-low);
+              border-bottom:1px solid var(--surface-separator);
+              padding:8px 16px;font-size:12px;line-height:1.5">
+    ⛔ <strong>Superseded — do not judge anything on this page.</strong>
+    V1–V4's highlight band is on the element only ~0.49&nbsp;s of each 1.5&nbsp;s cycle, so
+    two-thirds of every cycle is static and they read as “not moving” whatever their amplitude.
+    <code>UX-1</code> was decided on the <strong>v2</strong> ladder (shipping geometry, five
+    highlight values) — see <code>NIGHT-SITTING.md</code>.
+    <em>Kept dim on purpose: this page is judged in a dark room.</em>
+  </div>
   <div class="bar">
     <h1>UX-1 — skeleton shimmer</h1>
     <p class="hint">All five animate in step. Two questions: <strong>can you tell it moves?</strong>

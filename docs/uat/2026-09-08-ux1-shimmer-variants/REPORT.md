@@ -1,6 +1,19 @@
 # `UX-1` shimmer variants — harness, and an aborted first sitting
 
-**Status: DEFERRED to a night sitting.** The harness works and is reusable; the *conditions* were
+> ⛔ **CORRECTION, 2026-09-08 (night sitting) — the sentence below was wrong about the harness, and
+> it is the one sentence in this file a reader would act on.** ~~"The harness works and is reusable;
+> the *conditions* were wrong."~~ **Both halves failed.** The conditions were indeed wrong, but the
+> harness was *also* broken: its V1–V4 concentrate the highlight into a band spanning ~0.32 of the
+> element width, which — against a sweep travelling 4 element-widths in 1.5 s — sits on the element
+> only **~0.49 s per cycle**, leaving those columns flat and unmoving for two-thirds of every cycle.
+> It could not compare geometry against amplitude; it compared a faint-but-continuous shimmer against
+> a brighter-but-mostly-absent one. ⛔ **Do not reuse `index.html` as an instrument** — it now carries
+> a banner saying so. `UX-1` was decided on the **v2** ladder (shipping geometry, five highlight
+> values), reconstructible from [`NIGHT-SITTING.md`](NIGHT-SITTING.md) § *"The v2 harness"*.
+> Everything else in this file — the aborted sitting, and the finding that the plan's dark-room-only
+> gate was an incomplete specification — stands, and led directly to the daylight sitting.
+
+**Status: DEFERRED to a night sitting.** ~~The harness works and is reusable;~~ the *conditions* were
 wrong.
 
 ## What happened, 2026-09-08 ~03:45 EDT
