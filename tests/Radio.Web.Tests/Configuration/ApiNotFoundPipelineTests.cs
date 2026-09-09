@@ -99,6 +99,53 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
     Assert.DoesNotContain("gvbridge", body);
   }
 
+  /// <summary>
+  /// The <c>/api/</c> scope of the terminal rule is real: an unmatched path that is NOT under
+  /// <c>/api/</c> must not be answered with the API problem document.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// ⭐ <b>This test exists because mutation testing found the gap it closes.</b> Widening the route
+  /// pattern from <c>/api/{**rest}</c> to <c>/{**rest}</c> left the entire suite <b>20/20 green</b> —
+  /// including all twelve deep-link assertions, which the plan had nominated as the guard against
+  /// exactly that widening. They cannot detect it: <c>MapFallback</c> stamps
+  /// <c>Order = int.MaxValue</c>, so it loses to every real <c>@page</c> endpoint no matter how wide
+  /// its pattern is. A wider pattern therefore does <em>not</em> "black out the console" — the plan's
+  /// stated reason for the narrow scope is false, and nothing was testing the scope at all.
+  /// </para>
+  /// <para>
+  /// What a wider pattern actually breaks is <b>truthfulness</b>. <c>/some-typo</c> is a mistyped
+  /// <em>page</em>, and answering it with "No API route on this service matches the request path"
+  /// tells the caller something untrue about what they asked for — a wrong answer wearing a
+  /// well-formed body, which is this repo's most expensive recurring defect class.
+  /// </para>
+  /// <para>
+  /// ⚠ The differential is what makes this non-vacuous. The first assertion proves the terminal rule
+  /// is live and reachable, so the second is testing the <em>scope</em> rather than passing because
+  /// the endpoint was absent. Do not split them into two tests.
+  /// </para>
+  /// </remarks>
+  [Theory]
+  [InlineData("/definitely-not-a-page")]
+  [InlineData("/phone/nope")]
+  [InlineData("/apitypo")]  // shares a prefix with /api but is not under it
+  public async Task UnmatchedNonApiPath_DoesNotGetTheApiProblemBody(string pagePath)
+  {
+    var client = _factory.CreateClient();
+
+    // Non-vacuity guard: the terminal /api/ rule must actually be live for the check below to mean
+    // anything. If this assertion ever fails, the one after it is proving nothing.
+    var apiResponse = await client.GetAsync("/api/definitely-not-a-route");
+    Assert.Equal("application/problem+json", apiResponse.Content.Headers.ContentType?.MediaType);
+
+    var pageResponse = await client.GetAsync(pagePath);
+    var pageBody = await pageResponse.Content.ReadAsStringAsync();
+
+    Assert.Equal(HttpStatusCode.NotFound, pageResponse.StatusCode);
+    Assert.NotEqual("application/problem+json", pageResponse.Content.Headers.ContentType?.MediaType);
+    Assert.DoesNotContain("No API route on this service", pageBody);
+  }
+
   // ─── Direction 2: real routes still win, and every SPA deep link still serves the shell ────
 
   /// <summary>
