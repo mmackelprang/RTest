@@ -229,7 +229,15 @@ public class AudioController : ControllerBase
           if (request.SeekPosition.HasValue && primarySource is IPrimaryAudioSource seekSource && seekSource.IsSeekable)
           {
             await seekSource.SeekAsync(request.SeekPosition.Value);
-            _logger.LogInformation("Seeked to {Position}", request.SeekPosition.Value);
+
+            // AUD-24. "requested", not "Seeked to". IPrimaryAudioSource.SeekAsync returns Task, not
+            // Task<bool> — closed deliberately in DECISION-LOG (ADR-029 amendments, Decision 2) —
+            // so this layer cannot observe whether the player moved and must not say that it did.
+            // The outcome is logged one layer down by FilePlayerAudioSource.SeekCoreAsync, which is
+            // the only place that knows.
+            _logger.LogInformation(
+              "Seek to {Position} requested on source {SourceId}",
+              request.SeekPosition.Value, seekSource.Id);
           }
           else
           {
@@ -242,13 +250,26 @@ public class AudioController : ControllerBase
             //
             // ⚠ "was not attempted" is exactly what happened — not "failed", and not "refused",
             // which would describe a decision the source made. It did not get the chance.
+            //
+            // ⚠ Warning rather than Debug even though a scrub is a user action, because our own
+            // panel CANNOT produce this: NowPlayingPanel renders the draggable slider only when
+            // CanSeek, which is the same IsSeekable this arm tests. Every way of reaching it is a
+            // client sending a seek it had no business sending, which is worth seeing in the
+            // journal. Contrast SeekCoreAsync's refusal arm, which a stopped player reaches
+            // normally and which is therefore Debug.
+            //
+            // ⚠ Three-way, not two: primarySource is IAudioSource? and every in-tree primary source
+            // implements IPrimaryAudioSource, so the last arm realistically fires only when there
+            // is no active source at all — reporting that as "not a primary source" would name the
+            // wrong cause in the one case it occurs.
             _logger.LogWarning(
-              "Seek to {Position} was not attempted: source {SourceId} is {Reason}",
-              request.SeekPosition,
+              "Seek was not attempted: source {SourceId} is {Reason}",
               primarySource?.Id ?? "(none)",
-              primarySource is IPrimaryAudioSource s
-                ? (s.IsSeekable ? "seekable but no position was supplied" : "not seekable")
-                : "not a primary source");
+              primarySource is null
+                ? "absent — there is no active source"
+                : primarySource is IPrimaryAudioSource seekable
+                  ? (seekable.IsSeekable ? "seekable but no position was supplied" : "not seekable")
+                  : "not a primary source");
           }
           break;
 

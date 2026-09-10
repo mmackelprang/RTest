@@ -35,8 +35,21 @@ namespace Radio.Core.Tests;
 ///   <item>a seek reached through a local alias of the service field — the pattern names
 ///     <c>_playbackService</c> literally;</item>
 ///   <item>a method body whose closing brace is not at the house two-space indent, which makes
-///     <see cref="SeekCoreBody"/> fail its own assertion rather than scan the wrong region.</item>
+///     <see cref="SeekCoreBody"/> fail its own assertion rather than scan the wrong region;</item>
+///   <item>a branch on the returned bool that is written as a ternary, a <c>switch</c>, or a
+///     <c>while</c> rather than an <c>if</c> — the guard scan matches <c>if (moved)</c> /
+///     <c>if (!moved)</c> only, so a correct method written another way fails LOUDLY and must
+///     update this test. That is the safe direction;</item>
+///   <item>a seek whose bool is captured and then branched on in a HELPER, so the branch text
+///     never appears in this body.</item>
 /// </list>
+///
+/// ⭐ <b>The guard property was tightened in pre-merge review, and the reason is worth keeping.</b>
+/// It first asserted merely that a <c>return</c> appeared between the engine call and each
+/// <c>_position</c> assignment. That is disarmed by ANY unrelated early return after the call — a
+/// cancellation check, a null check — after which an unconditional assignment sits below it and the
+/// lint stays green through the exact defect it pins. It now requires a branch on the bool the
+/// engine returned, which is the fact that actually licenses the assignment.
 ///
 /// ⭐ <b>The second test is NOT the one the plan specified, and the difference is measured.</b> The
 /// plan's version compared counts — <c>Regex.Matches(body, "_position = position;").Count</c> against
@@ -102,19 +115,40 @@ public class FilePlayerSeekReachesTheEngineLintTests
       + "successful seek would reposition the audio and leave the readout behind. Either this "
       + "lint has stopped recognising the assignment, or the success path stopped recording it.");
 
+    // ⛔ The property is "a branch on the value the engine RETURNED", not "a return exists above".
+    // An earlier revision asserted the latter, and pre-merge review showed it is disarmed by any
+    // unrelated early return after the call —
+    //     var moved = _playbackService.Seek(Id, position);
+    //     if (cancellationToken.IsCancellationRequested) { return Task.CompletedTask; }
+    //     _position = position;                      // unconditional. Lint would stay GREEN.
+    // — which is the defect wearing one extra statement. Binding to the returned bool closes it and
+    // accepts both correct shapes (an early return on !moved, or `if (moved) { … }`).
+    var result = Regex.Match(body[seekLine.Value], @"\b(?:var|bool)\s+(\w+)\s*=\s*_playbackService");
+
+    Assert.True(
+      result.Success,
+      "SeekCoreAsync calls _playbackService.Seek(...) without capturing its bool result, so nothing "
+      + "downstream can branch on whether the player actually moved. SoundFlowPlaybackService.Seek "
+      + "returns false when the position is negative, when no player is registered, or when the "
+      + "data provider refuses — discarding that is how a refused seek reports success (AUD-24). "
+      + "Capture it.\nSeek line: " + body[seekLine.Value].Trim());
+
+    var resultVar = Regex.Escape(result.Groups[1].Value);
+    var branchOnResult = new Regex($@"\bif\s*\(\s*!?\s*{resultVar}\b", RegexOptions.Compiled);
+
     foreach (var assignment in afterTheCall)
     {
       var guarded = Enumerable
-        .Range(seekLine.Value, assignment - seekLine.Value)
-        .Any(i => body[i].TrimStart().StartsWith("return", StringComparison.Ordinal));
+        .Range(seekLine.Value + 1, assignment - seekLine.Value - 1)
+        .Any(i => branchOnResult.IsMatch(body[i]));
 
       Assert.True(
         guarded,
         $"'_position = position;' on body line {assignment + 1} follows the engine call with no "
-        + "return between them, so it runs whether or not the player moved. Position is what the "
-        + "panel and /api/audio read — advancing it on a refusal is how a seek that repositioned "
-        + "nothing came to look like one that worked (AUD-24). Put it behind the refusal's early "
-        + "return, or inside an if that tests the returned bool and update this test to match."
+        + $"branch on '{result.Groups[1].Value}' between them, so it runs whether or not the player "
+        + "moved. Position is what the panel and /api/audio read — advancing it on a refusal is how "
+        + "a seek that repositioned nothing came to look like one that worked (AUD-24). Put it "
+        + "behind an early return on the refusal, or inside an if that tests the returned bool."
         + "\nBody scanned:\n  " + string.Join("\n  ", body));
     }
   }

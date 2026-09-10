@@ -309,12 +309,21 @@ public class FilePlayerAudioSourceTests : IDisposable
   {
     // AUD-24, and the whole row in one assertion. A device-free SoundFlowPlaybackService can never
     // register a player (see DeviceFreePlaybackService's own remarks), so Seek returns false
-    // deterministically — which is exactly the shape of a refusal on the box. The reported
-    // position must NOT move, because Position is what the panel and /api/audio read: moving it
-    // here is how a seek that repositioned nothing came to look like one that worked.
+    // deterministically. The reported position must NOT move, because Position is what the panel
+    // and /api/audio read: moving it here is how a seek that repositioned nothing came to look
+    // like one that worked.
     //
     // ⛔ RED ON main: SeekCoreAsync there assigns _position on every path, so this reads 30s.
-    var source = CreateSource(DeviceFreePlaybackService.Create());
+    //
+    // ⚠ This is the shape of a seek against a source with NO REGISTERED PLAYER — not the shape of
+    // a player-refused seek on the box. LoadFileAsync never starts playback, so _playbackId is
+    // null and SeekCoreAsync takes its Debug arm. The WARNING arm (_playbackId set, player still
+    // refuses) is the operator-visible one and is NOT covered by any test — reaching it needs a
+    // failed PlayFileAsync, because _playbackId is assigned before that call. Recorded rather than
+    // papered over: both arms leave Position alone, which is what this asserts, but only one of
+    // them is exercised.
+    using var playback = DeviceFreePlaybackService.Create();
+    var source = CreateSource(playback);
     CreateTestFile("test.mp3");
     await source.LoadFileAsync("test.mp3");
 
@@ -328,7 +337,11 @@ public class FilePlayerAudioSourceTests : IDisposable
   {
     // The range guard runs before the engine is consulted, and must keep doing so: an out-of-range
     // seek is a caller error, not a refusal, and EventPlaybackService distinguishes them.
-    var source = CreateSource(DeviceFreePlaybackService.Create());
+    //
+    // ⚠ This one PASSES on main — the guard already precedes the (absent) engine call there. It is
+    // a pin against the guard being moved below the call, not a red-before-green test.
+    using var playback = DeviceFreePlaybackService.Create();
+    var source = CreateSource(playback);
     CreateTestFile("test.mp3");
     await source.LoadFileAsync("test.mp3");
 

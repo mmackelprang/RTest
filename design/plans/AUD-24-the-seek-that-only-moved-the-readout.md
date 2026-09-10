@@ -949,3 +949,25 @@ box correlates with audible distortion.
   the file was written. **That is a change to how the appliance behaves at startup**, and nobody chose
   it. If you would rather a restart always begin a track from zero, say so and it becomes a one-line
   row — but it should be a decision, not a side effect.
+
+---
+
+## 7. Added during the build — carried forward from pre-merge review
+
+- **⚠ `MonitorPlaybackAsync` and `SeekCoreAsync` now race on `_position`, and the CONSEQUENCE of
+  losing that race changed.** The monitor does a read-modify-write (`_position = _position.Add(interval)`)
+  from its timer thread while `SeekCoreAsync` writes from the request thread. The window is
+  nanoseconds and this is not a practical concern — but on `main` the readout and the audio were
+  wrong *together*, whereas now a lost update leaves the audio at the seek target and the readout
+  counting from the old value, which would surface as § 3 U3's *"runs past the end"*. **Same fix as
+  the `Position` read-through item above** — if `Position` read the player, there would be no second
+  copy to lose. Worth folding into that row rather than opening its own.
+- **⚠ `PreviousAsync` site 1 now does redundant work on the audio path.** With `_position > 3s` while
+  Playing, it seeks the player to zero and then calls `PlayCoreAsync`, which stops that player and
+  starts a new one from the file start. Harmless, but the seek is wasted. A `State != Playing` guard
+  or a comment would settle it.
+- **⚠ The WARNING arm of `SeekCoreAsync`'s refusal branch has no test coverage.** It needs
+  `_playbackId` non-null with the player still refusing, which is reachable without hardware — a
+  failed `PlayFileAsync` leaves `_playbackId` set, because it is assigned before that call — but no
+  test does it. The Debug arm is covered. Both arms leave `Position` alone, which is the behaviour
+  that matters; what is uncovered is the log severity split (§ 0.5 C-9).

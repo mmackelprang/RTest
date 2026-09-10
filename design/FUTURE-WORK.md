@@ -1687,7 +1687,10 @@ not take them as shipped:
   deliberately unreachable until someone restores one line. ⚠ **The latent consequence, unchanged
   from before the fix:** a restored queue sets `_position` to the saved offset while audio starts at
   zero, so `MonitorPlaybackAsync` still counts from the wrong place and ends such a track early.
-  Pre-existing, not a regression, and un-guarding the resume is what would have fixed it.
+  Pre-existing, not a regression — on `main` the restore seek was itself a silent no-op, so the
+  outcome was identical. ⚠ Un-guarding the resume would fix it **only on the success path**: if the
+  player refuses the restore seek, `_position` is still the saved offset from `InitializeAsync` and
+  the track still ends early.
 
 #### What Existed (the 2026-09-02 diagnosis, kept verbatim)
 
