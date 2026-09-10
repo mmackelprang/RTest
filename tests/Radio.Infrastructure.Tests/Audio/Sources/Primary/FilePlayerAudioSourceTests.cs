@@ -7,7 +7,9 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Fingerprinting;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio;
+using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Infrastructure.Tests.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 
@@ -68,6 +70,23 @@ public class FilePlayerAudioSourceTests : IDisposable
       _optionsMock.Object,
       _preferencesMock.Object,
       _testDir);
+  }
+
+  /// <summary>
+  /// A source wired to a real but device-free playback service (AUD-24).
+  /// </summary>
+  /// <remarks>
+  /// An overload rather than an optional parameter on <see cref="CreateSource()"/>, so that none of
+  /// the ~80 existing call sites changes meaning.
+  /// </remarks>
+  private FilePlayerAudioSource CreateSource(SoundFlowPlaybackService playbackService)
+  {
+    return new FilePlayerAudioSource(
+      _loggerMock.Object,
+      _optionsMock.Object,
+      _preferencesMock.Object,
+      _testDir,
+      playbackService: playbackService);
   }
 
   private void CreateTestFile(string relativePath, string content = "test")
@@ -265,18 +284,56 @@ public class FilePlayerAudioSourceTests : IDisposable
   }
 
   [Fact]
-  public async Task SeekAsync_ValidPosition_SeeksSuccessfully()
+  public async Task SeekAsync_WithNoPlaybackService_MovesTheReportedPositionOnly()
   {
-    // Arrange
+    // AUD-24. This is the degraded arm: with no playback service there is no audio to contradict
+    // the field, so moving it is honest. It is NOT evidence that a seek repositions anything —
+    // that is SeekAsync_WhenThePlayerRefuses_LeavesTheReportedPositionAlone below, and the owner
+    // UAT in the plan's §3.
+    //
+    // ⚠ This test replaced SeekAsync_ValidPosition_SeeksSuccessfully, which ran the SAME three
+    // lines under a name claiming a successful seek — and asserted precisely the field write that
+    // WAS the defect. The assertion is unchanged; what changed is that the name and this comment
+    // no longer claim it proves a reposition.
     var source = CreateSource();
     CreateTestFile("test.mp3");
     await source.LoadFileAsync("test.mp3");
 
-    // Act
     await source.SeekAsync(TimeSpan.FromSeconds(30));
 
-    // Assert
     Assert.Equal(TimeSpan.FromSeconds(30), source.Position);
+  }
+
+  [Fact]
+  public async Task SeekAsync_WhenThePlayerRefuses_LeavesTheReportedPositionAlone()
+  {
+    // AUD-24, and the whole row in one assertion. A device-free SoundFlowPlaybackService can never
+    // register a player (see DeviceFreePlaybackService's own remarks), so Seek returns false
+    // deterministically — which is exactly the shape of a refusal on the box. The reported
+    // position must NOT move, because Position is what the panel and /api/audio read: moving it
+    // here is how a seek that repositioned nothing came to look like one that worked.
+    //
+    // ⛔ RED ON main: SeekCoreAsync there assigns _position on every path, so this reads 30s.
+    var source = CreateSource(DeviceFreePlaybackService.Create());
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+
+    await source.SeekAsync(TimeSpan.FromSeconds(30));
+
+    Assert.Equal(TimeSpan.Zero, source.Position);
+  }
+
+  [Fact]
+  public async Task SeekAsync_WhenThePlayerRefuses_StillRangeChecks()
+  {
+    // The range guard runs before the engine is consulted, and must keep doing so: an out-of-range
+    // seek is a caller error, not a refusal, and EventPlaybackService distinguishes them.
+    var source = CreateSource(DeviceFreePlaybackService.Create());
+    CreateTestFile("test.mp3");
+    await source.LoadFileAsync("test.mp3");
+
+    await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+      () => source.SeekAsync(TimeSpan.FromSeconds(-1)));
   }
 
   [Fact]
