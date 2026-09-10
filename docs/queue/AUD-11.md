@@ -149,3 +149,62 @@ capture on this box.** Use `OnProcess` counts, or the node id/serial from the se
 measured.** No timestamped record of the owner's button presses exists for this session. **A
 purpose-built run — note the wall-clock time of each pause, then read the log against it — would
 settle it, and that is the honest next step rather than more log archaeology.**
+
+---
+
+## ⭐⭐ MEASURED 2026-09-10 15:42 EDT — the owner timestamped a pause/resume and it FALSIFIES the premise
+
+The owner paused and resumed at a noted wall-clock time, which is the controlled run
+`AUD-10` / `AUD-11` / `AUD-14` had all been waiting on. Log window read **unfiltered**.
+
+```
+15:42:10.302  Audio source Bluetooth-… state changed from "Playing" to "Paused"     <- THE PAUSE
+              (no stream stop, no generator disposal, no node teardown — nothing)
+15:42:14.910  Audio source Bluetooth-… state changed from "Paused" to "Playing"     <- THE RESUME
+15:42:15.292  ⚠️ Buffer underrun (Single): 50 underruns, 96000 zero samples in last 1.0s
+15:42:18.355  🔬 PipeWire OnProcess: count=1546, interval min=8.99ms max=2036.88ms
+15:42:21.844  PipeWire native stream stopped
+15:42:21.857  Bluetooth device disconnected … reason="Unknown" (user-initiated: false)
+15:42:21.857  BufferedSoundGenerator #6 disposed. received=2062812, output=2110144
+15:42:21.857  Starting reconnection loop for B0:D5:FB:D2:0D:68 (max 20 attempts)
+15:42:21.857  Device already connected — stopping reconnection loop
+15:42:35.418  BT device connected but capture stream missing (attempt 1/3) — attempting recovery
+```
+
+### ⛔ PAUSE DOES NOT DESTROY THE NODE. RESUME IS WHAT BREAKS IT.
+
+**Across the entire 4.6 s pause the stream was untouched** — no teardown, no disposal, callbacks
+still arriving. ⛔ **The long-standing premise that *"pause on the handset destroys the node"* is
+FALSIFIED by direct measurement.**
+
+**Within 400 ms of the resume the buffer starves** — 50 underruns and 96,000 zero samples in one
+second — then callbacks stall for **2036.88 ms**, and ~7 s later the phone drops the link with
+`user-initiated: false`, i.e. **not the owner and not this service.**
+
+⚠ **The last link is STRONGLY SUGGESTED, NOT PROVEN.** Underrun-storm → callback-stall → disconnect is
+one coherent chain in one sample. ⛔ **Do not write it up as established causation from n=1.**
+A repeat run is cheap now that the method exists.
+
+### ⛔ THE RECOVERY IS DISARMED BY A STALE "CONNECTED" READING — a second, separable defect
+
+The reconnection loop starts and **aborts in the same millisecond**, because BlueZ still reports the
+device connected while the audio path is already gone.
+
+⭐ **This is the same family as [`AUD-25`](AUD-25.md)'s phantom `isConnected` — but here it is
+LOAD-BEARING: the stale reading switches the repair OFF.** `AUD-25` was filed as a cosmetic lie in a
+status response; this shows the same class of untruth **disabling a recovery path**. ⚠ **Whoever plans
+either row should read the other.**
+
+⚠ **A different recovery DID fire 13.5 s later** (`capture stream missing (attempt 1/3)`), so the
+system is not defenceless — but it is triggered by a **device-connected** event, not by the failure
+itself, and it left ~14 s of silence.
+
+### ⚠ Also measured, and worth not losing
+
+- **Node discovery took 10 attempts (~10 s)** after connect: `Found PipeWire BT node … (attempt 10)`.
+  ⚠ **Nobody has established whether that is normal.** It is not obviously a defect and it is not
+  obviously fine.
+- **The 15:41:43 disconnect was `reason="LocalHost" (user-initiated: true)`** — a *different* event
+  from the 15:42:21 spontaneous one. ⛔ **Do not conflate them when reading this window.**
+- ⭐ **`ApplyDeferredCaptureState` promoted `Ready → Playing` again** at 15:41:58 — `AUD-12`'s fix
+  working, third sighting.
