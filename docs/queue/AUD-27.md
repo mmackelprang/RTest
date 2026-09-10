@@ -120,3 +120,40 @@ nothing. ⛔ **Do not plan a fix before it has been done.**
 
 ⚠ **And record the wall-clock time of the button press** — the `AUD-11` investigation could not
 correlate pauses with node events for exactly this reason.
+
+---
+
+## ⭐ 2026-09-10 15:42 — a THIRD data point, and it contradicts the filed description AGAIN
+
+From the owner's timestamped pause/resume run, during the **4.6 s the source was `Paused`**:
+
+```
+15:42:10.302  Playing -> Paused
+15:42:14.438  SongRec recognized: 'Heart and Soul' by 'Huey Lewis & The News'
+15:42:14.644  Cover art found for 'Heart and Soul': /api/albumart/0f924e4c2dd0504e.jpg
+15:42:14.645  Shazam metadata replaced AVRCP for BT: 'Heart and Soul'
+15:42:14.910  Paused -> Playing
+```
+
+⛔ **Album art was WRITTEN while the source was PAUSED.** Fingerprinting continued through the pause,
+landed an identification, and **set** the art — the opposite of clearing it.
+
+### Where the row now stands — three observations, no two alike
+
+| # | Source | Observation |
+|---|---|---|
+| 1 | Owner, at the cabinet | *"art … disappears **immediately** when pause is pressed"* |
+| 2 | Direct API read while paused | **Art PERSISTED**; artist persisted; **title clobbered to the device name** |
+| 3 | Log, during a 4.6 s pause | **Art WRITTEN during the pause** by a fingerprint landing |
+
+⛔ **This row cannot be planned from any one of these.** ⚠ **And note the pause in #3 lasted only
+4.6 seconds** — the owner's original sighting may involve a longer pause, a different pause path
+(console vs handset), or a pause taken *before* any identification had landed.
+
+⭐ **Reconciler 1 in the list above — "pause BEFORE fingerprinting lands, so art was never set and
+'disappears' was 'never appeared'" — is now the leading candidate**, because #3 shows the write path
+is alive during a pause. ⛔ **But it is still untested, and #2's clobbered title is unexplained by it.**
+
+⚠ **The polling run specified above is now MORE necessary, not less.** Three samples have produced
+three different answers, and the only thing common to them is that nobody was watching all three
+fields continuously across a single pause.
