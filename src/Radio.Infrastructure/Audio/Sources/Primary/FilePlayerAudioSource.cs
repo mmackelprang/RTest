@@ -657,9 +657,27 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           }
           
           _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
-          _pendingSeekMs = prefs.SongPositionMs;
+
+          // ⛔ AUD-24 — OWNER RULING, 2026-09-10. `_pendingSeekMs = prefs.SongPositionMs;` used to
+          // sit here, and PlayCoreAsync still consumes it. It is deliberately not assigned.
+          //
+          // Repairing SeekCoreAsync would otherwise have made resume-where-you-left-off start
+          // working on every restart — a startup behaviour change nobody asked for, riding along on
+          // a bug fix. The owner declined it for this PR; re-enabling it is exactly this one line.
+          //
+          // ⭐ Not assigning it also makes the two restore arms AGREE. The fallback arm below
+          // ("restore just the last played file") sets _position and never set _pendingSeekMs, so
+          // un-guarding this arm alone would have left a restored QUEUE resuming audibly while a
+          // restored LAST-PLAYED FILE did not. Neither resumes, which is what this appliance has
+          // always done.
           UpdateMetadataFromFile(_currentFile);
-          Logger.LogInformation("Restored queue position at index {Index}: {File} (seek to {Ms}ms)",
+
+          // ⚠ This line used to end "(seek to {Ms}ms)". No seek ever happened — SeekCoreAsync did
+          // not call the engine — so the message had claimed one on every startup for the life of
+          // the file, which is the CLAUDE.md § Pre-Merge Review failure class. With the resume
+          // deliberately guarded above, it would now be claiming one that definitely cannot happen.
+          Logger.LogInformation(
+            "Restored queue position at index {Index}: {File} — reported position set to {Ms}ms; playback will start from the beginning of the track",
             _currentIndex, Path.GetFileName(_currentFile), prefs.SongPositionMs);
         }
         else if (_playlist.Count > 0)
@@ -756,7 +774,17 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       // Successful playback start — reset consecutive skip counter
       _consecutiveSkipCount = 0;
 
-      // Restore persisted playback position if this is the first play after queue restoration
+      // Restore persisted playback position if this is the first play after queue restoration.
+      //
+      // ⛔ AUD-24 — DORMANT BY THE OWNER'S RULING, 2026-09-10, and deliberately kept rather than
+      // deleted. InitializeAsync no longer assigns _pendingSeekMs (see the ruling recorded there),
+      // and nothing else writes it, so this branch cannot currently be entered. It is the whole
+      // consumer half of resume-where-you-left-off: restoring that feature is one line there, and
+      // this block is what it would feed. Deleting it would make that a rewrite instead.
+      //
+      // ⚠ Before this row, the branch DID run and was a second silent no-op — SeekCoreAsync moved
+      // a field and called nothing, under a log line reading "Restored playback position to {Ms}ms".
+      // SeekCoreAsync is fixed, so if the assignment is ever restored this now works.
       if (_pendingSeekMs > 0)
       {
         try
@@ -910,13 +938,86 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// <b>AUD-24.</b> This method used to assign <c>_position</c> and return, which moved the readout
+  /// and the API's reported position while the audio carried on from where it was — the defect
+  /// <c>design/FUTURE-WORK.md</c> § 14a recorded on 2026-09-02 and the owner observed at the cabinet
+  /// on 2026-09-09. Two rules hold it closed:
+  /// <list type="number">
+  ///   <item>the engine is asked to reposition, through the same registration this class already
+  ///     uses for <c>Pause</c> / <c>Resume</c> / <c>SetVolume</c> / <c>StopAsync</c>; and</item>
+  ///   <item>when a playback service is wired, <c>_position</c> advances only if that service
+  ///     reports the player moved — which requires a registered player that accepted the seek.
+  ///     <see cref="Position"/> reads that field, so writing it on a refusal would re-create the
+  ///     defect in a smaller shape.</item>
+  /// </list>
+  /// Leaving the anchor where it was makes the scrubber snap back on the panel's next state read,
+  /// which <c>design/DECISION-LOG.md</c> (ADR-029 amendments, Decision 2) names as the correct
+  /// user-visible answer to a refused seek. ⚠ That entry reaches the same conclusion by a mechanism
+  /// this class does NOT have — it says <c>Position</c> "reads through to the player", which is true
+  /// of <c>AudioFileEventSource</c> and not of this one, whose <c>Position</c> is still the
+  /// wall-clock accumulator <c>MonitorPlaybackAsync</c> advances. The principle is borrowed; the
+  /// read-through is not (see the plan's § 6).
+  ///
+  /// ⚠ <b>The no-playback-service arm still moves the field unconditionally</b>, so rule 2 above is
+  /// hedged on the SERVICE being wired rather than stated as "only when the engine says it moved".
+  /// A source with no playback service cannot produce audio by any route — <c>GetSoundComponent</c>
+  /// returns the <c>ChunkedDataProvider</c>, whose only consumer casts it to
+  /// <c>BufferedSoundGenerator&lt;float&gt;</c> and gets null — so there is nothing for the field to
+  /// contradict; every path that can actually play has a service.
+  /// </remarks>
   protected override Task SeekCoreAsync(TimeSpan position, CancellationToken cancellationToken)
   {
-    // Seeking is only valid for positive positions within the duration
-    // When duration is zero or not set, seeking is limited to position zero
+    // Seeking is only valid for non-negative positions within the duration.
+    //
+    // ⚠ When duration is zero or unknown, ONLY the negative check applies — any non-negative
+    // position is accepted, because there is no upper bound to compare against. An earlier revision
+    // of this comment said seeking was "limited to position zero" in that case, which the second
+    // clause's short-circuit makes false; two tests in FilePlayerAudioSourceTests seek to 30s
+    // against a stub file whose duration IS zero, and both pass.
+    //
+    // ⚠ This guard must stay ABOVE the engine call: an out-of-range seek is a caller error, not a
+    // refusal, and the two are reported differently.
     if (position < TimeSpan.Zero || (_duration > TimeSpan.Zero && position > _duration))
     {
       throw new ArgumentOutOfRangeException(nameof(position), "Seek position out of range");
+    }
+
+    // The degraded configuration described in the remarks above: no service, no audio, so the
+    // field is the position and nothing can contradict it.
+    if (_playbackService is null)
+    {
+      _position = position;
+      Logger.LogDebug("Seeked to {Position} (no playback service — reported position only)", position);
+      return Task.CompletedTask;
+    }
+
+    // Id, not _playbackId. Every assignment to _playbackId is either Id or null — pinned by
+    // PlaybackKeyLintTests rule 1 — so the key is never anything but Id. But the field is CLEARED
+    // by StopCoreAsync and DisposeAsyncCore, and is set optimistically BEFORE PlayFileAsync, so it
+    // can be non-null with no player registered and null while Id is still a perfectly good key. It
+    // answers "a session was started and not yet stopped", which is why it gates the log level
+    // below and NOT this lookup. Only _activePlayers knows whether a player is live, so ask it.
+    var moved = _playbackService.Seek(Id, position);
+
+    if (!moved)
+    {
+      // WARNING only when playback was believed live — a scrub against a stopped player is an
+      // ordinary outcome, and journal volume on the appliance correlates with audible distortion
+      // (CLAUDE.md § Services).
+      if (_playbackId is not null)
+      {
+        Logger.LogWarning(
+          "🎵 FILE PLAYER: seek to {Position} was refused by the player for \"{FileName}\"; the reported position stays at {Reported}",
+          position, Path.GetFileName(_currentFile ?? "(none)"), _position);
+      }
+      else
+      {
+        Logger.LogDebug(
+          "🎵 FILE PLAYER: seek to {Position} ignored — no live player registered", position);
+      }
+
+      return Task.CompletedTask;
     }
 
     _position = position;

@@ -176,3 +176,55 @@ player, so `Seek` returns `false` deterministically. Inject it, seek, and assert
 position did not move**. That is red on `main` today (`main` assigns `_position` on every path) and
 green only after the fix, with no hardware and no `InternalsVisibleTo` — which is ADR-030's first rule
 observed rather than cited.
+
+---
+
+## ⛔ OWNER RULING 2026-09-10 — the resume rides along, and it was declined
+
+Recorded here so it is not re-litigated. The plan's § 0.6 established that repairing `SeekCoreAsync`
+would make **resume-where-you-left-off** start working for free, because `PlayCoreAsync` seeks to the
+persisted `SongPositionMs` on the first play after a queue restore — a startup behaviour change
+nobody asked for, arriving on a bug fix.
+
+**The owner's decision: guard the resume, ship only the seek fix.**
+
+It is separable in one line, exactly as the plan said: `_pendingSeekMs` is assigned at one site in
+`InitializeAsync`, consumed at one site in `PlayCoreAsync`, and `SeekCoreAsync` touches neither. The
+assignment is removed; the consumer is kept and documented as dormant, so restoring the feature is
+the one line that was taken out rather than a rewrite.
+
+⭐ **This makes behaviour CONSISTENT, which is the point of the ruling.** `InitializeAsync`'s fallback
+arm — *"restore just the last played file"* — sets `_position` and never set `_pendingSeekMs`.
+Un-guarded, a restored **queue** would have resumed audibly while a restored **last-played file** did
+not. Guarded, neither resumes — which is exactly what the appliance has always done.
+
+⛔ **The log line was fixed in the same PR, as the ruling required.** The `Information`-level
+*"Restored queue position … (seek to {Ms}ms)"* had claimed a seek that never happened, on every
+startup, for the life of the file — the `CLAUDE.md` § Pre-Merge Review class. With the resume
+guarded it would have claimed one that definitely cannot happen. It now says the reported position
+was set and that playback will start from the beginning of the track.
+
+⚠ **One consequence of the ruling that the plan did not spell out, and it is a real one.** A restored
+queue sets `_position` to the saved offset while the audio starts at zero, and
+`MonitorPlaybackAsync` accumulates from `_position` — so such a track still ends early, by roughly
+the saved offset. **This is pre-existing and not a regression** (it is equally true on `main`, where
+the resume seek was a silent no-op), and **un-guarding the resume is what would have fixed it.** If
+the early end is ever reported as a bug, this is the row that explains it.
+
+## ⚠ Corrections to the plan, found while shipping it
+
+1. ⛔ **The plan's Task 3 second lint test was vacuous against the mutation the plan itself named as
+   its red.** It compared `Regex.Matches(body, @"\bif\s*\(").Count >= Regex.Matches(body,
+   @"_position\s*=\s*position\s*;").Count`. **Measured on the mutated method: 4 ifs, 2 assignments**
+   — so hoisting the assignment above the refusal guard leaves `4 >= 2` and the test stays GREEN.
+   Replaced with an ordering property — every `_position` assignment after the engine call must have
+   a `return` between it and that call — which was then **proven red on that exact mutation**. Same
+   failure family as the brace-less-`if` hole `PHN-10`'s review found in its own lint.
+2. ⚠ **The plan's Task 2 acceptance line says "two new tests red before Task 1". Only one is.**
+   `SeekAsync_WhenThePlayerRefuses_StillRangeChecks` passes on `main`, because the range guard
+   already precedes the (absent) engine call. The plan's own § 2.1 table is correct about this — it
+   reds only under a different mutation — so the acceptance line, not the design, was wrong.
+3. ⚠ **The plan's Task 1 comment asserted *"`_position` advances ONLY when the engine says it
+   moved"*, which the no-playback-service arm makes false.** Shipped with the hedge made explicit
+   rather than as written — a comment claiming an invariant the code does not enforce is the exact
+   class this repo has shipped four times.
