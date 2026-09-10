@@ -103,3 +103,49 @@ Manual recovery, for reference — this is what was used on the night:
 pw-link -d alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FL radio-bt-stream:input_FL
 pw-link -d alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FR radio-bt-stream:input_FR
 ```
+
+---
+
+## 🔬 LOG EVIDENCE GATHERED 2026-09-10 — the owner asked for logs rather than a cabinet run
+
+Item #4 of the phone sitting was *"check the logs for this."* Captured live on `f4d71b28`, Pixel 10
+Pro XL over A2DP.
+
+### ⛔ CORRECTION FIRST — an instrument error made while gathering this, recorded so nobody repeats it
+
+`pactl list short sources | grep -i bluez` returned **nothing**, and this coordinator concluded from
+that there was **no audio path**. ⛔ **That conclusion was FALSE and audio was flowing the entire
+time.**
+
+**This box captures BT through native PipeWire P/Invoke (`PipeWireNativeStream`), not `pw-record`**,
+so the capture **never appears as a PulseAudio source at all**. The node existed and the log names it:
+`bluez_input.B0_D5_FB_D2_0D_68.2 (id=64, serial=27884)`.
+
+⭐ **The correct instrument is the callback counter, which shows the stream live and healthy:**
+
+```
+15:15:09 🔬 PipeWire OnProcess: count=28136, interval min=7.02ms max=14.49ms, bursts=5, execution max=2.74ms
+```
+
+~938 callbacks per 10 s, climbing. ⚠ **`pactl` returning no bluez source is NOT evidence of a missing
+capture on this box.** Use `OnProcess` counts, or the node id/serial from the service's own log.
+
+### What the logs show
+
+- **The node IS destroyed and re-established**, and the service detects it:
+  `BT device connected but capture stream missing (attempt 1/3) — attempting recovery` →
+  `BT pipeline recovery successful — capture stream re-established`, 0.5 s apart.
+- ⚠ **The recovery is raised from a DEVICE-CONNECTED event**, which a pause/resume does not raise —
+  see [`AUD-10`](AUD-10.md), where this is the likely explanation for *"only a full
+  disconnect/reconnect restores it."*
+- **One buffer underrun** in the window: `⚠️ Buffer underrun (Single): 1 underruns, 1920 zero samples`.
+- **`Bluetooth device removed from BlueZ … — evicted from cache`** appears mid-session, followed by a
+  reconnect. ⚠ **Not yet correlated with the owner's pause presses** — the timeline was reconstructed
+  after the fact and nobody recorded when each button was pushed.
+
+### ⚠ What was NOT established
+
+⛔ **The causal link between "pause on the handset" and "node destroyed" is still INFERRED, not
+measured.** No timestamped record of the owner's button presses exists for this session. **A
+purpose-built run — note the wall-clock time of each pause, then read the log against it — would
+settle it, and that is the honest next step rather than more log archaeology.**

@@ -1166,6 +1166,15 @@ box is `x86_64`, so **the literally documented invocation ships ARM binaries to 
 
 ## 5. P2 — Post-GA
 
+> ⛔ **OWNER RULING 2026-09-10 — `AUD-1` AND `AUD-19` ARE PRE-GA. This section's P2/Post-GA tier no longer applies to `AUD-1`.**
+> This resolves a contradiction in which **this document** listed `AUD-1` under *"P2 — Post-GA"* while
+> **`docs/BUILDER_QUEUE.md` scheduled `AUD-19` behind it** — i.e. treated it as buildable now. ⛔ **The
+> two positions could not both be acted on, and nobody had ever put the choice to the owner.**
+> ⭐ **`AUD-1` was confirmed firing in production the same day** — *"Shazam metadata replaced AVRCP for
+> BT: 'Heart and Soul'"*, captured live on the box. See [`queue/AUD-1.md`](queue/AUD-1.md) and
+> [`queue/AUD-19.md`](queue/AUD-19.md).
+> ⚠ **The dependency is unchanged: `AUD-1` still ships before `AUD-19`.** Pre-GA changes **when**, not **what**.
+
 | ID | Item | Why P2 | Effort | Queued? |
 |---|---|---|---|---|
 | **`AUD-1`** | **Split `UseShazamForAllSources` into the two independent decisions it conflates** — *always fingerprint BT* (**necessary**: BlueZ 5.72 ships **no BIP/cover-art implementation**; 7 days of data show **0 AVRCP-sourced art vs 2,560 SongRec-sourced**) and *let SongRec overwrite AVRCP title/artist/album* (**not** necessary — it rewrites `Enter Sandman (Remastered)` → `Enter Sandman`). ⚠ **Do NOT "fix" it by setting the flag `false` — that kills BT album art entirely.** The wanted behaviour already exists at `BluetoothAudioSource.cs:893-905`, on the branch the flag never takes. | The visible symptom is a slightly wrong track title. Real, annoying, not a GA blocker. The danger note is what makes the row worth its size. | 1–2 d | Yes 📋 |

@@ -64,3 +64,14 @@ correct. Check the tap is alive first, as `AUD-1`'s §4.4 does.
 
 **`AUD-1`** — this row has no meaning until the per-field rule exists to diverge from. ⛔ **Do not claim
 it first.**
+
+---
+
+## ✅ OWNER RULING 2026-09-10 — **PRE-GA**, together with `AUD-1`
+
+The owner ruled both this row and [`AUD-1`](AUD-1.md) **pre-GA**, resolving a contradiction in which
+`HANDOFF-GA-PUNCH-LIST.md` §5 listed `AUD-1` as *"P2 — Post-GA"* while this queue scheduled **this row
+behind it** — treating it as buildable now. ⛔ **The two positions could not both be acted on.**
+
+⚠ **The dependency is unchanged: `AUD-1` still ships first.** This row *"has no meaning until the
+per-field rule exists to diverge from."* Pre-GA changes **when**, not **what**.

@@ -68,3 +68,42 @@ because the workaround cost is high and lands on the owner every time.
 Box-only; nothing here is unit-testable. Play over BT, pause on the handset, resume, and confirm
 audio returns without a reconnect. Watch `pactl list cards … sources:` across the cycle — it should
 never reach `0` while the device is connected.
+
+---
+
+## ⛔ RE-CONFIRMED 2026-09-10 at the cabinet — **"still happens"**, on `f4d71b28`
+
+Owner ran the phone sitting on a **Pixel 10 Pro XL**. Item #3: *"still happens."*
+
+⭐ **AND ITEM #1 IS PROBABLY THIS ROW, NOT `AUD-12`.** The owner reported *"playing over BT works, but
+**won't resume after pause** on either the radio console or the phone."* That is this row's symptom
+(*"pressing play again does nothing; only a full disconnect/reconnect from the handset restores it"*),
+not `AUD-12`'s `Ready` stall.
+
+⛔ **`AUD-12`'s mechanism was captured FIRING CORRECTLY in the same session**, which is what separates
+them:
+
+```
+BluetoothAudioSource: phone reports Playing but the source is Ready
+  — promoting to Playing (via ApplyDeferredCaptureState)
+```
+
+**So the `Ready` stall is being caught and promoted. The resume failure is a different defect.**
+
+### ⭐ A recovery path EXISTS and works — but nothing triggers it on resume
+
+Captured live:
+
+```
+15:10:09 [WRN] BT device connected but capture stream missing (attempt 1/3) — attempting recovery
+15:10:09 [INF] Found PipeWire BT node: bluez_input.B0_D5_FB_D2_0D_68.2 (id=64, serial=27884, attempt 1)
+15:10:10 [INF] BT pipeline recovery successful — capture stream re-established
+```
+
+⚠ **That recovery is raised from a DEVICE-CONNECTED event.** A pause/resume does not raise one — which
+is exactly why *"only a full disconnect/reconnect restores it"*: the reconnect is what fires the
+recovery, not the play button. ⭐ **The repair mechanism this row needs may already exist and simply be
+wired to the wrong trigger.** **Check that before designing a new one.**
+
+⚠ **Do not read the `attempt 1/3` cap as the cause without measuring it** — it succeeded on attempt 1
+here, so the cap was never approached in this sample.
