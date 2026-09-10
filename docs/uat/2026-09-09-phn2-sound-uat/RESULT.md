@@ -171,3 +171,37 @@ throughout the defect** and would have stayed green — it uses a fake source, a
 always correct. The cabinet gate is: start one voicemail, start a second, confirm the first goes
 **silent** while the second plays — **plus a TTS control in the same sitting**, because the whole risk
 of the fix is buying #11 by breaking the preemption the owner ruled correct.
+
+---
+
+## ✅ FINAL 2026-09-10 — **8 pass / 1 fail / 0 deferred. Every one of the nine has now actually been run.**
+
+`PHN-10` shipped ([#649](https://github.com/mmackelprang/RTest/pull/649), `914748fe`) and was deployed
+as `914748f`. The owner re-ran the affected checks at the cabinet.
+
+| # | Check | Was | Now |
+|---|---|---|---|
+| 11 | The room never carries **two voices** | ⛔ FAIL | ✅ **PASS** — two voicemails now **replace** rather than overlap |
+| 10 | Doorbell **preempts** cleanly, ducking **releases** after | ⚠ DEFERRED | ✅ **PASS** — triggered by `curl`; **no doorbell hardware was needed after all** |
+
+⭐ **The owner tested MORE than was asked**, and it is the part that matters most: **both directions of
+cross-type preemption** — TTS interrupts voicemail, **and** voicemail interrupts TTS. ⛔ **That is
+precisely what a naive "serialise all event audio" fix would have broken silently**, and no automated
+check in this suite would have caught it.
+
+### ⚠ Check #10 was DEFERRED for a reason that turned out not to hold
+
+It was deferred on 2026-09-09 as *"no doorbell configured on this box"*. It is triggerable by `curl`.
+⭐ **The check sat unrun for a hardware dependency it did not have** — and it was the only one
+exercising preemption *and* ducking release together, on a build where ducking was later proven
+broken. **Re-examine a deferral's stated reason before carrying it forward.**
+
+### What remains
+
+⛔ **#1 (seek) is the only outstanding failure** — [`AUD-24`](../../queue/AUD-24.md), re-confirmed by
+the owner on `f4d71b28` after the deploys: *"dragging the position bar moves the marker, but not the
+music at all."* Untouched by everything shipped in this arc.
+
+⭐ **Nine `SOUND` checks, deferred since `PHN-2` merged 2026-09-05, are now discharged to a single
+known defect** — and every one of the three failures the first sitting found (`AUD-2`, `AUD-24`,
+`PHN-10`) was invisible to a green suite.

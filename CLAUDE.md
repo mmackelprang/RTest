@@ -447,6 +447,36 @@ curl -s http://radio:5000/api/health/version   # API  — gitSha, assemblyName "
 curl -s http://radio:5002/api/health/version   # Web  — gitSha, assemblyName "Radio.Web"
 ```
 
+
+### ⛔ Read the deployed SHA BEFORE a human runs UAT — merged is not deployed
+
+**Measured 2026-09-10: an owner ran a four-part cabinet UAT on `PHN-10` against a box that did not
+have the fix.** It was merged to `main`; the coordinator had offered to deploy, asked *"say when"*,
+and never closed the loop. Four checks, run by a person, against a binary that did not contain the
+thing under test.
+
+**The check that catches it takes four seconds and must run before the human sits down, not after:**
+
+```bash
+curl -s http://radio:5000/api/health/version | grep -o '"gitShaShort":"[^"]*"'
+git log --oneline -1 origin/main       # the two must match, or the UAT tests nothing
+```
+
+⚠ **`main` is what we read; the box is what runs, and nothing in the workflow makes the difference
+loud.** The same failure occurred in the RotaryPhone repo within hours of this one, unprompted and
+independently — an alarm that merged the previous day and was never installed. **Treat the
+merge→deploy gap as structurally invisible rather than as a thing you will remember.**
+
+⭐ **AND IF YOU DISCOVER IT AFTERWARDS, READ THE RESULTS BEFORE DISCARDING THEM.** That sitting
+produced better evidence than a correct one would have: two of the plan's five predicted-broken paths
+**passed on the unfixed build**, falsifying the blast-radius claim the row's P0 tier rested on. Had
+the deploy happened on time, those passes would have read as *"the fix works"* and the overstated
+claim would have entered the record as verified.
+
+**A pre-fix baseline is only ever produced by a mistake** — nobody schedules a measurement of the
+thing they are about to change — **so the only way to get one is to notice you have been handed it,
+at the moment you are most motivated to throw the evidence away and move on.**
+
 **An unmatched path under `/api/` on either service returns 404, and since `UI-11` `Radio.Web` says so
 in JSON.** ⚠ **`Radio.Web` has no SPA fallback and never had one** — it is a Blazor Web App, so
 `MapRazorComponents` registers one endpoint per `@page` route and **no catch-all**, and a mistyped API
