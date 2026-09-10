@@ -166,3 +166,68 @@ itself, and it left ~14 s of silence.
   from the 15:42:21 spontaneous one. ⛔ **Do not conflate them when reading this window.**
 - ⭐ **`ApplyDeferredCaptureState` promoted `Ready → Playing` again** at 15:41:58 — `AUD-12`'s fix
   working, third sighting.
+
+---
+
+## ⛔⛔ CORRECTION 2026-09-10 — **RUN 2 FALSIFIES THE CAUSAL CLAIM RUN 1 PRODUCED. THE PAUSE IS THE TRIGGER, NOT THE RESUME.**
+
+The section above concluded *"pause does not destroy the node — RESUME is what breaks it."* ⛔ **The
+second half is WRONG.** A second timestamped run, with a **52-second** pause instead of 4.6 s,
+separates two events that the first run's short pause had overlapped.
+
+```
+15:49:27.707  Playing -> Paused                                     <- THE PAUSE
+15:49:31.623  ⚠️ Buffer underrun (Single): 1 underruns              <- ~4 s AFTER THE PAUSE
+15:49:32.625  ⚠️ Buffer underrun (Single): 50 underruns, 96000 zero samples in last 1.0s
+15:49:32.678  🔬 OnProcess: count=2749, interval min=7.66ms max=2036.17ms
+15:49:42 -> 15:50:12   OnProcess interval now 19-23ms  (was 7-13ms) <- CALLBACK RATE HALVED
+15:50:19.064  Paused -> Playing                                     <- THE RESUME
+15:50:34.068  ⚠️ No audio data captured after 15004.2554ms and 1416 read attempts
+15:50:49.084  ⚠️ No audio data captured after 15015.227ms and 1415 read attempts
+```
+
+### How run 1 misled, stated plainly
+
+Re-read run 1 against this: its first underrun was at **15:42:14.290 — ~4 s after the pause at
+15:42:10.302** — and the resume at 15:42:14.910 fell **between** that first underrun and the
+50-underrun burst. ⛔ **The resume did not cause the burst; it merely happened in the middle of a
+sequence already under way.** With a 4.6 s pause the two are inseparable. **The longer pause is what
+made them distinguishable, and nothing about run 1's data was wrong — only the reading of it.**
+
+### The corrected sequence, identical in BOTH runs
+
+**pause → ~4 s → buffer starves → ~1 s later a 50-underrun burst → ~2036 ms callback stall →
+callback interval roughly DOUBLES and stays there.**
+
+⭐ **THE STALL FIGURE IS A CONSTANT, NOT NOISE: 2036.88 ms and 2036.17 ms across two runs — 0.71 ms
+apart.** That is a **fixed timeout**, not random starvation. ⭐ **Grep for a 2000 ms constant on the
+capture path; that is the cheapest lead on this row.**
+
+### ⛔ What RESUME actually does: nothing
+
+```
+No audio data captured after 15004ms and 1416 read attempts
+```
+Twice, back to back. **The stream is ALIVE — `OnProcess` keeps counting — and delivering ZERO BYTES.**
+Resume cannot recover because the capture is **running-but-empty**, not stopped.
+
+⭐⭐ **THAT SIGNATURE IS ALREADY A KNOWN UNSOLVED BUG IN THIS PROJECT**, recorded as *"after days of
+uptime + source switches, SoundFlow capture stops delivering audio. Generator in mixer but output=0."*
+— and [`AUD-18`](AUD-18.md), *"the fingerprint tap returned ZERO bytes for 11½ hours."* ⭐ **Same shape,
+and it is now REPRODUCIBLE ON DEMAND WITH A PAUSE BUTTON.** ⛔ **That is the single most valuable thing
+in this row: a months-old intermittent has a deterministic trigger.**
+
+### What survives from run 1
+
+✅ **"Pause does not destroy the node" is STILL TRUE** — no teardown, no generator disposal at the
+pause in either run. **The node survives; the STREAM degrades.** Those are different claims and only
+the causal one was wrong.
+
+✅ **The stale-reading abort reproduced** — `Starting reconnection loop (max 20 attempts)` /
+`Device already connected — stopping reconnection loop`, same millisecond, at 15:48:51. **Second
+sighting.**
+
+⚠ **Still n=2 and still not proven end to end.** The link from underrun-storm to the *spontaneous
+disconnect* seen in run 1 did not recur here — run 2's disconnect happened **before** the pause, not
+after. ⛔ **Do not carry "the starvation causes the disconnect" forward; it now has one supporting
+sample and one non-recurrence.**
