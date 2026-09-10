@@ -66,3 +66,57 @@ pause.**
 
 ⭐ **Found by the owner in a sitting whose stated purpose was four other rows.** It is not covered by
 any `PHN-2` check, and no automated check in this repo asserts anything about metadata lifetime.
+
+---
+
+## ⛔ CONTRADICTED 2026-09-10, HOURS AFTER FILING — measured on the live box with BT PAUSED
+
+**This row was filed on a single owner observation — *"album art … disappears immediately when pause is
+pressed."* A direct measurement of the paused state does NOT reproduce that, and shows something
+different:**
+
+```
+src=Bluetooth  playing=False  paused=True
+title  = 'Pixel 10 Pro XL'          <- the DEVICE NAME, not the track
+artist = 'Huey Lewis & The News'    <- correct, RETAINED
+art    = /api/albumart/0f924e4c2dd0504e.jpg   <- STILL PRESENT
+```
+
+⛔ **The art did NOT disappear. The TITLE was clobbered to the Bluetooth device name**, while artist
+and cover art both survived the pause.
+
+### What this changes
+
+| Filed as | Measured |
+|---|---|
+| *"Art vanishes on pause"* | ⛔ **Art persisted.** |
+| Implied: all metadata cleared together | ⚠ **PARTIAL loss — one field lost, two retained.** |
+| Implied: a single clearing action | ⚠ **Fields behave DIFFERENTLY**, so probably not one clear |
+
+⭐ **The row's real shape is "partial metadata loss on pause, and the title is the field that goes" —
+not "art disappears."** ⚠ **A plan written against the filed description would look for the wrong
+thing in the wrong layer.**
+
+### ⚠ Both observations are the owner's and BOTH may be true
+
+⛔ **Do not resolve this by declaring the owner's original report mistaken.** Plausible reconcilers,
+none yet tested:
+
+1. **Pause BEFORE fingerprinting lands** — art was never set, so "disappears" was "never appeared".
+2. **Two different pause paths** — the owner reported pausing *"on either the radio console or the
+   phone"*; console-pause and handset-pause may not clear the same fields.
+3. **Timing** — art may clear and then be restored by the next identification cycle (~15 s), so a
+   check moments after pause and one minutes after pause disagree.
+4. ⚠ **`title = device name` may be NORMAL AVRCP behaviour when paused** — the phone may simply stop
+   publishing track metadata, and BlueZ falls back to the device name. **If so, the title half is not
+   a defect at all and this row is smaller than it looks.** ⛔ **Establish this FIRST — it is the
+   cheapest of the four and it can dissolve the row.**
+
+### The measurement that settles it
+
+⭐ **Poll `/api/audio/nowplaying` every second across a pause**, from before the press until 30 s
+after, and record all three fields. That distinguishes all four reconcilers in one run and costs
+nothing. ⛔ **Do not plan a fix before it has been done.**
+
+⚠ **And record the wall-clock time of the button press** — the `AUD-11` investigation could not
+correlate pauses with node events for exactly this reason.

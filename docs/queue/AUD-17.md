@@ -121,3 +121,38 @@ conclusion.
 premise instead of contradicting it.** `AUD-1` said "AVRCP can never supply art", so a zero looked
 expected. This row then said "66 arts disprove that", so a decline looked like a regression. Both
 readings came from not checking what the column actually records.
+
+---
+
+## ⛔ 2026-09-10 — **ART IS NOW APPEARING IN BT MODE, AND THIS ROW IS *NOT* FIXED.** Read this before closing it.
+
+The owner observed album art appearing during Bluetooth playback and asked whether it comes from
+fingerprinting. **It does.** Measured on the live box, same session:
+
+```
+Identified track: 'Heart and Soul' by 'Huey Lewis & The News' (confidence: 80 %, source: "SongRec", coverArt: /api/albumart/0f924e4c2dd0504e.jpg)
+Cover art found for 'Heart and Soul' by 'Huey Lewis & The News': /api/albumart/0f924e4c2dd0504e.jpg
+```
+
+That is the exact URL the panel was displaying, and its source is **SongRec**. ⛔ **Zero
+`CacheAvrcpArt` lines appear in the log. The AVRCP cover-art path still has never executed** — which
+is precisely what this row is about.
+
+## ⭐ THE TRAP: A WORKING SYMPTOM THAT READS AS A FIXED ROW
+
+**Art appearing in BT mode looks exactly like this row resolving itself.** It has not. What is
+working is the **fingerprinting** path; what this row tracks — `LinuxBluetoothService` reading MPRIS
+names (`ArtUrl` / `mpris:artUrl`) off an `org.bluez.MediaPlayer1` proxy that publishes **`ImgHandle`**
+— is **still dead and has never run**.
+
+⛔ **DO NOT CLOSE THIS ROW ON THE OBSERVATION THAT ART APPEARS.** The correct test is whether
+`CacheAvrcpArtAsync` executes, not whether an image reaches the panel. ⚠ **They are different
+subsystems that populate the same UI element**, which is the whole reason this is easy to get wrong.
+
+⭐ **Consequence worth stating plainly: this row is only observable when fingerprinting FAILS.** With
+SongRec succeeding on ~80 % confidence, the AVRCP path is masked on every track it identifies. **Any
+future "AVRCP art works now" sighting must be checked against the log before it is believed.**
+
+⚠ **And `AUD-1` is the reason it stays masked**: `UseShazamForAllSources: true` makes SongRec run on
+BT and *replace* AVRCP metadata — confirmed live the same day. **If `AUD-1`'s split lands, the
+relative visibility of this row changes**, and a re-test then is worth more than one now.
