@@ -226,6 +226,21 @@ a failure**."*
 
 ### 0.6 ⭐ The one behaviour change that rides along — and it IS separable, in one line
 
+> ## ⛔ RULED 2026-09-10 — **GUARDED. The resume was declined; only the seek fix shipped.**
+> This section's recommendation ("ship both") was **not** taken. The owner ruled that the resume is
+> a startup behaviour change nobody asked for and must not ride along on a bug fix.
+> `InitializeAsync` no longer assigns `_pendingSeekMs`; the consumer in `PlayCoreAsync` is kept and
+> documented as dormant, so restoring the feature is the one line that was removed. The
+> `Information` log line that claimed *"(seek to {Ms}ms)"* was corrected in the same PR, as the
+> ruling required. ⭐ **Both restore arms now agree** — neither resumes, matching today's behaviour
+> exactly, which is the inconsistency point 1 below warned about. Full record:
+> [`docs/queue/AUD-24.md`](../../docs/queue/AUD-24.md) § *OWNER RULING*.
+>
+> ⚠ **Consequence not spelled out below:** a restored queue still sets `_position` to the saved
+> offset while audio starts at zero, so `MonitorPlaybackAsync` still ends such a track early.
+> **Pre-existing, not a regression** — un-guarding the resume is what would have fixed it.
+> ⛔ **§ 3 U4 therefore cannot pass and is not a gate.** See the note there.
+
 C-4 notes that the fix repairs resume-where-you-left-off for free. **A Builder must know, before Task
 1, whether that can be declined** — *"a startup behaviour change nobody chose"* riding along on a bug
 fix is the kind of thing that gets discovered in a room three weeks later.
@@ -814,7 +829,15 @@ closed.
 `_duration`. **On the broken build, dragging to 75 % of a four-minute track should have ended it about
 a minute later, mid-song.** If you ever saw that, it was this. (§ 0.4.)
 
-**U4 — Does resume-where-you-left-off work now? (`FUTURE-WORK` § 14a's own required check, C-3/C-4)**
+**U4 — ⛔ SUPERSEDED BY THE OWNER'S RULING (§ 0.6). This check CANNOT pass and is NOT a gate.**
+The resume was deliberately guarded, so playback after a restart starts from the beginning of the
+track by design. ⭐ **Run it anyway, once, as a NEGATIVE check:** the readout should show roughly
+where you stopped and the audio should start from the beginning. **That is the PASS.** If playback
+instead resumes audibly near 1:00, the guard did not hold and the PR shipped a startup behaviour
+change the owner declined — report that. The original text is kept below for the day the ruling is
+revisited.
+
+**U4 (original, for the day the resume is re-enabled) — Does resume-where-you-left-off work now? (`FUTURE-WORK` § 14a's own required check, C-3/C-4)**
 *Do:* Play a track, let it reach ~1:00, press Stop. Restart `radio-api`
 (`ssh mmack@radio 'sudo systemctl restart radio-api'`), then press Play.
 *Pass:* playback resumes **audibly** near 1:00. *Fail:* it starts from the beginning while the readout

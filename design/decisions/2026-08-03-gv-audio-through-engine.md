@@ -472,6 +472,20 @@ ADR-022 D4 picked native `<audio>` *for* Range seeking. That reasoning does not 
 
 The contract cost is real but **much smaller than it first appears, because the members already exist in-tree**: `IPrimaryAudioSource` declares `Position` (:19), `IsSeekable` (:24), `SeekAsync(TimeSpan)` (:71), `PauseAsync` (:47) and `ResumeAsync` (:54), and `FilePlayerAudioSource` (`:117`, `IsSeekable => true`) already implements seeking over a local file through `SoundFlowPlaybackService`. **D4 copies those five member signatures verbatim onto `IEventAudioSource` and lifts `FilePlayerAudioSource`'s implementation into `AudioFileEventSource`.** No new API is designed.
 
+> ⚠ **⟨`AUD-24`, 2026-09-10⟩ The clause *"already implements seeking over a local file through
+> `SoundFlowPlaybackService`"* was false on both halves when written, and stayed false for five
+> weeks.** `FilePlayerAudioSource.SeekCoreAsync` assigned `_position` and called nothing, and
+> `SoundFlowPlaybackService` had no seek method at all until `PHN-1a` added one.
+> `design/FUTURE-WORK.md` § 14a recorded the first half on 2026-09-02; the owner observed it at the
+> cabinet on 2026-09-09 (`PHN-2` check #1). Fixed by `AUD-24`.
+>
+> ⭐ **The argument § 8.3 makes is unaffected, and that is the point of annotating rather than
+> rewriting** — seeking a materialised local file is the right mechanism, and it is now real. What
+> was wrong was the evidence offered for it: the claim that it already worked was an assumption
+> about a symbol, not a reading of it. ⚠ Note also that what D4 *actually* lifted into
+> `AudioFileEventSource` was a correct implementation, not this one — `AudioFileEventSource` calls
+> the engine and checks the returned `bool`, which is why the voicemail path was never broken.
+
 Two implementers exist (`AudioFileEventSource`, `TTSEventSource`), so the blast radius is two files. `TTSEventSource` returns `IsSeekable => false` and no-ops `SeekAsync` — seeking inside a spoken text message has no user value, and `AudioSourceState` already contains `Paused` so the state model needs no change.
 
 **Latency budget** — this is what Designer needs, as a number:

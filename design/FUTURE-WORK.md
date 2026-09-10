@@ -1661,9 +1661,35 @@ following the convention set by `radioconsole-gv-markread-readstate-request.md`.
 **Added:** 2026-09-02
 **Priority:** Medium — a capability the UI advertises does not work, but nothing that worked is broken
 
-### 14a. `FilePlayerAudioSource.IsSeekable` claims a seek that does not move any audio
+### 14a. `FilePlayerAudioSource.IsSeekable` claimed a seek that did not move any audio — ✅ FIXED by `AUD-24` (2026-09-10)
 
-#### What Exists
+✅ **Fixed by `AUD-24`** — `SeekCoreAsync` now calls `SoundFlowPlaybackService.Seek` and advances
+`_position` only when the player reports it moved. ⭐ **This entry predated the owner's sighting by a
+week and was never connected to it**: the row was filed on 2026-09-09 as a fresh unknown with three
+open scope questions, all three of which are answered below. **A defect logged here is only worth the
+grep that finds it again** — cite this section from any row that touches seek.
+
+⚠ **The diagnosis below is preserved deliberately** — it is the best account of the mechanism anyone
+wrote, and it is what the row should have found. Read it as history, not as an open item.
+
+⚠ **Two things this entry proposed that `AUD-24` deliberately did NOT do**, so the next reader does
+not take them as shipped:
+
+- **`Position` still does not read through to `SoundFlowPlaybackService.GetPosition`.** It remains
+  the wall-clock accumulator `MonitorPlaybackAsync` advances. That is a second change with a
+  different blast radius — `_position` is also the persisted resume position and the completion
+  deadline — and it is carried forward in the plan's § 6.
+- **Resume-where-you-left-off is still off, by the owner's ruling.** Repairing the seek would have
+  enabled it for free, because `PlayCoreAsync` seeks to the persisted position on the first play
+  after a queue restore. The owner declined that startup behaviour change for this PR, so
+  `InitializeAsync` no longer assigns `_pendingSeekMs`. ⛔ **Which means this entry's own UAT
+  requirement is only half-dischargeable**: the seek half is owner-testable, the resume half is
+  deliberately unreachable until someone restores one line. ⚠ **The latent consequence, unchanged
+  from before the fix:** a restored queue sets `_position` to the saved offset while audio starts at
+  zero, so `MonitorPlaybackAsync` still counts from the wrong place and ends such a track early.
+  Pre-existing, not a regression, and un-guarding the resume is what would have fixed it.
+
+#### What Existed (the 2026-09-02 diagnosis, kept verbatim)
 
 `FilePlayerAudioSource.cs:119` declares `public override bool IsSeekable => true;`.
 `SeekCoreAsync` (`:910-922`) range-checks its argument and then executes `_position = position;`.
