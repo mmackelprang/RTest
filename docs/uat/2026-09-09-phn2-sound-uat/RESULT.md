@@ -205,3 +205,30 @@ music at all."* Untouched by everything shipped in this arc.
 ⭐ **Nine `SOUND` checks, deferred since `PHN-2` merged 2026-09-05, are now discharged to a single
 known defect** — and every one of the three failures the first sitting found (`AUD-2`, `AUD-24`,
 `PHN-10`) was invisible to a green suite.
+
+---
+
+## ⛔ CORRECTION 2026-09-10 — **"every one of the nine has actually been run" IS WRONG. Check #1 as SPECIFIED has probably never been run.**
+
+The `FINAL` block above claims all nine checks have been run. ⛔ **That claim is this coordinator's and it is almost certainly false.** Found by `AUD-24`'s Planner while establishing the defect's layer.
+
+**The specified check and the observed defect are on DIFFERENT SURFACES:**
+
+| | Surface | Component | State |
+|---|---|---|---|
+| **`PHN-2` §3 U5, as written** | *"start a **voicemail** … **tap** the bar"* | `AudioFileEventSource` | ⚠ **NEVER RUN — and it is already CORRECT** |
+| **What the owner actually reported, twice** | *"**Mp3 files** … **dragging** the position bar"* | `FilePlayerAudioSource` via `NowPlayingPanel` | ⛔ **BROKEN — this is `AUD-24`** |
+
+⚠ **`VoicemailPlayer` has no drag handler at all**, so the two are not variants of one gesture on one surface — they are different controls on different components, and only one of them is defective.
+
+### ⭐ Why this matters more than a bookkeeping fix
+
+**A defect was found on a surface the check did not specify, and the check was then marked against it.** Had the owner run U5 exactly as written — voicemail, tap — it would have **PASSED**, because that path calls the engine correctly. `AUD-24` would not have been filed, and the file-player defect would have survived the sitting untouched.
+
+⛔ **So the score was right by accident and the attribution was wrong.** ⭐ **The owner found a real defect by deviating from the script**, which is the strongest argument in this record for why a person at the cabinet outperforms a checklist: the checklist was aimed at the wrong component.
+
+### What is actually true
+
+**8 pass · 1 fail · 0 deferred — but with one check UNRUN AS SPECIFIED**, whose surface is believed correct and has never been confirmed. `AUD-24`'s plan runs **both** surfaces and records them **separately**, rather than closing one by implication. ⛔ **Do not mark U5 discharged until the voicemail-tap path has itself been exercised.**
+
+⚠ **And the row's other citation was wrong too:** `AUD-24` and its queue row both attributed the *"a caller that posts … gets `200` … has been misled"* reasoning to `CLAUDE.md`. **The word *seek* does not appear in `CLAUDE.md`.** The quote is `DECISION-LOG`'s, about `MaxSpeechChars` **truncation**, citing seek only as precedent. That citation was written by this coordinator and propagated into three documents without the source ever being opened.
