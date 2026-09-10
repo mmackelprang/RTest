@@ -231,6 +231,25 @@ public class AudioController : ControllerBase
             await seekSource.SeekAsync(request.SeekPosition.Value);
             _logger.LogInformation("Seeked to {Position}", request.SeekPosition.Value);
           }
+          else
+          {
+            // AUD-24. This arm used to fall through in silence and still return a 200 with a fresh
+            // state snapshot, so a client could post a seek, be told nothing was wrong, and hear no
+            // change. The response shape is unchanged deliberately — UpdatePlaybackState returns
+            // GetPlaybackState() for every action and the panel re-reads it; altering that is an
+            // API-shape decision, not a bug fix. What changes is that the refusal is now visible to
+            // anyone reading the log.
+            //
+            // ⚠ "was not attempted" is exactly what happened — not "failed", and not "refused",
+            // which would describe a decision the source made. It did not get the chance.
+            _logger.LogWarning(
+              "Seek to {Position} was not attempted: source {SourceId} is {Reason}",
+              request.SeekPosition,
+              primarySource?.Id ?? "(none)",
+              primarySource is IPrimaryAudioSource s
+                ? (s.IsSeekable ? "seekable but no position was supplied" : "not seekable")
+                : "not a primary source");
+          }
           break;
 
         case PlaybackAction.None:
