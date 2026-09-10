@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (55)
+## Shipped rows (56)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2518,3 +2518,52 @@ measurement.
 ⚠ **Two pre-existing defects were surfaced and deliberately NOT fixed**, both adjacent to the changed lines: switching source during an active duck leaves the new source at full volume (`StopAsync` removes the multiplier before registration reads it back — and this fix makes it *observable* for the first time), and `_duckingMultipliers` is read outside `_playersLock` at four registration sites.
 
 ⭐ **Both pre-merge reviewers found the same irony, independently: the PR shipped two overclaiming comments inside the PR about overclaiming comments.** A warning asserted *"the playback key and its Id have diverged"* on a condition that does not establish it — four paths reach `Playing` with nothing registered and nothing diverged — and the lint called a defensive regex guard "load-bearing" while being wrong about the count, the anchors and the mechanism. Both were corrected before merge. **A third instance appeared during the fix itself**: the corrected line-number anchors had already shifted again by the time they were typed, because the same commit was editing those files. The self-referential anchors are now symbol names.
+
+---
+
+### PHN-10 — Nothing can stop a voicemail: the teardown's first statement disarmed the guard its last statements depended on.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#649](https://github.com/mmackelprang/RTest/pull/649) — **owner UAT PASSED at the cabinet 2026-09-10** |
+| Plan | [`PHN-10-nothing-can-stop-a-voicemail.md`](../design/plans/PHN-10-nothing-can-stop-a-voicemail.md) |
+| Spec / handoff | _no spec doc_ · **ADR-029 §6.2 rule 1** (attended vs attended → **replace**) · [`PHN-2` SOUND UAT 2026-09-09](uat/2026-09-09-phn2-sound-uat/RESULT.md) checks #10 and #11 |
+| Depends on | — _(none. ⛔ **`PHN-1f` was FALSIFIED as a dependency** — attended playback registers at priority **6**, `PreemptAtPriority` is **8**, so the queue's predicate can never see a voicemail as a blocker. The row's premise that "`PHN-1f` shipped the queue that was supposed to prevent this" was wrong.)_ |
+| Branch | `fix/phn-10-nothing-can-stop-a-voicemail` |
+
+**Detail: [`queue/PHN-10.md`](queue/PHN-10.md)**
+
+**The mechanism.** `TearDownAsync`'s **first** statement disarmed the guard its **last** statements depended on. `playback.Cancel()` cancelled `_playbackCts` (linked over that token); `AwaitCompletionAsync`'s filter did not swallow it; `PlayWithSoundFlowAsync`'s `catch (OperationCanceledException)` set `_isPlaybackActive = false` **while stopping nothing** — its comment said `// Playback was stopped`, and it had not been. `StopCoreAsync` and `DisposeAsyncCore` then both skipped `SoundFlowPlaybackService.StopAsync`, the only call performing `MasterMixer.RemoveComponent`. A **500 ms** `DuckingReleaseMs` fade sat between the cancel and the guard read, making it **deterministic, not racy**. `TTSEventSource` called the same stop **unconditionally** — that asymmetry was the entire bug. The fix deletes a conjunct from two guards and wraps in try/catch: **no queue, no arbitration, no new state.**
+
+⭐ **THE OWNER'S RULING WAS THE SPECIFICATION, NOT A CONSTRAINT TO DESIGN AROUND.** The row was filed with two behaviours and an explicit note that only one was certainly wrong. The owner ruled at the cabinet that **a second TTS interrupting the first is CORRECT**. That collapsed the row: the two paths are **one behaviour** — same method, slot, priority and ADR rule — and the fix preserves TTS preemption **by adding nothing**.
+
+⛔ **AND IT RETIRED A VERIFICATION CRITERION THAT WOULD HAVE GATED ON THE WRONG BEHAVIOUR.** The row and this coordinator's dispatch both said *"assert the PRESENCE of serialisation — the second waits, then plays."* **ADR-029 §6.2 rule 1 says the opposite:** attended vs attended → **replace**, because *"queueing behind 40 seconds of voicemail would be baffling."* **A build where the second voicemail waits satisfies that criterion and violates the ADR.** Caught by the Planner, not by review.
+
+## ⛔ THE BLAST-RADIUS CLAIM WAS OVERSTATED, AND AN ACCIDENT PROVED IT
+
+The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (ADR §7.1's "THE guarantee"), the `/sleep` edges and the last-circuit backstop** all funnelled through the one disarmed guard. **This coordinator re-tiered the row to P0 on that breadth.**
+
+⚠ **Two of the five demonstrably worked WITHOUT the fix.** The owner ran the four-part UAT against a box still on the **previous build** — the coordinator had offered to deploy, asked "say when", and never closed the loop. Measured on the **unfixed** binary:
+
+| Check | Plan predicted | Measured pre-fix |
+|---|---|---|
+| U3 Stop button | broken, "never once checked" | ✅ **PASSED** |
+| U4 Doorbell preempt + ducking release | "would have FAILED for this same cause" | ✅ **PASSED** |
+| U1 Two voicemails | broken | ⛔ FAILED (correct — defect present) |
+| U2 TTS preemption | works | ✅ PASSED |
+
+**So the mechanism was real and the scope was not.** Stop and doorbell reach the stop by a route that does not pass through that guard.
+
+⭐ **THE ACCIDENT WAS WORTH MORE THAN THE CLEAN RUN WOULD HAVE BEEN.** Had the deploy happened on time, all four checks would have passed against the fix, and the overstated scope claim would have entered the record as **verified**. Failing to deploy bought a **pre-fix baseline** — the one control nobody ever schedules. **The general form, now house practice: when you discover you tested the wrong build, READ THE RESULTS BEFORE DISCARDING THEM.**
+
+⚠ **A second inference, also wrong, in the opposite direction.** From "U3 and U4 passed pre-fix" the coordinator reasoned the guard was probably not on the voicemail path either, and told the owner the fix was at *less than even odds*. **It was on the voicemail path.** The observation supported a narrower claim than was drawn from it — the same failure shape as the day's others, merely pessimistic rather than optimistic.
+
+**Owner UAT, 2026-09-10, on `914748f`: U1 PASSED, U2 PASSED.** Two voicemails now replace rather than overlap, and the owner independently verified **both directions** of cross-type preemption — TTS interrupts voicemail, voicemail interrupts TTS — which is more than was asked and is exactly what a naive fix would have broken silently.
+
+⭐ **`PHN-2` check #10 (doorbell) was discharged in the same arc, from `DEFERRED`, with no doorbell hardware — triggerable by `curl`.** It had been deferred since the original sitting as the only check exercising preemption *and* ducking release together.
+
+⚠ **Three plan claims were found false by the Builder and are recorded rather than quietly dropped:** `C-911`'s "closes this window as a by-product" (it does not — that is a *registration ordering* problem in `SoundFlowPlaybackService`, filed as `FUTURE-WORK` 37 with reachability explicitly **unmeasured**); "provably dead" for the dispose guard (the join swallows both `TimeoutException` and `OperationCanceledException`, so it was dead for a different reason); and §0.6 listing `AudioSourceBase.cs` among files "not modified" while Task 4 directed an edit to it.
+
+⚠ **A regression lint shipped with a hole exactly where it mattered**, caught by review rather than by the Builder: a brace-less `if (flag) Stop();` defeated the walk entirely — **and that style is already idiomatic in the directory the lint scans**, so four call sites could have been de-braced with the lint still green.
+
+⛔ **WHY THIS ENTRY CARRIES ITS OWN FALSE JUSTIFICATION RATHER THAN QUIETLY DROPPING IT — A ROW THAT SHIPPED SUCCESSFULLY ON PARTLY-FALSE REASONING IS MORE DANGEROUS THAN ONE THAT FAILED.** The fix was right; the **priority call rested on something untrue**. The row now sits in the record as a **success**, and the next person cites it as precedent — *"we P0'd this class of guard defect before and it shipped clean"* — inheriting the false half **with no signal that it was false**. ⭐ **A failed row gets re-examined. A successful one does not.** A correct outcome retrospectively launders the reasoning that produced it, and nothing in the outcome distinguishes a sound rationale from a lucky one. *(Framing contributed by the RotaryPhone session, 2026-09-10.)*
