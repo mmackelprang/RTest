@@ -37,6 +37,23 @@ display-only and position is a wall-clock estimate"*) and `design/DECISION-LOG.m
 Amendments Decision 2, which names `FilePlayerAudioSource` as *"out of scope, and logged with its own
 UAT requirement in `design/FUTURE-WORK.md` §14a"*.
 
+> ⭐⭐ **THE TRANSFERABLE PART, STATED PLAINLY, BECAUSE IT IS THE MOST REUSABLE THING IN THIS ROW.**
+> **This is not a claim that was wrong. It is a correct answer that sat unread for a week while a
+> person found the same defect by ear.** Three documents held the diagnosis — one of them held the
+> *fix* — and the row was opened with three scope questions they had already answered. The cost was
+> not a bad decision; it was a fifteen-minute cabinet sitting and a P1 row that did not need to exist
+> as an unknown.
+>
+> ⛔ **The failure mode is not laziness, it is that nothing pointed.** `FUTURE-WORK` §14a cites
+> `PHN-1a`; nothing cites §14a. The `AUD` prefix collision recorded in `BUILDER_QUEUE`'s ID-namespace
+> section diagnosed the identical mechanism and named the remedy: *"the collision was **the absence of
+> a cross-citation**, not bad luck — so a new row that cites its counterpart section is a row that
+> cannot silently diverge."* **That remedy was written for IDs and applies unchanged to defects.**
+>
+> **So: before filing a defect row, grep `design/FUTURE-WORK.md` and `design/AUDIO-PIPELINE-REVIEW.md`
+> for the symbol.** Two greps. Had either been run on `SeekCoreAsync` or on the word *seek*, this row
+> would have opened with the mechanism in hand.
+
 **② `CLAUDE.md` does NOT record the "throw rather than no-op / has been misled" reasoning.** The row,
 the queue row and the dispatch all attribute it there. The word *seek* does not appear in `CLAUDE.md`
 at all. The quote lives in `design/DECISION-LOG.md`, it is about **`MaxSpeechChars` truncation**, and
@@ -204,6 +221,45 @@ a failure**."*
   with audible distortion, and `radio-api`'s console sink is WARNING-and-above since `LOG-11`. A
   refusal warning that fires on every scrub of a stopped player would be noise on the journal. Task 1
   gates the severity on whether playback was believed live.
+
+---
+
+### 0.6 ⭐ The one behaviour change that rides along — and it IS separable, in one line
+
+C-4 notes that the fix repairs resume-where-you-left-off for free. **A Builder must know, before Task
+1, whether that can be declined** — *"a startup behaviour change nobody chose"* riding along on a bug
+fix is the kind of thing that gets discovered in a room three weeks later.
+
+**Answer: fully separable. The two are coupled through exactly one field with exactly one writer.**
+
+- `FilePlayerAudioSource.InitializeAsync` assigns `_pendingSeekMs = prefs.SongPositionMs` at **one
+  site**, inside the queue-restoration arm, and logs *"Restored queue position at index {Index}:
+  {File} (seek to {Ms}ms)"* at Information.
+- `PlayCoreAsync` consumes it at **one site**, gated `if (_pendingSeekMs > 0)`, and clears it.
+- **`SeekCoreAsync` neither reads nor writes it.**
+
+So the seek fix and the resume behaviour meet only at that one assignment. **To ship the fix without
+enabling resume, guard or remove that single assignment** — `_position` keeps being restored (the
+readout still shows where you stopped, exactly as today) and no seek is attempted. **To ship both,
+change nothing.** Either way Task 1 is identical.
+
+⚠ **Two facts that should inform the choice, both measured while planning:**
+
+1. ⭐ **The two restore arms already disagree, and nobody noticed.** `InitializeAsync`'s *fallback*
+   arm — *"restore just the last played file"* — sets `_position` and **not** `_pendingSeekMs`. So
+   after the fix, restoring from a saved **queue** would resume audibly while restoring a single
+   **last-played file** would not. **That inconsistency exists today and is invisible today**, because
+   neither arm resumes anything. The fix makes one of them start working and leaves the other alone.
+   ⛔ **Whichever way the owner rules, make both arms agree** — that is the part not choosing is
+   choosing.
+2. **The Information-level log has been claiming a seek that never happened**, on every startup with a
+   restored queue, for the life of the file. Same failure class as `SeekCoreAsync`'s own Debug line.
+
+**Recommendation: ship both, and put U4 in front of the owner** — resuming where you stopped is the
+behaviour the persisted field, the restore code and the log message have all claimed for years, and
+declining it means keeping three pieces of code that describe a feature the appliance does not have.
+⛔ **But it is the owner's call, not Builder's.** If the PR review has no ruling, ship the seek fix and
+guard the assignment; a feature that appears without being asked for is worse than one that waits.
 
 ---
 
@@ -841,9 +897,30 @@ box correlates with audible distortion.
 - **`EventPlaybackService.SeekAsync` returns `true` for a player-refused seek.** Closed as "no" once;
   the owner now has a surface where a refusal is visible, so it may be worth re-asking. **Do not
   re-open it inside this row.**
-- **⚠ `docs/BUILDER_QUEUE.md`'s ID-namespace section says the next free `AUD` number is `AUD-24`.**
-  It is taken. The next Planner to mint an `AUD` row must not read that line literally. Corrected in
-  the same commit as this plan's queue update.
+- **⚠ `docs/BUILDER_QUEUE.md`'s ID-namespace section said the next free `AUD` number was `AUD-24`.**
+  It is taken, and so was `PHN-10`. Corrected in the same commit as this plan's queue update.
+- **⛔ THE QUEUE'S COUNT SITES MUST BE RE-ENUMERATED, NOT ASSUMED — and this is a bigger finding than
+  the stale number it produced.** The count sentence read `**30** live, **55** archived, **85**
+  total` while the tree held 29/56/85: `c1b9972c` archived `PHN-10` without updating it. ⭐ **But the
+  interesting part is why repeated verification missed it.** The standing procedure verifies "four
+  count sites" with regexes tuned to the canonical phrasing; `PHN-10`'s Builder wrote its count in
+  **prose** — `Counts unchanged: N live, N archived, N total` — a shape those patterns cannot see.
+  **The instrument was validated against the sites that existed when it was written, and an agent
+  then created a site in a phrasing it could not match.** *"Four count sites"* was a description of
+  the file at a moment, never a constraint on it — and there is **one** count site in
+  `BUILDER_QUEUE.md` today, not four.
+  **The rule: enumerate by meaning, not by pattern**, with something markdown-tolerant:
+  `grep -noE "[*0-9]+ ?(live|archived|total)" docs/BUILDER_QUEUE.md docs/BUILDER_QUEUE_ARCHIVE.md`.
+  ⚠ **The obvious `[0-9]+ live` returns ZERO hits** against a file holding dozens of counts, because
+  every one is bolded as `**29** live` and the digits are not adjacent to the word. *(That was this
+  entry's own first draft. The advice was defeated by the exact mechanism it had just described — so
+  validate the instrument on a case you know is there before trusting a clean sweep.)* ⭐ **Then read
+  the hits rather than counting them:** only the **newest banner entry** must be current; every count
+  below it belongs to a `Previously` entry, is a true record of its own moment, and must not be
+  rewritten. ⭐ **Same family as the two traps
+  `CLAUDE.md` already records** — `dotnet test | tail` reporting `tail`'s exit code, and a failed
+  `git push` ending `Everything up-to-date`: **an instrument that cannot see the state it claims to
+  measure, whose clean result is indistinguishable from a true one.**
 - **⚠ To the owner — one question this plan does not answer.** § 3 U4 makes resume-where-you-left-off
   start working after a restart, because the fix repairs a call that has been silently failing since
   the file was written. **That is a change to how the appliance behaves at startup**, and nobody chose
