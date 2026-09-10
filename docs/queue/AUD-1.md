@@ -130,3 +130,42 @@ landed identification (`:563-573`, `:631-641`) without consulting which branch t
 the count proves the play-history RECORD carries SongRec's titles** — it does **not**, on its own,
 prove the source's metadata was overwritten. That is true too, but it is established by reading the
 code, not by this count. Both facts survive; only the inference from one to the other does not.
+
+---
+
+## ⭐ CONFIRMED IN PRODUCTION 2026-09-10 — the defect logged itself, verbatim
+
+Captured from the live box during the owner's phone sitting, on a Pixel 10 Pro XL playing over A2DP:
+
+```
+15:13:48 Identified track: 'Heart and Soul' by 'Huey Lewis & The News' (confidence: 80 %, source: "SongRec")
+15:13:48 Updating Bluetooth Audio metadata from fingerprinting: Heart and Soul by Huey Lewis & The News
+15:13:48 Cover art found for 'Heart and Soul': /api/albumart/0f924e4c2dd0504e.jpg
+15:13:48 Shazam metadata replaced AVRCP for BT: 'Heart and Soul' by 'Huey Lewis & The News'
+```
+
+⭐ **`"Shazam metadata replaced AVRCP for BT"` is this row's thesis, printed by the running system.**
+Until now the row rested on a code read plus a single historical log line. **This is the strongest
+evidence it has ever had, and it was captured incidentally while investigating four other rows.**
+
+⚠ **Note what it does NOT show.** Here Shazam's answer was *correct* — the phone really was playing
+Huey Lewis. **The defect is that it OVERWRITES, not that it is wrong**; the harm appears when the
+identification is wrong or when AVRCP carried a better title (*"Enter Sandman (Remastered)"* →
+*"Enter Sandman"*). **Do not let a correct-looking overwrite be read as evidence the row is invalid.**
+
+## ✅ OWNER RULING 2026-09-10 — **`AUD-1` AND `AUD-19` ARE PRE-GA**
+
+This resolves a standing contradiction between two documents that **could not both be acted on**:
+`HANDOFF-GA-PUNCH-LIST.md` §5 (*"P2 — Post-GA"*) listed `AUD-1` as post-GA, while the queue scheduled
+[`AUD-19`](AUD-19.md) **behind** it — i.e. treated it as buildable now. **Both are now pre-GA.**
+
+⛔ **THE TRAP THAT MUST SURVIVE THIS RULING — DO NOT RENAME THE FLAG WHEN SPLITTING IT.** The SQLite
+config store outranks both JSON layers and already holds `fingerprinting:useShazamForAllSources|true`.
+**Renaming orphans that row**, the new key falls through to `appsettings.json`'s `false`, and
+**BT album art dies entirely** — the exact outcome this row exists to prevent. ⚠ **This is measured,
+not theoretical: `fingerprinting:fpcalcPath` is already sitting orphaned in that store** from the
+AcoustID→SongRec rename. **Keeping the name makes migration a genuine no-op.**
+
+⚠ **And `AUD-27` now acts on the same field in the OPPOSITE direction** — it erases art that landed
+correctly, where this row writes metadata that should not have been written. **A fix for either that
+does not name the other risks trading one defect for the other.**
