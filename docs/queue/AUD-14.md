@@ -68,3 +68,31 @@ transport drops, reconnect, and confirm exactly one watcher is live and the init
 ⚠ Currently blocked — the owner's phone is unavailable.
 
 ⚠ This touches the live audio path on a device event. **Not auto-mergeable.**
+
+---
+
+## 🔬 2026-09-10 — BT was PAUSED on the box and the capture stream stayed ALIVE
+
+The owner reported *"the BT audio is paused right now"* during the phone sitting. Measured in that
+state, on `9ca42590`:
+
+```
+src=Bluetooth  playing=False  paused=True
+🔬 PipeWire OnProcess: count=5185 -> 5654     (still climbing while PAUSED)
+```
+
+⭐ **The native capture stream keeps running and delivering callbacks through a pause.** It is not
+torn down by the pause itself in this instance.
+
+⚠ **This does NOT settle `AUD-11`'s question, and must not be quoted as if it does.** An earlier
+sample the same day showed the node missing and a recovery firing
+(*"BT device connected but capture stream missing (attempt 1/3)"*). **So the node survives some pauses
+and not others**, and nobody has yet established what distinguishes them. ⛔ **Two samples, opposite
+outcomes, no controlled variable.**
+
+⚠ **Note also that `radio-api` restarted between the two samples** (a deploy), which is why the
+`OnProcess` counter resets — **do not read the lower count as degradation.**
+
+**The honest next step is the timestamped run**: note the wall-clock moment of each pause and each
+resume, then read the log against it. Both this row and `AUD-10`/`AUD-11` are waiting on the same
+measurement.
