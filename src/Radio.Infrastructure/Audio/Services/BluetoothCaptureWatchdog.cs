@@ -24,6 +24,17 @@ namespace Radio.Infrastructure.Audio.Services;
 /// BT-disabled, the registered implementation is
 /// <see cref="NullCaptureStreamSnapshotSource"/>, which always returns
 /// <c>null</c>; the watchdog then idles without ever firing.
+///
+/// ⚠ THIS WATCHDOG MEASURES LIVENESS, NOT CORRECTNESS, and the distinction is load-bearing. It compares
+/// elapsed time since the last OnProcess callback and nothing else. A capture stream bound to the WRONG
+/// source — AUD-11, where PipeWire re-linked radio-bt-stream to the built-in analog capture after the
+/// bluez_input node vanished — delivers callbacks perfectly on schedule, so this watchdog stays silent
+/// at every possible threshold. ⛔ Do not try to make it catch that by lowering
+/// OnProcessStallThresholdMs: it would fire on healthy BT and still never fire on this. Peer identity
+/// is answered by LinuxBluetoothService.AuditCaptureStreamPeer and by OnRegistryNodeDisappeared.
+/// ⚠ And while a capture is parked waiting for its node (AUD-10) there is no stream, so the snapshot
+/// is null and this watchdog is idle — by design, not a gap: the absence is reported by
+/// PipelineStatus = WaitingForCaptureNode instead.
 /// </remarks>
 internal sealed class BluetoothCaptureWatchdog : BackgroundService
 {

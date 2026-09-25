@@ -874,6 +874,51 @@ a settings-field-that-lies. **Functionally fine. Do not "finish" the swap.**
 
 ---
 
+## BT capture follow/refuse (`AUD-10` + `AUD-11`) — seven things deliberately not done
+
+**Status:** filed 2026-09-25 by the Builder shipping `AUD-10` + `AUD-11` as one PR
+(`fix/aud-10-follow-the-bt-node`). None is a stub; each is a decision not to widen that PR.
+
+1. **USB capture falls back to the first enumerated device** (`USBAudioSourceBase.cs`, AUD-11 plan
+   `C-167`). ✅ **Already a queue row — `AUD-13`.** Listed here only so the AUD-11 plan's §6.1 pointer
+   resolves.
+2. **`capture-{i}` device ids are enumeration indices** (`SoundFlowDeviceManager`, persisted as
+   `AudioPreferences:CurrentInput`). **Latent** — no capture-open path reads the persisted id; the only
+   consumer is `DevicesController`. A note, not a defect; recorded so it is not "discovered" again.
+3. **Dropping `node.autoconnect` in favour of explicit `pw-link` links** (AUD-11 plan §6.2). Held in
+   reserve, **not rejected**: it is the next move only if the box session shows WirePlumber 0.4.17
+   ignoring `node.dont-reconnect` (the stream still lands on `alsa_input…analog-stereo` after a pause).
+4. **A periodic peer audit** (AUD-11 plan §6.3). The audit runs once per bind (initial acquisition and
+   every AUD-10 re-bind). A timer would mean a `pw-link` subprocess on a schedule on a box where
+   subprocess churn correlates with audible distortion. **Justified only by a wrong binding observed
+   WITHOUT a preceding node removal** — that would be a new row.
+5. **An explicit BlueZ transport `Acquire` over D-Bus** (AUD-10 plan §7). The shipped re-bind rests on
+   PipeWire re-acquiring the transport when something links the recreated node (read from source,
+   `media-source.c`, not measured). **If the box session shows the stream linked to the new serial but
+   the transport stuck at `pending`, this is the next candidate.**
+6. **The phantom disconnect and phantom eviction** seen in the same 2026-09-25 window (AUD-10 plan §6)
+   and the open-loop resampler ratio (`AUD-15`). Not touched. The two phantoms are filed as
+   **`AUD-30`** and **`AUD-31`** (PR #662).
+7. **The registry listener does not notice a PipeWire daemon restart** (review of `97b6b4e`, MEDIUM).
+   It registers no core `error`/disconnect listener, so after `systemctl --user restart pipewire`
+   without a radio-api restart, `IsHealthy` stays `true`, the Plan B scrape stays off, and no registry
+   event arrives again. The 30 s parked probe (`LinuxBluetoothService`) is the only re-bind left — too
+   slow for the ~4 s life of a recreated node. **Not new** (the listener was dead before this PR), but it
+   matters now that the listener is the primary path.
+   - **What's needed:** a `pw_core_events` listener on `_core` via the same
+     `pw_proxy_add_object_listener` (`pw_core_add_listener` is a macro, like `pw_registry_add_listener`);
+     on the core `error` event that signals disconnection (⚠ believed to be `id == PW_ID_CORE`,
+     `res == -EPIPE` — **unverified**, check `src/pipewire/core.c` before relying on it), set
+     `IsHealthy = false`, restart the chain,
+     and let `EnsureRescanLoopRunning` fall back meanwhile. Must be proven on the box by restarting
+     PipeWire with nothing playing.
+   - **Mitigation today:** the standing BT recovery procedure already restarts radio-api after any
+     PipeWire/WirePlumber restart (memory `feedback_bt_audio_recovery_sequence`), which rebuilds the
+     listener. The gap is an *unplanned* daemon restart.
+   - **Priority:** P2 — file as a row if a PipeWire restart is ever seen without a radio-api restart.
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed

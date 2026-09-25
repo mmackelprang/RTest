@@ -289,3 +289,26 @@ and PipeWire created a new node (serial 59112) under the same name.
 ⛔ **Plan this row together with `AUD-10`.** `node.dont-reconnect` alone would stop the line-in fallback
 but leave the stream bound to a serial that never returns; the fix must also re-bind to the recreated
 node, and must not let `dont-reconnect` block that.
+
+---
+
+## 🚧 BUILT 2026-09-25 — as Task D of `AUD-10`, one PR, NOT merged, NOT deployed
+
+Branch `fix/aud-10-follow-the-bt-node`. Full write-up, the plan claims found false, and the box-session
+checklist are in [`AUD-10`](AUD-10.md)'s last section. This row's proof is steps 2 and 5 there:
+`radio-bt-stream` must never be on `alsa_input…` after a pause.
+
+The scope questions above are answered by the plan (§1.1, §1.2, §0.6), with one amendment: §1.2's
+re-arm path was dead, and the re-arm is `AUD-10` Task C. `dont-reconnect` does not block following the
+node, because the follow starts a NEW stream against the new serial. What shipped for this row:
+
+- `node.dont-reconnect = true` in the stream properties; `PW_ID_ANY` untouched.
+- A zero serial is refused before a native stream is built (pw-record fallback, targets by name), and
+  `PipeWireNativeStream`'s constructor rejects 0.
+- `state_changed` is wired: transitions logged (Error at Warning, others Information).
+- A node removal tears the stream down and parks it — matched by the bound **serial**, not just MAC.
+- A fail-closed peer audit (`ParsePwLinkOutputForStreamPeers`, fixtures verbatim from this dossier)
+  replaces the dead, fail-open `IsPwRecordLinkedToBtNode`, and runs after every bind.
+- `PipelineStatus.WaitingForCaptureNode`; `/health` reports it Degraded. ⚠ **The health switch HAD a
+  discard arm** (`_ => Unhealthy("Unknown pipeline state")`), so without the new arm every pause would
+  have reported Unhealthy — pinned by a test.

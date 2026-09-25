@@ -464,6 +464,14 @@ exactly this situation: `SearchForCaptureDeviceAsync` retries 20 × 1 s (`:1289-
 causing hours of failed retries + triggers capture lifecycle degradation."* Re-entering that loop the
 instant the node disappears is the failure mode we already have a note about.
 
+> ⛔ **AMENDED 2026-09-25 (AUD-10 plan Task D.2) — the next paragraph's first sentence is FALSE.** The
+> path it names never re-armed anything: `NodeAppeared` had never fired (the registry filter expected
+> `.a2dp-source`), it published the registry id as the serial, and `BluetoothAutoSwitchService` ignores
+> an already-active BT source. **The re-arm is AUD-10 plan Task C:**
+> `LinuxBluetoothService.RebindParkedCaptureAsync`, driven by `OnRegistryNodeAppeared`, which starts a new
+> stream against the recreated node's `object.serial` and feeds the parked generator. The paragraph is
+> kept as written because it is the reasoning the amendment corrects.
+
 **Why park, and why it is cheap.** The re-arm path is already built and already correct:
 `PipeWireRegistryListener.NodeAppeared` → `OnRegistryNodeAppeared` (`:1559-1574`) → `CaptureNodeAvailable`
 → `BluetoothAutoSwitchService` (`:142-181`). And the tear-down trigger is already delivered and

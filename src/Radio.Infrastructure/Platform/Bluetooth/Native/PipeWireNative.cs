@@ -84,7 +84,8 @@ internal static class PipeWireNative
   // Registry API: `pw_context_new(loop, props, sz) → pw_context *`;
   // `pw_context_connect(ctx, props, sz) → pw_core *`;
   // `pw_core_get_registry(core, version, sz) → pw_registry *`;
-  // `pw_proxy_add_listener(registry, &hook, &events_struct, user_data)`.
+  // `pw_proxy_add_object_listener(registry, &hook, &registry_events, user_data)` — NOT
+  // pw_proxy_add_listener, which takes proxy events; see the declaration below.
   // Each pw_thread_loop owns its own context/core/registry chain.
   //
   // CAUTION: `pw_core_get_registry` is declared `static inline` in
@@ -114,8 +115,16 @@ internal static class PipeWireNative
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
   public static extern int pw_core_disconnect(IntPtr core);
 
+  // ⛔ AUD-10: the registry's global/global_remove events MUST be registered with
+  // pw_proxy_add_object_listener — "a listener for the events received from the remote object"
+  // (<pipewire/proxy.h>:130-135), which is what the pw_registry_add_listener MACRO
+  // dispatches to (<pipewire/core.h>:509). pw_proxy_add_listener takes `struct pw_proxy_events`
+  // — { version, destroy, bound, removed, done, error, bound_props } — so handing it
+  // PwRegistryEvents put Global in the `destroy` slot and GlobalRemove in `bound`: no registry
+  // global was ever delivered, and IsHealthy still reported true. Both symbols are exported by
+  // libpipewire-0.3.so.0 on the appliance (nm -D, 2026-09-25), so no helper is needed.
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
-  public static extern void pw_proxy_add_listener(IntPtr proxy, IntPtr hook, IntPtr events, IntPtr data);
+  public static extern void pw_proxy_add_object_listener(IntPtr proxy, IntPtr hook, IntPtr funcs, IntPtr data);
 
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
   public static extern void pw_proxy_destroy(IntPtr proxy);
@@ -125,8 +134,11 @@ internal static class PipeWireNative
 
   // spa_hook is a small struct the caller owns (see <spa/utils/hook.h>).
   // Layout: struct spa_list link (2 pointers) + void *cb + void *removed + uint32_t pad.
-  // 24 bytes is a safe upper bound on 64-bit; PipeWire only writes through the pointer
-  // we pass, never reads it after add_listener for our purposes.
+  // struct spa_hook is 48 bytes on 64-bit (<spa/utils/hook.h>, PipeWire 1.0.7); 64 leaves headroom.
+  // ⚠ PipeWire links the hook into the proxy's listener list and WALKS it on every event emit,
+  // so this buffer must stay allocated until the proxy is destroyed (Cleanup frees it after
+  // pw_proxy_destroy). An earlier revision said "24 bytes … never reads it after add_listener";
+  // both halves were wrong, and harmless only while the listener never received an event.
   public const int SpaHookSize = 64;
 
   /// <summary>
@@ -150,7 +162,8 @@ internal static class PipeWireNative
   /// Matches struct pw_registry_events (PipeWire 0.3.x).
   /// Version 0: { version, global, global_remove }.
   /// Must be pinned for the lifetime of the listener (the pointer is captured
-  /// by pw_proxy_add_listener and dereferenced from the PipeWire thread loop).
+  /// by pw_proxy_add_object_listener and dereferenced from the PipeWire thread loop).
+  /// Layout checked against the appliance's &lt;pipewire/core.h&gt; (PipeWire 1.0.7) on 2026-09-25.
   /// </summary>
   [StructLayout(LayoutKind.Sequential)]
   public struct PwRegistryEvents
@@ -159,6 +172,44 @@ internal static class PipeWireNative
     public IntPtr Global;        // PwRegistryGlobalDelegate function pointer
     public IntPtr GlobalRemove;  // PwRegistryGlobalRemoveDelegate function pointer
   }
+
+  // --- pw_stream state (AUD-11 Task 3) ---
+
+  /// <summary>
+  /// <c>enum pw_stream_state</c> from &lt;pipewire/stream.h&gt;. <c>ERROR</c> is negative, so the
+  /// marshalled callback parameter is a signed <c>int</c> and not a <c>uint</c>.
+  /// </summary>
+  /// <remarks>
+  /// Values checked against <c>src/pipewire/stream.h</c> at the PipeWire <c>1.0.7</c> tag (the
+  /// version on the appliance), lines 182-186: ERROR = -1, UNCONNECTED = 0, CONNECTING = 1,
+  /// PAUSED = 2, STREAMING = 3.
+  /// </remarks>
+  public enum PwStreamState
+  {
+    Error = -1,
+    Unconnected = 0,
+    Connecting = 1,
+    Paused = 2,
+    Streaming = 3,
+  }
+
+  /// <summary>
+  /// <c>pw_stream_events.state_changed</c>:
+  /// <c>void (*)(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error)</c>.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ AUD-11 C-168. Checked against <c>src/pipewire/stream.h</c> at the PipeWire <c>1.0.7</c> tag,
+  /// lines 344-345 (fetched from gitlab.freedesktop.org 2026-09-25) — NOT against the header
+  /// installed on the appliance, which was not read. It is the third member of
+  /// <c>struct pw_stream_events</c> after <c>version</c> and <c>destroy</c>, matching
+  /// <see cref="PwStreamEvents.StateChanged"/>'s position. If the box's header ever disagrees,
+  /// this delegate is what must change: a wrong arity does NOT throw — under the x86-64 SysV
+  /// convention the callee reads whatever registers hold, so the failure is plausible garbage on
+  /// the PipeWire thread.
+  /// </remarks>
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+  public delegate void PwStreamStateChangedDelegate(
+    IntPtr userData, int oldState, int newState, IntPtr error);
 
   // --- Helper library (pod builder + spa_dict lookup) ---
 
@@ -205,7 +256,7 @@ internal static class PipeWireNative
   {
     public uint Version;
     public IntPtr Destroy;        // void (*destroy)(void *data)
-    public IntPtr StateChanged;   // void (*state_changed)(void *data, ...)
+    public IntPtr StateChanged;   // PwStreamStateChangedDelegate — wired since AUD-11
     public IntPtr Control;        // void (*control_info)(void *data, ...)
     public IntPtr IoChanged;      // void (*io_changed)(void *data, ...)
     public IntPtr ParamChanged;   // void (*param_changed)(void *data, ...)

@@ -40,6 +40,11 @@ public class BluetoothHealthCheck : IHealthCheck
         "No Bluetooth device connected", null, data),
       BluetoothPipelineStatus.Broken => HealthCheckResult.Unhealthy(
         "Device connected but capture stream missing", null, data),
+      // AUD-11: without this arm the discard below would report a routine handset pause as
+      // Unhealthy "Unknown pipeline state".
+      BluetoothPipelineStatus.WaitingForCaptureNode => HealthCheckResult.Degraded(
+        "Bluetooth device connected but its PipeWire capture node is gone; capture is parked and "
+        + "will re-bind when the node reappears (AUD-10/AUD-11)", null, data),
       _ => HealthCheckResult.Unhealthy("Unknown pipeline state", null, data)
     };
 

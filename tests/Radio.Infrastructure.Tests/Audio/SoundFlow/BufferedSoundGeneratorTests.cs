@@ -169,6 +169,65 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
       }
 
       [Fact]
+      public void Underrun_WhileProducerParked_NeitherLogsNorCounts()
+      {
+          // AUD-10: a parked BT capture leaves its generator in the mixer with nothing feeding it for
+          // the whole handset pause. Pulling it dry then is expected, and must not put a Warning into
+          // radio-api's journal once a second.
+          var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var metrics = new Mock<IMetricsCollector>();
+          var generator = new TestBufferedGenerator<float>(
+              _engineMock.Object, format, _loggerMock.Object, metrics.Object);
+          generator.AddSamples(new float[] { 0.1f, 0.2f });
+          generator.Read(new float[2]);
+
+          generator.ProducerParked = true;
+          var output = new float[8];
+          for (var i = 0; i < 3; i++)
+          {
+              generator.Read(output);
+          }
+
+          Assert.All(output, x => Assert.Equal(0f, x));
+          _loggerMock.Verify(
+              l => l.Log(
+                  LogLevel.Warning,
+                  It.IsAny<EventId>(),
+                  It.Is<It.IsAnyType>((v, _) => v!.ToString()!.Contains("Buffer underrun")),
+                  null,
+                  It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+              Times.Never);
+          metrics.Verify(
+              m => m.Increment("audio.buffer.underrun_total", It.IsAny<long>(), It.IsAny<IDictionary<string, string>>()),
+              Times.Never);
+
+          // Un-parked, the same condition is an underrun again.
+          generator.ProducerParked = false;
+          generator.Read(output);
+          metrics.Verify(
+              m => m.Increment("audio.buffer.underrun_total", 1, It.IsAny<IDictionary<string, string>>()),
+              Times.Once);
+      }
+
+      [Fact]
+      public void ResetWithSilence_DiscardsStaleAudio_AndCushionsWithZeros()
+      {
+          // AUD-10: a re-bound generator must not replay audio from before the pause. PreFillSilence
+          // alone would (it advances the write pointer over whatever the ring holds).
+          var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var generator = new TestBufferedGenerator<float>(_engineMock.Object, format, _loggerMock.Object);
+          var stale = Enumerable.Repeat(0.9f, 4800).ToArray();
+          generator.AddSamples(stale);
+
+          generator.ResetWithSilence(0.05f); // 4800 samples at 48 kHz stereo
+
+          var output = new float[4800];
+          generator.Read(output);
+          Assert.All(output, x => Assert.Equal(0f, x));
+          Assert.Equal(0, generator.GetDiagnostics().BufferCount);
+      }
+
+      [Fact]
       public void DriftCompensation_IncrementsCounter_OnEachEvent()
       {
           // Arrange — small buffer so compensation threshold is reachable in test time

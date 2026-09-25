@@ -50,6 +50,24 @@ public class BluetoothHealthCheckTests
   }
 
   [Fact]
+  public async Task Returns_Degraded_NotUnhealthy_When_WaitingForCaptureNode()
+  {
+    // AUD-10/AUD-11: a parked capture is what every handset pause looks like. The switch has a
+    // discard arm (`_ => Unhealthy("Unknown pipeline state")`), so without an explicit arm the new
+    // state would silently report Unhealthy — this pins the arm.
+    _mockBtService.Setup(s => s.PipelineStatus).Returns(BluetoothPipelineStatus.WaitingForCaptureNode);
+    _mockBtService.Setup(s => s.ConnectedDevice).Returns(
+      new BluetoothDeviceInfo { Name = "Pixel 10 Pro XL", Address = "B0:D5:FB:D2:0D:68", IsConnected = true });
+
+    var result = await CreateSut().CheckHealthAsync(
+      new HealthCheckContext { Registration = new HealthCheckRegistration("bt", CreateSut(), null, null) });
+
+    Assert.Equal(HealthStatus.Degraded, result.Status);
+    Assert.Equal("WaitingForCaptureNode", result.Data["pipelineStatus"]);
+    Assert.Contains("parked", result.Description);
+  }
+
+  [Fact]
   public async Task Returns_Healthy_When_Inactive()
   {
     _mockBtService.Setup(s => s.PipelineStatus).Returns(BluetoothPipelineStatus.Inactive);

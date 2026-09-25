@@ -320,3 +320,189 @@ node to bind to. **The re-bind must be driven by the node's appearance, not by a
 - **Spurious eviction.** 11:29:43.883 and 11:28:20.879: `Bluetooth device removed from BlueZ … evicted from
   cache`, while `bluetoothctl info` reported `Paired: yes / Bonded: yes / Connected: yes`. Candidate: an
   `InterfacesRemoved` for a child object (transport or player) read as the device's — see `AUD-14`.
+
+---
+
+## 🚧 BUILT 2026-09-25 — shipped with `AUD-11` as one PR, NOT merged, NOT deployed
+
+Branch `fix/aud-10-follow-the-bt-node`. ⛔ **Not auto-mergeable** (plan §0): the merge decision
+goes to the owner after the box session below. Every gate this repo can run is green; **not one of them
+can observe the fix**, because the fix is PipeWire behaviour on a real handset.
+
+### What the build does
+
+- **The registry listener finally delivers events.** The filter matches `bluez_input.<MAC>[.<suffix>]`
+  (it required `.a2dp-source`); the listener reads `object.serial` from the global and publishes it —
+  never the registry id. Missing serial → Warning, no event.
+- **Pause → park.** `NodeDisappeared` for the node our stream is bound to (matched by **serial**, not
+  just MAC) tears the stream down and parks it. The generator stays in the mixer, with its underrun
+  Warning suppressed while parked. `PipelineStatus` = `WaitingForCaptureNode`, `/health` Degraded.
+  Logged at **Information** (file sink only) — this fires on every pause.
+- **Resume → re-bind.** `NodeAppeared` for the connected device starts a **new** native stream against
+  the **new** serial, feeding the same generator (reset to 0.5 s of zeroed silence). One **Warning** per
+  re-bind: `BT capture re-bound to <node> (serial N) X ms after it appeared (trigger: …)`. If the
+  replacement appeared *before* the old node was removed, the park binds it immediately.
+- **Backstop:** while parked, the 30 s pipeline monitor makes one `pw-cli` probe per tick and re-binds
+  if the node is there. It no longer runs the 20-attempt search that builds a generator nobody routes.
+- **AUD-11:** `node.dont-reconnect = true`, zero-serial refusal, `state_changed` wired, fail-closed peer
+  audit after every bind — see [`AUD-11`](AUD-11.md).
+
+### ⚠ Plan claims found false while building
+
+1. **§5.1 "run the 1 Hz recorder from AUD-10.md's 2026-09-25 section"** — the recorder script is **not
+   in the repo**, only its output table. A reconstruction is given below; it is not the one used on
+   09-25.
+2. **AUD-11 plan §4.3's predicted mutations (1) and (2) do not fail any test, and cannot with real
+   names.** Splitting a `pw-link` token on the first colon instead of the last is identical for
+   `bluez_input.<MAC>.<N>:output_FL`, because MACs here use underscores. Dropping the `[active]` strip is
+   masked because the last-colon cut already removes the marker. Both are redundant defences, not gaps.
+
+### ⚠ Still not established — the box session decides
+
+- That binding the recreated node makes BlueZ's transport go `active` (PipeWire source, not measured).
+  **If the stream links but the transport sticks at `pending`, the next candidate is an explicit
+  transport `Acquire` over D-Bus** (plan §7; `design/FUTURE-WORK.md`).
+- That WirePlumber 0.4.17 honours `node.dont-reconnect`.
+- Whether `PipeWire stream error: … -> Error` (logged at **Warning**) fires on every pause. If it does,
+  that is one journald line per pause; deliberately not demoted yet (see the PR body).
+- Which output shape the box's `pw-link -l` prints (both are parsed).
+- `state_changed`'s signature was checked against PipeWire **1.0.7's** `stream.h` from upstream, **not**
+  against the header installed on the box.
+
+### Box session checklist (plan §5.1) — owner at the cabinet with the phone
+
+```bash
+# 0. Deploy, then prove the box runs this build (CLAUDE.md: merged is not deployed).
+curl -s http://radio:5000/api/health/version | grep -o '"gitShaShort":"[^"]*"'   # must equal the PR head
+# 0b. Read-only: confirm the state_changed signature this build assumes.
+ssh mmack@radio 'grep -A2 "state_changed" /usr/include/pipewire-0.3/pipewire/stream.h'
+```
+
+0c. **Recorder** (a reconstruction — see above; run it in its own terminal on the box, kill it when
+done — it spawns three subprocesses a second on a box where that correlates with distortion). One line
+per second: node serial, our stream's peer, transport state:
+
+```bash
+M=B0_D5_FB_D2_0D_68
+while true; do
+  printf '%s | ' "$(date +%T.%3N)"
+  pw-cli ls Node | grep -A8 "bluez_input.$M" | grep -o 'object.serial = "[0-9]*"' | tr '\n' ' '
+  printf '| '; pw-link -l | grep -A1 'radio-bt-stream:input_FL' | tail -1 | tr -s ' '
+  printf '| '; T=$(busctl tree org.bluez | grep -o "/org/bluez/hci0/dev_$M/[a-z]*[0-9]*/fd[0-9]*" | head -1)
+  if [ -n "$T" ]; then busctl get-property org.bluez "$T" org.bluez.MediaTransport1 State; else echo 'no transport'; fi
+  sleep 1
+done
+```
+
+1. **Healthy baseline** — play. PASS: `pw-link -l | grep -A2 radio-bt-stream` shows `bluez_input.<MAC>.N`;
+   audible; `curl -s http://radio:5000/health` BT Healthy. ⭐ **First-ever evidence the listener works:**
+   the file sink has `PW registry: BT node appeared id=… serial=… name=…`
+   (`ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep "PW registry: BT node" $F | tail -5'`).
+2. **Pause 30 s.** PASS: node gone; `radio-bt-stream` **absent or unlinked — never `alsa_input…`**;
+   `/health` Degraded naming `WaitingForCaptureNode`; file sink has `BT capture target lost (NodeRemoved)`.
+   Record whether `journalctl -u radio-api --since '-2min' | grep "PipeWire stream error"` fires.
+   ⛔ FAIL if `radio-bt-stream` is on `alsa_input…`: `node.dont-reconnect` was not honoured AND the
+   teardown did not run.
+3. **Resume** (play on the handset, nothing else). PASS: new serial; stream linked to it within ~2 s;
+   transport reaches `active`; **audio returns**; the journal has
+   `BT capture re-bound to bluez_input… (serial N) X ms after it appeared (trigger: NodeAppeared…)` —
+   **record X**; ~1.5 s later **no** `WRONG node` / `NO input links` Warning (the peer audit).
+   ⚠ Linked but the transport stuck at `pending` → the plan's decision is wrong; see above.
+4. **Connect while paused, then press play** — the 11:27 case. Same PASS as step 3.
+5. **Repeat 2–3 three times.** PASS each time; `pw-link -l` shows exactly one `radio-bt-stream`; one
+   `re-bound` Warning per resume and none per pause.
+
+Expect the phantom disconnect / eviction (plan §6) during the session; record it and re-run. ⚠ **They
+should be filed as rows before the session** so a sighting has somewhere to go — not done in this PR.
+
+---
+
+## ⛔ 2026-09-25 14:40–14:48 — the registry listener was subscribed to the WRONG EVENT TABLE; fixed in `97b6b4e`
+
+Found on the box **after** deploying `5f80ea9`, with the owner away, by a check that needs no phone.
+
+**The check.** Create a throwaway node with a BT-shaped name for ~5 s, then read the file sink:
+
+```bash
+( echo "create-node adapter { factory.name=support.null-audio-sink node.name=bluez_input.00_11_22_33_44_55.9 media.class=Audio/Source/Virtual priority.session=0 priority.driver=0 audio.position=[FL,FR] }"; sleep 4 ) | timeout 8 pw-cli
+```
+
+The node lives only while `pw-cli` is connected, matches no connected device (so nothing re-binds), and
+must produce **both** `PW registry: BT node appeared` and `PW registry: BT node disappeared`.
+
+**On `5f80ea9` it produced NEITHER** — although `SoundFlowDeviceManager` logged the node added and removed,
+the fixed filter accepts the name, and `ClassifyNodeGlobal` logs on both of its branches. The listener was
+connected (three `Radio.API` PipeWire clients) and `libpw_helper.so` exports all three helpers (`nm -D`).
+
+**Cause.** `PipeWireRegistryListener.Start()` registered `PwRegistryEvents` with **`pw_proxy_add_listener`**,
+which takes `struct pw_proxy_events` (appliance `<pipewire/proxy.h>:125-128`). Registry globals arrive only
+through **`pw_proxy_add_object_listener`** (`:130-135`) — what the `pw_registry_add_listener` macro
+dispatches to (`<pipewire/core.h>:509`). `Global` sat in the proxy `destroy` slot and `GlobalRemove` in
+`bound`. ⛔ **The filter bug this row found was the SECOND gate; this was the first. Fixing only the filter
+would have shipped a re-bind that could never fire, and the owner's sitting would have failed.**
+
+**On `97b6b4e`:**
+
+```
+14:47:50.678  PW registry: BT node appeared id=79 serial=59937 name=bluez_input.00_11_22_33_44_55.9 address=00:11:22:33:44:55
+14:47:50.683  PW capture node appeared for 00:11:22:33:44:55 (registry id=79, serial=59937, …)
+14:47:55.105  SoundFlowDeviceManager: Audio device added: capture-3 (…)          <- 4.4 s LATER than the registry
+14:47:58.641  PW registry: BT node disappeared id=79 serial=59937 …
+```
+
+✅ First registry events ever recorded in production. ✅ Task B live: **id 79 ≠ serial 59937**, and the serial
+is what is carried. ✅ No re-bind for a non-connected MAC.
+
+⭐ **Run this check before every owner sitting on this row** — it costs nothing and it is the only way the
+event path can be proven without a phone. `IsHealthy` is not evidence: it was `true` for five days of a
+listener that could not receive an event.
+
+---
+
+## ✅ OWNER UAT 2026-09-25 16:23–16:52 on `da8ead8` — pause/resume restores audio with no reconnect (3 of 3 clean cycles)
+
+Owner at the cabinet, Pixel 10 Pro XL. Instruments: the 1 Hz recorder (node serial, `radio-bt-stream`'s
+link, `MediaTransport1.State`), the service file log, `radio-api`'s journal, and RotaryPhone's journal.
+
+| Cycle | Pause → parked | Resume → re-bound | Transport | Owner |
+|---|---|---|---|---|
+| 1 | 16:49:50.181 | 16:51:03.994 — **11 ms**, serial 61992 | recorder: **`active`** at 16:51:04.6 | ✅ audio + art back |
+| 2 | 16:51:56.464 | 16:52:06.867 — **5 ms**, serial 62122 | **`active`** at 16:52:07.5 | ✅ |
+| 3 | 16:52:14.976 | 16:52:23.188 — **6 ms**, serial 62167 | **`active`** at 16:52:23.5 | ✅ |
+
+⭐ **The plan's central unverified claim (§7) is now measured:** binding the recreated node DOES make
+PipeWire acquire the transport — `pending → active` within ~0.6 s of the re-bind, three times. The explicit
+D-Bus `Acquire` fallback (FUTURE-WORK item 5) is not needed.
+
+**Pass criteria (plan §5.1):** exactly one `radio-bt-stream` throughout; never linked to `alsa_input…`
+(`AUD-11` ✅); `radio-api`'s journal carried **exactly one Warning per resume** (the re-bind line) and none
+per pause; **no** `WRONG node`, `NO input links` or `PipeWire stream error` (review item M3 did not fire).
+✅ Connect-while-paused-then-play (16:47:44 → 16:47:50, re-bound in 4 ms) also captured audio — SongRec
+identified the track at 16:48:05.
+
+### ⛔ The one failed cycle is `AUD-30`, not this fix — measured, with both services' timestamps
+
+```
+16:48:14.790  RotaryPhone: Mgmt disconnect event: B0:D5:FB:D2:0D:68 reason=LocalHost
+16:48:14.824  RotaryPhone: BLOCKED: … already paired on hci0 — refusing on /org/bluez/hci1
+16:48:15.137  radio-api:   Bluetooth device disconnected … reason="Unknown" (user-initiated: false)
+              -> playing stream torn down, source Playing -> Stopped   <- "art and title vanished on pause"
+```
+
+Same shape at 16:23:47.221 → 16:23:47.539 (318 ms). **Two for two.** The phantom disposes the parked
+generator, so a resume after it has nothing waiting — the pipeline monitor rebuilds ~5 s later. With no
+`BLOCKED` in RotaryPhone's journal (16:51–16:52), all three cycles passed.
+
+### ⛔ A retraction, so it is not inherited
+
+At 16:23 this coordinator read the absence of `bluetoothd`'s `fd(N) ready` line for the second node as
+"no transport acquire happened". **Wrong** — at 16:47:50 a re-bind with no such line produced audio that
+SongRec identified. That line is not a marker of an acquire; the recorder's `MediaTransport1.State` is.
+
+### Not explained, recorded rather than smoothed over
+
+After the 16:48:40 re-bind (serial 61958) SongRec identified *Tainted Love* from captured audio at
+16:49:11, yet the owner reported no music. That cycle followed the 16:48:15 phantom teardown and a
+pipeline-monitor rebuild with a fresh generator, so it is confounded. `ProducerParked` was checked and is
+**not** the cause (it gates only the underrun log, `BufferedSoundGenerator.cs:465`, and is cleared on
+re-bind). If "captured but not heard" recurs **without** a preceding phantom, it is a new row.

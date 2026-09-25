@@ -83,6 +83,8 @@ internal sealed class NullBluetoothService : IBluetoothService
   public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
   // Null service never raises CaptureNodeAvailable.
   public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
+  // Null service never raises CaptureTargetLost (AUD-11).
+  public event EventHandler<CaptureTargetLostEventArgs>? CaptureTargetLost { add { } remove { } }
   public float? DeviceVolume => null;
   public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
   public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

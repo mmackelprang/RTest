@@ -135,6 +135,13 @@ public interface IBluetoothService : IAsyncDisposable
   /// </summary>
   event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable;
 
+  /// <summary>
+  /// Raised when the capture stream's intended PipeWire target went away (or the stream was found
+  /// bound to a different node) and the stream was torn down rather than being allowed to re-link
+  /// to another source. AUD-11.
+  /// </summary>
+  event EventHandler<CaptureTargetLostEventArgs>? CaptureTargetLost;
+
   /// <summary>Event raised when playback metadata changes (Track, Artist, etc.).</summary>
   event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged;
 
@@ -210,7 +217,21 @@ public enum BluetoothPipelineStatus
   Healthy,
 
   /// <summary>Device connected but capture stream is missing or broken.</summary>
-  Broken
+  Broken,
+
+  /// <summary>
+  /// Device connected, but the capture target left PipeWire (or the stream was found bound to the
+  /// wrong node) and the stream was torn down deliberately. Waiting for the node to reappear.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ AUD-11 / AUD-10. This state exists because "Healthy" used to mean "a stream object exists" —
+  /// which was equally true of a stream recording the unplugged line-in. Parking is a real, expected
+  /// state on this appliance: pausing on the handset destroys the bluez_input node (measured at 1 Hz,
+  /// 2026-09-25), so this is what a normal pause looks like from here. It is Degraded rather than
+  /// Unhealthy for exactly that reason. Appended after <see cref="Broken"/> so no existing member's
+  /// underlying value moves.
+  /// </remarks>
+  WaitingForCaptureNode
 }
 
 /// <summary>Bluetooth adapter states.</summary>
@@ -299,6 +320,31 @@ public class CaptureNodeAvailableEventArgs : EventArgs
   /// <summary>
   /// PipeWire object.serial of the discovered node, or 0 if not known to the probe.
   /// (The probe path may not always extract a serial; the full acquisition path does.)
+  /// ⚠ AUD-10: a serial, never a registry global id — they are different numbers.
   /// </summary>
   public required int PipeWireSerial { get; init; }
+}
+
+/// <summary>Why a capture target was lost. AUD-11.</summary>
+public enum CaptureTargetLostReason
+{
+  /// <summary>The target node left the PipeWire registry.</summary>
+  NodeRemoved,
+
+  /// <summary>A post-connect audit found the stream bound to a node other than the intended one.</summary>
+  WrongPeerBound,
+}
+
+/// <summary>Payload for <see cref="IBluetoothService.CaptureTargetLost"/>. AUD-11.</summary>
+public class CaptureTargetLostEventArgs : EventArgs
+{
+  /// <summary>The Bluetooth address of the device whose capture target was lost.</summary>
+  public required string DeviceAddress { get; init; }
+
+  /// <summary>Why the stream was torn down.</summary>
+  public required CaptureTargetLostReason Reason { get; init; }
+
+  /// <summary>The node(s) the stream was actually bound to, when known. Null for
+  /// <see cref="CaptureTargetLostReason.NodeRemoved"/>.</summary>
+  public string? BoundPeerNodeName { get; init; }
 }
