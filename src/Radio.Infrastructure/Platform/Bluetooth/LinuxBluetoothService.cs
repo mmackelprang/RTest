@@ -58,7 +58,23 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   private ObjectPath? _mediaTransportPath;
   private IDisposable? _transportPropertiesWatcher;
 
-  // Maps object path to device info
+  // AUD-30 / AUD-31: the D-Bus object path of the adapter StartAsync selected (e.g. "/org/bluez/hci0").
+  // BlueZ's ObjectManager signals cover EVERY adapter on the box, and this box has two: hci1 belongs
+  // to RotaryPhone (CLAUDE.md § Cross-Service Boundary). Every place that creates, watches or evicts a
+  // Device1 — or attaches to a device-scoped MediaPlayer1/MediaTransport1 — checks the object path
+  // against this with IsObjectUnderAdapter. Null until an adapter is selected; while null, NO device
+  // object is accepted (fail closed). In practice the D-Bus watchers are only subscribed after
+  // selection succeeds, so null is only ever seen by a service that failed to start.
+  private volatile string? _adapterPath;
+
+  // Object paths under a foreign adapter that have already been logged as ignored. Each is logged
+  // once, at Debug: under LOG-11 anything at Warning reaches journald, and log volume on this box
+  // correlates with audible distortion. Bounded so a busy discovery on the other adapter cannot grow
+  // it without limit — once full it is cleared, which at worst re-logs a path at Debug.
+  private readonly HashSet<string> _loggedForeignObjectPaths = new(StringComparer.Ordinal);
+  private const int MaxLoggedForeignObjectPaths = 256;
+
+  // Maps object path to device info. Holds only Device1 objects under _adapterPath (AUD-30/31).
   private readonly Dictionary<ObjectPath, BluetoothDeviceInfo> _deviceCache = new();
 
   // Maps a watched device path -> the generation of the subscribe attempt that owns it.
@@ -471,10 +487,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       Linux.IAdapter1? fallbackAdapter = null;
       ObjectPath? fallbackPath = null;
 
-      // Build adapter path prefix filter (e.g., "/org/bluez/hci0")
-      string? adapterPathPrefix = !string.IsNullOrEmpty(adapterName)
-        ? $"/org/bluez/{adapterName}"
-        : null;
+      ObjectPath? selectedPath = null;
 
       foreach (var obj in objects)
       {
@@ -483,9 +496,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           continue;
         }
 
-        // Skip adapters that don't match the configured adapter name
-        if (adapterPathPrefix != null &&
-            !obj.Key.ToString().StartsWith(adapterPathPrefix, StringComparison.OrdinalIgnoreCase))
+        // Skip adapters that don't match the configured adapter name. An exact match on the
+        // adapter's object path — a StartsWith here let AdapterName "hci1" select /org/bluez/hci10.
+        if (!string.IsNullOrEmpty(adapterName) &&
+            !IsConfiguredAdapterPath(obj.Key.ToString(), adapterName))
         {
           _logger.LogDebug("Skipping adapter at {Path} — doesn't match configured adapter {Name}",
             obj.Key, adapterName);
@@ -502,6 +516,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
             if (string.Equals(addr, preferredAddress, StringComparison.OrdinalIgnoreCase))
             {
               _adapter = candidate;
+              selectedPath = obj.Key;
               _logger.LogInformation("Selected preferred Bluetooth adapter {Address} at {Path}",
                 addr, obj.Key);
               break;
@@ -521,6 +536,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       if (_adapter == null && fallbackAdapter != null)
       {
         _adapter = fallbackAdapter;
+        selectedPath = fallbackPath;
         if (!string.IsNullOrEmpty(preferredAddress))
         {
           _logger.LogWarning("Preferred adapter {PreferredAddress} not found, falling back to {Path}",
@@ -538,6 +554,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         State = BluetoothAdapterState.Error;
         return false;
       }
+
+      // AUD-30/31: from here on, device objects are only accepted under this adapter's path.
+      _adapterPath = selectedPath?.ToString();
 
       // Set powered
       await _adapter.SetAsync("Powered", true);
@@ -562,14 +581,18 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           if (!obj.Value.ContainsKey(Linux.BluezConstants.DeviceInterface))
             continue;
 
+          // AUD-30: a connection on RotaryPhone's adapter is not ours to wait for.
+          if (!AcceptObjectForAdapter(obj.Key, "pre-existing connection check"))
+            continue;
+
           var props = obj.Value[Linux.BluezConstants.DeviceInterface];
           var device = ParseDevice(obj.Key, props);
           if (device.IsConnected)
           {
             preExistingDevice = device;
             _logger.LogInformation(
-              "Pre-existing BT connection detected: {Name} ({Address}) — agent registration may briefly disconnect it",
-              device.Name, device.Address);
+              "Pre-existing BT connection detected: {Name} ({Address}) at {ObjectPath} — agent registration may briefly disconnect it",
+              device.Name, device.Address, obj.Key);
             break;
           }
         }
@@ -606,12 +629,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         }
       }
 
-      // Watch for new interfaces (device connects/disconnects)
+      // Watch for new interfaces (device connects/disconnects). Like InterfacesRemoved below, this
+      // fires for every adapter's objects; OnInterfaceAdded filters by _adapterPath (AUD-30).
       _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
 
       // Watch for removed interfaces so devices that BlueZ drops (unpaired, or a
       // discovered-but-unpaired device that ages out of the object tree) are evicted
       // from our in-memory caches and their per-device property watcher is disposed.
+      // ⚠ The signal is NOT adapter-scoped — BlueZ emits it for every adapter's objects, including
+      // RotaryPhone's hci1. OnInterfaceRemoved filters by _adapterPath (AUD-31).
       _interfacesRemovedWatcher = await _objectManager.WatchInterfacesRemovedAsync(OnInterfaceRemoved);
 
       // Set up property watchers on all existing devices so we detect
@@ -744,6 +770,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           continue;
         }
 
+        // AUD-30: GetManagedObjects returns every adapter's devices; only ours are cached/watched.
+        if (!AcceptObjectForAdapter(obj.Key, "device enumeration"))
+        {
+          continue;
+        }
+
         var props = obj.Value[Linux.BluezConstants.DeviceInterface];
         var device = ParseDevice(obj.Key, props);
 
@@ -760,8 +792,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           _connectionStartTime = DateTime.UtcNow;
           _metricsCollector?.Increment("bluetooth.devices_connected_total");
           _metricsCollector?.Gauge("bluetooth.active_connections", 1);
-          _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address})",
-            device.Name, device.Address);
+          _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address}) at {ObjectPath}",
+            device.Name, device.Address, obj.Key);
           _pipelineRecoveryFailures = 0;
           EnsureRescanLoopRunning();
           DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
@@ -774,8 +806,23 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     }
   }
 
-  private void OnInterfaceAdded((ObjectPath objectPath, IDictionary<string, IDictionary<string, object>> interfaces) change)
+  /// <summary>
+  /// Handles BlueZ's InterfacesAdded signal. ⚠ BlueZ emits it for objects under EVERY adapter —
+  /// including RotaryPhone's hci1 — so everything below is gated on the object path being under the
+  /// adapter this service selected (AUD-30). A Device1 for our phone under hci1 used to be cached and
+  /// watched, and RotaryPhone refusing it there read as our phone disconnecting.
+  /// </summary>
+  internal void OnInterfaceAdded((ObjectPath objectPath, IDictionary<string, IDictionary<string, object>> interfaces) change)
   {
+    var isDeviceScoped =
+      change.interfaces.ContainsKey(Linux.BluezConstants.DeviceInterface) ||
+      change.interfaces.ContainsKey(Linux.BluezConstants.MediaPlayerInterface) ||
+      change.interfaces.ContainsKey(Linux.BluezConstants.MediaTransportInterface);
+    if (isDeviceScoped && !AcceptObjectForAdapter(change.objectPath, "InterfacesAdded"))
+    {
+      return;
+    }
+
     if (change.interfaces.ContainsKey(Linux.BluezConstants.DeviceInterface))
     {
       var props = change.interfaces[Linux.BluezConstants.DeviceInterface];
@@ -793,8 +840,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         _connectionStartTime = DateTime.UtcNow;
         _metricsCollector?.Increment("bluetooth.devices_connected_total");
         _metricsCollector?.Gauge("bluetooth.active_connections", 1);
-        _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
-          device.Name, device.Address);
+        _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address}) at {ObjectPath}",
+          device.Name, device.Address, change.objectPath);
 
         // Hide adapter from other devices while one is connected
         _ = SetDiscoverableAsync(false);
@@ -826,6 +873,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return;
     }
 
+    // AUD-30: callers already filter; a watcher on another adapter's device is exactly the bug.
+    if (!AcceptObjectForAdapter(devicePath, "property watch"))
+    {
+      return;
+    }
+
     // Prevent duplicate watchers — each fires DeviceConnected independently. Claim the
     // path and capture a generation token identifying this specific subscribe attempt.
     long myGeneration;
@@ -851,113 +904,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         {
           if (prop.Key == "Connected" && prop.Value is bool connected)
           {
-            BluetoothDeviceInfo? deviceInfo;
-            lock (_deviceCache)
-            {
-              _deviceCache.TryGetValue(devicePath, out deviceInfo);
-            }
-
-            if (deviceInfo == null)
-            {
-              return;
-            }
-
-            // Update cache with new connection state
-            var updatedDevice = new BluetoothDeviceInfo
-            {
-              Address = deviceInfo.Address,
-              Name = deviceInfo.Name,
-              IsPaired = deviceInfo.IsPaired,
-              IsConnected = connected
-            };
-
-            lock (_deviceCache)
-            {
-              _deviceCache[devicePath] = updatedDevice;
-            }
-
-            if (connected)
-            {
-              _reconnectionLoop?.Cancel();
-              _lastDisconnectReason = null;
-              _connectionStartTime = DateTime.UtcNow;
-              _metricsCollector?.Increment("bluetooth.devices_connected_total");
-              _metricsCollector?.Gauge("bluetooth.active_connections", 1);
-              _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address})",
-                updatedDevice.Name, updatedDevice.Address);
-
-              // Hide adapter from other devices while one is connected
-              _ = SetDiscoverableAsync(false);
-
-              _pipelineRecoveryFailures = 0;
-              EnsureRescanLoopRunning();
-              DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
-            }
-            else
-            {
-              var wasUserInitiated = _userInitiatedDisconnect;
-              _userInitiatedDisconnect = false;
-
-              // Read disconnect reason from mgmt monitor — wait briefly for it since
-              // the D-Bus property change may arrive before our poll loop processes the kernel event
-              var mgmtReason = _mgmtMonitor?.ConsumeDisconnectReason(updatedDevice.Address)
-                ?? BluetoothDisconnectReason.Unknown;
-
-              // If user initiated via our UI, override reason to LocalHost
-              if (wasUserInitiated)
-              {
-                mgmtReason = BluetoothDisconnectReason.LocalHost;
-              }
-
-              _lastDisconnectReason = mgmtReason;
-
-              RecordDisconnectionMetrics();
-              // AUD-10: a parked capture belongs to the session that just ended; BluetoothAudioSource
-              // removes its generator from the mixer on this same event.
-              _parkedCapture = null;
-              _captureTargetLost = false;
-              StopCaptureSubprocess();
-              StopRescanLoop();
-              // Clean up media transport on disconnect
-              _transportPropertiesWatcher?.Dispose();
-              _transportPropertiesWatcher = null;
-              _mediaTransport = null;
-              _mediaTransportPath = null;
-              DeviceVolume = null;
-
-              _logger.LogInformation(
-                "Bluetooth device disconnected: {DeviceName} ({Address}) reason={Reason} (user-initiated: {UserInitiated})",
-                updatedDevice.Name, updatedDevice.Address, mgmtReason, wasUserInitiated);
-
-              // Re-show adapter so other devices can discover and pair
-              _ = SetDiscoverableAsync(true);
-
-              _pipelineRecoveryFailures = 0;
-              DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
-              {
-                Device = updatedDevice,
-                UserInitiated = wasUserInitiated,
-                Reason = mgmtReason
-              });
-
-              // Start auto-reconnection only for reasons that suggest signal loss
-              var shouldReconnect = _options.AutoReconnect && !mgmtReason.ShouldSuppressReconnect();
-              if (shouldReconnect)
-              {
-                _reconnectionLoop?.Dispose();
-                _reconnectionLoop = new BluetoothReconnectionLoop(
-                  _logger, _options,
-                  (addr, ct) => ConnectAsync(addr, ct),
-                  () => ConnectedDevice != null,
-                  _metricsCollector);
-                _reconnectionLoop.Start(updatedDevice.Address);
-              }
-              else if (!wasUserInitiated)
-              {
-                _logger.LogInformation("Auto-reconnect suppressed: reason={Reason} for {Address}",
-                  mgmtReason, updatedDevice.Address);
-              }
-            }
+            OnDeviceConnectedChanged(devicePath, connected);
           }
         }
       });
@@ -999,16 +946,152 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   }
 
   /// <summary>
-  /// Handles BlueZ's InterfacesRemoved signal. Fires when a device is unpaired or when a
-  /// discovered-but-unpaired device ages out of BlueZ's object tree. When the Device1
-  /// interface itself is removed (the whole device object is gone) we evict it from all
-  /// in-memory tracking so the caches don't grow unbounded over long uptimes. A plain
-  /// disconnect does NOT remove Device1 (it only flips Connected=false), so this leaves
-  /// paired-but-disconnected devices in the cache — exactly what we want for reconnects.
+  /// Handles a <c>Device1.Connected</c> change for a watched device path. Extracted from the
+  /// PropertiesChanged lambda in <see cref="WatchDevicePropertiesAsync"/> so it can be driven without
+  /// D-Bus (AUD-30). ⚠ The disconnect branch tears down capture UNCONDITIONALLY — which is why a
+  /// device under another adapter must never reach here: RotaryPhone refusing our phone on hci1 flips
+  /// that object's Connected to false while the phone is still streaming to us on hci0.
   /// </summary>
-  private void OnInterfaceRemoved((ObjectPath objectPath, string[] interfaces) change)
+  internal void OnDeviceConnectedChanged(ObjectPath devicePath, bool connected)
+  {
+    // Belt and braces: the cache and the watchers are already adapter-scoped, so a foreign path
+    // cannot normally get here. Checked anyway because the consequence of one getting through is a
+    // dead stream on a healthy connection.
+    if (!AcceptObjectForAdapter(devicePath, "Connected change"))
+    {
+      return;
+    }
+
+    BluetoothDeviceInfo? deviceInfo;
+    lock (_deviceCache)
+    {
+      _deviceCache.TryGetValue(devicePath, out deviceInfo);
+    }
+
+    if (deviceInfo == null)
+    {
+      return;
+    }
+
+    // Update cache with new connection state
+    var updatedDevice = new BluetoothDeviceInfo
+    {
+      Address = deviceInfo.Address,
+      Name = deviceInfo.Name,
+      IsPaired = deviceInfo.IsPaired,
+      IsConnected = connected
+    };
+
+    lock (_deviceCache)
+    {
+      _deviceCache[devicePath] = updatedDevice;
+    }
+
+    if (connected)
+    {
+      _reconnectionLoop?.Cancel();
+      _lastDisconnectReason = null;
+      _connectionStartTime = DateTime.UtcNow;
+      _metricsCollector?.Increment("bluetooth.devices_connected_total");
+      _metricsCollector?.Gauge("bluetooth.active_connections", 1);
+      _logger.LogInformation("Bluetooth device connected: {DeviceName} ({Address}) at {ObjectPath}",
+        updatedDevice.Name, updatedDevice.Address, devicePath);
+
+      // Hide adapter from other devices while one is connected
+      _ = SetDiscoverableAsync(false);
+
+      _pipelineRecoveryFailures = 0;
+      EnsureRescanLoopRunning();
+      DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = updatedDevice });
+    }
+    else
+    {
+      var wasUserInitiated = _userInitiatedDisconnect;
+      _userInitiatedDisconnect = false;
+
+      // Read disconnect reason from mgmt monitor — wait briefly for it since
+      // the D-Bus property change may arrive before our poll loop processes the kernel event
+      var mgmtReason = _mgmtMonitor?.ConsumeDisconnectReason(updatedDevice.Address)
+        ?? BluetoothDisconnectReason.Unknown;
+
+      // If user initiated via our UI, override reason to LocalHost
+      if (wasUserInitiated)
+      {
+        mgmtReason = BluetoothDisconnectReason.LocalHost;
+      }
+
+      _lastDisconnectReason = mgmtReason;
+
+      RecordDisconnectionMetrics();
+      // AUD-10: a parked capture belongs to the session that just ended; BluetoothAudioSource
+      // removes its generator from the mixer on this same event.
+      _parkedCapture = null;
+      _captureTargetLost = false;
+      StopCaptureSubprocess();
+      StopRescanLoop();
+      // Clean up media transport on disconnect
+      _transportPropertiesWatcher?.Dispose();
+      _transportPropertiesWatcher = null;
+      _mediaTransport = null;
+      _mediaTransportPath = null;
+      DeviceVolume = null;
+
+      _logger.LogInformation(
+        "Bluetooth device disconnected: {DeviceName} ({Address}) at {ObjectPath} reason={Reason} (user-initiated: {UserInitiated})",
+        updatedDevice.Name, updatedDevice.Address, devicePath, mgmtReason, wasUserInitiated);
+
+      // Re-show adapter so other devices can discover and pair
+      _ = SetDiscoverableAsync(true);
+
+      _pipelineRecoveryFailures = 0;
+      DeviceDisconnected?.Invoke(this, new BluetoothDeviceDisconnectedEventArgs
+      {
+        Device = updatedDevice,
+        UserInitiated = wasUserInitiated,
+        Reason = mgmtReason
+      });
+
+      // Start auto-reconnection only for reasons that suggest signal loss
+      var shouldReconnect = _options.AutoReconnect && !mgmtReason.ShouldSuppressReconnect();
+      if (shouldReconnect)
+      {
+        _reconnectionLoop?.Dispose();
+        _reconnectionLoop = new BluetoothReconnectionLoop(
+          _logger, _options,
+          (addr, ct) => ConnectAsync(addr, ct),
+          () => ConnectedDevice != null,
+          _metricsCollector);
+        _reconnectionLoop.Start(updatedDevice.Address);
+      }
+      else if (!wasUserInitiated)
+      {
+        _logger.LogInformation("Auto-reconnect suppressed: reason={Reason} for {Address}",
+          mgmtReason, updatedDevice.Address);
+      }
+    }
+  }
+
+  /// <summary>
+  /// Handles BlueZ's InterfacesRemoved signal. BlueZ emits it whenever an object leaves its tree —
+  /// for Device1 that includes an unpair, a discovered-but-unpaired device ageing out, and any
+  /// removal BlueZ performs for its own reasons — and it emits it for objects under EVERY adapter,
+  /// not only ours. ⚠ Until AUD-31 this handler evicted Device1 objects under any adapter, so a
+  /// Device1 for our phone disappearing from RotaryPhone's hci1 was logged as our phone being
+  /// "removed from BlueZ". Removals are now ignored unless the path is under the selected adapter.
+  /// When the Device1 interface itself is removed we evict it from all in-memory tracking so the
+  /// caches don't grow unbounded over long uptimes. A plain disconnect does NOT remove Device1 (it
+  /// only flips Connected=false), so this leaves paired-but-disconnected devices in the cache —
+  /// exactly what we want for reconnects.
+  /// </summary>
+  internal void OnInterfaceRemoved((ObjectPath objectPath, string[] interfaces) change)
   {
     if (Array.IndexOf(change.interfaces, Linux.BluezConstants.DeviceInterface) < 0)
+    {
+      return;
+    }
+
+    // AUD-31: nothing under another adapter was ever cached by us, so there is nothing to evict.
+    if (!AcceptObjectForAdapter(change.objectPath, "InterfacesRemoved"))
     {
       return;
     }
@@ -1024,8 +1107,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     if (removed != null)
     {
       _logger.LogInformation(
-        "Bluetooth device removed from BlueZ: {DeviceName} ({Address}) — evicted from cache",
-        removed.Name, removed.Address);
+        "Bluetooth device removed from BlueZ: {DeviceName} ({Address}) at {ObjectPath} — evicted from cache",
+        removed.Name, removed.Address, change.objectPath);
     }
   }
 
@@ -2160,12 +2243,114 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   }
 
   /// <summary>
+  /// True when <paramref name="objectPath"/> is a BlueZ object strictly BELOW the adapter at
+  /// <paramref name="adapterPath"/> — a Device1 (<c>/org/bluez/hci0/dev_…</c>) or one of its children
+  /// (<c>…/player0</c>, <c>…/sep1/fd0</c>). The match is on a path-segment boundary, so
+  /// <c>/org/bluez/hci1</c> does not claim <c>/org/bluez/hci10/…</c>, and the adapter object itself
+  /// is not "under" itself. A null or empty <paramref name="adapterPath"/> (no adapter selected)
+  /// matches nothing: with no adapter of our own, no device object is ours. AUD-30 / AUD-31.
+  /// </summary>
+  internal static bool IsObjectUnderAdapter(string? objectPath, string? adapterPath)
+  {
+    if (string.IsNullOrEmpty(objectPath) || string.IsNullOrEmpty(adapterPath))
+    {
+      return false;
+    }
+
+    var root = adapterPath.TrimEnd('/');
+    if (root.Length == 0)
+    {
+      return false;
+    }
+
+    // Ordinal, not OrdinalIgnoreCase: D-Bus object paths are case-sensitive and BlueZ writes them
+    // lower-case, so a case-folded match could only ever produce a false positive.
+    return objectPath.Length > root.Length + 1
+      && objectPath[root.Length] == '/'
+      && objectPath.StartsWith(root, StringComparison.Ordinal);
+  }
+
+  /// <summary>
+  /// True when <paramref name="adapterObjectPath"/> is exactly the adapter named
+  /// <paramref name="adapterName"/> (<c>"hci0"</c> ⇒ <c>/org/bluez/hci0</c>). An exact comparison:
+  /// the StartsWith this replaced let a configured <c>"hci1"</c> select <c>/org/bluez/hci10</c>.
+  /// Case-insensitive on the configured name only because the old check was, and config is typed
+  /// by hand.
+  /// </summary>
+  internal static bool IsConfiguredAdapterPath(string adapterObjectPath, string adapterName) =>
+    string.Equals(adapterObjectPath, $"/org/bluez/{adapterName}", StringComparison.OrdinalIgnoreCase);
+
+  /// <summary>
+  /// Gate for every device-object handler: true when <paramref name="objectPath"/> is under the
+  /// selected adapter. Otherwise logs the path ONCE at Debug (see <see cref="_loggedForeignObjectPaths"/>)
+  /// and returns false. <paramref name="site"/> names the caller in that one log line.
+  /// </summary>
+  private bool AcceptObjectForAdapter(ObjectPath objectPath, string site)
+  {
+    var path = objectPath.ToString();
+    var adapterPath = _adapterPath;
+    if (IsObjectUnderAdapter(path, adapterPath))
+    {
+      return true;
+    }
+
+    bool firstSighting;
+    lock (_loggedForeignObjectPaths)
+    {
+      if (_loggedForeignObjectPaths.Count >= MaxLoggedForeignObjectPaths)
+      {
+        _loggedForeignObjectPaths.Clear();
+      }
+      firstSighting = _loggedForeignObjectPaths.Add(path);
+    }
+
+    if (firstSighting)
+    {
+      _logger.LogDebug(
+        "Ignoring BlueZ object {ObjectPath} ({Site}) — not under our adapter {AdapterPath}; further events for it are ignored silently",
+        path, site, adapterPath ?? "(none selected)");
+    }
+    return false;
+  }
+
+  /// <summary>
+  /// Test hook: sets the adapter path StartAsync would have selected, without D-Bus.
+  /// </summary>
+  internal void SetSelectedAdapterPathForTests(string? adapterPath) => _adapterPath = adapterPath;
+
+  /// <summary>
+  /// Test hook: writes a cache entry at an arbitrary path, bypassing the adapter gate. Lets a test
+  /// put a foreign-adapter entry where the pre-AUD-30 code would have put one, so the handlers' own
+  /// gates can be shown to hold independently of the gate in front of the cache.
+  /// </summary>
+  internal void PrimeCachedDeviceForTests(string objectPath, BluetoothDeviceInfo device)
+  {
+    lock (_deviceCache)
+    {
+      _deviceCache[new ObjectPath(objectPath)] = device;
+    }
+  }
+
+  /// <summary>
+  /// Test hook: the device object paths currently in the device cache.
+  /// </summary>
+  internal IReadOnlyCollection<string> CachedDevicePathsForTests()
+  {
+    lock (_deviceCache)
+    {
+      return _deviceCache.Keys.Select(k => k.ToString()).ToList();
+    }
+  }
+
+  /// <summary>
   /// Test hook: marks the service started and puts <paramref name="device"/> in the device cache as
   /// the connected device. The real path gets there through D-Bus, which a unit test does not have.
   /// </summary>
   internal void PrimeConnectedDeviceForTests(BluetoothDeviceInfo device)
   {
     _started = true;
+    // The primed path is under hci0, so hci0 is the selected adapter unless a test chose otherwise.
+    _adapterPath ??= "/org/bluez/hci0";
     lock (_deviceCache)
     {
       _deviceCache[new ObjectPath($"/org/bluez/hci0/dev_{device.Address.Replace(':', '_')}")] = device;
@@ -3248,6 +3433,16 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       var objects = await _objectManager.GetManagedObjectsAsync();
       foreach (var obj in objects)
       {
+        var isMediaObject =
+          obj.Value.ContainsKey(Linux.BluezConstants.MediaPlayerInterface) ||
+          obj.Value.ContainsKey(Linux.BluezConstants.MediaTransportInterface);
+        // AUD-30: a player/transport under RotaryPhone's adapter (e.g. its HFP transport) is not
+        // ours — attaching to it would route AVRCP metadata and volume from the wrong link.
+        if (isMediaObject && !AcceptObjectForAdapter(obj.Key, "media player/transport scan"))
+        {
+          continue;
+        }
+
         if (obj.Value.ContainsKey(Linux.BluezConstants.MediaPlayerInterface) && _mediaPlayer == null)
         {
           await AttachMediaPlayerAsync(obj.Key);
