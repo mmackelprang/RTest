@@ -86,3 +86,42 @@ also destroy the only evidence of which of the two explanations was true.
 Owner at the cabinet, BT playing, recorder from `AUD-10.md` running. PASS: over a full sitting, no
 `disconnected … reason="Unknown"` line while the recorder shows the transport `active` and the node serial
 unchanged — and, with step 1 shipped, every `connected`/`disconnected` line carries an `hci0` path.
+
+---
+
+## ✅ CONFIRMED 2026-09-25 16:23 and 16:48 — RotaryPhone refusing the Pixel on `hci1` is the phantom, two for two
+
+Owner's cabinet sitting for `AUD-10` (box on `da8ead8`). RotaryPhone's journal (`rotary-phone.service`)
+read alongside ours:
+
+```
+16:23:47.221  RotaryPhone: Mgmt disconnect event: B0:D5:FB:D2:0D:68 reason=LocalHost
+16:23:47.239  RotaryPhone: BLOCKED: B0:D5:FB:D2:0D:68 is already paired on hci0 — refusing on /org/bluez/hci1
+16:23:47.539  radio-api:   Bluetooth device disconnected … reason="Unknown" (user-initiated: false)      +318 ms
+
+16:48:14.790  RotaryPhone: Mgmt disconnect event: B0:D5:FB:D2:0D:68 reason=LocalHost
+16:48:14.824  RotaryPhone: BLOCKED: … refusing on /org/bluez/hci1
+16:48:15.137  radio-api:   Bluetooth device disconnected … reason="Unknown" (user-initiated: false)      +347 ms
+```
+
+Both times BlueZ still reported the Pixel **connected on `hci0`**. The phantom **tore down a playing stream**
+at 16:48:15 (source `Playing → Stopped`) — which is what the owner saw as *"as soon as the pause was hit,
+the album art and song title disappeared."* In a 16:51–16:52 window with **zero** `BLOCKED` lines, three
+pause/resume cycles all passed.
+
+⭐ **This settles the row's first task without the object-path logging** — the correlation is by timestamp
+across two services, twice, 318/347 ms apart. The path logging is still worth shipping as the regression
+instrument, but the fix no longer has to wait for it: **scope device enumeration, `OnInterfaceAdded` and
+`OnInterfaceRemoved` to the selected adapter's path prefix** (`LinuxBluetoothService.cs:397-399` already
+builds it). ⚠ Still update the boundary doc first, per `CLAUDE.md`.
+
+### Also found in the same journal — a boundary question for RotaryPhone, not this row
+
+```
+16:23:15.399  RotaryPhone bt_manager: NewConnection: device=/org/bluez/hci0/dev_B0_D5_FB_D2_0D_68 … RFCOMM connected
+```
+
+RotaryPhone's HFP profile handler **accepts an RFCOMM connection on `hci0`** — Radio Console's adapter
+under the boundary doc. BlueZ profiles are registered system-wide, not per adapter, so its handler answers
+on both. Not shown to break anything here, but it is outside the documented boundary; raise it through the
+boundary doc's Change Log rather than acting on it from this repo.
