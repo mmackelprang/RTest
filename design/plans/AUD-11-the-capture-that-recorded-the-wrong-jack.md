@@ -1,5 +1,13 @@
 # PLAN — `AUD-11` · The capture stream stops being allowed to record the wrong jack, and starts being able to say so
 
+> ⛔ **AMENDED 2026-09-25 — do not build this plan alone.** It ships as one PR with `AUD-10`, under
+> [`AUD-10-the-node-that-comes-back-under-a-new-serial.md`](AUD-10-the-node-that-comes-back-under-a-new-serial.md),
+> which keeps Tasks 1–7 below and adds three. **§1.2's *"the re-arm path is already built and already
+> correct"* is false:** `PipeWireRegistryFilter` expects `.a2dp-source` names the box never produces, so
+> `NodeAppeared`/`NodeDisappeared` have never fired in production; the registry **id** is published as the
+> serial; and `BluetoothAutoSwitchService` ignores an already-active BT source. Built alone, this plan fixes
+> the line-in fallback and parks BT forever on the first pause.
+
 > **Row:** `AUD-11`, [`docs/queue/AUD-11.md`](../../docs/queue/AUD-11.md). 🟠 **P1.** Filed 2026-09-06 from a live
 > observation on `radio`.
 > **Branch:** `fix/aud-11-bt-capture-refuses-the-wrong-node`
