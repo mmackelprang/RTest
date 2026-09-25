@@ -125,3 +125,80 @@ RotaryPhone's HFP profile handler **accepts an RFCOMM connection on `hci0`** —
 under the boundary doc. BlueZ profiles are registered system-wide, not per adapter, so its handler answers
 on both. Not shown to break anything here, but it is outside the documented boundary; raise it through the
 boundary doc's Change Log rather than acting on it from this repo.
+
+---
+
+## 🚧 BUILT 2026-09-25 — branch `fix/aud-30-31-scope-device-objects-to-adapter`, PR [#666](https://github.com/mmackelprang/RTest/pull/666) (with `AUD-31`)
+
+**Not merged, not deployed.** Proof needs the owner's phone with RotaryPhone running — see *Box session*
+below. ⚠ The boundary doc's Change Log entry is being filed by a separate housekeeping thread, not by
+this PR.
+
+### What changed (`src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs`)
+
+- **The selected adapter's object path is recorded** (`_adapterPath`, set at `:573`) and every place
+  that takes a device object from a BlueZ path goes through one gate, `AcceptObjectForAdapter`
+  (`:2315`) over the pure `IsObjectUnderAdapter` (`:2280`): startup enumeration (`IngestExistingDevices`,
+  `:796`), the pre-existing-connection check (`:599`), `InterfacesAdded` for `Device1`, `MediaPlayer1`
+  and `MediaTransport1` (`:848`), the property watch (`:904`), the `Connected` handler
+  (`OnDeviceConnectedChanged`, `:987`), `InterfacesRemoved` (`:1121`) and the media scan (`:3468`).
+- **The match is on a path-segment boundary** — `/org/bluez/hci1` does not claim `/org/bluez/hci10/…` —
+  and **Ordinal**: D-Bus paths are case-sensitive and `_adapterPath` comes from BlueZ's own key.
+- **No adapter selected ⇒ nothing accepted (fail closed).** `_adapterPath` is reset at the top of every
+  `StartAsync` (`:503`), so a UI Bluetooth stop/start re-selects instead of inheriting — the review
+  caught that without the reset, a restart would have left `_adapterPath` null and every device ignored.
+- **Adapter selection is now an exact match** (`IsConfiguredAdapterPath`, `:2307`). ⚠ The prefix the
+  dossier pointed at ("`:397-399` already builds it") was a `StartsWith`, so `AdapterName: "hci1"` would
+  have selected `hci10`. Reusing it as-is for device scoping would have carried that bug.
+- **`{ObjectPath}` is on every connected / already-connected / disconnected / evicted / pre-existing
+  line** — the regression instrument. Ignored foreign objects are logged **once per path at Debug**
+  (bounded set of 256), never at Information or above.
+- The `Connected` handler was extracted from its lambda unchanged apart from the gate and the log field.
+
+### Tests — `tests/Radio.Infrastructure.Tests/Platform/Bluetooth/AdapterScopingTests.cs` (31)
+
+Handler-level, no D-Bus, no clocks. A `Device1` under `hci1` is not cached and raises nothing; its
+`Connected=false` does not raise `DeviceDisconnected`, does not dispose the capture stream, and leaves
+`PipelineStatus` `Healthy`; its removal does not evict or log; startup enumeration skips it; a foreign
+`MediaTransport1` is ignored; foreign objects log once at Debug; `hci0` behaviour unchanged (disconnect
+still tears down and logs its path, removal still evicts); `hci1` vs `hci10`; no adapter ⇒ nothing.
+
+**Mutation-checked, each guard disabled alone:** InterfacesAdded gate (5 fail), Connected-handler gate
+(1), InterfacesRemoved gate (1), enumeration gate (1), segment boundary (2), exact adapter match (1),
+log-once (1), fail-closed-on-null (3). **All three handler gates off together — the pre-fix shape — 9
+fail**, including `ForeignConnectedFalse_DoesNotRaiseDisconnected_OrStopCapture`.
+⚠ **Not covered** (each sits behind a live D-Bus call): the gate inside `WatchDevicePropertiesAsync`,
+the pre-existing check, the media scan, and the stop/start re-selection. Deleting any one of those
+alone fails no test; they are defence in depth behind the tested gates.
+
+### Found while building — the mechanism is tighter than the dossier said
+
+- **Why the reason was `Unknown`:** our mgmt monitor is filtered to our controller index
+  (`BluetoothMgmtMonitor.cs:151-158`), so RotaryPhone's `hci1` disconnect event was never offered to us.
+- **Why +318 / +347 ms:** `ConsumeDisconnectReason` polls for up to **300 ms** (`BluetoothMgmtMonitor.cs:60`)
+  before giving up with `Unknown`. The lag in the confirmed timestamps is that wait.
+- **A wider blast radius than the row recorded:** `_deviceCache` is keyed by object path but
+  `FindDevicePath` / `ConnectedDevice` search it by address, first match wins. With an `hci1` entry for
+  the same MAC cached, UI connect/disconnect, the reconnect loop and unpair could have acted on
+  **RotaryPhone's** object. Closed by the same gate.
+
+### Box session — what PASS looks like
+
+1. **Deployed SHA first:** `curl -s http://radio:5000/api/health/version | grep -o '"gitShaShort":"[^"]*"'`
+   must match the merged commit.
+2. Owner's Pixel streaming on `hci0`, RotaryPhone running, `AUD-10`'s recorder on.
+3. **Provoke** the refusal the way the 16:23 / 16:48 sitting did — pause/resume on the phone until
+   RotaryPhone's journal shows `BLOCKED: B0:D5:FB:D2:0D:68 is already paired on hci0 — refusing on
+   /org/bluez/hci1` (`journalctl -u rotary-phone --since '-10min' | grep BLOCKED`). ⚠ Do not drive
+   `hci1` from our side (`bluetoothctl select 10:91:D1:FE:00:46` / `connect`) without the owner's say —
+   it is RotaryPhone's adapter.
+4. **PASS in radio-api's file log** (`F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1)`), in the
+   second after each `BLOCKED`: **no** `Bluetooth device disconnected`, **no** `PipeWire native stream
+   stopped`, **no** `removed from BlueZ`; audio continues. Every `connected` / `disconnected` / `removed`
+   line that does appear says `at /org/bluez/hci0/…`.
+5. **PASS in the journal:** `journalctl -u radio-api --since '-30min' --no-pager` shows no new warnings
+   from this (the ignore line is Debug and will not appear in either sink at the shipped levels).
+6. **Restart path (untested by unit tests):** Bluetooth off then on from the UI, reconnect the phone —
+   `Bluetooth device connected: … at /org/bluez/hci0/…` must appear and audio must route.
+7. **Positive control:** a real disconnect on `hci0` (phone BT off) still logs `disconnected … at
+   /org/bluez/hci0/… reason=<non-Unknown>` and tears down.
