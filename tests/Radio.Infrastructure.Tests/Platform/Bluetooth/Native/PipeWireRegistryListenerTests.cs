@@ -63,6 +63,63 @@ public class PipeWireRegistryListenerTests
     Assert.Throws<ObjectDisposedException>(() => listener.Start());
   }
 
+  // --- AUD-10 T2: the serial published is object.serial, never the registry id ---------------
+  //
+  // The id/serial pairs are the ones measured on the appliance (docs/queue/AUD-10.md 2026-09-25):
+  // id=76 / serial=58968 and id=71 / serial=58921. The native OnGlobal reads node.name and
+  // object.serial from the spa_dict and hands both to ClassifyNodeGlobal; what OnGlobal does with
+  // the result (log a Warning and skip the raise on BtCaptureNodeWithoutSerial) is two lines that
+  // need libpipewire to run and are NOT covered here.
+
+  [Theory]
+  [InlineData(76u, "58968")]
+  [InlineData(71u, "58921")]
+  public void ClassifyNodeGlobal_MeasuredIdAndSerial_CarriesTheSerialNotTheId(uint id, string serial)
+  {
+    var kind = PipeWireRegistryListener.ClassifyNodeGlobal(
+      id, "bluez_input.B0_D5_FB_D2_0D_68.2", serial, out var args);
+
+    Assert.Equal(BtNodeGlobalKind.BtCaptureNode, kind);
+    Assert.NotNull(args);
+    Assert.Equal(uint.Parse(serial), args!.ObjectSerial);
+    Assert.Equal(id, args.Id);
+    Assert.NotEqual(args.Id, args.ObjectSerial);
+    Assert.Equal("B0:D5:FB:D2:0D:68", args.DeviceAddress);
+    Assert.Equal("bluez_input.B0_D5_FB_D2_0D_68.2", args.NodeName);
+  }
+
+  [Theory]
+  [InlineData(null)]       // property absent
+  [InlineData("")]
+  [InlineData("0")]        // not a valid serial
+  [InlineData("-1")]
+  [InlineData("abc")]
+  [InlineData(" 58968")]   // not silently trimmed into a number
+  public void ClassifyNodeGlobal_MissingOrUnusableSerial_IsReportedAndNeverFallsBackToTheId(string? serial)
+  {
+    var kind = PipeWireRegistryListener.ClassifyNodeGlobal(
+      76u, "bluez_input.B0_D5_FB_D2_0D_68.2", serial, out var args);
+
+    Assert.Equal(BtNodeGlobalKind.BtCaptureNodeWithoutSerial, kind);
+    // Args still come back (so the node's REMOVAL can be reported), but with serial 0 — and the
+    // id is not smuggled in as the serial.
+    Assert.NotNull(args);
+    Assert.Equal(0u, args!.ObjectSerial);
+    Assert.Equal(76u, args.Id);
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("alsa_input.pci-0000_00_1f.3.analog-stereo")]
+  [InlineData("radio-bt-stream")]
+  public void ClassifyNodeGlobal_NotABtCaptureNode_IsIgnored(string? nodeName)
+  {
+    var kind = PipeWireRegistryListener.ClassifyNodeGlobal(76u, nodeName, "58968", out var args);
+
+    Assert.Equal(BtNodeGlobalKind.NotBtCaptureNode, kind);
+    Assert.Null(args);
+  }
+
   /// <summary>
   /// Regression guard: <c>pw_core_get_registry</c> is declared <c>static inline</c>
   /// in <c>pipewire/core.h</c> (it expands the <c>spa_interface_call_res</c>

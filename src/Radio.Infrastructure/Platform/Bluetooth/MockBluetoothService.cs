@@ -45,6 +45,8 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<CaptureStreamStalledEventArgs>? CaptureStreamStalled { add { } remove { } }
         // Mock never raises CaptureNodeAvailable — the platform manages capture-node visibility.
         public event EventHandler<CaptureNodeAvailableEventArgs>? CaptureNodeAvailable { add { } remove { } }
+        // Mock never raises CaptureTargetLost (AUD-11) — there is no PipeWire target to lose.
+        public event EventHandler<CaptureTargetLostEventArgs>? CaptureTargetLost { add { } remove { } }
         public float? DeviceVolume => null;
         public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
         public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;

@@ -160,6 +160,44 @@ internal static class PipeWireNative
     public IntPtr GlobalRemove;  // PwRegistryGlobalRemoveDelegate function pointer
   }
 
+  // --- pw_stream state (AUD-11 Task 3) ---
+
+  /// <summary>
+  /// <c>enum pw_stream_state</c> from &lt;pipewire/stream.h&gt;. <c>ERROR</c> is negative, so the
+  /// marshalled callback parameter is a signed <c>int</c> and not a <c>uint</c>.
+  /// </summary>
+  /// <remarks>
+  /// Values checked against <c>src/pipewire/stream.h</c> at the PipeWire <c>1.0.7</c> tag (the
+  /// version on the appliance), lines 182-186: ERROR = -1, UNCONNECTED = 0, CONNECTING = 1,
+  /// PAUSED = 2, STREAMING = 3.
+  /// </remarks>
+  public enum PwStreamState
+  {
+    Error = -1,
+    Unconnected = 0,
+    Connecting = 1,
+    Paused = 2,
+    Streaming = 3,
+  }
+
+  /// <summary>
+  /// <c>pw_stream_events.state_changed</c>:
+  /// <c>void (*)(void *data, enum pw_stream_state old, enum pw_stream_state state, const char *error)</c>.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ AUD-11 C-168. Checked against <c>src/pipewire/stream.h</c> at the PipeWire <c>1.0.7</c> tag,
+  /// lines 344-345 (fetched from gitlab.freedesktop.org 2026-09-25) — NOT against the header
+  /// installed on the appliance, which was not read. It is the third member of
+  /// <c>struct pw_stream_events</c> after <c>version</c> and <c>destroy</c>, matching
+  /// <see cref="PwStreamEvents.StateChanged"/>'s position. If the box's header ever disagrees,
+  /// this delegate is what must change: a wrong arity does NOT throw — under the x86-64 SysV
+  /// convention the callee reads whatever registers hold, so the failure is plausible garbage on
+  /// the PipeWire thread.
+  /// </remarks>
+  [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+  public delegate void PwStreamStateChangedDelegate(
+    IntPtr userData, int oldState, int newState, IntPtr error);
+
   // --- Helper library (pod builder + spa_dict lookup) ---
 
   [DllImport(HelperLib, CallingConvention = CallingConvention.Cdecl)]
@@ -205,7 +243,7 @@ internal static class PipeWireNative
   {
     public uint Version;
     public IntPtr Destroy;        // void (*destroy)(void *data)
-    public IntPtr StateChanged;   // void (*state_changed)(void *data, ...)
+    public IntPtr StateChanged;   // PwStreamStateChangedDelegate — wired since AUD-11
     public IntPtr Control;        // void (*control_info)(void *data, ...)
     public IntPtr IoChanged;      // void (*io_changed)(void *data, ...)
     public IntPtr ParamChanged;   // void (*param_changed)(void *data, ...)

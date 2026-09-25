@@ -5,25 +5,40 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Native;
 /// <c>PipeWireRegistryListener</c> so the (parser-level) classification can
 /// be unit-tested without a real PipeWire daemon. The listener calls
 /// <see cref="TryExtractBtCaptureAddress"/> from its <c>global()</c>
-/// callback to decide whether a newly-appeared global is a BT A2DP source
+/// callback to decide whether a newly-appeared global is a BT capture node
 /// and, if so, the device address it represents.
-///
-/// Recognises names of the shape <c>bluez_input.AA_BB_CC_DD_EE_FF.a2dp-source</c>
-/// (the PipeWire bluez5 module's node-naming convention for A2DP source nodes).
-/// HFP profile nodes (<c>...hfp-ag</c>, <c>...hfp-hf</c>) are rejected — RTest's
-/// audio path is A2DP-only; the HFP path lives on the second adapter
-/// (RotaryPhone, see CLAUDE.md cross-service boundary).
 /// </summary>
+/// <remarks>
+/// Recognises <c>bluez_input.AA_BB_CC_DD_EE_FF</c> followed by either the end of the
+/// string or a <c>.</c> and a non-empty suffix — the same shape the working
+/// <c>pw-cli</c> scrape has always matched by prefix
+/// (<c>LinuxBluetoothService.FindPipeWireBluetoothNodeAsync</c>).
+///
+/// ⚠ AUD-10: this filter used to require the suffix <c>.a2dp-source</c>, a naming
+/// convention the appliance (PipeWire 1.0.7) never produces. The node there is
+/// <c>bluez_input.B0_D5_FB_D2_0D_68.2</c> — measured 2026-09-10 and 2026-09-25, <c>.2</c>
+/// both times. So the filter never matched, <c>NodeAppeared</c>/<c>NodeDisappeared</c>
+/// never fired in production, and the listener's healthy start-up report switched off
+/// the Plan B fallback scrape at the same time. Its tests passed because their fixtures
+/// were invented in the same shape as the filter. ⛔ Do not match the full name or pin the
+/// numeric suffix: two sightings of <c>.2</c> are not a guarantee (plan AUD-10 §0.3).
+///
+/// HFP profile suffixes (<c>.hfp-ag</c>, <c>.hfp-hf</c>) are still rejected. They have not
+/// been observed on <c>hci0</c>; the HFP path lives on the second adapter (RotaryPhone,
+/// see CLAUDE.md cross-service boundary), so rejecting them is harmless.
+/// </remarks>
 internal static class PipeWireRegistryFilter
 {
   private const string Prefix = "bluez_input.";
-  private const string A2dpSuffix = ".a2dp-source";
 
   // Underscored MAC body length: "AA_BB_CC_DD_EE_FF" = 17 chars.
   private const int MacBodyLength = 17;
 
+  private static readonly string[] RejectedSuffixes = { "hfp-ag", "hfp-hf" };
+
   /// <summary>
-  /// Returns true if the given PipeWire node name is a BT A2DP source node,
+  /// Returns true if the given PipeWire node name is a BT capture node
+  /// (<c>bluez_input.&lt;MAC&gt;</c> or <c>bluez_input.&lt;MAC&gt;.&lt;suffix&gt;</c>),
   /// and writes the colon-separated upper-case device address to <paramref name="address"/>.
   /// </summary>
   public static bool TryExtractBtCaptureAddress(string nodeName, out string address)
@@ -37,16 +52,34 @@ internal static class PipeWireRegistryFilter
     {
       return false;
     }
-    if (!nodeName.EndsWith(A2dpSuffix, System.StringComparison.Ordinal))
+
+    var bodyStart = Prefix.Length;
+    var bodyEnd = bodyStart + MacBodyLength;
+    if (nodeName.Length < bodyEnd)
     {
       return false;
     }
 
-    var bodyStart = Prefix.Length;
-    var bodyEnd = nodeName.Length - A2dpSuffix.Length;
-    if (bodyEnd - bodyStart != MacBodyLength)
+    // After the MAC body: either end-of-string, or '.' followed by a non-empty suffix.
+    // Anything else (a longer MAC-like body, a '-' separator, ...) is not our shape.
+    if (nodeName.Length > bodyEnd)
     {
-      return false;
+      if (nodeName[bodyEnd] != '.')
+      {
+        return false;
+      }
+      var suffix = nodeName[(bodyEnd + 1)..];
+      if (suffix.Length == 0)
+      {
+        return false;
+      }
+      foreach (var rejected in RejectedSuffixes)
+      {
+        if (string.Equals(suffix, rejected, System.StringComparison.Ordinal))
+        {
+          return false;
+        }
+      }
     }
 
     // Validate the body is six pairs of hex separated by underscores.

@@ -43,6 +43,7 @@ public class BluetoothAutoSwitchServiceTests
     public event EventHandler<BluetoothDeviceDiscoveredEventArgs>? DeviceDiscovered
     { add { } remove { } }
     public event EventHandler? CaptureStreamRecovered { add { } remove { } }
+    public event EventHandler<CaptureTargetLostEventArgs>? CaptureTargetLost { add { } remove { } }
     public event EventHandler<BluetoothPlaybackMetadata>? MetadataChanged
     { add { } remove { } }
     public event EventHandler<BluetoothPlaybackStatus>? PlaybackStatusChanged

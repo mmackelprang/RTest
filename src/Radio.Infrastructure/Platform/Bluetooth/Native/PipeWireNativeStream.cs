@@ -24,7 +24,7 @@ internal delegate void AudioDataCallback(float[] samples, int count);
 /// Replaces the pw-record subprocess + pw-link link management with a single
 /// native stream that PipeWire connects directly to the target node.
 /// </summary>
-internal sealed class PipeWireNativeStream : IDisposable
+internal sealed class PipeWireNativeStream : IBtCaptureStream
 {
   private static bool _pwInitialized;
   private static readonly object InitLock = new();
@@ -90,6 +90,30 @@ internal sealed class PipeWireNativeStream : IDisposable
 
   // Pinned delegate references to prevent GC collection during native callbacks
   private readonly ProcessDelegate _processDelegate;
+  // AUD-11 C-166: state_changed was declared in PwStreamEvents from PR #262 and never assigned, so the
+  // stream has never been able to report PW_STREAM_STATE_ERROR — including the error that
+  // node.dont-reconnect is expected to produce when the target is destroyed. Same GC-lifetime rule as
+  // _processDelegate: Marshal.GetFunctionPointerForDelegate only stays valid while the delegate object
+  // is reachable.
+  private readonly PwStreamStateChangedDelegate _stateChangedDelegate;
+
+  private int _state = (int)PwStreamState.Unconnected;
+  private string? _lastError;
+
+  /// <summary>
+  /// The stream's most recent PipeWire state. <see cref="PwStreamState.Unconnected"/> until the first
+  /// state_changed callback. Safe to read from any thread.
+  /// </summary>
+  public PwStreamState State => (PwStreamState)Volatile.Read(ref _state);
+
+  /// <summary>
+  /// PipeWire's own error string from the most recent state_changed callback, if that callback was a
+  /// transition into <see cref="PwStreamState.Error"/>; null otherwise. Safe to read from any thread.
+  /// </summary>
+  public string? LastError => Volatile.Read(ref _lastError);
+
+  /// <summary>The intended capture target (an <c>object.serial</c>), as passed to the constructor.</summary>
+  public uint TargetNodeSerial => _targetNodeId;
 
   // Native callback signature: void process(void* userData)
   [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -130,6 +154,13 @@ internal sealed class PipeWireNativeStream : IDisposable
     bool useRealtime = false, int rtPriority = 50,
     bool useResampler = false, double initialResamplerRatio = 1.0)
   {
+    // AUD-11 C-163: 0 is not a valid object.serial. Accepting it writes `target.object = 0`, which
+    // resolves to nothing. The caller is expected to have refused this already
+    // (LinuxBluetoothService.StartCaptureSubprocess); this guard exists so a FUTURE caller cannot
+    // reintroduce the same silent substitution. It is the FIRST statement on purpose: EnsurePwInit()
+    // below is a native call, and a guard placed after it could not be unit-tested without libpipewire.
+    ArgumentOutOfRangeException.ThrowIfZero(targetNodeId);
+
     _targetNodeId = targetNodeId;
     _sampleRate = sampleRate;
     _channels = channels;
@@ -151,8 +182,9 @@ internal sealed class PipeWireNativeStream : IDisposable
       _resampleOutputBuffer = new float[8192];
     }
 
-    // Pin delegate to prevent GC
+    // Pin delegates to prevent GC
     _processDelegate = OnProcess;
+    _stateChangedDelegate = OnStateChanged;
 
     EnsurePwInit();
   }
@@ -196,12 +228,13 @@ internal sealed class PipeWireNativeStream : IDisposable
     _events = new PwStreamEvents
     {
       Version = PW_STREAM_EVENTS_VERSION,
+      StateChanged = Marshal.GetFunctionPointerForDelegate(_stateChangedDelegate),
       Process = Marshal.GetFunctionPointerForDelegate(_processDelegate)
     };
     _eventsHandle = GCHandle.Alloc(_events, GCHandleType.Pinned);
 
-    // Create stream with properties targeting our node
-    var propsStr = $"{{ media.type = Audio media.category = Capture media.role = Music node.autoconnect = true target.object = {_targetNodeId} }}";
+    // Create stream with properties targeting our node (AUD-11: see BuildStreamProperties).
+    var propsStr = BuildStreamProperties(_targetNodeId);
     var props = pw_properties_new_string(propsStr);
 
     _stream = pw_stream_new_simple(
@@ -231,7 +264,9 @@ internal sealed class PipeWireNativeStream : IDisposable
 
       // Connect the stream
       var paramPods = new[] { podBuffer };
-      // Use PW_ID_ANY so PipeWire resolves target from the target.object property
+      // Use PW_ID_ANY so PipeWire resolves target from the target.object property.
+      // ⛔ AUD-11: this stays. It is not the cause of the wrong-jack binding — see plan AUD-11 C-161.
+      // The refusal lives in node.dont-reconnect, in BuildStreamProperties.
       const uint PW_ID_ANY = 0xffffffff;
       var result = pw_stream_connect(
         _stream, PwDirection.Input, PW_ID_ANY,
@@ -258,6 +293,107 @@ internal sealed class PipeWireNativeStream : IDisposable
     _logger.LogInformation(
       "PipeWire native stream started (target node {NodeId}, {Rate}Hz, {Ch}ch)",
       _targetNodeId, _sampleRate, _channels);
+  }
+
+  /// <summary>
+  /// Builds the <c>pw_properties</c> string for the capture stream.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Extracted as a pure static so AUD-11's targeting contract can be pinned by a unit test with no
+  /// PipeWire daemon and no native library — the same reason
+  /// <c>LinuxBluetoothService.ParsePwCliOutputForBtNode</c> is a static.
+  ///
+  /// ⚠ node.dont-reconnect = true IS THE AUD-11 FIX and it is the only token here that refuses
+  /// anything. pipewire-props(7): "When the node has a target configured and the target is destroyed,
+  /// destroy the node as well. This property also inhibits that the node is moved to another
+  /// sink/source." Without it, node.autoconnect = true is an instruction with no failure mode: when
+  /// target.object cannot be resolved the session manager satisfies it with the DEFAULT source, which
+  /// on the appliance is alsa_input.pci-0000_00_1f.3.analog-stereo — the unplugged line-in. Measured
+  /// live 2026-09-06 and again, at 1 Hz, 2026-09-25 (docs/queue/AUD-10.md).
+  ///
+  /// ⚠ AUD-10: dont-reconnect does NOT stop us following the node across a pause. The A2DP node is
+  /// destroyed on pause and recreated on resume under a NEW object.serial, which this stream's
+  /// target.object can never match. Following it is done by starting a NEW stream against the new
+  /// serial (LinuxBluetoothService.RebindParkedCaptureAsync), never by re-linking this one.
+  ///
+  /// ⚠ node.autoconnect STAYS. Removing it instead was considered and rejected without measurement:
+  /// this box's WirePlumber graph is hand-tuned (deploy/common/41-disable-bt-input-restore-target.lua)
+  /// and it is not established that the stream would connect at all without it. Plan AUD-11 §6.2 holds
+  /// that option in reserve.
+  ///
+  /// ⚠ targetNodeId is an object.serial, NOT a registry global id. pipewire-props(7) gives
+  /// target.object as &lt;node.name|object.serial&gt;, and says the DEPRECATED node.target is the one
+  /// that took an object.id. On the appliance they are different numbers (id 76 / serial 58968).
+  ///
+  /// ⛔ Do NOT respond to a targeting problem by passing targetNodeId to pw_stream_connect's targetId
+  /// argument. That parameter means node id, and handing it a serial is the bug PR #262 (commit
+  /// 5353f020a) already paid to remove. See plan AUD-11 C-161.
+  /// </remarks>
+  internal static string BuildStreamProperties(uint targetNodeId) =>
+    "{ media.type = Audio media.category = Capture media.role = Music "
+    + "node.autoconnect = true node.dont-reconnect = true "
+    + $"target.object = {targetNodeId} }}";
+
+  /// <summary>
+  /// Fires on the PipeWire thread loop for every stream state transition.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ Must not throw and must not block — this runs on the loop that also drives OnProcess.
+  /// ⚠ AUD-11: an ERROR transition is the loud form of the wrong-jack defect. With
+  /// node.dont-reconnect = true, a destroyed target is expected to arrive here rather than being
+  /// silently satisfied by the default source. It is not the only guard, because whether the
+  /// property is honoured is WirePlumber's decision; the registry teardown and the peer audit in
+  /// LinuxBluetoothService are the independent ones.
+  /// </remarks>
+  private static void OnStateChanged(IntPtr userData, int oldState, int newState, IntPtr error)
+  {
+    if (userData == IntPtr.Zero)
+    {
+      return;
+    }
+
+    PipeWireNativeStream? self;
+    try
+    {
+      self = GCHandle.FromIntPtr(userData).Target as PipeWireNativeStream;
+    }
+    catch
+    {
+      return;
+    }
+    if (self == null)
+    {
+      return;
+    }
+
+    try
+    {
+      var message = error == IntPtr.Zero ? null : Marshal.PtrToStringAnsi(error);
+      Volatile.Write(ref self._state, newState);
+      Volatile.Write(ref self._lastError, newState == (int)PwStreamState.Error ? message : null);
+
+      if (newState == (int)PwStreamState.Error)
+      {
+        // Warning, so it reaches `journalctl -u radio-api` — Radio.API's console sink is restricted to
+        // Warning and above (LOG-11) and under systemd the console IS the journal.
+        self._logger.LogWarning(
+          "PipeWire stream error: {Old} -> {New} for target.object {Serial}: {Error}",
+          (PwStreamState)oldState, (PwStreamState)newState, self._targetNodeId,
+          message ?? "(no message)");
+      }
+      else
+      {
+        // Information: file sink only. Deliberately quiet — log volume on this box correlates with
+        // audible audio distortion, and healthy transitions are a handful per capture session.
+        self._logger.LogInformation(
+          "PipeWire stream state: {Old} -> {New} (target.object {Serial})",
+          (PwStreamState)oldState, (PwStreamState)newState, self._targetNodeId);
+      }
+    }
+    catch
+    {
+      // Must not throw on the PipeWire thread loop.
+    }
   }
 
   /// <summary>
