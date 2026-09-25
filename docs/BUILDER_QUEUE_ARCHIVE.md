@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (56)
+## Shipped rows (58)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2567,3 +2567,39 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 ⚠ **A regression lint shipped with a hole exactly where it mattered**, caught by review rather than by the Builder: a brace-less `if (flag) Stop();` defeated the walk entirely — **and that style is already idiomatic in the directory the lint scans**, so four call sites could have been de-braced with the lint still green.
 
 ⛔ **WHY THIS ENTRY CARRIES ITS OWN FALSE JUSTIFICATION RATHER THAN QUIETLY DROPPING IT — A ROW THAT SHIPPED SUCCESSFULLY ON PARTLY-FALSE REASONING IS MORE DANGEROUS THAN ONE THAT FAILED.** The fix was right; the **priority call rested on something untrue**. The row now sits in the record as a **success**, and the next person cites it as precedent — *"we P0'd this class of guard defect before and it shipped clean"* — inheriting the false half **with no signal that it was false**. ⭐ **A failed row gets re-examined. A successful one does not.** A correct outcome retrospectively launders the reasoning that produced it, and nothing in the outcome distinguishes a sound rationale from a lucky one. *(Framing contributed by the RotaryPhone session, 2026-09-10.)*
+
+---
+
+### AUD-10 — Pausing on the phone destroyed the A2DP node, and our stream stayed bound to a serial that never came back.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#663](https://github.com/mmackelprang/RTest/pull/663) (squash `85cb4620`) — **owner UAT PASSED at the cabinet 2026-09-25: 3 of 3 pause/resume cycles restored audio with no reconnect** |
+| Plan | [`AUD-10-the-node-that-comes-back-under-a-new-serial.md`](../design/plans/AUD-10-the-node-that-comes-back-under-a-new-serial.md) — **shipped as ONE PR with `AUD-11`** |
+| Spec / handoff | _no spec doc_ · root cause measured 2026-09-25 with a 1 Hz node/link/transport recorder |
+| Depends on | — |
+| Branch | `fix/aud-10-follow-the-bt-node` |
+
+**Detail: [`queue/AUD-10.md`](queue/AUD-10.md)** — the root-cause run, the wrong-event-table finding, and the UAT table.
+
+**The mechanism.** PipeWire removes the dynamic A2DP node when the transport goes `idle` and recreates it on resume under the same name with a **new `object.serial`**; the stream was bound by serial, so it fell to the line-in (`AUD-11`) and the recreated node was never linked, never acquired, and died ~4 s later. The fix parks the stream on node loss and re-binds on node appearance — **5–11 ms** at the cabinet, transport `pending → active` each time.
+
+⛔ **TWO DEFECTS SAT UNDER THE ONE THE ROW NAMED, AND THE SECOND WAS FOUND ONLY ON THE BOX.** The registry filter expected `.a2dp-source` names the appliance never produces (found in planning), **and** the listener was registered with `pw_proxy_add_listener` — proxy events — so no registry global had ever been delivered while `IsHealthy` read `true` (found post-deploy with a phone-free fake-node check, fixed in `97b6b4e`). Fixing only the first would have shipped a re-bind that could never fire. ⭐ **Run the fake-node check before any sitting on this path** — `IsHealthy` is not evidence.
+
+⚠ **The one failed cycle in the sitting was `AUD-30`** (RotaryPhone refusing the Pixel on `hci1`, read by us as our disconnect, 318/347 ms later, two for two). Not this row.
+
+---
+
+### AUD-11 — The BT capture stream silently re-linked to the built-in line-in when its target disappeared.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#663](https://github.com/mmackelprang/RTest/pull/663) (squash `85cb4620`) — shipped with `AUD-10`; **verified at the cabinet 2026-09-25: `radio-bt-stream` was never linked to `alsa_input…` across four pauses** |
+| Plan | [`AUD-11-the-capture-that-recorded-the-wrong-jack.md`](../design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md) — ⛔ amended by the `AUD-10` plan (its §1.2 re-arm claim was false) |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — |
+| Branch | `fix/aud-10-follow-the-bt-node` |
+
+**Detail: [`queue/AUD-11.md`](queue/AUD-11.md)**
+
+`node.dont-reconnect` plus a teardown-and-park on node loss: the only state in which the wrong jack is impossible is the state with no stream. Health now reports `Degraded / WaitingForCaptureNode` while parked instead of `Healthy`.
