@@ -31,9 +31,12 @@ namespace Radio.Infrastructure.Tests.Platform.Bluetooth;
 /// <para>
 /// ⚠ What these cannot show: that BlueZ emits these signals for hci1 objects in the order and shape
 /// modelled here. That was measured on the box, and is re-checked at the cabinet (AUD-30 §
-/// Verification). The per-device <c>WatchPropertiesAsync</c> subscription is also not exercised —
-/// it needs a D-Bus connection — so "not watched" is covered through its consequence (a foreign
-/// Connected=false changes nothing) rather than by inspecting the subscription set.
+/// Verification). Also NOT covered, because each sits behind a live D-Bus call: the gate inside
+/// <c>WatchDevicePropertiesAsync</c> (it returns before the gate when there is no connection), the
+/// pre-existing-connection check and the media-object scan in <c>StartAsync</c>/<c>CheckForMediaPlayersAsync</c>,
+/// and adapter re-selection on a stop/start. Those gates are defence in depth behind the ones tested
+/// here — a foreign path never reaches the cache, and a foreign Connected=false is refused by the
+/// handler itself — but deleting any one of them alone would fail no test.
 /// </para>
 /// </remarks>
 public class AdapterScopingTests
@@ -94,6 +97,30 @@ public class AdapterScopingTests
   }
 
   [Fact]
+  public void StartupEnumeration_SkipsForeignDevices_AndCachesOurs()
+  {
+    // radio-api starting while RotaryPhone already holds an hci1 object for our phone.
+    var h = new Harness(primeConnected: false);
+    const string other = "/org/bluez/hci0/dev_D4_3A_2C_64_87_9E";
+    var snapshot = new Dictionary<ObjectPath, IDictionary<string, IDictionary<string, object>>>();
+    foreach (var (path, ifaces) in new[]
+    {
+      DeviceAdded(ForeignPath, connected: true),
+      DeviceAdded(other, connected: false, address: "D4:3A:2C:64:87:9E"),
+    })
+    {
+      snapshot[path] = ifaces;
+    }
+
+    h.Service.IngestExistingDevices(snapshot);
+
+    Assert.Equal(new[] { other }, h.Service.CachedDevicePathsForTests());
+    Assert.Empty(h.Connected);
+    Assert.Null(h.Service.ConnectedDevice);
+    Assert.DoesNotContain(h.Log.Entries, e => e.Message.Contains("already connected", StringComparison.Ordinal));
+  }
+
+  [Fact]
   public void ForeignConnectedFalse_DoesNotRaiseDisconnected_OrStopCapture()
   {
     // The measured sequence: the hci1 object exists, then RotaryPhone refuses it and BlueZ flips
@@ -129,8 +156,11 @@ public class AdapterScopingTests
   }
 
   [Fact]
-  public void ForeignDeviceRemoved_ThroughTheSignal_DoesNotEvictOurDevice_OrLogAnEviction()
+  public void ForeignDeviceAddedThenRemoved_LeavesNoTrace()
   {
+    // The signal sequence end to end. Guarded by the InterfacesAdded gate (the foreign object never
+    // reaches the cache, so there is nothing to evict); the Removed gate on its own is pinned by
+    // ForeignDeviceRemoved_IsIgnoredByTheHandlerItself_EvenIfCached below.
     var h = new Harness();
 
     h.Service.OnInterfaceAdded(DeviceAdded(ForeignPath, connected: false));

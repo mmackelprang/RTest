@@ -61,10 +61,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   // AUD-30 / AUD-31: the D-Bus object path of the adapter StartAsync selected (e.g. "/org/bluez/hci0").
   // BlueZ's ObjectManager signals cover EVERY adapter on the box, and this box has two: hci1 belongs
   // to RotaryPhone (CLAUDE.md § Cross-Service Boundary). Every place that creates, watches or evicts a
-  // Device1 — or attaches to a device-scoped MediaPlayer1/MediaTransport1 — checks the object path
-  // against this with IsObjectUnderAdapter. Null until an adapter is selected; while null, NO device
-  // object is accepted (fail closed). In practice the D-Bus watchers are only subscribed after
-  // selection succeeds, so null is only ever seen by a service that failed to start.
+  // Device1 — or attaches to a device-scoped MediaPlayer1/MediaTransport1 — from a BlueZ object path
+  // checks it against this through AcceptObjectForAdapter. Paths that act on a device by ADDRESS
+  // (FindDevicePath, ConnectedDevice, UnpairDeviceAsync's EvictDevice, the reconnection loop) do no
+  // check of their own: they read _deviceCache, which only ever receives gated paths (the
+  // *ForTests hooks aside).
+  // Null until an adapter is selected, and reset to null at the start of every StartAsync; while
+  // null, NO device object is accepted (fail closed). StartAsync returns false without subscribing
+  // if selection fails, but watchers subscribed by an EARLIER successful start are not disposed by
+  // StopAsync, so they can see null briefly during a restart and will ignore what they see.
   private volatile string? _adapterPath;
 
   // Object paths under a foreign adapter that have already been logged as ignored. Each is logged
@@ -489,6 +494,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
       ObjectPath? selectedPath = null;
 
+      // Re-select from scratch on every start. StopAsync leaves _adapter set, and a UI stop/start
+      // (BluetoothController) comes back through here: with the old proxy still in _adapter the
+      // fallback branch below was skipped, selectedPath stayed null, and _adapterPath would have
+      // been cleared — every device object then ignored. The old proxy is also bound to the
+      // previous Connection, which this method has already replaced. Until selection below
+      // completes, device objects are ignored (fail closed).
+      _adapter = null;
+      _adapterPath = null;
+
       foreach (var obj in objects)
       {
         if (!obj.Value.ContainsKey(Linux.BluezConstants.AdapterInterface))
@@ -765,46 +779,57 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     try
     {
       var objects = await _objectManager.GetManagedObjectsAsync();
-      foreach (var obj in objects)
-      {
-        if (!obj.Value.ContainsKey(Linux.BluezConstants.DeviceInterface))
-        {
-          continue;
-        }
-
-        // AUD-30: GetManagedObjects returns every adapter's devices; only ours are cached/watched.
-        if (!AcceptObjectForAdapter(obj.Key, "device enumeration"))
-        {
-          continue;
-        }
-
-        var props = obj.Value[Linux.BluezConstants.DeviceInterface];
-        var device = ParseDevice(obj.Key, props);
-
-        lock (_deviceCache)
-        {
-          _deviceCache[obj.Key] = device;
-        }
-
-        // Watch property changes (Connected, etc.) on this device
-        _ = WatchDevicePropertiesAsync(obj.Key);
-
-        if (device.IsConnected)
-        {
-          _connectionStartTime = DateTime.UtcNow;
-          _metricsCollector?.Increment("bluetooth.devices_connected_total");
-          _metricsCollector?.Gauge("bluetooth.active_connections", 1);
-          _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address}) at {ObjectPath}",
-            device.Name, device.Address, obj.Key);
-          _pipelineRecoveryFailures = 0;
-          EnsureRescanLoopRunning();
-          DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
-        }
-      }
+      IngestExistingDevices(objects);
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Failed to watch existing Bluetooth devices");
+    }
+  }
+
+  /// <summary>
+  /// Caches and watches the Device1 objects in a GetManagedObjects snapshot. Split out of
+  /// <see cref="WatchExistingDevicesAsync"/> so the adapter gate on startup enumeration — the path
+  /// the AUD-30 hci1 object arrives by when radio-api starts with RotaryPhone already running — can be
+  /// driven without D-Bus.
+  /// </summary>
+  internal void IngestExistingDevices(IDictionary<ObjectPath, IDictionary<string, IDictionary<string, object>>> objects)
+  {
+    foreach (var obj in objects)
+    {
+      if (!obj.Value.ContainsKey(Linux.BluezConstants.DeviceInterface))
+      {
+        continue;
+      }
+
+      // AUD-30: GetManagedObjects returns every adapter's devices; only ours are cached/watched.
+      if (!AcceptObjectForAdapter(obj.Key, "device enumeration"))
+      {
+        continue;
+      }
+
+      var props = obj.Value[Linux.BluezConstants.DeviceInterface];
+      var device = ParseDevice(obj.Key, props);
+
+      lock (_deviceCache)
+      {
+        _deviceCache[obj.Key] = device;
+      }
+
+      // Watch property changes (Connected, etc.) on this device
+      _ = WatchDevicePropertiesAsync(obj.Key);
+
+      if (device.IsConnected)
+      {
+        _connectionStartTime = DateTime.UtcNow;
+        _metricsCollector?.Increment("bluetooth.devices_connected_total");
+        _metricsCollector?.Gauge("bluetooth.active_connections", 1);
+        _logger.LogInformation("Bluetooth device already connected: {DeviceName} ({Address}) at {ObjectPath}",
+          device.Name, device.Address, obj.Key);
+        _pipelineRecoveryFailures = 0;
+        EnsureRescanLoopRunning();
+        DeviceConnected?.Invoke(this, new BluetoothDeviceConnectedEventArgs { Device = device });
+      }
     }
   }
 
@@ -2276,8 +2301,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// True when <paramref name="adapterObjectPath"/> is exactly the adapter named
   /// <paramref name="adapterName"/> (<c>"hci0"</c> ⇒ <c>/org/bluez/hci0</c>). An exact comparison:
   /// the StartsWith this replaced let a configured <c>"hci1"</c> select <c>/org/bluez/hci10</c>.
-  /// Case-insensitive on the configured name only because the old check was, and config is typed
-  /// by hand.
+  /// The whole comparison is case-insensitive, as the old check was — config is typed by hand, and
+  /// BlueZ only ever emits lower-case adapter paths, so folding the rest costs nothing.
   /// </summary>
   internal static bool IsConfiguredAdapterPath(string adapterObjectPath, string adapterName) =>
     string.Equals(adapterObjectPath, $"/org/bluez/{adapterName}", StringComparison.OrdinalIgnoreCase);
