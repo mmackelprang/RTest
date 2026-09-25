@@ -458,7 +458,11 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             var deficit = buffer.Length - samplesWritten;
             buffer.Slice(samplesWritten).Fill(0);
 
-            if (_totalSamplesReceived > 0)
+            // AUD-10: while the producer is deliberately parked (the BT node left PipeWire on a handset
+            // pause and the capture is waiting for it to come back), an empty buffer is the expected
+            // state, not an underrun. Without this gate the branch below logs a Warning once a second
+            // for the whole pause, and Warning is what reaches radio-api's journal (LOG-11).
+            if (_totalSamplesReceived > 0 && !_producerParked)
             {
                 _underrunCount++;
                 _underrunSamplesSinceLastLog += deficit;
@@ -794,6 +798,48 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         _logger.LogInformation(
             "Pre-filled buffer with {Samples} samples ({Seconds:F2}s) of silence as startup cushion",
             samplesToFill, seconds);
+    }
+
+    /// <summary>
+    /// True while the producer feeding this generator is deliberately parked (AUD-10). The mixer keeps
+    /// pulling and gets silence; the underrun accounting and its Warning are suppressed, because an
+    /// empty buffer is the expected state and not a fault. Safe to set from any thread.
+    /// </summary>
+    public bool ProducerParked
+    {
+        get => _producerParked;
+        set => _producerParked = value;
+    }
+
+    private volatile bool _producerParked;
+
+    /// <summary>
+    /// Discards everything buffered and restarts from <paramref name="seconds"/> of ZEROED silence —
+    /// the startup cushion <see cref="PreFillSilence"/> gives a fresh generator, for one that has
+    /// already been used (AUD-10: re-binding a parked generator to a recreated BT node).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Not the same as <see cref="ClearBuffer"/> followed by <see cref="PreFillSilence"/>.
+    /// PreFillSilence only advances the write pointer, relying on a brand-new ring buffer being zero;
+    /// on a used buffer that would replay stale audio from before the pause. This zeroes the samples it
+    /// counts.
+    /// </remarks>
+    public void ResetWithSilence(float seconds)
+    {
+        var samplesToFill = (int)(Format.SampleRate * Format.Channels * seconds);
+        samplesToFill = Math.Clamp(samplesToFill, 0, _maxBufferSamples / 2);
+
+        lock (_bufferLock)
+        {
+            Array.Clear(_ringBuffer, 0, samplesToFill);
+            _readPos = 0;
+            _writePos = samplesToFill % _maxBufferSamples;
+            _count = samplesToFill;
+            if (_overflowStrategy == BufferOverflowStrategy.Block)
+            {
+                Monitor.PulseAll(_bufferLock);
+            }
+        }
     }
 
     /// <summary>

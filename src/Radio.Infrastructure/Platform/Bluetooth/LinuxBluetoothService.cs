@@ -148,6 +148,13 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   private readonly HashSet<string> _knownNodeAddresses = new(StringComparer.OrdinalIgnoreCase);
   private readonly object _knownNodesLock = new();
 
+  // AUD-10: the BT capture nodes the registry listener says exist right now, by registry id, with
+  // the serial and name each appeared with. Maintained by the two registry handlers (under
+  // _knownNodesLock) and read by the park path, which must notice when the node's REPLACEMENT
+  // appeared BEFORE the original was removed — in that order the replacement's NodeAppeared finds
+  // the old stream still bound and does nothing, and no second NodeAppeared will come.
+  private readonly Dictionary<uint, (string Address, uint Serial, string NodeName)> _liveBtNodes = new();
+
   // Plan E: event-driven PW registry listener. When healthy, replaces the Plan B
   // periodic pw-cli scrape with a real pw_registry_add_listener subscription.
   // Disposed in DisposeAsync (after StopRescanLoop, before connection cleanup).
@@ -1690,6 +1697,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     lock (_knownNodesLock)
     {
       _knownNodeAddresses.Add(e.DeviceAddress);
+      if (e.ObjectSerial != 0)
+      {
+        _liveBtNodes[e.Id] = (e.DeviceAddress, e.ObjectSerial, e.NodeName);
+      }
     }
     _metricsCollector?.Increment("bluetooth.capture_node_appeared_total");
     _logger.LogInformation(
@@ -1748,6 +1759,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     lock (_knownNodesLock)
     {
       _knownNodeAddresses.Remove(e.DeviceAddress);
+      _liveBtNodes.Remove(e.Id);
     }
     _metricsCollector?.Increment("bluetooth.capture_node_disappeared_total");
     _logger.LogInformation(
@@ -1755,9 +1767,30 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       e.Id, e.ObjectSerial, e.DeviceAddress);
 
     var address = e.DeviceAddress;
+    var serial = e.ObjectSerial;
     EnqueueRegistryWork(
-      () => TearDownAndParkAsync(address, CaptureTargetLostReason.NodeRemoved, null, null),
+      () => TearDownAndParkAsync(address, CaptureTargetLostReason.NodeRemoved, null, null, serial),
       "node-removed teardown");
+  }
+
+  /// <summary>
+  /// A BT capture node currently in the registry for <paramref name="deviceAddress"/> whose serial is
+  /// not <paramref name="excludeSerial"/>, or null. Reads <see cref="_liveBtNodes"/>.
+  /// </summary>
+  private (uint Id, uint Serial, string NodeName)? FindLiveBtNode(string deviceAddress, uint excludeSerial)
+  {
+    lock (_knownNodesLock)
+    {
+      foreach (var (id, node) in _liveBtNodes)
+      {
+        if (node.Serial != excludeSerial
+          && string.Equals(node.Address, deviceAddress, StringComparison.OrdinalIgnoreCase))
+        {
+          return (id, node.Serial, node.NodeName);
+        }
+      }
+    }
+    return null;
   }
 
   /// <summary>
@@ -1827,9 +1860,15 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// When non-null, tear down only if this is still the current stream — the audit that found a
   /// wrong peer must not tear down a stream that has since been re-bound.
   /// </param>
+  /// <param name="removedSerial">
+  /// For <see cref="CaptureTargetLostReason.NodeRemoved"/>: the removed node's <c>object.serial</c>, or
+  /// 0 if unknown. When known, the stream is torn down only if it is bound to THAT serial — a late
+  /// removal of a node we already moved off must not kill the stream bound to its replacement, and a
+  /// removal of another node for the same MAC must not kill a healthy one.
+  /// </param>
   internal async Task TearDownAndParkAsync(
     string deviceAddress, CaptureTargetLostReason reason, string? boundPeers,
-    IBtCaptureStream? expectedStream)
+    IBtCaptureStream? expectedStream, uint removedSerial = 0)
   {
     if (!await _captureDeviceLock.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false))
     {
@@ -1840,6 +1879,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return;
     }
 
+    ParkedCapture? parkedNow = null;
     try
     {
       var stream = _nativeStream;
@@ -1851,6 +1891,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       {
         return;
       }
+      if (removedSerial != 0 && stream!.TargetNodeSerial != removedSerial)
+      {
+        return;
+      }
 
       var generator = _activeGenerator as BufferedSoundGenerator<float>;
       var format = _activeCaptureFormat;
@@ -1858,6 +1902,14 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       _parkedCapture = generator != null && format != null
         ? new ParkedCapture(deviceAddress, generator, format.Value, reason, Stopwatch.GetTimestamp())
         : null;
+      parkedNow = _parkedCapture;
+      if (generator != null)
+      {
+        // The generator stays in the mixer and will be pulled dry for the whole pause; that is
+        // expected, so its underrun Warning is suppressed until the re-bind (H1 of the pre-merge
+        // review: otherwise one journald Warning per second of pause).
+        generator.ProducerParked = true;
+      }
 
       if (reason == CaptureTargetLostReason.NodeRemoved)
       {
@@ -1895,6 +1947,21 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     {
       _logger.LogWarning(ex, "CaptureTargetLost subscriber threw");
     }
+
+    // AUD-10: if the replacement node appeared BEFORE this one was removed, its NodeAppeared already
+    // ran, found the old stream still bound, and did nothing — and no second NodeAppeared will come.
+    // Bind to it now rather than leaving the 30 s monitor probe to find it after the ~4 s the
+    // unlinked node lives. (Nothing live yet is the common case: the replacement arrives on resume.)
+    if (parkedNow != null && reason == CaptureTargetLostReason.NodeRemoved)
+    {
+      var replacement = FindLiveBtNode(deviceAddress, removedSerial);
+      if (replacement is { } r)
+      {
+        await RebindParkedCaptureAsync(
+          deviceAddress, r.Serial, r.NodeName, (int)r.Id, Stopwatch.GetTimestamp(),
+          "replacement already present at park").ConfigureAwait(false);
+      }
+    }
   }
 
   /// <summary>
@@ -1903,11 +1970,14 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// parked generator, which BluetoothAudioSource still has in the mixer.
   /// </summary>
   /// <remarks>
-  /// ⭐ This is what makes audio return after a pause. PipeWire recreates the A2DP node on resume under
-  /// the same name and a NEW serial (58968 → 59112, measured), and re-acquires the BlueZ transport only
-  /// when something links the node; unlinked, the transport falls back to idle ~4 s later and the
-  /// phone gives up. Nothing else re-arms a parked capture: BluetoothAutoSwitchService ignores an
-  /// already-active BT source.
+  /// ⭐ MEASURED: PipeWire recreates the A2DP node on resume under the same name and a NEW serial
+  /// (58968 → 59112), and when nothing bound it the transport fell back to idle ~4 s later and the
+  /// phone gave up. ⚠ EXPECTED, NOT MEASURED: that PipeWire re-acquires the BlueZ transport when
+  /// something links the recreated node, so binding it here is what brings audio back. That rests on
+  /// PipeWire source (spa/plugins/bluez5/media-source.c:689-709 @ 1.0.7) and is unverified until the
+  /// box session (plan AUD-10 §5.1 step 3, §7) — if the stream links but the transport sticks at
+  /// `pending`, this method is necessary but not sufficient. Nothing else re-arms a parked capture:
+  /// BluetoothAutoSwitchService ignores an already-active BT source.
   ///
   /// ⚠ Deliberately NOT routed through <see cref="SearchForCaptureDeviceAsync"/>: that scrapes pw-cli
   /// and waits between attempts, builds a NEW generator nothing would route, and the whole budget is
@@ -1974,6 +2044,13 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       _captureCts?.Dispose();
       _captureCts = new CancellationTokenSource();
 
+      // The parked generator was pulled dry for the whole pause. Give it the same startup cushion a
+      // fresh generator gets (StartCaptureSubprocess pre-fills 0.5 s) — with ZEROED samples, since
+      // PreFillSilence on a used ring buffer would replay audio from before the pause — and let its
+      // underrun accounting resume.
+      parked.Generator.ResetWithSilence(0.5f);
+      parked.Generator.ProducerParked = false;
+
       IBtCaptureStream? stream = null;
       try
       {
@@ -1982,6 +2059,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       }
       catch (Exception ex)
       {
+        parked.Generator.ProducerParked = true;
         try { stream?.Dispose(); }
         catch (Exception disposeEx) { _logger.LogDebug(disposeEx, "Disposing a failed re-bind stream threw"); }
         _captureCts.Cancel();
@@ -2470,45 +2548,56 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   private void StopCaptureSubprocess()
   {
-    _captureCts?.Cancel();
-    _captureCts?.Dispose();
-    _captureCts = null;
+    // ⚠ AUD-10: this can now run on two threads at once — the D-Bus disconnect handler calls it
+    // without _captureDeviceLock, and since the registry listener actually delivers events,
+    // NodeDisappeared reaches TearDownAndParkAsync, which calls it under the lock, for the same
+    // disconnect. Each resource is therefore SWAPPED OUT atomically, so exactly one caller cancels
+    // and disposes it: a double Dispose of a CancellationTokenSource can throw into the D-Bus handler
+    // before it raises DeviceDisconnected, and a double stop of a PipeWire thread loop is a native
+    // use-after-free.
+    var cts = Interlocked.Exchange(ref _captureCts, null);
+    if (cts != null)
+    {
+      try { cts.Cancel(); }
+      catch (ObjectDisposedException) { /* already torn down */ }
+      cts.Dispose();
+    }
     _activeGenerator = null;
 
     // Stop native PipeWire stream
-    if (_nativeStream != null)
+    var stream = Interlocked.Exchange(ref _nativeStream, null);
+    if (stream != null)
     {
-      try { _nativeStream.Dispose(); }
+      try { stream.Dispose(); }
       catch (Exception ex) { _logger.LogDebug(ex, "Error stopping native PipeWire stream"); }
-      _nativeStream = null;
     }
 
     // Stop pw-record fallback subprocess
-    if (_captureProcess != null)
+    var process = Interlocked.Exchange(ref _captureProcess, null);
+    if (process != null)
     {
       try
       {
-        if (!_captureProcess.HasExited)
+        if (!process.HasExited)
         {
-          _captureProcess.Kill();
-          _captureProcess.WaitForExit(2000);
+          process.Kill();
+          process.WaitForExit(2000);
         }
       }
       catch (Exception ex)
       {
         _logger.LogDebug(ex, "Error stopping capture subprocess");
       }
-      _captureProcess.Dispose();
-      _captureProcess = null;
+      process.Dispose();
     }
 
     // Disconnect PipeWire's auto-link from the BT input node to the default
     // output sink. PipeWire/WirePlumber automatically links bluez_input to the
     // default audio output, which bypasses our application entirely.
-    if (_activeNodeName != null)
+    var nodeName = Interlocked.Exchange(ref _activeNodeName, null);
+    if (nodeName != null)
     {
-      DisconnectPipeWireBtAutoLinks(_activeNodeName);
-      _activeNodeName = null;
+      DisconnectPipeWireBtAutoLinks(nodeName);
     }
   }
 
@@ -2720,8 +2809,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
   /// <summary>
   /// Audits what <c>radio-bt-stream</c> is actually linked to. Returns the comma-joined wrong peers
-  /// when it is linked to anything other than <paramref name="expectedNodeName"/> (the caller tears
-  /// the stream down); returns null when it is correctly bound OR when the audit could not tell.
+  /// when it is linked to anything other than <paramref name="expectedNodeName"/> (the caller queues
+  /// a teardown); returns null when it is correctly bound OR when the audit could not tell.
   /// </summary>
   /// <remarks>
   /// ⚠ AUD-11's second, independent guard. node.dont-reconnect is a request to WirePlumber, whose
@@ -2799,7 +2888,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     _logger.LogWarning(
       "BT capture is bound to the WRONG node: {Stream} <- [{Actual}], expected {Expected}. "
       + "This is AUD-11 — the graph shows an active capture and every downstream indicator reads "
-      + "healthy while the audio comes from somewhere else. Tearing the stream down.",
+      + "healthy while the audio comes from somewhere else. Queueing a teardown (skipped if the "
+      + "stream has been replaced by then).",
       StreamNodeName, wrongJoined, expectedNodeName);
     return wrongJoined;
   }

@@ -23,9 +23,16 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Native;
 /// were invented in the same shape as the filter. ⛔ Do not match the full name or pin the
 /// numeric suffix: two sightings of <c>.2</c> are not a guarantee (plan AUD-10 §0.3).
 ///
-/// HFP profile suffixes (<c>.hfp-ag</c>, <c>.hfp-hf</c>) are still rejected. They have not
-/// been observed on <c>hci0</c>; the HFP path lives on the second adapter (RotaryPhone,
-/// see CLAUDE.md cross-service boundary), so rejecting them is harmless.
+/// ⚠ The literal suffixes <c>.hfp-ag</c> / <c>.hfp-hf</c> are rejected, but that is NOT a profile
+/// filter and must not be read as one: no source here shows any PipeWire/WirePlumber version naming
+/// nodes that way, and WirePlumber may well name every profile's node numerically
+/// (<c>bluez_input.&lt;MAC&gt;.&lt;N&gt;</c>), in which case an HFP node for the same phone passes this
+/// filter exactly like the A2DP one. Not observed: WirePlumber only manages <c>hci0</c> on the
+/// appliance and the HFP path lives on the second adapter (RotaryPhone, CLAUDE.md cross-service
+/// boundary). What bounds the blast radius downstream is that a removal tears down only a stream bound
+/// to the removed node's serial, and a re-bind targets only the connected device. If profile
+/// discrimination is ever needed, read <c>api.bluez5.profile</c> / <c>media.class</c> from the global's
+/// properties — not the name.
 /// </remarks>
 internal static class PipeWireRegistryFilter
 {

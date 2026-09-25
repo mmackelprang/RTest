@@ -186,6 +186,73 @@ public class CaptureNodeFollowTests
   }
 
   [Fact]
+  public async Task RemovalOfAnotherNodeForTheSameDevice_LeavesTheBoundStreamAlone()
+  {
+    // Pre-merge review M1: the teardown used to match by MAC only.
+    var h = new Harness();
+    h.BindInitial(58968);
+
+    h.Service.OnRegistryNodeDisappeared(null, Harness.Node(id: 99, serial: 60000));
+    await h.Service.WhenRegistryWorkIdleAsync();
+
+    Assert.False(h.Streams[0].Disposed);
+    Assert.Equal(BluetoothPipelineStatus.Healthy, h.Service.PipelineStatus);
+  }
+
+  [Fact]
+  public async Task LateRemovalOfTheReplacedNode_DoesNotTearDownTheReboundStream()
+  {
+    // Pre-merge review M1: a stale removal of the node we already moved off.
+    var h = new Harness();
+    h.BindInitial(58968);
+    h.Service.OnRegistryNodeDisappeared(null, Harness.Node(id: 76, serial: 58968));
+    h.Service.OnRegistryNodeAppeared(null, Harness.Node(id: 81, serial: 59112));
+    await h.Service.WhenRegistryWorkIdleAsync();
+
+    h.Service.OnRegistryNodeDisappeared(null, Harness.Node(id: 77, serial: 58968));
+    await h.Service.WhenRegistryWorkIdleAsync();
+
+    Assert.False(h.Streams[^1].Disposed);
+    Assert.Equal(59112u, h.Streams[^1].TargetNodeSerial);
+    Assert.Equal(BluetoothPipelineStatus.Healthy, h.Service.PipelineStatus);
+  }
+
+  [Fact]
+  public async Task ReplacementAppearingBeforeTheOldNodeIsRemoved_IsStillBound()
+  {
+    // Pre-merge review M2: appear(new) runs while the old stream is still bound and does nothing;
+    // then remove(old) parks. No second NodeAppeared will come, so the park must bind the
+    // replacement that is already live.
+    var h = new Harness();
+    h.BindInitial(58968);
+
+    h.Service.OnRegistryNodeAppeared(null, Harness.Node(id: 81, serial: 59112));
+    h.Service.OnRegistryNodeDisappeared(null, Harness.Node(id: 76, serial: 58968));
+    await h.Service.WhenRegistryWorkIdleAsync();
+
+    Assert.Equal(BluetoothPipelineStatus.Healthy, h.Service.PipelineStatus);
+    Assert.Equal(59112u, h.Streams[^1].TargetNodeSerial);
+    Assert.Equal(1, h.Streams.Count(s => !s.Disposed));
+  }
+
+  [Fact]
+  public async Task Park_MarksTheGeneratorsProducerParked_AndRebindClearsIt()
+  {
+    // Pre-merge review H1: the parked generator is pulled dry for the whole pause; its underrun
+    // Warning must be off while parked and back on once re-bound.
+    var h = new Harness();
+    h.BindInitial(58968);
+
+    h.Service.OnRegistryNodeDisappeared(null, Harness.Node(id: 76, serial: 58968));
+    await h.Service.WhenRegistryWorkIdleAsync();
+    Assert.True(h.Generator.ProducerParked);
+
+    h.Service.OnRegistryNodeAppeared(null, Harness.Node(id: 81, serial: 59112));
+    await h.Service.WhenRegistryWorkIdleAsync();
+    Assert.False(h.Generator.ProducerParked);
+  }
+
+  [Fact]
   public async Task NodeAppearedForAnotherDevice_WhileParked_DoesNothing()
   {
     var h = new Harness();
@@ -234,11 +301,14 @@ public class CaptureNodeFollowTests
     uint serial = 58968;
     for (var i = 0; i < 3; i++)
     {
+      // Real pauses and resumes are seconds apart: let each event's work finish before the next.
       h.Service.OnRegistryNodeDisappeared(null, Harness.Node(id: 76, serial: serial));
+      await h.Service.WhenRegistryWorkIdleAsync();
+      Assert.Equal(BluetoothPipelineStatus.WaitingForCaptureNode, h.Service.PipelineStatus);
       serial += 100;
       h.Service.OnRegistryNodeAppeared(null, Harness.Node(id: 76, serial: serial));
+      await h.Service.WhenRegistryWorkIdleAsync();
     }
-    await h.Service.WhenRegistryWorkIdleAsync();
 
     Assert.Equal(4, h.Streams.Count);
     Assert.Equal(1, h.Streams.Count(s => !s.Disposed));

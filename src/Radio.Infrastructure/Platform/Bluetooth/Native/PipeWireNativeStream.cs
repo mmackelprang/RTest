@@ -52,6 +52,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   private GCHandle _eventsHandle;
   private GCHandle _selfHandle;
   private bool _disposed;
+  private int _disposedFlag;
 
   // Instrumentation: OnProcess delivery timing
   private long _lastOnProcessTimestamp;
@@ -218,6 +219,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
     _threadLoop = pw_thread_loop_new("radio-bt-capture", IntPtr.Zero);
     if (_threadLoop == IntPtr.Zero)
     {
+      FreeHandles(); // L4: a failed Start must not leave GCHandles rooting this stream
       throw new InvalidOperationException("Failed to create PipeWire thread loop");
     }
 
@@ -245,6 +247,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
     {
       pw_thread_loop_destroy(_threadLoop);
       _threadLoop = IntPtr.Zero;
+      FreeHandles(); // L4: a failed Start must not leave GCHandles rooting this stream
       throw new InvalidOperationException("Failed to create PipeWire stream");
     }
 
@@ -259,6 +262,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
         pw_thread_loop_destroy(_threadLoop);
         _stream = IntPtr.Zero;
         _threadLoop = IntPtr.Zero;
+        FreeHandles(); // L4: a failed Start must not leave GCHandles rooting this stream
         throw new InvalidOperationException("Failed to build SPA format pod");
       }
 
@@ -279,6 +283,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
         pw_thread_loop_destroy(_threadLoop);
         _stream = IntPtr.Zero;
         _threadLoop = IntPtr.Zero;
+        FreeHandles(); // L4: a failed Start must not leave GCHandles rooting this stream
         throw new InvalidOperationException($"pw_stream_connect failed: {result}");
       }
     }
@@ -425,6 +430,18 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
     pw_thread_loop_destroy(_threadLoop);
     _threadLoop = IntPtr.Zero;
 
+    FreeHandles();
+
+    _logger.LogInformation("PipeWire native stream stopped");
+  }
+
+  /// <summary>
+  /// Frees the pinned events struct and the self handle. Called by <see cref="Stop"/> and by every
+  /// failure path in <see cref="Start"/> — those zero <c>_threadLoop</c>, so a later Stop() returns
+  /// early and would otherwise leave both handles (and this object) rooted for the process lifetime.
+  /// </summary>
+  private void FreeHandles()
+  {
     if (_eventsHandle.IsAllocated)
     {
       _eventsHandle.Free();
@@ -433,8 +450,6 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
     {
       _selfHandle.Free();
     }
-
-    _logger.LogInformation("PipeWire native stream stopped");
   }
 
   /// <summary>
@@ -638,7 +653,10 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
 
   public void Dispose()
   {
-    if (_disposed)
+    // Atomic: two teardown paths can race to dispose the same stream (AUD-10 — see
+    // LinuxBluetoothService.StopCaptureSubprocess), and Stop() twice would stop and destroy the
+    // PipeWire thread loop twice.
+    if (Interlocked.Exchange(ref _disposedFlag, 1) != 0)
     {
       return;
     }

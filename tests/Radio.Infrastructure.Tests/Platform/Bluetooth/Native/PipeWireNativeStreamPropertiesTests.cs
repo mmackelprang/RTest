@@ -67,8 +67,12 @@ public class PipeWireNativeStreamPropertiesTests
   [SkippableFact]
   public void Constructor_NonZeroTargetSerial_DoesNotThrow()
   {
-    // Needs libpipewire: the constructor calls pw_init. Skipped everywhere but Linux.
-    Skip.IfNot(OperatingSystem.IsLinux(), "PipeWireNativeStream's constructor calls pw_init (libpipewire).");
+    // Needs libpipewire: the constructor calls pw_init. Skipped wherever it cannot be loaded —
+    // including a Linux CI runner without PipeWire installed, not just Windows.
+    Skip.IfNot(
+      OperatingSystem.IsLinux()
+        && System.Runtime.InteropServices.NativeLibrary.TryLoad("libpipewire-0.3.so.0", out _),
+      "PipeWireNativeStream's constructor calls pw_init (libpipewire-0.3 not loadable here).");
     using var stream = new PipeWireNativeStream(58968u, 48000, 2, (_, _) => { }, NullLogger.Instance);
     Assert.Equal(58968u, stream.TargetNodeSerial);
   }
