@@ -436,7 +436,7 @@ connected (three `Radio.API` PipeWire clients) and `libpw_helper.so` exports all
 
 **Cause.** `PipeWireRegistryListener.Start()` registered `PwRegistryEvents` with **`pw_proxy_add_listener`**,
 which takes `struct pw_proxy_events` (appliance `<pipewire/proxy.h>:125-128`). Registry globals arrive only
-through **`pw_proxy_add_object_listener`** (`:130-135`) — what the static-inline `pw_registry_add_listener`
+through **`pw_proxy_add_object_listener`** (`:130-135`) — what the `pw_registry_add_listener` macro
 dispatches to (`<pipewire/core.h>:509`). `Global` sat in the proxy `destroy` slot and `GlobalRemove` in
 `bound`. ⛔ **The filter bug this row found was the SECOND gate; this was the first. Fixing only the filter
 would have shipped a re-bind that could never fire, and the owner's sitting would have failed.**

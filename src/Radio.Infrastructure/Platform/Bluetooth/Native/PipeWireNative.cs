@@ -117,7 +117,7 @@ internal static class PipeWireNative
 
   // ⛔ AUD-10: the registry's global/global_remove events MUST be registered with
   // pw_proxy_add_object_listener — "a listener for the events received from the remote object"
-  // (<pipewire/proxy.h>:130-135), which is what the static-inline pw_registry_add_listener
+  // (<pipewire/proxy.h>:130-135), which is what the pw_registry_add_listener MACRO
   // dispatches to (<pipewire/core.h>:509). pw_proxy_add_listener takes `struct pw_proxy_events`
   // — { version, destroy, bound, removed, done, error, bound_props } — so handing it
   // PwRegistryEvents put Global in the `destroy` slot and GlobalRemove in `bound`: no registry
@@ -134,8 +134,11 @@ internal static class PipeWireNative
 
   // spa_hook is a small struct the caller owns (see <spa/utils/hook.h>).
   // Layout: struct spa_list link (2 pointers) + void *cb + void *removed + uint32_t pad.
-  // 24 bytes is a safe upper bound on 64-bit; PipeWire only writes through the pointer
-  // we pass, never reads it after add_listener for our purposes.
+  // struct spa_hook is 48 bytes on 64-bit (<spa/utils/hook.h>, PipeWire 1.0.7); 64 leaves headroom.
+  // ⚠ PipeWire links the hook into the proxy's listener list and WALKS it on every event emit,
+  // so this buffer must stay allocated until the proxy is destroyed (Cleanup frees it after
+  // pw_proxy_destroy). An earlier revision said "24 bytes … never reads it after add_listener";
+  // both halves were wrong, and harmless only while the listener never received an event.
   public const int SpaHookSize = 64;
 
   /// <summary>
