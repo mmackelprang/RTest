@@ -414,3 +414,45 @@ done
 
 Expect the phantom disconnect / eviction (plan §6) during the session; record it and re-run. ⚠ **They
 should be filed as rows before the session** so a sighting has somewhere to go — not done in this PR.
+
+---
+
+## ⛔ 2026-09-25 14:40–14:48 — the registry listener was subscribed to the WRONG EVENT TABLE; fixed in `97b6b4e`
+
+Found on the box **after** deploying `5f80ea9`, with the owner away, by a check that needs no phone.
+
+**The check.** Create a throwaway node with a BT-shaped name for ~5 s, then read the file sink:
+
+```bash
+( echo "create-node adapter { factory.name=support.null-audio-sink node.name=bluez_input.00_11_22_33_44_55.9 media.class=Audio/Source/Virtual priority.session=0 priority.driver=0 audio.position=[FL,FR] }"; sleep 4 ) | timeout 8 pw-cli
+```
+
+The node lives only while `pw-cli` is connected, matches no connected device (so nothing re-binds), and
+must produce **both** `PW registry: BT node appeared` and `PW registry: BT node disappeared`.
+
+**On `5f80ea9` it produced NEITHER** — although `SoundFlowDeviceManager` logged the node added and removed,
+the fixed filter accepts the name, and `ClassifyNodeGlobal` logs on both of its branches. The listener was
+connected (three `Radio.API` PipeWire clients) and `libpw_helper.so` exports all three helpers (`nm -D`).
+
+**Cause.** `PipeWireRegistryListener.Start()` registered `PwRegistryEvents` with **`pw_proxy_add_listener`**,
+which takes `struct pw_proxy_events` (appliance `<pipewire/proxy.h>:125-128`). Registry globals arrive only
+through **`pw_proxy_add_object_listener`** (`:130-135`) — what the static-inline `pw_registry_add_listener`
+dispatches to (`<pipewire/core.h>:509`). `Global` sat in the proxy `destroy` slot and `GlobalRemove` in
+`bound`. ⛔ **The filter bug this row found was the SECOND gate; this was the first. Fixing only the filter
+would have shipped a re-bind that could never fire, and the owner's sitting would have failed.**
+
+**On `97b6b4e`:**
+
+```
+14:47:50.678  PW registry: BT node appeared id=79 serial=59937 name=bluez_input.00_11_22_33_44_55.9 address=00:11:22:33:44:55
+14:47:50.683  PW capture node appeared for 00:11:22:33:44:55 (registry id=79, serial=59937, …)
+14:47:55.105  SoundFlowDeviceManager: Audio device added: capture-3 (…)          <- 4.4 s LATER than the registry
+14:47:58.641  PW registry: BT node disappeared id=79 serial=59937 …
+```
+
+✅ First registry events ever recorded in production. ✅ Task B live: **id 79 ≠ serial 59937**, and the serial
+is what is carried. ✅ No re-bind for a non-connected MAC.
+
+⭐ **Run this check before every owner sitting on this row** — it costs nothing and it is the only way the
+event path can be proven without a phone. `IsHealthy` is not evidence: it was `true` for five days of a
+listener that could not receive an event.
