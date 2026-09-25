@@ -874,6 +874,34 @@ a settings-field-that-lies. **Functionally fine. Do not "finish" the swap.**
 
 ---
 
+## BT capture follow/refuse (`AUD-10` + `AUD-11`) — six things deliberately not done
+
+**Status:** filed 2026-09-25 by the Builder shipping `AUD-10` + `AUD-11` as one PR
+(`fix/aud-10-follow-the-bt-node`). None is a stub; each is a decision not to widen that PR.
+
+1. **USB capture falls back to the first enumerated device** (`USBAudioSourceBase.cs`, AUD-11 plan
+   `C-167`). ✅ **Already a queue row — `AUD-13`.** Listed here only so the AUD-11 plan's §6.1 pointer
+   resolves.
+2. **`capture-{i}` device ids are enumeration indices** (`SoundFlowDeviceManager`, persisted as
+   `AudioPreferences:CurrentInput`). **Latent** — no capture-open path reads the persisted id; the only
+   consumer is `DevicesController`. A note, not a defect; recorded so it is not "discovered" again.
+3. **Dropping `node.autoconnect` in favour of explicit `pw-link` links** (AUD-11 plan §6.2). Held in
+   reserve, **not rejected**: it is the next move only if the box session shows WirePlumber 0.4.17
+   ignoring `node.dont-reconnect` (the stream still lands on `alsa_input…analog-stereo` after a pause).
+4. **A periodic peer audit** (AUD-11 plan §6.3). The audit runs once per bind (initial acquisition and
+   every AUD-10 re-bind). A timer would mean a `pw-link` subprocess on a schedule on a box where
+   subprocess churn correlates with audible distortion. **Justified only by a wrong binding observed
+   WITHOUT a preceding node removal** — that would be a new row.
+5. **An explicit BlueZ transport `Acquire` over D-Bus** (AUD-10 plan §7). The shipped re-bind rests on
+   PipeWire re-acquiring the transport when something links the recreated node (read from source,
+   `media-source.c`, not measured). **If the box session shows the stream linked to the new serial but
+   the transport stuck at `pending`, this is the next candidate.**
+6. **The phantom disconnect and phantom eviction** seen in the same 2026-09-25 window (AUD-10 plan §6)
+   and the open-loop resampler ratio (`AUD-15`). Not touched. The two phantoms want their own rows
+   before the box session so a sighting has somewhere to go.
+
+---
+
 ## 1. Bluetooth AVRCP Volume Sync — Windows
 
 **Status:** Linux fully implemented; Windows still stubbed
