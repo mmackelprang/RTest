@@ -118,7 +118,9 @@ internal sealed class PipeWireRegistryListener : IDisposable
   private readonly ConcurrentDictionary<uint, (string Address, uint Serial, string NodeName)> _idToNode = new();
 
   /// <summary>True after <see cref="Start"/> brings up context/core/registry
-  /// successfully and pw_proxy_add_listener has been invoked. False if
+  /// successfully and pw_proxy_add_object_listener has been invoked. ⚠ True says the
+  /// subscription was REQUESTED, not that any event has ever arrived — until AUD-10 it was true
+  /// for a listener that could not receive one. False if
   /// the listener has not been started, failed to start, or has been
   /// disposed. Consumers gate the fallback periodic scrape on this.
   /// </summary>
@@ -217,13 +219,16 @@ internal sealed class PipeWireRegistryListener : IDisposable
 
       _hook = Marshal.AllocHGlobal(SpaHookSize);
       // Zero the hook buffer — PipeWire initialises the list-link pointers
-      // through pw_proxy_add_listener but a clean zero start is paranoia-safe.
+      // through pw_proxy_add_object_listener but a clean zero start is paranoia-safe.
       for (var i = 0; i < SpaHookSize; i++)
       {
         Marshal.WriteByte(_hook, i, 0);
       }
 
-      pw_proxy_add_listener(
+      // ⛔ OBJECT listener, not pw_proxy_add_listener — see the declaration in PipeWireNative.
+      // Until AUD-10 this was pw_proxy_add_listener, which registers proxy events, so the
+      // registry never delivered a single global and Start() still reported healthy.
+      pw_proxy_add_object_listener(
         _registry,
         _hook,
         _eventsHandle.AddrOfPinnedObject(),

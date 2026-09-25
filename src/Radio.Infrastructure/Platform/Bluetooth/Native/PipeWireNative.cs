@@ -84,7 +84,8 @@ internal static class PipeWireNative
   // Registry API: `pw_context_new(loop, props, sz) → pw_context *`;
   // `pw_context_connect(ctx, props, sz) → pw_core *`;
   // `pw_core_get_registry(core, version, sz) → pw_registry *`;
-  // `pw_proxy_add_listener(registry, &hook, &events_struct, user_data)`.
+  // `pw_proxy_add_object_listener(registry, &hook, &registry_events, user_data)` — NOT
+  // pw_proxy_add_listener, which takes proxy events; see the declaration below.
   // Each pw_thread_loop owns its own context/core/registry chain.
   //
   // CAUTION: `pw_core_get_registry` is declared `static inline` in
@@ -114,8 +115,16 @@ internal static class PipeWireNative
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
   public static extern int pw_core_disconnect(IntPtr core);
 
+  // ⛔ AUD-10: the registry's global/global_remove events MUST be registered with
+  // pw_proxy_add_object_listener — "a listener for the events received from the remote object"
+  // (<pipewire/proxy.h>:130-135), which is what the static-inline pw_registry_add_listener
+  // dispatches to (<pipewire/core.h>:509). pw_proxy_add_listener takes `struct pw_proxy_events`
+  // — { version, destroy, bound, removed, done, error, bound_props } — so handing it
+  // PwRegistryEvents put Global in the `destroy` slot and GlobalRemove in `bound`: no registry
+  // global was ever delivered, and IsHealthy still reported true. Both symbols are exported by
+  // libpipewire-0.3.so.0 on the appliance (nm -D, 2026-09-25), so no helper is needed.
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
-  public static extern void pw_proxy_add_listener(IntPtr proxy, IntPtr hook, IntPtr events, IntPtr data);
+  public static extern void pw_proxy_add_object_listener(IntPtr proxy, IntPtr hook, IntPtr funcs, IntPtr data);
 
   [DllImport(PipeWireLib, CallingConvention = CallingConvention.Cdecl)]
   public static extern void pw_proxy_destroy(IntPtr proxy);
@@ -150,7 +159,8 @@ internal static class PipeWireNative
   /// Matches struct pw_registry_events (PipeWire 0.3.x).
   /// Version 0: { version, global, global_remove }.
   /// Must be pinned for the lifetime of the listener (the pointer is captured
-  /// by pw_proxy_add_listener and dereferenced from the PipeWire thread loop).
+  /// by pw_proxy_add_object_listener and dereferenced from the PipeWire thread loop).
+  /// Layout checked against the appliance's &lt;pipewire/core.h&gt; (PipeWire 1.0.7) on 2026-09-25.
   /// </summary>
   [StructLayout(LayoutKind.Sequential)]
   public struct PwRegistryEvents
