@@ -583,7 +583,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
           // AUD-30: a connection on RotaryPhone's adapter is not ours to wait for.
           if (!AcceptObjectForAdapter(obj.Key, "pre-existing connection check"))
+          {
             continue;
+          }
 
           var props = obj.Value[Linux.BluezConstants.DeviceInterface];
           var device = ParseDevice(obj.Key, props);
