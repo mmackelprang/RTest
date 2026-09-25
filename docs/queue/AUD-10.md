@@ -231,3 +231,92 @@ sighting.**
 disconnect* seen in run 1 did not recur here — run 2's disconnect happened **before** the pause, not
 after. ⛔ **Do not carry "the starvation causes the disconnect" forward; it now has one supporting
 sample and one non-recurrence.**
+
+---
+
+## ✅ ROOT CAUSE MEASURED 2026-09-25 11:29–11:30 EDT — the node IS destroyed on pause, and our stream targets a serial that never comes back
+
+⛔ **This supersedes "pause does not destroy the node" in both sections above.** That claim was read off
+**our** log — no teardown of **our** stream — and was never a measurement of **PipeWire's** node. A 1 Hz
+recorder on the box (node serial, `radio-bt-stream`'s link, BlueZ `MediaTransport1.State`) settles it.
+Owner at the cabinet, Pixel 10 Pro XL, box on `9ca4259` (code-identical to `main`).
+
+| time | recorder (box) | app log |
+|---|---|---|
+| 11:29:26 | node `bluez_input.B0_D5_FB_D2_0D_68.2` **serial 58968**, stream linked to it, transport `active` | — |
+| 11:29:31.9 | **PAUSE** — transport `active → idle`, **node 58968 GONE** | — |
+| 11:29:32–33 | — | `1 underruns` then `50 underruns, 96000 zero samples` |
+| 11:29:34.1 | stream **re-linked to `alsa_input.pci-0000_00_1f.3.analog-stereo`** (the line-in — `AUD-11`) | `OnProcess … max=2045.44ms` |
+| 11:30:03.7 | — | **RESUME** — AVRCP `Playing` |
+| 11:30:04.6 | transport `pending`, **NEW node, serial 59112**, same name | stream still on the line-in, 18–24 ms callbacks |
+| 11:30:08.9 | transport back to `idle`, node 59112 **gone again** | — |
+
+**Owner: "no audio started back up."**
+
+### The mechanism, end to end
+
+1. **PipeWire destroys the A2DP node on pause, by design.** It is a *dynamic* node: emitted when the
+   transport rises to `PENDING`, removed when it falls to `IDLE` (`spa/plugins/bluez5/bluez5-device.c:769-780`
+   @ 1.0.7). It is recreated on resume under the **same name with a new `object.serial`**.
+2. **Our stream binds by serial** — `target.object = {_targetNodeId}` with the serial
+   (`PipeWireNativeStream.cs:204`), and WirePlumber 0.4.17 matches a numeric `target.object` **only**
+   against `object.serial` (`policy-node.lua:298-300`). The recreated node can never match.
+3. **With the target gone, `node.autoconnect = true` re-links us to the default source** — the line-in.
+   That is `AUD-11`, and it is the same event, not a neighbouring one.
+4. **Nobody links or starts the recreated node, so nobody `Acquire`s the transport.** Re-acquisition only
+   happens from the node's start (`media-source.c:689-709`). Unacquired, the transport falls back to
+   `idle` ~4 s after resume and the phone gives up. **That is why resume never recovers.**
+
+### The ~2036 ms constant, explained (by timing — strongly supported, not proven from source)
+
+Node gone at 31.9 → re-linked to the line-in at 34.1 ≈ **2.1 s**. During that window our stream has **no
+driver**, so no callbacks arrive; the `max=` figure *is* that gap. The later **~21 ms interval is the
+line-in's ALSA device driving the graph at the default 1024-frame quantum** (1024/48000 = 21.3 ms), in
+place of the BT node's 512/48000 request (`media-source.c:861-868`). No ~2 s timer exists in the bluez5
+plugin (checked @ 1.0.7); the delay is WirePlumber's re-link, not a PipeWire timeout.
+
+### The same signature appears WITHOUT a pause
+
+The owner's first connection at 11:27:16 came up with the phone paused. Our stream started against serial
+58921 while the transport was not delivering, and within 4 s showed the identical burst → `max=2046.18ms` →
+~21 ms callbacks. Pressing play at 11:27:28 never recovered it. **The trigger is "our stream bound while the
+phone is not streaming", of which pause is the common case.**
+
+### Why nothing notices — four health signals, all blind to it
+
+- `OnProcess` stamps `_lastOnProcessTimestamp` **before** the empty-buffer checks
+  (`PipeWireNativeStream.cs:377` vs `:380-410`) — and in this failure the buffers are not even empty,
+  they are line-in audio.
+- `BluetoothCaptureWatchdog` reads `MillisecondsSinceLastOnProcess()` (`LinuxBluetoothService.cs:223`) —
+  callbacks keep coming.
+- `MonitorBtPipelineAsync` recovers only when `_nativeStream == null` (`:269`) — it is not null.
+- `PipelineStatus` reports `Healthy` whenever `_nativeStream != null` (`:184`).
+
+⭐ **A full rebuild path exists and nothing can reach it** — `OnGeneratorStalled` → `StopCoreAsync` +
+`PlayCoreAsync` (`BluetoothAudioSource.cs:460-493`); a rebuild re-searches by device address
+(`GetAudioCaptureDeviceAsync` → `SearchForCaptureDeviceAsync` → `FindPipeWireBluetoothNodeAsync`,
+`LinuxBluetoothService.cs:292`, `:1305`). ⚠ **But do not assume it is the fix.** The recreated node lived
+**~4 s** (11:30:04.6 → 11:30:08.9) before the unacquired transport fell back to `idle`. A rebuild helps
+only if it lands inside that window, so a *timed* watchdog on "no BT data for N s" would usually find no
+node to bind to. **The re-bind must be driven by the node's appearance, not by a timeout.**
+
+### What a fix must do (for the plan — not decided here)
+
+- **Follow the node across recreation**: bind by `node.name` (stable across pause/resume; WirePlumber
+  matches non-numeric targets by name, `policy-node.lua:337-345`), **or** watch the registry and re-target
+  on `global` for the same name. ⚠ **Reconcile with `AUD-11`'s plan**, which adds `node.dont-reconnect`:
+  whatever stops the fallback to the line-in must not also stop the re-link to the recreated node.
+- **Make the binding observable** — a liveness signal that means "attached to *the BT node*", not "a
+  callback arrived". `AUD-11` requires this too.
+- ⛔ **Merge `AUD-10` and `AUD-11` into one plan.** They are one event observed from two sides.
+
+### Two further defects seen in the same window — NOT this row, recorded so they are not lost
+
+- **Spurious disconnect.** 11:29:14.381 and 11:27:50.492: `Bluetooth device disconnected … reason="Unknown"
+  (user-initiated: false)` — while the recorder showed the device still connected, the transport `active`
+  and node 58968 unchanged. Our service tore down a healthy stream on it (the 11:29:15–26 unlink), and the
+  reconnect loop then aborted on `Device already connected` in the same millisecond. Same family as
+  `AUD-25` / `AUD-21`.
+- **Spurious eviction.** 11:29:43.883 and 11:28:20.879: `Bluetooth device removed from BlueZ … evicted from
+  cache`, while `bluetoothctl info` reported `Paired: yes / Bonded: yes / Connected: yes`. Candidate: an
+  `InterfacesRemoved` for a child object (transport or player) read as the device's — see `AUD-14`.

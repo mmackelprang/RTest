@@ -273,3 +273,19 @@ sighting.**
 disconnect* seen in run 1 did not recur here — run 2's disconnect happened **before** the pause, not
 after. ⛔ **Do not carry "the starvation causes the disconnect" forward; it now has one supporting
 sample and one non-recurrence.**
+
+---
+
+## ✅ CONFIRMED 2026-09-25 — this row's fallback observed at 1 Hz, and it is the same event as `AUD-10`
+
+A recorder on the box caught the whole sequence during an owner-timed pause (full table in
+[`AUD-10`](AUD-10.md)'s last section): at **11:29:31.9** the transport went `idle` and node serial 58968
+disappeared; at **11:29:34.1** `radio-bt-stream` was linked to
+`alsa_input.pci-0000_00_1f.3.analog-stereo:capture_FL`, and it **stayed there** after the phone resumed
+and PipeWire created a new node (serial 59112) under the same name.
+
+⛔ **The "pause destroys the node" premise this row's Verification section relies on is TRUE after all** —
+`AUD-10`'s 2026-09-10 "falsification" was read off our own log, not PipeWire's node.
+⛔ **Plan this row together with `AUD-10`.** `node.dont-reconnect` alone would stop the line-in fallback
+but leave the stream bound to a serial that never returns; the fix must also re-bind to the recreated
+node, and must not let `dont-reconnect` block that.
