@@ -456,3 +456,53 @@ is what is carried. ✅ No re-bind for a non-connected MAC.
 ⭐ **Run this check before every owner sitting on this row** — it costs nothing and it is the only way the
 event path can be proven without a phone. `IsHealthy` is not evidence: it was `true` for five days of a
 listener that could not receive an event.
+
+---
+
+## ✅ OWNER UAT 2026-09-25 16:23–16:52 on `da8ead8` — pause/resume restores audio with no reconnect (3 of 3 clean cycles)
+
+Owner at the cabinet, Pixel 10 Pro XL. Instruments: the 1 Hz recorder (node serial, `radio-bt-stream`'s
+link, `MediaTransport1.State`), the service file log, `radio-api`'s journal, and RotaryPhone's journal.
+
+| Cycle | Pause → parked | Resume → re-bound | Transport | Owner |
+|---|---|---|---|---|
+| 1 | 16:49:50.181 | 16:51:03.994 — **11 ms**, serial 61992 | recorder: **`active`** at 16:51:04.6 | ✅ audio + art back |
+| 2 | 16:51:56.464 | 16:52:06.867 — **5 ms**, serial 62122 | **`active`** at 16:52:07.5 | ✅ |
+| 3 | 16:52:14.976 | 16:52:23.188 — **6 ms**, serial 62167 | **`active`** at 16:52:23.5 | ✅ |
+
+⭐ **The plan's central unverified claim (§7) is now measured:** binding the recreated node DOES make
+PipeWire acquire the transport — `pending → active` within ~0.6 s of the re-bind, three times. The explicit
+D-Bus `Acquire` fallback (FUTURE-WORK item 5) is not needed.
+
+**Pass criteria (plan §5.1):** exactly one `radio-bt-stream` throughout; never linked to `alsa_input…`
+(`AUD-11` ✅); `radio-api`'s journal carried **exactly one Warning per resume** (the re-bind line) and none
+per pause; **no** `WRONG node`, `NO input links` or `PipeWire stream error` (review item M3 did not fire).
+✅ Connect-while-paused-then-play (16:47:44 → 16:47:50, re-bound in 4 ms) also captured audio — SongRec
+identified the track at 16:48:05.
+
+### ⛔ The one failed cycle is `AUD-30`, not this fix — measured, with both services' timestamps
+
+```
+16:48:14.790  RotaryPhone: Mgmt disconnect event: B0:D5:FB:D2:0D:68 reason=LocalHost
+16:48:14.824  RotaryPhone: BLOCKED: … already paired on hci0 — refusing on /org/bluez/hci1
+16:48:15.137  radio-api:   Bluetooth device disconnected … reason="Unknown" (user-initiated: false)
+              -> playing stream torn down, source Playing -> Stopped   <- "art and title vanished on pause"
+```
+
+Same shape at 16:23:47.221 → 16:23:47.539 (318 ms). **Two for two.** The phantom disposes the parked
+generator, so a resume after it has nothing waiting — the pipeline monitor rebuilds ~5 s later. With no
+`BLOCKED` in RotaryPhone's journal (16:51–16:52), all three cycles passed.
+
+### ⛔ A retraction, so it is not inherited
+
+At 16:23 this coordinator read the absence of `bluetoothd`'s `fd(N) ready` line for the second node as
+"no transport acquire happened". **Wrong** — at 16:47:50 a re-bind with no such line produced audio that
+SongRec identified. That line is not a marker of an acquire; the recorder's `MediaTransport1.State` is.
+
+### Not explained, recorded rather than smoothed over
+
+After the 16:48:40 re-bind (serial 61958) SongRec identified *Tainted Love* from captured audio at
+16:49:11, yet the owner reported no music. That cycle followed the 16:48:15 phantom teardown and a
+pipeline-monitor rebuild with a fresh generator, so it is confounded. `ProducerParked` was checked and is
+**not** the cause (it gates only the underrun log, `BufferedSoundGenerator.cs:465`, and is cleared on
+re-bind). If "captured but not heard" recurs **without** a preceding phantom, it is a new row.
