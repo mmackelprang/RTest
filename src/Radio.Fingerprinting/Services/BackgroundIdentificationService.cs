@@ -215,10 +215,13 @@ public class BackgroundIdentificationService : BackgroundService
         }
         else if (!captured)
         {
-          // AUD-35: a cycle that captured nothing returned without awaiting anything, so going straight
-          // round again was a synchronous tight loop — one core at 99.9 % on the appliance, indefinitely.
-          // RequestImmediateIdentification cancels this wait, so a track change is not delayed by it.
-          delay = TimeSpan.FromMilliseconds(Math.Max(1, _options.IdlePollIntervalMs));
+          // AUD-35: a cycle that captured nothing may have returned without awaiting anything, so going
+          // straight round again was a synchronous tight loop — one core at 99.9 % on the appliance,
+          // indefinitely. RequestImmediateIdentification cancels this wait, so a track change that
+          // requests identification is delayed by at most one idle interval (a request that lands outside
+          // the wait, or before the source is Playing, is not lost for longer than that). The 100 ms floor
+          // keeps a mistaken 0 from recreating most of the old cost.
+          delay = TimeSpan.FromMilliseconds(Math.Max(100, _options.IdlePollIntervalMs));
         }
         else
         {

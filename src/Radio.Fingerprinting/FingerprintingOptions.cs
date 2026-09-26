@@ -52,10 +52,11 @@ public sealed class FingerprintingOptions
   public int IdentificationIntervalSeconds { get; set; } = 15;
 
   /// <summary>
-  /// How long (ms) the identification loop waits before checking again when a cycle had nothing to
-  /// identify (no active source, or the source does not need a lookup). A track change still starts an
-  /// identification at once, via <c>RequestImmediateIdentification</c>. AUD-35: without this wait the
-  /// loop spun a CPU core indefinitely on the appliance.
+  /// How long (ms, minimum 100) the identification loop waits before checking again when a cycle captured
+  /// nothing (no active source, no lookup needed, no samples, or the cycle failed).
+  /// <c>RequestImmediateIdentification</c> cancels the wait, so a track change that requests
+  /// identification is delayed by at most this long. AUD-35: without this wait the loop spun a CPU core
+  /// indefinitely on the appliance.
   /// </summary>
   public int IdlePollIntervalMs { get; set; } = 1000;
 

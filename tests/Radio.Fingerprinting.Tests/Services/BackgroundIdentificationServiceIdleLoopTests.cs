@@ -13,13 +13,27 @@ namespace Radio.Fingerprinting.Tests.Services;
 /// Measured on the appliance before the fix: one thread-pool thread at 99.9 % CPU, indefinitely.
 /// </summary>
 /// <remarks>
-/// Each test pays the service's fixed 5 s start-up delay once, then synchronises on the tap being
-/// polled — the loop's own observation — rather than on elapsed time.
+/// Each test pays the service's fixed 5 s start-up delay once and synchronises on the tap being polled —
+/// the loop's own observation. The spin test then measures over a 2 s wall-clock window, a bounded check
+/// that is safe in its direction (see its remarks).
 /// </remarks>
 public class BackgroundIdentificationServiceIdleLoopTests
 {
-  /// <summary>An inactive tap that counts how often the loop asks whether it is active.</summary>
-  private sealed class CountingInactiveTap : IAudioSampleProvider
+  /// <summary>The three ways a cycle can return without capturing samples.</summary>
+  public enum NothingToCapture
+  {
+    /// <summary>The tap reports no active source.</summary>
+    SourceInactive,
+
+    /// <summary>Active, but the source does not need a lookup — the appliance's steady state.</summary>
+    NoLookupNeeded,
+
+    /// <summary>Active and needing a lookup, but the capture returns no samples at once.</summary>
+    CaptureReturnsNothing
+  }
+
+  /// <summary>A tap that counts how often the loop asks whether it is active (once per cycle).</summary>
+  private sealed class CountingTap(NothingToCapture mode) : IAudioSampleProvider
   {
     private int _polls;
     private readonly List<(int AtPoll, TaskCompletionSource Reached)> _waiters = new();
@@ -38,7 +52,7 @@ public class BackgroundIdentificationServiceIdleLoopTests
             w.Reached.TrySetResult();
           }
         }
-        return false;
+        return mode != NothingToCapture.SourceInactive;
       }
     }
 
@@ -62,12 +76,12 @@ public class BackgroundIdentificationServiceIdleLoopTests
     public string SourceName => "Idle";
     public PlaySource SourceType => PlaySource.File;
     public string? SourceFilePath => null;
-    public bool NeedsFingerprintingLookup => false;
+    public bool NeedsFingerprintingLookup => mode == NothingToCapture.CaptureReturnsNothing;
     public Task<AudioSampleBuffer?> CaptureAsync(TimeSpan duration, CancellationToken ct = default) =>
       Task.FromResult<AudioSampleBuffer?>(null);
   }
 
-  private static BackgroundIdentificationService CreateService(CountingInactiveTap tap, FingerprintingOptions options)
+  private static BackgroundIdentificationService CreateService(CountingTap tap, FingerprintingOptions options)
   {
     var services = new ServiceCollection();
     services.AddSingleton<IAudioSampleProvider>(tap);
@@ -84,10 +98,13 @@ public class BackgroundIdentificationServiceIdleLoopTests
   /// only LOWER the poll count, so starvation can weaken this test but never fail it. Before the fix the
   /// loop polled the tap hundreds of thousands of times in the same window.
   /// </summary>
-  [Fact]
-  public async Task NothingToIdentify_TheLoopWaitsInsteadOfSpinning()
+  [Theory]
+  [InlineData(NothingToCapture.SourceInactive)]
+  [InlineData(NothingToCapture.NoLookupNeeded)]
+  [InlineData(NothingToCapture.CaptureReturnsNothing)]
+  public async Task NothingToIdentify_TheLoopWaitsInsteadOfSpinning(NothingToCapture mode)
   {
-    var tap = new CountingInactiveTap();
+    var tap = new CountingTap(mode);
     using var service = CreateService(tap, new FingerprintingOptions { Enabled = true, IdlePollIntervalMs = 500 });
 
     await service.StartAsync(CancellationToken.None);
@@ -115,7 +132,7 @@ public class BackgroundIdentificationServiceIdleLoopTests
   [Fact]
   public async Task RequestImmediateIdentification_CutsTheIdleWaitShort()
   {
-    var tap = new CountingInactiveTap();
+    var tap = new CountingTap(NothingToCapture.SourceInactive);
     // An idle poll far longer than the test's own safety timeout: the next poll can only arrive in time
     // if the request cancelled the wait.
     using var service = CreateService(tap, new FingerprintingOptions { Enabled = true, IdlePollIntervalMs = 600_000 });
