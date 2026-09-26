@@ -36,6 +36,13 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
+    <!-- AUD-32: the first 18 KB of "Meditating Beat.mp3" (Kevin MacLeod, freepd.com, public domain).
+         Its ID3v2.2 tag is rejected by SoundFlow's SoundMetadataReader and read correctly by TagLib. -->
+    <Content Include="TestData\**\*.mp3">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+  <ItemGroup>
     <!-- ENC-17: the golden vectors are shared with tools/encoder-harness/virtual_encoder.py.
          One artifact, two readers - that is what stops the harness and the decoder drifting. -->
     <Content Include="..\..\tools\encoder-harness\report-vectors.json">
