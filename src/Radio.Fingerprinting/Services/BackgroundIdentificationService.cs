@@ -708,7 +708,9 @@ public class BackgroundIdentificationService : BackgroundService
   }
 
   /// <summary>Test seam (kind B — injection): writes the suppression entry a real identification cycle
-  /// writes; no test harness runs a cycle (it needs a live audio tap and SongRec).</summary>
+  /// writes. A real cycle CAN be driven (<c>BackgroundIdentificationServiceCaptureTimeTests</c> does, with a
+  /// mock tap and SongRec), but not paused between the mark and the raise, and each run pays the service's
+  /// fixed 5 s start-up delay — so source tests that need "marked, then raised" state write it here.</summary>
   internal void MarkAsRecentlyIdentifiedForTesting(TrackMetadata track, double confidence) =>
     MarkAsRecentlyIdentified(TrackKey(track), confidence);
 

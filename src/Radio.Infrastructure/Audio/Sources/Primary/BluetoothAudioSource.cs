@@ -966,6 +966,17 @@ public class BluetoothAudioSource : USBAudioSourceBase
       return;
     }
 
+    // Track-change detection drives the async-art generation guard and the per-track art cache
+    // below. AUD-33: it runs BEFORE the new title is written, so an identification handled on the
+    // fingerprint thread in between is already judged against the new track's start.
+    var newTrackKey = MakeTrackKey(e.Title, e.Artist);
+    if (!string.Equals(newTrackKey, _currentTrackKey, StringComparison.Ordinal))
+    {
+      _currentTrackKey = newTrackKey;
+      Interlocked.Increment(ref _trackGeneration);
+      Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
+    }
+
     // Clear stale audio from the previous song so the new track is heard immediately
     // rather than draining 0.8-2.0s of buffered audio from the old song.
     ClearAudioBuffer();
@@ -998,16 +1009,6 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // NotSupportedException, caught inside SaveFromUrlAsync). On null we leave
     // AlbumArtUrl absent so the UI shows the fallback icon; SongRec, if it later
     // identifies the track via OnTrackIdentified, will populate the art then.
-
-    // Track-change detection drives the async-art generation guard and the
-    // per-track art cache below.
-    var newTrackKey = MakeTrackKey(e.Title, e.Artist);
-    if (!string.Equals(newTrackKey, _currentTrackKey, StringComparison.Ordinal))
-    {
-      _currentTrackKey = newTrackKey;
-      Interlocked.Increment(ref _trackGeneration);
-      Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
-    }
 
     // Always clear stale art from the previous song first (PlayHistoryTracker
     // reads AlbumArtUrl from source metadata, so leftover art must not leak).
@@ -1069,7 +1070,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // AUD-33: capture + recognition takes ~15 s. A result whose sample began before the current
     // track key took effect describes the previous track: applying it would cache that track's art
     // under THIS track's key, and duplicate suppression can hold off the correcting identification
-    // for minutes. Dropped before the lookup flag is cleared, so this track is still identified.
+    // for minutes. Dropped before the lookup flag is cleared, so when that flag is set for this track
+    // (incomplete AVRCP metadata, or UseShazamForAllSources) it is still identified next cycle.
     var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
     if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
     {

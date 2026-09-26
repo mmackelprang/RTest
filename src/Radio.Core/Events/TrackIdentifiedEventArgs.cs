@@ -31,13 +31,15 @@ public class TrackIdentifiedEventArgs : EventArgs
   public DateTime IdentifiedAt { get; }
 
   /// <summary>
-  /// Gets when (UTC) capture of the audio sample behind this identification began, or <c>null</c> when
-  /// the raiser did not record it.
+  /// Gets when (UTC) capture of the audio sample behind this identification was started, or <c>null</c>
+  /// when the raiser did not record it.
   /// </summary>
   /// <remarks>
   /// AUD-33: capture plus recognition takes ~15 s, so a result can arrive after the listener skipped to
   /// another track. Sources compare this against when their current track started (see
   /// <see cref="WasCapturedBefore"/>) and drop a result that describes the previous track.
+  /// ⚠ The boundary is approximate at sub-second scale: the tap starts reading a fraction of a second
+  /// behind the live write position and skips silent chunks. Harmless against ~15 s samples.
   /// </remarks>
   public DateTime? CaptureStartedAt { get; }
 
