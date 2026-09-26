@@ -51,6 +51,14 @@ public sealed class FingerprintingOptions
   /// <summary>Interval between identification attempts (seconds).</summary>
   public int IdentificationIntervalSeconds { get; set; } = 15;
 
+  /// <summary>
+  /// How long (ms) the identification loop waits before checking again when a cycle had nothing to
+  /// identify (no active source, or the source does not need a lookup). A track change still starts an
+  /// identification at once, via <c>RequestImmediateIdentification</c>. AUD-35: without this wait the
+  /// loop spun a CPU core indefinitely on the appliance.
+  /// </summary>
+  public int IdlePollIntervalMs { get; set; } = 1000;
+
   /// <summary>Minimum confidence threshold for accepting a match (0.0 to 1.0).</summary>
   public double MinimumConfidenceThreshold { get; set; } = 0.5;
 
