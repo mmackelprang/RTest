@@ -199,7 +199,7 @@ does not name the other risks trading one defect for the other.**
   - Only AVRCP art is protected.
   - Art from an identification is refreshed by each later identification, as before this row.
 
-**Open owner question:** should BT take fingerprint art when the identified artist disagrees with AVRCP's? See the PR.
+**Owner decision (2026-09-26):** BT takes fingerprint art whenever the source supplied none, with **no artist-match guard** — "use the album art from fingerprinting when there is none available in the song metadata." A misidentification's art may briefly sit under the phone's correct title; the provenance fix guarantees the next identification corrects it. This is what the PR already implements, so no code change followed.
 
 **Follow-ups:**
 - `AUD-19`: History still records SongRec's title; the PR says so up front.
