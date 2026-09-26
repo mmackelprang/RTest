@@ -180,9 +180,10 @@ public class BackgroundIdentificationService : BackgroundService
 
     while (!stoppingToken.IsCancellationRequested)
     {
+      var captured = false;
       try
       {
-        await IdentifyCurrentAudioAsync(stoppingToken);
+        captured = await IdentifyCurrentAudioAsync(stoppingToken);
 
         // Clean up old entries from duplicate suppression cache
         CleanupRecentIdentifications();
@@ -201,24 +202,36 @@ public class BackgroundIdentificationService : BackgroundService
       {
         UpdatePhase(FingerprintPhase.Idle);
 
-        // Skip idle delay when there are no failures — the capture duration already throttles.
-        // Only delay on SongRec backoff.
-        if (_consecutiveSongRecFailures == 0)
+        TimeSpan delay;
+        if (_consecutiveSongRecFailures > 0)
         {
+          var delaySeconds = BackoffSeconds[Math.Min(_consecutiveSongRecFailures - 1, BackoffSeconds.Length - 1)];
+
+          _logger.LogDebug("SongRec backoff: {BackoffSeconds}s after {Failures} consecutive failures",
+            delaySeconds, _consecutiveSongRecFailures);
+
+          _metricsCollector?.Gauge("fingerprint.consecutive_failures", _consecutiveSongRecFailures);
+          delay = TimeSpan.FromSeconds(delaySeconds);
+        }
+        else if (!captured)
+        {
+          // AUD-35: a cycle that captured nothing may have returned without awaiting anything, so going
+          // straight round again was a synchronous tight loop — one core at 99.9 % on the appliance,
+          // indefinitely. RequestImmediateIdentification cancels this wait, so a track change that
+          // requests identification is delayed by at most one idle interval (a request that lands outside
+          // the wait, or before the source is Playing, is not lost for longer than that). The 100 ms floor
+          // keeps a mistaken 0 from recreating most of the old cost.
+          delay = TimeSpan.FromMilliseconds(Math.Max(100, _options.IdlePollIntervalMs));
+        }
+        else
+        {
+          // The capture itself (SampleDurationSeconds) throttles a cycle that did work.
           continue;
         }
 
         using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _delayCts = delayCts;
-
-        var delaySeconds = BackoffSeconds[Math.Min(_consecutiveSongRecFailures - 1, BackoffSeconds.Length - 1)];
-
-        _logger.LogDebug("SongRec backoff: {BackoffSeconds}s after {Failures} consecutive failures",
-          delaySeconds, _consecutiveSongRecFailures);
-
-        _metricsCollector?.Gauge("fingerprint.consecutive_failures", _consecutiveSongRecFailures);
-
-        await Task.Delay(TimeSpan.FromSeconds(delaySeconds), delayCts.Token);
+        await Task.Delay(delay, delayCts.Token);
         _delayCts = null;
       }
       catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
@@ -235,7 +248,11 @@ public class BackgroundIdentificationService : BackgroundService
     _logger.LogInformation("Background identification service stopped");
   }
 
-  private async Task IdentifyCurrentAudioAsync(CancellationToken ct)
+  /// <returns>
+  /// True when the cycle captured audio — which is what throttles the loop. False when it returned without
+  /// capturing (no tap, inactive source, no lookup needed, no samples): the caller must then wait (AUD-35).
+  /// </returns>
+  private async Task<bool> IdentifyCurrentAudioAsync(CancellationToken ct)
   {
     _logger.LogDebug("Starting identification cycle");
     var cycleStartTime = DateTime.UtcNow;
@@ -247,20 +264,20 @@ public class BackgroundIdentificationService : BackgroundService
     if (audioTap == null)
     {
       _logger.LogWarning("Audio sample provider not available for fingerprinting");
-      return;
+      return false;
     }
 
     // Check if source is active and needs fingerprinting
     if (!audioTap.IsActive)
     {
       _logger.LogDebug("Audio source not active, skipping identification");
-      return;
+      return false;
     }
 
     if (!audioTap.NeedsFingerprintingLookup)
     {
       _logger.LogDebug("Source {SourceType} does not need fingerprinting, skipping", audioTap.SourceType);
-      return;
+      return false;
     }
 
     _logger.LogDebug("Audio source active: {SourceType} - {SourceName}", audioTap.SourceType, audioTap.SourceName);
@@ -292,7 +309,7 @@ public class BackgroundIdentificationService : BackgroundService
       UpdatePhase(FingerprintPhase.Error, "No audio samples captured");
       _metricsCollector?.Increment("fingerprint.identification_failures", 1,
         new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
-      return;
+      return false;
     }
 
     _logger.LogDebug("Captured {SampleCount} audio samples in {Elapsed}ms", samples.Samples.Length, captureElapsed);
@@ -305,7 +322,7 @@ public class BackgroundIdentificationService : BackgroundService
       UpdatePhase(FingerprintPhase.NoMatch);
       _metricsCollector?.Increment("fingerprint.identification_failures", 1,
         new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
-      return;
+      return true;
     }
 
     UpdatePhase(FingerprintPhase.Querying);
@@ -401,7 +418,7 @@ public class BackgroundIdentificationService : BackgroundService
         _logger.LogDebug("Suppressing duplicate identification: {Title} by {Artist}",
           result.Metadata.Title, result.Metadata.Artist);
         _metricsCollector?.Increment("fingerprint.duplicate_suppressions");
-        return;
+        return true;
       }
 
       MarkAsRecentlyIdentified(trackKey, result.Confidence);
@@ -436,6 +453,7 @@ public class BackgroundIdentificationService : BackgroundService
     var totalElapsed = (DateTime.UtcNow - cycleStartTime).TotalMilliseconds;
     _logger.LogDebug("Identification cycle completed in {TotalElapsed}ms (lookup: {Lookup}ms)",
       totalElapsed, lookupElapsed);
+    return true;
   }
 
   /// <summary>
