@@ -71,7 +71,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
   /// <param name="albumArtCache">Optional album art cache for extracting embedded cover art.</param>
-  /// <param name="fingerprintingOptions">Optional fingerprinting options (controls UseShazamForAllSources toggle).</param>
+  /// <param name="fingerprintingOptions">Optional fingerprinting options. Controls the
+  /// UseShazamForAllSources gate only — what is done with a fingerprint ANSWER is decided per
+  /// field by SourceMetadataPrecedence and is not configurable (AUD-1).</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
@@ -2187,7 +2189,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   /// <summary>
   /// Handles the TrackIdentified event from the fingerprinting service.
-  /// Updates metadata with identified track information when file tags are incomplete.
+  /// Fills metadata fields the file's own tags left missing, deciding each field
+  /// independently (AUD-1). Cover art is filled whenever it is missing, including for a file
+  /// whose tags are complete; title/artist/album are filled only while
+  /// NeedsFingerprintingLookup is set, which this method clears once it has run.
   /// </summary>
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
@@ -2211,44 +2216,22 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     bool needsLookup = _metadata.ContainsKey("NeedsFingerprintingLookup")
       && _metadata["NeedsFingerprintingLookup"] is bool b && b;
 
-    // When UseShazamForAllSources is enabled, SongRec metadata replaces ID3 metadata
-    // (SongRec is more authoritative and has better cover art from Apple Music CDN)
-    if (FpOptions.UseShazamForAllSources && needsLookup)
-    {
-      if (!string.IsNullOrEmpty(track.Title))
-      {
-        _metadata[StandardMetadataKeys.Title] = track.Title;
-      }
-      if (!string.IsNullOrEmpty(track.Artist))
-      {
-        _metadata[StandardMetadataKeys.Artist] = track.Artist;
-      }
-      if (!string.IsNullOrEmpty(track.Album))
-      {
-        _metadata[StandardMetadataKeys.Album] = track.Album;
-      }
-      if (!string.IsNullOrEmpty(track.CoverArtUrl))
-      {
-        _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
-      }
-
-      _metadata["NeedsFingerprintingLookup"] = false;
-      _metadata["IdentificationConfidence"] = e.Confidence;
-      _metadata["IdentifiedAt"] = e.IdentifiedAt;
-      _metadata["MetadataSource"] = "Shazam";
-
-      Logger.LogInformation(
-        "Shazam metadata replaced ID3 for file: '{Title}' by '{Artist}'",
-        track.Title, track.Artist);
-      return;
-    }
-
-    // Update album art from fingerprinting if still using default (no embedded art found).
-    if (_metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl) &&
-        _metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
-        !string.IsNullOrEmpty(track.CoverArtUrl))
+    // AUD-1: cover art, by the same per-field rule as everything else (owner decision
+    // 2026-09-08). Kept above the needsLookup return, as the art fill was before AUD-1: a
+    // file whose tags are complete but which carries no embedded art still gets art.
+    //
+    // ExtractEmbeddedAlbumArt has already put a content-addressed /api/albumart/<hash> path
+    // here when the file had an APIC frame; absent that, AlbumArtUrl still holds the
+    // DefaultAlbumArtUrl UpdateMetadataFromFile seeded, which the shared rule treats as
+    // missing. ⚠ Before AUD-1 this path REPLACED embedded art unconditionally whenever the
+    // lookup flag was set — measured on the appliance: one stable hash per song from the
+    // embedded art, at least nine different hashes for the same song from SongRec.
+    var filledArt = false;
+    if (SourceMetadataPrecedence.ShouldFillAlbumArt(_metadata)
+        && !string.IsNullOrEmpty(track.CoverArtUrl))
     {
       _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+      filledArt = true;
       Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
     }
 
@@ -2257,29 +2240,24 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       return;
     }
 
+    // AUD-1: the same per-field rule BluetoothAudioSource uses, from the same helper. ID3
+    // tags are source metadata and win where they exist; only missing fields are filled.
+    // (Before AUD-1, UseShazamForAllSources — true on the appliance — sent every first
+    // identification of a track down a branch that replaced all four fields.)
+    //
+    // The filename is an extra "no title" placeholder because UpdateMetadataFromFile seeds
+    // Title with Path.GetFileNameWithoutExtension and replaces it only when the file has a
+    // non-empty Title tag, so "title equals filename" means "no title tag". ⚠ It cannot tell
+    // that apart from a file whose Title tag genuinely equals its filename — that file's
+    // title is treated as missing, exactly as it was before AUD-1.
+    var filled = SourceMetadataPrecedence.FillMissingFrom(
+      _metadata,
+      track,
+      Path.GetFileNameWithoutExtension(_currentFile ?? string.Empty));
+
     Logger.LogInformation(
-      "Updating FilePlayer metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
-      track.Title, track.Artist, e.Confidence);
-
-    // Only update fields that are using defaults (incomplete)
-    if (_metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist))
-    {
-      _metadata[StandardMetadataKeys.Artist] = track.Artist;
-    }
-
-    if (_metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum) &&
-        !string.IsNullOrEmpty(track.Album))
-    {
-      _metadata[StandardMetadataKeys.Album] = track.Album;
-    }
-
-    // Update title if it's just the filename (contains extension or equals filename without extension)
-    var currentTitle = _metadata[StandardMetadataKeys.Title]?.ToString() ?? "";
-    var filename = Path.GetFileNameWithoutExtension(_currentFile ?? "");
-    if (currentTitle.Equals(filename, StringComparison.OrdinalIgnoreCase))
-    {
-      _metadata[StandardMetadataKeys.Title] = track.Title;
-    }
+      "Fingerprint result for file '{Title}' by '{Artist}' (confidence: {Confidence:P0}); filled from it: {Fields}",
+      track.Title, track.Artist, e.Confidence, filled.Describe(filledArt));
 
     // Add optional metadata if not already present
     if (!_metadata.ContainsKey(StandardMetadataKeys.Genre) && track.Genre != null)
@@ -2297,14 +2275,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _metadata[StandardMetadataKeys.TrackNumber] = track.TrackNumber.Value;
     }
 
-    // Mark that fingerprinting has been applied
+    // Mark that an identification has been processed for this track — which stops SongRec
+    // re-applying every cycle. ⚠ "MetadataSource" records that an identification ran, NOT
+    // that it contributed anything: after AUD-1 a fully tagged file still gets
+    // "Fingerprinting" here with every field its own. No code under src/ looks the key up by
+    // name (it can still travel with the whole metadata dictionary).
     _metadata["NeedsFingerprintingLookup"] = false;
     _metadata["IdentificationConfidence"] = e.Confidence;
     _metadata["IdentifiedAt"] = e.IdentifiedAt;
     _metadata["MetadataSource"] = "Fingerprinting";
-
-    Logger.LogInformation(
-      "File metadata enhanced via fingerprinting: {Title} by {Artist}",
-      _metadata[StandardMetadataKeys.Title], _metadata[StandardMetadataKeys.Artist]);
   }
 }

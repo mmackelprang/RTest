@@ -892,12 +892,14 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       confidence: 0.95));
     await Task.Delay(100);
 
-    // Assert — AVRCP title/artist survive; the album AVRCP left empty ("" — the mock
-    // supplies none) is filled; and the handler ran to completion rather than being
-    // short-circuited by the active-source guard (it clears NeedsFingerprintingLookup).
+    // Assert — every field AVRCP supplied survives (MockBluetoothService.SimulateMetadataChange
+    // always supplies Album = "Mock Album"), and the handler ran to completion rather than
+    // being short-circuited by the active-source guard: only the handler body clears
+    // NeedsFingerprintingLookup, which the gate had set because the toggle is on.
     Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
-    Assert.Equal("Shazam Album", _source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("Mock Album", _source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal(0.95, _source.Metadata["IdentificationConfidence"]);
     Assert.False(_source.NeedsFingerprintingLookup);
   }
 

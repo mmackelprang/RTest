@@ -133,6 +133,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private int _trackGeneration;
   private string? _currentTrackKey;
 
+  // The title this source shows before it has any track metadata, and the device name it
+  // falls back to when the connected device reports none. Both are OUR placeholders, not
+  // something the phone said, so the AUD-1 per-field merge treats a title equal to either
+  // as missing (see OnTrackIdentified).
+  private const string DefaultTitle = "Bluetooth";
+  private const string DefaultDeviceName = "Bluetooth Device";
+
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
     _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
@@ -164,7 +171,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     _options = options;
     _fingerprintingOptionsMonitor = fingerprintingOptions;
     _playbackService = playbackService;
-    SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
+    SetDefaultMetadata(DefaultTitle, "Bluetooth", DefaultDeviceName);
 
     _bluetoothService.MetadataChanged += OnMetadataChanged;
     _bluetoothService.PlaybackStatusChanged += OnPlaybackStatusChanged;
@@ -215,7 +222,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       Logger.LogInformation("BluetoothAudioSource: platform manages audio routing, skipping capture device");
       var connected = _bluetoothService.ConnectedDevice;
-      var connectedName = connected?.Name ?? "Bluetooth Device";
+      var connectedName = connected?.Name ?? DefaultDeviceName;
       MetadataInternal[StandardMetadataKeys.Title] = connectedName;
       MetadataInternal["Device"] = connectedName;
       if (!string.IsNullOrWhiteSpace(connected?.Address))
@@ -420,7 +427,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private void SetConnectedDeviceMetadata()
   {
     var connected = _bluetoothService.ConnectedDevice;
-    var connectedName = connected?.Name ?? "Bluetooth Device";
+    var connectedName = connected?.Name ?? DefaultDeviceName;
     MetadataInternal[StandardMetadataKeys.Title] = connectedName;
     MetadataInternal["Device"] = connectedName;
     if (!string.IsNullOrWhiteSpace(connected?.Address))
@@ -920,7 +927,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       if (State == AudioSourceState.Playing || State == AudioSourceState.Paused)
       {
         State = AudioSourceState.Stopped;
-        SetDefaultMetadata("Bluetooth", "Bluetooth", "Bluetooth Device");
+        SetDefaultMetadata(DefaultTitle, "Bluetooth", DefaultDeviceName);
       }
     }
     catch (Exception ex)
@@ -1010,12 +1017,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
 
     // If metadata is incomplete (no title or artist), request fingerprinting.
-    // When UseShazamForAllSources is enabled, always fingerprint — SongRec provides
-    // higher-quality cover art (Apple Music CDN) and more accurate metadata.
+    // When UseShazamForAllSources is enabled, always fingerprint — on the appliance SongRec
+    // is the only source of BT cover art there is: AVRCP has never supplied any, because
+    // LinuxBluetoothService reads the MPRIS names ArtUrl/mpris:artUrl off a proxy on
+    // org.bluez.MediaPlayer1, which publishes ImgHandle (AUD-17). When SongRec does not
+    // identify the track either, the UI shows the fallback icon — accepted UX.
     //
-    // SongRec is the only cover-art fallback for BT (MusicBrainz has been removed
-    // project-wide); when AVRCP has no art and SongRec doesn't identify the track,
-    // the UI shows the fallback icon — accepted UX.
+    // This is a GATE only. What is done with the answer is decided per field in
+    // OnTrackIdentified and is not configurable: since AUD-1 an identification may only
+    // fill fields AVRCP left missing.
     var hasIncompleteMetadata = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
     NeedsFingerprintingLookup = hasIncompleteMetadata || FpOptions.UseShazamForAllSources;
 
@@ -1045,46 +1055,85 @@ public class BluetoothAudioSource : USBAudioSourceBase
         e.Track.Title, e.Track.Artist);
     }
 
-    // When UseShazamForAllSources is enabled, SongRec metadata replaces AVRCP metadata
-    // (SongRec is more authoritative and has better cover art from Apple Music CDN)
-    if (FpOptions.UseShazamForAllSources)
+    // AUD-1: per-FIELD precedence, decided by the owner 2026-09-08. The source's own
+    // metadata wins for every field it actually supplied; an identification fills only
+    // the fields the source left missing, each decided on its own.
+    //
+    // This deliberately does NOT branch on UseShazamForAllSources. That flag is the gate
+    // in OnMetadataChanged — whether SongRec runs at all — and letting it also decide what
+    // happens to the ANSWER is the conflation AUD-1 removed. No configuration makes an
+    // identification replace a title, artist or album AVRCP supplied.
+    //
+    // "Missing" covers "" and whitespace (the usual shape of an AVRCP field the phone did
+    // not publish), "--", and the title placeholders this class writes itself when it has
+    // no track metadata: its default title and the connected device's name
+    // (SetConnectedDeviceMetadata / OnDeviceConnected).
+    var deviceName = MetadataInternal.TryGetValue("Device", out var device) ? device as string : null;
+    var filled = SourceMetadataPrecedence.FillMissingFrom(
+      MetadataInternal, e.Track, DefaultTitle, DefaultDeviceName, deviceName);
+
+    // Genre/year/track number: BluetoothPlaybackMetadata has no such fields, so AVRCP
+    // never supplies them and the identification is their only writer. Written as the
+    // base class did before AUD-1 overrode it (UpdateMetadataFromFingerprint below).
+    if (e.Track.Genre != null)
     {
-      if (!string.IsNullOrEmpty(e.Track.Title))
-      {
-        MetadataInternal[StandardMetadataKeys.Title] = e.Track.Title;
-      }
-      if (!string.IsNullOrEmpty(e.Track.Artist))
-      {
-        MetadataInternal[StandardMetadataKeys.Artist] = e.Track.Artist;
-      }
-      if (!string.IsNullOrEmpty(e.Track.Album))
-      {
-        MetadataInternal[StandardMetadataKeys.Album] = e.Track.Album;
-      }
+      MetadataInternal[StandardMetadataKeys.Genre] = e.Track.Genre;
+    }
+    if (e.Track.ReleaseYear.HasValue)
+    {
+      MetadataInternal[StandardMetadataKeys.Year] = e.Track.ReleaseYear.Value;
+    }
+    if (e.Track.TrackNumber.HasValue)
+    {
+      MetadataInternal[StandardMetadataKeys.TrackNumber] = e.Track.TrackNumber.Value;
+    }
+    MetadataInternal["IdentificationConfidence"] = e.Confidence;
+    MetadataInternal["IdentifiedAt"] = e.IdentifiedAt;
 
-      if (!string.IsNullOrEmpty(e.Track.CoverArtUrl) && _serviceScopeFactory != null)
-      {
-        _ = CacheAndSetCoverArtAsync(e.Track.CoverArtUrl, e.Track.Title, e.Track.Artist);
-      }
+    // Cover art by the same rule, but written by CacheAndSetCoverArtAsync rather than the
+    // helper, because a remote URL must be downloaded into the local album-art cache
+    // before the browser can fetch it. On the appliance AVRCP has never supplied art
+    // (AUD-17), and OnMetadataChanged removes the key on every AVRCP event unless the
+    // resolved-art cache restores it — so for a track not yet resolved this fills every
+    // time, which is the SongRec-sourced album art the gate exists to keep.
+    //
+    // ⚠ The write is fire-and-forget: two identifications landing before the first
+    // download completes can both see art missing and both start one. That was equally
+    // true of the art-only branch this replaced.
+    var fillingArt = SourceMetadataPrecedence.ShouldFillAlbumArt(MetadataInternal)
+      && !string.IsNullOrEmpty(e.Track.CoverArtUrl)
+      && _serviceScopeFactory != null;
 
-      Logger.LogInformation(
-        "Shazam metadata replaced AVRCP for BT: '{Title}' by '{Artist}'",
-        e.Track.Title, e.Track.Artist);
-      return;
+    if (fillingArt)
+    {
+      _ = CacheAndSetCoverArtAsync(e.Track.CoverArtUrl!, e.Track.Title, e.Track.Artist);
     }
 
-    // Use fingerprint-identified cover art if we don't already have art.
-    // SongRec provides Apple Music CDN URLs which are HTTPS and cache cleanly.
-    // If SongRec didn't provide a CoverArtUrl, leave art absent (UI fallback);
-    // MusicBrainz CAA / release-ID lookup is no longer used for BT (deprecated
-    // project-wide in favor of SongRec).
-    var hasArt = MetadataInternal.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var existingArt)
-      && existingArt is string artStr && !string.IsNullOrEmpty(artStr);
+    // ⚠ "cover art" here means the art write was STARTED, not that it landed — the
+    // download can still fail or be dropped by the track-generation guard, and
+    // CacheAndSetCoverArtUrlAsync logs "Cover art found …" only when it actually writes.
+    Logger.LogInformation(
+      "Fingerprint result for BT '{Title}' by '{Artist}' (confidence: {Confidence:P0}); filled from it: {Fields}",
+      e.Track.Title, e.Track.Artist, e.Confidence, filled.Describe(fillingArt));
+  }
 
-    if (!hasArt && !string.IsNullOrEmpty(e.Track.CoverArtUrl) && _serviceScopeFactory != null)
-    {
-      _ = CacheAndSetCoverArtAsync(e.Track.CoverArtUrl, e.Track.Title, e.Track.Artist);
-    }
+  /// <summary>
+  /// Suppresses <see cref="USBAudioSourceBase"/>'s fingerprint handling for Bluetooth.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>AUD-1: the base class subscribes its OWN <c>TrackIdentified</c> handler</b>, before
+  /// this class subscribes <see cref="OnTrackIdentified"/>, and its default implementation of this
+  /// method writes Title, Artist, Album and AlbumArtUrl <b>unconditionally</b> — the art falling
+  /// back to the placeholder path when the identification has none. That handler runs only while
+  /// the source is Playing or Paused, which is exactly when it matters on the appliance: the
+  /// 2026-09-10 production log shows it firing (<c>"Updating Bluetooth Audio metadata from
+  /// fingerprinting"</c>) ahead of this class's own overwrite on the same identification. Left in
+  /// place it would overwrite AVRCP metadata whatever <see cref="OnTrackIdentified"/> decided, so
+  /// Bluetooth's per-field merge would be decoration. <see cref="OnTrackIdentified"/> is the only
+  /// place Bluetooth applies an identification.
+  /// </remarks>
+  protected override void UpdateMetadataFromFingerprint(TrackMetadata track, double confidence, DateTime identifiedAt)
+  {
   }
 
   private async Task CacheAndSetCoverArtAsync(string coverArtUrl, string title, string artist)
