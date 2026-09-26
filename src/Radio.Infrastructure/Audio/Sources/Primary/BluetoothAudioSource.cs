@@ -147,6 +147,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private int _trackGeneration;
   private string? _currentTrackKey;
 
+  // AUD-33: when (UTC ticks, 0 = unknown) the current AVRCP track key took effect. Written in
+  // OnMetadataChanged, read on the identification thread.
+  private long _trackStartedAtTicks;
+
   // The title this source shows before it has any track metadata, and the device name it
   // falls back to when the connected device reports none. Both are OUR placeholders, not
   // something the phone said, so the AUD-1 per-field merge treats a title equal to either
@@ -1002,6 +1006,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       _currentTrackKey = newTrackKey;
       Interlocked.Increment(ref _trackGeneration);
+      Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
     }
 
     // Always clear stale art from the previous song first (PlayHistoryTracker
@@ -1058,6 +1063,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // fingerprinting always taps the active source's audio.
     if (!IsActiveSource)
     {
+      return;
+    }
+
+    // AUD-33: capture + recognition takes ~15 s. A result whose sample began before the current
+    // track key took effect describes the previous track: applying it would cache that track's art
+    // under THIS track's key, and duplicate suppression can hold off the correcting identification
+    // for minutes. Dropped before the lookup flag is cleared, so this track is still identified.
+    var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
+    if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
+    {
+      Logger.LogInformation(
+        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current BT track started",
+        e.Track.Title, e.Track.Artist);
+      // The service marked this song as recently identified before raising the event. AVRCP metadata
+      // can trail the audio by a second or two, so a dropped result may name the track now playing;
+      // without this its re-identification — BT's only source of art — would be suppressed for minutes.
+      _identificationService?.ForgetRecentIdentification(e.Track);
       return;
     }
 

@@ -989,6 +989,86 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       UpdatedAt = DateTime.UtcNow
     }, confidence: 0.95);
 
+  private static TrackIdentifiedEventArgs SongRecCapturedAt(
+    DateTime captureStartedAt, string title, string artist, string? coverArtUrl) =>
+    new(SongRec(title, artist, coverArtUrl: coverArtUrl).Track, confidence: 0.95, captureStartedAt);
+
+  /// <summary>
+  /// AUD-33: a result sampled from the previous track and delivered after the phone moved on must not
+  /// land on the new track. On Bluetooth that matters more than on files: the art would be cached under
+  /// the NEW track's key, and duplicate suppression can hold off the correcting identification for minutes.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_ResultSampledBeforeATrackChange_IsNotApplied()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Song A", "Artist A");
+    var captureStartedAt = DateTime.UtcNow;
+
+    await Task.Delay(20); // the track change happens strictly after the capture began
+    RaiseAvrcp(bt, "Song B", "Artist B");
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(captureStartedAt, "Song A", "Artist A", "/api/albumart/song-a.jpg"));
+
+    Assert.False(_source.Metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl));
+    Assert.Equal("Song B", _source.Metadata[StandardMetadataKeys.Title]);
+    // Still wants an identification of the track that IS playing.
+    Assert.True(_source.NeedsFingerprintingLookup);
+  }
+
+  /// <summary>
+  /// The service marks a result as recently identified before raising it. AVRCP can trail the audio,
+  /// so a dropped result may name the track now playing — which must not then be suppressed as a
+  /// duplicate, or BT's only art source stays silent for the whole window.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_DroppedResult_IsForgottenByDuplicateSuppression()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Song A", "Artist A");
+    var captureStartedAt = DateTime.UtcNow;
+    await Task.Delay(20);
+    RaiseAvrcp(bt, "Song B", "Artist B");
+    var stale = SongRecCapturedAt(captureStartedAt, "Song B", "Artist B", "/api/albumart/song-b.jpg");
+    id.MarkAsRecentlyIdentifiedForTesting(stale.Track, stale.Confidence);
+
+    id.RaiseTrackIdentifiedForTesting(stale);
+
+    Assert.False(id.IsSuppressedAsDuplicateForTesting(stale.Track));
+  }
+
+  [Fact]
+  public async Task Aud33_AppliedResult_StaysSuppressedAsADuplicate()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Song A", "Artist A");
+    var fresh = SongRecCapturedAt(DateTime.UtcNow, "Song A", "Artist A", "/api/albumart/song-a.jpg");
+    id.MarkAsRecentlyIdentifiedForTesting(fresh.Track, fresh.Confidence);
+
+    id.RaiseTrackIdentifiedForTesting(fresh);
+
+    Assert.True(id.IsSuppressedAsDuplicateForTesting(fresh.Track));
+  }
+
+  /// <summary>
+  /// An AVRCP refresh of the SAME track (the phone re-publishing its metadata) is not a track change,
+  /// so a result sampled before the refresh still applies.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_AvrcpRefreshOfTheSameTrack_DoesNotDropAnInFlightResult()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Song A", "Artist A");
+    var captureStartedAt = DateTime.UtcNow;
+
+    await Task.Delay(20);
+    RaiseAvrcp(bt, "Song A", "Artist A");
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(captureStartedAt, "Song A", "Artist A", "/api/albumart/song-a.jpg"));
+
+    Assert.Equal("/api/albumart/song-a.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
   /// <summary>
   /// The row's thesis, and today's ~99% album-art path in one test: AVRCP supplies the
   /// text, AVRCP never supplies art on the appliance (AUD-17), so the identification

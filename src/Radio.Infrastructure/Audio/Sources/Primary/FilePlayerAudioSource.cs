@@ -41,6 +41,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private List<string> _originalOrder = new(); // Store original order for shuffle toggle
   private List<string> _playedHistory = new(); // Track played songs for Previous
   private string? _currentFile;
+
+  // AUD-33: when (UTC ticks, 0 = unknown) the current file became the track whose metadata we hold,
+  // and which file that was. Written on the playback path, read on the identification thread.
+  private long _trackStartedAtTicks;
+  private string? _trackStartedFile;
   private int _consecutiveSkipCount;
   private ISoundDataProvider? _dataProvider;
   private FileStream? _fileStream;
@@ -1951,6 +1956,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   private void UpdateMetadataFromFile(string filePath)
   {
+    // AUD-33: a different file is a new track; re-reading the same one (repeat, queue edits,
+    // restore) is not, so an identification already in flight for it stays valid.
+    if (!string.Equals(filePath, _trackStartedFile, StringComparison.Ordinal))
+    {
+      _trackStartedFile = filePath;
+      Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
+    }
+
     _metadata.Clear();
     
     // Set default values first
@@ -2149,6 +2162,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // Only update metadata if this is the active source
     if (State != AudioSourceState.Playing && State != AudioSourceState.Paused)
     {
+      return;
+    }
+
+    // AUD-33: capture + recognition takes ~15 s. A result whose sample began before this file
+    // became the current track describes the previous one; merging it here put Eve 6 on
+    // "Meditating Beat" on the appliance (2026-09-26).
+    var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
+    if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
+    {
+      Logger.LogInformation(
+        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current file started",
+        e.Track.Title, e.Track.Artist);
+      // The service marked this song as recently identified before raising the event; without this,
+      // a straddling capture that named the NEW file would suppress its own re-identification.
+      _identificationService?.ForgetRecentIdentification(e.Track);
       return;
     }
 
