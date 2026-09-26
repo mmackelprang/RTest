@@ -2190,7 +2190,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     //
     // The filename is an extra "no title" placeholder because UpdateMetadataFromFile seeds
     // Title with Path.GetFileNameWithoutExtension and replaces it only when the file has a
-    // non-empty Title tag, so "title equals filename" means "no title tag". ⚠ It cannot tell
+    // non-blank Title tag (AudioTagReader reports blank tags as null), so "title equals filename" means "no title tag". ⚠ It cannot tell
     // that apart from a file whose Title tag genuinely equals its filename — that file's
     // title is treated as missing, exactly as it was before AUD-1.
     var filled = SourceMetadataPrecedence.FillMissingFrom(

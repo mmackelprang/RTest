@@ -16,7 +16,7 @@ namespace Radio.Infrastructure.Audio.Services;
 /// <param name="Duration">TagLib's duration when it has one (it parses VBR headers), else SoundFlow's.</param>
 /// <param name="SampleRate">Sample rate in Hz, when known.</param>
 /// <param name="Channels">Channel count, when known.</param>
-/// <param name="Bitrate">Bitrate as the reader reports it; units differ between readers and nothing reads it.</param>
+/// <param name="Bitrate">Average bitrate in bits per second (SoundFlow reports bps; TagLib's kbps is converted).</param>
 /// <param name="ReadBy">Which reader produced the tags: <see cref="AudioTagReader.SoundFlowReader"/> or <see cref="AudioTagReader.TagLibReader"/>.</param>
 public sealed record AudioFileTags(
   string? Title,
@@ -37,9 +37,9 @@ public sealed record AudioFileTags(
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⚠ SoundFlow 1.4.1 rejects some real ID3v2.2 tags outright (<c>CorruptFrameError: A 'ID3v2.2' frame is
-/// corrupted</c>) that TagLib reads without complaint — measured on the appliance on two Kevin MacLeod
-/// library files. Before this class every caller treated that failure as "the file has no tags", so the
+/// ⚠ SoundFlow 1.4.1 appears to reject ID3v2.2 tags wholesale (<c>CorruptFrameError: A 'ID3v2.2' frame is
+/// corrupted</c>), while TagLib reads them without complaint. First measured on two library files on the
+/// appliance; a hand-built, well-formed v2.2 tag is rejected the same way. Before this class every caller treated that failure as "the file has no tags", so the
 /// file player showed placeholders and AUD-1's per-field rule let fingerprinting fill the tagged fields.
 /// </para>
 /// <para>
@@ -119,8 +119,9 @@ public static class AudioTagReader
         properties?.Duration > TimeSpan.Zero ? properties.Duration : null,
         properties?.AudioSampleRate > 0 ? properties.AudioSampleRate : null,
         properties?.AudioChannels > 0 ? properties.AudioChannels : null,
-        // TagLib reports kbps; SoundFlow's unit is not documented. Nothing reads this value today.
-        properties?.AudioBitrate > 0 ? properties.AudioBitrate : null,
+        // TagLib reports kbps; SoundFlow (and so this record) uses bps. The metadata dictionary is
+        // published over the API, so the two readers must agree.
+        properties?.AudioBitrate > 0 ? properties.AudioBitrate * 1000 : null,
         TagLibReader);
     }
     catch (Exception ex)

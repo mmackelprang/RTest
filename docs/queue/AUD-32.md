@@ -32,7 +32,39 @@ Run `SoundMetadataReader.Read` on the two files (copies from the box) and record
 log a warning when it fails, and fall back to TagLib (already referenced for duration and art) for the
 tags rather than dropping to placeholders.
 
-## Verification
+## Verification (planned)
 
 Both files show their tagged artist (and album, for *Meditating Beat*) before and after an
 identification; the fill log lists only genuinely missing fields; no `Duration: 00:00:00` for either.
+
+---
+
+## 🚧 BUILT 2026-09-26 — branch `fix/aud-32-tag-read-fallback`
+
+**Cause, reproduced off the box:** SoundFlow 1.4.1's `SoundMetadataReader.Read` returns
+`CorruptFrameError: A 'ID3v2.2' frame is corrupted` for both files; TagLib reads every tag. ⚠ **The
+"Logic/iTunes frames" lead above was a red herring** — the adversarial reviewer hand-built a minimal,
+well-formed v2.2 tag and SoundFlow rejected that too. **Blast radius: every ID3v2.2 file in the library**,
+not two Kevin MacLeod tracks. SoundFlow handles ID3v1 and v2.3 correctly.
+
+**Fix:** new `Radio.Infrastructure.Audio.Services.AudioTagReader` — SoundFlow first, TagLib when it fails,
+blank tags → `null`, bitrate always bps. All four tag-reading sites now go through it:
+`FilePlayerAudioSource.UpdateMetadataFromFile`, both queue-item builders, and
+`FileBrowser.ExtractMetadataAsync` (the file browser showed no artist/album for these files either).
+Embedded-art extraction now also runs for v2.2 files; before, it was skipped along with the tags.
+
+**Logging:** the reader logs only at Debug (queue renders re-read every queued file, and log volume
+correlates with audio distortion on the box). A file **neither** reader can open is a Warning, once per
+track load.
+
+**Tests** (fixture: first 18 KB of `Meditating Beat.mp3`, public domain — `TestData/id3v22-soundflow-rejects.mp3`):
+red first against unmodified code, 7 of 9 failing — including the box case verbatim
+(`Expected: Meditating Beat / Actual: Prezis In My Pocket`) and the file browser showing the filename.
+`Fixture_IsStillRejectedBySoundFlow` guards against a SoundFlow upgrade making the fallback tests vacuous.
+Known gap: `CreateQueueItemWithState` (full-playlist view) has no fallback test of its own; its code is
+identical to `CreateQueueItem`'s today.
+
+**Box check (for the owner's UAT):** play `Meditating Beat.mp3` and `Hear What They Say.mp3` from the queue.
+Before any identification, both show artist **Kevin MacLeod** (and album **FreePD Music** for the first); the
+`Starting playback` line shows a real duration, not `00:00:00`; after an identification the artist is
+unchanged and the fill line lists only genuinely missing fields.
