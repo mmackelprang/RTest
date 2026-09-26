@@ -1995,6 +1995,82 @@ public class FilePlayerAudioSourceTests : IDisposable
     Assert.NotNull(item.Duration);
   }
 
+  /// <summary>
+  /// AUD-33, the appliance case (2026-09-26): SongRec's sample of "Here's To The Night" came back 9 s
+  /// after the listener skipped to "Meditating Beat", and was merged into the new track's metadata.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_ResultSampledBeforeASkip_IsNotAppliedToTheNewTrack()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("heres-to-the-night.mp3");
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("heres-to-the-night.mp3");
+    SetState(active, AudioSourceState.Playing);
+    var captureStartedAt = DateTime.UtcNow;
+
+    await Task.Delay(20); // the skip happens strictly after the capture began
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Here's to the Night", "Eve 6", "Horrorscope", "/api/albumart/eve6.jpg"),
+      0.8,
+      captureStartedAt);
+
+    Assert.Equal("meditating", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal(StandardMetadataKeys.DefaultArtist, active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal(StandardMetadataKeys.DefaultAlbumArtUrl, active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  [Fact]
+  public async Task Aud33_ResultSampledFromTheCurrentTrack_IsApplied()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Meditating Beat", "Kevin MacLeod", "FreePD Music", "/api/albumart/mb.jpg"),
+      0.8,
+      DateTime.UtcNow);
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("/api/albumart/mb.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
+  /// Re-reading the SAME file (repeat, queue edits, restore) is not a track change: a result sampled
+  /// from it before the re-read still describes what is playing.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_ReloadingTheSameFile_DoesNotDropAnInFlightResult()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    var captureStartedAt = DateTime.UtcNow;
+
+    await Task.Delay(20);
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Meditating Beat", "Kevin MacLeod", "FreePD Music", "/api/albumart/mb.jpg"),
+      0.8,
+      captureStartedAt);
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+  }
+
   private static void SetCurrentFile(FilePlayerAudioSource source, string path)
   {
     var field = typeof(FilePlayerAudioSource).GetField(
@@ -2068,12 +2144,13 @@ public class FilePlayerAudioSourceTests : IDisposable
   private static void InvokeOnTrackIdentified(
     FilePlayerAudioSource source,
     TrackMetadata track,
-    double confidence)
+    double confidence,
+    DateTime? captureStartedAt = null)
   {
     var method = typeof(FilePlayerAudioSource).GetMethod(
       "OnTrackIdentified",
       System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-    method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence) });
+    method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence, captureStartedAt) });
   }
 
   #endregion

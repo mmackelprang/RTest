@@ -391,7 +391,7 @@ public class BackgroundIdentificationService : BackgroundService
     // Update event record with result
     if (result?.IsMatch == true && result.Metadata != null)
     {
-      var trackKey = $"{result.Metadata.Title}|{result.Metadata.Artist}";
+      var trackKey = TrackKey(result.Metadata);
       UpdateCurrentEventMatch(result.Metadata, result.Confidence);
       UpdatePhase(FingerprintPhase.Matched);
 
@@ -423,7 +423,10 @@ public class BackgroundIdentificationService : BackgroundService
         result.Metadata.Title, result.Metadata.Artist, result.Confidence,
         result.Source, result.Metadata.CoverArtUrl ?? "(none)");
 
-      TrackIdentified?.Invoke(this, new TrackIdentifiedEventArgs(result.Metadata, result.Confidence));
+      // AUD-33: carry the capture start so a source can drop a result sampled from a track the
+      // listener has since skipped away from.
+      TrackIdentified?.Invoke(
+        this, new TrackIdentifiedEventArgs(result.Metadata, result.Confidence, captureStartTime));
     }
     else
     {
@@ -688,6 +691,34 @@ public class BackgroundIdentificationService : BackgroundService
 
     SongChanged?.Invoke(this, new SongChangedEventArgs(previousTrack, newTrack, confidence));
   }
+
+  /// <summary>
+  /// Removes <paramref name="track"/> from duplicate suppression, so the next identification of it is
+  /// raised rather than suppressed.
+  /// </summary>
+  /// <remarks>
+  /// AUD-33: a result is marked as recently identified BEFORE <see cref="TrackIdentified"/> is raised.
+  /// A source that then drops it as stale (sampled before its current track started) calls this, or the
+  /// song it dropped would be suppressed for the whole window — even when that song is the one now
+  /// playing (a capture straddling the skip, or Bluetooth AVRCP metadata arriving after the audio).
+  /// </remarks>
+  public void ForgetRecentIdentification(TrackMetadata track)
+  {
+    _recentIdentifications.TryRemove(TrackKey(track), out _);
+  }
+
+  /// <summary>Test seam (kind B — injection): writes the suppression entry a real identification cycle
+  /// writes. A real cycle CAN be driven (<c>BackgroundIdentificationServiceCaptureTimeTests</c> does, with a
+  /// mock tap and SongRec), but not paused between the mark and the raise, and each run pays the service's
+  /// fixed 5 s start-up delay — so source tests that need "marked, then raised" state write it here.</summary>
+  internal void MarkAsRecentlyIdentifiedForTesting(TrackMetadata track, double confidence) =>
+    MarkAsRecentlyIdentified(TrackKey(track), confidence);
+
+  /// <summary>Test seam (kind A — visibility): whether duplicate suppression would block <paramref name="track"/>.</summary>
+  internal bool IsSuppressedAsDuplicateForTesting(TrackMetadata track) =>
+    IsDuplicateIdentification(TrackKey(track));
+
+  private static string TrackKey(TrackMetadata track) => $"{track.Title}|{track.Artist}";
 
   private bool IsDuplicateIdentification(string trackKey)
   {
