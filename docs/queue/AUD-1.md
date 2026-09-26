@@ -205,3 +205,20 @@ does not name the other risks trading one defect for the other.**
 - `AUD-19`: History still records SongRec's title; the PR says so up front.
 - The pre-existing BT text-field churn: an AVRCP refresh resets a filled album to `""`.
 
+
+---
+
+## ✅ UAT PASSED 2026-09-26 — merged `e726f80`, deployed, SHA verified on API and Web
+
+Run by the owner at the cabinet with the coordinator reading the file sink. All four checks passed:
+
+1. **BT, AVRCP complete** — *Telephone Line* / ELO: `filled from it: cover art requested`, art shown, no `replaced AVRCP`, no base-class `Updating Bluetooth Audio metadata` line since the deploy.
+2. **BT art cache** — skip away and back: art returned instantly, title stayed the phone's.
+3. **Tagged file** — `08-I'm Not In Love.mp3`, staged into the effective root. SongRec returned `I'm Not In Love` + art `a5b0c1a1…`; the console kept `I'm Not in Love` + embedded art `bf252d13…`; log `filled from it: nothing`.
+4. **Untagged file** — a tag- and art-stripped copy of *All The Small Things*, played via `POST /api/files/play`: `filled from it: title, artist, album, cover art` → blink-182 / *Greatest Hits* with art.
+
+Both staged files were removed afterwards; the effective root is empty again.
+
+⚠ **The daily log file spans the deploy.** Zero-count checks must start at the last `Application started` line, or old-binary lines (e.g. a 00:17 `replaced AVRCP`) read as failures.
+
+**Found during UAT, filed separately (both pre-date AUD-1):** [`AUD-32`](AUD-32.md) — some MP3s' tags silently fail to load, so tagged fields are "missing" and get filled; [`AUD-33`](AUD-33.md) — a late identification is applied to the next track after a skip.
