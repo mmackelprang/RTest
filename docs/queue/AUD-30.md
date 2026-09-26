@@ -202,3 +202,32 @@ alone fails no test; they are defence in depth behind the tested gates.
    `Bluetooth device connected: … at /org/bluez/hci0/…` must appear and audio must route.
 7. **Positive control:** a real disconnect on `hci0` (phone BT off) still logs `disconnected … at
    /org/bluez/hci0/… reason=<non-Unknown>` and tears down.
+
+---
+
+## ✅ OWNER UAT 2026-09-25 22:55–23:03 on `029b1c7` — all four box-checklist steps passed
+
+Owner at the cabinet, Pixel 10 Pro XL, RotaryPhone running. Instruments: the 1 Hz recorder, the service
+file log, and `rotary-phone.service`'s journal.
+
+| Step | Evidence | Result |
+|---|---|---|
+| 1. Connect logs our adapter | 22:55:28.495 and 22:57:32.774 `Bluetooth device connected … at /org/bluez/hci0/dev_B0_D5_FB_D2_0D_68` | ✅ |
+| 2. RotaryPhone refuses the Pixel on `hci1` **while playing** | RotaryPhone `BLOCKED … refusing on /org/bluez/hci1` at **22:58:05.090**; source `Playing` since 22:57:38, first pause 22:58:12. **Our log: nothing** in the 7 s after — no disconnect, no stream stop, no eviction. Recorder: transport `active`, link intact. Owner: *"Music kept playing."* | ✅ |
+| 3. Adapter stop/start (the review's HIGH) | `POST /api/bluetooth/stop` 23:03:01.8 → `start` 23:03:07.1 (both 200); **23:03:07.154 `Selected preferred Bluetooth adapter 78:20:51:F5:FB:A7 at /org/bluez/hci0`**; Pixel reconnected 23:03:12.069 at `hci0`; capture `Playing` 23:03:23.8; recorder transport `active`. Owner confirmed audio. | ✅ |
+| 4. Phone Bluetooth off — positive control | 23:00:40.782 mgmt `reason="Remote"`; `disconnected … at /org/bluez/hci0/… reason="Remote" (user-initiated: false)`; stream torn down; auto-reconnect suppressed | ✅ |
+
+**Before this fix, step 2's event produced a phantom disconnect 318–347 ms later** (16:23:47 and 16:48:14,
+same day). An earlier refusal at 22:56:00.416, when the Pixel was already disconnected, was also silent.
+
+⭐ **`AUD-10` held under this build too** — five resumes re-bound in 1, 102, 1, 1 and 3 ms, transport
+`active` each time, one Warning per resume.
+
+**Also recorded, not a defect:** a disconnect at 22:55:56.938 on `hci0`, `reason="LocalHost"`,
+`user-initiated: true`, preceded by BlueZ's `RequestDisconnection` to RotaryPhone's HFP handler at
+22:55:54.5 — a real disconnect on our adapter, logged with a real reason.
+
+⚠ **Instrument note:** the first "Bluetooth toggle" at 23:00:06 produced a disconnect/reconnect, not an
+adapter restart; step 3 was then run explicitly through the two API endpoints the Bluetooth page's
+**Disable**/**Enable** buttons call (`BluetoothPage.razor:68`/`:73`). `bluetoothctl power off/on` would
+NOT exercise this path.
