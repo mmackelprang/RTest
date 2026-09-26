@@ -11,7 +11,7 @@
 
 | Field | Value |
 |---|---|
-| Status | 📋 |
+| Status | 🚧 built — [PR #667](https://github.com/mmackelprang/RTest/pull/667), awaiting owner UAT |
 | Plan | _plan TBD (small-to-medium; the behaviour already exists — the work is splitting the switch and deciding FilePlayer's side)_ |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ · provenance: 2026-08-10 debugging session; PR #469 is the adjacent merged fix |
 | Depends on | — _(no row dependency. **Touches the same file and method region as PR #469** (`BluetoothAudioSource.OnTrackIdentified`), which is merged — rebase, don't re-derive. **Also touches `FilePlayerAudioSource.cs`, which #468 changed on 2026-08-11** — the anchors above are already re-sited, but rebase rather than trusting any earlier copy.)_ |
@@ -169,3 +169,39 @@ AcoustID→SongRec rename. **Keeping the name makes migration a genuine no-op.**
 ⚠ **And `AUD-27` now acts on the same field in the OPPOSITE direction** — it erases art that landed
 correctly, where this row writes metadata that should not have been written. **A fix for either that
 does not name the other risks trading one defect for the other.**
+
+---
+
+## 🚧 BUILT 2026-09-25 — [PR #667](https://github.com/mmackelprang/RTest/pull/667), branch `fix/split-shazam-fingerprint-vs-overwrite`
+
+**Not merged.** Needs the owner's box UAT (a phone and a staged file); the checklist is in the PR body.
+
+**What shipped:**
+- The owner's per-field rule, in one helper: `src/Radio.Core/Models/Audio/SourceMetadataPrecedence.cs`, used by both `BluetoothAudioSource.OnTrackIdentified` and `FilePlayerAudioSource.OnTrackIdentified`.
+- "Missing" covers null, empty or whitespace, `--`, `No Track`, the fallback art path, and each source's own title placeholders: the filename on files; on BT the default title, `Bluetooth Device`, and the connected device name.
+- Both overwrite branches are deleted.
+- `UseShazamForAllSources` is **not renamed** and its value is untouched. It is now documented as the gate only.
+
+**Plan and row claims found false while building:**
+1. ⛔ **The plan and the row both missed a second overwrite path, which was the one firing on the box.**
+   - `USBAudioSourceBase` subscribes its own `TrackIdentified` handler before `BluetoothAudioSource` does. It runs only while the source is Playing or Paused.
+   - Its default `UpdateMetadataFromFingerprint` wrote Title, Artist, Album and AlbumArtUrl unconditionally, falling back to the placeholder art path.
+   - The 2026-09-10 log above shows it: `Updating Bluetooth Audio metadata from fingerprinting` is that handler.
+   - Removing only the BT branch would have changed nothing on the appliance, and every existing BT test would still have passed, because none of them reaches Playing.
+   - BT now overrides the method as a no-op. The new BT tests reach Playing through the real `PlayAsync`.
+2. **Every BT anchor had drifted by roughly 180 lines.** The overwrite branch was at `:1048-1074`, not `:867-891`.
+3. **The plan's 6b assertion was wrong.** `MockBluetoothService.SimulateMetadataChange` always supplies `Album = "Mock Album"`, not `""`.
+4. **The plan's B3 would have gone red for a reason the box never exhibits.** Its fixture never reaches Playing, so the base handler stays inert and the art-only preserve branch leaves the title `""`. In the live (Playing) shape, the base handler fills the title. The new tests' actual red set is in the PR body.
+
+**The adversarial review found, and the PR fixed:**
+- **Fingerprint-supplied art had become impossible to correct.** Once it was cached, it never read as missing again.
+- **The fix:** the resolved-art cache now records provenance.
+  - Only AVRCP art is protected.
+  - Art from an identification is refreshed by each later identification, as before this row.
+
+**Open owner question:** should BT take fingerprint art when the identified artist disagrees with AVRCP's? See the PR.
+
+**Follow-ups:**
+- `AUD-19`: History still records SongRec's title; the PR says so up front.
+- The pre-existing BT text-field churn: an AVRCP refresh resets a filled album to `""`.
+
