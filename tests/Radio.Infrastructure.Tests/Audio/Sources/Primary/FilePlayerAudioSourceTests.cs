@@ -1928,6 +1928,73 @@ public class FilePlayerAudioSourceTests : IDisposable
     Assert.Equal("The Very Best of 10cc", active.Metadata[StandardMetadataKeys.Album]);
   }
 
+  // AUD-32: a real ID3v2.2 tag that SoundFlow's SoundMetadataReader rejects (CorruptFrameError)
+  // and TagLib reads. See AudioTagReaderTests for the fixture's provenance.
+  private static readonly string Id3v22Fixture =
+    Path.Combine(AppContext.BaseDirectory, "TestData", "id3v22-soundflow-rejects.mp3");
+
+  private string CopyId3v22Fixture(string relativePath)
+  {
+    var dest = Path.Combine(_testDir, relativePath);
+    System.IO.File.Copy(Id3v22Fixture, dest, overwrite: true);
+    return dest;
+  }
+
+  [Fact]
+  public async Task Aud32_TagSoundFlowRejects_LoadFileStillReadsTheTags()
+  {
+    await using var source = CreateSource();
+    CopyId3v22Fixture("meditating.mp3");
+
+    await source.LoadFileAsync("meditating.mp3");
+
+    Assert.Equal("Meditating Beat", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Kevin MacLeod", source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("FreePD Music", source.Metadata[StandardMetadataKeys.Album]);
+    Assert.True(source.Duration > TimeSpan.Zero);
+  }
+
+  /// <summary>
+  /// The appliance case, end to end: before AUD-32 the rejected tag left placeholder metadata, so
+  /// AUD-1's per-field rule saw every field as missing and a wrong identification replaced the
+  /// tagged artist ("Hear What They Say" → "Dsp Records North", 2026-09-26).
+  /// </summary>
+  [Fact]
+  public async Task Aud32_TagSoundFlowRejects_IdentificationDoesNotReplaceTheTaggedArtist()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CopyId3v22Fixture("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+
+    InvokeOnTrackIdentified(
+      active, CreateTrackMetadata("Prezis In My Pocket", "Dsp Records North", "Wrong Album", "/api/albumart/x.jpg"), 0.8);
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Kevin MacLeod", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("FreePD Music", active.Metadata[StandardMetadataKeys.Album]);
+    // The file has no embedded art, so art is the one field fingerprinting may fill.
+    Assert.Equal("/api/albumart/x.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  [Fact]
+  public async Task Aud32_TagSoundFlowRejects_QueueItemStillShowsTheTags()
+  {
+    await using var source = CreateSource();
+    CopyId3v22Fixture("meditating.mp3");
+    await source.LoadFileAsync("meditating.mp3");
+
+    var queue = await source.GetQueueAsync();
+
+    var item = Assert.Single(queue);
+    Assert.Equal("Meditating Beat", item.Title);
+    Assert.Equal("Kevin MacLeod", item.Artist);
+    Assert.Equal("FreePD Music", item.Album);
+    Assert.NotNull(item.Duration);
+  }
+
   private static void SetCurrentFile(FilePlayerAudioSource source, string path)
   {
     var field = typeof(FilePlayerAudioSource).GetField(

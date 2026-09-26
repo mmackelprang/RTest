@@ -15,7 +15,6 @@ using Radio.Fingerprinting.Services;
 using Radio.Fingerprinting;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
-using SoundFlow.Metadata;
 using SoundFlow.Providers;
 using SoundFlow.Structs;
 
@@ -1690,40 +1689,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     var album = "--";
     TimeSpan? duration = null;
 
-    try
+    // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
+    var tags = AudioTagReader.Read(filePath, Logger);
+    if (tags != null)
     {
-      var result = SoundMetadataReader.Read(filePath);
-      if (result.IsSuccess && result.Value != null)
-      {
-        var formatInfo = result.Value;
-
-        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
-        duration = AccurateDurationReader.GetDuration(filePath, Logger);
-        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
-        {
-          duration = formatInfo.Duration;
-        }
-
-        if (formatInfo.Tags != null)
-        {
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
-          {
-            title = formatInfo.Tags.Title;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
-          {
-            artist = formatInfo.Tags.Artist;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
-          {
-            album = formatInfo.Tags.Album;
-          }
-        }
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
+      duration = tags.Duration;
+      title = tags.Title ?? title;
+      artist = tags.Artist ?? artist;
+      album = tags.Album ?? album;
     }
 
     // Populate album art from embedded picture tags so Up Next tiles render real art
@@ -1756,39 +1729,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     var album = "--";
     TimeSpan? duration = null;
 
-    try
+    // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
+    var tags = AudioTagReader.Read(filePath, Logger);
+    if (tags != null)
     {
-      var result = SoundMetadataReader.Read(filePath);
-      if (result.IsSuccess && result.Value != null)
-      {
-        var formatInfo = result.Value;
-
-        duration = AccurateDurationReader.GetDuration(filePath, Logger);
-        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
-        {
-          duration = formatInfo.Duration;
-        }
-
-        if (formatInfo.Tags != null)
-        {
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
-          {
-            title = formatInfo.Tags.Title;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
-          {
-            artist = formatInfo.Tags.Artist;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
-          {
-            album = formatInfo.Tags.Album;
-          }
-        }
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
+      duration = tags.Duration;
+      title = tags.Title ?? title;
+      artist = tags.Artist ?? artist;
+      album = tags.Album ?? album;
     }
 
     // Populate album art from embedded picture tags so Up Next / Recent tiles render real
@@ -1980,7 +1928,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _dataProvider = null;
     }
 
-    // Read metadata from the file (this uses SoundMetadataReader which is separate from decoding)
+    // Read metadata from the file (AudioTagReader: tags only, separate from decoding)
     UpdateMetadataFromFile(fileToLoad);
 
     Logger.LogDebug("Loaded file: {File}", fileToLoad);
@@ -2020,69 +1968,62 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // is the best available source for a human-readable display name.
     _metadata["FilePath"] = filePath;
 
-    // Use SoundFlow's metadata reader to get audio tags
+    // AUD-32: AudioTagReader tries SoundFlow and falls back to TagLib. SoundFlow alone rejects some
+    // real ID3v2.2 tags, and that failure used to leave placeholders here — which AUD-1's per-field
+    // rule then (correctly) treated as missing, letting fingerprinting replace a tagged artist.
     try
     {
-      var result = SoundMetadataReader.Read(filePath);
-      if (result.IsSuccess && result.Value != null)
+      var tags = AudioTagReader.Read(filePath, Logger);
+      if (tags != null)
       {
-        var formatInfo = result.Value;
-
-        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
-        var accurateDuration = AccurateDurationReader.GetDuration(filePath, Logger);
-        if (accurateDuration != null)
-        {
-          _duration = accurateDuration.Value;
-        }
-        else if (formatInfo.Duration != TimeSpan.Zero)
-        {
-          _duration = formatInfo.Duration;
-        }
-        else
-        {
-          _duration = TimeSpan.Zero;
-        }
-
+        _duration = tags.Duration ?? TimeSpan.Zero;
         _metadata[StandardMetadataKeys.Duration] = _duration;
-        _metadata["SampleRate"] = formatInfo.SampleRate;
-        _metadata["Channels"] = formatInfo.ChannelCount;
-        _metadata["BitRate"] = formatInfo.Bitrate;
+        if (tags.SampleRate.HasValue)
+        {
+          _metadata["SampleRate"] = tags.SampleRate.Value;
+        }
+        if (tags.Channels.HasValue)
+        {
+          _metadata["Channels"] = tags.Channels.Value;
+        }
+        if (tags.Bitrate.HasValue)
+        {
+          _metadata["BitRate"] = tags.Bitrate.Value;
+        }
 
         // Extract embedded album art via TagLib (SoundFlow doesn't read pictures)
         ExtractEmbeddedAlbumArt(filePath);
 
-        // Get tags (Title, Artist, Album, etc.) - override defaults if available
-        if (formatInfo.Tags != null)
+        // Tags override the defaults seeded above; AudioTagReader reports blank tags as null.
+        if (tags.Title != null)
         {
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
-          {
-            _metadata[StandardMetadataKeys.Title] = formatInfo.Tags.Title;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
-          {
-            _metadata[StandardMetadataKeys.Artist] = formatInfo.Tags.Artist;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
-          {
-            _metadata[StandardMetadataKeys.Album] = formatInfo.Tags.Album;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Genre))
-          {
-            _metadata[StandardMetadataKeys.Genre] = formatInfo.Tags.Genre;
-          }
-          if (formatInfo.Tags.Year.HasValue)
-          {
-            _metadata[StandardMetadataKeys.Year] = formatInfo.Tags.Year.Value;
-          }
-          if (formatInfo.Tags.TrackNumber.HasValue)
-          {
-            _metadata[StandardMetadataKeys.TrackNumber] = formatInfo.Tags.TrackNumber.Value;
-          }
+          _metadata[StandardMetadataKeys.Title] = tags.Title;
+        }
+        if (tags.Artist != null)
+        {
+          _metadata[StandardMetadataKeys.Artist] = tags.Artist;
+        }
+        if (tags.Album != null)
+        {
+          _metadata[StandardMetadataKeys.Album] = tags.Album;
+        }
+        if (tags.Genre != null)
+        {
+          _metadata[StandardMetadataKeys.Genre] = tags.Genre;
+        }
+        if (tags.Year.HasValue)
+        {
+          _metadata[StandardMetadataKeys.Year] = tags.Year.Value;
+        }
+        if (tags.TrackNumber.HasValue)
+        {
+          _metadata[StandardMetadataKeys.TrackNumber] = tags.TrackNumber.Value;
         }
 
         Logger.LogDebug(
-          "Loaded metadata for {File}: Title={Title}, Artist={Artist}, Duration={Duration}",
+          "Loaded metadata for {File} via {Reader}: Title={Title}, Artist={Artist}, Duration={Duration}",
           Path.GetFileName(filePath),
+          tags.ReadBy,
           _metadata.GetValueOrDefault(StandardMetadataKeys.Title),
           _metadata.GetValueOrDefault(StandardMetadataKeys.Artist),
           _duration);
@@ -2102,11 +2043,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
       else
       {
-        // Fallback to basic file info only
+        // Neither SoundFlow nor TagLib could read the file. Once per track load, so a Warning: before
+        // AUD-32 this was a Debug line and the failure was invisible on the appliance.
         _duration = TimeSpan.Zero;
         _metadata[StandardMetadataKeys.Duration] = _duration;
         _metadata["NeedsFingerprintingLookup"] = true;
-        Logger.LogDebug("Could not read metadata from {File}, using file name as title", filePath);
+        Logger.LogWarning("Could not read tags from {File}; using the file name as the title", filePath);
       }
     }
     catch (Exception ex)
