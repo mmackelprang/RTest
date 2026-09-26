@@ -35,6 +35,19 @@ public class BluetoothAutoSwitchServiceTests
 
     public int CaptureNodeAvailableSubscriberCount { get; private set; }
 
+    // TEST-10: what the service did, as events a test can await instead of sleeping and assuming.
+    private readonly TaskCompletionSource _subscribed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource _unsubscribed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    /// <summary>Completes when the service first subscribes to CaptureNodeAvailable.</summary>
+    public Task SubscribedTask => _subscribed.Task;
+
+    /// <summary>Completes when the service has removed its last CaptureNodeAvailable handler — which it
+    /// does in a <c>finally</c>, after it has decided whether to switch.</summary>
+    public Task UnsubscribedTask => _unsubscribed.Task;
+
+    public bool EverSubscribed => _subscribed.Task.IsCompleted;
+
     public event EventHandler<BluetoothAdapterStateChangedEventArgs>? StateChanged
     { add { } remove { } }
     public event EventHandler<BluetoothDeviceConnectedEventArgs>? DeviceConnected;
@@ -59,15 +72,33 @@ public class BluetoothAutoSwitchServiceTests
       {
         if (value != null)
         {
-          _captureHandlers.Add(value);
-          CaptureNodeAvailableSubscriberCount = _captureHandlers.Count;
+          lock (_captureHandlers)
+          {
+            _captureHandlers.Add(value);
+            CaptureNodeAvailableSubscriberCount = _captureHandlers.Count;
+          }
+          _subscribed.TrySetResult();
         }
       }
       remove
       {
-        if (value != null && _captureHandlers.Remove(value))
+        if (value == null)
         {
+          return;
+        }
+        bool nowEmpty;
+        lock (_captureHandlers)
+        {
+          if (!_captureHandlers.Remove(value))
+          {
+            return;
+          }
           CaptureNodeAvailableSubscriberCount = _captureHandlers.Count;
+          nowEmpty = _captureHandlers.Count == 0;
+        }
+        if (nowEmpty)
+        {
+          _unsubscribed.TrySetResult();
         }
       }
     }
@@ -125,7 +156,12 @@ public class BluetoothAutoSwitchServiceTests
     public void RaiseCaptureNodeAvailable(string address)
     {
       var args = new CaptureNodeAvailableEventArgs { DeviceAddress = address, PipeWireSerial = 0 };
-      foreach (var h in _captureHandlers.ToArray())
+      EventHandler<CaptureNodeAvailableEventArgs>[] handlers;
+      lock (_captureHandlers)
+      {
+        handlers = _captureHandlers.ToArray();
+      }
+      foreach (var h in handlers)
       {
         h(this, args);
       }
@@ -134,8 +170,15 @@ public class BluetoothAutoSwitchServiceTests
 
   private sealed class FakeAudioManagerCounters
   {
+    private readonly TaskCompletionSource _switched = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
     public bool GetOrCreateCalled { get; set; }
-    public bool SwitchedToBluetooth { get; set; }
+    public bool SwitchedToBluetooth => _switched.Task.IsCompleted;
+
+    /// <summary>Completes when the service asks to switch to Bluetooth (TEST-10).</summary>
+    public Task SwitchedToBluetoothTask => _switched.Task;
+
+    public void MarkSwitchedToBluetooth() => _switched.TrySetResult();
   }
 
   private static BluetoothAutoSwitchService CreateService(
@@ -181,7 +224,7 @@ public class BluetoothAutoSwitchServiceTests
         counters.GetOrCreateCalled = true;
         if (t == AudioSourceType.Bluetooth && switchTo)
         {
-          counters.SwitchedToBluetooth = true;
+          counters.MarkSwitchedToBluetooth();
         }
       })
       .ReturnsAsync((IAudioSource?)null);
@@ -229,6 +272,19 @@ public class BluetoothAutoSwitchServiceTests
   }
 
   // ---- Auto-switch gating (Plan B) ----
+  //
+  // TEST-10: none of these tests sleeps and then assumes the service has done something. The service's
+  // handler is `async void` and runs its own probe-window and max-wait timers; a test that slept for a
+  // fixed time and then asserted raced those timers, and lost under load (NodeArrivesAfterProbe failed a
+  // real merge gate). Instead each test waits on something the service itself does — subscribing to
+  // CaptureNodeAvailable, unsubscribing (which it does in a `finally`, after its decision), or switching —
+  // with a generous timeout that is only a safety net. See CLAUDE.md § Test Timing.
+  //
+  // The skip tests need no wait at all: the handler returns before its first `await` on every skip path,
+  // so the decision is complete by the time SimulateDeviceConnected returns.
+
+  /// <summary>Upper bound on any wait below. Never the thing a test is timing.</summary>
+  private static readonly TimeSpan SafetyNet = TimeSpan.FromSeconds(30);
 
   [Fact]
   public async Task NodeReadyInsideProbeWindow_SwitchesImmediately()
@@ -239,12 +295,10 @@ public class BluetoothAutoSwitchServiceTests
     using var svc = CreateService(bt, audioMock, probeMs: 1000, maxWaitMs: 30000);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    // Allow async-void handler to complete its probe — probe returns true on the first
-    // iteration because IsCaptureNodeAvailable is set.
-    await Task.Delay(150);
+    await counters.SwitchedToBluetoothTask.WaitAsync(SafetyNet);
 
-    Assert.True(counters.SwitchedToBluetooth);
     Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
+    Assert.False(bt.EverSubscribed);
   }
 
   [Fact]
@@ -253,20 +307,18 @@ public class BluetoothAutoSwitchServiceTests
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = false };
     var counters = new FakeAudioManagerCounters();
     var audioMock = MakeAudioMock(counters);
-    using var svc = CreateService(bt, audioMock, probeMs: 200, maxWaitMs: 5000);
+    using var svc = CreateService(bt, audioMock, probeMs: 200, maxWaitMs: 60000);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
 
-    // Wait long enough for the probe window to expire and the event subscription to be active.
-    await Task.Delay(500);
+    // The probe window has expired and the service has fallen back to the event — observed, not assumed.
+    await bt.SubscribedTask.WaitAsync(SafetyNet);
     Assert.False(counters.SwitchedToBluetooth);
-    Assert.True(bt.CaptureNodeAvailableSubscriberCount >= 1, "Expected event subscription active");
 
     bt.RaiseCaptureNodeAvailable("AA:BB:CC:DD:EE:FF");
-    // Allow async continuation to complete the switch.
-    await Task.Delay(150);
+    await counters.SwitchedToBluetoothTask.WaitAsync(SafetyNet);
+    await bt.UnsubscribedTask.WaitAsync(SafetyNet);
 
-    Assert.True(counters.SwitchedToBluetooth);
     Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
   }
 
@@ -279,15 +331,18 @@ public class BluetoothAutoSwitchServiceTests
     using var svc = CreateService(bt, audioMock, probeMs: 100, maxWaitMs: 300);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    // Wait for probe (100ms) + timeout (300ms) + slack.
-    await Task.Delay(700);
+
+    // The service unsubscribes in a `finally` after its max-wait decision, so once it has unsubscribed
+    // the decision is final — however long the timers took to fire under load.
+    await bt.SubscribedTask.WaitAsync(SafetyNet);
+    await bt.UnsubscribedTask.WaitAsync(SafetyNet);
 
     Assert.False(counters.SwitchedToBluetooth);
     Assert.Equal(0, bt.CaptureNodeAvailableSubscriberCount);
   }
 
   [Fact]
-  public async Task AlreadyActiveBluetoothSource_SkipsSwitch()
+  public void AlreadyActiveBluetoothSource_SkipsSwitch()
   {
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
     var counters = new FakeAudioManagerCounters();
@@ -295,13 +350,12 @@ public class BluetoothAutoSwitchServiceTests
     using var svc = CreateService(bt, audioMock, probeMs: 1000, maxWaitMs: 30000);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    await Task.Delay(200);
 
     Assert.False(counters.GetOrCreateCalled);
   }
 
   [Fact]
-  public async Task AutoSwitchDisabled_SkipsEntirely()
+  public void AutoSwitchDisabled_SkipsEntirely()
   {
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
     var counters = new FakeAudioManagerCounters();
@@ -309,7 +363,6 @@ public class BluetoothAutoSwitchServiceTests
     using var svc = CreateService(bt, audioMock, probeMs: 1000, maxWaitMs: 30000, autoSwitchEnabled: false);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    await Task.Delay(200);
 
     Assert.False(counters.GetOrCreateCalled);
   }
@@ -317,7 +370,7 @@ public class BluetoothAutoSwitchServiceTests
   // ---- Existing safety nets ----
 
   [Fact]
-  public async Task OnBluetoothDeviceConnected_Skips_WhenAdapterUnavailable()
+  public void OnBluetoothDeviceConnected_Skips_WhenAdapterUnavailable()
   {
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true, IsAvailable = false };
     var counters = new FakeAudioManagerCounters();
@@ -325,13 +378,12 @@ public class BluetoothAutoSwitchServiceTests
     using var svc = CreateService(bt, audioMock);
 
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    await Task.Delay(200);
 
     Assert.False(counters.GetOrCreateCalled);
   }
 
   [Fact]
-  public async Task Dispose_UnsubscribesFromEvent()
+  public void Dispose_UnsubscribesFromEvent()
   {
     var bt = new FakeBluetoothService { IsCaptureNodeAvailable = true };
     var counters = new FakeAudioManagerCounters();
@@ -340,9 +392,9 @@ public class BluetoothAutoSwitchServiceTests
 
     svc.Dispose();
     bt.SimulateDeviceConnected("AA:BB:CC:DD:EE:FF");
-    await Task.Delay(150);
 
-    // No GetOrCreate calls should happen after dispose — handler was unsubscribed.
+    // No handler remains to run. (Were one still subscribed, it would reach GetOrCreateSourceAsync
+    // synchronously here: the fake's probe and the mock's switch both complete without yielding.)
     audioMock.Verify(m => m.GetOrCreateSourceAsync(
       It.IsAny<AudioSourceType>(),
       It.IsAny<bool>(),
