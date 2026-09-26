@@ -46,3 +46,29 @@ and neither should be "fixed" before the path has been read.
 Over a full sitting with the recorder running: no `removed from BlueZ` line for a device that
 `bluetoothctl` on `hci0` still reports paired; with the logging shipped, every eviction line names its
 adapter.
+
+---
+
+## 🚧 BUILT 2026-09-25 — shipped with `AUD-30`, branch `fix/aud-30-31-scope-device-objects-to-adapter`, PR [#666](https://github.com/mmackelprang/RTest/pull/666)
+
+Mechanism confirmed by `AUD-30`'s cross-service timestamps. `OnInterfaceRemoved` now ignores any path not
+under the selected adapter (`LinuxBluetoothService.cs:1121`), and its doc comment no longer claims the
+signal fires only on unpair / age-out, or only for our adapter. The eviction line carries
+`{ObjectPath}`. Full change, tests and box checklist: [`AUD-30.md` § BUILT](AUD-30.md).
+
+### ⚠ This row overstated its own risk — correction
+
+*"a phantom `removed from BlueZ` … **evicts the connected phone from our cache**"* and the P1 scenario
+(*"we dispose the watcher for the phone we are streaming from"*) **do not follow from the confirmed
+mechanism.** `_deviceCache`, `_watchedDevicePaths` and `_devicePropertyWatchers` are all keyed by
+**object path**, not address. The `hci1` removal evicted the `hci1` entry — a second cache entry for the
+same MAC — and disposed the `hci1` watcher. The `hci0` entry and its `Connected` watcher were never
+touched. The damage was the misleading line plus the `AUD-30` teardown that the `hci1` entry enabled,
+i.e. **P2 as filed was right; the P1 branch was not reachable this way.**
+
+Tests: `ForeignDeviceRemoved_IsIgnoredByTheHandlerItself_EvenIfCached` (the observed line, with an
+`hci1` entry placed where the old code put one), `ForeignDeviceAddedThenRemoved_LeavesNoTrace`,
+`OurDeviceRemoved_StillEvicts_AndLogsItsPath`.
+
+**Box PASS:** over a sitting with RotaryPhone refusing the Pixel on `hci1`, no `removed from BlueZ` line
+at all; any that does appear names `/org/bluez/hci0/…` and corresponds to a real unpair.
