@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (58)
+## Shipped rows (61)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2603,3 +2603,59 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-11.md`](queue/AUD-11.md)**
 
 `node.dont-reconnect` plus a teardown-and-park on node loss: the only state in which the wrong jack is impossible is the state with no stream. Health now reports `Degraded / WaitingForCaptureNode` while parked instead of `Healthy`.
+
+---
+
+### AUD-24 — The seek bar did not move the audio, and the clock reported a position the player was not at.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#653](https://github.com/mmackelprang/RTest/pull/653) (squash `9ca42590`) — **owner UAT PASSED at the cabinet 2026-09-10: the seek reaches the engine and the audio moves** (recorded in `5e07559d`, [#655](https://github.com/mmackelprang/RTest/pull/655)) |
+| Plan | [`AUD-24-the-seek-that-only-moved-the-readout.md`](../design/plans/AUD-24-the-seek-that-only-moved-the-readout.md) |
+| Spec / handoff | _spec is §0 of the plan_ · ADR-029 §14 Q3/Q4 · [`PHN-2` SOUND UAT 2026-09-09](uat/2026-09-09-phn2-sound-uat/RESULT.md) check #1 / §3 U5 |
+| Depends on | — |
+| Branch | `fix/aud-24-seek-does-not-reposition` |
+
+**Detail: [`queue/AUD-24.md`](queue/AUD-24.md)** — the layer, the five premises that did not hold, the owner's resume ruling, and three corrections to the plan found while shipping it.
+
+**The mechanism.** `FilePlayerAudioSource.SeekCoreAsync` range-checked, assigned `_position`, logged *"Seeked to {Position}"* and returned — **it never called the audio engine**, though `SoundFlowPlaybackService.Seek` existed and the sibling voicemail source used it correctly. `Position` read back the same field, so the clock looked honest while the audio never moved. The fix makes the engine call and checks its `bool`; the queue-restore resume that it would have switched on for free was **guarded by owner ruling** (see the dossier).
+
+⛔ **`AUD-28` IS THIS ROW'S REGRESSION.** Before the fix a drag had no audio effect and could not stutter; now every intermediate slider value reaches the engine, so scrubbing stutters. The slider always emitted continuously — the fix made that audible for the first time. Tracked as its own row, not as a failure of this one.
+
+⚠ **`PHN-2` §3 U5 AS SPECIFIED (voicemail + TAP the bar) is still not recorded as run.** The recorded UAT pass is the file-player drag, which is where the defect was. The plan scheduled the voicemail-tap path (`AudioFileEventSource`, believed correct) as its **U2**, and no U2 result is recorded — see the 2026-09-10 correction in the UAT record. **Archiving this row does not discharge U5.**
+
+---
+
+### AUD-30 — A phantom "disconnected" tore down healthy BT audio whenever RotaryPhone refused the Pixel on its own adapter.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#666](https://github.com/mmackelprang/RTest/pull/666) (squash `1496c5e0`) — **owner UAT PASSED at the cabinet 2026-09-25, 4 of 4 box-checklist steps** |
+| Plan | _no plan doc — the dossier carried the measured mechanism_ · shipped as ONE PR with `AUD-31` |
+| Spec / handoff | cross-service: RotaryPhone boundary-doc Change Log, [RotaryPhone #91](https://github.com/mmackelprang/RotaryPhone/pull/91) |
+| Depends on | — |
+| Branch | `fix/aud-30-31-scope-device-objects-to-adapter` |
+
+**Detail: [`queue/AUD-30.md`](queue/AUD-30.md)** — the two-for-two cross-service timestamps and the UAT table.
+
+**The mechanism.** `LinuxBluetoothService` accepted `org.bluez.Device1` objects under **any** adapter; the adapter filter only chose the adapter. RotaryPhone owns `hci1`; its `BLOCKED … refusing on /org/bluez/hci1` flipped `Connected=false` on an `hci1` object for the same phone, which we read as OUR disconnect (reason `Unknown` — our mgmt monitor watches only our controller; the 318/347 ms lag is its 300 ms reason poll timing out) and tore down playing A2DP. The fix scopes every device-object path to the selected adapter with a segment-safe prefix, makes adapter selection an exact match (the old `StartsWith` let `hci1` select `hci10`), fails closed with no adapter, and logs `{ObjectPath}` on connect/disconnect/evict.
+
+⛔ **THE REVIEW CAUGHT A HIGH THAT NO UNIT TEST COULD:** `StopAsync` never cleared `_adapter`, so a UI Disable/Enable would have left every device ignored. Fixed, and proven at the cabinet — `Selected preferred Bluetooth adapter … at /org/bluez/hci0` after `POST /api/bluetooth/stop` + `start`. ⚠ `bluetoothctl power off/on` does NOT exercise that path.
+
+⚠ **Deferred, boundary material:** the BlueZ pairing agent is per-bus and may answer for `hci1` devices; RotaryPhone accepts HFP on `hci0` (asked in RotaryPhone #91).
+
+---
+
+### AUD-31 — A phantom "removed from BlueZ" for the phone we were streaming from.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#666](https://github.com/mmackelprang/RTest/pull/666) (squash `1496c5e0`) — shipped with `AUD-30`; no `removed from BlueZ` for the Pixel in the 2026-09-25 22:55–23:03 sitting |
+| Plan | _see `AUD-30`_ |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — |
+| Branch | `fix/aud-30-31-scope-device-objects-to-adapter` |
+
+**Detail: [`queue/AUD-31.md`](queue/AUD-31.md)**
+
+⛔ **The row overstated its own risk, and the Builder corrected it:** the caches are keyed by object path, so the `hci1` removal evicted only a *second* entry for the same MAC — the `hci0` entry and its watcher were never touched. The unrecorded blast radius was elsewhere: address-first-match lookups (`FindDevicePath`, `ConnectedDevice`) could have pointed UI connect/disconnect, the reconnect loop and unpair at RotaryPhone's object. The same scoping closes it.
