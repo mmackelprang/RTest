@@ -799,7 +799,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   {
     // Arrange — UseShazamForAllSources ON is the exact production configuration. What the
     // guard protects is that a NON-active source adopts nothing at all: it returns before
-    // the per-field merge (AUD-1), so even a field it is missing stays missing.
+    // the per-field merge (AUD-1) and before any bookkeeping.
     var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
     fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
@@ -841,11 +841,16 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
         UpdatedAt = DateTime.UtcNow
       },
       confidence: 0.95));
-    await Task.Delay(100);
 
     // Assert — BT kept its own AVRCP metadata; the radio's track did not leak in.
     Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+
+    // ⚠ Since AUD-1 the two asserts above hold with or without the guard — supplied fields
+    // survive the per-field merge either way. What discriminates is state ONLY the handler
+    // body writes: it records the confidence and clears the lookup flag the gate set.
+    Assert.False(_source.Metadata.ContainsKey("IdentificationConfidence"));
+    Assert.True(_source.NeedsFingerprintingLookup);
   }
 
   [Fact]
@@ -890,12 +895,12 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
         UpdatedAt = DateTime.UtcNow
       },
       confidence: 0.95));
-    await Task.Delay(100);
 
     // Assert — every field AVRCP supplied survives (MockBluetoothService.SimulateMetadataChange
     // always supplies Album = "Mock Album"), and the handler ran to completion rather than
-    // being short-circuited by the active-source guard: only the handler body clears
-    // NeedsFingerprintingLookup, which the gate had set because the toggle is on.
+    // being short-circuited by the active-source guard: the gate set
+    // NeedsFingerprintingLookup because the toggle is on, and nothing else in this fixture
+    // clears it but the handler body.
     Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
     Assert.Equal("Mock Album", _source.Metadata[StandardMetadataKeys.Album]);
@@ -988,6 +993,11 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   /// The row's thesis, and today's ~99% album-art path in one test: AVRCP supplies the
   /// text, AVRCP never supplies art on the appliance (AUD-17), so the identification
   /// contributes the art and nothing else.
+  /// ⚠ Note what this pins: a MIS-identification's art lands on the phone's correct title,
+  /// because art is missing and the rule has no notion of whether the identification is of
+  /// the same track. Whether to require the identified artist to match AVRCP's before taking
+  /// its art is an open owner question, not something this row decided; the refresh test
+  /// below is what keeps such art from sticking.
   /// </summary>
   [Fact]
   public async Task Aud1_AvrcpSuppliesAllText_KeepsEveryField_AndTakesOnlyTheArt()
@@ -1069,6 +1079,54 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     Assert.Equal("Huey Lewis & The News", _source.Metadata[StandardMetadataKeys.Artist]);
     Assert.Equal("Sports", _source.Metadata[StandardMetadataKeys.Album]);
     Assert.Equal("/api/albumart/0f924e4c2dd0504e.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
+  /// Art an earlier IDENTIFICATION supplied is not source metadata, so a later
+  /// identification refreshes it — as every identification did before AUD-1. Without this, a
+  /// single misidentification (the 2026-09-06 incident: residual radio audio matched seconds
+  /// after a reconnect) would pin the wrong art to the AVRCP title|artist key, because
+  /// OnMetadataChanged restores cached art on every refresh and the art would never again
+  /// read as missing. Found by AUD-1's pre-merge review.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_FingerprintSuppliedArt_IsRefreshedByALaterIdentification()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Spirit In The Sky", "Norman Greenbaum", coverArtUrl: "/api/albumart/wrong.jpg"));
+    Assert.Equal("/api/albumart/wrong.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica", coverArtUrl: "/api/albumart/right.jpg"));
+    Assert.Equal("/api/albumart/right.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    // And the correction is what the resolved-art cache now restores on an AVRCP refresh.
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
+    Assert.Equal("/api/albumart/right.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+    Assert.Equal("Enter Sandman (Remastered)", _source.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  /// <summary>
+  /// Art the SOURCE supplied survives an AVRCP refresh as source art: restored from the
+  /// resolved-art cache with its provenance, it is still not replaceable by an identification.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_AvrcpArt_RestoredFromCache_IsStillNotReplaced()
+  {
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock.Setup(c => c.SaveFromUrlAsync("https://example.com/existing.jpg"))
+             .ReturnsAsync("/api/albumart/existing.jpg");
+
+    var (bt, id) = await PlayActiveSourceAsync(cacheMock.Object);
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", albumArtUrl: "https://example.com/existing.jpg");
+    // A plain refresh of the same track with no art: the cache restores the AVRCP art.
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
+    Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica", coverArtUrl: "/api/albumart/songrec.jpg"));
+
+    Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
   }
 
   /// <summary>

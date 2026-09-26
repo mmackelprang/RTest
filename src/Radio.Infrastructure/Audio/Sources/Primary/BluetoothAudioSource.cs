@@ -122,9 +122,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
   // plain metadata refreshes, leaving the display with no art. Caching the
   // resolved art lets OnMetadataChanged restore it instantly for a known track.
   private readonly object _artCacheLock = new();
-  private readonly Dictionary<string, string> _resolvedArtByTrack = new(StringComparer.OrdinalIgnoreCase);
+  //
+  // Each entry remembers WHERE the art came from, because AUD-1's per-field rule treats
+  // the two differently: art AVRCP supplied is source metadata and an identification may
+  // never replace it; art an earlier identification supplied is not, so a later
+  // identification may refresh it (otherwise one misidentification would pin the wrong
+  // art to that AVRCP title|artist key for the life of the process).
+  private readonly Dictionary<string, ResolvedArt> _resolvedArtByTrack = new(StringComparer.OrdinalIgnoreCase);
   private readonly Queue<string> _resolvedArtOrder = new();
   private const int MaxResolvedArtEntries = 64;
+
+  private readonly record struct ResolvedArt(string Url, bool FromSource);
+
+  // True while the AlbumArtUrl in MetadataInternal was supplied by AVRCP (directly, or
+  // restored from an AVRCP-sourced cache entry). Cleared whenever that art is removed or
+  // replaced by fingerprint art. Read by OnTrackIdentified to decide whether present art
+  // is source metadata (keep) or an earlier identification's (may be refreshed).
+  private volatile bool _currentArtIsFromSource;
 
   // Monotonic counter bumped whenever the current track changes. Async art
   // resolution captures the generation at kickoff and only writes to the live
@@ -993,13 +1007,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // Always clear stale art from the previous song first (PlayHistoryTracker
     // reads AlbumArtUrl from source metadata, so leftover art must not leak).
     MetadataInternal.Remove(StandardMetadataKeys.AlbumArtUrl);
+    _currentArtIsFromSource = false;
 
     // Restore art we already resolved for this exact track so the display does
     // not blank out on AVRCP metadata refreshes, track repeats, or the window
     // before SongRec re-identifies (and while duplicate-suppression blocks it).
     if (newTrackKey != null && TryGetResolvedArt(newTrackKey, out var cachedArt))
     {
-      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = cachedArt;
+      MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = cachedArt.Url;
+      _currentArtIsFromSource = cachedArt.FromSource;
     }
     else if (!string.IsNullOrEmpty(e.AlbumArtUrl))
     {
@@ -1097,24 +1113,37 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // resolved-art cache restores it — so for a track not yet resolved this fills every
     // time, which is the SongRec-sourced album art the gate exists to keep.
     //
+    // Art counts as SOURCE metadata only when AVRCP supplied it (_currentArtIsFromSource).
+    // Art an earlier identification supplied is not, so it is refreshed by each later
+    // identification exactly as it was before AUD-1 — a misidentified track's art is
+    // corrected by the next correct identification instead of being pinned to the AVRCP
+    // title|artist key, and the play-history art patch inside CacheAndSetCoverArtAsync
+    // still runs on every identification.
+    //
     // ⚠ The write is fire-and-forget: two identifications landing before the first
-    // download completes can both see art missing and both start one. That was equally
-    // true of the art-only branch this replaced.
-    var fillingArt = SourceMetadataPrecedence.ShouldFillAlbumArt(MetadataInternal)
+    // download completes can both start one. That was equally true before AUD-1.
+    var artIsSourceSupplied = _currentArtIsFromSource
+      && !SourceMetadataPrecedence.ShouldFillAlbumArt(MetadataInternal);
+    var requestingArt = !artIsSourceSupplied
       && !string.IsNullOrEmpty(e.Track.CoverArtUrl)
       && _serviceScopeFactory != null;
 
-    if (fillingArt)
+    if (requestingArt)
     {
       _ = CacheAndSetCoverArtAsync(e.Track.CoverArtUrl!, e.Track.Title, e.Track.Artist);
     }
 
-    // ⚠ "cover art" here means the art write was STARTED, not that it landed — the
-    // download can still fail or be dropped by the track-generation guard, and
+    // "cover art requested" means the art write was STARTED, not that it landed — the
+    // download can still fail or be dropped by the track-generation guard;
     // CacheAndSetCoverArtUrlAsync logs "Cover art found …" only when it actually writes.
+    var fields = filled.Describe();
+    if (requestingArt)
+    {
+      fields = filled.Any ? fields + "; cover art requested" : "cover art requested";
+    }
     Logger.LogInformation(
       "Fingerprint result for BT '{Title}' by '{Artist}' (confidence: {Confidence:P0}); filled from it: {Fields}",
-      e.Track.Title, e.Track.Artist, e.Confidence, filled.Describe(fillingArt));
+      e.Track.Title, e.Track.Artist, e.Confidence, fields);
   }
 
   /// <summary>
@@ -1177,13 +1206,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // restore it without a fresh (possibly suppressed) identification.
       if (trackKey != null)
       {
-        StoreResolvedArt(trackKey, localUrl);
+        StoreResolvedArt(trackKey, localUrl, fromSource: true);
       }
 
       // Only write to the live metadata if we're still on the same track.
       if (Volatile.Read(ref _trackGeneration) == generationAtStart)
       {
         MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = localUrl;
+        _currentArtIsFromSource = true;
         Logger.LogInformation(
           "Cached AVRCP album art for '{Title}' by '{Artist}': {LocalUrl}",
           title, artist, localUrl);
@@ -1227,7 +1257,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
     url.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
 
-  private void StoreResolvedArt(string trackKey, string artUrl)
+  private void StoreResolvedArt(string trackKey, string artUrl, bool fromSource)
   {
     lock (_artCacheLock)
     {
@@ -1240,15 +1270,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
           _resolvedArtByTrack.Remove(evicted);
         }
       }
-      _resolvedArtByTrack[trackKey] = artUrl;
+      _resolvedArtByTrack[trackKey] = new ResolvedArt(artUrl, fromSource);
     }
   }
 
-  private bool TryGetResolvedArt(string trackKey, out string artUrl)
+  private bool TryGetResolvedArt(string trackKey, out ResolvedArt art)
   {
     lock (_artCacheLock)
     {
-      return _resolvedArtByTrack.TryGetValue(trackKey, out artUrl!);
+      return _resolvedArtByTrack.TryGetValue(trackKey, out art);
     }
   }
 
@@ -1277,13 +1307,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // restore it without a fresh (possibly suppressed) identification.
     if (trackKey != null)
     {
-      StoreResolvedArt(trackKey, coverArtUrl);
+      StoreResolvedArt(trackKey, coverArtUrl, fromSource: false);
     }
 
     // Only write to the live metadata if we're still on the same track.
     if (Volatile.Read(ref _trackGeneration) == generationAtStart)
     {
       MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = coverArtUrl;
+      _currentArtIsFromSource = false;
       Logger.LogInformation("Cover art found for '{Title}' by '{Artist}': {Url}", title, artist, coverArtUrl);
       await UpdateRecentPlayHistoryCoverArtAsync(coverArtUrl, title, artist);
     }

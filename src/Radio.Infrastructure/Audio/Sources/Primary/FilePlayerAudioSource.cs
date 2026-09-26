@@ -2223,9 +2223,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // ExtractEmbeddedAlbumArt has already put a content-addressed /api/albumart/<hash> path
     // here when the file had an APIC frame; absent that, AlbumArtUrl still holds the
     // DefaultAlbumArtUrl UpdateMetadataFromFile seeded, which the shared rule treats as
-    // missing. ⚠ Before AUD-1 this path REPLACED embedded art unconditionally whenever the
-    // lookup flag was set — measured on the appliance: one stable hash per song from the
-    // embedded art, at least nine different hashes for the same song from SongRec.
+    // missing. ⚠ Before AUD-1, whenever UseShazamForAllSources (true on the appliance) and
+    // the lookup flag were both set and SongRec returned art, a separate branch REPLACED
+    // embedded art — measured on the appliance: one stable hash per song from the embedded
+    // art, at least nine different hashes for the same song from SongRec.
     var filledArt = false;
     if (SourceMetadataPrecedence.ShouldFillAlbumArt(_metadata)
         && !string.IsNullOrEmpty(track.CoverArtUrl))

@@ -12,21 +12,23 @@ public sealed class FingerprintingOptions
   public bool Enabled { get; set; } = true;
 
   /// <summary>
-  /// When true, runs SongRec (Shazam) on ALL sources, even when AVRCP or ID3 tags already
-  /// supply a title and artist. This is a <b>gate</b>: it decides whether fingerprinting runs
-  /// at all. It does <b>not</b> decide what is done with the answer.
+  /// When true, runs SongRec (Shazam) on Bluetooth and file sources even when their own
+  /// metadata is complete (Bluetooth: AVRCP title and artist; files: ID3 artist and album).
+  /// This is a <b>gate</b>: it decides whether fingerprinting runs at all. It does <b>not</b>
+  /// decide what is done with the answer.
   /// </summary>
   /// <remarks>
   /// <para>
-  /// ⚠ <b>Since AUD-1 there is no "overwrite" decision to pair this with.</b> A fingerprint result
-  /// may only fill fields the source left missing, decided per field by
-  /// <c>Radio.Core.Models.Audio.SourceMetadataPrecedence</c>. Turning this flag off does not stop
-  /// source metadata being replaced — nothing replaces it any more — it only stops fingerprinting
-  /// for tracks whose source already supplied a title and artist.
+  /// ⚠ <b>Since AUD-1 there is no "overwrite" decision to pair this with.</b> On Bluetooth and file
+  /// sources a fingerprint result may only fill fields the source left missing, decided per field
+  /// by <c>Radio.Core.Models.Audio.SourceMetadataPrecedence</c>; turning this flag off does not
+  /// change that, it only stops fingerprinting for tracks whose metadata is already complete.
+  /// (Radio, vinyl, generic USB and SDR sources were not changed by AUD-1: they still take an
+  /// identification's fields wholesale, and this flag is not read by them.)
   /// </para>
   /// <para>
   /// ⚠ <b>Do not set this false on the appliance.</b> Bluetooth fingerprinting then hard-returns for
-  /// any track whose AVRCP supplied a title and artist, so no cover art is ever found. AVRCP has
+  /// any track whose AVRCP supplied a title and artist, so those tracks never get cover art. AVRCP has
   /// <b>never</b> supplied cover art there: the Bluetooth service reads the MPRIS attribute names
   /// <c>ArtUrl</c>/<c>mpris:artUrl</c> from a proxy on <c>org.bluez.MediaPlayer1</c>, which publishes
   /// <c>ImgHandle</c> (AUD-17). SongRec is the only art source Bluetooth has.

@@ -1774,6 +1774,12 @@ public class FilePlayerAudioSourceTests : IDisposable
     // Assert — the file player kept its own ID3 metadata.
     Assert.Equal("Local File Title", source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Local File Artist", source.Metadata[StandardMetadataKeys.Artist]);
+
+    // ⚠ Since AUD-1 the two asserts above hold with or without the guard — supplied tags
+    // survive the per-field merge either way. What discriminates is state ONLY the handler
+    // body writes: its bookkeeping clears the lookup flag and records MetadataSource.
+    Assert.Equal(true, source.Metadata["NeedsFingerprintingLookup"]);
+    Assert.False(source.Metadata.ContainsKey("MetadataSource"));
   }
 
   [Fact]
@@ -1932,8 +1938,9 @@ public class FilePlayerAudioSourceTests : IDisposable
 
   /// <summary>
   /// Builds a source with UseShazamForAllSources enabled — the appliance's production
-  /// configuration — so the identification path is reached. Since AUD-1 that path fills
-  /// only the fields the file's tags left missing; it no longer replaces tags it finds.
+  /// configuration. ⚠ Since AUD-1 the flag is inert for these tests: OnTrackIdentified no
+  /// longer reads it (it only gates UpdateMetadataFromFile, which these tests bypass by
+  /// setting NeedsFingerprintingLookup by hand). It is set so the fixture matches the box.
   /// </summary>
   private FilePlayerAudioSource CreateSourceForIdentification(Func<IAudioSource?>? getActiveSource)
   {
