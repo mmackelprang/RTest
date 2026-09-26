@@ -797,8 +797,9 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   [Fact]
   public async Task TrackIdentified_WhileDifferentSourceIsActive_DoesNotOverwriteAvrcpMetadata()
   {
-    // Arrange — UseShazamForAllSources ON is the exact production configuration:
-    // SongRec metadata unconditionally replaces AVRCP metadata in the handler.
+    // Arrange — UseShazamForAllSources ON is the exact production configuration. What the
+    // guard protects is that a NON-active source adopts nothing at all: it returns before
+    // the per-field merge (AUD-1) and before any bookkeeping.
     var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
     fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
@@ -840,18 +841,24 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
         UpdatedAt = DateTime.UtcNow
       },
       confidence: 0.95));
-    await Task.Delay(100);
 
     // Assert — BT kept its own AVRCP metadata; the radio's track did not leak in.
     Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+
+    // ⚠ Since AUD-1 the two asserts above hold with or without the guard — supplied fields
+    // survive the per-field merge either way. What discriminates is state ONLY the handler
+    // body writes: it records the confidence and clears the lookup flag the gate set.
+    Assert.False(_source.Metadata.ContainsKey("IdentificationConfidence"));
+    Assert.True(_source.NeedsFingerprintingLookup);
   }
 
   [Fact]
   public async Task TrackIdentified_WhileThisSourceIsActive_StillUpdatesMetadata()
   {
-    // The guard must not break the normal path: when BT *is* the active source,
-    // SongRec metadata still replaces AVRCP metadata as before.
+    // The guard must not break the normal path: when BT *is* the active source the
+    // identification is still processed — but since AUD-1 "processed" means missing fields
+    // are filled and supplied ones are kept, not that AVRCP metadata is replaced.
     var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
     fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
     {
@@ -888,12 +895,263 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
         UpdatedAt = DateTime.UtcNow
       },
       confidence: 0.95));
-    await Task.Delay(100);
 
-    // Assert — the more authoritative SongRec metadata was adopted.
-    Assert.Equal("Shazam Title", _source.Metadata[StandardMetadataKeys.Title]);
-    Assert.Equal("Shazam Artist", _source.Metadata[StandardMetadataKeys.Artist]);
-    Assert.Equal("Shazam Album", _source.Metadata[StandardMetadataKeys.Album]);
+    // Assert — every field AVRCP supplied survives (MockBluetoothService.SimulateMetadataChange
+    // always supplies Album = "Mock Album"), and the handler ran to completion rather than
+    // being short-circuited by the active-source guard: the gate set
+    // NeedsFingerprintingLookup because the toggle is on, and nothing else in this fixture
+    // clears it but the handler body.
+    Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Mock Album", _source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal(0.95, _source.Metadata["IdentificationConfidence"]);
+    Assert.False(_source.NeedsFingerprintingLookup);
+  }
+
+  // -----------------------------------------------------------------------
+  // AUD-1: per-FIELD precedence (owner decision 2026-09-08). "When metadata is
+  // available from the audio source, use the source metadata. When one or more is
+  // missing, use fingerprinting to augment the missing data." Title, artist, album and
+  // cover art are each decided on their own; empty, whitespace and placeholder values
+  // count as missing.
+  //
+  // ⚠ WHY THESE TESTS PLAY THE SOURCE, and the tests above do not. BluetoothAudioSource
+  // has TWO TrackIdentified handlers: its own, and USBAudioSourceBase's, which the base
+  // constructor subscribes FIRST. The base handler returns unless the source is Playing or
+  // Paused — so in a fixture that never plays, it is inert, and a test can pass while the
+  // live box (where the source IS Playing) runs a second, unconditional overwrite. The
+  // 2026-09-10 production log shows both firing on one identification:
+  //   "Updating Bluetooth Audio metadata from fingerprinting: …"  (the base)
+  //   "Shazam metadata replaced AVRCP for BT: …"                  (this class)
+  // So these tests reach Playing through the real PlayAsync, on the platform-managed arm
+  // (no capture object needed), with BT as the active source — the live shape.
+  //
+  // Art writes here are synchronous: a local /api/albumart path skips the download, and
+  // an https URL resolves through a mock whose task is already complete, so no test below
+  // waits on a timer.
+  // -----------------------------------------------------------------------
+
+  private async Task<(Mock<IBluetoothService> Bt, BackgroundIdentificationService Id)> PlayActiveSourceAsync(
+    IAlbumArtCacheService? albumArtCache = null)
+  {
+    var fpMonitor = new Mock<IOptionsMonitor<FingerprintingOptions>>();
+    fpMonitor.Setup(o => o.CurrentValue).Returns(new FingerprintingOptions
+    {
+      // The appliance's effective value (its SQLite config store holds
+      // fingerprinting:useShazamForAllSources|true).
+      UseShazamForAllSources = true
+    });
+
+    var identificationService = BuildIdentificationServiceForTests();
+    var btMock = BuildBtMock(capture: null, new CaptureAcquisitionProbe(), platformManaged: true);
+
+    await _source.DisposeAsync();
+    BluetoothAudioSource? active = null;
+    active = new BluetoothAudioSource(
+      _loggerMock.Object,
+      _deviceManagerMock.Object,
+      btMock.Object,
+      _options,
+      identificationService: identificationService,
+      metricsCollector: _metricsMock.Object,
+      serviceScopeFactory: BuildScopeFactory(),
+      albumArtCache: albumArtCache,
+      fingerprintingOptions: fpMonitor.Object,
+      getActiveSource: () => active);
+    _source = active;
+
+    await _source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, _source.State);
+    return (btMock, identificationService);
+  }
+
+  private static void RaiseAvrcp(
+    Mock<IBluetoothService> btMock, string title, string artist, string album = "", string? albumArtUrl = null) =>
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object, new BluetoothPlaybackMetadata
+    {
+      Title = title,
+      Artist = artist,
+      Album = album,
+      AlbumArtUrl = albumArtUrl
+    });
+
+  private static TrackIdentifiedEventArgs SongRec(
+    string title, string artist, string? album = null, string? coverArtUrl = null) =>
+    new(new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      Title = title,
+      Artist = artist,
+      Album = album,
+      CoverArtUrl = coverArtUrl,
+      Source = MetadataSource.Shazam,
+      CreatedAt = DateTime.UtcNow,
+      UpdatedAt = DateTime.UtcNow
+    }, confidence: 0.95);
+
+  /// <summary>
+  /// The row's thesis, and today's ~99% album-art path in one test: AVRCP supplies the
+  /// text, AVRCP never supplies art on the appliance (AUD-17), so the identification
+  /// contributes the art and nothing else.
+  /// ⚠ Note what this pins: a MIS-identification's art lands on the phone's correct title,
+  /// because art is missing and the rule has no notion of whether the identification is of
+  /// the same track. Whether to require the identified artist to match AVRCP's before taking
+  /// its art is an open owner question, not something this row decided; the refresh test
+  /// below is what keeps such art from sticking.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_AvrcpSuppliesAllText_KeepsEveryField_AndTakesOnlyTheArt()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+
+    // The live 2026-09-06 defect: SongRec misidentified residual radio audio seconds
+    // after a BT reconnect and replaced the phone's correct metadata.
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", "Metallica (Remastered)");
+
+    id.RaiseTrackIdentifiedForTesting(
+      SongRec("Spirit In The Sky", "Norman Greenbaum", "Spirit In The Sky", "/api/albumart/songrec.jpg"));
+
+    Assert.Equal("Enter Sandman (Remastered)", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Metallica (Remastered)", _source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("/api/albumart/songrec.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
+  /// Per-field, the common Bluetooth shape: most phones publish no album, so AVRCP writes
+  /// "" under the key (BluetoothPlaybackMetadata.Album defaults to string.Empty and
+  /// OnMetadataChanged writes it through unguarded). "" is missing — the album is filled;
+  /// the title and artist AVRCP did supply are not touched.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_EmptyAvrcpAlbum_FillsTheAlbumOnly()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", album: "");
+    Assert.Equal("", _source.Metadata[StandardMetadataKeys.Album]);
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica Tribute Band", "Metallica"));
+
+    Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("Enter Sandman (Remastered)", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Metallica", _source.Metadata[StandardMetadataKeys.Artist]);
+  }
+
+  /// <summary>
+  /// The mirror image: an empty or whitespace-only AVRCP title is missing and gets filled,
+  /// while the artist AVRCP did supply stays. This is the case an earlier revision of the
+  /// AUD-1 plan would have regressed (BT's old preserve branch filled cover art only).
+  /// </summary>
+  [Theory]
+  [InlineData("")]
+  [InlineData("   ")]
+  public async Task Aud1_MissingAvrcpTitle_FillsTheTitleOnly(string avrcpTitle)
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, avrcpTitle, "Some Artist", "Some Album");
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica", "Metallica"));
+
+    Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Some Artist", _source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Some Album", _source.Metadata[StandardMetadataKeys.Album]);
+  }
+
+  /// <summary>
+  /// No AVRCP at all — a phone streaming A2DP with no media player attached. What the
+  /// source holds is our OWN placeholders: the connected device's name as the title
+  /// (SetConnectedDeviceMetadata / InitializeAsync), "--" for artist and album, and the
+  /// fallback art path. None of that is the source reporting a track, so all of it is
+  /// missing and everything is filled. Regression guard: this passes before AUD-1 too
+  /// (the overwrite wrote everything), and must keep passing after.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_NoAvrcpAtAll_DeviceNamePlaceholders_AreAllFilled()
+  {
+    var (_, id) = await PlayActiveSourceAsync();
+    Assert.Equal("Test Phone", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal(StandardMetadataKeys.DefaultArtist, _source.Metadata[StandardMetadataKeys.Artist]);
+
+    id.RaiseTrackIdentifiedForTesting(
+      SongRec("Heart and Soul", "Huey Lewis & The News", "Sports", "/api/albumart/0f924e4c2dd0504e.jpg"));
+
+    Assert.Equal("Heart and Soul", _source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Huey Lewis & The News", _source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Sports", _source.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("/api/albumart/0f924e4c2dd0504e.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
+  /// Art an earlier IDENTIFICATION supplied is not source metadata, so a later
+  /// identification refreshes it — as every identification did before AUD-1. Without this, a
+  /// single misidentification (the 2026-09-06 incident: residual radio audio matched seconds
+  /// after a reconnect) would pin the wrong art to the AVRCP title|artist key, because
+  /// OnMetadataChanged restores cached art on every refresh and the art would never again
+  /// read as missing. Found by AUD-1's pre-merge review.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_FingerprintSuppliedArt_IsRefreshedByALaterIdentification()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Spirit In The Sky", "Norman Greenbaum", coverArtUrl: "/api/albumart/wrong.jpg"));
+    Assert.Equal("/api/albumart/wrong.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica", coverArtUrl: "/api/albumart/right.jpg"));
+    Assert.Equal("/api/albumart/right.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    // And the correction is what the resolved-art cache now restores on an AVRCP refresh.
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
+    Assert.Equal("/api/albumart/right.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+    Assert.Equal("Enter Sandman (Remastered)", _source.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  /// <summary>
+  /// Art the SOURCE supplied survives an AVRCP refresh as source art: restored from the
+  /// resolved-art cache with its provenance, it is still not replaceable by an identification.
+  /// </summary>
+  [Fact]
+  public async Task Aud1_AvrcpArt_RestoredFromCache_IsStillNotReplaced()
+  {
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock.Setup(c => c.SaveFromUrlAsync("https://example.com/existing.jpg"))
+             .ReturnsAsync("/api/albumart/existing.jpg");
+
+    var (bt, id) = await PlayActiveSourceAsync(cacheMock.Object);
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", albumArtUrl: "https://example.com/existing.jpg");
+    // A plain refresh of the same track with no art: the cache restores the AVRCP art.
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
+    Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica", coverArtUrl: "/api/albumart/songrec.jpg"));
+
+    Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
+  /// Art the source already has is not replaced — whether SongRec offers different art or
+  /// none at all. ⚠ Honest scope: AVRCP has never supplied art on the appliance (AUD-17),
+  /// so the live route into "art already in place" is the resolved-art cache restoring art
+  /// on an AVRCP refresh of a known track, not a phone. The https path used here is real
+  /// for MPRIS-exposing local players, and the invariant is the same either way.
+  /// </summary>
+  [Theory]
+  [InlineData("/api/albumart/songrec.jpg")]
+  [InlineData(null)]
+  public async Task Aud1_ArtAlreadyInPlace_IsNotReplaced(string? songRecArt)
+  {
+    var cacheMock = new Mock<IAlbumArtCacheService>();
+    cacheMock.Setup(c => c.SaveFromUrlAsync("https://example.com/existing.jpg"))
+             .ReturnsAsync("/api/albumart/existing.jpg");
+
+    var (bt, id) = await PlayActiveSourceAsync(cacheMock.Object);
+    RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", albumArtUrl: "https://example.com/existing.jpg");
+    Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+
+    id.RaiseTrackIdentifiedForTesting(SongRec("Enter Sandman", "Metallica", coverArtUrl: songRecArt));
+
+    Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
   }
 
   // -----------------------------------------------------------------------

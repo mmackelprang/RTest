@@ -715,7 +715,7 @@
             <RadzenRow Gap="0.5rem">
               <RadzenColumn Size="12">
                 <RadzenAlert AlertStyle="AlertStyle.Info" Size="AlertSize.Small" AllowClose="false">
-                  Fingerprinting uses SongRec (Shazam) for audio recognition. Enable "Use Shazam for All Sources" to get higher-quality cover art from Apple Music CDN on Bluetooth and file sources.
+                  Fingerprinting uses SongRec (Shazam) for audio recognition. "Use Shazam for All Sources" decides whether SongRec runs even when the phone (title and artist) or the file's tags (artist and album) already describe the track — SongRec is the only source of Bluetooth cover art on this system, so turning it off removes album art for every track the phone fully describes. On Bluetooth and file sources a recognition result never replaces information the phone or the file already provided; it only fills in what is missing, field by field.
                 </RadzenAlert>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
@@ -726,7 +726,7 @@
                   <RadzenCheckBox TValue="bool" @bind-Value="_fingerprintingConfig.UseShazamForAllSources" Disabled="@(!_fingerprintingConfig.Enabled)" />
                   <span>Use Shazam for All Sources</span>
                 </div>
-                <span style="font-size:0.75rem; color:var(--text-low); margin-left:32px; display:block">Use Shazam (SongRec) for metadata and high-quality cover art on all sources, even when Bluetooth AVRCP or file ID3 tags are available</span>
+                <span style="font-size:0.75rem; color:var(--text-low); margin-left:32px; display:block">Run SongRec even when the phone (title and artist) or the file's tags (artist and album) already describe the track. Results only fill in missing fields — they never replace a title, artist, album or cover art the phone or file already reported. Turning this off removes album art for tracks the phone fully describes.</span>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
                 <RadzenNumeric TValue="int" @bind-Value="_fingerprintingConfig.SampleDurationSeconds" Min="5" Max="60" Placeholder="Sample Duration (s)" Style="width:100%" />
