@@ -77,16 +77,31 @@ public class RdsDecoder
   private int _symbolCount;       // symbols decoded since last diag
   private DateTime _lastSymbolCountTime = DateTime.MinValue;
 
-  // Group assembly
+  // Group assembly. _groupBlockMask records which of A/B/C/D passed the
+  // syndrome check in the CURRENT group; a group is only processed when all
+  // four did. Before AUD-60 a failed block was skipped but its slot kept the
+  // previous group's word, so block D of one group was interpreted through
+  // another group's block B (wrong PS segment address, wrong group type).
   private readonly ushort[] _groupBlocks = new ushort[4]; // A, B, C, D data words
+  private int _groupBlockMask;
 
-  // PS name assembly with noise rejection
+  // PS name assembly (AUD-69). The eight characters arrive as four 2-char
+  // segments, addressed 0-3, which the standard transmits in order. A
+  // candidate name is assembled only from one complete, in-order cycle
+  // (segment 0 first, then 1, 2, 3 with nothing missing in between): the
+  // moment a segment is lost, repeated, or carries a control code, the cycle
+  // is abandoned until the next segment 0. Assembling from whatever each slot
+  // last held — the previous behaviour — confirmed old/new hybrids on rolling-
+  // PS stations whenever one group of the new page was lost.
   private readonly char[] _psChars = new char[8];
-  private readonly int[] _psCharConfidence = new int[8]; // how many times each position confirmed
+  private int _psSegmentMask = PsCycleAbandoned; // bit n set: segment n received this cycle
+  private int _psLastSegment = -1;
+  private const int PsCycleAbandoned = -1;
+  private const int PsCycleComplete = 0x0F;
   private string? _confirmedStationName;
   private string? _candidateStationName;
   private int _candidateMatchCount;
-  private const int PsConfirmThreshold = 2; // identical complete names required
+  private const int PsConfirmThreshold = 2; // consecutive identical complete cycles required
 
   // Radio Text (Group 2A/2B) — 64-char free text, often "Artist - Title".
   // Assembly + noise rejection live in RadioTextAssembler (per-char
@@ -157,19 +172,19 @@ public class RdsDecoder
     ? PtyNames[_ptyCode] : null;
 
   /// <summary>
-  /// Raised whenever a complete 8-character Program Service name is decoded
-  /// from an RDS group 0A/0B frame, regardless of whether the decoder
-  /// considers the name "confirmed" yet. Fires at the natural RDS PS frame
-  /// cadence (~10 Hz when the signal is clean), with the freshly-decoded
-  /// candidate name. Downstream consumers can apply their own stability
-  /// filter (e.g. <c>RdsStationNameStabilityTracker</c>) at this rate to
-  /// reject mid-roll rolling-PS fragments.
+  /// Raised once per complete Program Service cycle — the four group 0A/0B
+  /// segments received in order with none missing — regardless of whether
+  /// the decoder considers the name "confirmed" yet. On a clean signal that
+  /// is one event per four group-0 groups (roughly 1–3 Hz, depending on how
+  /// much of the station's group budget goes to type 0); a cycle with a lost
+  /// or out-of-order segment produces no event at all.
   /// </summary>
   /// <remarks>
-  /// This fires BEFORE the decoder's internal 2-sample confirmation step
-  /// updates <see cref="StationName"/>. The argument is the raw candidate
-  /// from this single frame; subscribers should not treat it as a final
-  /// station identifier without their own consensus logic.
+  /// This fires BEFORE the decoder's own confirmation (two consecutive
+  /// identical cycles) updates <see cref="StationName"/>. The argument is the
+  /// name from this single cycle; on a rolling-PS station successive events
+  /// carry successive pages. <c>RadioReceiver</c> forwards it as
+  /// <c>RdsStationNameChanged</c>.
   /// </remarks>
   public event EventHandler<RdsStationNameDecodedEventArgs>? StationNameDecoded;
 
@@ -341,8 +356,10 @@ public class RdsDecoder
     _lastDiagTime = DateTime.MinValue;
     _lastSymbolCountTime = DateTime.MinValue;
     Array.Clear(_groupBlocks);
+    _groupBlockMask = 0;
     Array.Clear(_psChars);
-    Array.Clear(_psCharConfidence);
+    _psSegmentMask = PsCycleAbandoned;
+    _psLastSegment = -1;
     _confirmedStationName = null;
     _candidateStationName = null;
     _candidateMatchCount = 0;
@@ -520,15 +537,23 @@ public class RdsDecoder
         if (_bitsReceived >= 26)
         {
           _bitsReceived = 0;
+          if (_blockIndex == 0)
+          {
+            _groupBlockMask = 0; // block A opens a new group
+          }
           if (CheckSyndrome(_shiftRegister, _blockIndex))
           {
             StoreBlockData(_blockIndex);
+            _groupBlockMask |= 1 << _blockIndex;
             _goodBlockRun++;
             _badBlockCount = 0; // reset consecutive bad block counter
 
-            // Only process groups in Synced state to avoid stale data.
-            // Block D (index 3) completes a group.
-            if (_blockIndex == 3)
+            // Only process groups in Synced state. Block D (index 3)
+            // completes a group, and only a group whose four blocks all
+            // passed the syndrome check this frame is processed — a group
+            // with a failed block is dropped whole rather than interpreted
+            // through the previous group's word in that slot.
+            if (_blockIndex == 3 && _groupBlockMask == 0x0F)
             {
               ProcessGroup();
             }
@@ -622,39 +647,65 @@ public class RdsDecoder
 
   private void ProcessGroup0PS(ushort blockB, ushort blockD)
   {
-    // Block B bits 1-0: character position index (0-3, each giving 2 chars)
-    var charIndex = blockB & 0x03;
-    var pos = charIndex * 2;
+    // Block B bits 1-0: segment address (0-3, each carrying 2 characters).
+    var segment = blockB & 0x03;
 
-    // Block D contains two PS characters (high byte = first char, low byte = second)
-    var char1 = (char)((blockD >> 8) & 0xFF);
-    var char2 = (char)(blockD & 0xFF);
-
-    // Validate: printable ASCII range (0x20-0x7E)
-    if (char1 >= 0x20 && char1 <= 0x7E && char2 >= 0x20 && char2 <= 0x7E)
+    // A cycle starts at segment 0 and must continue in order. Any other
+    // sequence — a missing segment, a repeated one (e.g. after a lost group
+    // the station is already one segment ahead) — abandons the cycle until
+    // the next segment 0, because the two halves would come from different
+    // pages of a rolling PS.
+    if (segment == 0)
     {
-      _psChars[pos] = char1;
-      _psChars[pos + 1] = char2;
-      _psCharConfidence[pos]++;
-      _psCharConfidence[pos + 1]++;
-
-      // Check if all 4 positions have been received at least once
-      if (_psCharConfidence[0] > 0 && _psCharConfidence[2] > 0 &&
-          _psCharConfidence[4] > 0 && _psCharConfidence[6] > 0)
-      {
-        var name = new string(_psChars).Trim();
-        if (!string.IsNullOrEmpty(name))
-        {
-          // Fire raw-frame event BEFORE the decoder's internal 2-sample
-          // confirmation. Downstream stability filters (see SDRRadioAudioSource)
-          // need to observe at the natural ~10 Hz PS frame rate so rolling-PS
-          // fragments (e.g. "WSMW THE", "CARS") never accumulate enough
-          // consecutive identical samples to be promoted to "stable".
-          StationNameDecoded?.Invoke(this, new RdsStationNameDecodedEventArgs(name));
-          TryConfirmStationName(name);
-        }
-      }
+      _psSegmentMask = 0;
     }
+    else if (_psSegmentMask == PsCycleAbandoned || segment != _psLastSegment + 1)
+    {
+      _psSegmentMask = PsCycleAbandoned;
+    }
+    _psLastSegment = segment;
+
+    if (_psSegmentMask == PsCycleAbandoned)
+    {
+      return;
+    }
+
+    // Block D carries two characters (high byte first) in the RDS basic
+    // character table. A control code is not a character and also abandons
+    // the cycle — writing nothing into the slot is what previously left the
+    // previous page's characters standing there.
+    if (!RdsCharset.TryDecode((byte)((blockD >> 8) & 0xFF), out var char1) ||
+        !RdsCharset.TryDecode((byte)(blockD & 0xFF), out var char2))
+    {
+      _psSegmentMask = PsCycleAbandoned;
+      return;
+    }
+
+    var pos = segment * 2;
+    _psChars[pos] = char1;
+    _psChars[pos + 1] = char2;
+    _psSegmentMask |= 1 << segment;
+
+    if (_psSegmentMask != PsCycleComplete)
+    {
+      return;
+    }
+
+    // One complete in-order cycle → one candidate. The mask is abandoned
+    // until the next segment 0 so a repeated segment 3 cannot re-emit it.
+    _psSegmentMask = PsCycleAbandoned;
+    var name = new string(_psChars).Trim();
+    if (string.IsNullOrEmpty(name))
+    {
+      return;
+    }
+
+    // Fire the raw per-cycle event BEFORE the decoder's own confirmation, so
+    // a subscriber can observe every complete page of a rolling PS at the
+    // rate the station sends them. RadioReceiver forwards this as
+    // RdsStationNameChanged.
+    StationNameDecoded?.Invoke(this, new RdsStationNameDecodedEventArgs(name));
+    TryConfirmStationName(name);
   }
 
   private void TryConfirmStationName(string name)
