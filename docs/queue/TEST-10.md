@@ -60,3 +60,35 @@ job when the callback is `async`** — a completion rendezvous is still needed b
 ⭐ **Assert the fix by REPEAT COUNT UNDER LOAD, not by one green run.** `TEST-4`'s standard was
 **200 iterations under CPU saturation**, before and after. A single pass proves nothing here — the
 test passes most of the time already, which is precisely the problem.
+
+---
+
+## 🚧 BUILT 2026-09-26 — branch `fix/test-10-autoswitch-probe-rendezvous`
+
+**Test-only fix, as the row said, across the whole file (not just the reported test).** Every
+`Task.Delay`-then-assert in `BluetoothAutoSwitchServiceTests` is gone:
+- The fake now signals when the service **subscribes** to `CaptureNodeAvailable` and when it removes its
+  last handler — which the service does in a `finally`, *after* its switch/abandon decision — and the
+  audio-manager mock signals the **switch**. `NodeReadyInsideProbeWindow`, `NodeArrivesAfterProbe` and
+  `NodeNeverArrives` await those, with a 30 s safety net that is never the thing being timed.
+- The three skip tests and `Dispose_UnsubscribesFromEvent` need **no wait at all**: on every skip path the
+  `async void` handler returns before its first `await`, so its decision is complete when
+  `SimulateDeviceConnected` returns.
+- The class's run time went from ~2.3 s of fixed sleeps plus its timers to ~0.8 s measured (the remaining
+  floor is the production probe / max-wait timers the tests configure).
+
+**Meaningfulness, by mutation** (run 2026-09-26, each caught by exactly its target): the service never
+switching when the node arrives → `NodeArrivesAfterProbe` fails (at its 30 s safety net); `Dispose` not
+unsubscribing → `Dispose_UnsubscribesFromEvent` fails at once.
+
+**Adversarial review (session model): nothing blocking.** Its two comment findings are fixed (the skip tests'
+reliance on `IsCaptureNodeAvailable = true`; the safety net must stay shorter than the 60 s max wait).
+
+⚠ **The row's "repeat count under load, before and after" standard was NOT met, and here is exactly why.**
+- *Before*, under CPU saturation (64 spinning threads, 200 iterations of the whole class, 9 min):
+  **0/200 failures for every test** — CPU pressure alone does not reproduce it.
+- A second baseline under **thread-pool starvation** (200 blocked pool threads — the more likely pressure
+  in a parallel full-suite run) was **killed by the host for low system memory** before reporting, and was
+  not re-run.
+- So there is no reproduction of the original failure on record. The fix's claim rests on construction —
+  no assertion depends on a sleep any more — plus the mutations above, not on a measured before/after.

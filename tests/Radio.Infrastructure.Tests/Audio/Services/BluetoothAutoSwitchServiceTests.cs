@@ -281,9 +281,16 @@ public class BluetoothAutoSwitchServiceTests
   // with a generous timeout that is only a safety net. See CLAUDE.md § Test Timing.
   //
   // The skip tests need no wait at all: the handler returns before its first `await` on every skip path,
-  // so the decision is complete by the time SimulateDeviceConnected returns.
+  // so the decision is complete by the time SimulateDeviceConnected returns. ⚠ They set
+  // IsCaptureNodeAvailable = true on purpose: with the node "ready", a handler whose guard had been
+  // removed would probe and switch without yielding, so the immediate assertion catches it. With it
+  // false, such a handler would yield at the probe's Task.Delay and the assertion would pass vacuously.
 
-  /// <summary>Upper bound on any wait below. Never the thing a test is timing.</summary>
+  /// <summary>
+  /// Upper bound on any wait below; a hang fails here instead of stalling the run. ⚠ In
+  /// NodeArrivesAfterProbe it must stay SHORTER than that test's maxWaitMs (60 s): that gap is what
+  /// tells an event-driven switch from a timeout-driven one.
+  /// </summary>
   private static readonly TimeSpan SafetyNet = TimeSpan.FromSeconds(30);
 
   [Fact]
