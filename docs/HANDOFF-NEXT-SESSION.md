@@ -1,5 +1,10 @@
 # HANDOFF — Start here
 
+> ⭐ **2026-09-27 — a BT / Cast / FM-SDR code review filed `AUD-37` … `AUD-62` on the punch list. Nothing was built or queued.**
+> The pick-up point, with a box-check list and a suggested build order, is
+> [`HANDOFF-BT-CAST-SDR-REVIEW.md`](HANDOFF-BT-CAST-SDR-REVIEW.md). The sections below are otherwise as of 2026-09-03 and
+> their "latest merge" / "box SHA" figures are stale — `main` has moved to the `AUD-3x` fixes since.
+
 **Status:** `[CURRENT — 2026-09-03]` · Rewritten against the tree at `5e571b88`. **The previous
 revision was ~30 merges stale in its first three sections** — it named `#511` as the latest merge,
 the box at `739a859`, a P0 count of "21 listed, 18 effective", and pointed "Start here" at `ENC-5` /
