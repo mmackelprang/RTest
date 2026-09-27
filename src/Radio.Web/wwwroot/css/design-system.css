@@ -4330,6 +4330,19 @@ body {
   will-change: transform;
 }
 
+/* The track is two spans — the station-name head ("{PS} • ") and the RT
+   body — so rds-marquee.js can measure them separately: a rolling-PS page
+   of a different length moves the scroll offset by exactly the head's width
+   change, and front-evicted characters are priced at the body's own
+   per-character width (AUD-63). inline-block + pre keep the head's trailing
+   separator space from collapsing at the span boundary; the spans are
+   adjacent in the markup, so there is no inter-span whitespace to collapse. */
+.rcp-rds-rt-head,
+.rcp-rds-rt-body {
+  display: inline-block;
+  white-space: pre;
+}
+
 /* Static-fit variant — when the measured track width fits the container,
    the JS engine adds .is-static and skips the marquee entirely. Feels less
    twitchy on stations with a single short tagline (HANDOFF §8 q8). */

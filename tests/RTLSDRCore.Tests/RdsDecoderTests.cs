@@ -7,8 +7,6 @@ public class RdsDecoderTests
 {
   private const int SampleRate = 240000;
   private const float PilotFrequency = 19000f;
-  private const float RdsCarrierFrequency = 57000f;
-  private const float BaudRate = 1187.5f;
   private const float TwoPi = 2.0f * MathF.PI;
 
   // RDS CRC polynomial and offset words
@@ -94,7 +92,7 @@ public class RdsDecoderTests
     var decoder = new RdsDecoder(SampleRate);
 
     // Feed a valid RDS signal to get a station name
-    FeedSyntheticRdsSignal(decoder, "TEST FM ");
+    RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "TEST FM ");
 
     Assert.NotNull(decoder.StationName);
 
@@ -164,7 +162,7 @@ public class RdsDecoderTests
   public void SyntheticRdsSignal_ExtractsStationName()
   {
     var decoder = new RdsDecoder(SampleRate);
-    FeedSyntheticRdsSignal(decoder, "KEXP-FM ");
+    RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "KEXP-FM ");
 
     Assert.NotNull(decoder.StationName);
     Assert.Equal("KEXP-FM", decoder.StationName);
@@ -175,7 +173,7 @@ public class RdsDecoderTests
   public void SyntheticRdsSignal_DifferentStationName()
   {
     var decoder = new RdsDecoder(SampleRate);
-    FeedSyntheticRdsSignal(decoder, "KUOW    ");
+    RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "KUOW    ");
 
     Assert.NotNull(decoder.StationName);
     Assert.Equal("KUOW", decoder.StationName);
@@ -192,7 +190,7 @@ public class RdsDecoderTests
     var fired = new List<string>();
     decoder.StationNameDecoded += (_, e) => fired.Add(e.Name);
 
-    FeedSyntheticRdsSignal(decoder, "KEXP-FM ");
+    RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "KEXP-FM ");
 
     // The synthetic signal repeats the PS name many times — we expect at
     // least one event, and every event payload should be the decoded name.
@@ -210,12 +208,97 @@ public class RdsDecoderTests
     var fireCount = 0;
     decoder.StationNameDecoded += (_, _) => fireCount++;
 
-    FeedSyntheticRdsSignal(decoder, "WUNC-FM ");
+    RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "WUNC-FM ");
 
     // The synthetic feed sends the PS name multiple times. The event
     // should fire more than once — that's the whole point: per-frame
     // sampling, not per-confirmation.
     Assert.True(fireCount >= 2, $"Expected at least 2 frame-level events, got {fireCount}");
+  }
+
+  #endregion
+
+
+  #region PS Cycle Integrity Tests (AUD-69 / AUD-60)
+
+  // A rolling-PS station changes all eight characters between cycles. If one
+  // group of the new page is lost, the old decoder assembled a candidate from
+  // the slots' last-held values — three new segments plus one old one — and,
+  // because the same hybrid was re-assembled by the following segments,
+  // confirmed and displayed it. A candidate must come from one complete
+  // in-order cycle, so a lost segment yields no candidate at all.
+  [Fact]
+  public void RollingPs_PageChangeWithLostSegment_NeverEmitsHybrid()
+  {
+    var decoder = new RdsDecoder(SampleRate);
+    var seen = new List<string>();
+    decoder.StationNameDecoded += (_, e) => seen.Add(e.Name);
+
+    const string oldPage = "ROCK 92 ";
+    const string newPage = "LIMELIGH";
+    var groups = new List<RdsTestGroup>();
+    for (int i = 0; i < 3; i++)
+    {
+      groups.AddRange(RdsDecoderTestSeam.PsCycle(oldPage));
+    }
+    // First cycle of the new page with segment 1 lost (the group is simply
+    // not transmitted, which keeps block alignment — the decoder stays synced).
+    groups.Add(RdsDecoderTestSeam.PsGroup(newPage, 0));
+    groups.Add(RdsDecoderTestSeam.PsGroup(newPage, 2));
+    groups.Add(RdsDecoderTestSeam.PsGroup(newPage, 3));
+    for (int i = 0; i < 3; i++)
+    {
+      groups.AddRange(RdsDecoderTestSeam.PsCycle(newPage));
+    }
+
+    RdsDecoderTestSeam.FeedSyntheticGroups(decoder, groups);
+
+    Assert.All(seen, name => Assert.Contains(name, new[] { "ROCK 92", "LIMELIGH" }));
+    Assert.Contains("LIMELIGH", seen);
+    Assert.Equal("LIMELIGH", decoder.StationName);
+  }
+
+  // AUD-60: a block that fails its syndrome check used to leave the previous
+  // group's word in its slot, so block D of this group was read through the
+  // previous group's block B — here a stale segment-1 address puts segment
+  // 2's characters into slots 2-3 and emits "RO 9 92". A group with a bad
+  // block must be dropped whole.
+  [Fact]
+  public void BadBlockMidGroup_DropsTheGroup_NoCandidateFromStaleBlocks()
+  {
+    var decoder = new RdsDecoder(SampleRate);
+    var seen = new List<string>();
+    decoder.StationNameDecoded += (_, e) => seen.Add(e.Name);
+
+    const string name = "ROCK 92 ";
+    var groups = new List<RdsTestGroup>();
+    groups.AddRange(RdsDecoderTestSeam.PsCycle(name));
+    groups.AddRange(RdsDecoderTestSeam.PsCycle(name));
+    groups.Add(RdsDecoderTestSeam.PsGroup(name, 0));
+    groups.Add(RdsDecoderTestSeam.PsGroup(name, 1));
+    groups.Add(RdsDecoderTestSeam.PsGroup(name, 2, corruptBlock: 1));
+    groups.Add(RdsDecoderTestSeam.PsGroup(name, 3));
+    groups.AddRange(RdsDecoderTestSeam.PsCycle(name));
+    groups.AddRange(RdsDecoderTestSeam.PsCycle(name));
+
+    RdsDecoderTestSeam.FeedSyntheticGroups(decoder, groups);
+
+    Assert.NotEmpty(seen);
+    Assert.All(seen, n => Assert.Equal("ROCK 92", n));
+    Assert.Equal("ROCK 92", decoder.StationName);
+  }
+
+  // A byte outside printable ASCII used to fail the segment's validation, so
+  // the slot was never written and kept whatever the previous page left
+  // there. 0x82 is 'é' in the RDS basic character table (IEC 62106 E.1).
+  [Fact]
+  public void AccentedPsCharacter_DecodesThroughBasicCharset()
+  {
+    var decoder = new RdsDecoder(SampleRate);
+
+    RdsDecoderTestSeam.FeedSyntheticRdsSignal(decoder, "CAF\u0082 FM ");
+
+    Assert.Equal("CAFé FM", decoder.StationName);
   }
 
   #endregion
@@ -268,129 +351,6 @@ public class RdsDecoderTests
       }
     }
     return (ushort)(reg & 0x3FF);
-  }
-
-  /// <summary>
-  /// Generates synthetic RDS-modulated composite FM signal and feeds it to the decoder.
-  /// Encodes a PS station name into Group 0A RDS blocks, modulates at 57 kHz BPSK.
-  /// </summary>
-  private static void FeedSyntheticRdsSignal(RdsDecoder decoder, string psName)
-  {
-    if (psName.Length != 8)
-    {
-      throw new ArgumentException("PS name must be exactly 8 characters", nameof(psName));
-    }
-
-    // Build the RDS bitstream: multiple repetitions of the complete PS name
-    // via Group 0A blocks (4 groups per complete PS name, 4 blocks per group)
-    var bits = new List<int>();
-    var piCode = (ushort)0x1234; // arbitrary PI code
-
-    // Repeat 4 times for noise rejection (PsConfirmThreshold = 2, need multiple complete names)
-    for (int rep = 0; rep < 4; rep++)
-    {
-      for (int charPair = 0; charPair < 4; charPair++)
-      {
-        // Block A: PI code
-        AppendBlock(bits, piCode, 0);
-
-        // Block B: Group type 0A (0000 in bits 15-12), version A (0 in bit 11),
-        // TP=0, PTY=0, char pair index in bits 1-0
-        ushort blockB = (ushort)(0x0000 | (charPair & 0x03));
-        AppendBlock(bits, blockB, 1);
-
-        // Block C: AF data (arbitrary for Group 0A)
-        AppendBlock(bits, 0x0000, 2);
-
-        // Block D: Two PS characters
-        var c1 = (byte)psName[charPair * 2];
-        var c2 = (byte)psName[charPair * 2 + 1];
-        ushort blockD = (ushort)((c1 << 8) | c2);
-        AppendBlock(bits, blockD, 3);
-      }
-    }
-
-    // Convert bits to differentially encoded symbols
-    var symbols = new int[bits.Count];
-    int prevSymbol = 0;
-    for (int i = 0; i < bits.Count; i++)
-    {
-      // Differential encoding: symbol = bit XOR prevSymbol
-      symbols[i] = bits[i] ^ prevSymbol;
-      prevSymbol = symbols[i];
-    }
-
-    // Biphase (Manchester) encoding: each diff-encoded symbol → 2 chips of opposite polarity.
-    // This matches the RDS standard where each bit period contains two half-periods.
-    var chips = new List<int>();
-    for (int i = 0; i < symbols.Length; i++)
-    {
-      if (symbols[i] == 1)
-      {
-        chips.Add(1);   // first half positive
-        chips.Add(-1);  // second half negative
-      }
-      else
-      {
-        chips.Add(-1);  // first half negative
-        chips.Add(1);   // second half positive
-      }
-    }
-
-    // Modulate: BPSK on 57 kHz carrier at the given sample rate, one chip per half-symbol
-    var samplesPerChip = (float)SampleRate / (BaudRate * 2); // ~101 samples/chip
-    var totalSamples = (int)(chips.Count * samplesPerChip) + SampleRate; // extra 1s for filter settling
-    var composite = new float[totalSamples];
-
-    // Pre-fill with carrier (no data) for filter settling
-    var settlingLength = SampleRate / 2; // 0.5s settling
-    for (int i = 0; i < settlingLength; i++)
-    {
-      var t = (float)i / SampleRate;
-      composite[i] = 0.05f * MathF.Cos(TwoPi * RdsCarrierFrequency * t);
-    }
-
-    // Modulate biphase chips
-    for (int chip = 0; chip < chips.Count; chip++)
-    {
-      var amplitude = chips[chip] == 1 ? 0.05f : -0.05f;
-      var startSample = settlingLength + (int)(chip * samplesPerChip);
-      var endSample = settlingLength + (int)((chip + 1) * samplesPerChip);
-      endSample = Math.Min(endSample, totalSamples);
-
-      for (int i = startSample; i < endSample; i++)
-      {
-        var t = (float)i / SampleRate;
-        composite[i] = amplitude * MathF.Cos(TwoPi * RdsCarrierFrequency * t);
-      }
-    }
-
-    // Feed to decoder in blocks
-    const int blockSize = 4800;
-    var pllPhase = 0f;
-    for (int offset = 0; offset < totalSamples; offset += blockSize)
-    {
-      var count = Math.Min(blockSize, totalSamples - offset);
-      decoder.Process(composite.AsSpan(offset, count), count, pllPhase, PilotFrequency);
-
-      // Advance PLL phase as if locked to pilot
-      pllPhase += TwoPi * PilotFrequency * count / SampleRate;
-      pllPhase %= TwoPi;
-    }
-  }
-
-  /// <summary>
-  /// Appends a 26-bit RDS block (16 data + 10 check) as individual bits to the list.
-  /// </summary>
-  private static void AppendBlock(List<int> bits, ushort data, int blockIndex)
-  {
-    var word26 = BuildValidBlock(data, blockIndex);
-
-    // Append MSB first
-    for (int i = 25; i >= 0; i--)
-    {
-      bits.Add((int)((word26 >> i) & 1));
-    }
   }
 
   #endregion

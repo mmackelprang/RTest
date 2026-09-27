@@ -116,9 +116,9 @@ assembler confirms complete hybrids on an in-place change with one lost group (`
 
 | Row | Tier | One line |
 |---|---|---|
-| `AUD-63` | P1 | Marquee diff defeated by the PS head; rolling PS resets; Blazor paints the text a round-trip before the engine compensates. **Fix this first.** |
-| `AUD-69` | P1 | PS confirmation confirms hybrids on a lost segment; accented chars freeze a slot. Fix with `AUD-60`. |
-| `AUD-70` | P1 | In-place RT change + one lost group confirms a complete hybrid; ticker keeps both. |
+| ~~`AUD-63`~~ | P1 | Marquee diff defeated by the PS head; rolling PS resets; Blazor paints the text a round-trip before the engine compensates. ✅ **Shipped 2026-09-27 — [#674](https://github.com/mmackelprang/RTest/pull/674).** |
+| ~~`AUD-69`~~ | P1 | PS confirmation confirms hybrids on a lost segment; accented chars freeze a slot. ✅ **Shipped with `AUD-60` — [#674](https://github.com/mmackelprang/RTest/pull/674).** |
+| ~~`AUD-70`~~ | P1 | In-place RT change + one lost group confirms a complete hybrid; ticker keeps both. ✅ **Shipped — [#674](https://github.com/mmackelprang/RTest/pull/674).** |
 | `AUD-64` | P2 | Speed policy steps 40 ↔ 60 px/s on alternate updates; no hysteresis. |
 | `AUD-65` | P2 | Decoder/ticker comments, tests and logs that describe a pipeline that does not exist; dead PS event. |
 | `AUD-66` | P2 | The card vanishes on every tune and grows 8 px when RT arrives — layout shift under the frequency well. |
@@ -138,13 +138,42 @@ assembler confirms complete hybrids on an in-place change with one lost group (`
 4. Look for a mangled station name in the same log window (`AUD-69`) and an RT line that is a mix of
    two titles (`AUD-70`).
 
-### Build order
+### What shipped, and what the next session does with it
 
-`AUD-63` alone removes the jump on every RT update and every PS page; do it with its two tests and a
-bUnit case that composes a PS head onto the existing eviction test (fails today). Then `AUD-69` +
-`AUD-60` + `AUD-70` as one decoder PR with the tests `RdsDecoderTests` lacks (a roll with a lost
-segment, a bad block mid-group, an in-place RT change). `AUD-64`, `AUD-66`, `AUD-67` are an afternoon
-each and independent. `AUD-71`, `AUD-72` and `AUD-68` ride with whichever PR next touches their files.
+✅ **`AUD-63`, `AUD-69`, `AUD-70` and `AUD-60` shipped 2026-09-27 in [#674](https://github.com/mmackelprang/RTest/pull/674)** (three commits, one per
+row set). What landed, in one line each:
+
+- `AUD-63` — the track is two spans; `RdsCard` passes `Head` (`"{PS}{Separator}"`) and `Text` (RT)
+  separately, only the RT is diffed, and `rds-marquee.js` `update()` now takes the head and body strings,
+  writes them, re-measures and restarts the leg in one JS task, absorbing the head's width change into the
+  offset. Once the engine is attached Blazor never rewrites the span text. Driven in a headless Chromium
+  against the real stylesheet: a body glyph stays within 0.01 px across every kind of update.
+- `AUD-69` + `AUD-60` — a PS candidate comes only from one complete in-order cycle (segment 0 → 3, nothing
+  missing), a group with a bad block is dropped whole, and 0x80–0xFF map through the new `RdsCharset`.
+- `AUD-70` — `RadioTextAssembler` tracks a change wave per slot; only slots re-sighted since the change
+  began count towards a complete assembly. 2B is complete at 32; 0x0A/0x0B are spaces.
+
+⚠ **Verified in unit tests and a browser harness only — not deployed, not watched on the panel.** The box
+checks above are now the acceptance step: deploy, read the deployed SHA (`/api/health/version` on both
+services) *before* looking, then poll `_debugState(id)` over CDP — `offset` must no longer drop to 0 on
+an RT update or a PS page, and the file sink must show no mangled `RDS: Station name` lines. Two things
+to know when reading the result: the head is still the live rolling PS (it now flips in place without
+moving the body; anchoring it on the PI call sign instead is an open product choice), and a rolling-PS
+page now needs two clean consecutive cycles to show, so under heavy block loss the head goes *stale*
+rather than wrong. `_debugState` reports `headWidth`, `bodyCharWidth`, `headText` and `bodyText` in place
+of the old `charWidth`.
+
+One thing seen while gating, not filed: `BluetoothAutoSwitchServiceTests.NodeArrivesAfterProbe_SwitchesViaEvent`
+sleeps 500 ms on a wall clock (`:261`) and failed once under load, then passed 3/3 alone — the shape
+`TEST-4` was written about. Worth a `TEST` row if it shows up in CI.
+
+### Build order for what is left
+
+`AUD-64`, `AUD-66`, `AUD-67` are an afternoon each and independent; `AUD-64` is the one still visible
+now that the jump is gone (the 40 ↔ 60 px/s speed step). `AUD-71`, `AUD-72` and `AUD-68` ride with
+whichever PR next touches their files — `AUD-68`(1) (cancel/recreate on every update) and (2)
+(`OnAfterRenderAsync` re-entrancy) are partly closed by `AUD-63`'s serialised interop; (1) still applies
+to `'swap'` and `'speed'`.
 
 ---
 

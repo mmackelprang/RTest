@@ -96,12 +96,15 @@ public class MarqueeTextDiffTests
       .Should().Be(new MarqueeDiff(MarqueeTransition.Reset, 0));
   }
 
-  // ─── In-place swap (rolling PS / corrections) ────────────────────────────
+  // ─── In-place swap (equal-length corrections) ────────────────────────────
+  // The station name is NOT part of the diffed text (RdsScrollMarquee diffs
+  // the RT body alone and measures the head separately — AUD-63), so these
+  // are equal-length chunk replacements inside the buffer.
 
   [Fact]
   public void SameLengthDifferentHead_IsInPlaceSwap()
   {
-    // Rolling-PS page swap: PS is always exactly 8 chars, so the track
+    // The leading chunk was replaced by one of equal length: the track
     // length is preserved — keep the offset, swap the glyphs.
     MarqueeTextDiff.Compute(
         "EAGLES97 • Hotel California",
