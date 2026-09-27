@@ -25,11 +25,11 @@ namespace RTLSDRCore.DSP;
 /// hardened decoders (e.g. redsea) do.
 /// </para>
 /// <para>
-/// 2. <b>Complete-before-partial confirmation.</b> A COMPLETE message — the
-/// full 64 characters received, or a 0x0D terminator observed (which pads the
-/// remainder with spaces) — confirms after
-/// <see cref="CompleteConfirmThreshold"/> consecutive stable assemblies, same
-/// as before. An INCOMPLETE prefix must instead stay byte-stable for
+/// 2. <b>Complete-before-partial confirmation.</b> A COMPLETE message — every
+/// slot the group version can address filled (64 for 2A, 32 for 2B), or a
+/// 0x0D terminator observed (which pads the remainder with spaces) — confirms
+/// after <see cref="CompleteConfirmThreshold"/> consecutive stable assemblies.
+/// An INCOMPLETE prefix must instead stay byte-stable for
 /// <see cref="PartialConfirmThreshold"/> consecutive RT groups (≈ two full
 /// 16-segment cycles) before it may confirm. A transiently-missing segment is
 /// virtually always repaired within one cycle — which grows the text and
@@ -37,11 +37,29 @@ namespace RTLSDRCore.DSP;
 /// truncated prefixes. Stations with broken encoders (no terminator, not all
 /// segments transmitted) still display after ~10–30 s of genuine stability.
 /// </para>
+/// <para>
+/// 3. <b>Change waves</b> (<c>AUD-70</c>). Many stations change the RT in
+/// place — same A/B flag, new characters — so the old message's accepted
+/// characters are replaced slot by slot as the new one is double-received.
+/// Rule 2 alone called that assembly complete as soon as every slot held
+/// <i>some</i> accepted value, so one lost group during the changeover left
+/// four characters of the old message in an otherwise-new one and confirmed
+/// the hybrid (<c>"Toto - Afrinna :: Material Girl"</c>). Now the first
+/// sighting of a value that differs from a slot's current accepted value opens
+/// a new change wave, and every slot must be re-sighted (accepted, or
+/// re-confirmed unchanged) within the current wave before the assembly counts
+/// as complete. A slot the changeover has not reached yet is not stale text to
+/// publish; it is a gap, and the assembly waits for it exactly as it waits for
+/// a never-received slot.
+/// </para>
 /// </remarks>
 internal sealed class RadioTextAssembler
 {
   /// <summary>RT messages are at most 64 characters (Group 2A).</summary>
   private const int RtLength = 64;
+
+  /// <summary>Group 2B segments carry two characters, so 2B messages are at most 32.</summary>
+  private const int RtLengthVersionB = 32;
 
   /// <summary>
   /// Stable assemblies required to confirm a complete (64-char / terminated)
@@ -63,6 +81,13 @@ internal sealed class RadioTextAssembler
   private readonly char[] _accepted = new char[RtLength];
   private readonly bool[] _acceptedValid = new bool[RtLength];
 
+  // The change wave in which each accepted slot was last sighted (accepted,
+  // re-confirmed, or covered by a terminator fill). A slot whose wave is
+  // older than _changeWave has not been seen since the current changeover
+  // began and does not count towards a complete assembly.
+  private readonly int[] _slotWave = new int[RtLength];
+  private int _changeWave = 1;
+
   // Most recent single sighting per slot — the candidate for acceptance.
   private readonly char[] _staged = new char[RtLength];
   private readonly bool[] _stagedValid = new bool[RtLength];
@@ -72,6 +97,7 @@ internal sealed class RadioTextAssembler
   private bool _abFlagTogglePending; // one group carried the opposite flag
   private string? _candidate;       // assembled text awaiting confirmation
   private int _candidateMatchCount; // consecutive identical assemblies
+  private int _messageCapacity = RtLength; // 64 for 2A, 32 for 2B (per the last group)
 
   /// <summary>
   /// The most recently confirmed RadioText (trimmed), or null when nothing
@@ -134,23 +160,25 @@ internal sealed class RadioTextAssembler
     if (versionB)
     {
       // Group 2B: 2 chars from block D only (block C carries the PI repeat).
+      _messageCapacity = RtLengthVersionB;
       var pos = segmentAddr * 2;
       if (pos + 1 < RtLength)
       {
-        ReceiveChar(pos, (char)((blockD >> 8) & 0xFF));
-        ReceiveChar(pos + 1, (char)(blockD & 0xFF));
+        ReceiveByte(pos, (byte)((blockD >> 8) & 0xFF));
+        ReceiveByte(pos + 1, (byte)(blockD & 0xFF));
       }
     }
     else
     {
       // Group 2A: 4 chars from blocks C and D.
+      _messageCapacity = RtLength;
       var pos = segmentAddr * 4;
       if (pos + 3 < RtLength)
       {
-        ReceiveChar(pos, (char)((blockC >> 8) & 0xFF));
-        ReceiveChar(pos + 1, (char)(blockC & 0xFF));
-        ReceiveChar(pos + 2, (char)((blockD >> 8) & 0xFF));
-        ReceiveChar(pos + 3, (char)(blockD & 0xFF));
+        ReceiveByte(pos, (byte)((blockC >> 8) & 0xFF));
+        ReceiveByte(pos + 1, (byte)(blockC & 0xFF));
+        ReceiveByte(pos + 2, (byte)((blockD >> 8) & 0xFF));
+        ReceiveByte(pos + 3, (byte)(blockD & 0xFF));
       }
     }
 
@@ -167,6 +195,7 @@ internal sealed class RadioTextAssembler
     _abFlag = false;
     _abFlagInitialized = false;
     _abFlagTogglePending = false;
+    _messageCapacity = RtLength;
     ConfirmedText = null;
   }
 
@@ -174,19 +203,21 @@ internal sealed class RadioTextAssembler
   {
     Array.Clear(_accepted);
     Array.Clear(_acceptedValid);
+    Array.Clear(_slotWave);
+    _changeWave = 1;
     Array.Clear(_staged);
     Array.Clear(_stagedValid);
     _candidate = null;
     _candidateMatchCount = 0;
   }
 
-  private void ReceiveChar(int pos, char c)
+  private void ReceiveByte(int pos, byte code)
   {
     // 0x0D (carriage return) terminates the message: everything from its
     // position to the end is padding. The terminator itself goes through the
     // same double-receive rule — a corrupt byte aliasing to 0x0D would
     // otherwise wipe the tail of a longer message.
-    if (c == '\r')
+    if (code == 0x0D)
     {
       if (_stagedValid[pos] && _staged[pos] == '\r')
       {
@@ -194,29 +225,46 @@ internal sealed class RadioTextAssembler
         {
           _accepted[i] = ' ';
           _acceptedValid[i] = true;
+          _slotWave[i] = _changeWave;
         }
       }
       else
       {
+        // A terminator where an accepted non-space character stands means the
+        // message got shorter — a change in flight, like any other new value.
+        if (_acceptedValid[pos] && _accepted[pos] != ' ')
+        {
+          OpenChangeWave(pos);
+        }
         _staged[pos] = '\r';
         _stagedValid[pos] = true;
       }
       return;
     }
 
-    // Only printable ASCII participates; anything else is dropped on the
-    // floor (same validation the decoder always applied).
-    if (c < 0x20 || c > 0x7E)
+    char c;
+    if (code == 0x0A || code == 0x0B)
     {
+      // Line feed / end-of-headline: layout hints on a multi-line display.
+      // On a single-line ticker they are word breaks, and dropping them (as
+      // the old validation did) left the slot forever unfilled, so a message
+      // containing one could never be complete.
+      c = ' ';
+    }
+    else if (!RdsCharset.TryDecode(code, out c))
+    {
+      // Remaining control codes are not characters — nothing to record.
       return;
     }
 
     if (_acceptedValid[pos] && _accepted[pos] == c)
     {
       // Re-confirmation of an already-accepted value — refresh the stage so
-      // a later corrupt sighting has to repeat twice to displace it.
+      // a later corrupt sighting has to repeat twice to displace it, and mark
+      // the slot as sighted in the current wave.
       _staged[pos] = c;
       _stagedValid[pos] = true;
+      _slotWave[pos] = _changeWave;
       return;
     }
 
@@ -227,21 +275,44 @@ internal sealed class RadioTextAssembler
       // changes without an A/B toggle eventually propagate).
       _accepted[pos] = c;
       _acceptedValid[pos] = true;
+      _slotWave[pos] = _changeWave;
       return;
     }
 
-    // First sighting of a new value for this slot — stage it.
+    // First sighting of a new value for this slot — stage it. If the slot
+    // already holds an accepted value that was sighted in the current wave,
+    // this is the first evidence of a changeover: open a new wave so every
+    // slot has to be re-sighted before the assembly counts as complete.
+    if (_acceptedValid[pos])
+    {
+      OpenChangeWave(pos);
+    }
     _staged[pos] = c;
     _stagedValid[pos] = true;
   }
 
+  private void OpenChangeWave(int pos)
+  {
+    // Only a slot that is current in the present wave can open a new one. A
+    // slot that is already stale (its wave is older) belongs to a changeover
+    // that is still in progress; a differing sighting there is that same
+    // changeover reaching it, not a second one.
+    if (_slotWave[pos] == _changeWave)
+    {
+      _changeWave++;
+    }
+  }
+
   private bool TryConfirm()
   {
-    // Contiguous accepted run from position 0.
+    // Contiguous run from position 0 of slots that are accepted AND have been
+    // sighted in the current change wave. A slot last sighted in an earlier
+    // wave is text the changeover has not reached yet; publishing it would be
+    // the old/new hybrid this class exists to prevent.
     var length = 0;
     for (var i = 0; i < RtLength; i++)
     {
-      if (!_acceptedValid[i])
+      if (!_acceptedValid[i] || _slotWave[i] != _changeWave)
       {
         break;
       }
@@ -263,7 +334,7 @@ internal sealed class RadioTextAssembler
     if (text == _candidate)
     {
       _candidateMatchCount++;
-      var threshold = length == RtLength ? CompleteConfirmThreshold : PartialConfirmThreshold;
+      var threshold = length >= _messageCapacity ? CompleteConfirmThreshold : PartialConfirmThreshold;
       if (_candidateMatchCount >= threshold && ConfirmedText != text)
       {
         ConfirmedText = text;
