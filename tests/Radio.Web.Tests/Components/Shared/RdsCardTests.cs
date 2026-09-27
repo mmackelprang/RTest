@@ -180,6 +180,35 @@ public class RdsCardTests : TestContext
       "a changed RadioText must re-render so the new buffer scrolls");
   }
 
+  // --- Head / body split (AUD-63) ---
+  // The card hands the station name (plus separator) and the RT buffer to
+  // the marquee as two parameters, so only the RT is diffed for transitions.
+
+  [Fact]
+  public void Card_PassesStationNameAndSeparatorAsHead_AndRadioTextAsBody()
+  {
+    var cut = RenderComponent<RdsCard>(p => p
+      .Add(x => x.StationName, "WUNC")
+      .Add(x => x.RadioText, "Morning Edition")
+      .Add(x => x.Separator, " • "));
+
+    cut.Find(".rcp-rds-rt-head").TextContent.Should().Be("WUNC • ");
+    cut.Find(".rcp-rds-rt-body").TextContent.Should().Be("Morning Edition");
+    cut.Find(".rcp-rds-rt-track").TextContent.Should().Be("WUNC • Morning Edition",
+      "the two spans read as the single continuous PS • RT string the revision specified");
+  }
+
+  [Fact]
+  public void Card_WithoutStationName_RendersEmptyHead_NoLeadingSeparator()
+  {
+    var cut = RenderComponent<RdsCard>(p => p
+      .Add(x => x.StationName, null)
+      .Add(x => x.RadioText, "Morning Edition"));
+
+    cut.Find(".rcp-rds-rt-head").TextContent.Should().BeEmpty();
+    cut.Find(".rcp-rds-rt-track").TextContent.Should().Be("Morning Edition");
+  }
+
   /// <summary>
   /// Locate the design-system.css source file by walking up from the test
   /// binary directory until we find the Radio.Web/wwwroot/css folder. The
