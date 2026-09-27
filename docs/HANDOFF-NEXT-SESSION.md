@@ -1,6 +1,6 @@
 # HANDOFF — Start here
 
-> ⭐ **2026-09-27 — a BT / Cast / FM-SDR code review filed `AUD-37` … `AUD-62` on the punch list. Nothing was built or queued.**
+> ⭐ **2026-09-27 — a BT / Cast / FM-SDR code review filed `AUD-37` … `AUD-62` on the punch list, and an FM RDS follow-up the same day filed `AUD-63` … `AUD-72` (the owner's *"jerky RDS display"* — root cause found, not yet fixed). Nothing was built or queued.**
 > The pick-up point, with a box-check list and a suggested build order, is
 > [`HANDOFF-BT-CAST-SDR-REVIEW.md`](HANDOFF-BT-CAST-SDR-REVIEW.md). The sections below are otherwise as of 2026-09-03 and
 > their "latest merge" / "box SHA" figures are stale — `main` has moved to the `AUD-3x` fixes since.

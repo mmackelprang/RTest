@@ -1,7 +1,7 @@
 # HANDOFF — the 2026-09-27 Bluetooth / Google Cast / FM-SDR code review
 
-**Status:** `[FILED 2026-09-27 — NOTHING BUILT, NOTHING QUEUED]`. Twenty-six punch-list rows,
-`AUD-37` … `AUD-62`, filed in [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) §4.2 (P1) and §5
+**Status:** `[FILED 2026-09-27 — NOTHING BUILT, NOTHING QUEUED]`. Thirty-six punch-list rows,
+`AUD-37` … `AUD-72`, filed in [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) §4.2 (P1) and §5
 (P2) from a read of the code, not from the box. This file is the pick-up point for whoever works them.
 
 ---
@@ -92,14 +92,70 @@ would take, cheapest evidence first:
 
 ---
 
+## The FM RDS follow-up (later the same day)
+
+The owner reported that *"the display often has jerky visual artifacts when showing RDS data"* and asked
+for the same kind of review of the RDS code. Ten more rows: `AUD-63` … `AUD-72`. **The symptom has one
+display-side root cause and two decoder-side fragment sources, and they are separable.**
+
+### The answer, in one paragraph
+
+The RDS ticker's JavaScript engine keeps its scroll position across renders only when
+`MarqueeTextDiff.Compute` can align the new track text as *front-trim + tail-append* of the old. That diff
+was designed for a RadioText-only track. The inline-scroll revision (option (c)) then made the track
+`"{PS} • {RT}"`, and a fixed head defeats the alignment: once the 256-char buffer is full, **every**
+RadioText update classifies as an in-place swap (the whole text shifts a chunk under a fixed offset) or a
+reset (snap to home); and because the decoder trims the station name, consecutive rolling-PS pages differ
+in length and three of four page changes also reset. A line-for-line Python port of the diff reproduces
+both (`AUD-63`). Two tests pin the wrong assumption that PS is always eight characters. Separately, the
+decoder's PS confirmation confirms old/new hybrids on a lost segment (`AUD-69`) and the RadioText
+assembler confirms complete hybrids on an in-place change with one lost group (`AUD-70`) — the
+"fragments that change back and forth".
+
+### Rows
+
+| Row | Tier | One line |
+|---|---|---|
+| `AUD-63` | P1 | Marquee diff defeated by the PS head; rolling PS resets; Blazor paints the text a round-trip before the engine compensates. **Fix this first.** |
+| `AUD-69` | P1 | PS confirmation confirms hybrids on a lost segment; accented chars freeze a slot. Fix with `AUD-60`. |
+| `AUD-70` | P1 | In-place RT change + one lost group confirms a complete hybrid; ticker keeps both. |
+| `AUD-64` | P2 | Speed policy steps 40 ↔ 60 px/s on alternate updates; no hysteresis. |
+| `AUD-65` | P2 | Decoder/ticker comments, tests and logs that describe a pipeline that does not exist; dead PS event. |
+| `AUD-66` | P2 | The card vanishes on every tune and grows 8 px when RT arrives — layout shift under the frequency well. |
+| `AUD-67` | P2 | A tap on the touchscreen freezes the ticker (sticky `:hover` + focus); static-fit → scroll snaps from centred to left. |
+| `AUD-68` | P2 | Engine cancels/recreates the animation on every update; `OnAfterRenderAsync` re-entrancy; server-global `RdsRelevantChanged`. |
+| `AUD-71` | P2 | PI and PTY have no confirmation; one aliased block flips the call sign and empties the ticker. |
+| `AUD-72` | P2 | Decoder reset races the DSP thread; Costas/pilot loops are first-order by a units error. |
+
+### Box checks before building (CDP is on `:9223`)
+
+1. PS flip cadence on the station the owner listens to: count `RDS: Station name` lines in the file
+   sink over a bounded window. Every one is a candidate reset.
+2. Snap detection: via CDP, `const m = await import('/js/rds-marquee.js')` and poll `m._debugState(id)`
+   at 200 ms; `offset` dropping to 0 on an RT update is `AUD-63`(1), on a PS change `AUD-63`(2).
+3. `matchMedia('(prefers-reduced-motion: reduce)').matches` once — GNOME's `enable-animations` can
+   set it, which would give a static strip rather than jerk.
+4. Look for a mangled station name in the same log window (`AUD-69`) and an RT line that is a mix of
+   two titles (`AUD-70`).
+
+### Build order
+
+`AUD-63` alone removes the jump on every RT update and every PS page; do it with its two tests and a
+bUnit case that composes a PS head onto the existing eviction test (fails today). Then `AUD-69` +
+`AUD-60` + `AUD-70` as one decoder PR with the tests `RdsDecoderTests` lacks (a roll with a lost
+segment, a bad block mid-group, an in-place RT change). `AUD-64`, `AUD-66`, `AUD-67` are an afternoon
+each and independent. `AUD-71`, `AUD-72` and `AUD-68` ride with whichever PR next touches their files.
+
+---
+
 ## State of the tree
 
 | | |
 |---|---|
 | **Branch** | `claude/bt-cast-fm-sdr-review-flm1x1`, squash-merged to `main` (see the PR this file landed in) |
-| **Files changed** | `docs/HANDOFF-GA-PUNCH-LIST.md` (+26 rows, two §9 cells, the header ID line), `docs/BUILDER_QUEUE.md` (the two "next free" lines only), `docs/HANDOFF-NEXT-SESSION.md` (pointer), this file |
+| **Files changed** | `docs/HANDOFF-GA-PUNCH-LIST.md` (+26 rows, then +10 RDS rows, two §9 cells, the header ID line), `docs/BUILDER_QUEUE.md` (the two "next free" lines only), `docs/HANDOFF-NEXT-SESSION.md` (pointer), this file |
 | **Code** | untouched |
 | **Box** | untouched; nothing to deploy |
 | **Queue** | no row claimed, no row added — the punch list is the review artifact, the queue is the dispatch artifact |
 
-The commit that filed the rows is `2fc13de`; its message lists the rows by tier.
+The commit that filed the first 26 rows is `2fc13de` (merged in #672); the RDS follow-up is the PR this revision landed in.
