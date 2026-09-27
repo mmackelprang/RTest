@@ -140,6 +140,9 @@ assembler confirms complete hybrids on an in-place change with one lost group (`
 
 ### What shipped, and what the next session does with it
 
+> ⏸ **Paused 2026-09-27: the owner is doing the deploy, acceptance and follow-up on the dev box.** The
+> step-by-step for that is [`HANDOFF-RDS-DEV-BOX.md`](HANDOFF-RDS-DEV-BOX.md); this section stays as the record.
+
 ✅ **`AUD-63`, `AUD-69`, `AUD-70` and `AUD-60` shipped 2026-09-27 in [#674](https://github.com/mmackelprang/RTest/pull/674)** (three commits, one per
 row set). What landed, in one line each:
 
