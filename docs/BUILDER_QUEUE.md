@@ -44,7 +44,7 @@ body's claim that no punch-list row existed.
 PRs and archive entries. Its `AUD-10`/`11`/`11a`/`12` became **`AUD-21`/`22`/`22a`/`23`**.
 
 ⚠ **`AUD-21`, `AUD-22`, `AUD-22a` and `AUD-23` are RESERVED by the punch list. The next free `AUD`
-number is `AUD-63`.** ⚠ *(Said `AUD-37` until 2026-09-27, when the punch list filed `AUD-37` … `AUD-62` from a BT / Cast / SDR code review — rows in `HANDOFF-GA-PUNCH-LIST.md` §4.2 and §5, none queued. Said `AUD-36` briefly on 2026-09-26, until `AUD-36` was filed from `AUD-35`'s review. Said `AUD-34` until later on 2026-09-26, when `AUD-34` and `AUD-35` were filed from `AUD-33`'s review. Said `AUD-32` until 2026-09-26, when `AUD-32` and `AUD-33` were filed from `AUD-1`'s UAT. Said `AUD-25` until 2026-09-25 — **stale by five rows**, `AUD-25` … `AUD-29`,
+number is `AUD-73`.** ⚠ *(Said `AUD-63` for a few hours on 2026-09-27, until the punch list's FM RDS follow-up filed `AUD-63` … `AUD-72`. Said `AUD-37` until earlier that day, when the punch list filed `AUD-37` … `AUD-62` from a BT / Cast / SDR code review — rows in `HANDOFF-GA-PUNCH-LIST.md` §4.2 and §5, none queued. Said `AUD-36` briefly on 2026-09-26, until `AUD-36` was filed from `AUD-35`'s review. Said `AUD-34` until later on 2026-09-26, when `AUD-34` and `AUD-35` were filed from `AUD-33`'s review. Said `AUD-32` until 2026-09-26, when `AUD-32` and `AUD-33` were filed from `AUD-1`'s UAT. Said `AUD-25` until 2026-09-25 — **stale by five rows**, `AUD-25` … `AUD-29`,
 the same failure this note describes. And before that it said `AUD-24` until 2026-09-10, by which time `AUD-24` had been a
 live row for a day — exactly the silent divergence this section exists to prevent, arriving through
 the front door: a row was minted and the line was not updated. **Update it in the same commit that
@@ -55,7 +55,7 @@ takes a number, or it is wrong before anyone reads it.**)*
 independently. **No other prefix diverges.**
 
 **Next free number in each namespace** — take these, and update this line when you do:
-`AUD-63` · `GV-13` · `UI-16` · `TEST-11` · `OPS-13` · `PHN-11` · `ENC-22` · `KIOSK-4` · `UX-3`.
+`AUD-73` · `GV-13` · `UI-16` · `TEST-11` · `OPS-13` · `PHN-11` · `ENC-22` · `KIOSK-4` · `UX-3`.
 ⚠ **Re-derived 2026-09-25 from all four sources (queue, archive, punch list, `docs/queue/*.md`).** Three
 entries had drifted — `AUD` (said 25), `TEST` (said 9 while `TEST-10` was live), `OPS` (said 11 while
 `OPS-12` was live) — and `UX` was missing. ⚠ **Exclude this line when you grep**: it names free numbers,
