@@ -33,7 +33,7 @@ public class AnnouncementService : IAnnouncementService
   }
 
   /// <inheritdoc />
-  public async Task AnnounceAsync(string message, int priority = 5, CancellationToken cancellationToken = default)
+  public async Task<AnnouncementOutcome> AnnounceAsync(string message, int priority = 5, CancellationToken cancellationToken = default)
   {
     ArgumentException.ThrowIfNullOrWhiteSpace(message);
     priority = Math.Clamp(priority, 1, 10);
@@ -53,24 +53,47 @@ public class AnnouncementService : IAnnouncementService
       // Start ducking, play TTS, stop ducking
       await _duckingService.StartDuckingAsync(ttsSource, cancellationToken);
 
-      var completionTcs = new TaskCompletionSource<bool>();
-      ttsSource.PlaybackCompleted += (_, _) => completionTcs.TrySetResult(true);
+      // The REASON is kept, not just the fact of completion (TTS-2). A source that fails to start
+      // raises PlaybackCompleted(Error) — TTSEventSource does so synchronously inside PlayAsync when
+      // there is no playback device — and treating every completion as success is how a failed
+      // announcement came back as 200 "Announcement played".
+      var completionTcs = new TaskCompletionSource<PlaybackCompletionReason>();
+      ttsSource.PlaybackCompleted += (_, e) => completionTcs.TrySetResult(e.Reason);
 
       await ttsSource.PlayAsync(cancellationToken);
 
       // Wait for playback to complete or cancellation
       using var reg = cancellationToken.Register(() => completionTcs.TrySetCanceled());
-      await completionTcs.Task;
+      var reason = await completionTcs.Task;
 
-      _logger.LogDebug("Announcement playback completed");
+      var outcome = reason switch
+      {
+        PlaybackCompletionReason.EndOfContent => AnnouncementOutcome.Completed,
+        PlaybackCompletionReason.Error => AnnouncementOutcome.Failed,
+        _ => AnnouncementOutcome.Interrupted
+      };
+
+      if (outcome == AnnouncementOutcome.Failed)
+      {
+        // Warning, not Error: the cause was already logged at Error by whichever layer failed.
+        _logger.LogWarning("Announcement playback failed to start or finish");
+      }
+      else
+      {
+        _logger.LogDebug("Announcement playback ended: {Outcome}", outcome);
+      }
+
+      return outcome;
     }
     catch (OperationCanceledException)
     {
       _logger.LogDebug("Announcement cancelled");
+      return AnnouncementOutcome.Interrupted;
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error during announcement");
+      return AnnouncementOutcome.Failed;
     }
     finally
     {
