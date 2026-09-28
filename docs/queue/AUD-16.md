@@ -58,3 +58,14 @@ Whatever is removed, the gate is that RTL-SDR tuning still works end-to-end and 
 throws on an existing deployed store. ⚠ Needs a box session; the tuner is hardware.
 
 **Not auto-mergeable** if code is removed. Auto-mergeable if the outcome is documentation only.
+
+## Owner ruling 2026-09-28 — remove it all (D-D)
+
+Recorded in [`HANDOFF-GA-CLOSEOUT.md`](../HANDOFF-GA-CLOSEOUT.md) §4: **remove all support for the
+RaddyRF320BT device, including the `external/RaddyRF320BT` submodule. The RTL-SDR supersedes it.**
+The row's "keep it, documented" close is withdrawn. Scope for the removal PR, sized 2026-09-28:
+~25 files under `src/`, `tools/` and `tests/` reference it, the core ones being `RadioFactory.cs`, `RadioAudioSource.cs`, `USBAudioSourceBase.cs`,
+`IRadioFactory.cs`, `IRadioControl.cs`, `RadioOptions.cs`, `DeviceOptions.cs`, `RadioDtos.cs`,
+`RadioStateMapper.cs`, `RadioController.cs`, `SourceTypeHelper.cs`, `SoundFlowMasterMixer.cs`,
+`IAudioSource.cs`; plus `.gitmodules`, the `RaddyRF320BT/` line in `CLAUDE.md` and `README.md`'s structure trees, and the design docs. Check the orphaned
+SQLite store row question the original text raises before deleting the options type.

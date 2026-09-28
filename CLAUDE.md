@@ -78,11 +78,15 @@ and `CoverArtPipelineIntegrationTests.CoverArtArchive_ReturnsValidUrl_ForKnownRe
 timeout, passes on re-run, and excluded by `build.yml:58`'s `Category!=Integration` filter, so CI
 never runs it).
 
-⚠ **The Release build baseline is 47 warnings, 0 errors** — measured on `main` 2026-09-06 while
-shipping `OPS-2`, with an identical warning histogram (all `IDE0011`) before and after the change.
-Earlier notes citing **53** are stale. The number matters because the gate is *equality with the
-baseline*, not an absolute: a Builder holding the wrong figure either waves through four new
-warnings or chases four that were never there.
+⚠ **The Release build baseline is 47 warnings, 0 errors on Windows, and 33 warnings, 0 errors on
+Linux** — both all `IDE0011`. The Windows figure was measured on `main` 2026-09-06 while shipping
+`OPS-2`, with an identical warning histogram before and after the change; the Linux figure was
+measured twice on 2026-09-28 (SDK 10.0.401 and 10.0.112, `main` at `d1674e4d`) while setting up the
+Linux dev box. **They differ because `Radio.Infrastructure` builds two target frameworks on Windows
+(`net10.0` + `net10.0-windows10.0.19041.0`) and one on Linux**, so its style warnings are counted
+twice there — it is the same code. Earlier notes citing **53** are stale. The number matters because
+the gate is *equality with the baseline*, not an absolute: a Builder holding the wrong figure for its
+host either waves through new warnings or chases fourteen that were never there.
 
 ⛔ **AND YOU MUST BUILD `--no-incremental` TO MEASURE IT. An incremental Release build reports
 `0 Warning(s)`.** Measured 2026-09-09 while shipping `UI-8`: the incremental run said zero, and

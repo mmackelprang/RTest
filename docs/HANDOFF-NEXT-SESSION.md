@@ -1,5 +1,13 @@
 # HANDOFF — Start here
 
+> ⭐⭐ **2026-09-28 — THE SEQUENCING AUTHORITY IS NOW [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md), owner-approved.**
+> P0 is closed (every `PHN` PR archived; §9 re-tallied). It orders what is left — Phase 0 record fixes (this
+> commit), a box-check afternoon with RDS first, then deploy safety (`OPS-13`+`OPS-12`) as the install gate, then
+> the build phases — and records the owner's four rulings, including **remove all RaddyRF320BT support (`AUD-16`)**.
+> The RDS fixes from [#674](https://github.com/mmackelprang/RTest/pull/674) **are now deployed** (`f409bb9`, both
+> services, 2026-09-28 from the Linux dev box) but not yet watched on the panel; `HANDOFF-RDS-DEV-BOX.md` §3 is
+> Phase 1 check 1.1. The "Start here: `PHN-1c`" section further down is **three weeks stale** and kept only as history.
+>
 > ⭐ **2026-09-27 — a BT / Cast / FM-SDR code review filed `AUD-37` … `AUD-62` on the punch list, and an FM RDS follow-up the same day filed `AUD-63` … `AUD-72` (the owner's *"jerky RDS display"*). ✅ Its three P1 rows `AUD-63`, `AUD-69`, `AUD-70` and the related `AUD-60` shipped the same day in [#674](https://github.com/mmackelprang/RTest/pull/674) — unit-tested and browser-harnessed, ⚠ not yet deployed to `radio` or checked on the panel. Nothing else was built or queued.**
 > **Paused 2026-09-27 — the owner is picking the RDS work up on the dev box.** The pick-up point for that is
 > [`HANDOFF-RDS-DEV-BOX.md`](HANDOFF-RDS-DEV-BOX.md) (gates, deploy, panel acceptance, the two open decisions,
