@@ -78,7 +78,7 @@ building anything, and record results in `docs/uat/2026-09-xx-…/REPORT.md` as 
 Governed by punch list §2 (`O4`, `O6`, `O7` still bind) and the review handoffs' own orders. Within
 that: **deploy safety first (2e — the owner may install mid-arc and keep deploying), then
 audible/visible-at-the-cabinet, diagnostics second, hygiene last.** Effort figures are the rows' own.
-The subsection letters are labels, not the order; the order is: **2e → 2a → 2b → 2c → 2d → 2f → 2g → 2h → 2i → 2j → 2k.**
+The subsection letters are labels, not the order; the order is: **2e → 2a → 2b → 2d → 2g (`ENC-22` first) → 2f → 2h → 2i → 2j → 2k → 2c.** *(Updated 2026-09-28: casting (2c) deferred to last by the owner; `ENC-22` added and pulled forward as GA scope.)*
 
 ### 2a. Sub-hour BT fixes, one PR each (≈ ½ day total) — after 1.2/1.3/1.7
 
@@ -131,7 +131,7 @@ times out every ~30 s — check `ServerTimeout ≥ 2 × KeepAlive` first) · `UI
 
 ### 2g. Encoders P1 (≈ 1–2 days)
 
-`ENC-19` first and cheap: a firmware-version read at startup so a re-flash to an older build (which
+**`ENC-22` first — owner request 2026-09-28, GA:** power the panel off after a period in sleep, any knob wakes it; feasibility measured on the box (see the row), safety rules included. Then `ENC-19`, cheap: a firmware-version read at startup so a re-flash to an older build (which
 silently reinstates the dropped-report defect) is *announced*. Then `ENC-18` (presence state
 machine seam + tests). `ENC-14` (diagnostics card) last — survives smaller since D5; candidate for a
 P2 ruling, see §4.
