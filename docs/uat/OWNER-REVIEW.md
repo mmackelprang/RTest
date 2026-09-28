@@ -40,20 +40,20 @@ Shipped and deployed: `LOG-5` [#699](https://github.com/mmackelprang/RTest/pull/
   | radio-api file sink | 476 lines | **69** (−85 %) |
   | radio-web journal | 99 lines | **0** |
   | `Visualization hub reconnecting` | 33 | **0** |
-  | radio-api journal | 8 | 11 (my 2 `LOG-5` flips and 2 `LOG-8` reports; the rest are missed-deadline Warnings) |
+  | radio-api journal | 8 | 11 (2 are my `LOG-5` flip and reset of the Audio namespace; the RTLSDRCore ones were before 15:04. 2 are the `LOG-8` reports, and 7 are missed-deadline Warnings) |
 
 **What needs you:**
 
-- [ ] **Distortion, by ear (the reason this phase exists).** Listen to FM (and BT if you can) for 20+ minutes on this build. **Pass:** no new artefacts, and ideally fewer than before. **A/B in 2 seconds, no restart** (this is what `LOG-5` is for): open the DevTray (triple-tap top-right), tap **Verbose logs** ("config · tap for Debug" changes to "runtime · tap to reset"), listen for 10 minutes, tap again to reset. If audio is worse with Verbose on, log volume is still an audio problem. Note the time of any artefact and I can correlate it.
+- [ ] **Distortion, by ear (the reason this phase exists).** Listen to FM (and BT if you can) for 20+ minutes on this build. **Pass:** no new artefacts, and ideally fewer than before. **A/B in 2 seconds, no restart** (this is what `LOG-5` is for): open the DevTray (triple-tap top-right), tap **Verbose logs** ("config · tap for Debug" changes to "runtime · tap to reset"), listen for 10 minutes, then triple-tap to reopen the tray (it auto-locks after 30 s) and tap again to reset. Don't leave it on: that would contaminate the comparison. If audio is worse with Verbose on, log volume is still an audio problem. Note the time of any artefact and I can correlate it.
 - [ ] **DevTray card works on the panel.** Triple-tap and check the card reads "config · tap for Debug". Tap it and it reads "runtime · tap to reset"; tap again and it goes back. **Pass:** exactly that. It is unit-tested but not driven on the kiosk.
 - [ ] **`LOG-6` on a real BT session** (needs your phone; BT was idle today).
   1. `curl -X PUT http://radio:5000/api/system/logging/levels/Radio.Infrastructure.Platform.Bluetooth -H 'Content-Type: application/json' -d '{"level":"Information"}'`
-  2. Play from the phone for 2 min: `grep "PipeWire OnProcess" /opt/radio-console/logs/radio-$(date +%Y%m%d).txt | tail`
+  2. Play from the phone for 2 min, then: `ssh mmack@radio 'grep -h "PipeWire OnProcess" /opt/radio-console/logs/radio-$(date +%Y%m%d)*.txt | tail'`
   3. Pause the phone for 1 min and check the lines stop.
-  4. `POST …/levels/reset`
+  4. `curl -X POST http://radio:5000/api/system/logging/levels/reset`
 
   **Pass:** a line every ~10–12 s while playing, and none while paused. That silence is what `bt_stall_detect.py` depends on.
-- [ ] **UI-10 over a full day.** 30 minutes at 0 is strong but short, and CLAUDE.md warns against claiming a fix on a quiet hour. Tomorrow: `ssh mmack@radio "journalctl -u radio-web --since '-24h' --no-pager | grep -c 'Visualization hub reconnecting'"`. **Pass:** near 0 (it was 535/day). Then UI-10 can move from ✅🔬 to the archive.
+- [ ] **UI-10 over a full day.** 30 minutes at 0 is strong but short, and CLAUDE.md warns against claiming a fix on a quiet hour. Tomorrow: `ssh mmack@radio "journalctl -u radio-web --since '-24h' --no-pager | grep -c 'Visualization hub reconnecting'"`. **Pass:** ≤ 5 in 24 h. The baselines were 535 on 2026-09-27, 56 in the hour before the fix, and 33 in the half-hour before it. Then UI-10 can move from ✅🔬 to the archive.
 - [ ] **Judgement calls I made; overrule if you disagree:**
   - `LOG-2` carve-outs: `Audio.Services` (source switching, announcements) and `Audio.SoundFlow` (device selection) stay at Information. Cast (`Audio.Outputs`) lines are now at Warning, so raise that namespace when casting work (2c) starts.
   - `LOG-2` lives in the shipped `appsettings.json`, not the Production overlay, because the overlay is seed-only.

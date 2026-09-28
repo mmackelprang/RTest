@@ -19,9 +19,10 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Native;
 /// <para>
 /// ⛔ <b>Logging was one of several blockers, not the only one — LOG-6 does not discharge O4.</b> The
 /// same thread still takes <c>BufferedSoundGenerator.AddSamples</c>' ring-buffer lock (shared with the
-/// non-real-time mixer reader: the textbook inversion shape), still reaches
-/// <c>SrcVariableResampler.Process</c>' warning (<c>LOG-8</c>), and the loop's <c>OnStateChanged</c>
-/// callback still logs. <c>LOG-10</c> stays blocked on those.
+/// non-real-time mixer reader: the textbook inversion shape), still allocates through
+/// <c>Marshal.PtrToStructure</c>, and the loop's <c>OnStateChanged</c> callback still logs.
+/// (<c>SrcVariableResampler.Process</c>' per-buffer warning was removed by <c>LOG-8</c>.) <c>LOG-10</c>
+/// stays blocked on those.
 /// </para>
 /// <para>
 /// So the split is: the <c>Record*</c> methods are called on the callback thread and do only plain
