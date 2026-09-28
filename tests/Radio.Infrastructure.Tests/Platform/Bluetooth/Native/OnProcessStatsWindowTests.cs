@@ -11,6 +11,9 @@ namespace Radio.Infrastructure.Tests.Platform.Bluetooth.Native;
 /// </summary>
 /// <remarks>
 /// Time is passed in as Stopwatch timestamps, so nothing here reads a clock: no test can race one.
+/// ⚠ These tests are single-threaded. They pin the ordering of the snapshot/reset handshake (one test
+/// replays a mid-emission callback deterministically), but they do not exercise real concurrent
+/// interleavings or the memory-model reasoning in the class remarks.
 /// </remarks>
 public class OnProcessStatsWindowTests
 {
@@ -92,6 +95,26 @@ public class OnProcessStatsWindowTests
     Assert.Single(log.Entries);
   }
 
+  [Fact]
+  public void CallbackArrivingWhileTheEmitterLogs_BelongsToTheNextWindow()
+  {
+    // The emitter snapshots, requests the reset, and only then logs. A callback that lands during
+    // the logging call therefore performs the reset and starts the next window — it is not merged into
+    // the window just reported, and not wiped by a later reset. Driven single-threaded: the logger
+    // itself plays the concurrent callback.
+    var window = new OnProcessStatsWindow();
+    window.RecordCallback(-1);
+    window.RecordCallback(40.0);
+    var log = new CapturingLogger { OnLog = () => window.RecordCallback(5.0) };
+
+    Assert.True(window.EmitIfDue(log, T0));
+    log.OnLog = null;
+    Assert.True(window.EmitIfDue(log, T0 + 10 * Second));
+
+    Assert.Equal("🔬 PipeWire OnProcess: count=3, interval min=5.00ms max=5.00ms, bursts=0, execution max=0.00ms",
+      log.Entries[1].Message);
+  }
+
   [Theory]
   [InlineData(true, 0, LogLevel.Information, "PipeWire capture thread bumped to SCHED_FIFO priority 50")]
   [InlineData(false, 1, LogLevel.Warning,
@@ -114,6 +137,9 @@ public class OnProcessStatsWindowTests
   {
     public List<(LogLevel Level, string Template, string Message)> Entries { get; } = new();
 
+    /// <summary>Invoked inside Log — lets a test act as a callback that runs mid-emission.</summary>
+    public Action? OnLog { get; set; }
+
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
     public bool IsEnabled(LogLevel logLevel) => true;
@@ -125,6 +151,7 @@ public class OnProcessStatsWindowTests
         ? kvs.FirstOrDefault(kv => kv.Key == "{OriginalFormat}").Value as string ?? string.Empty
         : string.Empty;
       Entries.Add((logLevel, template, formatter(state, exception)));
+      OnLog?.Invoke();
     }
   }
 }

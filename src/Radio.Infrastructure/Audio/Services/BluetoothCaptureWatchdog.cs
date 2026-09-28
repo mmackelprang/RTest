@@ -47,6 +47,7 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly ICaptureStreamSnapshotSource _snapshotSource;
   private int _consecutiveStalledChecks;
+  private int _diagnosticsFailures;
 
   public BluetoothCaptureWatchdog(
     ILogger<BluetoothCaptureWatchdog> logger,
@@ -95,7 +96,16 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
       }
       catch (Exception ex)
       {
-        _logger.LogWarning(ex, "BluetoothCaptureWatchdog: capture stream diagnostics failed");
+        // First failure at Warning (journald), repeats at Debug: a persistently failing emit would
+        // otherwise put a Warning in the journal every tick.
+        if (++_diagnosticsFailures == 1)
+        {
+          _logger.LogWarning(ex, "BluetoothCaptureWatchdog: capture stream diagnostics failed (further failures at Debug)");
+        }
+        else
+        {
+          _logger.LogDebug(ex, "BluetoothCaptureWatchdog: capture stream diagnostics failed ({Failures} so far)", _diagnosticsFailures);
+        }
       }
 
       try

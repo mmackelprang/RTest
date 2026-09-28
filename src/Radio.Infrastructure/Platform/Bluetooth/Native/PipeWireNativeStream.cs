@@ -56,7 +56,8 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
 
   // Instrumentation: OnProcess delivery timing. LOG-6: OnProcess only RECORDS into the window; the
   // line is emitted from BluetoothCaptureWatchdog's tick via EmitDiagnostics. ⛔ Do not add logging
-  // back to OnProcess — see OnProcessStatsWindow and punch-list O4 (LOG-6 before LOG-10).
+  // back to OnProcess — see OnProcessStatsWindow and punch-list O4, which LOG-6 alone does not
+  // discharge (the AddSamples lock and OnStateChanged's logging remain).
   private long _lastOnProcessTimestamp;
   private readonly OnProcessStatsWindow _stats = new();
 
@@ -486,11 +487,12 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
       self._rtPriorityApplied = true;
       var param = new SchedParam { sched_priority = self._rtPriority };
       var result = pthread_setschedparam(pthread_self(), SCHED_FIFO, ref param);
-      // The errno must be read here, on this thread, straight after the call. The outcome is logged
-      // later from the watchdog (LOG-6), not from this callback.
+      // pthread_setschedparam RETURNS the error number and does not set errno, so `result` is the
+      // errno. (This used to read Marshal.GetLastPInvokeError(), which reported 0 on EPERM.) The
+      // outcome is logged later from the watchdog (LOG-6), not from this callback.
       self._stats.RecordRealtimeResult(
         applied: result == 0,
-        errno: result == 0 ? 0 : Marshal.GetLastPInvokeError(),
+        errno: result,
         priority: self._rtPriority);
     }
 

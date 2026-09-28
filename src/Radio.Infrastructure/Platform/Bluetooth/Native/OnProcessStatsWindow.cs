@@ -13,9 +13,15 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Native;
 /// <c>PipeWireNativeStream.OnProcess</c> used to call <c>LogInformation</c> itself every 10 s, which
 /// meant a params-array allocation, a <c>DateTime.UtcNow</c> read on every callback, and whatever the
 /// logging pipeline does synchronously (level checks, enrichment, the async sink's queue) — all on the
-/// thread that feeds the BT audio. ⚠ It is also the hard prerequisite of <c>LOG-10</c> (O4): promoting
-/// that thread to <c>SCHED_FIFO</c> while it still logs risks a priority-inversion hang on a box
-/// reachable only by SSH.
+/// thread that feeds the BT audio. It is a prerequisite of <c>LOG-10</c> (O4): promoting that thread to
+/// <c>SCHED_FIFO</c> while it logs risks a priority-inversion hang on a box reachable only by SSH.
+/// </para>
+/// <para>
+/// ⛔ <b>Logging was one of several blockers, not the only one — LOG-6 does not discharge O4.</b> The
+/// same thread still takes <c>BufferedSoundGenerator.AddSamples</c>' ring-buffer lock (shared with the
+/// non-real-time mixer reader: the textbook inversion shape), still reaches
+/// <c>SrcVariableResampler.Process</c>' warning (<c>LOG-8</c>), and the loop's <c>OnStateChanged</c>
+/// callback still logs. <c>LOG-10</c> stays blocked on those.
 /// </para>
 /// <para>
 /// So the split is: the <c>Record*</c> methods are called on the callback thread and do only plain
@@ -25,18 +31,20 @@ namespace Radio.Infrastructure.Platform.Bluetooth.Native;
 /// </para>
 /// <para>
 /// <b>Cross-thread contract.</b> Exactly one thread records (the PipeWire loop) and one emits (the
-/// watchdog). The emitter reads the window's fields without synchronization — 64-bit reads are atomic on
-/// the x64 and ARM64 targets — and then <em>requests</em> a window reset rather than performing it; the
+/// watchdog). The emitter snapshots the window into locals — aligned 64-bit reads are atomic on the x64
+/// and ARM64 targets — then immediately <em>requests</em> a window reset, and only then logs; the
 /// recorder performs the reset at the start of its next callback. The consequence, stated rather than
-/// hidden: a callback that lands between the emitter's read and that reset is counted in the
-/// cumulative totals but its interval and execution time are dropped from both windows. That is at most
-/// one callback per 10 s window, in a diagnostic.
+/// hidden: callbacks that land between the snapshot and the recorder's next reset check are counted in
+/// the cumulative totals but their interval and execution time are dropped from both windows —
+/// normally none or one, since the snapshot and the request are adjacent instructions. The unit tests
+/// are single-threaded and do not exercise this interleaving.
 /// </para>
 /// <para>
 /// ⚠ <b>The emitted line is a liveness heartbeat as well as a statistic.</b>
 /// <c>scripts/research/bt_stall_detect.py</c> reports a stall when <c>PipeWire OnProcess</c> goes silent
-/// during capture. The line is therefore emitted only when at least one callback arrived since the last
-/// one — a stalled stream stays silent here exactly as it did when the callback logged for itself.
+/// during capture. The line is therefore emitted only when a callback has run since the last one — shown
+/// by that callback having consumed the reset request — so a stalled stream stays silent here exactly as
+/// it did when the callback logged for itself.
 /// </para>
 /// </remarks>
 internal sealed class OnProcessStatsWindow
@@ -62,9 +70,6 @@ internal sealed class OnProcessStatsWindow
   private long _lastEmitTimestamp;
   private bool _realtimeResultLogged;
 
-  /// <summary>Cumulative callback count. Safe to read from any thread.</summary>
-  public long Count => Interlocked.Read(ref _count);
-
   /// <summary>
   /// Callback thread: one callback started, <paramref name="intervalMs"/> after the previous one (pass a
   /// negative value for the first callback, which has no interval).
@@ -87,7 +92,9 @@ internal sealed class OnProcessStatsWindow
       }
       if (intervalMs < _minIntervalMs)
       {
-        _minIntervalMs = intervalMs;
+        // Release after max: an emitter that reads min first (acquire) then max never sees this min
+        // paired with an older max — the min > max shape ARM64 would otherwise permit.
+        Volatile.Write(ref _minIntervalMs, intervalMs);
       }
       if (intervalMs < 1.0)
       {
@@ -95,7 +102,8 @@ internal sealed class OnProcessStatsWindow
       }
     }
 
-    // Volatile so the emitter's "did anything arrive" comparison sees a current value.
+    // Single writer, so a plain increment is exact. The release ordering is what matters: an emitter
+    // that observes this count also observes the reset and window writes that preceded it.
     Volatile.Write(ref _count, _count + 1);
   }
 
@@ -109,8 +117,9 @@ internal sealed class OnProcessStatsWindow
   }
 
   /// <summary>
-  /// Callback thread: the outcome of the one-time <c>SCHED_FIFO</c> request. The errno must be read by
-  /// the caller on the same thread, immediately after the call.
+  /// Callback thread: the outcome of the one-time <c>SCHED_FIFO</c> request.
+  /// <paramref name="errno"/> is <c>pthread_setschedparam</c>'s <em>return value</em>: it reports the
+  /// error number directly and does not set <c>errno</c>.
   /// </summary>
   public void RecordRealtimeResult(bool applied, int errno, int priority)
   {
@@ -149,9 +158,10 @@ internal sealed class OnProcessStatsWindow
     }
 
     var count = Volatile.Read(ref _count);
-    if (count == _countAtLastEmit)
+    if (count == _countAtLastEmit || Volatile.Read(ref _resetRequested) != 0)
     {
-      // Nothing arrived since the last line: stay silent, so silence still means "stalled".
+      // Nothing arrived since the last line — no new count, or no callback has yet consumed the reset
+      // that line requested. Stay silent, so silence still means "stalled".
       return false;
     }
 
@@ -161,18 +171,24 @@ internal sealed class OnProcessStatsWindow
       return false;
     }
 
-    var min = _minIntervalMs;
+    // Snapshot, request the reset, THEN log: the window between reading and requesting stays two
+    // instructions wide however long the logging call takes. min is read first (acquire) — see
+    // RecordCallback.
+    var min = Volatile.Read(ref _minIntervalMs);
+    var max = _maxIntervalMs;
+    var execution = _maxExecutionMs;
+    var bursts = Volatile.Read(ref _bursts);
+    Volatile.Write(ref _resetRequested, 1);
+    _countAtLastEmit = count;
+    _lastEmitTimestamp = nowTimestamp;
+
     logger.LogInformation(
       "🔬 PipeWire OnProcess: count={Count}, interval min={Min:F2}ms max={Max:F2}ms, " +
       "bursts={Bursts}, execution max={Exec:F2}ms",
       count,
       min == double.MaxValue ? 0 : min,
-      _maxIntervalMs, Volatile.Read(ref _bursts),
-      _maxExecutionMs);
-
-    _countAtLastEmit = count;
-    _lastEmitTimestamp = nowTimestamp;
-    Volatile.Write(ref _resetRequested, 1);
+      max, bursts,
+      execution);
     return true;
   }
 }
