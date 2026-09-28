@@ -239,6 +239,36 @@ Booting with the knobs **already** unplugged raises no toast at all — just the
 assumption that whoever unplugged them knows. Booting *into* a configuration fault does raise its
 toast, once, as soon as a browser is there to receive it.
 
+#### After any re-flash — the firmware output-report check (`ENC-19`)
+
+**RotaryUsb [#11](https://github.com/mmackelprang/RotaryUsb/pull/11) must be in every build flashed to the
+encoder.** Before it, the C++ firmware dropped every report arriving on its interrupt OUT endpoint: config
+pushes, read-config requests, all accepted by the kernel and ignored by the device. Flashing an older build
+reinstates that silently, and the device runs whatever is in its flash — on a factory-default Pico, volume
+acceleration at ×50. Record: [`design/research/ENC-11-firmware-drops-output-reports.md`](research/ENC-11-firmware-drops-output-reports.md).
+
+**The console checks this at every connection**, before the configuration push: it sends command `0x04`
+(read config) and waits for a full **107-byte Input Report `0x02`**. Up to three attempts (the push's own
+retry budget). The outcome is in `GET /api/integrations/encoder/provisioning` as `firmwareCheck`
+(`NotRun` / `Passed` / `Failed`) and on **System Config → Integrations → Rotary Encoders** as a
+*Firmware:* line. A failure is surfaced through the hard-fault path above, not a channel of its own: the
+push that follows cannot verify either, so the tier is `HardFault`, and the badge's accessible name and
+the toast name the cause — *"Knob firmware is ignoring its settings — Volume is limited. The knob
+controller needs re-flashing with a RotaryUsb build that includes #11."* It is also logged at **Error**,
+so it reaches `journalctl -u radio-api` (the file sink has the `Passed` line at Information). Any later
+read-back — a successful Re-apply — turns it back to `Passed`.
+
+**By hand, after a flash**, if the console is not running (the command the fix was verified with):
+
+```text
+write 03 04 00        (report 0x03, command 0x04 = read config)
+-> expect exactly one Input Report 0x02 of 107 bytes
+-> a pre-#11 build answers with diagnostics (report 0x04) only
+```
+
+To see the failure path on the box without a bad flash, run the ENC-17 harness with
+`--drop-output-reports`: it behaves like pre-#11 firmware.
+
 ### Setup Steps
 
 **Step 1: Connect the Pico**

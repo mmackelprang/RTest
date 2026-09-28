@@ -516,6 +516,10 @@ class VirtualEncoder:
         self.descriptor = descriptor
         self.verbose = verbose
 
+        # ENC-19: when True, behave like the pre-RotaryUsb #11 C++ firmware -- accept every
+        # host-to-device report and act on none of them. Set by --drop-output-reports.
+        self.drop_output_reports = False
+
         self.fd = None
         self._usbipd = None
         self._write_lock = threading.Lock()
@@ -761,6 +765,11 @@ class VirtualEncoder:
     def _on_host_report(self, report: bytes):
         self.stats["outputs_received"] += 1
         if not report:
+            return
+        if self.drop_output_reports:
+            # The defect RotaryUsb #11 fixed: reports on the interrupt OUT endpoint arrived with
+            # report_id 0 and matched no branch, so they were dropped without a word.
+            self._log(f"host report 0x{report[0]:02x} dropped (--drop-output-reports: pre-#11 firmware)")
             return
         report_id = report[0]
 
@@ -1176,6 +1185,9 @@ def main(argv=None):
     parser.add_argument("--no-unbind", action="store_true",
                         help="do not unbind/rebind the real device (use when it is already absent)")
     parser.add_argument("--quiet", action="store_true", help="suppress [gadget] chatter")
+    parser.add_argument("--drop-output-reports", action="store_true",
+                        help="behave like pre-RotaryUsb #11 firmware: accept and ignore every "
+                             "host-to-device report (ENC-19 negative test)")
     args = parser.parse_args(argv)
 
     if args.selftest:
@@ -1238,6 +1250,7 @@ def main(argv=None):
 
     device = VirtualEncoder(args.name, args.vid, args.pid, args.uniq, descriptor,
                             verbose=not args.quiet)
+    device.drop_output_reports = args.drop_output_reports
     harness = Harness(device)
 
     deadline = time.time() + args.max_seconds

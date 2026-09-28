@@ -49,7 +49,9 @@ Encoders are `0 = VOLUME`, `1 = SOURCE`, `2 = PRESETS`, `3 = TUNING`.
 
 Flags worth knowing: `--selftest` (frame checks, no root, runs on any OS), `--check-descriptor`
 (compare the embedded descriptor against the live device), `--cleanup` (tear down leftovers
-after a hard kill), `--settle-seconds`, `--max-seconds`, `--no-unbind`.
+after a hard kill), `--settle-seconds`, `--max-seconds`, `--no-unbind`, and
+`--drop-output-reports` (behave like pre-RotaryUsb #11 firmware — accept every host-to-device report
+and act on none, which is how `ENC-19`'s firmware check is shown to fail on the box).
 
 ---
 
