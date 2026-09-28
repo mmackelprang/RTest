@@ -282,6 +282,183 @@ public class DuckingReachesTheActiveSourceTests
     }
   }
 
+  // --- AUD-26: a duck survives the source's own registration ---
+  //
+  // ⚠ WHAT "REGISTRATION" MEANS IN THESE TESTS. The production registration path (PlayComponentAsync
+  // and its three siblings) needs a MiniAudio device, so a device-less service returns before it
+  // registers anything. Each source below therefore does, in its PlayAsync, the two steps every
+  // Play*Async performs on its key: StopAsync(key) FIRST, then register and read the stored
+  // multiplier back. AUD-26 lives entirely in that ordering — the stop used to remove the multiplier
+  // the registration then looked for — so a test that registered WITHOUT the preceding stop would
+  // pass on the broken tree. Keep the stop.
+
+  [Fact]
+  public async Task ASourceSwitchedInDuringADuckRegistersDucked()
+  {
+    // ⭐ AUD-26 ITSELF. A duck to 20% is in effect and the user switches source. The incoming source
+    // must come up at 0.2, not 1.0.
+    //
+    // MUTATION: restore `_duckingMultipliers.Remove(sourceId);` in SoundFlowPlaybackService.StopAsync
+    // and this goes red with "expected 0.2000, was 1.0000".
+    var h = await CreateAsync();
+    await using (h.Manager)
+    {
+      h.Ducking.Setup(d => d.IsDucking).Returns(true);
+      h.Ducking.Setup(d => d.CurrentDuckLevel).Returns(20f);
+
+      var incoming = NewComponent();
+      var vinyl = CreateRegisteringSource(AudioSourceType.Vinyl, "Vinyl", h.Playback, () => incoming);
+
+      await h.Manager.SwitchSourceAsync(vinyl.Object);
+
+      AssertVolume(0.2f, incoming, "a source switched in mid-duck must inherit the duck");
+    }
+  }
+
+  [Fact]
+  public async Task TheActiveSourceReRegisteringDuringADuckStaysDucked()
+  {
+    // The OTHER paths the dossier asked about. A FilePlayer track change, a Bluetooth capture
+    // recovery and an SDR restart all re-register the ACTIVE source under its own key while the duck
+    // may be sustained — and a sustained duck raises no further level events to correct it. Same
+    // stop-then-register ordering, no source switch involved.
+    //
+    // MUTATION: as above — restoring the Remove in StopAsync turns this red at 1.0.
+    var h = await CreateAsync();
+    await using (h.Manager)
+    {
+      var first = NewComponent();
+      h.Playback.RegisterComponentForTests(h.Source.Object.Id, first, baseVolume: 1.0f);
+      RaiseDuckLevel(h.Ducking, from: 100f, to: 20f, complete: true);
+      AssertVolume(0.2f, first, "precondition: the duck must have landed");
+
+      await h.Playback.StopAsync(h.Source.Object.Id);
+      var second = NewComponent();
+      h.Playback.RegisterComponentForTests(h.Source.Object.Id, second, baseVolume: 1.0f);
+
+      AssertVolume(0.2f, second, "re-registering the active source mid-duck must keep it ducked");
+    }
+  }
+
+  [Fact]
+  public async Task ASourceSwitchedInWithNoDuckRunningDropsAStaleMultiplier()
+  {
+    // The price of the fix above, paid here. A multiplier now survives a stop, so one stranded on a
+    // source would be picked up by that source's next registration and play it quiet with no duck
+    // running. SwitchSourceAsync clears the incoming source's entry when nothing is ducking.
+    //
+    // MUTATION: delete the `else { ClearDuckingMultiplier(source.Id); }` arm in
+    // AudioManager.SwitchSourceAsync and this goes red at 0.2.
+    var h = await CreateAsync();
+    await using (h.Manager)
+    {
+      h.Ducking.Setup(d => d.IsDucking).Returns(false);
+
+      var incoming = NewComponent();
+      var vinyl = CreateRegisteringSource(AudioSourceType.Vinyl, "Vinyl", h.Playback, () => incoming);
+      h.Playback.SetDuckingMultiplier(vinyl.Object.Id, 0.2f);
+
+      await h.Manager.SwitchSourceAsync(vinyl.Object);
+
+      AssertVolume(1.0f, incoming, "with no duck in effect a stale multiplier must not reach the new source");
+    }
+  }
+
+  [Fact]
+  public async Task DuckingEndedClearsMultipliersStrandedOnSourcesThatAreNotActive()
+  {
+    // The other half of the price. An entry on a NON-active key — the shape a fade step leaves when it
+    // read _activeSource just before a switch replaced it — must not outlive the duck.
+    //
+    // MUTATION: delete the ClearAllDuckingMultipliers() call in AudioManager.OnDuckingStateChanged and
+    // this goes red at 0.2.
+    var h = await CreateAsync();
+    await using (h.Manager)
+    {
+      var active = NewComponent();
+      h.Playback.RegisterComponentForTests(h.Source.Object.Id, active, baseVolume: 1.0f);
+      var stranded = NewComponent();
+      h.Playback.RegisterComponentForTests("Vinyl-stranded", stranded, baseVolume: 1.0f);
+      h.Playback.SetDuckingMultiplier("Vinyl-stranded", 0.2f);
+      AssertVolume(0.2f, stranded, "precondition: the stranded entry must be attenuating");
+
+      h.Ducking.Raise(d => d.DuckingStateChanged += null, h.Ducking.Object,
+        new DuckingStateChangedEventArgs { IsDucking = false, ActiveEventCount = 0 });
+
+      AssertVolume(1.0f, stranded, "ducking ended, so no source may stay attenuated");
+      AssertVolume(1.0f, active, "the active source must be restored as before");
+      VerifyInformationContaining(h.Logger, "otherEntriesCleared=1", Times.Once());
+    }
+  }
+
+  [Fact]
+  public async Task SwitchingAwayMidDuckAndBackAfterItEndsLeavesTheFirstSourceAtFullVolume()
+  {
+    // ⭐ TTS-6's scenario, end to end: "switch sources mid-announcement and source A stays permanently
+    // attenuated". The late fade step is injected directly — SetDuckingMultiplier on A AFTER the
+    // switch has cleared A — because that race is the only way this tree can strand an entry.
+    //
+    // ⚠ HONEST ABOUT WHAT THIS PINS. This is GREEN ON THE PRE-AUD-26 TREE: there, A's own
+    // re-registration wiped the stranded entry. It is a guard on the invariant AUD-26 moved, not a
+    // reproduction of a live bug. Two independent clears now protect it — the switch-in clear and
+    // the ducking-ended clear-all — so it goes red only when BOTH are removed (measured); either
+    // mutation alone is caught by its own test above.
+    var h = await CreateAsync();
+    await using (h.Manager)
+    {
+      var aFirst = NewComponent();
+      h.Playback.RegisterComponentForTests(h.Source.Object.Id, aFirst, baseVolume: 1.0f);
+      h.Ducking.Setup(d => d.IsDucking).Returns(true);
+      h.Ducking.Setup(d => d.CurrentDuckLevel).Returns(20f);
+      RaiseDuckLevel(h.Ducking, from: 100f, to: 20f, complete: true);
+
+      var bComponent = NewComponent();
+      var b = CreateRegisteringSource(AudioSourceType.Vinyl, "Vinyl", h.Playback, () => bComponent);
+      await h.Manager.SwitchSourceAsync(b.Object);
+      AssertVolume(0.2f, bComponent, "precondition: B inherited the duck");
+
+      // The late fade step: it read _activeSource == A before the switch, and writes after it.
+      h.Playback.SetDuckingMultiplier(h.Source.Object.Id, 0.2f);
+
+      h.Ducking.Setup(d => d.IsDucking).Returns(false);
+      h.Ducking.Raise(d => d.DuckingStateChanged += null, h.Ducking.Object,
+        new DuckingStateChangedEventArgs { IsDucking = false, ActiveEventCount = 0 });
+      AssertVolume(1.0f, bComponent, "B released at duck end");
+
+      var aSecond = NewComponent();
+      MakeRegistering(h.Source, h.Playback, () => aSecond);
+      await h.Manager.SwitchSourceAsync(h.Source.Object);
+
+      AssertVolume(1.0f, aSecond, "A must come back at full volume once the duck has ended");
+    }
+  }
+
+  private static Mock<IPrimaryAudioSource> CreateRegisteringSource(
+    AudioSourceType type, string name, SoundFlowPlaybackService playback,
+    Func<global::SoundFlow.Abstracts.SoundComponent> component)
+  {
+    var source = CreateMockPrimarySource(type, name);
+    MakeRegistering(source, playback, component);
+    return source;
+  }
+
+  /// <summary>
+  /// Makes the mock's PlayAsync do what every real source's start does to its playback key: stop it,
+  /// then register. See the note at the head of the AUD-26 section for why the stop is essential.
+  /// </summary>
+  private static void MakeRegistering(
+    Mock<IPrimaryAudioSource> source, SoundFlowPlaybackService playback,
+    Func<global::SoundFlow.Abstracts.SoundComponent> component)
+  {
+    source.Setup(s => s.PlayAsync(It.IsAny<CancellationToken>()))
+      .Returns(async () =>
+      {
+        var id = source.Object.Id;
+        await playback.StopAsync(id);
+        playback.RegisterComponentForTests(id, component(), baseVolume: 1.0f);
+      });
+  }
+
   // --- Harness ---
 
   private sealed record Harness(
