@@ -24,8 +24,8 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
       private class TestBufferedGenerator<T> : BufferedSoundGenerator<T> where T : struct
       {
           public TestBufferedGenerator(AudioEngine engine, AudioFormat format, ILogger logger,
-              IMetricsCollector? metricsCollector = null)
-              : base(engine, format, logger, metricsCollector: metricsCollector) { }
+              IMetricsCollector? metricsCollector = null, TimeProvider? timeProvider = null)
+              : base(engine, format, logger, metricsCollector: metricsCollector, timeProvider: timeProvider) { }
 
           public int Read(Span<float> buffer)
           {
@@ -143,19 +143,21 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
       [Fact]
       public void Underrun_LogsAtWarning_WithThrottle()
       {
-          // Arrange
+          // Arrange. LOG-7: the Warning is written by the diagnostics timer, so drive it.
           var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
           var generator = new TestBufferedGenerator<float>(
-              _engineMock.Object, format, _loggerMock.Object);
+              _engineMock.Object, format, _loggerMock.Object, timeProvider: time);
 
           // Seed _totalSamplesReceived > 0
           generator.AddSamples(new float[] { 0.1f, 0.2f });
           var drain = new float[2];
           generator.Read(drain);
 
-          // Act: trigger an underrun
+          // Act: trigger an underrun, then let the diagnostics timer tick
           var output = new float[8];
           generator.Read(output);
+          time.Advance(TimeSpan.FromSeconds(1));
 
           // Assert: the underrun log is at Warning level (existing behavior).
           _loggerMock.Verify(
@@ -260,10 +262,10 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
           generator.AddSamples(prefill);
           generator.Read(output); readCount++;
 
-          // Wait > 2 s between each subsequent read so the drift-check timer fires.
+          // No sleeps: the 2 s cooldown these waited out was removed by Path C, and since LOG-7 the drift
+          // check reads no clock at all.
           for (int check = 0; check < 4; check++)
           {
-              Thread.Sleep(2100);
               // Top up just enough to keep level draining but under threshold.
               generator.AddSamples(new float[256]);
               generator.Read(output); readCount++;
@@ -289,10 +291,11 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
       [Fact]
       public void DriftCompensation_LogsAtInformation_WhenTriggered()
       {
-          // Arrange
+          // Arrange. LOG-7: the line is written by the diagnostics timer, so drive it.
           var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
+          var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
           var generator = new TestBufferedGenerator<float>(
-              _engineMock.Object, format, _loggerMock.Object);
+              _engineMock.Object, format, _loggerMock.Object, timeProvider: time);
 
           // Same setup as compensation counter test
           var prefill = new float[10_000];
@@ -305,12 +308,14 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
           generator.AddSamples(prefill);
           generator.Read(output);
 
+          // No sleeps: since LOG-7 the drift check has no wall-clock component (it used to wait out
+          // a DateTime-based cooldown here, 8.4 s per run).
           for (int check = 0; check < 4; check++)
           {
-              Thread.Sleep(2100);
               generator.AddSamples(new float[256]);
               generator.Read(output);
           }
+          time.Advance(TimeSpan.FromSeconds(1));
 
           // Assert: the compensation log is now at Information level (the change being tested).
           _loggerMock.Verify(
@@ -363,7 +368,7 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
           var output = new float[512];
 
           generator.AddSamples(prefill);
-          generator.Read(output); // anchor _lastDriftCheckTime
+          generator.Read(output); // first drift check: anchors the level
 
           // Tight loop — no Thread.Sleep, because Path C removed the 2-second cooldown.
           // Refill just enough each iteration to keep the drain going under the threshold.
