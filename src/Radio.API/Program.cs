@@ -138,7 +138,10 @@ builder.Services.AddSingleton<ISleepService>(sp => sp.GetRequiredService<SleepSe
 
 // ENC-22: power the panel off after Sleep:PanelOffAfterMinutes on the sleep screen (0 = off, the
 // shipped default); any knob wakes it. Linux only — it drives Mutter over the session bus. Registered
-// before the other hosted services so its unconditional start-up power-on is the first thing to run.
+// here, ahead of the audio-engine, encoder and phone hosted services (not ahead of every hosted
+// service — AddRadioServices and a few above register earlier): its unconditional start-up power-on
+// runs before the encoder can deliver input, and because hosted services stop in reverse order it
+// stops after the encoder, so its shutdown power-on is the last word.
 builder.Services.Configure<Radio.Core.Configuration.PanelPowerOptions>(
   builder.Configuration.GetSection(Radio.Core.Configuration.PanelPowerOptions.SectionName));
 if (OperatingSystem.IsLinux())

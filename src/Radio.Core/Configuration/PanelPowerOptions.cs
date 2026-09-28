@@ -3,7 +3,8 @@ namespace Radio.Core.Configuration;
 /// <summary>
 /// Panel power-off in sleep (<c>ENC-22</c>). Bound from the <c>Sleep</c> configuration section and
 /// read through <c>IOptionsMonitor</c>, so an edit to <c>appsettings.Production.json</c> takes effect
-/// at the next sleep-screen entry without a restart.
+/// without a restart — including on a console already sitting on the sleep screen, where the change
+/// re-arms the countdown from the moment it is read.
 /// </summary>
 public class PanelPowerOptions
 {

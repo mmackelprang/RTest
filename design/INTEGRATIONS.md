@@ -450,14 +450,28 @@ which never reached DPMS-off.
 3. **Panel on unconditionally at `radio-api` start-up and at a clean stop**, and `ExecStopPost=` on
    `radio-api.service` powers it on whenever the service stops — crash, `systemctl stop`, deploy. On a box
    whose unit predates `ENC-22` the same line is the drop-in
-   `/etc/systemd/system/radio-api.service.d/panel-power-on.conf` (`deploy/provision/`). **Verify systemd
-   actually parsed it** — it silently drops an `Exec` line it cannot parse:
-   `systemctl show radio-api -p ExecStopPost` must show the `gdbus` argv.
-4. A power-on the compositor did not confirm is retried (5 s, doubling to 5 min), and a knob input keeps
-   treating the panel as dark until one is confirmed.
+   `/etc/systemd/system/radio-api.service.d/panel-power-on.conf`, which `deploy/provision/provision.sh`
+   installs. ⚠ **`Deploy-ToLinux.ps1` installs neither** — it only runs `daemon-reload` — so a box gets
+   this backstop from provisioning (or by hand), not from a deploy. `radio` has the drop-in since
+   2026-09-28. **Verify systemd actually parsed it before enabling the feature** — it silently drops an
+   `Exec` line it cannot parse: `systemctl show radio-api -p ExecStopPost` must show the `gdbus` argv.
+4. A power-off the compositor did not **confirm** is treated as possibly landed: the panel is assumed
+   dark and a power-on is sent at once (gdbus reports failure on a reply timeout, so "not confirmed"
+   is not "did not happen"). A power-on the compositor did not confirm is retried (5 s, doubling to
+   5 min), and until one is confirmed a knob input keeps treating the panel as dark — consumed, and
+   another power-on sent.
 5. The sleep screen closing by any route (REST wake, incoming call, navigation) lights the panel.
 
 Check state: `cat /sys/class/drm/card1-DP-1/dpms` (`On`/`Off`). Recovery is the Mutter command above.
+
+⚠ **Known limitation — a stale sleep-screen flag can dark a panel someone is using by touch.** The
+server learns the sleep screen is gone from `Sleep.razor`'s dispose report (best-effort, 2 s) and
+`MainLayout`'s corrective first-render report (fire-and-forget). If both are lost — a WiFi blip during
+a hard navigation — `IsSleepScreenVisible` stays `true` on an ordinary page, and `N` minutes later the
+panel powers off mid-use, because touch input never reaches `radio-api` to restart the countdown.
+Before `ENC-22` the same stale flag cost one consumed knob input. It is still knob-wakeable, so it is
+an annoyance rather than a lock-out; closing it needs a periodic re-report from the page, which is the
+same open follow-up `design/FUTURE-WORK.md` §7 records for the flag not surviving an API restart.
 
 ---
 

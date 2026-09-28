@@ -18,8 +18,10 @@ namespace Radio.Core.Interfaces;
 public interface IPanelPowerService
 {
   /// <summary>
-  /// True when the panel has been commanded off, or a command to turn it back on has not yet been
-  /// confirmed. A diagnostic read; the router decides through <see cref="OnEncoderInput"/>.
+  /// True when the panel has been commanded off, or may be dark and has not yet been confirmed back on
+  /// (after a confirmed or an unconfirmed power-off). False while the panel's state is merely unknown
+  /// at start-up, where the unconditional power-on is being retried in the background. A diagnostic
+  /// read; the router decides through <see cref="OnEncoderInput"/>.
   /// </summary>
   bool IsPanelOff { get; }
 

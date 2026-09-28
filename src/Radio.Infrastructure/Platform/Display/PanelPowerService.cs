@@ -141,16 +141,19 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
   /// <inheritdoc />
   public Task StartAsync(CancellationToken cancellationToken)
   {
-    lock (_gate)
-    {
-      _started = true;
-      _encoderConnectedSince = _encoder?.IsConnected == true ? _time.GetUtcNow() : null;
-    }
-
+    // Subscribe first, then read: a connect landing between the two is then seen by the handler
+    // rather than lost. (The handler ignores events until _started, so an event in the gap sets
+    // nothing; the read below then observes the connection it reported.)
     _sleep.SleepScreenVisibilityChanged += OnSleepScreenVisibilityChanged;
     if (_encoder is not null)
     {
       _encoder.ConnectionChanged += OnEncoderConnectionChanged;
+    }
+
+    lock (_gate)
+    {
+      _started = true;
+      _encoderConnectedSince = _encoder?.IsConnected == true ? _time.GetUtcNow() : null;
     }
 
     _optionsSubscription = _options.OnChange(_ => ReevaluateTimer());
@@ -240,7 +243,7 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
 
     if (powerOn)
     {
-      _logger.LogInformation("Panel power: {Source} powered the panel on; input consumed", source);
+      _logger.LogInformation("Panel power: {Source} on a dark panel; requested power-on, input consumed", source);
       KickPump();
     }
 
@@ -250,9 +253,10 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
   private void OnSleepScreenVisibilityChanged(object? sender, bool visible)
   {
     // The field is re-read rather than trusting the argument: SleepService's report is lock-free and a
-    // concurrent pair of reports can deliver their events out of order. Reading the settled value means
-    // the last event to arrive decides from the last write, and every interleaving that still gets it
-    // wrong leaves the timer DISarmed — the panel stays on, which is the safe direction.
+    // concurrent pair of reports can deliver their events out of order. Reading the settled value
+    // narrows that, but does not close it — a handler can read the field before a later write and take
+    // _gate after that write's handler, arming the timer for a screen that is now hidden. What makes
+    // that harmless is OnOffTimer re-checking IsSleepScreenVisible at the moment it would power off.
     bool nowVisible = _sleep.IsSleepScreenVisible;
     bool powerOn = false;
 
@@ -337,10 +341,21 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
 
     lock (_gate)
     {
-      if (!_offTimerArmed || _time.GetUtcNow() < _offDueAt)
+      if (!_offTimerArmed)
       {
-        // Disarmed, or re-armed since this callback was scheduled. The timer has been re-pointed at
-        // the new due time already; this firing is stale.
+        return;
+      }
+
+      DateTimeOffset firedAt = _time.GetUtcNow();
+      if (firedAt < _offDueAt)
+      {
+        // Early by the wall clock. Either a stale firing from before a re-arm, or the real timer —
+        // which runs on a monotonic tick — landing a little ahead of GetUtcNow(), or an NTP step
+        // backwards. Re-point at the remaining time rather than dropping it: returning here used to
+        // lose the firing for the whole sleep period (pre-merge review, M1).
+        TimeSpan remaining = _offDueAt - firedAt;
+        _offTimer.Change(remaining < TimeSpan.FromMilliseconds(1) ? TimeSpan.FromMilliseconds(1) : remaining,
+          Timeout.InfiniteTimeSpan);
         return;
       }
 
@@ -482,8 +497,13 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
 
         if (!target)
         {
-          // A power-off that did not land: the panel is presumably still lit, so stop wanting it off.
-          // The loop then settles, or (if the start-up power-on never landed either) re-sends "on".
+          // A power-off that was NOT CONFIRMED — which is not the same as one that did not land. gdbus
+          // times out on the reply, not on the request, so a slow compositor can take the panel dark
+          // and still report failure. Assume the worst: treat the panel as dark (so a knob keeps
+          // consuming and kicking) and stop wanting it off, which makes the loop send "on" next.
+          // Settling here instead — "presumably still lit" — left a possibly-dark panel with every
+          // knob dispatching and nothing ever sending "on" (pre-merge review, H1).
+          _appliedOn = false;
           _desiredOn = true;
           continue;
         }

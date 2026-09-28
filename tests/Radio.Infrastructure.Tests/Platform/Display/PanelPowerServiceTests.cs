@@ -491,8 +491,11 @@ public class PanelPowerServiceTests
   }
 
   [Fact]
-  public async Task APowerOffThatDidNotLand_LeavesThePanelTreatedAsLit()
+  public async Task AnUnconfirmedPowerOff_IsFollowedByAPowerOn()
   {
+    // Pre-merge review H1. gdbus reports failure on a reply timeout, not a request failure, so a slow
+    // compositor can take the panel dark AND report the off as failed. Treating that as "still lit"
+    // left a possibly-dark panel with every knob dispatching and nothing ever sending "on".
     using var h = new Harness(minutes: 10);
     await h.StartAsync();
     h.Sleep.Show(true);
@@ -500,7 +503,29 @@ public class PanelPowerServiceTests
     h.Control.Results.Enqueue(false);
     await h.AdvanceAsync(TimeSpan.FromMinutes(10));
 
+    Assert.Equal([true, false, true], h.Control.Commands);
     Assert.False(h.Service.IsPanelOff);
     Assert.False(h.Service.OnEncoderInput("encoder-turn"));
+  }
+
+  [Fact]
+  public async Task AnUnconfirmedPowerOff_FollowedByAnUnconfirmedPowerOn_KeepsTheKnobAWakeSource()
+  {
+    // Both halves unconfirmed: the panel may be dark, so a knob must still be consumed and must kick
+    // another power-on rather than dispatching into what may be a black screen.
+    using var h = new Harness(minutes: 10);
+    await h.StartAsync();
+    h.Sleep.Show(true);
+
+    h.Control.Results.Enqueue(false);
+    h.Control.Results.Enqueue(false);
+    await h.AdvanceAsync(TimeSpan.FromMinutes(10));
+    Assert.True(h.Service.IsPanelOff);
+
+    Assert.True(h.Service.OnEncoderInput("encoder-turn"));
+    await h.Service.PumpIdle;
+
+    Assert.Equal([true, false, true, true], h.Control.Commands);
+    Assert.False(h.Service.IsPanelOff);
   }
 }
