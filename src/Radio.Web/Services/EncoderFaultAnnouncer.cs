@@ -59,8 +59,13 @@ public sealed class EncoderFaultAnnouncer
   /// Disappearing mid-session gets a toast, because it is surprising and may land mid-interaction.
   /// Those are the same <c>IsConnected == false</c> and they are not the same event.
   /// </param>
+  /// <param name="firmwareCheck">
+  /// Serialized <c>RotaryEncoderFirmwareCheck</c> (ENC-19). Changes only the <i>copy</i> of a hard-fault
+  /// toast, never whether one is raised: the level and the anti-storm rule are decided on
+  /// <paramref name="status"/> alone.
+  /// </param>
   public (string Summary, string Detail, EncoderFaultLevel Level)? Evaluate(
-    string? status, bool? isConnected, bool wasEverConnected)
+    string? status, bool? isConnected, bool wasEverConnected, string? firmwareCheck = null)
   {
     if (isConnected == false)
     {
@@ -91,7 +96,7 @@ public sealed class EncoderFaultAnnouncer
     }
 
     _highestAnnounced = level;
-    var faultCopy = EncoderFaultRules.NotificationCopy(status, isConnected);
+    var faultCopy = EncoderFaultRules.NotificationCopy(status, isConnected, firmwareCheck);
     return faultCopy is null ? null : (faultCopy.Value.Summary, faultCopy.Value.Detail, level);
   }
 }

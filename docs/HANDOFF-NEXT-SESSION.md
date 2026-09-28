@@ -208,6 +208,8 @@ Bluetooth — is the next row's work and is now cheap.
    the interrupt OUT endpoint. Flashing an older build silently reinstates the defect: every
    host-to-device write is accepted and ignored, so config pushes do nothing and nothing complains.
    Verify by sending command `0x04` — a working device answers with a 107-byte report `0x02`.
+   ✅ **Since `ENC-19` (2026-09-28) the console does this itself at every connection** and raises a
+   hard fault naming the re-flash if it fails (`design/INTEGRATIONS.md` §1, *After any re-flash*).
 
 7. **Shell heredocs with complex content keep failing in this environment.** Writing C# or Markdown
    through a nested Python string inside a bash heredoc broke repeatedly, including one case that

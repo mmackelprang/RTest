@@ -72,7 +72,7 @@ Shipped and deployed: `LOG-5` [#699](https://github.com/mmackelprang/RTest/pull/
 
 ## Phase 2g — panel power-off and firmware check
 
-Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707) — the panel powers off after a period on the sleep screen, and any knob wakes it. **It shipped DISABLED** because the check below needs your hand. `ENC-18` and `ENC-14` were skipped per D-A.
+Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707) — the panel powers off after a period on the sleep screen, and any knob wakes it. **It shipped DISABLED** because the check below needs your hand. ✅ `ENC-19` [#708](https://github.com/mmackelprang/RTest/pull/708) — the encoder firmware is checked at every connection. `ENC-18` and `ENC-14` were skipped per D-A.
 
 **What I verified on the box myself** (build `47b55ae`, timeout temporarily 1 min, virtual encoder harness; full table in [`queue/ENC-22.md`](../queue/ENC-22.md)):
 - (a) Sleep screen by the idle route: power-off after exactly 1 min, `dpms=Off`, and the encoder stays connected.
@@ -118,4 +118,11 @@ Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707)
 - [ ] **Known limitation (recorded, not fixed):** if both "sleep screen closed" reports are lost (a WiFi blip during a hard navigation), the server keeps believing the sleep screen is up. The panel can then go dark N minutes into normal touch use. It is still knob-wakeable. Details are in `design/INTEGRATIONS.md` §1.
 - [ ] **Not verified: `PowerSaveMode 0` sent to a panel that is already on.** It happens at every `radio-api` start and stop. I saw no kiosk disconnect and no `dpms` change, but I did not watch the panel for a flicker. Glance at it during the next restart.
 - **Build baseline moved to 32 warnings (Linux) from 33.** The warning that went is the `IDE0011` in the deleted `SleepService.SetDisplayPowerAsync`. I measured `main` and the branch side by side.
+
+**ENC-19 — what I verified, and what is left for you:**
+- ✅ **Real device (`radio`, build `f64d17a`):** `Encoder firmware check passed on attempt 1: read-config (0x04) was answered with a 107-byte report 0x02`. Provisioning shows `firmwareCheck: Passed`, `status: Configured`.
+- ✅ **Failure path, without a bad flash:** I ran the ENC-17 harness with the new `--drop-output-reports` flag, which behaves like pre-#11 firmware. The tier went `Transient → HardFault`, the Error reached `journalctl -u radio-api`, and the kiosk showed the toast *"Knob firmware is ignoring its settings — Volume is limited. The knob controller needs re-flashing with a RotaryUsb build that includes #11."* The Settings pill's label read *"Settings — knob firmware needs re-flashing, volume limited"*. After the harness exited, the real encoder came back `Passed` / `Configured`.
+- [ ] **Glance at System Config → Integrations → Rotary Encoders:** there is a new *Firmware:* line under *Saved to device*. **Pass:** it reads "processes settings ✓" in green. I checked the value through the API, not the rendered line.
+- [ ] **Next time you re-flash the Pico** (any reason), look at that line or the badge afterwards. That is the moment this exists for.
+- **Judgement call:** the check runs as a separate read-config *before* the configuration push. It does not infer the verdict from the push's own read-back, so "the firmware ignores writes" and "the config did not verify" can be told apart. On working firmware it costs one round-trip. On broken firmware the hard fault arrives after about 15 s instead of 7, with the volume clamp tight throughout.
 

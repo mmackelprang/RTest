@@ -1379,6 +1379,12 @@ public class EncoderConfigStatusDto
 
   /// <summary>The tier immediately before this change.</summary>
   public string PreviousStatus { get; set; } = "Unknown";
+
+  /// <summary>
+  /// Serialized <c>RotaryEncoderFirmwareCheck</c>: NotRun / Passed / Failed (ENC-19). An open string for
+  /// the same reason <see cref="Status"/> is; an older API that does not send it leaves "NotRun".
+  /// </summary>
+  public string FirmwareCheck { get; set; } = "NotRun";
 }
 
 /// <summary>
@@ -1511,6 +1517,9 @@ public class EncoderProvisioningDto
   public DateTimeOffset? LastSavedToDeviceUtc { get; set; }
   public EncoderFlashStateDto Flash { get; set; }
   public List<EncoderFieldStateDto> Fields { get; set; } = [];
+
+  /// <summary>Serialized <c>RotaryEncoderFirmwareCheck</c>: NotRun / Passed / Failed (ENC-19).</summary>
+  public string FirmwareCheck { get; set; } = "NotRun";
 }
 
 /// <summary>One row of <c>GET /api/integrations/encoder/mapping</c> (ENC-8).</summary>

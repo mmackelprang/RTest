@@ -177,4 +177,19 @@ public class EncoderFaultAnnouncerTests
     Assert.NotNull(first.Evaluate("Degraded", true, true));
     Assert.NotNull(new EncoderFaultAnnouncer().Evaluate("Degraded", true, true));
   }
+
+  [Fact]
+  public void AFirmwareHardFault_AnnouncesOnce_WithTheReflashCopy()
+  {
+    // ENC-19 rides on ENC-12's latch: same one-per-severity rule, cause named in the copy.
+    var sut = new EncoderFaultAnnouncer();
+
+    var first = sut.Evaluate("HardFault", isConnected: true, wasEverConnected: true, firmwareCheck: "Failed");
+    var second = sut.Evaluate("HardFault", isConnected: true, wasEverConnected: true, firmwareCheck: "Failed");
+
+    Assert.NotNull(first);
+    Assert.Equal(EncoderFaultLevel.Critical, first!.Value.Level);
+    Assert.Contains("re-flashing", first.Value.Detail);
+    Assert.Null(second);
+  }
 }

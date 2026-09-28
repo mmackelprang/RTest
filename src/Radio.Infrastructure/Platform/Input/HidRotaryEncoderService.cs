@@ -146,6 +146,15 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
 
   private RotaryEncoderConfigStatus _configStatus = RotaryEncoderConfigStatus.Unknown;
 
+  // ENC-19. Held as an int so it can be volatile: written by the read loop (a read-back arriving),
+  // by the boot push and by the disconnect reset, and read by request threads through GetSnapshot.
+  private volatile int _firmwareCheck = (int)RotaryEncoderFirmwareCheck.NotRun;
+
+  /// <summary>
+  /// Whether this connection's firmware has shown it processes output reports (<c>ENC-19</c>).
+  /// </summary>
+  internal RotaryEncoderFirmwareCheck FirmwareCheck => (RotaryEncoderFirmwareCheck)_firmwareCheck;
+
   /// <summary>
   /// Makes the compare-and-set in <see cref="ConfigStatus"/>'s setter atomic against the two threads
   /// that write it.
@@ -202,6 +211,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
       {
         Status = value,
         PreviousStatus = previous,
+        FirmwareCheck = FirmwareCheck,
       });
     }
   }
@@ -436,6 +446,10 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
       // the five call sites so a sixth added later cannot reintroduce the stale tier by omission.
       // Note the same value drives the host's volume clamp, and VolumeClampFor(Unknown) is the
       // TIGHT one, which is the correct direction for a device nobody can verify.
+      //
+      // ENC-19, the same reasoning: the next device plugged in may be running different firmware,
+      // so a verdict about the last one must not carry over to it.
+      _firmwareCheck = (int)RotaryEncoderFirmwareCheck.NotRun;
       ConfigStatus = RotaryEncoderConfigStatus.Unknown;
     }
 
@@ -483,7 +497,9 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     //
     // Measured on the appliance 2026-09-02: awaited, the boot push reported the timed-out tier with
     // every field "not read back"; started concurrently, it reports Configured with real read-back
-    // values. The three writes still land before the loop's first read, and the device's reply waits
+    // values. (Since ENC-19 a read-config request precedes those three writes — the firmware check in
+    // RunBootConfigurationPushAsync — and the same reasoning covers it.) The three writes still land
+    // before the loop's first read, and the device's reply waits
     // in the HID queue until the loop picks it up.
     //
     // ⚠ That measurement predates ENC-16, which moved the never-answered outcome from Degraded to
@@ -561,11 +577,15 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// one read-back slot.
   /// </para>
   /// </summary>
-  private async Task RunBootConfigurationPushAsync(HidStream stream, CancellationToken cancellationToken)
+  internal async Task RunBootConfigurationPushAsync(Stream stream, CancellationToken cancellationToken)
   {
     await _maintenanceLock.WaitAsync(cancellationToken);
     try
     {
+      // ENC-19 first: it asks only "does this firmware process output reports at all", which the push
+      // below cannot answer on its own — an unanswered push is also what a merely busy device looks
+      // like, and the two need different fixes (wait vs re-flash).
+      await CheckFirmwareAsync(stream, cancellationToken);
       await ApplyConfigurationAsync(stream, cancellationToken);
     }
     finally
@@ -594,7 +614,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// until the volume knob behaves as though it is on factory tiers.
   /// </para>
   /// </summary>
-  private async Task ApplyConfigurationAsync(HidStream stream, CancellationToken cancellationToken)
+  private async Task ApplyConfigurationAsync(Stream stream, CancellationToken cancellationToken)
   {
     // ENC-8. The designed table with the owner's direction overrides layered on. This one local is
     // both what gets encoded onto the wire and what the read-back is compared against, so a reverse
@@ -659,7 +679,113 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   }
 
   /// <summary>How long to wait for a <c>0x02</c> read-back. Unchanged from ENC-11's inline value.</summary>
-  private static readonly TimeSpan ReadBackTimeout = TimeSpan.FromSeconds(2);
+  /// <remarks>Settable only so a test of the never-answers path does not wait out real seconds.</remarks>
+  internal TimeSpan ReadBackTimeout { get; set; } = TimeSpan.FromSeconds(2);
+
+  /// <summary>Pause between firmware-check attempts; ENC-11's retry backoff by default.</summary>
+  /// <remarks>Settable for the same reason as <see cref="ReadBackTimeout"/>.</remarks>
+  internal Func<int, TimeSpan> FirmwareCheckBackoff { get; set; } =
+    attempt => TimeSpan.FromMilliseconds(RotaryEncoderConfigVerifier.RetryBackoffMs[attempt - 1]);
+
+  /// <summary>
+  /// The post-flash check <c>ENC-19</c> asks for, run once per connection before the configuration
+  /// push: send command <c>0x04</c> (read config) and wait for a full 107-byte Input Report
+  /// <c>0x02</c>.
+  ///
+  /// <para>
+  /// <b>What the verdict means.</b> An answer proves the firmware dispatches reports that arrive on
+  /// its interrupt OUT endpoint — the RotaryUsb #11 fix. No answer across
+  /// <see cref="RotaryEncoderConfigVerifier.TransientAttempts"/> attempts is read as the pre-#11 defect: every host write accepted and ignored, so the configuration
+  /// push that follows cannot change anything. A shorter report <c>0x02</c> does not count —
+  /// <see cref="RotaryEncoderConfigCodec.TryDecode"/> rejects anything under 107 bytes, so it is not
+  /// claimed as a read-back at all.
+  /// </para>
+  ///
+  /// <para>
+  /// ⚠ "Connected" is inferred, not checked: a write that throws, or the read loop failing the armed
+  /// waiter, ends the check without a verdict. An unplug landing during a backoff, followed by a write
+  /// the not-yet-disposed stream still accepts, can reach <c>Failed</c> for a device that is simply
+  /// gone; the disconnect reset then clears it, but the Error line has been logged.
+  /// </para>
+  ///
+  /// <para>
+  /// <b>How it is surfaced.</b> Not through a channel of its own. The push that follows cannot verify
+  /// either, so the tier normally lands on <see cref="RotaryEncoderConfigStatus.HardFault"/> (not
+  /// always — a disconnect mid-push ends in <c>Unknown</c>) — the red badge and
+  /// the "volume is limited" toast <c>ENC-12</c> already drives — and the verdict rides on that
+  /// transition (<see cref="EncoderConfigStatusEventArgs.FirmwareCheck"/>) so the copy can name the
+  /// cause. It is also in the provisioning snapshot the Settings page renders, and logged at Error,
+  /// which since <c>LOG-11</c> is what reaches journald.
+  /// </para>
+  ///
+  /// <para>
+  /// A read-back arriving at any later point — a successful push, the owner's Re-apply — sets
+  /// <see cref="RotaryEncoderFirmwareCheck.Passed"/> through <see cref="TryClaimConfigReadBack"/>, so a
+  /// check that failed on a slow boot corrects itself the moment the device proves otherwise.
+  /// </para>
+  /// </summary>
+  internal async Task<RotaryEncoderFirmwareCheck> CheckFirmwareAsync(Stream stream, CancellationToken cancellationToken)
+  {
+    // This connection's verdict starts here. The disconnect reset in RaiseConnectionChanged does not
+    // run on every reconnect: a read-side IOException returns from the read loop with _isConnected
+    // still true, and a device that re-enumerates inside one rescan is reopened without a false edge.
+    // Without this, a Passed from the previous connection would survive into the guard below and
+    // report re-flashed pre-#11 firmware as Passed (pre-merge review, M1).
+    _firmwareCheck = (int)RotaryEncoderFirmwareCheck.NotRun;
+
+    for (int attempt = 1; attempt <= RotaryEncoderConfigVerifier.TransientAttempts; attempt++)
+    {
+      RotaryEncoderDeviceConfig? readBack;
+      try
+      {
+        readBack = await RequestConfigReadBackAsync(stream, cancellationToken);
+      }
+      catch (Exception ex) when (ex is IOException or ObjectDisposedException)
+      {
+        // The device went away mid-check. No verdict: the reconnect runs the check again.
+        _logger.LogDebug(ex, "Encoder firmware check interrupted on attempt {Attempt}", attempt);
+        return FirmwareCheck;
+      }
+
+      if (readBack is not null)
+      {
+        _logger.LogInformation(
+          "Encoder firmware check passed on attempt {Attempt}: read-config (0x04) was answered with a " +
+          "107-byte report 0x02, so the firmware processes host-to-device reports (RotaryUsb #11 present)",
+          attempt);
+        return FirmwareCheck;
+      }
+
+      if (attempt < RotaryEncoderConfigVerifier.TransientAttempts)
+      {
+        await Task.Delay(FirmwareCheckBackoff(attempt), cancellationToken);
+      }
+    }
+
+    // A read-back may still have landed between the last timeout and here; it wins. Compare-and-swap
+    // rather than check-then-write, so a Passed set by the read loop in between cannot be overwritten.
+    if (Interlocked.CompareExchange(
+          ref _firmwareCheck, (int)RotaryEncoderFirmwareCheck.Failed, (int)RotaryEncoderFirmwareCheck.NotRun)
+        != (int)RotaryEncoderFirmwareCheck.NotRun)
+    {
+      return FirmwareCheck;
+    }
+
+    _logger.LogError(
+      "Encoder firmware check FAILED: the device is connected but did not answer read-config (0x04) " +
+      "with report 0x02 after {Attempts} attempts. This is the pre-RotaryUsb #11 defect - the firmware " +
+      "accepts host writes and ignores them, so the knob configuration cannot be applied and the device " +
+      "runs whatever is in its flash. Re-flash the encoder with a RotaryUsb build that includes #11 " +
+      "(design/research/ENC-11-firmware-drops-output-reports.md).",
+      RotaryEncoderConfigVerifier.TransientAttempts);
+
+    // Drain before the push starts. The wire carries no correlation id, so a slow device's late answer
+    // to the check's last request could otherwise be claimed as the push's first read-back and compared
+    // against the designed configuration — a spurious HardFault on attempt 1 (pre-merge review, L3).
+    // Only on this path: a passing check has already had its answer.
+    await Task.Delay(FirmwareCheckBackoff(RotaryEncoderConfigVerifier.TransientAttempts), cancellationToken);
+    return FirmwareCheck;
+  }
 
   /// <summary>
   /// Asks the device for its live configuration and waits for the read loop to hand it back.
@@ -671,7 +797,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// </summary>
   /// <returns>The device's configuration, or null if it did not answer within the timeout.</returns>
   private async Task<RotaryEncoderDeviceConfig?> RequestConfigReadBackAsync(
-    HidStream stream, CancellationToken cancellationToken)
+    Stream stream, CancellationToken cancellationToken)
   {
     TaskCompletionSource<RotaryEncoderDeviceConfig> tcs = ArmConfigReadBack();
 
@@ -724,6 +850,10 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     {
       return false;
     }
+
+    // ENC-19. Any full read-back proves output reports are processed — whoever asked for it. Set
+    // before the waiter is completed, so a tier transition the waiter goes on to cause carries it.
+    _firmwareCheck = (int)RotaryEncoderFirmwareCheck.Passed;
 
     Interlocked.Exchange(ref _pendingConfigRead, null)?.TrySetResult(readBack);
     return true;
@@ -881,6 +1011,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
         LastSavedToDeviceUtc = _lastSavedToDeviceUtc,
         Flash = _flashState,
         Fields = ProjectFields(_lastPushed, _lastReadBack),
+        FirmwareCheck = FirmwareCheck,
       };
     }
   }

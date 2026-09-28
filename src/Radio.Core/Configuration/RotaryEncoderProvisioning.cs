@@ -46,6 +46,42 @@ public enum RotaryEncoderFlashState
 }
 
 /// <summary>
+/// Whether the encoder's firmware processes host-to-device (output) reports (<c>ENC-19</c>).
+///
+/// <para>
+/// <b>Why this is checked at all.</b> Before RotaryUsb #11 the C++ firmware dropped every report
+/// arriving on its interrupt OUT endpoint — config pushes, read-config requests, all of them — while
+/// the kernel reported every write as a success. Flashing an older build reinstates that silently:
+/// <c>ENC-11</c>'s configuration push does nothing and the device runs whatever is in its flash,
+/// which on a factory-default Pico is volume acceleration at ×50. See
+/// <c>design/research/ENC-11-firmware-drops-output-reports.md</c>.
+/// </para>
+///
+/// <para>
+/// <b>The tell</b> is the one the fix was verified with: send command <c>0x04</c> (read config) and a
+/// working device answers with a 107-byte Input Report <c>0x02</c>; a broken one never answers it.
+/// </para>
+/// </summary>
+public enum RotaryEncoderFirmwareCheck
+{
+  /// <summary>Not yet checked on this connection (or no device connected).</summary>
+  NotRun = 0,
+
+  /// <summary>
+  /// The device answered a read-config request with a full 107-byte report <c>0x02</c>, so it is
+  /// processing output reports. Set by the start-up check or by any later read-back.
+  /// </summary>
+  Passed = 1,
+
+  /// <summary>
+  /// The device never answered a read-config request across the check's retry budget, with no write
+  /// failing along the way: read as accepting host writes and ignoring them — the pre-RotaryUsb #11
+  /// defect.
+  /// </summary>
+  Failed = 2,
+}
+
+/// <summary>
 /// Everything the encoder Settings surface renders, in one immutable read (ENC-8).
 ///
 /// <para>
@@ -83,6 +119,12 @@ public sealed record RotaryEncoderProvisioningSnapshot
 
   /// <summary>Every comparable field, designed value beside read-back value.</summary>
   public IReadOnlyList<RotaryEncoderFieldState> Fields { get; init; } = [];
+
+  /// <summary>
+  /// Whether the firmware processes host-to-device reports (<c>ENC-19</c>). <c>Failed</c> means the
+  /// device needs re-flashing with a build that includes RotaryUsb #11.
+  /// </summary>
+  public RotaryEncoderFirmwareCheck FirmwareCheck { get; init; } = RotaryEncoderFirmwareCheck.NotRun;
 }
 
 /// <summary>

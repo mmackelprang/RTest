@@ -66,4 +66,15 @@ public class EncoderConfigStatusDtoTests
     dto!.Status.Should().Be("Unknown");
     dto.PreviousStatus.Should().Be("Unknown");
   }
+
+  [Fact]
+  public void TheFirmwareVerdict_Deserializes_AndAnOlderApiThatOmitsItReadsNotRun()
+  {
+    // ENC-19. The API sends e.FirmwareCheck.ToString(); an API from before ENC-19 sends nothing.
+    var dto = JsonSerializer.Deserialize<EncoderConfigStatusDto>(
+      """{"status":"HardFault","previousStatus":"Transient","firmwareCheck":"Failed"}""", HubLike);
+    dto!.FirmwareCheck.Should().Be("Failed");
+
+    JsonSerializer.Deserialize<EncoderConfigStatusDto>("{}", HubLike)!.FirmwareCheck.Should().Be("NotRun");
+  }
 }

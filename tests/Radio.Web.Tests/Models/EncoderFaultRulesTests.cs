@@ -72,4 +72,58 @@ public class EncoderFaultRulesTests
   {
     Assert.Equal("link_off", EncoderFaultRules.BadgeIcon("HardFault", isConnected: false));
   }
+
+  // --- ENC-19: the firmware verdict names the cause of a hard fault --------------------------------
+
+  [Fact]
+  public void AFirmwareHardFault_NamesTheReflash_AndKeepsTheVolumePromise()
+  {
+    var copy = EncoderFaultRules.NotificationCopy("HardFault", isConnected: true, firmwareCheck: "Failed");
+
+    Assert.NotNull(copy);
+    Assert.Contains("firmware", copy!.Value.Summary);
+    Assert.Contains("re-flashing", copy.Value.Detail);
+    // The hard-fault line's promise, unchanged: VolumeClampFor(HardFault) still tightens the clamp.
+    Assert.Contains("Volume is limited", copy.Value.Detail);
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("NotRun")]
+  [InlineData("Passed")]
+  [InlineData("SomethingNewer")]
+  public void AHardFaultWithoutAFailedFirmwareCheck_KeepsTheEnc12Copy(string? firmwareCheck)
+  {
+    Assert.Equal(
+      EncoderFaultRules.NotificationCopy("HardFault", isConnected: true),
+      EncoderFaultRules.NotificationCopy("HardFault", isConnected: true, firmwareCheck));
+  }
+
+  [Theory]
+  [InlineData("Configured")]
+  [InlineData("Transient")]
+  [InlineData("Unknown")]
+  public void AFailedFirmwareCheck_DoesNotRaiseANotificationTheTierDidNot(string status)
+  {
+    // The verdict changes words, never severity: a tier that says nothing still says nothing.
+    Assert.Null(EncoderFaultRules.NotificationCopy(status, isConnected: true, firmwareCheck: "Failed"));
+    Assert.Null(new Radio.Web.Services.EncoderFaultAnnouncer()
+      .Evaluate(status, isConnected: true, wasEverConnected: true, firmwareCheck: "Failed"));
+  }
+
+  [Fact]
+  public void AFirmwareHardFault_AriaLabelSaysReflash()
+  {
+    Assert.Contains("re-flashing", EncoderFaultRules.NavPillAriaLabel("HardFault", true, firmwareCheck: "Failed"));
+  }
+
+  [Theory]
+  [InlineData("Passed", "processes settings")]
+  [InlineData("Failed", "re-flash")]
+  [InlineData("NotRun", "not checked")]
+  [InlineData(null, "not checked")]
+  public void TheSettingsLine_SaysWhatTheCheckFound(string? firmwareCheck, string expected)
+  {
+    Assert.Contains(expected, EncoderFaultRules.FirmwareCheckText(firmwareCheck));
+  }
 }

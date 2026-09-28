@@ -1302,7 +1302,11 @@
 
   private string EncoderBadgeIcon => EncoderFaultRules.BadgeIcon(_encoderStatus, _encoderConnected, _encoderEnabled);
   private string EncoderBadgeClass => EncoderFaultRules.BadgeClass(_encoderStatus, _encoderConnected, _encoderEnabled);
-  private string EncoderNavLabel => EncoderFaultRules.NavPillAriaLabel(_encoderStatus, _encoderConnected, _encoderEnabled);
+  private string EncoderNavLabel =>
+    EncoderFaultRules.NavPillAriaLabel(_encoderStatus, _encoderConnected, _encoderEnabled, _encoderFirmwareCheck);
+
+  // ENC-19: why a hard fault happened, when the reason is firmware that ignores host writes.
+  private string? _encoderFirmwareCheck;
 
   /// <summary>
   /// Seeds the badge fields from <c>GET /api/integrations/encoder/provisioning</c>, falling back to
@@ -1331,6 +1335,7 @@
         // Status is already the serialized tier name on the DTO, which is the shape
         // EncoderFaultRules takes — no enum conversion in between.
         _encoderStatus = provisioning.Status;
+        _encoderFirmwareCheck = provisioning.FirmwareCheck;
         _encoderConnected = provisioning.IsConnected;
         _encoderWasEverConnected = provisioning.WasEverConnected;
         return;
@@ -1346,6 +1351,7 @@
     }
 
     _encoderStatus = AudioState.EncoderConfigStatus?.Status;
+    _encoderFirmwareCheck = AudioState.EncoderConfigStatus?.FirmwareCheck;
     _encoderConnected = AudioState.EncoderConnection?.IsConnected;
     _encoderWasEverConnected = AudioState.EncoderConnection?.WasEverConnected ?? false;
   }
@@ -1358,9 +1364,11 @@
   private async Task OnEncoderConfigStatusChangedAsync()
   {
     string? status = AudioState.EncoderConfigStatus?.Status;
+    string? firmwareCheck = AudioState.EncoderConfigStatus?.FirmwareCheck;
     await InvokeAsync(() =>
     {
       _encoderStatus = status;
+      _encoderFirmwareCheck = firmwareCheck;
       _encoderBroadcastSeen = true;
       AnnounceEncoderStateIfNeeded();
       StateHasChanged();
@@ -1490,7 +1498,8 @@
   /// </summary>
   private void AnnounceEncoderStateIfNeeded()
   {
-    var announcement = EncoderAnnouncer.Evaluate(_encoderStatus, _encoderConnected, _encoderWasEverConnected);
+    var announcement = EncoderAnnouncer.Evaluate(
+      _encoderStatus, _encoderConnected, _encoderWasEverConnected, _encoderFirmwareCheck);
     if (announcement is not { } a)
     {
       return;

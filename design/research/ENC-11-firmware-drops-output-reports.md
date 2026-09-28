@@ -3,6 +3,10 @@
 **Status:** ✅ `[FIXED AND FLASHED 2026-09-02 — RotaryUsb #11. Kept as the record of what it was.]`
 **Was:** blocked `ENC-11`, and through O10 also `ENC-8`, `ENC-12` and `ENC-14`.
 
+> ⭐ **Tracked since 2026-09-28 by `ENC-19`:** the console now runs this note's verification command
+> (`03 04 00` → a 107-byte report `0x02`) at every encoder connection and raises a hard fault naming a
+> re-flash if the device never answers. See `design/INTEGRATIONS.md` §1, *After any re-flash*.
+
 ## Resolution
 
 Fixed in [RotaryUsb #11](https://github.com/mmackelprang/RotaryUsb/pull/11) by normalising the two
