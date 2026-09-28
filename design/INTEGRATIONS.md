@@ -340,10 +340,14 @@ The console has **three** states, derived from two facts rather than stored as a
 | **Ambient** | false | yes | **playing** | 30 min idle (`idle-dimmer.js`), or navigating to `/sleep` |
 | **Standby** | **true** | yes | **paused + muted** | the topbar Sleep pill · a VOLUME long-press · `POST /api/system/sleep` |
 
-**Designer Rev 5 §8 describes five states. The two dark ones are withdrawn** with the blanking half —
-see the recovery section below for why the panel must never blank.
+**Designer Rev 5 §8 describes five states. The two dark ones are not states of this model.** `ENC-15`
+withdrew them with the blanking half; **`ENC-22` (2026-09-28) brings back a dark panel for the knob-only
+design, as a separate layer** — see *Panel power-off in sleep* below. A dark panel leaves the console in
+whichever of the three states it was in; the router asks the panel layer first.
 
-**What each input does** (handoff §8.3, minus the two dark columns):
+**What each input does on a lit panel** (handoff §8.3, minus the two dark columns). On a **dark** panel
+(`ENC-22`, off by default) every turn and every press is consumed and does one thing only — lights the
+panel — and so does anything within `Sleep:WakeGraceMilliseconds` (2 s) after that:
 
 | Input | Awake | Ambient | Standby |
 |---|---|---|---|
@@ -404,13 +408,56 @@ call fails in a way that looks like the interface is missing — the incantation
 Check state with `cat /sys/class/drm/card1-DP-1/dpms` and the `PowerSaveMode` property — `status`, `dpms`
 and `enabled` are reported independently and do not always agree.
 
-> **Why screen blanking is switched off, and must stay off.** `ENC-15` established on the box that **the
-> touchscreen is powered by the panel and leaves the USB bus when the panel blanks** — so touch cannot wake
-> it, because no input device exists to generate the event. The rotary encoder cannot wake it either: it
-> exposes `/dev/hidraw3` and **no evdev node at all**, so it is invisible to the compositor and cannot even
-> reset the idle timer. A knob wake would work only through `radio-api` reading hidraw and calling the
-> unblank itself, which makes that service a single point of failure in the only remaining wake path.
+**Restarting `radio-api` also lights the panel** (`sudo systemctl restart radio-api`): since `ENC-22` the
+service powers the panel on unconditionally at start-up, and `radio-api.service`'s `ExecStopPost=` does it
+again whenever the service stops.
+
+> **Why GNOME's own screen blanking is switched off, and must stay off.** `ENC-15` established on the box
+> that **the touchscreen is powered by the panel and leaves the USB bus when the panel blanks** — so touch
+> cannot wake it, because no input device exists to generate the event. The rotary encoder cannot wake a
+> *compositor* blank either: it exposes a hidraw node and **no evdev node at all**, so it is invisible to
+> the compositor and cannot even reset the idle timer. A knob wake works only through `radio-api` reading
+> hidraw and calling the unblank itself — which is exactly what `ENC-22` does, with the safety rules below
+> standing in for the second wake path that does not exist. GNOME's idle blanking stays off at all three
+> layers regardless: it would dark the panel with no knob wake behind it.
 > Full write-up: [`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
+
+### Panel power-off in sleep — `ENC-22`
+
+**Off by default** (`Sleep:PanelOffAfterMinutes = 0`). When set to `N > 0`, `radio-api`'s
+`PanelPowerService` powers the panel off after `N` minutes of **continuous sleep screen** — keyed on the
+`/sleep` page being on screen (`ISleepService.IsSleepScreenVisible`), so the 30-minute idle path counts
+as well as the Sleep pill. Any knob turn or press lights it again; the input is consumed, and the screen
+that comes back is the one that went dark (the browser is not touched by a panel power cycle). The panel's
+own firmware splash shows for about two seconds on power-up — accepted by the owner, not a defect.
+
+| Key (`Sleep:`) | Default | |
+|---|---|---|
+| `PanelOffAfterMinutes` | `0` (off) | minutes on the sleep screen before power-off |
+| `EncoderStableSeconds` | `30` | the encoder must have been connected this long |
+| `WakeGraceMilliseconds` | `2000` | input consumed for this long after a knob wake (the splash) |
+| `SessionBusAddress` | `unix:path=/run/user/1000/bus` | where Mutter is |
+
+Read through `IOptionsMonitor`, so an edit to `/opt/radio-console/api/appsettings.Production.json`
+(which a deploy never overwrites) takes effect without a restart. The mechanism is Mutter
+`org.gnome.Mutter.DisplayConfig` `PowerSaveMode` (`3` off, `0` on) — **not** the ScreenSaver route,
+which never reached DPMS-off.
+
+⛔ **The safety rules, because touch cannot wake a dark panel and the knobs are the only way back:**
+
+1. **Never powered off unless the encoder is connected** and has been for `EncoderStableSeconds`.
+2. **Encoder disconnects while dark → panel on at once**, on the connection event.
+3. **Panel on unconditionally at `radio-api` start-up and at a clean stop**, and `ExecStopPost=` on
+   `radio-api.service` powers it on whenever the service stops — crash, `systemctl stop`, deploy. On a box
+   whose unit predates `ENC-22` the same line is the drop-in
+   `/etc/systemd/system/radio-api.service.d/panel-power-on.conf` (`deploy/provision/`). **Verify systemd
+   actually parsed it** — it silently drops an `Exec` line it cannot parse:
+   `systemctl show radio-api -p ExecStopPost` must show the `gdbus` argv.
+4. A power-on the compositor did not confirm is retried (5 s, doubling to 5 min), and a knob input keeps
+   treating the panel as dark until one is confirmed.
+5. The sleep screen closing by any route (REST wake, incoming call, navigation) lights the panel.
+
+Check state: `cat /sys/class/drm/card1-DP-1/dpms` (`On`/`Off`). Recovery is the Mutter command above.
 
 ---
 

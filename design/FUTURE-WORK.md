@@ -1451,6 +1451,15 @@ are the retired guess — see the banner above for the measured format)**
 
 ## 7. Sleep Mode — Rotary Encoder Wake/Sleep Button
 
+> ⭐ **2026-09-28 — `ENC-22` ships a knob-only panel power-off, off by default.** The blocker below still
+> stands for *touch* and for GNOME's own blanking; what changed is that the knob path it describes as
+> "a single point of failure in the only remaining wake path" was built deliberately, with safety rules in
+> place of the missing second path (never dark without a connected encoder; power on when the encoder is
+> lost, at start-up, and in `ExecStopPost=`). It drives Mutter `PowerSaveMode` from a separate
+> `PanelPowerService`, not the ScreenSaver-route `SetDisplayPowerAsync` the sections below refer to —
+> that method was removed. Current behaviour: `design/INTEGRATIONS.md` §1, *Panel power-off in sleep*.
+> The rest of this section is the historical record.
+
 **Status:** ⚠ **CORRECTED 2026-09-02 by the `ENC-15` gate result — the previous status overclaimed in two
 ways.** (1) It said *"Display DPMS control implemented … in `SleepService`"*; the display-power calls at
 `SleepService.cs:164-168` and `:198-199` are **commented out**, so nothing in the running service turns the
