@@ -48,3 +48,39 @@ the assertion passes on the defect. **Duck to a value distinguishable from full.
 - ⚠ **`BluetoothAudioSource` derives from `USBAudioSourceBase` but overrides three methods without
   calling base**, and declares its own `_playbackId` shadowing the base field. `AUD-2`'s Builder found
   this; it makes "all USB sources behave alike" false.
+
+## Resolution — shipped 2026-09-28 as [#694](https://github.com/mmackelprang/RTest/pull/694) (✅🔬 until owner by-ear UAT)
+
+**Q1 — was the removal correct in isolation?** No, and the ordering was not the whole of it. Every
+`Play*Async` calls `StopAsync` on its **own** key before registering, so no reordering at any one
+call site could have saved a multiplier that `StopAsync` deletes. The multiplier now survives a stop,
+as the gain offset already did.
+
+**Q2 — which paths?** Every re-registration of the active source during a sustained duck, not just
+the switch. That includes a FilePlayer track change, a BT capture recovery and an SDR restart. A
+sustained duck raises no level events, so nothing corrected the volume until the announcement ended.
+The fix is in the one place all of those paths share.
+
+**Q3 — the new source's level mid-duck:** it **inherits the current duck.** "Un-ducked until the next
+event" would mean full volume for the rest of the announcement, because no next event comes during a
+sustained duck.
+
+**Lifetime is now owned by `AudioManager`:**
+- clear the outgoing source on switch;
+- clear the incoming source when no duck is in effect;
+- re-check `IsDucking` after the mid-switch write;
+- clear **all** entries on ducking-ended.
+
+`Play*Async` recompute the volume under the lock that registers the player or component, so a duck
+write landing mid-registration is not lost.
+
+⚠ **Known gap:** the tests register through `RegisterComponentForTests`, because the production path
+needs a MiniAudio device. They prove the multiplier's lifetime, not audibility. That is what the
+by-ear check is for.
+
+**`TTS-6` was struck as stale by the same PR.** Its premise was false on `main`:
+- the switch path has cleared the outgoing source since #321;
+- re-registration wiped any stranded entry;
+- the log line has been honest since `AUD-2`.
+
+AUD-26 removed the second guard, so the clear-all on ducking-ended replaces it.
