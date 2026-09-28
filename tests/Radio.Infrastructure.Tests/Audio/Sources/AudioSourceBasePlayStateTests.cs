@@ -15,11 +15,11 @@ namespace Radio.Infrastructure.Tests.Audio.Sources;
 /// it did before.
 /// </summary>
 /// <remarks>
-/// MUTATION for every test in the first section: replace
-/// <c>PromoteToPlayingUnlessTerminatedSince(versionBeforePlay)</c> with the old
-/// <c>State = AudioSourceState.Playing</c> and they go red reading <c>Playing</c>. The second section
-/// is the negative control: it stays green under that mutation, and must, because it pins the
-/// behaviour the fix is required to keep.
+/// MUTATION (measured): replace <c>PromoteToPlayingUnlessTerminatedSince(versionBeforePlay)</c> in
+/// PlayAsync with the old <c>State = AudioSourceState.Playing</c> and every test in the first section
+/// goes red, plus <c>AnErrorKeptFromAFailedPlayIsRetriedByTheNextPlay</c> (whose first assertion is
+/// the same claim). The "negative control" section stays green under it, and must, because it pins
+/// the behaviour the fix is required to keep. The review sections name their own mutations.
 /// </remarks>
 public class AudioSourceBasePlayStateTests
 {
