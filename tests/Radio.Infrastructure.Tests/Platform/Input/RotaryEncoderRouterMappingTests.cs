@@ -67,9 +67,35 @@ public class RotaryEncoderRouterMappingTests
     }
   }
 
+  /// <summary>
+  /// ENC-22's panel. <see cref="Dark"/> decides what <see cref="OnEncoderInput"/> answers, so a test
+  /// states "the panel is dark" rather than reproducing <c>PanelPowerService</c>'s own rules — those
+  /// are pinned in <c>PanelPowerServiceTests</c>.
+  /// </summary>
+  private sealed class FakePanelPower : IPanelPowerService
+  {
+    public bool Dark { get; set; }
+    public List<string> Inputs { get; } = [];
+
+    public bool IsPanelOff => Dark;
+
+    public bool OnEncoderInput(string source)
+    {
+      Inputs.Add(source);
+      bool consume = Dark;
+      // A real knob wake lights the panel; the next input finds it on.
+      Dark = false;
+      return consume;
+    }
+  }
+
   private sealed class FakeSleepService : ISleepService
   {
     private int _wakeClaimed;
+
+#pragma warning disable CS0067 // The router does not subscribe; PanelPowerService does, and has its own fake.
+    public event EventHandler<bool>? SleepScreenVisibilityChanged;
+#pragma warning restore CS0067
 
     public bool IsSleeping { get; set; }
     public bool IsSleepScreenVisible { get; set; }
@@ -230,6 +256,7 @@ public class RotaryEncoderRouterMappingTests
     public readonly FakeAudioManager Audio = new();
     public readonly FakeBandMemory BandMemory = new();
     public readonly FakeTimeProvider Time = new();
+    public readonly FakePanelPower Panel = new();
     public readonly PresetBankScope Presets = new();
     public readonly SourceSelectorService Selector;
     public readonly PresetSelectorService PresetSelector;
@@ -264,7 +291,8 @@ public class RotaryEncoderRouterMappingTests
         Selector,
         PresetSelector,
         Sleep,
-        Time);
+        Time,
+        Panel);
     }
 
     /// <summary>Puts one saved station in the bank the PRESETS knob reads.</summary>
@@ -812,6 +840,61 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.False(h.PresetSelector.IsOpen);
     Assert.Empty(h.Audio.GetOrCreateCalls);
+  }
+
+  // --- The dark panel (ENC-22) ---------------------------------------------------------------
+
+  [Fact]
+  public void DarkPanel_AVolumeTurn_LightsItAndIsConsumed_OnTheAmbientClockWhereVolumeWouldAct()
+  {
+    // Ambient is the one state where a VOLUME turn acts in place, so it is the state where a missing
+    // panel gate would be audible: the knob that lit the panel would also have moved the volume, unseen.
+    using var h = new Harness();
+    h.Sleep.ReportSleepScreen(true);
+    h.Panel.Dark = true;
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(["encoder-turn"], h.Panel.Inputs);
+    Assert.Equal(0.5f, h.Audio.MasterVolume);
+    Assert.Empty(h.Hud.Published);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void DarkPanel_APress_LightsItWithoutWakingAndItsReleaseFiresNothing()
+  {
+    // Standby, where a press would otherwise resume audio. Lighting the panel is all the press buys:
+    // the owner sees the sleep screen that went dark, and a second press resumes.
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.ReportSleepScreen(true);
+    h.Panel.Dark = true;
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(["encoder-button"], h.Panel.Inputs);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
+    // The release reached the gesture with no press recorded, so the mute toggle did not fire.
+    Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  [Fact]
+  public void LitPanel_TheInputIsReportedAndThenGatedAsBefore()
+  {
+    // The panel is told about every input (it restarts the countdown), and when it declines to consume
+    // it the ENC-6 gate runs unchanged: Ambient VOLUME still acts in place.
+    using var h = new Harness();
+    h.Sleep.ReportSleepScreen(true);
+
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseButton(1, isPressed: false);
+
+    Assert.Equal(["encoder-turn"], h.Panel.Inputs);
+    Assert.True(h.Audio.MasterVolume > 0.5f);
   }
 
   // --- The sleep gate (ENC-6, handoff 8.3) --------------------------------------------------

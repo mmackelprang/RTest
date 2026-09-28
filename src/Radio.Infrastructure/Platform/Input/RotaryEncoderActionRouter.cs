@@ -45,6 +45,7 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly IRotaryEncoderService _encoderService;
   private readonly Func<IAudioManager> _audioManagerFactory;
   private readonly ISleepService? _sleepService;
+  private readonly IPanelPowerService? _panelPower;
   private readonly IOptionsMonitor<RotaryEncoderOptions> _options;
   private readonly IEncoderFeedbackSink _hud;
   private readonly SourceSelectorService _sourceSelector;
@@ -88,7 +89,8 @@ public class RotaryEncoderActionRouter : IDisposable
     SourceSelectorService sourceSelector,
     PresetSelectorService presetSelector,
     ISleepService? sleepService = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IPanelPowerService? panelPower = null)
   {
     _logger = logger;
     _encoderService = encoderService;
@@ -98,6 +100,7 @@ public class RotaryEncoderActionRouter : IDisposable
     _sourceSelector = sourceSelector;
     _presetSelector = presetSelector;
     _sleepService = sleepService;
+    _panelPower = panelPower;
 
     // Index-ordered and index-addressed: entry n dispatches encoder n. Kept as three parallel arrays
     // rather than delegates on the record so the record stays a plain data type the API can project.
@@ -164,6 +167,14 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
+      // ENC-22, ahead of every other gate: a turn on a dark panel is spent lighting it. Nothing else
+      // happens — no HUD card, no sleep wake — because nothing on the panel is visible yet, and the
+      // screen that comes back is the one that went dark (the browser is untouched by a power cycle).
+      if (_panelPower?.OnEncoderInput("encoder-turn") == true)
+      {
+        return;
+      }
+
       SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: true);
       if (gate != SleepGateOutcome.Dispatch)
       {
@@ -208,6 +219,14 @@ public class RotaryEncoderActionRouter : IDisposable
       // dropped by its orphan-release guard, which exists for exactly this path.
       if (e.IsPressed)
       {
+        // ENC-22, as in OnEncoderTurned. The press edge only, for the same reason the sleep gate is
+        // press-only: the release that follows reaches the gesture and is dropped by its orphan-release
+        // guard, so a press that lit the panel cannot fire a short action on release.
+        if (_panelPower?.OnEncoderInput("encoder-button") == true)
+        {
+          return;
+        }
+
         SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: false);
         if (gate != SleepGateOutcome.Dispatch)
         {
@@ -394,8 +413,10 @@ public class RotaryEncoderActionRouter : IDisposable
   /// <para>
   /// Rule 2 on a lit panel: VOLUME acts in place and everything else is spent waking. Standby adds
   /// D22 on top of it — a <b>turn</b> never resumes audio, only a press or a screen tap does — so a
-  /// turn there is consumed without a wake. <b>The two dark states are withdrawn by
-  /// <c>ENC-15</c></b>, so Rule 1 has no reachable state and appears nowhere below.
+  /// turn there is consumed without a wake. <b>Rule 1 (the dark panel) is not applied here</b>: since
+  /// <c>ENC-22</c> it is <see cref="IPanelPowerService.OnEncoderInput"/>, which the two handlers call
+  /// before this method and which consumes any input that lights a dark panel. By the time an input
+  /// reaches this gate the panel is lit, so only the lit columns below apply.
   /// </para>
   ///
   /// <para>

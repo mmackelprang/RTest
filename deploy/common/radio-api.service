@@ -79,6 +79,22 @@ Environment=DOTNET_GCHeapHardLimit=0x30000000
 # === end memory guard ===
 
 ExecStart=/opt/radio-console/api/Radio.API
+
+# === Panel power-on at stop (ENC-22) ===
+# radio-api can power the kiosk panel off after a period on the sleep screen, and the rotary
+# encoder is then the ONLY wake source (touch leaves the USB bus when the panel is dark). A dark
+# panel must therefore never outlive the process that knows how to wake it: this line powers the
+# panel on whenever the service stops - clean stop, crash, deploy (Deploy-ToLinux.ps1 stops
+# radio-api) - and radio-api also powers it on unconditionally at start-up.
+# Leading '-' so a failure here (no graphical session yet, compositor gone) never marks the unit
+# failed. The env prefix makes the line self-contained; it matches DBUS_SESSION_BUS_ADDRESS below.
+# The command is the same as the recovery line in design/INTEGRATIONS.md section 1 and as
+# MutterPanelPowerControl.BuildArguments(on: true); PanelPowerCommandParityTests pins this line,
+# the fallback drop-in and the code together.
+# VERIFY after installing - systemd silently drops an Exec line it cannot parse (OPS-10):
+#   systemctl show radio-api -p ExecStopPost
+ExecStopPost=-/usr/bin/env DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus /usr/bin/gdbus call --session --timeout 5 --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig --method org.freedesktop.DBus.Properties.Set org.gnome.Mutter.DisplayConfig PowerSaveMode "<0>"
+# === end panel power-on ===
 Restart=always
 RestartSec=10
 KillSignal=SIGINT

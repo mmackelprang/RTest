@@ -493,7 +493,10 @@ public static class AudioServiceExtensions
       presetSelector: sp.GetRequiredService<PresetSelectorService>(),
       // GetService, not GetRequiredService: nothing registers TimeProvider in production, and the
       // constructor default is TimeProvider.System. Tests inject a fake clock directly instead.
-      timeProvider: sp.GetService<TimeProvider>()));
+      timeProvider: sp.GetService<TimeProvider>(),
+      // ENC-22. Registered in Radio.API, and only on Linux; null elsewhere, which leaves the router's
+      // gating exactly as it was before the panel could go dark.
+      panelPower: sp.GetService<IPanelPowerService>()));
 
     return services;
   }

@@ -170,6 +170,9 @@ reconcile_dropin() {  # unit_name  needle  dropin_relpath
 }
 reconcile_dropin radio-api.service DBUS_SESSION_BUS_ADDRESS radio-api.service.d/pipewire.conf
 reconcile_dropin radio-api.service DOTNET_GCHeapHardLimit   radio-api.service.d/memory-limit.conf
+# ENC-22: power the panel on whenever radio-api stops (the knobs are the only wake source for a
+# dark panel). Needle is the Mutter property the ExecStopPost= line sets.
+reconcile_dropin radio-api.service PowerSaveMode            radio-api.service.d/panel-power-on.conf
 reconcile_dropin radio-web.service DOTNET_GCHeapHardLimit   radio-web.service.d/memory-limit.conf
 # radio-web only: HOME must land on a writable path inside the ProtectHome=true
 # sandbox. Needle is the full value, not just "HOME=", so a unit that sets no HOME
