@@ -15,7 +15,7 @@ Box state at the time of writing is in the last line of each section (`-VerifyOn
 ## Standing items (carried from earlier today)
 
 - [ ] **AUD-73 (optional, 1 min):** send two long test notifications a second apart. Two voices at once = promote AUD-73 to P1.
-- [ ] **ENC-22 physical check:** the one thing the feasibility test could not prove — that a real knob turn is delivered while the panel is dark. See the ENC-22 section below once built.
+- [ ] **ENC-22 physical check:** the one thing the feasibility test could not prove — that a real knob turn is delivered while the panel is dark. **Built; the check and the enable step are in Phase 2g below.**
 - [ ] **OPS-3** (`BindsTo=` for radio-web) — owner reviews personally; not attempted autonomously.
 - [ ] **Casting** — deferred by you; `AUD-37`, `AUD-38`, `AUD-54`, `AUD-5` untouched.
 
@@ -68,3 +68,54 @@ Shipped and deployed: `LOG-5` [#699](https://github.com/mmackelprang/RTest/pull/
 - [ ] **An observation for `AUD-20`, not caused by this phase.** The GC-correlated missed-deadline lines show roughly 0.25 full (Gen2) collections per second, both before and after this deploy (e.g. 13:40 `Gen2 +57` over 4 min; 15:20 `Gen2 +77` over 5 min). The Gen1-to-Gen2 ratio changed (now equal), but the rate did not.
 
 `-VerifyOnly` (2026-09-28 15:02 EDT): `API (:5000): running b8162e8 - matches` · `Web (:5002): running b8162e8 - matches` · `Kiosk: 2 established connections to :5002` · **`=== Box matches HEAD ===`**
+
+
+## Phase 2g — panel power-off and firmware check
+
+Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707) — the panel powers off after a period on the sleep screen, and any knob wakes it. **It shipped DISABLED** because the check below needs your hand. `ENC-18` and `ENC-14` were skipped per D-A.
+
+**What I verified on the box myself** (build `47b55ae`, timeout temporarily 1 min, virtual encoder harness; full table in [`queue/ENC-22.md`](../queue/ENC-22.md)):
+- (a) Sleep screen by the idle route: power-off after exactly 1 min, `dpms=Off`, and the encoder stays connected.
+- (b) `turn` while dark lights the panel. The turn is consumed; volume and mute are unchanged.
+- (c) `tap` / `press` while dark light the panel. The VOLUME press did not toggle mute.
+- (d) Unplugging the encoder while dark lights the panel within about a second. With the encoder unplugged, the timer declines to power off.
+- (e) `systemctl restart radio-api` while dark lights the panel. SIGKILL while dark also lights it within 0.5 s, from `ExecStopPost=` alone.
+- (f) A deploy while dark ends with the panel on and the kiosk live.
+- Then set back to disabled and confirmed: the panel stays on for 73 s on the sleep screen.
+
+**What needs you — ENC-22, in this order:**
+
+- [ ] **1. The physical check, BEFORE enabling (2 min).** This is the one thing no script can do: a real knob, turned by a hand, delivered while the panel is dark. Temporarily dark the panel by hand, then turn a knob:
+  ```bash
+  ssh mmack@radio
+  export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+  gdbus call --session --dest org.gnome.Mutter.DisplayConfig --object-path /org/gnome/Mutter/DisplayConfig \
+    --method org.freedesktop.DBus.Properties.Set org.gnome.Mutter.DisplayConfig PowerSaveMode "<3>"
+  ```
+  The panel goes dark. Turn **VOLUME** one detent.
+
+  ⚠ With the feature disabled the app does not light a panel that *you* darkened: it only tracks darks it caused. So in this step you are checking that the knob event **arrives**, not that the panel wakes:
+  ```bash
+  ssh mmack@radio 'journalctl -u radio-api --since "-2min" --no-pager | tail -3; F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep -h "encoder\|Encoder" $F | tail -5'
+  ```
+  Also check `curl -s http://radio:5000/api/audio/volume` moved by 1 point.
+
+  **Pass:** the volume changed while dark. Then light the panel again with the same command using `"<0>"` (or `sudo systemctl restart radio-api`).
+- [ ] **2. Enable it.** Add this to `/opt/radio-console/api/appsettings.Production.json`. A deploy never overwrites that file, and no restart is needed:
+  ```json
+  "Sleep": { "PanelOffAfterMinutes": 10 }
+  ```
+  First confirm the stop-time backstop is installed. It came from provisioning, not a deploy, and it is on `radio` since today:
+  `ssh mmack@radio 'systemctl show radio-api -p ExecStopPost'` must print the `gdbus … PowerSaveMode <0>` argv.
+- [ ] **3. Real wake, by hand.** Let the console reach the sleep screen, wait 10 min for the panel to go dark, then turn a knob. **Pass:** the panel lights within ~2 s. The panel's own splash for ~2 s is expected. You land on the same sleep screen, and that first turn changes nothing. Repeat with a press.
+- [ ] **4. One overnight cycle.** Leave it on the sleep screen overnight. **Pass:** dark in the morning, and one knob wakes it.
+- [ ] **Judgement calls I made; overrule if you disagree:**
+  - **Wake lights the sleep screen; it does not leave it.** This is the dossier's default. A second input then acts as it does on the lit sleep screen.
+  - **Grace window:** for 2 s after a knob wake, all knob input is consumed. The panel is showing its splash, so a fast VOLUME spin that woke it must not change the volume unseen. Setting: `Sleep:WakeGraceMilliseconds`.
+  - **Knob activity on the lit sleep screen restarts the countdown.** Touch cannot, because touch never reaches the API.
+  - **An unconfirmed power-off is treated as dark.** gdbus reports failure on a reply timeout, so the panel is sent "on" at once. From the pre-merge review.
+  - **Default suggestion 10 min,** from the dossier.
+- [ ] **Known limitation (recorded, not fixed):** if both "sleep screen closed" reports are lost (a WiFi blip during a hard navigation), the server keeps believing the sleep screen is up. The panel can then go dark N minutes into normal touch use. It is still knob-wakeable. Details are in `design/INTEGRATIONS.md` §1.
+- [ ] **Not verified: `PowerSaveMode 0` sent to a panel that is already on.** It happens at every `radio-api` start and stop. I saw no kiosk disconnect and no `dpms` change, but I did not watch the panel for a flicker. Glance at it during the next restart.
+- **Build baseline moved to 32 warnings (Linux) from 33.** The warning that went is the `IDE0011` in the deleted `SleepService.SetDisplayPowerAsync`. I measured `main` and the branch side by side.
+

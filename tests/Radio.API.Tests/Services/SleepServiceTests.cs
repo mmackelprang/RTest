@@ -138,6 +138,34 @@ public class SleepServiceTests
   }
 
   [Fact]
+  public async Task SleepScreenVisibilityChanged_FiresOnEachEdge_AndNotOnARepeatReport()
+  {
+    // ENC-22's panel timer arms on this event. A re-report of the state already held must not fire
+    // it: a future heartbeat would otherwise restart the power-off countdown forever.
+    var (service, _) = CreateService();
+    var seen = new List<bool>();
+    service.SleepScreenVisibilityChanged += (_, visible) => seen.Add(visible);
+
+    await service.SetSleepScreenVisibleAsync(true);
+    await service.SetSleepScreenVisibleAsync(true);
+    await service.SetSleepScreenVisibleAsync(false);
+    await service.SetSleepScreenVisibleAsync(false);
+
+    Assert.Equal([true, false], seen);
+  }
+
+  [Fact]
+  public async Task SleepScreenVisibilityChanged_ASubscriberThatThrows_DoesNotFailTheReport()
+  {
+    var (service, _) = CreateService();
+    service.SleepScreenVisibilityChanged += (_, _) => throw new InvalidOperationException("boom");
+
+    await service.SetSleepScreenVisibleAsync(true);
+
+    Assert.True(service.IsSleepScreenVisible);
+  }
+
+  [Fact]
   public async Task WakeState_WithTheSleepScreenUpAndAudioPlaying_IsAmbient()
   {
     // The overnight state, and the one the machine actually reaches: the browser idled onto /sleep

@@ -13,6 +13,32 @@ knob-only design ENC-15 identified as the one remaining path (*"a knob wake can 
 `radio-api` reads `hidraw` and itself calls the D-Bus unblank"*) and never measured. It has now been
 measured, and it works. **The single-wake-path risk is real and is what the safety rules below are for.**
 
+## ✅🔬 Shipped 2026-09-28 — [#707](https://github.com/mmackelprang/RTest/pull/707), **off by default**
+
+`Radio.Infrastructure.Platform.Display.PanelPowerService` (Mutter `PowerSaveMode` via `gdbus`, keyed on
+`IsSleepScreenVisible`), asked first by `RotaryEncoderActionRouter`; `ExecStopPost=` on
+`radio-api.service` (canonical unit + `deploy/provision` fallback drop-in, installed on `radio`). The
+retained ScreenSaver-route `SleepService.SetDisplayPowerAsync` was removed. Config and rules:
+`design/INTEGRATIONS.md` §1, *Panel power-off in sleep*. **Enable only after the owner's physical check —
+[`uat/OWNER-REVIEW.md`](../uat/OWNER-REVIEW.md), Phase 2g.**
+
+**Box UAT, 2026-09-28, build `47b55ae`, `Sleep:PanelOffAfterMinutes = 1` set temporarily in
+`/opt/radio-console/api/appsettings.Production.json` (restored afterwards), sampled at 1 Hz:**
+
+| Step | Result |
+|---|---|
+| (a) kiosk to `/sleep` by `window.location.href` (the idle path, `IsSleeping` false) → timer | ✅ `Ambient` 16:10:43 → power-off logged 16:11:43.485 → `dpms=Off`; encoder connected throughout |
+| (b) harness `turn 0 1` while dark | ✅ consumed 16:13:25.040 → `dpms=On` next sample; volume 0.21 and mute unchanged |
+| (c) harness `tap 1`, and `press 0`/`release 0`, each while dark | ✅ `On` at 16:14:33 and 16:15:39; mute not toggled by the VOLUME press/release |
+| (d) harness `detach` while dark | ✅ disconnect seen 16:16:47.6 → `On` 16:16:48. Detached while lit with the timer due: *"not powering off — the encoder is not connected"* 16:18:37, panel stayed on |
+| (e) `sudo systemctl restart radio-api` while dark | ✅ `On` 1.3 s after the command. **Plus** `systemctl kill -s SIGKILL` while dark: `On` 0.5 s later while the unit was still `activating` — `ExecStopPost=` alone, since `RestartSec=10` rules out start-up |
+| (f) `Deploy-ToLinux.ps1` while dark | ✅ `On` at the service stop (16:23:01); deploy ended `Kiosk is live (14 …)` |
+| Disabled again | ✅ 73 s on `/sleep` (`Ambient`) with the setting removed: panel stayed on |
+
+Also observed: starting the harness while dark (it unbinds the real encoder) lit the panel through the
+encoder-lost rule, and after every reconnect the 30 s stability period was honoured before a power-off.
+**Not measured:** a physical knob by a hand while dark (owner, OWNER-REVIEW), and an overnight cycle.
+
 ## Feasibility — measured on `radio` 2026-09-28, 12:41
 
 A 20-second blank driven through `org.gnome.Mutter.DisplayConfig.PowerSaveMode`, set and cleared from a

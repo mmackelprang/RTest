@@ -1,14 +1,16 @@
 namespace Radio.Core.Interfaces;
 
 /// <summary>
-/// Which of the console's three reachable states it is in, as the encoder router must see it.
+/// Which of the console's three lit states it is in, as the encoder router must see it.
 ///
 /// <para>
-/// Handoff §8.2 describes five. <b>The two dark states are withdrawn by <c>ENC-15</c></b>: the
-/// touchscreen is powered by the panel and leaves the USB bus when it blanks, and the encoder has no
-/// evdev node at all, so a blanked panel would have one application-mediated wake path rather than
-/// two. Blanking does not ship, so nothing can reach a dark state and there is no enum member for
-/// one. See <c>design/INTEGRATIONS.md</c> §1 and <c>design/FUTURE-WORK.md</c> §7 (Sleep Mode).
+/// Handoff §8.2 describes five. <b>The two dark states are not members of this enum.</b>
+/// <c>ENC-15</c> withdrew them because touch cannot wake a dark panel — the touchscreen is powered by
+/// the panel and leaves the USB bus when it goes dark. <c>ENC-22</c> reinstates a dark panel for the
+/// <b>knob-only</b> design, but as a separate layer rather than a state here:
+/// <see cref="IPanelPowerService"/> is asked first by the router, consumes any input that lights a
+/// dark panel, and leaves the console in whichever of these three states it was already in. See
+/// <c>docs/queue/ENC-22.md</c> and <c>design/INTEGRATIONS.md</c> §1.
 /// </para>
 /// </summary>
 public enum ConsoleWakeState
@@ -58,6 +60,17 @@ public interface ISleepService
   /// that an unexamined "three client paths" claim propagated through four documents.
   /// </remarks>
   bool IsSleepScreenVisible { get; }
+
+  /// <summary>
+  /// Raised when <see cref="IsSleepScreenVisible"/> <b>changes</b> — not on a re-report of the state
+  /// already held. The argument is the value this report wrote; a subscriber that must not act on an
+  /// out-of-order delivery should re-read <see cref="IsSleepScreenVisible"/> instead.
+  /// </summary>
+  /// <remarks>
+  /// Added for <c>ENC-22</c>, whose panel power-off timer is keyed on the sleep screen being up rather
+  /// than on <see cref="IsSleeping"/>: the idle path never sets <see cref="IsSleeping"/>.
+  /// </remarks>
+  event EventHandler<bool>? SleepScreenVisibilityChanged;
 
   /// <summary>
   /// The state the encoder router gates on. <b>Reads <see cref="ConsoleWakeState.Awake"/> from the

@@ -73,6 +73,7 @@ deploy/provision/
     radio-api-restart.{service,timer}  # LEGACY — captured, NOT installed (see below)
     radio-api.service.d/pipewire.conf      # FALLBACK drop-in (DBus) — see note
     radio-api.service.d/memory-limit.conf  # FALLBACK drop-in (GC cap)
+    radio-api.service.d/panel-power-on.conf # FALLBACK drop-in (ENC-22 ExecStopPost panel on)
     radio-web.service.d/memory-limit.conf  # FALLBACK drop-in (GC cap)
     radio-web.service.d/10-dataprotection-home.conf # FALLBACK drop-in (writable HOME)
   scripts/

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using Microsoft.AspNetCore.SignalR;
 using Radio.API.Hubs;
 using Radio.Core.Interfaces;
@@ -25,11 +24,13 @@ namespace Radio.API.Services;
 /// </para>
 ///
 /// <para>
-/// ⚠ <b>This service does not touch display power, and must not.</b> <see cref="SetDisplayPowerAsync"/>
-/// is retained but uncalled: <c>ENC-15</c> established on the box that the touchscreen is powered by
-/// the panel and leaves the USB bus when it blanks, so touch cannot wake a blanked panel, and the
-/// encoder exposes no evdev node so it cannot wake one either. See <c>design/INTEGRATIONS.md</c> §1
-/// for the recovery commands and <c>design/FUTURE-WORK.md</c> §7 (Sleep Mode) for the full record.
+/// ⚠ <b>This service does not touch display power, and must not.</b> Panel power belongs to
+/// <c>PanelPowerService</c> (<c>ENC-22</c>), which listens to <see cref="SleepScreenVisibilityChanged"/>
+/// and powers the panel off after a period on the sleep screen. Keeping it out of here is deliberate:
+/// the power-off is keyed on the sleep <i>screen</i>, which the idle path reaches without ever calling
+/// <see cref="EnterSleepAsync"/>, and its safety rules (never dark without a connected encoder) have
+/// nothing to do with audio. The ScreenSaver-route <c>SetDisplayPowerAsync</c> this class used to
+/// carry uncalled was removed by <c>ENC-22</c>; <c>ENC-15</c> had found it never reached DPMS-off.
 /// </para>
 ///
 /// Wake sources: a screen tap, an encoder input, or an API call.
@@ -64,16 +65,12 @@ public class SleepService : ISleepService
   /// </summary>
   private static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(3);
 
-  // GNOME ScreenSaver D-Bus for physical display DPMS control.
-  // Runs as the desktop session user (mmack) to reach the GNOME session bus.
-  private const string GnomeScreenSaverSetActive =
-    "gdbus call --session --dest org.gnome.ScreenSaver --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.SetActive";
-  private const string SessionUser = "mmack";
-  private const string SessionBusEnv = "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus";
-
   public bool IsSleeping => _isSleeping;
 
   public bool IsSleepScreenVisible => _isSleepScreenVisible;
+
+  /// <inheritdoc />
+  public event EventHandler<bool>? SleepScreenVisibilityChanged;
 
   /// <summary>
   /// The three states, derived rather than stored, so there is no second state machine to keep in
@@ -207,6 +204,18 @@ public class SleepService : ISleepService
     if (changed)
     {
       Interlocked.Exchange(ref _wakeClaimed, 0);
+
+      // ENC-22's panel power-off timer. Raised on the same edge as the claim release, before the
+      // attended-playback stop below, so a slow stop cannot delay the timer arming or a dark panel
+      // being lit when the screen closes. A subscriber's failure must not fail the report.
+      try
+      {
+        SleepScreenVisibilityChanged?.Invoke(this, visible);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "A sleep-screen visibility subscriber threw");
+      }
     }
 
     _logger.LogDebug("Sleep screen reported {Visible}", visible ? "visible" : "hidden");
@@ -325,11 +334,9 @@ public class SleepService : ISleepService
       await _hubContext.Clients.All
         .SendAsync("SleepStateChanged", true);
 
-      // Hardware DPMS stays off. ENC-15 (2026-09-02) tested the precondition on this box and it
-      // failed: the touchscreen leaves the USB bus when the panel powers down, so no touch event can
-      // be generated while dark, and the encoder has no evdev node so it cannot wake the compositor
-      // either. That leaves one application-mediated wake path where two were required.
-      // await SetDisplayPowerAsync(false);
+      // No display power here. The panel is powered off, if at all, by PanelPowerService (ENC-22)
+      // after a period on the sleep screen — which this route reaches via MainLayout navigating to
+      // /sleep on the SleepStateChanged push above.
 
       _logger.LogInformation("Sleep mode entered");
     }
@@ -440,8 +447,8 @@ public class SleepService : ISleepService
 
       _logger.LogInformation("Waking from sleep mode (source: {WakeSource})", wakeSource);
 
-      // Hardware DPMS wake stays off - see the note in EnterSleepAsync.
-      // await SetDisplayPowerAsync(true);
+      // No display power here either: the browser leaving /sleep reports the screen hidden, and
+      // PanelPowerService lights a dark panel on that edge.
 
       _isSleeping = false;
 
@@ -475,58 +482,6 @@ public class SleepService : ISleepService
     finally
     {
       _lock.Release();
-    }
-  }
-
-  /// <summary>
-  /// Controls the physical display via GNOME ScreenSaver D-Bus.
-  ///
-  /// <para>
-  /// ⚠ <b>Nothing calls this, deliberately</b> (see the class remarks). It is retained as the
-  /// recorded shape of the thing <c>ENC-15</c> ruled out, so the FUTURE-WORK entry explaining why
-  /// blanking does not ship points at real code. Two further reasons not to revive it as written:
-  /// the ScreenSaver route <b>does not reach DPMS-off</b> — <c>ENC-15</c> found the panel dark with
-  /// <c>dpms=Off</c> while the screensaver reported inactive — and it needs the desktop session bus,
-  /// which it reaches by shelling out as another user.
-  /// </para>
-  /// </summary>
-  private async Task SetDisplayPowerAsync(bool on)
-  {
-    if (!OperatingSystem.IsLinux()) return;
-
-    var active = on ? "false" : "true"; // ScreenSaver active=true means display OFF
-    var command = $"sudo -u {SessionUser} {SessionBusEnv} {GnomeScreenSaverSetActive} {active}";
-
-    try
-    {
-      using var process = Process.Start(new ProcessStartInfo
-      {
-        FileName = "/bin/bash",
-        Arguments = $"-c \"{command}\"",
-        RedirectStandardOutput = true,
-        RedirectStandardError = true,
-        UseShellExecute = false,
-        CreateNoWindow = true
-      });
-
-      if (process != null)
-      {
-        await process.WaitForExitAsync();
-        if (process.ExitCode == 0)
-        {
-          _logger.LogInformation("Display DPMS {State}", on ? "on" : "off");
-        }
-        else
-        {
-          var stderr = await process.StandardError.ReadToEndAsync();
-          _logger.LogWarning("Display DPMS control failed (exit {Code}): {Error}",
-            process.ExitCode, stderr.Trim());
-        }
-      }
-    }
-    catch (Exception ex)
-    {
-      _logger.LogWarning(ex, "Failed to set display power — GNOME ScreenSaver D-Bus may not be available");
     }
   }
 }

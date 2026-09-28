@@ -136,6 +136,31 @@ builder.Services.AddSingleton<Radio.Infrastructure.Audio.Diagnostics.DiagnosticC
 builder.Services.AddSingleton<SleepService>();
 builder.Services.AddSingleton<ISleepService>(sp => sp.GetRequiredService<SleepService>());
 
+// ENC-22: power the panel off after Sleep:PanelOffAfterMinutes on the sleep screen (0 = off, the
+// shipped default); any knob wakes it. Linux only — it drives Mutter over the session bus. Registered
+// here, ahead of the audio-engine, encoder and phone hosted services (not ahead of every hosted
+// service — AddRadioServices and a few above register earlier): its unconditional start-up power-on
+// runs before the encoder can deliver input, and because hosted services stop in reverse order it
+// stops after the encoder, so its shutdown power-on is the last word.
+builder.Services.Configure<Radio.Core.Configuration.PanelPowerOptions>(
+  builder.Configuration.GetSection(Radio.Core.Configuration.PanelPowerOptions.SectionName));
+if (OperatingSystem.IsLinux())
+{
+  builder.Services.AddSingleton<Radio.Infrastructure.Platform.Display.IPanelPowerControl,
+    Radio.Infrastructure.Platform.Display.MutterPanelPowerControl>();
+  builder.Services.AddSingleton(sp => new Radio.Infrastructure.Platform.Display.PanelPowerService(
+    sp.GetRequiredService<ILogger<Radio.Infrastructure.Platform.Display.PanelPowerService>>(),
+    sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<Radio.Core.Configuration.PanelPowerOptions>>(),
+    sp.GetRequiredService<ISleepService>(),
+    sp.GetRequiredService<Radio.Infrastructure.Platform.Display.IPanelPowerControl>(),
+    sp.GetService<Radio.Core.Interfaces.Input.IRotaryEncoderService>(),
+    sp.GetService<TimeProvider>()));
+  builder.Services.AddSingleton<IPanelPowerService>(sp =>
+    sp.GetRequiredService<Radio.Infrastructure.Platform.Display.PanelPowerService>());
+  builder.Services.AddHostedService(sp =>
+    sp.GetRequiredService<Radio.Infrastructure.Platform.Display.PanelPowerService>());
+}
+
 // Add the audio engine initialization service (must run first)
 builder.Services.AddHostedService<AudioEngineInitializationService>();
 
