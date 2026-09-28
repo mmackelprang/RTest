@@ -3584,10 +3584,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       catch (Exception ex)
       {
         // Properties might not be available yet
-        _logger.LogDebug($"Failed to get initial player state: {ex.Message}");
+        _logger.LogDebug("Failed to get initial player state: {Error}", ex.Message);
       }
 
-      _logger.LogInformation($"Attached to Media Player at {objectPath}");
+      _logger.LogInformation("Attached to Media Player at {ObjectPath}", objectPath);
     }
     catch (Exception ex)
     {

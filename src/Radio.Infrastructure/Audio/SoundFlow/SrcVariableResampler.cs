@@ -40,9 +40,12 @@ internal sealed class SrcVariableResampler : IDisposable
   internal static readonly TimeSpan ErrorReportInterval = TimeSpan.FromSeconds(30);
   private long _processErrorCount;
   private int _lastProcessError;
-  // Emitter-side state: touched only by EmitErrorsIfDue (one thread).
+  // Emitter-side state: touched only by EmitErrorsIfDue, whose one caller (the watchdog's async loop)
+  // is sequential even though its continuations may run on different threads.
   private long _errorsAtLastReport;
   private long _lastErrorReportTimestamp;
+  // So the first report's interval covers the resampler's life so far, not "0.0s".
+  private readonly long _createdTimestamp = Stopwatch.GetTimestamp();
 
   /// <summary>Cumulative <c>src_process</c> failures. Safe to read from any thread.</summary>
   public long ProcessErrorCount => Interlocked.Read(ref _processErrorCount);
@@ -194,9 +197,8 @@ internal sealed class SrcVariableResampler : IDisposable
       return false;
     }
 
-    var interval = _lastErrorReportTimestamp == 0
-      ? 0.0
-      : (nowTimestamp - _lastErrorReportTimestamp) / (double)Stopwatch.Frequency;
+    var since = _lastErrorReportTimestamp == 0 ? _createdTimestamp : _lastErrorReportTimestamp;
+    var interval = Math.Max(0, nowTimestamp - since) / (double)Stopwatch.Frequency;
     logger.LogWarning(
       "src_process failed {Count} times in the last {Interval:F1}s (total {Total}): {Err}",
       errors - _errorsAtLastReport, interval, errors, SrcErrorMessage(Volatile.Read(ref _lastProcessError)));

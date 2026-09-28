@@ -614,9 +614,10 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   /// </summary>
   public void EmitDiagnostics(long nowTimestamp)
   {
-    _stats.EmitIfDue(_logger, nowTimestamp);
     // LOG-8: the resampler counts its failures on the capture thread; they are reported from here.
+    // First, so a failure in the statistics line cannot skip it.
     _resampler?.EmitErrorsIfDue(_logger, nowTimestamp);
+    _stats.EmitIfDue(_logger, nowTimestamp);
   }
 
   public void Dispose()

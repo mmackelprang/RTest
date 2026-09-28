@@ -20,8 +20,8 @@ namespace Radio.API.Logging;
 /// </para>
 /// <para>
 /// The budget is sized from measurement, not taste: the busiest legitimate line on the box
-/// (<c>RTLSDRCore.RadioReceiver</c> "DSP processing queue full", 2026-09-27 file sink) peaked at 97 per
-/// minute. 120 per minute leaves that untouched and cuts a runaway such as the resampler's old
+/// (<c>RTLSDRCore.RadioReceiver</c> "DSP processing queue full", 2026-09-27 file sink — one day's sample)
+/// peaked at 97 per minute. 120 per minute leaves that untouched and cuts a runaway such as the resampler's old
 /// ~94–350 per <em>second</em> to 2 per second, plus one summary line.
 /// </para>
 /// <para>
@@ -29,7 +29,13 @@ namespace Radio.API.Logging;
 /// suppress the evidence of suppression). Keys are a message template by reference plus the source
 /// string; a code path that builds templates dynamically (an interpolated string passed as a template)
 /// would mint a key per message, so the table is cleared if it ever grows past
-/// <see cref="MaxKeys"/> — losing only in-flight counts, never events.
+/// <see cref="MaxKeys"/>. Suppressed counts are carried across a clear (reported as one line), but each
+/// key's budget restarts. Serilog's template caches do not keep templates over 1024 characters, so such a
+/// template gets a fresh key per event and is never limited.
+/// </para>
+/// <para>
+/// The reporter's own journald cost: at most one Warning per flooding key per minute for as long as the
+/// flood lasts — including floods of Information lines that never reached journald themselves.
 /// </para>
 /// </remarks>
 public sealed class LogRateLimiter : ILogEventFilter
@@ -46,6 +52,7 @@ public sealed class LogRateLimiter : ILogEventFilter
   private readonly long _windowTicks;
   private readonly ConcurrentDictionary<Key, Bucket> _buckets = new();
   private int _keyCount;
+  private long _suppressedLostToClear;
 
   public LogRateLimiter(TimeProvider? timeProvider = null)
   {
@@ -72,8 +79,13 @@ public sealed class LogRateLimiter : ILogEventFilter
     if (!_buckets.TryGetValue(key, out var bucket))
     {
       // ConcurrentDictionary.Count takes every internal lock, so the size is tracked separately.
+      // (Racing misses can over-count; that only makes a clear happen earlier.)
       if (Interlocked.Increment(ref _keyCount) > MaxKeys)
       {
+        foreach (var dropped in _buckets.Values)
+        {
+          Interlocked.Add(ref _suppressedLostToClear, Interlocked.Exchange(ref dropped.Suppressed, 0));
+        }
         _buckets.Clear();
         Interlocked.Exchange(ref _keyCount, 1);
       }
@@ -104,6 +116,11 @@ public sealed class LogRateLimiter : ILogEventFilter
   public IReadOnlyList<(string? Source, string Template, long Count)> DrainSuppressed()
   {
     var drained = new List<(string?, string, long)>();
+    var cleared = Interlocked.Exchange(ref _suppressedLostToClear, 0);
+    if (cleared > 0)
+    {
+      drained.Add((null, "(keys cleared: more than 10000 distinct lines — see LogRateLimiter.MaxKeys)", cleared));
+    }
     foreach (var (key, bucket) in _buckets)
     {
       var count = Interlocked.Exchange(ref bucket.Suppressed, 0);
@@ -156,6 +173,8 @@ public sealed class LogRateLimitReporter : BackgroundService
   /// <summary>This reporter's SourceContext; exempt from the limiter.</summary>
   public static readonly string SourceContext = typeof(LogRateLimitReporter).FullName!;
 
+  private const int MaxTemplateChars = 160;
+
   private readonly LogRateLimiter _limiter;
   private readonly ILogger<LogRateLimitReporter> _logger;
   private readonly TimeProvider _time;
@@ -172,10 +191,11 @@ public sealed class LogRateLimitReporter : BackgroundService
   {
     foreach (var (source, template, count) in _limiter.DrainSuppressed())
     {
-      // The template is a code constant (not rendered values), so it carries no caller data.
+      // The template is usually a code constant, but an interpolated string passed as a template
+      // carries its values — and this line goes to journald. Capped so one cannot dump much.
       _logger.LogWarning(
         "LOG-8: rate limit suppressed {Count} events from {Source} in the last minute: {Template}",
-        count, source ?? "(no source)", template);
+        count, source ?? "(no source)", template.Length > MaxTemplateChars ? template[..MaxTemplateChars] + "…" : template);
     }
   }
 

@@ -144,14 +144,61 @@ public class LogRateLimiterTests
     var (logger, _) = Build();
     using (logger)
     {
+      // The reporter logs through ILogger<LogRateLimitReporter>; go through the same MEL category
+      // rather than the constant, so the exemption is checked against the real SourceContext.
+      using var factory = new Serilog.Extensions.Logging.SerilogLoggerFactory(logger);
+      var reporter = factory.CreateLogger<LogRateLimitReporter>();
       for (var i = 0; i < 200; i++)
       {
         From(logger, "Radio.X").Fatal("dying");
-        From(logger, LogRateLimitReporter.SourceContext).Warning("LOG-8: summary");
+        reporter.LogWarning("LOG-8: summary");
       }
 
       Assert.Equal(400, _sink.Count);
     }
+  }
+
+  [Fact]
+  public void KeyTableClear_CarriesSuppressedCountsIntoTheReport()
+  {
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      var noisy = From(logger, "Radio.Noisy");
+      for (var i = 0; i < 130; i++)
+      {
+        noisy.Information("flood");
+      }
+      // Force the key table past MaxKeys with distinct (dynamically built) templates.
+      for (var i = 0; i <= LogRateLimiter.MaxKeys; i++)
+      {
+        From(logger, "Radio.Dynamic").Information("dynamic " + i);
+      }
+    }
+
+    var drained = limiter.DrainSuppressed();
+    Assert.Equal(10, drained.Sum(d => d.Count));
+  }
+
+  [Fact]
+  public void Reporter_CapsTemplateLength()
+  {
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      var longTemplate = "interpolated " + new string('x', 500);
+      for (var i = 0; i < 125; i++)
+      {
+        From(logger, "Radio.X").Information(longTemplate);
+      }
+    }
+
+    var log = new CapturingLogger();
+    new LogRateLimitReporter(limiter, log, _time).ReportOnce();
+
+    var message = Assert.Single(log.Messages);
+    Assert.EndsWith("…", message);
+    Assert.True(message.Length < 300, message.Length.ToString());
   }
 
   [Fact]

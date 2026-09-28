@@ -112,7 +112,8 @@ public class SrcVariableResamplerTests
     using var r = new SrcVariableResampler(log, channels: 2, initialRatio: 1000.0);
     log.Reset();
     long second = System.Diagnostics.Stopwatch.Frequency;
-    long t0 = 1_000_000;
+    // Real timestamps: the first report's interval runs from the resampler's creation.
+    long t0 = System.Diagnostics.Stopwatch.GetTimestamp() + 5 * second;
 
     Assert.False(r.EmitErrorsIfDue(log, t0)); // nothing failed yet
 
@@ -123,7 +124,7 @@ public class SrcVariableResamplerTests
     Assert.True(r.EmitErrorsIfDue(log, t0));
     Assert.Equal(1, log.Calls);
     Assert.Equal(LogLevel.Warning, log.LastLevel);
-    Assert.StartsWith("src_process failed 300 times in the last 0.0s (total 300): ", log.LastMessage);
+    Assert.Matches(@"^src_process failed 300 times in the last 5\.\ds \(total 300\): ", log.LastMessage);
 
     r.Process(new float[64], new float[128]);
     Assert.False(r.EmitErrorsIfDue(log, t0 + 29 * second)); // throttled
