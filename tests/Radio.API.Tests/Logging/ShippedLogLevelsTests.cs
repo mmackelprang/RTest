@@ -12,17 +12,26 @@ namespace Radio.API.Tests.Logging;
 /// with the Debian deploy overlay the way the installed box loads them.
 /// </summary>
 /// <remarks>
-/// The O7 constraint is the point of these tests: the two namespaces are quiet by default, and their
-/// Information lines — the ones <c>scripts/research/bt_drift_analyze.py</c> and
-/// <c>bt_stall_detect.py</c> parse — come back with one LOG-5 switch each. The SourceContexts below
-/// are the loggers those lines are actually written through.
+/// <para>
+/// The O7 constraint is the point of these tests: the two namespaces are quiet by default, and the
+/// Information lines <c>scripts/research/bt_drift_analyze.py</c> and <c>bt_stall_detect.py</c> parse
+/// come back when both are raised at runtime (LOG-5). Those scripts read the file sink — radio-api's
+/// journal has been Warning-only since LOG-11.
+/// </para>
+/// <para>
+/// The SourceContexts are the loggers the lines are really written through. On Linux the BT
+/// <c>BufferedSoundGenerator</c> is built by <c>LinuxBluetoothService.GetAudioCaptureDeviceAsync</c> with
+/// that service's logger, so its drift/underrun lines — and <c>PipeWireNativeStream</c>'s OnProcess
+/// heartbeat — are <c>...Platform.Bluetooth.LinuxBluetoothService</c>. The SDR generator logs as
+/// <c>SDRRadioAudioSource</c>. <c>bt_stall_detect.py</c> also needs <c>BluetoothAudioSource</c>'s state
+/// lines, which are in the Audio namespace.
+/// </para>
 /// </remarks>
 public class ShippedLogLevelsTests : IDisposable
 {
-  // BufferedSoundGenerator lines are written through the owning source's logger.
-  private const string BtSource = "Radio.Infrastructure.Audio.Sources.Primary.BluetoothAudioSource";
-  // PipeWireNativeStream's OnProcess line is written through LinuxBluetoothService's logger.
   private const string BtService = "Radio.Infrastructure.Platform.Bluetooth.LinuxBluetoothService";
+  private const string BtSource = "Radio.Infrastructure.Audio.Sources.Primary.BluetoothAudioSource";
+  private const string SdrSource = "Radio.Infrastructure.Audio.Sources.Primary.SDRRadioAudioSource";
 
   private readonly string _logDir = Path.Combine(Path.GetTempPath(), $"radio-log2-{Guid.NewGuid():N}");
 
@@ -68,10 +77,13 @@ public class ShippedLogLevelsTests : IDisposable
     Assert.Equal(LogEventLevel.Warning, switches.Get("Radio.Infrastructure.Audio")!.Level);
     Assert.Equal(LogEventLevel.Warning, switches.Get("Radio.Infrastructure.Platform.Bluetooth")!.Level);
     Assert.Equal(LogEventLevel.Information, switches.Get("Radio")!.Level);
+    // Carve-outs: source switching / announcements, and engine / device selection, stay visible.
+    Assert.Equal(LogEventLevel.Information, switches.Get("Radio.Infrastructure.Audio.Services")!.Level);
+    Assert.Equal(LogEventLevel.Information, switches.Get("Radio.Infrastructure.Audio.SoundFlow")!.Level);
   }
 
   [Fact]
-  public void ParsedResearchLines_AreQuietByDefault_AndReturnWithOneSwitchEach()
+  public void ParsedResearchLines_AreQuietByDefault_AndReturnWhenBothNamespacesAreRaised()
   {
     var config = Load(withDeployOverlay: true);
     var switches = LogLevelSwitches.FromConfiguration(config);
@@ -80,26 +92,40 @@ public class ShippedLogLevelsTests : IDisposable
 
     void EmitResearchLines()
     {
-      logger.ForContext(Constants.SourceContextPropertyName, BtSource)
-        .Information("🔄 Clock drift compensation (Single): drift");
+      logger.ForContext(Constants.SourceContextPropertyName, SdrSource)
+        .Information("🔄 Clock drift compensation (Single): sdr drift");
+      logger.ForContext(Constants.SourceContextPropertyName, BtService)
+        .Information("🔄 Clock drift compensation (Single): bt drift");
       logger.ForContext(Constants.SourceContextPropertyName, BtService)
         .Information("🔬 PipeWire OnProcess: heartbeat");
+      logger.ForContext(Constants.SourceContextPropertyName, BtSource)
+        .Information("BluetoothAudioSource state = Playing");
     }
 
     EmitResearchLines();
     // Warnings in the same namespaces are untouched — "Buffer underrun" is a Warning.
-    logger.ForContext(Constants.SourceContextPropertyName, BtSource).Warning("⚠️ Buffer underrun (Single): underrun");
-    // The override is not over-broad: the rest of Radio.* keeps Information.
+    logger.ForContext(Constants.SourceContextPropertyName, BtService).Warning("⚠️ Buffer underrun (Single): underrun");
+    // Not over-broad: the rest of Radio.*, and the carve-outs, keep Information.
     logger.ForContext(Constants.SourceContextPropertyName, "Radio.API.Services.AudioStateUpdateService").Information("api info");
-    logger.ForContext(Constants.SourceContextPropertyName, "Radio.Fingerprinting.Services.X").Information("fp info");
+    logger.ForContext(Constants.SourceContextPropertyName, "Radio.Infrastructure.Audio.Services.AudioManager").Information("switching source");
+    logger.ForContext(Constants.SourceContextPropertyName, "Radio.Infrastructure.Audio.SoundFlow.SoundFlowDeviceManager").Information("device selected");
 
-    Assert.Equal(new[] { "⚠️ Buffer underrun (Single): underrun", "api info", "fp info" }, sink.Take());
+    Assert.Equal(new[] { "⚠️ Buffer underrun (Single): underrun", "api info", "switching source", "device selected" }, sink.Take());
 
-    switches.TrySet("Radio.Infrastructure.Audio", LogEventLevel.Information);
+    // One namespace is not enough for bt_stall_detect: it needs the state line AND the heartbeat.
     switches.TrySet("Radio.Infrastructure.Platform.Bluetooth", LogEventLevel.Information);
     EmitResearchLines();
+    Assert.Equal(new[] { "🔄 Clock drift compensation (Single): bt drift", "🔬 PipeWire OnProcess: heartbeat" }, sink.Take());
 
-    Assert.Equal(new[] { "🔄 Clock drift compensation (Single): drift", "🔬 PipeWire OnProcess: heartbeat" }, sink.Take());
+    switches.TrySet("Radio.Infrastructure.Audio", LogEventLevel.Information);
+    EmitResearchLines();
+    Assert.Equal(new[]
+    {
+      "🔄 Clock drift compensation (Single): sdr drift",
+      "🔄 Clock drift compensation (Single): bt drift",
+      "🔬 PipeWire OnProcess: heartbeat",
+      "BluetoothAudioSource state = Playing",
+    }, sink.Take());
   }
 
   private sealed class Collector : ILogEventSink
