@@ -45,7 +45,7 @@ dotnet run --project src/Radio.Web
 # Run audio UAT tool
 dotnet run --project tools/Radio.Tools.AudioUAT
 
-# Deploy to Pi (from Windows)
+# Deploy to Pi (from a Windows or Linux host running pwsh)
 ./deploy/Deploy-ToPi.ps1 -PiHost piradio -PiUser radio
 ```
 

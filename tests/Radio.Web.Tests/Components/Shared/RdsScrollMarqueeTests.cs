@@ -21,7 +21,15 @@ namespace Radio.Web.Tests.Components.Shared;
 ///     contract: init on first mount, update("append"/"swap"/"reset") on text
 ///     changes, update("speed") on speed-only changes, dispose on unmount —
 ///     asserted via bUnit's module-interop invocation records
+///   - Only the BODY (Text) goes through the transition diff; the station-name
+///     Head is handed to the engine separately and never causes a reset
+///     (AUD-63)
+///   - Once the engine is attached it owns the track text: Blazor rewrites
+///     the title and the SR mirror, not the track spans
 ///   - No DOM churn / no interop on no-op parent re-renders (ShouldRender)
+///
+/// update() argument positions: [0] instance id, [1] mode, [2] trimmed body
+/// chars, [3] head text, [4] body text, [5] speed. init(): [5] speed.
 /// </summary>
 public class RdsScrollMarqueeTests : TestContext
 {
@@ -149,7 +157,7 @@ public class RdsScrollMarqueeTests : TestContext
 
     var inits = EngineCalls("init");
     inits.Should().HaveCount(1, "one engine instance per mounted marquee");
-    inits[0].Arguments[3].Should().Be(40, "the configured speed is passed to init");
+    inits[0].Arguments[5].Should().Be(40, "the configured speed is passed to init");
     EngineCalls("update").Should().BeEmpty();
   }
 
@@ -191,13 +199,13 @@ public class RdsScrollMarqueeTests : TestContext
   [Fact]
   public void Marquee_SameLengthSwap_CallsUpdateSwap()
   {
-    // Rolling-PS page swap: the 8-char PS head changes, track length is
-    // unchanged — keep the offset, swap the glyphs (no visual jump).
+    // A chunk replaced in place by a correction of equal length: track
+    // length is unchanged — keep the offset, swap the glyphs (no jump).
     var cut = RenderComponent<RdsScrollMarquee>(p => p
-      .Add(x => x.Text, "EAGLES97 • Hotel California"));
+      .Add(x => x.Text, "RDS PS • GivJ It Away"));
 
     cut.SetParametersAndRender(p => p
-      .Add(x => x.Text, "CLASSICS • Hotel California"));
+      .Add(x => x.Text, "RDS PS • Give It Away"));
 
     var updates = EngineCalls("update");
     updates.Should().HaveCount(1);
@@ -233,7 +241,194 @@ public class RdsScrollMarqueeTests : TestContext
     var updates = EngineCalls("update");
     updates.Should().HaveCount(1);
     updates[0].Arguments[1].Should().Be("speed");
-    updates[0].Arguments[3].Should().Be(60);
+    updates[0].Arguments[5].Should().Be(60);
+  }
+
+  // ─── Head / body split (AUD-63) ──────────────────────────────────────────
+  // RdsCard composes "{PS} • " as Head and the RT buffer as Text. Composing
+  // them into one string defeated the suffix-of-old-is-head-of-new alignment:
+  // once the buffer was full, every eviction classified as a swap (the whole
+  // text shifted a chunk under a fixed offset) or a reset (a snap to home).
+
+  [Fact]
+  public void Marquee_FrontTrimmedAppend_WithStationNameHead_StillClassifiesFromBodyAlone()
+  {
+    // The eviction case above, with a station-name head in front of it. The
+    // head must not disturb the classification: still an append with exactly
+    // the 6 body characters that were evicted.
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "WXYZ • ")
+      .Add(x => x.Text, "Old • Morning Edition"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "WXYZ • ")
+      .Add(x => x.Text, "Morning Edition • NPR News"));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("append",
+      "the head is not part of the diffed text, so the eviction still aligns as a continuation");
+    updates[0].Arguments[2].Should().Be(6);
+    updates[0].Arguments[3].Should().Be("WXYZ • ");
+    updates[0].Arguments[4].Should().Be("Morning Edition • NPR News");
+  }
+
+  [Fact]
+  public void Marquee_HeadChange_WithUnchangedBody_CallsUpdateSwap_NeverReset()
+  {
+    // A rolling-PS page flip: the decoder trims the name, so consecutive
+    // pages differ in length ("Rock 92" → "Limeligh" → "Rush"). The body is
+    // unchanged, so this is an in-place change; the engine absorbs the
+    // head's width delta into the offset. It must never be a reset.
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "Rock 92 • ")
+      .Add(x => x.Text, "Hotel California"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "Limeligh • ")
+      .Add(x => x.Text, "Hotel California"));
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "Rush • ")
+      .Add(x => x.Text, "Hotel California"));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(2);
+    updates.Should().AllSatisfy(u =>
+    {
+      u.Arguments[1].Should().Be("swap");
+      u.Arguments[2].Should().Be(0);
+      u.Arguments[4].Should().Be("Hotel California");
+    });
+    updates[0].Arguments[3].Should().Be("Limeligh • ");
+    updates[1].Arguments[3].Should().Be("Rush • ");
+  }
+
+  [Fact]
+  public void Marquee_HeadAndBodyChangeTogether_ClassifiesTheBody()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "Rock 92 • ")
+      .Add(x => x.Text, "Hotel California"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "Rush • ")
+      .Add(x => x.Text, "Hotel California • Tom Sawyer"));
+
+    var updates = EngineCalls("update");
+    updates.Should().HaveCount(1);
+    updates[0].Arguments[1].Should().Be("append");
+    updates[0].Arguments[3].Should().Be("Rush • ");
+    updates[0].Arguments[4].Should().Be("Hotel California • Tom Sawyer");
+  }
+
+  [Fact]
+  public void Marquee_HeadOnlyChange_DoesNotReInit()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "Rock 92 • ")
+      .Add(x => x.Text, "Hotel California"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "Rush • ")
+      .Add(x => x.Text, "Hotel California"));
+
+    EngineCalls("init").Should().HaveCount(1);
+    EngineCalls("dispose").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Marquee_TrackSpans_CarryMountedText_AndEngineOwnsUpdates()
+  {
+    // Blazor renders the head/body spans with the text they mounted with and
+    // never rewrites them: the engine sets textContent and the compensated
+    // offset in one JS task, so the new text cannot paint a round-trip
+    // before the offset catches up. The title and SR mirror DO follow the
+    // live parameters.
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+
+    cut.Find(".rcp-rds-rt-head").TextContent.Should().Be("WUNC • ");
+    cut.Find(".rcp-rds-rt-body").TextContent.Should().Be("Morning Edition");
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition • NPR News"));
+
+    cut.Find(".rcp-rds-rt-body").TextContent.Should().Be("Morning Edition",
+      "the track text is the engine's to update once attached");
+    cut.Find(".rcp-rds-rt-sr-only").TextContent.Trim().Should().Be("WUNC • Morning Edition • NPR News");
+    cut.Find(".rcp-rds-rt-scroll").GetAttribute("title").Should().Be("WUNC • Morning Edition • NPR News");
+    EngineCalls("update").Single().Arguments[4].Should().Be("Morning Edition • NPR News",
+      "the engine receives the new body text and writes it itself");
+  }
+
+  [Fact]
+  public void Marquee_TrackSpans_AreAdjacent_NoWhitespaceTextNodeBetween()
+  {
+    // The head's trailing separator space is preserved by white-space: pre
+    // on the spans; a whitespace text node BETWEEN the spans would be a third
+    // piece of text the engine does not manage and would double the gap.
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+
+    var track = cut.Find(".rcp-rds-rt-track");
+    track.ChildNodes.Should().HaveCount(2);
+    track.TextContent.Should().Be("WUNC • Morning Edition");
+  }
+
+  [Fact]
+  public void Marquee_ReMountAfterEmpty_MountsTheCurrentText()
+  {
+    // After the markup unmounts (empty Text) and re-mounts, the spans must
+    // carry the CURRENT text — the freeze applies only while an engine is
+    // attached to them.
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, string.Empty));
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "KEXP • ")
+      .Add(x => x.Text, "All Things Considered"));
+
+    cut.Find(".rcp-rds-rt-head").TextContent.Should().Be("KEXP • ");
+    cut.Find(".rcp-rds-rt-body").TextContent.Should().Be("All Things Considered");
+    EngineCalls("init").Should().HaveCount(2);
+  }
+
+  [Fact]
+  public void Marquee_TitleAndMirror_CarryHeadAndBody()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+
+    cut.Find(".rcp-rds-rt-scroll").GetAttribute("title").Should().Be("WUNC • Morning Edition");
+    cut.Find(".rcp-rds-rt-sr-only").TextContent.Trim().Should().Be("WUNC • Morning Edition");
+  }
+
+  [Fact]
+  public void Marquee_DoesNotReRender_WhenHeadAndTextUnchanged()
+  {
+    var cut = RenderComponent<RdsScrollMarquee>(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+    var afterPrime = cut.RenderCount;
+
+    cut.SetParametersAndRender(p => p
+      .Add(x => x.Head, "WUNC • ")
+      .Add(x => x.Text, "Morning Edition"));
+
+    cut.RenderCount.Should().Be(afterPrime);
+    EngineCalls("update").Should().BeEmpty();
   }
 
   [Fact]

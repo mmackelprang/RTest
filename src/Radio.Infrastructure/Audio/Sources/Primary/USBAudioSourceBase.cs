@@ -477,24 +477,30 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
       return;
     }
 
-    var track = e.Track;
-    Logger.LogInformation(
-      "Updating {SourceName} metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
-      Name, track.Title, track.Artist, e.Confidence);
-
     // Update metadata with fingerprinted track information using StandardMetadataKeys
-    UpdateMetadataFromFingerprint(track, e.Confidence, e.IdentifiedAt);
+    UpdateMetadataFromFingerprint(e.Track, e.Confidence, e.IdentifiedAt);
   }
 
   /// <summary>
   /// Updates metadata from fingerprinted track information.
   /// Can be overridden by derived classes to customize behavior.
   /// </summary>
+  /// <remarks>
+  /// ⚠ This default REPLACES Title/Artist/Album/AlbumArtUrl unconditionally, which is right
+  /// for a capture source with no metadata of its own (vinyl, line-in) and wrong for one that
+  /// has some. <see cref="BluetoothAudioSource"/> overrides it to do nothing and applies the
+  /// AUD-1 per-field rule in its own handler instead. The log line lives here rather than in
+  /// the caller so that an override which writes nothing does not log that it updated anything.
+  /// </remarks>
   /// <param name="track">The identified track metadata.</param>
   /// <param name="confidence">The confidence level of the identification.</param>
   /// <param name="identifiedAt">When the track was identified.</param>
   protected virtual void UpdateMetadataFromFingerprint(TrackMetadata track, double confidence, DateTime identifiedAt)
   {
+    Logger.LogInformation(
+      "Updating {SourceName} metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
+      Name, track.Title, track.Artist, confidence);
+
     // Store current source/device info to restore later
     var sourceInfo = _metadata.TryGetValue("Source", out var source) ? source : null;
     var deviceInfo = _metadata.TryGetValue("Device", out var device) ? device : null;

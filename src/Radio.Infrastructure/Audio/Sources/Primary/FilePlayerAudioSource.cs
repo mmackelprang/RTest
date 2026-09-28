@@ -15,7 +15,6 @@ using Radio.Fingerprinting.Services;
 using Radio.Fingerprinting;
 using SoundFlow.Backends.MiniAudio;
 using SoundFlow.Interfaces;
-using SoundFlow.Metadata;
 using SoundFlow.Providers;
 using SoundFlow.Structs;
 
@@ -42,6 +41,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private List<string> _originalOrder = new(); // Store original order for shuffle toggle
   private List<string> _playedHistory = new(); // Track played songs for Previous
   private string? _currentFile;
+
+  // AUD-33: when (UTC ticks, 0 = unknown) the current file became the track whose metadata we hold,
+  // and which file that was. Written on the playback path, read on the identification thread.
+  private long _trackStartedAtTicks;
+  private string? _trackStartedFile;
   private int _consecutiveSkipCount;
   private ISoundDataProvider? _dataProvider;
   private FileStream? _fileStream;
@@ -71,7 +75,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for queue persistence.</param>
   /// <param name="albumArtCache">Optional album art cache for extracting embedded cover art.</param>
-  /// <param name="fingerprintingOptions">Optional fingerprinting options (controls UseShazamForAllSources toggle).</param>
+  /// <param name="fingerprintingOptions">Optional fingerprinting options. Controls the
+  /// UseShazamForAllSources gate only — what is done with a fingerprint ANSWER is decided per
+  /// field by SourceMetadataPrecedence and is not configurable (AUD-1).</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
   public FilePlayerAudioSource(
     ILogger<FilePlayerAudioSource> logger,
@@ -1688,40 +1694,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     var album = "--";
     TimeSpan? duration = null;
 
-    try
+    // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
+    var tags = AudioTagReader.Read(filePath, Logger);
+    if (tags != null)
     {
-      var result = SoundMetadataReader.Read(filePath);
-      if (result.IsSuccess && result.Value != null)
-      {
-        var formatInfo = result.Value;
-
-        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
-        duration = AccurateDurationReader.GetDuration(filePath, Logger);
-        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
-        {
-          duration = formatInfo.Duration;
-        }
-
-        if (formatInfo.Tags != null)
-        {
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
-          {
-            title = formatInfo.Tags.Title;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
-          {
-            artist = formatInfo.Tags.Artist;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
-          {
-            album = formatInfo.Tags.Album;
-          }
-        }
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
+      duration = tags.Duration;
+      title = tags.Title ?? title;
+      artist = tags.Artist ?? artist;
+      album = tags.Album ?? album;
     }
 
     // Populate album art from embedded picture tags so Up Next tiles render real art
@@ -1754,39 +1734,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     var album = "--";
     TimeSpan? duration = null;
 
-    try
+    // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
+    var tags = AudioTagReader.Read(filePath, Logger);
+    if (tags != null)
     {
-      var result = SoundMetadataReader.Read(filePath);
-      if (result.IsSuccess && result.Value != null)
-      {
-        var formatInfo = result.Value;
-
-        duration = AccurateDurationReader.GetDuration(filePath, Logger);
-        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
-        {
-          duration = formatInfo.Duration;
-        }
-
-        if (formatInfo.Tags != null)
-        {
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
-          {
-            title = formatInfo.Tags.Title;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
-          {
-            artist = formatInfo.Tags.Artist;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
-          {
-            album = formatInfo.Tags.Album;
-          }
-        }
-      }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogDebug(ex, "Failed to read metadata for {File}, using defaults", filePath);
+      duration = tags.Duration;
+      title = tags.Title ?? title;
+      artist = tags.Artist ?? artist;
+      album = tags.Album ?? album;
     }
 
     // Populate album art from embedded picture tags so Up Next / Recent tiles render real
@@ -1978,7 +1933,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _dataProvider = null;
     }
 
-    // Read metadata from the file (this uses SoundMetadataReader which is separate from decoding)
+    // Read metadata from the file (AudioTagReader: tags only, separate from decoding)
     UpdateMetadataFromFile(fileToLoad);
 
     Logger.LogDebug("Loaded file: {File}", fileToLoad);
@@ -2001,6 +1956,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   private void UpdateMetadataFromFile(string filePath)
   {
+    // AUD-33: a different file is a new track; re-reading the same one (repeat, queue edits,
+    // restore) is not, so an identification already in flight for it stays valid.
+    if (!string.Equals(filePath, _trackStartedFile, StringComparison.Ordinal))
+    {
+      _trackStartedFile = filePath;
+      Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
+    }
+
     _metadata.Clear();
     
     // Set default values first
@@ -2018,69 +1981,62 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // is the best available source for a human-readable display name.
     _metadata["FilePath"] = filePath;
 
-    // Use SoundFlow's metadata reader to get audio tags
+    // AUD-32: AudioTagReader tries SoundFlow and falls back to TagLib. SoundFlow alone rejects some
+    // real ID3v2.2 tags, and that failure used to leave placeholders here — which AUD-1's per-field
+    // rule then (correctly) treated as missing, letting fingerprinting replace a tagged artist.
     try
     {
-      var result = SoundMetadataReader.Read(filePath);
-      if (result.IsSuccess && result.Value != null)
+      var tags = AudioTagReader.Read(filePath, Logger);
+      if (tags != null)
       {
-        var formatInfo = result.Value;
-
-        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
-        var accurateDuration = AccurateDurationReader.GetDuration(filePath, Logger);
-        if (accurateDuration != null)
-        {
-          _duration = accurateDuration.Value;
-        }
-        else if (formatInfo.Duration != TimeSpan.Zero)
-        {
-          _duration = formatInfo.Duration;
-        }
-        else
-        {
-          _duration = TimeSpan.Zero;
-        }
-
+        _duration = tags.Duration ?? TimeSpan.Zero;
         _metadata[StandardMetadataKeys.Duration] = _duration;
-        _metadata["SampleRate"] = formatInfo.SampleRate;
-        _metadata["Channels"] = formatInfo.ChannelCount;
-        _metadata["BitRate"] = formatInfo.Bitrate;
+        if (tags.SampleRate.HasValue)
+        {
+          _metadata["SampleRate"] = tags.SampleRate.Value;
+        }
+        if (tags.Channels.HasValue)
+        {
+          _metadata["Channels"] = tags.Channels.Value;
+        }
+        if (tags.Bitrate.HasValue)
+        {
+          _metadata["BitRate"] = tags.Bitrate.Value;
+        }
 
         // Extract embedded album art via TagLib (SoundFlow doesn't read pictures)
         ExtractEmbeddedAlbumArt(filePath);
 
-        // Get tags (Title, Artist, Album, etc.) - override defaults if available
-        if (formatInfo.Tags != null)
+        // Tags override the defaults seeded above; AudioTagReader reports blank tags as null.
+        if (tags.Title != null)
         {
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Title))
-          {
-            _metadata[StandardMetadataKeys.Title] = formatInfo.Tags.Title;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Artist))
-          {
-            _metadata[StandardMetadataKeys.Artist] = formatInfo.Tags.Artist;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Album))
-          {
-            _metadata[StandardMetadataKeys.Album] = formatInfo.Tags.Album;
-          }
-          if (!string.IsNullOrEmpty(formatInfo.Tags.Genre))
-          {
-            _metadata[StandardMetadataKeys.Genre] = formatInfo.Tags.Genre;
-          }
-          if (formatInfo.Tags.Year.HasValue)
-          {
-            _metadata[StandardMetadataKeys.Year] = formatInfo.Tags.Year.Value;
-          }
-          if (formatInfo.Tags.TrackNumber.HasValue)
-          {
-            _metadata[StandardMetadataKeys.TrackNumber] = formatInfo.Tags.TrackNumber.Value;
-          }
+          _metadata[StandardMetadataKeys.Title] = tags.Title;
+        }
+        if (tags.Artist != null)
+        {
+          _metadata[StandardMetadataKeys.Artist] = tags.Artist;
+        }
+        if (tags.Album != null)
+        {
+          _metadata[StandardMetadataKeys.Album] = tags.Album;
+        }
+        if (tags.Genre != null)
+        {
+          _metadata[StandardMetadataKeys.Genre] = tags.Genre;
+        }
+        if (tags.Year.HasValue)
+        {
+          _metadata[StandardMetadataKeys.Year] = tags.Year.Value;
+        }
+        if (tags.TrackNumber.HasValue)
+        {
+          _metadata[StandardMetadataKeys.TrackNumber] = tags.TrackNumber.Value;
         }
 
         Logger.LogDebug(
-          "Loaded metadata for {File}: Title={Title}, Artist={Artist}, Duration={Duration}",
+          "Loaded metadata for {File} via {Reader}: Title={Title}, Artist={Artist}, Duration={Duration}",
           Path.GetFileName(filePath),
+          tags.ReadBy,
           _metadata.GetValueOrDefault(StandardMetadataKeys.Title),
           _metadata.GetValueOrDefault(StandardMetadataKeys.Artist),
           _duration);
@@ -2100,11 +2056,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
       else
       {
-        // Fallback to basic file info only
+        // Neither SoundFlow nor TagLib could read the file. Once per track load, so a Warning: before
+        // AUD-32 this was a Debug line and the failure was invisible on the appliance.
         _duration = TimeSpan.Zero;
         _metadata[StandardMetadataKeys.Duration] = _duration;
         _metadata["NeedsFingerprintingLookup"] = true;
-        Logger.LogDebug("Could not read metadata from {File}, using file name as title", filePath);
+        Logger.LogWarning("Could not read tags from {File}; using the file name as the title", filePath);
       }
     }
     catch (Exception ex)
@@ -2187,7 +2144,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   /// <summary>
   /// Handles the TrackIdentified event from the fingerprinting service.
-  /// Updates metadata with identified track information when file tags are incomplete.
+  /// Fills metadata fields the file's own tags left missing, deciding each field
+  /// independently (AUD-1). Cover art is filled whenever it is missing, including for a file
+  /// whose tags are complete; title/artist/album are filled only while
+  /// NeedsFingerprintingLookup is set, which this method clears once it has run.
   /// </summary>
   private void OnTrackIdentified(object? sender, TrackIdentifiedEventArgs e)
   {
@@ -2205,50 +2165,44 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       return;
     }
 
+    // AUD-33: capture + recognition takes ~15 s. A result whose sample began before this file
+    // became the current track describes the previous one; merging it here put Eve 6 on
+    // "Meditating Beat" on the appliance (2026-09-26).
+    var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
+    if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
+    {
+      Logger.LogInformation(
+        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current file started",
+        e.Track.Title, e.Track.Artist);
+      // The service marked this song as recently identified before raising the event; without this,
+      // a straddling capture that named the NEW file would suppress its own re-identification.
+      _identificationService?.ForgetRecentIdentification(e.Track);
+      return;
+    }
+
     var track = e.Track;
 
     // Check if current file needs fingerprinting metadata lookup
     bool needsLookup = _metadata.ContainsKey("NeedsFingerprintingLookup")
       && _metadata["NeedsFingerprintingLookup"] is bool b && b;
 
-    // When UseShazamForAllSources is enabled, SongRec metadata replaces ID3 metadata
-    // (SongRec is more authoritative and has better cover art from Apple Music CDN)
-    if (FpOptions.UseShazamForAllSources && needsLookup)
-    {
-      if (!string.IsNullOrEmpty(track.Title))
-      {
-        _metadata[StandardMetadataKeys.Title] = track.Title;
-      }
-      if (!string.IsNullOrEmpty(track.Artist))
-      {
-        _metadata[StandardMetadataKeys.Artist] = track.Artist;
-      }
-      if (!string.IsNullOrEmpty(track.Album))
-      {
-        _metadata[StandardMetadataKeys.Album] = track.Album;
-      }
-      if (!string.IsNullOrEmpty(track.CoverArtUrl))
-      {
-        _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
-      }
-
-      _metadata["NeedsFingerprintingLookup"] = false;
-      _metadata["IdentificationConfidence"] = e.Confidence;
-      _metadata["IdentifiedAt"] = e.IdentifiedAt;
-      _metadata["MetadataSource"] = "Shazam";
-
-      Logger.LogInformation(
-        "Shazam metadata replaced ID3 for file: '{Title}' by '{Artist}'",
-        track.Title, track.Artist);
-      return;
-    }
-
-    // Update album art from fingerprinting if still using default (no embedded art found).
-    if (_metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl) &&
-        _metadata[StandardMetadataKeys.AlbumArtUrl].Equals(StandardMetadataKeys.DefaultAlbumArtUrl) &&
-        !string.IsNullOrEmpty(track.CoverArtUrl))
+    // AUD-1: cover art, by the same per-field rule as everything else (owner decision
+    // 2026-09-08). Kept above the needsLookup return, as the art fill was before AUD-1: a
+    // file whose tags are complete but which carries no embedded art still gets art.
+    //
+    // ExtractEmbeddedAlbumArt has already put a content-addressed /api/albumart/<hash> path
+    // here when the file had an APIC frame; absent that, AlbumArtUrl still holds the
+    // DefaultAlbumArtUrl UpdateMetadataFromFile seeded, which the shared rule treats as
+    // missing. ⚠ Before AUD-1, whenever UseShazamForAllSources (true on the appliance) and
+    // the lookup flag were both set and SongRec returned art, a separate branch REPLACED
+    // embedded art — measured on the appliance: one stable hash per song from the embedded
+    // art, at least nine different hashes for the same song from SongRec.
+    var filledArt = false;
+    if (SourceMetadataPrecedence.ShouldFillAlbumArt(_metadata)
+        && !string.IsNullOrEmpty(track.CoverArtUrl))
     {
       _metadata[StandardMetadataKeys.AlbumArtUrl] = track.CoverArtUrl;
+      filledArt = true;
       Logger.LogInformation("Album art URL set for '{Title}': {Url}", track.Title, track.CoverArtUrl);
     }
 
@@ -2257,29 +2211,24 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       return;
     }
 
+    // AUD-1: the same per-field rule BluetoothAudioSource uses, from the same helper. ID3
+    // tags are source metadata and win where they exist; only missing fields are filled.
+    // (Before AUD-1, UseShazamForAllSources — true on the appliance — sent every first
+    // identification of a track down a branch that replaced all four fields.)
+    //
+    // The filename is an extra "no title" placeholder because UpdateMetadataFromFile seeds
+    // Title with Path.GetFileNameWithoutExtension and replaces it only when the file has a
+    // non-blank Title tag (AudioTagReader reports blank tags as null), so "title equals filename" means "no title tag". ⚠ It cannot tell
+    // that apart from a file whose Title tag genuinely equals its filename — that file's
+    // title is treated as missing, exactly as it was before AUD-1.
+    var filled = SourceMetadataPrecedence.FillMissingFrom(
+      _metadata,
+      track,
+      Path.GetFileNameWithoutExtension(_currentFile ?? string.Empty));
+
     Logger.LogInformation(
-      "Updating FilePlayer metadata from fingerprinting: {Title} by {Artist} (confidence: {Confidence:P0})",
-      track.Title, track.Artist, e.Confidence);
-
-    // Only update fields that are using defaults (incomplete)
-    if (_metadata[StandardMetadataKeys.Artist].Equals(StandardMetadataKeys.DefaultArtist))
-    {
-      _metadata[StandardMetadataKeys.Artist] = track.Artist;
-    }
-
-    if (_metadata[StandardMetadataKeys.Album].Equals(StandardMetadataKeys.DefaultAlbum) &&
-        !string.IsNullOrEmpty(track.Album))
-    {
-      _metadata[StandardMetadataKeys.Album] = track.Album;
-    }
-
-    // Update title if it's just the filename (contains extension or equals filename without extension)
-    var currentTitle = _metadata[StandardMetadataKeys.Title]?.ToString() ?? "";
-    var filename = Path.GetFileNameWithoutExtension(_currentFile ?? "");
-    if (currentTitle.Equals(filename, StringComparison.OrdinalIgnoreCase))
-    {
-      _metadata[StandardMetadataKeys.Title] = track.Title;
-    }
+      "Fingerprint result for file '{Title}' by '{Artist}' (confidence: {Confidence:P0}); filled from it: {Fields}",
+      track.Title, track.Artist, e.Confidence, filled.Describe(filledArt));
 
     // Add optional metadata if not already present
     if (!_metadata.ContainsKey(StandardMetadataKeys.Genre) && track.Genre != null)
@@ -2297,14 +2246,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _metadata[StandardMetadataKeys.TrackNumber] = track.TrackNumber.Value;
     }
 
-    // Mark that fingerprinting has been applied
+    // Mark that an identification has been processed for this track — which stops SongRec
+    // re-applying every cycle. ⚠ "MetadataSource" records that an identification ran, NOT
+    // that it contributed anything: after AUD-1 a fully tagged file still gets
+    // "Fingerprinting" here with every field its own. No code under src/ looks the key up by
+    // name (it can still travel with the whole metadata dictionary).
     _metadata["NeedsFingerprintingLookup"] = false;
     _metadata["IdentificationConfidence"] = e.Confidence;
     _metadata["IdentifiedAt"] = e.IdentifiedAt;
     _metadata["MetadataSource"] = "Fingerprinting";
-
-    Logger.LogInformation(
-      "File metadata enhanced via fingerprinting: {Title} by {Artist}",
-      _metadata[StandardMetadataKeys.Title], _metadata[StandardMetadataKeys.Artist]);
   }
 }

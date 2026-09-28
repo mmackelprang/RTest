@@ -1,5 +1,12 @@
 # HANDOFF — Start here
 
+> ⭐ **2026-09-27 — a BT / Cast / FM-SDR code review filed `AUD-37` … `AUD-62` on the punch list, and an FM RDS follow-up the same day filed `AUD-63` … `AUD-72` (the owner's *"jerky RDS display"*). ✅ Its three P1 rows `AUD-63`, `AUD-69`, `AUD-70` and the related `AUD-60` shipped the same day in [#674](https://github.com/mmackelprang/RTest/pull/674) — unit-tested and browser-harnessed, ⚠ not yet deployed to `radio` or checked on the panel. Nothing else was built or queued.**
+> **Paused 2026-09-27 — the owner is picking the RDS work up on the dev box.** The pick-up point for that is
+> [`HANDOFF-RDS-DEV-BOX.md`](HANDOFF-RDS-DEV-BOX.md) (gates, deploy, panel acceptance, the two open decisions,
+> and what is left). The review narrative, box-check list and the BT / Cast rows are in
+> [`HANDOFF-BT-CAST-SDR-REVIEW.md`](HANDOFF-BT-CAST-SDR-REVIEW.md). The sections below are otherwise as of 2026-09-03 and
+> their "latest merge" / "box SHA" figures are stale — `main` has moved to the `AUD-3x` fixes since.
+
 **Status:** `[CURRENT — 2026-09-03]` · Rewritten against the tree at `5e571b88`. **The previous
 revision was ~30 merges stale in its first three sections** — it named `#511` as the latest merge,
 the box at `739a859`, a P0 count of "21 listed, 18 effective", and pointed "Start here" at `ENC-5` /

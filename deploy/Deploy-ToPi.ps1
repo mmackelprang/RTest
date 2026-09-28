@@ -44,4 +44,6 @@ if (-not (Test-CallerNamed -Arguments $args -ParameterNames @('Runtime'))) {
   $defaults['Runtime'] = 'linux-arm64'
 }
 
-& "$PSScriptRoot\Deploy-ToLinux.ps1" @defaults @args
+# Join-Path, not "$PSScriptRoot\Deploy-ToLinux.ps1": a literal backslash is not a separator on a
+# Linux host, so that spelling looked for a file named `deploy\Deploy-ToLinux.ps1` and failed.
+& (Join-Path $PSScriptRoot "Deploy-ToLinux.ps1") @defaults @args

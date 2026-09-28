@@ -3,6 +3,15 @@ using RTLSDRCore.DSP;
 namespace RTLSDRCore.Tests;
 
 /// <summary>
+/// One RDS group for the synthetic signal generator: the four 16-bit data
+/// words, plus an optional block to corrupt so that its syndrome check fails
+/// while the other three blocks stay valid (models a burst error inside one
+/// group without disturbing block alignment).
+/// </summary>
+internal readonly record struct RdsTestGroup(
+  ushort BlockA, ushort BlockB, ushort BlockC, ushort BlockD, int? CorruptBlock = null);
+
+/// <summary>
 /// Shared synthetic-RDS-signal helpers used by both <see cref="RdsDecoderTests"/>
 /// and <see cref="RadioReceiverTests"/>. Keeps the BPSK / biphase / CRC modulation
 /// logic in one place so receiver-level integration tests can drive the same
@@ -21,6 +30,15 @@ internal static class RdsDecoderTestSeam
   private static readonly ushort[] OffsetWords = { 0x0FC, 0x198, 0x168, 0x1B4 };
 
   /// <summary>
+  /// Complete PS cycles of one name that the generator sends for
+  /// <see cref="FeedSyntheticRdsSignal"/>. The decoder needs two consecutive
+  /// complete in-order cycles to confirm a name, and sync acquisition
+  /// consumes part of the first cycle, so four would be the bare minimum;
+  /// six leaves headroom for the clock-recovery settle.
+  /// </summary>
+  private const int PsRepetitions = 6;
+
+  /// <summary>
   /// Generates a synthetic RDS-modulated FM composite signal carrying the
   /// given 8-character PS name and feeds it to the decoder. Drives the same
   /// path real-world RDS data takes through <c>RdsDecoder.Process</c>.
@@ -30,32 +48,60 @@ internal static class RdsDecoderTestSeam
   /// </summary>
   internal static void FeedSyntheticRdsSignal(RdsDecoder decoder, string psName, ushort piCode = 0x1234)
   {
+    var groups = new List<RdsTestGroup>();
+    for (int rep = 0; rep < PsRepetitions; rep++)
+    {
+      groups.AddRange(PsCycle(psName, piCode));
+    }
+    FeedSyntheticGroups(decoder, groups);
+  }
+
+  /// <summary>
+  /// The four group 0A segments (addresses 0-3, in order) that carry one
+  /// complete 8-character PS name. Characters are sent as their low byte, so
+  /// a <c>'\u0082'</c> in the name goes out as RDS code 0x82.
+  /// </summary>
+  internal static IEnumerable<RdsTestGroup> PsCycle(string psName, ushort piCode = 0x1234)
+  {
     if (psName.Length != 8)
     {
       throw new ArgumentException("PS name must be exactly 8 characters", nameof(psName));
     }
 
-    var bits = new List<int>();
-
-    // Repeat 4 times for noise rejection (PsConfirmThreshold = 2, need
-    // multiple complete names to confirm).
-    for (int rep = 0; rep < 4; rep++)
+    for (int segment = 0; segment < 4; segment++)
     {
-      for (int charPair = 0; charPair < 4; charPair++)
-      {
-        AppendBlock(bits, piCode, 0);
+      yield return PsGroup(psName, segment, piCode);
+    }
+  }
 
-        // Group type 0A, char pair index in bits 1-0
-        ushort blockB = (ushort)(0x0000 | (charPair & 0x03));
-        AppendBlock(bits, blockB, 1);
+  /// <summary>One group 0A carrying segment <paramref name="segment"/> of <paramref name="psName"/>.</summary>
+  internal static RdsTestGroup PsGroup(string psName, int segment, ushort piCode = 0x1234, int? corruptBlock = null)
+  {
+    // Block B: group type 0A (0000 in bits 15-12, version A in bit 11),
+    // TP=0, PTY=0, segment address in bits 1-0.
+    var blockB = (ushort)(0x0000 | (segment & 0x03));
+    var c1 = (byte)psName[segment * 2];
+    var c2 = (byte)psName[segment * 2 + 1];
+    var blockD = (ushort)((c1 << 8) | c2);
+    return new RdsTestGroup(piCode, blockB, 0x0000 /* AF, arbitrary */, blockD, corruptBlock);
+  }
 
-        AppendBlock(bits, 0x0000, 2); // AF data (arbitrary)
-
-        var c1 = (byte)psName[charPair * 2];
-        var c2 = (byte)psName[charPair * 2 + 1];
-        ushort blockD = (ushort)((c1 << 8) | c2);
-        AppendBlock(bits, blockD, 3);
-      }
+  /// <summary>
+  /// Modulates the given groups, in order, onto a 57 kHz BPSK subcarrier and
+  /// feeds the composite to the decoder in SDR-sized blocks. A group whose
+  /// <see cref="RdsTestGroup.CorruptBlock"/> is set has one data bit of that
+  /// block flipped after the check word was computed, so the block fails the
+  /// syndrome check; alignment of the surrounding blocks is unaffected.
+  /// </summary>
+  internal static void FeedSyntheticGroups(RdsDecoder decoder, IReadOnlyList<RdsTestGroup> groups)
+  {
+    var bits = new List<int>();
+    foreach (var group in groups)
+    {
+      AppendBlock(bits, group.BlockA, 0, corrupt: group.CorruptBlock == 0);
+      AppendBlock(bits, group.BlockB, 1, corrupt: group.CorruptBlock == 1);
+      AppendBlock(bits, group.BlockC, 2, corrupt: group.CorruptBlock == 2);
+      AppendBlock(bits, group.BlockD, 3, corrupt: group.CorruptBlock == 3);
     }
 
     // Differential encode
@@ -156,9 +202,15 @@ internal static class RdsDecoderTestSeam
     return (ushort)(reg & 0x3FF);
   }
 
-  private static void AppendBlock(List<int> bits, ushort data, int blockIndex)
+  private static void AppendBlock(List<int> bits, ushort data, int blockIndex, bool corrupt = false)
   {
     var word26 = BuildValidBlock(data, blockIndex);
+    if (corrupt)
+    {
+      // Flip one data bit after the check word was computed. The (26,16)
+      // code detects every single-bit error, so the syndrome check fails.
+      word26 ^= 1u << 15;
+    }
     for (int i = 25; i >= 0; i--)
     {
       bits.Add((int)((word26 >> i) & 1));

@@ -344,6 +344,134 @@ public class RadioTextAssemblerTests
     Assert.Equal(new[] { message }, confirmed);
   }
 
+
+  // ─── In-place changes (AUD-70) ────────────────────────────────────────────
+  //
+  // Many stations change the RT without toggling the A/B flag, so the old
+  // message's accepted characters are replaced slot by slot as the new one is
+  // double-received. Completeness used to mean "every slot holds some accepted
+  // value", which one lost group during the changeover satisfied with four
+  // characters of the old message still standing — and the hybrid confirmed.
+
+  private const string NextMessage = "Simon - Toto :: Africa";
+
+  [Fact]
+  public void InPlaceChange_CleanReception_ConfirmsOldThenNew_NoHybrid()
+  {
+    var assembler = new RadioTextAssembler();
+    var oldCycle = BuildCycle2A(Message, abFlag: false);
+    var newCycle = BuildCycle2A(NextMessage, abFlag: false);
+
+    var confirmed = Feed(assembler, oldCycle, oldCycle, oldCycle, newCycle, newCycle, newCycle);
+
+    // Same latency as before the change-wave rule: the new text is complete
+    // at the end of its second cycle and confirms one group later.
+    Assert.Equal(new[] { Message, NextMessage }, confirmed);
+  }
+
+  [Theory]
+  [InlineData(1, 2)] // segment 2 ("Mado" → "Toto") lost in the first cycle of the new text
+  [InlineData(2, 2)] // …lost in the second cycle, when it would have been accepted
+  [InlineData(1, 4)] // segment 4 ("a ::" → "Afri") lost in the first cycle
+  [InlineData(2, 5)] // the segment carrying the new terminator lost in the second cycle
+  public void InPlaceChange_LostGroupDuringChangeover_NeverConfirmsHybrid(int lostInCycle, int lostSegment)
+  {
+    var assembler = new RadioTextAssembler();
+    var oldCycle = BuildCycle2A(Message, abFlag: false);
+    var clean = BuildCycle2A(NextMessage, abFlag: false);
+    var lossy = BuildCycle2A(NextMessage, abFlag: false, skipSegment: lostSegment);
+
+    Feed(assembler, oldCycle, oldCycle, oldCycle);
+    Assert.Equal(Message, assembler.ConfirmedText);
+
+    var cycles = lostInCycle == 1
+      ? new[] { lossy, clean, clean, clean }
+      : new[] { clean, lossy, clean, clean };
+    var confirmed = Feed(assembler, cycles);
+
+    // Nothing but the genuine new text may confirm — never a mix of the two.
+    Assert.Equal(new[] { NextMessage }, confirmed);
+  }
+
+  [Fact]
+  public void InPlaceChange_ToLongerMessage_NeverConfirmsHybrid()
+  {
+    // The reverse direction: the old terminator's space fill has to be
+    // overwritten by real characters, and the lost group is one of those.
+    var assembler = new RadioTextAssembler();
+    var shortCycle = BuildCycle2A(NextMessage, abFlag: false);
+    var longClean = BuildCycle2A(Message, abFlag: false);
+    var longLossy = BuildCycle2A(Message, abFlag: false, skipSegment: 6);
+
+    Feed(assembler, shortCycle, shortCycle, shortCycle);
+    Assert.Equal(NextMessage, assembler.ConfirmedText);
+
+    var confirmed = Feed(assembler, longLossy, longClean, longClean, longClean);
+
+    Assert.Equal(new[] { Message }, confirmed);
+  }
+
+  // ─── Character set ───────────────────────────────────────────────────────
+
+  [Fact]
+  public void LineFeed_IsASpace_MessageStillCompletes()
+  {
+    // 0x0A is the standard's line break. Dropping it (as the old printable-
+    // ASCII validation did) left the slot unfilled, so a message containing
+    // one could never be complete and only ever showed through the partial
+    // path, truncated at the break.
+    var assembler = new RadioTextAssembler();
+    var cycle = BuildCycle2A("Traffic on I-40\nExpect delays", abFlag: false);
+
+    var confirmed = Feed(assembler, cycle, cycle, cycle);
+
+    Assert.Equal(new[] { "Traffic on I-40 Expect delays" }, confirmed);
+  }
+
+  [Fact]
+  public void AccentedCharacter_MapsThroughBasicCharset()
+  {
+    // 0x82 is 'é' in the RDS basic character table (IEC 62106 E.1); the old
+    // validation dropped every byte above 0x7E, leaving "Beyonc" + a hole.
+    var assembler = new RadioTextAssembler();
+    var cycle = BuildCycle2A("Beyonc\u0082 - Halo", abFlag: false);
+
+    var confirmed = Feed(assembler, cycle, cycle, cycle);
+
+    Assert.Equal(new[] { "Beyoncé - Halo" }, confirmed);
+  }
+
+  // ─── Group 2B completeness (AUD-60) ──────────────────────────────────────
+
+  [Fact]
+  public void Version2B_UnterminatedFullMessage_IsCompleteAt32()
+  {
+    // 2B segments can address only 32 characters, so a 32-character 2B
+    // message with no terminator IS complete; it used to wait out the
+    // 32-group partial threshold as if half the message were missing.
+    var assembler = new RadioTextAssembler();
+    const string message = "ROCK 92 FM - The Classic Hits!!!"; // exactly 32 chars
+    Assert.Equal(32, message.Length);
+
+    var confirmed = new List<string>();
+    for (var cycle = 0; cycle < 3; cycle++)
+    {
+      for (var seg = 0; seg < 16; seg++)
+      {
+        var blockB = (ushort)(0x2800 | (seg & 0x0F)); // type 2, version B
+        var blockD = (ushort)((message[seg * 2] << 8) | message[seg * 2 + 1]);
+        if (assembler.ProcessGroup(blockB, blockC: 0x0000, blockD, versionB: true))
+        {
+          confirmed.Add(assembler.ConfirmedText!);
+        }
+      }
+    }
+
+    // Three cycles = 48 groups: under the partial threshold (32 stable groups
+    // after the end-of-cycle-2 assembly) nothing would have confirmed yet.
+    Assert.Equal(new[] { message }, confirmed);
+  }
+
   // ─── Reset ───────────────────────────────────────────────────────────────
 
   [Fact]

@@ -120,10 +120,16 @@ sudo deploy/raspberry-pi/setup.sh
 The setup script installs all system dependencies, creates the application user,
 configures PipeWire/WirePlumber for Bluetooth A2DP sink, and installs both systemd services.
 
-### 2. Build and Deploy from Windows
+### 2. Build and Deploy from the dev machine (Windows or Linux)
+
+Both deploy scripts run under PowerShell 7 (`pwsh`) on either host. Until 2026-09-28 they were
+Windows-only in practice, because every repo path in them was spelled with a backslash — a
+separator on Windows and an ordinary filename character on Linux. They now build paths with
+`Join-Path`, so the same invocation works from a Linux dev box with `pwsh`, the .NET 10 SDK,
+`ssh`/`scp` and (optionally) `rsync` installed.
 
 ```powershell
-# One-command build and deploy from your Windows dev machine
+# One-command build and deploy from your dev machine
 .\deploy\Deploy-ToPi.ps1 -PiHost piradio -PiUser mmack
 
 # Or with log tailing
@@ -161,6 +167,17 @@ fallback prints `(rsync not found, using scp)`.
 ⚠ **The fallback is not exotic. On a Windows dev box without `rsync` installed it is the only path
 every deploy takes** — measured on this repo's dev machine 2026-09-05, where `rsync` is absent
 entirely. Check the line above before assuming a deploy went over rsync.
+
+⚠ **On a Linux dev host the opposite holds: `rsync` is normally installed, so the rsync branch is
+the one that runs.** `OPS-12` records that this branch had never executed before 2026-09-09 and
+that its first attempt, from Windows, failed for three reasons that are all artifacts of the MSYS2
+toolchain (`D:` read as a hostname, MSYS rsync unable to drive Windows OpenSSH, a separate
+`known_hosts`). None of those exist on Linux, where rsync and ssh are native and share `~/.ssh`,
+and the transport was proven from a Linux host on 2026-09-28 the way that row prescribes — an
+`rsync -n` dry run to a scratch path on `radio`, exit 0, with the services untouched. ⚠ The row's
+*other* finding is host-independent and still open: the script stops both services in step 2
+before it has proven in step 3 that it can reach the target at all, so any transport failure is an
+outage on every host. Do the dry run before the first deploy from a new machine.
 
 Since `OPS-9`, **a failed transfer stops the deploy** on both routes: the script captures each
 `ssh`/`scp`/`rsync` exit code at its call site and exits with `API sync failed!` or

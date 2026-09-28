@@ -1774,34 +1774,316 @@ public class FilePlayerAudioSourceTests : IDisposable
     // Assert — the file player kept its own ID3 metadata.
     Assert.Equal("Local File Title", source.Metadata[StandardMetadataKeys.Title]);
     Assert.Equal("Local File Artist", source.Metadata[StandardMetadataKeys.Artist]);
+
+    // ⚠ Since AUD-1 the two asserts above hold with or without the guard — supplied tags
+    // survive the per-field merge either way. What discriminates is state ONLY the handler
+    // body writes: its bookkeeping clears the lookup flag and records MetadataSource.
+    Assert.Equal(true, source.Metadata["NeedsFingerprintingLookup"]);
+    Assert.False(source.Metadata.ContainsKey("MetadataSource"));
   }
 
   [Fact]
-  public void OnTrackIdentified_WhileThisSourceIsActive_UpdatesMetadata()
+  public void OnTrackIdentified_WhileThisSourceIsActive_FillsMissingTags()
   {
-    // Arrange — the file player is both Playing and the active source.
+    // Arrange — the file player is both Playing and the active source, and two of its
+    // tags are the "--" placeholders UpdateMetadataFromFile seeds when a file carries none.
+    // (An earlier revision of this test populated both fields and asserted they were
+    // replaced, under a comment calling them "incomplete" — nothing established that.)
     FilePlayerAudioSource? active = null;
     active = CreateSourceForIdentification(getActiveSource: () => active);
     SetState(active, AudioSourceState.Playing);
 
     var metadata = GetMetadataDictionary(active);
     metadata[StandardMetadataKeys.Title] = "Local File Title";
-    metadata[StandardMetadataKeys.Artist] = "Local File Artist";
+    metadata[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    metadata[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
     metadata["NeedsFingerprintingLookup"] = true;
 
     // Act
     InvokeOnTrackIdentified(active, CreateTrackMetadata("Shazam Song", "Shazam Artist"), 0.95);
 
-    // Assert — Shazam metadata replaced the incomplete ID3 tags, as before.
-    Assert.Equal("Shazam Song", active.Metadata[StandardMetadataKeys.Title]);
+    // Assert — the two placeholder fields were filled; the real title was NOT replaced;
+    // and the handler ran to its bookkeeping (MetadataSource is only written there).
     Assert.Equal("Shazam Artist", active.Metadata[StandardMetadataKeys.Artist]);
-    Assert.Equal("Shazam", active.Metadata["MetadataSource"]);
+    Assert.Equal("Some Album", active.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("Local File Title", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Fingerprinting", active.Metadata["MetadataSource"]);
+    Assert.Equal(false, active.Metadata["NeedsFingerprintingLookup"]);
+  }
+
+  // -----------------------------------------------------------------------
+  // AUD-1: per-FIELD precedence, the same rule as Bluetooth. ID3 tags and embedded art
+  // are source metadata and win where they exist; an identification fills only what the
+  // file left missing. Measured on the appliance before this change: 79% of music files
+  // carry embedded art, and PlayHistory held SongRec's titles for 44 of 52 file plays —
+  // including "blink‐182" with a U+2010 HYPHEN in place of the file's ASCII "Blink-182".
+  // -----------------------------------------------------------------------
+
+  [Fact]
+  public void Aud1_EveryTagAndEmbeddedArtPresent_NothingIsOverwritten()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    SetState(active, AudioSourceState.Playing);
+
+    var metadata = GetMetadataDictionary(active);
+    metadata[StandardMetadataKeys.Title] = "All the Small Things";
+    metadata[StandardMetadataKeys.Artist] = "Blink-182";
+    metadata[StandardMetadataKeys.Album] = "Enema of the State";
+    // What ExtractEmbeddedAlbumArt leaves for a file with an APIC frame: a content-addressed path.
+    metadata[StandardMetadataKeys.AlbumArtUrl] = "/api/albumart/c8d4539b92c87615.jpg";
+    metadata["NeedsFingerprintingLookup"] = true;
+
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata(
+        "All the Small Things (Dimatik Remix)", "blink‐182", "Remixes", "/api/albumart/songrec-9th-hash.jpg"),
+      0.95);
+
+    Assert.Equal("All the Small Things", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Blink-182", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("Enema of the State", active.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("/api/albumart/c8d4539b92c87615.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  [Fact]
+  public void Aud1_NoTagsAndNoEmbeddedArt_EverythingIsFilled()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    SetState(active, AudioSourceState.Playing);
+    SetCurrentFile(active, Path.Combine(_testDir, "08-track.mp3"));
+
+    // Exactly what UpdateMetadataFromFile seeds for a file with no tags and no APIC frame:
+    // the filename as title, "--" artist/album, and the fallback art path.
+    var metadata = GetMetadataDictionary(active);
+    metadata[StandardMetadataKeys.Title] = "08-track";
+    metadata[StandardMetadataKeys.Artist] = StandardMetadataKeys.DefaultArtist;
+    metadata[StandardMetadataKeys.Album] = StandardMetadataKeys.DefaultAlbum;
+    metadata[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    metadata["NeedsFingerprintingLookup"] = true;
+
+    InvokeOnTrackIdentified(
+      active, CreateTrackMetadata("I'm Not in Love", "10cc", "The Very Best of 10cc", "/api/albumart/art.jpg"), 0.95);
+
+    Assert.Equal("I'm Not in Love", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("10cc", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("The Very Best of 10cc", active.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("/api/albumart/art.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  [Theory]
+  [InlineData("")]
+  [InlineData("   ")]
+  [InlineData(StandardMetadataKeys.DefaultAlbum)]
+  public void Aud1_MissingAlbumOnly_FillsTheAlbumAndKeepsTheRest(string album)
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    SetState(active, AudioSourceState.Playing);
+
+    var metadata = GetMetadataDictionary(active);
+    metadata[StandardMetadataKeys.Title] = "I'm Not in Love";
+    metadata[StandardMetadataKeys.Artist] = "10cc";
+    metadata[StandardMetadataKeys.Album] = album;
+    metadata[StandardMetadataKeys.AlbumArtUrl] = "/api/albumart/c8d4539b92c87615.jpg";
+    metadata["NeedsFingerprintingLookup"] = true;
+
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Wrong Song", "Wrong Artist", "The Very Best of 10cc", "/api/albumart/wrong.jpg"),
+      0.95);
+
+    Assert.Equal("The Very Best of 10cc", active.Metadata[StandardMetadataKeys.Album]);
+    Assert.Equal("I'm Not in Love", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("10cc", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("/api/albumart/c8d4539b92c87615.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
   }
 
   /// <summary>
-  /// Builds a source with UseShazamForAllSources enabled so the identification
-  /// path unconditionally replaces file tags — the branch that leaks another
-  /// source's track when the active-source guard is missing.
+  /// Complete tags but no embedded art: the art is missing, so it is filled — and nothing
+  /// else is. Regression guard for the art half (it held before AUD-1 on the non-overwrite
+  /// path, and the overwrite also wrote art).
+  /// </summary>
+  [Fact]
+  public void Aud1_TagsCompleteButNoEmbeddedArt_TakesOnlyTheArt()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    SetState(active, AudioSourceState.Playing);
+
+    var metadata = GetMetadataDictionary(active);
+    metadata[StandardMetadataKeys.Title] = "I'm Not in Love";
+    metadata[StandardMetadataKeys.Artist] = "10cc";
+    metadata[StandardMetadataKeys.Album] = "The Very Best of 10cc";
+    metadata[StandardMetadataKeys.AlbumArtUrl] = StandardMetadataKeys.DefaultAlbumArtUrl;
+    metadata["NeedsFingerprintingLookup"] = true;
+
+    InvokeOnTrackIdentified(
+      active, CreateTrackMetadata("Wrong Song", "Wrong Artist", "Wrong Album", "/api/albumart/art.jpg"), 0.95);
+
+    Assert.Equal("/api/albumart/art.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+    Assert.Equal("I'm Not in Love", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("10cc", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("The Very Best of 10cc", active.Metadata[StandardMetadataKeys.Album]);
+  }
+
+  // AUD-32: a real ID3v2.2 tag that SoundFlow's SoundMetadataReader rejects (CorruptFrameError)
+  // and TagLib reads. See AudioTagReaderTests for the fixture's provenance.
+  private static readonly string Id3v22Fixture =
+    Path.Combine(AppContext.BaseDirectory, "TestData", "id3v22-soundflow-rejects.mp3");
+
+  private string CopyId3v22Fixture(string relativePath)
+  {
+    var dest = Path.Combine(_testDir, relativePath);
+    System.IO.File.Copy(Id3v22Fixture, dest, overwrite: true);
+    return dest;
+  }
+
+  [Fact]
+  public async Task Aud32_TagSoundFlowRejects_LoadFileStillReadsTheTags()
+  {
+    await using var source = CreateSource();
+    CopyId3v22Fixture("meditating.mp3");
+
+    await source.LoadFileAsync("meditating.mp3");
+
+    Assert.Equal("Meditating Beat", source.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Kevin MacLeod", source.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("FreePD Music", source.Metadata[StandardMetadataKeys.Album]);
+    Assert.True(source.Duration > TimeSpan.Zero);
+  }
+
+  /// <summary>
+  /// The appliance case, end to end: before AUD-32 the rejected tag left placeholder metadata, so
+  /// AUD-1's per-field rule saw every field as missing and a wrong identification replaced the
+  /// tagged artist ("Hear What They Say" → "Dsp Records North", 2026-09-26).
+  /// </summary>
+  [Fact]
+  public async Task Aud32_TagSoundFlowRejects_IdentificationDoesNotReplaceTheTaggedArtist()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CopyId3v22Fixture("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+
+    InvokeOnTrackIdentified(
+      active, CreateTrackMetadata("Prezis In My Pocket", "Dsp Records North", "Wrong Album", "/api/albumart/x.jpg"), 0.8);
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("Kevin MacLeod", active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal("FreePD Music", active.Metadata[StandardMetadataKeys.Album]);
+    // The file has no embedded art, so art is the one field fingerprinting may fill.
+    Assert.Equal("/api/albumart/x.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  [Fact]
+  public async Task Aud32_TagSoundFlowRejects_QueueItemStillShowsTheTags()
+  {
+    await using var source = CreateSource();
+    CopyId3v22Fixture("meditating.mp3");
+    await source.LoadFileAsync("meditating.mp3");
+
+    var queue = await source.GetQueueAsync();
+
+    var item = Assert.Single(queue);
+    Assert.Equal("Meditating Beat", item.Title);
+    Assert.Equal("Kevin MacLeod", item.Artist);
+    Assert.Equal("FreePD Music", item.Album);
+    Assert.NotNull(item.Duration);
+  }
+
+  /// <summary>
+  /// AUD-33, the appliance case (2026-09-26): SongRec's sample of "Here's To The Night" came back 9 s
+  /// after the listener skipped to "Meditating Beat", and was merged into the new track's metadata.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_ResultSampledBeforeASkip_IsNotAppliedToTheNewTrack()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("heres-to-the-night.mp3");
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("heres-to-the-night.mp3");
+    SetState(active, AudioSourceState.Playing);
+    var captureStartedAt = DateTime.UtcNow;
+
+    await Task.Delay(20); // the skip happens strictly after the capture began
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Here's to the Night", "Eve 6", "Horrorscope", "/api/albumart/eve6.jpg"),
+      0.8,
+      captureStartedAt);
+
+    Assert.Equal("meditating", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal(StandardMetadataKeys.DefaultArtist, active.Metadata[StandardMetadataKeys.Artist]);
+    Assert.Equal(StandardMetadataKeys.DefaultAlbumArtUrl, active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  [Fact]
+  public async Task Aud33_ResultSampledFromTheCurrentTrack_IsApplied()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Meditating Beat", "Kevin MacLeod", "FreePD Music", "/api/albumart/mb.jpg"),
+      0.8,
+      DateTime.UtcNow);
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("/api/albumart/mb.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
+  /// Re-reading the SAME file (repeat, queue edits, restore) is not a track change: a result sampled
+  /// from it before the re-read still describes what is playing.
+  /// </summary>
+  [Fact]
+  public async Task Aud33_ReloadingTheSameFile_DoesNotDropAnInFlightResult()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    var captureStartedAt = DateTime.UtcNow;
+
+    await Task.Delay(20);
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Meditating Beat", "Kevin MacLeod", "FreePD Music", "/api/albumart/mb.jpg"),
+      0.8,
+      captureStartedAt);
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  private static void SetCurrentFile(FilePlayerAudioSource source, string path)
+  {
+    var field = typeof(FilePlayerAudioSource).GetField(
+      "_currentFile",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    field!.SetValue(source, path);
+  }
+
+  /// <summary>
+  /// Builds a source with UseShazamForAllSources enabled — the appliance's production
+  /// configuration. ⚠ Since AUD-1 the flag is inert for these tests: OnTrackIdentified no
+  /// longer reads it (it only gates UpdateMetadataFromFile, which these tests bypass by
+  /// setting NeedsFingerprintingLookup by hand). It is set so the fixture matches the box.
   /// </summary>
   private FilePlayerAudioSource CreateSourceForIdentification(Func<IAudioSource?>? getActiveSource)
   {
@@ -1820,14 +2102,16 @@ public class FilePlayerAudioSourceTests : IDisposable
       getActiveSource: getActiveSource);
   }
 
-  private static TrackMetadata CreateTrackMetadata(string title, string artist)
+  private static TrackMetadata CreateTrackMetadata(
+    string title, string artist, string? album = "Some Album", string? coverArtUrl = null)
   {
     return new TrackMetadata
     {
       Id = Guid.NewGuid().ToString(),
       Title = title,
       Artist = artist,
-      Album = "Some Album",
+      Album = album,
+      CoverArtUrl = coverArtUrl,
       Source = MetadataSource.Shazam,
       CreatedAt = DateTime.UtcNow,
       UpdatedAt = DateTime.UtcNow
@@ -1860,12 +2144,13 @@ public class FilePlayerAudioSourceTests : IDisposable
   private static void InvokeOnTrackIdentified(
     FilePlayerAudioSource source,
     TrackMetadata track,
-    double confidence)
+    double confidence,
+    DateTime? captureStartedAt = null)
   {
     var method = typeof(FilePlayerAudioSource).GetMethod(
       "OnTrackIdentified",
       System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-    method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence) });
+    method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence, captureStartedAt) });
   }
 
   #endregion

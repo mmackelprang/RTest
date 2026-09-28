@@ -15,6 +15,23 @@
    branch is decided from REAL measured widths instead of the old 7 px/char
    × 420 px approximation that clipped in-card 14 px text.
 
+   The track is two spans (AUD-63): a HEAD carrying the station name and its
+   separator, and a BODY carrying the RadioText buffer. Only the body goes
+   through MarqueeTextDiff — the head is a fixed prefix that defeated the
+   suffix-of-old-is-head-of-new alignment when the two were one string, so
+   every buffer eviction classified as a swap or a reset (the reported jerk).
+   The engine measures the head separately and shifts the offset by the
+   head's width change, so a rolling-PS page of a different length changes
+   in place without moving the body.
+
+   The engine also owns the text of both spans once it is attached: Blazor
+   renders the spans with the text they mounted with and never rewrites
+   them, and update() sets textContent and the compensated offset in the
+   same JS task. Rendering the new text from Blazor painted it one server
+   round-trip BEFORE the compensation arrived — a one-to-three-frame shift
+   of every visible glyph on each buffer eviction. The title attribute and
+   the SR-only mirror are still rendered from the live parameters.
+
    Spec: HANDOFF-rds-accumulating-scroll §3, §4, §7 (behaviours preserved:
    pause-on-hover/focus, prefers-reduced-motion fallback, SR-only aria-live
    mirror, static-fit branch, configurable speed). *@
@@ -30,26 +47,40 @@
        class="rcp-rds-rt-scroll"
        tabindex="0"
        aria-label="RDS RadioText"
-       title="@Text">
+       title="@FullText">
     @* Visible scrolling track — hidden from assistive tech (the mirror
        below carries the readable copy). The transform is driven entirely by
-       the JS engine; Blazor only ever updates the text content. *@
-    <div @ref="_trackRef" class="rcp-rds-rt-track" aria-hidden="true">@Text</div>
+       the JS engine, and so is the text of the two spans once the engine is
+       attached: _mountedHead/_mountedText are frozen at mount time, so
+       Blazor's diff never touches these text nodes again (see the header).
+       The spans are written adjacent on purpose — whitespace between them
+       would become a text node the engine does not manage. *@
+    <div @ref="_trackRef" class="rcp-rds-rt-track" aria-hidden="true"><span @ref="_headRef" class="rcp-rds-rt-head">@_mountedHead</span><span @ref="_bodyRef" class="rcp-rds-rt-body">@_mountedText</span></div>
 
     @* SR-only mirror — aria-live="polite" so screen readers announce buffer
        updates without interrupting the user. *@
     <div class="rcp-rds-rt-sr-only" aria-live="polite" aria-atomic="true">
-      @Text
+      @FullText
     </div>
   </div>
 }
 
 @code {
   /// <summary>
-  /// Current buffer text rendered into the marquee. Empty / null collapses
-  /// the entire component (no markup) and disposes the JS engine instance.
+  /// Current buffer text rendered into the marquee body. Empty / null
+  /// collapses the entire component (no markup) and disposes the JS engine
+  /// instance.
   /// </summary>
   [Parameter, EditorRequired] public string? Text { get; set; }
+
+  /// <summary>
+  /// Fixed prefix rendered ahead of <see cref="Text"/> on the same track —
+  /// <see cref="RdsCard"/> passes the station name plus its separator
+  /// (<c>"WUNC • "</c>). Optional. It is not part of the transition diff: a
+  /// change here keeps the body's glyphs where they are and the engine
+  /// absorbs the head's width change into the scroll offset.
+  /// </summary>
+  [Parameter] public string? Head { get; set; }
 
   /// <summary>
   /// Marquee scroll speed in pixels per second. Default 40 matches the
@@ -61,6 +92,9 @@
   /// </summary>
   [Parameter] public int ScrollSpeedPxPerSec { get; set; } = 40;
 
+  /// <summary>Head and body as one string — the tooltip and the SR mirror.</summary>
+  private string FullText => string.Concat(Head, Text);
+
   // Per-instance id for the JS engine registry. Keyed by number (not by
   // element) so dispose works even after Blazor detached the elements —
   // no stale Map entries holding detached DOM (leak guard).
@@ -69,16 +103,40 @@
 
   private ElementReference _containerRef;
   private ElementReference _trackRef;
+  private ElementReference _headRef;
+  private ElementReference _bodyRef;
   private IJSObjectReference? _module;
   private bool _engineAttached;
 
+  // Blazor does not wait for one OnAfterRenderAsync to finish before running
+  // the next render's; two in flight would diff from the same baseline and
+  // double-apply a trim or issue a spurious reset. One engine sync at a time.
+  private readonly SemaphoreSlim _interopGate = new(1, 1);
+
+  // Text the track spans were rendered with. Updated only while the engine
+  // is NOT attached (the mount render, and any render before init completes);
+  // frozen afterwards so the engine owns the text nodes.
+  private string? _mountedHead;
+  private string? _mountedText;
+
   // Last state pushed to the JS engine — the diff baseline for the next push.
+  private string? _engineHead;
   private string? _engineText;
   private int _engineSpeed;
 
   // Last-rendered inputs for the ShouldRender guard.
+  private string? _renderedHead;
   private string? _renderedText;
   private int _renderedSpeed;
+
+  protected override void OnParametersSet()
+  {
+    if (!_engineAttached)
+    {
+      _mountedHead = Head;
+      _mountedText = Text;
+    }
+  }
 
   /// <summary>
   /// Suppress re-renders that wouldn't change anything the user can see. The
@@ -92,11 +150,13 @@
   protected override bool ShouldRender()
   {
     var changed =
+      !string.Equals(_renderedHead, Head, StringComparison.Ordinal) ||
       !string.Equals(_renderedText, Text, StringComparison.Ordinal) ||
       _renderedSpeed != ScrollSpeedPxPerSec;
 
     if (changed)
     {
+      _renderedHead = Head;
       _renderedText = Text;
       _renderedSpeed = ScrollSpeedPxPerSec;
     }
@@ -106,6 +166,7 @@
 
   protected override async Task OnAfterRenderAsync(bool firstRender)
   {
+    await _interopGate.WaitAsync();
     try
     {
       if (string.IsNullOrEmpty(Text))
@@ -117,6 +178,7 @@
         {
           await _module.InvokeVoidAsync("dispose", _instanceId);
           _engineAttached = false;
+          _engineHead = null;
           _engineText = null;
         }
         return;
@@ -126,32 +188,44 @@
 
       if (!_engineAttached)
       {
-        await _module.InvokeVoidAsync("init", _instanceId, _containerRef, _trackRef, ScrollSpeedPxPerSec);
+        await _module.InvokeVoidAsync("init", _instanceId, _containerRef, _trackRef, _headRef, _bodyRef, ScrollSpeedPxPerSec);
         _engineAttached = true;
-        _engineText = Text;
+        // The engine measured what the spans hold — the mounted text — which
+        // is the baseline for the diff below. Normally that equals the live
+        // parameters and nothing more happens this render; if a parameter
+        // change slipped in while init was in flight, the diff catches it.
+        _engineHead = _mountedHead;
+        _engineText = _mountedText;
         _engineSpeed = ScrollSpeedPxPerSec;
-        return;
       }
 
-      if (!string.Equals(_engineText, Text, StringComparison.Ordinal))
+      var head = Head;
+      var text = Text;
+      var speed = ScrollSpeedPxPerSec;
+
+      if (!string.Equals(_engineText, text, StringComparison.Ordinal) ||
+          !string.Equals(_engineHead, head, StringComparison.Ordinal))
       {
-        // Text changed — classify the transition so the engine can preserve
-        // the scroll offset wherever that is visually meaningful.
-        var diff = MarqueeTextDiff.Compute(_engineText, Text);
+        // Classify the BODY transition only, so the engine can preserve the
+        // scroll offset wherever that is visually meaningful. A head-only
+        // change is an in-place change as far as the body is concerned.
+        var diff = MarqueeTextDiff.Compute(_engineText, text);
         var mode = diff.Transition switch
         {
           MarqueeTransition.Continuation => "append",
           MarqueeTransition.InPlaceSwap => "swap",
+          MarqueeTransition.Unchanged => "swap",
           _ => "reset",
         };
-        await _module.InvokeVoidAsync("update", _instanceId, mode, diff.TrimmedCharCount, ScrollSpeedPxPerSec);
-        _engineText = Text;
-        _engineSpeed = ScrollSpeedPxPerSec;
+        await _module.InvokeVoidAsync("update", _instanceId, mode, diff.TrimmedCharCount, head ?? string.Empty, text, speed);
+        _engineHead = head;
+        _engineText = text;
+        _engineSpeed = speed;
       }
-      else if (_engineSpeed != ScrollSpeedPxPerSec)
+      else if (_engineSpeed != speed)
       {
-        await _module.InvokeVoidAsync("update", _instanceId, "speed", 0, ScrollSpeedPxPerSec);
-        _engineSpeed = ScrollSpeedPxPerSec;
+        await _module.InvokeVoidAsync("update", _instanceId, "speed", 0, head ?? string.Empty, text, speed);
+        _engineSpeed = speed;
       }
     }
     catch (JSDisconnectedException)
@@ -166,7 +240,13 @@
       // degrade to "ticker doesn't animate until the next update" — an
       // unhandled lifecycle exception would fault the circuit, which on an
       // unattended kiosk takes down the whole page with nobody there to
-      // reload it. The next text/speed change retries the interop naturally.
+      // reload it. The next text/speed change retries the interop naturally,
+      // and update() always writes the text it is handed, so the spans catch
+      // up on that retry too.
+    }
+    finally
+    {
+      _interopGate.Release();
     }
   }
 

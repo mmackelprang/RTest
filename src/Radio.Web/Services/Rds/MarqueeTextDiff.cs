@@ -1,9 +1,11 @@
 namespace Radio.Web.Services.Rds;
 
 /// <summary>
-/// How the marquee track text changed between two renders — drives which
-/// JS-interop call <c>RdsScrollMarquee</c> makes so the scroll position is
-/// preserved wherever that is visually meaningful.
+/// How the marquee BODY text (the RadioText buffer) changed between two
+/// renders — drives which JS-interop call <c>RdsScrollMarquee</c> makes so
+/// the scroll position is preserved wherever that is visually meaningful.
+/// The station-name head is not part of the diffed text: it is a fixed
+/// prefix the engine measures separately (see <c>RdsScrollMarquee</c>).
 /// </summary>
 public enum MarqueeTransition
 {
@@ -20,9 +22,8 @@ public enum MarqueeTransition
 
   /// <summary>
   /// Same length, different content — an in-place substitution such as a
-  /// rolling-PS page swap at the head of the track ("{PS} • {RT}") or a
-  /// minor-correction chunk replacement. The scroll offset is kept as-is;
-  /// the glyphs simply change under it.
+  /// minor-correction chunk replacement of equal length. The scroll offset
+  /// is kept as-is; the glyphs simply change under it.
   /// </summary>
   InPlaceSwap,
 
@@ -45,7 +46,7 @@ public enum MarqueeTransition
 public readonly record struct MarqueeDiff(MarqueeTransition Transition, int TrimmedCharCount);
 
 /// <summary>
-/// Classifies how the marquee track text changed between two renders.
+/// Classifies how the marquee body text changed between two renders.
 /// </summary>
 /// <remarks>
 /// The accumulating RT buffer only ever mutates as front-trim + tail-append
@@ -56,7 +57,12 @@ public readonly record struct MarqueeDiff(MarqueeTransition Transition, int Trim
 /// re-render — the fix for the user-visible "jerk" (the old CSS keyframe
 /// animation reinterpreted its elapsed fraction against the new text width
 /// and duration on every append, snapping the track many characters at
-/// once).
+/// once). The alignment only holds for the buffer text on its own: with a
+/// fixed station-name prefix composed into the same string, no suffix of
+/// the old text is a head of the new one after an eviction, and every such
+/// update classified as <see cref="MarqueeTransition.InPlaceSwap"/> or
+/// <see cref="MarqueeTransition.Reset"/> (AUD-63). Callers must pass the
+/// body alone.
 /// </remarks>
 public static class MarqueeTextDiff
 {
@@ -87,7 +93,7 @@ public static class MarqueeTextDiff
     // append; k > 0 means k chars were evicted from the front. Retained
     // suffix must be meaningful (>= MinRetainedChars) so a lucky one-char
     // overlap doesn't masquerade as a continuation. O(n²) worst case with
-    // n <= buffer cap (~256 + PS) — runs once per RT update (seconds apart).
+    // n <= buffer cap (256) — runs once per RT update (seconds apart).
     var minRetained = Math.Min(MinRetainedChars, oldT.Length);
     var maxTrim = oldT.Length - minRetained;
     for (var k = 0; k <= maxTrim; k++)
@@ -101,8 +107,8 @@ public static class MarqueeTextDiff
     }
 
     // No continuation alignment. Same length ⇒ in-place substitution (e.g. a
-    // rolling-PS page swap: PS is always exactly 8 chars, so the track length
-    // is unchanged and keeping the offset swaps the glyphs without a jump).
+    // chunk replaced by a correction of equal length): keeping the offset
+    // swaps the glyphs without a jump.
     if (oldT.Length == newT.Length)
     {
       return new MarqueeDiff(MarqueeTransition.InPlaceSwap, 0);

@@ -168,6 +168,25 @@ public class FileBrowserTests : IDisposable
     Assert.True(result.SizeBytes > 0);
   }
 
+  /// <summary>
+  /// AUD-32: an ID3v2.2 tag that SoundFlow rejects must still reach the file browser's listing.
+  /// </summary>
+  [Fact]
+  public async Task GetFileInfoAsync_TagSoundFlowRejects_StillReportsTheTags()
+  {
+    File.Copy(
+      Path.Combine(AppContext.BaseDirectory, "TestData", "id3v22-soundflow-rejects.mp3"),
+      Path.Combine(_testAudioDir, "meditating.mp3"));
+
+    var result = await _fileBrowser.GetFileInfoAsync("meditating.mp3");
+
+    Assert.NotNull(result);
+    Assert.Equal("Meditating Beat", result.Title);
+    Assert.Equal("Kevin MacLeod", result.Artist);
+    Assert.Equal("FreePD Music", result.Album);
+    Assert.NotNull(result.Duration);
+  }
+
   [Fact]
   public async Task GetFileInfoAsync_NonExistentFile_ReturnsNull()
   {

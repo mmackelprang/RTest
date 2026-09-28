@@ -278,6 +278,14 @@ Continuous loop:
 3. **AVRCP metadata used**: BT metadata sets `NeedsFingerprintingLookup` based on completeness + `UseShazamForAllSources` setting
 4. **Immediate identification on demand**: `RequestImmediateIdentification()` cancels backoff delay for urgent cycles
 5. **Silence detection**: Skips SongRec call when captured audio is silence
+6. **Source metadata has precedence, per field (`AUD-1`)**: an identification fills only the fields
+   the source left missing — title, artist, album and cover art are decided independently, and an
+   empty/whitespace string or a placeholder (`--`, the fallback art path, the filename on files, the
+   default title / device name on Bluetooth) counts as missing. One rule, in
+   `Radio.Core.Models.Audio.SourceMetadataPrecedence`, used by both `BluetoothAudioSource` and
+   `FilePlayerAudioSource`. `UseShazamForAllSources` (item 3) is the gate only — it decides whether
+   SongRec runs, never whether its answer replaces anything. ⚠ `PlayHistoryTracker` does not follow
+   this rule yet — History still records the fingerprint's title (`AUD-19`).
 
 ---
 

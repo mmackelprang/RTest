@@ -13,12 +13,16 @@
 
    This revision (HANDOFF-rds-inline-scroll-revision.md, option (c))
    collapses the card back to a single row: the light-blue PS slot itself
-   BECOMES the marquee surface. When RT is present, the track text is
+   BECOMES the marquee surface. When RT is present, the track reads
    "{PS} • {RT}" — station identity anchors the head, then accumulating
-   RT scrolls after a bullet separator. When RT is empty, render the
-   original static PS span (no animation). When PS is empty but RT is
-   present (transient tune-in), render the marquee with just RT (no
-   leading separator). When both are empty, the @if gate hides the card. *@
+   RT scrolls after a bullet separator. The two parts are handed to the
+   marquee SEPARATELY (Head = "{PS}{Separator}", Text = RT) so that only
+   the RT goes through its transition diff; composing them into one string
+   made every buffer eviction look like an unrelated text and reset the
+   scroll (AUD-63). When RT is empty, render the original static PS span
+   (no animation). When PS is empty but RT is present (transient tune-in),
+   render the marquee with just RT (empty head, no separator). When both
+   are empty, the @if gate hides the card. *@
 
 @if (!string.IsNullOrEmpty(StationName) || !string.IsNullOrEmpty(RadioText))
 {
@@ -26,16 +30,17 @@
     <span class="rds-card-label">RDS</span>
     @if (!string.IsNullOrEmpty(RadioText))
     {
-      @* Inline marquee fills the PS slot. Track text composition:
-         - PS + RT  → "{PS}{Separator}{RT}" (single continuous scroll string)
-         - PS empty → "{RT}" alone (no leading separator)
+      @* Inline marquee fills the PS slot. Track composition:
+         - PS + RT  → Head "{PS}{Separator}", Text "{RT}"
+         - PS empty → Head empty, Text "{RT}" (no leading separator)
          The CSS override .rds-card .rcp-rds-rt-track restyles the track
          to inherit PS typography (blue 14 px 700) so the marquee reads
          as the PS slot rather than as the dim 11 px standalone variant.
-         _trackText is composed in OnParametersSet (not inline) so the
-         compose + nested-marquee diff don't re-run on every telemetry tick;
-         the ShouldRender guard below gates that churn. *@
-      <RdsScrollMarquee Text="@_trackText"
+         _head is composed in OnParametersSet (not inline) so the compose
+         + nested-marquee diff don't re-run on every telemetry tick; the
+         ShouldRender guard below gates that churn. *@
+      <RdsScrollMarquee Head="@_head"
+                        Text="@RadioText"
                         ScrollSpeedPxPerSec="@ScrollSpeedPxPerSec" />
     }
     else if (!string.IsNullOrEmpty(StationName))
@@ -75,8 +80,8 @@
   [Parameter] public string? ProgramType { get; set; }
 
   /// <summary>
-  /// Accumulating RDS RadioText (RT) buffer text rendered as a scrolling
-  /// marquee in the PS slot (post-revision). Optional — when null/empty the
+  /// Accumulating RDS RadioText (RT) buffer text rendered as the scrolling
+  /// body of the marquee in the PS slot (post-revision). Optional — when null/empty the
   /// PS slot reverts to a static <c>&lt;span class="rds-card-station"&gt;</c>
   /// and no marquee renders. Caller passes the post-accumulation, post-dedup
   /// string from the
@@ -101,11 +106,11 @@
   /// </summary>
   [Parameter] public string Separator { get; set; } = " • ";
 
-  // Cached composed marquee track + last-rendered inputs. The parent
+  // Cached composed marquee head + last-rendered inputs. The parent
   // re-renders ~2x/second on signal telemetry; this guard stops that churn
   // from propagating into the nested RdsScrollMarquee diff when nothing the
   // user sees has changed.
-  private string? _trackText;
+  private string? _head;
   private string? _renderedStation;
   private string? _renderedRadioText;
   private string? _renderedProgramType;
@@ -114,9 +119,9 @@
 
   protected override void OnParametersSet()
   {
-    _trackText = string.IsNullOrEmpty(StationName)
-      ? RadioText
-      : $"{StationName}{Separator}{RadioText}";
+    _head = string.IsNullOrEmpty(StationName)
+      ? null
+      : $"{StationName}{Separator}";
   }
 
   protected override bool ShouldRender()

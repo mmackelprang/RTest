@@ -5,7 +5,6 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Metrics;
-using SoundFlow.Metadata;
 using System.Diagnostics;
 
 namespace Radio.Infrastructure.Audio.Services;
@@ -384,7 +383,7 @@ public class FileBrowser : IFileBrowser
   }
 
   /// <summary>
-  /// Extracts metadata from an audio file using SoundFlow's SoundMetadataReader.
+  /// Extracts metadata from an audio file via <see cref="AudioTagReader"/> (SoundFlow, then TagLib).
   /// </summary>
   /// <remarks>
   /// Uses Task.Run to offload CPU-bound metadata reading from the thread pool.
@@ -406,32 +405,14 @@ public class FileBrowser : IFileBrowser
     {
       return await Task.Run<(string?, string?, string?, TimeSpan?, int?, string?, int?)>(() =>
       {
-        var result = SoundMetadataReader.Read(filePath);
-        
-        if (!result.IsSuccess || result.Value == null)
+        // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
+        var tags = AudioTagReader.Read(filePath, _logger);
+        if (tags == null)
         {
           return (null, null, null, null, null, null, null);
         }
 
-        var formatInfo = result.Value;
-        var tags = formatInfo.Tags;
-
-        // Use TagLib for accurate duration (SoundFlow miscalculates VBR MP3s)
-        TimeSpan? duration = AccurateDurationReader.GetDuration(filePath, _logger);
-        if (duration == null && formatInfo.Duration != TimeSpan.Zero)
-        {
-          duration = formatInfo.Duration;
-        }
-
-        return (
-          string.IsNullOrWhiteSpace(tags?.Title) ? null : tags.Title,
-          string.IsNullOrWhiteSpace(tags?.Artist) ? null : tags.Artist,
-          string.IsNullOrWhiteSpace(tags?.Album) ? null : tags.Album,
-          duration,
-          (int?)tags?.TrackNumber,
-          string.IsNullOrWhiteSpace(tags?.Genre) ? null : tags.Genre,
-          (int?)tags?.Year
-        );
+        return (tags.Title, tags.Artist, tags.Album, tags.Duration, tags.TrackNumber, tags.Genre, tags.Year);
       }, cancellationToken);
     }
     catch (Exception ex)

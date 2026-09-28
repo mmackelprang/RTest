@@ -24,10 +24,18 @@
 // Each animation "leg" runs from the current offset to trackWidth at a
 // constant px/s; on finish the offset wraps to -containerWidth and the next
 // leg starts (classic ticker loop — the full rolling history replays each
-// cycle). When Blazor re-renders the track text, update() re-measures and
-// restarts the leg FROM THE PRESERVED OFFSET, compensating front-trims by
-// the trimmed character count × measured char width (the track is
-// monospace), so appends and buffer evictions are visually seamless.
+// cycle).
+//
+// The track is two spans: a HEAD (station name + separator, may be empty)
+// and a BODY (the RadioText buffer). Blazor classifies each BODY change and
+// calls update(); the engine then, in ONE task, writes the new text into both
+// spans, re-measures, and restarts the leg FROM THE PRESERVED OFFSET with two
+// compensations: the head's width change (a rolling-PS page of a different
+// length must not move the body), and the width of any characters evicted
+// from the front of the body (trimmed count × the body's measured per-char
+// width — the track is monospace). Setting the text here rather than from
+// Blazor is what keeps the compensation on the same frame as the text
+// change (AUD-63).
 //
 // Instances are keyed by a C#-generated numeric id (never by element), so
 // dispose() works even after Blazor has detached the elements.
@@ -41,11 +49,23 @@ function prefersReducedMotion() {
 
 function measure(inst) {
   // scrollWidth of the nowrap inline-block track = full content width even
-  // while a transform is applied (transforms don't affect layout).
+  // while a transform is applied (transforms don't affect layout). The span
+  // rects are translated along with the track, but a translation does not
+  // change their width.
   inst.trackWidth = inst.track.scrollWidth;
   inst.containerWidth = inst.container.clientWidth;
-  const charCount = (inst.track.textContent || '').length;
-  inst.charWidth = charCount > 0 ? inst.trackWidth / charCount : 0;
+  inst.headWidth = inst.head ? inst.head.getBoundingClientRect().width : 0;
+
+  const bodyEl = inst.body || inst.track;
+  const bodyWidth = inst.body ? inst.body.getBoundingClientRect().width : inst.trackWidth;
+  const bodyChars = (bodyEl.textContent || '').length;
+  inst.bodyCharWidth = bodyChars > 0 ? bodyWidth / bodyChars : 0;
+}
+
+function setText(el, text) {
+  if (el && typeof text === 'string' && el.textContent !== text) {
+    el.textContent = text;
+  }
 }
 
 // Current offset in px, derived from the running leg. Works while paused
@@ -128,13 +148,16 @@ function start(inst) {
 }
 
 /**
- * Attach the engine to a freshly-rendered marquee.
+ * Attach the engine to a freshly-rendered marquee. The spans already hold
+ * the text Blazor mounted them with; init only measures.
  * @param {number} id C#-generated instance id.
  * @param {Element} container .rcp-rds-rt-scroll element.
  * @param {Element} track .rcp-rds-rt-track element.
+ * @param {Element|null} head .rcp-rds-rt-head span (station name + separator).
+ * @param {Element|null} body .rcp-rds-rt-body span (RadioText buffer).
  * @param {number} speedPxPerSec configured scroll speed.
  */
-export function init(id, container, track, speedPxPerSec) {
+export function init(id, container, track, head, body, speedPxPerSec) {
   if (!container || !track) {
     return;
   }
@@ -143,6 +166,8 @@ export function init(id, container, track, speedPxPerSec) {
   const inst = {
     container,
     track,
+    head: head || null,
+    body: body || null,
     speed: Math.max(1, speedPxPerSec || 40),
     offset: 0,       // start at the home position — new text readable immediately
     legStart: 0,
@@ -150,7 +175,8 @@ export function init(id, container, track, speedPxPerSec) {
     paused: false,
     trackWidth: 0,
     containerWidth: 0,
-    charWidth: 0,
+    headWidth: 0,
+    bodyCharWidth: 0,
     onPause: null,
     onMaybeResume: null,
     resizeObserver: null,
@@ -209,17 +235,22 @@ export function init(id, container, track, speedPxPerSec) {
 }
 
 /**
- * Re-sync after Blazor updated the track text and/or the configured speed.
+ * Re-sync after Blazor classified a change in the head/body text and/or the
+ * configured speed. Writes the text, re-measures and restarts the leg in one
+ * task, so the compensated offset lands on the same frame as the new text.
  * @param {number} id instance id from init().
- * @param {string} mode 'append' (continuation: preserve offset, compensate
- *   front-trim), 'swap' (in-place substitution: preserve offset), 'speed'
- *   (text unchanged, speed changed), or 'reset' (unrelated text: restart
- *   from the home position).
+ * @param {string} mode 'append' (body continuation: preserve offset,
+ *   compensate the front-trim), 'swap' (body substituted in place and/or
+ *   only the head changed: preserve offset), 'speed' (text unchanged, speed
+ *   changed), or 'reset' (unrelated body: restart from the home position).
+ *   Every mode but 'reset' also absorbs the head's width change.
  * @param {number} trimmedChars characters evicted from the FRONT of the
- *   track text since the last sync (mode 'append' only).
+ *   body text since the last sync (mode 'append' only).
+ * @param {string} headText the head span's new text (null: leave as is).
+ * @param {string} bodyText the body span's new text (null: leave as is).
  * @param {number} speedPxPerSec current configured speed.
  */
-export function update(id, mode, trimmedChars, speedPxPerSec) {
+export function update(id, mode, trimmedChars, headText, bodyText, speedPxPerSec) {
   const inst = instances.get(id);
   if (!inst) {
     return;
@@ -229,20 +260,30 @@ export function update(id, mode, trimmedChars, speedPxPerSec) {
   inst.offset = currentOffset(inst);
   cancelAnim(inst);
 
-  const prevCharWidth = inst.charWidth;
+  const prevHeadWidth = inst.headWidth;
+  const prevBodyCharWidth = inst.bodyCharWidth;
+
+  setText(inst.head, headText);
+  setText(inst.body, bodyText);
+
   inst.speed = Math.max(1, speedPxPerSec || inst.speed);
   measure(inst);
 
   if (mode === 'reset') {
     inst.offset = 0;
-  } else if (mode === 'append' && trimmedChars > 0) {
-    // Front-evicted glyphs are gone from the DOM; shift the offset left by
-    // their width (monospace ⇒ trimmedChars × per-char width) so the glyphs
-    // still on screen do not move. Measured with the PREVIOUS char width —
-    // the width the trimmed glyphs actually had.
-    inst.offset -= trimmedChars * (prevCharWidth || inst.charWidth);
+  } else if (mode !== 'speed') {
+    // The head sits ahead of the body on the track: if it grew by Δ, every
+    // body glyph moved right by Δ, so the offset moves by Δ to hold them.
+    inst.offset += inst.headWidth - prevHeadWidth;
+    if (mode === 'append' && trimmedChars > 0) {
+      // Front-evicted glyphs are gone from the DOM; shift the offset left by
+      // their width (monospace ⇒ trimmedChars × per-char width) so the
+      // glyphs still on screen do not move. Priced at the PREVIOUS body char
+      // width — the width the trimmed glyphs actually had.
+      inst.offset -= trimmedChars * (prevBodyCharWidth || inst.bodyCharWidth);
+    }
   }
-  // 'swap' and 'speed' keep the offset untouched.
+  // 'speed' keeps the offset untouched.
 
   start(inst);
 }
@@ -280,7 +321,10 @@ export function _debugState(id) {
     offset: currentOffset(inst),
     trackWidth: inst.trackWidth,
     containerWidth: inst.containerWidth,
-    charWidth: inst.charWidth,
+    headWidth: inst.headWidth,
+    bodyCharWidth: inst.bodyCharWidth,
+    headText: inst.head ? inst.head.textContent : null,
+    bodyText: inst.body ? inst.body.textContent : null,
     speed: inst.speed,
     paused: inst.paused,
     isStatic: inst.container.classList.contains('is-static'),
