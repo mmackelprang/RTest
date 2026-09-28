@@ -16,7 +16,9 @@ namespace Radio.Infrastructure.Tests.Audio;
 /// <para>
 /// ⚠ What it cannot see: calls <em>out</em> of these bodies. OnProcess calls
 /// <c>BufferedSoundGenerator.AddSamples</c> (which takes the ring-buffer lock) and
-/// <c>SrcVariableResampler.Process</c> (which logs on error, <c>LOG-8</c>); neither is listed yet. That
+/// <c>SrcVariableResampler.Process</c> (which logs on error, <c>LOG-8</c>); neither is listed yet.
+/// <c>GenerateAudio</c> calls <c>IMetricsCollector.Increment</c>, which in production allocates, reads
+/// the clock and locks — a lint on the caller's body cannot see into it. That
 /// gap is one reason <c>LOG-10</c> (SCHED_FIFO, punch-list O4) is still blocked after LOG-6.
 /// </para>
 /// </remarks>

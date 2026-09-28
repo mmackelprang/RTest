@@ -63,7 +63,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private int _underrunCountSinceLastLog;
     private long _compensationSamplesSinceLastLog;
     private int _compensationCountSinceLastLog;
-    // The most recent compensation's buffer levels, for the emitted line. Plain writes by the callback.
+    // The most recent compensation's buffer levels, for the emitted line. Plain writes by the callback;
+    // the timer may pair one event's level with an adjacent event's new level. Diagnostic only.
     private int _lastCompensationLevel;
     private int _lastCompensationNewLevel;
 
@@ -213,10 +214,11 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     // ── LOG-7: diagnostics off the render callback ──────────────────────────────────────────────────
     //
     // GenerateAudio runs on the audio render thread. It used to log from there: a 1 Hz underrun
-    // Warning, a 5 s compensation Information, a 10 s pair of Debug stats lines whose 9- and 11-argument
+    // Warning, a 5 s compensation Information, a 10 s pair of Debug stats lines whose 12- and 10-argument
     // params arrays were allocated even when Debug was off, a 5 s missed-deadline Warning — plus a
     // DateTime.UtcNow read per callback and a lock every 10 s to read the buffer level. All of it now
-    // happens on a 1 s timer (EmitDiagnostics); the callback only counts. Same messages, same cadences.
+    // happens on a 1 s timer (EmitDiagnostics); the callback only counts. Same message templates; the
+    // cadences are the same to within one tick, and a line now lands up to 1 s after its event.
     //
     // The timer holds the generator WEAKLY (DiagnosticsTicker), so a generator that is never disposed
     // is still collectable and its timer stops — a strongly-held timer would root it forever.
@@ -259,6 +261,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         public static DiagnosticsTicker Start(BufferedSoundGenerator<T> target, TimeProvider timeProvider)
         {
             var ticker = new DiagnosticsTicker(target);
+            // Don't capture the creator's ExecutionContext: a generator created during an API request
+            // would otherwise stamp that request's log scope on every line the timer writes.
+            using var noFlow = ExecutionContext.SuppressFlow();
             ticker._timer = timeProvider.CreateTimer(
                 static state => ((DiagnosticsTicker)state!).Tick(), ticker,
                 DiagnosticsTickInterval, DiagnosticsTickInterval);
@@ -286,8 +291,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private double SecondsSince(long timestamp) =>
         timestamp == 0 ? 0.0 : _timeProvider.GetElapsedTime(timestamp).TotalSeconds;
 
+    // Half a tick of tolerance: the timer is scheduled on a coarse clock and `now` is read after
+    // thread-pool dispatch, so consecutive ticks often measure a little under the period. Without it a
+    // 1 s cadence routinely became 2 s (and 5 s became 6 s).
     private bool Due(long lastTimestamp, TimeSpan interval) =>
-        lastTimestamp == 0 || _timeProvider.GetElapsedTime(lastTimestamp) >= interval;
+        lastTimestamp == 0 || IsDue(_timeProvider.GetElapsedTime(lastTimestamp), interval);
+
+    internal static bool IsDue(TimeSpan elapsed, TimeSpan interval) =>
+        elapsed >= interval - DiagnosticsTickInterval / 2;
 
     /// <summary>
     /// Writes every diagnostic this generator produces. Runs on the diagnostics timer, never on the
@@ -366,8 +377,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private void EmitMissedDeadline()
     {
         var misses = Interlocked.Read(ref _gcCorrelatedMissedDeadlines);
-        if (misses == _missedDeadlinesAtLastLog || !Due(_lastMissedDeadlineLogTimestamp, MissedDeadlineLogInterval))
+        if (misses == _missedDeadlinesAtLastLog)
         {
+            return;
+        }
+        if (!Due(_lastMissedDeadlineLogTimestamp, MissedDeadlineLogInterval))
+        {
+            // Misses inside the throttle window are discarded, not deferred — as before LOG-7, when
+            // only the first miss after the throttle expired was logged. Keeps AUD-20's per-hour counts
+            // comparable across this change.
+            _missedDeadlinesAtLastLog = misses;
             return;
         }
 
@@ -400,13 +419,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             return;
         }
 
-        // Read the whole window before requesting its reset.
+        // Read the whole window before requesting its reset. If the previous reset request is still
+        // pending, no callback has run since the last report (engine stopped, generator detached): the
+        // window is empty, so report it as empty rather than re-publishing the previous one.
         var currentBuffer = Volatile.Read(ref _count);
-        var minBuf = _minBufferSinceLastLog == int.MaxValue ? currentBuffer : _minBufferSinceLastLog;
-        var maxBuf = _maxBufferSinceLastLog;
-        var minInterval = _minCallbackIntervalMs == double.MaxValue ? 0 : _minCallbackIntervalMs;
-        var maxInterval = _maxCallbackIntervalMs;
-        var maxExecution = _maxCallbackExecutionMs;
+        var windowEmpty = Volatile.Read(ref _statsWindowResetRequested) != 0;
+        var minBuf = windowEmpty || _minBufferSinceLastLog == int.MaxValue ? currentBuffer : _minBufferSinceLastLog;
+        var maxBuf = windowEmpty ? currentBuffer : _maxBufferSinceLastLog;
+        var minInterval = windowEmpty || _minCallbackIntervalMs == double.MaxValue ? 0 : _minCallbackIntervalMs;
+        var maxInterval = windowEmpty ? 0 : _maxCallbackIntervalMs;
+        var maxExecution = windowEmpty ? 0 : _maxCallbackExecutionMs;
         Volatile.Write(ref _statsWindowResetRequested, 1);
 
         if (_logger.IsEnabled(LogLevel.Debug))
@@ -588,8 +610,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     {
         var callbackStartTicks = Stopwatch.GetTimestamp();
 
-        // LOG-7: ⛔ this method must not log, lock for diagnostics, or read the wall clock — record into
-        // fields and let EmitDiagnostics (timer) report. Pinned by AudioHotPathLoggingLintTests.
+        // LOG-7: ⛔ this method must not log or read the wall clock — record into fields and let
+        // EmitDiagnostics (timer) report. Pinned by AudioHotPathLoggingLintTests. ⚠ Not yet true of the
+        // IMetricsCollector.Increment calls below (underrun, compensation): BufferedMetricsCollector
+        // allocates, reads the clock and takes a lock per call. Pre-existing; not in this row.
         var resetStatsWindow = Volatile.Read(ref _statsWindowResetRequested) != 0;
         if (resetStatsWindow)
         {
@@ -1045,7 +1069,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             return;
         }
 
-        _diagnosticsTicker.Stop();
+        // Null-conditional: SoundComponent has a finalizer, so Dispose(false) can run for an object
+        // whose constructor threw before the ticker was assigned.
+        _diagnosticsTicker?.Stop();
 
         if (disposing)
         {

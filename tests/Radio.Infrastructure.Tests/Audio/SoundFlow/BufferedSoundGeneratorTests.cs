@@ -178,8 +178,11 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
           // radio-api's journal once a second.
           var format = new AudioFormat { SampleRate = 48000, Channels = 2, Format = SampleFormat.F32 };
           var metrics = new Mock<IMetricsCollector>();
+          // LOG-7: the Warning is written by the diagnostics timer, so drive the timer — otherwise the
+          // Times.Never below would pass whether or not the parked gate works.
+          var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
           var generator = new TestBufferedGenerator<float>(
-              _engineMock.Object, format, _loggerMock.Object, metrics.Object);
+              _engineMock.Object, format, _loggerMock.Object, metrics.Object, time);
           generator.AddSamples(new float[] { 0.1f, 0.2f });
           generator.Read(new float[2]);
 
@@ -189,6 +192,7 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
           {
               generator.Read(output);
           }
+          time.Advance(TimeSpan.FromSeconds(2));
 
           Assert.All(output, x => Assert.Equal(0f, x));
           _loggerMock.Verify(
@@ -308,8 +312,8 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
           generator.AddSamples(prefill);
           generator.Read(output);
 
-          // No sleeps: since LOG-7 the drift check has no wall-clock component (it used to wait out
-          // a DateTime-based cooldown here, 8.4 s per run).
+          // No sleeps: the cooldown these once waited out was removed by Path C, and since LOG-7 the
+          // drift check reads no clock at all.
           for (int check = 0; check < 4; check++)
           {
               generator.AddSamples(new float[256]);

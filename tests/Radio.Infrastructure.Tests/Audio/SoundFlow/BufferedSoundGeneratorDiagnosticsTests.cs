@@ -171,6 +171,64 @@ public class BufferedSoundGeneratorDiagnosticsTests
     }
   }
 
+  [Theory]
+  [InlineData(999, 1000, true)]   // a tick measured a hair short of the period still counts
+  [InlineData(500, 1000, true)]
+  [InlineData(499, 1000, false)]
+  [InlineData(4999, 5000, true)]
+  [InlineData(3000, 5000, false)]
+  public void IsDue_ToleratesHalfATickOfJitter(int elapsedMs, int intervalMs, bool expected)
+  {
+    Assert.Equal(expected, BufferedSoundGenerator<float>.IsDue(
+      TimeSpan.FromMilliseconds(elapsedMs), TimeSpan.FromMilliseconds(intervalMs)));
+  }
+
+  [Fact]
+  public void Stats_WhenNoCallbackRanSinceTheLastReport_ReportAnEmptyWindow()
+  {
+    // A generator that is no longer being pulled must not keep re-publishing its last window.
+    var metrics = new Mock<Radio.Metrics.IMetricsCollector>();
+    using var generator = new Harness(_log, _time, metrics.Object);
+    generator.AddSamples(new float[4096]);
+    generator.Render(512);
+    Thread.SpinWait(1000);
+    generator.Render(512);
+
+    _time.Advance(TimeSpan.FromSeconds(10)); // window with callbacks
+    _time.Advance(TimeSpan.FromSeconds(10)); // no callbacks since
+
+    metrics.Verify(m => m.Gauge("audio.callback.max_interval_ms",
+      It.Is<double>(v => v > 0), It.IsAny<IDictionary<string, string>>()), Times.Once);
+    metrics.Verify(m => m.Gauge("audio.callback.max_interval_ms",
+      0, It.IsAny<IDictionary<string, string>>()), Times.Once);
+  }
+
+  [Fact]
+  public void MissedDeadlineWarning_IsWrittenByTheTimer_WithItsTemplate()
+  {
+    using var generator = Create();
+    generator.AddSamples(new float[64]);
+    _time.Advance(TimeSpan.FromSeconds(1)); // first stats tick samples the GC counts
+    GC.Collect();
+    _time.Advance(TimeSpan.FromSeconds(10)); // re-sample after the collection
+    _log.Clear();
+
+    // The quantum for 8 samples is ~0.08 ms; a spin between callbacks is a "missed deadline", and the
+    // GC counts moved since the previous callback's snapshot, so it is GC-correlated.
+    generator.Render(8);
+    Thread.SpinWait(20_000);
+    generator.Render(8);
+    _time.Advance(TimeSpan.FromSeconds(1));
+
+    var miss = Assert.Single(_log.Entries, e => e.Template.StartsWith("🔬 Missed callback deadline", StringComparison.Ordinal));
+    Assert.Equal(LogLevel.Warning, miss.Level);
+    Assert.Equal("🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
+      miss.Template);
+    // Not tested here: that a second miss inside the 5 s throttle is discarded rather than deferred.
+    // A second GC-correlated miss needs a GC-count re-sample (10 s cadence), which always lands outside
+    // the throttle, so this harness cannot produce one.
+  }
+
   [Fact]
   public void DisposedGenerator_ReportsNothing()
   {
