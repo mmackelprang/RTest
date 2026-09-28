@@ -49,6 +49,18 @@ public sealed class MockBluetoothService : IBluetoothService
         public event EventHandler<CaptureTargetLostEventArgs>? CaptureTargetLost { add { } remove { } }
         public float? DeviceVolume => null;
         public Task SetDeviceVolumeAsync(float volume) => Task.CompletedTask;
+        // AUD-40: the mock plays a phone with an AVRCP controller that obeys, and reports the
+        // resulting status the way a real phone would.
+        public Task<bool> PauseMediaAsync(CancellationToken cancellationToken = default)
+        {
+            PlaybackStatusChanged?.Invoke(this, BluetoothPlaybackStatus.Paused);
+            return Task.FromResult(true);
+        }
+        public Task<bool> PlayMediaAsync(CancellationToken cancellationToken = default)
+        {
+            PlaybackStatusChanged?.Invoke(this, BluetoothPlaybackStatus.Playing);
+            return Task.FromResult(true);
+        }
         public Task NextTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public Task PreviousTrackAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
         public bool IsReconnecting => false;
