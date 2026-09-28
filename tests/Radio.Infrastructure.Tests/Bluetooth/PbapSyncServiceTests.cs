@@ -60,4 +60,44 @@ public class PbapSyncServiceTests : IDisposable
       File.Delete(tempFile);
     }
   }
+
+  // --- 2026-09-28: the post-sync reconnect must not touch a live link ------------------------
+
+  private static PbapSyncService BuildWith(Mock<IBluetoothService> bt, SqliteConnection conn)
+  {
+    var repo = new PbapContactRepository(conn);
+    var options = new Mock<IOptionsMonitor<PbapOptions>>();
+    options.Setup(m => m.CurrentValue).Returns(new PbapOptions());
+    return new PbapSyncService(bt.Object, repo, options.Object, Options.Create(new BluetoothOptions()),
+      NullLogger<PbapSyncService>.Instance) { ReconnectSettleDelay = TimeSpan.Zero };
+  }
+
+  [Fact]
+  public async Task ReconnectAfterSync_WhenPhoneStillConnected_DoesNotReconnect()
+  {
+    // Measured on the box: Connect() on the still-connected phone renegotiated its profiles and
+    // the hci0 card came back on the call profile — album art showed, no music played.
+    var bt = new Mock<IBluetoothService>();
+    bt.Setup(b => b.ConnectedDevice).Returns(new BluetoothDeviceInfo
+    {
+      Address = "B0:D5:FB:D2:0D:68", Name = "Pixel", IsPaired = true, IsConnected = true
+    });
+    var svc = BuildWith(bt, _connection);
+
+    await svc.ReconnectAfterSyncAsync("b0:d5:fb:d2:0d:68");
+
+    bt.Verify(b => b.ConnectAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task ReconnectAfterSync_WhenPhoneDropped_Reconnects()
+  {
+    var bt = new Mock<IBluetoothService>();
+    bt.Setup(b => b.ConnectedDevice).Returns((BluetoothDeviceInfo?)null);
+    var svc = BuildWith(bt, _connection);
+
+    await svc.ReconnectAfterSyncAsync("B0:D5:FB:D2:0D:68");
+
+    bt.Verify(b => b.ConnectAsync("B0:D5:FB:D2:0D:68", It.IsAny<CancellationToken>()), Times.Once);
+  }
 }
