@@ -17,6 +17,11 @@ namespace Radio.Infrastructure.Audio.Services;
 /// raises <c>CaptureStreamStalled</c> on the Bluetooth service so the existing
 /// recovery interlock in <c>BluetoothAudioSource</c> can dedup with downstream
 /// generator-stall recovery.
+/// <para>
+/// LOG-6: every tick also asks the active stream to write its OnProcess statistics
+/// (<see cref="ICaptureStreamSnapshotSource.EmitCaptureStreamDiagnostics"/>), which is how that
+/// line left the audio callback.
+/// </para>
 /// </summary>
 /// <remarks>
 /// Depends on <see cref="ICaptureStreamSnapshotSource"/>, which on Linux is
@@ -80,6 +85,18 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
     {
       var opts = _options.CurrentValue;
       var tickMs = Math.Max(10, opts.WatchdogTickIntervalMs);
+
+      // LOG-6: the capture stream's OnProcess statistics are written from here, not from the audio
+      // callback. Before the stall check (so a disabled stall threshold does not silence them), and
+      // isolated so a logging failure can never cost a stall check.
+      try
+      {
+        _snapshotSource.EmitCaptureStreamDiagnostics();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "BluetoothCaptureWatchdog: capture stream diagnostics failed");
+      }
 
       try
       {

@@ -150,6 +150,51 @@ public class BluetoothCaptureWatchdogTests
   }
 
   /// <summary>
+  /// LOG-6: every tick asks the stream for its OnProcess diagnostics, before the stall poll — this is
+  /// the path the statistics line takes now that the audio callback no longer logs.
+  /// </summary>
+  [Fact]
+  public async Task EveryTick_EmitsDiagnosticsBeforePolling()
+  {
+    await using var h = await WatchdogHarness.StartGatedAsync(thresholdMs: 5000, consecutive: 3);
+
+    // Parked at poll 1, so tick 1 has emitted; each granted poll lets exactly one more tick emit and
+    // park again. Counted at a parked point, so the count is exact.
+    Assert.Equal(1, h.Source.EmitCount);
+    await h.Source.GrantPollsAsync(("AA:BB:CC:DD:EE:FF", 100L), count: 3);
+    Assert.Equal(4, h.Source.EmitCount);
+  }
+
+  /// <summary>
+  /// LOG-6: a disabled stall threshold must not silence the statistics line — it would otherwise take
+  /// bt_stall_detect.py's heartbeat with it.
+  /// </summary>
+  [Fact]
+  public async Task DisabledStallDetection_StillEmitsDiagnostics()
+  {
+    await using var h = await WatchdogHarness.StartUngatedAsync(thresholdMs: 0, consecutive: 1);
+
+    await h.Source.WaitForEmitAsync();
+    await h.Source.WaitForEmitAsync();
+
+    Assert.Equal(0, h.Source.PollCount);
+  }
+
+  /// <summary>
+  /// LOG-6: a failure while writing diagnostics must never cost a stall check.
+  /// </summary>
+  [Fact]
+  public async Task FailingDiagnostics_DoNotPreventStallDetection()
+  {
+    await using var h = await WatchdogHarness.StartGatedAsync(thresholdMs: 5000, consecutive: 2);
+    h.Source.ThrowOnEmit = true;
+
+    await h.Source.GrantPollsAsync(("AA:BB:CC:DD:EE:FF", 6000L), count: 2);
+
+    Assert.Equal(1, h.Source.RaiseCount);
+  }
+
+  /// <summary>
   /// Verifies that the watchdog idles when a
   /// <see cref="NullCaptureStreamSnapshotSource"/> is registered — the Windows /
   /// Mock / BT-disabled production path.
@@ -334,6 +379,33 @@ public class BluetoothCaptureWatchdogTests
       {
         _pollCount++;
         return _snapshot;
+      }
+    }
+
+    public int EmitCount { get { lock (_lock) { return _emitCount; } } }
+
+    /// <summary>When set, <see cref="EmitCaptureStreamDiagnostics"/> throws (after counting).</summary>
+    public bool ThrowOnEmit { get; set; }
+
+    private int _emitCount;
+    private readonly SemaphoreSlim _emitted = new(0);
+
+    public void EmitCaptureStreamDiagnostics()
+    {
+      lock (_lock) { _emitCount++; }
+      _emitted.Release();
+      if (ThrowOnEmit)
+      {
+        throw new InvalidOperationException("emit failed (test)");
+      }
+    }
+
+    /// <summary>Rendezvous: waits for the watchdog to have asked for diagnostics at least once more.</summary>
+    public async Task WaitForEmitAsync()
+    {
+      if (!await _emitted.WaitAsync(GateTimeout).ConfigureAwait(false))
+      {
+        throw new TimeoutException($"The watchdog did not ask for diagnostics within {GateTimeout.TotalSeconds:0}s.");
       }
     }
 

@@ -25,5 +25,12 @@ internal interface IBtCaptureStream : IDisposable
   /// has fired yet.
   /// </summary>
   long MillisecondsSinceLastOnProcess();
+
+  /// <summary>
+  /// LOG-6: writes the stream's periodic OnProcess diagnostics, if any are due. Called from the
+  /// watchdog's tick, never from the capture callback.
+  /// </summary>
+  /// <param name="nowTimestamp">A <see cref="System.Diagnostics.Stopwatch.GetTimestamp"/> value.</param>
+  void EmitDiagnostics(long nowTimestamp);
 }
 #endif

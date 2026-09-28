@@ -54,14 +54,11 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   private bool _disposed;
   private int _disposedFlag;
 
-  // Instrumentation: OnProcess delivery timing
+  // Instrumentation: OnProcess delivery timing. LOG-6: OnProcess only RECORDS into the window; the
+  // line is emitted from BluetoothCaptureWatchdog's tick via EmitDiagnostics. ⛔ Do not add logging
+  // back to OnProcess — see OnProcessStatsWindow and punch-list O4 (LOG-6 before LOG-10).
   private long _lastOnProcessTimestamp;
-  private double _maxOnProcessIntervalMs;
-  private double _minOnProcessIntervalMs = double.MaxValue;
-  private long _onProcessCount;
-  private long _onProcessBurstCount; // intervals < 1ms (burst delivery)
-  private double _maxOnProcessExecutionMs;
-  private DateTime _lastOnProcessLogTime;
+  private readonly OnProcessStatsWindow _stats = new();
 
   // SCHED_FIFO bump (Plan D, feature-flagged). Applied once on the first
   // OnProcess callback so we mutate the thread that actually drives the audio
@@ -489,44 +486,22 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
       self._rtPriorityApplied = true;
       var param = new SchedParam { sched_priority = self._rtPriority };
       var result = pthread_setschedparam(pthread_self(), SCHED_FIFO, ref param);
-      if (result != 0)
-      {
-        // EPERM (1) is the common failure when systemd LimitRTPRIO is too low.
-        self._logger.LogWarning(
-          "pthread_setschedparam(SCHED_FIFO, {Prio}) failed: errno={Errno}. " +
-          "Verify radio-api.service has LimitRTPRIO>={Prio}.",
-          self._rtPriority, Marshal.GetLastPInvokeError(), self._rtPriority);
-      }
-      else
-      {
-        self._logger.LogInformation(
-          "PipeWire capture thread bumped to SCHED_FIFO priority {Prio}",
-          self._rtPriority);
-      }
+      // The errno must be read here, on this thread, straight after the call. The outcome is logged
+      // later from the watchdog (LOG-6), not from this callback.
+      self._stats.RecordRealtimeResult(
+        applied: result == 0,
+        errno: result == 0 ? 0 : Marshal.GetLastPInvokeError(),
+        priority: self._rtPriority);
     }
 
     var processStart = Stopwatch.GetTimestamp();
 
-    // Track delivery interval
-    if (self._lastOnProcessTimestamp > 0)
-    {
-      var intervalMs = (double)(processStart - self._lastOnProcessTimestamp)
-        / Stopwatch.Frequency * 1000.0;
-      if (intervalMs > self._maxOnProcessIntervalMs)
-      {
-        self._maxOnProcessIntervalMs = intervalMs;
-      }
-      if (intervalMs < self._minOnProcessIntervalMs)
-      {
-        self._minOnProcessIntervalMs = intervalMs;
-      }
-      if (intervalMs < 1.0)
-      {
-        self._onProcessBurstCount++;
-      }
-    }
+    // Track delivery interval (negative = first callback, no interval yet)
+    var previous = self._lastOnProcessTimestamp;
+    self._stats.RecordCallback(previous > 0
+      ? (double)(processStart - previous) / Stopwatch.Frequency * 1000.0
+      : -1.0);
     self._lastOnProcessTimestamp = processStart;
-    self._onProcessCount++;
 
     var pwBufPtr = pw_stream_dequeue_buffer(self._stream);
     if (pwBufPtr == IntPtr.Zero)
@@ -625,30 +600,19 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
     {
       pw_stream_queue_buffer(self._stream, pwBufPtr);
 
-      var execMs = (double)(Stopwatch.GetTimestamp() - processStart) / Stopwatch.Frequency * 1000.0;
-      if (execMs > self._maxOnProcessExecutionMs)
-      {
-        self._maxOnProcessExecutionMs = execMs;
-      }
+      self._stats.RecordExecution(
+        (double)(Stopwatch.GetTimestamp() - processStart) / Stopwatch.Frequency * 1000.0);
     }
+  }
 
-    // Log OnProcess stats every 10 seconds
-    var now = DateTime.UtcNow;
-    if ((now - self._lastOnProcessLogTime).TotalSeconds >= 10 && self._onProcessCount > 0)
-    {
-      self._logger.LogInformation(
-        "🔬 PipeWire OnProcess: count={Count}, interval min={Min:F2}ms max={Max:F2}ms, " +
-        "bursts={Bursts}, execution max={Exec:F2}ms",
-        self._onProcessCount,
-        self._minOnProcessIntervalMs == double.MaxValue ? 0 : self._minOnProcessIntervalMs,
-        self._maxOnProcessIntervalMs, self._onProcessBurstCount,
-        self._maxOnProcessExecutionMs);
-      // Reset per-window
-      self._maxOnProcessIntervalMs = 0;
-      self._minOnProcessIntervalMs = double.MaxValue;
-      self._maxOnProcessExecutionMs = 0;
-      self._lastOnProcessLogTime = now;
-    }
+  /// <summary>
+  /// LOG-6: writes the OnProcess statistics line (every 10 s, and only if callbacks arrived since the
+  /// last one) and the one-time SCHED_FIFO outcome. Called from <c>BluetoothCaptureWatchdog</c>'s tick,
+  /// never from the PipeWire thread. Uses this stream's logger so the line's SourceContext is unchanged.
+  /// </summary>
+  public void EmitDiagnostics(long nowTimestamp)
+  {
+    _stats.EmitIfDue(_logger, nowTimestamp);
   }
 
   public void Dispose()

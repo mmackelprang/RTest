@@ -56,6 +56,8 @@ public class CaptureNodeFollowTests
       _startGate?.Invoke().GetAwaiter().GetResult();
     }
     public long MillisecondsSinceLastOnProcess() => 0;
+
+    public void EmitDiagnostics(long nowTimestamp) { }
     public void Dispose() => Disposed = true;
   }
 
