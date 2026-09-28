@@ -755,8 +755,8 @@ public class DuckingServiceTests
     // not the first that CAN throw: AudioManager's handler reaches ThrowIfDisposed at shutdown.)
     // Unguarded, the exception propagates out of StartDuckingAsync into
     // AnnouncementService.AnnounceAsync, which catches it and cleans up — so ducking is restored and
-    // nothing is stuck, but the announcement never plays AND POST /api/notifications/announce still
-    // answers 200. A fault in the attended seam would silence the unattended one, invisibly.
+    // nothing is stuck, but the announcement never plays (since TTS-2 POST /api/notifications/announce
+    // answers 500 for that; before, 200). A fault in the attended seam would silence the unattended one.
     var service = CreateService();
     var eventSource = CreateMockEventSource();
     var reached = false;

@@ -11,10 +11,11 @@ namespace Radio.API.Tests.Controllers;
 /// The /api/audio/events route family, built so the tests can fail.
 /// </summary>
 /// <remarks>
-/// ⚠ The hazard this file is written against is next door.
-/// NotificationsControllerTests.Announce_WithValidMessage_ReturnsOk asserts a success status against
-/// a host where TTS cannot possibly work, and it passes because AnnounceAsync swallows every
-/// exception internally — so a green test there proves the route is mapped and nothing else.
+/// ⚠ The hazard this file is written against was next door. Until TTS-2,
+/// NotificationsControllerTests.Announce_WithValidMessage_ReturnsOk asserted a success status against
+/// a host where TTS cannot possibly work, and it passed because AnnounceAsync swallowed every
+/// exception internally — so a green test there proved the route was mapped and nothing else.
+/// TTS-2 replaced it with tests that control the announcement's outcome.
 ///
 /// Every fact below therefore asserts an outcome a dead or half-wired surface could not produce. An
 /// unmapped route gives 404, a broken DTO gives a generic 400 with no named reason, an unresolvable

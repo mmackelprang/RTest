@@ -75,7 +75,7 @@ public class PhoneCallIntegrationLogSafetyTests
     announcements
       .Setup(a => a.AnnounceAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
       .Callback<string, int, CancellationToken>((message, _, _) => spoken.Add(message))
-      .Returns(Task.CompletedTask);
+      .ReturnsAsync(AnnouncementOutcome.Completed);
     announcements
       .Setup(a => a.PlaySoundWithAnnouncementAsync(
         It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))

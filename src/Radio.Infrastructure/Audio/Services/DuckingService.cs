@@ -543,8 +543,8 @@ public class DuckingService : IDuckingService
   /// Unguarded, that exception propagates out of StartDuckingAsync into whichever event path called it.
   /// Traced against the tree: AnnounceAsync, PlaySoundWithAnnouncementAsync and
   /// EventPlaybackService.AcquireAndPlayAsync all catch and then restore ducking, so the cost is NOT
-  /// stuck ducking — it is an announcement that never plays while POST /api/notifications/announce
-  /// still reports 200. Silent to the CALLER, not to the log: AnnounceAsync logs it at Error, which
+  /// stuck ducking — it is an announcement that never plays. Since TTS-2 POST
+  /// /api/notifications/announce returns 500 for it (it used to report 200). Logged too: AnnounceAsync logs it at Error, which
   /// survives the LOG-11 journal filter.
   ///
   /// This catches; it does not resume the invocation list. A handler that throws still prevents the

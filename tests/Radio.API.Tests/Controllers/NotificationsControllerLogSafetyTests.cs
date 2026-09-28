@@ -33,6 +33,9 @@ public class NotificationsControllerLogSafetyTests
   {
     var logs = new CapturingLoggerProvider();
     var announcements = new Mock<IAnnouncementService>();
+    announcements
+      .Setup(a => a.AnnounceAsync(It.IsAny<string>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(AnnouncementOutcome.Completed);
 
     var controller = new NotificationsController(
       logs.CreateLogger<NotificationsController>(), announcements.Object);
