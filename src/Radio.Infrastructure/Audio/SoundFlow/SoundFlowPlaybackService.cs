@@ -142,12 +142,13 @@ public class SoundFlowPlaybackService : IDisposable
       _logger.LogDebug("PlayFileAsync: Creating SoundPlayer...");
       soundPlayer = new SoundPlayer(engine, format, dataProvider);
       float gainOffset;
+      float fileDuckMult;
       lock (_playersLock)
       {
         _baseVolumes[sourceId] = volume;
         gainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+        fileDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       }
-      var fileDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       soundPlayer.Volume = Math.Clamp(volume * gainOffset * fileDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
       _logger.LogDebug("PlayFileAsync: SoundPlayer created, Volume: {Volume}, GainOffset: {Gain}", volume, gainOffset);
 
@@ -165,6 +166,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       var fileName = Path.GetFileName(filePath);
@@ -271,12 +277,13 @@ public class SoundFlowPlaybackService : IDisposable
       // Create a sound player (apply gain offset if set)
       var soundPlayer = new SoundPlayer(engine, format, dataProvider);
       float streamGainOffset;
+      float streamDuckMult;
       lock (_playersLock)
       {
         _baseVolumes[sourceId] = volume;
         streamGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+        streamDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       }
-      var streamDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       soundPlayer.Volume = Math.Clamp(volume * streamGainOffset * streamDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
@@ -289,6 +296,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       _logger.LogInformation("Started stream playback for source {SourceId}", sourceId);
@@ -337,12 +349,13 @@ public class SoundFlowPlaybackService : IDisposable
       // Create a sound player from the existing data provider (apply gain offset if set)
       var soundPlayer = new SoundPlayer(engine, format, dataProvider);
       float dpGainOffset;
+      float dpDuckMult;
       lock (_playersLock)
       {
         _baseVolumes[sourceId] = volume;
         dpGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+        dpDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       }
-      var dpDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       soundPlayer.Volume = Math.Clamp(volume * dpGainOffset * dpDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
@@ -355,6 +368,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       _logger.LogInformation("Started data provider playback for source {SourceId}", sourceId);
@@ -401,12 +419,13 @@ public class SoundFlowPlaybackService : IDisposable
 
       // Set volume on the component (apply gain offset if set)
       float compGainOffset;
+      float compDuckMult;
       lock (_playersLock)
       {
         _baseVolumes[sourceId] = volume;
         compGainOffset = _gainOffsets.GetValueOrDefault(sourceId, 1.0f);
+        compDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       }
-      var compDuckMult = _duckingMultipliers.GetValueOrDefault(sourceId, 1.0f);
       component.Volume = Math.Clamp(volume * compGainOffset * compDuckMult, AudioPreferencePersistence.MinGain, AudioPreferencePersistence.MaxGain);
 
       // Add to the playback device's mixer
@@ -421,6 +440,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activeComponents[sourceId] = component;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       _logger.LogInformation(
@@ -508,7 +532,23 @@ public class SoundFlowPlaybackService : IDisposable
         _activeComponents.Remove(sourceId);
       }
       _baseVolumes.Remove(sourceId);
-      _duckingMultipliers.Remove(sourceId);
+      // Keep _duckingMultipliers (AUD-26). Every Play*Async method calls THIS method on its own key
+      // before it registers, and then reads the multiplier back — so removing it here meant the
+      // read always found nothing. A source registered while a duck was in effect therefore played
+      // at FULL volume under the announcement: on a source switch (AudioManager.SwitchSourceAsync
+      // stores the duck on the incoming source BEFORE starting it), and equally on every other
+      // re-registration of the active source — a FilePlayer track change, a Bluetooth capture
+      // recovery, an SDR restart. A sustained duck raises no further level events, so nothing
+      // corrected it until the announcement ended.
+      //
+      // ⚠ The entry's lifetime is therefore owned by AudioManager, not by stop/start. AudioManager
+      // clears the outgoing source's entry on every switch, clears the incoming source's entry when a
+      // switch happens with no duck in effect, and clears EVERY entry when ducking ends
+      // (ClearAllDuckingMultipliers). No type other than AudioManager calls SetDuckingMultiplier,
+      // ClearDuckingMultiplier or ClearAllDuckingMultipliers. If a future caller adds
+      // a SetDuckingMultiplier on some other path, it must take on the matching clear, or a source
+      // can come back attenuated long after the duck that set it has ended.
+      //
       // Keep _gainOffsets: they persist across a stop/start cycle for the same source.
       //
       // ⚠ This is true only because the playback key is the source's IAudioSource.Id, which
@@ -776,6 +816,37 @@ public class SoundFlowPlaybackService : IDisposable
   }
 
   /// <summary>
+  /// Clears every stored ducking multiplier and recomputes the volume of any source that had one.
+  /// </summary>
+  /// <returns>
+  /// The number of multiplier entries that were removed — registered or not. Zero means no entry
+  /// existed. It does NOT count sources whose volume was rewritten, and it says nothing about
+  /// whether any of them had been attenuated (an entry may hold 1.0f).
+  /// </returns>
+  /// <remarks>
+  /// Exists because multipliers now survive <see cref="StopAsync"/> (AUD-26), so an entry left on a
+  /// source that is no longer the active one is no longer wiped by that source's next registration.
+  /// <c>AudioManager</c> calls this when ducking ends, which is the moment "no source should be
+  /// attenuated" becomes true.
+  /// </remarks>
+  public int ClearAllDuckingMultipliers()
+  {
+    ThrowIfDisposed();
+
+    lock (_playersLock)
+    {
+      var keys = _duckingMultipliers.Keys.ToList();
+      _duckingMultipliers.Clear();
+      foreach (var key in keys)
+      {
+        ApplyEffectiveVolume(key);
+      }
+
+      return keys.Count;
+    }
+  }
+
+  /// <summary>
   /// Recalculates and applies the effective volume for a source.
   /// Must be called under _playersLock.
   /// </summary>
@@ -789,8 +860,8 @@ public class SoundFlowPlaybackService : IDisposable
   /// applies the stored offset on every source switch and FilePlayer is the one type with
   /// <c>canAutoPlay = false</c> in that method's switch — and the offset is picked up at
   /// registration time by the
-  /// <c>_gainOffsets.GetValueOrDefault</c> reads in PlayFileAsync (:148), PlayStreamAsync (:277),
-  /// PlayDataProviderAsync (:343) and PlayComponentAsync (:407). This class cannot distinguish that
+  /// <c>_gainOffsets.GetValueOrDefault</c> reads in PlayFileAsync, PlayStreamAsync,
+  /// PlayDataProviderAsync and PlayComponentAsync. This class cannot distinguish that
   /// from a key mismatch, because it knows its dictionaries and not whether the source was supposed
   /// to be live. AudioManager can, and does. AUD-2.
   /// </para>

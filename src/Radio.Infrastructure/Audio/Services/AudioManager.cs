@@ -278,11 +278,42 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         _playbackService.ClearDuckingMultiplier(oldSource.Id);
       }
 
-      // If ducking is currently active, apply the current duck level to the new source
-      if (_duckingService is { IsDucking: true } && _playbackService != null)
+      // If ducking is currently active, the new source INHERITS the current duck level (AUD-26).
+      // The alternative — start un-ducked and wait for the next ducking event — is wrong here,
+      // because a sustained duck raises no further level events: the new source would play at full
+      // volume over the rest of the announcement. The multiplier is stored BEFORE the source starts
+      // and is picked up at registration, which works only because SoundFlowPlaybackService.StopAsync
+      // no longer removes it (every Play*Async stops its own key first); before AUD-26 this write was
+      // wiped by the new source's own registration, for any source this method starts.
+      //
+      // With no duck in effect, clear the incoming source's entry instead. Entries now survive a
+      // stop, so a stale one — left, for instance, by a fade step that read _activeSource just before
+      // this method replaced it — would otherwise be picked up at registration and play the source
+      // attenuated with no duck running.
+      if (_playbackService != null)
       {
-        var multiplier = _duckingService.CurrentDuckLevel / 100f;
-        _playbackService.SetDuckingMultiplier(source.Id, multiplier);
+        if (_duckingService is { IsDucking: true })
+        {
+          var multiplier = _duckingService.CurrentDuckLevel / 100f;
+          _playbackService.SetDuckingMultiplier(source.Id, multiplier);
+
+          // Re-check after the write. Nothing orders this block against OnDuckingStateChanged, so a
+          // release plus ducking-ended can run between the IsDucking read above and the Set — which
+          // would strand this write after ClearAllDuckingMultipliers had already run. DuckingService
+          // drops IsDucking before it raises ducking-ended, so a false here means that raise has
+          // happened or is about to; clearing is right either way. A duck that restarts in between
+          // writes its own attack levels. Only reachable with an instant release — the shipped
+          // 500 ms fade makes the window microseconds against half a second — but it is a new path
+          // AUD-26 opened, so it is closed rather than argued away.
+          if (!_duckingService.IsDucking)
+          {
+            _playbackService.ClearDuckingMultiplier(source.Id);
+          }
+        }
+        else
+        {
+          _playbackService.ClearDuckingMultiplier(source.Id);
+        }
       }
 
       // Reset song change detection state for the new source
@@ -625,7 +656,9 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       return;
     }
 
-    // Ducking ended — clear all ducking multipliers to restore full volume.
+    // Ducking ended — restore full volume. The active source is cleared first and on its own
+    // because its result is what volumeRestored reports; every OTHER entry is then cleared too (see
+    // below).
     // ⚠ SEMANTICALLY unchanged from before PHN-1f, deliberately: the edge is still literally
     // `!e.IsDucking`, and nothing about when this block runs has moved. The BYTES did move — the block
     // came out of an `else` and now sits behind an early `return`, two spaces to the left — and an
@@ -645,14 +678,23 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       }
     }
 
+    // Then clear every other entry. Since AUD-26 a multiplier survives SoundFlowPlaybackService.StopAsync,
+    // so an entry stranded on a source that is no longer active — a fade step that read _activeSource
+    // just before SwitchSourceAsync replaced it and then wrote to the OLD source after that method had
+    // cleared it — is no longer wiped by the old source's next registration. Before AUD-26 that
+    // wipe was the only thing that stopped such an entry from mattering. "No source should be
+    // attenuated" is exactly true at this point, so this is where the dictionary is emptied.
+    // otherEntriesCleared counts entries removed, NOT sources that had been audibly attenuated.
+    var otherEntriesCleared = _playbackService.ClearAllDuckingMultipliers();
+
     // ⚠ "volumeRestored" is REPORTED, not ASSERTED. The wording this replaces — "Ducking ended:
     // volume restored, activeEvents={EventCount}" — was printed unconditionally: with a null
     // _activeSource (nothing to restore) and with a missed key (nothing restored) it said exactly
     // what it says on success. docs/HANDOFF-GA-PUNCH-LIST.md cites this family of lines as evidence
     // that ducking works end to end; it never was such evidence, and AUD-2 corrects that entry.
     _logger.LogInformation(
-      "Ducking ended: activeEvents={EventCount}, volumeRestored={Restored}",
-      e.ActiveEventCount, restored);
+      "Ducking ended: activeEvents={EventCount}, volumeRestored={Restored}, otherEntriesCleared={OtherEntries}",
+      e.ActiveEventCount, restored, otherEntriesCleared);
   }
 
   /// <inheritdoc/>

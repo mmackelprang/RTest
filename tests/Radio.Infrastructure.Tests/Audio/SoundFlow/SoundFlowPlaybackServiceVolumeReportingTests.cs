@@ -97,6 +97,48 @@ public class SoundFlowPlaybackServiceVolumeReportingTests
   }
 
   [Fact]
+  public async Task ADuckingMultiplierSurvivesStopAndAppliesAtTheNextRegistration()
+  {
+    // AUD-26 at this layer. Every Play*Async calls StopAsync on its own key before it registers, so a
+    // StopAsync that removed the multiplier made the registration read 1.0 every time.
+    // MUTATION: restore `_duckingMultipliers.Remove(sourceId);` in StopAsync — red at 1.0.
+    var service = DeviceLessPlaybackService.Create();
+    service.SetDuckingMultiplier("k", 0.2f);
+
+    await service.StopAsync("k");
+    var component = NewComponent();
+    service.RegisterComponentForTests("k", component, baseVolume: 1.0f);
+
+    AssertVolume(0.2f, component);
+  }
+
+  [Fact]
+  public void ClearAllDuckingMultipliersRestoresEveryKeyAndCountsEntries()
+  {
+    var service = DeviceLessPlaybackService.Create();
+    var a = NewComponent();
+    var b = NewComponent();
+    service.RegisterComponentForTests("a", a, baseVolume: 1.0f);
+    service.RegisterComponentForTests("b", b, baseVolume: 1.0f);
+    service.SetDuckingMultiplier("a", 0.2f);
+    service.SetDuckingMultiplier("b", 0.3f);
+    service.SetDuckingMultiplier("unregistered", 0.4f);
+    AssertVolume(0.2f, a);
+    AssertVolume(0.3f, b);
+
+    // Counts ENTRIES, registered or not — the doc comment says so and this holds it to that.
+    Assert.Equal(3, service.ClearAllDuckingMultipliers());
+    AssertVolume(1.0f, a);
+    AssertVolume(1.0f, b);
+    Assert.Equal(0, service.ClearAllDuckingMultipliers());
+
+    // …and the unregistered entry is really gone, not merely uncounted.
+    var late = NewComponent();
+    service.RegisterComponentForTests("unregistered", late, baseVolume: 1.0f);
+    AssertVolume(1.0f, late);
+  }
+
+  [Fact]
   public void GetDiagnosticsReportsComponentKeysAndNotOnlyPlayerKeys()
   {
     // ⚠ AUD-2's queue row proposed GetDiagnostics as the way to compare live playback keys against
