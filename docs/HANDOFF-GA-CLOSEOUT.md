@@ -76,8 +76,9 @@ building anything, and record results in `docs/uat/2026-09-xx-…/REPORT.md` as 
 ## 3. Phase 2 — the build order
 
 Governed by punch list §2 (`O4`, `O6`, `O7` still bind) and the review handoffs' own orders. Within
-that: **audible/visible-at-the-cabinet first, diagnostics second, hygiene last.** Effort figures are
-the rows' own.
+that: **deploy safety first (2e — the owner may install mid-arc and keep deploying), then
+audible/visible-at-the-cabinet, diagnostics second, hygiene last.** Effort figures are the rows' own.
+The subsection letters are labels, not the order; the order is: **2e → 2a → 2b → 2c → 2d → 2f → 2g → 2h → 2i → 2j → 2k.**
 
 ### 2a. Sub-hour BT fixes, one PR each (≈ ½ day total) — after 1.2/1.3/1.7
 
@@ -144,7 +145,10 @@ decision, not a build.
 ### 2i. Confirm-or-close (each ≤ ½ day, may end in no code)
 
 `AUD-21` (BT disconnect reason — does BlueZ even supply one?) · `GV-10` (falsified as ours; owner
-closes) · `TEST-2` (P2) · `AUD-36` (dead `IdentificationIntervalSeconds`).
+closes) · `TEST-2` (P2) · `AUD-36` (dead `IdentificationIntervalSeconds`) · **`AUD-16` as a removal
+PR per D-D**: delete the RaddyRF320BT USB radio source, its protocol/config/docs surface and the
+`external/RaddyRF320BT` submodule; the RTL-SDR path is the only tuner afterwards. Check first that
+nothing in `Radio.Tools.AudioUAT` or the `SourceSelector` list still enumerates it.
 
 ### 2j. Test & ops hygiene
 
@@ -166,16 +170,22 @@ voice default; fresh-install reproducibility), `PHN-8`, `PHN-9`, `OPS-10`, `AUD-
 radio path — a removal decision), `AUD-19`, `AUD-20` (SDR deadline misses, no cause established —
 `AUD-42`'s GC measurement is the cheap next step), and every P2 row in punch list §5.
 
-## 4. Decisions the owner needs to make (none block Phase 0 or 1)
+## 4. Decisions — answered by the owner 2026-09-28
 
-| # | Question | Recommendation |
+| # | Question | Ruling |
 |---|---|---|
-| D-A | **Does "finished" require the diagnostics tier?** `AUD-22`, `AUD-23`, `ENC-14`, `ENC-18`, `LOG-4`, `HW-2`, `TEST-5`, `TEST-6` are P1 by the original criteria but none changes what a guest hears or sees. | Rule them **P2** for the cabinet install, keep them P1 in the document with the ruling dated. That takes ~8 rows and ~6 days off the critical path. |
-| D-B | RDS head: live rolling PS or PI call sign? `PsConfirmThreshold` 2 or 1? | Decide after watching one rolling-PS station in 1.1; both are one-line changes. |
-| D-C | `OPS-12`: delete the rsync branch, or keep it as the Linux transport with an explicit per-host choice? | Keep, explicit; it is the only transport that has run from this box. |
-| D-D | `AUD-16`: is the deprecated USB radio path (and the `RaddyRF320BT` submodule) in or out for the cabinet? | Out of scope for GA either way; decide so the row stops carrying "plan TBD". |
+| D-A | **Does "finished" require the diagnostics tier?** `AUD-22`, `AUD-23`, `ENC-14`, `ENC-18`, `LOG-4`, `HW-2`, `TEST-5`, `TEST-6` are P1 by the original criteria but none changes what a guest hears or sees. | ✅ **P2 for the cabinet install.** They stay P1 in the punch list with this ruling dated beside them; ~8 rows and ~6 days off the critical path. |
+| D-B | RDS head: live rolling PS or PI call sign? `PsConfirmThreshold` 2 or 1? | ✅ **Decide after watching one rolling-PS station in 1.1**; both are one-line changes. The owner flagged RDS as one of the jankiest UX items left, which is why 1.1 is first. |
+| D-C | `OPS-12`: delete the rsync branch, or keep it as the Linux transport with an explicit per-host choice? | ✅ **Keep, explicit.** It is the only transport that has run from this box. |
+| D-D | `AUD-16`: is the deprecated USB radio path (and the `RaddyRF320BT` submodule) in or out? | ✅ **REMOVE ALL SUPPORT for the RaddyRF320BT device — the RTL-SDR supersedes it.** `AUD-16` becomes a removal row: the USB radio source, its protocol code, config surface, docs, and the `external/RaddyRF320BT` submodule (`.gitmodules`) all go. Sequenced in 2i as a self-contained PR; it is deletion, not GA-blocking, but the owner wants it done rather than carried. |
 
-## 5. Install-day checklist (the last thing, and it is short)
+**Also ruled:** the cabinet install is **not the end of the arc**. Deploying to the installed radio
+is quick, so the owner may install before this list is done and keep developing. Two consequences,
+both applied above: **2e (deploy safety) runs right after Phase 1**, ahead of the long build phases,
+because every post-install deploy goes through the script that darkened the panel on 2026-09-28; and
+§5 is an *"any time after 2e"* checklist rather than a finish line.
+
+## 5. Install checklist (any time after 2e — the install does not end the arc)
 
 - [ ] `main` and both `/api/health/version` endpoints agree, read by IP *and* by name from the box.
 - [ ] `OPS-13`/`OPS-12` merged, so a deploy can no longer leave the panel dark on a failed check.
@@ -195,13 +205,13 @@ radio path — a removal decision), `AUD-19`, `AUD-20` (SDR deadline misses, no 
 |---|---|---|
 | 0 record + `TEST-11` | ½ d | CI green on `main` |
 | 1 box afternoon | ½ d + owner | report on file; tiers of `AUD-37`–`41` settled |
+| 2e deploy/service safety | 1–2 d | one supervised deploy from this box, panel live at the end — **this is the install gate** |
+| 5 checklist | ½ d | back on the cabinet, whenever the owner chooses |
 | 2a–2c audible fixes | ~4–5 d | owner UAT per PR, at the cabinet |
 | 2d logging | 2–3 d | `LOG-5` toggles a level without a restart |
-| 2e deploy/service safety | 1–2 d | one supervised deploy from this box, panel live at the end |
 | 2f queue symptoms | 3–4 d | per-row UAT |
-| 2g–2j remainder | 2–4 d, less with D-A | — |
-| 5 checklist | ½ d | back on the cabinet |
+| 2g–2k remainder incl. `AUD-16` removal | 2–4 d, with D-A applied | — |
 
-**About three working weeks at the pace of the last three, two with D-A.** The number is a shape,
+**About two working weeks with D-A applied, at the pace of the last three.** The number is a shape,
 not a promise: `AUD-15` and `AUD-20` are the two rows where the cause is not yet established, and
 either can absorb a week.
