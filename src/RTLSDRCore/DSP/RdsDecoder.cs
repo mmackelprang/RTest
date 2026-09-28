@@ -17,7 +17,16 @@ namespace RTLSDRCore.DSP;
 /// </summary>
 public class RdsDecoder
 {
-  private static readonly ILogger Logger = Log.ForContext<RdsDecoder>();
+  // An instance logger (LOG-12) so tests can observe what is written. Production passes nothing and
+  // gets the same static-pipeline logger this class always used.
+  private readonly ILogger _logger;
+  private readonly TimeProvider _timeProvider;
+
+  // LOG-12: station-name and sync-loss log policy — see TryConfirmStationName and the sync-loss branch.
+  private bool _stationNameLoggedSinceReset;
+  private static readonly TimeSpan SyncLossSummaryInterval = TimeSpan.FromMinutes(5);
+  private int _syncLossesSinceSummary;
+  private long _syncLossWindowStart;
 
   private readonly int _sampleRate;
   private readonly BandPassFilter _rdsBpf;
@@ -207,7 +216,15 @@ public class RdsDecoder
   /// </summary>
   /// <param name="sampleRate">Sample rate of the composite FM signal (e.g., 240000 Hz).</param>
   public RdsDecoder(int sampleRate)
+    : this(sampleRate, logger: null, timeProvider: null)
   {
+  }
+
+  /// <summary>Test seam: an explicit logger and clock (LOG-12).</summary>
+  internal RdsDecoder(int sampleRate, ILogger? logger, TimeProvider? timeProvider)
+  {
+    _logger = logger ?? Log.ForContext<RdsDecoder>();
+    _timeProvider = timeProvider ?? TimeProvider.System;
     _sampleRate = sampleRate;
 
     // 57 kHz BPF to isolate RDS subcarrier (55-59 kHz, 127 taps)
@@ -306,7 +323,7 @@ public class RdsDecoder
       _lastSymbolCountTime = now;
       _symbolCount = 0;
       _lastDiagTime = now;
-      Logger.Debug(
+      _logger.Debug(
         "RDS diag: bpfLevel={BpfLevel:F6}, basebandLevel={BasebandLevel:F6}, " +
         "symbolRate={SymbolRate:F1}/s, syncState={SyncState}, " +
         "validBlocks={ValidBlocks}, searchMatches={SearchMatches}, " +
@@ -370,6 +387,9 @@ public class RdsDecoder
     _ptyLogged = false;
     _validBlockCount = 0;
     _syncAcquiredLogged = false;
+    _stationNameLoggedSinceReset = false;
+    _syncLossesSinceSummary = 0;
+    _syncLossWindowStart = 0;
   }
 
   private void ProcessClockRecovery(float sample)
@@ -486,7 +506,7 @@ public class RdsDecoder
               // Store the block data but do NOT call ProcessGroup —
               // we don't have enough confirmed blocks yet
               StoreBlockData(offset);
-              Logger.Debug("RDS: Potential sync at block {Block}, entering Confirming", offset);
+              _logger.Debug("RDS: Potential sync at block {Block}, entering Confirming", offset);
               return;
             }
           }
@@ -510,20 +530,20 @@ public class RdsDecoder
               if (!_syncAcquiredLogged)
               {
                 _syncAcquiredLogged = true;
-                Logger.Information("RDS: Block sync acquired after {Confirms} confirmed blocks " +
+                _logger.Information("RDS: Block sync acquired after {Confirms} confirmed blocks " +
                   "(total valid={ValidBlocks}, searchMatches={SearchMatches})",
                   _syncConfirmCount, _validBlockCount, _searchMatchCount);
               }
               else
               {
-                Logger.Debug("RDS: Block sync re-acquired");
+                _logger.Debug("RDS: Block sync re-acquired");
               }
             }
           }
           else
           {
             // Bad block — reset to searching
-            Logger.Debug("RDS: Confirming failed at block {Block} (had {Count} good), back to Searching",
+            _logger.Debug("RDS: Confirming failed at block {Block} (had {Count} good), back to Searching",
               _blockIndex, _syncConfirmCount);
             _syncState = SyncState.Searching;
             _syncConfirmCount = 0;
@@ -564,7 +584,7 @@ public class RdsDecoder
             _badBlockCount++;
             if (_badBlockCount >= SyncLossThreshold)
             {
-              Logger.Information("RDS: Block sync lost after {Failures} consecutive bad blocks", _badBlockCount);
+              LogSyncLoss(_badBlockCount);
               _syncState = SyncState.Searching;
               _syncConfirmCount = 0;
               _badBlockCount = 0;
@@ -591,7 +611,7 @@ public class RdsDecoder
       if (!_piCodeLogged)
       {
         _piCodeLogged = true;
-        Logger.Information("RDS: PI code = 0x{PiCode:X4}", piCode);
+        _logger.Information("RDS: PI code = 0x{PiCode:X4}", piCode);
       }
       // Task #80 v4 — notify subscribers (RadioReceiver → SDRRadioAudioSource →
       // RbdsCallSignDecoder) so the call sign becomes available the instant
@@ -626,8 +646,37 @@ public class RdsDecoder
         ProcessGroup2RT(blockB, _groupBlocks[2], _groupBlocks[3], versionB);
         break;
       default:
-        Logger.Debug("RDS: Received group {Group} (not decoded)", groupLabel);
+        _logger.Debug("RDS: Received group {Group} (not decoded)", groupLabel);
         break;
+    }
+  }
+
+  /// <summary>
+  /// LOG-12: sync loss is routine on a weak signal — 16.6k Information lines on the box on 2026-09-27.
+  /// Each loss is Debug; at Information there is at most one tally line per
+  /// <see cref="SyncLossSummaryInterval"/>, written on the first loss after the interval has run.
+  /// A lone loss is therefore only reported at Information once a later one closes its window, and a
+  /// tally still open at a tune (<see cref="Reset"/>) is dropped. ⚠ `grep -c "Block sync lost"` no
+  /// longer counts losses: sum the tallies' Count, or raise RTLSDRCore to Debug and count
+  /// "Block sync lost after".
+  /// </summary>
+  private void LogSyncLoss(int failures)
+  {
+    _logger.Debug("RDS: Block sync lost after {Failures} consecutive bad blocks", failures);
+
+    var now = _timeProvider.GetTimestamp();
+    if (_syncLossesSinceSummary == 0)
+    {
+      _syncLossWindowStart = now;
+    }
+    _syncLossesSinceSummary++;
+
+    var elapsed = _timeProvider.GetElapsedTime(_syncLossWindowStart, now);
+    if (elapsed >= SyncLossSummaryInterval)
+    {
+      _logger.Information("RDS: Block sync lost {Count} times in the last {Minutes:F0} min (weak signal)",
+        _syncLossesSinceSummary, elapsed.TotalMinutes);
+      _syncLossesSinceSummary = 0;
     }
   }
 
@@ -640,7 +689,7 @@ public class RdsDecoder
       if (!_ptyLogged || pty != 0) // always log non-zero PTY changes
       {
         _ptyLogged = true;
-        Logger.Information("RDS: PTY = {PtyCode} ({PtyName})", pty, name);
+        _logger.Information("RDS: PTY = {PtyCode} ({PtyName})", pty, name);
       }
     }
   }
@@ -717,11 +766,23 @@ public class RdsDecoder
       {
         var oldName = _confirmedStationName;
         _confirmedStationName = name;
-        Logger.Information("RDS: Station name = \"{StationName}\" (PI=0x{PiCode:X4})",
-          name, _piCode ?? 0);
+        // LOG-12: Information once per tune; every later change at Debug. A rolling-PS station (Rock 92
+        // pages artist and title through PS) confirms a new name every ~3 s — 30.8k Information lines on
+        // the box on 2026-09-27. Raise RTLSDRCore to Debug (LOG-5) to see them again.
+        if (!_stationNameLoggedSinceReset)
+        {
+          _stationNameLoggedSinceReset = true;
+          _logger.Information("RDS: Station name = \"{StationName}\" (PI=0x{PiCode:X4})",
+            name, _piCode ?? 0);
+        }
+        else
+        {
+          _logger.Debug("RDS: Station name = \"{StationName}\" (PI=0x{PiCode:X4})",
+            name, _piCode ?? 0);
+        }
         if (oldName != null)
         {
-          Logger.Debug("RDS: Station name changed from \"{OldName}\" to \"{NewName}\"", oldName, name);
+          _logger.Debug("RDS: Station name changed from \"{OldName}\" to \"{NewName}\"", oldName, name);
         }
       }
     }
@@ -740,7 +801,7 @@ public class RdsDecoder
     // distinct text.
     if (_rtAssembler.ProcessGroup(blockB, blockC, blockD, versionB))
     {
-      Logger.Information("RDS: Radio Text = \"{RadioText}\"", _rtAssembler.ConfirmedText);
+      _logger.Information("RDS: Radio Text = \"{RadioText}\"", _rtAssembler.ConfirmedText);
     }
   }
 

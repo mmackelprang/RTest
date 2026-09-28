@@ -227,7 +227,15 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     internal static readonly TimeSpan DiagnosticsTickInterval = TimeSpan.FromSeconds(1);
 
     private static readonly TimeSpan UnderrunLogInterval = TimeSpan.FromSeconds(1);
-    private static readonly TimeSpan CompensationLogInterval = TimeSpan.FromSeconds(5);
+    // LOG-12: the compensation line was 10.5k Information lines on the box on 2026-09-27 (the SDR generator
+    // compensates continuously). Since LOG-2 its usual owners' namespaces (Radio.Infrastructure.Audio,
+    // ...Platform.Bluetooth) are held at Warning, so by default it is filtered anyway; this governs what
+    // you get when you raise one of them. At Information it is one tally per 5 minutes;
+    // with Debug enabled for the owning logger (LOG-5) it returns to every 5 s, at Debug. Either way the
+    // template is the same and each line covers exactly its own window, so bt_drift_analyze.py's sums
+    // hold at any cadence.
+    private static readonly TimeSpan CompensationLogInterval = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan CompensationDebugLogInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan MissedDeadlineLogInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(10);
 
@@ -355,7 +363,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
     private void EmitCompensation()
     {
-        if (Volatile.Read(ref _compensationCountSinceLastLog) == 0 || !Due(_lastCompensationLogTimestamp, CompensationLogInterval))
+        var verbose = _logger.IsEnabled(LogLevel.Debug);
+        var interval = verbose ? CompensationDebugLogInterval : CompensationLogInterval;
+        if (Volatile.Read(ref _compensationCountSinceLastLog) == 0 || !Due(_lastCompensationLogTimestamp, interval))
         {
             return;
         }
@@ -364,7 +374,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         var samples = Interlocked.Exchange(ref _compensationSamplesSinceLastLog, 0);
         var now = _timeProvider.GetTimestamp();
 
-        _logger.LogInformation(
+        _logger.Log(verbose ? LogLevel.Debug : LogLevel.Information,
             "🔄 Clock drift compensation ({Type}): {Count} events, {Samples} duplicated samples in last {Interval:F1}s " +
             "(buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
             typeof(T).Name, count, samples,

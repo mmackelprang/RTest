@@ -356,6 +356,111 @@ public class SongRecRecognitionServiceTests
     }
   }
 
+  [Fact]
+  public async Task Recognized_IsInformationOnlyWhenTheResultChanges_AndNoMatchIsTrace()
+  {
+    // LOG-12: the same song is recognized every cycle while it plays.
+    if (OperatingSystem.IsWindows())
+    {
+      return; // the stand-in is /bin/sh
+    }
+
+    var log = new LevelLog();
+    var service = new ScriptedSongRecService(log, Options.Create(new FingerprintingOptions()));
+
+    foreach (var output in new[]
+    {
+      "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}",
+      "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}",
+      "",
+      "{\"track\":{\"title\":\"Song B\",\"subtitle\":\"Band\"}}",
+    })
+    {
+      service.NextOutput = output;
+      await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+    }
+
+    Assert.Equal(
+      new[] { LogLevel.Information, LogLevel.Debug, LogLevel.Information },
+      log.Entries.Where(e => e.Message.StartsWith("SongRec recognized", StringComparison.Ordinal)).Select(e => e.Level));
+    Assert.Equal(LogLevel.Trace, Assert.Single(log.Entries, e => e.Message.Contains("no match")).Level);
+  }
+
+  [Fact]
+  public async Task SameSong_AfterTenMinutes_IsInformationAgain()
+  {
+    // A pause/resume, a different source, or the song coming round hours later must still produce an
+    // Information line (AUD-12's UAT looks for it).
+    if (OperatingSystem.IsWindows())
+    {
+      return;
+    }
+
+    var log = new LevelLog();
+    var clock = new ManualClock();
+    var service = new ScriptedSongRecService(log, Options.Create(new FingerprintingOptions())) { TimeProvider = clock };
+    service.NextOutput = "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}";
+
+    await service.RunSongRecAsync("unused.wav", CancellationToken.None);  // Information
+    clock.Advance(TimeSpan.FromMinutes(9));
+    await service.RunSongRecAsync("unused.wav", CancellationToken.None);  // Debug
+    clock.Advance(TimeSpan.FromMinutes(1));
+    await service.RunSongRecAsync("unused.wav", CancellationToken.None);  // 10 min since Information
+
+    Assert.Equal(
+      new[] { LogLevel.Information, LogLevel.Debug, LogLevel.Information },
+      log.Entries.Where(e => e.Message.StartsWith("SongRec recognized", StringComparison.Ordinal)).Select(e => e.Level));
+  }
+
+  private sealed class ManualClock : TimeProvider
+  {
+    private long _ticks = 1_000_000;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => _ticks;
+
+    public void Advance(TimeSpan by) => _ticks += by.Ticks;
+  }
+
+  private sealed class ScriptedSongRecService : SongRecRecognitionService
+  {
+    public ScriptedSongRecService(ILogger<SongRecRecognitionService> logger, IOptions<FingerprintingOptions> options)
+      : base(logger, options)
+    {
+    }
+
+    public string NextOutput { get; set; } = string.Empty;
+
+    internal override Process? StartProcess(ProcessStartInfo startInfo)
+    {
+      var info = new ProcessStartInfo
+      {
+        FileName = "/bin/sh",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+      };
+      info.ArgumentList.Add("-c");
+      info.ArgumentList.Add("printf '%s' \"$0\"");
+      info.ArgumentList.Add(NextOutput);
+      return Process.Start(info);
+    }
+  }
+
+  private sealed class LevelLog : ILogger<SongRecRecognitionService>
+  {
+    public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
+  }
+
   /// <summary>
   /// Test double: launches a long-running, cross-platform stand-in process in place
   /// of the real songrec binary so the timeout path can be exercised deterministically.

@@ -14,8 +14,11 @@ src/Radio.Infrastructure/Audio/SoundFlow/BufferedSoundGenerator.cs:
   🔄 Clock drift compensation (<Type>): <N> events, <M> duplicated samples in
     last <T>s (buffer: <level>→<new>/<capacity>, total compensated: <total>)
 
-Both throttle to once per ~5 s in production, so the per-burst <N>/<M>/<T> values
-are summed across the input window. The "total" field is sanity-checked against
+Underrun lines are ~1 s apart; compensation lines are 5 min apart at Information or 5 s at
+Debug (LOG-12). Each line covers exactly its own window, so the per-burst <N>/<M>/<T> values
+are summed across the input window. ⚠ The rate denominator spans the first to last timestamp of
+ANY line in the input: if you raised the level part-way through a file, trim the input to the
+period it was raised, or the rates and ppm read low. The "total" field is sanity-checked against
 the running sum.
 
 PPM math (see notes in `--help`): with stereo audio, the effective sample-rate
@@ -35,6 +38,8 @@ compensation line is not in the file either until you raise them at runtime (LOG
        -H 'Content-Type: application/json' -d '{"level":"Information"}'
   (and .../Radio.Infrastructure.Platform.Bluetooth for the BT generator), then POST .../reset.
 Note the BT generator only compensates when the input resampler is OFF (Path D default is on).
+Since LOG-12 the compensation line is a 5-minute tally at Information; raise the namespace to
+Debug instead for the old 5 s cadence. The sums below are correct at either cadence.
 """
 
 from __future__ import annotations

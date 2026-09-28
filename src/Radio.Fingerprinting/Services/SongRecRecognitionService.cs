@@ -25,6 +25,15 @@ public class SongRecRecognitionService : ISongRecRecognitionService
   private readonly string _songRecPath;
   private readonly int _timeoutSeconds;
 
+  // LOG-12: the last recognized "title\u0001artist" and when it was last logged at Information.
+  // Recognition repeats every cycle while a song plays — the same song was logged up to ~28 times on
+  // the box — so a repeat is Debug. But a repeat after RepeatInformationInterval is Information again:
+  // the same song after a pause/resume (AUD-12's UAT looks for this line), on another source, or hours
+  // later must still be visible. The service is a singleton with one sequential caller.
+  private static readonly TimeSpan RepeatInformationInterval = TimeSpan.FromMinutes(10);
+  private string? _lastRecognizedKey;
+  private long _lastInformationTimestamp;
+
   public SongRecRecognitionService(
     ILogger<SongRecRecognitionService> logger,
     IOptions<FingerprintingOptions> options)
@@ -55,6 +64,9 @@ public class SongRecRecognitionService : ISongRecRecognitionService
 
   /// <inheritdoc/>
   public bool IsAvailable { get; private set; }
+
+  /// <summary>Clock for the repeat-recognition log policy (LOG-12). Tests substitute a fake.</summary>
+  internal TimeProvider TimeProvider { get; set; } = TimeProvider.System;
 
   /// <inheritdoc/>
   public async Task<TrackMetadata?> RecognizeAsync(
@@ -157,7 +169,9 @@ public class SongRecRecognitionService : ISongRecRecognitionService
 
       if (string.IsNullOrWhiteSpace(stdout))
       {
-        _logger.LogInformation("SongRec returned empty output (no match)");
+        // LOG-12: Trace. Every no-match used to be logged twice at Information (here and in
+        // BackgroundIdentificationService, 1.8k/day each); the caller's Debug line is the one kept.
+        _logger.LogTrace("SongRec returned empty output (no match)");
         return null;
       }
 
@@ -167,11 +181,21 @@ public class SongRecRecognitionService : ISongRecRecognitionService
       var result = JsonSerializer.Deserialize<SongRecResult>(stdout);
       if (result?.Track == null)
       {
-        _logger.LogInformation("SongRec returned no track match");
+        _logger.LogTrace("SongRec returned no track match");
         return null;
       }
 
-      _logger.LogInformation(
+      var key = result.Track.Title + "\u0001" + result.Track.Subtitle;
+      var previous = Interlocked.Exchange(ref _lastRecognizedKey, key);
+      var now = TimeProvider.GetTimestamp();
+      var information = previous != key
+        || TimeProvider.GetElapsedTime(Interlocked.Read(ref _lastInformationTimestamp), now) >= RepeatInformationInterval;
+      if (information)
+      {
+        Interlocked.Exchange(ref _lastInformationTimestamp, now);
+      }
+      _logger.Log(
+        information ? LogLevel.Information : LogLevel.Debug,
         "SongRec recognized: '{Title}' by '{Artist}'",
         result.Track.Title, result.Track.Subtitle);
 

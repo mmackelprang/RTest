@@ -80,6 +80,8 @@ public class ShippedLogLevelsTests : IDisposable
     // Carve-outs: source switching / announcements, and engine / device selection, stay visible.
     Assert.Equal(LogEventLevel.Information, switches.Get("Radio.Infrastructure.Audio.Services")!.Level);
     Assert.Equal(LogEventLevel.Information, switches.Get("Radio.Infrastructure.Audio.SoundFlow")!.Level);
+    // LOG-12: SongRec's demoted lines come back with their own switch, not the whole of Radio.*.
+    Assert.Equal(LogEventLevel.Information, switches.Get("Radio.Fingerprinting")!.Level);
   }
 
   [Fact]

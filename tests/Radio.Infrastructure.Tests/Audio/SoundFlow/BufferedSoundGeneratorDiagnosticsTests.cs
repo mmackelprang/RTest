@@ -101,34 +101,59 @@ public class BufferedSoundGeneratorDiagnosticsTests
     Assert.Equal(2, Warnings().Count);
   }
 
-  [Fact]
-  public void CompensationLine_IsWrittenByTheTimer_AtMostEveryFiveSeconds()
+  private void DrainWithCompensation(Harness generator, int samples = 8192, int reads = 10)
   {
-    using var generator = Create();
-    generator.AddSamples(new float[8192]);
-    for (var i = 0; i < 10; i++)
+    generator.AddSamples(new float[samples]);
+    for (var i = 0; i < reads; i++)
     {
       generator.Render(512);
     }
+  }
+
+  private List<(LogLevel Level, string Template, string Message)> Compensation() =>
+    _log.Entries.Where(e => e.Template.StartsWith("🔄 Clock drift compensation", StringComparison.Ordinal)).ToList();
+
+  [Fact]
+  public void CompensationLine_DefaultsToOneInformationTallyPerFiveMinutes()
+  {
+    // LOG-12: 10.5k Information lines/day from the SDR generator. Debug off: one tally per 5 min.
+    _log.DebugEnabled = false;
+    using var generator = Create();
+    DrainWithCompensation(generator);
 
     _time.Advance(TimeSpan.FromSeconds(1));
-    var first = Assert.Single(_log.Entries, e => e.Template.StartsWith("🔄 Clock drift compensation", StringComparison.Ordinal));
+    var first = Assert.Single(Compensation());
     Assert.Equal(LogLevel.Information, first.Level);
     Assert.Matches(@"^🔄 Clock drift compensation \(Single\): \d+ events, \d+ duplicated samples in last 0\.0s", first.Message);
 
-    // More compensation, but under 5 s since the last line: nothing until the fifth second.
-    generator.AddSamples(new float[4096]);
-    for (var i = 0; i < 6; i++)
-    {
-      generator.Render(512);
-    }
-    for (var s = 0; s < 4; s++)
+    // More compensation mid-window; nothing more until five minutes after the first line.
+    // (The first line was written at t = 1 s; the tally is due at t = 301 s.)
+    _time.Advance(TimeSpan.FromSeconds(149));
+    DrainWithCompensation(generator);
+    _time.Advance(TimeSpan.FromSeconds(149));   // t = 299: 298 s since the first line
+    Assert.Single(Compensation());
+    _time.Advance(TimeSpan.FromSeconds(2));     // t = 301: 300 s
+    Assert.Equal(2, Compensation().Count);
+    Assert.Contains("in last 300.0s", Compensation()[1].Message);
+  }
+
+  [Fact]
+  public void CompensationLine_WithDebugEnabled_ReturnsToEveryFiveSecondsAtDebug()
+  {
+    // The O7 principle: the detail is switched off by default, not deleted — raise the owning
+    // namespace to Debug (LOG-5) and the 5 s line comes back.
+    _log.DebugEnabled = true;
+    using var generator = Create();
+    DrainWithCompensation(generator);
+    _time.Advance(TimeSpan.FromSeconds(1));
+    Assert.Equal(LogLevel.Debug, Assert.Single(Compensation()).Level);
+
+    DrainWithCompensation(generator, samples: 4096, reads: 6);
+    for (var s = 0; s < 5; s++)
     {
       _time.Advance(TimeSpan.FromSeconds(1));
     }
-    Assert.Single(_log.Entries, e => e.Template.StartsWith("🔄", StringComparison.Ordinal));
-    _time.Advance(TimeSpan.FromSeconds(1));
-    Assert.Equal(2, _log.Entries.Count(e => e.Template.StartsWith("🔄", StringComparison.Ordinal)));
+    Assert.Equal(2, Compensation().Count);
   }
 
   [Fact]

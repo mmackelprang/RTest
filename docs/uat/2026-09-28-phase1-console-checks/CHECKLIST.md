@@ -30,7 +30,7 @@ Start time: ______
 
 ## What I run remotely during or after (you don't need to do these)
 
-- RDS: CDP poll of the ticker's `_debugState` offset and a scan of `RDS: Station name` log lines over the same window as 1.1.
+- RDS: CDP poll of the ticker's `_debugState` offset and a scan of `RDS: Station name` log lines over the same window as 1.1 (with `RTLSDRCore` raised to Debug for the window — since `LOG-12` only the first name per tune is Information).
 - `AUD-47` volume policy (`wpctl`) and `AUD-39` AVRCP-vs-underrun correlation during 1.2/1.3's BT session.
 - Encoder re-verification with `tools/encoder-harness/virtual_encoder.py` (ENC-5/6/7 scenarios).
 

@@ -462,7 +462,10 @@ heartbeat. Two carve-outs stay at Information: `...Audio.Services` (source switc
 (a more specific override shadows it) — `PUT` each one, or use the DevTray *Verbose logs* card.
 **They are switched off, not deleted:** `scripts/research/bt_drift_analyze.py` / `bt_stall_detect.py`
 read the **file sink** (they could not parse it before `LOG-2`; journald has had no Information since
-`LOG-11`) and `bt_stall_detect.py` needs **both** namespaces raised. (Deliberately not in
+`LOG-11`) and `bt_stall_detect.py` needs **both** namespaces raised. Since `LOG-12` the compensation line
+is a 5-minute tally at Information (5 s at Debug), RDS station-name changes after the first per tune are
+Debug, and RDS sync loss is Debug with a 5-minute Information tally — raise `RTLSDRCore` to Debug to see
+the per-event lines. (Deliberately not in
 `deploy/*/appsettings.Production.json`: that overlay is seed-only — `Deploy-ToLinux.ps1` leaves an
 installed copy alone — so a change there never reaches the box.)
 
