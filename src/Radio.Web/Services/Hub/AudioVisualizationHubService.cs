@@ -120,7 +120,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
       {
         if (exception == null || !IsConnectionRefused(exception))
         {
-          _logger.LogWarning(exception, "Visualization hub reconnecting");
+          HubReconnectLogging.LogReconnecting(_logger, exception, "Visualization");
         }
 
         return Task.CompletedTask;

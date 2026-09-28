@@ -81,12 +81,20 @@ builder.Services.AddCors(options =>
 });
 
 // Add SignalR — tuned for kiosk reliability.
-// Chrome may throttle JS timers when the page is visually occluded (screen-blanked overlay),
-// so we allow generous timeouts to avoid killing the circuit during idle screen-blank.
+// ClientTimeoutInterval (how long the SERVER waits to hear from a client) is generous: Chrome may
+// throttle JS timers when the page is occluded (screen-blanked overlay).
+//
+// UI-10: KeepAliveInterval (how often the SERVER pings an idle connection) must be at most half the
+// CLIENT's ServerTimeout. Every client here — radio-web's hub services and any browser client — uses
+// SignalR's default ServerTimeout of 30 s. This was 30 s, equal to it, so any connection that carried
+// no other traffic raced its own keepalive: radio-web's visualization-hub connection, subscribed to
+// no group while the kiosk is off the visualizer page, timed out and reconnected 535 times a day
+// (2026-09-27), the largest single source of journald lines on the box. 15 s is SignalR's default and
+// its documented pairing with a 30 s ServerTimeout. Pinned by SignalRTimeoutTests.
 builder.Services.AddSignalR(options =>
 {
   options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);
-  options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+  options.KeepAliveInterval = TimeSpan.FromSeconds(15);
 });
 
 // Add health checks

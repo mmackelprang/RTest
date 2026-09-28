@@ -298,7 +298,7 @@ public class AudioStateHubService : IAsyncDisposable
       {
         if (error == null || !IsConnectionRefused(error))
         {
-          _logger.LogWarning(error, "Audio hub reconnecting...");
+          HubReconnectLogging.LogReconnecting(_logger, error, "Audio");
         }
 
         return Task.CompletedTask;
