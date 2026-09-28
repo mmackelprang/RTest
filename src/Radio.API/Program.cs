@@ -46,7 +46,13 @@ builder.Services.AddSingleton(configStoreNotifier);
 var logLevelSwitches = LogLevelSwitches.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(logLevelSwitches);
 
-Log.Logger = ApiLoggerConfiguration.Build(builder.Configuration, logLevelSwitches).CreateLogger();
+// LOG-8: per-line rate limit as a backstop against any single call site flooding the sinks; the
+// reporter turns suppressed events into one counted Warning per line per minute.
+var logRateLimiter = new LogRateLimiter();
+builder.Services.AddSingleton(logRateLimiter);
+builder.Services.AddHostedService<LogRateLimitReporter>();
+
+Log.Logger = ApiLoggerConfiguration.Build(builder.Configuration, logLevelSwitches, logRateLimiter).CreateLogger();
 
 builder.Host.UseSerilog();
 
