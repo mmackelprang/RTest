@@ -440,6 +440,25 @@ ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); tail 
 The split is deliberate: every line used to be stored twice, once in the journal and once in the file, on
 a box where log volume correlates with audible audio distortion.
 
+**Log levels on `radio-api` can be changed at runtime, without a restart (`LOG-5`, 2026-09-28).** Every
+level configuration names — `Serilog:MinimumLevel:Default` and each `Override` key — is backed by a
+switch. Only configured sources are switchable: to make a namespace independently switchable, give it an
+override line. A more specific override shadows its prefix (raising `Radio` does not raise
+`Radio.Infrastructure.Audio` if that has its own line). **Changes are not persisted** — a restart
+restores configuration, deliberately. The console sink stays Warning-only regardless, so lowering a
+switch never widens journald; the extra lines go to the file sink. Levels above Warning are refused
+(unless configured) — the endpoint is unauthenticated, and Fatal would blind triage until a restart.
+⚠ Lowering `Default` below Warning lets request logging write full request paths (which can carry phone
+numbers, `PHN-5`) to the file sink. The DevTray's *Verbose logs* card lowers every `Radio*` switch to
+Debug — never `Default` — and resets them.
+
+```bash
+curl -s http://radio:5000/api/system/logging/levels                       # every switch, current + configured
+curl -s -X PUT http://radio:5000/api/system/logging/levels/Radio.Infrastructure.Audio \
+  -H 'Content-Type: application/json' -d '{"level":"Information"}'        # one switch
+curl -s -X POST http://radio:5000/api/system/logging/levels/reset          # back to configuration
+```
+
 **Verifying a deploy actually landed.** ✅ **Closed by `OPS-1` (2026-09-01) — both services are now
 verified by SHA.** `Radio.Web` serves `/api/health/version` on **port 5002**, the twin of the API's on
 5000, and `Deploy-ToLinux.ps1` polls both and `exit 1`s on a mismatch. The SHA parsing behind both is

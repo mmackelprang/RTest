@@ -1,4 +1,5 @@
 @inject AudioApiService AudioApi
+@inject SystemApiService SystemApi
 @inject AudioStateHubService AudioState
 @inject VisualizerTelemetryService VizTelemetry
 @inject NavigationManager Nav
@@ -13,7 +14,7 @@
   Hidden developer surface revealed by a 3-tap gesture on the invisible
   top-right corner hit area (see dev-gesture.js + MainLayout). When open it
   slides down with a backdrop blur and presents a 2×3 grid of diagnostic
-  actions. Auto-locks after 30 seconds of no interaction so the tray never
+  actions, plus a full-width "Verbose logs" toggle (LOG-5) beneath it. Auto-locks after 30 seconds of no interaction so the tray never
   sits unlocked in a kiosk that was triple-tapped accidentally.
 
   Why a component instead of just an overlay:
@@ -88,6 +89,19 @@
       <div class="dev-card-label">Engine state</div>
       <div class="dev-card-value">@_engineState</div>
     </button>
+
+    @* LOG-5: flips radio-api's Radio / Radio.* log levels between configuration and Debug at
+       runtime, without a restart. "Off" resets every switch to configuration, so it also undoes a
+       change made directly through the endpoint. *@
+    <button type="button"
+            class="dev-card dev-card--wide"
+            @onclick="ToggleVerboseLoggingAsync"
+            disabled="@_logBusy"
+            aria-pressed="@(_logVerbose ? "true" : "false")"
+            aria-label="Toggle verbose logging">
+      <div class="dev-card-label">Verbose logs</div>
+      <div class="dev-card-value">@_logStatus</div>
+    </button>
   </div>
 </div>
 
@@ -108,6 +122,9 @@
   private string _autoLockRemaining = "0:30";
   private string _distortionStatus = string.Empty;
   private string _dumpStatus = string.Empty;
+  private string _logStatus = "—";
+  private bool _logVerbose;
+  private bool _logBusy;
   private Timer? _autoLockTimer;
   private DateTime _lastInteractionUtc = DateTime.UtcNow;
   private bool _disposed;
@@ -137,6 +154,9 @@
       _lastInteractionUtc = DateTime.UtcNow;
       _autoLockRemaining = FormatRemaining(AutoLockSeconds);
       UpdateEngineState();
+      // Re-read on every open: the levels may have been changed through the endpoint, or reset by
+      // an API restart, since the tray last looked.
+      _ = InvokeAsync(RefreshLogStateOnOpenAsync);
     }
     _wasOpen = IsOpen;
   }
@@ -261,6 +281,74 @@
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "DevTray: failed to open log download");
+    }
+  }
+
+  // Bounds each logging-endpoint call so a hung API cannot leave the card disabled for HttpClient's
+  // 100 s default.
+  private static readonly TimeSpan LogCallTimeout = TimeSpan.FromSeconds(10);
+
+  private async Task RefreshLogStateOnOpenAsync()
+  {
+    // Busy while the first read is in flight, so a tap cannot act on the stale "off" default.
+    _logBusy = true;
+    try
+    {
+      await RefreshLogStateAsync();
+    }
+    finally
+    {
+      _logBusy = false;
+      if (!_disposed) StateHasChanged();
+    }
+  }
+
+  private async Task RefreshLogStateAsync()
+  {
+    if (_disposed) return;
+    using var cts = new CancellationTokenSource(LogCallTimeout);
+    var levels = await SystemApi.GetLogLevelsAsync(cts.Token);
+    if (levels is null)
+    {
+      _logStatus = "unavailable";
+    }
+    else
+    {
+      // "Runtime" means any switch differs from configuration — including one changed directly
+      // through the endpoint, not only by this card. A tap then resets everything.
+      _logVerbose = SystemApiService.IsRuntimeModified(levels);
+      _logStatus = _logVerbose ? "runtime · tap to reset" : "config · tap for Debug";
+    }
+    if (!_disposed) StateHasChanged();
+  }
+
+  private async Task ToggleVerboseLoggingAsync()
+  {
+    RecordInteraction();
+    _logBusy = true;
+    _logStatus = "…";
+    StateHasChanged();
+    try
+    {
+      bool ok;
+      using (var cts = new CancellationTokenSource(LogCallTimeout))
+      {
+        ok = _logVerbose
+          ? await SystemApi.ResetLogLevelsAsync(cts.Token)
+          : await SystemApi.EnableVerboseRadioLoggingAsync(cts.Token);
+      }
+      // Refresh either way: a partly failed enable can still have changed some switches, and the
+      // reading must reflect what the API is actually running.
+      await RefreshLogStateAsync();
+      if (!ok)
+      {
+        _logStatus = "failed";
+      }
+    }
+    finally
+    {
+      _logBusy = false;
+      if (!_disposed) StateHasChanged();
     }
   }
 

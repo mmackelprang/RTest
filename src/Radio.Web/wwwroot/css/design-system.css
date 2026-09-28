@@ -3537,7 +3537,8 @@ body {
  *
  * The cards are a 2×3 grid of touch targets — each hosts one diagnostic
  * action (Mark distortion, Dump audio frame, Download logs, Fingerprint
- * events) or a read-only metric (Updates/sec, Engine state).
+ * events) or a read-only metric (Updates/sec, Engine state) — plus a
+ * full-width fourth row for the LOG-5 "Verbose logs" toggle.
  * ─────────────────────────────────────────────────────────────────────────── */
 .dev-tray {
   position: fixed;
@@ -3557,7 +3558,8 @@ body {
 }
 
 .dev-tray.is-open {
-  max-height: 400px;
+  /* 480, not 400: LOG-5 added a fourth, full-width row beneath the 2×3 grid. */
+  max-height: 480px;
 }
 
 .dev-tray-header {
@@ -3598,9 +3600,14 @@ body {
 .dev-tray-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(3, 1fr);
+  grid-template-rows: repeat(4, 1fr);
   gap: 8px;
   padding: 12px;
+}
+
+/* A card spanning both columns — the LOG-5 "Verbose logs" toggle. */
+.dev-card--wide {
+  grid-column: 1 / -1;
 }
 
 .dev-card {
