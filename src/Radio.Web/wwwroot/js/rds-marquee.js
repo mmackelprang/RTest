@@ -21,10 +21,15 @@
 //     o = 0              → text head at the LEFT edge (home position)
 //     o = trackWidth     → text fully off the LEFT edge
 //
-// Each animation "leg" runs from the current offset to trackWidth at a
-// constant px/s; on finish the offset wraps to -containerWidth and the next
-// leg starts (classic ticker loop — the full rolling history replays each
-// cycle).
+// SEAMLESS LOOP (2026-09-28, owner: "a significant space between the end of one scroll and the
+// beginning of the next"). When the track carries a .rcp-rds-rt-repeat span, the engine writes
+// `{separator}{body}` into it and each leg runs from the current offset to loopStart + loopWidth,
+// where loopWidth is the repeat span's measured width; on finish the offset wraps back by exactly
+// loopWidth, at which instant the repeat's copy of the body sits where the body did — so the wrap
+// is invisible and the strip is never blank. The only gap between passes is the separator.
+//
+// Without a repeat span (older markup) the original loop applies: each leg runs to trackWidth and
+// wraps to -containerWidth, re-entering from the right edge after a full container of blank.
 //
 // The track is two spans: a HEAD (station name + separator, may be empty)
 // and a BODY (the RadioText buffer). Blazor classifies each BODY change and
@@ -52,11 +57,15 @@ function measure(inst) {
   // while a transform is applied (transforms don't affect layout). The span
   // rects are translated along with the track, but a translation does not
   // change their width.
-  inst.trackWidth = inst.track.scrollWidth;
   inst.containerWidth = inst.container.clientWidth;
   inst.headWidth = inst.head ? inst.head.getBoundingClientRect().width : 0;
 
   const bodyEl = inst.body || inst.track;
+  // With a repeat span the track's scrollWidth includes the loop copy, which must not count
+  // towards "does it fit" or the per-char width: measure head + body directly.
+  inst.trackWidth = inst.repeat && inst.body
+    ? inst.headWidth + inst.body.getBoundingClientRect().width
+    : inst.track.scrollWidth;
   const bodyWidth = inst.body ? inst.body.getBoundingClientRect().width : inst.trackWidth;
   const bodyChars = (bodyEl.textContent || '').length;
   inst.bodyCharWidth = bodyChars > 0 ? bodyWidth / bodyChars : 0;
@@ -86,6 +95,10 @@ function cancelAnim(inst) {
 }
 
 function runLeg(inst) {
+  if (inst.loopWidth > 0) {
+    runLoopLeg(inst);
+    return;
+  }
   let from = inst.offset;
   const to = inst.trackWidth;
   if (to - from <= 0) {
@@ -115,6 +128,50 @@ function runLeg(inst) {
   }
 }
 
+// Seamless-loop leg: offset → loopStart + loopWidth, then wrap back by exactly loopWidth.
+function runLoopLeg(inst) {
+  const end = inst.loopStart + inst.loopWidth;
+  const from = inst.offset;
+  const distance = end - from;
+  if (distance <= 0) {
+    inst.offset = inst.loopStart;
+    if (inst.loopWidth <= 0) {
+      return;
+    }
+    runLoopLeg(inst);
+    return;
+  }
+  inst.legStart = from;
+  inst.anim = inst.track.animate(
+    [
+      { transform: `translateX(${-from}px)` },
+      { transform: `translateX(${-end}px)` },
+    ],
+    { duration: (distance / inst.speed) * 1000, easing: 'linear', fill: 'forwards' });
+  inst.anim.onfinish = () => {
+    // The repeat's copy of the body now sits exactly where the body was at loopStart.
+    inst.offset = inst.loopStart;
+    runLoopLeg(inst);
+  };
+  if (inst.paused) {
+    inst.anim.pause();
+  }
+}
+
+// Writes (or clears) the loop copy and measures its width. Returns the loop width, 0 when the
+// markup has no repeat span or the text is not scrolling.
+function syncRepeat(inst, scrolling) {
+  if (!inst.repeat) {
+    return 0;
+  }
+  const sep = (inst.track.dataset && inst.track.dataset.loopSep) || ' \u2022 ';
+  const text = scrolling && inst.body ? sep + (inst.body.textContent || '') : '';
+  if (inst.repeat.textContent !== text) {
+    inst.repeat.textContent = text;
+  }
+  return scrolling ? inst.repeat.getBoundingClientRect().width : 0;
+}
+
 function start(inst) {
   cancelAnim(inst);
 
@@ -126,6 +183,7 @@ function start(inst) {
     inst.container.classList.toggle('is-static', fits);
     inst.track.style.transform = '';
     inst.offset = 0;
+    inst.loopWidth = syncRepeat(inst, false);
     return;
   }
 
@@ -137,11 +195,24 @@ function start(inst) {
     // it wrongly classified as fitting.
     inst.track.style.transform = '';
     inst.offset = 0;
+    inst.loopWidth = syncRepeat(inst, false);
     return;
   }
 
-  // Clamp the preserved offset into the leg's domain.
-  if (inst.offset < -inst.containerWidth || inst.offset >= inst.trackWidth) {
+  inst.loopStart = inst.headWidth;
+  inst.loopWidth = syncRepeat(inst, true);
+  if (inst.loopWidth > 0) {
+    // Normalise the preserved offset into one loop period. A front-trim can push it slightly
+    // negative (text briefly starts right of the left edge) — that is allowed; only an offset
+    // with no text in view at all is reset.
+    while (inst.offset >= inst.loopStart + inst.loopWidth) {
+      inst.offset -= inst.loopWidth;
+    }
+    if (inst.offset < -inst.containerWidth) {
+      inst.offset = inst.loopStart;
+    }
+  } else if (inst.offset < -inst.containerWidth || inst.offset >= inst.trackWidth) {
+    // Clamp the preserved offset into the leg's domain (non-loop markup).
     inst.offset = -inst.containerWidth;
   }
   runLeg(inst);
@@ -168,6 +239,9 @@ export function init(id, container, track, head, body, speedPxPerSec) {
     track,
     head: head || null,
     body: body || null,
+    repeat: track.querySelector('.rcp-rds-rt-repeat'),
+    loopStart: 0,
+    loopWidth: 0,
     speed: Math.max(1, speedPxPerSec || 40),
     offset: 0,       // start at the home position — new text readable immediately
     legStart: 0,
@@ -321,6 +395,8 @@ export function _debugState(id) {
     offset: currentOffset(inst),
     trackWidth: inst.trackWidth,
     containerWidth: inst.containerWidth,
+    loopStart: inst.loopStart,
+    loopWidth: inst.loopWidth,
     headWidth: inst.headWidth,
     bodyCharWidth: inst.bodyCharWidth,
     headText: inst.head ? inst.head.textContent : null,

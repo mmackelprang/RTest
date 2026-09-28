@@ -613,10 +613,9 @@ public class RadioControlPanelTests : TestContext
     };
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
-    var trackText = cut.Find(".rcp-rds-rt-track").TextContent;
-    trackText.Should().StartWith("WKRR");
-    trackText.Should().NotContain("Cars •",
-      "the rolling PS page must not appear in the head");
+    cut.Find(".rds-card-station--pinned").TextContent.Trim().Should().Be("WKRR");
+    cut.Find(".rcp-rds-rt-track").TextContent.Should().NotContain("Cars •",
+      "the rolling PS page must not appear anywhere on the ticker");
   }
 
   [Fact]
@@ -693,12 +692,14 @@ public class RadioControlPanelTests : TestContext
       rdsRadioText: "Now playing: Pink Floyd — Wish You Were Here");
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
+    // Since 2026-09-28 the station name is pinned beside the ticker (owner ruling), so the
+    // scroller — and its title — carry the RadioText only.
     var rt = cut.Find(".rcp-rds-rt-scroll");
     Assert.Contains("Pink Floyd", rt.TextContent);
-    Assert.Contains("WKQX", rt.TextContent);
-    // Title carries the full composed track text — "{PS} • {RT}".
+    Assert.DoesNotContain("WKQX", rt.TextContent);
+    Assert.Equal("WKQX", cut.Find(".rds-card-station--pinned").TextContent.Trim());
     Assert.Equal(
-      "WKQX • Now playing: Pink Floyd — Wish You Were Here",
+      "Now playing: Pink Floyd — Wish You Were Here",
       rt.GetAttribute("title"));
   }
 
@@ -790,12 +791,15 @@ public class RadioControlPanelTests : TestContext
     var tracks = cut.FindAll(".rcp-rds-rt-track");
     tracks.Should().HaveCount(1,
       "the marquee renders once in the PS slot; no second-row duplicate");
+    // Since 2026-09-28: the station name is pinned beside the ticker on the same row, and the
+    // configured separator joins one pass of the RT to the next (seamless loop) rather than
+    // joining PS to RT.
     var trackText = tracks[0].TextContent;
-    trackText.Should().Contain("Eagles");
     trackText.Should().Contain("Green Day · Boulevard");
-    trackText.Should().Contain(" • ",
-      "the configured RtChunkSeparator (' • ' default) joins PS and RT so " +
-      "the scroll reads as one continuous identity-plus-context string");
+    trackText.Should().NotContain("Eagles");
+    card.QuerySelector(".rds-card-station--pinned")!.TextContent.Trim().Should().Be("Eagles");
+    tracks[0].GetAttribute("data-loop-sep").Should().Be(" • ",
+      "the configured RtChunkSeparator (' • ' default) separates successive passes of the RT");
   }
 
   [Fact]
