@@ -58,6 +58,27 @@ public class LogRateLimiterTests
   }
 
   [Fact]
+  public void RunawayLine_ThroughMicrosoftExtensionsLogging_IsAlsoCut()
+  {
+    // Almost every call site in this codebase logs through ILogger<T>, which reaches Serilog via
+    // Serilog.Extensions.Logging — a different path from Serilog's own ILogger, with its own template
+    // handling. The limiter must hold on that path too.
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      using var factory = new Serilog.Extensions.Logging.SerilogLoggerFactory(logger);
+      var mel = factory.CreateLogger("Radio.Infrastructure.Audio.SoundFlow.SrcVariableResampler");
+      for (var i = 0; i < 350; i++)
+      {
+        mel.LogWarning("src_process failed: {Err}", i);
+      }
+
+      Assert.Equal(LogRateLimiter.Budget, _sink.Count);
+      Assert.Equal(350 - LogRateLimiter.Budget, Assert.Single(limiter.DrainSuppressed()).Count);
+    }
+  }
+
+  [Fact]
   public void TheBusiestMeasuredLegitimateLine_IsNeverSuppressed()
   {
     // 97/min — "DSP processing queue full", the box's busiest legitimate line on 2026-09-27.
