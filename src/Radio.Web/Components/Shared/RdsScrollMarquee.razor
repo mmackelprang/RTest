@@ -55,7 +55,7 @@
        Blazor's diff never touches these text nodes again (see the header).
        The spans are written adjacent on purpose — whitespace between them
        would become a text node the engine does not manage. *@
-    <div @ref="_trackRef" class="rcp-rds-rt-track" aria-hidden="true"><span @ref="_headRef" class="rcp-rds-rt-head">@_mountedHead</span><span @ref="_bodyRef" class="rcp-rds-rt-body">@_mountedText</span></div>
+    <div @ref="_trackRef" class="rcp-rds-rt-track" aria-hidden="true" data-loop-sep="@EffectiveLoopSeparator"><span @ref="_headRef" class="rcp-rds-rt-head">@_mountedHead</span><span @ref="_bodyRef" class="rcp-rds-rt-body">@_mountedText</span><span class="rcp-rds-rt-repeat"></span></div>
 
     @* SR-only mirror — aria-live="polite" so screen readers announce buffer
        updates without interrupting the user. *@
@@ -81,6 +81,18 @@
   /// absorbs the head's width change into the scroll offset.
   /// </summary>
   [Parameter] public string? Head { get; set; }
+
+  /// <summary>
+  /// Separator between one pass of the body and the next. The ticker loops seamlessly: the engine
+  /// writes <c>{LoopSeparator}{Text}</c> into a trailing repeat span and wraps the offset by exactly
+  /// that span's width, so the strip is never blank between cycles (owner, 2026-09-28: a
+  /// "significant space between the end of one scroll and the beginning of the next"). The repeat
+  /// span is engine-owned and empty in Blazor's markup; this value reaches the engine as the
+  /// track's <c>data-loop-sep</c> attribute.
+  /// </summary>
+  [Parameter] public string? LoopSeparator { get; set; }
+
+  private string EffectiveLoopSeparator => string.IsNullOrEmpty(LoopSeparator) ? " • " : LoopSeparator;
 
   /// <summary>
   /// Marquee scroll speed in pixels per second. Default 40 matches the
@@ -127,6 +139,7 @@
   // Last-rendered inputs for the ShouldRender guard.
   private string? _renderedHead;
   private string? _renderedText;
+  private string? _renderedLoopSeparator;
   private int _renderedSpeed;
 
   protected override void OnParametersSet()
@@ -152,12 +165,14 @@
     var changed =
       !string.Equals(_renderedHead, Head, StringComparison.Ordinal) ||
       !string.Equals(_renderedText, Text, StringComparison.Ordinal) ||
+      !string.Equals(_renderedLoopSeparator, LoopSeparator, StringComparison.Ordinal) ||
       _renderedSpeed != ScrollSpeedPxPerSec;
 
     if (changed)
     {
       _renderedHead = Head;
       _renderedText = Text;
+      _renderedLoopSeparator = LoopSeparator;
       _renderedSpeed = ScrollSpeedPxPerSec;
     }
 

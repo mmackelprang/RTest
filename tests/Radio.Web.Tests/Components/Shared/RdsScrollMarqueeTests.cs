@@ -374,7 +374,10 @@ public class RdsScrollMarqueeTests : TestContext
       .Add(x => x.Text, "Morning Edition"));
 
     var track = cut.Find(".rcp-rds-rt-track");
-    track.ChildNodes.Should().HaveCount(2);
+    // head, body, and the engine-owned seamless-loop repeat span (empty in Blazor's markup).
+    track.ChildNodes.Should().HaveCount(3);
+    track.ChildNodes.Should().AllSatisfy(n => n.NodeType.Should().Be(AngleSharp.Dom.NodeType.Element));
+    track.QuerySelector(".rcp-rds-rt-repeat")!.TextContent.Should().BeEmpty();
     track.TextContent.Should().Be("WUNC • Morning Edition");
   }
 

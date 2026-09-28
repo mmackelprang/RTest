@@ -39,8 +39,16 @@
          _head is composed in OnParametersSet (not inline) so the compose
          + nested-marquee diff don't re-run on every telemetry tick; the
          ShouldRender guard below gates that churn. *@
-      <RdsScrollMarquee Head="@_head"
+      @* Owner ruling 2026-09-28: the station name is PINNED — always visible, never scrolled.
+         Only the RadioText scrolls, as a continuous loop (LoopSeparator between repeats), so the
+         strip is never blank between cycles. The head parameter is therefore always null here. *@
+      @if (!string.IsNullOrEmpty(StationName))
+      {
+        <span class="rds-card-station rds-card-station--pinned">@StationName</span>
+      }
+      <RdsScrollMarquee Head="@null"
                         Text="@RadioText"
+                        LoopSeparator="@Separator"
                         ScrollSpeedPxPerSec="@ScrollSpeedPxPerSec" />
     }
     else if (!string.IsNullOrEmpty(StationName))
@@ -110,19 +118,12 @@
   // re-renders ~2x/second on signal telemetry; this guard stops that churn
   // from propagating into the nested RdsScrollMarquee diff when nothing the
   // user sees has changed.
-  private string? _head;
   private string? _renderedStation;
   private string? _renderedRadioText;
   private string? _renderedProgramType;
   private int _renderedSpeed;
   private string _renderedSeparator = string.Empty;
 
-  protected override void OnParametersSet()
-  {
-    _head = string.IsNullOrEmpty(StationName)
-      ? null
-      : $"{StationName}{Separator}";
-  }
 
   protected override bool ShouldRender()
   {

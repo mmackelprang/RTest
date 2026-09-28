@@ -185,17 +185,21 @@ public class RdsCardTests : TestContext
   // the marquee as two parameters, so only the RT is diffed for transitions.
 
   [Fact]
-  public void Card_PassesStationNameAndSeparatorAsHead_AndRadioTextAsBody()
+  public void Card_PinsStationName_BesideTheTicker_AndScrollsOnlyRadioText()
   {
+    // Owner ruling 2026-09-28: the station name is pinned and always visible; only the RT scrolls,
+    // looping with the separator between passes (the head/body split of AUD-63 remains in the
+    // marquee, but the card no longer uses the head).
     var cut = RenderComponent<RdsCard>(p => p
       .Add(x => x.StationName, "WUNC")
       .Add(x => x.RadioText, "Morning Edition")
       .Add(x => x.Separator, " • "));
 
-    cut.Find(".rcp-rds-rt-head").TextContent.Should().Be("WUNC • ");
+    cut.Find(".rds-card-station--pinned").TextContent.Should().Be("WUNC");
+    cut.Find(".rcp-rds-rt-head").TextContent.Should().BeEmpty();
     cut.Find(".rcp-rds-rt-body").TextContent.Should().Be("Morning Edition");
-    cut.Find(".rcp-rds-rt-track").TextContent.Should().Be("WUNC • Morning Edition",
-      "the two spans read as the single continuous PS • RT string the revision specified");
+    cut.Find(".rcp-rds-rt-track").GetAttribute("data-loop-sep").Should().Be(" • ",
+      "the configured separator is what joins one pass of the RT to the next");
   }
 
   [Fact]

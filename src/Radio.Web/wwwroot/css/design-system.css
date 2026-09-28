@@ -4204,6 +4204,16 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Pinned station name (owner ruling 2026-09-28): when RadioText scrolls, the station name sits
+   BESIDE the ticker instead of on its track, so it is always visible. It sizes to its content
+   (the PI call sign is 3-4 chars) rather than taking the flex remainder the static variant
+   uses, and a hairline divides it from the scrolling text. */
+.rds-card-station--pinned {
+  flex: 0 0 auto;
+  padding-right: 12px;
+  border-right: 1px solid var(--surface-separator);
+}
+
 .rds-card-pty {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -4338,7 +4348,8 @@ body {
    separator space from collapsing at the span boundary; the spans are
    adjacent in the markup, so there is no inter-span whitespace to collapse. */
 .rcp-rds-rt-head,
-.rcp-rds-rt-body {
+.rcp-rds-rt-body,
+.rcp-rds-rt-repeat {
   display: inline-block;
   white-space: pre;
 }
@@ -4346,6 +4357,11 @@ body {
 /* Static-fit variant — when the measured track width fits the container,
    the JS engine adds .is-static and skips the marquee entirely. Feels less
    twitchy on stations with a single short tagline (HANDOFF §8 q8). */
+/* The seamless-loop repeat is only meaningful while scrolling. */
+.rcp-rds-rt-scroll.is-static .rcp-rds-rt-repeat {
+  display: none;
+}
+
 .rcp-rds-rt-scroll.is-static .rcp-rds-rt-track {
   transform: none;
   display: block;
