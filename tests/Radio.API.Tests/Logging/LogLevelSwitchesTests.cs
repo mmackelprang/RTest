@@ -16,6 +16,9 @@ namespace Radio.API.Tests.Logging;
 /// fails here, not only in a hand-built logger. Events are collected by an in-memory sink added after
 /// Build; configuration declares no sinks, so only the console sink (Warning+) and the collector exist.
 /// </remarks>
+// Serialized against every other test: one test here redirects Console.Out, and a parallel test's
+// console output would otherwise land in (and be swallowed by) its capture.
+[Collection(ConsoleCaptureCollection.Name)]
 public class LogLevelSwitchesTests
 {
   private static IConfigurationRoot Config(Dictionary<string, string?> values)
@@ -186,6 +189,22 @@ public class LogLevelSwitchesTests
   }
 
   [Fact]
+  public void FromConfiguration_WithUnparseableDefault_LeavesDefaultToConfiguration()
+  {
+    // A "$switch" reference (or anything else we cannot parse) must not be silently replaced by
+    // Information: no Default switch is created, and ApplyTo leaves ReadFrom.Configuration's in place.
+    var config = Config(new()
+    {
+      ["Serilog:MinimumLevel:Default"] = "$notALevel",
+      ["Serilog:MinimumLevel:Override:Radio"] = "Information",
+    });
+    var switches = LogLevelSwitches.FromConfiguration(config);
+
+    Assert.Null(switches.Get("Default"));
+    Assert.Equal(new[] { "Radio" }, switches.GetAll().Select(s => s.Source));
+  }
+
+  [Fact]
   public void FromConfiguration_WithNoMinimumLevel_DefaultsToInformation()
   {
     var switches = LogLevelSwitches.FromConfiguration(Config(new()));
@@ -198,6 +217,7 @@ public class LogLevelSwitchesTests
   [InlineData("3", false)]
   [InlineData("42", false)]
   [InlineData("Loud", false)]
+  [InlineData("Debug,Information", false)]
   [InlineData("", false)]
   [InlineData(null, false)]
   public void TryParseLevel_AcceptsNamesOnly(string? text, bool expected)
@@ -228,4 +248,10 @@ public class LogLevelSwitchesTests
       }
     }
   }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class ConsoleCaptureCollection
+{
+  public const string Name = "Console capture (no parallelism)";
 }

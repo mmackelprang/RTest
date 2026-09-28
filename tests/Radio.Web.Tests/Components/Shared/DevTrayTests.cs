@@ -23,7 +23,7 @@ namespace Radio.Web.Tests.Components.Shared;
 /// component directly with <c>IsOpen=true</c> and assert:
 ///
 /// <list type="bullet">
-///   <item>Seven action cards exist (the six below plus LOG-5's Verbose logs) (Mark distortion, Updates, Dump audio
+///   <item>Seven action cards exist (Verbose logs, from LOG-5, plus Mark distortion, Updates, Dump audio
 ///         frame, Download logs, Fingerprint events, Engine state).</item>
 ///   <item>The "Updates" card reflects the current
 ///         <see cref="VisualizerTelemetryService.UpdatesPerSecond"/> value
@@ -119,7 +119,7 @@ public class DevTrayTests : TestContext
   [Fact]
   public void DevTray_Open_ListsAllSevenCardLabels()
   {
-    // The six labels are part of the handoff acceptance criteria — every one
+    // The six handoff labels (plus LOG-5's Verbose logs) are part of the acceptance criteria — every one
     // must surface so an operator can identify the action at a glance.
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
     var labels = cut.FindAll(".dev-card-label").Select(e => e.TextContent.Trim()).ToList();
@@ -337,7 +337,7 @@ public class DevTrayTests : TestContext
   public void VerboseLogs_OnOpen_ReadsTheApisState()
   {
     var cut = RenderOpenAndSettled();
-    LogValue(cut).Should().Be("off (config)");
+    LogValue(cut).Should().Be("config · tap for Debug");
     LogCard(cut).GetAttribute("aria-pressed").Should().Be("false");
   }
 
@@ -347,7 +347,7 @@ public class DevTrayTests : TestContext
     var cut = RenderOpenAndSettled();
 
     LogCard(cut).Click();
-    cut.WaitForAssertion(() => LogValue(cut).Should().Be("on (runtime)"));
+    cut.WaitForAssertion(() => LogValue(cut).Should().Be("runtime · tap to reset"));
 
     // Radio and Radio.Infrastructure.Audio were above Debug and get lowered; Radio.Chatty is
     // already Verbose and must not be raised to Debug; Default is third-party and untouched.
@@ -361,10 +361,10 @@ public class DevTrayTests : TestContext
   {
     var cut = RenderOpenAndSettled();
     LogCard(cut).Click();
-    cut.WaitForAssertion(() => LogValue(cut).Should().Be("on (runtime)"));
+    cut.WaitForAssertion(() => LogValue(cut).Should().Be("runtime · tap to reset"));
 
     LogCard(cut).Click();
-    cut.WaitForAssertion(() => LogValue(cut).Should().Be("off (config)"));
+    cut.WaitForAssertion(() => LogValue(cut).Should().Be("config · tap for Debug"));
 
     _loggingApi.Resets.Should().Be(1);
     _loggingApi.Level("Radio").Should().Be("Information");

@@ -3537,7 +3537,8 @@ body {
  *
  * The cards are a 2×3 grid of touch targets — each hosts one diagnostic
  * action (Mark distortion, Dump audio frame, Download logs, Fingerprint
- * events) or a read-only metric (Updates/sec, Engine state).
+ * events) or a read-only metric (Updates/sec, Engine state) — plus a
+ * full-width fourth row for the LOG-5 "Verbose logs" toggle.
  * ─────────────────────────────────────────────────────────────────────────── */
 .dev-tray {
   position: fixed;

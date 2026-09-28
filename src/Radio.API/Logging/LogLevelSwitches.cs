@@ -32,9 +32,12 @@ namespace Radio.API.Logging;
 ///   <item>Runtime changes are not persisted. A restart returns every switch to its configured
 ///   level, which is deliberate: a Debug level forgotten inside a sealed cabinet does not survive the
 ///   next restart.</item>
-///   <item>Levels are only ever lowered <em>on the emission side</em>. A sink with its own
+///   <item>Switches act on the logger pipeline, not on sinks. A sink with its own
 ///   <c>restrictedToMinimumLevel</c> (the API's Warning-only console sink, LOG-11) still applies, so
 ///   lowering a switch does not widen journald volume.</item>
+///   <item>When configuration sets both the scalar <c>MinimumLevel</c> and <c>MinimumLevel:Default</c>,
+///   this class takes <c>Default</c>; Serilog.Settings.Configuration picks whichever provider set one
+///   last. Nothing here sets both.</item>
 /// </list>
 /// </para>
 /// </remarks>
@@ -55,8 +58,9 @@ public sealed class LogLevelSwitches
 
   /// <summary>
   /// Builds a switch per configured level. Unparseable values (for example a <c>$switchName</c>
-  /// reference) are skipped, leaving whatever <c>ReadFrom.Configuration</c> installed for that key in
-  /// place — they are not switchable through this class.
+  /// reference) are skipped — Default included — leaving whatever <c>ReadFrom.Configuration</c>
+  /// installed for that key in place; they are not switchable through this class. Only when no default
+  /// level is configured at all does Default get a switch at Serilog's own default, Information.
   /// </summary>
   public static LogLevelSwitches FromConfiguration(IConfiguration configuration)
   {
@@ -66,8 +70,14 @@ public sealed class LogLevelSwitches
     // Serilog.Settings.Configuration accepts both "MinimumLevel": "Debug" and
     // "MinimumLevel": { "Default": "Debug" }. Honour both.
     var defaultText = minimumLevel["Default"] ?? minimumLevel.Value;
-    var defaultLevel = TryParseLevel(defaultText, out var parsedDefault) ? parsedDefault : SerilogDefaultLevel;
-    entries[DefaultSource] = new Entry(defaultLevel);
+    if (defaultText is null)
+    {
+      entries[DefaultSource] = new Entry(SerilogDefaultLevel);
+    }
+    else if (TryParseLevel(defaultText, out var parsedDefault))
+    {
+      entries[DefaultSource] = new Entry(parsedDefault);
+    }
 
     foreach (var child in minimumLevel.GetSection("Override").GetChildren())
     {
@@ -89,7 +99,10 @@ public sealed class LogLevelSwitches
   /// </summary>
   public LoggerConfiguration ApplyTo(LoggerConfiguration loggerConfiguration)
   {
-    loggerConfiguration.MinimumLevel.ControlledBy(_entries[DefaultSource].Switch);
+    if (_entries.TryGetValue(DefaultSource, out var defaultEntry))
+    {
+      loggerConfiguration.MinimumLevel.ControlledBy(defaultEntry.Switch);
+    }
     foreach (var (source, entry) in _entries)
     {
       if (source == DefaultSource)
@@ -170,8 +183,9 @@ public sealed class LogLevelSwitches
   public static bool TryParseLevel(string? text, out LogEventLevel level)
   {
     level = default;
-    // Enum.TryParse accepts "3" and "42"; a level is only ever meant to arrive by name.
-    if (string.IsNullOrWhiteSpace(text) || !char.IsLetter(text.Trim()[0]))
+    // Enum.TryParse accepts "3" and "42", and ORs comma lists ("Debug,Information" is 1|2 = Warning);
+    // a level is only ever meant to arrive as one name.
+    if (string.IsNullOrWhiteSpace(text) || !char.IsLetter(text.Trim()[0]) || text.Contains(','))
     {
       return false;
     }

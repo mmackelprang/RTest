@@ -73,6 +73,38 @@ public class SystemLoggingControllerTests : IClassFixture<CustomWebApplicationFa
     Assert.Equal(LogEventLevel.Information, switches.Get("Radio")!.Level);
   }
 
+  [Theory]
+  [InlineData("Error")]
+  [InlineData("Fatal")]
+  public void SetLevel_AboveWarning_Returns400(string level)
+  {
+    // An unauthenticated caller must not be able to silence warnings and errors (and this
+    // endpoint's own audit line) until the next restart.
+    var controller = Controller(out var switches);
+
+    var result = controller.SetLevel("Radio", new SetLogLevelRequest(level));
+
+    Assert.IsType<BadRequestObjectResult>(result.Result);
+    Assert.Equal(LogEventLevel.Information, switches.Get("Radio")!.Level);
+  }
+
+  [Fact]
+  public void SetLevel_AboveWarning_IsAllowedWhenItIsTheConfiguredLevel()
+  {
+    var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+      ["Serilog:MinimumLevel:Override:Noisy"] = "Error",
+    }).Build();
+    var switches = LogLevelSwitches.FromConfiguration(config);
+    var controller = new SystemLoggingController(switches, NullLogger<SystemLoggingController>.Instance);
+    switches.TrySet("Noisy", LogEventLevel.Debug);
+
+    var result = controller.SetLevel("Noisy", new SetLogLevelRequest("Error"));
+
+    Assert.IsType<OkObjectResult>(result.Result);
+    Assert.Equal(LogEventLevel.Error, switches.Get("Noisy")!.Level);
+  }
+
   [Fact]
   public void ResetLevels_RestoresConfiguration()
   {
@@ -88,8 +120,10 @@ public class SystemLoggingControllerTests : IClassFixture<CustomWebApplicationFa
   [Fact]
   public async Task Endpoint_IsWiredEndToEnd_AgainstTheHostsOwnSwitches()
   {
-    // Proves the DI registration and routing, and that PUT mutates the same instance the logger was
-    // built with (the singleton registered in Program.cs), not a second copy.
+    // Proves the DI registration and routing, and that PUT mutates the LogLevelSwitches singleton the
+    // host registered. It does not prove the host's logger emits differently: Log.Logger is
+    // process-global and the factory replaces it. That half is LogLevelSwitchesTests' job, which
+    // drives the same ApiLoggerConfiguration.Build that Program.cs calls.
     var client = _factory.CreateClient();
 
     var levels = await client.GetFromJsonAsync<List<JsonElement>>("/api/system/logging/levels");

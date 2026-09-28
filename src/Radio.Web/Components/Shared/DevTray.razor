@@ -156,7 +156,7 @@
       UpdateEngineState();
       // Re-read on every open: the levels may have been changed through the endpoint, or reset by
       // an API restart, since the tray last looked.
-      _ = InvokeAsync(RefreshLogStateAsync);
+      _ = InvokeAsync(RefreshLogStateOnOpenAsync);
     }
     _wasOpen = IsOpen;
   }
@@ -284,18 +284,40 @@
     }
   }
 
+  // Bounds each logging-endpoint call so a hung API cannot leave the card disabled for HttpClient's
+  // 100 s default.
+  private static readonly TimeSpan LogCallTimeout = TimeSpan.FromSeconds(10);
+
+  private async Task RefreshLogStateOnOpenAsync()
+  {
+    // Busy while the first read is in flight, so a tap cannot act on the stale "off" default.
+    _logBusy = true;
+    try
+    {
+      await RefreshLogStateAsync();
+    }
+    finally
+    {
+      _logBusy = false;
+      if (!_disposed) StateHasChanged();
+    }
+  }
+
   private async Task RefreshLogStateAsync()
   {
     if (_disposed) return;
-    var levels = await SystemApi.GetLogLevelsAsync();
+    using var cts = new CancellationTokenSource(LogCallTimeout);
+    var levels = await SystemApi.GetLogLevelsAsync(cts.Token);
     if (levels is null)
     {
       _logStatus = "unavailable";
     }
     else
     {
+      // "Runtime" means any switch differs from configuration — including one changed directly
+      // through the endpoint, not only by this card. A tap then resets everything.
       _logVerbose = SystemApiService.IsRuntimeModified(levels);
-      _logStatus = _logVerbose ? "on (runtime)" : "off (config)";
+      _logStatus = _logVerbose ? "runtime · tap to reset" : "config · tap for Debug";
     }
     if (!_disposed) StateHasChanged();
   }
@@ -308,11 +330,15 @@
     StateHasChanged();
     try
     {
-      var ok = _logVerbose
-        ? await SystemApi.ResetLogLevelsAsync()
-        : await SystemApi.EnableVerboseRadioLoggingAsync();
+      bool ok;
+      using (var cts = new CancellationTokenSource(LogCallTimeout))
+      {
+        ok = _logVerbose
+          ? await SystemApi.ResetLogLevelsAsync(cts.Token)
+          : await SystemApi.EnableVerboseRadioLoggingAsync(cts.Token);
+      }
       // Refresh either way: a partly failed enable can still have changed some switches, and the
-      // on/off reading must reflect what the API is actually running.
+      // reading must reflect what the API is actually running.
       await RefreshLogStateAsync();
       if (!ok)
       {
