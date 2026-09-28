@@ -38,19 +38,15 @@ builder.Services.AddSingleton(configStoreNotifier);
 // ALSA/JACK C library noise (written directly to stdout without a prefix)
 // gets the default priority, allowing filtering with `journalctl -p info`.
 //
-// LOG-11: the console sink is restricted to Warning. Under systemd, stdout is captured by
-// journald, so an unrestricted console sink meant every Information line was written twice — once
-// to the journal and once to the file sink — on a box where log volume is an audio problem, not a
-// disk problem. Dropping the sink outright was the other option in the row and is the wrong half:
-// it would take the journald priority path with it, and `journalctl -p` is how this box gets
-// triaged remotely. Warnings and errors still reach the journal; the file keeps full Information
-// detail.
-Log.Logger = new LoggerConfiguration()
-  .ReadFrom.Configuration(builder.Configuration)
-  .WriteTo.Async(a => a.Console(
-    new SystemdConsoleFormatter(),
-    restrictedToMinimumLevel: Serilog.Events.LogEventLevel.Warning))
-  .CreateLogger();
+// LOG-11: the console sink is restricted to Warning — see ApiLoggerConfiguration.Build for why.
+//
+// LOG-5: every configured minimum level (Default + each Override) is backed by a runtime switch,
+// adjustable through /api/system/logging/levels without a restart. The logger itself is assembled
+// in ApiLoggerConfiguration.Build so the ordering that makes the switches win is under test.
+var logLevelSwitches = LogLevelSwitches.FromConfiguration(builder.Configuration);
+builder.Services.AddSingleton(logLevelSwitches);
+
+Log.Logger = ApiLoggerConfiguration.Build(builder.Configuration, logLevelSwitches).CreateLogger();
 
 builder.Host.UseSerilog();
 

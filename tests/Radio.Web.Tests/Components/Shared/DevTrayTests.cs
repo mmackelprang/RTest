@@ -23,7 +23,7 @@ namespace Radio.Web.Tests.Components.Shared;
 /// component directly with <c>IsOpen=true</c> and assert:
 ///
 /// <list type="bullet">
-///   <item>Six action cards exist (Mark distortion, Updates, Dump audio
+///   <item>Seven action cards exist (the six below plus LOG-5's Verbose logs) (Mark distortion, Updates, Dump audio
 ///         frame, Download logs, Fingerprint events, Engine state).</item>
 ///   <item>The "Updates" card reflects the current
 ///         <see cref="VisualizerTelemetryService.UpdatesPerSecond"/> value
@@ -37,6 +37,7 @@ namespace Radio.Web.Tests.Components.Shared;
 public class DevTrayTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
+  private readonly FakeLoggingApi _loggingApi;
 
   public DevTrayTests()
   {
@@ -61,6 +62,13 @@ public class DevTrayTests : TestContext
     Services.AddRadzenComponents();
 
     Services.AddHttpClient<AudioApiService>();
+
+    // LOG-5: the Verbose logs card talks to radio-api's logging endpoint through SystemApiService.
+    // A stateful fake stands in for the API so the card's round trip is observable.
+    _loggingApi = new FakeLoggingApi();
+    Services.AddSingleton(new SystemApiService(
+      new HttpClient(_loggingApi) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      NullLogger<SystemApiService>.Instance));
 
     Services.AddSingleton(sp =>
       new AudioStateHubService(
@@ -101,15 +109,15 @@ public class DevTrayTests : TestContext
   }
 
   [Fact]
-  public void DevTray_Open_RendersAllSixCards()
+  public void DevTray_Open_RendersAllSevenCards()
   {
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
     var cards = cut.FindAll(".dev-card");
-    cards.Count.Should().Be(6);
+    cards.Count.Should().Be(7);
   }
 
   [Fact]
-  public void DevTray_Open_ListsAllSixCardLabels()
+  public void DevTray_Open_ListsAllSevenCardLabels()
   {
     // The six labels are part of the handoff acceptance criteria — every one
     // must surface so an operator can identify the action at a glance.
@@ -121,6 +129,7 @@ public class DevTrayTests : TestContext
     labels.Should().Contain("Download logs");
     labels.Should().Contain("Fingerprint events");
     labels.Should().Contain("Engine state");
+    labels.Should().Contain("Verbose logs");
   }
 
   [Fact]
@@ -306,5 +315,140 @@ public class DevTrayTests : TestContext
 
     closeCount.Should().Be(0,
       "interaction must reset the auto-lock window — close handler must not fire");
+  }
+
+  // ── LOG-5: Verbose logs card ──────────────────────────────────────────────────────────────────
+
+  private IRenderedComponent<DevTray> RenderOpenAndSettled()
+  {
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+    // The first open fires a GET; wait on its rendered result, not on time.
+    cut.WaitForAssertion(() => LogValue(cut).Should().NotBe("—"));
+    return cut;
+  }
+
+  private static AngleSharp.Dom.IElement LogCard(IRenderedComponent<DevTray> cut) =>
+    cut.FindAll(".dev-card").First(c => c.GetAttribute("aria-label") == "Toggle verbose logging");
+
+  private static string LogValue(IRenderedComponent<DevTray> cut) =>
+    LogCard(cut).QuerySelector(".dev-card-value")!.TextContent.Trim();
+
+  [Fact]
+  public void VerboseLogs_OnOpen_ReadsTheApisState()
+  {
+    var cut = RenderOpenAndSettled();
+    LogValue(cut).Should().Be("off (config)");
+    LogCard(cut).GetAttribute("aria-pressed").Should().Be("false");
+  }
+
+  [Fact]
+  public void VerboseLogs_TapWhenOff_LowersOnlyRadioSwitchesToDebug()
+  {
+    var cut = RenderOpenAndSettled();
+
+    LogCard(cut).Click();
+    cut.WaitForAssertion(() => LogValue(cut).Should().Be("on (runtime)"));
+
+    // Radio and Radio.Infrastructure.Audio were above Debug and get lowered; Radio.Chatty is
+    // already Verbose and must not be raised to Debug; Default is third-party and untouched.
+    _loggingApi.Puts.Should().BeEquivalentTo(new[] { ("Radio", "Debug"), ("Radio.Infrastructure.Audio", "Debug") });
+    _loggingApi.Level("Default").Should().Be("Warning");
+    LogCard(cut).GetAttribute("aria-pressed").Should().Be("true");
+  }
+
+  [Fact]
+  public void VerboseLogs_TapWhenOn_ResetsToConfiguration()
+  {
+    var cut = RenderOpenAndSettled();
+    LogCard(cut).Click();
+    cut.WaitForAssertion(() => LogValue(cut).Should().Be("on (runtime)"));
+
+    LogCard(cut).Click();
+    cut.WaitForAssertion(() => LogValue(cut).Should().Be("off (config)"));
+
+    _loggingApi.Resets.Should().Be(1);
+    _loggingApi.Level("Radio").Should().Be("Information");
+  }
+
+  [Fact]
+  public void VerboseLogs_ApiUnreachable_SaysSo()
+  {
+    _loggingApi.Unreachable = true;
+    var cut = RenderOpenAndSettled();
+    LogValue(cut).Should().Be("unavailable");
+  }
+
+  /// <summary>Stateful stand-in for radio-api's /api/system/logging endpoints.</summary>
+  private sealed class FakeLoggingApi : HttpMessageHandler
+  {
+    private readonly object _sync = new();
+    private readonly Dictionary<string, (string Level, string Configured)> _levels = new()
+    {
+      ["Default"] = ("Warning", "Warning"),
+      ["Radio"] = ("Information", "Information"),
+      ["Radio.Chatty"] = ("Verbose", "Verbose"),
+      ["Radio.Infrastructure.Audio"] = ("Warning", "Warning"),
+    };
+    private readonly List<(string, string)> _puts = new();
+    private int _resets;
+
+    public bool Unreachable { get; set; }
+
+    public IReadOnlyList<(string, string)> Puts { get { lock (_sync) { return _puts.ToList(); } } }
+
+    public int Resets { get { lock (_sync) { return _resets; } } }
+
+    public string Level(string source) { lock (_sync) { return _levels[source].Level; } }
+
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+    {
+      if (Unreachable)
+      {
+        throw new HttpRequestException("unreachable");
+      }
+
+      var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
+      const string prefix = "/api/system/logging/levels";
+      lock (_sync)
+      {
+        if (request.Method == HttpMethod.Get && path == prefix)
+        {
+          var body = System.Text.Json.JsonSerializer.Serialize(
+            _levels.Select(kv => new { source = kv.Key, level = kv.Value.Level, configuredLevel = kv.Value.Configured }));
+          return new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+          {
+            Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
+          };
+        }
+        if (request.Method == HttpMethod.Post && path == prefix + "/reset")
+        {
+          _resets++;
+          foreach (var key in _levels.Keys.ToList())
+          {
+            _levels[key] = (_levels[key].Configured, _levels[key].Configured);
+          }
+          return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
+      }
+
+      if (request.Method == HttpMethod.Put && path.StartsWith(prefix + "/", StringComparison.Ordinal))
+      {
+        var source = path[(prefix.Length + 1)..];
+        using var doc = System.Text.Json.JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+        var level = doc.RootElement.GetProperty("level").GetString()!;
+        lock (_sync)
+        {
+          if (!_levels.ContainsKey(source))
+          {
+            return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+          }
+          _puts.Add((source, level));
+          _levels[source] = (level, _levels[source].Configured);
+        }
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+      }
+
+      return new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+    }
   }
 }
