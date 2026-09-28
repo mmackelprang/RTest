@@ -72,3 +72,27 @@ tuned on slow drags can still admit a burst on a quick one.
 - **`AUD-24`** — shipped `9ca42590`, the parent. **Its UAT PASSED**; this row is a follow-on, not a
   failure of it.
 - **`AUD-26`** — the other "a fix made a pre-existing defect observable" row, from `AUD-2`.
+
+---
+
+## ⭐ OWNER RULING 2026-09-25 — SEEK-ON-RELEASE, no debounce
+
+The owner chose **option (1) above: commit the seek when the drag ends.** No seek is sent to the engine
+during the drag, and **there is no debounce or throttle.**
+
+**The stated cost, accepted with the ruling:** **silence-then-jump** — no audible response to the drag,
+then the audio jumps to the new position on release — and **scrub preview is lost.**
+
+⛔ **Option (2), debounce/throttle, is DECLINED.** Do not re-propose it in the plan without new
+evidence; this section exists so the choice is not re-litigated.
+
+**What the ruling does NOT settle, and the plan must still do:**
+
+- ⚠ **The readout must still track the finger during the drag** (scope question 4) — deferring the
+  seek must not make the control look dead.
+- ⚠ Scope question 1 still applies: check whether `RadzenSlider` exposes a change-on-release event
+  before writing any gesture logic.
+- The unit-test shape in **Verification** narrows to the drag-end case: **exactly 1** engine seek per
+  gesture, shown failing on `9ca42590`.
+
+**Status: still 📋, and the row now needs a plan written against this ruling.**
