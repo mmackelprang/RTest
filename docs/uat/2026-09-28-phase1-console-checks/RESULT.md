@@ -35,7 +35,11 @@ Rock 92, 92.3 FM, PI `0x70DB` → call sign WKRR.
 - Console volume slider **not** driving the phone's volume is **acceptable — do not change it.**
 - Casting UAT and the Cast rows (`AUD-37`, `AUD-38`, `AUD-54`, `AUD-5`) are **deferred** until the owner schedules them.
 
-## Still to confirm at the console
+## Re-checks — ✅ all accepted by the owner, 2026-09-28
+
+*"These are all accepted."* — 1.2 (#685), 1.3 (#686) and the ticker at panel width (#687).
+
+### (as listed before the re-check)
 
 1. **1.2 again** — console Pause/Play on a BT source now pauses/resumes the phone (#685).
 2. **1.3 again** — reconnect the phone; ideally forget and re-pair once to exercise the first-connect sync path (#686).

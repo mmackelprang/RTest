@@ -1,3 +1,4 @@
+using Moq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
@@ -317,6 +318,31 @@ public class AdapterScopingTests
     public void Start() { }
     public long MillisecondsSinceLastOnProcess() => 0;
     public void Dispose() => Disposed = true;
+  }
+
+  // --- AUD-41: Stop Scan must not blind the service -------------------------------------------
+
+  private sealed class DisposeSpy : IDisposable
+  {
+    public int Disposals { get; private set; }
+    public void Dispose() => Disposals++;
+  }
+
+  [Fact]
+  public async Task StopDiscovery_LeavesTheInterfacesAddedWatcherAlive_AndDisposeReleasesIt()
+  {
+    // StopDiscoveryAsync used to dispose the service's only InterfacesAdded subscription, so after
+    // one "Stop Scan" no new phone could be cached (pairing failed "not found") and no fresh
+    // transport was attached on reconnect, until a restart.
+    var h = new Harness();
+    var watcher = new DisposeSpy();
+    h.Service.SetDiscoveryPlumbingForTests(new Mock<Radio.Infrastructure.Platform.Bluetooth.Linux.IAdapter1>().Object, watcher);
+
+    await h.Service.StopDiscoveryAsync();
+    Assert.Equal(0, watcher.Disposals);
+
+    await h.Service.DisposeAsync();
+    Assert.Equal(1, watcher.Disposals);
   }
 
   private sealed class Harness
