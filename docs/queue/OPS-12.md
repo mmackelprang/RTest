@@ -122,3 +122,33 @@ That is the owner's call, not a Builder's. Recommendation: **leave it disabled**
 nothing to either repo as things stand — and treat "make MSYS2 rsync actually reach the box
 (identity + `known_hosts` + a drivable ssh)" as a **separate, explicit** piece of work if the safe
 sync path is still wanted.
+
+## Update 2026-09-28 — the rsync branch has now executed successfully, from a Linux host
+
+Filed by the session that shipped [PR #677](https://github.com/mmackelprang/RTest/pull/677)
+(`Deploy-ToLinux.ps1` made runnable from a Linux `pwsh`). Measured on `appserver` (Ubuntu 24.04,
+native rsync 3.5.0 / OpenSSH, one `~/.ssh` for both):
+
+1. **Dry run first, per this row's instruction:** `rsync -n -avz --delete deploy/common/
+   mmack@radio:/tmp/rsync-preflight-scratch/` → exit 0, `(DRY RUN)`, scratch path never created,
+   services untouched.
+2. **Then a full deploy took the rsync branch** — `Get-Command rsync` found `/usr/bin/rsync` — and
+   steps 1–3 completed: both publish dirs transferred, remote move OK, `f409bb9` verified on both
+   services by IP. ⭐ **This is the branch's first successful execution in project history.**
+   (Step 4's verification then failed for an unrelated reason — see `OPS-13`.)
+
+**What that changes about this row:**
+
+- The three stacked defects in the table above are **all artifacts of the Windows/MSYS2 toolchain**
+  (`D:` as hostname; MSYS rsync vs. native Windows OpenSSH; MSYS ssh's separate `known_hosts`).
+  None exists on a Linux host. So the branch is not *broken*; it is **broken on Windows** and has
+  never had a working transport there.
+- ⭐ **"Strongly consider deleting the branch" should be re-weighed.** On a Linux dev host rsync is
+  the transport that works and is faster; deleting it would push Linux deploys onto the scp
+  fallback whose `mv` exit codes are the ones the comment block at `:213-217` says are still masked.
+  A per-host answer — scp on Windows, rsync on Linux — is now a defensible shape, **provided the
+  choice is made explicit** rather than by `Get-Command` silently arming whichever is installed.
+- ⛔ **The independent defect stands and is now joined by a sibling.** Services stop at step 2
+  before step 3 proves the transport (this row); the kiosk stops at step 2 and is only relaunched
+  after step 4's verification succeeds (`OPS-13`). Both convert a *sequencing* failure into a dark
+  console. Fix them together or the script keeps one outage path.
