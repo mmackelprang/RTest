@@ -1,5 +1,7 @@
 #if !WINDOWS_TARGET
 using System;
+using System.Diagnostics;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using static Radio.Infrastructure.Platform.Bluetooth.Native.PipeWireNative;
 
@@ -31,6 +33,22 @@ internal sealed class SrcVariableResampler : IDisposable
   private IntPtr _state;
   private double _currentRatio;
   private bool _disposed;
+
+  // LOG-8: Process() runs on the PipeWire capture thread for every buffer. A persistently failing
+  // libsamplerate state used to log a Warning per buffer from there (~94–350/s). Now Process only
+  // counts; EmitErrorsIfDue reports from the BT watchdog tick, at most once per ErrorReportInterval.
+  internal static readonly TimeSpan ErrorReportInterval = TimeSpan.FromSeconds(30);
+  private long _processErrorCount;
+  private int _lastProcessError;
+  // Emitter-side state: touched only by EmitErrorsIfDue, whose one caller (the watchdog's async loop)
+  // is sequential even though its continuations may run on different threads.
+  private long _errorsAtLastReport;
+  private long _lastErrorReportTimestamp;
+  // So the first report's interval covers the resampler's life so far, not "0.0s".
+  private readonly long _createdTimestamp = Stopwatch.GetTimestamp();
+
+  /// <summary>Cumulative <c>src_process</c> failures. Safe to read from any thread.</summary>
+  public long ProcessErrorCount => Interlocked.Read(ref _processErrorCount);
 
   /// <summary>
   /// Current conversion ratio (output_rate / input_rate). 1.0 = no conversion.
@@ -146,15 +164,47 @@ internal sealed class SrcVariableResampler : IDisposable
       var err = src_process(_state, ref data);
       if (err != 0)
       {
-        // Log on the hot path is acceptable here — libsamplerate errors are
-        // rare (invalid ratio, NaN, etc.) and indicate a configuration bug
-        // worth surfacing immediately rather than swallowing.
-        _logger.LogWarning("src_process failed: {Err}", SrcErrorMessage(err));
+        // LOG-8: counted, not logged. This is the per-buffer audio path, and an error here tends to
+        // persist (bad ratio, NaN) — it used to become a Warning per buffer. Reported by
+        // EmitErrorsIfDue from the watchdog tick.
+        Volatile.Write(ref _lastProcessError, err);
+        Interlocked.Increment(ref _processErrorCount);
         return 0;
       }
 
       return (int)data.OutputFramesGen;
     }
+  }
+
+  /// <summary>
+  /// LOG-8: reports <c>src_process</c> failures counted since the last report — at most one Warning per
+  /// <see cref="ErrorReportInterval"/>, and none when there were no new failures. Called from the BT
+  /// capture watchdog's tick (via <c>PipeWireNativeStream.EmitDiagnostics</c>), never from
+  /// <see cref="Process"/>. Returns true if a line was written.
+  /// </summary>
+  /// <param name="logger">The owning stream's logger, so the line keeps its SourceContext.</param>
+  /// <param name="nowTimestamp">A <see cref="Stopwatch.GetTimestamp"/> value.</param>
+  internal bool EmitErrorsIfDue(ILogger logger, long nowTimestamp)
+  {
+    var errors = Interlocked.Read(ref _processErrorCount);
+    if (errors == _errorsAtLastReport)
+    {
+      return false;
+    }
+    if (_lastErrorReportTimestamp != 0
+        && nowTimestamp - _lastErrorReportTimestamp < (long)(ErrorReportInterval.TotalSeconds * Stopwatch.Frequency))
+    {
+      return false;
+    }
+
+    var since = _lastErrorReportTimestamp == 0 ? _createdTimestamp : _lastErrorReportTimestamp;
+    var interval = Math.Max(0, nowTimestamp - since) / (double)Stopwatch.Frequency;
+    logger.LogWarning(
+      "src_process failed {Count} times in the last {Interval:F1}s (total {Total}): {Err}",
+      errors - _errorsAtLastReport, interval, errors, SrcErrorMessage(Volatile.Read(ref _lastProcessError)));
+    _errorsAtLastReport = errors;
+    _lastErrorReportTimestamp = nowTimestamp;
+    return true;
   }
 
   /// <summary>

@@ -84,5 +84,76 @@ public class SrcVariableResamplerTests
     r.Dispose();
     r.Dispose();   // no exception — second Dispose is a no-op
   }
+
+  // ── LOG-8 ──────────────────────────────────────────────────────────────────────────────────────
+
+  [Fact]
+  public void Process_WhenLibsamplerateFails_CountsInsteadOfLogging()
+  {
+    // A ratio outside libsamplerate's 1/256..256 makes every src_process call fail — the persistently
+    // failing state LOG-8 is about. Process runs on the capture thread, so it must not log.
+    var log = new CountingLogger();
+    using var r = new SrcVariableResampler(log, channels: 2, initialRatio: 1000.0);
+    log.Reset(); // the "initialized" line
+
+    for (var i = 0; i < 500; i++)
+    {
+      Assert.Equal(0, r.Process(new float[64], new float[128]));
+    }
+
+    Assert.Equal(0, log.Calls);
+    Assert.Equal(500, r.ProcessErrorCount);
+  }
+
+  [Fact]
+  public void EmitErrorsIfDue_ReportsOncePerIntervalAndOnlyNewFailures()
+  {
+    var log = new CountingLogger();
+    using var r = new SrcVariableResampler(log, channels: 2, initialRatio: 1000.0);
+    log.Reset();
+    long second = System.Diagnostics.Stopwatch.Frequency;
+    // Real timestamps: the first report's interval runs from the resampler's creation.
+    long t0 = System.Diagnostics.Stopwatch.GetTimestamp() + 5 * second;
+
+    Assert.False(r.EmitErrorsIfDue(log, t0)); // nothing failed yet
+
+    for (var i = 0; i < 300; i++)
+    {
+      r.Process(new float[64], new float[128]);
+    }
+    Assert.True(r.EmitErrorsIfDue(log, t0));
+    Assert.Equal(1, log.Calls);
+    Assert.Equal(LogLevel.Warning, log.LastLevel);
+    Assert.Matches(@"^src_process failed 300 times in the last 5\.\ds \(total 300\): ", log.LastMessage);
+
+    r.Process(new float[64], new float[128]);
+    Assert.False(r.EmitErrorsIfDue(log, t0 + 29 * second)); // throttled
+    Assert.True(r.EmitErrorsIfDue(log, t0 + 30 * second));
+    Assert.StartsWith("src_process failed 1 times in the last 30.0s (total 301): ", log.LastMessage);
+
+    Assert.False(r.EmitErrorsIfDue(log, t0 + 90 * second)); // no new failures: silent
+    Assert.Equal(2, log.Calls);
+  }
+
+  private sealed class CountingLogger : ILogger
+  {
+    public int Calls { get; private set; }
+    public LogLevel LastLevel { get; private set; }
+    public string LastMessage { get; private set; } = string.Empty;
+
+    public void Reset() => Calls = 0;
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter)
+    {
+      Calls++;
+      LastLevel = logLevel;
+      LastMessage = formatter(state, exception);
+    }
+  }
 }
 #endif

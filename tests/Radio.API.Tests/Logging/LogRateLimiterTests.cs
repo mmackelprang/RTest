@@ -1,0 +1,247 @@
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Time.Testing;
+using Radio.API.Logging;
+using Serilog;
+using Serilog.Core;
+using Serilog.Events;
+using Xunit;
+using ILogger = Serilog.ILogger;
+
+namespace Radio.API.Tests.Logging;
+
+/// <summary>
+/// LOG-8: the per-line rate limit, through the real <see cref="ApiLoggerConfiguration.Build"/> pipeline.
+/// Time is a <see cref="FakeTimeProvider"/>, so window boundaries are crossed by advancing, never by
+/// waiting.
+/// </summary>
+public class LogRateLimiterTests
+{
+  private readonly FakeTimeProvider _time = new();
+  private readonly Collector _sink = new();
+
+  private (Logger Logger, LogRateLimiter Limiter) Build()
+  {
+    var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+    {
+      ["Serilog:MinimumLevel:Default"] = "Information",
+    }).Build();
+    var limiter = new LogRateLimiter(_time);
+    var logger = ApiLoggerConfiguration.Build(config, LogLevelSwitches.FromConfiguration(config), limiter)
+      .WriteTo.Sink(_sink)
+      .CreateLogger();
+    return (logger, limiter);
+  }
+
+  private static ILogger From(ILogger logger, string source) =>
+    logger.ForContext(Constants.SourceContextPropertyName, source);
+
+  [Fact]
+  public void RunawayLine_IsCutToTheBudget_AndTheExcessIsCounted()
+  {
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      // The resampler's old failure mode: hundreds per second from one call site.
+      var resampler = From(logger, "Radio.Infrastructure.Platform.Bluetooth.LinuxBluetoothService");
+      for (var i = 0; i < 350; i++)
+      {
+        resampler.Information("src_process failed: {Err}", "bad ratio");
+      }
+
+      Assert.Equal(LogRateLimiter.Budget, _sink.Count);
+      var drained = Assert.Single(limiter.DrainSuppressed());
+      Assert.Equal(350 - LogRateLimiter.Budget, drained.Count);
+      Assert.Equal("src_process failed: {Err}", drained.Template);
+      Assert.Empty(limiter.DrainSuppressed()); // drained means reset
+    }
+  }
+
+  [Fact]
+  public void RunawayLine_ThroughMicrosoftExtensionsLogging_IsAlsoCut()
+  {
+    // Almost every call site in this codebase logs through ILogger<T>, which reaches Serilog via
+    // Serilog.Extensions.Logging — a different path from Serilog's own ILogger, with its own template
+    // handling. The limiter must hold on that path too.
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      using var factory = new Serilog.Extensions.Logging.SerilogLoggerFactory(logger);
+      var mel = factory.CreateLogger("Radio.Infrastructure.Audio.SoundFlow.SrcVariableResampler");
+      for (var i = 0; i < 350; i++)
+      {
+        mel.LogWarning("src_process failed: {Err}", i);
+      }
+
+      Assert.Equal(LogRateLimiter.Budget, _sink.Count);
+      Assert.Equal(350 - LogRateLimiter.Budget, Assert.Single(limiter.DrainSuppressed()).Count);
+    }
+  }
+
+  [Fact]
+  public void TheBusiestMeasuredLegitimateLine_IsNeverSuppressed()
+  {
+    // 97/min — "DSP processing queue full", the box's busiest legitimate line on 2026-09-27.
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      var receiver = From(logger, "RTLSDRCore.RadioReceiver");
+      for (var minute = 0; minute < 3; minute++)
+      {
+        for (var i = 0; i < 97; i++)
+        {
+          receiver.Warning("DSP processing queue full — dropping IQ batch");
+        }
+        _time.Advance(LogRateLimiter.Window);
+      }
+
+      Assert.Equal(3 * 97, _sink.Count);
+      Assert.Empty(limiter.DrainSuppressed());
+    }
+  }
+
+  [Fact]
+  public void Budget_RefillsEachWindow()
+  {
+    var (logger, _) = Build();
+    using (logger)
+    {
+      var source = From(logger, "Radio.X");
+      for (var i = 0; i < 200; i++)
+      {
+        source.Information("same line");
+      }
+      _time.Advance(LogRateLimiter.Window);
+      for (var i = 0; i < 200; i++)
+      {
+        source.Information("same line");
+      }
+
+      Assert.Equal(2 * LogRateLimiter.Budget, _sink.Count);
+    }
+  }
+
+  [Fact]
+  public void Budgets_AreIndependentPerSourceAndPerTemplate()
+  {
+    var (logger, _) = Build();
+    using (logger)
+    {
+      for (var i = 0; i < 200; i++)
+      {
+        From(logger, "Radio.A").Information("line one");
+        From(logger, "Radio.B").Information("line one");
+        From(logger, "Radio.A").Information("line two");
+      }
+
+      Assert.Equal(3 * LogRateLimiter.Budget, _sink.Count);
+    }
+  }
+
+  [Fact]
+  public void Fatal_AndTheReportersOwnLines_AreNeverSuppressed()
+  {
+    var (logger, _) = Build();
+    using (logger)
+    {
+      // The reporter logs through ILogger<LogRateLimitReporter>; go through the same MEL category
+      // rather than the constant, so the exemption is checked against the real SourceContext.
+      using var factory = new Serilog.Extensions.Logging.SerilogLoggerFactory(logger);
+      var reporter = factory.CreateLogger<LogRateLimitReporter>();
+      for (var i = 0; i < 200; i++)
+      {
+        From(logger, "Radio.X").Fatal("dying");
+        reporter.LogWarning("LOG-8: summary");
+      }
+
+      Assert.Equal(400, _sink.Count);
+    }
+  }
+
+  [Fact]
+  public void KeyTableClear_CarriesSuppressedCountsIntoTheReport()
+  {
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      var noisy = From(logger, "Radio.Noisy");
+      for (var i = 0; i < 130; i++)
+      {
+        noisy.Information("flood");
+      }
+      // Force the key table past MaxKeys with distinct (dynamically built) templates.
+      for (var i = 0; i <= LogRateLimiter.MaxKeys; i++)
+      {
+        From(logger, "Radio.Dynamic").Information("dynamic " + i);
+      }
+    }
+
+    var drained = limiter.DrainSuppressed();
+    Assert.Equal(10, drained.Sum(d => d.Count));
+  }
+
+  [Fact]
+  public void Reporter_CapsTemplateLength()
+  {
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      var longTemplate = "interpolated " + new string('x', 500);
+      for (var i = 0; i < 125; i++)
+      {
+        From(logger, "Radio.X").Information(longTemplate);
+      }
+    }
+
+    var log = new CapturingLogger();
+    new LogRateLimitReporter(limiter, log, _time).ReportOnce();
+
+    var message = Assert.Single(log.Messages);
+    Assert.EndsWith("…", message);
+    Assert.True(message.Length < 300, message.Length.ToString());
+  }
+
+  [Fact]
+  public void Reporter_WritesOneCountedWarningPerSuppressedLine()
+  {
+    var (logger, limiter) = Build();
+    using (logger)
+    {
+      for (var i = 0; i < 130; i++)
+      {
+        From(logger, "Radio.X").Information("noisy {N}", i);
+      }
+    }
+
+    var log = new CapturingLogger();
+    new LogRateLimitReporter(limiter, log, _time).ReportOnce();
+
+    var entry = Assert.Single(log.Messages);
+    Assert.Equal("LOG-8: rate limit suppressed 10 events from Radio.X in the last minute: noisy {N}", entry);
+  }
+
+  private sealed class Collector : ILogEventSink
+  {
+    private int _count;
+
+    public int Count => Volatile.Read(ref _count);
+
+    public void Emit(LogEvent logEvent) => Interlocked.Increment(ref _count);
+  }
+
+  private sealed class CapturingLogger : ILogger<LogRateLimitReporter>
+  {
+    public List<string> Messages { get; } = new();
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(Microsoft.Extensions.Logging.LogLevel logLevel) => true;
+
+    public void Log<TState>(Microsoft.Extensions.Logging.LogLevel logLevel, EventId eventId, TState state,
+      Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+      Assert.Equal(Microsoft.Extensions.Logging.LogLevel.Warning, logLevel);
+      Messages.Add(formatter(state, exception));
+    }
+  }
+}

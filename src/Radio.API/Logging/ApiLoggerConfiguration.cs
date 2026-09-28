@@ -29,10 +29,21 @@ public static class ApiLoggerConfiguration
   /// detail. Because the restriction is on the sink, lowering a LOG-5 switch never widens journald.
   /// </para>
   /// </remarks>
-  public static LoggerConfiguration Build(IConfiguration configuration, LogLevelSwitches switches)
+  /// <param name="configuration">Application configuration (the <c>Serilog</c> section).</param>
+  /// <param name="switches">LOG-5 runtime level switches.</param>
+  /// <param name="rateLimiter">
+  /// LOG-8 backstop, applied to every sink. Optional so tests can build the pipeline without it;
+  /// Program.cs always passes one.
+  /// </param>
+  public static LoggerConfiguration Build(IConfiguration configuration, LogLevelSwitches switches, LogRateLimiter? rateLimiter = null)
   {
     var loggerConfiguration = new LoggerConfiguration()
       .ReadFrom.Configuration(configuration);
+
+    if (rateLimiter is not null)
+    {
+      loggerConfiguration.Filter.With(rateLimiter);
+    }
 
     return switches.ApplyTo(loggerConfiguration)
       .WriteTo.Async(a => a.Console(
