@@ -136,9 +136,10 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         //
         // ⚠ THE MESSAGE NAMES CANDIDATES, NOT A CAUSE, AND THAT IS DELIBERATE. An earlier draft
         // ended "The source's playback key and its IAudioSource.Id have diverged" — which this
-        // condition does not establish. AudioSourceBase.PlayAsync sets State = Playing
-        // unconditionally once PlayCoreAsync returns (AudioSourceBase.cs:95-96), and at least four
-        // paths reach Playing with nothing registered and nothing diverged:
+        // condition does not establish. AudioSourceBase.PlayAsync promotes to Playing once
+        // PlayCoreAsync returns unless PlayCoreAsync left it Stopped/Error/Disposed
+        // (PromoteToPlayingUnlessTerminatedSince, TTS-5) — none of the paths below does — and at
+        // least four paths reach Playing with nothing registered and nothing diverged:
         // USBAudioSourceBase.cs:350-352 (engine null), :344-345 (PlayComponentAsync returned
         // false — no playback device), BluetoothAudioSource.cs:293 (capture not acquired yet, so
         // StartCaptureRetryLoop runs — a normal state on this box for minutes at a time), and

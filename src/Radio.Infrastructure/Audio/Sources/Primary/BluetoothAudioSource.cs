@@ -613,7 +613,8 @@ public class BluetoothAudioSource : USBAudioSourceBase
   ///
   /// ⚠ "Effectively", and the precision matters — an earlier draft of this remark said
   /// Ready's ONLY exit is an AVRCP edge, and that is simply false. AudioSourceBase
-  /// leaves Ready from PlayAsync (which writes Playing unconditionally), StopAsync and
+  /// leaves Ready from PlayAsync (which promotes to Playing unless PlayCoreAsync left it Stopped/Error/Disposed —
+  /// PromoteToPlayingUnlessTerminatedSince, TTS-5), StopAsync and
   /// DisposeAsync. (It also writes Initializing in InitializeAsync, which does not
   /// reach THIS type — BluetoothAudioSource overrides InitializeAsync without calling
   /// base — but the sentence is scoped to AudioSourceBase, so name it rather than

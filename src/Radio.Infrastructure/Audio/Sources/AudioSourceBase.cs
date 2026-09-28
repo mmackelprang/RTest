@@ -13,6 +13,13 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   private AudioSourceState _state = AudioSourceState.Created;
   private readonly object _stateLock = new();
   private long _stateVersion;
+
+  // True only while the current Error is one a PlayAsync call declined to overwrite (TTS-5). Before
+  // TTS-5 such an Error was always replaced by Playing, so the next PlayAsync retried. Keeping the
+  // Error must not also turn it into the "initialization failed" early return below, or a source
+  // whose play failed once — FilePlayer's AutoSkipToNextAsync sets Error after too many skips —
+  // would ignore every later Play press. Any state change clears it.
+  private bool _errorKeptFromPlay;
   private float _volume = 1.0f;
   private bool _disposed;
   private string? _id;
@@ -42,24 +49,7 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
   public AudioSourceState State
   {
     get => _state;
-    protected set
-    {
-      AudioSourceState previousState;
-      lock (_stateLock)
-      {
-        if (_state == value)
-        {
-          return;
-        }
-        previousState = _state;
-        _state = value;
-        _stateVersion++;
-      }
-
-      // Raised outside the lock: handlers may read State or call back into this source.
-      LogStateChange(previousState, value);
-      OnStateChanged(previousState, value);
-    }
+    protected set => TrySetState(value, requireUnchangedSince: null);
   }
 
   /// <inheritdoc/>
@@ -95,67 +85,112 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
       await InitializeAsync(cancellationToken);
     }
 
-    // Check if initialization failed
-    if (State == AudioSourceState.Error)
+    // Check if initialization failed. An Error that an earlier PlayAsync declined to overwrite is
+    // NOT an initialization failure and is retried, exactly as it was when that Error used to be
+    // overwritten with Playing (see _errorKeptFromPlay).
+    bool errorKeptFromPlay;
+    lock (_stateLock)
+    {
+      errorKeptFromPlay = _errorKeptFromPlay;
+    }
+    if (State == AudioSourceState.Error && !errorKeptFromPlay)
     {
       return;
     }
 
-    long versionBeforePlay;
-    lock (_stateLock)
-    {
-      versionBeforePlay = _stateVersion;
-    }
-
+    var versionBeforePlay = CurrentStateVersion();
     await PlayCoreAsync(cancellationToken);
     PromoteToPlayingUnlessTerminatedSince(versionBeforePlay);
   }
 
   /// <summary>
-  /// Sets <see cref="AudioSourceState.Playing"/> after <see cref="PlayCoreAsync"/> returns — UNLESS
-  /// the state was moved to Stopped, Error or Disposed while it ran (TTS-5).
+  /// Reads the state-change counter that <see cref="PromoteToPlayingUnlessTerminatedSince"/>
+  /// compares against. Take it immediately before calling the core method.
   /// </summary>
-  /// <remarks>
-  /// ⚠ The unconditional <c>State = Playing</c> this replaces overwrote a terminal state that
-  /// PlayCoreAsync had already reached. TTSEventSource and AudioFileEventSource return from
-  /// PlayCoreAsync after starting a background task, and that task runs SYNCHRONOUSLY up to its first
-  /// real await — so a playback service that fails without awaiting (no playback device) sets Error
-  /// and raises PlaybackCompleted(Error) before PlayCoreAsync has even returned. The source then
-  /// reported Playing forever. It is the #469 shape (a state assignment that silently defeats the
-  /// state another path set), one layer up, in the base class.
-  ///
-  /// "Since" is decided by a version counter, not by reading the state: a source replayed from
-  /// Stopped must still become Playing when PlayCoreAsync leaves the state alone. Only the three
-  /// terminal states are protected; a non-terminal change made inside PlayCoreAsync (e.g. Ready) is
-  /// overwritten exactly as before. The check and the write share <c>_stateLock</c>, so a background
-  /// task that terminates concurrently either lands first and is kept, or lands after Playing and
-  /// wins — never lost in between.
-  /// </remarks>
-  private void PromoteToPlayingUnlessTerminatedSince(long versionBeforePlay)
+  protected long CurrentStateVersion()
   {
-    AudioSourceState previousState;
     lock (_stateLock)
     {
-      if (_stateVersion != versionBeforePlay
+      return _stateVersion;
+    }
+  }
+
+  /// <summary>
+  /// Sets <see cref="AudioSourceState.Playing"/> after a core start (PlayCoreAsync, ResumeCoreAsync)
+  /// returns — UNLESS the state was moved to Stopped, Error or Disposed while it ran (TTS-5).
+  /// </summary>
+  /// <param name="versionBeforeCore">The value of <see cref="CurrentStateVersion"/> taken just
+  /// before the core method was called.</param>
+  /// <remarks>
+  /// ⚠ The unconditional <c>State = Playing</c> this replaces overwrote a terminal state that the
+  /// core method had already reached. TTSEventSource and AudioFileEventSource return from
+  /// PlayCoreAsync after starting a background task, and that task runs synchronously up to its first
+  /// real await — so a playback service that fails without awaiting (no playback device) sets Error
+  /// and raises PlaybackCompleted(Error) before PlayCoreAsync has even returned. The source then
+  /// reported Playing until a caller stopped it, and SourcesController's TTS preview never does. It is
+  /// the #469 shape (a state assignment that silently defeats the state another path set), one layer
+  /// up, in the base classes — which is why ResumeAsync in PrimaryAudioSourceBase and
+  /// EventAudioSourceBase uses this too: for USB and TestTone sources ResumeCoreAsync IS
+  /// PlayCoreAsync.
+  ///
+  /// "Since" is decided by a version counter, not by reading the state: a source replayed from
+  /// Stopped must still become Playing when the core method leaves the state alone. Only the three
+  /// terminal states are protected; a non-terminal state left by the core method (e.g. Ready) is
+  /// overwritten exactly as before. The check and the write share <c>_stateLock</c>, so the STORED
+  /// state is never lost between them: a background task that terminates concurrently either lands
+  /// first and is kept, or lands after Playing and wins. ⚠ StateChanged NOTIFICATIONS are raised
+  /// after the lock is released and are not ordered across threads, so a subscriber can in a narrow
+  /// race see Playing as the last event while State reads Error — as it could before TTS-5, when the
+  /// setter took no lock at all.
+  /// </remarks>
+  protected void PromoteToPlayingUnlessTerminatedSince(long versionBeforeCore)
+  {
+    TrySetState(AudioSourceState.Playing, requireUnchangedSince: versionBeforeCore);
+  }
+
+  /// <summary>
+  /// The single state-write path. With <paramref name="requireUnchangedSince"/> null this is a plain
+  /// assignment (the <see cref="State"/> setter). With a version, the write is skipped when the state
+  /// has changed since that version AND now reads Stopped, Error or Disposed.
+  /// </summary>
+  private void TrySetState(AudioSourceState value, long? requireUnchangedSince)
+  {
+    AudioSourceState previousState;
+    AudioSourceState? declinedOver = null;
+    lock (_stateLock)
+    {
+      if (requireUnchangedSince is { } since
+          && _stateVersion != since
           && _state is AudioSourceState.Stopped or AudioSourceState.Error or AudioSourceState.Disposed)
       {
-        _logger.LogDebug(
-          "Audio source {Id} reached {State} while starting; not promoting it to Playing", Id, _state);
-        return;
+        declinedOver = _state;
+        _errorKeptFromPlay = _state == AudioSourceState.Error;
+        previousState = _state;
       }
-
-      if (_state == AudioSourceState.Playing)
+      else
       {
-        return;
-      }
+        if (_state == value)
+        {
+          return;
+        }
 
-      previousState = _state;
-      _state = AudioSourceState.Playing;
-      _stateVersion++;
+        previousState = _state;
+        _state = value;
+        _stateVersion++;
+        _errorKeptFromPlay = false;
+      }
     }
 
-    LogStateChange(previousState, AudioSourceState.Playing);
-    OnStateChanged(previousState, AudioSourceState.Playing);
+    // Logged and raised outside the lock: handlers may read State or call back into this source.
+    if (declinedOver is { } kept)
+    {
+      _logger.LogDebug(
+        "Audio source {Id} reached {State} while starting; not promoting it to {Requested}", Id, kept, value);
+      return;
+    }
+
+    LogStateChange(previousState, value);
+    OnStateChanged(previousState, value);
   }
 
   /// <summary>

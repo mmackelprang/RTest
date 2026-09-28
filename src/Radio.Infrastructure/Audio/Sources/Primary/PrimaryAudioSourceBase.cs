@@ -129,8 +129,11 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
       return;
     }
 
+    // TTS-5: do not overwrite a Stopped/Error/Disposed reached while resuming (for USB and TestTone
+    // sources ResumeCoreAsync is PlayCoreAsync). See AudioSourceBase.PromoteToPlayingUnlessTerminatedSince.
+    var versionBeforeResume = CurrentStateVersion();
     await ResumeCoreAsync(cancellationToken);
-    State = AudioSourceState.Playing;
+    PromoteToPlayingUnlessTerminatedSince(versionBeforeResume);
   }
 
   /// <inheritdoc/>

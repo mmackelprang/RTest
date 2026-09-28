@@ -3,6 +3,7 @@ using Moq;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Sources;
 using Radio.Infrastructure.Audio.Sources.Events;
+using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Tests.Audio;
 using Xunit;
 
@@ -139,6 +140,117 @@ public class AudioSourceBasePlayStateTests
     await source.PlayAsync();
 
     Assert.Equal(new[] { AudioSourceState.Playing }, raised);
+  }
+
+  // --- Review H1: a kept Error must not become a dead Play button ---
+
+  [Fact]
+  public async Task AnErrorKeptFromAFailedPlayIsRetriedByTheNextPlay()
+  {
+    // Before TTS-5 this Error was overwritten with Playing, so the next Play ran PlayCoreAsync again.
+    // Keeping the Error must not route it into the "initialization failed" early return — that is
+    // FilePlayerAudioSource.AutoSkipToNextAsync's Error, and every later Play press would do nothing.
+    // MUTATION: drop `&& !errorKeptFromPlay` from PlayAsync's early return — red, calls stays 1.
+    var fail = true;
+    var calls = 0;
+    var source = new ScriptedSource(core: s =>
+    {
+      calls++;
+      if (fail)
+      {
+        s.ForceState(AudioSourceState.Error);
+      }
+    });
+    source.ForceState(AudioSourceState.Ready);
+
+    await source.PlayAsync();
+    Assert.Equal(AudioSourceState.Error, source.State);
+
+    fail = false;
+    await source.PlayAsync();
+
+    Assert.Equal(2, calls);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  [Fact]
+  public async Task AnErrorFromInitializationStillSkipsPlayCore()
+  {
+    // The early return's original purpose, unchanged: an Error that did NOT come from a declined
+    // promotion still stops PlayAsync before PlayCoreAsync.
+    var calls = 0;
+    var source = new ScriptedSource(core: _ => calls++);
+    source.ForceState(AudioSourceState.Error);
+
+    await source.PlayAsync();
+
+    Assert.Equal(0, calls);
+    Assert.Equal(AudioSourceState.Error, source.State);
+  }
+
+  // --- Review M2: the Resume path had the same shape ---
+
+  [Fact]
+  public async Task ATerminalStateReachedDuringResumeIsNotOverwritten()
+  {
+    // For USB and TestTone sources ResumeCoreAsync IS PlayCoreAsync, so the defect lived here too.
+    // MUTATION: restore `State = AudioSourceState.Playing` after ResumeCoreAsync in
+    // PrimaryAudioSourceBase.ResumeAsync — red, reads Playing.
+    var source = new ScriptedPrimarySource(resume: s => s.ForceState(AudioSourceState.Error));
+    source.ForceState(AudioSourceState.Paused);
+
+    await source.ResumeAsync();
+
+    Assert.Equal(AudioSourceState.Error, source.State);
+  }
+
+  [Fact]
+  public async Task AnOrdinaryResumeStillBecomesPlaying()
+  {
+    var source = new ScriptedPrimarySource(resume: _ => { });
+    source.ForceState(AudioSourceState.Paused);
+
+    await source.ResumeAsync();
+
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  private sealed class ScriptedPrimarySource : PrimaryAudioSourceBase
+  {
+    private readonly Action<ScriptedPrimarySource> _resume;
+
+    public ScriptedPrimarySource(Action<ScriptedPrimarySource> resume) : base(Mock.Of<ILogger>())
+    {
+      _resume = resume;
+    }
+
+    public override string Name => "ScriptedPrimary";
+
+    public override AudioSourceType Type => AudioSourceType.TestTone;
+
+    public override TimeSpan? Duration => null;
+
+    public override TimeSpan Position => TimeSpan.Zero;
+
+    public override bool IsSeekable => false;
+
+    public override IReadOnlyDictionary<string, object> Metadata => new Dictionary<string, object>();
+
+    public override object GetSoundComponent() => new();
+
+    public void ForceState(AudioSourceState state) => State = state;
+
+    protected override Task PlayCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    protected override Task StopCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    protected override Task PauseCoreAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+    {
+      _resume(this);
+      return Task.CompletedTask;
+    }
   }
 
   private sealed class ScriptedSource : AudioSourceBase
