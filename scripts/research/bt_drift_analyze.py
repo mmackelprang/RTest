@@ -35,6 +35,8 @@ compensation line is not in the file either until you raise them at runtime (LOG
        -H 'Content-Type: application/json' -d '{"level":"Information"}'
   (and .../Radio.Infrastructure.Platform.Bluetooth for the BT generator), then POST .../reset.
 Note the BT generator only compensates when the input resampler is OFF (Path D default is on).
+Since LOG-12 the compensation line is a 5-minute tally at Information; raise the namespace to
+Debug instead for the old 5 s cadence. The sums below are correct at either cadence.
 """
 
 from __future__ import annotations
