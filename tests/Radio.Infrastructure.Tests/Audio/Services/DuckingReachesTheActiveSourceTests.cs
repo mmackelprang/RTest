@@ -398,11 +398,13 @@ public class DuckingReachesTheActiveSourceTests
     // attenuated". The late fade step is injected directly — SetDuckingMultiplier on A AFTER the
     // switch has cleared A — because that race is the only way this tree can strand an entry.
     //
-    // ⚠ HONEST ABOUT WHAT THIS PINS. This is GREEN ON THE PRE-AUD-26 TREE: there, A's own
-    // re-registration wiped the stranded entry. It is a guard on the invariant AUD-26 moved, not a
-    // reproduction of a live bug. Two independent clears now protect it — the switch-in clear and
-    // the ducking-ended clear-all — so it goes red only when BOTH are removed (measured); either
-    // mutation alone is caught by its own test above.
+    // ⚠ HONEST ABOUT WHAT THIS PINS. On the pre-AUD-26 tree this test fails only at its PRECONDITION
+    // (B does not inherit the duck — that is AUD-26). Its FINAL assertion held there, because A's own
+    // re-registration wiped the stranded entry — which is why TTS-6 was struck as stale rather than
+    // built. It is a guard on the invariant AUD-26 moved, not a reproduction of a live bug. Two
+    // independent clears now protect it — the switch-in clear and the ducking-ended clear-all — so its
+    // final assertion goes red only when BOTH are removed (measured); either mutation alone is caught
+    // by its own test above.
     var h = await CreateAsync();
     await using (h.Manager)
     {
