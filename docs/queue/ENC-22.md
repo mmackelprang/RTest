@@ -79,3 +79,13 @@ cabinet.** The encoder USB *does* drop on this box — the reconnect loop exists
 
 Supersedes the "withdrawn permanently — do not reinstate" note on `ENC-6`'s blanking half **for the
 knob-only design, with the rules above**; the ENC-15 finding about touch stands unchanged.
+
+## Owner observation of the 2026-09-28 test blank
+
+- *"The panel came back in sleep mode after you started it back up."* — the kiosk page survives a
+  panel power cycle: the browser is untouched, so whatever screen was showing when the panel went dark
+  is what comes back. The wake therefore needs no navigation of its own.
+- *"There is a hardware splash dialog that appears for a couple of seconds in the middle of the screen,
+  but that's acceptable."* — the panel's own firmware splash on power-up. **Accepted by the owner; not a
+  defect, do not try to suppress it.** It does mean the first ~2 s after a knob wake show the splash
+  over the sleep screen — factor that into any "wake feels slow" report.
