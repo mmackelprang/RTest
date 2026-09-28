@@ -265,7 +265,8 @@ public class AudioStateUpdateServiceTests
     IEventPlaybackService? eventPlayback,
     Action<string, object?[]>? onSend = null,
     Exception? sendThrows = null,
-    ILogger<AudioStateUpdateService>? logger = null)
+    ILogger<AudioStateUpdateService>? logger = null,
+    Radio.Core.Interfaces.Input.IRotaryEncoderService? encoder = null)
   {
     var hubContextMock = new Mock<IHubContext<AudioStateHub>>();
     var clientsMock = new Mock<IHubClients>();
@@ -297,6 +298,11 @@ public class AudioStateUpdateServiceTests
     if (eventPlayback is not null)
     {
       collection.AddSingleton(eventPlayback);
+    }
+
+    if (encoder is not null)
+    {
+      collection.AddSingleton(encoder);
     }
 
     return new AudioStateUpdateService(
@@ -567,6 +573,40 @@ public class AudioStateUpdateServiceTests
     TimeSpan PositionAtBroadcast,
     DateTimeOffset BroadcastAtUtc,
     string? FailureReason);
+
+  [Fact]
+  public async Task EncoderConfigStatusChanged_CarriesTheFirmwareVerdict_AsAString()
+  {
+    // ENC-19 rides on ENC-12's broadcast. A string for the reason Status is one: an unknown value from
+    // a newer API must reach an older kiosk as "nothing special", not as a deserialisation failure.
+    var encoder = new Mock<Radio.Core.Interfaces.Input.IRotaryEncoderService>();
+    object? captured = null;
+    var service = CreateServiceWith(eventPlayback: null, onSend: (method, args) =>
+    {
+      if (method == "EncoderConfigStatusChanged")
+      {
+        captured = args[0];
+      }
+    }, encoder: encoder.Object);
+
+    encoder.Raise(e => e.ConfigStatusChanged += null, encoder.Object,
+      new Radio.Core.Interfaces.Input.EncoderConfigStatusEventArgs
+      {
+        Status = Radio.Core.Configuration.RotaryEncoderConfigStatus.HardFault,
+        PreviousStatus = Radio.Core.Configuration.RotaryEncoderConfigStatus.Transient,
+        FirmwareCheck = Radio.Core.Configuration.RotaryEncoderFirmwareCheck.Failed,
+      });
+
+    await WaitUntilAsync(() => captured is not null, TimeSpan.FromSeconds(5));
+
+    using var doc = JsonDocument.Parse(JsonSerializer.Serialize(
+      captured, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+    Assert.Equal("HardFault", doc.RootElement.GetProperty("status").GetString());
+    Assert.Equal("Failed", doc.RootElement.GetProperty("firmwareCheck").GetString());
+
+    service.Dispose();
+  }
+
 }
 
 /// <summary>
