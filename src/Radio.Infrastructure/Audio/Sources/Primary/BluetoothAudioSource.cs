@@ -1007,11 +1007,16 @@ public class BluetoothAudioSource : USBAudioSourceBase
       _currentTrackKey = newTrackKey;
       Interlocked.Increment(ref _trackGeneration);
       Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
-    }
 
-    // Clear stale audio from the previous song so the new track is heard immediately
-    // rather than draining 0.8-2.0s of buffered audio from the old song.
-    ClearAudioBuffer();
+      // Clear stale audio from the previous song so the new track is heard immediately
+      // rather than draining 0.8-2.0s of buffered audio from the old song.
+      //
+      // ⚠ AUD-39: ONLY on a real track change. This used to run on EVERY AVRCP Track event — and
+      // phones re-send the same track's metadata for many reasons (art arriving, a player refresh,
+      // a status poke) — so each refresh threw away the whole playback cushion mid-song: the
+      // listener lost 0.6-2 s of the song, then the stream underran until the cushion rebuilt.
+      ClearAudioBuffer();
+    }
 
     // AVRCP metadata arriving means a media player is attached — enable next/prev
     _hasMediaPlayer = true;

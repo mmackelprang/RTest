@@ -1355,6 +1355,39 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     return btMock;
   }
 
+  // --- AUD-39: flush the playback buffer only on a real track change ------------------------
+
+  [Fact]
+  public async Task MetadataRefresh_ForTheSameTrack_KeepsTheBuffer_AndATrackChangeClearsIt()
+  {
+    var format = new global::SoundFlow.Structs.AudioFormat
+    {
+      SampleRate = 48000, Channels = 2, Format = global::SoundFlow.Enums.SampleFormat.F32
+    };
+    var generator = new Radio.Infrastructure.Audio.SoundFlow.BufferedSoundGenerator<float>(
+      null!, format, Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+    var btMock = BuildBtMock(generator, new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+
+    var song = new BluetoothPlaybackMetadata { Title = "Good Times Roll", Artist = "The Cars" };
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object, song);   // first sight = a change
+
+    generator.AddSamples(new float[9600]);                                // ~100 ms of cushion
+    var cushion = generator.GetDiagnostics().BufferCount;
+    Assert.True(cushion > 0);
+
+    // The phone re-sends the SAME track (art arrived, a refresh) — the cushion must survive.
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object,
+      new BluetoothPlaybackMetadata { Title = "Good Times Roll", Artist = "The Cars", Album = "Candy-O" });
+    Assert.Equal(cushion, generator.GetDiagnostics().BufferCount);
+
+    // A real track change still flushes the old song's audio.
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object,
+      new BluetoothPlaybackMetadata { Title = "Just What I Needed", Artist = "The Cars" });
+    Assert.Equal(0, generator.GetDiagnostics().BufferCount);
+  }
+
   // --- AUD-40: the console's Pause/Play go to the phone ------------------------------------
   //
   // Owner at the cabinet, 2026-09-28: "Pausing from the phone works, pausing from the console
