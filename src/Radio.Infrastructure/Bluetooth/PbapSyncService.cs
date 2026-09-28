@@ -122,8 +122,9 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
 
       var result = await ProcessDownloadedVcfAsync(deviceAddress, tempFile, ct);
 
-      // OBEX session teardown causes a LocalHost disconnect, which suppresses
-      // auto-reconnect. Give BlueZ a moment to finish cleanup, then reconnect.
+      // OBEX session teardown CAN cause a LocalHost disconnect, which suppresses
+      // auto-reconnect — so after a moment, reconnect IF the phone actually dropped.
+      // ⚠ "can", not "does": see ReconnectAfterSyncAsync for the case where it did not.
       _ = ReconnectAfterSyncAsync(deviceAddress);
 
       return result;
@@ -144,13 +145,40 @@ public class PbapSyncService : BackgroundService, IPbapSyncService
     }
   }
 
-  private async Task ReconnectAfterSyncAsync(string deviceAddress)
+  // Reconnects only when the sync's OBEX teardown actually dropped the phone.
+  //
+  // ⛔ Before 2026-09-28 this reconnected unconditionally, on the premise that the teardown
+  // ALWAYS disconnects. Measured on `radio` that day (Pixel 10 Pro XL, first sync): no
+  // disconnect was logged between the download and the reconnect, the A2DP capture was
+  // streaming — and Device1.Connect() on the ALREADY-connected phone made BlueZ renegotiate its
+  // profiles. The A2DP node vanished within 250 ms and the hci0 card came back in
+  // `audio-gateway` (the call profile) instead of A2DP, so the console showed the phone's album
+  // art and track while playing nothing and the visualiser was flat. A guest's phone hits this
+  // path on its first connection, because that is when the sync runs.
+  //
+  // The delay is a settle time, not a rendezvous: if the drop lands after it, the phone is still
+  // reported connected, we skip, and BlueZ's own reconnect policy is the fallback — a missed
+  // reconnect costs a tap on the phone; a needless one cost the music.
+  internal TimeSpan ReconnectSettleDelay { get; set; } = TimeSpan.FromSeconds(3);
+
+  internal async Task ReconnectAfterSyncAsync(string deviceAddress)
   {
     try
     {
       // Wait for OBEX/BlueZ to finish tearing down the PBAP RFCOMM channel
-      await Task.Delay(3000);
-      _logger.LogInformation("Reconnecting to {Address} after PBAP sync", deviceAddress);
+      await Task.Delay(ReconnectSettleDelay);
+
+      var connected = _bluetoothService.ConnectedDevice;
+      if (connected is { IsConnected: true }
+          && string.Equals(connected.Address, deviceAddress, StringComparison.OrdinalIgnoreCase))
+      {
+        _logger.LogInformation(
+          "PBAP sync finished and {Address} is still connected — not reconnecting " +
+          "(a Connect on a live link renegotiates its profiles and can drop A2DP)", deviceAddress);
+        return;
+      }
+
+      _logger.LogInformation("Reconnecting to {Address} after PBAP sync (the phone dropped)", deviceAddress);
       await _bluetoothService.ConnectAsync(deviceAddress);
     }
     catch (Exception ex)
