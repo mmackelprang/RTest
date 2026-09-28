@@ -57,10 +57,11 @@ without it** — the test bug and the runtime dependency are the same fact seen 
 - `gh run list --workflow build.yml --branch main`: **five consecutive failures, 2026-09-26 →
   2026-09-28** (`e46fa68`, `76557c0`, `4f3b033`, `0aa7c6f`, `d1674e4`), each at the **Test** step.
 - The 2026-09-28 run on PR #677 (`f409bb9`) fails on **this one test and nothing else**.
-- ⚠ The older runs' failed-step logs could not be read from the dev box (`gh run view --log-failed`
-  returned nothing for them), so **"the same test since 09-26" is the likely reading, not the
-  measured one.** The first task of this row is to confirm it from the Actions UI before assuming
-  a single cause. If a different test fails in the older runs, that is a second row.
+- ✅ **CONFIRMED 2026-09-28 — one cause.** `gh run view --log-failed` returned nothing for the older
+  runs, but the raw job-log endpoint (`gh api repos/…/actions/jobs/<id>/logs`) does: run
+  `36247191913` (`e46fa68`, 2026-09-26) and run `36333531919` (`d1674e4`, 2026-09-27) each list
+  exactly one failure, `PipeWireNativeStreamPropertiesTests.Constructor_NonZeroTargetSerial_DoesNotThrow`.
+  There is no second row hiding behind this one.
 
 ## Recommended shape
 
