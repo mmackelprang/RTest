@@ -319,16 +319,47 @@ public class BluetoothAudioSource : USBAudioSourceBase
     }
   }
 
-  protected override Task PauseCoreAsync(CancellationToken cancellationToken)
+  // AUD-40 — the console's Pause and Play are requests TO THE PHONE, the way a car stereo's are.
+  //
+  // Before AUD-40 these overrides called _captureDevice?.Stop()/Start(), and on Linux
+  // _captureDevice is always null (the capture arrives as a BufferedSoundGenerator in
+  // SoundComponent), so the base class set State = Paused while the music kept playing —
+  // measured by the owner at the cabinet 2026-09-28: "pausing from the console doesn't pause
+  // the music in BT mode". Pausing our mixer component instead would silence the room while
+  // the phone kept playing and the song ran on unheard, so the phone is asked.
+  //
+  // ⚠ If the phone cannot be reached (no AVRCP controller, D-Bus error) PauseCoreAsync THROWS,
+  // so the base class never assigns Paused: a control that reports success and does nothing is
+  // the defect this row exists to remove, and a thrown pause surfaces through the API instead.
+  //
+  // _pausedByConsole exists because a phone-side pause tears the A2DP transport down (AUD-10)
+  // and the phone may then report Stopped rather than Paused. Without the flag that Stopped would
+  // demote this source out of Paused, and the console's Play would go to PlayAsync — which does
+  // not ask the phone to play — instead of ResumeAsync, which does.
+  private volatile bool _pausedByConsole;
+
+  protected override async Task PauseCoreAsync(CancellationToken cancellationToken)
   {
     _captureDevice?.Stop();
-    return Task.CompletedTask;
+    if (!await _bluetoothService.PauseMediaAsync(cancellationToken))
+    {
+      _captureDevice?.Start();
+      throw new InvalidOperationException(
+        "The phone could not be asked to pause (no AVRCP media player attached). " +
+        "Pause on the phone instead.");
+    }
+    _pausedByConsole = true;
   }
 
-  protected override Task ResumeCoreAsync(CancellationToken cancellationToken)
+  protected override async Task ResumeCoreAsync(CancellationToken cancellationToken)
   {
     _captureDevice?.Start();
-    return Task.CompletedTask;
+    _pausedByConsole = false;
+    if (!await _bluetoothService.PlayMediaAsync(cancellationToken))
+    {
+      Logger.LogWarning("BluetoothAudioSource: resume could not reach the phone over AVRCP; " +
+        "state follows the phone when it next reports Playing");
+    }
   }
 
   protected override async Task StopCoreAsync(CancellationToken cancellationToken)
@@ -914,6 +945,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       // change AUD-12 could not UAT, and it would trade away the throw-robustness this
       // placement was chosen for. Recorded, deliberately, rather than half-fixed.
       _avrcpReportsPlaying = false;
+      _pausedByConsole = false;
 
       _btPosition = TimeSpan.Zero;
       _btDuration = null;
@@ -1473,6 +1505,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     switch (e)
     {
       case BluetoothPlaybackStatus.Playing:
+        _pausedByConsole = false;
         // ⚠ Stopped joined this accept set in AUD-12, and the guard on it is not
         // decoration. AUD-10 (the A2DP transport dies on pause) drives this source
         // to Stopped routinely, and before AUD-12 an AVRCP Playing arriving in that
@@ -1523,6 +1556,10 @@ public class BluetoothAudioSource : USBAudioSourceBase
         break;
       case BluetoothPlaybackStatus.Paused when State == AudioSourceState.Playing:
         State = AudioSourceState.Paused;
+        break;
+      case BluetoothPlaybackStatus.Stopped when State == AudioSourceState.Paused && _pausedByConsole:
+        // AUD-40: the console asked for this pause, and the phone's transport teardown (AUD-10)
+        // surfaced as Stopped. Stay Paused so the console's Play resumes the phone.
         break;
       case BluetoothPlaybackStatus.Stopped when State == AudioSourceState.Playing || State == AudioSourceState.Paused:
         State = AudioSourceState.Stopped;

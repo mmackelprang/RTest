@@ -1348,7 +1348,82 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       IsPaired = true,
       IsConnected = true
     });
+    // AUD-40: a phone that has an AVRCP controller and obeys. Tests that need a phone with no
+    // controller override these two setups.
+    btMock.Setup(b => b.PauseMediaAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+    btMock.Setup(b => b.PlayMediaAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
     return btMock;
+  }
+
+  // --- AUD-40: the console's Pause/Play go to the phone ------------------------------------
+  //
+  // Owner at the cabinet, 2026-09-28: "Pausing from the phone works, pausing from the console
+  // doesn't pause the music in BT mode." The console path set State = Paused and stopped a
+  // capture device that is always null on Linux, so nothing paused. These pin the fix: the
+  // phone is asked, an unreachable phone is an error rather than a false Paused, and a phone
+  // transport teardown after a console pause does not strand the source in Stopped.
+
+  [Fact]
+  public async Task ConsolePause_AsksThePhoneToPause_AndReportsPaused()
+  {
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+
+    await source.PauseAsync(CancellationToken.None);
+
+    btMock.Verify(b => b.PauseMediaAsync(It.IsAny<CancellationToken>()), Times.Once);
+    Assert.Equal(AudioSourceState.Paused, source.State);
+  }
+
+  [Fact]
+  public async Task ConsolePause_WhenThePhoneCannotBeAsked_Throws_AndStaysPlaying()
+  {
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    btMock.Setup(b => b.PauseMediaAsync(It.IsAny<CancellationToken>())).ReturnsAsync(false);
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+
+    await Assert.ThrowsAsync<InvalidOperationException>(() => source.PauseAsync(CancellationToken.None));
+
+    // The defect was a Paused state over audio that kept playing. Refusing is the fix.
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  [Fact]
+  public async Task ConsolePause_ThenPhoneReportsStopped_StaysPaused_AndResumeAsksThePhoneToPlay()
+  {
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+    await source.PauseAsync(CancellationToken.None);
+
+    // AUD-10: the phone's transport dies on pause and it may report Stopped.
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+    Assert.Equal(AudioSourceState.Paused, source.State);
+
+    await source.ResumeAsync(CancellationToken.None);
+
+    btMock.Verify(b => b.PlayMediaAsync(It.IsAny<CancellationToken>()), Times.Once);
+    Assert.Equal(AudioSourceState.Playing, source.State);
+  }
+
+  [Fact]
+  public async Task PhonePause_ThenStopped_StillDemotesToStopped()
+  {
+    // The AUD-40 exemption is for a pause the CONSOLE asked for. A phone-side pause followed by
+    // Stopped keeps its pre-AUD-40 meaning.
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock);
+    await source.PlayAsync(CancellationToken.None);
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Paused);
+    Assert.Equal(AudioSourceState.Paused, source.State);
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Stopped);
+
+    Assert.Equal(AudioSourceState.Stopped, source.State);
+    btMock.Verify(b => b.PauseMediaAsync(It.IsAny<CancellationToken>()), Times.Never);
   }
 
   private BluetoothAudioSource BuildSource(Mock<IBluetoothService> btMock) =>

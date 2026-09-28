@@ -168,6 +168,20 @@ public interface IBluetoothService : IAsyncDisposable
   /// <param name="volume">Volume level (0.0 to 1.0).</param>
   Task SetDeviceVolumeAsync(float volume);
 
+  /// <summary>
+  /// Asks the connected phone to pause via AVRCP (BlueZ <c>MediaPlayer1.Pause</c>).
+  /// Returns <c>true</c> only when the command was delivered to a media player; <c>false</c> when
+  /// no player is attached or the call failed. The default is <c>false</c> so a platform without
+  /// an AVRCP controller reports honestly rather than claiming success (AUD-40).
+  /// </summary>
+  Task<bool> PauseMediaAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+  /// <summary>
+  /// Asks the connected phone to play via AVRCP (BlueZ <c>MediaPlayer1.Play</c>).
+  /// Same return contract as <see cref="PauseMediaAsync"/>.
+  /// </summary>
+  Task<bool> PlayMediaAsync(CancellationToken cancellationToken = default) => Task.FromResult(false);
+
   /// <summary>Skip to next track via AVRCP.</summary>
   Task NextTrackAsync(CancellationToken cancellationToken = default);
 

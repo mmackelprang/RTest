@@ -431,6 +431,40 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     }
   }
 
+  /// <inheritdoc/>
+  public Task<bool> PauseMediaAsync(CancellationToken cancellationToken = default) =>
+    SendMediaCommandAsync("Pause", p => p.PauseAsync());
+
+  /// <inheritdoc/>
+  public Task<bool> PlayMediaAsync(CancellationToken cancellationToken = default) =>
+    SendMediaCommandAsync("Play", p => p.PlayAsync());
+
+  // AUD-40: the console's Pause/Play for a BT source is a request to the PHONE, like a car stereo's.
+  // Returns whether the command reached a MediaPlayer1, so the caller can tell the difference
+  // between "the phone was asked" and "there was nobody to ask" — the latter must not be reported
+  // as a successful pause.
+  private async Task<bool> SendMediaCommandAsync(string name, Func<Linux.IMediaPlayer1, Task> command)
+  {
+    var player = _mediaPlayer;
+    if (player == null)
+    {
+      _logger.LogWarning("AVRCP: cannot send {Command} — no MediaPlayer1 attached " +
+        "(the phone may not expose an AVRCP controller)", name);
+      return false;
+    }
+    try
+    {
+      await command(player);
+      _logger.LogInformation("AVRCP: Sent {Command} command via D-Bus ({Path})", name, _mediaPlayerPath);
+      return true;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to send AVRCP {Command} command via D-Bus ({Path})", name, _mediaPlayerPath);
+      return false;
+    }
+  }
+
   public async Task NextTrackAsync(CancellationToken cancellationToken = default)
   {
     if (_mediaPlayer == null)
