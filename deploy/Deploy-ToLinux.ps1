@@ -1,11 +1,12 @@
 ﻿<#
 .SYNOPSIS
-  One-command build and deploy to a Linux target from Windows.
+  One-command build and deploy to a Linux target, from a Windows or Linux host running pwsh.
 
 .DESCRIPTION
   Cross-compiles Radio.API and Radio.Web for the specified Linux runtime,
   syncs to the target via SCP/SSH, and restarts both services.
   Uses rsync over SSH for incremental transfers when available.
+  Needs PowerShell 7 (pwsh), the .NET 10 SDK, ssh/scp, and optionally rsync on the host.
 
 .PARAMETER NoRestart
   Deploy without restarting the services.
@@ -53,9 +54,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
-$ApiPublishDir = Join-Path $RepoRoot "publish\$Runtime\api"
-$WebPublishDir = Join-Path $RepoRoot "publish\$Runtime\web"
+# Paths are built with Join-Path and forward slashes, never a literal backslash. This script was
+# Windows-only until 2026-09-28 for no reason other than its separators: on Linux a backslash is
+# an ordinary filename character, so `"$PSScriptRoot\.."` did not resolve and
+# `"$RepoRoot\src\Radio.API\Radio.API.csproj"` named a file that does not exist. PowerShell on
+# Windows accepts a forward slash in every one of these positions, so this is one spelling for
+# both hosts rather than a branch per OS.
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$ApiPublishDir = Join-Path $RepoRoot "publish/$Runtime/api"
+$WebPublishDir = Join-Path $RepoRoot "publish/$Runtime/web"
 $SshTarget = "${TargetUser}@${TargetHost}"
 $ApiPort = if ($env:RADIO_API_PORT) { $env:RADIO_API_PORT } else { "5000" }
 $WebPort = if ($env:RADIO_WEB_PORT) { $env:RADIO_WEB_PORT } else { "5002" }
@@ -118,12 +125,14 @@ if ($Quick) {
 
 # Restore for net10.0 (Windows conditional TFM means assets are built for windows TFM by default)
 Write-Host "  Restoring for net10.0 / $Runtime..." -ForegroundColor DarkGray
-dotnet restore "$RepoRoot\src\Radio.API\Radio.API.csproj" --runtime $Runtime -p:TargetFramework=net10.0 -v quiet
-dotnet restore "$RepoRoot\src\Radio.Web\Radio.Web.csproj" --runtime $Runtime -p:TargetFramework=net10.0 -v quiet
+$ApiProject = Join-Path $RepoRoot "src/Radio.API/Radio.API.csproj"
+$WebProject = Join-Path $RepoRoot "src/Radio.Web/Radio.Web.csproj"
+dotnet restore $ApiProject --runtime $Runtime -p:TargetFramework=net10.0 -v quiet
+dotnet restore $WebProject --runtime $Runtime -p:TargetFramework=net10.0 -v quiet
 
 # Publish Radio.API
 Write-Host "  Publishing Radio.API..." -ForegroundColor DarkGray
-dotnet publish "$RepoRoot\src\Radio.API\Radio.API.csproj" --no-restore --output $ApiPublishDir @commonArgs
+dotnet publish $ApiProject --no-restore --output $ApiPublishDir @commonArgs
 if ($LASTEXITCODE -ne 0) {
   Write-Host "API build failed!" -ForegroundColor Red
   exit 1
@@ -131,7 +140,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # Publish Radio.Web
 Write-Host "  Publishing Radio.Web..." -ForegroundColor DarkGray
-dotnet publish "$RepoRoot\src\Radio.Web\Radio.Web.csproj" --no-restore --output $WebPublishDir @commonArgs
+dotnet publish $WebProject --no-restore --output $WebPublishDir @commonArgs
 if ($LASTEXITCODE -ne 0) {
   Write-Host "Web build failed!" -ForegroundColor Red
   exit 1
@@ -311,7 +320,7 @@ if ($moveExit -ne 0) {
 # present overlay, which is the very thing this block exists to prevent. The remote script
 # therefore always `exit 0`s and reports presence on stdout, leaving a non-zero exit to
 # mean only "the question could not be asked" — in which case we abort rather than guess.
-$targetConfigPath = Join-Path $RepoRoot "deploy\$configDir\appsettings.Production.json"
+$targetConfigPath = Join-Path $RepoRoot "deploy/$configDir/appsettings.Production.json"
 if (Test-Path $targetConfigPath) {
   $probe = ssh $SshTarget "for d in api web; do if [ -f $TargetPath/`$d/appsettings.Production.json ]; then echo `$d; fi; done; exit 0"
   if ($LASTEXITCODE -ne 0) {
@@ -386,7 +395,7 @@ $wpBluetoothRules = @(
 
 $wpRulesChanged = $false
 function Sync-WpRule($name, $remoteDir) {
-  $localPath = Join-Path $RepoRoot "deploy\common\$name"
+  $localPath = Join-Path $RepoRoot "deploy/common/$name"
   if (-not (Test-Path $localPath)) {
     Write-Host "  WARNING: missing $localPath (skipped)" -ForegroundColor Yellow
     return $false
