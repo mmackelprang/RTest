@@ -1100,9 +1100,21 @@ Content-Type: application/json
 
 ### Response
 
-**Success (200):**
+The request **waits until the announcement has finished** (or failed) before it answers.
+
+**Played (200):**
 ```json
-{ "message": "Announcement played" }
+{ "message": "Announcement played", "outcome": "completed" }
+```
+
+**Stopped part-way (200):**
+```json
+{ "message": "Announcement stopped before it finished", "outcome": "interrupted" }
+```
+
+**Did not play (500)** — TTS synthesis, ducking or playback failed (e.g. a misconfigured TTS voice). Since TTS-2 (2026-09-28); before that this case returned 200 "Announcement played":
+```json
+{ "error": "Announcement did not play; see the radio-api log", "outcome": "failed" }
 ```
 
 **Validation error (400):**

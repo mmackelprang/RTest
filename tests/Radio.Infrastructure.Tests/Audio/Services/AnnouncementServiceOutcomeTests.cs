@@ -34,6 +34,41 @@ public class AnnouncementServiceOutcomeTests
   }
 
   [Fact]
+  public async Task ATtsHttpTimeoutIsReportedAsFailedNotInterrupted()
+  {
+    // TTSFactory's HttpClient times out with TaskCanceledException — an OperationCanceledException
+    // the CALLER did not ask for. Treating it as an interruption would return 200 for TTS-1's own
+    // failure chain. MUTATION: drop the `when (cancellationToken.IsCancellationRequested)` filter — red.
+    var factory = new Mock<ITTSFactory>();
+    factory
+      .Setup(f => f.CreateAsync(It.IsAny<string>(), It.IsAny<TTSParameters>(), It.IsAny<CancellationToken>()))
+      .ThrowsAsync(new TaskCanceledException("HttpClient.Timeout of 100 seconds elapsing"));
+
+    var outcome = await CreateService(factory).AnnounceAsync("hello");
+
+    Assert.Equal(AnnouncementOutcome.Failed, outcome);
+  }
+
+  [Fact]
+  public async Task TheCallersOwnCancellationIsReportedAsInterrupted()
+  {
+    using var cts = new CancellationTokenSource();
+    var factory = new Mock<ITTSFactory>();
+    factory
+      .Setup(f => f.CreateAsync(It.IsAny<string>(), It.IsAny<TTSParameters>(), It.IsAny<CancellationToken>()))
+      .Returns<string, TTSParameters?, CancellationToken>((_, _, ct) =>
+      {
+        cts.Cancel();
+        ct.ThrowIfCancellationRequested();
+        return Task.FromResult<IEventAudioSource>(null!);
+      });
+
+    var outcome = await CreateService(factory).AnnounceAsync("hello", cancellationToken: cts.Token);
+
+    Assert.Equal(AnnouncementOutcome.Interrupted, outcome);
+  }
+
+  [Fact]
   public async Task ARealTtsSourceThatCannotReachAPlaybackDeviceIsReportedAsFailed()
   {
     // End to end through the real TTSEventSource: with no playback device it raises

@@ -85,8 +85,11 @@ public class AnnouncementService : IAnnouncementService
 
       return outcome;
     }
-    catch (OperationCanceledException)
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
     {
+      // Only the CALLER's cancellation is an interruption. Any other OperationCanceledException —
+      // above all TaskCanceledException from TTSFactory's HttpClient timeout — is a failure and
+      // falls through to the arm below, logged at Error (TTS-2 review).
       _logger.LogDebug("Announcement cancelled");
       return AnnouncementOutcome.Interrupted;
     }
