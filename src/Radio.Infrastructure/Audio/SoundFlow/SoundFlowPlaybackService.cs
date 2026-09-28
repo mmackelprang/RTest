@@ -166,6 +166,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       var fileName = Path.GetFileName(filePath);
@@ -291,6 +296,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       _logger.LogInformation("Started stream playback for source {SourceId}", sourceId);
@@ -358,6 +368,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activePlayers[sourceId] = soundPlayer;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       _logger.LogInformation("Started data provider playback for source {SourceId}", sourceId);
@@ -425,6 +440,11 @@ public class SoundFlowPlaybackService : IDisposable
       lock (_playersLock)
       {
         _activeComponents[sourceId] = component;
+        // Recompute under the lock that makes the source visible to SetDuckingMultiplier /
+        // ClearAllDuckingMultipliers (AUD-26). The volume set above was computed in an EARLIER lock;
+        // a duck write landing between the two found nothing registered, so without this the
+        // source would keep a multiplier the dictionary no longer holds (or miss one it now does).
+        ApplyEffectiveVolume(sourceId);
       }
 
       _logger.LogInformation(
@@ -524,7 +544,8 @@ public class SoundFlowPlaybackService : IDisposable
       // ⚠ The entry's lifetime is therefore owned by AudioManager, not by stop/start. AudioManager
       // clears the outgoing source's entry on every switch, clears the incoming source's entry when a
       // switch happens with no duck in effect, and clears EVERY entry when ducking ends
-      // (ClearAllDuckingMultipliers). Nothing else writes this dictionary. If a future caller adds
+      // (ClearAllDuckingMultipliers). No type other than AudioManager calls SetDuckingMultiplier,
+      // ClearDuckingMultiplier or ClearAllDuckingMultipliers. If a future caller adds
       // a SetDuckingMultiplier on some other path, it must take on the matching clear, or a source
       // can come back attenuated long after the duck that set it has ended.
       //

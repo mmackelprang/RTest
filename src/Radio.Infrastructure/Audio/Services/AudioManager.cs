@@ -284,7 +284,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       // volume over the rest of the announcement. The multiplier is stored BEFORE the source starts
       // and is picked up at registration, which works only because SoundFlowPlaybackService.StopAsync
       // no longer removes it (every Play*Async stops its own key first); before AUD-26 this write was
-      // wiped a few lines later by the new source's own registration.
+      // wiped by the new source's own registration, for any source this method starts.
       //
       // With no duck in effect, clear the incoming source's entry instead. Entries now survive a
       // stop, so a stale one — left, for instance, by a fade step that read _activeSource just before
@@ -296,6 +296,19 @@ public class AudioManager : IAudioManager, IAsyncDisposable
         {
           var multiplier = _duckingService.CurrentDuckLevel / 100f;
           _playbackService.SetDuckingMultiplier(source.Id, multiplier);
+
+          // Re-check after the write. Nothing orders this block against OnDuckingStateChanged, so a
+          // release plus ducking-ended can run between the IsDucking read above and the Set — which
+          // would strand this write after ClearAllDuckingMultipliers had already run. DuckingService
+          // drops IsDucking before it raises ducking-ended, so a false here means that raise has
+          // happened or is about to; clearing is right either way. A duck that restarts in between
+          // writes its own attack levels. Only reachable with an instant release — the shipped
+          // 500 ms fade makes the window microseconds against half a second — but it is a new path
+          // AUD-26 opened, so it is closed rather than argued away.
+          if (!_duckingService.IsDucking)
+          {
+            _playbackService.ClearDuckingMultiplier(source.Id);
+          }
         }
         else
         {

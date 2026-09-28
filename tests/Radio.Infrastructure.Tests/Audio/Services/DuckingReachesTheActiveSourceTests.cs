@@ -287,8 +287,9 @@ public class DuckingReachesTheActiveSourceTests
   // ⚠ WHAT "REGISTRATION" MEANS IN THESE TESTS. The production registration path (PlayComponentAsync
   // and its three siblings) needs a MiniAudio device, so a device-less service returns before it
   // registers anything. Each source below therefore does, in its PlayAsync, the two steps every
-  // Play*Async performs on its key: StopAsync(key) FIRST, then register and read the stored
-  // multiplier back. AUD-26 lives entirely in that ordering — the stop used to remove the multiplier
+  // Play*Async performs on its key: StopAsync(key) FIRST, then register — and since AUD-26's review
+  // every Play*Async, like the seam, ends by computing the volume through ApplyEffectiveVolume under
+  // the lock that registers it, so the seam and production share the read that matters. AUD-26 lives entirely in that ordering — the stop used to remove the multiplier
   // the registration then looked for — so a test that registered WITHOUT the preceding stop would
   // pass on the broken tree. Keep the stop.
 
@@ -312,6 +313,31 @@ public class DuckingReachesTheActiveSourceTests
       await h.Manager.SwitchSourceAsync(vinyl.Object);
 
       AssertVolume(0.2f, incoming, "a source switched in mid-duck must inherit the duck");
+    }
+  }
+
+  [Fact]
+  public async Task ADuckThatEndsDuringTheSwitchDoesNotStrandTheIncomingSourcesMultiplier()
+  {
+    // The review's MEDIUM-2. SwitchSourceAsync reads IsDucking, then writes the multiplier; a whole
+    // release plus ducking-ended can land in between, after which nothing would clear the write. The
+    // mock answers IsDucking true to the first read and false to the re-check, which is exactly the
+    // interleaving — ducking-ended's ClearAll has "already run" before the write.
+    //
+    // MUTATION: delete the `if (!_duckingService.IsDucking) ClearDuckingMultiplier(source.Id)`
+    // re-check in SwitchSourceAsync and this goes red at 0.2.
+    var h = await CreateAsync();
+    await using (h.Manager)
+    {
+      h.Ducking.SetupSequence(d => d.IsDucking).Returns(true).Returns(false);
+      h.Ducking.Setup(d => d.CurrentDuckLevel).Returns(20f);
+
+      var incoming = NewComponent();
+      var vinyl = CreateRegisteringSource(AudioSourceType.Vinyl, "Vinyl", h.Playback, () => incoming);
+
+      await h.Manager.SwitchSourceAsync(vinyl.Object);
+
+      AssertVolume(1.0f, incoming, "a duck that ended mid-switch must not leave the new source attenuated");
     }
   }
 
@@ -396,7 +422,8 @@ public class DuckingReachesTheActiveSourceTests
   {
     // ⭐ TTS-6's scenario, end to end: "switch sources mid-announcement and source A stays permanently
     // attenuated". The late fade step is injected directly — SetDuckingMultiplier on A AFTER the
-    // switch has cleared A — because that race is the only way this tree can strand an entry.
+    // switch has cleared A — because that is the race this test injects (SwitchSourceAsync re-checks IsDucking after its own
+    // write to close the other one).
     //
     // ⚠ HONEST ABOUT WHAT THIS PINS. On the pre-AUD-26 tree this test fails only at its PRECONDITION
     // (B does not inherit the duck — that is AUD-26). Its FINAL assertion held there, because A's own
