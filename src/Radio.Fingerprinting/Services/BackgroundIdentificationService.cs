@@ -379,7 +379,8 @@ public class BackgroundIdentificationService : BackgroundService
       }
       else
       {
-        _logger.LogInformation("SongRec returned no match");
+        // LOG-12: Debug — the one no-match line kept (SongRecRecognitionService's is Trace).
+        _logger.LogDebug("SongRec returned no match");
         _metricsCollector?.Increment("fingerprint.identification_failures", 1,
           new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "no_match" });
       }

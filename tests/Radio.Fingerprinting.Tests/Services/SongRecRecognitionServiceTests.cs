@@ -356,6 +356,74 @@ public class SongRecRecognitionServiceTests
     }
   }
 
+  [Fact]
+  public async Task Recognized_IsInformationOnlyWhenTheResultChanges_AndNoMatchIsTrace()
+  {
+    // LOG-12: the same song is recognized every cycle while it plays.
+    if (OperatingSystem.IsWindows())
+    {
+      return; // the stand-in is /bin/sh
+    }
+
+    var log = new LevelLog();
+    var service = new ScriptedSongRecService(log, Options.Create(new FingerprintingOptions()));
+
+    foreach (var output in new[]
+    {
+      "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}",
+      "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}",
+      "",
+      "{\"track\":{\"title\":\"Song B\",\"subtitle\":\"Band\"}}",
+    })
+    {
+      service.NextOutput = output;
+      await service.RunSongRecAsync("unused.wav", CancellationToken.None);
+    }
+
+    Assert.Equal(
+      new[] { LogLevel.Information, LogLevel.Debug, LogLevel.Information },
+      log.Entries.Where(e => e.Message.StartsWith("SongRec recognized", StringComparison.Ordinal)).Select(e => e.Level));
+    Assert.Equal(LogLevel.Trace, Assert.Single(log.Entries, e => e.Message.Contains("no match")).Level);
+  }
+
+  private sealed class ScriptedSongRecService : SongRecRecognitionService
+  {
+    public ScriptedSongRecService(ILogger<SongRecRecognitionService> logger, IOptions<FingerprintingOptions> options)
+      : base(logger, options)
+    {
+    }
+
+    public string NextOutput { get; set; } = string.Empty;
+
+    internal override Process? StartProcess(ProcessStartInfo startInfo)
+    {
+      var info = new ProcessStartInfo
+      {
+        FileName = "/bin/sh",
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        UseShellExecute = false,
+        CreateNoWindow = true,
+      };
+      info.ArgumentList.Add("-c");
+      info.ArgumentList.Add("printf '%s' \"$0\"");
+      info.ArgumentList.Add(NextOutput);
+      return Process.Start(info);
+    }
+  }
+
+  private sealed class LevelLog : ILogger<SongRecRecognitionService>
+  {
+    public List<(LogLevel Level, string Message)> Entries { get; } = new();
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+      Func<TState, Exception?, string> formatter) => Entries.Add((logLevel, formatter(state, exception)));
+  }
+
   /// <summary>
   /// Test double: launches a long-running, cross-platform stand-in process in place
   /// of the real songrec binary so the timeout path can be exercised deterministically.

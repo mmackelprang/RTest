@@ -17,7 +17,16 @@ namespace RTLSDRCore.DSP;
 /// </summary>
 public class RdsDecoder
 {
-  private static readonly ILogger Logger = Log.ForContext<RdsDecoder>();
+  // An instance logger (LOG-12) so tests can observe what is written. Production passes nothing and
+  // gets the same static-pipeline logger this class always used.
+  private readonly ILogger Logger;
+  private readonly TimeProvider _timeProvider;
+
+  // LOG-12: station-name and sync-loss log policy — see TryConfirmStationName and the sync-loss branch.
+  private bool _stationNameLoggedSinceReset;
+  private static readonly TimeSpan SyncLossSummaryInterval = TimeSpan.FromMinutes(5);
+  private int _syncLossesSinceSummary;
+  private long _syncLossWindowStart;
 
   private readonly int _sampleRate;
   private readonly BandPassFilter _rdsBpf;
@@ -207,7 +216,15 @@ public class RdsDecoder
   /// </summary>
   /// <param name="sampleRate">Sample rate of the composite FM signal (e.g., 240000 Hz).</param>
   public RdsDecoder(int sampleRate)
+    : this(sampleRate, logger: null, timeProvider: null)
   {
+  }
+
+  /// <summary>Test seam: an explicit logger and clock (LOG-12).</summary>
+  internal RdsDecoder(int sampleRate, ILogger? logger, TimeProvider? timeProvider)
+  {
+    Logger = logger ?? Log.ForContext<RdsDecoder>();
+    _timeProvider = timeProvider ?? TimeProvider.System;
     _sampleRate = sampleRate;
 
     // 57 kHz BPF to isolate RDS subcarrier (55-59 kHz, 127 taps)
@@ -370,6 +387,9 @@ public class RdsDecoder
     _ptyLogged = false;
     _validBlockCount = 0;
     _syncAcquiredLogged = false;
+    _stationNameLoggedSinceReset = false;
+    _syncLossesSinceSummary = 0;
+    _syncLossWindowStart = 0;
   }
 
   private void ProcessClockRecovery(float sample)
@@ -564,7 +584,7 @@ public class RdsDecoder
             _badBlockCount++;
             if (_badBlockCount >= SyncLossThreshold)
             {
-              Logger.Information("RDS: Block sync lost after {Failures} consecutive bad blocks", _badBlockCount);
+              LogSyncLoss(_badBlockCount);
               _syncState = SyncState.Searching;
               _syncConfirmCount = 0;
               _badBlockCount = 0;
@@ -628,6 +648,32 @@ public class RdsDecoder
       default:
         Logger.Debug("RDS: Received group {Group} (not decoded)", groupLabel);
         break;
+    }
+  }
+
+  /// <summary>
+  /// LOG-12: sync loss is routine on a weak signal — 16.6k Information lines a day on the box (20 % of
+  /// the file sink). Each loss is Debug; at Information there is at most one tally line per
+  /// <see cref="SyncLossSummaryInterval"/>, written on the first loss after the interval has run.
+  /// A lone loss is therefore only reported at Information once a later one closes its window.
+  /// </summary>
+  private void LogSyncLoss(int failures)
+  {
+    Logger.Debug("RDS: Block sync lost after {Failures} consecutive bad blocks", failures);
+
+    var now = _timeProvider.GetTimestamp();
+    if (_syncLossesSinceSummary == 0)
+    {
+      _syncLossWindowStart = now;
+    }
+    _syncLossesSinceSummary++;
+
+    var elapsed = _timeProvider.GetElapsedTime(_syncLossWindowStart, now);
+    if (elapsed >= SyncLossSummaryInterval)
+    {
+      Logger.Information("RDS: Block sync lost {Count} times in the last {Minutes:F0} min (weak signal)",
+        _syncLossesSinceSummary, elapsed.TotalMinutes);
+      _syncLossesSinceSummary = 0;
     }
   }
 
@@ -717,8 +763,20 @@ public class RdsDecoder
       {
         var oldName = _confirmedStationName;
         _confirmedStationName = name;
-        Logger.Information("RDS: Station name = \"{StationName}\" (PI=0x{PiCode:X4})",
-          name, _piCode ?? 0);
+        // LOG-12: Information once per tune; every later change at Debug. A rolling-PS station (Rock 92
+        // pages artist and title through PS) confirms a new name every ~3 s — 30.8k Information lines a
+        // day on the box, 34 % of the file sink. Raise RTLSDRCore to Debug (LOG-5) to see them again.
+        if (!_stationNameLoggedSinceReset)
+        {
+          _stationNameLoggedSinceReset = true;
+          Logger.Information("RDS: Station name = \"{StationName}\" (PI=0x{PiCode:X4})",
+            name, _piCode ?? 0);
+        }
+        else
+        {
+          Logger.Debug("RDS: Station name = \"{StationName}\" (PI=0x{PiCode:X4})",
+            name, _piCode ?? 0);
+        }
         if (oldName != null)
         {
           Logger.Debug("RDS: Station name changed from \"{OldName}\" to \"{NewName}\"", oldName, name);

@@ -25,6 +25,10 @@ public class SongRecRecognitionService : ISongRecRecognitionService
   private readonly string _songRecPath;
   private readonly int _timeoutSeconds;
 
+  // LOG-12: the last recognized "title\u0001artist". Recognition repeats every cycle while a song
+  // plays — the same song was logged up to ~28 times on the box — so only a change is Information.
+  private string? _lastRecognizedKey;
+
   public SongRecRecognitionService(
     ILogger<SongRecRecognitionService> logger,
     IOptions<FingerprintingOptions> options)
@@ -157,7 +161,9 @@ public class SongRecRecognitionService : ISongRecRecognitionService
 
       if (string.IsNullOrWhiteSpace(stdout))
       {
-        _logger.LogInformation("SongRec returned empty output (no match)");
+        // LOG-12: Trace. Every no-match used to be logged twice at Information (here and in
+        // BackgroundIdentificationService, 1.8k/day each); the caller's Debug line is the one kept.
+        _logger.LogTrace("SongRec returned empty output (no match)");
         return null;
       }
 
@@ -167,11 +173,14 @@ public class SongRecRecognitionService : ISongRecRecognitionService
       var result = JsonSerializer.Deserialize<SongRecResult>(stdout);
       if (result?.Track == null)
       {
-        _logger.LogInformation("SongRec returned no track match");
+        _logger.LogTrace("SongRec returned no track match");
         return null;
       }
 
-      _logger.LogInformation(
+      var key = result.Track.Title + "\u0001" + result.Track.Subtitle;
+      var previous = Interlocked.Exchange(ref _lastRecognizedKey, key);
+      _logger.Log(
+        previous == key ? LogLevel.Debug : LogLevel.Information,
         "SongRec recognized: '{Title}' by '{Artist}'",
         result.Track.Title, result.Track.Subtitle);
 
