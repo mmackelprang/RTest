@@ -7,10 +7,10 @@ namespace Radio.Web.Services.Hub;
 /// </summary>
 /// <remarks>
 /// A reconnect is worth a Warning. But the common cause, the client's <c>ServerTimeout</c> elapsing, is a
-/// <see cref="TimeoutException"/> whose stack trace says nothing the message does not. radio-web's
-/// journal is Information-level and every stack is ~10 lines there (CLAUDE.md § Services), and before
-/// UI-10 this fired 535 times a day. So a timeout logs its message only; anything else keeps the full
-/// exception.
+/// <see cref="TimeoutException"/> whose stack trace says nothing the message does not, and radio-web's
+/// console sink is unrestricted, so the text lands in the journal (CLAUDE.md § Services). Before UI-10
+/// this fired 535 times a day. So a timeout logs its message only (every TimeoutException, not just
+/// ServerTimeout's); anything else keeps the full exception.
 /// </remarks>
 internal static class HubReconnectLogging
 {

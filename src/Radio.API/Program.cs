@@ -85,12 +85,14 @@ builder.Services.AddCors(options =>
 // throttle JS timers when the page is occluded (screen-blanked overlay).
 //
 // UI-10: KeepAliveInterval (how often the SERVER pings an idle connection) must be at most half the
-// CLIENT's ServerTimeout. Every client here — radio-web's hub services and any browser client — uses
-// SignalR's default ServerTimeout of 30 s. This was 30 s, equal to it, so any connection that carried
-// no other traffic raced its own keepalive: radio-web's visualization-hub connection, subscribed to
-// no group while the kiosk is off the visualizer page, timed out and reconnected 535 times a day
-// (2026-09-27), the largest single source of journald lines on the box. 15 s is SignalR's default and
-// its documented pairing with a 30 s ServerTimeout. Pinned by SignalRTimeoutTests.
+// CLIENT's ServerTimeout. The only clients of these hubs are radio-web's two HubConnections (Audio,
+// Visualization), both on SignalR's default ServerTimeout of 30 s. This was 30 s, equal to it, so any
+// connection carrying no other traffic raced its own keepalive. radio-web's visualization connection
+// carries no group traffic when it has no subscription or the visualizer is inactive (nothing
+// playing); it timed out and reconnected 535 times on 2026-09-27 — about 1,070 of radio-web's 1,781
+// journal lines that day. The audio hub was spared only by that day's change-driven traffic; a silent
+// box would race it too. 15 s is SignalR's default and its documented pairing with a 30 s
+// ServerTimeout. Pinned by SignalRTimeoutTests.
 builder.Services.AddSignalR(options =>
 {
   options.ClientTimeoutInterval = TimeSpan.FromMinutes(2);

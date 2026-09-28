@@ -24,13 +24,21 @@ public class SignalRTimeoutTests : IClassFixture<CustomWebApplicationFactory<Pro
   }
 
   [Fact]
-  public void KeepAlive_IsAtMostHalfTheClientServerTimeout()
+  public void KeepAlive_IsAtMostHalfTheClientServerTimeout_ForEachHub()
   {
-    var options = _factory.Services.GetRequiredService<IOptions<HubOptions>>().Value;
+    // Per-hub options too: an AddHubOptions<T> override would otherwise slip past a global check. A
+    // null per-hub value means "inherit the global one", so the effective value is checked.
+    var global = _factory.Services.GetRequiredService<IOptions<HubOptions>>().Value.KeepAliveInterval;
+    Assert.NotNull(global);
+    AssertKeepAlive(global, "global");
+    AssertKeepAlive(_factory.Services.GetRequiredService<IOptions<HubOptions<Radio.API.Hubs.AudioVisualizationHub>>>().Value.KeepAliveInterval ?? global, "AudioVisualizationHub");
+    AssertKeepAlive(_factory.Services.GetRequiredService<IOptions<HubOptions<Radio.API.Hubs.AudioStateHub>>>().Value.KeepAliveInterval ?? global, "AudioStateHub");
+  }
 
-    Assert.NotNull(options.KeepAliveInterval);
-    Assert.True(options.KeepAliveInterval!.Value * 2 <= ClientServerTimeout,
-      $"KeepAliveInterval {options.KeepAliveInterval} must be <= half the clients' ServerTimeout ({ClientServerTimeout})");
+  private static void AssertKeepAlive(TimeSpan? keepAlive, string which)
+  {
+    Assert.True(keepAlive!.Value * 2 <= ClientServerTimeout,
+      $"{which}: KeepAliveInterval {keepAlive} must be <= half the clients' ServerTimeout ({ClientServerTimeout})");
   }
 
   [Fact]

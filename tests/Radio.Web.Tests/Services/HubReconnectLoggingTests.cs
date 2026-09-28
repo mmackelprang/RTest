@@ -11,8 +11,9 @@ public class HubReconnectLoggingTests
   [Fact]
   public void ClientDefaultServerTimeout_Is30Seconds()
   {
-    // Radio.API's KeepAliveInterval (15 s) is sized against this default; none of radio-web's hub
-    // services override it. If SignalR ever changes it, SignalRTimeoutTests' constant must follow.
+    // Radio.API's KeepAliveInterval (15 s) is sized against this default. As of UI-10 neither
+    // AudioStateHubService nor AudioVisualizationHubService sets ServerTimeout (not tested here). If
+    // SignalR ever changes the default, SignalRTimeoutTests' constant must follow.
     Assert.Equal(TimeSpan.FromSeconds(30), HubConnection.DefaultServerTimeout);
   }
 
