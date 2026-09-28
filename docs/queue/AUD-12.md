@@ -88,7 +88,7 @@ the code.
 ## Verification
 
 Cannot be closed by a green suite. It needs the box: play over BT, confirm `Playing` in
-`/api/audio/nowplaying`, confirm a `SongRec recognized` line appears within ~15 s, and confirm
+`/api/audio/nowplaying`, confirm a `SongRec recognized` line appears within ~15 s (⚠ since `LOG-12` a repeat of the same song within 10 min is Debug — raise `Radio.Fingerprinting` to Debug via `PUT /api/system/logging/levels/Radio.Fingerprinting` for the check, then reset), and confirm
 `albumArtUrl` leaves the placeholder. Pause and resume, then confirm all three still hold —
 the stall appeared *after* a pause/resume cycle, so a test that never pauses will pass on a broken
 build.

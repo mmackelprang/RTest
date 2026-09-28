@@ -86,7 +86,9 @@ Tune an RDS-rich station, ideally one that rolls its PS. All of these are CDP on
    alternate 40 ↔ 60 px/s on successive RT updates (`s.speed` in the poll). That is the one
    jerk-adjacent thing left; it is `AUD-64`, an afternoon, `RdsScrollSpeedPolicy.cs:40`.
 4. **No fragments in the log.** Over the same window, from the file sink (Information lines are
-   not in journald for `radio-api`):
+   not in journald for `radio-api`). ⚠ **Since `LOG-12` (2026-09-28) only the first station name per tune is Information; later pages are Debug.** Raise `RTLSDRCore` first and reset after, or this grep finds one line and passes having checked nothing:
+   `curl -s -X PUT http://radio:5000/api/system/logging/levels/RTLSDRCore -H 'Content-Type: application/json' -d '{"level":"Debug"}'` … `curl -s -X POST http://radio:5000/api/system/logging/levels/reset`
+   (Debug turns on all of `RTLSDRCore`'s ~34 Debug lines, including per-group ones — do not leave it on.)
    ```bash
    ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); grep -E "RDS: (Station name|Radio Text)" $F | tail -40'
    ```

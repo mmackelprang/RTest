@@ -227,8 +227,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     internal static readonly TimeSpan DiagnosticsTickInterval = TimeSpan.FromSeconds(1);
 
     private static readonly TimeSpan UnderrunLogInterval = TimeSpan.FromSeconds(1);
-    // LOG-12: the compensation line was 10.5k Information lines a day on the box (27 % of the file sink —
-    // the SDR generator compensates continuously). By default it is one Information tally per 5 minutes;
+    // LOG-12: the compensation line was 10.5k Information lines on the box on 2026-09-27 (the SDR generator
+    // compensates continuously). Since LOG-2 its usual owners' namespaces (Radio.Infrastructure.Audio,
+    // ...Platform.Bluetooth) are held at Warning, so by default it is filtered anyway; this governs what
+    // you get when you raise one of them. At Information it is one tally per 5 minutes;
     // with Debug enabled for the owning logger (LOG-5) it returns to every 5 s, at Debug. Either way the
     // template is the same and each line covers exactly its own window, so bt_drift_analyze.py's sums
     // hold at any cadence.

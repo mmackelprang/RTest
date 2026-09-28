@@ -38,7 +38,7 @@ vs 55k on 09-05), so it is not an artefact of more logging either.
    09-09 had **2** and 531. Overnight ran 42–65 misses/hour with **zero** SongRec activity.
 2. **The 09-08 47-PR deploy.** `radio-api` started **16:07:28**; the sustained run began **13:00:51**,
    three hours earlier. Also still elevated on two later builds.
-3. **RF / signal quality.** Anticorrelated. RDS `Block sync lost` per day: 09-05 **13,680** with
+3. **RF / signal quality.** Anticorrelated. RDS `Block sync lost` per day (⚠ counted by `grep -c` before `LOG-12`; since 2026-09-28 per-event lines are Debug with a 5-minute Information tally — sum the tallies' Count, or raise `RTLSDRCore` to Debug and count `Block sync lost after`): 09-05 **13,680** with
    baseline misses; 09-07 **845**; 09-09 **10,060**. ⚠ **And the RDS "station-name flapping" is a red
    herring** — `Limeligh`/`imelight`/`Rock 92`/`Rush` is a station scrolling its name and current
    track through the 8-character PS field. That is normal, not instability.

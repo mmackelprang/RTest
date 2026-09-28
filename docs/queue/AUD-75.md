@@ -24,12 +24,13 @@ Real media files in the appliance's own media directory are rejected as traversa
   fileplayer:rootDirectory | /home/mmack/RTest/src/Radio.API/media/audio | 2026-02-12T18:39:11Z
   ```
   `Program.cs` adds the SQLite bridge **after** the appsettings files, so this row wins. It was written in February, most likely when a development-era config was imported or saved. `/home/mmack/RTest/src/Radio.API/media/audio` does exist on the box, **and it is empty**.
-- A second problem sits behind the first. `FilePlayer:BookmarkedPaths` in the shipped `appsettings.json` lists `/opt/radio-console/media/audio` ("Local Audio Files"). The persisted queue (`FilePlayerPreferences:QueueItems`) holds absolute paths under it. **Any bookmark outside `RootDirectory` is rejected by design**, so even a correct `/mnt/nas/music` root would still block the "Local Audio Files" bookmark.
+- A second problem sits behind the first, and it is a mismatch between two layers rather than a design choice. `FilePlayer:BookmarkedPaths` in the shipped `appsettings.json` lists `/opt/radio-console/media/audio` ("Local Audio Files"), and the persisted queue (`FilePlayerPreferences:QueueItems`) holds absolute paths under it. `FilesController.IsPathAllowed` explicitly allows `AllowedBrowseDirectories` and `BookmarkedPaths`, but `FileBrowser.GetFullPath` ignores them and checks only `RootDirectory`. So even a correct `/mnt/nas/music` root would still reject the "Local Audio Files" bookmark. `GetFullPath` also uses `StartsWith` with no trailing separator (`/mnt/nas` would admit `/mnt/nasty`); the controller already guards against that.
+- Order check: `WebApplication.CreateBuilder` loads `appsettings.{Environment}.json`, environment variables and the command line; `Program.cs` adds the SQLite bridge after all of them, so a store row overrides every one.
 
 ## Fix shapes (owner decides)
 
 1. Delete (or correct) the `fileplayer:rootDirectory` row in the box's config store. That restores the Production value, `/mnt/nas/music`. Check `ls /mnt/nas/music` first: it listed nothing on 2026-09-28, so it may not be mounted.
-2. Decide the bookmark semantics: either treat each bookmark as an additional allowed root in `GetFullPath`, or make the "Local Audio Files" directory the root.
+2. Make `FileBrowser.GetFullPath` honour the same allow-list as `FilesController.IsPathAllowed` (bookmarks and allowed browse directories), with the trailing-separator check.
 3. Consider whether a config-store key that points at a directory that does not exist, or is empty, should be logged once at startup. It was invisible for seven months.
 
 ## Verification

@@ -386,6 +386,43 @@ public class SongRecRecognitionServiceTests
     Assert.Equal(LogLevel.Trace, Assert.Single(log.Entries, e => e.Message.Contains("no match")).Level);
   }
 
+  [Fact]
+  public async Task SameSong_AfterTenMinutes_IsInformationAgain()
+  {
+    // A pause/resume, a different source, or the song coming round hours later must still produce an
+    // Information line (AUD-12's UAT looks for it).
+    if (OperatingSystem.IsWindows())
+    {
+      return;
+    }
+
+    var log = new LevelLog();
+    var clock = new ManualClock();
+    var service = new ScriptedSongRecService(log, Options.Create(new FingerprintingOptions())) { TimeProvider = clock };
+    service.NextOutput = "{\"track\":{\"title\":\"Song A\",\"subtitle\":\"Band\"}}";
+
+    await service.RunSongRecAsync("unused.wav", CancellationToken.None);  // Information
+    clock.Advance(TimeSpan.FromMinutes(9));
+    await service.RunSongRecAsync("unused.wav", CancellationToken.None);  // Debug
+    clock.Advance(TimeSpan.FromMinutes(1));
+    await service.RunSongRecAsync("unused.wav", CancellationToken.None);  // 10 min since Information
+
+    Assert.Equal(
+      new[] { LogLevel.Information, LogLevel.Debug, LogLevel.Information },
+      log.Entries.Where(e => e.Message.StartsWith("SongRec recognized", StringComparison.Ordinal)).Select(e => e.Level));
+  }
+
+  private sealed class ManualClock : TimeProvider
+  {
+    private long _ticks = 1_000_000;
+
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+    public override long GetTimestamp() => _ticks;
+
+    public void Advance(TimeSpan by) => _ticks += by.Ticks;
+  }
+
   private sealed class ScriptedSongRecService : SongRecRecognitionService
   {
     public ScriptedSongRecService(ILogger<SongRecRecognitionService> logger, IOptions<FingerprintingOptions> options)

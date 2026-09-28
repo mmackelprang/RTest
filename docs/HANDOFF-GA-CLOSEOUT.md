@@ -59,7 +59,7 @@ building anything, and record results in `docs/uat/2026-09-xx-…/REPORT.md` as 
 
 | # | Check | Source | Decides |
 |---|---|---|---|
-| 1.1 | **RDS acceptance**: `_debugState` poll over CDP `:9223`, offset never drops to 0 on RT update or PS flip; no fragment `RDS: Station name` lines in the file sink | `HANDOFF-RDS-DEV-BOX.md` §3 | closes `AUD-63`/`69`/`70` at the panel; and the **two product questions** in its §4 (head = rolling PS vs PI call sign; `PsConfirmThreshold` 2 vs 1) |
+| 1.1 | **RDS acceptance**: `_debugState` poll over CDP `:9223`, offset never drops to 0 on RT update or PS flip; no fragment `RDS: Station name` lines in the file sink (⚠ raise `RTLSDRCore` to Debug first — since `LOG-12` later pages are Debug; see `HANDOFF-RDS-DEV-BOX.md` §3 step 4) | `HANDOFF-RDS-DEV-BOX.md` §3 | closes `AUD-63`/`69`/`70` at the panel; and the **two product questions** in its §4 (head = rolling PS vs PI call sign; `PsConfirmThreshold` 2 vs 1) |
 | 1.2 | BT playing → press Pause on the panel → does audio stop? | `AUD-40` | P1 confirmed → one-line fix in 2a; or close |
 | 1.3 | Stop Scan → disconnect/reconnect phone → does AVRCP re-attach? pair a new phone | `AUD-41` | same |
 | 1.4 | Cast at 20 %, restart `radio-api` with Cast persisted, read speaker + master; turn the knob | `AUD-38` | whether the 70 % push and the knob dead-end are real |

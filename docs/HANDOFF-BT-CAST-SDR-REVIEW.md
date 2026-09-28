@@ -130,7 +130,8 @@ assembler confirms complete hybrids on an in-place change with one lost group (`
 ### Box checks before building (CDP is on `:9223`)
 
 1. PS flip cadence on the station the owner listens to: count `RDS: Station name` lines in the file
-   sink over a bounded window. Every one is a candidate reset.
+   sink over a bounded window. Every one is a candidate reset. (⚠ Since `LOG-12`, raise `RTLSDRCore`
+   to Debug for the window first — otherwise the count is 1 per tune.)
 2. Snap detection: via CDP, `const m = await import('/js/rds-marquee.js')` and poll `m._debugState(id)`
    at 200 ms; `offset` dropping to 0 on an RT update is `AUD-63`(1), on a PS change `AUD-63`(2).
 3. `matchMedia('(prefers-reduced-motion: reduce)').matches` once — GNOME's `enable-animations` can
@@ -159,7 +160,8 @@ row set). What landed, in one line each:
 ⚠ **Verified in unit tests and a browser harness only — not deployed, not watched on the panel.** The box
 checks above are now the acceptance step: deploy, read the deployed SHA (`/api/health/version` on both
 services) *before* looking, then poll `_debugState(id)` over CDP — `offset` must no longer drop to 0 on
-an RT update or a PS page, and the file sink must show no mangled `RDS: Station name` lines. Two things
+an RT update or a PS page, and the file sink must show no mangled `RDS: Station name` lines (with
+`RTLSDRCore` raised to Debug — `LOG-12`). Two things
 to know when reading the result: the head is still the live rolling PS (it now flips in place without
 moving the body; anchoring it on the PI call sign instead is an open product choice), and a rolling-PS
 page now needs two clean consecutive cycles to show, so under heavy block loss the head goes *stale*
