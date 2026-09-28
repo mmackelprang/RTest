@@ -674,7 +674,7 @@ The project deploys as two separate systemd services on Raspberry Pi:
 | `radio-api.service` | 5000 | REST API, SignalR hubs, audio engine, all hardware I/O |
 | `radio-web.service` | 5002 | Blazor Server UI, proxies to API |
 
-Deploy from Windows:
+Deploy from a Windows or Linux dev host (needs PowerShell 7, `pwsh`):
 ```powershell
 ./deploy/Deploy-ToPi.ps1 -PiHost piradio -PiUser pi
 ```

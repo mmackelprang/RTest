@@ -28,7 +28,7 @@ Run in the order the runbook (audit §5) prescribes:
 # 1. Base packages, users, dirs, services, WP 90/41+85/87/89, APT hook, tuning
 sudo deploy/debian-x64/setup.sh
 
-# 2. App binaries (from the Windows dev box)
+# 2. App binaries (from the dev box — Windows or Linux, via pwsh)
 #    ./deploy/Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64
 
 # 3. The platform layer this tree owns — run as the login user (mmack) w/ sudo
