@@ -32,7 +32,13 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   private Connection? _connection;
   private Linux.IObjectManager? _objectManager;
   private Linux.IAdapter1? _adapter;
-  private IDisposable? _discoveryWatcher;
+  // AUD-41: this is the service's ONLY InterfacesAdded subscription — every new Device1,
+  // MediaPlayer1 and MediaTransport1 arrives through it — so it lives for the whole service
+  // lifetime and is disposed only in DisposeAsync. It was named _discoveryWatcher and disposed by
+  // StopDiscoveryAsync, which blinded the service after the first "Stop Scan": a new phone never
+  // entered the device cache (pairing failed "not found") and a reconnect's fresh transport was
+  // never attached, until the service restarted.
+  private IDisposable? _interfacesAddedWatcher;
   private MiniAudioEngine? _captureEngine;
   private Process? _captureProcess;
   // Typed as the interface so AUD-10's re-bind orchestration can be exercised without libpipewire
@@ -681,7 +687,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
       // Watch for new interfaces (device connects/disconnects). Like InterfacesRemoved below, this
       // fires for every adapter's objects; OnInterfaceAdded filters by _adapterPath (AUD-30).
-      _discoveryWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
+      _interfacesAddedWatcher = await _objectManager.WatchInterfacesAddedAsync(OnInterfaceAdded);
 
       // Watch for removed interfaces so devices that BlueZ drops (unpaired, or a
       // discovered-but-unpaired device that ages out of the object tree) are evicted
@@ -767,9 +773,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       IsDiscovering = true;
       _metricsCollector?.Increment("bluetooth.discovery_sessions");
 
-      // InterfacesAdded watcher is already set up in StartAsync — no need to
-      // create a duplicate here (the old one would leak, and both would fire
-      // events causing duplicate DeviceConnected/AttachMediaPlayer calls).
+      // The InterfacesAdded watcher is set up once in StartAsync and lives until DisposeAsync —
+      // StopDiscoveryAsync does NOT dispose it (AUD-41) — so there is nothing to create here, and
+      // creating one would double every DeviceConnected/AttachMediaPlayer.
 
       // Scan for existing players that appeared before discovery started
       await CheckForMediaPlayersAsync();
@@ -790,7 +796,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     {
       await _adapter.StopDiscoveryAsync();
       IsDiscovering = false;
-      _discoveryWatcher?.Dispose();
+      // ⛔ Do not dispose _interfacesAddedWatcher here (AUD-41): it is not a discovery watcher.
     }
     catch (Exception ex)
     {
@@ -2379,6 +2385,14 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// </summary>
   internal void SetSelectedAdapterPathForTests(string? adapterPath) => _adapterPath = adapterPath;
 
+  // AUD-41 seam: stands in for the D-Bus adapter proxy and the InterfacesAdded subscription that
+  // StartAsync would create, so Stop Scan can be driven without a system bus.
+  internal void SetDiscoveryPlumbingForTests(Linux.IAdapter1 adapter, IDisposable interfacesAddedWatcher)
+  {
+    _adapter = adapter;
+    _interfacesAddedWatcher = interfacesAddedWatcher;
+  }
+
   /// <summary>
   /// Test hook: writes a cache entry at an arbitrary path, bypassing the adapter gate. Lets a test
   /// put a foreign-adapter entry where the pre-AUD-30 code would have put one, so the handlers' own
@@ -3371,7 +3385,8 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     _reconnectionLoop = null;
     _playerPropertiesWatcher?.Dispose();
     _transportPropertiesWatcher?.Dispose();
-    _discoveryWatcher?.Dispose();
+    _interfacesAddedWatcher?.Dispose();
+    _interfacesAddedWatcher = null;
     _interfacesRemovedWatcher?.Dispose();
     _interfacesRemovedWatcher = null;
 
