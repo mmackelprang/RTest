@@ -82,7 +82,16 @@
            cap, so a song-change burst surfaces the newest chunk sooner.
            The JS engine restarts its leg from the preserved offset on a
            speed change, so the boost engages/disengages seamlessly. -->
-      <RdsCard StationName="@_radioState.RdsStationName"
+      <!-- The head shows the PI-decoded call sign (RdsStationNameStable, e.g. WKRR), NOT the live
+           PS. Many stations roll their PS through the artist and title ("Rock 92" → "Cars" →
+           "Good" → "Times" …, a new page every ~3 s), and the head is the first thing on screen at
+           the start of every scroll cycle, so the live PS made its first characters flip two or
+           three times per cycle — the owner's 2026-09-28 panel report, decision D-B in
+           HANDOFF-GA-CLOSEOUT.md §4. The rolling pages carry nothing the RadioText does not.
+           Falls back to the live PS only when no call sign decodes (3-letter, international,
+           LPFM). The preset-save seed deliberately never falls back to the PS; the head does,
+           because a rolling name is still better than no name on screen. -->
+      <RdsCard StationName="@(string.IsNullOrEmpty(_radioState.RdsStationNameStable) ? _radioState.RdsStationName : _radioState.RdsStationNameStable)"
                ProgramType="@_radioState.RdsProgramType"
                RadioText="@_rdsBuffer.Text"
                ScrollSpeedPxPerSec="@RdsScrollSpeedPolicy.EffectiveSpeed(_rdsScrollOptions.RtScrollSpeedPxPerSec, _rdsBuffer.Text.Length, _rdsBuffer.MaxChars)"
