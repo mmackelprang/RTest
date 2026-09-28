@@ -25,8 +25,8 @@ public class BufferedSoundGeneratorDiagnosticsTests
 
   private sealed class Harness : BufferedSoundGenerator<float>
   {
-    public Harness(ILogger logger, TimeProvider time)
-      : base(new Mock<AudioEngine>().Object, Stereo48k, logger, timeProvider: time) { }
+    public Harness(ILogger logger, TimeProvider time, Radio.Metrics.IMetricsCollector? metrics = null)
+      : base(new Mock<AudioEngine>().Object, Stereo48k, logger, metricsCollector: metrics, timeProvider: time) { }
 
     public void Render(int samples) => GenerateAudio(new float[samples], Format.Channels);
   }
@@ -140,11 +140,35 @@ public class BufferedSoundGeneratorDiagnosticsTests
 
     _log.DebugEnabled = false;
     _time.Advance(TimeSpan.FromSeconds(10));
-    Assert.DoesNotContain(_log.Entries, e => e.Level == LogLevel.Debug);
+    // Not merely filtered out by the logger: never handed to it. LoggerExtensions.LogDebug calls Log
+    // unconditionally, allocating its params array first, so only the IsEnabled guard prevents that.
+    Assert.Equal(0, _log.DebugLogCalls);
 
     _log.DebugEnabled = true;
     _time.Advance(TimeSpan.FromSeconds(10));
     Assert.Equal(2, _log.Entries.Count(e => e.Level == LogLevel.Debug));
+  }
+
+  [Fact]
+  public void TimingGauges_ReportTheWindow_NotTheResetValue()
+  {
+    // Before LOG-7 the gauges were read after the window had been reset, so max interval and max
+    // execution always reported 0.
+    var metrics = new Mock<Radio.Metrics.IMetricsCollector>();
+    using (var generator = new Harness(_log, _time, metrics.Object))
+    {
+      generator.AddSamples(new float[4096]);
+      generator.Render(512);
+      Thread.SpinWait(1000); // any non-zero gap between the two callbacks
+      generator.Render(512);
+
+      _time.Advance(TimeSpan.FromSeconds(10));
+
+      metrics.Verify(m => m.Gauge("audio.callback.max_interval_ms",
+        It.Is<double>(v => v > 0), It.IsAny<IDictionary<string, string>>()), Times.Once);
+      metrics.Verify(m => m.Gauge("audio.callback.max_execution_ms",
+        It.Is<double>(v => v > 0), It.IsAny<IDictionary<string, string>>()), Times.Once);
+    }
   }
 
   [Fact]
@@ -190,11 +214,14 @@ public class BufferedSoundGeneratorDiagnosticsTests
     private readonly object _sync = new();
     private readonly List<(LogLevel Level, string Template, string Message)> _entries = new();
     private int _logCalls;
+    private int _debugLogCalls;
     private int _isEnabledCalls;
 
     public bool DebugEnabled { get; set; } = true;
 
     public int LogCalls { get { lock (_sync) { return _logCalls; } } }
+
+    public int DebugLogCalls { get { lock (_sync) { return _debugLogCalls; } } }
 
     public int IsEnabledCalls { get { lock (_sync) { return _isEnabledCalls; } } }
 
@@ -205,7 +232,7 @@ public class BufferedSoundGeneratorDiagnosticsTests
 
     public void Clear()
     {
-      lock (_sync) { _entries.Clear(); _logCalls = 0; _isEnabledCalls = 0; }
+      lock (_sync) { _entries.Clear(); _logCalls = 0; _debugLogCalls = 0; _isEnabledCalls = 0; }
     }
 
     public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -225,6 +252,10 @@ public class BufferedSoundGeneratorDiagnosticsTests
       lock (_sync)
       {
         _logCalls++;
+        if (logLevel == LogLevel.Debug)
+        {
+          _debugLogCalls++;
+        }
         if (logLevel != LogLevel.Debug || DebugEnabled)
         {
           _entries.Add((logLevel, template, formatter(state, exception)));
