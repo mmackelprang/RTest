@@ -409,7 +409,8 @@ what makes one visible is stacking order, i.e. whichever browser restarted most 
 **⚠ Since `LOG-11` (2026-09-02), `journalctl -u radio-api` only carries WARNING and above. ⚠ This is
 true of `radio-api` ONLY — read the `radio-web` note below before concluding an `Information` line is
 safe from the journal.** The API's console sink is level-restricted, and under systemd the console *is*
-the journal — so its `Information` lines no longer appear there. They go to the file sink instead. This
+the journal — so its `Information` lines no longer appear there. They go to the file sink instead (except
+the namespaces `LOG-2` holds at Warning — see below). This
 changes how the box gets triaged: a startup sequence you expect to see in `journalctl -u radio-api` will
 look like it never happened.
 
@@ -433,7 +434,7 @@ crash you will see those and nothing from the app. Grep for a substring instead.
 # Warnings and errors — journald
 ssh mmack@radio "journalctl -u radio-api --since '-30min' --no-pager | tail -50"
 
-# Information detail — the file sink, which is where startup/device/source lines now live
+# Information detail — the file sink (minus LOG-2's Warning-held namespaces unless raised; see below)
 ssh mmack@radio 'F=$(ls -t /opt/radio-console/logs/radio-*.txt | head -1); tail -100 $F'
 ```
 
@@ -451,6 +452,19 @@ switch never widens journald; the extra lines go to the file sink. Levels above 
 ⚠ Lowering `Default` below Warning lets request logging write full request paths (which can carry phone
 numbers, `PHN-5`) to the file sink. The DevTray's *Verbose logs* card lowers every `Radio*` switch to
 Debug — never `Default` — and resets them.
+
+⚠ **Since `LOG-2` (2026-09-28), `Radio.Infrastructure.Audio` and `Radio.Infrastructure.Platform.Bluetooth`
+are held at Warning** in the shipped `src/Radio.API/appsettings.json`, so most of their Information lines
+are in **neither** the journal **nor** the file sink by default — including the SDR and BT
+`🔄 Clock drift compensation` lines, `BluetoothAudioSource`'s state lines and the `🔬 PipeWire OnProcess`
+heartbeat. Two carve-outs stay at Information: `...Audio.Services` (source switching, announcements) and
+`...Audio.SoundFlow` (engine and device selection). **Raising `Radio` does not raise these namespaces**
+(a more specific override shadows it) — `PUT` each one, or use the DevTray *Verbose logs* card.
+**They are switched off, not deleted:** `scripts/research/bt_drift_analyze.py` / `bt_stall_detect.py`
+read the **file sink** (they could not parse it before `LOG-2`; journald has had no Information since
+`LOG-11`) and `bt_stall_detect.py` needs **both** namespaces raised. (Deliberately not in
+`deploy/*/appsettings.Production.json`: that overlay is seed-only — `Deploy-ToLinux.ps1` leaves an
+installed copy alone — so a change there never reaches the box.)
 
 ```bash
 curl -s http://radio:5000/api/system/logging/levels                       # every switch, current + configured

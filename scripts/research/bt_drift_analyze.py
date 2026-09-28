@@ -24,8 +24,17 @@ is `sample_rate_hz * channels`. The net buffer deficit rate is
 `deficit_per_sec / effective_sample_rate * 1e6`.
 
 Usage:
-  journalctl -u radio-api --since "1 hour ago" | python3 bt_drift_analyze.py
+  python3 bt_drift_analyze.py --input /opt/radio-console/logs/radio-YYYYMMDD.txt
   python3 bt_drift_analyze.py --input radio_journal.log --sample-rate 48000 --channels 2
+
+⚠ Read the FILE SINK, not journald. Since LOG-11 (2026-09-02) radio-api's journal carries Warning
+and above only, so the Information compensation line is never there; the Warning underrun line is.
+⚠ Since LOG-2 (2026-09-28) the generators' owning namespaces are held at Warning, so the
+compensation line is not in the file either until you raise them at runtime (LOG-5), e.g.:
+  curl -X PUT http://radio:5000/api/system/logging/levels/Radio.Infrastructure.Audio \
+       -H 'Content-Type: application/json' -d '{"level":"Information"}'
+  (and .../Radio.Infrastructure.Platform.Bluetooth for the BT generator), then POST .../reset.
+Note the BT generator only compensates when the input resampler is OFF (Path D default is on).
 """
 
 from __future__ import annotations
@@ -37,7 +46,7 @@ from datetime import datetime
 
 # journalctl --output=short-iso prefix: "2026-05-22T12:34:56+0000"
 ISO_TS_RE = re.compile(
-    r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:?\d{2}|Z)?)"
+    r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?: ?(?:[+-]\d{2}:?\d{2}|Z))?)"
 )
 
 # "Buffer underrun (Single): 5 underruns, 2048 zero samples in last 4.8s ... total underruns: 82)"
@@ -65,7 +74,11 @@ def parse_ts(line: str):
   m = ISO_TS_RE.search(line)
   if not m:
     return None
-  raw = m.group(1).replace("Z", "+00:00")
+  # LOG-2: also accept radio-api's file sink ("2026-09-27 12:34:56.789 -05:00"): drop the space
+  # before the offset so fromisoformat takes it, and normalise "+0000" to "+00:00".
+  raw = re.sub(r" (?=[+-]\d{2}:?\d{2}$|Z$)", "", m.group(1)).replace("Z", "+00:00")
+  if re.search(r"[+-]\d{4}$", raw):
+    raw = raw[:-2] + ":" + raw[-2:]
   try:
     return datetime.fromisoformat(raw)
   except ValueError:
@@ -127,7 +140,7 @@ def main() -> int:
     src.close()
 
   if first_ts is None or last_ts is None or first_ts == last_ts:
-    print("ERROR: no parseable timestamps in input (use journalctl --output=short-iso)",
+    print("ERROR: no parseable timestamps in input (file sink, or journalctl --output=short-iso)",
           file=sys.stderr)
     return 1
 

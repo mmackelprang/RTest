@@ -10,8 +10,16 @@ Output (stdout, one event per line, tab-separated):
   start_ts<TAB>end_ts<TAB>gap_seconds
 
 Notes:
+  - ⚠ Read the FILE SINK (/opt/radio-console/logs/radio-YYYYMMDD.txt), not journald: since LOG-11
+    radio-api's journal is Warning+ and both lines this script needs are Information. Since LOG-2
+    both namespaces are held at Warning even in the file, so raise BOTH at runtime (LOG-5) first —
+    Radio.Infrastructure.Audio (the BluetoothAudioSource state lines) and
+    Radio.Infrastructure.Platform.Bluetooth (the OnProcess heartbeat) — and reset afterwards:
+      for ns in Radio.Infrastructure.Audio Radio.Infrastructure.Platform.Bluetooth; do
+        curl -X PUT http://radio:5000/api/system/logging/levels/$ns \
+             -H 'Content-Type: application/json' -d '{"level":"Information"}'; done
   - The OnProcess log line is emitted every ~10s when capture is healthy (see
-    PipeWireNativeStream.cs OnProcess stat logging window).
+    OnProcessStatsWindow / PipeWireNativeStream).
   - Default --window is 60s, which catches single-emission misses while
     tolerating brief transient gaps; tune to the source data.
   - Timestamps are taken from the journalctl line prefix; use
@@ -29,7 +37,7 @@ import sys
 from datetime import datetime, timezone
 
 # journalctl --output=short-iso prefix: "2026-05-22T12:34:56+0000"
-ISO_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[+-]\d{2}:?\d{2}|Z)?)")
+ISO_TS_RE = re.compile(r"(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?: ?(?:[+-]\d{2}:?\d{2}|Z))?)")
 ON_PROCESS_RE = re.compile(r"PipeWire OnProcess", re.IGNORECASE)
 BT_PLAYING_RE = re.compile(r"BluetoothAudioSource.*(state\s*==\s*Playing|state\s*=\s*Playing|"
                            r"capture (bridge|generator|stream).*(active|acquired|added))",
@@ -40,7 +48,8 @@ def parse_ts(line: str):
   m = ISO_TS_RE.search(line)
   if not m:
     return None
-  s = m.group(1)
+  # LOG-2: also accept radio-api's file sink ("2026-09-27 12:34:56.789 -05:00").
+  s = re.sub(r" (?=[+-]\d{2}:?\d{2}$|Z$)", "", m.group(1))
   if s.endswith("Z"):
     s = s[:-1] + "+00:00"
   # Normalize "+0000" → "+00:00" for fromisoformat
@@ -65,10 +74,12 @@ def main() -> int:
   bt_active: bool = False
   events = []
 
+  parsed = 0
   for line in sys.stdin:
     ts = parse_ts(line)
     if ts is None:
       continue
+    parsed += 1
     if BT_PLAYING_RE.search(line):
       bt_active = True
     if "BluetoothAudioSource" in line and "Stopped" in line:
@@ -81,6 +92,13 @@ def main() -> int:
         if gap >= args.window:
           events.append((last_on_process, ts, gap))
       last_on_process = ts
+
+  if parsed == 0:
+    # Without this, input the parser cannot read printed nothing and exited 0 — indistinguishable
+    # from "no stalls".
+    print("ERROR: no parseable timestamps in input (file sink, or journalctl --output=short-iso)",
+          file=sys.stderr)
+    return 2
 
   for start, end, gap in events:
     sys.stdout.write(
