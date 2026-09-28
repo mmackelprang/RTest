@@ -1539,6 +1539,16 @@
                         </span>
                       </div>
                     </RadzenColumn>
+                    <RadzenColumn Size="12">
+                      @* ENC-19: does the firmware process host writes at all (RotaryUsb #11)? *@
+                      <div style="display:flex; flex-direction:row; gap:8px; align-items:center">
+                        <span><strong>Firmware:</strong></span>
+                        <span class="encoder-firmware-check"
+                              style="color:@EncoderFaultRules.FirmwareCheckColor(_encoderProvisioning.FirmwareCheck)">
+                          @EncoderFaultRules.FirmwareCheckText(_encoderProvisioning.FirmwareCheck)
+                        </span>
+                      </div>
+                    </RadzenColumn>
                   }
                 </RadzenRow>
               }

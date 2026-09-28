@@ -105,4 +105,11 @@ public class EncoderConfigStatusEventArgs : EventArgs
 
   /// <summary>The tier it was in immediately before. Never equal to <see cref="Status"/>.</summary>
   public RotaryEncoderConfigStatus PreviousStatus { get; init; }
+
+  /// <summary>
+  /// The firmware output-report check (<c>ENC-19</c>) as it stood when the tier changed. Carried on
+  /// this event so the fault surfacing <c>ENC-12</c> already drives can say <i>why</i> a hard fault
+  /// happened when the reason is old firmware, rather than opening a second channel for it.
+  /// </summary>
+  public RotaryEncoderFirmwareCheck FirmwareCheck { get; init; }
 }

@@ -72,4 +72,54 @@ public class EncoderFaultRulesTests
   {
     Assert.Equal("link_off", EncoderFaultRules.BadgeIcon("HardFault", isConnected: false));
   }
+
+  // --- ENC-19: the firmware verdict names the cause of a hard fault --------------------------------
+
+  [Fact]
+  public void AFirmwareHardFault_NamesTheReflash_AndKeepsTheVolumePromise()
+  {
+    var copy = EncoderFaultRules.NotificationCopy("HardFault", isConnected: true, firmwareCheck: "Failed");
+
+    Assert.NotNull(copy);
+    Assert.Contains("firmware", copy!.Value.Summary);
+    Assert.Contains("re-flashing", copy.Value.Detail);
+    // The hard-fault line's promise, unchanged: VolumeClampFor(HardFault) still tightens the clamp.
+    Assert.Contains("Volume is limited", copy.Value.Detail);
+  }
+
+  [Theory]
+  [InlineData(null)]
+  [InlineData("NotRun")]
+  [InlineData("Passed")]
+  [InlineData("SomethingNewer")]
+  public void AHardFaultWithoutAFailedFirmwareCheck_KeepsTheEnc12Copy(string? firmwareCheck)
+  {
+    Assert.Equal(
+      EncoderFaultRules.NotificationCopy("HardFault", isConnected: true),
+      EncoderFaultRules.NotificationCopy("HardFault", isConnected: true, firmwareCheck));
+  }
+
+  [Fact]
+  public void AFailedFirmwareCheck_DoesNotRaiseALevelTheTierDidNot()
+  {
+    // The verdict changes words, never severity: the level is the tier's alone.
+    Assert.Null(EncoderFaultRules.NotificationCopy("Configured", isConnected: true, firmwareCheck: "Failed"));
+    Assert.Equal(EncoderFaultLevel.None, EncoderFaultRules.Level("Configured", true));
+  }
+
+  [Fact]
+  public void AFirmwareHardFault_AriaLabelSaysReflash()
+  {
+    Assert.Contains("re-flashing", EncoderFaultRules.NavPillAriaLabel("HardFault", true, firmwareCheck: "Failed"));
+  }
+
+  [Theory]
+  [InlineData("Passed", "processes settings")]
+  [InlineData("Failed", "re-flash")]
+  [InlineData("NotRun", "not checked")]
+  [InlineData(null, "not checked")]
+  public void TheSettingsLine_SaysWhatTheCheckFound(string? firmwareCheck, string expected)
+  {
+    Assert.Contains(expected, EncoderFaultRules.FirmwareCheckText(firmwareCheck));
+  }
 }

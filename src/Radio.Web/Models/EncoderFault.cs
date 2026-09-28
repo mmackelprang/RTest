@@ -35,6 +35,28 @@ public enum EncoderFaultLevel
 /// </summary>
 public static class EncoderFaultRules
 {
+  /// <summary>The serialized <c>RotaryEncoderFirmwareCheck.Failed</c> (ENC-19).</summary>
+  public const string FirmwareCheckFailed = "Failed";
+
+  /// <summary>
+  /// The Settings page's one-line firmware verdict (ENC-19). Words rather than a glyph alone, for the
+  /// reason <see cref="NavPillAriaLabel"/> gives.
+  /// </summary>
+  public static string FirmwareCheckText(string? firmwareCheck) => firmwareCheck switch
+  {
+    "Passed" => "processes settings ✓",
+    FirmwareCheckFailed => "ignoring settings — re-flash with RotaryUsb #11 ⚠",
+    _ => "not checked yet",
+  };
+
+  /// <summary>Colour token for <see cref="FirmwareCheckText"/>.</summary>
+  public static string FirmwareCheckColor(string? firmwareCheck) => firmwareCheck switch
+  {
+    "Passed" => "var(--signal-green)",
+    FirmwareCheckFailed => "var(--signal-red)",
+    _ => "var(--text-low)",
+  };
+
   /// <summary>
   /// How severe the current hardware state is.
   ///
@@ -125,9 +147,12 @@ public static class EncoderFaultRules
   /// perceives neither.
   /// </para>
   /// </summary>
-  public static string NavPillAriaLabel(string? status, bool? isConnected, bool encoderEnabled = true) =>
+  public static string NavPillAriaLabel(
+    string? status, bool? isConnected, bool encoderEnabled = true, string? firmwareCheck = null) =>
     Level(status, isConnected, encoderEnabled) switch
     {
+      EncoderFaultLevel.Critical when firmwareCheck == FirmwareCheckFailed =>
+        "Settings — knob firmware needs re-flashing, volume limited",
       EncoderFaultLevel.Critical => "Settings — knob safety settings not applied, volume limited",
       EncoderFaultLevel.Warning when isConnected == false => "Settings — knobs not connected",
       EncoderFaultLevel.Warning => "Settings — knob settings not applied",
@@ -156,11 +181,21 @@ public static class EncoderFaultRules
   /// <b>Do not soften either one.</b>
   /// </para>
   /// </summary>
-  public static (string Summary, string Detail)? NotificationCopy(string? status, bool? isConnected)
+  public static (string Summary, string Detail)? NotificationCopy(
+    string? status, bool? isConnected, string? firmwareCheck = null)
   {
     if (isConnected == false)
     {
       return ("Knobs disconnected", "Touch controls still work.");
+    }
+
+    // ENC-19. The same hard fault, with its cause named: the firmware accepts host writes and ignores
+    // them, so no amount of waiting or Re-apply will fix it — it needs re-flashing. The volume half
+    // is the hard-fault line's promise, unchanged, and still true: VolumeClampFor(HardFault) is 2.
+    if (status == "HardFault" && firmwareCheck == FirmwareCheckFailed)
+    {
+      return ("Knob firmware is ignoring its settings",
+              "Volume is limited. The knob controller needs re-flashing with a RotaryUsb build that includes #11.");
     }
 
     return status switch

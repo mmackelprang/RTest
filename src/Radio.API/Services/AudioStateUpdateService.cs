@@ -1077,6 +1077,10 @@ public class AudioStateUpdateService : BackgroundService
       {
         Status = e.Status.ToString(),
         PreviousStatus = e.PreviousStatus.ToString(),
+        // ENC-19. Rides on the tier change rather than a broadcast of its own: a failed firmware check
+        // always ends in HardFault (the push that follows cannot verify either), so this is the
+        // transition that needs to say why.
+        FirmwareCheck = e.FirmwareCheck.ToString(),
       });
       // Information, where the adjacent connection broadcast logs at Debug, and that asymmetry is
       // deliberate. The tier changes a handful of times per connection rather than continuously, so
