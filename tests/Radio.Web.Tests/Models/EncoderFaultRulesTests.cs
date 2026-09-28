@@ -99,12 +99,16 @@ public class EncoderFaultRulesTests
       EncoderFaultRules.NotificationCopy("HardFault", isConnected: true, firmwareCheck));
   }
 
-  [Fact]
-  public void AFailedFirmwareCheck_DoesNotRaiseALevelTheTierDidNot()
+  [Theory]
+  [InlineData("Configured")]
+  [InlineData("Transient")]
+  [InlineData("Unknown")]
+  public void AFailedFirmwareCheck_DoesNotRaiseANotificationTheTierDidNot(string status)
   {
-    // The verdict changes words, never severity: the level is the tier's alone.
-    Assert.Null(EncoderFaultRules.NotificationCopy("Configured", isConnected: true, firmwareCheck: "Failed"));
-    Assert.Equal(EncoderFaultLevel.None, EncoderFaultRules.Level("Configured", true));
+    // The verdict changes words, never severity: a tier that says nothing still says nothing.
+    Assert.Null(EncoderFaultRules.NotificationCopy(status, isConnected: true, firmwareCheck: "Failed"));
+    Assert.Null(new Radio.Web.Services.EncoderFaultAnnouncer()
+      .Evaluate(status, isConnected: true, wasEverConnected: true, firmwareCheck: "Failed"));
   }
 
   [Fact]

@@ -36,15 +36,31 @@ public class RotaryEncoderFirmwareCheckTests
   private sealed class ScriptedDevice(HidRotaryEncoderService service, params Answer[] script) : Stream
   {
     private int _requests;
+    private byte[]? _pushed;
     public int ReadConfigRequests => _requests;
+
+    /// <summary>The order the device saw requests in: "read" for a read-config, "push" for a config write.</summary>
+    public List<string> Sequence { get; } = [];
 
     public override void Write(byte[] buffer, int offset, int count)
     {
+      byte[] data = buffer.AsSpan(offset, count).ToArray();
       byte[] readConfig = RotaryEncoderConfigCodec.EncodeCommand(RotaryEncoderCommand.ReadConfig);
-      if (!buffer.AsSpan(offset, count).SequenceEqual(readConfig))
+      if (data.Length > 0 && data[0] == 0x02)
+      {
+        // A configuration push. Remembered so a working device can read it back, as the real
+        // firmware (and the ENC-17 harness) does.
+        Sequence.Add("push");
+        _pushed = data;
+        return;
+      }
+
+      if (!data.AsSpan().SequenceEqual(readConfig))
       {
         return;
       }
+
+      Sequence.Add("read");
 
       Answer answer = _requests < script.Length ? script[_requests] : Answer.Nothing;
       _requests++;
@@ -52,7 +68,7 @@ public class RotaryEncoderFirmwareCheckTests
       switch (answer)
       {
         case Answer.FullConfigReport:
-          byte[] full = RotaryEncoderConfigCodec.Encode(RotaryEncoderConfigDefaults.Create());
+          byte[] full = _pushed ?? RotaryEncoderConfigCodec.Encode(RotaryEncoderConfigDefaults.Create());
           Assert.Equal(107, full.Length);
           service.TryClaimConfigReadBack(full, full.Length);
           break;
@@ -214,5 +230,52 @@ public class RotaryEncoderFirmwareCheckTests
     await service.CheckFirmwareAsync(new ScriptedDevice(service), CancellationToken.None);
 
     Assert.Equal(RotaryEncoderFirmwareCheck.Failed, service.GetSnapshot().FirmwareCheck);
+  }
+
+  [Fact]
+  public async Task APassFromThePreviousConnection_DoesNotSurviveIntoTheNextCheck()
+  {
+    // Pre-merge review M1. A device that resets and re-enumerates inside one rescan is reopened with no
+    // disconnect edge, so the reset in RaiseConnectionChanged never runs. If it came back on pre-#11
+    // firmware, the old Passed must not answer for it.
+    using var service = BuildService();
+    await service.CheckFirmwareAsync(new ScriptedDevice(service, Answer.FullConfigReport), CancellationToken.None);
+    Assert.Equal(RotaryEncoderFirmwareCheck.Passed, service.FirmwareCheck);
+
+    RotaryEncoderFirmwareCheck result = await service.CheckFirmwareAsync(new ScriptedDevice(service), CancellationToken.None);
+
+    Assert.Equal(RotaryEncoderFirmwareCheck.Failed, result);
+  }
+
+  [Fact]
+  public async Task TheBootPush_RunsTheCheckFirst_AndAFailedCheckEndsInAHardFaultThatCarriesIt()
+  {
+    // The wiring, end to end through the boot path: the check's read-config precedes the first push,
+    // and pre-#11 firmware (answers nothing) lands on HardFault with the verdict on that transition.
+    using var service = BuildService();
+    var seen = new List<EncoderConfigStatusEventArgs>();
+    service.ConfigStatusChanged += (_, e) => seen.Add(e);
+    var device = new ScriptedDevice(service);
+
+    await service.RunBootConfigurationPushAsync(device, CancellationToken.None);
+
+    Assert.Equal(["read", "read", "read", "push"], device.Sequence.Take(4));
+    Assert.Equal(RotaryEncoderConfigStatus.HardFault, service.ConfigStatus);
+    EncoderConfigStatusEventArgs hardFault = Assert.Single(seen, e => e.Status == RotaryEncoderConfigStatus.HardFault);
+    Assert.Equal(RotaryEncoderFirmwareCheck.Failed, hardFault.FirmwareCheck);
+  }
+
+  [Fact]
+  public async Task TheBootPush_OnWorkingFirmware_PassesTheCheckAndConfigures()
+  {
+    using var service = BuildService();
+    var device = new ScriptedDevice(service,
+      Answer.FullConfigReport, Answer.FullConfigReport, Answer.FullConfigReport, Answer.FullConfigReport);
+
+    await service.RunBootConfigurationPushAsync(device, CancellationToken.None);
+
+    Assert.Equal("read", device.Sequence[0]);
+    Assert.Equal(RotaryEncoderFirmwareCheck.Passed, service.FirmwareCheck);
+    Assert.Equal(RotaryEncoderConfigStatus.Configured, service.ConfigStatus);
   }
 }

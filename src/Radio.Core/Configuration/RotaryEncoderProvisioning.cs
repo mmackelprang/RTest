@@ -74,8 +74,9 @@ public enum RotaryEncoderFirmwareCheck
   Passed = 1,
 
   /// <summary>
-  /// The device stayed connected but never answered a read-config request across the check's retry
-  /// budget: it is accepting host writes and ignoring them — the pre-RotaryUsb #11 defect.
+  /// The device never answered a read-config request across the check's retry budget, with no write
+  /// failing along the way: read as accepting host writes and ignoring them — the pre-RotaryUsb #11
+  /// defect.
   /// </summary>
   Failed = 2,
 }

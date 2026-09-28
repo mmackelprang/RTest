@@ -252,11 +252,17 @@ acceleration at ×50. Record: [`design/research/ENC-11-firmware-drops-output-rep
 retry budget). The outcome is in `GET /api/integrations/encoder/provisioning` as `firmwareCheck`
 (`NotRun` / `Passed` / `Failed`) and on **System Config → Integrations → Rotary Encoders** as a
 *Firmware:* line. A failure is surfaced through the hard-fault path above, not a channel of its own: the
-push that follows cannot verify either, so the tier is `HardFault`, and the badge's accessible name and
-the toast name the cause — *"Knob firmware is ignoring its settings — Volume is limited. The knob
+push that follows cannot verify either, so the tier normally lands on `HardFault`, and the badge's
+accessible name and the toast name the cause — *"Knob firmware is ignoring its settings — Volume is limited. The knob
 controller needs re-flashing with a RotaryUsb build that includes #11."* It is also logged at **Error**,
 so it reaches `journalctl -u radio-api` (the file sink has the `Passed` line at Information). Any later
 read-back — a successful Re-apply — turns it back to `Passed`.
+
+⚠ Two limits, both from riding on `ENC-12` rather than adding a channel. **The toast is subject to
+`ENC-12`'s latch**: if a hard-fault toast already fired in that browser session, a firmware hard fault
+raises no second one, and only the badge's accessible name and the Settings page carry the cause. And
+**the kiosk learns the verdict only on a tier change**, so a verdict that flips without one can leave the
+badge's wording stale until the next change; the Settings page reads the snapshot and is always current.
 
 **By hand, after a flash**, if the console is not running (the command the fix was verified with):
 
