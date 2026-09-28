@@ -1,5 +1,7 @@
 # HANDOFF — Start here
 
+> ⏸⏸ **PAUSED 2026-09-28 ~17:00 EDT for owner testing. Start with [`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md)** — box and `main` at `30e69df`; phases 0, 1, 2a, 2b, 2d, 2e, 2g done; **2f is next** per [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md). Linux build baseline is now **32/0**.
+>
 > ⭐⭐ **2026-09-28 — THE SEQUENCING AUTHORITY IS NOW [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md), owner-approved.**
 > P0 is closed (every `PHN` PR archived; §9 re-tallied). It orders what is left — Phase 0 record fixes (this
 > commit), a box-check afternoon with RDS first, then deploy safety (`OPS-13`+`OPS-12`) as the install gate, then
