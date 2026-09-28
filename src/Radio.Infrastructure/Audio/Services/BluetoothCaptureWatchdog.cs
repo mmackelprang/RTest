@@ -17,6 +17,11 @@ namespace Radio.Infrastructure.Audio.Services;
 /// raises <c>CaptureStreamStalled</c> on the Bluetooth service so the existing
 /// recovery interlock in <c>BluetoothAudioSource</c> can dedup with downstream
 /// generator-stall recovery.
+/// <para>
+/// LOG-6: every tick also asks the active stream to write its OnProcess statistics
+/// (<see cref="ICaptureStreamSnapshotSource.EmitCaptureStreamDiagnostics"/>), which is how that
+/// line left the audio callback.
+/// </para>
 /// </summary>
 /// <remarks>
 /// Depends on <see cref="ICaptureStreamSnapshotSource"/>, which on Linux is
@@ -42,6 +47,7 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
   private readonly IOptionsMonitor<BluetoothOptions> _options;
   private readonly ICaptureStreamSnapshotSource _snapshotSource;
   private int _consecutiveStalledChecks;
+  private int _diagnosticsFailures;
 
   public BluetoothCaptureWatchdog(
     ILogger<BluetoothCaptureWatchdog> logger,
@@ -80,6 +86,27 @@ internal sealed class BluetoothCaptureWatchdog : BackgroundService
     {
       var opts = _options.CurrentValue;
       var tickMs = Math.Max(10, opts.WatchdogTickIntervalMs);
+
+      // LOG-6: the capture stream's OnProcess statistics are written from here, not from the audio
+      // callback. Before the stall check (so a disabled stall threshold does not silence them), and
+      // isolated so a logging failure can never cost a stall check.
+      try
+      {
+        _snapshotSource.EmitCaptureStreamDiagnostics();
+      }
+      catch (Exception ex)
+      {
+        // First failure at Warning (journald), repeats at Debug: a persistently failing emit would
+        // otherwise put a Warning in the journal every tick.
+        if (++_diagnosticsFailures == 1)
+        {
+          _logger.LogWarning(ex, "BluetoothCaptureWatchdog: capture stream diagnostics failed (further failures at Debug)");
+        }
+        else
+        {
+          _logger.LogDebug(ex, "BluetoothCaptureWatchdog: capture stream diagnostics failed ({Failures} so far)", _diagnosticsFailures);
+        }
+      }
 
       try
       {

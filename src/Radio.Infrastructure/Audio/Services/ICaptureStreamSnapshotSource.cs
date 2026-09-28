@@ -25,6 +25,12 @@ internal interface ICaptureStreamSnapshotSource
   /// checks). Raises the BT service's <c>CaptureStreamStalled</c> event.
   /// </summary>
   void RaiseCaptureStreamStalled(string address, long elapsedMs, int consecutiveChecks);
+
+  /// <summary>
+  /// LOG-6: asks the active native capture stream, if any, to write its periodic diagnostics. The
+  /// watchdog calls this every tick so the capture callback itself never has to log.
+  /// </summary>
+  void EmitCaptureStreamDiagnostics();
 }
 
 /// <summary>
@@ -43,5 +49,10 @@ internal sealed class NullCaptureStreamSnapshotSource : ICaptureStreamSnapshotSo
   public void RaiseCaptureStreamStalled(string address, long elapsedMs, int consecutiveChecks)
   {
     // No-op: there is no underlying BT service to raise on this platform.
+  }
+
+  public void EmitCaptureStreamDiagnostics()
+  {
+    // No-op: there is no native capture stream on this platform.
   }
 }

@@ -331,6 +331,16 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
     });
   }
 
+  /// <summary>
+  /// LOG-6: forwards the watchdog's tick to the active native capture stream so it can write its
+  /// OnProcess statistics off the audio thread. No stream (parked, stopped, pw-record fallback) means
+  /// nothing to write. Implements <see cref="ICaptureStreamSnapshotSource"/>.
+  /// </summary>
+  public void EmitCaptureStreamDiagnostics()
+  {
+    _nativeStream?.EmitDiagnostics(System.Diagnostics.Stopwatch.GetTimestamp());
+  }
+
   private async Task MonitorBtPipelineAsync(CancellationToken cancellationToken)
   {
     _logger.LogInformation("BT pipeline monitor started (interval: 30s)");

@@ -317,6 +317,8 @@ public class AdapterScopingTests
     public bool Disposed;
     public void Start() { }
     public long MillisecondsSinceLastOnProcess() => 0;
+
+    public void EmitDiagnostics(long nowTimestamp) { }
     public void Dispose() => Disposed = true;
   }
 
