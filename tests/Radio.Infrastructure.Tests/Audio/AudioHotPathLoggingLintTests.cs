@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 namespace Radio.Infrastructure.Tests.Audio;
 
 /// <summary>
-/// LOG-6: the audio-thread bodies listed here must not log, write to the console, read the wall clock,
+/// LOG-6 / LOG-7: the audio-thread bodies listed here must not log, write to the console, read the wall clock,
 /// format messages, or call the diagnostics emitters. Logging from them moved to timers (the BT capture
 /// watchdog for OnProcess). Entries marked lock-free must also not take a lock.
 /// </summary>
@@ -16,7 +16,9 @@ namespace Radio.Infrastructure.Tests.Audio;
 /// <para>
 /// ⚠ What it cannot see: calls <em>out</em> of these bodies. OnProcess calls
 /// <c>BufferedSoundGenerator.AddSamples</c> (which takes the ring-buffer lock) and
-/// <c>SrcVariableResampler.Process</c> (which logs on error, <c>LOG-8</c>); neither is listed yet. That
+/// <c>SrcVariableResampler.Process</c> (which logs on error, <c>LOG-8</c>); neither is listed yet.
+/// <c>GenerateAudio</c> calls <c>IMetricsCollector.Increment</c>, which in production allocates, reads
+/// the clock and locks — a lint on the caller's body cannot see into it. That
 /// gap is one reason <c>LOG-10</c> (SCHED_FIFO, punch-list O4) is still blocked after LOG-6.
 /// </para>
 /// </remarks>
@@ -29,6 +31,11 @@ public class AudioHotPathLoggingLintTests
     { "src/Radio.Infrastructure/Platform/Bluetooth/Native/OnProcessStatsWindow.cs", "public void RecordCallback(double intervalMs)", false },
     { "src/Radio.Infrastructure/Platform/Bluetooth/Native/OnProcessStatsWindow.cs", "public void RecordExecution(double executionMs)", false },
     { "src/Radio.Infrastructure/Platform/Bluetooth/Native/OnProcessStatsWindow.cs", "public void RecordRealtimeResult(bool applied, int errno, int priority)", false },
+    // LOG-7: the SoundFlow render callback and the per-buffer drift hook it calls. Both keep the ring
+    // buffer's own lock (that is the data structure, not diagnostics).
+    { "src/Radio.Infrastructure/Audio/SoundFlow/BufferedSoundGenerator.cs", "protected override void GenerateAudio(Span<float> buffer, int channels)", true },
+    { "src/Radio.Infrastructure/Audio/SoundFlow/BufferedSoundGenerator.cs", "private void CompensateClockDrift(int channels)", true },
+    { "src/Radio.Infrastructure/Audio/SoundFlow/BufferedSoundGenerator.cs", "private void ApplyCrossfadeFloat(int startPos, int rampLength)", true },
   };
 
   // A logger call, a Serilog static, console/debug/trace output, message formatting, a wall-clock or
@@ -53,7 +60,7 @@ public class AudioHotPathLoggingLintTests
       .ToList();
 
     Assert.True(offenders.Count == 0,
-      $"{signature} in {relativePath} must not log or read the wall clock (LOG-6, O4):\n  " +
+      $"{signature} in {relativePath} must not log or read the wall clock (LOG-6/7, O4):\n  " +
       string.Join("\n  ", offenders.Select(l => l.Trim())));
   }
 

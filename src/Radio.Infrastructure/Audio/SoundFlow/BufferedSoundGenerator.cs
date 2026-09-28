@@ -57,13 +57,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _underrunCount;
     private long _lastReportedDropped;
     private long _lastReportedUnderruns;
-    private DateTime _lastLogTime = DateTime.MinValue;
-    private DateTime _lastUnderrunLogTime;
+    // LOG-7: window counters bumped by the render callback (Interlocked — no lock, no allocation) and
+    // drained by the diagnostics timer (Interlocked.Exchange). See EmitDiagnostics.
     private long _underrunSamplesSinceLastLog;
     private int _underrunCountSinceLastLog;
-    private DateTime _lastCompensationLogTime;
     private long _compensationSamplesSinceLastLog;
     private int _compensationCountSinceLastLog;
+    // The most recent compensation's buffer levels, for the emitted line. Plain writes by the callback;
+    // the timer may pair one event's level with an adjacent event's new level. Diagnostic only.
+    private int _lastCompensationLevel;
+    private int _lastCompensationNewLevel;
 
     // Buffer level tracking between log intervals
     private int _minBufferSinceLastLog = int.MaxValue;
@@ -82,8 +85,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private long _generateAudioContentionCount;
     private double _maxGenerateAudioLockWaitMs;
 
-    // GC pause correlation — counts are sampled in LogStats (every 10s) and cached
-    // via Volatile so the audio callback avoids GC.CollectionCount() syscalls.
+    // GC pause correlation — counts are sampled by the diagnostics timer every 10 s (LOG-7; previously
+    // from the callback) and cached via Volatile so the audio callback never calls GC.CollectionCount().
     private int _cachedGen0Count;
     private int _cachedGen1Count;
     private int _cachedGen2Count;
@@ -92,15 +95,21 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private int _prevGen2Count;
     private long _gcCorrelatedMissedDeadlines;
 
-    // Throttle per-miss logging to avoid overwhelming journald
-    // (high-frequency LogWarning calls cause journald CPU spike → memory pressure → more GC → feedback loop)
-    private long _lastMissedDeadlineLogTicks;
+    // The most recent GC-correlated missed deadline, recorded by the callback for the timer to report
+    // (throttled to one Warning per 5 s: high-frequency warnings cause a journald CPU spike → memory
+    // pressure → more GC → feedback loop). The four fields are written together by one thread and read
+    // together by another without a lock, so a line can pair one miss's interval with an adjacent
+    // miss's GC deltas. Diagnostic only; accepted.
+    private double _lastGcMissIntervalMs;
+    private int _lastGcMissGen0Delta;
+    private int _lastGcMissGen1Delta;
+    private int _lastGcMissGen2Delta;
 
     // Tracking for delta-based metrics reporting
     private long _lastReportedMissedDeadlines;
     private long _lastReportedGcCorrelatedMisses;
 
-    // Pre-allocated metrics tags to avoid Dictionary allocation in LogStats
+    // Pre-allocated metrics tags to avoid Dictionary allocation in EmitDiagnostics
     private readonly Dictionary<string, string>? _metricsTags;
 
     // Unique identity for lifecycle tracking across mixer add/remove/dispose
@@ -126,7 +135,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     private const float DriftCompensationTargetPercent = 0.25f;
     private readonly int _driftCompensationThreshold; // samples
     private readonly int _driftCompensationTarget;     // samples
-    private DateTime _lastDriftCheckTime;
+    private bool _driftCheckInitialized;
     private int _lastDriftCheckLevel;
     private int _driftCheckCount;
 
@@ -156,6 +165,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// preserves the pre-existing behaviour for all other generators (USB,
     /// file, SDR, etc.).
     /// </param>
+    /// <param name="timeProvider">
+    /// Clock for the diagnostics timer (LOG-7). Defaults to <see cref="TimeProvider.System"/>; tests pass
+    /// a fake so every emission is driven, not waited for.
+    /// </param>
     public BufferedSoundGenerator(
         AudioEngine engine,
         AudioFormat format,
@@ -163,7 +176,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         float maxBufferSeconds = 4.0f,
         BufferOverflowStrategy overflowStrategy = BufferOverflowStrategy.DropOldest,
         IMetricsCollector? metricsCollector = null,
-        bool disableDriftCompensation = false)
+        bool disableDriftCompensation = false,
+        TimeProvider? timeProvider = null)
         : base(engine, format)
     {
         GeneratorId = Interlocked.Increment(ref _nextGeneratorId);
@@ -192,6 +206,299 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             "BufferedSoundGenerator #{GeneratorId} created: Type={Type}, OutputSampleRate={SampleRate}Hz, OutputChannels={Channels}, MaxBufferSamples={MaxBuffer}, Strategy={Strategy}, DriftCompensation={Drift}",
             GeneratorId, typeof(T).Name, format.SampleRate, format.Channels, _maxBufferSamples, _overflowStrategy,
             _disableDriftCompensation ? "disabled" : "enabled");
+
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _diagnosticsTicker = DiagnosticsTicker.Start(this, _timeProvider);
+    }
+
+    // ── LOG-7: diagnostics off the render callback ──────────────────────────────────────────────────
+    //
+    // GenerateAudio runs on the audio render thread. It used to log from there: a 1 Hz underrun
+    // Warning, a 5 s compensation Information, a 10 s pair of Debug stats lines whose 12- and 10-argument
+    // params arrays were allocated even when Debug was off, a 5 s missed-deadline Warning — plus a
+    // DateTime.UtcNow read per callback and a lock every 10 s to read the buffer level. All of it now
+    // happens on a 1 s timer (EmitDiagnostics); the callback only counts. Same message templates; the
+    // cadences are the same to within one tick, and a line now lands up to 1 s after its event.
+    //
+    // The timer holds the generator WEAKLY (DiagnosticsTicker), so a generator that is never disposed
+    // is still collectable and its timer stops — a strongly-held timer would root it forever.
+
+    /// <summary>Tick period of the diagnostics timer.</summary>
+    internal static readonly TimeSpan DiagnosticsTickInterval = TimeSpan.FromSeconds(1);
+
+    private static readonly TimeSpan UnderrunLogInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan CompensationLogInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MissedDeadlineLogInterval = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan StatsLogInterval = TimeSpan.FromSeconds(10);
+
+    private readonly TimeProvider _timeProvider;
+    private readonly DiagnosticsTicker _diagnosticsTicker;
+
+    // Emitter-side state: touched only inside EmitDiagnostics, which never runs concurrently with
+    // itself (_emitting).
+    private int _emitting;
+    private long _lastUnderrunLogTimestamp;
+    private long _lastCompensationLogTimestamp;
+    private long _lastMissedDeadlineLogTimestamp;
+    private long _missedDeadlinesAtLastLog;
+    private long _lastStatsTimestamp;
+
+    // Set by EmitDiagnostics after it has read a window; the callback resets its per-window min/max
+    // fields at the start of its next run and clears the flag. A reset is never performed by the timer
+    // thread, so the callback's plain writes to those fields cannot race a reset.
+    private int _statsWindowResetRequested;
+
+    private sealed class DiagnosticsTicker
+    {
+        private readonly WeakReference<BufferedSoundGenerator<T>> _target;
+        private ITimer? _timer;
+
+        private DiagnosticsTicker(BufferedSoundGenerator<T> target)
+        {
+            _target = new WeakReference<BufferedSoundGenerator<T>>(target);
+        }
+
+        public static DiagnosticsTicker Start(BufferedSoundGenerator<T> target, TimeProvider timeProvider)
+        {
+            var ticker = new DiagnosticsTicker(target);
+            // Don't capture the creator's ExecutionContext: a generator created during an API request
+            // would otherwise stamp that request's log scope on every line the timer writes.
+            using var noFlow = ExecutionContext.SuppressFlow();
+            ticker._timer = timeProvider.CreateTimer(
+                static state => ((DiagnosticsTicker)state!).Tick(), ticker,
+                DiagnosticsTickInterval, DiagnosticsTickInterval);
+            return ticker;
+        }
+
+        private void Tick()
+        {
+            if (_target.TryGetTarget(out var generator))
+            {
+                generator.EmitDiagnostics();
+            }
+            else
+            {
+                Stop();
+            }
+        }
+
+        public void Stop()
+        {
+            Interlocked.Exchange(ref _timer, null)?.Dispose();
+        }
+    }
+
+    private double SecondsSince(long timestamp) =>
+        timestamp == 0 ? 0.0 : _timeProvider.GetElapsedTime(timestamp).TotalSeconds;
+
+    // Half a tick of tolerance: the timer is scheduled on a coarse clock and `now` is read after
+    // thread-pool dispatch, so consecutive ticks often measure a little under the period. Without it a
+    // 1 s cadence routinely became 2 s (and 5 s became 6 s).
+    private bool Due(long lastTimestamp, TimeSpan interval) =>
+        lastTimestamp == 0 || IsDue(_timeProvider.GetElapsedTime(lastTimestamp), interval);
+
+    internal static bool IsDue(TimeSpan elapsed, TimeSpan interval) =>
+        elapsed >= interval - DiagnosticsTickInterval / 2;
+
+    /// <summary>
+    /// Writes every diagnostic this generator produces. Runs on the diagnostics timer, never on the
+    /// render thread. Internal for tests.
+    /// </summary>
+    internal void EmitDiagnostics()
+    {
+        if (_isDisposed || Interlocked.Exchange(ref _emitting, 1) != 0)
+        {
+            return;
+        }
+
+        try
+        {
+            EmitUnderruns();
+            EmitCompensation();
+            EmitMissedDeadline();
+            EmitStats();
+        }
+        catch (Exception ex)
+        {
+            // A diagnostics failure must never take the timer down with it.
+            _logger.LogDebug(ex, "BufferedSoundGenerator #{GeneratorId}: diagnostics tick failed", GeneratorId);
+        }
+        finally
+        {
+            Volatile.Write(ref _emitting, 0);
+        }
+    }
+
+    private void EmitUnderruns()
+    {
+        if (Volatile.Read(ref _underrunCountSinceLastLog) == 0 || !Due(_lastUnderrunLogTimestamp, UnderrunLogInterval))
+        {
+            return;
+        }
+
+        // Drain count and samples separately: an underrun landing between the two exchanges is split
+        // across this line and the next. Totals stay exact.
+        var count = Interlocked.Exchange(ref _underrunCountSinceLastLog, 0);
+        var samples = Interlocked.Exchange(ref _underrunSamplesSinceLastLog, 0);
+        var now = _timeProvider.GetTimestamp();
+
+        // Lock-free read of the buffer level: taking _bufferLock here would make the render callback
+        // wait on the timer. An int read is atomic; the value is a snapshot either way.
+        _logger.LogWarning(
+            "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
+            "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
+            typeof(T).Name, count, samples,
+            SecondsSince(_lastUnderrunLogTimestamp),
+            Volatile.Read(ref _count), _maxBufferSamples, Interlocked.Read(ref _underrunCount));
+        _lastUnderrunLogTimestamp = now;
+    }
+
+    private void EmitCompensation()
+    {
+        if (Volatile.Read(ref _compensationCountSinceLastLog) == 0 || !Due(_lastCompensationLogTimestamp, CompensationLogInterval))
+        {
+            return;
+        }
+
+        var count = Interlocked.Exchange(ref _compensationCountSinceLastLog, 0);
+        var samples = Interlocked.Exchange(ref _compensationSamplesSinceLastLog, 0);
+        var now = _timeProvider.GetTimestamp();
+
+        _logger.LogInformation(
+            "🔄 Clock drift compensation ({Type}): {Count} events, {Samples} duplicated samples in last {Interval:F1}s " +
+            "(buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
+            typeof(T).Name, count, samples,
+            SecondsSince(_lastCompensationLogTimestamp),
+            _lastCompensationLevel, _lastCompensationNewLevel, _maxBufferSamples,
+            Interlocked.Read(ref _totalSamplesCompensated));
+        _lastCompensationLogTimestamp = now;
+    }
+
+    private void EmitMissedDeadline()
+    {
+        var misses = Interlocked.Read(ref _gcCorrelatedMissedDeadlines);
+        if (misses == _missedDeadlinesAtLastLog)
+        {
+            return;
+        }
+        if (!Due(_lastMissedDeadlineLogTimestamp, MissedDeadlineLogInterval))
+        {
+            // Misses inside the throttle window are discarded, not deferred — as before LOG-7, when
+            // only the first miss after the throttle expired was logged. Keeps AUD-20's per-hour counts
+            // comparable across this change.
+            _missedDeadlinesAtLastLog = misses;
+            return;
+        }
+
+        _logger.LogWarning(
+            "🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: " +
+            "Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
+            _lastGcMissIntervalMs,
+            _lastGcMissGen0Delta, _lastGcMissGen1Delta, _lastGcMissGen2Delta);
+        _missedDeadlinesAtLastLog = misses;
+        _lastMissedDeadlineLogTimestamp = _timeProvider.GetTimestamp();
+    }
+
+    private void EmitStats()
+    {
+        if (!Due(_lastStatsTimestamp, StatsLogInterval))
+        {
+            return;
+        }
+        _lastStatsTimestamp = _timeProvider.GetTimestamp();
+
+        // Sample GC collection counts here (every 10 s) so the audio callback can read cached values
+        // via Volatile.Read instead of making syscalls.
+        Volatile.Write(ref _cachedGen0Count, GC.CollectionCount(0));
+        Volatile.Write(ref _cachedGen1Count, GC.CollectionCount(1));
+        Volatile.Write(ref _cachedGen2Count, GC.CollectionCount(2));
+
+        // Don't report if completely idle (no received samples ever)
+        if (Interlocked.Read(ref _totalSamplesReceived) == 0)
+        {
+            return;
+        }
+
+        // Read the whole window before requesting its reset. If the previous reset request is still
+        // pending, no callback has run since the last report (engine stopped, generator detached): the
+        // window is empty, so report it as empty rather than re-publishing the previous one.
+        var currentBuffer = Volatile.Read(ref _count);
+        var windowEmpty = Volatile.Read(ref _statsWindowResetRequested) != 0;
+        var minBuf = windowEmpty || _minBufferSinceLastLog == int.MaxValue ? currentBuffer : _minBufferSinceLastLog;
+        var maxBuf = windowEmpty ? currentBuffer : _maxBufferSinceLastLog;
+        var minInterval = windowEmpty || _minCallbackIntervalMs == double.MaxValue ? 0 : _minCallbackIntervalMs;
+        var maxInterval = windowEmpty ? 0 : _maxCallbackIntervalMs;
+        var maxExecution = windowEmpty ? 0 : _maxCallbackExecutionMs;
+        Volatile.Write(ref _statsWindowResetRequested, 1);
+
+        if (_logger.IsEnabled(LogLevel.Debug))
+        {
+            var fillPct = (double)currentBuffer / _maxBufferSamples * 100.0;
+            var minPct = (double)minBuf / _maxBufferSamples * 100.0;
+
+            _logger.LogDebug(
+                "📊 Buffer ({Type}): fill={FillPct:F1}% ({Buffered}/{Capacity}), min={MinBuf} ({MinPct:F1}%), max={MaxBuf}, " +
+                "recv={Received}, out={Output}, drop={Dropped}, comp={Compensated}, under={Underruns}",
+                typeof(T).Name, fillPct, currentBuffer, _maxBufferSamples,
+                minBuf, minPct, maxBuf,
+                _totalSamplesReceived, _totalSamplesOutput,
+                _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
+
+            _logger.LogDebug(
+                "🔬 Timing ({Type}): callback interval min={MinInterval:F2}ms max={MaxInterval:F2}ms, " +
+                "missed deadlines={Missed} (GC-correlated={GcMisses}), execution max={MaxExec:F2}ms, " +
+                "lock contention: addSamples={AddContentions} (max {AddWait:F2}ms), " +
+                "generateAudio={GenContentions} (max {GenWait:F2}ms)",
+                typeof(T).Name,
+                minInterval, maxInterval, _missedDeadlineCount, _gcCorrelatedMissedDeadlines,
+                maxExecution,
+                _addSamplesContentionCount, _maxAddSamplesLockWaitMs,
+                _generateAudioContentionCount, _maxGenerateAudioLockWaitMs);
+        }
+
+        // Report metrics. These gauges read the window captured above: before LOG-7 they were read
+        // after the window had been reset, so the interval and execution gauges always reported 0.
+        if (_metricsCollector != null && _metricsTags != null)
+        {
+            var fillPercent = (double)currentBuffer / _maxBufferSamples * 100.0;
+            _metricsCollector.Gauge("audio.buffer.fill_percent", fillPercent, _metricsTags);
+            _metricsCollector.Gauge("audio.callback.max_interval_ms", maxInterval, _metricsTags);
+            _metricsCollector.Gauge("audio.callback.max_execution_ms", maxExecution, _metricsTags);
+            _metricsCollector.Gauge("audio.lock.add_samples_max_wait_ms", _maxAddSamplesLockWaitMs, _metricsTags);
+            _metricsCollector.Gauge("audio.lock.generate_audio_max_wait_ms", _maxGenerateAudioLockWaitMs, _metricsTags);
+
+            var totalDropped = Interlocked.Read(ref _totalSamplesDropped);
+            var droppedDelta = totalDropped - _lastReportedDropped;
+            if (droppedDelta > 0)
+            {
+                _metricsCollector.Increment("audio.buffer.samples_dropped", droppedDelta, _metricsTags);
+                _lastReportedDropped = totalDropped;
+            }
+
+            var underruns = Interlocked.Read(ref _underrunCount);
+            var underrunDelta = underruns - _lastReportedUnderruns;
+            if (underrunDelta > 0)
+            {
+                _metricsCollector.Increment("audio.buffer.underruns", underrunDelta, _metricsTags);
+                _lastReportedUnderruns = underruns;
+            }
+
+            var missed = Interlocked.Read(ref _missedDeadlineCount);
+            var missedDelta = missed - _lastReportedMissedDeadlines;
+            if (missedDelta > 0)
+            {
+                _metricsCollector.Increment("audio.callback.missed_deadlines", missedDelta, _metricsTags);
+                _lastReportedMissedDeadlines = missed;
+            }
+
+            var gcMisses = Interlocked.Read(ref _gcCorrelatedMissedDeadlines);
+            var gcDelta = gcMisses - _lastReportedGcCorrelatedMisses;
+            if (gcDelta > 0)
+            {
+                _metricsCollector.Increment("audio.callback.gc_correlated_misses", gcDelta, _metricsTags);
+                _lastReportedGcCorrelatedMisses = gcMisses;
+            }
+        }
     }
 
     /// <summary>
@@ -303,6 +610,18 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     {
         var callbackStartTicks = Stopwatch.GetTimestamp();
 
+        // LOG-7: ⛔ this method must not log or read the wall clock — record into fields and let
+        // EmitDiagnostics (timer) report. Pinned by AudioHotPathLoggingLintTests. ⚠ Not yet true of the
+        // IMetricsCollector.Increment calls below (underrun, compensation): BufferedMetricsCollector
+        // allocates, reads the clock and takes a lock per call. Pre-existing; not in this row.
+        var resetStatsWindow = Volatile.Read(ref _statsWindowResetRequested) != 0;
+        if (resetStatsWindow)
+        {
+            _maxCallbackIntervalMs = 0;
+            _minCallbackIntervalMs = double.MaxValue;
+            _maxCallbackExecutionMs = 0;
+        }
+
         // Track interval between successive callbacks
         if (_lastGenerateAudioTimestamp > 0)
         {
@@ -323,26 +642,19 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             if (intervalMs > expectedMs * 2)
             {
                 _missedDeadlineCount++;
-                // Read cached GC counts (sampled every 10s in LogStats) to avoid
+                // Read cached GC counts (sampled every 10 s by the diagnostics timer) to avoid
                 // GC.CollectionCount() syscalls on the audio callback thread.
                 var gen0 = Volatile.Read(ref _cachedGen0Count);
                 var gen1 = Volatile.Read(ref _cachedGen1Count);
                 var gen2 = Volatile.Read(ref _cachedGen2Count);
                 if (gen0 != _prevGen0Count || gen1 != _prevGen1Count || gen2 != _prevGen2Count)
                 {
-                    _gcCorrelatedMissedDeadlines++;
-                    // Throttle per-miss logging to once per 5s to avoid overwhelming journald
-                    // (high-frequency warnings cause journald CPU spike → memory pressure → more GC)
-                    var now = Stopwatch.GetTimestamp();
-                    if ((now - _lastMissedDeadlineLogTicks) / (double)Stopwatch.Frequency >= 5.0)
-                    {
-                        _lastMissedDeadlineLogTicks = now;
-                        _logger.LogWarning(
-                            "🔬 Missed callback deadline ({Interval:F1}ms) with GC activity: " +
-                            "Gen0 +{G0}, Gen1 +{G1}, Gen2 +{G2}",
-                            intervalMs,
-                            gen0 - _prevGen0Count, gen1 - _prevGen1Count, gen2 - _prevGen2Count);
-                    }
+                    // Recorded for EmitDiagnostics, which reports at most one per 5 s.
+                    _lastGcMissIntervalMs = intervalMs;
+                    _lastGcMissGen0Delta = gen0 - _prevGen0Count;
+                    _lastGcMissGen1Delta = gen1 - _prevGen1Count;
+                    _lastGcMissGen2Delta = gen2 - _prevGen2Count;
+                    Interlocked.Increment(ref _gcCorrelatedMissedDeadlines);
                 }
                 _prevGen0Count = gen0;
                 _prevGen1Count = gen1;
@@ -408,6 +720,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             _count -= toRead;
             _totalSamplesOutput += toRead;
 
+            if (resetStatsWindow)
+            {
+                // Start the new window from the current level (inside the lock that guards _count).
+                _minBufferSinceLastLog = _count;
+                _maxBufferSinceLastLog = _count;
+                Volatile.Write(ref _statsWindowResetRequested, 0);
+            }
+
             // Track min/max buffer levels between log intervals
             if (_count < _minBufferSinceLastLog)
             {
@@ -460,13 +780,13 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
 
             // AUD-10: while the producer is deliberately parked (the BT node left PipeWire on a handset
             // pause and the capture is waiting for it to come back), an empty buffer is the expected
-            // state, not an underrun. Without this gate the branch below logs a Warning once a second
-            // for the whole pause, and Warning is what reaches radio-api's journal (LOG-11).
+            // state, not an underrun. Without this gate the counters below would drive a Warning once a
+            // second for the whole pause, and Warning is what reaches radio-api's journal (LOG-11).
             if (_totalSamplesReceived > 0 && !_producerParked)
             {
-                _underrunCount++;
-                _underrunSamplesSinceLastLog += deficit;
-                _underrunCountSinceLastLog++;
+                Interlocked.Increment(ref _underrunCount);
+                Interlocked.Add(ref _underrunSamplesSinceLastLog, deficit);
+                Interlocked.Increment(ref _underrunCountSinceLastLog);
 
                 // Counters bump on EVERY underrun (independent of log throttle)
                 if (_metricsCollector != null && _metricsTags != null)
@@ -475,32 +795,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                     _metricsCollector.Increment("audio.buffer.underrun_samples_total", deficit, _metricsTags);
                 }
 
-                // Log underrun bursts: throttled to once per second to avoid log spam
-                // while still revealing the pattern of when underruns occur.
-                var now = DateTime.UtcNow;
-                var sinceLastLog = _lastUnderrunLogTime == default
-                    ? 0.0 : (now - _lastUnderrunLogTime).TotalSeconds;
-                if (sinceLastLog >= 1.0 || _lastUnderrunLogTime == default)
-                {
-                    int buffered;
-                    lock (_bufferLock)
-                    {
-                        buffered = _count;
-                    }
-                    _logger.LogWarning(
-                        "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
-                        "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
-                        typeof(T).Name, _underrunCountSinceLastLog, _underrunSamplesSinceLastLog,
-                        sinceLastLog,
-                        buffered, _maxBufferSamples, _underrunCount);
-                    _underrunSamplesSinceLastLog = 0;
-                    _underrunCountSinceLastLog = 0;
-                    _lastUnderrunLogTime = now;
-                }
+                // The Warning is written by EmitDiagnostics (≤ 1 per second), not here.
             }
         }
-
-        LogStats();
 
         var executionMs = (double)(Stopwatch.GetTimestamp() - callbackStartTicks)
             / Stopwatch.Frequency * 1000.0;
@@ -531,10 +828,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// </summary>
     private void CompensateClockDrift(int channels)
     {
-        var now = DateTime.UtcNow;
-        if (_lastDriftCheckTime == default)
+        if (!_driftCheckInitialized)
         {
-            _lastDriftCheckTime = now;
+            _driftCheckInitialized = true;
             lock (_bufferLock)
             {
                 _lastDriftCheckLevel = _count;
@@ -614,34 +910,16 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                         _metricsCollector.Increment("audio.buffer.drift_compensation_samples_total", deficit, _metricsTags);
                     }
 
-                    _compensationCountSinceLastLog++;
-                    _compensationSamplesSinceLastLog += deficit;
-
-                    // Log compensation bursts at Info: throttled to once per 5 seconds.
-                    // With no cooldown, compensation can now fire on every Process call
-                    // while draining; the 5 s throttle aggregates the burst into a single
-                    // line revealing event-count + total-duplicated-samples cadence.
-                    var compNow = DateTime.UtcNow;
-                    var compSinceLastLog = _lastCompensationLogTime == default
-                        ? 0.0 : (compNow - _lastCompensationLogTime).TotalSeconds;
-                    if (compSinceLastLog >= 5.0 || _lastCompensationLogTime == default)
-                    {
-                        _logger.LogInformation(
-                            "🔄 Clock drift compensation ({Type}): {Count} events, {Samples} duplicated samples in last {Interval:F1}s " +
-                            "(buffer: {Level}→{NewLevel}/{Capacity}, total compensated: {Total})",
-                            typeof(T).Name, _compensationCountSinceLastLog, _compensationSamplesSinceLastLog,
-                            compSinceLastLog,
-                            currentLevel, currentLevel + deficit, _maxBufferSamples, _totalSamplesCompensated);
-                        _compensationSamplesSinceLastLog = 0;
-                        _compensationCountSinceLastLog = 0;
-                        _lastCompensationLogTime = compNow;
-                    }
+                    // Reported by EmitDiagnostics (≤ 1 per 5 s), not here.
+                    _lastCompensationLevel = currentLevel;
+                    _lastCompensationNewLevel = currentLevel + deficit;
+                    Interlocked.Add(ref _compensationSamplesSinceLastLog, deficit);
+                    Interlocked.Increment(ref _compensationCountSinceLastLog);
                 }
             }
         }
 
         _lastDriftCheckLevel = currentLevel;
-        _lastDriftCheckTime = now;
     }
 
     /// <summary>
@@ -676,102 +954,6 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 var gain = (float)((1.0 - Math.Cos(phase)) * 0.5);
                 var idx = (startPos + i) % _maxBufferSamples;
                 floatRing[idx] = floatRing[idx] * gain;
-            }
-        }
-    }
-
-    private void LogStats()
-    {
-        var now = DateTime.UtcNow;
-        if ((now - _lastLogTime).TotalSeconds >= 10)
-        {
-            // Sample GC collection counts here (every 10s) so the audio callback
-            // can read cached values via Volatile.Read instead of making syscalls.
-            Volatile.Write(ref _cachedGen0Count, GC.CollectionCount(0));
-            Volatile.Write(ref _cachedGen1Count, GC.CollectionCount(1));
-            Volatile.Write(ref _cachedGen2Count, GC.CollectionCount(2));
-
-            int currentBuffer;
-            lock (_bufferLock)
-            {
-                currentBuffer = _count;
-            }
-
-            // Don't log if completely idle (no received samples ever)
-            if (_totalSamplesReceived > 0)
-            {
-                var minBuf = _minBufferSinceLastLog == int.MaxValue ? currentBuffer : _minBufferSinceLastLog;
-                var maxBuf = _maxBufferSinceLastLog;
-                var fillPct = (double)currentBuffer / _maxBufferSamples * 100.0;
-                var minPct = (double)minBuf / _maxBufferSamples * 100.0;
-
-                _logger.LogDebug(
-                    "📊 Buffer ({Type}): fill={FillPct:F1}% ({Buffered}/{Capacity}), min={MinBuf} ({MinPct:F1}%), max={MaxBuf}, " +
-                    "recv={Received}, out={Output}, drop={Dropped}, comp={Compensated}, under={Underruns}",
-                    typeof(T).Name, fillPct, currentBuffer, _maxBufferSamples,
-                    minBuf, minPct, maxBuf,
-                    _totalSamplesReceived, _totalSamplesOutput,
-                    _totalSamplesDropped, _totalSamplesCompensated, _underrunCount);
-
-                _logger.LogDebug(
-                    "🔬 Timing ({Type}): callback interval min={MinInterval:F2}ms max={MaxInterval:F2}ms, " +
-                    "missed deadlines={Missed} (GC-correlated={GcMisses}), execution max={MaxExec:F2}ms, " +
-                    "lock contention: addSamples={AddContentions} (max {AddWait:F2}ms), " +
-                    "generateAudio={GenContentions} (max {GenWait:F2}ms)",
-                    typeof(T).Name,
-                    _minCallbackIntervalMs == double.MaxValue ? 0 : _minCallbackIntervalMs,
-                    _maxCallbackIntervalMs, _missedDeadlineCount, _gcCorrelatedMissedDeadlines,
-                    _maxCallbackExecutionMs,
-                    _addSamplesContentionCount, _maxAddSamplesLockWaitMs,
-                    _generateAudioContentionCount, _maxGenerateAudioLockWaitMs);
-
-                // Reset per-window tracking (contention counts and missed deadlines are cumulative)
-                _maxCallbackIntervalMs = 0;
-                _minCallbackIntervalMs = double.MaxValue;
-                _maxCallbackExecutionMs = 0;
-
-                _minBufferSinceLastLog = currentBuffer;
-                _maxBufferSinceLastLog = currentBuffer;
-                _lastLogTime = now;
-
-                // Report metrics (outside lock — reads of long fields are safe for approximate values)
-                if (_metricsCollector != null && _metricsTags != null)
-                {
-                    var fillPercent = (double)currentBuffer / _maxBufferSamples * 100.0;
-                    _metricsCollector.Gauge("audio.buffer.fill_percent", fillPercent, _metricsTags);
-                    _metricsCollector.Gauge("audio.callback.max_interval_ms", _maxCallbackIntervalMs, _metricsTags);
-                    _metricsCollector.Gauge("audio.callback.max_execution_ms", _maxCallbackExecutionMs, _metricsTags);
-                    _metricsCollector.Gauge("audio.lock.add_samples_max_wait_ms", _maxAddSamplesLockWaitMs, _metricsTags);
-                    _metricsCollector.Gauge("audio.lock.generate_audio_max_wait_ms", _maxGenerateAudioLockWaitMs, _metricsTags);
-
-                    var droppedDelta = _totalSamplesDropped - _lastReportedDropped;
-                    if (droppedDelta > 0)
-                    {
-                        _metricsCollector.Increment("audio.buffer.samples_dropped", droppedDelta, _metricsTags);
-                        _lastReportedDropped = _totalSamplesDropped;
-                    }
-
-                    var underrunDelta = _underrunCount - _lastReportedUnderruns;
-                    if (underrunDelta > 0)
-                    {
-                        _metricsCollector.Increment("audio.buffer.underruns", underrunDelta, _metricsTags);
-                        _lastReportedUnderruns = _underrunCount;
-                    }
-
-                    var missedDelta = _missedDeadlineCount - _lastReportedMissedDeadlines;
-                    if (missedDelta > 0)
-                    {
-                        _metricsCollector.Increment("audio.callback.missed_deadlines", missedDelta, _metricsTags);
-                        _lastReportedMissedDeadlines = _missedDeadlineCount;
-                    }
-
-                    var gcDelta = _gcCorrelatedMissedDeadlines - _lastReportedGcCorrelatedMisses;
-                    if (gcDelta > 0)
-                    {
-                        _metricsCollector.Increment("audio.callback.gc_correlated_misses", gcDelta, _metricsTags);
-                        _lastReportedGcCorrelatedMisses = _gcCorrelatedMissedDeadlines;
-                    }
-                }
             }
         }
     }
@@ -886,6 +1068,10 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             base.Dispose(disposing);
             return;
         }
+
+        // Null-conditional: SoundComponent has a finalizer, so Dispose(false) can run for an object
+        // whose constructor threw before the ticker was assigned.
+        _diagnosticsTicker?.Stop();
 
         if (disposing)
         {
