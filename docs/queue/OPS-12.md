@@ -152,3 +152,25 @@ native rsync 3.5.0 / OpenSSH, one `~/.ssh` for both):
   before step 3 proves the transport (this row); the kiosk stops at step 2 and is only relaunched
   after step 4's verification succeeds (`OPS-13`). Both convert a *sequencing* failure into a dark
   console. Fix them together or the script keeps one outage path.
+
+## BUILT 2026-09-28 — `fix/ops-13-ops-12-deploy-safety` (with `OPS-13`), per D-C: keep rsync, make it explicit
+
+New **step 1.5**, between the build and the service stop:
+
+- `-Transport rsync|scp|auto` (default `auto` = **scp on a Windows host**, **rsync on any other host
+  with it on PATH**). The choice and its reason are printed. `Get-Command rsync` no longer selects a
+  branch by itself; it only answers whether `-Transport rsync` / `auto` *can* use rsync.
+- Pre-flight, in order: `ssh -o ConnectTimeout=10 $SshTarget true`; box prerequisites
+  (`command -v rsync && command -v curl && sudo -n true` — the move into place uses `sudo rsync`
+  whichever transport carried the bytes); then the transport itself — `rsync -n -az` of the real API
+  publish dir to the real staging path, or a one-byte `scp` probe copied and removed. **Any failure
+  exits 1 with "Nothing was stopped" and names the other transport to try.**
+- Step 3 no longer probes; it reads the step-1.5 decision.
+
+Measured on the Linux dev box (`-NoRestart`, so build + pre-flight + sync with services untouched):
+auto → rsync, pre-flight OK, both syncs complete. **`-Transport scp -NoRestart`: `[1.5/4] Pre-flight
+(scp - requested)… Pre-flight OK`, then the scp fallback synced both services end to end, exit 0,
+probe file and `-tmp` staging dirs gone from the box afterwards.** ⭐ That is the first time the scp
+branch has been driven against a real target from a script run, which `OPS-9` recorded as never
+having happened (`design/FUTURE-WORK.md` §27). Its masked `mv` exit codes are unchanged by this row. ⚠ The Windows half of `auto` (scp) is by construction from this row's own
+measurements, not re-measured on a Windows host today.

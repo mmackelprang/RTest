@@ -100,3 +100,29 @@ script.
 ⚠ **Not auto-mergeable.** Production deploy path. Validate the verification change with
 `-NoRestart` against `radio` (it skips step 2 and step 4 entirely, so it cannot darken the panel),
 then one supervised full deploy.
+
+## BUILT 2026-09-28 — `fix/ops-13-ops-12-deploy-safety` (with `OPS-12`)
+
+Both halves of the recommended shape, plus the instrument on its own:
+
+1. **Verify from the box.** `Get-DeployedSha` runs `curl -s -m 3 http://localhost:<port>/api/health/version`
+   over the same ssh every other step uses and parses the JSON locally; ten attempts, two seconds
+   apart. `Invoke-RestMethod` and the `http://$TargetHost:…` URLs are gone from the verification.
+2. **Relaunch on every path that stopped the kiosk, except reached-and-mismatched.** Step 4 now
+   produces one of three verdicts — `Verified` (relaunch, exit 0), `Unreachable` (relaunch, exit 1),
+   `Mismatch` (kiosk left down, exit 1) — and the "services not active" branch relaunches before its
+   exit 1 too. `Invoke-KioskRelaunch` / `Get-KioskLiveness` carry the 2026-08-18 Wayland and
+   2026-08-02 liveness reasoning verbatim.
+3. **`-VerifyOnly`.** No build, no stop, no sync: both SHAs read on the box against local HEAD, kiosk
+   liveness, exit 0 only on a match.
+
+**Measured on the Linux dev box, `main` at `89b5b12` with the box running `f409bb9`:**
+
+| Run | Result |
+|---|---|
+| `-VerifyOnly` | `API (:5000): running f409bb9 - MISMATCH`, same for Web, `Kiosk: 4 established connections … radio-kiosk.service=active`, **exit 1** — correct, `main` was four docs/test commits ahead of the box |
+| `-NoRestart` (auto → rsync) | `[1.5/4] Pre-flight (rsync - auto: non-Windows host with rsync on PATH)… Pre-flight OK`, both syncs, `WirePlumber rules up to date`, exit 0, services untouched |
+
+⚠ The full path — a real deploy exercising the `Verified` verdict and the relaunch — is the
+supervised deploy at merge time, per the row's own instruction. The `Unreachable` and `Mismatch`
+branches were not driven live; they are read-verified and the row should say so until one occurs.

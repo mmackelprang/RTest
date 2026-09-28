@@ -27,8 +27,21 @@
   Install path on target. Default: /opt/radio-console (override with env var PI_PATH).
 
 .PARAMETER Runtime
-  .NET runtime identifier. Default: linux-arm64.
+  .NET runtime identifier. Default: linux-x64.
   Common values: linux-arm64 (Raspberry Pi), linux-x64 (Ubuntu x64).
+
+.PARAMETER Transport
+  How the publish output reaches the target: rsync, scp, or auto (default). auto picks scp on a
+  Windows host and rsync on any other host that has it on PATH -- OPS-12 measured that an MSYS2
+  rsync on Windows cannot reach the box at all, and OPS-12's 2026-09-28 update measured rsync
+  working from Linux. The choice is printed, and proven by a pre-flight BEFORE any service is
+  stopped, whichever way it was made.
+
+.PARAMETER VerifyOnly
+  Build nothing, stop nothing, sync nothing. Read /api/health/version on the box for both services
+  over ssh, compare with the local HEAD, report the kiosk's liveness, and exit 0 only if both match.
+  The instrument step 4 runs after a deploy, on its own -- for proving a box matches main before a
+  human sits down to UAT (CLAUDE.md: merged is not deployed).
 
 .EXAMPLE
   .\deploy\Deploy-ToLinux.ps1
@@ -36,12 +49,17 @@
   .\deploy\Deploy-ToLinux.ps1 -Logs
   .\deploy\Deploy-ToLinux.ps1 -Quick -NoRestart
   .\deploy\Deploy-ToLinux.ps1 -TargetHost 192.168.86.44
+  .\deploy\Deploy-ToLinux.ps1 -Transport scp
+  .\deploy\Deploy-ToLinux.ps1 -VerifyOnly
 #>
 [CmdletBinding()]
 param(
   [switch]$NoRestart,
   [switch]$Logs,
   [switch]$Quick,
+  [ValidateSet("auto", "rsync", "scp")]
+  [string]$Transport = "auto",
+  [switch]$VerifyOnly,
   [Alias("PiHost")]
   [string]$TargetHost = $(if ($env:PI_HOST) { $env:PI_HOST } else { "radio" }),
   [Alias("PiUser")]
@@ -100,6 +118,136 @@ Write-Host "Runtime: $Runtime"
 Write-Host "Commit:  $ExpectedSha"
 Write-Host ""
 
+# --- Helpers: verification and the kiosk (OPS-13) ---
+#
+# Everything here talks to the box over the SAME ssh every other step uses. That is the point.
+# Before OPS-13 the SHA verification was an Invoke-RestMethod against http://$TargetHost:$port from
+# the dev host, i.e. resolved by the dev host's OS resolver -- while ssh, scp and rsync resolve
+# $TargetHost through ~/.ssh/config. On a host where the bare name only resolves through that file
+# (measured 2026-09-28 on the Linux dev box), steps 1-4 all succeeded, the verification failed ten
+# times on a name lookup, the script exited 1, and the kiosk -- stopped in step 2 -- was never
+# relaunched. A dark panel after a deploy that had in fact succeeded: a false-NEGATIVE gate.
+
+# Reads /api/health/version for one service ON THE BOX and returns its full gitSha, or $null when
+# the endpoint could not be reached or parsed after $Attempts. Polls because Kestrel takes a few
+# seconds to bind after `systemctl start`. curl's -m bounds each attempt; ssh's own transport
+# failures (exit 255) simply count as a miss.
+function Get-DeployedSha([int]$Port, [int]$Attempts = 10) {
+  for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+    $raw = ssh $SshTarget "curl -s -m 3 http://localhost:${Port}/api/health/version 2>/dev/null"
+    if ($LASTEXITCODE -eq 0 -and $raw) {
+      try {
+        $obj = ("$raw" | ConvertFrom-Json -ErrorAction Stop)
+        if ($obj -and $obj.gitSha) { return [string]$obj.gitSha }
+      } catch {
+        # Not JSON yet (proxy page, partial start); keep polling.
+      }
+    }
+    Start-Sleep -Seconds 2
+  }
+  return $null
+}
+
+# Liveness, not process existence. During the 2026-08-02 outage Chrome was running and radio-web
+# returned 200 for ~33 hours while the panel showed an auth dialog and made ZERO connections to
+# :5002. Established connections are the check that would have caught it.
+#
+# This counts established TCP sockets whose source OR destination port is 5002, so a single browser
+# session shows up as more than one line -- both ends of the socket are on this box. The number is a
+# liveness signal, not a tab count; only "at least one" is meaningful.
+#
+# The port test is ss's own filter, not `grep ':5002'`. That substring also matches the ephemeral
+# ports 50020-50029, which sit inside this box's ip_local_port_range (32768-60999) -- so an unrelated
+# socket could have reported a dead kiosk as live, defeating the one check this exists to make.
+# `-H` drops the header row so `grep -c .` counts sockets only.
+#
+# Returns @{ Connections = <int>; Unit = <systemctl --user is-active radio-kiosk.service> }.
+function Get-KioskLiveness([int]$Polls = 10) {
+  $conns = 0
+  for ($i = 0; $i -lt $Polls; $i++) {
+    if ($i -gt 0) { Start-Sleep -Seconds 2 }
+    $raw = ssh $SshTarget "ss -Htn state established '( sport = :5002 or dport = :5002 )' | grep -c . || true"
+    $parsed = 0
+    if ([int]::TryParse((($raw | Select-Object -Last 1) -as [string]).Trim(), [ref]$parsed)) {
+      $conns = $parsed
+    }
+    if ($conns -ge 1) { break }
+  }
+  # Corroborating evidence, not the gate. The connection count alone cannot distinguish a kiosk THIS
+  # deploy relaunched from one that was never stopped -- which is exactly what a missing
+  # radio-kiosk-exit leaves behind. `radio-kiosk.service` is a transient unit that only exists because
+  # radio-kiosk-launch created it, so `active` is positive proof of the new launch path.
+  $rawUnit = ssh $SshTarget "systemctl --user is-active radio-kiosk.service 2>/dev/null || echo unknown"
+  $unit = "$($rawUnit | Select-Object -Last 1)".Trim()
+  return @{ Connections = $conns; Unit = $unit }
+}
+
+# Relaunches the kiosk browser and reports whether it reached the UI.
+#
+# Step 4 calls this on EVERY path that stopped the kiosk in step 2 except one: a SHA that was
+# REACHED and MISMATCHED, where a panel showing the wrong binary would be worse than a dark one.
+# Every other outcome -- verified, endpoint unreachable, a service not active -- relaunches, because
+# a panel showing an honest error page can be read from across the room and a dark one cannot
+# (OPS-13). The exit code still says what went wrong; the relaunch is not a claim of success.
+#
+# This used to be `DISPLAY=:0 nohup google-chrome ...`, and the comment that stood here named it a
+# known defect rather than fixing it: DISPLAY=:0 assumes X11, but the box runs Wayland (loginctl
+# session 1, seat0, Type=wayland), so the relaunch landed under XWayland with a flag set that did
+# not match the boot path -- and in practice left the panel dead after every deploy. `systemd-run
+# --user` (inside radio-kiosk-launch) starts the browser from the graphical session's OWN service
+# manager, so it inherits that session's WAYLAND_DISPLAY / DBUS_SESSION_BUS_ADDRESS /
+# XDG_RUNTIME_DIR instead of an SSH shell's. Verified by hand on the box 2026-08-18.
+#
+# The flag set is not duplicated here -- radio-kiosk-launch owns it, and the autostart entry calls
+# the same script, so boot and deploy cannot drift apart. --password-store=basic lives there too and
+# is still REQUIRED, not cosmetic: without it Chrome asks gnome-keyring for the login keyring, which
+# GDM auto-login never unlocks, and gnome-shell raises a modal "Authentication required" prompt that
+# grabs input and sits on top of the kiosk. On 2026-08-02 that blocked the panel for ~33 hours and
+# Chrome never even reached navigation. See docs/uat/2026-08-03-osk-wayland-viability/.
+function Invoke-KioskRelaunch {
+  Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
+  ssh $SshTarget "if [ -x /usr/local/bin/radio-kiosk-launch ]; then /usr/local/bin/radio-kiosk-launch; else echo 'WARNING: /usr/local/bin/radio-kiosk-launch is missing - run deploy/debian-x64/kiosk/setup-kiosk.sh on this box'; fi"
+  Write-Host "  Verifying the kiosk reached the UI..." -ForegroundColor DarkGray
+  $k = Get-KioskLiveness
+  if ($k.Connections -ge 1) {
+    Write-Host "  Kiosk is live ($($k.Connections) established connections to :5002, radio-kiosk.service=$($k.Unit))" -ForegroundColor Green
+  } else {
+    # Deliberately a warning, not exit 1: what failed is the browser relaunch, and saying so loudly
+    # is the whole point -- the old code said nothing at all and the owner found a dead screen.
+    Write-Host "  WARNING: 0 established connections to :5002 - the kiosk did not reach the UI." -ForegroundColor Red
+    Write-Host "    Check: ssh $SshTarget 'systemctl --user status radio-kiosk.service'"
+    Write-Host "    Retry: ssh $SshTarget '/usr/local/bin/radio-kiosk-launch'"
+  }
+}
+
+# --- VerifyOnly: the step-4 instrument on its own ---
+if ($VerifyOnly) {
+  if ($ExpectedSha -eq "unknown") {
+    Write-Host "Cannot verify: local git HEAD is unknown." -ForegroundColor Red
+    exit 1
+  }
+  Write-Host "=== Verify only: ${SshTarget} against local HEAD $($ExpectedSha.Substring(0, 7)) ===" -ForegroundColor Cyan
+  $ok = $true
+  foreach ($svc in @(@{ Name = "API"; Port = $ApiPort }, @{ Name = "Web"; Port = $WebPort })) {
+    $sha = Get-DeployedSha -Port $svc.Port -Attempts 3
+    if (-not $sha) {
+      Write-Host "  $($svc.Name) (:$($svc.Port)): UNREACHABLE on the box" -ForegroundColor Red
+      $ok = $false
+    } elseif ($sha -ne $ExpectedSha) {
+      Write-Host "  $($svc.Name) (:$($svc.Port)): running $($sha.Substring(0, 7)) - MISMATCH" -ForegroundColor Red
+      $ok = $false
+    } else {
+      Write-Host "  $($svc.Name) (:$($svc.Port)): running $($sha.Substring(0, 7)) - matches" -ForegroundColor Green
+    }
+  }
+  $k = Get-KioskLiveness -Polls 1
+  $color = if ($k.Connections -ge 1) { "Green" } else { "Yellow" }
+  Write-Host "  Kiosk: $($k.Connections) established connections to :5002, radio-kiosk.service=$($k.Unit)" -ForegroundColor $color
+  if ($ok) { Write-Host "=== Box matches HEAD ===" -ForegroundColor Green; exit 0 }
+  Write-Host "=== Box does NOT match HEAD - deploy before anyone runs UAT ===" -ForegroundColor Red
+  exit 1
+}
+
 # --- Step 1: Build both projects ---
 Write-Host "[1/4] Building for $Runtime..." -ForegroundColor Yellow
 
@@ -150,6 +298,81 @@ $apiSize = "{0:N1} MB" -f ((Get-ChildItem $ApiPublishDir -Recurse | Measure-Obje
 $webSize = "{0:N1} MB" -f ((Get-ChildItem $WebPublishDir -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB)
 Write-Host "  Build complete (API: $apiSize, Web: $webSize)" -ForegroundColor Green
 
+# --- Step 1.5: Transport decision and pre-flight (OPS-12) ---
+#
+# The transport is DECIDED HERE, printed, and PROVEN against the target before step 2 stops
+# anything. Both halves are OPS-12: on 2026-09-09 `Get-Command rsync` silently selected a branch
+# that had never run (an MSYS2 rsync on Windows cannot reach the box: `D:` parsed as a hostname, no
+# drivable ssh, its own known_hosts), and because the services had already been stopped in step 2,
+# a sync error became an outage. Two rules follow. (1) A capability probe never chooses the
+# transport on its own; the host OS does by default, and -Transport overrides it explicitly.
+# (2) Nothing is stopped until the chosen transport has moved bytes to the target.
+$onWindows = [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
+  [System.Runtime.InteropServices.OSPlatform]::Windows)
+$rsyncOnPath = $null -ne (Get-Command rsync -ErrorAction SilentlyContinue)
+$useRsync = $false
+switch ($Transport) {
+  "rsync" {
+    if (-not $rsyncOnPath) {
+      Write-Host "-Transport rsync requested but rsync is not on PATH." -ForegroundColor Red
+      exit 1
+    }
+    $useRsync = $true
+    $transportWhy = "requested"
+  }
+  "scp" {
+    $useRsync = $false
+    $transportWhy = "requested"
+  }
+  "auto" {
+    # scp on Windows regardless of what is on PATH (OPS-12); rsync elsewhere when present. The
+    # Linux path was measured 2026-09-28: dry run, then a full deploy, over a native rsync/ssh.
+    $useRsync = (-not $onWindows) -and $rsyncOnPath
+    $transportWhy = if ($onWindows) { "auto: Windows host, scp is the only transport measured working there" }
+                    elseif ($rsyncOnPath) { "auto: non-Windows host with rsync on PATH" }
+                    else { "auto: rsync not on PATH" }
+  }
+}
+$transportName = if ($useRsync) { "rsync" } else { "scp" }
+Write-Host "[1.5/4] Pre-flight ($transportName - $transportWhy)..." -ForegroundColor Yellow
+
+# (a) The box answers over ssh at all. ConnectTimeout keeps a dead WiFi link from hanging the deploy
+#     at a step where nothing has been stopped yet -- which is the only place a hang is cheap.
+ssh -o ConnectTimeout=10 $SshTarget "true"
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Pre-flight failed: ssh ${SshTarget} did not answer. Nothing was stopped." -ForegroundColor Red
+  exit 1
+}
+# (b) What later steps assume on the box: `sudo rsync` for the move into place (both transports),
+#     `curl` for the readiness poll and the SHA check, and a sudo that needs no terminal.
+ssh $SshTarget "command -v rsync >/dev/null && command -v curl >/dev/null && sudo -n true"
+if ($LASTEXITCODE -ne 0) {
+  Write-Host "Pre-flight failed: the box needs rsync, curl and passwordless sudo for ${TargetUser}. Nothing was stopped." -ForegroundColor Red
+  exit 1
+}
+# (c) The chosen transport moves bytes to the target. rsync: a dry run of the real API sync, which
+#     parses the paths, opens the connection and lists the transfer without writing. scp: a one-byte
+#     probe file, copied and removed. Both are the actual command that step 3 will run, in miniature.
+if ($useRsync) {
+  rsync -n -az "${ApiPublishDir}/" "${SshTarget}:/tmp/radio-deploy-api/" | Out-Null
+  $preflightExit = $LASTEXITCODE
+} else {
+  $probe = Join-Path ([System.IO.Path]::GetTempPath()) "radio-deploy-preflight-$PID"
+  Set-Content -Path $probe -Value "1" -NoNewline
+  scp -q $probe "${SshTarget}:/tmp/radio-deploy-preflight-probe"
+  $preflightExit = $LASTEXITCODE
+  Remove-Item $probe -ErrorAction SilentlyContinue
+  if ($preflightExit -eq 0) {
+    ssh $SshTarget "rm -f /tmp/radio-deploy-preflight-probe"
+  }
+}
+if ($preflightExit -ne 0) {
+  Write-Host "Pre-flight failed: $transportName could not reach ${SshTarget} (exit $preflightExit). Nothing was stopped." -ForegroundColor Red
+  Write-Host "  Try the other transport explicitly: -Transport $(if ($useRsync) { 'scp' } else { 'rsync' })" -ForegroundColor Yellow
+  exit 1
+}
+Write-Host "  Pre-flight OK: $transportName reaches ${SshTarget}; box prerequisites present" -ForegroundColor Green
+
 # --- Step 2: Stop services ---
 if (-not $NoRestart) {
   Write-Host "[2/4] Stopping services and kiosk browser..." -ForegroundColor Yellow
@@ -184,14 +407,8 @@ if (-not $NoRestart) {
 # --- Step 3: Sync files ---
 Write-Host "[3/4] Syncing files..." -ForegroundColor Yellow
 
-# Check if rsync is available locally (Git Bash, WSL, etc.)
-$useRsync = $false
-try {
-  $null = Get-Command rsync -ErrorAction Stop
-  $useRsync = $true
-} catch {
-  # rsync not available, fall back to scp
-}
+# $useRsync was decided and PROVEN in step 1.5, before anything was stopped (OPS-12). It is not
+# re-derived here: a capability probe at this point is what turned a sync error into an outage.
 
 # Sync API
 #
@@ -229,7 +446,7 @@ if ($useRsync) {
   rsync -avz --delete "${ApiPublishDir}/" "${SshTarget}:/tmp/radio-deploy-api/"
   $apiSyncExit = $LASTEXITCODE
 } else {
-  Write-Host "  (rsync not found, using scp)" -ForegroundColor DarkGray
+  Write-Host "  (scp transport - $transportWhy)" -ForegroundColor DarkGray
   # Clears the -tmp staging dir as well as the destination. Only the third ssh below
   # removes -tmp, and since OPS-9 that ssh is skipped when the transfer fails — so a
   # failed deploy can leave a partial -tmp behind. Clearing it here means the next
@@ -465,152 +682,78 @@ if (-not $NoRestart) {
   $webStatus = ssh $SshTarget "systemctl is-active radio-web 2>/dev/null"
 
   if ($apiStatus -eq "active" -and $webStatus -eq "active") {
-    # Verify the running API reports the SHA we just built. Poll because the
-    # service takes a few seconds to bind its HTTP listener after start.
+    # Verify the running services report the SHA we just built -- read ON THE BOX over ssh
+    # (Get-DeployedSha), never from the dev host's own resolver (OPS-13).
+    #
+    # Three verdicts, and they are handled differently on purpose:
+    #   Verified    -- both SHAs match: relaunch the kiosk, exit 0.
+    #   Unreachable -- an endpoint could not be read after ten attempts: the INSTRUMENT failed, not
+    #                  necessarily the deploy. Relaunch the kiosk, then exit 1. A dark panel after a
+    #                  deploy that succeeded is the OPS-13 outage; a panel that shows whatever the
+    #                  box is running, plus a red exit code here, is the honest outcome.
+    #   Mismatch    -- an endpoint answered with a different commit: the deploy did not take.
+    #                  Leave the kiosk down and exit 1; a panel showing the wrong binary is worse.
+    #
+    # The web half matters as much as the API half. Until OPS-1 the web binary was verified only by
+    # `systemctl is-active`, which is true of a STALE binary just as much as a fresh one -- so a web
+    # fix that silently failed to land would be debugged as a code bug.
+    $verdict = "Verified"
     if ($ExpectedSha -ne "unknown") {
-      Write-Host "  Verifying deployed commit via /api/health/version..." -ForegroundColor DarkGray
-      $verifyUrl = "http://${TargetHost}:${ApiPort}/api/health/version"
-      $deployedSha = $null
-      for ($attempt = 1; $attempt -le 10; $attempt++) {
-        try {
-          $resp = Invoke-RestMethod -Uri $verifyUrl -TimeoutSec 3 -ErrorAction Stop
-          if ($resp -and $resp.gitSha) {
-            $deployedSha = $resp.gitSha
-            break
-          }
-        } catch {
-          # Service not ready yet; retry
+      Write-Host "  Verifying deployed commit via /api/health/version on the box..." -ForegroundColor DarkGray
+      foreach ($svc in @(@{ Name = "API"; Port = $ApiPort }, @{ Name = "Web"; Port = $WebPort })) {
+        $deployedSha = Get-DeployedSha -Port $svc.Port
+        if (-not $deployedSha) {
+          Write-Host ""
+          Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
+          Write-Host "  Could not read http://localhost:$($svc.Port)/api/health/version on ${SshTarget} after 10 attempts."
+          Write-Host "  Check: ssh $SshTarget 'journalctl -u radio-$($svc.Name.ToLower()) -n 50'"
+          $verdict = "Unreachable"
+          break
+        } elseif ($deployedSha -ne $ExpectedSha) {
+          Write-Host ""
+          Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
+          Write-Host "  Expected commit: $ExpectedSha"
+          Write-Host "  Running commit:  $deployedSha  (radio-$($svc.Name.ToLower()))"
+          Write-Host "  The deployed $($svc.Name) binary does not match the local HEAD."
+          if ($svc.Name -eq "Web") { Write-Host '  This is the exact failure that systemctl is-active could not see.' }
+          $verdict = "Mismatch"
+          break
+        } else {
+          Write-Host "  Verified: $($svc.Name) is running commit $($deployedSha.Substring(0, 7))" -ForegroundColor Green
         }
-        Start-Sleep -Seconds 2
-      }
-
-      if (-not $deployedSha) {
-        Write-Host ""
-        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
-        Write-Host "  Could not reach $verifyUrl after 10 attempts."
-        Write-Host "  Check: ssh $SshTarget 'journalctl -u radio-api -n 50'"
-        exit 1
-      } elseif ($deployedSha -ne $ExpectedSha) {
-        Write-Host ""
-        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
-        Write-Host "  Expected commit: $ExpectedSha"
-        Write-Host "  Running commit:  $deployedSha"
-        Write-Host "  The deployed binary does not match the local HEAD."
-        exit 1
-      } else {
-        Write-Host "  Verified: API is running commit $($deployedSha.Substring(0, 7))" -ForegroundColor Green
-      }
-
-      # Same check for radio-web. Until this existed the web half of a deploy was verified only
-      # by `systemctl is-active`, which is true of a STALE binary just as much as a fresh one —
-      # so a web fix that silently failed to land would be debugged as a code bug. OPS-1.
-      Write-Host "  Verifying deployed commit via web /api/health/version..." -ForegroundColor DarkGray
-      $webVerifyUrl = "http://${TargetHost}:${WebPort}/api/health/version"
-      $deployedWebSha = $null
-      for ($attempt = 1; $attempt -le 10; $attempt++) {
-        try {
-          $webResp = Invoke-RestMethod -Uri $webVerifyUrl -TimeoutSec 3 -ErrorAction Stop
-          if ($webResp -and $webResp.gitSha) {
-            $deployedWebSha = $webResp.gitSha
-            break
-          }
-        } catch {
-          # Service not ready yet; retry
-        }
-        Start-Sleep -Seconds 2
-      }
-
-      if (-not $deployedWebSha) {
-        Write-Host ""
-        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
-        Write-Host "  Could not reach $webVerifyUrl after 10 attempts."
-        Write-Host "  Check: ssh $SshTarget 'journalctl -u radio-web -n 50'"
-        exit 1
-      } elseif ($deployedWebSha -ne $ExpectedSha) {
-        Write-Host ""
-        Write-Host "=== DEPLOY VERIFICATION FAILED ===" -ForegroundColor Red
-        Write-Host "  Expected commit: $ExpectedSha"
-        Write-Host "  Running commit:  $deployedWebSha  (radio-web)"
-        Write-Host "  The deployed web binary does not match the local HEAD."
-        Write-Host '  This is the exact failure that systemctl is-active could not see.'
-        exit 1
-      } else {
-        Write-Host "  Verified: Web is running commit $($deployedWebSha.Substring(0, 7))" -ForegroundColor Green
       }
     }
 
-    # Relaunch the kiosk browser.
-    #
-    # This used to be `DISPLAY=:0 nohup google-chrome ...`, and the comment that stood here
-    # named it a known defect rather than fixing it: DISPLAY=:0 assumes X11, but the box runs
-    # Wayland (loginctl session 1, seat0, Type=wayland), so the relaunch landed under XWayland
-    # with a flag set that did not match the boot path — and in practice left the panel dead
-    # after every deploy. `systemd-run --user` (inside radio-kiosk-launch) starts the browser
-    # from the graphical session's OWN service manager, so it inherits that session's
-    # WAYLAND_DISPLAY / DBUS_SESSION_BUS_ADDRESS / XDG_RUNTIME_DIR instead of an SSH shell's.
-    # Verified by hand on the box 2026-08-18.
-    #
-    # The flag set is no longer duplicated here — radio-kiosk-launch owns it, and the autostart
-    # entry calls the same script, so boot and deploy can no longer drift apart.
-    # --password-store=basic lives there too and is still REQUIRED, not cosmetic: without it
-    # Chrome asks gnome-keyring for the login keyring, which GDM auto-login never unlocks, and
-    # gnome-shell raises a modal "Authentication required" prompt that grabs input and sits on
-    # top of the kiosk. On 2026-08-02 that blocked the panel for ~33 hours and Chrome never even
-    # reached navigation. See docs/uat/2026-08-03-osk-wayland-viability/.
-    Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
-    ssh $SshTarget "if [ -x /usr/local/bin/radio-kiosk-launch ]; then /usr/local/bin/radio-kiosk-launch; else echo 'WARNING: /usr/local/bin/radio-kiosk-launch is missing - run deploy/debian-x64/kiosk/setup-kiosk.sh on this box'; fi"
-
-    # Liveness, not process existence. During the 2026-08-02 outage Chrome was running and
-    # radio-web returned 200 for ~33 hours while the panel showed an auth dialog and made ZERO
-    # connections to :5002. Established connections are the check that would have caught it.
-    #
-    # This counts established TCP sockets whose source OR destination port is 5002, so a single
-    # browser session shows up as more than one line — both ends of the socket are on this box.
-    # The number is a liveness signal, not a tab count; only "at least one" is meaningful.
-    #
-    # The port test is ss's own filter, not `grep ':5002'`. That substring also matches the
-    # ephemeral ports 50020-50029, which sit inside this box's ip_local_port_range (32768-60999)
-    # — so an unrelated socket could have reported a dead kiosk as live, defeating the one check
-    # this block exists to make. `-H` drops the header row so `grep -c .` counts sockets only.
-    Write-Host "  Verifying the kiosk reached the UI..." -ForegroundColor DarkGray
-    $kioskConns = 0
-    for ($i = 0; $i -lt 10; $i++) {
-      Start-Sleep -Seconds 2
-      $raw = ssh $SshTarget "ss -Htn state established '( sport = :5002 or dport = :5002 )' | grep -c . || true"
-      $parsed = 0
-      if ([int]::TryParse((($raw | Select-Object -Last 1) -as [string]).Trim(), [ref]$parsed)) {
-        $kioskConns = $parsed
+    switch ($verdict) {
+      "Verified" {
+        Invoke-KioskRelaunch
+        Write-Host ""
+        Write-Host "=== Deploy successful ===" -ForegroundColor Green
+        Write-Host "API: http://${TargetHost}:${ApiPort}"
+        Write-Host "Web: http://${TargetHost}:${WebPort}"
       }
-      if ($kioskConns -ge 1) { break }
+      "Unreachable" {
+        Write-Host "  Relaunching the kiosk anyway: the binaries were synced and the services are active; what failed is reading the version endpoint." -ForegroundColor Yellow
+        Invoke-KioskRelaunch
+        Write-Host ""
+        Write-Host "=== Deploy NOT verified (endpoint unreachable) - read the SHA by hand before trusting the box ===" -ForegroundColor Red
+        exit 1
+      }
+      "Mismatch" {
+        Write-Host "  Kiosk left stopped on purpose: the box is running a different commit than the one just built." -ForegroundColor Yellow
+        Write-Host "    Relaunch by hand once resolved: ssh $SshTarget '/usr/local/bin/radio-kiosk-launch'"
+        exit 1
+      }
     }
-    # Corroborating evidence, not the gate. The connection count alone cannot distinguish a kiosk
-    # THIS deploy relaunched from one that was never stopped — which is exactly what a missing
-    # radio-kiosk-exit leaves behind. `radio-kiosk.service` is a transient unit that only exists
-    # because radio-kiosk-launch created it, so `active` is positive proof of the new launch path.
-    $rawUnit = ssh $SshTarget "systemctl --user is-active radio-kiosk.service 2>/dev/null || echo unknown"
-    $kioskUnit = "$($rawUnit | Select-Object -Last 1)".Trim()
-
-    if ($kioskConns -ge 1) {
-      Write-Host "  Kiosk is live ($kioskConns established connections to :5002, radio-kiosk.service=$kioskUnit)" -ForegroundColor Green
-    } else {
-      # Deliberately a warning, not exit 1: the binaries deployed and verified successfully.
-      # What failed is the browser relaunch, and saying so loudly is the whole point — the old
-      # code said nothing at all and the owner found a dead screen.
-      Write-Host "  WARNING: 0 established connections to :5002 - the kiosk did not reach the UI." -ForegroundColor Red
-      Write-Host "    Check: ssh $SshTarget 'systemctl --user status radio-kiosk.service'"
-      Write-Host "    Retry: ssh $SshTarget '/usr/local/bin/radio-kiosk-launch'"
-    }
-
-    Write-Host ""
-    Write-Host "=== Deploy successful ===" -ForegroundColor Green
-    Write-Host "API: http://${TargetHost}:${ApiPort}"
-    Write-Host "Web: http://${TargetHost}:${WebPort}"
   } else {
     Write-Host ""
     Write-Host "=== WARNING: One or more services may have failed ===" -ForegroundColor Red
     Write-Host "  radio-api: $apiStatus"
     Write-Host "  radio-web: $webStatus"
     Write-Host "Check: ssh $SshTarget 'journalctl -u radio-api -u radio-web -n 20'"
+    # The kiosk was stopped in step 2. A panel showing "cannot connect" is a symptom someone can
+    # read; a dark one is a service call (OPS-13). Relaunch, then fail.
+    Invoke-KioskRelaunch
     exit 1
   }
 } else {

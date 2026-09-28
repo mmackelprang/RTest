@@ -445,6 +445,13 @@ verified by SHA.** `Radio.Web` serves `/api/health/version` on **port 5002**, th
 5000, and `Deploy-ToLinux.ps1` polls both and `exit 1`s on a mismatch. The SHA parsing behind both is
 one implementation, `Radio.Core.Utilities.AssemblyBuildInfo` — two copies would be two chances for the
 services to derive a version differently and quietly pass a check that should fail.
+⚠ **Since `OPS-13` (2026-09-28) the deploy reads both endpoints ON THE BOX over ssh
+(`curl http://localhost:<port>/...`), not from the dev host.** The old `Invoke-RestMethod` against
+`http://radio:5000` depended on the dev host's OS resolver knowing `radio`, which the Linux dev box does
+not (its `~/.ssh/config` pins the IP for ssh only). Measured 2026-09-28: a deploy that had succeeded
+failed its own check ten times on a name lookup, exited 1 **before the kiosk relaunch**, and left the
+panel dark. **`./deploy/Deploy-ToLinux.ps1 -VerifyOnly`** now runs that same box-side check on its own —
+no build, no stop, no sync — and is the four-second gate to run before a human UATs anything.
 
 ```bash
 curl -s http://radio:5000/api/health/version   # API  — gitSha, assemblyName "Radio.API"
@@ -543,7 +550,16 @@ After relaunching, `Deploy-ToLinux.ps1` polls for up to 20s and prints either
 `Kiosk is live (N established connections to :5002)` in green, or
 `WARNING: 0 established connections to :5002 - the kiosk did not reach the UI.` in red. The warning
 means the **binaries landed and verified fine** — what failed is the browser coming back; the deploy
-does not exit non-zero for it. Established connections are the check because process existence is
+does not exit non-zero for it.
+⚠ **The relaunch runs on every path that stopped the kiosk except one (`OPS-13`, 2026-09-28).** Step 2
+stops the kiosk unconditionally; until `OPS-13` the relaunch lived only behind a *successful* SHA
+verification, so any `exit 1` between them — including a verification that merely could not be *reached* —
+left the panel dark. Now: verified → relaunch; endpoint unreachable → relaunch **and** exit 1; a service
+not active → relaunch **and** exit 1; a SHA that was reached and **mismatched** → kiosk deliberately left
+down, exit 1, because a panel showing the wrong binary is worse than a dark one. **A red exit code from
+the deploy therefore no longer implies a dark panel, and a live panel no longer implies a verified deploy —
+read the verdict line.** The transport is likewise decided and *proven* in step 1.5 before step 2 stops
+anything (`OPS-12`): `-Transport rsync|scp|auto`, with `auto` = scp on Windows, rsync elsewhere when on PATH. Established connections are the check because process existence is
 not: during the 2026-08-02 outage Chrome was running and `radio-web` returned 200 for ~33 hours
 while the connection count was **0**. Recover with
 `ssh mmack@radio '/usr/local/bin/radio-kiosk-launch'`, and diagnose with

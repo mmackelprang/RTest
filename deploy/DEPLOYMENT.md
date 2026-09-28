@@ -159,10 +159,30 @@ already exists. On a freshly provisioned Pi, copy
 
 #### How files reach the target, and what happens when that fails
 
-`Deploy-ToLinux.ps1` uses `rsync` when it is on PATH and falls back to `scp` when it is not
-(`Get-Command rsync` decides; there is no flag). Both routes stage into `/tmp` and are then moved
-into place, so which one ran is not visible in the result — only in the deploy output, where the
-fallback prints `(rsync not found, using scp)`.
+`Deploy-ToLinux.ps1` chooses its transport in **step 1.5, before anything is stopped, and prints
+the choice with its reason** (since `OPS-12`/`OPS-13`, 2026-09-28). `-Transport rsync|scp` makes it
+explicit; the default `auto` is **scp on a Windows host** (the only transport measured working
+there — `OPS-12`) and **rsync on any other host that has it on PATH**. Whichever was chosen is then
+*proven* by a pre-flight — an `rsync -n` dry run of the real API sync, or a one-byte `scp` probe —
+together with `ssh` reachability and the box-side prerequisites (`rsync`, `curl`, passwordless
+`sudo`). A pre-flight failure exits 1 with **nothing stopped**, and names the other transport to try.
+⚠ *Previously* `Get-Command rsync` decided silently inside step 3, after the services were already
+down, which is how a transport error became an outage on 2026-09-09. Both routes still stage into
+`/tmp` and are then moved into place.
+
+**Verification reads the box, not the dev host's DNS.** Step 4's SHA check runs
+`curl http://localhost:<port>/api/health/version` *over ssh* for both services, so it has the same
+answer on every dev host — including one where `radio` only resolves through `~/.ssh/config`. On
+2026-09-28 the old `Invoke-RestMethod` form failed a name lookup ten times after a deploy that had
+succeeded, exited 1, and left the kiosk stopped (`OPS-13`). Three verdicts now: **verified** →
+relaunch the kiosk, exit 0; **unreachable** → relaunch the kiosk *and* exit 1 (the instrument failed,
+not necessarily the deploy; read the SHA by hand); **mismatch** → exit 1 with the kiosk deliberately
+left down. A service that fails to come up also relaunches the kiosk before exiting 1 — a panel
+showing "cannot connect" can be read from across the room, a dark one cannot.
+
+**`-VerifyOnly`** runs that instrument on its own: no build, no stop, no sync. It prints both
+services' running commit against the local HEAD and the kiosk's liveness, and exits 0 only on a
+match. Use it before a human runs UAT (CLAUDE.md: *merged is not deployed*).
 
 ⚠ **The fallback is not exotic. On a Windows dev box without `rsync` installed it is the only path
 every deploy takes** — measured on this repo's dev machine 2026-09-05, where `rsync` is absent
