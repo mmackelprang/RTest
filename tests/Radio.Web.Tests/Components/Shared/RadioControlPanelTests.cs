@@ -601,6 +601,37 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
+  public void RdsCard_Head_ShowsStableCallSign_NotTheRollingPs()
+  {
+    // D-B, 2026-09-28: Rock 92 (PI 0x70DB → WKRR) rolls its PS through artist/title every ~3 s,
+    // and the head is on screen at the start of every scroll cycle, so the live PS flipped the
+    // first characters two or three times per cycle. The head must hold the call sign.
+    var state = BuildState(frequency: 92_300_000, rdsRadioText: "Cars - Good Times Roll - Rock 92") with
+    {
+      RdsStationName = "Cars",        // a rolling page — must NOT be the head
+      RdsStationNameStable = "WKRR",  // PI-decoded call sign — must be the head
+    };
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    var trackText = cut.Find(".rcp-rds-rt-track").TextContent;
+    trackText.Should().StartWith("WKRR");
+    trackText.Should().NotContain("Cars •",
+      "the rolling PS page must not appear in the head");
+  }
+
+  [Fact]
+  public void RdsCard_Head_FallsBackToLivePs_WhenNoCallSignDecodes()
+  {
+    var state = BuildState(rdsStationName: "KQED FM", rdsProgramType: "News") with
+    {
+      RdsStationNameStable = null,
+    };
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+
+    Assert.Equal("KQED FM", cut.Find(".rds-card-station").TextContent.Trim());
+  }
+
+  [Fact]
   public void RdsCard_Renders_WhenStationNamePresent()
   {
     var state = BuildState(rdsStationName: "KQED FM", rdsProgramType: "News");
