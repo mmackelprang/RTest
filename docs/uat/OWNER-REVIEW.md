@@ -72,7 +72,7 @@ Shipped and deployed: `LOG-5` [#699](https://github.com/mmackelprang/RTest/pull/
 
 ## Phase 2g — panel power-off and firmware check
 
-Shipped: ✅🔬 `ENC-22` [#PRNUM](https://github.com/mmackelprang/RTest/pull/PRNUM) — the panel powers off after a period on the sleep screen, and any knob wakes it. **It shipped DISABLED** because the check below needs your hand. `ENC-18` and `ENC-14` were skipped per D-A.
+Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707) — the panel powers off after a period on the sleep screen, and any knob wakes it. **It shipped DISABLED** because the check below needs your hand. `ENC-18` and `ENC-14` were skipped per D-A.
 
 **What I verified on the box myself** (build `47b55ae`, timeout temporarily 1 min, virtual encoder harness; full table in [`queue/ENC-22.md`](../queue/ENC-22.md)):
 - (a) Sleep screen by the idle route: power-off after exactly 1 min, `dpms=Off`, and the encoder stays connected.

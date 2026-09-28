@@ -13,7 +13,7 @@ knob-only design ENC-15 identified as the one remaining path (*"a knob wake can 
 `radio-api` reads `hidraw` and itself calls the D-Bus unblank"*) and never measured. It has now been
 measured, and it works. **The single-wake-path risk is real and is what the safety rules below are for.**
 
-## ✅🔬 Shipped 2026-09-28 — [#PRNUM](https://github.com/mmackelprang/RTest/pull/PRNUM), **off by default**
+## ✅🔬 Shipped 2026-09-28 — [#707](https://github.com/mmackelprang/RTest/pull/707), **off by default**
 
 `Radio.Infrastructure.Platform.Display.PanelPowerService` (Mutter `PowerSaveMode` via `gdbus`, keyed on
 `IsSleepScreenVisible`), asked first by `RotaryEncoderActionRouter`; `ExecStopPost=` on
