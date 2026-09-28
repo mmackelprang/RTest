@@ -126,3 +126,12 @@ Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707)
 - [ ] **Next time you re-flash the Pico** (any reason), look at that line or the badge afterwards. That is the moment this exists for.
 - **Judgement call:** the check runs as a separate read-config *before* the configuration push. It does not infer the verdict from the push's own read-back, so "the firmware ignores writes" and "the config did not verify" can be told apart. On working firmware it costs one round-trip. On broken firmware the hard fault arrives after about 15 s instead of 7, with the volume clamp tight throughout.
 
+**Box state at the end of Phase 2g:**
+- Panel **on**.
+- ENC-22 **off**: there is no `Sleep` section in `/opt/radio-console/api/appsettings.Production.json`, and the start-up line reads "power-off after sleep is off".
+- **One** encoder on USB, the real one (`3-2.3`), with `isConnected: true`, `firmwareCheck: Passed` and `status: Configured`.
+- The harness is cleaned up (`--cleanup`: nothing to restore).
+- `ExecStopPost=` is parsed.
+
+`-VerifyOnly` (2026-09-28 16:53 EDT, build `adb55fd` = both Phase 2g rows): `API (:5000): running adb55fd - matches` · `Web (:5002): running adb55fd - matches` · `Kiosk: 4 established connections to :5002` · **`=== Box matches HEAD ===`**. The closing PR (this list plus a one-line log-wording fix) was deployed on top of it and verified the same way.
+

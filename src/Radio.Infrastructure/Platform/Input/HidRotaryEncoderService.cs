@@ -772,7 +772,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
     }
 
     _logger.LogError(
-      "Encoder firmware check FAILED: the device is connected but did not answer read-config (0x04) " +
+      "Encoder firmware check FAILED: the device accepted read-config (0x04) but did not answer it " +
       "with report 0x02 after {Attempts} attempts. This is the pre-RotaryUsb #11 defect - the firmware " +
       "accepts host writes and ignores them, so the knob configuration cannot be applied and the device " +
       "runs whatever is in its flash. Re-flash the encoder with a RotaryUsb build that includes #11 " +
