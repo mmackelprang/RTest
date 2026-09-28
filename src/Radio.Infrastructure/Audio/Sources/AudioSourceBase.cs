@@ -11,6 +11,8 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
 {
   private readonly ILogger _logger;
   private AudioSourceState _state = AudioSourceState.Created;
+  private readonly object _stateLock = new();
+  private long _stateVersion;
   private float _volume = 1.0f;
   private bool _disposed;
   private string? _id;
@@ -42,12 +44,19 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
     get => _state;
     protected set
     {
-      if (_state == value)
+      AudioSourceState previousState;
+      lock (_stateLock)
       {
-        return;
+        if (_state == value)
+        {
+          return;
+        }
+        previousState = _state;
+        _state = value;
+        _stateVersion++;
       }
-      var previousState = _state;
-      _state = value;
+
+      // Raised outside the lock: handlers may read State or call back into this source.
       LogStateChange(previousState, value);
       OnStateChanged(previousState, value);
     }
@@ -92,8 +101,61 @@ public abstract class AudioSourceBase : IAudioSource, IAsyncDisposable
       return;
     }
 
+    long versionBeforePlay;
+    lock (_stateLock)
+    {
+      versionBeforePlay = _stateVersion;
+    }
+
     await PlayCoreAsync(cancellationToken);
-    State = AudioSourceState.Playing;
+    PromoteToPlayingUnlessTerminatedSince(versionBeforePlay);
+  }
+
+  /// <summary>
+  /// Sets <see cref="AudioSourceState.Playing"/> after <see cref="PlayCoreAsync"/> returns — UNLESS
+  /// the state was moved to Stopped, Error or Disposed while it ran (TTS-5).
+  /// </summary>
+  /// <remarks>
+  /// ⚠ The unconditional <c>State = Playing</c> this replaces overwrote a terminal state that
+  /// PlayCoreAsync had already reached. TTSEventSource and AudioFileEventSource return from
+  /// PlayCoreAsync after starting a background task, and that task runs SYNCHRONOUSLY up to its first
+  /// real await — so a playback service that fails without awaiting (no playback device) sets Error
+  /// and raises PlaybackCompleted(Error) before PlayCoreAsync has even returned. The source then
+  /// reported Playing forever. It is the #469 shape (a state assignment that silently defeats the
+  /// state another path set), one layer up, in the base class.
+  ///
+  /// "Since" is decided by a version counter, not by reading the state: a source replayed from
+  /// Stopped must still become Playing when PlayCoreAsync leaves the state alone. Only the three
+  /// terminal states are protected; a non-terminal change made inside PlayCoreAsync (e.g. Ready) is
+  /// overwritten exactly as before. The check and the write share <c>_stateLock</c>, so a background
+  /// task that terminates concurrently either lands first and is kept, or lands after Playing and
+  /// wins — never lost in between.
+  /// </remarks>
+  private void PromoteToPlayingUnlessTerminatedSince(long versionBeforePlay)
+  {
+    AudioSourceState previousState;
+    lock (_stateLock)
+    {
+      if (_stateVersion != versionBeforePlay
+          && _state is AudioSourceState.Stopped or AudioSourceState.Error or AudioSourceState.Disposed)
+      {
+        _logger.LogDebug(
+          "Audio source {Id} reached {State} while starting; not promoting it to Playing", Id, _state);
+        return;
+      }
+
+      if (_state == AudioSourceState.Playing)
+      {
+        return;
+      }
+
+      previousState = _state;
+      _state = AudioSourceState.Playing;
+      _stateVersion++;
+    }
+
+    LogStateChange(previousState, AudioSourceState.Playing);
+    OnStateChanged(previousState, AudioSourceState.Playing);
   }
 
   /// <summary>
