@@ -181,13 +181,12 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
 
       var bytesRead = 0;
 
-      // IMPORTANT: Use ReadAsync with real-time pacing, not sync Read.
-      // The ring buffer's ReadForReader returns silence (zeros) when no new
-      // audio is available. Sync Read hammers the buffer at CPU speed, filling
-      // the capture with 99% silence in milliseconds. ReadAsync paces silence
-      // reads to approximate real-time, ensuring we capture actual audio over
-      // the full duration. We also skip zero-only chunks to only accumulate
-      // real audio data.
+      // IMPORTANT: Use ReadAsync, not sync Read (which blocks a thread while it waits).
+      // While the source is playing, ReadAsync waits for the next block when it has
+      // caught up (AUD-79). Only when the source has been silent for ~250 ms does the
+      // ring buffer hand out keep-alive silence (zeros), and ReadAsync paces those reads
+      // to approximate real-time. Zero-only chunks are skipped so only real audio
+      // accumulates.
       var stopwatch = System.Diagnostics.Stopwatch.StartNew();
       var readAttempts = 0;
       var silenceChunks = 0;

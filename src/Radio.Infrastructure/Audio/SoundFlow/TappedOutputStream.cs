@@ -28,6 +28,7 @@ internal sealed class TappedOutputStream : Stream
   private long _totalBytesWritten;
   private long _totalWriteCalls;
   private DateTime _lastWriteTime;
+  private readonly TimeProvider _timeProvider;
 
   // Metrics tracking
   private DateTime _lastMetricsTime = DateTime.MinValue;
@@ -45,7 +46,19 @@ internal sealed class TappedOutputStream : Stream
   /// <param name="metricsCollector">Optional metrics collector for pipeline metrics.</param>
   public TappedOutputStream(int sampleRate = 48000, int channels = 2, int bufferSizeSeconds = 5,
     IMetricsCollector? metricsCollector = null)
+    : this(sampleRate, channels, bufferSizeSeconds, metricsCollector, TimeProvider.System)
   {
+  }
+
+  /// <summary>
+  /// Initializes a new instance with an explicit clock for the last-write stamp and the keep-alive idle
+  /// check (AUD-79). A separate overload, not an optional parameter, because tests construct this type by
+  /// reflection against the four-parameter signature.
+  /// </summary>
+  internal TappedOutputStream(int sampleRate, int channels, int bufferSizeSeconds,
+    IMetricsCollector? metricsCollector, TimeProvider timeProvider)
+  {
+    _timeProvider = timeProvider;
     _sampleRate = sampleRate;
     _channels = channels;
     _bytesPerSample = BytesPerSample16Bit;
@@ -151,9 +164,22 @@ internal sealed class TappedOutputStream : Stream
   }
 
   /// <summary>
+  /// Returned by <see cref="ReadForReader"/> when the reader has caught up with a writer that is still
+  /// writing: no data yet, wait and read again (AUD-79).
+  /// </summary>
+  internal const int WaitForData = -1;
+
+  /// <summary>
+  /// How long the writer must have been silent before a caught-up reader is given keep-alive silence
+  /// (AUD-79). Shorter than any Cast/HTTP timeout; far longer than the ~21 ms between writes.
+  /// </summary>
+  internal static readonly TimeSpan KeepAliveAfterIdle = TimeSpan.FromMilliseconds(250);
+
+  /// <summary>
   /// Reads data for a specific reader, advancing only that reader's position.
-  /// When no data is available, returns PCM silence to keep HTTP streams alive
-  /// during source pause (prevents Cast device timeout/disconnect).
+  /// When the reader has caught up: if the writer has written within <see cref="KeepAliveAfterIdle"/>,
+  /// returns <see cref="WaitForData"/>; if the writer has gone idle (source paused), returns PCM silence
+  /// to keep HTTP/Cast streams alive (prevents Cast device timeout/disconnect).
   /// </summary>
   internal int ReadForReader(string readerId, byte[] buffer, int offset, int count)
   {
@@ -173,9 +199,19 @@ internal sealed class TappedOutputStream : Stream
 
       if (available == 0)
       {
-        // No new audio data — return silence (zeroed PCM) to keep HTTP streams
-        // alive during source pause. The reader position is NOT advanced so
-        // real audio data will be read immediately when the source resumes.
+        // AUD-79: caught up with a writer that is still writing is not a pause. This used to return
+        // silence here too, and because the reader position is not advanced the silence was SPLICED
+        // into the stream between two real blocks. With the writer running even slightly slow (the tap
+        // was losing batches, BufferedTapModifier), every catch-up inserted 1,024 frames of zeros:
+        // Cast audio alternated 21 ms of music with 21 ms of silence — the owner's "underwater" sound.
+        if (_timeProvider.GetUtcNow().UtcDateTime - _lastWriteTime < KeepAliveAfterIdle)
+        {
+          return WaitForData;
+        }
+
+        // The writer has gone quiet (source paused) — return silence (zeroed PCM) to keep HTTP streams
+        // alive. The reader position is NOT advanced so real audio data will be read immediately when
+        // the source resumes.
         // Limit to ~21ms of audio per call (1024 stereo 16-bit samples = 4096 bytes)
         // to approximate real-time rate.
         var silenceBytes = Math.Min(count, 4096);
@@ -291,9 +327,9 @@ internal sealed class TappedOutputStream : Stream
 
   private void ReportMetrics()
   {
-    var now = DateTime.UtcNow;
-    // Update last write time here instead of in WriteFromEngine hot path
-    // to avoid a syscall (DateTime.UtcNow) on every audio callback
+    // Called at the end of every WriteFromEngine: the last-write stamp is what ReadForReader's
+    // keep-alive idle check reads (AUD-79), so it must be current, not sampled.
+    var now = _timeProvider.GetUtcNow().UtcDateTime;
     _lastWriteTime = now;
 
     if (_metricsCollector == null)
@@ -446,15 +482,28 @@ internal sealed class TappedOutputStreamReader : Stream
     {
       throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
     }
-    return _parent.ReadForReader(_readerId, buffer, offset, count);
+    while (true)
+    {
+      var bytesRead = _parent.ReadForReader(_readerId, buffer, offset, count);
+      if (bytesRead != TappedOutputStream.WaitForData)
+      {
+        return bytesRead;
+      }
+      if (_disposed)
+      {
+        throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
+      }
+      // AUD-79: caught up with an active writer — wait for the next block rather than splice silence.
+      Thread.Sleep(2);
+    }
   }
 
   /// <inheritdoc/>
   /// <remarks>
-  /// Paces silence reads to approximate real-time rate. Without this,
-  /// callers spin a tight loop when no audio data is available because
-  /// <see cref="TappedOutputStream.ReadForReader"/> returns non-zero
-  /// silence bytes instead of 0.
+  /// Waits for the next block while the writer is active (AUD-79), and paces keep-alive silence reads
+  /// (writer idle) to approximate real-time rate. Without the pacing, callers spin a tight loop during
+  /// a pause because <see cref="TappedOutputStream.ReadForReader"/> returns non-zero silence bytes
+  /// instead of 0.
   /// </remarks>
   public override async Task<int> ReadAsync(
     byte[] buffer, int offset, int count, CancellationToken cancellationToken)
@@ -464,8 +513,20 @@ internal sealed class TappedOutputStreamReader : Stream
       throw new ObjectDisposedException(nameof(TappedOutputStreamReader));
     }
 
-    var available = _parent.GetAvailableForReader(_readerId);
-    var bytesRead = _parent.ReadForReader(_readerId, buffer, offset, count);
+    int available;
+    int bytesRead;
+    while (true)
+    {
+      available = _parent.GetAvailableForReader(_readerId);
+      bytesRead = _parent.ReadForReader(_readerId, buffer, offset, count);
+      if (bytesRead != TappedOutputStream.WaitForData)
+      {
+        break;
+      }
+      // AUD-79: caught up with an active writer — wait for the next block (~21 ms apart) rather than
+      // splice silence into the stream.
+      await Task.Delay(2, cancellationToken);
+    }
 
     if (available == 0 && bytesRead > 0)
     {
