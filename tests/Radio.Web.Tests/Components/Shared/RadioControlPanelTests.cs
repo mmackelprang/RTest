@@ -571,18 +571,19 @@ public class RadioControlPanelTests : TestContext
   // Tuner header, RDS card mount, tall band pills, RT line, presets
   // grid (slot · name+band · freq) + dashed empty-slot placeholder.
 
+  /// <summary>
+  /// UI-17: the tuner header row is gone — the centre panel's "Radio" tab names the panel and the band
+  /// pill shows the range (pinned by <see cref="BandPills_RenderTwoLineLabelAndRange"/>). Its height was
+  /// what the tab strip needed; with it back, the frequency well is squeezed under the meter.
+  /// </summary>
   [Fact]
-  public void TunerHeader_RendersBandAndRange_WhenBandKnown()
+  public void TunerHeader_IsNotRendered()
   {
     var state = BuildState();
     var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
 
-    var title = cut.Find(".rcp-tuner-title");
-    Assert.Equal("Tuner", title.TextContent.Trim());
-
-    var range = cut.Find(".rcp-tuner-band-range");
-    Assert.Contains("FM", range.TextContent);
-    Assert.Contains("87.5–108 MHz", range.TextContent);
+    Assert.Empty(cut.FindAll(".rcp-tuner-header"));
+    Assert.Empty(cut.FindAll(".rcp-tuner-title"));
   }
 
   [Fact]

@@ -4186,39 +4186,6 @@ body {
    - RT (RadioText) line below the frequency well — one-line ellipsis.
 */
 
-/* Tuner header — promoted from absolute label to a real heading row.
-   Bottom margin removed in PR A follow-up #37; the 24px gap below the
-   header is now owned by `margin-top: 24px` on `.rcp-band-group` (the
-   first content element below) to match spec §P1·1 step 1 wording. */
-.rcp-tuner-header {
-  width: 100%;
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 4px 8px;
-  margin: 0;
-  border-bottom: 1px solid var(--surface-separator);
-}
-
-.rcp-tuner-title {
-  margin: 0;
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 14px;
-  font-weight: 500;
-  color: var(--text-high);
-  letter-spacing: 0.01em;
-}
-
-.rcp-tuner-band-range {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--signal-amber);
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
 /* Tall band pills — override §RCP base .rcp-band-btn into a two-line column.
    The base rule already sets background/hover/active states; we layer on the
    sizing and inner layout so the dual-line label fits comfortably.
