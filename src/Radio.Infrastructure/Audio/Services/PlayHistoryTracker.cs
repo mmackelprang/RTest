@@ -867,6 +867,48 @@ public class PlayHistoryTracker : IDisposable
       entryId, btMeta.Title, btMeta.Artist);
   }
 
+  /// <summary>
+  /// Finalizes the in-flight play history entry, if there is one, by stamping its end time.
+  /// Called from <see cref="PlayHistoryShutdownFinalizer.StopAsync"/> during host shutdown, while
+  /// the root service provider is still alive — <see cref="Dispose"/> runs after the container is
+  /// disposed and cannot create a scope (AUD-78).
+  /// </summary>
+  /// <remarks>
+  /// Best-effort: a failure is logged at Warning and swallowed so it cannot fail shutdown. If this
+  /// never runs (crash, kill), the entry stays open until the next start's orphan cleanup
+  /// (<c>AudioEngineInitializationService.CloseOrphanedPlayHistoryEntriesAsync</c>), which only
+  /// closes entries whose <c>PlayedAt</c> is more than two minutes before that start, and stamps
+  /// an estimated end time rather than the real one.
+  /// </remarks>
+  public async Task FinalizeInFlightEntryAsync(CancellationToken cancellationToken = default)
+  {
+    // Snapshot: the event handlers reassign this field from other threads.
+    string? entryId = _currentPlayHistoryEntryId;
+    if (entryId == null)
+    {
+      return;
+    }
+
+    try
+    {
+      using var scope = _serviceScopeFactory.CreateScope();
+      var repo = scope.ServiceProvider.GetRequiredService<IPlayHistoryRepository>();
+      await repo.FinalizeEntryAsync(entryId, DateTime.UtcNow, cancellationToken);
+      // Clear only if no handler replaced the entry while the write was in flight.
+      Interlocked.CompareExchange(ref _currentPlayHistoryEntryId, null, entryId);
+      _logger.LogInformation("Finalized in-flight play history entry {Id} during shutdown", entryId);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to finalize play history entry {Id} during shutdown", entryId);
+    }
+  }
+
+  /// <summary>
+  /// Unsubscribes from the Bluetooth and identification events. Does not touch the database:
+  /// by the time the container disposes this singleton it can no longer create a scope, so the
+  /// in-flight entry is finalized earlier by <see cref="FinalizeInFlightEntryAsync"/> (AUD-78).
+  /// </summary>
   public void Dispose()
   {
     if (_disposed)
@@ -874,29 +916,6 @@ public class PlayHistoryTracker : IDisposable
       return;
     }
     _disposed = true;
-
-    // Finalize any in-flight play history entry before unsubscribing
-    if (_currentPlayHistoryEntryId != null)
-    {
-      try
-      {
-        using var scope = _serviceScopeFactory.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IPlayHistoryRepository>();
-        // Safe to block: Dispose runs on a threadpool thread during hosted service shutdown
-        // (no SynchronizationContext in ASP.NET Core), and it's a single short SQLite call.
-        // Startup orphan cleanup is the backup for crash/kill scenarios where this doesn't run.
-        repo.FinalizeEntryAsync(_currentPlayHistoryEntryId, DateTime.UtcNow)
-          .GetAwaiter().GetResult();
-        _logger.LogInformation("Finalized in-flight play history entry {Id} during shutdown",
-          _currentPlayHistoryEntryId);
-        _currentPlayHistoryEntryId = null;
-      }
-      catch (Exception ex)
-      {
-        _logger.LogWarning(ex, "Failed to finalize play history entry {Id} during shutdown",
-          _currentPlayHistoryEntryId);
-      }
-    }
 
     _bluetoothService.MetadataChanged -= OnBluetoothMetadataChanged;
 
