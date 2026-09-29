@@ -20,6 +20,7 @@ namespace Radio.Web.Tests.Components.Pages;
 public class SystemConfigPageTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
+  private readonly RoutedApiHandler _metricsApi = new();
 
   public SystemConfigPageTests()
   {
@@ -54,6 +55,17 @@ public class SystemConfigPageTests : TestContext
 
     // Add AudioStateHubService
     Services.AddSingleton<AudioStateHubService>();
+
+    // UI-2: the Diagnostics tab hosts DiagnosticsPanel, which reads metrics through this client. A
+    // recording handler (not the hermetic one) so tests can prove when the panel does — and does
+    // not — touch the metrics API.
+    Services.AddSingleton(_ => new MetricsApiService(
+      new HttpClient(_metricsApi, disposeHandler: false) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      NullLogger<MetricsApiService>.Instance));
+    _metricsApi.Get("/api/metrics/window", new List<MetricWindowSummaryDto>
+    {
+      new("fingerprint.identification_successes", "Counter", 3, 3, null, null, 1, DateTimeOffset.UtcNow, 1),
+    });
     
     // Setup JSInterop for Radzen components
     JSInterop.Mode = JSRuntimeMode.Loose;
@@ -606,5 +618,74 @@ public class SystemConfigPageTests : TestContext
     HubHandlerCounts(hub).Should().BeEquivalentTo(afterOneVisit,
       "five visits to /system must leave the singleton in the same state as one; the appliance runs "
       + "for weeks between restarts, so per-visit growth is unbounded in practice");
+  }
+
+  // ─── UI-2 / D11 / D13: Diagnostics lives under Settings ────────────────────────────────────
+
+  [Fact]
+  public void SystemConfigPage_ExposesADiagnosticsTab()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    cut.FindAll("a[role='tab']")
+      .Select(a => a.TextContent.Trim())
+      .Should().Contain(t => t.Contains("Diagnostics"));
+  }
+
+  [Fact]
+  public void SelectingTheDiagnosticsTab_MountsThePanel()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    cut.FindAll("a[role='tab']").First(a => a.TextContent.Contains("Diagnostics")).Click();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
+  }
+
+  [Fact]
+  public void AtSystemRoute_DiagnosticsPanelIsNotMounted_AndTheMetricsApiIsNeverCalled()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+
+    // The load rule: nothing polls the metrics DB unless someone is looking at the Diagnostics tab.
+    cut.FindAll("[data-testid='diagnostics-panel']").Should().BeEmpty();
+    _metricsApi.Requests.Should().BeEmpty();
+  }
+
+  [Fact]
+  public void AtDiagnosticsRoute_OpensOnTheDiagnosticsTab()
+  {
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+
+    var cut = RenderComponent<SystemConfigPage>();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
+    cut.WaitForAssertion(() =>
+      _metricsApi.Requests.Count(r => r.Path == "/api/metrics/window").Should().Be(1));
+  }
+
+  [Fact]
+  public void LeavingTheDiagnosticsTab_UnmountsThePanel()
+  {
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+    var cut = RenderComponent<SystemConfigPage>();
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
+
+    cut.FindAll("a[role='tab']").First(a => a.TextContent.Contains("System Stats")).Click();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().BeEmpty());
+  }
+
+  [Theory]
+  [InlineData("diagnostics", true)]
+  [InlineData("Diagnostics", true)]
+  [InlineData("diagnostics/", true)]
+  [InlineData("diagnostics?x=1", true)]
+  [InlineData("system", false)]
+  [InlineData("diagnostic", false)]
+  [InlineData("", false)]
+  public void IsDiagnosticsRoute_MatchesOnlyTheDiagnosticsPath(string path, bool expected)
+  {
+    SystemConfigPage.IsDiagnosticsRoute(path).Should().Be(expected);
   }
 }

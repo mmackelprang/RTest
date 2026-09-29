@@ -257,4 +257,20 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
     Assert.Contains("_framework/blazor.web.js", body);
     Assert.Contains("<title>Radio Console</title>", body);
   }
+
+  /// <summary>
+  /// UI-2 deleted <c>/metrics</c> (folded into Settings → Diagnostics at <c>/diagnostics</c>), and
+  /// UI-1 / D13 deleted <c>/diagnostic</c>. Neither may quietly come back as a page.
+  /// </summary>
+  [Theory]
+  [InlineData("/metrics")]
+  [InlineData("/diagnostic")]
+  public async Task RemovedPageRoute_IsNotServed(string path)
+  {
+    var response = await _factory.CreateClient().GetAsync(path);
+    var body = await response.Content.ReadAsStringAsync();
+
+    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    Assert.DoesNotContain("_framework/blazor.web.js", body);
+  }
 }

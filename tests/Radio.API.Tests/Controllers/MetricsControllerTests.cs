@@ -356,4 +356,43 @@ public class MetricsControllerTests
     Assert.NotNull(memory);
     Assert.Equal(MetricUnit.Megabytes, memory!.Unit);
   }
+
+  // ─── UI-2: GET /api/metrics/window ─────────────────────────────────────────────────────────
+
+  [Fact]
+  public async Task GetWindow_WithValidRange_ReturnsTheReadersSummaries()
+  {
+    var start = DateTimeOffset.UtcNow.AddHours(-1);
+    var end = DateTimeOffset.UtcNow;
+    IReadOnlyList<MetricWindowSummary> expected =
+    [
+      new MetricWindowSummary
+      {
+        Key = "audio.buffer.underruns", Type = MetricType.Counter, Sum = 3, SampleCount = 3,
+        LatestAverage = 1, LatestTimestamp = end, BucketCount = 2
+      }
+    ];
+    _mockMetricsReader
+      .Setup(x => x.GetWindowSummariesAsync(start, end, MetricResolution.Hour, It.IsAny<CancellationToken>()))
+      .ReturnsAsync(expected);
+
+    var result = await _controller.GetWindow(start, end, MetricResolution.Hour);
+
+    var ok = Assert.IsType<OkObjectResult>(result.Result);
+    Assert.Same(expected, ok.Value);
+  }
+
+  [Fact]
+  public async Task GetWindow_WithStartAfterEnd_ReturnsBadRequest_WithoutQuerying()
+  {
+    var now = DateTimeOffset.UtcNow;
+
+    var result = await _controller.GetWindow(now, now.AddMinutes(-1));
+
+    Assert.IsType<BadRequestObjectResult>(result.Result);
+    _mockMetricsReader.Verify(
+      x => x.GetWindowSummariesAsync(It.IsAny<DateTimeOffset>(), It.IsAny<DateTimeOffset>(),
+        It.IsAny<MetricResolution>(), It.IsAny<CancellationToken>()),
+      Times.Never);
+  }
 }
