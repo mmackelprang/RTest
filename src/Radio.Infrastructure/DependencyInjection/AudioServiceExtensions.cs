@@ -365,6 +365,11 @@ public static class AudioServiceExtensions
     // Register Cast device cache repository (singleton - shares FingerprintDbContext)
     services.AddSingleton<CastDeviceCacheRepository>();
 
+    // AUD-80: per-device Cast volume memory, persisted in the config store.
+    services.AddSingleton<ICastDeviceVolumeStore>(sp => new ConfigStoreCastDeviceVolumeStore(
+      sp.GetRequiredService<ILogger<ConfigStoreCastDeviceVolumeStore>>(),
+      sp.GetService<Radio.Configuration.Abstractions.IConfigurationManager>()));
+
     // Register Google Cast Output (singleton - optional external output)
     services.AddSingleton<GoogleCastOutput>();
 

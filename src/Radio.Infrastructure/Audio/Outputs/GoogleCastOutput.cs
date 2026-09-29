@@ -26,6 +26,7 @@ public class GoogleCastOutput : AudioOutputBase
   private readonly GoogleCastOutputOptions _options;
   private readonly CastDeviceCacheRepository? _cacheRepository;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly ICastDeviceVolumeStore? _volumeStore;
   private ChromecastClient? _client;
   private ChromecastReceiver? _connectedReceiver;
 
@@ -161,6 +162,17 @@ public class GoogleCastOutput : AudioOutputBase
   /// Null (and therefore free) in production.
   /// </summary>
   internal Func<Task<(float Volume, bool Muted)?>>? CastStatusReadOverrideForTests { get; set; }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the Cast SET_VOLUME inside
+  /// <see cref="PushVolumeToDeviceAsync"/>. Set by <c>GoogleCastOutputVolumeMemoryTests</c>.
+  /// <b>Why the real path is unreachable:</b> the same as
+  /// <see cref="CastStatusReadOverrideForTests"/> — no fake socket speaks the Cast protocol.
+  /// <b>NOT covered by this seam:</b> whether the device honours the level. The choice of
+  /// level, and the echo-filter baseline set before sending it, are real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<float, Task>? CastSetVolumeOverrideForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -184,6 +196,14 @@ public class GoogleCastOutput : AudioOutputBase
   private float _lastSetVolume = -1f;
   private bool _lastSetMute;
   private bool _suppressNextVolumeEvent;
+
+  // AUD-80: the level the current connection should hold on the device — the volume
+  // remembered for it, else the level it reported when first seen, else NaN (unknown).
+  // SyncVolumeAfterStartAsync pushes this after the receiver app launches; NaN means
+  // "leave the device alone". Written from the connect path and from SharpCaster's
+  // status callback, so accessed through Volatile (a float write is atomic; a float?
+  // would not be).
+  private float _connectionVolume = float.NaN;
 
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
@@ -231,11 +251,16 @@ public class GoogleCastOutput : AudioOutputBase
   /// <param name="options">The Google Cast output options.</param>
   /// <param name="cacheRepository">Optional SQLite-backed cache repository.</param>
   /// <param name="metricsCollector">Optional metrics collector for streaming metrics.</param>
+  /// <param name="volumeStore">
+  /// Optional per-device volume memory (AUD-80). Without it every connection adopts the
+  /// device's own level and nothing is restored.
+  /// </param>
   public GoogleCastOutput(
     ILogger<GoogleCastOutput> logger,
     IOptions<AudioOutputOptions> options,
     CastDeviceCacheRepository? cacheRepository = null,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    ICastDeviceVolumeStore? volumeStore = null)
     : base("cast-output", "Google Cast Output",
         options?.Value?.GoogleCast?.DefaultVolume ?? 0.7f,
         options?.Value?.GoogleCast?.Enabled ?? false)
@@ -244,6 +269,7 @@ public class GoogleCastOutput : AudioOutputBase
     _options = options?.Value?.GoogleCast ?? throw new ArgumentNullException(nameof(options));
     _cacheRepository = cacheRepository;
     _metricsCollector = metricsCollector;
+    _volumeStore = volumeStore;
   }
 
   /// <inheritdoc />
@@ -665,7 +691,7 @@ public class GoogleCastOutput : AudioOutputBase
 
       // Read initial device volume. The generation goes with it: the read is a
       // network round-trip, and this connection can be superseded inside it.
-      await SyncInitialVolumeAsync(client, myGeneration).ConfigureAwait(false);
+      await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
 
       Connected?.Invoke(this, new ChromecastConnectedEventArgs { Device = device });
 
@@ -921,17 +947,33 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Syncs the volume level to the Cast device after starting playback.
+  /// Re-applies this connection's volume (<c>_connectionVolume</c>, AUD-80) after the
+  /// receiver application launches. Leaves the device alone when that level is unknown.
   /// </summary>
-  private async Task SyncVolumeAfterStartAsync()
+  /// <remarks>
+  /// This used to push the output's own <c>Volume</c> — which nothing sets after
+  /// construction, so it was always <c>GoogleCast.DefaultVolume</c> — on every start, and
+  /// without baselining the echo filter. Measured on the box 2026-09-29: every connect was
+  /// followed by <c>Synced volume from Cast device: 70 % (initial: false)</c>.
+  /// <c>internal</c> so a test can drive it: the StartAsync chain that calls it needs a
+  /// launched receiver application, which no offline test can produce.
+  /// </remarks>
+  internal async Task SyncVolumeAfterStartAsync()
   {
+    var target = Volatile.Read(ref _connectionVolume);
+    if (float.IsNaN(target))
+    {
+      _logger.LogInformation(
+        "Cast: no remembered or reported volume for {Name} — leaving the device's own volume unchanged",
+        ConnectedDevice?.FriendlyName);
+      return;
+    }
+
     try
     {
-      var receiverChannel = _client!.GetChannel<ReceiverChannel>();
-      if (receiverChannel != null)
+      if (await PushVolumeToDeviceAsync(_client!, target).ConfigureAwait(false))
       {
-        await receiverChannel.SetVolume(Volume);
-        _logger.LogInformation("Cast: Volume synced to {Volume:P0}", Volume);
+        _logger.LogInformation("Cast: Volume synced to {Volume:P0}", target);
       }
     }
     catch (Exception volEx)
@@ -1572,7 +1614,8 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Reads the initial device volume after connecting and syncs our local state.
+  /// Reads the initial device volume after connecting, restores the volume remembered for
+  /// this device if there is one (AUD-80), and syncs our local state.
   /// </summary>
   /// <param name="client">
   /// The client to read from, passed explicitly rather than read from <c>_client</c>
@@ -1582,34 +1625,42 @@ public class GoogleCastOutput : AudioOutputBase
   /// </param>
   /// <param name="generation">
   /// The connection generation the caller claimed. Re-checked after the network read
-  /// and before the event fire; the comment on that check states exactly what it does
-  /// and does not guarantee.
+  /// and before anything is published; the comment on that check states exactly what
+  /// it does and does not guarantee.
   /// </param>
-  private async Task SyncInitialVolumeAsync(ChromecastClient client, int generation)
+  /// <param name="device">The device connected to; its <c>Id</c> keys the volume memory.</param>
+  private async Task SyncInitialVolumeAsync(ChromecastClient client, int generation, ChromecastDeviceInfo device)
   {
     try
     {
-      var reading = await ReadInitialCastVolumeAsync(client).ConfigureAwait(false);
-      if (reading == null)
+      (float Volume, bool Muted)? reading = null;
+      try
       {
-        return;
+        reading = await ReadInitialCastVolumeAsync(client).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Could not read initial Cast device volume — will sync on first status update");
       }
 
-      var (deviceVolume, deviceMuted) = reading.Value;
+      if (reading != null)
+      {
+        // Primed BEFORE the currency check, and therefore primed even for a reading
+        // that is about to be discarded. That is deliberate. These two fields are the
+        // echo filter's baseline, not connection state: _lastSetVolume starts at the
+        // -1f sentinel, and OnReceiverStatusChanged reports any status event arriving
+        // while it is still -1f as an EXTERNAL change. Skipping the priming here would
+        // convert a suppressed initial sync into a spurious user-authored one — the
+        // same write to master volume, through the other door.
+        _lastSetVolume = reading.Value.Volume;
+        _lastSetMute = reading.Value.Muted;
 
-      // Primed BEFORE the currency check, and therefore primed even for a reading
-      // that is about to be discarded. That is deliberate. These two fields are the
-      // echo filter's baseline, not connection state: _lastSetVolume starts at the
-      // -1f sentinel, and OnReceiverStatusChanged reports any status event arriving
-      // while it is still -1f as an EXTERNAL change. Skipping the priming here would
-      // convert a suppressed initial sync into a spurious user-authored one — the
-      // same write to master volume, through the other door.
-      _lastSetVolume = deviceVolume;
-      _lastSetMute = deviceMuted;
+        _logger.LogInformation(
+          "Cast device initial volume: {Volume:P0}, Muted: {Muted}",
+          reading.Value.Volume, reading.Value.Muted);
+      }
 
-      _logger.LogInformation(
-        "Cast device initial volume: {Volume:P0}, Muted: {Muted}",
-        deviceVolume, deviceMuted);
+      var remembered = await GetRememberedVolumeAsync(device.Id).ConfigureAwait(false);
 
       // AUD-5. The read above is a network round-trip, and four sites bump the
       // generation while it is in flight: InitializeAsync, a newer connect's claim,
@@ -1621,9 +1672,10 @@ public class GoogleCastOutput : AudioOutputBase
       // has shipped comments that claimed more than the code enforced:
       //   IT DOES remove the network round-trip from the window. A supersede landing
       //     any time between the claim and the status response is caught here.
-      //   IT DOES NOT make the window empty. The lock is released before the Invoke —
-      //     subscriber code must never run under _lifecycleLock — so a bump landing in
-      //     the few instructions between the release and the Invoke is still published.
+      //   IT DOES NOT make the window empty. The lock is released before anything
+      //     below runs — subscriber code must never run under _lifecycleLock — so a
+      //     bump landing after the release can still see this connection write
+      //     _connectionVolume, push its remembered level to its own device, and fire.
       //   IT IS NOT what stops an initial read moving master volume. That is
       //     AudioStateUpdateService.OnCastVolumeChanged, which ignores IsInitialSync
       //     events outright and has no timing dependence at all. This check is the
@@ -1636,11 +1688,61 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
-      // Fire event so subscribers can observe the device's actual volume
+      // AUD-80. Which level this connection holds, in order of preference:
+      //   1. the level remembered for THIS device — pushed to it if it differs;
+      //   2. for a device never seen, the level it reported — adopted and remembered;
+      //   3. neither (the read failed, nothing remembered) — unknown; the device is left
+      //      alone and its first status update is handled as before.
+      // Deliberately NOT the console's master volume for a never-seen device, and NOT
+      // GoogleCast.DefaultVolume: master volume is the local speakers' level (casting
+      // never reads it), and pushing a configured default is exactly what made every
+      // reconnect land at 70 %.
+      float? effectiveVolume = reading?.Volume;
+      if (remembered is float target)
+      {
+        Volatile.Write(ref _connectionVolume, target);
+        if (reading == null || Math.Abs(reading.Value.Volume - target) > 0.01f)
+        {
+          try
+          {
+            if (await PushVolumeToDeviceAsync(client, target).ConfigureAwait(false))
+            {
+              effectiveVolume = target;
+              _logger.LogInformation(
+                "Cast: restored remembered volume {Volume:P0} on {Name} (device reported {Reported:P0})",
+                target, device.FriendlyName, reading?.Volume);
+            }
+          }
+          catch (Exception ex)
+          {
+            // _connectionVolume keeps the target, so the push after the receiver
+            // launches (SyncVolumeAfterStartAsync) tries again.
+            _logger.LogWarning(ex, "Cast: could not restore remembered volume on {Name}", device.FriendlyName);
+          }
+        }
+      }
+      else if (reading != null)
+      {
+        Volatile.Write(ref _connectionVolume, reading.Value.Volume);
+        _volumeStore?.Remember(device.Id, reading.Value.Volume);
+      }
+      else
+      {
+        Volatile.Write(ref _connectionVolume, float.NaN);
+      }
+
+      if (reading == null || effectiveVolume == null)
+      {
+        // Nothing was observed on the device, so there is nothing to report — the same
+        // contract as before AUD-80.
+        return;
+      }
+
+      // Fire event so subscribers can observe the device's volume after this sync
       CastVolumeChanged?.Invoke(this, new CastVolumeChangedEventArgs
       {
-        Volume = deviceVolume,
-        IsMuted = deviceMuted,
+        Volume = effectiveVolume.Value,
+        IsMuted = reading.Value.Muted,
         IsInitialSync = true
       });
     }
@@ -1648,9 +1750,70 @@ public class GoogleCastOutput : AudioOutputBase
     {
       // Also where an ObjectDisposedException from IsCurrentGenerationAsync lands when
       // disposal races the read. Swallowing it is intended: a disposed output must not
-      // publish, and an exception escaping into ConnectAsync would leave the output in
-      // Error for a read that only ever informed the event.
-      _logger.LogDebug(ex, "Could not read initial Cast device volume — will sync on first status update");
+      // publish, and an exception escaping into ConnectAsync would put the output in
+      // Error for a sync that is not needed to stream.
+      _logger.LogDebug(ex, "Initial Cast volume sync did not complete");
+    }
+  }
+
+  /// <summary>
+  /// The volume remembered for <paramref name="deviceId"/>, or null when there is no
+  /// store, nothing is remembered, or the store cannot be read.
+  /// </summary>
+  private async Task<float?> GetRememberedVolumeAsync(string deviceId)
+  {
+    if (_volumeStore == null)
+    {
+      return null;
+    }
+
+    try
+    {
+      return await _volumeStore.GetVolumeAsync(deviceId).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Could not read the remembered volume for Cast device {DeviceId}", deviceId);
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Sends <paramref name="volume"/> to the device as a SET_VOLUME. Returns false when the
+  /// client exposes no receiver channel (nothing sent). Throws what SharpCaster throws.
+  /// </summary>
+  private async Task<bool> PushVolumeToDeviceAsync(ChromecastClient client, float volume)
+  {
+    // Baseline the echo filter to the level being set BEFORE sending it. The device
+    // confirms a SET_VOLUME with a status carrying the new level, and
+    // OnReceiverStatusChanged must see that as our own change (within 0.01 of
+    // _lastSetVolume), not an external one. Until AUD-80 the after-start push skipped
+    // this, so every connect's confirmation of DefaultVolume (70 %) arrived as an
+    // external change and was written — and persisted — as master volume.
+    var previous = _lastSetVolume;
+    _lastSetVolume = volume;
+    try
+    {
+      if (CastSetVolumeOverrideForTests != null)
+      {
+        await CastSetVolumeOverrideForTests(volume).ConfigureAwait(false);
+        return true;
+      }
+
+      var receiverChannel = client.GetChannel<ReceiverChannel>();
+      if (receiverChannel == null)
+      {
+        _lastSetVolume = previous;
+        return false;
+      }
+
+      await receiverChannel.SetVolume(volume).ConfigureAwait(false);
+      return true;
+    }
+    catch
+    {
+      _lastSetVolume = previous;
+      throw;
     }
   }
 
@@ -1739,6 +1902,15 @@ public class GoogleCastOutput : AudioOutputBase
     _lastSetVolume = deviceVolume;
     _lastSetMute = deviceMuted;
 
+    if (volumeChanged)
+    {
+      // AUD-80: a level set on the speaker (buttons, Google Home) is the level to come
+      // back to. Keyed by ConnectedDevice, which a handler left attached to a torn-down
+      // client can misattribute (C-126 in the AUD-5 plan) — bounded, as that note says.
+      Volatile.Write(ref _connectionVolume, deviceVolume);
+      RememberVolume(deviceVolume);
+    }
+
     _logger.LogInformation(
       "Cast device volume changed externally: {Volume:P0}, Muted: {Muted}",
       deviceVolume, deviceMuted);
@@ -1749,6 +1921,16 @@ public class GoogleCastOutput : AudioOutputBase
       IsMuted = deviceMuted,
       IsInitialSync = false
     });
+  }
+
+  /// <summary>Records <paramref name="volume"/> for the connected device, if any (AUD-80).</summary>
+  private void RememberVolume(float volume)
+  {
+    var deviceId = ConnectedDevice?.Id;
+    if (deviceId != null)
+    {
+      _volumeStore?.Remember(deviceId, volume);
+    }
   }
 
   private async Task SetCastVolumeAsync(float volume)
@@ -1766,6 +1948,8 @@ public class GoogleCastOutput : AudioOutputBase
         _suppressNextVolumeEvent = true;
         _lastSetVolume = volume;
         await receiverChannel.SetVolume(volume);
+        Volatile.Write(ref _connectionVolume, volume);
+        RememberVolume(volume);
         _logger.LogDebug("Chromecast volume set to {Volume:P0}", volume);
       }
     }

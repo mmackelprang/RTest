@@ -35,3 +35,74 @@ Reconnecting should put the speaker back at the volume the console last had for 
 ## Verification
 
 Set the speaker to 25 % from the console, disconnect Cast, reconnect: the speaker plays at 25 %, and the console's volume shows 25 %. Repeat across a `radio-api` restart.
+
+## Shipped — 2026-09-29 (branch `fix/aud-5-80-ui-15-cast-volume`, with `AUD-5` and `UI-15`)
+
+### Root cause, measured on the box (file sink, read-only)
+
+**"Always pretty loud" is `GoogleCast.DefaultVolume` (0.7), pushed on every start.** Every connect on
+2026-09-29 (16:27:18, 16:33:54, 16:49:50, 16:55:26, 16:57:13) is followed within seconds by
+`Synced volume from Cast device: 70 % (initial: false)`, then the owner stepping it down on the speaker
+(60, 50, 40, 30 %). `SyncVolumeAfterStartAsync` pushed the output's own `Volume` — which nothing sets after
+construction, so it is always `DefaultVolume` — and did not baseline the echo filter, so the device's
+confirmation arrived as an **external** change and was written (and persisted) as master volume. The
+initial-sync adoption the row describes was real too, but it was overwritten by the 70 % echo seconds later.
+
+⚠ **Finding, not fixed here: the console cannot change the Cast speaker's volume at all.** Nothing assigns
+`GoogleCastOutput.Volume` after construction (so `OnVolumeChanged` → `SetCastVolumeAsync` never runs in
+production), and the Cast audio is tapped **before** the master mixer's volume
+(`SoundFlowAudioEngine.UpdatePlaybackDeviceVolume` applies it only to the local playback device). While
+casting, the console slider moves only the (muted) local level. **The row's verification step "set the
+speaker to 25 % from the console" is therefore not performable** — set it on the speaker or in Google Home.
+Wiring console volume to the speaker is a candidate new row, not part of this fix.
+
+### The duplicate master-volume keys (code + read-only `sqlite3` on the box)
+
+| Key | Value on box | Last written | Written by | Read by |
+|---|---|---|---|---|
+| `AudioPreferences:MasterVolume` | 12 | 2026-09-29 21:05 UTC | `AudioPreferencePersistence.PersistVolumePreferencesAsync` | `AudioPreferencePersistence.RestoreVolumePreferencesAsync` (startup) |
+| `audiopreferences:masterVolume` | 75 | **2026-03-10** | `ConfigurationController.UpdateConfigurationSection` — the System Config page's "Audio Preferences" save (section lower-cased, keys camelCased by JSON) | only that page, through `GET /api/configuration/audiopreferences`, whose prefix match is case-insensitive and returns **both** keys |
+
+**The runtime is already consistent: it writes and reads only the PascalCase key.** The lower-case one is a
+six-month-old shadow the runtime never reads, so it is **not** the cause of "loud" (the 70 % push is). The
+same shadow exists for `currentOutput` and `currentSource`. The SQLite key column is case-sensitive, which is
+what lets both exist.
+
+**Deliberately not changed:** the generic `ConfigurationController` write path. Making it reuse an existing
+key's casing would turn the System Config page's stale DTO into a live editor of the runtime's persisted
+volume/source/output — a behaviour change for every section, outside this row. The new key this row adds,
+`AudioPreferences:CastDeviceVolumes`, uses the runtime's casing.
+
+**One-off box cleanup (described, NOT run — owner or coordinator):** stop nothing; with `sqlite3`:
+
+```sql
+-- /opt/radio-console/data/config/configuration.db — back it up first
+DELETE FROM Config_sqlite WHERE Key IN
+  ('audiopreferences:masterVolume', 'audiopreferences:currentOutput', 'audiopreferences:currentSource');
+```
+
+Leave `audiopreferences:hiddenSources` — it has no PascalCase twin and `SourcesController` reads it through
+`IOptionsMonitor<AudioPreferences>`. Opening and **saving** the System Config page's Audio Preferences section
+will recreate the lower-case rows; that is pre-existing and harmless to the runtime.
+
+### What landed
+
+- **`ICastDeviceVolumeStore` / `ConfigStoreCastDeviceVolumeStore`** (`src/Radio.Infrastructure/Audio/Outputs/CastDeviceVolumeStore.cs`):
+  last volume per Cast device keyed by `ChromecastDeviceInfo.Id`, persisted as one JSON object under
+  `AudioPreferences:CastDeviceVolumes` (one entry because a device id is a URI containing `:`).
+- **`GoogleCastOutput`**: on connect, a remembered volume is pushed to the device; a device never seen keeps
+  its own level, which is remembered; with neither (read failed, nothing remembered) the device is left
+  alone. The after-start push re-applies that level instead of `DefaultVolume`, and every push baselines
+  the echo filter first. A level set on the speaker is remembered.
+- ⚠ **Deviation from the dossier's recommendation, stated for veto:** a never-seen device does **not** get the
+  console's master volume. Master volume is the local speakers' level (casting never reads it) and on this box
+  it has been overwritten by the 70 % echo on every connect, so pushing it would reproduce the bug on the first
+  connect to any new speaker. `GoogleCast.DefaultVolume` is no longer pushed to any device.
+- With `AUD-5`, the console slider no longer snaps to the speaker on connect; it follows the speaker's
+  external changes as before.
+
+**Migration:** nothing is remembered yet after deploy, so the first reconnect to each speaker keeps whatever
+level the speaker is at (no 70 % push) and remembers it; from then on reconnects restore it.
+
+**Keying caveat:** `Id` is the device URI (`https://<ip>/`), so a DHCP address change makes a speaker look new
+(it then keeps its own level — the safe fallback).
