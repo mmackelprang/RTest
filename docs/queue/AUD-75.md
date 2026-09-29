@@ -51,6 +51,10 @@ sudo systemctl restart radio-api
 
 Until then the file player's root is still the empty dev path, so relative browsing and root-checked playback stay broken; the **Add Files** default above does not depend on it. Fix 2 (bookmark paths rejected by `FileBrowser.GetFullPath`) is still open and is why queued `/opt/radio-console/media/audio/...` files fail.
 
+### Saved playlists backfilled 2026-09-29 (fallout of the mount move)
+
+Owner: loading a saved playlist said *"XX tracks loaded successfully"* but nothing appeared. 85 of the 114 saved `PlaylistItems` rows (`fingerprints.db`: Abba 19, Beatles 31, Hall and oats 35) named `/mnt/nas/music/...`, the retired mount; the load endpoint skipped all of them ("Beatles": 0 loaded, 31 skipped) and the dialog toasted the saved `ItemCount` anyway. Backfilled on the box: `UPDATE PlaylistItems SET FilePath = '/mnt/nas_media/Music/' || substr(FilePath, 16) WHERE FilePath LIKE '/mnt/nas/music/%'` (85 rows; backup `fingerprints.db.bak-20260929-132910`). Afterwards all 114 rows name files that exist. The code defects behind the silent failure (a toast from `ItemCount`, and a queue cleared before any file was checked) are fixed separately in `PlaylistsController.Load` / `LoadPlaylistDialog`.
+
 ### Fix 2 done 2026-09-29 — and a correction to what it was for
 
 ⛔ **Correction: queued files under `/opt/radio-console/media/audio` were never refused at playback.** This dossier (and the session that shipped #711) said they were. Checked in code: only `FilesController` uses `IFileBrowser`; the queue and `FilePlayerAudioSource.GetFullPath` accept absolute paths without consulting it, and `FilesController.QueueFiles`/`PlayFile` validate absolute paths with `IsPathAllowed`, which already honoured bookmarks. The box's file sink shows no queue-path refusals.
