@@ -77,3 +77,11 @@ no `No audio data captured` warnings) before trusting a position reading.
 - The position half remains, and the reason is in code: `BluetoothAudioSource.Position => _btPosition` (`:225`), set only in `OnPositionChanged` (`:990-992`) from BlueZ's `MediaPlayer1.Position`. Phones send that property on events (play/pause/seek/track change), not continuously, and **nothing extrapolates between them** — neither the source nor the Web UI. So the bar moves only when the phone happens to send an update.
 - This is achievable (the row's first question): extrapolate while `Playing` — last AVRCP position + time since it arrived, clamped to the duration — freeze on pause, re-anchor on each AVRCP update and on resume. Owner-independent; queued to be built after the batch touching `BluetoothAudioSource` (`AUD-34`) lands, to avoid a conflict in the same file.
 - The reads were taken while the phone was paused (`playing=False`, position steady at 00:00:50.177 across 8 s), which is correct behaviour and so says nothing about advancement.
+
+## ✅ Shipped 2026-09-29 — owner UAT at the panel outstanding
+
+`BluetoothAudioSource.Position` now extrapolates while `Playing`: the last AVRCP position (the anchor) plus the time since it was taken, capped at the duration. The anchor is re-taken on every AVRCP `Position` update, on the two resets to zero (new track, disconnect), and on every state change (`OnStateChanged` override) — so a pause freezes the position where the extrapolation had reached and resume continues from there. `TimeProvider` is an optional last constructor parameter.
+
+Tests (`BluetoothAudioSourceTests`, `FakeTimeProvider`): advances from the last AVRCP position; capped at the duration; frozen across a pause and resumed from the frozen value; re-anchored by a new AVRCP position (a seek on the phone). All four fail with `Position` returning the anchor verbatim.
+
+**UAT:** play a track over Bluetooth; the console's position bar moves and tracks the phone's within a second or two; pause on the phone and it stops; seek on the phone and it jumps to match on the next AVRCP update.
