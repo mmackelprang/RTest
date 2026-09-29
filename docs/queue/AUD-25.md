@@ -69,3 +69,9 @@ mechanism that produced it. Establish question 1 first.
   phantom entry in a status response. They may share a cause; **check, do not assume.**
 - Found during the vinyl investigation recorded at
   [`docs/diagnostics/vinyl-signal-floor.md`](../diagnostics/vinyl-signal-floor.md).
+
+---
+
+## Does not reproduce 2026-09-29
+
+`GET /api/sources` → `bluetoothDevices` holds one entry, well-formed: `{address: "B0:D5:FB:D2:0D:68", name: "Pixel 10 Pro XL", isPaired: true, isConnected: true}` (the phone was genuinely connected). No `Turntable` entry, no empty address. The malformed record from 2026-09-09 is gone; where it came from (a persisted record vs a live object) was never established. **Recommend: close as not reproducible unless it reappears**, with the check above as the instrument.
