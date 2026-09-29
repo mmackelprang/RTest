@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (65)
+## Shipped rows (66)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2715,3 +2715,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-79.md`](queue/AUD-79.md)**
 
 🟠 **NEW 2026-09-29 (owner report) — Bluetooth cast to a speaker sounded "underwater": the Cast stream alternated 21 ms of music with 21 ms of digital silence.** Measured by recording the Cast tap on the box: exact 1,024-frame audio/zero alternation, reader at 2.00× real time, writer at 0.967×. `BufferedTapModifier` dropped a batch whenever the previous ThreadPool flush had not run within 21 ms; `TappedOutputStream` spliced 4,096 bytes of keep-alive silence into the stream on every reader catch-up. — [detail](queue/AUD-79.md)
+
+### AUD-27 — Album art "vanishing on pause" did not reproduce; closed with a 1 Hz polling run across phone and console pauses.
+
+| Field | Value |
+|---|---|
+| Status | ✅ closed, no code change — 2026-09-29 owner-driven run on `2006974`: title/artist/art unchanged across a 45 s phone pause and a 53 s console pause (0 of ~150 samples differ). The original sighting is best explained by pausing before identification had landed. |
+| Plan | _plan TBD — ⚠ **establish WHICH LAYER clears it before designing**: the source clearing its own metadata on `Paused`, `AudioStateUpdateService` broadcasting a cleared DTO, or the Web layer discarding on state change — **three different fixes** · ⚠ **Is pause distinguishable from stop at that layer?** If one path serves both, this is a **contract question** (*what does pause mean for metadata?*), not a bug fix — **say which** · ⚠ **Does resume restore it?** UNTESTED. Returns on resume = display lifetime; does not = something destroyed. **Different fixes** · ⛔ **Do not assume the scope from the symptom that was noticed** — `AUD-24` was reported as a seek defect and the same field carried the clock_ · ⛔ **NOT auto-mergeable** — user-visible audio surface |
+| Spec / handoff | _no spec doc — ⛔ **THIS IS A THIRD MECHANISM; DO NOT FOLD IT INTO `AUD-1` OR `AUD-17`.** `AUD-1` = Shazam **overwrites** correct AVRCP metadata (confirmed live the same day); `AUD-17` = the AVRCP **cover-art path** has never worked; **this row = art that SUCCESSFULLY LANDED is DISCARDED on pause** · ⭐ **`AUD-1` and this row act in OPPOSITE directions on the same field** — one writes metadata that should not have been written, the other erases metadata that should have been kept. **A fix for either that does not name the other risks trading one for the other** · ⭐ **Assert the PRESENCE of retained metadata across a pause** — read `albumArtUrl` before and after and assert unchanged; ⚠ **"pause did not throw" passes today** · ⚠ **Beware a vacuous run**: if fingerprinting has not landed, `albumArtUrl` is the placeholder both sides and the assertion passes on a broken build — **wait for the identification, THEN pause**_ |
+| Depends on | — _(no row dependency. ⚠ **Related to but distinct from `AUD-1` and `AUD-17`** — see the three-mechanism table in the dossier.)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-27.md`](queue/AUD-27.md)**
+
+🟠 **NEW 2026-09-10 — album art appears on identification, then VANISHES the instant pause is pressed.** Owner UAT: *"album art appears after ~20 seconds of playing, but disappears **immediately** when pause is pressed."* ⭐ **The appearing half is CONFIRMED WORKING** — `Cover art found for 'Heart and Soul' … /api/albumart/0f924e4c2dd0504e.jpg` captured live. **It is the disappearing half that is the defect: pausing is not stopping, and the metadata is still true of what is loaded.** — [detail](queue/AUD-27.md)
