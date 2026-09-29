@@ -11,47 +11,84 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 public abstract class BufferedTapModifier : SoundModifier
 {
   private readonly float[] _sampleBuffer;
-  private readonly float[] _flushBuffer;
   private readonly int _bufferSize;
   private int _bufferIndex;
   private readonly object _lock = new();
-  private volatile bool _flushInProgress;
+
+  // AUD-79: full batches are handed to the ThreadPool through a queue of pooled buffers, drained in
+  // order by one work item at a time. This used to be a single flush buffer plus an in-progress flag,
+  // and a batch that filled while the previous flush had not yet RUN was discarded outright — so the
+  // pool had 21 ms (2,048 samples at 48 kHz stereo) to schedule every flush or that audio was lost.
+  // Measured on the appliance 2026-09-29 with Bluetooth playing: the tap received 0.967x real time,
+  // i.e. one batch in thirty dropped. Now a batch is dropped only when every pooled buffer is still in
+  // flight (a stall of PoolSize x 21 ms), and the drop is counted.
+  private const int PoolSize = 16;
+  private readonly System.Collections.Concurrent.ConcurrentQueue<float[]> _free = new();
+  private readonly System.Collections.Concurrent.ConcurrentQueue<float[]> _pending = new();
+  private int _drainScheduled;
+  private long _droppedBatches;
 
   // Pre-allocated work item to avoid closure allocation on every flush
   private readonly FlushWorkItem _flushWorkItem;
 
   /// <summary>
-  /// Pre-allocated IThreadPoolWorkItem to avoid closure allocation (~94/sec)
-  /// when queueing flush work to the ThreadPool.
+  /// Pre-allocated IThreadPoolWorkItem that drains the pending queue in order. Only one runs at a time
+  /// (the <c>_drainScheduled</c> flag), so <see cref="ProcessFlushBuffer"/> calls never overlap.
   /// </summary>
   private sealed class FlushWorkItem : IThreadPoolWorkItem
   {
     private readonly BufferedTapModifier _owner;
     public FlushWorkItem(BufferedTapModifier owner) => _owner = owner;
-    public void Execute()
-    {
-      try
-      {
-        _owner.ProcessFlushBuffer(_owner._flushBuffer);
-      }
-      catch (Exception ex)
-      {
-        _owner.OnFlushError(ex);
-      }
-      finally
-      {
-        _owner._flushInProgress = false;
-      }
-    }
+    public void Execute() => _owner.DrainPending();
   }
 
   protected BufferedTapModifier(int bufferSize)
   {
     _bufferSize = bufferSize;
     _sampleBuffer = new float[bufferSize];
-    _flushBuffer = new float[bufferSize];
     _bufferIndex = 0;
     _flushWorkItem = new FlushWorkItem(this);
+    for (var i = 0; i < PoolSize; i++)
+    {
+      _free.Enqueue(new float[bufferSize]);
+    }
+  }
+
+  /// <summary>
+  /// Batches discarded because every pooled flush buffer was still waiting to be processed (AUD-79).
+  /// Should stay at zero; a rising count means the consumer is stalling for hundreds of milliseconds.
+  /// </summary>
+  public long DroppedBatches => Interlocked.Read(ref _droppedBatches);
+
+  private void DrainPending()
+  {
+    while (true)
+    {
+      while (_pending.TryDequeue(out var batch))
+      {
+        try
+        {
+          ProcessFlushBuffer(batch);
+        }
+        catch (Exception ex)
+        {
+          OnFlushError(ex);
+        }
+        finally
+        {
+          _free.Enqueue(batch);
+        }
+      }
+
+      Volatile.Write(ref _drainScheduled, 0);
+
+      // A batch enqueued after the inner loop emptied but before the flag cleared would otherwise wait
+      // for the next one to arrive. Re-claim the drain if so.
+      if (_pending.IsEmpty || Interlocked.CompareExchange(ref _drainScheduled, 1, 0) != 0)
+      {
+        return;
+      }
+    }
   }
 
   /// <summary>
@@ -64,7 +101,7 @@ public abstract class BufferedTapModifier : SoundModifier
   {
     // Hot path: called 96,000 times/second for stereo 48kHz.
     // Lock-free sample buffering via atomic index increment.
-    // Only lock briefly for the flush copy to _flushBuffer.
+    // Only lock briefly for the copy into a pooled flush batch.
     var index = Interlocked.Increment(ref _bufferIndex) - 1;
     if (index < _bufferSize)
     {
@@ -74,14 +111,21 @@ public abstract class BufferedTapModifier : SoundModifier
 
     if (index == _bufferSize - 1)
     {
-      if (!_flushInProgress)
+      if (_free.TryDequeue(out var batch))
       {
         lock (_lock)
         {
-          Array.Copy(_sampleBuffer, _flushBuffer, _bufferSize);
+          Array.Copy(_sampleBuffer, batch, _bufferSize);
         }
-        _flushInProgress = true;
-        ThreadPool.UnsafeQueueUserWorkItem(_flushWorkItem, preferLocal: false);
+        _pending.Enqueue(batch);
+        if (Interlocked.CompareExchange(ref _drainScheduled, 1, 0) == 0)
+        {
+          ThreadPool.UnsafeQueueUserWorkItem(_flushWorkItem, preferLocal: false);
+        }
+      }
+      else
+      {
+        Interlocked.Increment(ref _droppedBatches);
       }
       Volatile.Write(ref _bufferIndex, 0);
     }
