@@ -546,10 +546,22 @@ public class QueueHistoryPanelTests : TestContext
   /// <summary>Which view the body shows, read from the DOM.</summary>
   private static string ActiveView(IRenderedComponent<QueueHistoryPanel> cut)
   {
-    if (cut.FindAll(".rcp-root").Count > 0) return "Radio";
-    if (cut.FindAll(".bt-connect-panel").Count > 0) return "Bluetooth";
-    if (cut.FindAll(".queue-total-tile").Count > 0) return "Queue";
-    if (cut.FindAll(".queue-split").Count > 0) return "History";
+    if (cut.FindAll(".rcp-root").Count > 0)
+    {
+      return "Radio";
+    }
+    if (cut.FindAll(".bt-connect-panel").Count > 0)
+    {
+      return "Bluetooth";
+    }
+    if (cut.FindAll(".queue-total-tile").Count > 0)
+    {
+      return "Queue";
+    }
+    if (cut.FindAll(".queue-split").Count > 0)
+    {
+      return "History";
+    }
     return "?";
   }
 
