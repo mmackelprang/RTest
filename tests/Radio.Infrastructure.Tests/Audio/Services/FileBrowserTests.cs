@@ -271,6 +271,98 @@ public class FileBrowserTests : IDisposable
     Assert.Equal("test", fileInfo.Title);
   }
 
+  // AUD-75 fix 2: FileBrowser accepts the same directories FilesController.IsPathAllowed does — the media
+  // root, AllowedBrowseDirectories and BookmarkedPaths — with a trailing-separator prefix check.
+
+  [Fact]
+  public async Task GetFileInfoAsync_AbsolutePathInBookmarkOutsideRoot_ReturnsFileInfo()
+  {
+    var bookmarkDir = Path.Combine(_testRootDir, "local-audio");
+    var file = CreateAudioFileAt(Path.Combine(bookmarkDir, "queued.mp3"));
+    var browser = CreateBrowser(new FilePlayerOptions
+    {
+      RootDirectory = "audio",
+      BookmarkedPaths = [new BookmarkedPath { Path = bookmarkDir, Label = "Local Audio Files", Tag = "sounds" }]
+    });
+
+    var result = await browser.GetFileInfoAsync(file);
+
+    Assert.NotNull(result);
+    Assert.Equal("queued.mp3", result.FileName);
+  }
+
+  [Fact]
+  public async Task GetFileInfoAsync_AbsolutePathInAllowedBrowseDirectory_ReturnsFileInfo()
+  {
+    var allowedDir = Path.Combine(_testRootDir, "nas");
+    var file = CreateAudioFileAt(Path.Combine(allowedDir, "Artist", "song.mp3"));
+    var browser = CreateBrowser(new FilePlayerOptions
+    {
+      RootDirectory = "audio",
+      AllowedBrowseDirectories = [allowedDir]
+    });
+
+    var result = await browser.GetFileInfoAsync(file);
+
+    Assert.NotNull(result);
+  }
+
+  [Fact]
+  public async Task GetFileInfoAsync_SiblingDirectorySharingBookmarkPrefix_IsRejected()
+  {
+    // "/…/nas" must not admit "/…/nasty": the prefix match needs a trailing separator.
+    var bookmarkDir = Path.Combine(_testRootDir, "nas");
+    Directory.CreateDirectory(bookmarkDir);
+    var file = CreateAudioFileAt(Path.Combine(_testRootDir, "nasty", "song.mp3"));
+    var browser = CreateBrowser(new FilePlayerOptions
+    {
+      RootDirectory = "audio",
+      BookmarkedPaths = [new BookmarkedPath { Path = bookmarkDir }]
+    });
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(() => browser.GetFileInfoAsync(file));
+  }
+
+  [Fact]
+  public async Task GetFileInfoAsync_SiblingDirectorySharingRootPrefix_IsRejected()
+  {
+    // The media root is "<tmp>/audio"; "<tmp>/audiox" shares the prefix. Before AUD-75 fix 2 the root check was a
+    // bare StartsWith with no trailing separator and admitted it.
+    CreateAudioFileAt(Path.Combine(_testRootDir, "audiox", "song.mp3"));
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _fileBrowser.GetFileInfoAsync("../audiox/song.mp3"));
+  }
+
+  [Fact]
+  public async Task GetFileInfoAsync_AbsolutePathOutsideEveryAllowedDirectory_IsRejected()
+  {
+    var file = CreateAudioFileAt(Path.Combine(_testRootDir, "elsewhere", "song.mp3"));
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _fileBrowser.GetFileInfoAsync(file));
+  }
+
+  [Fact]
+  public async Task GetFileInfoAsync_RelativePathEscapingRoot_IsRejected()
+  {
+    CreateAudioFileAt(Path.Combine(_testRootDir, "escaped.mp3"));
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _fileBrowser.GetFileInfoAsync("../escaped.mp3"));
+  }
+
+  private FileBrowser CreateBrowser(FilePlayerOptions options)
+  {
+    var monitor = new Mock<IOptionsMonitor<FilePlayerOptions>>();
+    monitor.Setup(m => m.CurrentValue).Returns(options);
+    return new FileBrowser(_mockLogger.Object, monitor.Object, _testRootDir);
+  }
+
+  private static string CreateAudioFileAt(string fullPath)
+  {
+    Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+    File.WriteAllBytes(fullPath, new byte[] { 0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00 });
+    return fullPath;
+  }
+
   private string CreateTestAudioFile(string relativePath)
   {
     var fullPath = Path.Combine(_testAudioDir, relativePath);

@@ -295,9 +295,17 @@ public class FileBrowser : IFileBrowser
   }
 
   /// <summary>
-  /// Gets the full file system path from a relative path.
-  /// Validates that the resolved path stays within the media root to prevent path traversal.
+  /// Gets the full file system path from a path relative to the media root, or from an absolute path.
   /// </summary>
+  /// <remarks>
+  /// The resolved path must be the media root or inside it, or inside one of
+  /// <see cref="FilePlayerOptions.AllowedBrowseDirectories"/> or <see cref="FilePlayerOptions.BookmarkedPaths"/>.
+  /// That is the same set <c>FilesController.IsPathAllowed</c> accepts (AUD-75 fix 2). Before, only the media
+  /// root was accepted, so every file in a bookmark outside it (e.g. "Local Audio Files" at
+  /// <c>/opt/radio-console/media/audio</c> with the root on the NAS) threw here: the controller's absolute-path
+  /// listing fell back to a listing without metadata and logged one traversal warning per file.
+  /// Every prefix comparison carries a trailing separator, so <c>/mnt/nas</c> does not admit <c>/mnt/nasty</c>.
+  /// </remarks>
   private string GetFullPath(string? relativePath)
   {
     var configuredPath = _options.CurrentValue.RootDirectory;
@@ -315,18 +323,47 @@ public class FileBrowser : IFileBrowser
       return basePath;
     }
 
-    // Resolve the combined path and verify it stays within the base
+    // Path.Combine returns relativePath unchanged when it is rooted, so an absolute path is checked as itself.
     var combined = Path.GetFullPath(Path.Combine(basePath, relativePath));
     var resolvedBase = Path.GetFullPath(basePath);
 
-    if (!combined.StartsWith(resolvedBase, StringComparison.OrdinalIgnoreCase))
+    if (!IsWithinAllowedDirectory(combined, resolvedBase))
     {
-      _logger.LogWarning("Path traversal attempt blocked: {RelativePath} resolved to {FullPath} (outside {Base})",
+      _logger.LogWarning("Path traversal attempt blocked: {RelativePath} resolved to {FullPath} (outside {Base} and the allowed directories)",
         relativePath, combined, resolvedBase);
       throw new UnauthorizedAccessException($"Path '{relativePath}' is outside the allowed media directory");
     }
 
     return combined;
+  }
+
+  /// <summary>
+  /// Whether <paramref name="fullPath"/> (already resolved) is the media root, or is inside it or inside an
+  /// allowed browse directory or bookmark.
+  /// </summary>
+  private bool IsWithinAllowedDirectory(string fullPath, string resolvedBase)
+  {
+    var options = _options.CurrentValue;
+    var allowed = new[] { resolvedBase }
+      .Concat(options.AllowedBrowseDirectories)
+      .Concat(options.BookmarkedPaths.Select(b => b.Path));
+
+    foreach (var dir in allowed)
+    {
+      if (string.IsNullOrWhiteSpace(dir))
+      {
+        continue;
+      }
+
+      var resolvedDir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(dir));
+      if (fullPath.Equals(resolvedDir, StringComparison.OrdinalIgnoreCase)
+          || fullPath.StartsWith(resolvedDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+      {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   /// <summary>
