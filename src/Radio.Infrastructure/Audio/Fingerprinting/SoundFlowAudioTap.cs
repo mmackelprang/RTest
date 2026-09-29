@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Fingerprinting.Services;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.Infrastructure.Audio.Fingerprinting;
@@ -15,6 +16,8 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   private readonly ILogger<SoundFlowAudioTap> _logger;
   private readonly IAudioEngine _audioEngine;
   private readonly IAudioManager _audioManager;
+  private readonly FingerprintCaptureWatchdog? _captureWatchdog;
+  private readonly IBluetoothService? _bluetoothService;
 
   // Reusable chunk buffer — avoids allocating a new byte[4096] per loop iteration
   private readonly byte[] _chunkBuffer = new byte[4096];
@@ -41,14 +44,26 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
   /// <param name="logger">The logger instance.</param>
   /// <param name="audioEngine">The audio engine.</param>
   /// <param name="audioManager">The audio manager for active source state.</param>
+  /// <param name="captureWatchdog">
+  /// AUD-18: told the outcome of every capture window; while it is latched this tap's per-window
+  /// "no audio" Warning is logged at Debug. Optional so tests and hosts without it still construct.
+  /// </param>
+  /// <param name="bluetoothService">
+  /// Used only to ask whether the Bluetooth capture pipeline is <see cref="BluetoothPipelineStatus.Healthy"/>
+  /// when Bluetooth is the active source. Optional; without it that check is skipped.
+  /// </param>
   public SoundFlowAudioTap(
     ILogger<SoundFlowAudioTap> logger,
     IAudioEngine audioEngine,
-    IAudioManager audioManager)
+    IAudioManager audioManager,
+    FingerprintCaptureWatchdog? captureWatchdog = null,
+    IBluetoothService? bluetoothService = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _audioManager = audioManager;
+    _captureWatchdog = captureWatchdog;
+    _bluetoothService = bluetoothService;
   }
 
   /// <inheritdoc/>
@@ -136,6 +151,34 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
     }
   }
 
+  /// <summary>
+  /// AUD-18: whether <paramref name="source"/> should be delivering audio to this tap right now — it is the
+  /// active source, the engine is running, it is Playing, a fingerprint lookup is wanted, and, for
+  /// Bluetooth, the capture pipeline reports <see cref="BluetoothPipelineStatus.Healthy"/>. Anything else
+  /// (no phone connected, the capture node gone because the handset paused, a broken stream) is the
+  /// Bluetooth pipeline's own state to report (PipelineStatus), and a tap with nothing upstream is not
+  /// starving.
+  /// </summary>
+  private bool AudioShouldBeReachingTap(IAudioSource? source)
+  {
+    if (source == null
+      || !ReferenceEquals(_audioManager.ActiveSource, source)
+      || !IsActive
+      || !NeedsFingerprintingLookup)
+    {
+      return false;
+    }
+
+    if (source.Type == AudioSourceType.Bluetooth
+      && _bluetoothService != null
+      && _bluetoothService.PipelineStatus != BluetoothPipelineStatus.Healthy)
+    {
+      return false;
+    }
+
+    return true;
+  }
+
   /// <inheritdoc/>
   public async Task<AudioSampleBuffer?> CaptureAsync(TimeSpan duration, CancellationToken ct = default)
   {
@@ -151,6 +194,13 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
 
     _logger.LogDebug("Capturing {Duration}s of audio from SoundFlow output", duration.TotalSeconds);
     var captureStartTime = DateTime.UtcNow;
+
+    // AUD-18: what the watchdog needs to judge an empty window, taken at the START — the same checks are
+    // repeated at the end, and the window only counts as "empty while playing" if both ends pass.
+    var sourceAtStart = _audioManager.ActiveSource;
+    var sourceNameAtStart = SourceName;
+    var sourceTypeAtStart = SourceType;
+    var audioExpectedAtStart = AudioShouldBeReachingTap(sourceAtStart);
 
     try
     {
@@ -230,9 +280,25 @@ public sealed class SoundFlowAudioTap : IAudioSampleProvider
 
       if (bytesRead == 0)
       {
-        _logger.LogWarning("No audio data captured after {Elapsed}ms and {Attempts} read attempts", captureElapsed, readAttempts);
+        var outcome = audioExpectedAtStart
+          && !ct.IsCancellationRequested
+          && AudioShouldBeReachingTap(sourceAtStart)
+          ? CaptureWindowOutcome.EmptyWhilePlaying
+          : CaptureWindowOutcome.EmptyNotPlaying;
+        _captureWatchdog?.RecordWindow(
+          outcome, sourceNameAtStart, sourceTypeAtStart, TimeSpan.FromMilliseconds(captureElapsed));
+
+        // AUD-18: record first, so the window that trips the watchdog is reported by the watchdog's own
+        // Warning rather than by this one as well. Every window before the trip keeps its Warning.
+        var level = _captureWatchdog?.IsLatched == true ? LogLevel.Debug : LogLevel.Warning;
+        _logger.Log(level, "No audio data captured after {Elapsed}ms and {Attempts} read attempts", captureElapsed, readAttempts);
         return null;
       }
+
+      // Any non-zero chunk counts as audio here, including a capture the RMS check below then calls silence:
+      // the tap is receiving samples, which is the thing the watchdog is watching.
+      _captureWatchdog?.RecordWindow(
+        CaptureWindowOutcome.Audio, sourceNameAtStart, sourceTypeAtStart, TimeSpan.FromMilliseconds(captureElapsed));
 
       _logger.LogDebug("Read {BytesRead} bytes in {Attempts} attempts over {Elapsed}ms",
         bytesRead, readAttempts, captureElapsed);

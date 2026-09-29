@@ -131,3 +131,44 @@ not an aspiration.
 `No audio data captured` (`SoundFlowAudioTap`) in the `radio-api` file sink: 2026-09-23/24/27 **0**; 09-25 **45**; 09-26 **7**; 09-28 **1**; 09-29 **4** (10:57–10:58, the start of a Bluetooth session with pauses — the capture skips all-zero chunks, so a paused source legitimately yields nothing). **None after the `AUD-79` deploy** (16:43), which changed how tap readers behave when caught up: they now wait for data, and keep-alive silence is only emitted after 250 ms of writer idleness — so a capture window during playback can no longer be filled with spliced zeros.
 
 The 2026-09-08 pattern (240 failures/hour, back to back, 11½ h) is nothing like this. **Recommend** the row's own split: ship a watchdog (a sustained run of zero-byte captures while the active source is Playing and not parked → one Warning plus a metric, rate-limited) as its own small deliverable, and keep the root cause open until it recurs with the watchdog in place.
+
+---
+
+## Shipped 2026-09-29 — the watchdog half (root cause still open)
+
+**What it does.** `FingerprintCaptureWatchdog` (`src/Radio.Fingerprinting/Services/`) counts consecutive
+capture windows that returned **zero audio bytes** while audio should have been reaching the tap.
+`SoundFlowAudioTap` reports every window it actually runs; a zero-byte window counts only if, at **both**
+its start and its end, the same source was active and `Playing`, the engine was running, a fingerprint
+lookup was wanted and — for Bluetooth — `PipelineStatus` was `Healthy`. Anything else (paused, source
+switched, no phone, capture node gone after a handset pause, broken stream, cancelled) breaks an
+un-latched run instead of extending it. Any window with a non-zero chunk counts as audio, even if the RMS
+check then calls it silence.
+
+- **Trips at 20 consecutive windows** — five minutes at the default 15 s. Chosen from the box's file sink
+  for 2026-09-23 → 09-29: the longest runs were 3, 5 and 13 windows (all at or near a Bluetooth session
+  start) and 23 (09-25 23:48, BT `Playing` with AVRCP tracks advancing and nothing reaching the tap for six
+  minutes). 20 clears the first three; the fourth would trip, which is intended. The 2026-09-08 outage
+  would have been reported five minutes in.
+- **On trip:** one Warning naming the source, the run length and its duration, and one increment of
+  `fingerprint.capture_starvation_trips` (tag `source`). Then latched.
+- **While latched:** nothing further from the watchdog, and the per-window `No audio data captured`
+  (`SoundFlowAudioTap`) and `No audio samples captured` (`BackgroundIdentificationService`) Warnings are
+  logged at **Debug**. The 19 windows before the trip keep both Warnings; the tripping window is reported
+  by the watchdog's Warning in place of the tap's.
+- **On recovery** (the next window with audio): one Information line with the outage duration and window
+  count, and the latch clears. The watchdog logs under `Radio.Fingerprinting`, which the shipped config
+  keeps at Information — `Radio.Infrastructure.Audio` is held at Warning by `LOG-2`, so a recovery line
+  from the tap's own category would have reached neither sink.
+
+**Log-volume effect of a 2026-09-08-shaped outage:** ~480 Warning lines an hour → 38 Warnings (19 windows
+× 2) plus the trip Warning, then silence at Warning until recovery.
+
+**Deliberately not done:** no automatic recovery (restarting the tap or the source) and no root-cause
+work. The evidence above says a source-stream restart cleared the 09-08 outage, but that stays a lead
+for the root-cause plan. **Keep this row open** until the outage recurs with the watchdog in place and
+is diagnosed.
+
+**Field signal, replacing the one above:** `grep -c 'Fingerprint capture has returned zero audio bytes'`
+per day in the `radio-api` file sink (also in `journalctl -u radio-api`, since it is a Warning), paired
+with `Fingerprint capture recovered` for the duration.
