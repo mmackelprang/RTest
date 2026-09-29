@@ -51,6 +51,17 @@ sudo systemctl restart radio-api
 
 Until then the file player's root is still the empty dev path, so relative browsing and root-checked playback stay broken; the **Add Files** default above does not depend on it. Fix 2 (bookmark paths rejected by `FileBrowser.GetFullPath`) is still open and is why queued `/opt/radio-console/media/audio/...` files fail.
 
+### Fix 2 done 2026-09-29 — and a correction to what it was for
+
+⛔ **Correction: queued files under `/opt/radio-console/media/audio` were never refused at playback.** This dossier (and the session that shipped #711) said they were. Checked in code: only `FilesController` uses `IFileBrowser`; the queue and `FilePlayerAudioSource.GetFullPath` accept absolute paths without consulting it, and `FilesController.QueueFiles`/`PlayFile` validate absolute paths with `IsPathAllowed`, which already honoured bookmarks. The box's file sink shows no queue-path refusals.
+
+**What fix 2 actually fixes** (`FileBrowser.GetFullPath`, `IsWithinAllowedDirectory`):
+- **Browsing a bookmark outside the root.** `FilesController.ListFilesAbsolute` asks `FileBrowser.GetFileInfoAsync` for each file's metadata. For "Local Audio Files" that threw, so every file came back **without artist/album/duration** and logged one `Path traversal attempt blocked` warning — the 48-line burst above. It now accepts the root, `AllowedBrowseDirectories` and `BookmarkedPaths`, the same set as `IsPathAllowed`.
+- **A root-prefix hole.** The root check was a bare `StartsWith`, so a root of `/mnt/nas_media/Music` admitted `/mnt/nas_media/MusicX`. Every comparison now carries a trailing separator.
+- Tests: six in `FileBrowserTests` (bookmark and allowed directory accepted; root-prefix sibling, bookmark-prefix sibling, unrelated absolute path and `../` escape rejected). Run against the old `GetFullPath`, the two acceptance tests and the root-prefix test fail.
+
+Fix 3 (log once when a configured root is missing or empty) is still open.
+
 ## Where the root comes from (measured on the box, read-only)
 
 - `FileBrowser.GetFullPath` (`src/Radio.Infrastructure/Audio/Services/FileBrowser.cs`) uses `FilePlayer:RootDirectory`. If that path is relative, it is combined with `RootDir` or the working directory, which is `/opt/radio-console` on the box.
