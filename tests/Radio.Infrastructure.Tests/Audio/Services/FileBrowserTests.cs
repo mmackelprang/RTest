@@ -324,6 +324,16 @@ public class FileBrowserTests : IDisposable
   }
 
   [Fact]
+  public async Task GetFileInfoAsync_SiblingDirectorySharingRootPrefix_IsRejected()
+  {
+    // The media root is "<tmp>/audio"; "<tmp>/audiox" shares the prefix. Before AUD-75 fix 2 the root check was a
+    // bare StartsWith with no trailing separator and admitted it.
+    CreateAudioFileAt(Path.Combine(_testRootDir, "audiox", "song.mp3"));
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(() => _fileBrowser.GetFileInfoAsync("../audiox/song.mp3"));
+  }
+
+  [Fact]
   public async Task GetFileInfoAsync_AbsolutePathOutsideEveryAllowedDirectory_IsRejected()
   {
     var file = CreateAudioFileAt(Path.Combine(_testRootDir, "elsewhere", "song.mp3"));
