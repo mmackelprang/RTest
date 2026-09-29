@@ -227,9 +227,11 @@ public class GoogleCastOutput : AudioOutputBase
   public event EventHandler<ChromecastDisconnectedEventArgs>? Disconnected;
 
   /// <summary>
-  /// Event raised when the Cast device volume or mute state changes externally
-  /// (e.g., via Google Home app, voice command, or physical controls).
-  /// Not fired for changes initiated by this application.
+  /// Event raised with the Cast device's volume and mute state: once after each connect
+  /// with the level the device holds after the initial sync — which may be a remembered
+  /// level this application just pushed (AUD-80) — flagged <c>IsInitialSync</c>; and
+  /// whenever the state changes externally (Google Home app, voice command, physical
+  /// controls). Not fired for the device's confirmation of a level this application set.
   /// </summary>
   public event EventHandler<CastVolumeChangedEventArgs>? CastVolumeChanged;
 
