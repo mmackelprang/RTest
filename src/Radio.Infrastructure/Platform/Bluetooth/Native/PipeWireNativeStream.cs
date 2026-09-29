@@ -46,6 +46,16 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   private readonly SrcVariableResampler? _resampler;
   private readonly float[]? _resampleOutputBuffer;
 
+  // AUD-15: closed-loop ratio control (the "Phase 2" Path D deferred). Non-null only when the resampler
+  // is on AND the caller supplied a buffer-level provider and target. Fed from OnProcess, on the same
+  // thread that owns _resampler, so SetRatio needs no synchronization. The provider returns null while
+  // the generator is priming; those windows are skipped so the integral cannot wind up.
+  private readonly BufferLevelRatioController? _ratioController;
+  private readonly Func<int?>? _bufferLevelProvider;
+  private readonly int _samplesPerSecond;
+  private long _lastRatioLogTimestamp;
+  private static readonly long RatioLogIntervalTicks = Stopwatch.Frequency * 60;
+
   private IntPtr _threadLoop;
   private IntPtr _stream;
   private PwStreamEvents _events;
@@ -147,11 +157,20 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   /// (250 ppm consumer-faster) on the Ubuntu N100 + Pixel-class phone combo.
   /// Ignored when <paramref name="useResampler"/> is false.
   /// </param>
+  /// <param name="bufferLevelProvider">
+  /// AUD-15: the playback buffer's level while playing, or null while it primes. With
+  /// <paramref name="resamplerTargetSamples"/> it turns on closed-loop ratio control. Called on the
+  /// PipeWire thread. Ignored when <paramref name="useResampler"/> is false.
+  /// </param>
+  /// <param name="resamplerTargetSamples">
+  /// AUD-15: the buffer fill (interleaved samples) the ratio controller holds. 0 = static ratio.
+  /// </param>
   public PipeWireNativeStream(
     uint targetNodeId, int sampleRate, int channels,
     AudioDataCallback onAudioData, ILogger logger,
     bool useRealtime = false, int rtPriority = 50,
-    bool useResampler = false, double initialResamplerRatio = 1.0)
+    bool useResampler = false, double initialResamplerRatio = 1.0,
+    Func<int?>? bufferLevelProvider = null, int resamplerTargetSamples = 0)
   {
     // AUD-11 C-163: 0 is not a valid object.serial. Accepting it writes `target.object = 0`, which
     // resolves to nothing. The caller is expected to have refused this already
@@ -179,6 +198,14 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
       // stereo 48 kHz audio) is several × the largest plausible single
       // callback, with headroom for SINC filter startup transients.
       _resampleOutputBuffer = new float[8192];
+
+      if (bufferLevelProvider != null && resamplerTargetSamples > 0)
+      {
+        _bufferLevelProvider = bufferLevelProvider;
+        _samplesPerSecond = sampleRate * channels;
+        _ratioController = new BufferLevelRatioController(
+          initialResamplerRatio, resamplerTargetSamples, _samplesPerSecond);
+      }
     }
 
     // Pin delegates to prevent GC
@@ -581,6 +608,26 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
           {
             self._onAudioData(self._resampleOutputBuffer, samplesOut);
           }
+
+          // AUD-15: steer the ratio toward the buffer target. After delivery, so the level includes
+          // this block. No logging here — EmitDiagnostics reports the ratio from the watchdog tick.
+          if (self._ratioController != null)
+          {
+            var level = self._bufferLevelProvider!();
+            if (level is int buffered)
+            {
+              var newRatio = self._ratioController.Observe(
+                buffered, (double)processStart / Stopwatch.Frequency);
+              if (newRatio.HasValue)
+              {
+                self._resampler.SetRatio(newRatio.Value);
+              }
+            }
+            else
+            {
+              self._ratioController.SkipWindow();
+            }
+          }
         }
         else
         {
@@ -618,6 +665,20 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
     // First, so a failure in the statistics line cannot skip it.
     _resampler?.EmitErrorsIfDue(_logger, nowTimestamp);
     _stats.EmitIfDue(_logger, nowTimestamp);
+
+    // AUD-15: once a minute, what the ratio controller is doing. Ratio and LastAveragedLevel are
+    // written on the capture thread; a double read on x64 is not torn, and a value one update stale is
+    // fine for a diagnostic.
+    if (_ratioController != null && nowTimestamp - _lastRatioLogTimestamp >= RatioLogIntervalTicks)
+    {
+      _lastRatioLogTimestamp = nowTimestamp;
+      var averaged = _ratioController.LastAveragedLevel;
+      _logger.LogInformation(
+        "BT resampler control: ratio={Ratio:F6} ({Ppm:+0;-0} ppm), buffer avg={LevelMs:F0} ms",
+        _ratioController.Ratio,
+        (_ratioController.Ratio - 1.0) * 1e6,
+        averaged < 0 ? -1 : averaged / _samplesPerSecond * 1000.0);
+    }
   }
 
   public void Dispose()

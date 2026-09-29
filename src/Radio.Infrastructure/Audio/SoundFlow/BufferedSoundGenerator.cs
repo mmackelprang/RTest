@@ -149,6 +149,14 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// </summary>
     private readonly bool _disableDriftCompensation;
 
+    // AUD-15 jitter-buffer priming (opt-in; 0 = off, the behaviour every other generator keeps).
+    // While priming, GenerateAudio outputs silence WITHOUT consuming, until _primeSamples of real
+    // audio are buffered; a genuine run-dry while playing re-arms it. Both fields are read and written
+    // under _bufferLock only.
+    private int _primeSamples;
+    private bool _priming;
+    private long _primeCount;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="BufferedSoundGenerator{T}"/> class.
     /// </summary>
@@ -680,6 +688,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         }
 
         int samplesWritten = 0;
+        var primingHold = false;
 
         // Measure lock contention: try non-blocking first, only time if contended
         double generateLockWaitMs = 0;
@@ -698,7 +707,25 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         }
         try
         {
-            var toRead = Math.Min(buffer.Length, _count);
+            // AUD-15: hold playback until the jitter buffer holds its target of REAL audio. A pre-fill of
+            // silence cannot do this: it is drained while the capture stream is still connecting, so the
+            // first real samples used to arrive into an empty buffer with no margin at all.
+            if (_priming && _count >= _primeSamples)
+            {
+                _priming = false;
+                _primeCount++;
+            }
+
+            primingHold = _priming;
+            var toRead = primingHold ? 0 : Math.Min(buffer.Length, _count);
+
+            // A genuine run-dry while playing re-arms priming, so the next audio is buffered to target
+            // again instead of hovering at empty and chattering on every late packet.
+            if (!primingHold && _primeSamples > 0 && toRead < buffer.Length
+                && _totalSamplesReceived > 0 && !_producerParked)
+            {
+                _priming = true;
+            }
 
             if (typeof(T) == typeof(float))
             {
@@ -792,7 +819,8 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             // pause and the capture is waiting for it to come back), an empty buffer is the expected
             // state, not an underrun. Without this gate the counters below would drive a Warning once a
             // second for the whole pause, and Warning is what reaches radio-api's journal (LOG-11).
-            if (_totalSamplesReceived > 0 && !_producerParked)
+            // AUD-15: a priming hold is deliberate silence while the buffer fills, not an underrun.
+            if (_totalSamplesReceived > 0 && !_producerParked && !primingHold)
             {
                 Interlocked.Increment(ref _underrunCount);
                 Interlocked.Add(ref _underrunSamplesSinceLastLog, deficit);
@@ -966,6 +994,72 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
                 floatRing[idx] = floatRing[idx] * gain;
             }
         }
+    }
+
+    /// <summary>
+    /// Turns on jitter-buffer priming (AUD-15): playback is held — silence out, nothing consumed — until
+    /// <paramref name="seconds"/> of real audio are buffered, and re-held after a genuine run-dry.
+    /// Use INSTEAD of <see cref="PreFillSilence"/>, whose silence is drained before a slow-to-connect
+    /// producer delivers anything. Off by default; call before the generator is added to the mixer.
+    /// </summary>
+    public void ConfigurePriming(float seconds)
+    {
+        var samples = (int)(Format.SampleRate * Format.Channels * seconds);
+        samples = samples / Format.Channels * Format.Channels;
+        samples = Math.Clamp(samples, 0, _maxBufferSamples / 2);
+        lock (_bufferLock)
+        {
+            _primeSamples = samples;
+            _priming = samples > 0;
+        }
+    }
+
+    /// <summary>
+    /// Discards everything buffered and re-arms priming — the fresh-start state of a priming generator,
+    /// for one that has already been used (AUD-10 re-bind after a pause).
+    /// </summary>
+    public void RearmPriming()
+    {
+        lock (_bufferLock)
+        {
+            _readPos = 0;
+            _writePos = 0;
+            _count = 0;
+            _priming = _primeSamples > 0;
+            if (_overflowStrategy == BufferOverflowStrategy.Block)
+            {
+                Monitor.PulseAll(_bufferLock);
+            }
+        }
+    }
+
+    /// <summary>Whether <see cref="ConfigurePriming"/> turned priming on.</summary>
+    public bool IsPrimingEnabled
+    {
+        get { lock (_bufferLock) { return _primeSamples > 0; } }
+    }
+
+    /// <summary>The priming target in interleaved samples (0 when priming is off).</summary>
+    public int PrimeTargetSamples
+    {
+        get { lock (_bufferLock) { return _primeSamples; } }
+    }
+
+    /// <summary>How many times priming completed (start, re-bind, and after each run-dry).</summary>
+    public long PrimeCount
+    {
+        get { lock (_bufferLock) { return _primeCount; } }
+    }
+
+    /// <summary>
+    /// The buffered sample count while audio is playing, or null while priming — when the level is
+    /// being filled on purpose and says nothing about producer-vs-consumer clock rates. Read by the BT
+    /// resampler's ratio controller on the capture thread; takes the buffer lock briefly, as
+    /// <see cref="AddSamples"/> already does on that thread.
+    /// </summary>
+    public int? LevelWhilePlaying
+    {
+        get { lock (_bufferLock) { return _priming ? null : _count; } }
     }
 
     /// <summary>

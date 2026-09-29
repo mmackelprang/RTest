@@ -6,6 +6,26 @@
 RotaryPhone HFP boundary violation — see below). **This is a different defect and must not be
 conflated with that one.**
 
+## Diagnosis 2026-09-29 — two causes, neither the callback
+
+**Still happening, milder.** The owner's BT session 2026-09-29 10:55–11:29 (return-checklist item 3): 9 underrun Warnings in ~34 min, the buffer at **1,176–2,566 of 384,000 samples (12–27 ms)** rather than 0, ~2,000 zero samples per 3–4 min window.
+
+**The callback is no longer the suspect.** Same session: OnProcess execution max 0.10–0.36 ms typical, 8.40 ms worst; intervals 9–12 ms. `AUD-39` fixed what this row was filed under.
+
+**Cause 1 — the startup cushion is silence, and it is spent before audio arrives.** `StartCaptureSubprocess` pre-filled 0.5 s of silence, but the mixer drains it while the capture stream is still connecting. Generator #3 created 10:57:53; stream started (resampler init) 10:57:58.958; **first underrun 10:57:59**. Real audio began with no margin.
+
+**Cause 2 — Path D's resampler ratio is static, and nothing refills the buffer.** `InputResamplerInitialRatio` = 1.00025 (one phone's measured skew); `SrcVariableResampler.SetRatio` had **no callers**; drift compensation is disabled on the resampler path (`LinuxBluetoothService.cs:1573`). The Path D plan deferred closed-loop control as "Phase 2" (`docs/plans/2026-05-22-bt-input-resampler.md:644`) while setting its own acceptance at **0 underruns/hour**. The session's drain (~9 samples/s ≈ 100 ppm) is a residual ratio error with no loop to correct it.
+
+**Fix (branch `fix/aud-15-bt-ring-buffer`):**
+- `BufferedSoundGenerator` priming (opt-in): hold playback — silence out, nothing consumed — until the target of **real** audio is buffered; re-arm after a genuine run-dry; a hold is not an underrun.
+- `BufferLevelRatioController`: P + slow I on the buffer error, 1 s averaging, base ± 500 ppm (0.9 cents), ≤ 20 ppm/update, anti-windup; fed from `OnProcess` on the resampler's thread, skipped while priming.
+- `BluetoothOptions.CaptureTargetBufferMs` = 100 turns both on. Once a minute: `BT resampler control: ratio=…, buffer avg=… ms` (Information; the `Platform.Bluetooth` namespace is held at Warning by `LOG-2`, so raise it to see the line).
+- Tests: 8 controller (incl. a 30-min 100 ppm plant that must settle at target and never run dry — it runs dry at −7,680 samples with the gains zeroed), 7 priming (2 fail with the hold removed).
+
+**Box verification (the gate):** a sustained BT session with **no `Buffer underrun` Warnings** after the initial prime, and the control line showing the buffer average near 100 ms. Not auto-mergeable.
+
+**Noticed, not fixed:** on the `pw-record` fallback path (no `object.serial`), drift compensation is also disabled when `UseInputResampler` is true, yet that path has no resampler — so it has no drift correction at all. Priming still applies there.
+
 ## The evidence
 
 From the `radio-api` file sink, four samples inside ~32 seconds of ordinary BT playback:
