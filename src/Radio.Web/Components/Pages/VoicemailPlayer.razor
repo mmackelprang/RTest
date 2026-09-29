@@ -5,7 +5,6 @@
 @inject ConsolePlaybackState ConsolePlayback
 @inject AudioStateStore AudioState
 @inject AudioApiService AudioApi
-@inject IJSRuntime JS
 @implements IDisposable
 
 @* ADR-029 Feature A. This transport is a REMOTE CONTROL for something happening in the room, not a
@@ -64,15 +63,17 @@
          leaving an unchangeable slider — an accessibility lie in exactly that state (handoff §A6). *@
       @if (DurationKnown)
       {
-        <div class="vm-scrubber" role="slider"
-             aria-label="Playback position"
-             aria-valuemin="0" aria-valuemax="@((int)TotalSeconds)"
-             aria-valuenow="@((int)ElapsedSeconds)"
-             @onclick="OnScrubberClickAsync" @ref="_scrubberEl">
-          <div class="now-playing-dock-progress">
-            <div class="now-playing-dock-progress-bar" style="width:@ProgressWidth"></div>
-          </div>
-        </div>
+        @* UI-16: drag OR tap, committed on release (the AUD-28 ruling, applied by analogy). Disabled
+           until this row has a playback to seek — the same no-op the tap-only scrubber had. *@
+        <SeekBar Class="vm-scrubber"
+                 Fraction="@ProgressFraction"
+                 Disabled="@(_playbackId is null)"
+                 OnScrub="OnScrub"
+                 OnSeek="OnSeekAsync"
+                 AriaLabel="Playback position"
+                 AriaValueMin="0"
+                 AriaValueMax="@(((int)TotalSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture))"
+                 AriaValueNow="@(((int)DisplayedSeconds).ToString(System.Globalization.CultureInfo.InvariantCulture))" />
       }
       else
       {
@@ -82,7 +83,7 @@
         </div>
       }
 
-      <span class="vm-time">@FormatTime(ElapsedSeconds) / @TotalDisplay</span>
+      <span class="vm-time">@FormatTime(DisplayedSeconds) / @TotalDisplay</span>
 
       <button type="button" class="transport-btn transport-btn-secondary"
               aria-label="Stop playing" title="Stop"
@@ -144,8 +145,7 @@
   private bool _heardSent;
   private bool _mutedAtPlay;
   private bool _starting;                     // a StartVoicemailAsync is in flight; see PlayAsync
-  private IJSObjectReference? _scrubberModule; // imported once per instance; see OnScrubberClickAsync
-  private ElementReference _scrubberEl;
+  private double? _scrubSeconds;             // position under the finger while the SeekBar is dragged
 
   protected override void OnInitialized() => ConsolePlayback.Changed += OnPlaybackChangedAsync;
 
@@ -238,9 +238,12 @@
   private double TotalSeconds => Mine?.Duration?.TotalSeconds ?? Item.DurationSeconds;
   private bool DurationKnown => TotalSeconds > 0;
   private string TotalDisplay => DurationKnown ? FormatTime(TotalSeconds) : "--:--";
-  private string ProgressWidth =>
-    (DurationKnown ? Math.Clamp(ElapsedSeconds / TotalSeconds * 100, 0, 100) : 0)
-      .ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+  private double ProgressFraction =>
+    DurationKnown ? Math.Clamp(ElapsedSeconds / TotalSeconds, 0, 1) : 0;
+
+  // The readout follows the finger during a drag (AUD-28 scope question 4: deferring the seek must not
+  // make the control look dead), and the interpolated position otherwise.
+  private double DisplayedSeconds => _scrubSeconds ?? ElapsedSeconds;
 
   private string PrimaryLabel => IsMineAndPlaying
     ? "Pause"
@@ -405,46 +408,17 @@
     await EventPlaybackApi.SeekAsync(_playbackId, target);
   }
 
-  // ⚠ Tap-to-seek only. There is no pointermove handler and never was — the previous player was
-  // already tap-only (:36 bound @onclick, :135 took a MouseEventArgs). Drag-scrub needs a ~16 ms
-  // budget we do not have and a grabbable thumb .now-playing-dock-progress does not have (handoff
-  // §A3). If it is ever added, commit-on-release is the only acceptable pattern.
-  //
-  // ⚠ The fraction still comes from JS, and that is the ONE thing on this path with no server-side
-  // replacement: converting a click's clientX to a fraction needs the element's rendered box, which
-  // only the browser has. It is why js/voicemail-player.js is REDUCED rather than deleted (Task 7a).
-  private async Task OnScrubberClickAsync(MouseEventArgs e)
+  // UI-16. The SeekBar reports the gesture; this row only acts on its release. OnScrub is display-only
+  // and must never seek — the owner's AUD-28 ruling (seek on release, no debounce) is what makes a
+  // drag cost one seek instead of one per frame. The fraction comes from js/seek-bar.js, because
+  // converting a pointer's clientX to a fraction needs the track's rendered box.
+  private void OnScrub(double? fraction) =>
+    _scrubSeconds = fraction is { } f && DurationKnown ? f * TotalSeconds : null;
+
+  private async Task OnSeekAsync(double fraction)
   {
     if (_playbackId is null || !DurationKnown)
     {
-      return;
-    }
-
-    double fraction;
-    try
-    {
-      // ⚠ Imported ONCE per component instance, not once per click. The browser side is not the cost —
-      // ES modules are cached by URL, so a repeated import() hands back the same module object — but
-      // each InvokeAsync<IJSObjectReference> mints a NEW server-side reference id in the circuit's
-      // interop tracking table, released only by DisposeAsync or by the circuit ending. Importing per
-      // click therefore grew that table by one entry per seek, for the life of the circuit. (The file
-      // this component replaced cached its module in a field too; the per-click import arrived with
-      // the rewrite.)
-      //
-      // ⚠ It is deliberately NOT disposed. Dispose() must stay the single `Changed -=` expression body
-      // (plan C-77 / grep 3) so that nothing in this component's teardown can ever be mistaken for a
-      // stop, and IJSObjectReference only offers DisposeAsync. One reference per expanded row, freed
-      // when the circuit ends, is the price of that guarantee and is bounded by the rows a person can
-      // open — where the per-click version was bounded by nothing.
-      _scrubberModule ??=
-        await JS.InvokeAsync<IJSObjectReference>("import", "./js/voicemail-player.js");
-      fraction = await _scrubberModule.InvokeAsync<double>(
-        "fractionFromEvent", _scrubberEl, e.ClientX);
-    }
-    catch
-    {
-      // bUnit's loose interop and a missing module both land here. A seek that cannot be located is a
-      // no-op, never an exception out of an event handler on a wall panel.
       return;
     }
 
