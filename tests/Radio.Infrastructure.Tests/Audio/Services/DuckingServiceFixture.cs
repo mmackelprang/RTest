@@ -45,6 +45,10 @@ internal sealed class DuckingServiceFixture
   public DuckingService CreateService() =>
     new(LoggerMock.Object, OptionsMock.Object, MixerMock.Object);
 
+  /// <summary>With an injected clock, so fade steps advance only when the test says so.</summary>
+  public DuckingService CreateService(TimeProvider timeProvider) =>
+    new(LoggerMock.Object, OptionsMock.Object, MixerMock.Object, timeProvider);
+
   public Mock<IEventAudioSource> CreateMockEventSource(string? id = null)
   {
     var mock = new Mock<IEventAudioSource>();

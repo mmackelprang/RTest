@@ -15,12 +15,19 @@ public class DuckingService : IDuckingService
   private readonly ILogger<DuckingService> _logger;
   private readonly IOptionsMonitor<AudioOptions> _audioOptions;
   private readonly IMasterMixer _masterMixer;
+  private readonly TimeProvider _timeProvider;
   private readonly object _lock = new();
 
   private readonly Dictionary<string, IEventAudioSource> _activeEvents = new();
   private readonly Dictionary<string, int> _sourcePriorities = new();
   private float _currentDuckLevel = 100f; // 100% = full volume
   private bool _isDucking;
+
+  // AUD-74: numbers duck episodes. Incremented under _lock by every StartDuckingAsync that begins a
+  // new episode (the not-ducking -> ducking transition). A release that started under one episode
+  // compares it after its fade; a different value means a new episode began in between, so the
+  // release must not announce ducking as ended.
+  private long _duckEpisode;
   private CancellationTokenSource? _fadeTokenSource;
   private bool _disposed;
 
@@ -40,11 +47,14 @@ public class DuckingService : IDuckingService
   /// <param name="logger">The logger instance.</param>
   /// <param name="audioOptions">The audio options.</param>
   /// <param name="masterMixer">The master mixer for volume control.</param>
+  /// <param name="timeProvider">Clock for fade-step delays; <see cref="TimeProvider.System"/> when null.</param>
   public DuckingService(
     ILogger<DuckingService> logger,
     IOptionsMonitor<AudioOptions> audioOptions,
-    IMasterMixer masterMixer)
+    IMasterMixer masterMixer,
+    TimeProvider? timeProvider = null)
   {
+    _timeProvider = timeProvider ?? TimeProvider.System;
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _audioOptions = audioOptions ?? throw new ArgumentNullException(nameof(audioOptions));
     _masterMixer = masterMixer ?? throw new ArgumentNullException(nameof(masterMixer));
@@ -166,6 +176,7 @@ public class DuckingService : IDuckingService
       if (!_isDucking)
       {
         _isDucking = true;
+        _duckEpisode++;
       }
     }
 
@@ -216,6 +227,7 @@ public class DuckingService : IDuckingService
     bool wasPresent;
     int remainingEvents;
     int priorityBeforeRemoval;
+    long episodeAtRelease = 0;
 
     lock (_lock)
     {
@@ -242,6 +254,7 @@ public class DuckingService : IDuckingService
       if (needsRestore)
       {
         _isDucking = false;
+        episodeAtRelease = _duckEpisode;
       }
     }
 
@@ -271,6 +284,34 @@ public class DuckingService : IDuckingService
       await ApplyFadeAsync(100f, releaseMs, options.DuckingPolicy, eventSource, cancellationToken);
     }
 
+    // AUD-74: a release is SUPERSEDED when a StartDuckingAsync began a new episode after the lock
+    // above — typically by cancelling this release's fade mid-way, which returns ApplyFadeAsync early
+    // rather than throwing. Announcing IsDucking:false then made AudioManager clear every ducking
+    // multiplier while the new episode's attack was ramping down: an audible swell to full volume at
+    // the start of an announcement that followed closely on another. The departing source is still
+    // announced (Transition Ended), in the shape a departure-while-others-remain already has:
+    // IsDucking:true.
+    //
+    // ⚠ This narrows the window; it does not close it. A new episode that starts after this check but
+    // before the raise below is not seen, because the raise happens outside the lock (subscribers
+    // must not run under it). That residual window is a few instructions wide, where the one closed
+    // here spanned the whole release fade (Audio:DuckingReleaseMs, 500 ms shipped).
+    bool releaseSuperseded = false;
+    if (needsRestore)
+    {
+      lock (_lock)
+      {
+        releaseSuperseded = _duckEpisode != episodeAtRelease;
+      }
+
+      if (releaseSuperseded)
+      {
+        _logger.LogDebug(
+          "Release for event source '{SourceId}' was superseded by a new ducking episode; not announcing ducking ended",
+          eventSource.Id);
+      }
+    }
+
     // ⚠ RAISED FOR EVERY SOURCE THAT LEAVES, not only when the set empties. This is the mirror of what
     // PHN-1d did for StartDuckingAsync and it is here for the same reason: a subscriber cannot act on
     // a source ending if it is never told one did. Before this line moved, a priority-8 blocker ending
@@ -296,8 +337,9 @@ public class DuckingService : IDuckingService
     //
     // ⚠ IsDucking is the aggregate AS IT STOOD INSIDE THE LOCK ABOVE: false exactly on the removal
     // that emptied the set, which is what needsRestore means, and true while others remain. It is a
-    // SNAPSHOT, not a live read — a StartDuckingAsync landing after that lock is not reflected in it.
-    // That is the same pre-existing looseness the ActiveEventCount field has from the other side,
+    // SNAPSHOT, not a live read, with ONE exception since AUD-74: a StartDuckingAsync that began a
+    // new episode after that lock and before the superseded-release check turns false into true (see
+    // releaseSuperseded above). A start landing after that check is still not reflected. That is the same pre-existing looseness the ActiveEventCount field has from the other side,
     // since that one IS read live inside RaiseDuckingStateChanged. What the snapshot buys is the thing
     // AudioManager.ClearDuckingMultiplier depends on: raising IsDucking:false while other sources
     // remain would restore the radio to full volume MID-ANNOUNCEMENT, and that hazard is why this
@@ -309,7 +351,7 @@ public class DuckingService : IDuckingService
     if (wasPresent || needsRestore)
     {
       RaiseDuckingStateChanged(
-        !needsRestore, eventSource, DuckingSourceTransition.Ended, priorityBeforeRemoval);
+        !needsRestore || releaseSuperseded, eventSource, DuckingSourceTransition.Ended, priorityBeforeRemoval);
     }
   }
 
@@ -458,7 +500,7 @@ public class DuckingService : IDuckingService
       {
         try
         {
-          await Task.Delay(stepDurationMs, fadeToken);
+          await Task.Delay(TimeSpan.FromMilliseconds(stepDurationMs), _timeProvider, fadeToken);
         }
         catch (TaskCanceledException)
         {
