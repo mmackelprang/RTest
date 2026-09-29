@@ -1051,6 +1051,65 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   /// <summary>
+  /// AUD-34, the first review scenario: a capture starts on another source, the listener switches to
+  /// BT, and the phone resumes the SAME song as its last session — no AVRCP key change, so AUD-33's
+  /// stamp does not move. The activation stamp is what drops it. (The 2026-09-06 "Spirit In The Sky"
+  /// misidentification had this shape.) Times are explicit, so nothing here races a clock.
+  /// </summary>
+  [Fact]
+  public async Task Aud34_SameSongAfterASwitchBack_ResultSampledBeforeActivation_IsNotApplied()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Enter Sandman", "Metallica");
+    DateTime captureStartedAt = DateTime.UtcNow;
+
+    _source.MarkActivated(captureStartedAt.AddSeconds(1));
+    RaiseAvrcp(bt, "Enter Sandman", "Metallica"); // the phone re-publishes the same track
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(captureStartedAt, "Spirit In The Sky", "Norman Greenbaum", "/api/albumart/sits.jpg"));
+
+    Assert.False(_source.Metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl));
+    Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  /// <summary>
+  /// AUD-34: before BT's first AVRCP event its own stamp is 0 ("unknown"), which AUD-33 treated as
+  /// never stale — exactly the window after a connect when residual audio from the previous source is
+  /// most likely. Never stamped now means "started at activation".
+  /// </summary>
+  [Fact]
+  public async Task Aud34_BeforeTheFirstAvrcpEvent_ActivationIsTheBoundary()
+  {
+    var (_, id) = await PlayActiveSourceAsync();
+    object titleBefore = _source.Metadata[StandardMetadataKeys.Title];
+    _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out object? artBefore);
+    DateTime activatedAt = DateTime.UtcNow;
+    _source.MarkActivated(activatedAt);
+
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(activatedAt.AddSeconds(-1), "Spirit In The Sky", "Norman Greenbaum", "/api/albumart/sits.jpg"));
+
+    Assert.Equal(titleBefore, _source.Metadata[StandardMetadataKeys.Title]);
+    _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out object? artAfter);
+    Assert.Equal(artBefore, artAfter);
+  }
+
+  /// <summary>AUD-34 control: a sample begun after the activation is BT's own and still applies.</summary>
+  [Fact]
+  public async Task Aud34_ResultSampledAfterActivation_IsApplied()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    DateTime activatedAt = DateTime.UtcNow;
+    _source.MarkActivated(activatedAt);
+    RaiseAvrcp(bt, "Song A", "Artist A");
+
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(DateTime.UtcNow.AddSeconds(1), "Song A", "Artist A", "/api/albumart/song-a.jpg"));
+
+    Assert.Equal("/api/albumart/song-a.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
   /// An AVRCP refresh of the SAME track (the phone re-publishing its metadata) is not a track change,
   /// so a result sampled before the refresh still applies.
   /// </summary>

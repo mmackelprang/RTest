@@ -4,6 +4,7 @@ using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.SoundFlow;
+using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Fingerprinting.Services;
 
 // Ducking support: AudioManager subscribes to IDuckingService events and applies
@@ -268,6 +269,16 @@ public class AudioManager : IAudioManager, IAsyncDisposable
       {
         _logger.LogInformation("Adding new source {SourceName} to mixer", source.Name);
         mixer.AddSource(source);
+      }
+
+      // AUD-34: stamp the activation BEFORE publishing the source as active, so an identification
+      // that the new source judges as its own (IsActiveSource) already sees the boundary. A capture
+      // begun on the old source is otherwise applied here whenever the new source's own track
+      // identity did not change — the same song resumed over BT, or the same file on return.
+      // Only a real change: re-selecting the active source is not an activation.
+      if (oldSource != source && source is PrimaryAudioSourceBase activatedSource)
+      {
+        activatedSource.MarkActivated(DateTime.UtcNow);
       }
 
       // Update the active source reference

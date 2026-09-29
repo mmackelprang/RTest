@@ -1111,10 +1111,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // for minutes. Dropped before the lookup flag is cleared, so when that flag is set for this track
     // (incomplete AVRCP metadata, or UseShazamForAllSources) it is still identified next cycle.
     var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
-    if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
+    // AUD-34: the boundary is also this source's last activation, so a sample captured from the
+    // previous source (or before a switch away and back on the same track) is dropped too.
+    if (e.WasCapturedBefore(LatestTrackBoundaryUtc(trackStartedTicks)))
     {
       Logger.LogInformation(
-        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current BT track started",
+        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current BT track started or BT became the active source",
         e.Track.Title, e.Track.Artist);
       // The service marked this song as recently identified before raising the event. AVRCP metadata
       // can trail the audio by a second or two, so a dropped result may name the track now playing;
