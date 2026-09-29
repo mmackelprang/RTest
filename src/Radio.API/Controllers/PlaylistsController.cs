@@ -226,13 +226,13 @@ public class PlaylistsController : ControllerBase
         playQueue = fileQueue;
       }
 
-      // Clear current queue
-      await playQueue.ClearQueueAsync(ct);
-
-      // Add each item from the playlist, skipping files that no longer exist
-      var loaded = 0;
+      // Check the files before touching the queue. A playlist whose files have all moved (e.g. saved under a
+      // mount point that no longer exists) used to clear the queue and then add nothing, leaving the owner with an
+      // empty queue behind a "loaded" message. If none exist, the current queue is left as it is.
+      var ordered = items.OrderBy(i => i.Position).ToList();
+      var existing = new List<string>(ordered.Count);
       var skipped = 0;
-      foreach (var item in items.OrderBy(i => i.Position))
+      foreach (var item in ordered)
       {
         if (!System.IO.File.Exists(item.FilePath))
         {
@@ -241,7 +241,27 @@ public class PlaylistsController : ControllerBase
           continue;
         }
 
-        await playQueue.AddToQueueAsync(item.FilePath, cancellationToken: ct);
+        existing.Add(item.FilePath);
+      }
+
+      if (ordered.Count > 0 && existing.Count == 0)
+      {
+        _logger.LogWarning("Playlist '{Name}' not loaded: all {Skipped} files are missing; queue left unchanged",
+          playlist.Name, skipped);
+        return Ok(new
+        {
+          message = $"Nothing loaded from '{playlist.Name}': all {skipped} files are missing. The queue was left unchanged.",
+          loaded = 0,
+          skipped
+        });
+      }
+
+      await playQueue.ClearQueueAsync(ct);
+
+      var loaded = 0;
+      foreach (var path in existing)
+      {
+        await playQueue.AddToQueueAsync(path, cancellationToken: ct);
         loaded++;
       }
 

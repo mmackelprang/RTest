@@ -79,17 +79,34 @@ public class PlaylistApiService
     }
   }
 
-  public async Task<bool> LoadAsync(string id, CancellationToken ct = default)
+  /// <summary>
+  /// Loads a playlist into the queue. Returns the server's loaded/skipped counts, or null when the request failed.
+  /// </summary>
+  /// <remarks>
+  /// The counts are the point: a playlist can be "loaded" with every file missing, and the caller must report what
+  /// reached the queue, not the playlist's saved size. <see cref="OperationCanceledException"/> propagates so the
+  /// caller can tell a timeout from a failure.
+  /// </remarks>
+  public async Task<PlaylistLoadResultDto?> LoadAsync(string id, CancellationToken ct = default)
   {
     try
     {
       var response = await _httpClient.PostAsync($"/api/playlists/{id}/load", null, ct);
-      return response.IsSuccessStatusCode;
+      if (!response.IsSuccessStatusCode)
+      {
+        return null;
+      }
+
+      return await response.Content.ReadFromJsonAsync<PlaylistLoadResultDto>(ct) ?? new PlaylistLoadResultDto();
+    }
+    catch (OperationCanceledException)
+    {
+      throw;
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to load playlist {Id}", id);
-      return false;
+      return null;
     }
   }
 }

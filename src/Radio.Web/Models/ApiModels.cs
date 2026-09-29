@@ -680,6 +680,17 @@ public class PlaylistSummaryDto
   public string ModifiedAt { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Response of <c>POST /api/playlists/{id}/load</c>: how many tracks actually reached the queue, and how many
+/// were skipped because their file no longer exists.
+/// </summary>
+public class PlaylistLoadResultDto
+{
+  public string Message { get; set; } = string.Empty;
+  public int Loaded { get; set; }
+  public int Skipped { get; set; }
+}
+
 public class PlaylistDetailDto : PlaylistSummaryDto
 {
   public List<PlaylistItemDto> Items { get; set; } = new();

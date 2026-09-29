@@ -97,6 +97,27 @@ else
 
   private void Cancel() => DialogService.Close();
 
+  /// <summary>
+  /// The notification for a playlist load, from the server's counts. Internal static so tests can pin it.
+  /// </summary>
+  internal static (NotificationSeverity Severity, string Summary, string Detail) DescribeLoad(
+    string name, Radio.Web.Models.PlaylistLoadResultDto result)
+  {
+    if (result.Loaded == 0 && result.Skipped > 0)
+    {
+      return (NotificationSeverity.Error, "Nothing loaded",
+        $"All {result.Skipped} files in '{name}' are missing. The queue was left unchanged.");
+    }
+
+    if (result.Skipped > 0)
+    {
+      return (NotificationSeverity.Warning, "Partly loaded",
+        $"Loaded {result.Loaded} of {result.Loaded + result.Skipped} tracks from '{name}' ({result.Skipped} files not found)");
+    }
+
+    return (NotificationSeverity.Success, "Success", $"Loaded '{name}' ({result.Loaded} tracks)");
+  }
+
   private async Task LoadPlaylistAsync(Radio.Web.Models.PlaylistSummaryDto playlist)
   {
     _actionInProgress = true;
@@ -105,17 +126,20 @@ else
     {
       using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
       Logger.LogInformation("Calling PlaylistApi.LoadAsync...");
-      var success = await PlaylistApi.LoadAsync(playlist.Id, cts.Token);
-      Logger.LogInformation("PlaylistApi.LoadAsync returned: {Success}", success);
-      if (success)
-      {
-        NotificationService.Notify(NotificationSeverity.Success, "Success", $"Loaded '{playlist.Name}' ({playlist.ItemCount} tracks)");
-        DialogService.Close(playlist);
-      }
-      else
+      var result = await PlaylistApi.LoadAsync(playlist.Id, cts.Token);
+      Logger.LogInformation("PlaylistApi.LoadAsync returned: {Loaded} loaded, {Skipped} skipped",
+        result?.Loaded, result?.Skipped);
+      if (result == null)
       {
         NotificationService.Notify(NotificationSeverity.Error, "Error", "Failed to load playlist");
+        return;
       }
+
+      // Report what reached the queue, not the playlist's saved size (ItemCount). Those differ when files have
+      // moved, and a success toast over an empty queue is how a fully-missing playlist used to look.
+      var (severity, summary, detail) = DescribeLoad(playlist.Name, result);
+      NotificationService.Notify(severity, summary, detail);
+      DialogService.Close(playlist);
     }
     catch (OperationCanceledException)
     {
