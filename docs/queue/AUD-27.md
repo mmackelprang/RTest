@@ -157,3 +157,37 @@ is alive during a pause. ⛔ **But it is still untested, and #2's clobbered titl
 ⚠ **The polling run specified above is now MORE necessary, not less.** Three samples have produced
 three different answers, and the only thing common to them is that nobody was watching all three
 fields continuously across a single pause.
+
+---
+
+## ✅ CLOSED 2026-09-29 — does not reproduce; the polling run the row asked for was done
+
+The measurement specified above, on `main` at `2006974`: `/api/audio/nowplaying` sampled every second from 16:56:59 to 17:03, the owner at the cabinet announcing each action, correlated with the `radio-api` file sink.
+
+```
+16:58:39 * Bluetooth PLAYING | Bluetooth       | --         | default-album-art    <- connect
+16:58:42 * Bluetooth PLAYING | Pixel 10 Pro XL | --         | default-album-art
+16:58:43 * Bluetooth PAUSED  | Perfect         | Ed Sheeran | default-album-art    <- phone starting
+16:58:59 * Bluetooth PLAYING | Perfect         | Ed Sheeran | default-album-art
+16:59:15 * Bluetooth PLAYING | Perfect         | Ed Sheeran | 190e8ee9304b24e7.jpg <- SongRec 16:59:14
+16:59:17 * Bluetooth PAUSED  | Perfect         | Ed Sheeran | 190e8ee9304b24e7.jpg <- PHONE pause
+17:00:02 * Bluetooth PLAYING | Perfect         | Ed Sheeran | 190e8ee9304b24e7.jpg <- phone resume
+17:00:35 * Bluetooth PAUSED  | Perfect         | Ed Sheeran | 190e8ee9304b24e7.jpg <- CONSOLE pause (AudioController: Paused playback)
+17:01:28 * Bluetooth PLAYING | Perfect         | Ed Sheeran | 190e8ee9304b24e7.jpg <- console resume
+```
+
+**Across a 45 s phone pause and a 53 s console pause, title, artist and art never changed** — 0 of ~150 samples after the art landed differ. Both pause paths (reconciler 2) behave identically.
+
+How the three 2026-09-10 observations reconcile:
+
+| # | 2026-09-10 | Explained by |
+|---|---|---|
+| 1 | *"art disappears immediately when pause is pressed"* | **Reconciler 1** — a pause before identification landed shows the placeholder; the first pause here (16:58:43) did, because the art arrived at 16:59:15. "Disappears" was "never appeared". |
+| 2 | title = device name while paused | **Reconciler 4, but at CONNECT, not pause** — the title reads `Bluetooth` then the device name for the ~3–4 s before AVRCP track metadata arrives (the source's own placeholder, `DefaultTitle`/device name). Not observed on either pause. |
+| 3 | art written during a pause | Consistent: identification keeps running while paused. |
+
+Intervening changes that plausibly matter: `AUD-1`'s per-field precedence (an identification only fills fields AVRCP left missing) and the resolved-art cache in `BluetoothAudioSource`, which restores art on AVRCP metadata refreshes.
+
+Also checked: resuming logs `PlayHistoryTracker … transitioned to Playing, recording play history`, but it created no duplicate history entries.
+
+**If the owner sees art vanish on pause again,** capture the time and whether identification had already landed; the poller at `/tmp/poll27.py` on the box (session scratch, re-creatable from this row) is the instrument.
