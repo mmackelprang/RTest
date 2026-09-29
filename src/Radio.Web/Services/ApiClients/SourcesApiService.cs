@@ -109,6 +109,41 @@ public class SourcesApiService
     }
   }
 
+  /// <summary>
+  /// The outcome of <see cref="ReadPrimarySourceAsync"/>: whether the API answered, and if so the
+  /// primary source it reported (<c>null</c> when none is active).
+  /// </summary>
+  public readonly record struct PrimarySourceRead(bool Succeeded, AudioSourceDto? Source);
+
+  /// <summary>
+  /// Reads the primary source, keeping apart the two cases <see cref="GetPrimarySourceAsync"/>
+  /// folds into one <c>null</c>: <c>404</c> means the API answered "no primary source"
+  /// (<c>Succeeded</c> true, <c>Source</c> null); any other failure means it could not be read
+  /// (<c>Succeeded</c> false). UI-17: the centre panel must not treat an API blip as a source change.
+  /// </summary>
+  /// <remarks>
+  /// A failure logs at Debug, not Error: the centre panel retries this on a 5 s poll while it cannot
+  /// read the source, and on <c>radio-web</c> every level at Information and above reaches journald.
+  /// </remarks>
+  public async Task<PrimarySourceRead> ReadPrimarySourceAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      AudioSourceDto? source =
+        await _httpClient.GetFromJsonAsync<AudioSourceDto>("/api/sources/primary", JsonOptions, cancellationToken);
+      return new PrimarySourceRead(true, source);
+    }
+    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+    {
+      return new PrimarySourceRead(true, null);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Could not read the primary source");
+      return new PrimarySourceRead(false, null);
+    }
+  }
+
   public async Task<bool> SwitchSourceAsync(string sourceType, CancellationToken cancellationToken = default)
   {
     try

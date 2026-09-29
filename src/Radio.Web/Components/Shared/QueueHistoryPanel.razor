@@ -45,17 +45,29 @@
 *@
 
 <div class="centre-panel">
-  <div class="queue-split-tabstrip" role="tablist" aria-label="Centre panel views">
-    @foreach (int tab in VisibleTabs)
+  @{
+    IReadOnlyList<int> visibleTabs = VisibleTabs;
+  }
+  <div class="queue-split-tabstrip">
+    @* The tablist holds only the tabs; the Stats chip and kebab are ordinary buttons beside it. A
+       source with no tabs (Vinyl / USB / Test Tone) renders no tablist at all. *@
+    @if (visibleTabs.Count > 0)
     {
-      int tabValue = tab;
-      <button type="button"
-              class="queue-split-tab @(_activeTab == tabValue ? "is-active" : "")"
-              role="tab"
-              aria-selected="@(_activeTab == tabValue ? "true" : "false")"
-              @onclick="@(() => SetTab(tabValue))">
-        @TabLabel(tabValue)
-      </button>
+      <div class="centre-tablist" role="tablist" aria-label="Centre panel views">
+        @foreach (int tab in visibleTabs)
+        {
+          int tabValue = tab;
+          <button type="button"
+                  id="@TabElementId(tabValue)"
+                  class="queue-split-tab @(_activeTab == tabValue ? "is-active" : "")"
+                  role="tab"
+                  aria-selected="@(_activeTab == tabValue ? "true" : "false")"
+                  aria-controls="centre-tabpanel"
+                  @onclick="@(() => SetTab(tabValue))">
+            @TabLabel(tabValue)
+          </button>
+        }
+      </div>
     }
     <div class="queue-split-tab-spacer"></div>
     @if (_activeTab == TabHistory)
@@ -68,9 +80,12 @@
         Stats
       </button>
     }
-    @if (_activeTab == TabQueue)
+    @if (_activeTab == TabQueue && IsFilePlayer(_sourceType))
     {
-      @* UI-17 point 3: the kebab belongs to the queue view. *@
+      @* UI-17 points 3 and 4: the kebab belongs to File Player's queue view only. On the queue view
+         reached from another source by the Queue pill it is hidden, because Add Files and Load
+         Playlist make the API switch the source to File Player — viewing the queue must not
+         interrupt what is playing. *@
       <div style="position: relative;">
         <button type="button"
                 class="queue-split-kebab"
@@ -115,7 +130,10 @@
     }
   </div>
 
-  <div class="centre-panel-body">
+  <div class="centre-panel-body"
+       id="centre-tabpanel"
+       role="@(visibleTabs.Count > 0 ? "tabpanel" : null)"
+       aria-labelledby="@(visibleTabs.Contains(_activeTab) ? TabElementId(_activeTab) : null)">
     @if (_activeTab == TabRadio)
     {
       <div class="centre-panel-fill">
@@ -356,12 +374,13 @@
   internal const string ShowStatsKey = "showStats";
 
   /// <summary>
-  /// How often the Bluetooth status is re-read while Bluetooth is the active source. Nothing pushes
-  /// Bluetooth connect/disconnect to Radio.Web (the API broadcasts to a hub group no client can join),
-  /// so the auto-switch in <see cref="ApplyBluetoothStatus"/> rides on this poll. Five seconds matches
-  /// PhonePage's status poll.
+  /// Period of <see cref="PollTickAsync"/>. A tick does work in two cases only: the last primary-source
+  /// read failed (re-read it), or Bluetooth is the active source (re-read its status — nothing pushes
+  /// Bluetooth connect/disconnect to Radio.Web, since the API broadcasts to a hub group no client can
+  /// join, so the auto-switch in <see cref="ApplyBluetoothStatus"/> rides on this). Otherwise a tick
+  /// does nothing. Five seconds matches PhonePage's status poll.
   /// </summary>
-  internal static readonly TimeSpan BluetoothPollInterval = TimeSpan.FromSeconds(5);
+  internal static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
 
   private int _activeTab = TabHistory;
 
@@ -370,8 +389,17 @@
   // a Bluetooth connect/disconnect, and not a repeated SourceChanged for the same source.
   private bool _userOverrodeTab;
 
-  // Active primary source type as last read from /api/sources/primary; null when none or unreadable.
+  // Active primary source type from the last SUCCESSFUL read of /api/sources/primary; null when the
+  // API reported none, or before any read has succeeded. A failed read leaves it unchanged.
   private string? _sourceType;
+
+  // Whether any primary-source read has succeeded yet. Until one has, _sourceType's null means
+  // "unknown", not "no source", so the first successful read applies its default without counting
+  // as a source change.
+  private bool _sourceEverRead;
+
+  // Set when the latest read failed; the poll re-reads the source while it is set.
+  private bool _sourceStale;
 
   private List<QueueItemDto> _queueItems = new();
   private List<PlayHistoryEntryDto> _historyItems = new();
@@ -402,6 +430,8 @@
   private string _topArtistTooltip = string.Empty;
 
   private IReadOnlyList<int> VisibleTabs => TabsFor(_sourceType, _btConnected, _activeTab);
+
+  private static string TabElementId(int tab) => $"centre-tab-{tab}";
 
   private string TabLabel(int tab) => tab switch
   {
@@ -484,19 +514,11 @@
     CentrePanelViews.ViewRequested += OnViewRequested;
 
     await LoadStatsPreferenceAsync();
-    await RefreshSourceAsync();
-    await RefreshQueueAsync();
-    if (IsBluetooth(_sourceType))
-    {
-      ApplyBluetoothStatus(await BluetoothApi.GetStatusAsync(), allowAutoSwitch: false);
-    }
 
-    // A view request that arrived while the awaits above were running has already set the tab and
-    // the override; the default must not overwrite it.
-    if (!_userOverrodeTab)
-    {
-      _activeTab = DefaultTabFor(_sourceType, _queueItems.Count, _btConnected);
-    }
+    // Reads the source and queue and applies the source's default tab — unless a view request that
+    // arrived during the awaits has already set the tab and the override. If the source cannot be
+    // read the panel stays on History and the poll keeps retrying (_sourceStale).
+    await SyncSourceAsync();
 
     // A request made while no centre panel existed (Queue pill or radio chevron tapped on another
     // page, which then navigated here) waits in the service for this panel to collect it.
@@ -514,7 +536,7 @@
   {
     _refreshCts = new CancellationTokenSource();
     _ = PeriodicHistoryRefreshAsync(_refreshCts.Token);
-    _ = PeriodicBluetoothRefreshAsync(_refreshCts.Token);
+    _ = PeriodicPollAsync(_refreshCts.Token);
   }
 
   private async Task PeriodicHistoryRefreshAsync(CancellationToken ct)
@@ -544,21 +566,43 @@
     }
   }
 
-  private async Task PeriodicBluetoothRefreshAsync(CancellationToken ct)
+  private async Task PeriodicPollAsync(CancellationToken ct)
   {
-    using var timer = new PeriodicTimer(BluetoothPollInterval);
+    using var timer = new PeriodicTimer(PollInterval);
     while (await timer.WaitForNextTickAsync(ct))
     {
       try
       {
-        await InvokeAsync(RefreshBluetoothStatusAsync);
+        // Gate the whole tick, not just the HTTP call, so an idle tick never hops onto the renderer.
+        // These two reads are off the renderer's context and may be one tick stale; PollTickAsync
+        // re-checks both on the renderer before acting.
+        if (_sourceStale || IsBluetooth(_sourceType))
+        {
+          await InvokeAsync(PollTickAsync);
+        }
       }
       catch (OperationCanceledException) { break; }
       catch (Exception ex)
       {
-        Logger.LogDebug(ex, "Periodic Bluetooth status refresh failed");
+        Logger.LogDebug(ex, "Centre panel poll failed");
       }
     }
+  }
+
+  /// <summary>
+  /// One poll tick: re-read the primary source if the last read failed; otherwise, with Bluetooth
+  /// active, re-read the Bluetooth status.
+  /// </summary>
+  internal async Task PollTickAsync()
+  {
+    if (_sourceStale)
+    {
+      await SyncSourceAsync();
+      StateHasChanged();
+      return;
+    }
+
+    await RefreshBluetoothStatusAsync();
   }
 
   /// <summary>
@@ -610,10 +654,57 @@
     }
   }
 
-  private async Task RefreshSourceAsync()
+  /// <summary>
+  /// Reads the primary source and the queue, and applies a source change if there was one.
+  ///
+  /// <para>A failed read changes nothing — not <c>_sourceType</c>, not the tab, not the override —
+  /// and sets <c>_sourceStale</c> so the poll re-reads it. An API blip is not a source change.</para>
+  ///
+  /// <para>A successful read is a change when the type differs from the last successful read, or
+  /// when it is the first successful read. A real change clears the override; the first read does
+  /// not (there was no earlier source for a tapped view to belong to). Either way the source's
+  /// default tab is applied unless the override is set.</para>
+  /// </summary>
+  private async Task SyncSourceAsync()
   {
-    AudioSourceDto? primary = await SourcesApi.GetPrimarySourceAsync();
-    _sourceType = primary?.Type;
+    bool hadPrevious = _sourceEverRead;
+    string? previous = _sourceType;
+
+    SourcesApiService.PrimarySourceRead read = await SourcesApi.ReadPrimarySourceAsync();
+    await RefreshQueueAsync();
+    if (!read.Succeeded)
+    {
+      _sourceStale = true;
+      return;
+    }
+
+    _sourceStale = false;
+    _sourceEverRead = true;
+    _sourceType = read.Source?.Type;
+
+    bool changed = !hadPrevious
+      || !string.Equals(previous, _sourceType, StringComparison.OrdinalIgnoreCase);
+    if (!changed)
+    {
+      return;
+    }
+
+    if (hadPrevious)
+    {
+      _userOverrodeTab = false;
+    }
+
+    _btStatus = null;
+    _btConnected = false;
+    if (IsBluetooth(_sourceType))
+    {
+      ApplyBluetoothStatus(await BluetoothApi.GetStatusAsync(), allowAutoSwitch: false);
+    }
+
+    if (!_userOverrodeTab)
+    {
+      _activeTab = DefaultTabFor(_sourceType, _queueItems.Count, _btConnected);
+    }
   }
 
   private async Task LoadStatsPreferenceAsync()
@@ -643,13 +734,12 @@
       await RefreshHistoryStatsAsync();
     }
 
-    try
+    // UpdateConfigurationAsync reports failure by returning false (it catches its own exceptions).
+    // Warning, never Information: Radio.Web's console sink is unrestricted, so either reaches journald.
+    bool saved = await ConfigApi.UpdateConfigurationAsync(UiPreferencesSection, ShowStatsKey, _showStats);
+    if (!saved)
     {
-      await ConfigApi.UpdateConfigurationAsync(UiPreferencesSection, ShowStatsKey, _showStats);
-    }
-    catch (Exception ex)
-    {
-      Logger.LogWarning(ex, "Failed to save the Stats chip preference");
+      Logger.LogWarning("Failed to save the Stats chip preference");
     }
   }
 
@@ -964,29 +1054,17 @@
 
   /// <summary>
   /// SourceChanged fires more than once per switch (MainLayout notifies locally, then the hub pushes)
-  /// and can fire without a switch, so the override is cleared and the default re-applied only when
-  /// the primary source TYPE actually changed. That is what makes a tapped tab stick "until the
-  /// source changes" rather than until the next SourceChanged.
+  /// and can fire without a switch, so <see cref="SyncSourceAsync"/> clears the override and
+  /// re-applies the default only when the primary source TYPE actually changed. That is what makes a
+  /// tapped tab stick "until the source changes" rather than until the next SourceChanged.
   /// </summary>
   private async Task OnSourceChanged()
   {
-    string? previous = _sourceType;
-    await RefreshSourceAsync();
-    await RefreshQueueAsync();
-
-    if (!string.Equals(previous, _sourceType, StringComparison.OrdinalIgnoreCase))
+    await InvokeAsync(async () =>
     {
-      _userOverrodeTab = false;
-      _btStatus = null;
-      _btConnected = false;
-      if (IsBluetooth(_sourceType))
-      {
-        ApplyBluetoothStatus(await BluetoothApi.GetStatusAsync(), allowAutoSwitch: false);
-      }
-      _activeTab = DefaultTabFor(_sourceType, _queueItems.Count, _btConnected);
-    }
-
-    await InvokeAsync(StateHasChanged);
+      await SyncSourceAsync();
+      StateHasChanged();
+    });
   }
 
   public async ValueTask DisposeAsync()

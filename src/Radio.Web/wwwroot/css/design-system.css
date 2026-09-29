@@ -2795,6 +2795,14 @@ body {
   border-color: rgba(92, 212, 232, 0.35);
 }
 
+/* UI-17: the tabs' own group inside the strip, so the Stats chip and kebab can sit outside the
+ * tablist element without changing the strip's layout. */
+.centre-tablist {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .queue-split-tab-spacer {
   flex: 1;
 }

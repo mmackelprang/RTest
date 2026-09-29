@@ -3,6 +3,7 @@
 @inject BluetoothApiService BluetoothApi
 @inject NotificationService NotificationService
 @inject ILogger<BluetoothConnectPanel> Logger
+@implements IAsyncDisposable
 
 @*
   UI-17 point 6 — the Bluetooth panel inside the Home centre panel. Shown as the "Connect" tab when
@@ -123,6 +124,11 @@
   /// waiting for its next poll.</summary>
   [Parameter] public EventCallback OnStatusChanged { get; set; }
 
+  // True from a successful "Scan for new devices" until this panel stops that scan. Discovery runs on
+  // hci0, the A2DP adapter, so a scan this panel started is stopped when the panel goes away (tab
+  // change, source change, navigation) rather than left running.
+  private bool _startedScan;
+
   // Address of the device an action is in flight for. While set, every device button is disabled so
   // two connects cannot race each other on the one adapter.
   private string? _busyAddress;
@@ -178,7 +184,11 @@
   private async Task StartScanAsync()
   {
     bool ok = await BluetoothApi.StartDiscoveryAsync();
-    if (!ok)
+    if (ok)
+    {
+      _startedScan = true;
+    }
+    else
     {
       NotificationService.Notify(NotificationSeverity.Warning, "Bluetooth", "Could not start scanning");
     }
@@ -188,6 +198,23 @@
   private async Task StopScanAsync()
   {
     await BluetoothApi.StopDiscoveryAsync();
+    _startedScan = false;
     await OnStatusChanged.InvokeAsync();
+  }
+
+  /// <summary>
+  /// Stops a scan this panel started and did not stop. A scan started elsewhere (the /bluetooth page)
+  /// is left alone. If discovery already ended on its own the stop call is redundant; the API's
+  /// failure answer is ignored.
+  /// </summary>
+  public async ValueTask DisposeAsync()
+  {
+    if (!_startedScan)
+    {
+      return;
+    }
+
+    _startedScan = false;
+    await BluetoothApi.StopDiscoveryAsync();
   }
 }

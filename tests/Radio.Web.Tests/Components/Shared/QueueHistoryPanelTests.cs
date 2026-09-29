@@ -735,7 +735,7 @@ public class QueueHistoryPanelTests : TestContext
   // --- Queue nav pill / radio chevron (CentrePanelViewService) ---
 
   [Fact]
-  public async Task QueuePill_OnANonFilePlayerSource_ShowsTheQueueView_WithoutSwitchingSource()
+  public async Task QueuePill_OnANonFilePlayerSource_ShowsTheQueueView_WithoutSwitchingSource_AndHidesTheKebab()
   {
     var cut = RenderOn("RTLSDRCore", queueCount: 2);
     AssertView(cut, "Radio");
@@ -745,7 +745,10 @@ public class QueueHistoryPanelTests : TestContext
 
     AssertView(cut, "Queue");
     TabLabels(cut).Should().Equal("Radio", "History", "Queue · 2");
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(1);
+    // Add Files / Load Playlist make the API switch the source to File Player, so the kebab is
+    // File Player only; Save as playlist does not switch source and stays.
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
+    cut.FindAll(".save-playlist-tile").Count.Should().Be(1);
     views.PendingView.Should().BeNull("the mounted panel consumed the request");
     _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Post && r.Path == "/api/sources",
       "viewing the queue must not switch source");
@@ -767,6 +770,7 @@ public class QueueHistoryPanelTests : TestContext
 
     AssertView(cut, "Queue");
     TabLabels(cut).Should().Equal("History", "Queue · 1");
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
     views.PendingView.Should().BeNull();
   }
 
@@ -860,5 +864,165 @@ public class QueueHistoryPanelTests : TestContext
   {
     var cut = RenderOn("Bluetooth", bluetoothConnected: false);
     cut.Find("a.bt-connect-settings-link").GetAttribute("href").Should().Be("/bluetooth");
+  }
+
+  // --- review fixes: an unreadable source is not a source change ---
+
+  private void StubSourceUnreadable() =>
+    _api.Route(HttpMethod.Get, "/api/sources/primary", HttpStatusCode.InternalServerError, null);
+
+  private static Task PollAsync(IRenderedComponent<QueueHistoryPanel> cut) =>
+    cut.InvokeAsync(() => cut.Instance.PollTickAsync());
+
+  [Fact]
+  public async Task SourceReadFailure_KeepsTheSourceTabsAndTheOverride_AndThePollReReadsIt()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+
+    StubSourceUnreadable();
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().Equal("Radio", "History");
+
+    // The API is back and the source never changed: the poll's re-read must keep the tapped tab.
+    StubSource("RTLSDRCore");
+    await PollAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().Equal("Radio", "History");
+    _api.Requests.Count(r => r.Path == "/api/sources/primary").Should().BeGreaterThanOrEqualTo(3,
+      "mount, the failed event read, and the poll's re-read");
+  }
+
+  [Fact]
+  public async Task SourceReadFailure_ThenARealChange_IsAppliedByThePoll()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+
+    StubSourceUnreadable();
+    await FireSourceChangedAsync(cut);
+
+    StubSource("Bluetooth");
+    StubBluetooth(connected: false);
+    await PollAsync(cut);
+    AssertView(cut, "Bluetooth");
+    TabLabels(cut).Should().Equal("Connect", "History");
+  }
+
+  [Fact]
+  public async Task SourceUnreadableOnFirstMount_IsRetriedByThePoll()
+  {
+    StubSourceUnreadable();
+    StubQueue(0);
+    var cut = RenderComponent<QueueHistoryPanel>();
+    WaitForInit(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().BeEmpty();
+
+    StubSource("RTLSDRCore");
+    await PollAsync(cut);
+    AssertView(cut, "Radio");
+  }
+
+  [Fact]
+  public async Task NoPrimarySource_404_IsARealChange()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+
+    StubSource(null); // 404: the API says there is no primary source
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().BeEmpty();
+
+    StubSource("RTLSDRCore");
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "Radio");
+  }
+
+  [Fact]
+  public async Task Poll_WithTheSourceReadAndNotBluetooth_MakesNoRequests()
+  {
+    var cut = RenderOn("Vinyl");
+    int before = _api.Requests.Count;
+
+    await PollAsync(cut);
+
+    _api.Requests.Count.Should().Be(before);
+  }
+
+  // --- review fixes: a scan the Connect panel started is stopped when it goes away ---
+
+  private void StartScan(IRenderedComponent<QueueHistoryPanel> cut)
+  {
+    cut.Find(".bt-scan-button").Click();
+    cut.WaitForAssertion(() => _api.Requests.Should().Contain(r =>
+      r.Method == HttpMethod.Post && r.Path == "/api/bluetooth/discovery/start"), TimeSpan.FromSeconds(10));
+  }
+
+  private bool StopRequested() =>
+    _api.Requests.Any(r => r.Method == HttpMethod.Post && r.Path == "/api/bluetooth/discovery/stop");
+
+  [Fact]
+  public void BluetoothScan_StartedByThePanel_IsStoppedWhenTheTabChanges()
+  {
+    _api.Post("/api/bluetooth/discovery/start").Post("/api/bluetooth/discovery/stop");
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    StartScan(cut);
+    StopRequested().Should().BeFalse();
+
+    ClickTab(cut, "History");
+    cut.WaitForAssertion(() => StopRequested().Should().BeTrue(), TimeSpan.FromSeconds(10));
+  }
+
+  [Fact]
+  public async Task BluetoothScan_StartedByThePanel_IsStoppedWhenTheSourceChanges()
+  {
+    _api.Post("/api/bluetooth/discovery/start").Post("/api/bluetooth/discovery/stop");
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    StartScan(cut);
+
+    StubSource("Vinyl");
+    await FireSourceChangedAsync(cut);
+    cut.WaitForAssertion(() => StopRequested().Should().BeTrue(), TimeSpan.FromSeconds(10));
+  }
+
+  [Fact]
+  public void BluetoothPanel_WithNoScanStarted_DoesNotStopDiscoveryWhenItGoesAway()
+  {
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    ClickTab(cut, "History");
+    AssertView(cut, "History");
+
+    StopRequested().Should().BeFalse("a scan started elsewhere (the /bluetooth page) is not this panel's to stop");
+  }
+
+  // --- review fixes: tab strip semantics ---
+
+  [Fact]
+  public void HistoryOnlySource_RendersNoTablist_AndNoTabpanelRole()
+  {
+    var cut = RenderOn("Vinyl");
+
+    cut.FindAll("[role=tablist]").Count.Should().Be(0);
+    cut.FindAll("[role=tabpanel]").Count.Should().Be(0);
+    cut.FindAll(".centre-stats-chip").Count.Should().Be(1, "the chip still shows, outside any tablist");
+  }
+
+  [Fact]
+  public void Tablist_HoldsOnlyTabs_AndTheBodyIsItsLabelledTabpanel()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+
+    var tablist = cut.Find("[role=tablist]");
+    tablist.Children.Should().OnlyContain(e => e.GetAttribute("role") == "tab");
+    tablist.QuerySelectorAll(".queue-split-kebab, .centre-stats-chip").Length.Should().Be(0);
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(1, "File Player's queue view keeps its kebab, beside the tablist");
+
+    var panel = cut.Find("[role=tabpanel]");
+    var active = cut.Find(".queue-split-tab.is-active");
+    panel.GetAttribute("aria-labelledby").Should().Be(active.Id);
+    active.GetAttribute("aria-controls").Should().Be(panel.Id);
   }
 }
