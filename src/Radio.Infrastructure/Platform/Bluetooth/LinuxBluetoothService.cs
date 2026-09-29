@@ -1165,6 +1165,17 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// </summary>
   internal void OnInterfaceRemoved((ObjectPath objectPath, string[] interfaces) change)
   {
+    // AUD-14: a removed MediaPlayer1 at the path we are attached to must release the attachment. This
+    // used to fall through to the Device1-only return below, so _mediaPlayer was never cleared: when
+    // BlueZ re-added player0 at the same path (ordinary across pause/reconnect cycles), the attach
+    // dedup still saw "already attached" and returned before disposing the old properties watcher and
+    // before reading the phone's current Status — leaving a watcher on a dead object and a phone that
+    // was already playing never reporting it.
+    if (Array.IndexOf(change.interfaces, Linux.BluezConstants.MediaPlayerInterface) >= 0)
+    {
+      DetachMediaPlayer(change.objectPath);
+    }
+
     if (Array.IndexOf(change.interfaces, Linux.BluezConstants.DeviceInterface) < 0)
     {
       return;
@@ -1190,6 +1201,29 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
         "Bluetooth device removed from BlueZ: {DeviceName} ({Address}) at {ObjectPath} — evicted from cache",
         removed.Name, removed.Address, change.objectPath);
     }
+  }
+
+  /// <summary>
+  /// Releases the media-player attachment if it is for <paramref name="objectPath"/> (AUD-14): disposes
+  /// the properties watcher and clears the proxy and path, so the next InterfacesAdded for a player at
+  /// that path performs a full attach (new watcher, initial Status/Track read).
+  /// </summary>
+  private void DetachMediaPlayer(ObjectPath objectPath)
+  {
+    lock (_mediaPlayerLock)
+    {
+      if (_mediaPlayerPath != objectPath)
+      {
+        return;
+      }
+
+      _playerPropertiesWatcher?.Dispose();
+      _playerPropertiesWatcher = null;
+      _mediaPlayer = null;
+      _mediaPlayerPath = null;
+    }
+
+    _logger.LogInformation("Media player removed from BlueZ at {ObjectPath} — detached", objectPath);
   }
 
   /// <summary>
