@@ -156,3 +156,22 @@ future "AVRCP art works now" sighting must be checked against the log before it 
 ⚠ **And `AUD-1` is the reason it stays masked**: `UseShazamForAllSources: true` makes SongRec run on
 BT and *replace* AVRCP metadata — confirmed live the same day. **If `AUD-1`'s split lands, the
 relative visibility of this row changes**, and a re-test then is worth more than one now.
+
+---
+
+## ⭐ Feasibility settled 2026-09-29 (read-only, on the box) — the phone offers no cover art to BlueZ
+
+The row's first question was *"whether to fix it at all"*. Measured with the owner's Pixel 10 Pro XL connected over `hci0`:
+
+- `busctl get-property … /player0 org.bluez.MediaPlayer1 Track` → `Title`, `TrackNumber`, `NumberOfTracks`, `Duration`, `Album`, `Item`, `Artist`. **No `ImgHandle`.**
+- `MediaPlayer1` properties: `Browsable Device Equalizer Name Playlist Position Repeat Scan Searchable Shuffle Status Subtype Track Type`. **No `ObexPort`** (how BlueZ exposes the AVRCP cover-art OBEX channel).
+- BlueZ **5.72**; `obexd` running as `/usr/libexec/bluetooth/obexd` (no `-E`), exposing only generic `org.bluez.obex.Client1`. `mpris-proxy` and `obexctl` are installed but unused.
+
+So reading the right attribute would still read nothing: the cover-art channel is never negotiated. Making it negotiate means enabling BlueZ's experimental AVRCP cover-art support (`main.conf` `Experimental = true` and `obexd -E`) — a system-wide change to a Bluetooth stack RotaryPhone shares, so it goes through `RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md` first, and even then the phone must support it.
+
+## Owner decision needed
+
+| Option | What it means |
+|---|---|
+| **A (recommended) — close the dead path** | Remove the never-firing `ArtUrl`/`mpris:artUrl` read and `CacheAvrcpArtAsync`'s unreachable branch; fix the "MPRIS" comments and log lines (`:339`, `:358`) that describe a BlueZ interface. BT art keeps coming from SongRec, which works (every BT track on 2026-09-29 got art ~15 s in; see `AUD-77` for the one straddled-sample miss). |
+| B — experiment | Enable BlueZ experimental cover art on the box behind the boundary-doc protocol, confirm the Pixel then publishes `ImgHandle`/`ObexPort`, and only then implement a BIP fetch. |

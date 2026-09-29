@@ -100,6 +100,12 @@ public class AudioStateUpdateService : BackgroundService
   private VolumeDto? _lastVolume;
   private string? _lastActiveSourceType;
 
+  // UI-15: whether CheckSourceChangedAsync has taken its baseline. Separate from
+  // _lastActiveSourceType because null is a legitimate OBSERVED value there ("no active
+  // source"), and using it as the "never observed" sentinel too suppressed every
+  // none -> source transition as if it were the first poll.
+  private bool _hasObservedSource;
+
   // PR 2 of the Radio Controller Polish arc — caches the MatchId of the
   // fingerprint event currently anchored as the playing match. The
   // recognition stream in NowPlayingPanel binds against this to render the
@@ -283,21 +289,25 @@ public class AudioStateUpdateService : BackgroundService
   {
     var currentSourceType = activeSource?.Type.ToString();
 
+    if (!_hasObservedSource)
+    {
+      // First poll: establish the baseline without broadcasting, to avoid a spurious
+      // SourceChanged at startup. Keyed on _hasObservedSource rather than on
+      // _lastActiveSourceType == null (UI-15): the first poll can legitimately observe
+      // "no source", and the user's first selection after that is a real change.
+      _lastActiveSourceType = currentSourceType;
+      _hasObservedSource = true;
+      return;
+    }
+
     if (currentSourceType != _lastActiveSourceType)
     {
-      // Skip broadcast on first poll (null → initial value) to avoid spurious SourceChanged
-      var isFirstRun = _lastActiveSourceType == null;
+      await _hubContext.Clients.All
+        .SendAsync("SourceChanged", cancellationToken);
+      _logger.LogInformation("Broadcast SourceChanged: {SourceType}", currentSourceType ?? "None");
 
-      if (!isFirstRun)
-      {
-        await _hubContext.Clients.All
-          .SendAsync("SourceChanged", cancellationToken);
-        _logger.LogInformation("Broadcast SourceChanged: {SourceType}", currentSourceType ?? "None");
-      }
-
-      // ⚠ AFTER the send — see the ordering remark on the cache fields above (UI-13). On the
-      // first poll there is no send, so this still runs and establishes the baseline; that
-      // asymmetry is why this site could not be moved by the same mechanical edit as the others.
+      // ⚠ AFTER the send — see the ordering remark on the cache fields above (UI-13). The
+      // first-poll baseline is taken in the early return above, where there is no send.
       _lastActiveSourceType = currentSourceType;
     }
   }
@@ -893,13 +903,32 @@ public class AudioStateUpdateService : BackgroundService
   }
 
   /// <summary>
-  /// Handles external Cast device volume/mute changes.
-  /// Updates IAudioManager so the console and UI stay in sync.
+  /// Handles Cast device volume/mute events. External changes update IAudioManager so
+  /// the console and UI stay in sync; initial-sync reads are logged and not applied.
   /// </summary>
   private void OnCastVolumeChanged(object? sender, CastVolumeChangedEventArgs e)
   {
     if (_audioManager == null)
     {
+      return;
+    }
+
+    // AUD-5. An initial sync is this application READING the Cast device's status
+    // right after connecting — not the user turning a knob on the Chromecast. Applying
+    // it rewrites the console's own master mixer volume, which is not the Cast device's
+    // volume, from a value set on a different device; and IAudioManager.MasterVolume's
+    // setter schedules a debounced write to the config store (AudioPreferencePersistence),
+    // so the rewrite outlives both the Cast session and the process.
+    //
+    // The event is still logged. It is the only record that the read happened, it is
+    // what a "my volume changed by itself" report gets checked against, and the
+    // "initial:" token is what that check greps for (the file sink renders the bool in
+    // lower case: "initial: true").
+    if (e.IsInitialSync)
+    {
+      _logger.LogInformation(
+        "Cast device initial volume read: {Volume:P0}, Muted: {Muted} (initial: {IsInitial}) — not applied to master volume",
+        e.Volume, e.IsMuted, e.IsInitialSync);
       return;
     }
 

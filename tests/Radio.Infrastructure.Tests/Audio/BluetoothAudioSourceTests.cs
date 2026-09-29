@@ -1051,6 +1051,65 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   /// <summary>
+  /// AUD-34, the first review scenario: a capture starts on another source, the listener switches to
+  /// BT, and the phone resumes the SAME song as its last session — no AVRCP key change, so AUD-33's
+  /// stamp does not move. The activation stamp is what drops it. (The 2026-09-06 "Spirit In The Sky"
+  /// misidentification had this shape.) Times are explicit, so nothing here races a clock.
+  /// </summary>
+  [Fact]
+  public async Task Aud34_SameSongAfterASwitchBack_ResultSampledBeforeActivation_IsNotApplied()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    RaiseAvrcp(bt, "Enter Sandman", "Metallica");
+    DateTime captureStartedAt = DateTime.UtcNow;
+
+    _source.MarkActivated(captureStartedAt.AddSeconds(1));
+    RaiseAvrcp(bt, "Enter Sandman", "Metallica"); // the phone re-publishes the same track
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(captureStartedAt, "Spirit In The Sky", "Norman Greenbaum", "/api/albumart/sits.jpg"));
+
+    Assert.False(_source.Metadata.ContainsKey(StandardMetadataKeys.AlbumArtUrl));
+    Assert.Equal("Enter Sandman", _source.Metadata[StandardMetadataKeys.Title]);
+  }
+
+  /// <summary>
+  /// AUD-34: before BT's first AVRCP event its own stamp is 0 ("unknown"), which AUD-33 treated as
+  /// never stale — exactly the window after a connect when residual audio from the previous source is
+  /// most likely. Never stamped now means "started at activation".
+  /// </summary>
+  [Fact]
+  public async Task Aud34_BeforeTheFirstAvrcpEvent_ActivationIsTheBoundary()
+  {
+    var (_, id) = await PlayActiveSourceAsync();
+    object titleBefore = _source.Metadata[StandardMetadataKeys.Title];
+    _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out object? artBefore);
+    DateTime activatedAt = DateTime.UtcNow;
+    _source.MarkActivated(activatedAt);
+
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(activatedAt.AddSeconds(-1), "Spirit In The Sky", "Norman Greenbaum", "/api/albumart/sits.jpg"));
+
+    Assert.Equal(titleBefore, _source.Metadata[StandardMetadataKeys.Title]);
+    _source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out object? artAfter);
+    Assert.Equal(artBefore, artAfter);
+  }
+
+  /// <summary>AUD-34 control: a sample begun after the activation is BT's own and still applies.</summary>
+  [Fact]
+  public async Task Aud34_ResultSampledAfterActivation_IsApplied()
+  {
+    var (bt, id) = await PlayActiveSourceAsync();
+    DateTime activatedAt = DateTime.UtcNow;
+    _source.MarkActivated(activatedAt);
+    RaiseAvrcp(bt, "Song A", "Artist A");
+
+    id.RaiseTrackIdentifiedForTesting(
+      SongRecCapturedAt(DateTime.UtcNow.AddSeconds(1), "Song A", "Artist A", "/api/albumart/song-a.jpg"));
+
+    Assert.Equal("/api/albumart/song-a.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>
   /// An AVRCP refresh of the SAME track (the phone re-publishing its metadata) is not a track change,
   /// so a result sampled before the refresh still applies.
   /// </summary>
@@ -1388,6 +1447,85 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     Assert.Equal(0, generator.GetDiagnostics().BufferCount);
   }
 
+  // --- AUD-29: the position advances between AVRCP events ----------------------------------
+  //
+  // Phones send AVRCP Position on events (play/pause/seek/track change), not continuously, and the
+  // source returned the last value verbatim — so the console's bar never moved. It now extrapolates
+  // from the last anchor while Playing. Driven by a FakeTimeProvider; nothing waits on a clock.
+
+  private static readonly DateTimeOffset T0 = new(2026, 9, 29, 21, 0, 0, TimeSpan.Zero);
+
+  private static void RaisePosition(Mock<IBluetoothService> btMock, TimeSpan position) =>
+    btMock.Raise(b => b.PositionChanged += null, btMock.Object, position);
+
+  [Fact]
+  public async Task Position_WhilePlaying_AdvancesFromTheLastAvrcpPosition()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(T0);
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    RaisePosition(btMock, TimeSpan.FromSeconds(30));
+
+    time.Advance(TimeSpan.FromSeconds(5));
+
+    Assert.Equal(TimeSpan.FromSeconds(35), source.Position);
+  }
+
+  [Fact]
+  public async Task Position_WhilePlaying_IsCappedAtTheDuration()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(T0);
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    btMock.Raise(b => b.MetadataChanged += null, btMock.Object, new BluetoothPlaybackMetadata
+    {
+      Title = "Song", Artist = "Artist", Album = "Album", Duration = TimeSpan.FromSeconds(200)
+    });
+    RaisePosition(btMock, TimeSpan.FromSeconds(190));
+
+    time.Advance(TimeSpan.FromSeconds(60));
+
+    Assert.Equal(TimeSpan.FromSeconds(200), source.Position);
+  }
+
+  [Fact]
+  public async Task Position_FreezesOnPause_AndResumesFromWhereItStopped()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(T0);
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    RaisePosition(btMock, TimeSpan.FromSeconds(10));
+    time.Advance(TimeSpan.FromSeconds(4));
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Paused);
+    time.Advance(TimeSpan.FromSeconds(30));
+    Assert.Equal(TimeSpan.FromSeconds(14), source.Position);   // frozen at the pause
+
+    btMock.Raise(b => b.PlaybackStatusChanged += null, btMock.Object, BluetoothPlaybackStatus.Playing);
+    time.Advance(TimeSpan.FromSeconds(3));
+
+    Assert.Equal(TimeSpan.FromSeconds(17), source.Position);   // resumed from 14
+  }
+
+  [Fact]
+  public async Task AnAvrcpPositionUpdate_ReanchorsTheExtrapolation()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(T0);
+    var btMock = BuildBtMock(NewCaptureMock("SoundComponent"), new CaptureAcquisitionProbe());
+    await using var source = BuildSource(btMock, time);
+    await source.PlayAsync(CancellationToken.None);
+    RaisePosition(btMock, TimeSpan.FromSeconds(10));
+    time.Advance(TimeSpan.FromSeconds(20));
+
+    RaisePosition(btMock, TimeSpan.FromSeconds(95));            // the listener seeked on the phone
+    time.Advance(TimeSpan.FromSeconds(2));
+
+    Assert.Equal(TimeSpan.FromSeconds(97), source.Position);
+  }
+
   // --- AUD-40: the console's Pause/Play go to the phone ------------------------------------
   //
   // Owner at the cabinet, 2026-09-28: "Pausing from the phone works, pausing from the console
@@ -1459,13 +1597,14 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
     btMock.Verify(b => b.PauseMediaAsync(It.IsAny<CancellationToken>()), Times.Never);
   }
 
-  private BluetoothAudioSource BuildSource(Mock<IBluetoothService> btMock) =>
+  private BluetoothAudioSource BuildSource(Mock<IBluetoothService> btMock, TimeProvider? timeProvider = null) =>
     new(_loggerMock.Object,
         _deviceManagerMock.Object,
         btMock.Object,
         _options,
         identificationService: null,
-        metricsCollector: _metricsMock.Object);
+        metricsCollector: _metricsMock.Object,
+        timeProvider: timeProvider);
 
   private static void RaiseDeviceConnected(Mock<IBluetoothService> btMock) =>
     btMock.Raise(

@@ -16,6 +16,10 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   private readonly IMetricsCollector? _metricsCollector;
   private readonly Func<IAudioSource?>? _getActiveSource;
 
+  // AUD-34: when (UTC ticks, 0 = never) the audio manager last made this source active. Written by
+  // AudioManager.SwitchSourceAsync, read on the identification thread.
+  private long _activatedAtTicks;
+
   /// <summary>
   /// Initializes a new instance of the <see cref="PrimaryAudioSourceBase"/> class.
   /// </summary>
@@ -55,6 +59,30 @@ public abstract class PrimaryAudioSourceBase : AudioSourceBase, IPrimaryAudioSou
   /// </summary>
   protected bool IsActiveSource
     => _getActiveSource is null || ReferenceEquals(_getActiveSource(), this);
+
+  /// <summary>
+  /// Records that the audio manager has just made this source the active one (AUD-34).
+  /// </summary>
+  /// <remarks>
+  /// Called by <c>AudioManager.SwitchSourceAsync</c> before it publishes the source as active, and
+  /// only when the active source actually changes. Audio captured before this instant came from
+  /// whatever was active before, so <see cref="LatestTrackBoundaryUtc"/> treats it as a track boundary
+  /// even when the source's own track identity (AVRCP key, file path) did not change.
+  /// </remarks>
+  internal void MarkActivated(DateTime utcNow) =>
+    Volatile.Write(ref _activatedAtTicks, utcNow.Ticks);
+
+  /// <summary>
+  /// The later of the source's own track-start stamp and its last activation, or <c>null</c> when
+  /// neither has ever been recorded (AUD-33, AUD-34). An identification sampled before this instant
+  /// describes something other than what this source is playing now.
+  /// </summary>
+  /// <param name="trackStartedAtTicks">The source's own track-start stamp, in UTC ticks; 0 = never.</param>
+  protected internal DateTime? LatestTrackBoundaryUtc(long trackStartedAtTicks)
+  {
+    long ticks = Math.Max(trackStartedAtTicks, Volatile.Read(ref _activatedAtTicks));
+    return ticks == 0 ? null : new DateTime(ticks, DateTimeKind.Utc);
+  }
 
   /// <inheritdoc/>
   public override AudioSourceCategory Category => AudioSourceCategory.Primary;

@@ -2621,6 +2621,63 @@ body {
   width: 0%;
 }
 
+/* ─── AUD-28 / UI-16  SeekBar ────────────────────────────────────────────────
+   Drag-to-seek with seek-on-release (Components/Shared/SeekBar.razor, js/seek-bar.js). The element
+   carrying .seek-bar is the HIT AREA: --touch-min (48px) tall, the thin track centred inside it, so a
+   tap only has to land within 24px of the bar vertically. touch-action: none stops the kiosk browser
+   from treating a horizontal drag as a pan. */
+.seek-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: var(--touch-min);
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.seek-bar.is-disabled { cursor: default; }
+.seek-bar-track {
+  position: relative;
+  flex: 1;
+  height: 4px;
+  background: var(--surface-separator);
+  border-radius: 2px;
+  pointer-events: none;
+}
+.seek-bar-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  background: var(--accent-primary);
+  border-radius: 2px;
+  transition: width 200ms linear;
+}
+.seek-bar-thumb {
+  position: absolute;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  transform: translate(-50%, -50%);
+  transition: left 200ms linear, width 120ms ease, height 120ms ease, box-shadow 120ms ease;
+}
+/* While dragging the bar follows the finger, so the 1 Hz smoothing transition would only lag it. */
+.seek-bar.is-dragging .seek-bar-fill { transition: none; }
+.seek-bar.is-dragging .seek-bar-thumb {
+  width: 24px;
+  height: 24px;
+  box-shadow: 0 0 0 8px var(--accent-glow-strong);
+  transition: width 120ms ease, height 120ms ease, box-shadow 120ms ease;
+}
+/* NowPlayingPanel transport bar: the 48px hit area overlaps the bar's own 8px top padding and the
+   non-interactive time labels below it, rather than growing the transport bar by the full 48px.
+   z-index keeps the labels (later in the DOM) from swallowing touches in the overlap. */
+.np-seek-bar { margin: -8px 0 -16px; z-index: 1; }
+
 .now-playing-dock-controls {
   display: flex;
   align-items: center;
@@ -5553,8 +5610,7 @@ body {
    renders at 44px. Either way it is short of the project's 48px --touch-min for
    buttons. Pad the HIT REGION with a pseudo-element rather than enlarging the visual
    button, so the strip's 44px min-height is not blown out (same intent as
-   .vm-scrubber's padded hit area at :5753, though that one deliberately stops short
-   of both tokens rather than clearing one). Measured in-browser: the hit region
+   .seek-bar's padded --touch-min hit area around a thin track). Measured in-browser: the hit region
    extends exactly 2px above and below the 44px button = 48px. */
 .phone-hero-alert .phone-btn-sm {
   position: relative;
@@ -5991,14 +6047,12 @@ body {
 /* §Ph — Voicemail inline player (PR2) */
 .vm-player { padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
 .vm-player-transport { display: flex; align-items: center; gap: var(--sp-3); }
-/* ⛔ DO NOT "ROUND THIS UP". 20 + 3 + 20 = 43px, verified in-browser, and 43px clears NEITHER
-   --touch-min (48px) NOR --touch-compact (44px). That is deliberate, not an oversight: the design
-   handoff specifies `20px 0` explicitly (§G-3) and PHN-2 §5c instructs shipping the handoff's number
-   rather than padding to 21px to manufacture a 44. The handoff's own arithmetic said "43 + 3 = 46px,
-   clearing --touch-min" and was simply wrong; the number below is what actually renders. This is a
-   div[role=slider], not a button, so the global `button { min-height: var(--touch-compact) }` at
-   :1330 never applied to it either. --touch-min is measured on the rendered ROW, which is taller. */
-.vm-scrubber { flex: 1; padding: 20px 0; cursor: pointer; }   /* 3px bar + 40px pad = 43px hit area */
+/* UI-16 (2026-09-29): the determinate scrubber is now a SeekBar (.seek-bar below), whose hit area is
+   --touch-min tall around the visible track. The previous `padding: 20px 0` gave 43px — the handoff's
+   §G-3 number, shipped deliberately under PHN-2 §5c — and the owner could not grab it at the cabinet
+   (UAT 2026-09-28 check 1.6). That padding now lives only on the indeterminate branch, which takes no
+   input. min-width matches the .now-playing-dock-progress bar this replaced. */
+.vm-scrubber { flex: 1; min-width: 200px; }
 .vm-time { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--text-medium); font-size: 13px; }
 .vm-buffering-note { font-family: var(--font-mono); font-size: 12px; color: var(--text-low); }
 .vm-player-error { display: flex; align-items: center; gap: var(--sp-2); color: var(--signal-red); }
@@ -6324,7 +6378,7 @@ body {
    state for a voicemail whose DurationSeconds is 0 (handoff §A5 / Q10). */
 .vm-player-error-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .vm-player-error-sub { color: var(--text-medium); font-size: 13px; }
-.vm-scrubber-indeterminate { cursor: default; opacity: 0.45; }
+.vm-scrubber-indeterminate { padding: 20px 0; cursor: default; opacity: 0.45; }
 
 
 /* ─── ENC-4  Encoder HUD ────────────────────────────────────────────────────

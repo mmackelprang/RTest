@@ -1100,4 +1100,82 @@ public class NowPlayingPanelTests : TestContext
 
     Assert.Empty(cut.FindAll("img[alt='Album Art']"));
   }
+
+  // ─── AUD-28: seek on release ───────────────────────────────────────────────
+
+  private static bool IsPlaybackUpdate(HttpMethod method, string path) =>
+    method == HttpMethod.Post && path == "/api/audio";
+
+  /// <summary>
+  /// Renders the panel over a RecordingHandler and pokes it into "seekable file, 1:00 of 4:00" so the
+  /// SeekBar branch renders. Returns the handler so a test can count the POST /api/audio a seek makes.
+  /// </summary>
+  private (IRenderedComponent<NowPlayingPanel> Cut, RecordingHandler Handler) RenderSeekable()
+  {
+    var handler = new RecordingHandler();
+    // Registered after the constructor's AddHttpClient<AudioApiService>, so this instance wins.
+    Services.AddSingleton(new AudioApiService(
+      new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      NullLogger<AudioApiService>.Instance));
+
+    var cut = RenderComponent<NowPlayingPanel>();
+    var type = typeof(NowPlayingPanel);
+    var flags = BindingFlags.NonPublic | BindingFlags.Instance;
+    type.GetField("_position", flags)!.SetValue(cut.Instance, "1:00");
+    type.GetField("_duration", flags)!.SetValue(cut.Instance, "4:00");
+    type.GetField("_canSeek", flags)!.SetValue(cut.Instance, true);
+    type.GetField("_totalDurationSeconds", flags)!.SetValue(cut.Instance, 240.0);
+    type.GetField("_progressPercent", flags)!.SetValue(cut.Instance, 25.0);
+    cut.Render();
+    return (cut, handler);
+  }
+
+  [Fact]
+  public async Task SeekBar_Drag_SendsNoSeekUntilRelease_ThenExactlyOne()
+  {
+    var (cut, handler) = RenderSeekable();
+    var seekBar = cut.FindComponent<SeekBar>();
+    var before = handler.Count(IsPlaybackUpdate);
+
+    // ⚠ THIS IS THE ROW. With RadzenSlider every one of these frames reached POST /api/audio as a
+    // Seek, which is the stutter the owner heard (AUD-28).
+    foreach (var f in new[] { 0.30, 0.35, 0.40, 0.45, 0.50 })
+    {
+      await seekBar.Instance.OnDragMove(f);
+    }
+
+    Assert.Equal(before, handler.Count(IsPlaybackUpdate));
+
+    // OnDragEnd awaits the whole commit (HandleSeekAsync awaits its POST), so the request is
+    // recorded by the time this returns — no rendezvous or delay needed.
+    await seekBar.Instance.OnDragEnd(0.5);
+
+    Assert.Equal(before + 1, handler.Count(IsPlaybackUpdate));
+  }
+
+  [Fact]
+  public async Task SeekBar_Tap_StillSeeksOnce()
+  {
+    var (cut, handler) = RenderSeekable();
+    var seekBar = cut.FindComponent<SeekBar>();
+    var before = handler.Count(IsPlaybackUpdate);
+
+    await seekBar.Instance.OnDragMove(0.75);
+    await seekBar.Instance.OnDragEnd(0.75);
+
+    Assert.Equal(before + 1, handler.Count(IsPlaybackUpdate));
+  }
+
+  [Fact]
+  public async Task SeekBar_Drag_ElapsedReadoutFollowsTheFinger()
+  {
+    var (cut, _) = RenderSeekable();
+    var seekBar = cut.FindComponent<SeekBar>();
+
+    // AUD-28 scope question 4: deferring the seek must not make the control look dead. 0.5 of 4:00.
+    await seekBar.Instance.OnDragMove(0.5);
+
+    Assert.Contains(">2:00<", cut.Markup);
+    Assert.DoesNotContain(">1:00<", cut.Markup);
+  }
 }

@@ -28,6 +28,10 @@ namespace Radio.Infrastructure.Tests.Audio.Outputs;
 /// This test instead drives the exact interleaving through a hook, and is
 /// mutation-verified: it fails with NullReferenceException against field-based
 /// receiver handling.
+///
+/// Also pins the AUD-5 volume-sync window: a teardown landing inside the initial
+/// Cast status read must stop that reading being published, driven the same way —
+/// the teardown runs inside the substituted read, so the interleaving is caused.
 /// </summary>
 public class GoogleCastOutputConcurrencyTests
 {
@@ -132,6 +136,72 @@ public class GoogleCastOutputConcurrencyTests
     await output.ConnectAsync(Device("cast-b", port));
 
     Assert.Equal("cast-b", output.ConnectedDevice?.Id);
+  }
+
+  [Fact]
+  public async Task InitialVolumeReadForASupersededConnection_IsNotPublished()
+  {
+    // AUD-5. The teardown lands INSIDE the status read — the window the network
+    // round-trip occupies in production — and the device then "answers" normally.
+    // The reading must be discarded rather than published, because its subscriber
+    // wrote AudioManager.MasterVolume and that setter persists.
+    using var listener = StartLoopbackListener(out var port);
+    await using var output = BuildOutput();
+    await output.InitializeAsync();
+
+    var published = new List<CastVolumeChangedEventArgs>();
+    output.CastVolumeChanged += (_, e) => { lock (published) { published.Add(e); } };
+
+    var readRan = false;
+
+    // The connect "succeeds" on the wire, as in ConnectThatSucceedsButLostTheRace.
+    output.ConnectTransportOverrideForTests = _ => Task.CompletedTask;
+
+    output.CastStatusReadOverrideForTests = async () =>
+    {
+      readRan = true;
+
+      // The catch is load-bearing, not tidiness: an exception escaping this delegate
+      // would be swallowed by SyncInitialVolumeAsync's own catch, which would make
+      // this test pass for the wrong reason and survive the mutation that deletes
+      // the generation check.
+      try { await output.DisconnectAsync(); }
+      catch { /* tearing down a client that never really connected may throw */ }
+
+      return (0.08f, false);
+    };
+
+    await output.ConnectAsync(Device("cast-a", port));
+
+    Assert.True(readRan, "the status-read seam never fired — the test never reached the window");
+    Assert.Empty(published);
+  }
+
+  [Fact]
+  public async Task InitialVolumeReadForTheCurrentConnection_IsPublishedAsAnInitialSync()
+  {
+    // The anti-vacuity twin: without it, IsCurrentGenerationAsync mutated to
+    // `return false;` passes the test above.
+    using var listener = StartLoopbackListener(out var port);
+    await using var output = BuildOutput();
+    await output.InitializeAsync();
+
+    var published = new List<CastVolumeChangedEventArgs>();
+    output.CastVolumeChanged += (_, e) => { lock (published) { published.Add(e); } };
+
+    output.ConnectTransportOverrideForTests = _ => Task.CompletedTask;
+    output.CastStatusReadOverrideForTests =
+      () => Task.FromResult<(float Volume, bool Muted)?>((0.42f, true));
+
+    await output.ConnectAsync(Device("cast-a", port));
+
+    var e = Assert.Single(published);
+    Assert.Equal(0.42f, e.Volume, 3);
+    Assert.True(e.IsMuted);
+
+    // Pins the flag the subscriber-side guard depends on. If this ever goes false,
+    // AudioStateUpdateService silently stops recognising the read and the harm returns.
+    Assert.True(e.IsInitialSync);
   }
 
   // --- helpers ---

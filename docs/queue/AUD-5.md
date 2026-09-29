@@ -68,3 +68,54 @@
 **Note the existing seam does not reach this window:** `ConnectRaceHookForTests` (`:124` — was `:120`, moved by `TEST-2` lengthening its doc comment) fires at receiver resolution, which is **too early** — a test for this must interleave a teardown during the *status read*, i.e. after publish. Whether that justifies a **fourth** `internal` seam is a real question and it is the one `TEST-2` now owns as a pattern — **check `TEST-2` first, and if you do add a seam, record it there.**
 
 _**Anchors re-verified 2026-09-05 against `main` @ `656f58e6`. Every `GoogleCastOutput.cs` citation above is byte-exact. Every `AudioStateUpdateService.cs` citation has DRIFTED and is corrected here:** subscribe `:118` → **`:121`**, handler `:819` → **`:851`**, `MasterVolume` write `:831` → **`:863`**, log `:832-834` → **`:864-866`**, `IsMuted` write `:839` → **`:871`**, unsubscribe `:935` → **`:967`**. **And the forensic instruction is stale:** `"Synced volume from Cast device"` is logged at **Information** from `Radio.API`, whose console sink has been Warning-restricted since `LOG-11` (2026-09-02) — so it is in the **file sink**, `/opt/radio-console/logs/radio-*.txt`, and **not** in `journalctl -u radio-api`. Also: the row calls the `MasterVolume` write "unconditional"; it is guarded by `Math.Abs(current - e.Volume) > 0.01f` at `:861`, which checks nothing about the connection — the conclusion stands, the word does not, and a test asserting "never written" must use a value more than 0.01 away or it passes vacuously._
+
+## Shipped — 2026-09-29 (branch `fix/aud-5-80-ui-15-cast-volume`, with `AUD-80` and `UI-15`)
+
+### Task 1 — the forensic read, run BEFORE the code change (box, read-only, file sink)
+
+Files available: `/opt/radio-console/logs/radio-20260923.txt` … `radio-20260929.txt` (7 days).
+
+- ⚠ **The plan's grep is case-wrong.** `grep -c "initial: True"` returns **0 in every file** because
+  the Serilog file sink renders the bool in lower case: the real line is
+  `Synced volume from Cast device: 30 % (initial: true)`. Grep case-insensitively.
+- `"Synced volume from Cast device"`: **27 lines, all on 2026-09-29** (none on the other six days — the
+  owner only started casting today). **3 carry `initial: true`** (16:27:14.505 → 30 %, its mute twin,
+  and 16:33:53.894 → 50 %); the other 24 are `initial: false`.
+- `"Cast device initial volume"` (logged by `GoogleCastOutput`): **0 hits.** `LOG-2` holds
+  `Radio.Infrastructure.Audio` at Warning, so every Information line from `GoogleCastOutput` —
+  including `"Connecting to Chromecast"` and `"Disconnecting"` — is in neither the journal nor the file
+  sink. **The correlation the plan asks for is therefore not possible from existing logs.**
+- `"was superseded while connecting"` (Warning, so it would be visible): **0 hits in 7 days.**
+- Both `initial: true` connects coincide with a user connect bouncing off
+  `InvalidOperationException: Cannot connect in state Connecting` (16:27:14.204, 16:33:53.679) — i.e.
+  the auto-connect and a user connect overlapped. That exception is thrown **before** a generation is
+  claimed, so the in-flight connect was not superseded, and its initial read was for a current
+  connection. **Verdict: no evidence that a stale publish has fired in production; the mechanism is
+  still real** (the row says a negative does not close it).
+
+### ⭐ `C-123` answered from the same logs — and it is worse than the plan feared, for a different reason
+
+Every connect is followed within 0.3–4 s by `Synced volume from Cast device: 70 % (initial: false)`
+(16:27:18, 16:33:54, 16:49:50, 16:55:26, 16:57:13). **70 % is `GoogleCast.DefaultVolume`.** The cause is
+not SharpCaster echoing the `GET_STATUS` response: `SyncVolumeAfterStartAsync` pushes the output's own
+`Volume` (never set after construction, so always `DefaultVolume`) to the device, **without priming the
+echo filter**, so the device's confirmation arrives at `OnReceiverStatusChanged` as an *external* change
+and is written — and persisted — as master volume. That is `AUD-80`'s "always loud", and it is fixed
+there (same branch), not here. It also means `C-125`'s "other door" was open on every connect.
+
+### What landed (plan Tasks 2–4, as written)
+
+- `GoogleCastOutput.SyncInitialVolumeAsync(client, generation)`: re-checks the generation after the
+  status read and before the fire (`IsCurrentGenerationAsync`, a seventh await-free critical section);
+  primes `_lastSetVolume`/`_lastSetMute` before the check (`C-120`). New seam
+  `CastStatusReadOverrideForTests`. Header comment: seven sections, two check-then-dereference sites,
+  and the `:95-104` paragraph rewritten to say what each half does and does not do (`C-119`, `C-122`).
+- `AudioStateUpdateService.OnCastVolumeChanged` ignores `IsInitialSync` events (logs
+  `Cast device initial volume read: … (initial: true) — not applied to master volume`). **This is the
+  load-bearing half.**
+- Tests: `GoogleCastOutputConcurrencyTests.InitialVolumeReadForASupersededConnection_IsNotPublished` /
+  `…ForTheCurrentConnection_IsPublishedAsAnInitialSync`, and the new
+  `AudioStateUpdateServiceCastVolumeTests` (two tests).
+
+**User-visible change (plan §0.4):** connecting to a Cast device no longer snaps the console's volume
+slider to the speaker's level. External changes on the speaker still reach master volume.

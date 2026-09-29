@@ -123,3 +123,11 @@ should be 0.** It was 0 for four consecutive days before 09-06, so zero is the e
 not an aspiration.
 
 ⚠ Live audio path. **Not auto-mergeable.**
+
+---
+
+## Status 2026-09-29 — the outage has not recurred
+
+`No audio data captured` (`SoundFlowAudioTap`) in the `radio-api` file sink: 2026-09-23/24/27 **0**; 09-25 **45**; 09-26 **7**; 09-28 **1**; 09-29 **4** (10:57–10:58, the start of a Bluetooth session with pauses — the capture skips all-zero chunks, so a paused source legitimately yields nothing). **None after the `AUD-79` deploy** (16:43), which changed how tap readers behave when caught up: they now wait for data, and keep-alive silence is only emitted after 250 ms of writer idleness — so a capture window during playback can no longer be filled with spliced zeros.
+
+The 2026-09-08 pattern (240 failures/hour, back to back, 11½ h) is nothing like this. **Recommend** the row's own split: ship a watchdog (a sustained run of zero-byte captures while the active source is Playing and not parked → one Warning plus a metric, rate-limited) as its own small deliverable, and keep the root cause open until it recurs with the watchdog in place.

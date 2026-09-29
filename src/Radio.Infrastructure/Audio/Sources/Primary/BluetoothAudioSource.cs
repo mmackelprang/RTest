@@ -36,7 +36,14 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private string? _playbackId;
   private AudioCaptureDevice? _captureDevice;
   private BufferedSoundGenerator<float>? _captureGenerator;
+  // AUD-29: _btPosition is the position ANCHOR — the last AVRCP Position, or where playback stood at the
+  // last state change — and _positionAnchorTimestamp is when it was taken. Phones send AVRCP Position on
+  // events (play/pause/seek/track change), not continuously, so Position extrapolates from the anchor
+  // while Playing. Both fields are written together under _positionLock.
   private TimeSpan _btPosition;
+  private long _positionAnchorTimestamp;
+  private readonly object _positionLock = new();
+  private readonly TimeProvider _timeProvider;
   private TimeSpan? _btDuration;
   private bool _hasMediaPlayer;
 
@@ -179,9 +186,11 @@ public class BluetoothAudioSource : USBAudioSourceBase
     IServiceScopeFactory? serviceScopeFactory = null,
     IAlbumArtCacheService? albumArtCache = null,
     IOptionsMonitor<FingerprintingOptions>? fingerprintingOptions = null,
-    Func<IAudioSource?>? getActiveSource = null)
+    Func<IAudioSource?>? getActiveSource = null,
+    TimeProvider? timeProvider = null)
     : base(logger, deviceManager, identificationService, metricsCollector, getActiveSource: getActiveSource)
   {
+    _timeProvider = timeProvider ?? TimeProvider.System;
     _bluetoothService = bluetoothService;
     _identificationService = identificationService;
     _serviceScopeFactory = serviceScopeFactory;
@@ -222,7 +231,60 @@ public class BluetoothAudioSource : USBAudioSourceBase
   public override bool IsSeekable => false;
 
   public override TimeSpan? Duration => _btDuration;
-  public override TimeSpan Position => _btPosition;
+  /// <summary>
+  /// The playback position: the last AVRCP position, advanced by the time since it arrived while the
+  /// source is Playing and capped at the track duration when that is known (AUD-29).
+  /// </summary>
+  public override TimeSpan Position
+  {
+    get
+    {
+      lock (_positionLock)
+      {
+        return State == AudioSourceState.Playing ? ExtrapolatedPosition() : _btPosition;
+      }
+    }
+  }
+
+  // Caller holds _positionLock.
+  private TimeSpan ExtrapolatedPosition()
+  {
+    if (_positionAnchorTimestamp == 0)
+    {
+      return _btPosition;
+    }
+
+    var position = _btPosition + _timeProvider.GetElapsedTime(_positionAnchorTimestamp);
+    return _btDuration is { } duration && duration > TimeSpan.Zero && position > duration ? duration : position;
+  }
+
+  private void SetPositionAnchor(TimeSpan position)
+  {
+    lock (_positionLock)
+    {
+      _btPosition = position;
+      _positionAnchorTimestamp = _timeProvider.GetTimestamp();
+    }
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// AUD-29: re-anchors the position on every transition. Leaving Playing freezes it where the
+  /// extrapolation had reached; entering Playing starts the clock from the frozen value.
+  /// </remarks>
+  protected override void OnStateChanged(AudioSourceState previousState, AudioSourceState newState)
+  {
+    lock (_positionLock)
+    {
+      if (previousState == AudioSourceState.Playing)
+      {
+        _btPosition = ExtrapolatedPosition();
+      }
+      _positionAnchorTimestamp = _timeProvider.GetTimestamp();
+    }
+
+    base.OnStateChanged(previousState, newState);
+  }
 
   public override async Task InitializeAsync(CancellationToken cancellationToken = default)
   {
@@ -948,7 +1010,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       _avrcpReportsPlaying = false;
       _pausedByConsole = false;
 
-      _btPosition = TimeSpan.Zero;
+      SetPositionAnchor(TimeSpan.Zero);
       _btDuration = null;
 
       // Remove capture from mixer and clear capture state so reconnect starts fresh
@@ -989,7 +1051,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
   private void OnPositionChanged(object? sender, TimeSpan position)
   {
-    _btPosition = position;
+    SetPositionAnchor(position);
   }
 
   private void OnMetadataChanged(object? sender, BluetoothPlaybackMetadata e)
@@ -1021,7 +1083,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     // AVRCP metadata arriving means a media player is attached — enable next/prev
     _hasMediaPlayer = true;
-    _btPosition = TimeSpan.Zero;
+    SetPositionAnchor(TimeSpan.Zero);
 
     MetricsCollector?.Increment("bluetooth.metadata_updates");
     MetadataInternal[StandardMetadataKeys.Title] = e.Title;
@@ -1111,10 +1173,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // for minutes. Dropped before the lookup flag is cleared, so when that flag is set for this track
     // (incomplete AVRCP metadata, or UseShazamForAllSources) it is still identified next cycle.
     var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
-    if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
+    // AUD-34: the boundary is also this source's last activation, so a sample captured from the
+    // previous source (or before a switch away and back on the same track) is dropped too.
+    if (e.WasCapturedBefore(LatestTrackBoundaryUtc(trackStartedTicks)))
     {
       Logger.LogInformation(
-        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current BT track started",
+        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current BT track started or BT became the active source",
         e.Track.Title, e.Track.Artist);
       // The service marked this song as recently identified before raising the event. AVRCP metadata
       // can trail the audio by a second or two, so a dropped result may name the track now playing;

@@ -2071,6 +2071,59 @@ public class FilePlayerAudioSourceTests : IDisposable
     Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
   }
 
+  /// <summary>
+  /// AUD-34: File -> BT -> File on the SAME file. The file path never changed, so AUD-33's stamp did
+  /// not move; a result whose sample began before the file player was re-activated came from whatever
+  /// was active in between and must be dropped. Times are explicit, so nothing here races a clock.
+  /// </summary>
+  [Fact]
+  public async Task Aud34_ResultSampledBeforeReactivationOnTheSameFile_IsNotApplied()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    DateTime captureStartedAt = DateTime.UtcNow;
+
+    // Switched away and back: the audio manager re-activates the source after the capture began.
+    active.MarkActivated(captureStartedAt.AddSeconds(1));
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Spirit In The Sky", "Norman Greenbaum", "Spirit In The Sky", "/api/albumart/sits.jpg"),
+      0.8,
+      captureStartedAt);
+
+    Assert.Equal("meditating", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal(StandardMetadataKeys.DefaultAlbumArtUrl, active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
+  /// <summary>AUD-34 control: a sample begun after the activation is the file's own and still applies.</summary>
+  [Fact]
+  public async Task Aud34_ResultSampledAfterActivation_IsApplied()
+  {
+    FilePlayerAudioSource? active = null;
+    active = CreateSourceForIdentification(getActiveSource: () => active);
+    await using var disposeActive = active;
+    CreateTestFile("meditating.mp3");
+    await active.LoadFileAsync("meditating.mp3");
+    SetState(active, AudioSourceState.Playing);
+    DateTime activatedAt = DateTime.UtcNow;
+    active.MarkActivated(activatedAt);
+
+    InvokeOnTrackIdentified(
+      active,
+      CreateTrackMetadata("Meditating Beat", "Kevin MacLeod", "FreePD Music", "/api/albumart/mb.jpg"),
+      0.8,
+      activatedAt.AddSeconds(1));
+
+    Assert.Equal("Meditating Beat", active.Metadata[StandardMetadataKeys.Title]);
+    Assert.Equal("/api/albumart/mb.jpg", active.Metadata[StandardMetadataKeys.AlbumArtUrl]);
+  }
+
   private static void SetCurrentFile(FilePlayerAudioSource source, string path)
   {
     var field = typeof(FilePlayerAudioSource).GetField(

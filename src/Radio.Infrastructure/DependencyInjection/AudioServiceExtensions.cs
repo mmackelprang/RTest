@@ -229,6 +229,10 @@ public static class AudioServiceExtensions
       sp.GetService<BackgroundIdentificationService>(),
       sp.GetService<IMetricsCollector>()));
 
+    // AUD-78: finalize the in-flight play history entry from a hosted service's StopAsync,
+    // while the container can still create a scope. The tracker's Dispose runs too late for that.
+    services.AddHostedService<PlayHistoryShutdownFinalizer>();
+
     // Register Bluetooth auto-switch service (Func<> defers IAudioManager resolution)
     services.AddSingleton<BluetoothAutoSwitchService>(sp => new BluetoothAutoSwitchService(
       sp.GetRequiredService<ILogger<BluetoothAutoSwitchService>>(),
@@ -360,6 +364,11 @@ public static class AudioServiceExtensions
 
     // Register Cast device cache repository (singleton - shares FingerprintDbContext)
     services.AddSingleton<CastDeviceCacheRepository>();
+
+    // AUD-80: per-device Cast volume memory, persisted in the config store.
+    services.AddSingleton<ICastDeviceVolumeStore>(sp => new ConfigStoreCastDeviceVolumeStore(
+      sp.GetRequiredService<ILogger<ConfigStoreCastDeviceVolumeStore>>(),
+      sp.GetService<Radio.Configuration.Abstractions.IConfigurationManager>()));
 
     // Register Google Cast Output (singleton - optional external output)
     services.AddSingleton<GoogleCastOutput>();
