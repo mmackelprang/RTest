@@ -228,16 +228,25 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
     await _repository.SaveBucketsAsync("test.cpu_percent", MetricType.Gauge, "percent", MetricResolution.Minute,
       [Bucket(t0, 180, 2, 80, 100), Bucket(t0 + 60, 60, 2, 20, 40)]);
 
-    // A metric whose only data is outside the window: absent from the result, not zero.
+    // A gauge whose only data is outside the window: absent from the result, not zero.
     await _repository.SaveBucketsAsync("test.stale", MetricType.Gauge, "bare", MetricResolution.Minute,
       [Bucket(t0 - 7200, 1, 1)]);
+
+    // A counter with nothing in the window: it counted zero, which is reported (the healthy reading).
+    await _repository.SaveBucketsAsync("test.idle_errors", MetricType.Counter, "count", MetricResolution.Minute,
+      [Bucket(t0 - 7200, 9, 1)]);
 
     var result = await _repository.GetWindowSummariesAsync(
       DateTimeOffset.FromUnixTimeSeconds(t0 - 60),
       DateTimeOffset.FromUnixTimeSeconds(t0 + 600),
       MetricResolution.Minute);
 
-    Assert.Equal(["test.cpu_percent", "test.underruns"], result.Select(r => r.Key));
+    Assert.Equal(["test.cpu_percent", "test.idle_errors", "test.underruns"], result.Select(r => r.Key));
+
+    var idle = result.Single(r => r.Key == "test.idle_errors");
+    Assert.Equal(0, idle.Sum);
+    Assert.Equal(0, idle.BucketCount);
+    Assert.Null(idle.LatestTimestamp);
 
     var counter = result.Single(r => r.Key == "test.underruns");
     Assert.Equal(MetricType.Counter, counter.Type);
@@ -245,7 +254,7 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
     Assert.Equal(8, counter.SampleCount);
     Assert.Equal(3, counter.BucketCount);
     Assert.Equal(1, counter.LatestAverage);        // newest bucket: 5 / 5
-    Assert.Equal(t0 + 120, counter.LatestTimestamp.ToUnixTimeSeconds());
+    Assert.Equal(t0 + 120, counter.LatestTimestamp!.Value.ToUnixTimeSeconds());
 
     var gauge = result.Single(r => r.Key == "test.cpu_percent");
     Assert.Equal(MetricType.Gauge, gauge.Type);
@@ -265,7 +274,8 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
     var from = DateTimeOffset.FromUnixTimeSeconds(t0 - 60);
     var to = DateTimeOffset.FromUnixTimeSeconds(t0 + 60);
 
-    Assert.Empty(await _repository.GetWindowSummariesAsync(from, to, MetricResolution.Minute));
+    // At Minute resolution the counter has no bucket, so it reads as an idle zero, not as the 4.
+    Assert.Equal(0, Assert.Single(await _repository.GetWindowSummariesAsync(from, to, MetricResolution.Minute)).Sum);
     Assert.Equal(4, Assert.Single(await _repository.GetWindowSummariesAsync(from, to, MetricResolution.Hour)).Sum);
   }
 

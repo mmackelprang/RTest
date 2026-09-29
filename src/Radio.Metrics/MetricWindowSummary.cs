@@ -43,9 +43,9 @@ public sealed record MetricWindowSummary
   /// </summary>
   public required double LatestAverage { get; init; }
 
-  /// <summary>Start of the newest bucket in the window.</summary>
-  public required DateTimeOffset LatestTimestamp { get; init; }
+  /// <summary>Start of the newest bucket in the window; null for a counter with no bucket in it.</summary>
+  public DateTimeOffset? LatestTimestamp { get; init; }
 
-  /// <summary>How many buckets fell inside the window.</summary>
+  /// <summary>How many buckets fell inside the window. Zero only for an idle counter.</summary>
   public required int BucketCount { get; init; }
 }

@@ -24,13 +24,14 @@ public interface IMetricsReader
     CancellationToken ct = default);
 
   /// <summary>
-  /// Summarises every metric that has data in a time window, in one database query.
+  /// Summarises every metric in a time window, in one database query.
   /// </summary>
   /// <remarks>
   /// UI-2. This is the bounded replacement for calling <see cref="GetHistoryAsync"/> once per key
-  /// (the Metrics page did so up to 40 times per refresh). Metrics with no bucket in the window are
-  /// absent from the result rather than reported as zero, because a zero would be a claim about a
-  /// gauge that nothing measured.
+  /// (the Metrics page did so up to 40 times per refresh). A <b>counter</b> with no bucket in the
+  /// window is reported with a zero sum — it counted nothing, which is the healthy reading for errors
+  /// and underruns. A <b>gauge</b> with no bucket is absent, because a zero would be a claim about a
+  /// value nothing measured.
   /// </remarks>
   /// <param name="start">Start of the window (inclusive).</param>
   /// <param name="end">End of the window (inclusive).</param>

@@ -394,7 +394,7 @@ html, body {
  * NOTE (PR 2): The topbar no longer uses .route-toggle for source/output —
  * see §27 .source-bubble and the .nav-pill rules in §7. .route-toggle is
  * retained because RadioPage (band selector), VisualizerPanel (viz mode),
- * and MetricsDashboardPage (time range) still render this control. Those
+ * and DiagnosticsPanel (time range; was MetricsDashboardPage) still render this control. Those
  * call sites migrate in PR 4 — at which point .route-toggle and the
  * per-data-source ::after underlines below can be deleted wholesale. */
 
@@ -2395,7 +2395,7 @@ body {
 
 /* ─── §29  Metric Tile + Sparkline (PR 4) ─────────────────────────────────── */
 
-/* Replaces the dense MetricsDashboardPage hero/row layout with a grid
+/* Replaces the dense MetricsDashboardPage (now DiagnosticsPanel) hero/row layout with a grid
    of category-grouped tiles. Each tile shows: category line, name line,
    big value (color from threshold band), and an optional inline
    sparkline matched to the value color. */

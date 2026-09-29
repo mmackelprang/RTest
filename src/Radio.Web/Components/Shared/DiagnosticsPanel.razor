@@ -22,7 +22,8 @@
       /api/metrics/history request only while a tile is selected — never a per-metric fan-out;
     • the poll runs only while this panel is mounted, and SystemConfigPage mounts it only while the
       Diagnostics tab is the showing tab;
-    • polls never overlap — a tick that arrives while the previous one is still in flight is skipped.
+    • timer ticks never stack — a tick that arrives while a poll is still in flight is skipped (a
+      skipped refresh the USER asked for, e.g. a time-range change, is re-run when that poll ends).
 
   Do not reintroduce per-tile sparklines by calling history per key. If sparklines come back, they
   come back through one batched call.
@@ -147,6 +148,14 @@
   private bool _showPerRoute;
   private bool _disposed;
   private int _pollInFlight;
+  private bool _rerunRequested;
+
+  /// <summary>
+  /// Polls that have run to completion. Tests rendezvous on this rather than on the request being
+  /// sent, because the poll's tail (deserialise, render, release the in-flight flag) finishes after
+  /// the request is recorded — advancing the clock inside that gap would hit the overlap guard.
+  /// </summary>
+  internal int CompletedPolls { get; private set; }
   private ITimer? _pollTimer;
   private IJSObjectReference? _jsModule;
   private bool _chartInitialized;
@@ -173,6 +182,9 @@
   protected override async Task OnInitializedAsync()
   {
     _loading = true;
+    // The initial load holds the same in-flight flag a poll does, so a Refresh pressed during it is
+    // queued (re-run below) rather than sent alongside it.
+    Interlocked.Exchange(ref _pollInFlight, 1);
     try
     {
       // Two one-off reads, then the window. None of these repeat on the poll.
@@ -180,7 +192,17 @@
       await LoadDescriptorsAsync();
       await LoadWindowAsync();
     }
-    finally { _loading = false; }
+    finally
+    {
+      _loading = false;
+      Interlocked.Exchange(ref _pollInFlight, 0);
+    }
+
+    if (_rerunRequested && !_disposed)
+    {
+      _rerunRequested = false;
+      await PollAsync(userRequested: false);
+    }
 
     if (!_disposed)
     {
@@ -213,10 +235,22 @@
   /// One poll: the window, plus the selected metric's history if a tile is selected. Skipped
   /// entirely if the previous poll has not finished, so a slow API cannot stack requests up.
   /// </summary>
-  internal async Task PollOnceAsync()
+  internal Task PollOnceAsync() => PollAsync(userRequested: false);
+
+  private async Task PollAsync(bool userRequested)
   {
-    if (_disposed || Interlocked.Exchange(ref _pollInFlight, 1) == 1)
+    if (_disposed)
     {
+      return;
+    }
+    if (Interlocked.Exchange(ref _pollInFlight, 1) == 1)
+    {
+      // A timer tick can simply be dropped — the next one is 15 s away. A refresh the user asked for
+      // (time range, refresh button) must not be: the pill would show the new range over old tiles.
+      if (userRequested)
+      {
+        _rerunRequested = true;
+      }
       return;
     }
 
@@ -236,10 +270,17 @@
     finally
     {
       Interlocked.Exchange(ref _pollInFlight, 0);
+      CompletedPolls++;
+    }
+
+    if (_rerunRequested && !_disposed)
+    {
+      _rerunRequested = false;
+      await PollAsync(userRequested: false);
     }
   }
 
-  private Task RefreshAsync() => PollOnceAsync();
+  private Task RefreshAsync() => PollAsync(userRequested: true);
 
   private async Task LoadPreferencesAsync()
   {
@@ -287,7 +328,7 @@
   {
     _timeRange = range;
     await ConfigApi.UpdateConfigurationAsync("ui.metrics", "timeRange", range);
-    await PollOnceAsync();
+    await PollAsync(userRequested: true);
   }
 
   private async Task ToggleMetricAsync(string key)
@@ -332,6 +373,7 @@
     }
     catch (OperationCanceledException) { }
     catch (JSDisconnectedException) { }
+    catch (ObjectDisposedException) { /* a poll that outlived the panel; nothing to draw on */ }
     catch (Exception ex) { Logger.LogWarning(ex, "Diagnostics chart render failed"); }
   }
 
@@ -344,8 +386,8 @@
     => summary.IsCounter ? Math.Max(0, summary.Sum) : summary.LatestAverage;
 
   /// <summary>
-  /// <c>api.requests.api.&lt;Controller&gt;.&lt;action&gt;</c> — one counter per API route, 148 of
-  /// the box's 220 metrics. Folded behind a toggle by default so the diagnostic tiles are not buried;
+  /// <c>api.requests.api.&lt;Controller&gt;.&lt;action&gt;</c> — one counter per API route, most of
+  /// the box's metrics (148 of 220 on 2026-09-29). Folded behind a toggle by default so the diagnostic tiles are not buried;
   /// the total (<c>api.requests.api</c>), errors and request duration stay visible.
   /// </summary>
   internal static bool IsPerRouteApiCounter(string key)

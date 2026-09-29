@@ -208,7 +208,7 @@ public record MetricWindowSummaryDto(
   double? Min,
   double? Max,
   double LatestAverage,
-  DateTimeOffset LatestTimestamp,
+  DateTimeOffset? LatestTimestamp,
   int BucketCount
 )
 {

@@ -267,7 +267,8 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   /// One statement, whatever the number of keys: the window's buckets are ranked newest-first per
   /// metric, then grouped, so the totals and the newest bucket come out of the same pass. This is the
   /// UI-2 replacement for a per-key <see cref="GetHistoryAsync"/> fan-out, and it must stay a single
-  /// query — the Diagnostics panel polls it.
+  /// query — the Diagnostics panel polls it. Driven from <c>MetricDefinitions</c> with a LEFT JOIN so
+  /// an idle counter comes back as zero instead of vanishing.
   /// </remarks>
   public async Task<IReadOnlyList<MetricWindowSummary>> GetWindowSummariesAsync(
     DateTimeOffset start,
@@ -303,16 +304,19 @@ public sealed class SqliteMetricsRepository : IMetricsReader
       SELECT
         md.Key,
         md.Type,
-        SUM(w.ValueSum),
-        SUM(w.ValueCount),
+        COALESCE(SUM(w.ValueSum), 0),
+        COALESCE(SUM(w.ValueCount), 0),
         MIN(w.ValueMin),
         MAX(w.ValueMax),
-        MAX(CASE WHEN w.rn = 1 THEN w.ValueSum END),
-        MAX(CASE WHEN w.rn = 1 THEN w.ValueCount END),
+        COALESCE(MAX(CASE WHEN w.rn = 1 THEN w.ValueSum END), 0),
+        COALESCE(MAX(CASE WHEN w.rn = 1 THEN w.ValueCount END), 0),
         MAX(w.Timestamp),
-        COUNT(*)
-      FROM w
-      INNER JOIN MetricDefinitions md ON md.Id = w.MetricId
+        COUNT(w.MetricId)
+      FROM MetricDefinitions md
+      LEFT JOIN w ON w.MetricId = md.Id
+      -- A counter with no bucket in the window genuinely counted zero, so it is reported (Sum 0,
+      -- BucketCount 0). A gauge with no bucket measured nothing, so it is left out.
+      WHERE w.MetricId IS NOT NULL OR md.Type = {(int)MetricType.Counter}
       GROUP BY md.Id, md.Key, md.Type
       ORDER BY md.Key";
 
@@ -337,7 +341,7 @@ public sealed class SqliteMetricsRepository : IMetricsReader
         Max = reader.IsDBNull(5) ? null : reader.GetDouble(5),
         // Same zero-count rule GetHistoryAsync uses for a bucket's Value.
         LatestAverage = latestCount > 0 ? latestSum / latestCount : latestSum,
-        LatestTimestamp = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(8)),
+        LatestTimestamp = reader.IsDBNull(8) ? null : DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(8)),
         BucketCount = reader.GetInt32(9)
       });
     }

@@ -664,6 +664,23 @@ public class SystemConfigPageTests : TestContext
       _metricsApi.Requests.Count(r => r.Path == "/api/metrics/window").Should().Be(1));
   }
 
+  /// <summary>
+  /// /system → /diagnostics on a page that is already mounted (the DevTray card pressed while Settings
+  /// is open): same component type, so the router re-sets parameters instead of re-initialising, and
+  /// OnParametersSet is what must switch the tab.
+  /// </summary>
+  [Fact]
+  public void NavigatingFromSystemToDiagnostics_OnAMountedPage_SwitchesTheTab()
+  {
+    var cut = RenderComponent<SystemConfigPage>();
+    cut.FindAll("[data-testid='diagnostics-panel']").Should().BeEmpty();
+
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().NavigateTo("/diagnostics");
+    cut.SetParametersAndRender();
+
+    cut.WaitForAssertion(() => cut.FindAll("[data-testid='diagnostics-panel']").Should().ContainSingle());
+  }
+
   [Fact]
   public void LeavingTheDiagnosticsTab_UnmountsThePanel()
   {

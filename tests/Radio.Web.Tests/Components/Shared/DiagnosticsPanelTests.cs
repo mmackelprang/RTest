@@ -49,7 +49,7 @@ public class DiagnosticsPanelTests : TestContext
     Services.AddSingleton(_ => new MetricsApiService(NewClient(), NullLogger<MetricsApiService>.Instance));
     Services.AddSingleton(_ => new ConfigurationApiService(NewClient(), NullLogger<ConfigurationApiService>.Instance));
 
-    // 220 keys on the real box, 148 of them per-route API counters. Four is enough to exercise every
+    // 220 keys on the real box (2026-09-29), most of them per-route API counters. Four is enough to exercise every
     // branch: a counter, a gauge, a per-route counter, and a fingerprint metric.
     _api.Get("/api/metrics/window", new List<MetricWindowSummaryDto>
     {
@@ -98,7 +98,7 @@ public class DiagnosticsPanelTests : TestContext
   [Fact]
   public void Poll_IssuesExactlyOneWindowRequest_AtThePollInterval()
   {
-    RenderPanel();
+    var cut = RenderPanel();
     int before = CountMetricsRequests();
 
     // One second short of the interval: the timer has not fired. (A bounded negative — a callback
@@ -108,13 +108,15 @@ public class DiagnosticsPanelTests : TestContext
     CountMetricsRequests().Should().Be(before);
 
     _clock.Advance(TimeSpan.FromSeconds(1));
-    WaitForState(() => CountMetricsRequests() == before + 1);
+    WaitForPolls(cut, 1);
+    CountMetricsRequests().Should().Be(before + 1);
 
     CountRequests("/api/metrics/window").Should().Be(2);
     CountRequests("/api/metrics/history").Should().Be(0);
 
     _clock.Advance(DiagnosticsPanel.PollInterval);
-    WaitForState(() => CountMetricsRequests() == before + 2);
+    WaitForPolls(cut, 2);
+    CountMetricsRequests().Should().Be(before + 2);
     CountRequests("/api/metrics/window").Should().Be(3);
     CountRequests("/api/metrics/history").Should().Be(0);
   }
@@ -129,7 +131,8 @@ public class DiagnosticsPanelTests : TestContext
 
     int windowBefore = CountRequests("/api/metrics/window");
     _clock.Advance(DiagnosticsPanel.PollInterval);
-    cut.WaitForAssertion(() => CountRequests("/api/metrics/history").Should().Be(2));
+    WaitForPolls(cut, 1);
+    CountRequests("/api/metrics/history").Should().Be(2);
     CountRequests("/api/metrics/window").Should().Be(windowBefore + 1);
   }
 
@@ -159,6 +162,17 @@ public class DiagnosticsPanelTests : TestContext
   }
 
   [Fact]
+  public void NoMetricsInTheWindow_ShowsTheEmptyStateNamingTheRange()
+  {
+    _api.Get("/api/metrics/window", new List<MetricWindowSummaryDto>());
+
+    var cut = RenderComponent<DiagnosticsPanel>(p => p.Add(x => x.Clock, _clock));
+
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("No metrics recorded in the last 1h"));
+    cut.FindAll(".metric-tile").Should().BeEmpty();
+  }
+
+  [Fact]
   public void PerRouteApiCounters_AreFoldedBehindAToggle()
   {
     var cut = RenderPanel();
@@ -172,18 +186,11 @@ public class DiagnosticsPanelTests : TestContext
     cut.FindAll(".metric-tile[data-metric-key='api.requests.api.Audio.volume']").Should().ContainSingle();
   }
 
-  private static void WaitForState(Func<bool> condition)
-  {
-    // Rendezvous on the recorded request, not on elapsed time: the timer callback dispatches the
-    // poll onto the renderer, so the request lands a moment after Advance returns.
-    var deadline = DateTime.UtcNow.AddSeconds(5);
-    while (!condition())
-    {
-      if (DateTime.UtcNow > deadline)
-      {
-        throw new TimeoutException("The expected poll never arrived.");
-      }
-      Thread.Sleep(5);
-    }
-  }
+  /// <summary>
+  /// Rendezvous on a poll having COMPLETED (its in-flight flag released), never on elapsed time and
+  /// not merely on its request having been sent — advancing the clock between those two points would
+  /// land on the overlap guard and the tick would be dropped.
+  /// </summary>
+  private static void WaitForPolls(IRenderedComponent<DiagnosticsPanel> cut, int completed) =>
+    cut.WaitForAssertion(() => cut.Instance.CompletedPolls.Should().Be(completed), TimeSpan.FromSeconds(5));
 }
