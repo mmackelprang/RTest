@@ -74,7 +74,7 @@ public class AudioFileEventSourceFactory
   ///
   /// It does not re-root. <see cref="CreateFromFileAsync"/> sends a relative path through
   /// ResolveFilePath, which combines it with FilePlayer:RootDirectory — "media/audio" in the repo
-  /// and "/mnt/nas/music" on the appliance. GvMedia:CacheDirectory ships as the RELATIVE
+  /// and "/mnt/nas_media/Music" on the appliance. GvMedia:CacheDirectory ships as the RELATIVE
   /// "./data/gvmedia", so a fetched recording would be looked for under the music root and the
   /// play would fail with a FileNotFoundException after a successful fetch.
   ///
