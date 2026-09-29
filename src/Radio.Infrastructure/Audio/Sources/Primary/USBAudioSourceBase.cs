@@ -164,6 +164,48 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     MetadataInternal["Device"] = deviceName;
   }
 
+  /// <summary>How <see cref="SelectCaptureDevice"/> decided (AUD-13).</summary>
+  internal enum CaptureDeviceMatch
+  {
+    /// <summary>A physical input's name contains the configured port.</summary>
+    Matched,
+
+    /// <summary>The port is empty or whitespace.</summary>
+    PortNotConfigured,
+
+    /// <summary>No physical input's name contains the port.</summary>
+    NoMatch
+  }
+
+  /// <summary>
+  /// Picks the capture device for a configured port: the first whose name contains it
+  /// (case-insensitive), skipping PipeWire "Monitor of …" loopbacks of output sinks. There is no
+  /// fallback — an empty port or a port that matches nothing selects nothing (AUD-13). Pure, so it is
+  /// tested without audio hardware.
+  /// </summary>
+  internal static (int Index, CaptureDeviceMatch Outcome) SelectCaptureDevice(
+    IReadOnlyList<string> deviceNames, string? usbPort)
+  {
+    if (string.IsNullOrWhiteSpace(usbPort))
+    {
+      return (-1, CaptureDeviceMatch.PortNotConfigured);
+    }
+
+    for (var i = 0; i < deviceNames.Count; i++)
+    {
+      if (!IsMonitor(deviceNames[i])
+          && deviceNames[i].Contains(usbPort, StringComparison.OrdinalIgnoreCase))
+      {
+        return (i, CaptureDeviceMatch.Matched);
+      }
+    }
+
+    return (-1, CaptureDeviceMatch.NoMatch);
+  }
+
+  private static bool IsMonitor(string deviceName) =>
+    deviceName.StartsWith("Monitor of", StringComparison.OrdinalIgnoreCase);
+
   /// <summary>
   /// Initializes the USB audio capture on the specified port.
   /// </summary>
@@ -173,6 +215,19 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   protected virtual async Task InitializeUSBCaptureAsync(string usbPort, CancellationToken cancellationToken = default)
   {
     await base.InitializeAsync(cancellationToken);
+
+    // AUD-13 (owner ruling 2026-09-07, extended 2026-09-29): an empty port is a configuration fault,
+    // not "any device". Checked before the port is reserved — reserving "" made two unconfigured sources
+    // collide on the empty string.
+    if (string.IsNullOrWhiteSpace(usbPort))
+    {
+      Logger.LogWarning(
+        "{SourceName}: no USB capture device configured (USBPort is empty) — not binding to any input. " +
+        "Set its USBPort to part of a capture device's name.",
+        Name);
+      State = AudioSourceState.Error;
+      throw new USBCaptureDeviceNotFoundException($"{Name}: USBPort is not configured");
+    }
 
     ReserveUSBPort(usbPort);
 
@@ -186,32 +241,23 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
       // put an ungated native enumeration alongside the shared engine's.
       _audioEngine = SerializedMiniAudioEngine.Create();
 
-      // Find the USB capture device matching the port
+      // Find the capture device whose name contains the configured port. No fallback: binding to
+      // "the first device" chose the input by enumeration order, which on the appliance made
+      // GenericUSB an alias of Vinyl and could equally have picked the speakers' own loopback.
       var captureDevices = _audioEngine.CaptureDevices;
-      DeviceInfo? targetDevice = null;
-
-      foreach (var device in captureDevices)
-      {
-        // Match by device name containing the USB port identifier
-        // USB devices on Linux typically include card/device info in the name
-        // Skip "Monitor of ..." devices — these are PipeWire loopbacks of output sinks,
-        // not physical audio inputs
-        if (device.Name.Contains(usbPort, StringComparison.OrdinalIgnoreCase) &&
-            !device.Name.StartsWith("Monitor of", StringComparison.OrdinalIgnoreCase))
-        {
-          targetDevice = device;
-          break;
-        }
-      }
-
-      // If no specific device found, use the default capture device if available
-      if (targetDevice == null && captureDevices.Length > 0)
+      var deviceNames = captureDevices.Select(d => d.Name).ToArray();
+      var (index, outcome) = SelectCaptureDevice(deviceNames, usbPort);
+      if (outcome != CaptureDeviceMatch.Matched)
       {
         Logger.LogWarning(
-          "Could not find USB capture device for port {USBPort}, using first available capture device",
-          usbPort);
-        targetDevice = captureDevices[0];
+          "{SourceName}: no capture device matches USBPort {USBPort} — not binding to any input. " +
+          "Physical inputs available: {Devices}",
+          Name, usbPort,
+          string.Join(", ", deviceNames.Where(n => !IsMonitor(n)).Select(n => $"'{n}'")));
+        throw new USBCaptureDeviceNotFoundException($"{Name}: no capture device matches USBPort '{usbPort}'");
       }
+
+      var targetDevice = captureDevices[index];
 
       // Match the capture sample rate to the playback engine to avoid rate mismatch
       // (44.1kHz capture into 48kHz playback causes ~8% silence padding = faint audio)
@@ -228,12 +274,16 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
 
       Logger.LogInformation(
         "{SourceName} initialized on USB port {USBPort} using device: {DeviceName}",
-        Name, usbPort, targetDevice?.Name ?? "default");
+        Name, usbPort, targetDevice.Name);
       State = AudioSourceState.Ready;
     }
     catch (Exception ex)
     {
-      Logger.LogError(ex, "Failed to initialize {SourceName} audio capture on {USBPort}", Name, usbPort);
+      // A refusal was already explained by its own Warning; only unexpected failures log an Error here.
+      if (ex is not USBCaptureDeviceNotFoundException)
+      {
+        Logger.LogError(ex, "Failed to initialize {SourceName} audio capture on {USBPort}", Name, usbPort);
+      }
       CleanupCaptureDevice();
       ReleaseUSBPort();
       State = AudioSourceState.Error;
@@ -577,4 +627,13 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
     _soundComponent = null;
     await base.DisposeAsyncCore();
   }
+}
+
+/// <summary>
+/// A USB audio source refused to bind because its configured port is empty or matches no capture device
+/// (AUD-13). The source is left in <see cref="AudioSourceState.Error"/>; the reason is in its Warning.
+/// </summary>
+public sealed class USBCaptureDeviceNotFoundException : InvalidOperationException
+{
+  public USBCaptureDeviceNotFoundException(string message) : base(message) { }
 }

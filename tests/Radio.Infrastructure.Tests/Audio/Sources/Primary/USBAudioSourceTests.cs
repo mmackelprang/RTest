@@ -7,6 +7,7 @@ using Radio.Core.Exceptions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Sources.Primary;
+using Radio.Infrastructure.Audio.SoundFlow;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 
@@ -15,6 +16,23 @@ namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 /// </summary>
 public class USBAudioSourceTests
 {
+  // AUD-13: a USB source binds only to a capture device whose name contains its port — there is no
+  // "first device" fallback any more. These lifecycle tests open the real audio engine, so their ports
+  // must name a real physical input on the machine running them. They used to be "/dev/ttyUSB0/1/2",
+  // which matched nothing and passed only through the fallback — which on the dev box grabbed
+  // "Monitor of xrdp-sink" and was the source of this class's "Unable to init device" flake.
+  private static readonly Lazy<string?> PhysicalInput = new(() =>
+  {
+    using var engine = SerializedMiniAudioEngine.Create();
+    return engine.CaptureDevices
+      .Select(d => d.Name)
+      .FirstOrDefault(n => !n.StartsWith("Monitor of", StringComparison.OrdinalIgnoreCase));
+  });
+
+  private static string RadioPort => PhysicalInput.Value ?? "no-physical-capture-device";
+  private static string VinylPort => RadioPort;
+  private static string GenericPort => RadioPort;
+
   private readonly Mock<ILogger<RadioAudioSource>> _radioLoggerMock;
   private readonly Mock<ILogger<VinylAudioSource>> _vinylLoggerMock;
   private readonly Mock<ILogger<GenericUSBAudioSource>> _genericLoggerMock;
@@ -34,8 +52,8 @@ public class USBAudioSourceTests
 
     _deviceOptions = new DeviceOptions
     {
-      Radio = new RadioDeviceOptions { USBPort = "/dev/ttyUSB0" },
-      Vinyl = new VinylDeviceOptions { USBPort = "/dev/ttyUSB1" }
+      Radio = new RadioDeviceOptions { USBPort = RadioPort },
+      Vinyl = new VinylDeviceOptions { USBPort = VinylPort }
     };
 
     _radioOptions = new RadioOptions
@@ -88,14 +106,14 @@ public class USBAudioSourceTests
 
     // Assert
     Assert.Equal(AudioSourceState.Playing, source.State);
-    _deviceManagerMock.Verify(d => d.ReserveUSBPort("/dev/ttyUSB0", It.IsAny<string>()), Times.Once);
+    _deviceManagerMock.Verify(d => d.ReserveUSBPort(RadioPort, It.IsAny<string>()), Times.Once);
   }
 
   [Fact]
   public async Task RadioAudioSource_PlayAsync_WhenPortInUse_ThrowsConflictException()
   {
     // Arrange
-    _deviceManagerMock.Setup(d => d.IsUSBPortInUse("/dev/ttyUSB0")).Returns(true);
+    _deviceManagerMock.Setup(d => d.IsUSBPortInUse(RadioPort)).Returns(true);
     var source = CreateRadioSource();
 
     // Act & Assert
@@ -113,7 +131,7 @@ public class USBAudioSourceTests
     await source.DisposeAsync();
 
     // Assert
-    _deviceManagerMock.Verify(d => d.ReleaseUSBPort("/dev/ttyUSB0"), Times.Once);
+    _deviceManagerMock.Verify(d => d.ReleaseUSBPort(RadioPort), Times.Once);
     Assert.Equal(AudioSourceState.Disposed, source.State);
   }
 
@@ -159,14 +177,14 @@ public class USBAudioSourceTests
 
     // Assert
     Assert.Equal(AudioSourceState.Playing, source.State);
-    _deviceManagerMock.Verify(d => d.ReserveUSBPort("/dev/ttyUSB1", It.IsAny<string>()), Times.Once);
+    _deviceManagerMock.Verify(d => d.ReserveUSBPort(VinylPort, It.IsAny<string>()), Times.Once);
   }
 
   [Fact]
   public async Task VinylAudioSource_PlayAsync_WhenPortInUse_ThrowsConflictException()
   {
     // Arrange
-    _deviceManagerMock.Setup(d => d.IsUSBPortInUse("/dev/ttyUSB1")).Returns(true);
+    _deviceManagerMock.Setup(d => d.IsUSBPortInUse(VinylPort)).Returns(true);
     var source = CreateVinylSource();
 
     // Act & Assert
@@ -184,7 +202,7 @@ public class USBAudioSourceTests
     await source.DisposeAsync();
 
     // Assert
-    _deviceManagerMock.Verify(d => d.ReleaseUSBPort("/dev/ttyUSB1"), Times.Once);
+    _deviceManagerMock.Verify(d => d.ReleaseUSBPort(VinylPort), Times.Once);
     Assert.Equal(AudioSourceState.Disposed, source.State);
   }
 
@@ -215,25 +233,25 @@ public class USBAudioSourceTests
     var source = CreateGenericSource();
 
     // Act
-    await source.InitializeWithPortAsync("/dev/ttyUSB2");
+    await source.InitializeWithPortAsync(GenericPort);
 
     // Assert
     Assert.Equal(AudioSourceState.Ready, source.State);
-    Assert.Equal("/dev/ttyUSB2", source.USBPort);
-    _deviceManagerMock.Verify(d => d.ReserveUSBPort("/dev/ttyUSB2", It.IsAny<string>()), Times.Once);
-    Assert.Equal("/dev/ttyUSB2", _genericPreferences.USBPort);
+    Assert.Equal(GenericPort, source.USBPort);
+    _deviceManagerMock.Verify(d => d.ReserveUSBPort(GenericPort, It.IsAny<string>()), Times.Once);
+    Assert.Equal(GenericPort, _genericPreferences.USBPort);
   }
 
   [Fact]
   public async Task GenericUSBAudioSource_InitializeWithPortAsync_WhenPortInUse_ThrowsConflictException()
   {
     // Arrange
-    _deviceManagerMock.Setup(d => d.IsUSBPortInUse("/dev/ttyUSB2")).Returns(true);
+    _deviceManagerMock.Setup(d => d.IsUSBPortInUse(GenericPort)).Returns(true);
     var source = CreateGenericSource();
 
     // Act & Assert
     await Assert.ThrowsAsync<AudioDeviceConflictException>(
-      () => source.InitializeWithPortAsync("/dev/ttyUSB2"));
+      () => source.InitializeWithPortAsync(GenericPort));
   }
 
   [Fact]
@@ -247,7 +265,7 @@ public class USBAudioSourceTests
       Name = "Test USB Device",
       Type = AudioDeviceType.Input,
       IsUSBDevice = true,
-      USBPort = "/dev/ttyUSB3"
+      USBPort = GenericPort
     };
 
     // Act
@@ -282,7 +300,7 @@ public class USBAudioSourceTests
   {
     // Arrange
     var source = CreateGenericSource();
-    await source.InitializeWithPortAsync("/dev/ttyUSB2");
+    await source.InitializeWithPortAsync(GenericPort);
 
     // Act
     await source.PlayAsync();
@@ -296,13 +314,13 @@ public class USBAudioSourceTests
   {
     // Arrange
     var source = CreateGenericSource();
-    await source.InitializeWithPortAsync("/dev/ttyUSB2");
+    await source.InitializeWithPortAsync(GenericPort);
 
     // Act
     await source.DisposeAsync();
 
     // Assert
-    _deviceManagerMock.Verify(d => d.ReleaseUSBPort("/dev/ttyUSB2"), Times.Once);
+    _deviceManagerMock.Verify(d => d.ReleaseUSBPort(GenericPort), Times.Once);
     Assert.Equal(AudioSourceState.Disposed, source.State);
     Assert.Null(source.USBPort);
   }
@@ -321,7 +339,7 @@ public class USBAudioSourceTests
 
     await radio.PlayAsync();
     await vinyl.PlayAsync();
-    await generic.InitializeWithPortAsync("/dev/ttyUSB2");
+    await generic.InitializeWithPortAsync(GenericPort);
     await generic.PlayAsync();
 
     // Act
@@ -502,6 +520,36 @@ public class USBAudioSourceTests
       "OnTrackIdentified",
       System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
     method!.Invoke(source, new object?[] { null, new TrackIdentifiedEventArgs(track, confidence) });
+  }
+
+  #endregion
+
+  #region AUD-13 refusals
+
+  [Fact]
+  public async Task VinylAudioSource_WithEmptyPort_RefusesWithoutReservingAPort()
+  {
+    _deviceOptions.Vinyl.USBPort = "";
+    var source = CreateVinylSource();
+
+    await Assert.ThrowsAsync<USBCaptureDeviceNotFoundException>(() => source.PlayAsync());
+
+    Assert.Equal(AudioSourceState.Error, source.State);
+    _deviceManagerMock.Verify(d => d.ReserveUSBPort(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+  }
+
+  [SkippableFact]
+  public async Task GenericUSBAudioSource_WithAPortMatchingNoDevice_RefusesAndReleasesThePort()
+  {
+    Skip.If(PhysicalInput.Value == null, "no physical capture device on this machine");
+    var source = CreateGenericSource();
+
+    await Assert.ThrowsAsync<USBCaptureDeviceNotFoundException>(
+      () => source.InitializeWithPortAsync("AB13X-matches-nothing"));
+
+    Assert.Equal(AudioSourceState.Error, source.State);
+    _deviceManagerMock.Verify(d => d.ReserveUSBPort("AB13X-matches-nothing", It.IsAny<string>()), Times.Once);
+    _deviceManagerMock.Verify(d => d.ReleaseUSBPort("AB13X-matches-nothing"), Times.Once);
   }
 
   #endregion
