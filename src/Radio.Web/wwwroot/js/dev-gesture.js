@@ -1,7 +1,7 @@
 // Dev-tray triple-tap gesture (PR 6 / handoff §P2·2).
 //
-// Listens for taps on the invisible 48×48 hit area in the top-right corner of
-// the viewport (element marked with `data-dev-gesture`). Three taps inside a
+// Listens for taps on the invisible hit area left of the Home pill in the
+// topbar nav row (element marked with `data-dev-gesture`). Three taps inside a
 // 1.5-second window call back into Blazor via DotNetObjectReference to toggle
 // the dev tray. Anything less than three taps is silently discarded after the
 // window lapses.
