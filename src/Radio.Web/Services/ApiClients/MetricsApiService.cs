@@ -50,6 +50,31 @@ public class MetricsApiService
   }
 
   /// <summary>
+  /// GET /api/metrics/window - One summary per metric with data in the window, from one request
+  /// and one database query (UI-2). Null on failure, like every other read here.
+  /// </summary>
+  public async Task<List<MetricWindowSummaryDto>?> GetMetricWindowAsync(
+    DateTime start,
+    DateTime end,
+    string resolution = "Minute",
+    CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var query = $"?start={HttpUtility.UrlEncode(start.ToString("o"))}" +
+                  $"&end={HttpUtility.UrlEncode(end.ToString("o"))}" +
+                  $"&resolution={resolution}";
+
+      return await _httpClient.GetFromJsonAsync<List<MetricWindowSummaryDto>>($"/api/metrics/window{query}", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to get metric window summaries");
+      return null;
+    }
+  }
+
+  /// <summary>
   /// GET /api/metrics/snapshots - Gets current/aggregate values for one or more metrics
   /// </summary>
   public async Task<Dictionary<string, double>?> GetMetricSnapshotsAsync(

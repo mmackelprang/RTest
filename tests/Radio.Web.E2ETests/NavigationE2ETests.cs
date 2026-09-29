@@ -64,18 +64,18 @@ public class NavigationE2ETests
   }
 
   [Fact]
-  public async Task Navigation_MetricsPage_LoadsSuccessfully()
+  public async Task Navigation_DiagnosticsPage_LoadsSuccessfully()
   {
     if (!_fixture.IsServerAvailable)
     {
       return;
     }
 
-    await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/metrics");
+    // UI-2: /metrics is gone; /diagnostics opens Settings on its Diagnostics tab.
+    await _fixture.Page.GotoAsync($"{_fixture.BaseUrl}/diagnostics");
     await _fixture.Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-    // Metrics page shows system metrics
-    var heading = _fixture.Page.Locator("text=Metrics").First;
+    var heading = _fixture.Page.Locator("text=Diagnostics").First;
     await Expect(heading).ToBeVisibleAsync();
   }
 

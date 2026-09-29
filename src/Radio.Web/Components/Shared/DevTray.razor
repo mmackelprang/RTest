@@ -355,10 +355,10 @@
   private void ViewFingerprintEvents()
   {
     RecordInteraction();
-    // Fingerprint events live on the Metrics dashboard (PR 4) — a dedicated
-    // detail panel doesn't exist as a route yet, so we navigate there and
-    // let the user scroll to the fingerprint cards.
-    Nav.NavigateTo("/metrics");
+    // UI-5 / UI-2: the fingerprint.* tiles live in Settings → Diagnostics, which /diagnostics opens
+    // directly. There is no fingerprint-only view; the card lands on the whole panel, where the
+    // FINGERPRINT group is one of the categories.
+    Nav.NavigateTo("/diagnostics");
   }
 
   public void Dispose()

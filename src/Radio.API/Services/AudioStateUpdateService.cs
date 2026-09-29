@@ -184,7 +184,7 @@ public class AudioStateUpdateService : BackgroundService
     }
 
     // ENC-12: the config-fault push path. The Settings page polls at 2 Hz while it is open, which is
-    // useless for a badge that must be correct on /queue and /metrics, so the tier — and only the
+    // useless for a badge that must be correct on /queue and /diagnostics, so the tier — and only the
     // tier — goes out on the hub.
     if (_encoderService != null)
     {

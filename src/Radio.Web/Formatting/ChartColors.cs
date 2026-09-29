@@ -8,7 +8,7 @@ namespace Radio.Web.Formatting;
 /// <c>src/Radio.Web/wwwroot/css/design-system.css §2</c>.
 /// </summary>
 /// <remarks>
-/// Extracted from MetricsDashboardPage.razor in PR A follow-up #7 so chart
+/// Extracted from MetricsDashboardPage.razor (now DiagnosticsPanel.razor, UI-2) in PR A follow-up #7 so chart
 /// code can't silently drift from the design tokens; previously each
 /// dashboard cell carried its own inline hex literal.
 /// </remarks>

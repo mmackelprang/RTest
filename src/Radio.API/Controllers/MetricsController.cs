@@ -101,6 +101,44 @@ public class MetricsController : ControllerBase
   }
 
   /// <summary>
+  /// Summarises every metric with data in a time window — one row per metric, one database query.
+  /// </summary>
+  /// <remarks>
+  /// UI-2. The Settings → Diagnostics tiles read this instead of one <c>history</c> call per metric.
+  /// </remarks>
+  /// <param name="start">Start timestamp</param>
+  /// <param name="end">End timestamp</param>
+  /// <param name="resolution">Which bucket table to summarise (Minute, Hour, Day)</param>
+  /// <param name="ct">Cancellation token</param>
+  /// <returns>One summary per metric that has data in the window</returns>
+  [HttpGet("window")]
+  [ProducesResponseType(typeof(IReadOnlyList<MetricWindowSummary>), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  public async Task<ActionResult<IReadOnlyList<MetricWindowSummary>>> GetWindow(
+    [FromQuery] DateTimeOffset start,
+    [FromQuery] DateTimeOffset end,
+    [FromQuery] MetricResolution resolution = MetricResolution.Minute,
+    CancellationToken ct = default)
+  {
+    if (start >= end)
+    {
+      return BadRequest("Start time must be before end time");
+    }
+
+    try
+    {
+      var summaries = await _metricsReader.GetWindowSummariesAsync(start, end, resolution, ct);
+      return Ok(summaries);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to retrieve metric window summaries");
+      return StatusCode(500, "An error occurred while retrieving metric window summaries");
+    }
+  }
+
+  /// <summary>
   /// Gets aggregate/current snapshot values for one or more metrics.
   /// For counters: returns total sum across all time periods.
   /// For gauges: returns the most recent value.

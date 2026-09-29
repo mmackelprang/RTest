@@ -394,7 +394,7 @@ html, body {
  * NOTE (PR 2): The topbar no longer uses .route-toggle for source/output —
  * see §27 .source-bubble and the .nav-pill rules in §7. .route-toggle is
  * retained because RadioPage (band selector), VisualizerPanel (viz mode),
- * and MetricsDashboardPage (time range) still render this control. Those
+ * and DiagnosticsPanel (time range; was MetricsDashboardPage) still render this control. Those
  * call sites migrate in PR 4 — at which point .route-toggle and the
  * per-data-source ::after underlines below can be deleted wholesale. */
 
@@ -1852,7 +1852,7 @@ body {
 }
 
 
-/* ─── §18  Metrics Dashboard ──────────────────────────────────────────────── */
+/* ─── §18  Metrics / Diagnostics (Settings → Diagnostics since UI-2) ───────── */
 
 .metrics-page {
   height: 100%;
@@ -2395,7 +2395,7 @@ body {
 
 /* ─── §29  Metric Tile + Sparkline (PR 4) ─────────────────────────────────── */
 
-/* Replaces the dense MetricsDashboardPage hero/row layout with a grid
+/* Replaces the dense MetricsDashboardPage (now DiagnosticsPanel) hero/row layout with a grid
    of category-grouped tiles. Each tile shows: category line, name line,
    big value (color from threshold band), and an optional inline
    sparkline matched to the value color. */
@@ -2480,6 +2480,33 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
+}
+
+/* Settings → Diagnostics (UI-2). Reuses the metrics-* header, chart and tile-grid rules above; the
+   panel sits inside a Settings tab, so it takes the tab's height rather than forcing 100%. */
+.diagnostics-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.diagnostics-cadence {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-low);
+}
+
+.diagnostics-tile {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.diagnostics-tile:focus-visible,
+.diagnostics-tile.selected {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 /* ─── §N  Now Playing Dock (PR 5) ─────────────────────────────────────────── */
