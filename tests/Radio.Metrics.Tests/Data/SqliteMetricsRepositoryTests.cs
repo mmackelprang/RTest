@@ -209,4 +209,80 @@ public class SqliteMetricsRepositoryTests : IAsyncLifetime
     Assert.NotEmpty(keys);
     Assert.Contains(key, keys);
   }
+
+  // ─── UI-2: GetWindowSummariesAsync ─────────────────────────────────────────────────────────
+
+  private static MetricBucket Bucket(long ts, double sum, int count, double? min = null, double? max = null) =>
+    new() { Timestamp = ts, ValueSum = sum, ValueCount = count, ValueMin = min, ValueMax = max, ValueLast = max };
+
+  [Fact]
+  public async Task GetWindowSummariesAsync_ReducesEveryMetricInTheWindow()
+  {
+    var t0 = new DateTimeOffset(2026, 9, 29, 12, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+
+    // A counter with three buckets in the window and one before it.
+    await _repository.SaveBucketsAsync("test.underruns", MetricType.Counter, "count", MetricResolution.Minute,
+      [Bucket(t0 - 3600, 100, 1), Bucket(t0, 2, 2), Bucket(t0 + 60, 3, 1), Bucket(t0 + 120, 5, 5)]);
+
+    // A gauge whose newest bucket averages 30 (60 / 2) while older ones sit much higher.
+    await _repository.SaveBucketsAsync("test.cpu_percent", MetricType.Gauge, "percent", MetricResolution.Minute,
+      [Bucket(t0, 180, 2, 80, 100), Bucket(t0 + 60, 60, 2, 20, 40)]);
+
+    // A gauge whose only data is outside the window: absent from the result, not zero.
+    await _repository.SaveBucketsAsync("test.stale", MetricType.Gauge, "bare", MetricResolution.Minute,
+      [Bucket(t0 - 7200, 1, 1)]);
+
+    // A counter with nothing in the window: it counted zero, which is reported (the healthy reading).
+    await _repository.SaveBucketsAsync("test.idle_errors", MetricType.Counter, "count", MetricResolution.Minute,
+      [Bucket(t0 - 7200, 9, 1)]);
+
+    var result = await _repository.GetWindowSummariesAsync(
+      DateTimeOffset.FromUnixTimeSeconds(t0 - 60),
+      DateTimeOffset.FromUnixTimeSeconds(t0 + 600),
+      MetricResolution.Minute);
+
+    Assert.Equal(["test.cpu_percent", "test.idle_errors", "test.underruns"], result.Select(r => r.Key));
+
+    var idle = result.Single(r => r.Key == "test.idle_errors");
+    Assert.Equal(0, idle.Sum);
+    Assert.Equal(0, idle.BucketCount);
+    Assert.Null(idle.LatestTimestamp);
+
+    var counter = result.Single(r => r.Key == "test.underruns");
+    Assert.Equal(MetricType.Counter, counter.Type);
+    Assert.Equal(10, counter.Sum);                 // 2 + 3 + 5; the 100 before the window is excluded
+    Assert.Equal(8, counter.SampleCount);
+    Assert.Equal(3, counter.BucketCount);
+    Assert.Equal(1, counter.LatestAverage);        // newest bucket: 5 / 5
+    Assert.Equal(t0 + 120, counter.LatestTimestamp!.Value.ToUnixTimeSeconds());
+
+    var gauge = result.Single(r => r.Key == "test.cpu_percent");
+    Assert.Equal(MetricType.Gauge, gauge.Type);
+    Assert.Equal(30, gauge.LatestAverage);
+    Assert.Equal(20, gauge.Min);
+    Assert.Equal(100, gauge.Max);
+    Assert.Equal(2, gauge.BucketCount);
+  }
+
+  [Fact]
+  public async Task GetWindowSummariesAsync_ReadsOnlyTheRequestedResolution()
+  {
+    var t0 = new DateTimeOffset(2026, 9, 29, 12, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+    await _repository.SaveBucketsAsync("test.hourly", MetricType.Counter, "count", MetricResolution.Hour,
+      [Bucket(t0, 4, 1)]);
+
+    var from = DateTimeOffset.FromUnixTimeSeconds(t0 - 60);
+    var to = DateTimeOffset.FromUnixTimeSeconds(t0 + 60);
+
+    // At Minute resolution the counter has no bucket, so it reads as an idle zero, not as the 4.
+    Assert.Equal(0, Assert.Single(await _repository.GetWindowSummariesAsync(from, to, MetricResolution.Minute)).Sum);
+    Assert.Equal(4, Assert.Single(await _repository.GetWindowSummariesAsync(from, to, MetricResolution.Hour)).Sum);
+  }
+
+  [Fact]
+  public async Task GetWindowSummariesAsync_ReturnsEmpty_WhenNoData()
+  {
+    var now = DateTimeOffset.UtcNow;
+    Assert.Empty(await _repository.GetWindowSummariesAsync(now.AddHours(-1), now));
+  }
 }

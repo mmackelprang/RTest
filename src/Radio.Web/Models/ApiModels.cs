@@ -194,6 +194,28 @@ public record MetricAggregateDto(
   double StdDev
 );
 
+/// <summary>
+/// One metric summarised over a window, from <c>/api/metrics/window</c> — mirror of
+/// <c>Radio.Metrics.MetricWindowSummary</c>. UI-2: the Diagnostics tiles read one of these per
+/// metric from a single call instead of pulling each metric's history separately.
+/// <c>Type</c> arrives as <c>"Counter"</c> or <c>"Gauge"</c> (radio-api serialises enums as strings).
+/// </summary>
+public record MetricWindowSummaryDto(
+  string Key,
+  string Type,
+  double Sum,
+  long SampleCount,
+  double? Min,
+  double? Max,
+  double LatestAverage,
+  DateTimeOffset? LatestTimestamp,
+  int BucketCount
+)
+{
+  /// <summary>True when radio-api recorded this metric as a counter.</summary>
+  public bool IsCounter => string.Equals(Type, "Counter", StringComparison.OrdinalIgnoreCase);
+}
+
 public record MetricEventRequest(
   string EventName,
   Dictionary<string, string>? Tags

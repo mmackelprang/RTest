@@ -28,11 +28,14 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
 
   public ApiNotFoundPipelineTests(RadioWebFactory factory) => _factory = factory;
 
-  /// <summary>Every <c>@page</c> route in the app, read out of the tree at <c>ab72bef3</c>.</summary>
+  /// <summary>
+  /// Every <c>@page</c> route in the app, read out of the tree at <c>ab72bef3</c>. UI-2 swapped
+  /// <c>/metrics</c> (deleted) for <c>/diagnostics</c> (Settings opened on its Diagnostics tab).
+  /// </summary>
   public static TheoryData<string> SpaDeepLinks() => new()
   {
-    "/", "/bare", "/bluetooth", "/devices", "/Error", "/history",
-    "/metrics", "/minimal", "/phone", "/radio", "/sleep", "/system",
+    "/", "/bare", "/bluetooth", "/devices", "/diagnostics", "/Error", "/history",
+    "/minimal", "/phone", "/radio", "/sleep", "/system",
   };
 
   // ─── Direction 1: an unmatched /api/* path must never look like a success ──────────────────
@@ -253,5 +256,21 @@ public class ApiNotFoundPipelineTests : IClassFixture<RadioWebFactory>
     Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
     Assert.Contains("_framework/blazor.web.js", body);
     Assert.Contains("<title>Radio Console</title>", body);
+  }
+
+  /// <summary>
+  /// UI-2 deleted <c>/metrics</c> (folded into Settings → Diagnostics at <c>/diagnostics</c>), and
+  /// UI-1 / D13 deleted <c>/diagnostic</c>. Neither may quietly come back as a page.
+  /// </summary>
+  [Theory]
+  [InlineData("/metrics")]
+  [InlineData("/diagnostic")]
+  public async Task RemovedPageRoute_IsNotServed(string path)
+  {
+    var response = await _factory.CreateClient().GetAsync(path);
+    var body = await response.Content.ReadAsStringAsync();
+
+    Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    Assert.DoesNotContain("_framework/blazor.web.js", body);
   }
 }

@@ -132,6 +132,21 @@ public class DevTrayTests : TestContext
     labels.Should().Contain("Verbose logs");
   }
 
+  /// <summary>
+  /// UI-5 / UI-2: the card used to navigate to <c>/metrics</c>, which UI-2 deleted. It now lands on
+  /// Settings → Diagnostics, where the <c>fingerprint.*</c> tiles live.
+  /// </summary>
+  [Fact]
+  public void FingerprintEventsCard_NavigatesToDiagnostics()
+  {
+    var nav = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    cut.Find("button[aria-label='View fingerprint events']").Click();
+
+    new Uri(nav.Uri).AbsolutePath.Should().Be("/diagnostics");
+  }
+
   [Fact]
   public void DevTray_Header_DeclaresDialogRoleAndAriaLabel()
   {

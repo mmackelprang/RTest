@@ -174,10 +174,8 @@
             <span class="nav-badge" aria-hidden="true">@_queueCount</span>
           }
         </button>
-        <a href="/metrics" class="nav-pill @(IsCurrentPage("/metrics") ? "nav-active" : "")" title="Metrics" aria-label="Metrics">
-          <RadzenIcon Icon="dashboard" />
-          <span class="nav-pill-label">Metrics</span>
-        </a>
+        @* UI-2 / D11: there is no Metrics pill. Diagnostics live under Settings (/diagnostics opens
+           the Settings page on its Diagnostics tab), so the Settings pill below lights for both. *@
         <a href="/devices" class="nav-pill @(IsCurrentPage("/devices") ? "nav-active" : "")" title="Devices" aria-label="Devices">
           <RadzenIcon Icon="devices" />
           <span class="nav-pill-label">Devices</span>
@@ -197,7 +195,7 @@
            title stays the short static "Settings", matching every other pill: mirroring the dynamic
            aria-label would give the element an identical accessible name and description, which
            several screen readers announce twice. *@
-        <a href="/system" class="nav-pill @(IsCurrentPage("/system") ? "nav-active" : "")"
+        <a href="/system" class="nav-pill @(IsCurrentPage("/system") || IsCurrentPage("/diagnostics") ? "nav-active" : "")"
            title="Settings"
            aria-label="@EncoderNavLabel">
           <RadzenIcon Icon="settings" />
