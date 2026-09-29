@@ -68,3 +68,12 @@ no `No audio data captured` warnings) before trusting a position reading.
 - ⚠ **`AUD-17`** — the precedent for "we read the wrong property off `org.bluez.MediaPlayer1`". **Read
   it before touching AVRCP.**
 - ⚠ **`AUD-10`** — its capture degradation can make any BT observation vacuous.
+
+---
+
+## ⭐ Re-measured 2026-09-29 — duration is fixed; the position still never advances between AVRCP events
+
+- `/api/audio/nowplaying` in BT mode now reports **`duration` 00:03:38 and `progressPercentage` 23 %** — the "duration null" half of the row is gone (AVRCP `Duration` is read; the phone publishes it: `Track["Duration"] = 218000`).
+- The position half remains, and the reason is in code: `BluetoothAudioSource.Position => _btPosition` (`:225`), set only in `OnPositionChanged` (`:990-992`) from BlueZ's `MediaPlayer1.Position`. Phones send that property on events (play/pause/seek/track change), not continuously, and **nothing extrapolates between them** — neither the source nor the Web UI. So the bar moves only when the phone happens to send an update.
+- This is achievable (the row's first question): extrapolate while `Playing` — last AVRCP position + time since it arrived, clamped to the duration — freeze on pause, re-anchor on each AVRCP update and on resume. Owner-independent; queued to be built after the batch touching `BluetoothAudioSource` (`AUD-34`) lands, to avoid a conflict in the same file.
+- The reads were taken while the phone was paused (`playing=False`, position steady at 00:00:50.177 across 8 s), which is correct behaviour and so says nothing about advancement.
