@@ -254,6 +254,18 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     // itself (_emitting).
     private int _emitting;
     private long _lastUnderrunLogTimestamp;
+
+    // AUD-15 follow-up: a phone pauses its A2DP stream for a moment between tracks, which the buffer
+    // cannot bridge — measured 2026-09-29, every underrun of a 13-minute session fell within a second of
+    // an AVRCP track change and none mid-song. Those are expected, so they are logged at Debug, not as a
+    // Warning into radio-api's journal. The render thread stamps each underrun (monotonic timestamp, no
+    // wall clock); NotifyProducerBoundary stamps the track change; EmitUnderruns compares them.
+    private long _lastUnderrunTimestamp;
+    private long _firstPendingUnderrunTimestamp;
+    private long _lastBoundaryTimestamp;
+    private static readonly TimeSpan UnderrunSettleInterval = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan UnderrunMaxDeferral = TimeSpan.FromSeconds(3);
+    private static readonly TimeSpan TrackBoundaryGrace = TimeSpan.FromSeconds(2);
     private long _lastCompensationLogTimestamp;
     private long _lastMissedDeadlineLogTimestamp;
     private long _missedDeadlinesAtLastLog;
@@ -352,22 +364,62 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             return;
         }
 
+        // Wait until the newest underrun is a settle interval old, so a track change reported just AFTER
+        // the gap (AVRCP metadata can trail the audio) is known before the line is classified. Capped, so
+        // continuous underruns — which never settle — still report within UnderrunMaxDeferral.
+        var newest = Volatile.Read(ref _lastUnderrunTimestamp);
+        var first = Volatile.Read(ref _firstPendingUnderrunTimestamp);
+        if (!Due(newest, UnderrunSettleInterval) && !Due(first, UnderrunMaxDeferral))
+        {
+            return;
+        }
+
         // Drain count and samples separately: an underrun landing between the two exchanges is split
-        // across this line and the next. Totals stay exact.
+        // across this line and the next. Totals stay exact. An underrun landing between the drain and the
+        // reset below loses only its "first pending" stamp, which affects classification, not the counts.
         var count = Interlocked.Exchange(ref _underrunCountSinceLastLog, 0);
         var samples = Interlocked.Exchange(ref _underrunSamplesSinceLastLog, 0);
+        Interlocked.Exchange(ref _firstPendingUnderrunTimestamp, 0);
         var now = _timeProvider.GetTimestamp();
+
+        // At a track change only if EVERY underrun in this line (first through newest) is within the grace
+        // of the most recent boundary; a mid-song underrun in the same line keeps it a Warning.
+        var boundary = Volatile.Read(ref _lastBoundaryTimestamp);
+        var atTrackChange = boundary != 0 && first != 0
+            && WithinGrace(first, boundary) && WithinGrace(newest, boundary);
 
         // Lock-free read of the buffer level: taking _bufferLock here would make the render callback
         // wait on the timer. An int read is atomic; the value is a snapshot either way.
-        _logger.LogWarning(
-            "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
-            "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
-            typeof(T).Name, count, samples,
-            SecondsSince(_lastUnderrunLogTimestamp),
-            Volatile.Read(ref _count), _maxBufferSamples, Interlocked.Read(ref _underrunCount));
+        if (atTrackChange)
+        {
+            _logger.LogDebug(
+                "Buffer underrun at a track change ({Type}): {Count} underruns, {Deficit} zero samples — the " +
+                "source paused its stream between tracks (buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
+                typeof(T).Name, count, samples,
+                Volatile.Read(ref _count), _maxBufferSamples, Interlocked.Read(ref _underrunCount));
+        }
+        else
+        {
+            _logger.LogWarning(
+                "⚠️ Buffer underrun ({Type}): {Count} underruns, {Deficit} zero samples in last {Interval:F1}s " +
+                "(buffer: {Buffered}/{Capacity}, total underruns: {TotalUnderruns})",
+                typeof(T).Name, count, samples,
+                SecondsSince(_lastUnderrunLogTimestamp),
+                Volatile.Read(ref _count), _maxBufferSamples, Interlocked.Read(ref _underrunCount));
+        }
         _lastUnderrunLogTimestamp = now;
     }
+
+    private bool WithinGrace(long a, long b) =>
+        Math.Abs(a - b) <= TrackBoundaryGrace.TotalSeconds * _timeProvider.TimestampFrequency;
+
+    /// <summary>
+    /// Tells the generator its producer has just crossed a track boundary (AUD-15 follow-up). Underruns
+    /// within <see cref="TrackBoundaryGrace"/> either side are the source pausing between tracks, and are
+    /// logged at Debug instead of Warning. Counters and metrics still include them. Safe from any thread.
+    /// </summary>
+    public void NotifyProducerBoundary() =>
+        Volatile.Write(ref _lastBoundaryTimestamp, _timeProvider.GetTimestamp());
 
     private void EmitCompensation()
     {
@@ -822,6 +874,9 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
             // AUD-15: a priming hold is deliberate silence while the buffer fills, not an underrun.
             if (_totalSamplesReceived > 0 && !_producerParked && !primingHold)
             {
+                var underrunAt = _timeProvider.GetTimestamp();
+                Volatile.Write(ref _lastUnderrunTimestamp, underrunAt);
+                Interlocked.CompareExchange(ref _firstPendingUnderrunTimestamp, underrunAt, 0);
                 Interlocked.Increment(ref _underrunCount);
                 Interlocked.Add(ref _underrunSamplesSinceLastLog, deficit);
                 Interlocked.Increment(ref _underrunCountSinceLastLog);
