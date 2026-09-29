@@ -405,4 +405,31 @@ public class AudioStateUpdateServiceCacheOrderingTests
     Assert.Equal(0, proxy.Attempts);
     svc.Dispose();
   }
+
+  /// <summary>
+  /// UI-15. A first poll that observes NO source is still a baseline, and the user's first
+  /// selection after it is a real change that must be broadcast. On `main` null doubled as the
+  /// "never observed" sentinel, so the none -> Radio transition was treated as the first run and
+  /// suppressed; only the SECOND selection broadcast. (Not reachable on the box today — every
+  /// logged startup restores a source before the first poll — but reachable whenever that
+  /// restore does not happen.)
+  /// </summary>
+  [Fact]
+  public async Task TheFirstSourceSelectedAfterStartingWithNone_IsBroadcast()
+  {
+    var (svc, proxy) = CreateService();
+    var radio = BareSource(AudioSourceType.Radio).Object;
+    var bluetooth = BareSource(AudioSourceType.Bluetooth).Object;
+
+    await InvokeCheck(svc, "CheckSourceChangedAsync", null, CancellationToken.None);
+    await InvokeCheck(svc, "CheckSourceChangedAsync", null, CancellationToken.None);
+    Assert.Equal(0, proxy.Attempts); // the baseline, and an unchanged "none", broadcast nothing
+
+    await InvokeCheck(svc, "CheckSourceChangedAsync", radio, CancellationToken.None);
+    Assert.Equal(new[] { "SourceChanged" }, proxy.Methods);
+
+    await InvokeCheck(svc, "CheckSourceChangedAsync", bluetooth, CancellationToken.None);
+    Assert.Equal(2, proxy.Attempts);
+    svc.Dispose();
+  }
 }
