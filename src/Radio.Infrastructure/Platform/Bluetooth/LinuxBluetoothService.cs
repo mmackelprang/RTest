@@ -1572,6 +1572,13 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
           // double-correcting the clock skew.
           disableDriftCompensation: _options.UseInputResampler);
 
+        // AUD-15: hold playback until real audio fills the target, instead of a silence pre-fill that the
+        // mixer drains while the stream is still connecting.
+        if (_options.CaptureTargetBufferMs > 0)
+        {
+          generator.ConfigurePriming(_options.CaptureTargetBufferMs / 1000f);
+        }
+
         StartCaptureSubprocess(generator, format, nodeName, nodeSerial);
 
         // Give the stream a moment to connect
@@ -2204,11 +2211,20 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       _captureCts?.Dispose();
       _captureCts = new CancellationTokenSource();
 
-      // The parked generator was pulled dry for the whole pause. Give it the same startup cushion a
-      // fresh generator gets (StartCaptureSubprocess pre-fills 0.5 s) — with ZEROED samples, since
-      // PreFillSilence on a used ring buffer would replay audio from before the pause — and let its
-      // underrun accounting resume.
-      parked.Generator.ResetWithSilence(0.5f);
+      // The parked generator was pulled dry for the whole pause. Give it the same start a fresh generator
+      // gets, and let its underrun accounting resume. With priming on (AUD-15, the default) that is an
+      // emptied buffer re-armed to fill with real audio before playing — silence is not a cushion when
+      // the producer has not started delivering yet. With priming off it is StartCaptureSubprocess's
+      // 0.5 s silence cushion, ZEROED, since PreFillSilence on a used ring buffer would replay audio
+      // from before the pause.
+      if (parked.Generator.IsPrimingEnabled)
+      {
+        parked.Generator.RearmPriming();
+      }
+      else
+      {
+        parked.Generator.ResetWithSilence(0.5f);
+      }
       parked.Generator.ProducerParked = false;
 
       IBtCaptureStream? stream = null;
@@ -2316,7 +2332,10 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       // libsamplerate resampler eliminates the BT-vs-speaker clock-skew
       // duplication. Default true; flip via BluetoothOptions.UseInputResampler.
       useResampler: _options.UseInputResampler,
-      initialResamplerRatio: _options.InputResamplerInitialRatio);
+      initialResamplerRatio: _options.InputResamplerInitialRatio,
+      // AUD-15: hold the buffer at the priming target by steering the resampler ratio.
+      bufferLevelProvider: () => generator.LevelWhilePlaying,
+      resamplerTargetSamples: generator.PrimeTargetSamples);
   }
 
   /// <summary>
@@ -2672,8 +2691,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
     _captureCts = new CancellationTokenSource();
 
-    // Pre-fill the buffer with silence before the stream starts delivering data.
-    generator.PreFillSilence(0.5f);
+    // Pre-fill the buffer with silence before the stream starts delivering data — unless the generator
+    // primes (AUD-15), in which case the silence would only be drained before real audio arrived.
+    if (!generator.IsPrimingEnabled)
+    {
+      generator.PreFillSilence(0.5f);
+    }
 
     // AUD-11 C-163: targetSerial == 0 means "pw-cli gave us the node NAME but we never saw its
     // object.serial line" (ParsePwCliOutputForBtNode returns exactly that on two of its paths). The

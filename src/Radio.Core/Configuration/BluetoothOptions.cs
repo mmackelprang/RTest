@@ -154,6 +154,16 @@ public class BluetoothOptions
   /// static seed with buffer-level-trend feedback.
   /// </summary>
   public double InputResamplerInitialRatio { get; set; } = 1.00025;
+
+  /// <summary>
+  /// Target fill of the BT playback buffer, in milliseconds (AUD-15). Two things use it: playback is
+  /// held until this much real audio is buffered (at start, after a pause re-bind, and after a run-dry),
+  /// and when <see cref="UseInputResampler"/> is on, a closed-loop controller nudges the resampler ratio
+  /// (within ±500 ppm) to hold the buffer here. It is the margin against delivery jitter; it adds the
+  /// same amount of latency, which a music-only A2DP sink does not notice. 0 turns both off and restores
+  /// the old silence pre-fill.
+  /// </summary>
+  public int CaptureTargetBufferMs { get; set; } = 100;
 }
 
 /// <summary>
