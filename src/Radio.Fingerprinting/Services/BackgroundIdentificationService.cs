@@ -22,6 +22,7 @@ public class BackgroundIdentificationService : BackgroundService
   private readonly IServiceProvider _serviceProvider;
   private readonly IOptionsMonitor<FingerprintingOptions> _optionsMonitor;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly FingerprintCaptureWatchdog? _captureWatchdog;
 
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions _options => _optionsMonitor.CurrentValue;
@@ -85,16 +86,22 @@ public class BackgroundIdentificationService : BackgroundService
   /// <param name="serviceProvider">The service provider for resolving scoped services.</param>
   /// <param name="options">The fingerprinting options.</param>
   /// <param name="metricsCollector">Optional metrics collector.</param>
+  /// <param name="captureWatchdog">
+  /// Optional AUD-18 watchdog. While it is latched, this service's per-cycle "no audio samples" Warning is
+  /// logged at Debug; the watchdog has already said it once.
+  /// </param>
   public BackgroundIdentificationService(
     ILogger<BackgroundIdentificationService> logger,
     IServiceProvider serviceProvider,
     IOptionsMonitor<FingerprintingOptions> options,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    FingerprintCaptureWatchdog? captureWatchdog = null)
   {
     _logger = logger;
     _serviceProvider = serviceProvider;
     _optionsMonitor = options;
     _metricsCollector = metricsCollector;
+    _captureWatchdog = captureWatchdog;
   }
 
   /// <summary>
@@ -160,6 +167,13 @@ public class BackgroundIdentificationService : BackgroundService
   {
     TrackIdentified?.Invoke(this, e);
   }
+
+  /// <summary>
+  /// Internal test hook: runs exactly one identification cycle, without <c>ExecuteAsync</c>'s start-up delay
+  /// or its idle wait. Returns what the cycle returns (true when audio was captured).
+  /// </summary>
+  internal Task<bool> RunOneCycleForTestingAsync(CancellationToken ct = default) =>
+    IdentifyCurrentAudioAsync(ct);
 
   /// <inheritdoc/>
   protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -305,7 +319,11 @@ public class BackgroundIdentificationService : BackgroundService
 
     if (samples == null)
     {
-      _logger.LogWarning("No audio samples captured after {Elapsed}ms", captureElapsed);
+      // AUD-18: the tap has already reported the window to the watchdog by the time it returns, so a latch
+      // set by this very window demotes this line too. Other null returns (silence, errors) are unaffected
+      // unless the watchdog happens to be latched when they occur.
+      var level = _captureWatchdog?.IsLatched == true ? LogLevel.Debug : LogLevel.Warning;
+      _logger.Log(level, "No audio samples captured after {Elapsed}ms", captureElapsed);
       UpdatePhase(FingerprintPhase.Error, "No audio samples captured");
       _metricsCollector?.Increment("fingerprint.identification_failures", 1,
         new Dictionary<string, string> { ["source"] = sourceTag, ["reason"] = "error" });
