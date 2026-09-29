@@ -34,6 +34,7 @@ public class VoicemailPlayerTests : TestContext
   private const string PlaybackId = "evp-1";
 
   private AudioStateStore _store = default!;
+  private readonly EventsApiHandler _events = new();
 
   private VoicemailItemDto Vm(int duration = 42, string? transcript = "hi",
     DateTime? received = null) =>
@@ -61,7 +62,7 @@ public class VoicemailPlayerTests : TestContext
       sp.GetRequiredService<AudioStateStore>(), NullLogger<ConsolePlaybackState>.Instance));
 
     Services.AddSingleton(new EventPlaybackApiService(
-      new HttpClient(new EventsApiHandler()) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
+      new HttpClient(_events) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
       NullLogger<EventPlaybackApiService>.Instance));
     Services.AddSingleton(new AudioApiService(
       new HttpClient(new MockHttpHandler("{}")) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) },
@@ -318,6 +319,78 @@ public class VoicemailPlayerTests : TestContext
     Assert.Contains("--:--", cut.Markup);
   }
 
+  // ── UI-16: drag-to-seek, committed on release (the AUD-28 ruling, by analogy) ────────────────
+
+  private const string SeekPath = "/api/audio/events/evp-1/seek";
+
+  private int SeekCount => _events.Paths.Count(p => p == SeekPath);
+
+  private async Task<IRenderedComponent<Radio.Web.Components.Shared.SeekBar>> PlayingSeekBarAsync(
+    IRenderedComponent<VoicemailPlayer> cut)
+  {
+    TapPlay(cut);
+    await BroadcastAsync(cut, Snapshot("Playing"));
+    return cut.FindComponent<Radio.Web.Components.Shared.SeekBar>();
+  }
+
+  [Fact]
+  public async Task Scrubber_Drag_SendsNoSeekUntilRelease_ThenExactlyOne()
+  {
+    var cut = RenderPlayer();
+    var seekBar = await PlayingSeekBarAsync(cut);
+
+    // ⚠ THIS IS THE ROW. Before UI-16 a drag delivered nothing the scrubber handled; it must now
+    // reposition the audio — once, on release, never per frame.
+    foreach (var f in new[] { 0.2, 0.3, 0.4, 0.5 })
+    {
+      await seekBar.Instance.OnDragMove(f);
+    }
+
+    Assert.Equal(0, SeekCount);
+
+    await seekBar.Instance.OnDragEnd(0.5);
+
+    Assert.Equal(1, SeekCount);
+  }
+
+  [Fact]
+  public async Task Scrubber_Tap_StillSeeksOnce()
+  {
+    var cut = RenderPlayer();
+    var seekBar = await PlayingSeekBarAsync(cut);
+
+    await seekBar.Instance.OnDragMove(0.25);
+    await seekBar.Instance.OnDragEnd(0.25);
+
+    Assert.Equal(1, SeekCount);
+  }
+
+  [Fact]
+  public async Task Scrubber_Drag_ReadoutFollowsTheFinger()
+  {
+    var cut = RenderPlayer();
+    var seekBar = await PlayingSeekBarAsync(cut);
+
+    // 0.5 of the 42 s snapshot duration.
+    await seekBar.Instance.OnDragMove(0.5);
+
+    Assert.Contains("0:21 / 0:42", cut.Find(".vm-time").TextContent);
+  }
+
+  [Fact]
+  public async Task Scrubber_BeforePlay_IsDisabled_AndDoesNotSeek()
+  {
+    var cut = RenderPlayer();
+    var seekBar = cut.FindComponent<Radio.Web.Components.Shared.SeekBar>();
+
+    Assert.Equal("true", cut.Find(".vm-scrubber").GetAttribute("aria-disabled"));
+
+    await seekBar.Instance.OnDragMove(0.5);
+    await seekBar.Instance.OnDragEnd(0.5);
+
+    Assert.Equal(0, SeekCount);
+  }
+
   /// <summary>
   /// Answers /api/audio/events* with a snapshot carrying the id every test above broadcasts against.
   /// </summary>
@@ -329,10 +402,16 @@ public class VoicemailPlayerTests : TestContext
   /// </remarks>
   private sealed class EventsApiHandler : HttpMessageHandler
   {
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _paths = new();
+
+    /// <summary>Every request path, in arrival order — how the UI-16 tests count seeks.</summary>
+    public IReadOnlyCollection<string> Paths => _paths;
+
     protected override Task<HttpResponseMessage> SendAsync(
       HttpRequestMessage request, CancellationToken cancellationToken)
     {
       var path = request.RequestUri?.AbsolutePath ?? string.Empty;
+      _paths.Enqueue(path);
       if (!path.StartsWith("/api/audio/events", StringComparison.Ordinal))
       {
         return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound));
