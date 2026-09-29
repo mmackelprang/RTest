@@ -24,8 +24,9 @@ namespace Radio.Web.Services;
 /// </para>
 ///
 /// <para>
-/// Idempotent set + event-on-change — mirrors <see cref="RadioPanelToggleService"/>
-/// so subscribers only see <see cref="StateChanged"/> on real transitions.
+/// Idempotent set + event-on-change, so subscribers only see <see cref="StateChanged"/> on real
+/// transitions. (This once cited <c>RadioPanelToggleService</c> as its model; UI-17 retired that
+/// service.)
 /// </para>
 /// </summary>
 public class GainPopoverService

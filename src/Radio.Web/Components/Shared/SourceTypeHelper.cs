@@ -75,9 +75,9 @@ public static class SourceTypeHelper
   /// <summary>
   /// Single source of truth for the "radio family" — the set of source types
   /// that share the radio control panel + tuning workflow. Consumed by
-  /// <c>MainLayout.IsRadioSource</c> (chevron click → "/" + show radio panel)
-  /// and <c>QueueHistoryPanel</c> (default-tab selection treats the whole
-  /// family as one source). Deliberately distinct from <see cref="HasDetail"/>
+  /// <see cref="GetDetailRoute"/> (chevron click → "/" + the Radio tab) and
+  /// <c>QueueHistoryPanel</c> (the Radio tab and default-tab selection treat the
+  /// whole family as one source, UI-17). Deliberately distinct from <see cref="HasDetail"/>
   /// — Bluetooth has a detail surface but is not part of the radio family.
   ///
   /// Future radio-style source types default to <c>false</c> and must be added
@@ -104,7 +104,7 @@ public static class SourceTypeHelper
   {
     /// <summary>Source has no detail surface; chevron tap is a no-op.</summary>
     None,
-    /// <summary>Radio family — navigate Home and show the radio control panel.</summary>
+    /// <summary>Radio family — navigate Home and open the centre panel's Radio tab (UI-17).</summary>
     RadioPanel,
     /// <summary>Bluetooth — navigate to the BT pairing page.</summary>
     BluetoothPage,

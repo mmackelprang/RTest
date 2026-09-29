@@ -1,8 +1,5 @@
 @page "/"
 @rendermode InteractiveServer
-@inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
-@inject AudioStateHubService HubService
-@implements IDisposable
 
 <PageTitle>Radio Console</PageTitle>
 
@@ -12,16 +9,11 @@
     <Radio.Web.Components.Shared.NowPlayingPanel />
   </div>
 
-  <!-- Center: Queue/History OR Radio Controls (flex fill ~688px) -->
+  <!-- Center (flex fill ~688px). UI-17: one tab strip for every source — queue, history, radio
+       controls and the Bluetooth connect panel are all tabs of this one component, so the page no
+       longer swaps it for RadioControlPanel. -->
   <div class="panel surface-raised" style="flex: 1;">
-    @if (RadioPanelToggle.IsRadioPanelVisible)
-    {
-      <Radio.Web.Components.Shared.RadioControlPanel />
-    }
-    else
-    {
-      <Radio.Web.Components.Shared.QueueHistoryPanel />
-    }
+    <Radio.Web.Components.Shared.QueueHistoryPanel />
   </div>
 
   <!-- Right: Visualizer (710px) -->
@@ -29,20 +21,3 @@
     <Radio.Web.Components.Shared.VisualizerPanel />
   </div>
 </div>
-
-@code {
-  protected override void OnInitialized()
-  {
-    RadioPanelToggle.RadioPanelToggled += OnRadioPanelToggled;
-  }
-
-  private async Task OnRadioPanelToggled()
-  {
-    await InvokeAsync(StateHasChanged);
-  }
-
-  public void Dispose()
-  {
-    RadioPanelToggle.RadioPanelToggled -= OnRadioPanelToggled;
-  }
-}

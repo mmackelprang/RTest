@@ -68,7 +68,7 @@ public class ConsolePlaybackChipTests : TestContext
       NullLogger<AudioStateHubService>.Instance, new ConfigurationBuilder().Build(),
       transport: new OfflineHubTransport()));
     Services.AddSingleton<DeviceDisplayStateService>();
-    Services.AddSingleton<RadioPanelToggleService>();
+    Services.AddSingleton<CentrePanelViewService>();
     Services.AddSingleton<GainPopoverService>();
     Services.AddSingleton<PhoneUnreadState>();
     Services.AddSingleton<EncoderFaultAnnouncer>();

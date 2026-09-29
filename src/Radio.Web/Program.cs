@@ -473,7 +473,7 @@ builder.Services.AddSingleton<CircuitHandler>(sp =>
 // Register application services
 builder.Services.AddScoped<Radio.Web.Services.QueuePersistenceService>();
 builder.Services.AddScoped<Radio.Web.Services.DeviceDisplayStateService>();
-builder.Services.AddScoped<Radio.Web.Services.RadioPanelToggleService>();
+builder.Services.AddScoped<Radio.Web.Services.CentrePanelViewService>();
 
 // Task #6 — Messages-feed contact-name resolution. Scoped so the per-circuit
 // cache (seeded from the merged contact set, backed by a deduped PBAP lookup)

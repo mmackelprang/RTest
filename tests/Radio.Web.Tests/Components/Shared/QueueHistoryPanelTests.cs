@@ -1,3 +1,4 @@
+using System.Net;
 using System.Reflection;
 using Bunit;
 using FluentAssertions;
@@ -19,19 +20,23 @@ namespace Radio.Web.Tests.Components.Shared;
 /// bUnit tests for <see cref="QueueHistoryPanel"/>.
 ///
 /// Originally introduced by PR 3 (now-playing row treatment + duration formatting
-/// invariants), expanded by PR 5 to cover the queue-split layout (handoff §P1·4):
-/// the panel now renders a two-column shape (list 1.6 / context 1) with a tab
-/// strip up top, a Queue Total LED tile, an Up Next tile, a Save-as-Playlist CTA,
-/// and a kebab menu replacing the inline ADD / CLEAR header buttons.
+/// invariants), expanded by PR 5 to cover the queue-split layout (handoff §P1·4),
+/// and reshaped by UI-17: the panel is now the whole Home centre, with one tab strip
+/// whose tabs depend on the active source (queue, history, radio controls, the
+/// Bluetooth connect panel), a Stats chip for the history stats, and Up Next gone.
 ///
-/// Per the FileBrowserDialog test pattern, the QueueApi / HistoryApi clients return
-/// null when no server is running, so RefreshQueueAsync sets <c>_queueItems</c> to
-/// empty and the queue grid is hidden. Empty-state assertions are sufficient to lock
-/// the structural contract; richer interaction tests belong in an E2E run.
+/// Every API client is backed by one <see cref="RoutedApiHandler"/>. Unstubbed
+/// endpoints answer 404, which the clients treat as "nothing there", so a test that
+/// stubs nothing sees the panel as it is with no source, no queue and no history.
+///
 /// </summary>
 public class QueueHistoryPanelTests : TestContext
 {
   private readonly ILoggerFactory _loggerFactory;
+  private readonly RoutedApiHandler _api = new();
+
+  private HttpClient NewClient() =>
+    new(_api, disposeHandler: false) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
   public QueueHistoryPanelTests()
   {
@@ -63,13 +68,23 @@ public class QueueHistoryPanelTests : TestContext
     // pre-existing assertions in this fixture continue to hold.
     Services.Configure<DisplayOptions>(_ => { });
 
-    Services.AddHttpClient<QueueApiService>();
-    Services.AddHttpClient<PlayHistoryApiService>();
-    Services.AddHttpClient<AudioApiService>();
-    Services.AddHttpClient<FileApiService>();
-    Services.AddHttpClient<PlaylistApiService>();
-    Services.AddHttpClient<SourcesApiService>();
-    Services.AddHttpClient<ConfigurationApiService>(); // dependency of QueuePersistenceService
+    // UI-17: every API client talks to one canned API. An empty table answers 404, which the
+    // clients treat as "nothing there" — the same state the old hermetic, unaddressed clients left
+    // the panel in — so tests stub only the endpoints their assertion depends on.
+    Services.AddSingleton(_ => new QueueApiService(NewClient(), NullLogger<QueueApiService>.Instance));
+    Services.AddSingleton(_ => new PlayHistoryApiService(NewClient(), NullLogger<PlayHistoryApiService>.Instance));
+    Services.AddSingleton(_ => new AudioApiService(NewClient(), NullLogger<AudioApiService>.Instance));
+    Services.AddSingleton(_ => new FileApiService(NewClient(), NullLogger<FileApiService>.Instance));
+    Services.AddSingleton(_ => new PlaylistApiService(NewClient(), NullLogger<PlaylistApiService>.Instance));
+    Services.AddSingleton(_ => new SourcesApiService(NewClient(), NullLogger<SourcesApiService>.Instance));
+    Services.AddSingleton(_ => new ConfigurationApiService(NewClient(), NullLogger<ConfigurationApiService>.Instance));
+    Services.AddSingleton(_ => new BluetoothApiService(NewClient(), NullLogger<BluetoothApiService>.Instance));
+    Services.AddSingleton(_ => new RadioApiService(NewClient(), NullLogger<RadioApiService>.Instance));
+
+    // The Radio tab hosts RadioControlPanel, which reads these options.
+    Services.AddOptions<RdsScrollOptions>();
+
+    Services.AddScoped<CentrePanelViewService>();
 
     Services.AddSingleton(sp =>
       new AudioStateHubService(
@@ -168,55 +183,39 @@ public class QueueHistoryPanelTests : TestContext
       .Should().Be(TimeSpan.FromMinutes(2) + TimeSpan.FromSeconds(15));
   }
 
-  // ── PR 5: queue-split layout assertions ──
+  // ── PR 5 queue-split layout, as reshaped by UI-17 ──
 
   [Fact]
-  public void QueueHistoryPanel_RendersSplitLayout_WithListAndContextColumns()
+  public void HistoryView_StatsChipOff_HasNoContextColumn_ListTakesTheWidth()
   {
-    // The two-column split (handoff §P1·4) replaces the single RadzenTabs body.
-    // Both columns must be in the DOM regardless of API availability.
+    // UI-17 point 1: with the Stats chip off (the default) the History view has no right column.
     var cut = RenderComponent<QueueHistoryPanel>();
+    WaitForInit(cut);
     cut.FindAll(".queue-split").Count.Should().Be(1);
     cut.FindAll(".queue-split-list-col").Count.Should().Be(1);
-    cut.FindAll(".queue-split-context-col").Count.Should().Be(1);
+    cut.FindAll(".queue-split-context-col").Count.Should().Be(0);
+    cut.FindAll(".history-stats-tile").Count.Should().Be(0);
   }
 
   [Fact]
-  public void QueueHistoryPanel_TabStrip_RendersQueueAndHistoryPills()
+  public void Kebab_ShowsOnlyOnTheQueueView()
   {
-    // Default state shows Queue and History tabs. The Radio pill is conditional
-    // on the active source being a radio family member, which isn't available
-    // here without an API, so it should NOT render.
-    var cut = RenderComponent<QueueHistoryPanel>();
-    var tabs = cut.FindAll(".queue-split-tab");
-    tabs.Count.Should().BeGreaterThanOrEqualTo(2);
+    // UI-17 point 3: the kebab (Add Files / Load Playlist / Clear All) goes with the Queue view.
+    var cut = RenderOn("FilePlayer");
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0, "File Player with an empty queue opens on History");
 
-    var tabLabels = tabs.Select(t => t.TextContent.Trim()).ToList();
-    tabLabels.Should().Contain(s => s.StartsWith("Queue"));
-    tabLabels.Should().Contain("History");
-  }
-
-  [Fact]
-  public void QueueHistoryPanel_TabStrip_RendersKebabButton()
-  {
-    // The ADD / CLEAR header buttons move into a kebab menu (handoff §P1·4 step 4).
-    // The kebab affordance itself is always present; its menu opens on click.
-    var cut = RenderComponent<QueueHistoryPanel>();
+    ClickTab(cut, "Queue");
     cut.FindAll(".queue-split-kebab").Count.Should().Be(1);
   }
 
   [Fact]
-  public void QueueHistoryPanel_QueueTab_RightColumn_ShowsAllThreeTiles()
+  public void QueueView_RightColumn_HasQueueTotalAndSave_ButNoUpNext()
   {
-    // The right column on the Queue tab carries the Queue Total LED, Up Next
-    // thumbs, and Save-as-Playlist CTA. The Save CTA is disabled when the
-    // queue is empty. (The component's default tab resolves to History when
-    // there is no API server because SetDefaultTabForSourceAsync's catch-all
-    // picks History — so we click into Queue explicitly first.)
-    var cut = RenderComponent<QueueHistoryPanel>();
+    // UI-17 point 2: Queue Total and Save as playlist stay; Up Next is gone (it repeated the list).
+    var cut = RenderOn("FilePlayer");
     ClickTab(cut, "Queue");
     cut.FindAll(".queue-total-tile").Count.Should().Be(1);
-    cut.FindAll(".up-next-tile").Count.Should().Be(1);
+    cut.FindAll(".up-next-tile").Count.Should().Be(0);
     var savePlaylist = cut.FindAll(".save-playlist-tile");
     savePlaylist.Count.Should().Be(1);
     savePlaylist[0].HasAttribute("disabled").Should().BeTrue(
@@ -228,7 +227,7 @@ public class QueueHistoryPanelTests : TestContext
   {
     // The LED value is the only place in the right column using --font-led
     // amber — locked here so a future refactor of design tokens trips this test.
-    var cut = RenderComponent<QueueHistoryPanel>();
+    var cut = RenderOn("FilePlayer");
     ClickTab(cut, "Queue");
     var ledValue = cut.Find(".queue-total-tile-value");
     ledValue.TextContent.Trim().Should().NotBeEmpty();
@@ -243,16 +242,17 @@ public class QueueHistoryPanelTests : TestContext
   // global ShowSeconds setting because :ss precision on a forward-looking
   // track-total estimate is meaningless.
   //
-  // The fixture has no API server so _totalRuntime / _queueItems stay at
-  // their initial values; we set them via reflection to drive the conditional
-  // ends-prediction branch.
+  // The fixture stubs no queue, so _totalRuntime / _queueItems stay at their
+  // initial values; we set them via reflection to drive the conditional
+  // ends-prediction branch. File Player is the source because the Queue tab
+  // only exists there (UI-17).
 
   [Fact]
   public void QueueHistoryPanel_EndsTile_12HourFormat_RendersAmOrPmSuffix()
   {
     Services.Configure<DisplayOptions>(o => o.TimeFormat = "12h");
 
-    var cut = RenderComponent<QueueHistoryPanel>();
+    var cut = RenderOn("FilePlayer");
     ClickTab(cut, "Queue");
 
     InjectQueueRuntime(cut, TimeSpan.FromMinutes(30), itemCount: 5);
@@ -277,7 +277,7 @@ public class QueueHistoryPanelTests : TestContext
       o.ShowSeconds = true;
     });
 
-    var cut = RenderComponent<QueueHistoryPanel>();
+    var cut = RenderOn("FilePlayer");
     ClickTab(cut, "Queue");
 
     InjectQueueRuntime(cut, TimeSpan.FromMinutes(30), itemCount: 5);
@@ -317,43 +317,34 @@ public class QueueHistoryPanelTests : TestContext
     cut.InvokeAsync(() => stateHasChanged!.Invoke(instance, null)).GetAwaiter().GetResult();
   }
 
-  [Fact]
-  public void QueueHistoryPanel_UpNextTile_EmptyState_ShowsPlaceholder()
-  {
-    // With an empty queue, the Up Next tile renders a friendly placeholder
-    // instead of stub rows — keeps the right column from feeling broken.
-    var cut = RenderComponent<QueueHistoryPanel>();
-    ClickTab(cut, "Queue");
-    cut.FindAll(".up-next-empty").Count.Should().Be(1);
-  }
 
   [Fact]
   public void QueueHistoryPanel_OpeningKebab_ShowsAddFilesAndClearAllItems()
   {
-    // Click the kebab — the menu fly-out should list Add Files and Clear All
-    // (per the handoff §P1·4 spec, those move out of the inline header strip).
-    var cut = RenderComponent<QueueHistoryPanel>();
+    var cut = RenderOn("FilePlayer");
+    ClickTab(cut, "Queue");
     cut.Find(".queue-split-kebab").Click();
     cut.Markup.Should().Contain("Add Files");
+    cut.Markup.Should().Contain("Load Playlist");
     cut.Markup.Should().Contain("Clear All");
   }
 
   [Fact]
-  public void QueueHistoryPanel_SwitchingToHistoryTab_SwapsRightColumnContent()
+  public void SwitchingFromQueueToHistory_SwapsRightColumnContent()
   {
-    // Clicking the History tab moves _activeTab → TabHistory; the queue-total /
-    // up-next / save-cta tiles are replaced by the history-stats tile inside the
-    // same right-column flex container (it is NOT remounted, just its children
-    // change). We assert the tile-presence transition.
-    var cut = RenderComponent<QueueHistoryPanel>();
+    // Queue view → its tiles; History view with the chip off → no right column at all; with the chip
+    // on → the stats tile.
+    var cut = RenderOn("FilePlayer");
     ClickTab(cut, "Queue");
     cut.FindAll(".queue-total-tile").Count.Should().Be(1);
     cut.FindAll(".history-stats-tile").Count.Should().Be(0);
 
-    // Now click History.
     ClickTab(cut, "History");
     cut.FindAll(".queue-total-tile").Count.Should().Be(0);
-    cut.FindAll(".up-next-tile").Count.Should().Be(0);
+    cut.FindAll(".save-playlist-tile").Count.Should().Be(0);
+    cut.FindAll(".history-stats-tile").Count.Should().Be(0);
+
+    cut.Find(".centre-stats-chip").Click();
     cut.FindAll(".history-stats-tile").Count.Should().Be(1);
   }
 
@@ -361,7 +352,8 @@ public class QueueHistoryPanelTests : TestContext
   public void QueueHistoryPanel_HistoryStatsTile_HasTotalPlaysTopTrackTopArtistRows()
   {
     var cut = RenderComponent<QueueHistoryPanel>();
-    ClickTab(cut, "History");
+    WaitForInit(cut);
+    cut.Find(".centre-stats-chip").Click();
 
     var labels = cut.FindAll(".history-stats-label")
       .Select(e => e.TextContent.Trim())
@@ -407,9 +399,8 @@ public class QueueHistoryPanelTests : TestContext
   /// track" state AND force the Queue tab active. Mirrors the
   /// SetRecognitionState pattern in NowPlayingPanelTests — same idea,
   /// different field set. The active-tab flip is the load-bearing piece:
-  /// without an API server, <c>SetDefaultTabForSourceAsync</c> drops the
-  /// component on the History tab (the catch branch), so the queue rows
-  /// would never render.
+  /// with no source stubbed, the panel opens on History (UI-17 default for
+  /// "no source"), so the queue rows would never render.
   /// </summary>
   private static void SeedQueueItems(
     IRenderedComponent<QueueHistoryPanel> cut,
@@ -420,7 +411,7 @@ public class QueueHistoryPanelTests : TestContext
     typeof(QueueHistoryPanel).GetField("_queueItems", flags)!
       .SetValue(instance, items.ToList());
     // Force the Queue tab + mark the user-override flag so OnParametersSet /
-    // any subsequent SetDefaultTabForSourceAsync don't snap us back.
+    // a later default-tab pass (source change) does not snap us back.
     typeof(QueueHistoryPanel).GetField("_activeTab", flags)!
       .SetValue(instance, 0 /* TabQueue */);
     typeof(QueueHistoryPanel).GetField("_userOverrodeTab", flags)!
@@ -458,6 +449,7 @@ public class QueueHistoryPanelTests : TestContext
     };
 
     var cut = RenderComponent<QueueHistoryPanel>();
+    WaitForInit(cut);
     SeedQueueItems(cut, items);
 
     // Exactly one currently-playing row, carrying both the class and the glyph.
@@ -469,5 +461,568 @@ public class QueueHistoryPanelTests : TestContext
     var glyphs = cut.FindAll(".queue-row-glyph");
     glyphs.Count.Should().Be(1, "the play-glyph is unique to the currently-playing row");
     glyphs[0].TextContent.Trim().Should().Be("▶");
+  }
+
+  // ── UI-17: the centre panel shows what each source needs ──────────────────────────────────────
+  //
+  // Every render below waits for OnInitializedAsync to finish before asserting (WaitForInit): the
+  // panel starts on History and only moves to its source's default after its API reads, so an
+  // assertion made too early would see History for every source and pass the History rows by
+  // accident.
+  //
+  // The Bluetooth tests drive RefreshBluetoothStatusAsync — the method the 5 s poll calls — rather
+  // than waiting for the poll. The poll can still tick during a slow test; that is harmless, because
+  // a tick reads the same canned status the test just set and applies the same transition, and a
+  // transition is applied once (it is keyed on the connected state CHANGING).
+
+  private const string BtAddress = "AA:BB:CC:DD:EE:01";
+
+  private void StubSource(string? sourceType)
+  {
+    if (sourceType == null)
+    {
+      _api.Route(HttpMethod.Get, "/api/sources/primary", HttpStatusCode.NotFound, null);
+      return;
+    }
+    _api.Get("/api/sources/primary", new AudioSourceDto
+    {
+      Id = sourceType.ToLowerInvariant(),
+      Name = sourceType,
+      Type = sourceType,
+      Category = "Primary",
+      State = "Active",
+    });
+  }
+
+  private void StubQueue(int count)
+  {
+    List<QueueItemDto> items = Enumerable.Range(0, count)
+      .Select(i => new QueueItemDto(i, $"Track {i}", "Artist", "Album", "3:00", false, "Upcoming", i))
+      .ToList();
+    _api.Get("/api/queue/full", items);
+  }
+
+  private void StubBluetooth(bool connected)
+  {
+    BluetoothDeviceDto phone = new()
+    {
+      Address = BtAddress,
+      Name = "Test Phone",
+      IsPaired = true,
+      IsConnected = connected,
+    };
+    _api.Get("/api/bluetooth/status", new BluetoothStatusDto
+    {
+      IsAvailable = true,
+      State = "On",
+      ConnectedDevice = connected ? phone : null,
+      PairedDevices = [phone],
+    });
+  }
+
+  private IRenderedComponent<QueueHistoryPanel> RenderOn(
+    string? sourceType, int queueCount = 0, bool bluetoothConnected = false)
+  {
+    StubSource(sourceType);
+    StubQueue(queueCount);
+    StubBluetooth(bluetoothConnected);
+    IRenderedComponent<QueueHistoryPanel> cut = RenderComponent<QueueHistoryPanel>();
+    WaitForInit(cut);
+    return cut;
+  }
+
+  /// <summary>
+  /// Waits until OnInitializedAsync has reached its last step (the history read), by which point the
+  /// default tab and any pending view request have been applied, then for the render that follows.
+  /// </summary>
+  private void WaitForInit(IRenderedComponent<QueueHistoryPanel> cut)
+  {
+    cut.WaitForAssertion(
+      () => _api.Requests.Should().Contain(r => r.Path == "/api/playhistory/statistics"),
+      TimeSpan.FromSeconds(10));
+    cut.WaitForAssertion(() => cut.FindAll(".centre-panel").Count.Should().Be(1), TimeSpan.FromSeconds(10));
+  }
+
+  /// <summary>Which view the body shows, read from the DOM.</summary>
+  private static string ActiveView(IRenderedComponent<QueueHistoryPanel> cut)
+  {
+    if (cut.FindAll(".rcp-root").Count > 0)
+    {
+      return "Radio";
+    }
+    if (cut.FindAll(".bt-connect-panel").Count > 0)
+    {
+      return "Bluetooth";
+    }
+    if (cut.FindAll(".queue-total-tile").Count > 0)
+    {
+      return "Queue";
+    }
+    if (cut.FindAll(".queue-split").Count > 0)
+    {
+      return "History";
+    }
+    return "?";
+  }
+
+  private static List<string> TabLabels(IRenderedComponent<QueueHistoryPanel> cut) =>
+    cut.FindAll(".queue-split-tab").Select(t => t.TextContent.Trim()).ToList();
+
+  private static string? ActiveTabLabel(IRenderedComponent<QueueHistoryPanel> cut) =>
+    cut.FindAll(".queue-split-tab.is-active").Select(t => t.TextContent.Trim()).SingleOrDefault();
+
+  private static void AssertView(IRenderedComponent<QueueHistoryPanel> cut, string view) =>
+    cut.WaitForAssertion(() => ActiveView(cut).Should().Be(view), TimeSpan.FromSeconds(10));
+
+  private Task FireSourceChangedAsync(IRenderedComponent<QueueHistoryPanel> cut)
+  {
+    AudioStateHubService hub = Services.GetRequiredService<AudioStateHubService>();
+    return cut.InvokeAsync(() => HubEventFire.FireAsync(hub, "SourceChanged"));
+  }
+
+  private static Task RefreshBluetoothAsync(IRenderedComponent<QueueHistoryPanel> cut) =>
+    cut.InvokeAsync(() => cut.Instance.RefreshBluetoothStatusAsync());
+
+  // --- pure rules ---
+
+  [Theory]
+  [InlineData("FilePlayer", 0, false, QueueHistoryPanel.TabHistory)]
+  [InlineData("FilePlayer", 3, false, QueueHistoryPanel.TabQueue)]
+  [InlineData("Vinyl", 3, false, QueueHistoryPanel.TabHistory)]
+  [InlineData("GenericUSB", 3, false, QueueHistoryPanel.TabHistory)]
+  [InlineData("TestTone", 3, false, QueueHistoryPanel.TabHistory)]
+  [InlineData("RTLSDRCore", 3, false, QueueHistoryPanel.TabRadio)]
+  [InlineData("Radio", 0, false, QueueHistoryPanel.TabRadio)]
+  [InlineData("RF320", 0, false, QueueHistoryPanel.TabRadio)]
+  [InlineData("Bluetooth", 3, false, QueueHistoryPanel.TabBluetooth)]
+  [InlineData("Bluetooth", 3, true, QueueHistoryPanel.TabHistory)]
+  [InlineData(null, 3, false, QueueHistoryPanel.TabHistory)]
+  public void DefaultTabFor_FollowsTheSourceMatrix(string? source, int queueCount, bool btConnected, int expected)
+  {
+    QueueHistoryPanel.DefaultTabFor(source, queueCount, btConnected).Should().Be(expected);
+  }
+
+  // --- the rendered matrix ---
+
+  [Theory]
+  [InlineData("FilePlayer", 0, false, "History", new[] { "Queue · 0", "History" })]
+  [InlineData("FilePlayer", 2, false, "Queue", new[] { "Queue · 2", "History" })]
+  [InlineData("Vinyl", 2, false, "History", new string[0])]
+  [InlineData("GenericUSB", 2, false, "History", new string[0])]
+  [InlineData("TestTone", 2, false, "History", new string[0])]
+  [InlineData("RTLSDRCore", 2, false, "Radio", new[] { "Radio", "History" })]
+  [InlineData("Bluetooth", 2, false, "Bluetooth", new[] { "Connect", "History" })]
+  [InlineData("Bluetooth", 2, true, "History", new[] { "History", "Devices" })]
+  public void EachSource_OpensOnItsDefaultView_WithItsTabs(
+    string source, int queueCount, bool btConnected, string expectedView, string[] expectedTabs)
+  {
+    var cut = RenderOn(source, queueCount, btConnected);
+
+    AssertView(cut, expectedView);
+    TabLabels(cut).Should().Equal(expectedTabs);
+  }
+
+  [Theory]
+  [InlineData("Vinyl", false)]
+  [InlineData("GenericUSB", false)]
+  [InlineData("TestTone", false)]
+  [InlineData("RTLSDRCore", false)]
+  [InlineData("Bluetooth", false)]
+  [InlineData("Bluetooth", true)]
+  public void NonFilePlayerSources_HaveNoQueueTab_AndNoKebab(string source, bool btConnected)
+  {
+    // A queue exists (3 tracks) so a Queue tab would have something to show — and still must not.
+    var cut = RenderOn(source, queueCount: 3, bluetoothConnected: btConnected);
+
+    TabLabels(cut).Should().NotContain(label => label.StartsWith("Queue"));
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
+  }
+
+  // --- override rule ---
+
+  [Fact]
+  public async Task TappedTab_SticksAcrossARepeatedSourceChanged_ButNotAcrossASourceSwitch()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    AssertView(cut, "Radio");
+
+    ClickTab(cut, "History");
+    AssertView(cut, "History");
+
+    // SourceChanged for the SAME source (it fires twice per real switch) must not undo the tap.
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "History");
+
+    // A real switch clears the override: away to Vinyl, then back — radio opens on Radio again.
+    StubSource("Vinyl");
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().BeEmpty();
+
+    StubSource("RTLSDRCore");
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "Radio");
+  }
+
+  [Fact]
+  public async Task SwitchingToFilePlayer_OpensOnQueueWhenItHasTracks()
+  {
+    var cut = RenderOn("Vinyl", queueCount: 2);
+    AssertView(cut, "History");
+
+    StubSource("FilePlayer");
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "Queue");
+    ActiveTabLabel(cut).Should().Be("Queue · 2");
+  }
+
+  // --- Stats chip ---
+
+  [Fact]
+  public void StatsChip_IsOffByDefault()
+  {
+    var cut = RenderOn("Vinyl");
+
+    var chip = cut.Find(".centre-stats-chip");
+    chip.GetAttribute("aria-pressed").Should().Be("false");
+    chip.ClassList.Should().NotContain("is-on");
+    cut.FindAll(".history-stats-tile").Count.Should().Be(0);
+  }
+
+  [Fact]
+  public void StatsChip_Toggling_PersistsTheValueToTheConfigStore()
+  {
+    _api.Post("/api/configuration/" + QueueHistoryPanel.UiPreferencesSection);
+    var cut = RenderOn("Vinyl");
+
+    cut.Find(".centre-stats-chip").Click();
+    cut.WaitForAssertion(() => _api.Requests.Should().Contain(r =>
+      r.Method == HttpMethod.Post
+      && r.Path == "/api/configuration/ui.centrePanel"
+      && r.Body != null && r.Body.Contains("\"showStats\":true")), TimeSpan.FromSeconds(10));
+    cut.FindAll(".history-stats-tile").Count.Should().Be(1);
+    cut.Find(".centre-stats-chip").GetAttribute("aria-pressed").Should().Be("true");
+
+    cut.Find(".centre-stats-chip").Click();
+    cut.WaitForAssertion(() => _api.Requests.Should().Contain(r =>
+      r.Method == HttpMethod.Post
+      && r.Path == "/api/configuration/ui.centrePanel"
+      && r.Body != null && r.Body.Contains("\"showStats\":false")), TimeSpan.FromSeconds(10));
+    cut.FindAll(".history-stats-tile").Count.Should().Be(0);
+  }
+
+  [Fact]
+  public void StatsChip_PersistedOn_IsRestoredOnLoad()
+  {
+    _api.Get("/api/configuration/ui.centrePanel", new Dictionary<string, object> { ["showStats"] = true });
+    var cut = RenderOn("Vinyl");
+
+    cut.Find(".centre-stats-chip").GetAttribute("aria-pressed").Should().Be("true");
+    cut.FindAll(".history-stats-tile").Count.Should().Be(1);
+  }
+
+  [Fact]
+  public void StatsChip_ShowsOnlyOnTheHistoryView()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    AssertView(cut, "Radio");
+    cut.FindAll(".centre-stats-chip").Count.Should().Be(0);
+
+    ClickTab(cut, "History");
+    cut.FindAll(".centre-stats-chip").Count.Should().Be(1);
+  }
+
+  // --- Queue nav pill / radio chevron (CentrePanelViewService) ---
+
+  [Fact]
+  public async Task QueuePill_OnANonFilePlayerSource_ShowsTheQueueView_WithoutSwitchingSource_AndHidesTheKebab()
+  {
+    var cut = RenderOn("RTLSDRCore", queueCount: 2);
+    AssertView(cut, "Radio");
+
+    CentrePanelViewService views = Services.GetRequiredService<CentrePanelViewService>();
+    await cut.InvokeAsync(() => views.RequestViewAsync(CentrePanelView.Queue));
+
+    AssertView(cut, "Queue");
+    TabLabels(cut).Should().Equal("Radio", "History", "Queue · 2");
+    // Add Files / Load Playlist make the API switch the source to File Player, so the kebab is
+    // File Player only; Save as playlist does not switch source and stays.
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
+    cut.FindAll(".save-playlist-tile").Count.Should().Be(1);
+    views.PendingView.Should().BeNull("the mounted panel consumed the request");
+    _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Post && r.Path == "/api/sources",
+      "viewing the queue must not switch source");
+
+    // Leaving the queue view by its History tab drops the transient Queue tab.
+    ClickTab(cut, "History");
+    TabLabels(cut).Should().Equal("Radio", "History");
+  }
+
+  [Fact]
+  public async Task QueuePill_TappedOnAnotherPage_IsCollectedWhenThePanelMounts()
+  {
+    // MainLayout navigates to "/" and then requests the view; if no panel is mounted yet the request
+    // waits in the service.
+    CentrePanelViewService views = Services.GetRequiredService<CentrePanelViewService>();
+    await views.RequestViewAsync(CentrePanelView.Queue);
+
+    var cut = RenderOn("Vinyl", queueCount: 1);
+
+    AssertView(cut, "Queue");
+    TabLabels(cut).Should().Equal("History", "Queue · 1");
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
+    views.PendingView.Should().BeNull();
+  }
+
+  [Fact]
+  public async Task RadioChevron_JumpsBackToTheRadioTab()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+    AssertView(cut, "History");
+
+    CentrePanelViewService views = Services.GetRequiredService<CentrePanelViewService>();
+    await cut.InvokeAsync(() => views.RequestViewAsync(CentrePanelView.Radio));
+
+    AssertView(cut, "Radio");
+  }
+
+  // --- Bluetooth auto-switch ---
+
+  [Fact]
+  public async Task Bluetooth_DeviceConnecting_WhileOnConnect_SwitchesToHistory_AndBackOnDisconnect()
+  {
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    AssertView(cut, "Bluetooth");
+    ActiveTabLabel(cut).Should().Be("Connect");
+
+    StubBluetooth(connected: true);
+    await RefreshBluetoothAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().Equal("History", "Devices");
+
+    StubBluetooth(connected: false);
+    await RefreshBluetoothAsync(cut);
+    AssertView(cut, "Bluetooth");
+    TabLabels(cut).Should().Equal("Connect", "History");
+  }
+
+  [Fact]
+  public async Task Bluetooth_AutoSwitch_RespectsATappedTab()
+  {
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+
+    // The owner taps away and back: now on Connect by choice.
+    ClickTab(cut, "History");
+    ClickTab(cut, "Connect");
+    AssertView(cut, "Bluetooth");
+
+    StubBluetooth(connected: true);
+    await RefreshBluetoothAsync(cut);
+    AssertView(cut, "Bluetooth");
+    ActiveTabLabel(cut).Should().Be("Devices", "the same panel, relabelled, and not auto-switched away");
+
+    // And with History chosen by tap, a disconnect does not pull the panel to Connect.
+    ClickTab(cut, "History");
+    StubBluetooth(connected: false);
+    await RefreshBluetoothAsync(cut);
+    AssertView(cut, "History");
+  }
+
+  [Fact]
+  public async Task Bluetooth_UnreadableStatus_DoesNotFlipTheTab()
+  {
+    var cut = RenderOn("Bluetooth", bluetoothConnected: true);
+    AssertView(cut, "History");
+
+    _api.Route(HttpMethod.Get, "/api/bluetooth/status", HttpStatusCode.InternalServerError, null);
+    await RefreshBluetoothAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().Equal("History", "Devices");
+  }
+
+  [Fact]
+  public void BluetoothConnectPanel_ConnectButton_CallsTheExistingConnectEndpoint_ThenAutoSwitches()
+  {
+    _api.Post("/api/bluetooth/connect");
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    AssertView(cut, "Bluetooth");
+    cut.Markup.Should().Contain("Test Phone");
+
+    // The server will report the phone connected once the connect call has gone through.
+    StubBluetooth(connected: true);
+    cut.FindAll(".bt-device-action").Single(b => b.TextContent.Trim() == "Connect").Click();
+
+    cut.WaitForAssertion(() => _api.Requests.Should().Contain(r =>
+      r.Method == HttpMethod.Post && r.Path == "/api/bluetooth/connect"
+      && r.Body != null && r.Body.Contains(BtAddress)), TimeSpan.FromSeconds(10));
+    AssertView(cut, "History");
+  }
+
+  [Fact]
+  public void BluetoothConnectPanel_LinksToTheBluetoothPageForForgetAndAdapterDetails()
+  {
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    cut.Find("a.bt-connect-settings-link").GetAttribute("href").Should().Be("/bluetooth");
+  }
+
+  // --- review fixes: an unreadable source is not a source change ---
+
+  private void StubSourceUnreadable() =>
+    _api.Route(HttpMethod.Get, "/api/sources/primary", HttpStatusCode.InternalServerError, null);
+
+  private static Task PollAsync(IRenderedComponent<QueueHistoryPanel> cut) =>
+    cut.InvokeAsync(() => cut.Instance.PollTickAsync());
+
+  [Fact]
+  public async Task SourceReadFailure_KeepsTheSourceTabsAndTheOverride_AndThePollReReadsIt()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+
+    StubSourceUnreadable();
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().Equal("Radio", "History");
+
+    // The API is back and the source never changed: the poll's re-read must keep the tapped tab.
+    StubSource("RTLSDRCore");
+    await PollAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().Equal("Radio", "History");
+    _api.Requests.Count(r => r.Path == "/api/sources/primary").Should().BeGreaterThanOrEqualTo(3,
+      "mount, the failed event read, and the poll's re-read");
+  }
+
+  [Fact]
+  public async Task SourceReadFailure_ThenARealChange_IsAppliedByThePoll()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+
+    StubSourceUnreadable();
+    await FireSourceChangedAsync(cut);
+
+    StubSource("Bluetooth");
+    StubBluetooth(connected: false);
+    await PollAsync(cut);
+    AssertView(cut, "Bluetooth");
+    TabLabels(cut).Should().Equal("Connect", "History");
+  }
+
+  [Fact]
+  public async Task SourceUnreadableOnFirstMount_IsRetriedByThePoll()
+  {
+    StubSourceUnreadable();
+    StubQueue(0);
+    var cut = RenderComponent<QueueHistoryPanel>();
+    WaitForInit(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().BeEmpty();
+
+    StubSource("RTLSDRCore");
+    await PollAsync(cut);
+    AssertView(cut, "Radio");
+  }
+
+  [Fact]
+  public async Task NoPrimarySource_404_IsARealChange()
+  {
+    var cut = RenderOn("RTLSDRCore");
+    ClickTab(cut, "History");
+
+    StubSource(null); // 404: the API says there is no primary source
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "History");
+    TabLabels(cut).Should().BeEmpty();
+
+    StubSource("RTLSDRCore");
+    await FireSourceChangedAsync(cut);
+    AssertView(cut, "Radio");
+  }
+
+  [Fact]
+  public async Task Poll_WithTheSourceReadAndNotBluetooth_MakesNoRequests()
+  {
+    var cut = RenderOn("Vinyl");
+    int before = _api.Requests.Count;
+
+    await PollAsync(cut);
+
+    _api.Requests.Count.Should().Be(before);
+  }
+
+  // --- review fixes: a scan the Connect panel started is stopped when it goes away ---
+
+  private void StartScan(IRenderedComponent<QueueHistoryPanel> cut)
+  {
+    cut.Find(".bt-scan-button").Click();
+    cut.WaitForAssertion(() => _api.Requests.Should().Contain(r =>
+      r.Method == HttpMethod.Post && r.Path == "/api/bluetooth/discovery/start"), TimeSpan.FromSeconds(10));
+  }
+
+  private bool StopRequested() =>
+    _api.Requests.Any(r => r.Method == HttpMethod.Post && r.Path == "/api/bluetooth/discovery/stop");
+
+  [Fact]
+  public void BluetoothScan_StartedByThePanel_IsStoppedWhenTheTabChanges()
+  {
+    _api.Post("/api/bluetooth/discovery/start").Post("/api/bluetooth/discovery/stop");
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    StartScan(cut);
+    StopRequested().Should().BeFalse();
+
+    ClickTab(cut, "History");
+    cut.WaitForAssertion(() => StopRequested().Should().BeTrue(), TimeSpan.FromSeconds(10));
+  }
+
+  [Fact]
+  public async Task BluetoothScan_StartedByThePanel_IsStoppedWhenTheSourceChanges()
+  {
+    _api.Post("/api/bluetooth/discovery/start").Post("/api/bluetooth/discovery/stop");
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    StartScan(cut);
+
+    StubSource("Vinyl");
+    await FireSourceChangedAsync(cut);
+    cut.WaitForAssertion(() => StopRequested().Should().BeTrue(), TimeSpan.FromSeconds(10));
+  }
+
+  [Fact]
+  public void BluetoothPanel_WithNoScanStarted_DoesNotStopDiscoveryWhenItGoesAway()
+  {
+    var cut = RenderOn("Bluetooth", bluetoothConnected: false);
+    ClickTab(cut, "History");
+    AssertView(cut, "History");
+
+    StopRequested().Should().BeFalse("a scan started elsewhere (the /bluetooth page) is not this panel's to stop");
+  }
+
+  // --- review fixes: tab strip semantics ---
+
+  [Fact]
+  public void HistoryOnlySource_RendersNoTablist_AndNoTabpanelRole()
+  {
+    var cut = RenderOn("Vinyl");
+
+    cut.FindAll("[role=tablist]").Count.Should().Be(0);
+    cut.FindAll("[role=tabpanel]").Count.Should().Be(0);
+    cut.FindAll(".centre-stats-chip").Count.Should().Be(1, "the chip still shows, outside any tablist");
+  }
+
+  [Fact]
+  public void Tablist_HoldsOnlyTabs_AndTheBodyIsItsLabelledTabpanel()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+
+    var tablist = cut.Find("[role=tablist]");
+    tablist.Children.Should().OnlyContain(e => e.GetAttribute("role") == "tab");
+    tablist.QuerySelectorAll(".queue-split-kebab, .centre-stats-chip").Length.Should().Be(0);
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(1, "File Player's queue view keeps its kebab, beside the tablist");
+
+    var panel = cut.Find("[role=tabpanel]");
+    var active = cut.Find(".queue-split-tab.is-active");
+    panel.GetAttribute("aria-labelledby").Should().Be(active.Id);
+    active.GetAttribute("aria-controls").Should().Be(panel.Id);
   }
 }
