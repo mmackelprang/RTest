@@ -8,6 +8,36 @@ Work top to bottom — it is ordered so the cheapest checks come first and each 
 ones above it established. Detail and the "what I already verified" record for every item is in
 [`OWNER-REVIEW.md`](OWNER-REVIEW.md); this file is the walk-through.
 
+
+## ⭐ Evening batch, 2026-09-29 — test these first
+
+**What is on the box:** `7dd34b5` = `main` (`dffb55f`) **plus the unmerged `AUD-14` fix** (PR #726, held for your phone test). So `-VerifyOnly` against `main` will report a mismatch until #726 merges — that is expected. The audio output is on the **built-in speakers** (switched from the console at 16:57), not Cast.
+
+### A. At the panel, no phone needed (10 min)
+- [ ] **Diagnostics (`UI-2`, #728):** no Metrics pill in the top nav; Settings has **Diagnostics** as its last tab; tiles grouped by category, header "Updates every 15 s while open"; tap a tile → its chart, tap again → closed; 5m/1h/24h changes the tiles and survives a reload; DevTray → Fingerprint events lands on Diagnostics.
+- [ ] **File player seek (`AUD-28`, #722):** drag the seek bar slowly, then fast, across a playing track — no stutter while dragging, one jump on release; the time follows your finger; a tap still seeks; the transport bar layout looks right.
+- [ ] **Voicemail scrubber (`UI-16`, #722 — `PHN-2` U5):** play a voicemail; drag and tap both move the audio; the bar is easy to grab.
+- [ ] **USB inputs (`AUD-13`, #719):** Vinyl still plays the turntable; **USB Audio shows Error** (unconfigured, as you ruled).
+- [ ] **Centre panel (`UI-17`, #715/#716 — still outstanding from this afternoon):** each source's default view; the Stats chip (off by default, survives reload); Queue pill on Radio shows the queue with no ⋮ menu and the radio keeps playing; Bluetooth with nothing connected opens on Connect.
+
+### B. With your phone on Bluetooth (15 min)
+- [ ] **Position bar (`AUD-29`, #724):** play a track — the console's bar moves with the phone; pause on the phone and it stops; seek on the phone and it jumps to match.
+- [ ] **Re-attach (`AUD-14`, #726 — then tell me to merge it):** pause on the phone for 30 s+ and resume; then disconnect and reconnect the phone while playing. Pass = the console follows play/pause/track after each.
+- [ ] **Announcements (`AUD-74`, #723):** two test announcements close together — the music must not swell back to full volume between them.
+
+### C. Cast volume (`AUD-80` + `AUD-5`, #725) — 5 min
+- [ ] Switch output to the Office speaker. Set the **speaker's** volume to about 25 % **on the speaker or Google Home** (the console cannot change it — see `AUD-81`). Disconnect Cast, reconnect: it comes back at 25 %, not loud. Repeat once after a `radio-api` restart. (The very first reconnect after the deploy keeps whatever the speaker is at, because nothing is remembered yet.)
+
+### D. Decisions only you can make
+- [ ] **`AUD-17` — Bluetooth album art from the phone:** measured, your phone offers no cover art to BlueZ. **A (recommended):** close the dead code path; art keeps coming from song recognition. **B:** experiment with BlueZ's experimental cover art (starts with the boundary doc).
+- [ ] **`AUD-81` — should the console's volume drive a connected Cast speaker?** Today only the speaker/Google Home can change it.
+- [ ] **Optional box cleanup (`AUD-80`):** the stale case-duplicated keys `audiopreferences:masterVolume/currentOutput/currentSource` are never read; delete them after a DB backup if you like (SQL in PR #725).
+
+### Already verified on the box, nothing to do
+`AUD-78` (history finalised at shutdown — clean on three deploys), `AUD-79` (Cast underwater — you confirmed), `AUD-18` watchdog (#727; trips after 5 min of genuinely empty captures). `AUD-27`, `AUD-25` did not reproduce; `AUD-73`'s by-ear check was clean.
+
+---
+
 ## 0. Before anything (30 s) — passed 2026-09-29
 
 - [x] **Box matches `main`:** `pwsh deploy/Deploy-ToLinux.ps1 -VerifyOnly` → `=== Box matches HEAD ===`.
