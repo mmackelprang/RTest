@@ -339,7 +339,8 @@ public class DuckingService : IDuckingService
     // that emptied the set, which is what needsRestore means, and true while others remain. It is a
     // SNAPSHOT, not a live read, with ONE exception since AUD-74: a StartDuckingAsync that began a
     // new episode after that lock and before the superseded-release check turns false into true (see
-    // releaseSuperseded above). A start landing after that check is still not reflected. That is the same pre-existing looseness the ActiveEventCount field has from the other side,
+    // releaseSuperseded above). A start landing after that check is still not reflected. That is the
+    // same pre-existing looseness the ActiveEventCount field has from the other side,
     // since that one IS read live inside RaiseDuckingStateChanged. What the snapshot buys is the thing
     // AudioManager.ClearDuckingMultiplier depends on: raising IsDucking:false while other sources
     // remain would restore the radio to full volume MID-ANNOUNCEMENT, and that hazard is why this
