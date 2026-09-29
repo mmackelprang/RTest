@@ -19,7 +19,7 @@ namespace Radio.Web.Tests.Components.Shared;
 /// §P2·2, PR 6 of the design tightening arc).
 ///
 /// The tray is normally hidden and revealed by a 3-tap gesture on the
-/// invisible top-right hit area in <c>MainLayout</c>. We render the
+/// invisible hit area left of the Home pill in <c>MainLayout</c>. We render the
 /// component directly with <c>IsOpen=true</c> and assert:
 ///
 /// <list type="bullet">

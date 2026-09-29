@@ -8,42 +8,46 @@ Work top to bottom — it is ordered so the cheapest checks come first and each 
 ones above it established. Detail and the "what I already verified" record for every item is in
 [`OWNER-REVIEW.md`](OWNER-REVIEW.md); this file is the walk-through.
 
-## 0. Before anything (30 s)
+## 0. Before anything (30 s) — passed 2026-09-29
 
-- [ ] **Box matches `main`:** `pwsh deploy/Deploy-ToLinux.ps1 -VerifyOnly` → `=== Box matches HEAD ===`.
-- [ ] **Console not muted**, volume audible. (One sitting has already been wasted on this.)
+- [x] **Box matches `main`:** `pwsh deploy/Deploy-ToLinux.ps1 -VerifyOnly` → `=== Box matches HEAD ===`.
+- [x] **Console not muted**, volume audible. (One sitting has already been wasted on this.)
 
-## 1. Glances at the panel — no sound needed (5 min)
+## 1. Glances at the panel — no sound needed (5 min) — passed 2026-09-29
 
-- [ ] **DevTray log card:** triple-tap top-right → the *Verbose logs* card reads "config · tap for Debug"; tap → "runtime · tap to reset"; tap → back. *(LOG-5)*
-- [ ] **Firmware line:** System Config → Integrations → Rotary Encoders → *Firmware:* reads "processes settings ✓" in green. *(ENC-19)*
-- [ ] **No flicker on restart:** watch the panel while running `ssh mmack@radio 'sudo systemctl restart radio-api'`. Pass = no blink when the app sends "panel on" to a panel already on. *(ENC-22 side-effect)*
-- [ ] **RDS ticker** on an FM station (e.g. Rock 92): call sign pinned on the left, song text loops with no blank gap. Already accepted — only re-look if anything seems off at the new log levels.
+> DevTray passed, but opening it needed a mouse: a finger cannot reach the top-right corner tap zone. Moved to the slot left of **Home** on branch `fix/devtray-gesture-left-of-home` (not yet merged/deployed).
 
-## 2. By ear (25–30 min, mostly just listening)
+- [x] **DevTray log card:** triple-tap the blank space just left of **Home** in the top nav → the *Verbose logs* card reads "config · tap for Debug"; tap → "runtime · tap to reset"; tap → back. *(LOG-5)*
+- [x] **Firmware line:** System Config → Integrations → Rotary Encoders → *Firmware:* reads "processes settings ✓" in green. *(ENC-19)*
+- [x] **No flicker on restart:** watch the panel while running `ssh mmack@radio 'sudo systemctl restart radio-api'`. Pass = no blink when the app sends "panel on" to a panel already on. *(ENC-22 side-effect)*
+- [x] **RDS ticker** on an FM station (e.g. Rock 92): call sign pinned on the left, song text loops with no blank gap. Already accepted — only re-look if anything seems off at the new log levels.
 
-- [ ] **Distortion A/B (the point of Phase 2d).** 20+ min of FM on this build. Pass = no new artefacts, ideally fewer. Then flip *Verbose logs* on (DevTray) for 10 min and back off. If Verbose makes it worse, log volume is still an audio problem — note the times. *(LOG-2/5/6/7/8/12)*
-- [ ] **Optional — two announcements at once:** send two long test notifications a second apart. Two voices together → tell me and `AUD-73` goes to P1.
+## 2. By ear (25–30 min, mostly just listening) — passed 2026-09-29 (audio and notifications good; `AUD-73` stays where it is)
 
-## 3. With your phone on Bluetooth (5 min)
+- [x] **Distortion A/B (the point of Phase 2d).** 20+ min of FM on this build. Pass = no new artefacts, ideally fewer. Then flip *Verbose logs* on (DevTray) for 10 min and back off. If Verbose makes it worse, log volume is still an audio problem — note the times. *(LOG-2/5/6/7/8/12)*
+- [x] **Optional — two announcements at once:** send two long test notifications a second apart. Two voices together → tell me and `AUD-73` goes to P1.
 
-- [ ] **BT capture statistics still work** (the four commands are in `OWNER-REVIEW.md` → Phase 2d → "LOG-6 on a real BT session"). Pass = a line every ~10–12 s while playing, none while paused. *(LOG-6)*
+## 3. With your phone on Bluetooth (5 min) — passed 2026-09-29 (a stats line every ~11 s)
 
-## 4. Panel power-off — `ENC-22`, in this exact order (15 min + overnight)
+- [x] **BT capture statistics still work** (the four commands are in `OWNER-REVIEW.md` → Phase 2d → "LOG-6 on a real BT session"). Pass = a line every ~10–12 s while playing, none while paused. *(LOG-6)*
 
-- [ ] **4.1 Physical check BEFORE enabling:** dark the panel by hand, turn VOLUME one detent, confirm the volume changed. Exact commands in `OWNER-REVIEW.md` → Phase 2g → step 1. This is the one thing no script could prove.
-- [ ] **4.2 Confirm the stop-time backstop:** `ssh mmack@radio 'systemctl show radio-api -p ExecStopPost'` prints the `gdbus … PowerSaveMode <0>` line.
-- [ ] **4.3 Enable:** add `"Sleep": { "PanelOffAfterMinutes": 10 }` to `/opt/radio-console/api/appsettings.Production.json` (no restart needed; deploys never overwrite it).
-- [ ] **4.4 Real wake:** reach the sleep screen, wait 10 min for dark, turn a knob → lit within ~2 s (panel splash expected), same sleep screen, the turn itself changes nothing. Repeat with a press.
-- [ ] **4.5 Overnight:** leave it; dark in the morning; one knob wakes it.
+## 4. Panel power-off — `ENC-22`, in this exact order (15 min + overnight) — passed 2026-09-29; `ENC-22` archived
 
-## 5. Next day (2 min)
+- [x] **4.1 Physical check BEFORE enabling:** dark the panel by hand, turn VOLUME one detent, confirm the volume changed. Exact commands in `OWNER-REVIEW.md` → Phase 2g → step 1. This is the one thing no script could prove.
+- [x] **4.2 Confirm the stop-time backstop:** `ssh mmack@radio 'systemctl show radio-api -p ExecStopPost'` prints the `gdbus … PowerSaveMode <0>` line.
+- [x] **4.3 Enable:** add `"Sleep": { "PanelOffAfterMinutes": 10 }` to `/opt/radio-console/api/appsettings.Production.json` (no restart needed; deploys never overwrite it).
+- [x] **4.4 Real wake:** reach the sleep screen, wait 10 min for dark, turn a knob → lit within ~2 s (panel splash expected), same sleep screen, the turn itself changes nothing. Repeat with a press.
+- [x] **4.5 Overnight:** leave it; dark in the morning; one knob wakes it.
 
-- [ ] **UI-10 over 24 h:** `ssh mmack@radio "journalctl -u radio-web --since '-24h' --no-pager | grep -c 'Visualization hub reconnecting'"`. Pass ≤ 5 (was 535/day). Then UI-10 archives.
+## 5. Next day (2 min) — passed 2026-09-29; `UI-10` archived
+
+> Run over ssh at 11:00. The literal `--since '-24h'` count is **116**, but every one of those lines is from 11:00–16:21 on 2026-09-28, before `radio-web` restarted onto the current build at 16:57:59. Since that restart (~18 h): **0**. The log line is still live — `HubReconnectLogging.cs` renders `"{Hub} hub reconnecting"` as `Visualization hub reconnecting` at Warning — so zero is a measurement, not a renamed string. Re-running the literal command after 16:58 today will read 0.
+
+- [x] **UI-10 over 24 h:** `ssh mmack@radio "journalctl -u radio-web --since '-24h' --no-pager | grep -c 'Visualization hub reconnecting'"`. Pass ≤ 5 (was 535/day). Then UI-10 archives.
 
 ## 6. Decisions only you can make
 
-- [ ] **`AUD-75` — file player media root.** The box's config store pins it to a dev checkout path (`/home/mmack/RTest/src/Radio.API/media/audio`), overriding `/mnt/nas/music`, which listed nothing on 2026-09-28. Where should the root be, and is the NAS mount expected to be up? *(`queue/AUD-75.md`)*
+- [x] **`AUD-75` — file player media root.** *Answered 2026-09-29:* `//nas.local/multimedia` at `/mnt/nas_media`; music root `/mnt/nas_media/Music`. The mount is fixed on the box (the old `//nas/...` fstab line never resolved). Pointing the app at it is the remaining `AUD-75` work. *(`queue/AUD-75.md`)*
 - [ ] **Queue the UI-10 follow-ups?** A `Levels` subscription leak in `GainControlPopover`, and the API's "skip FFT when nobody's watching" gate being effectively always on. CPU saving, not correctness.
 - [ ] **Judgement calls to overrule or accept** (each listed in `OWNER-REVIEW.md`): LOG-2 carve-outs (Audio.Services / Audio.SoundFlow kept at Information; Cast at Warning); ENC-22's wake-lights-but-stays-on-sleep-screen, 2 s grace window, knob-restarts-countdown; ENC-19's separate pre-push check.
 - [ ] **Still yours, still deferred:** casting UAT + `AUD-37`/`AUD-38`/`AUD-54`/`AUD-5`; `OPS-3` (`BindsTo=`), which you review personally.

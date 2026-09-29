@@ -3649,21 +3649,23 @@ body {
 
 /* ─── §R  Dev Gesture Hit Area (PR 6) ─────────────────────────────────────── *
  *
- * Invisible 48×48 hit zone in the top-right corner of the viewport, scoped
- * just above the dev tray's z-index so taps land here even when the topbar
- * paints over the same coordinates. Clicks bubble to dev-gesture.js which
- * counts taps and asks Blazor to toggle the tray when it sees three in a
- * 1.5s window.
+ * Invisible, pill-sized slot at the start of .topbar-nav, directly left of
+ * the Home pill. Clicks go to dev-gesture.js, which counts taps and asks
+ * Blazor to toggle the tray when it sees three in a 1.5s window.
+ *
+ * It used to be a fixed 48×48 zone in the viewport's top-right corner. A
+ * finger cannot reach that corner on the kiosk panel, so only a mouse could
+ * open the tray, and a near miss landed on the Sleep pill. As a flex child of
+ * the nav row it is the full 56px row height and follows the pills if the
+ * row reflows.
  * ─────────────────────────────────────────────────────────────────────────── */
 .dev-gesture-hit {
-  position: fixed;
-  top: 0;
-  right: 0;
-  width: 48px;
-  height: 48px;
-  z-index: 9997;
+  flex: none;
+  width: 64px;
+  height: 56px;
   pointer-events: auto;
   opacity: 0;
+  -webkit-tap-highlight-color: transparent;
   /* No background, no border — designed to be invisible to users. The
      `data-dev-gesture` attribute is the contract; opacity=0 keeps it visually
      absent without removing it from the hit-test tree. */

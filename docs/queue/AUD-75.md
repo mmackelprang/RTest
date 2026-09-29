@@ -15,6 +15,42 @@ Path traversal attempt blocked: /opt/radio-console/media/audio/08-I'm Not In Lov
 
 Real media files in the appliance's own media directory are rejected as traversal attempts.
 
+## Owner ruling 2026-09-29 — the library is `nas.local`'s `multimedia` share, at `/mnt/nas_media`
+
+The owner: *"/mnt/nas_media should point to the nas server nas.local to the multimedia share there. That is where the bulk of my MP3 files are stored."*
+
+**The mount is fixed on the box (done 2026-09-29, this session).** Why `/mnt/nas/music` "listed nothing": its fstab line was `//nas/multimedia/music`, and the bare name `nas` does not resolve on the box (`mount error: could not resolve address for nas`), so `mnt-nas-music.mount` failed at every boot. `nas.local` resolves (`192.168.86.47`, SMB 445 open) and the existing `/etc/smbcredentials` authenticate. Now:
+
+```
+//nas.local/multimedia /mnt/nas_media cifs credentials=/etc/smbcredentials,uid=1000,gid=1000,iocharset=utf8,nofail,_netdev,x-systemd.automount,x-systemd.mount-timeout=20 0 0
+```
+
+- The old `/mnt/nas/music` line is **commented out**, not deleted; the pre-change file is `/etc/fstab.bak-20260929-110405`.
+- `x-systemd.automount` (wanted by `remote-fs.target`) mounts on first access, so boot never waits on the NAS or on mDNS, and `nofail` keeps a NAS outage from failing boot. `uid=1000` is `mmack`, which `radio-api` runs as.
+- Verified: `/mnt/nas_media` lists `Music`, `Photos`, `Samples`, `Video`, `@Recycle`; `Music` has 349 artist directories.
+
+**What this changes for the fix below.** The music root is `/mnt/nas_media/Music`, not `/mnt/nas/music`, and `/mnt/nas/music` is now **never** mounted. Every repo reference to it needs to move with fix 1: `src/Radio.API/appsettings.json` (`BookmarkedPaths` → "NAS Music Library"), `deploy/debian-x64/appsettings.Production.json` (`RootDirectory` — seed-only, so the box's installed copy needs the same edit by hand), and the `AudioFileEventSourceFactory.cs:77` doc comment. The box's config-store row still wins over all of them until it is deleted or corrected. Fixes 2 and 3 are unchanged.
+
+### Repo half done 2026-09-29 (owner: *"make the file browser in the radio console default to start looking in `/mnt/nas_media/Music`"*)
+
+- `src/Radio.API/appsettings.json`: the `music`-tagged "NAS Music Library" bookmark is `/mnt/nas_media/Music`. That bookmark is what the queue's **Add Files** dialog opens by default (`QueueHistoryPanel` passes `PreferredBookmarkTag = "music"`; `FileBrowserDialog.FindDefaultBookmark` opens it when accessible). Before this, it named the never-mounted `/mnt/nas/music`, was inaccessible, and the dialog fell through to "Local Audio Files". **Reaches the box on the next deploy** (the API's `appsettings.json` is deployed; no store row overrides the bookmarks).
+- `deploy/debian-x64/appsettings.Production.json`: `RootDirectory` `/mnt/nas_media/Music`, `AllowedBrowseDirectories` `[ "/mnt/nas_media" ]`. Seed-only, so this does **not** change the box.
+- Placeholder in `SystemConfigPage.razor` and the `AudioFileEventSourceFactory` doc comment updated. The `/mnt/nas/music` strings in `FileBrowserDialogTests` are prefix-logic fixtures, not configuration, and were left.
+- Checked: moving the root does not affect the phone ring sound. `phoneintegration:ringSoundPath` is the relative `media/sounds/phone-ring.wav`, which `PhoneCallIntegrationService` tests with `File.Exists` against the working directory `/opt/radio-console`, where it does not exist, so it already plays TTS only (pre-existing, unrelated).
+
+### Box half — NOT done (the session's permission gate refused remote config writes; the owner runs it)
+
+```bash
+ssh mmack@radio
+T=$(date +%Y%m%d-%H%M%S); P=/opt/radio-console/api/appsettings.Production.json; D=/opt/radio-console/data/config/configuration.db
+cp -p $P $P.bak-$T && sqlite3 $D ".backup $D.bak-$T"
+# In $P set  "FilePlayer": { "RootDirectory": "/mnt/nas_media/Music", "AllowedBrowseDirectories": [ "/mnt/nas_media" ] }
+sqlite3 $D "delete from Config_sqlite where Key='fileplayer:rootDirectory';"
+sudo systemctl restart radio-api
+```
+
+Until then the file player's root is still the empty dev path, so relative browsing and root-checked playback stay broken; the **Add Files** default above does not depend on it. Fix 2 (bookmark paths rejected by `FileBrowser.GetFullPath`) is still open and is why queued `/opt/radio-console/media/audio/...` files fail.
+
 ## Where the root comes from (measured on the box, read-only)
 
 - `FileBrowser.GetFullPath` (`src/Radio.Infrastructure/Audio/Services/FileBrowser.cs`) uses `FilePlayer:RootDirectory`. If that path is relative, it is combined with `RootDir` or the working directory, which is `/opt/radio-console` on the box.

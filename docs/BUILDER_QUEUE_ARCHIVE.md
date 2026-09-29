@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (61)
+## Shipped rows (63)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2659,3 +2659,31 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-31.md`](queue/AUD-31.md)**
 
 ⛔ **The row overstated its own risk, and the Builder corrected it:** the caches are keyed by object path, so the `hci1` removal evicted only a *second* entry for the same MAC — the `hci0` entry and its watcher were never touched. The unrecorded blast radius was elsewhere: address-first-match lookups (`FindDevicePath`, `ConnectedDevice`) could have pointed UI connect/disconnect, the reconnect loop and unpair at RotaryPhone's object. The same scoping closes it.
+
+### UI-10 — The Blazor circuit timed out every ~30 seconds (in fact the visualization-hub connection, racing its keepalive).
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#705](https://github.com/mmackelprang/RTest/pull/705) — owner-requested 24 h check 2026-09-29: **0** `Visualization hub reconnecting` lines in `radio-web`'s journal since the current build started (2026-09-28 16:57:59 → 2026-09-29 11:00, ~18 h), against 535/day before and 116 in the 5 h preceding that restart. The raw `--since '-24h'` count (116) is entirely pre-restart |
+| Plan | _plan TBD — ⚠ **cheapest thing first**: check `ServerTimeout ≥ 2 × KeepAliveInterval`, the commonest cause. Then establish whether it is the kiosk, the network or the server, and whether the reconnect overlay ever appears on the panel_ · ⚠ **a unit test cannot show a wall-clock symptom on a live box** — baseline `grep -c 'Server timeout'` per day BEFORE changing anything, so "it improved" is a comparison not an impression |
+| Spec / handoff | _no spec doc — measured in `radio-web`'s log 2026-09-08; **continued after the upstream GV fix at 15:31**, so it is a standing condition rather than a symptom of that outage. 30000 ms is the SignalR client default, so this is the **Blazor Server circuit**, not a GV call_ |
+| Depends on | — _(no row dependency. ⚠ **May be upstream of `GV-12`** — a dead circuit cannot refetch. ⚠ **Check correlation with `AUD-18`** — same box, and `CLAUDE.md` records log volume correlating with audible distortion; both could be resource pressure. **Check, do not assume** — two rows blaming each other is worse than two independent rows.)_ |
+| Branch | `fix/ui-10-blazor-circuit-timeout` |
+
+**Detail: [`queue/UI-10.md`](queue/UI-10.md)**
+
+✅🔬 **SHIPPED 2026-09-28 as [#705](https://github.com/mmackelprang/RTest/pull/705)** — root cause: API `KeepAliveInterval` 30 s = client `ServerTimeout` 30 s; the visualization-hub connection (not the Blazor circuit) raced its keepalive, 535×/day. Now 15 s. Listed until the post-deploy 30-min count is recorded. *Original:* ⭐ **NEW 2026-09-08 — the Blazor circuit times out every ~30 s.** `System.TimeoutException: Server timeout (30000.00ms)` repeatedly, plus a `JSDisconnectedException`. **Ours entirely** — RotaryPhone touched neither service. — [detail](queue/UI-10.md)
+
+### ENC-22 — Power the panel off after a period in sleep; any knob wakes it.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#707](https://github.com/mmackelprang/RTest/pull/707) — owner UAT passed 2026-09-29 ([`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) §4: physical knob-while-dark, `ExecStopPost` backstop, enable, real wake, overnight) |
+| Plan | _plan TBD — timer keyed on `IsSleepScreenVisible` (both sleep entries, gotcha #9); Mutter `PowerSaveMode`, NOT the retained ScreenSaver-route `SetDisplayPowerAsync`; wake = `ConsumeAndWake`. ⛔ **Safety rules are part of the row, not follow-ups:** never power off with the encoder absent; encoder lost while dark → power on; power on at `radio-api` start and in `ExecStopPost=`. First task: confirm a physical knob event arrives while dark_ · ⛔ **NOT auto-mergeable** — a wrong edge leaves a sealed cabinet dark |
+| Spec / handoff | _feasibility measured 2026-09-28 — see the dossier_ |
+| Depends on | — |
+| Branch | `feat/enc-22-panel-power-off` |
+
+**Detail: [`queue/ENC-22.md`](queue/ENC-22.md)**
+
+✅🔬 **SHIPPED 2026-09-28 as [#707](https://github.com/mmackelprang/RTest/pull/707), OFF BY DEFAULT (`Sleep:PanelOffAfterMinutes = 0`); harness UAT (a)–(f) passed on `radio`; the physical knob-while-dark check and the enable step are in [`OWNER-REVIEW.md`](uat/OWNER-REVIEW.md) Phase 2g.** 🟠 NEW 2026-09-28 (owner request, GA) — after a period in sleep, power the panel off; any knob turn or press wakes it.** Feasibility **measured on `radio` the same day**: Mutter `PowerSaveMode` set from a service-like environment powers the panel fully off (`dpms=Off`, stable 20/20 s, no oscillation) and back on; **the encoder stays on USB and connected while dark** (`3-2.3`, `hidraw4`, API `isConnected:true`) because it hangs off a hub the panel does not power; touch drops off as ENC-15 found, so **knobs are the only wake source**. ⚠ Reinstates `ENC-6`'s withdrawn blanking half for the knob-only design. — [detail](queue/ENC-22.md)
