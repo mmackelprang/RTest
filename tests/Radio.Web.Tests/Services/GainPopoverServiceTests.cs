@@ -15,8 +15,8 @@ namespace Radio.Web.Tests.Services;
 ///
 /// 1. Open/Close flip <see cref="GainPopoverService.IsOpen"/>.
 /// 2. <see cref="GainPopoverService.StateChanged"/> fires only on real
-///    transitions (idempotent set + event-on-change, mirrors
-///    <c>RadioPanelToggleService</c>).
+///    transitions (idempotent set + event-on-change; the service it was once
+///    modelled on, <c>RadioPanelToggleService</c>, was retired by UI-17).
 /// 3. <see cref="GainPopoverService.HandleBackdropClick"/> invokes the
 ///    <see cref="GainPopoverService.OnClose"/> subscribers AND closes.
 /// 4. The OnClose subscribers are fired even when one throws — Close()

@@ -75,8 +75,11 @@ public class HomePageTests : TestContext
     // QueuePersistenceService
     Services.AddSingleton<QueuePersistenceService>();
 
-    // RadioPanelToggleService (used by Home.razor for radio panel toggle)
-    Services.AddScoped<RadioPanelToggleService>();
+    // QueueHistoryPanel (the Home centre, UI-17) takes view requests from the layout through this,
+    // reads Bluetooth status when Bluetooth is the source, and hosts RadioControlPanel on its Radio tab.
+    Services.AddScoped<CentrePanelViewService>();
+    Services.AddHttpClient<BluetoothApiService>();
+    Services.AddOptions<Radio.Web.Models.RdsScrollOptions>();
 
     // Task #15 PR E item #47 — NowPlayingPanel (rendered inside Home) now
     // injects GainPopoverService for the layout-portaled backdrop wiring.
@@ -179,9 +182,11 @@ public class HomePageTests : TestContext
   {
     var cut = RenderComponent<Home>();
 
-    // QueueHistoryPanel renders with tabs
-    Assert.Contains("Queue", cut.Markup);
-    Assert.Contains("History", cut.Markup);
+    // UI-17: the centre is always QueueHistoryPanel (radio controls are a tab inside it, not a page
+    // swap). With no API there is no source, so it shows History with no tabs — assert the panel
+    // and its History view rather than tab labels.
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".centre-panel")));
+    Assert.Single(cut.FindAll(".queue-split"));
   }
 
   [Fact]
