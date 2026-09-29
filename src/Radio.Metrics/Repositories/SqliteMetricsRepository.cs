@@ -263,6 +263,89 @@ public sealed class SqliteMetricsRepository : IMetricsReader
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// One statement, whatever the number of keys: the window's buckets are ranked newest-first per
+  /// metric, then grouped, so the totals and the newest bucket come out of the same pass. This is the
+  /// UI-2 replacement for a per-key <see cref="GetHistoryAsync"/> fan-out, and it must stay a single
+  /// query — the Diagnostics panel polls it.
+  /// </remarks>
+  public async Task<IReadOnlyList<MetricWindowSummary>> GetWindowSummariesAsync(
+    DateTimeOffset start,
+    DateTimeOffset end,
+    MetricResolution resolution = MetricResolution.Minute,
+    CancellationToken ct = default)
+  {
+    var tableName = resolution switch
+    {
+      MetricResolution.Minute => "MetricData_Minute",
+      MetricResolution.Hour => "MetricData_Hour",
+      MetricResolution.Day => "MetricData_Day",
+      _ => throw new ArgumentException($"Invalid resolution: {resolution}")
+    };
+
+    // Use independent read connection to avoid contention on the shared write connection
+    await using var readConn = _dbContext.CreateReadConnection();
+    await using var cmd = readConn.CreateCommand();
+    cmd.CommandText = $@"
+      WITH w AS (
+        SELECT
+          m.MetricId,
+          m.Timestamp,
+          m.ValueSum,
+          m.ValueCount,
+          m.ValueMin,
+          m.ValueMax,
+          ROW_NUMBER() OVER (PARTITION BY m.MetricId ORDER BY m.Timestamp DESC) AS rn
+        FROM {tableName} m
+        WHERE m.Timestamp >= @Start
+          AND m.Timestamp <= @End
+      )
+      SELECT
+        md.Key,
+        md.Type,
+        SUM(w.ValueSum),
+        SUM(w.ValueCount),
+        MIN(w.ValueMin),
+        MAX(w.ValueMax),
+        MAX(CASE WHEN w.rn = 1 THEN w.ValueSum END),
+        MAX(CASE WHEN w.rn = 1 THEN w.ValueCount END),
+        MAX(w.Timestamp),
+        COUNT(*)
+      FROM w
+      INNER JOIN MetricDefinitions md ON md.Id = w.MetricId
+      GROUP BY md.Id, md.Key, md.Type
+      ORDER BY md.Key";
+
+    cmd.Parameters.AddWithValue("@Start", start.ToUnixTimeSeconds());
+    cmd.Parameters.AddWithValue("@End", end.ToUnixTimeSeconds());
+
+    var summaries = new List<MetricWindowSummary>();
+    await using var reader = await cmd.ExecuteReaderAsync(ct);
+
+    while (await reader.ReadAsync(ct))
+    {
+      var latestSum = reader.GetDouble(6);
+      var latestCount = reader.GetInt64(7);
+
+      summaries.Add(new MetricWindowSummary
+      {
+        Key = reader.GetString(0),
+        Type = (MetricType)reader.GetInt32(1),
+        Sum = reader.GetDouble(2),
+        SampleCount = reader.GetInt64(3),
+        Min = reader.IsDBNull(4) ? null : reader.GetDouble(4),
+        Max = reader.IsDBNull(5) ? null : reader.GetDouble(5),
+        // Same zero-count rule GetHistoryAsync uses for a bucket's Value.
+        LatestAverage = latestCount > 0 ? latestSum / latestCount : latestSum,
+        LatestTimestamp = DateTimeOffset.FromUnixTimeSeconds(reader.GetInt64(8)),
+        BucketCount = reader.GetInt32(9)
+      });
+    }
+
+    return summaries;
+  }
+
+  /// <inheritdoc/>
   public async Task<IReadOnlyDictionary<string, double>> GetCurrentSnapshotsAsync(
     IEnumerable<string> keys,
     CancellationToken ct = default)
