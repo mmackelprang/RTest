@@ -89,6 +89,14 @@ public static class FingerprintingServiceExtensions
     // churn-reduction that keeps the Cast capture buffer from starving to zero.
     services.AddSingleton<IAudioSampleProvider, SoundFlowAudioTap>();
 
+    // AUD-18: one watchdog shared by the tap (which reports every capture window to it) and the
+    // identification service (which demotes its per-cycle Warning while it is latched). Singleton because
+    // its whole job is counting across cycles.
+    services.AddSingleton<FingerprintCaptureWatchdog>(sp =>
+      new FingerprintCaptureWatchdog(
+        sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<FingerprintCaptureWatchdog>>(),
+        sp.GetService<IMetricsCollector>()));
+
     // Register SongRec (Shazam) recognizer — checks IsAvailable at runtime
     services.AddSingleton<ISongRecRecognitionService, SongRecRecognitionService>();
 
@@ -100,7 +108,8 @@ public static class FingerprintingServiceExtensions
         sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<BackgroundIdentificationService>>(),
         sp,
         sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<FingerprintingOptions>>(),
-        sp.GetService<IMetricsCollector>()));
+        sp.GetService<IMetricsCollector>(),
+        sp.GetService<FingerprintCaptureWatchdog>()));
     services.AddHostedService(sp => sp.GetRequiredService<BackgroundIdentificationService>());
 
     // Play-history retention: bind PlayHistory options and register the scheduled
