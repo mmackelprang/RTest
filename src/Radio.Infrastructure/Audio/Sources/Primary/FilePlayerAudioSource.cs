@@ -2169,10 +2169,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // became the current track describes the previous one; merging it here put Eve 6 on
     // "Meditating Beat" on the appliance (2026-09-26).
     var trackStartedTicks = Volatile.Read(ref _trackStartedAtTicks);
-    if (e.WasCapturedBefore(trackStartedTicks == 0 ? null : new DateTime(trackStartedTicks, DateTimeKind.Utc)))
+    // AUD-34: the boundary is also this source's last activation, so a sample captured from the
+    // previous source (or before a switch away and back on the same track) is dropped too.
+    if (e.WasCapturedBefore(LatestTrackBoundaryUtc(trackStartedTicks)))
     {
       Logger.LogInformation(
-        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current file started",
+        "Dropped fingerprint result '{Title}' by '{Artist}': sampled before the current file started or the file player became the active source",
         e.Track.Title, e.Track.Artist);
       // The service marked this song as recently identified before raising the event; without this,
       // a straddling capture that named the NEW file would suppress its own re-identification.

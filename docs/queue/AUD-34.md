@@ -26,3 +26,26 @@ a capture already in flight.
 Stamp the track start on **source activation** as well (both sources), and treat "never stamped" as
 "started at activation". Test: capture begins, source switched away and back (same key / same file),
 result dropped.
+
+## Shipped
+
+- **Activation stamp.** `PrimaryAudioSourceBase.MarkActivated(utcNow)` records when the audio manager
+  made the source active; `AudioManager.SwitchSourceAsync` calls it *before* publishing the new
+  `_activeSource`, and only when the active source actually changes (re-selecting the active source
+  is not an activation).
+- **One comparison.** `LatestTrackBoundaryUtc(trackStartedTicks)` returns the later of the source's
+  own AUD-33 track-start stamp and its last activation, or `null` if neither was ever set. Both
+  `BluetoothAudioSource.OnTrackIdentified` and `FilePlayerAudioSource.OnTrackIdentified` now drop a
+  result sampled before that instant (same drop path, same `ForgetRecentIdentification`). "Never
+  stamped" on BT (before the first AVRCP event) therefore means "started at activation".
+- **Deliberately not changed:** the AVRCP key and file-path stamps are not reset on deactivation — the
+  activation stamp covers the switch-away-and-back cases without adding a later restamp on the
+  first AVRCP event after return. A BT *reconnect* while BT stays the active source is not an
+  activation and is not stamped; a reconnect onto a different song still restamps via the AVRCP key.
+  Radio/SDR/vinyl/USB keep no track boundary (unchanged from AUD-33).
+- Drop log lines keep their AUD-33 prefix (`… sampled before the current BT track started` / `… file
+  started`) and now add `or … became the active source`.
+- Tests: `AudioManagerActivationStampTests` (switch stamps; away-and-back restamps; re-select does
+  not); BT `Aud34_*` (same song after switch-back dropped; before first AVRCP, activation is the
+  boundary; post-activation sample applies); FilePlayer `Aud34_*` (same file after reactivation
+  dropped; post-activation sample applies).

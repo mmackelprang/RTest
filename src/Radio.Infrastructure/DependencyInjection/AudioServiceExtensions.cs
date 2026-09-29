@@ -229,6 +229,10 @@ public static class AudioServiceExtensions
       sp.GetService<BackgroundIdentificationService>(),
       sp.GetService<IMetricsCollector>()));
 
+    // AUD-78: finalize the in-flight play history entry from a hosted service's StopAsync,
+    // while the container can still create a scope. The tracker's Dispose runs too late for that.
+    services.AddHostedService<PlayHistoryShutdownFinalizer>();
+
     // Register Bluetooth auto-switch service (Func<> defers IAudioManager resolution)
     services.AddSingleton<BluetoothAutoSwitchService>(sp => new BluetoothAutoSwitchService(
       sp.GetRequiredService<ILogger<BluetoothAutoSwitchService>>(),

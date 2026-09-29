@@ -25,3 +25,21 @@ Finalise from `IHostApplicationLifetime.ApplicationStopping` (or a hosted servic
 ## Verification
 
 A deploy leaves no `Failed to finalize play history entry` line, and the in-flight entry has an end time.
+
+## Shipped
+
+- `PlayHistoryTracker.FinalizeInFlightEntryAsync` stamps the in-flight entry's end time; it is called
+  from the new hosted service `PlayHistoryShutdownFinalizer.StopAsync`, which runs before the root
+  container is disposed. `Dispose()` now only unsubscribes and never touches the database.
+- The finalizer is registered in `AddRadioServices`, before `AudioEngineInitializationService` in
+  `Program.cs`; hosted services stop in reverse order, so it runs after the audio engine has stopped.
+- **Orphan-cleanup claim checked — true, with two qualifications.**
+  `AudioEngineInitializationService.CloseOrphanedPlayHistoryEntriesAsync` runs at every start and
+  closes entries with `EndedAt IS NULL`, but only those whose `PlayedAt` is more than **two minutes**
+  before that start, and it stamps an *estimated* end (`PlayedAt + Duration`, else the cutoff), not
+  the real stop time. So an entry started less than two minutes before a quick restart stayed open
+  until the restart after that. The pre-fix harm was therefore a Warning per stop plus imprecise end
+  times, not lost rows.
+- Tests: `PlayHistoryShutdownFinalizerTests` (host stop finalizes once and container disposal logs
+  no Warning; disposal without stop does not reach the repository; no in-flight entry is a no-op;
+  a repository failure is logged and swallowed).
