@@ -1,0 +1,193 @@
+@using Radio.Web.Models
+@using Radio.Web.Services.ApiClients
+@inject BluetoothApiService BluetoothApi
+@inject NotificationService NotificationService
+@inject ILogger<BluetoothConnectPanel> Logger
+
+@*
+  UI-17 point 6 — the Bluetooth panel inside the Home centre panel. Shown as the "Connect" tab when
+  no device is connected and as the "Devices" tab when one is. Paired devices with Connect /
+  Disconnect, and "Scan for new devices" with inline pairing. Forgetting a device and the adapter
+  details stay on /bluetooth, linked from the footer.
+
+  Every action goes through BluetoothApiService, i.e. the existing /api/bluetooth endpoints, which
+  act on Radio Console's own adapter (hci0) per the RotaryPhone boundary doc. This component holds
+  no status of its own: the host (QueueHistoryPanel) owns the status poll and passes the latest
+  snapshot in as Status, and this component asks the host to re-read it after every action through
+  OnStatusChanged.
+*@
+
+<div class="bt-connect-panel">
+  @if (Status == null)
+  {
+    <div class="bt-connect-empty">
+      <RadzenIcon Icon="bluetooth_disabled" Style="font-size: 56px; opacity: 0.4;" />
+      <span>Bluetooth status is unavailable.</span>
+    </div>
+  }
+  else
+  {
+    <div class="bt-connect-section-header">Paired devices</div>
+    @if (Status.PairedDevices.Count == 0)
+    {
+      <div class="bt-connect-hint">No paired devices yet. Scan to find one.</div>
+    }
+    else
+    {
+      @foreach (BluetoothDeviceDto device in Status.PairedDevices)
+      {
+        bool isConnected = IsConnected(device);
+        <div class="bt-device-row @(isConnected ? "is-connected" : "")">
+          <RadzenIcon Icon="@(isConnected ? "bluetooth_connected" : "bluetooth")" />
+          <div class="bt-device-text">
+            <div class="bt-device-name">@DisplayName(device)</div>
+            <div class="bt-device-sub">@(isConnected ? "Connected" : "Paired")</div>
+          </div>
+          @if (isConnected)
+          {
+            <button type="button" class="bt-device-action is-secondary"
+                    disabled="@(_busyAddress != null)"
+                    @onclick="@(() => DisconnectAsync(device.Address))">
+              @(_busyAddress == device.Address ? "Disconnecting…" : "Disconnect")
+            </button>
+          }
+          else
+          {
+            <button type="button" class="bt-device-action"
+                    disabled="@(_busyAddress != null)"
+                    @onclick="@(() => ConnectAsync(device.Address))">
+              @(_busyAddress == device.Address ? "Connecting…" : "Connect")
+            </button>
+          }
+        </div>
+      }
+    }
+
+    <div class="bt-connect-section-header bt-connect-scan-header">
+      <span>New devices</span>
+      @if (Status.IsDiscovering)
+      {
+        <button type="button" class="bt-scan-button is-scanning" @onclick="StopScanAsync">
+          Stop scan
+        </button>
+      }
+      else
+      {
+        <button type="button" class="bt-scan-button"
+                disabled="@(!Status.IsAvailable)"
+                @onclick="StartScanAsync">
+          Scan for new devices
+        </button>
+      }
+    </div>
+
+    List<BluetoothDeviceDto> unpaired = Status.DiscoveredDevices.Where(d => !d.IsPaired).ToList();
+    @if (unpaired.Count == 0)
+    {
+      <div class="bt-connect-hint">
+        @(Status.IsDiscovering ? "Scanning for nearby devices…" : "Put your phone in pairing mode, then scan.")
+      </div>
+    }
+    else
+    {
+      @foreach (BluetoothDeviceDto device in unpaired)
+      {
+        <div class="bt-device-row">
+          <RadzenIcon Icon="bluetooth_searching" />
+          <div class="bt-device-text">
+            <div class="bt-device-name">@DisplayName(device)</div>
+          </div>
+          <button type="button" class="bt-device-action"
+                  disabled="@(_busyAddress != null)"
+                  @onclick="@(() => PairAsync(device.Address))">
+            @(_busyAddress == device.Address ? "Pairing…" : "Pair")
+          </button>
+        </div>
+      }
+    }
+  }
+
+  <div class="bt-connect-footer">
+    <a href="/bluetooth" class="bt-connect-settings-link">
+      <RadzenIcon Icon="settings" /> Forget a device or adapter details
+    </a>
+  </div>
+</div>
+
+@code {
+  /// <summary>The latest status snapshot from the host's poll, or <c>null</c> when it could not be
+  /// read.</summary>
+  [Parameter] public BluetoothStatusDto? Status { get; set; }
+
+  /// <summary>Invoked after every action so the host re-reads the status immediately instead of
+  /// waiting for its next poll.</summary>
+  [Parameter] public EventCallback OnStatusChanged { get; set; }
+
+  // Address of the device an action is in flight for. While set, every device button is disabled so
+  // two connects cannot race each other on the one adapter.
+  private string? _busyAddress;
+
+  private bool IsConnected(BluetoothDeviceDto device) =>
+    device.IsConnected
+    || string.Equals(Status?.ConnectedDevice?.Address, device.Address, StringComparison.OrdinalIgnoreCase);
+
+  private static string DisplayName(BluetoothDeviceDto device) =>
+    string.IsNullOrWhiteSpace(device.Name) ? device.Address : device.Name;
+
+  private Task ConnectAsync(string address) => RunDeviceActionAsync(
+    address, () => BluetoothApi.ConnectAsync(address),
+    "Connected", "Could not connect — the device may be out of range or need re-pairing");
+
+  private Task DisconnectAsync(string address) => RunDeviceActionAsync(
+    address, () => BluetoothApi.DisconnectAsync(address),
+    "Disconnected", "Could not disconnect the device");
+
+  private Task PairAsync(string address) => RunDeviceActionAsync(
+    address, () => BluetoothApi.PairAsync(address),
+    "Paired", "Could not pair the device");
+
+  private async Task RunDeviceActionAsync(
+    string address, Func<Task<bool>> action, string successText, string failureText)
+  {
+    _busyAddress = address;
+    try
+    {
+      bool ok = await action();
+      if (ok)
+      {
+        NotificationService.Notify(NotificationSeverity.Success, "Bluetooth", successText);
+      }
+      else
+      {
+        NotificationService.Notify(NotificationSeverity.Warning, "Bluetooth", failureText);
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Bluetooth device action failed");
+      NotificationService.Notify(NotificationSeverity.Error, "Bluetooth", failureText);
+    }
+    finally
+    {
+      _busyAddress = null;
+    }
+
+    await OnStatusChanged.InvokeAsync();
+  }
+
+  private async Task StartScanAsync()
+  {
+    bool ok = await BluetoothApi.StartDiscoveryAsync();
+    if (!ok)
+    {
+      NotificationService.Notify(NotificationSeverity.Warning, "Bluetooth", "Could not start scanning");
+    }
+    await OnStatusChanged.InvokeAsync();
+  }
+
+  private async Task StopScanAsync()
+  {
+    await BluetoothApi.StopDiscoveryAsync();
+    await OnStatusChanged.InvokeAsync();
+  }
+}

@@ -13,7 +13,7 @@
 @inject ILogger<MainLayout> Logger
 @inject IJSRuntime JSRuntime
 @inject Radio.Web.Services.DeviceDisplayStateService DeviceDisplayState
-@inject Radio.Web.Services.RadioPanelToggleService RadioPanelToggle
+@inject Radio.Web.Services.CentrePanelViewService CentrePanelView
 @inject Radio.Web.Services.GainPopoverService GainPopover
 @inject Radio.Web.Services.PhoneUnreadState PhoneUnread
 @inject Radio.Web.Services.BellHealthService BellHealth
@@ -1063,13 +1063,14 @@
 
   /// <summary>
   /// Source pill body tap (handoff §P1·2). Tapping a source pill ALWAYS switches
-  /// to that source — nothing else. The pill no longer toggles the radio panel
-  /// on second-tap and no longer navigates between detail surfaces; those
-  /// affordances live on the chevron (<see cref="HandleSourceDetailAsync"/>).
+  /// to that source — nothing else. The pill does not open panels or navigate
+  /// between detail surfaces; those affordances live on the chevron
+  /// (<see cref="HandleSourceDetailAsync"/>).
   ///
-  /// We still maintain the side-effect that switching TO Radio shows the radio
-  /// control panel on Home and switching AWAY hides it — the panel-visibility
-  /// state is a function of the active source, not of user-tap intent.
+  /// UI-17: the layout no longer shows or hides the radio controls on a source
+  /// switch. The Home centre panel picks its own opening tab from the new source
+  /// when it sees <c>SourceChanged</c> (switching TO a radio source opens on the
+  /// Radio tab).
   /// </summary>
   private async Task HandleSourceToggleAsync(AudioSourceDto source)
   {
@@ -1078,16 +1079,7 @@
     // switching. The body never opens panels or navigates — that's the chevron.
     if (source.Id == _selectedSourceId) return;
 
-    if (IsRadioSource(source.Type))
-    {
-      await HandleSourceChangeAsync(source.Id);
-      await RadioPanelToggle.ShowRadioPanelAsync();
-    }
-    else
-    {
-      await RadioPanelToggle.HideRadioPanelAsync();
-      await HandleSourceChangeAsync(source.Id);
-    }
+    await HandleSourceChangeAsync(source.Id);
   }
 
   /// <summary>
@@ -1096,8 +1088,8 @@
   /// <see cref="SourceTypeHelper.HasDetail(string)"/>). Dispatch:
   ///
   /// <list type="bullet">
-  ///   <item>Radio family (Radio / RTLSDRCore / RF320) → navigate Home and show
-  ///         the radio control panel (idempotent).</item>
+  ///   <item>Radio family (Radio / RTLSDRCore / RF320) → navigate Home and ask
+  ///         the centre panel for its Radio tab (UI-17).</item>
   ///   <item>Bluetooth → navigate to the BT pairing page.</item>
   /// </list>
   ///
@@ -1113,7 +1105,7 @@
     {
       case SourceTypeHelper.SourceDetailRoute.RadioPanel:
         NavigationManager.NavigateTo("/");
-        await RadioPanelToggle.ShowRadioPanelAsync();
+        await CentrePanelView.RequestViewAsync(global::Radio.Web.Services.CentrePanelView.Radio);
         break;
       case SourceTypeHelper.SourceDetailRoute.BluetoothPage:
         NavigationManager.NavigateTo("/bluetooth");
@@ -1125,13 +1117,15 @@
     }
   }
 
-  private static bool IsRadioSource(string sourceType) =>
-    SourceTypeHelper.IsRadioFamily(sourceType);
-
+  /// <summary>
+  /// Queue nav pill (UI-17 point 4): navigate Home and ask the centre panel for
+  /// its queue view, whatever the active source. It does not switch source, so
+  /// whatever is playing keeps playing.
+  /// </summary>
   private async Task HandleQueueNavAsync()
   {
-    await RadioPanelToggle.HideRadioPanelAsync();
     NavigationManager.NavigateTo("/");
+    await CentrePanelView.RequestViewAsync(global::Radio.Web.Services.CentrePanelView.Queue);
   }
 
   private async Task OnCastDeviceSelected(CastDeviceDto selectedDevice)
@@ -1188,20 +1182,9 @@
 
   private async Task OnSourceChanged()
   {
-    // Refresh selected source and sync radio panel with new source
+    // Refresh the selected source. The centre panel's tab follows the source on
+    // its own (UI-17) — it subscribes to SourceChanged itself.
     await LoadSourcesAsync();
-    var activeSource = _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
-    if (activeSource != null)
-    {
-      if (IsRadioSource(activeSource.Type))
-      {
-        await RadioPanelToggle.ShowRadioPanelAsync();
-      }
-      else
-      {
-        await RadioPanelToggle.HideRadioPanelAsync();
-      }
-    }
     await InvokeAsync(StateHasChanged);
   }
 

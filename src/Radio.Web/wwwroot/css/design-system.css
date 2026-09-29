@@ -2664,11 +2664,67 @@ body {
 /* ─── §O  Queue Split Layout (PR 5) ───────────────────────────────────────── */
 
 /*
- * Two-column queue/history panel (handoff §P1·4). Left column (flex 1.6) holds
- * a tab strip plus the list itself; right column (flex 1) holds three stacked
- * context tiles: Queue Total LED, Up Next thumbs, Save-as-Playlist CTA. The
- * tabs swap the list contents without remounting the right column.
+ * The Home centre panel (handoff §P1·4, reshaped by UI-17). A tab strip spans
+ * the top of .centre-panel; the body below shows the radio controls, the
+ * Bluetooth connect panel, or the .queue-split list layout. In the split the
+ * list column (flex 1.6) sits beside an optional context column: Queue Total +
+ * Save-as-Playlist on the queue view (narrow), the history stats tile on the
+ * history view only while the Stats chip is on. With no context column the
+ * list takes the full width.
  */
+
+.centre-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.centre-panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Hosts a full-width child (RadioControlPanel, BluetoothConnectPanel) the way
+ * .panel used to host RadioControlPanel directly. */
+.centre-panel-fill {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* Stats chip (UI-17 point 1) — a toggle, so it reads as a pill with an on
+ * state rather than as a tab. 44px tall for a finger on the kiosk panel. */
+.centre-stats-chip {
+  background: transparent;
+  border: 1px solid var(--surface-separator);
+  color: var(--text-medium);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+
+.centre-stats-chip:hover {
+  color: var(--text-high);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.centre-stats-chip.is-on {
+  background: var(--accent-dim);
+  color: var(--accent-primary);
+  border-color: rgba(92, 212, 232, 0.35);
+}
 
 .queue-split {
   display: flex;
@@ -2694,6 +2750,12 @@ body {
   min-width: 0;
   padding: 8px 0;
   overflow: hidden;
+}
+
+/* Queue view (UI-17 point 2): two tiles only, so the list keeps the width. */
+.queue-split-context-col.is-narrow {
+  flex: 0 0 220px;
+  padding-right: 12px;
 }
 
 /* Tab strip — mono uppercase, --accent-dim on the active pill. Matches the
@@ -2793,98 +2855,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Up Next tile ── */
-.up-next-tile {
-  background: var(--surface-overlay);
-  border: 1px solid var(--surface-separator);
-  border-radius: 8px;
-  padding: 10px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
-.up-next-tile-header {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-low);
-  text-transform: uppercase;
-  letter-spacing: 0.10em;
-  margin-bottom: 2px;
-}
-
-.up-next-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.up-next-row-thumb {
-  width: 32px;
-  height: 32px;
-  border-radius: 3px;
-  overflow: hidden;
-  background: var(--surface-inset);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.up-next-row-thumb img {
-  width: 32px;
-  height: 32px;
-  object-fit: cover;
-}
-
-.up-next-row-thumb .rzi {
-  font-size: 16px;
-  color: var(--text-low);
-}
-
-.up-next-row-text {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
-
-.up-next-row-title {
-  font-size: 13px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.2;
-}
-
-.up-next-row-artist {
-  font-size: 11px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.2;
-}
-
-/* Progressive dimming on the next 3 queue items — visual hierarchy that
- * mirrors the spec's "text-high → text-medium → text-low" cascade. */
-.up-next-row.dim-1 .up-next-row-title { color: var(--text-high); }
-.up-next-row.dim-1 .up-next-row-artist { color: var(--text-medium); }
-.up-next-row.dim-2 .up-next-row-title { color: var(--text-medium); }
-.up-next-row.dim-2 .up-next-row-artist { color: var(--text-low); }
-.up-next-row.dim-3 .up-next-row-title { color: var(--text-low); }
-.up-next-row.dim-3 .up-next-row-artist { color: var(--text-low); opacity: 0.7; }
-
-.up-next-empty {
-  font-size: 12px;
-  color: var(--text-low);
-  font-style: italic;
-  padding: 6px 0;
-}
-
 /* ── Save-as-playlist CTA tile ── */
 .save-playlist-tile {
   background: transparent;
@@ -2918,7 +2888,7 @@ body {
   color: var(--text-low);
 }
 
-/* ── History stats tile (shown in the right column when History tab is active) ── */
+/* ── History stats tile (right column of the History view while the Stats chip is on) ── */
 .history-stats-tile {
   background: var(--surface-overlay);
   border: 1px solid var(--surface-separator);
@@ -2962,6 +2932,146 @@ body {
   font-size: 22px;
   color: var(--signal-amber);
   letter-spacing: 0.02em;
+}
+
+/* ── Bluetooth connect panel (UI-17 point 6) — Connect / Devices tab ── */
+.bt-connect-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+}
+
+.bt-connect-section-header {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-low);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  margin-top: 4px;
+}
+
+.bt-connect-scan-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.bt-connect-hint {
+  font-size: 14px;
+  color: var(--text-low);
+  padding: 6px 0;
+}
+
+.bt-connect-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--text-low);
+  font-size: 16px;
+}
+
+.bt-device-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  min-height: 56px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  border-radius: 8px;
+}
+
+.bt-device-row .rzi {
+  font-size: 24px;
+  color: var(--text-medium);
+}
+
+.bt-device-row.is-connected {
+  border-color: var(--source-bluetooth, var(--accent-primary));
+}
+
+.bt-device-row.is-connected .rzi {
+  color: var(--source-bluetooth, var(--accent-primary));
+}
+
+.bt-device-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.bt-device-name {
+  font-size: 16px;
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bt-device-sub {
+  font-size: 13px;
+  color: var(--text-medium);
+}
+
+.bt-device-action,
+.bt-scan-button {
+  background: transparent;
+  border: 1px solid var(--accent-primary);
+  color: var(--accent-primary);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 8px 16px;
+  min-height: 44px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 120ms ease;
+}
+
+.bt-device-action:hover:not(:disabled),
+.bt-scan-button:hover:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.bt-device-action.is-secondary,
+.bt-scan-button.is-scanning {
+  border-color: var(--surface-separator);
+  color: var(--text-medium);
+}
+
+.bt-device-action:disabled,
+.bt-scan-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.bt-connect-footer {
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.bt-connect-settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 44px;
+  font-size: 14px;
+  color: var(--text-medium);
+  text-decoration: none;
+}
+
+.bt-connect-settings-link:hover {
+  color: var(--text-high);
 }
 
 
