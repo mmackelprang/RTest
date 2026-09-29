@@ -1,0 +1,189 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+@* SeekBar — drag-to-seek with SEEK ON RELEASE (AUD-28 owner ruling 2026-09-25; UI-16 by analogy).
+
+   ⛔ OnSeek fires ONCE per gesture, when the pointer is released. Nothing during the drag reaches it,
+   and there is no debounce or throttle — option (2) in docs/queue/AUD-28.md was declined by the owner.
+   The accepted cost is silence-then-jump: no audible response while dragging, and no scrub preview.
+
+   OnScrub is the readout channel: it carries the fraction under the finger while the drag is live, so a
+   parent can move its time text with the thumb, and null once the drag is over (committed or
+   cancelled). It is display-only — a parent must never seek from it.
+
+   The hit area (.seek-bar) is a padded box around the thin visible track; the geometry and the gesture
+   live in js/seek-bar.js because only the browser has the rendered box. *@
+<div class="@CssClass"
+     role="slider"
+     aria-label="@AriaLabel"
+     aria-valuemin="@AriaValueMin"
+     aria-valuemax="@AriaValueMax"
+     aria-valuenow="@AriaValueNow"
+     aria-valuetext="@AriaValueText"
+     aria-disabled="@(Disabled ? "true" : null)"
+     @ref="_hitEl">
+  <div class="seek-bar-track" @ref="_trackEl">
+    <div class="seek-bar-fill" style="width:@PercentText"></div>
+    @if (!Disabled)
+    {
+      <div class="seek-bar-thumb" style="left:@PercentText"></div>
+    }
+  </div>
+</div>
+
+@code {
+  /// <summary>Playback position as a fraction in [0, 1]. Ignored while a drag or its commit is in flight.</summary>
+  [Parameter] public double Fraction { get; set; }
+
+  /// <summary>When true the gesture is ignored (the JS reads aria-disabled at pointerdown) and no thumb renders.</summary>
+  [Parameter] public bool Disabled { get; set; }
+
+  /// <summary>Fraction under the finger while dragging; null when the drag ends. Display only — never seek from it.</summary>
+  [Parameter] public EventCallback<double?> OnScrub { get; set; }
+
+  /// <summary>The single commit for a gesture, raised on release with the release fraction in [0, 1].</summary>
+  [Parameter] public EventCallback<double> OnSeek { get; set; }
+
+  [Parameter] public string? AriaLabel { get; set; }
+  [Parameter] public string? AriaValueMin { get; set; }
+  [Parameter] public string? AriaValueMax { get; set; }
+  [Parameter] public string? AriaValueNow { get; set; }
+  [Parameter] public string? AriaValueText { get; set; }
+
+  /// <summary>Extra classes on the hit-area element.</summary>
+  [Parameter] public string? Class { get; set; }
+
+  private ElementReference _hitEl;
+  private ElementReference _trackEl;
+  private IJSObjectReference? _module;
+  private DotNetObjectReference<SeekBar>? _selfRef;
+
+  // True from the first OnDragMove until OnDragEnd / OnDragCancel.
+  private bool _dragging;
+
+  // What the bar shows instead of Fraction: set by the drag, and held through the commit so a parent
+  // re-render with the pre-seek position (the 1 Hz layout tick, a poll) cannot yank the thumb back
+  // before the seek has been sent. Cleared once OnSeek has completed.
+  private double? _dragFraction;
+
+  private string CssClass =>
+    "seek-bar"
+    + (_dragFraction is not null ? " is-dragging" : string.Empty)
+    + (Disabled ? " is-disabled" : string.Empty)
+    + (string.IsNullOrWhiteSpace(Class) ? string.Empty : " " + Class);
+
+  private double DisplayFraction => Math.Clamp(_dragFraction ?? Fraction, 0, 1);
+
+  private string PercentText =>
+    (DisplayFraction * 100).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (!firstRender)
+    {
+      return;
+    }
+
+    try
+    {
+      _selfRef = DotNetObjectReference.Create(this);
+      _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/seek-bar.js");
+      if (_module is not null)
+      {
+        await _module.InvokeVoidAsync("attach", _hitEl, _trackEl, _selfRef);
+      }
+    }
+    catch (JSException)
+    {
+      // A missing module leaves a bar that renders position but cannot be dragged — the same failure
+      // direction as the tap-to-seek it replaces, never an exception out of a render on a wall panel.
+    }
+    catch (JSDisconnectedException)
+    {
+      // Circuit went away between render and interop.
+    }
+  }
+
+  /// <summary>Pointer went down or moved while down. Moves the thumb and the parent's readout; never seeks.</summary>
+  [JSInvokable]
+  public Task OnDragMove(double fraction) => InvokeAsync(async () =>
+  {
+    if (Disabled || double.IsNaN(fraction))
+    {
+      return;
+    }
+
+    _dragging = true;
+    _dragFraction = Math.Clamp(fraction, 0, 1);
+    StateHasChanged();
+    await OnScrub.InvokeAsync(_dragFraction);
+  });
+
+  /// <summary>Pointer released: the one seek for this gesture.</summary>
+  [JSInvokable]
+  public Task OnDragEnd(double fraction) => InvokeAsync(async () =>
+  {
+    // No live drag (disabled at pointerdown, or already cancelled) means nothing to commit.
+    if (!_dragging)
+    {
+      return;
+    }
+
+    _dragging = false;
+    var target = Math.Clamp(double.IsNaN(fraction) ? _dragFraction ?? 0 : fraction, 0, 1);
+    _dragFraction = target;
+    StateHasChanged();
+
+    try
+    {
+      await OnSeek.InvokeAsync(target);
+    }
+    finally
+    {
+      // A new drag may have started while the seek was in flight; it owns the display now.
+      if (!_dragging)
+      {
+        _dragFraction = null;
+        StateHasChanged();
+        await OnScrub.InvokeAsync(null);
+      }
+    }
+  });
+
+  /// <summary>The browser took the pointer away mid-drag. No seek.</summary>
+  [JSInvokable]
+  public Task OnDragCancel() => InvokeAsync(async () =>
+  {
+    if (!_dragging)
+    {
+      return;
+    }
+
+    _dragging = false;
+    _dragFraction = null;
+    StateHasChanged();
+    await OnScrub.InvokeAsync(null);
+  });
+
+  public async ValueTask DisposeAsync()
+  {
+    if (_module is not null)
+    {
+      try
+      {
+        await _module.InvokeVoidAsync("detach", _hitEl);
+        await _module.DisposeAsync();
+      }
+      catch (JSDisconnectedException)
+      {
+        // Circuit already gone; the browser-side listeners went with the page.
+      }
+      catch (JSException)
+      {
+        // Element already removed; its listeners are unreachable and will be collected with it.
+      }
+    }
+
+    _selfRef?.Dispose();
+  }
+}

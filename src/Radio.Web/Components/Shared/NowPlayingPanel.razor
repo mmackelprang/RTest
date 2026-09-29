@@ -261,10 +261,20 @@
       <div style="margin-bottom: 4px;">
         @if (_canSeek)
         {
-          <RadzenSlider TValue="double" Value="@_progressPercent"
-                        Change="@((double v) => HandleSeekAsync(v))"
-                        Min="0" Max="100" Step="0.1"
-                        Style="width: 100%;" />
+          @* AUD-28 (owner ruling 2026-09-25): SEEK ON RELEASE, no debounce. RadzenSlider's Change fires
+             on every drag frame (Radzen.Blazor 6.6.4's mousemove/touchmove handler invokes
+             OnValueChange each time) and it has no release event, so every frame became an engine
+             seek and scrubbing stuttered. SeekBar commits once, on release; OnScrub only moves the
+             elapsed readout. *@
+          <SeekBar Class="np-seek-bar"
+                   Fraction="@(_progressPercent / 100.0)"
+                   OnScrub="OnSeekScrub"
+                   OnSeek="@((double f) => HandleSeekAsync(f * 100.0))"
+                   AriaLabel="Playback position"
+                   AriaValueMin="0"
+                   AriaValueMax="100"
+                   AriaValueNow="@((_scrubPercent ?? _progressPercent).ToString("0", System.Globalization.CultureInfo.InvariantCulture))"
+                   AriaValueText="@(_scrubPosition ?? _position)" />
         }
         else
         {
@@ -277,7 +287,7 @@
           </RadzenProgressBar>
         }
         <div style="display: flex; justify-content: space-between; font-size: 13px; color: var(--text-medium); margin-top: -2px; font-family: var(--font-mono); font-variant-numeric: tabular-nums;">
-          <span>@_position</span>
+          <span>@(_scrubPosition ?? _position)</span>
           <span>@_duration</span>
         </div>
       </div>
@@ -370,6 +380,11 @@
   // projection. Bound to the progress-bar label so it never shows the raw
   // decimal tail; _progressPercent (full precision) still drives the bar width.
   private string _progressPercentDisplay = "0%";
+  // AUD-28: set only while the seek bar is being dragged, so the elapsed readout follows the finger
+  // even though no seek is sent until release. Null otherwise; a poll landing mid-drag writes
+  // _position underneath without moving what is displayed.
+  private string? _scrubPosition;
+  private double? _scrubPercent;
   private double _totalDurationSeconds;
   // Fingerprint status state
   private FingerprintStatusDto? _fpStatus;
@@ -963,6 +978,23 @@
   }
 
   // --- Existing handlers ---
+
+  // AUD-28. Display only — the SeekBar raises this during a drag and with null when the drag is over.
+  // It must never seek; HandleSeekAsync is bound to the release.
+  private void OnSeekScrub(double? fraction)
+  {
+    if (fraction is { } f && _totalDurationSeconds > 0)
+    {
+      var progress = PlaybackProgressProjection.From(f * _totalDurationSeconds, _totalDurationSeconds);
+      _scrubPosition = progress.ElapsedDisplay;
+      _scrubPercent = progress.Percent;
+    }
+    else
+    {
+      _scrubPosition = null;
+      _scrubPercent = null;
+    }
+  }
 
   private async Task HandleSeekAsync(double newPercent)
   {

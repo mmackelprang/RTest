@@ -96,3 +96,34 @@ evidence; this section exists so the choice is not re-litigated.
   gesture, shown failing on `9ca42590`.
 
 **Status: still 📋, and the row now needs a plan written against this ruling.**
+
+---
+
+## Shipped — branch `feat/aud-28-ui-16-seek-on-release` (2026-09-29, pending merge)
+
+Built against the 2026-09-25 ruling: **seek on release, no debounce.**
+
+- **Scope question 1, answered: `RadzenSlider` has no release event.** Radzen.Blazor 6.6.4's
+  `createSlider` invokes `RadzenSlider.OnValueChange` from its `mousemove`/`touchmove` handler on every
+  frame, and its `mouseup` handler only removes listeners. So this was not a one-line binding change.
+- **New shared `SeekBar`** (`src/Radio.Web/Components/Shared/SeekBar.razor` + `wwwroot/js/seek-bar.js`)
+  replaces the `RadzenSlider` in `NowPlayingPanel`. The JS captures the pointer and reports the gesture
+  (`OnDragMove` / `OnDragEnd` / `OnDragCancel`); the component raises `OnSeek` **once, on release**, and
+  `OnScrub` (display only) during the drag. A tap is one down + one up, so it still seeks exactly once.
+  `UI-16` uses the same component for the voicemail scrubber.
+- **Scope question 4:** the elapsed readout follows the finger during the drag (`_scrubPosition`), and
+  the thumb holds the drag position through the commit so a poll or the 1 Hz tick cannot yank it back.
+- **Scope question 2 (stop/restart cost) was not measured** — with one seek per gesture it no longer
+  decides the remedy. **Scope question 3:** `VoicemailPlayer` had no drag at all; `UI-16` adds one with
+  the same on-release rule.
+- **Hit area:** 48 px (`--touch-min`) around a 4 px track, with negative margins (`-8px 0 -16px`) so it
+  takes 24 px of layout rather than 48; the transport bar's height change was not measured on the panel.
+- **Tests:** `SeekBarTests` (component, via the interop seam) and three `NowPlayingPanelTests`
+  counting `POST /api/audio`: 5 drag frames → 0 seeks, release → exactly 1; tap → 1; readout follows.
+  ⚠ The test cannot literally be run on `9ca42590` (the `SeekBar` it drives did not exist); instead a
+  mutation that seeks from `OnDragMove` failed 9 tests, and one that binds the panel's `OnScrub` to a
+  seek failed the panel and voicemail count tests. The JS was driven separately in headless Chromium
+  (mouse drag, click, drag off the element past the end, touch drag, touch tap, right click, disabled):
+  one `OnDragEnd` per gesture at the release position, none for right click or disabled.
+- **Cabinet gate still open:** drag slowly and fast across a playing file and listen — expected is
+  silence-then-jump with no stutter.
