@@ -6,6 +6,23 @@
 RotaryPhone HFP boundary violation — see below). **This is a different defect and must not be
 conflated with that one.**
 
+## ✅ Owner UAT passed 2026-09-29 — and a correction to the diagnosis below
+
+**Shipped as [#714](https://github.com/mmackelprang/RTest/pull/714) (squash `28d5a1b`), deployed `24b6ce7`.** Owner, after a Bluetooth session on the box: *"No dropouts mid-song."*
+
+⛔ **Correction: the "underruns every few minutes" in the diagnosis below were song changes.** Every underrun on BOTH builds fell within ~1 s of an AVRCP track change — the phone pauses the A2DP stream between tracks. **Neither build had a single mid-song underrun.** The drift explanation was drawn from spacing that was really song length; correlating with `Created BT play history entry` lines is what showed it. The mid-song defect this row was filed for (2026-09-07) was already gone with `AUD-39`.
+
+| | old build, 10:55–11:29 | new build, 15:57–16:11 |
+|---|---|---|
+| underruns mid-song | 0 | 0 |
+| underruns per track change | 1–4 | exactly 1 |
+| zero samples per track change | 1,500–3,000 (15–30 ms) | 896–1,920 (9–20 ms) |
+| buffer at report | 1,176–2,566 (≈ empty) | 9,212–9,854 (the 9,600 target) |
+
+The fix still earns its place: the buffer now sits at its 100 ms target instead of near empty, so a late packet mid-song has margin, and each track-change gap is shorter and single.
+
+**Follow-up in the same arc:** those track-change underruns now log at **Debug** instead of a journal Warning — `LinuxBluetoothService` stamps an AVRCP title|artist change on the generator (`NotifyProducerBoundary`), and an underrun line whose every underrun is within ±2 s of it is classified as the phone pausing between tracks. Counters and metrics unchanged.
+
 ## Diagnosis 2026-09-29 — two causes, neither the callback
 
 **Still happening, milder.** The owner's BT session 2026-09-29 10:55–11:29 (return-checklist item 3): 9 underrun Warnings in ~34 min, the buffer at **1,176–2,566 of 384,000 samples (12–27 ms)** rather than 0, ~2,000 zero samples per 3–4 min window.

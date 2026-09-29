@@ -46,6 +46,9 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   private IBtCaptureStream? _nativeStream;
   private CancellationTokenSource? _captureCts;
   private object? _activeGenerator;
+
+  // AUD-15 follow-up: the last AVRCP title|artist, to tell a track change from a metadata refresh.
+  private string? _lastAvrcpTrackKey;
   private string? _activeNodeName;
   // The format the current native stream was started with — kept so a parked capture can be
   // re-bound with the same format its generator (still in the mixer) was built for. AUD-10.
@@ -3827,6 +3830,17 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
     _logger.LogDebug("AVRCP metadata: {Title} by {Artist} (album: {Album}, art: {HasArt})",
       meta.Title, meta.Artist, meta.Album, !string.IsNullOrEmpty(meta.AlbumArtUrl));
+
+    // AUD-15 follow-up: a new title|artist is a track change, and the phone pauses the A2DP stream for a
+    // moment around it. Tell the playback buffer, so that expected gap is not logged as a Warning. AVRCP
+    // also re-sends unchanged metadata; only a changed key counts. The first track after connect is not a
+    // boundary (priming covers the start).
+    var trackKey = $"{meta.Title}|{meta.Artist}";
+    var previousKey = Interlocked.Exchange(ref _lastAvrcpTrackKey, trackKey);
+    if (previousKey != null && !string.Equals(previousKey, trackKey, StringComparison.Ordinal))
+    {
+      (_activeGenerator as BufferedSoundGenerator<float>)?.NotifyProducerBoundary();
+    }
 
     MetadataChanged?.Invoke(this, meta);
   }

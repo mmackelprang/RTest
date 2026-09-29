@@ -101,6 +101,73 @@ public class BufferedSoundGeneratorDiagnosticsTests
     Assert.Equal(2, Warnings().Count);
   }
 
+  // ─── AUD-15 follow-up: an underrun at a track change is the phone pausing between tracks ─────────
+
+  private List<(LogLevel Level, string Template, string Message)> TrackChangeLines() =>
+    _log.Entries.Where(e => e.Template.StartsWith("Buffer underrun at a track change", StringComparison.Ordinal)).ToList();
+
+  [Fact]
+  public void AnUnderrunFollowedByATrackChange_IsDebugNotWarning()
+  {
+    using var generator = Create();
+    generator.AddSamples(new float[4]);
+    generator.Render(8);                                  // underrun at t0
+
+    _time.Advance(TimeSpan.FromMilliseconds(500));
+    generator.NotifyProducerBoundary();                   // AVRCP metadata trails the gap
+    _time.Advance(TimeSpan.FromSeconds(1));
+
+    Assert.Empty(Warnings());
+    var line = Assert.Single(TrackChangeLines());
+    Assert.Equal(LogLevel.Debug, line.Level);
+  }
+
+  [Fact]
+  public void ATrackChangeFollowedByAnUnderrun_IsDebugNotWarning()
+  {
+    using var generator = Create();
+    generator.AddSamples(new float[4]);
+    generator.NotifyProducerBoundary();
+    _time.Advance(TimeSpan.FromMilliseconds(300));
+    generator.Render(8);
+
+    _time.Advance(TimeSpan.FromSeconds(1));
+
+    Assert.Empty(Warnings());
+    Assert.Single(TrackChangeLines());
+  }
+
+  [Fact]
+  public void AnUnderrunWellAfterATrackChange_IsStillAWarning()
+  {
+    using var generator = Create();
+    generator.AddSamples(new float[4]);
+    generator.NotifyProducerBoundary();
+    _time.Advance(TimeSpan.FromSeconds(5));
+    generator.Render(8);                                  // mid-song
+
+    _time.Advance(TimeSpan.FromSeconds(1));
+
+    Assert.Single(Warnings());
+    Assert.Empty(TrackChangeLines());
+  }
+
+  [Fact]
+  public void ContinuousUnderruns_StillWarnWithinTheDeferralCap()
+  {
+    using var generator = Create();
+    generator.AddSamples(new float[4]);
+
+    // An underrun every 100 ms never "settles"; the cap must still report it.
+    for (var i = 0; i < 35; i++)
+    {
+      generator.Render(8);
+      _time.Advance(TimeSpan.FromMilliseconds(100));
+    }
+
+    Assert.NotEmpty(Warnings());
+  }
+
   private void DrainWithCompensation(Harness generator, int samples = 8192, int reads = 10)
   {
     generator.AddSamples(new float[samples]);

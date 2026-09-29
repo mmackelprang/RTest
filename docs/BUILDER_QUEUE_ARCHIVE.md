@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (63)
+## Shipped rows (64)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2687,3 +2687,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/ENC-22.md`](queue/ENC-22.md)**
 
 ✅🔬 **SHIPPED 2026-09-28 as [#707](https://github.com/mmackelprang/RTest/pull/707), OFF BY DEFAULT (`Sleep:PanelOffAfterMinutes = 0`); harness UAT (a)–(f) passed on `radio`; the physical knob-while-dark check and the enable step are in [`OWNER-REVIEW.md`](uat/OWNER-REVIEW.md) Phase 2g.** 🟠 NEW 2026-09-28 (owner request, GA) — after a period in sleep, power the panel off; any knob turn or press wakes it.** Feasibility **measured on `radio` the same day**: Mutter `PowerSaveMode` set from a service-like environment powers the panel fully off (`dpms=Off`, stable 20/20 s, no oscillation) and back on; **the encoder stays on USB and connected while dark** (`3-2.3`, `hidraw4`, API `isConnected:true`) because it hangs off a hub the panel does not power; touch drops off as ENC-15 found, so **knobs are the only wake source**. ⚠ Reinstates `ENC-6`'s withdrawn blanking half for the knob-only design. — [detail](queue/ENC-22.md)
+
+### AUD-15 — The BT audio buffer ran near empty; the fix primes it on real audio and holds it with closed-loop resampler control.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#714](https://github.com/mmackelprang/RTest/pull/714) (squash `28d5a1b`) — owner UAT 2026-09-29: no mid-song dropouts; all remaining underruns are the phone pausing at track changes (now logged at Debug) |
+| Plan | [`AUD-15-the-buffer-that-runs-empty.md`](../design/plans/AUD-15-the-buffer-that-runs-empty.md) · **2 d + a ≥30 min box session with the owner present** (onset is ~12 min) · ⛔ **NOT auto-mergeable** — the fix continuously changes the sample rate of live audio and a wrong gain or sign detunes the music rather than failing loudly · ⚠ **the plan DISPROVED this row's headline**: the lock is a red herring (375-quantum ring), `buffer: 0/384000` is a tautology, and the cause is an open-loop resampler whose `SetRatio` has zero callers |
+| Spec / handoff | _no spec doc — measured on `radio` 2026-09-07; log evidence in the dossier_ · `CLAUDE.md` § PipeWire Quantum Tuning |
+| Depends on | — _(no row dependency. ⚠ **NOT the same defect as `AUD-10`** (transport dies on pause) **nor the RotaryPhone HFP disconnect** found in the same logs — same day, same journal, three different problems. Touches the live audio path; **not auto-mergeable**.)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-15.md`](queue/AUD-15.md)**
+
+⭐ **NEW 2026-09-07 — the BT audio ring buffer runs EMPTY (`buffer: 0/384000`), 55 underruns and climbing, substituting silence into playback.** PipeWire `OnProcess` execution reaches **14.2 ms** against a 10.67 ms quantum. — [detail](queue/AUD-15.md)
