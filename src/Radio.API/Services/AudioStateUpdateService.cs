@@ -893,13 +893,32 @@ public class AudioStateUpdateService : BackgroundService
   }
 
   /// <summary>
-  /// Handles external Cast device volume/mute changes.
-  /// Updates IAudioManager so the console and UI stay in sync.
+  /// Handles Cast device volume/mute events. External changes update IAudioManager so
+  /// the console and UI stay in sync; initial-sync reads are logged and not applied.
   /// </summary>
   private void OnCastVolumeChanged(object? sender, CastVolumeChangedEventArgs e)
   {
     if (_audioManager == null)
     {
+      return;
+    }
+
+    // AUD-5. An initial sync is this application READING the Cast device's status
+    // right after connecting — not the user turning a knob on the Chromecast. Applying
+    // it rewrites the console's own master mixer volume, which is not the Cast device's
+    // volume, from a value set on a different device; and IAudioManager.MasterVolume's
+    // setter schedules a debounced write to the config store (AudioPreferencePersistence),
+    // so the rewrite outlives both the Cast session and the process.
+    //
+    // The event is still logged. It is the only record that the read happened, it is
+    // what a "my volume changed by itself" report gets checked against, and the
+    // "initial:" token is what that check greps for (the file sink renders the bool in
+    // lower case: "initial: true").
+    if (e.IsInitialSync)
+    {
+      _logger.LogInformation(
+        "Cast device initial volume read: {Volume:P0}, Muted: {Muted} (initial: {IsInitial}) — not applied to master volume",
+        e.Volume, e.IsMuted, e.IsInitialSync);
       return;
     }
 
