@@ -1852,7 +1852,7 @@ body {
 }
 
 
-/* ─── §18  Metrics Dashboard ──────────────────────────────────────────────── */
+/* ─── §18  Metrics / Diagnostics (Settings → Diagnostics since UI-2) ───────── */
 
 .metrics-page {
   height: 100%;
@@ -2480,6 +2480,33 @@ body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 12px;
+}
+
+/* Settings → Diagnostics (UI-2). Reuses the metrics-* header, chart and tile-grid rules above; the
+   panel sits inside a Settings tab, so it takes the tab's height rather than forcing 100%. */
+.diagnostics-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.diagnostics-cadence {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-low);
+}
+
+.diagnostics-tile {
+  cursor: pointer;
+  border-radius: 8px;
+}
+
+.diagnostics-tile:focus-visible,
+.diagnostics-tile.selected {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }
 
 /* ─── §N  Now Playing Dock (PR 5) ─────────────────────────────────────────── */

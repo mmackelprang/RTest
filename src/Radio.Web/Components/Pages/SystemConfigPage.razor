@@ -1,4 +1,5 @@
 @page "/system"
+@page "/diagnostics"
 @rendermode InteractiveServer
 @using Radio.Web.Models
 @inject SystemApiService SystemApi
@@ -12,6 +13,7 @@
 @inject DialogService DialogService
 @inject IntegrationsApiService IntegrationsApi
 @inject ILogger<SystemConfigPage> Logger
+@inject NavigationManager Navigation
 @implements IDisposable
 
 <PageTitle>System Configuration</PageTitle>
@@ -1932,6 +1934,17 @@
       </RadzenTabs>
     </RadzenTabsItem>
 
+    <!-- Tab 9: Diagnostics (UI-2 / D11) — what the top-level /metrics page used to be. -->
+    <RadzenTabsItem Text="Diagnostics" Icon="monitor_heart">
+      @* Mounted only while this tab is the showing tab: DiagnosticsPanel polls for as long as it
+         exists, and the UI-2 load rule is that nothing polls the metrics DB unless someone is looking.
+         Same rule the Rotary Encoders poll follows (UpdateEncoderPolling). *@
+      @if (_activeTab == DiagnosticsTabIndex)
+      {
+        <DiagnosticsPanel />
+      }
+    </RadzenTabsItem>
+
     </Tabs>
   </RadzenTabs>
 </div>
@@ -1944,6 +1957,14 @@
   // move with it. They exist because the encoder poll is only allowed to run while that panel shows.
   private const int IntegrationsTabIndex = 7;
   private const int RotaryEncoderSubTabIndex = 0;
+
+  /// <summary>
+  /// Position of the Diagnostics tab (UI-2). It is the LAST tab deliberately, so adding it moved
+  /// neither index above. <c>/diagnostics</c> — the route name D13 freed by deleting <c>/diagnostic</c>
+  /// — opens this page with this tab selected; that is where the DevTray's "Fingerprint events" card
+  /// lands.
+  /// </summary>
+  internal const int DiagnosticsTabIndex = 8;
   private int _integrationsSubTab = 0;
   /// <summary>Set in <see cref="Dispose"/>; gates the hub subscriptions against a teardown that
   /// beats them.</summary>
@@ -2194,6 +2215,9 @@
 
   protected override async Task OnInitializedAsync()
   {
+    // Decided before any await so the first render already shows the right tab.
+    SelectTabForRoute();
+
     // Load initial data
     await LoadSystemStatsAsync();
     await LoadConfigurationAsync();
@@ -4139,6 +4163,44 @@
     {
       StopEncoderPolling();
     }
+  }
+
+  /// <summary>
+  /// Navigating from <c>/system</c> to <c>/diagnostics</c> (the DevTray card, pressed while Settings is
+  /// open) reuses this component instance — same type, so the router only re-sets parameters and
+  /// <see cref="OnInitializedAsync"/> does not run again. This is what switches the tab then.
+  /// </summary>
+  protected override void OnParametersSet() => SelectTabForRoute();
+
+  /// <summary>
+  /// <c>/diagnostics</c> is this page opened on its Diagnostics tab. Acts only when the URI has
+  /// CHANGED since last seen, so a stray parameter re-set while the address still reads
+  /// <c>/diagnostics</c> can never drag the user back from a tab they chose; and only ever selects
+  /// that tab — arriving at <c>/system</c> leaves whatever tab is showing alone.
+  /// </summary>
+  private void SelectTabForRoute()
+  {
+    var uri = Navigation.Uri;
+    if (uri == _lastRouteUri)
+    {
+      return;
+    }
+    _lastRouteUri = uri;
+
+    if (_activeTab != DiagnosticsTabIndex && IsDiagnosticsRoute(Navigation.ToBaseRelativePath(uri)))
+    {
+      _activeTab = DiagnosticsTabIndex;
+      UpdateEncoderPolling();
+    }
+  }
+
+  private string? _lastRouteUri;
+
+  /// <summary>True for <c>diagnostics</c>, with or without a query string or fragment.</summary>
+  internal static bool IsDiagnosticsRoute(string baseRelativePath)
+  {
+    var path = baseRelativePath.Split('?', '#')[0].TrimEnd('/');
+    return string.Equals(path, "diagnostics", StringComparison.OrdinalIgnoreCase);
   }
 
   private void OnTopLevelTabChanged(int index)

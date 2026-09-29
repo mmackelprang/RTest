@@ -1,0 +1,538 @@
+@inject MetricsApiService MetricsApi
+@inject ConfigurationApiService ConfigApi
+@inject IJSRuntime JS
+@inject ILogger<DiagnosticsPanel> Logger
+@implements IAsyncDisposable
+
+@*
+  DiagnosticsPanel — Settings → Diagnostics (UI-2 / UI-4, decision D11).
+
+  This replaces the top-level /metrics page. The owner's direction (D11) was structural: diagnostics
+  belong under Settings, not in the nav. The panel keeps what the page was genuinely for — one tile
+  per metric, tinted against its threshold band, with a chart for the metric you tap — and drops the
+  thing that made it part of the problem it was meant to diagnose.
+
+  ⚠ THE LOAD RULE (UI-2, and the pattern ENC-14 set). The old page, whenever it was mounted, sent
+  one snapshot request (which ran two SQLite queries per key server-side — 220 keys on the box) plus
+  up to 40 parallel history requests every 10 s, just to draw sparklines. scripts/research/
+  heavy_load_harness.sh uses a metrics-DB busy loop to REPRODUCE audio distortion, so an open
+  metrics page was an instance of the bug under investigation. Now:
+
+    • one /api/metrics/window request per poll (one SQL statement for every metric), plus one
+      /api/metrics/history request only while a tile is selected — never a per-metric fan-out;
+    • the poll runs only while this panel is mounted, and SystemConfigPage mounts it only while the
+      Diagnostics tab is the showing tab;
+    • polls never overlap — a tick that arrives while the previous one is still in flight is skipped.
+
+  Do not reintroduce per-tile sparklines by calling history per key. If sparklines come back, they
+  come back through one batched call.
+*@
+
+<div class="diagnostics-panel" data-testid="diagnostics-panel">
+  <div class="metrics-header">
+    <span class="metrics-title">Diagnostics</span>
+    <div class="route-group" style="padding: 4px 8px; flex-wrap: wrap;">
+      @foreach (var range in TimeRanges)
+      {
+        <button type="button"
+                class="route-toggle @(_timeRange == range ? "route-active" : "")"
+                style="width: auto; padding: 0 16px; height: 44px; border-radius: 22px; font-size: 14px; font-weight: 600;"
+                aria-pressed="@(_timeRange == range ? "true" : "false")"
+                @onclick="@(() => SetTimeRangeAsync(range))">@range</button>
+      }
+    </div>
+    <span class="diagnostics-cadence">Updates every @((int)PollInterval.TotalSeconds) s while open</span>
+    <div style="margin-left: auto;">
+      <RadzenButton Icon="refresh" ButtonStyle="ButtonStyle.Primary" aria-label="Refresh diagnostics"
+                    Click="RefreshAsync" Size="ButtonSize.Large" Variant="Variant.Text" />
+    </div>
+  </div>
+
+  @if (_loading && _window == null)
+  {
+    <RadzenProgressBar Mode="ProgressBarMode.Indeterminate" ProgressBarStyle="ProgressBarStyle.Primary" Style="height: 2px;" />
+  }
+
+  <div class="metrics-body">
+    @* Rendered always so the canvas is in the DOM for metricsChart.init; hidden until a tile is picked. *@
+    <div class="metrics-chart-panel" style="@(_selectedMetric == null ? "display: none;" : "")">
+      <div style="flex: 1; min-height: 0; position: relative;">
+        <canvas id="metricsChartCanvas" style="width: 100%; height: 100%; display: block;"></canvas>
+      </div>
+      @if (_selectedMetric != null && _selectedAggregate != null)
+      {
+        <div class="metrics-chart-stats">
+          <span><strong>@GetMetricLabel(_selectedMetric)</strong></span>
+          <span>Count: <strong>@FormatScaled(_selectedAggregate.Count)</strong></span>
+          <span>Avg: <strong>@FormatMetricValue(_selectedAggregate.Average, _selectedMetric)</strong></span>
+          <span>Min: <strong>@FormatMetricValue(_selectedAggregate.Min, _selectedMetric)</strong></span>
+          <span>Max: <strong>@FormatMetricValue(_selectedAggregate.Max, _selectedMetric)</strong></span>
+          <span>StdDev: <strong>@FormatMetricValue(_selectedAggregate.StdDev, _selectedMetric)</strong></span>
+        </div>
+      }
+    </div>
+
+    @if (_window is { Count: > 0 })
+    {
+      var perRouteCount = _window.Count(s => IsPerRouteApiCounter(s.Key));
+      <div class="metrics-categories-grid">
+        @foreach (var category in VisibleCategories())
+        {
+          <div class="metrics-category-block">
+            <h3 class="metrics-category-subheader">@category</h3>
+            <div class="metrics-tile-grid">
+              @foreach (var summary in VisibleMetrics(category))
+              {
+                var key = summary.Key;
+                var (warn, critical, invert) = GetThresholds(key);
+                <div class="diagnostics-tile @(key == _selectedMetric ? "selected" : "")"
+                     role="button" tabindex="0" aria-pressed="@(key == _selectedMetric ? "true" : "false")"
+                     @onclick="@(() => ToggleMetricAsync(key))">
+                  <MetricTile Key="@key"
+                              Category="@FormatCategoryLabel(category, key)"
+                              Name="@GetMetricLabel(key)"
+                              Value="@TileValue(summary)"
+                              Unit="@GetUnitForKey(key)"
+                              Warn="@warn"
+                              Critical="@critical"
+                              InvertThresholds="@invert" />
+                </div>
+              }
+            </div>
+          </div>
+        }
+
+        @if (perRouteCount > 0)
+        {
+          <div>
+            <RadzenButton Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Base" Size="ButtonSize.Large"
+                          data-testid="toggle-per-route"
+                          Text="@(_showPerRoute ? $"Hide per-route API counters ({perRouteCount})" : $"Show per-route API counters ({perRouteCount})")"
+                          Click="@(() => _showPerRoute = !_showPerRoute)" />
+          </div>
+        }
+      </div>
+    }
+    else if (!_loading)
+    {
+      <div style="padding: 24px; text-align: center; color: var(--text-low);">
+        No metrics recorded in the last @_timeRange. The API may not be collecting metrics, or may be unreachable.
+      </div>
+    }
+  </div>
+</div>
+
+@code {
+  internal static readonly string[] TimeRanges = ["5m", "1h", "24h", "7d", "30d"];
+
+  /// <summary>
+  /// How often the open panel re-reads the window. radio-api flushes metric buckets every 60 s
+  /// (<c>MetricsOptions.FlushIntervalSeconds</c>), so polling faster than this only re-reads the same
+  /// rows; 15 s bounds staleness to a quarter of a flush. <c>internal</c> so tests advance the fake
+  /// clock by the production value rather than a copied literal.
+  /// </summary>
+  internal static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(15);
+
+  /// <summary>
+  /// The clock the poll timer is armed against. Production never sets this — the default is the
+  /// production behaviour. It is a parameter rather than <c>@inject</c> because neither host
+  /// registers a <see cref="TimeProvider"/> (see NowPlayingPanel's <c>Clock</c> for the full
+  /// argument), and a parameter is set before <see cref="OnInitializedAsync"/> arms the timer, which
+  /// an <c>internal</c> property on a renderer-activated component is not.
+  /// </summary>
+  [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  private string _timeRange = "1h";
+  private bool _loading;
+  private bool _showPerRoute;
+  private bool _disposed;
+  private int _pollInFlight;
+  private ITimer? _pollTimer;
+  private IJSObjectReference? _jsModule;
+  private bool _chartInitialized;
+
+  private List<MetricWindowSummaryDto>? _window;
+  private string? _selectedMetric;
+  private List<MetricHistoryDto>? _selectedHistory;
+  private MetricAggregateDto? _selectedAggregate;
+  private Dictionary<string, MetricDescriptorDto> _descriptors = new(StringComparer.Ordinal);
+
+  // Threshold definitions: (warning, critical) by metric name fragment, carried over unchanged
+  // from the Metrics page. invertAbove == true → high is bad; false → low is bad (buffer fill).
+  private static readonly Dictionary<string, (double warn, double crit, bool invertAbove)> Thresholds = new()
+  {
+    ["cpu_temp"] = (70, 85, true),
+    ["cpu_usage"] = (80, 95, true),
+    ["memory_percent"] = (80, 95, true),
+    ["buffer_fill"] = (50, 20, false),
+    ["buffer_percent"] = (50, 20, false),
+    ["underrun"] = (1, 10, true),
+    ["error"] = (1, 10, true),
+  };
+
+  protected override async Task OnInitializedAsync()
+  {
+    _loading = true;
+    try
+    {
+      // Two one-off reads, then the window. None of these repeat on the poll.
+      await LoadPreferencesAsync();
+      await LoadDescriptorsAsync();
+      await LoadWindowAsync();
+    }
+    finally { _loading = false; }
+
+    if (!_disposed)
+    {
+      _pollTimer = Clock.CreateTimer(_ => _ = InvokeAsync(PollOnceAsync), null, PollInterval, PollInterval);
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    // The chart only matters once a tile is selected; import the module lazily then.
+    if (!_chartInitialized && _selectedMetric != null)
+    {
+      try
+      {
+        _jsModule ??= await JS.InvokeAsync<IJSObjectReference>("import", "./js/metricsChart.js");
+        _chartInitialized = await _jsModule.InvokeAsync<bool>("metricsChart.init", "metricsChartCanvas");
+        if (_chartInitialized)
+        {
+          await RenderChartAsync();
+        }
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Diagnostics chart canvas failed to initialise");
+      }
+    }
+  }
+
+  /// <summary>
+  /// One poll: the window, plus the selected metric's history if a tile is selected. Skipped
+  /// entirely if the previous poll has not finished, so a slow API cannot stack requests up.
+  /// </summary>
+  internal async Task PollOnceAsync()
+  {
+    if (_disposed || Interlocked.Exchange(ref _pollInFlight, 1) == 1)
+    {
+      return;
+    }
+
+    try
+    {
+      await LoadWindowAsync();
+      if (_selectedMetric != null)
+      {
+        await LoadSelectedHistoryAsync();
+        await RenderChartAsync();
+      }
+      if (!_disposed)
+      {
+        StateHasChanged();
+      }
+    }
+    finally
+    {
+      Interlocked.Exchange(ref _pollInFlight, 0);
+    }
+  }
+
+  private Task RefreshAsync() => PollOnceAsync();
+
+  private async Task LoadPreferencesAsync()
+  {
+    var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, System.Text.Json.JsonElement>>("ui.metrics");
+    if (prefs != null && prefs.TryGetValue("timeRange", out var stored)
+        && stored.ValueKind == System.Text.Json.JsonValueKind.String
+        && stored.GetString() is { } range
+        && TimeRanges.Contains(range))
+    {
+      _timeRange = range;
+    }
+  }
+
+  private async Task LoadDescriptorsAsync()
+  {
+    var descriptors = await MetricsApi.GetMetricDescriptorsAsync();
+    _descriptors.Clear();
+    foreach (var d in descriptors ?? [])
+    {
+      _descriptors[d.Key] = d;
+    }
+  }
+
+  private async Task LoadWindowAsync()
+  {
+    var (start, end) = GetWindow();
+    var window = await MetricsApi.GetMetricWindowAsync(start, end, GetResolution());
+    // A failed read keeps the last good tiles rather than blanking the panel.
+    if (window != null)
+    {
+      _window = window;
+    }
+  }
+
+  private async Task LoadSelectedHistoryAsync()
+  {
+    if (_selectedMetric == null) return;
+    var (start, end) = GetWindow();
+    var history = await MetricsApi.GetMetricHistoryAsync(_selectedMetric, start, end, GetResolution());
+    _selectedHistory = history;
+    _selectedAggregate = ComputeAggregate(history);
+  }
+
+  private async Task SetTimeRangeAsync(string range)
+  {
+    _timeRange = range;
+    await ConfigApi.UpdateConfigurationAsync("ui.metrics", "timeRange", range);
+    await PollOnceAsync();
+  }
+
+  private async Task ToggleMetricAsync(string key)
+  {
+    if (_selectedMetric == key)
+    {
+      _selectedMetric = null;
+      _selectedHistory = null;
+      _selectedAggregate = null;
+      return;
+    }
+
+    _selectedMetric = key;
+    await LoadSelectedHistoryAsync();
+    await RenderChartAsync();
+  }
+
+  private async Task RenderChartAsync()
+  {
+    if (!_chartInitialized || _jsModule == null || _selectedMetric == null) return;
+    if (_selectedHistory is not { Count: >= 2 } history) return;
+
+    try
+    {
+      var chartData = new
+      {
+        labels = history.Select(h => h.Timestamp.ToLocalTime().ToString("HH:mm")).ToArray(),
+        values = history.Select(h => h.Value).ToArray(),
+        min = history.Select(h => h.Min ?? h.Value).ToArray(),
+        max = history.Select(h => h.Max ?? h.Value).ToArray()
+      };
+      var current = _window?.FirstOrDefault(s => s.Key == _selectedMetric);
+      var chartOptions = new
+      {
+        // Chart canvas can't resolve CSS vars; ChartColors keeps the hex in step with the tokens.
+        color = ThresholdColor(_selectedMetric, current == null ? 0 : TileValue(current)),
+        fillOpacity = 0.15,
+        unit = UnitSuffix(GetUnitForKey(_selectedMetric)),
+        thresholds = ChartThresholds(_selectedMetric)
+      };
+      await _jsModule.InvokeVoidAsync("metricsChart.render", "metricsChartCanvas", chartData, chartOptions);
+    }
+    catch (OperationCanceledException) { }
+    catch (JSDisconnectedException) { }
+    catch (Exception ex) { Logger.LogWarning(ex, "Diagnostics chart render failed"); }
+  }
+
+  /// <summary>
+  /// A counter's tile shows its total over the window; a gauge's shows the newest bucket's average.
+  /// That is the reduction the Metrics page did per key in the circuit, now done once in SQL — but
+  /// decided by the metric's recorded type instead of by guessing from words in its key.
+  /// </summary>
+  internal static double TileValue(MetricWindowSummaryDto summary)
+    => summary.IsCounter ? Math.Max(0, summary.Sum) : summary.LatestAverage;
+
+  /// <summary>
+  /// <c>api.requests.api.&lt;Controller&gt;.&lt;action&gt;</c> — one counter per API route, 148 of
+  /// the box's 220 metrics. Folded behind a toggle by default so the diagnostic tiles are not buried;
+  /// the total (<c>api.requests.api</c>), errors and request duration stay visible.
+  /// </summary>
+  internal static bool IsPerRouteApiCounter(string key)
+    => key.StartsWith("api.requests.api.", StringComparison.Ordinal);
+
+  private IEnumerable<MetricWindowSummaryDto> ShownMetrics()
+    => (_window ?? []).Where(s => _showPerRoute || !IsPerRouteApiCounter(s.Key));
+
+  private IEnumerable<string> VisibleCategories()
+    => ShownMetrics().Select(s => GetMetricCategory(s.Key)).Distinct().OrderBy(c => c, StringComparer.Ordinal);
+
+  private IEnumerable<MetricWindowSummaryDto> VisibleMetrics(string category)
+    => ShownMetrics().Where(s => GetMetricCategory(s.Key) == category).OrderBy(s => s.Key, StringComparer.Ordinal);
+
+  private static MetricAggregateDto? ComputeAggregate(List<MetricHistoryDto>? history)
+  {
+    if (history is not { Count: > 0 }) return null;
+
+    var values = history.Select(h => h.Value).ToList();
+    var avg = values.Average();
+    var variance = values.Count > 1 ? values.Sum(v => (v - avg) * (v - avg)) / (values.Count - 1) : 0;
+    return new MetricAggregateDto(
+      history.Sum(h => h.Count),
+      values.Sum(),
+      avg,
+      history.Min(h => h.Min ?? h.Value),
+      history.Max(h => h.Max ?? h.Value),
+      Math.Sqrt(variance));
+  }
+
+  private Units GetUnitForKey(string key)
+  {
+    if (_descriptors.TryGetValue(key, out var d) && Enum.TryParse<Units>(d.Unit, ignoreCase: true, out var parsed))
+    {
+      return parsed;
+    }
+    return MapKeyToUnit(key);
+  }
+
+  /// <summary>
+  /// Residual key-pattern unit heuristic for metrics with no server-registered descriptor
+  /// (carried over from the Metrics page unchanged).
+  /// </summary>
+  internal static Units MapKeyToUnit(string metricKey)
+  {
+    if (string.IsNullOrEmpty(metricKey)) return Units.Bare;
+    var k = metricKey.ToLowerInvariant();
+
+    // Order matters — match more-specific suffixes first.
+    if (k.EndsWith("_mb") || k.Contains("memory_usage_mb") || k.Contains("_memory_mb")) return Units.Megabytes;
+    if (k.EndsWith("_ms") || k.Contains("latency_ms") || k.Contains("duration_ms")) return Units.Milliseconds;
+    if (k.Contains("percent") || k.Contains("_pct") || k.EndsWith("_ratio") ||
+        (k.Contains("cpu") && k.Contains("usage")) ||
+        (k.Contains("memory") && k.Contains("usage") && !k.EndsWith("_mb"))) return Units.Percent;
+    if (k.Contains("strength") || k.Contains("signal_quality")) return Units.Percent;
+    if (k.EndsWith("_per_min") || k.Contains("rate_per_min") || k.Contains("_per_minute")) return Units.PerMinute;
+    if (k.Contains("frequency_changes") || k.Contains("changes_count") || k.EndsWith("_count")) return Units.Count;
+    if (k.Contains("decibel") || k.EndsWith("_db") || k.Contains("_dbfs")) return Units.Decibels;
+    if (k.Contains("_hz") || k.Contains("frequency_hz") || k.Contains("_freq_hz")) return Units.Frequency;
+    if (k.Contains("count") || k.Contains("total") || k.Contains("errors") ||
+        k.Contains("underruns") || k.Contains("dropped") || k.Contains("requests") ||
+        k.Contains("failures") || k.Contains("connected") || k.Contains("disconnected") ||
+        k.Contains("reconnect") || k.Contains("played") || k.Contains("queued")) return Units.Count;
+
+    return Units.Bare;
+  }
+
+  private static (double? warn, double? critical, bool invert) GetThresholds(string key)
+  {
+    var k = key.ToLowerInvariant();
+    foreach (var (pattern, (warn, crit, invertAbove)) in Thresholds)
+    {
+      if (!k.Contains(pattern)) continue;
+      // invertAbove==false (low is bad) → MetricTile's InvertThresholds=true.
+      return (warn, crit, !invertAbove);
+    }
+    return (null, null, false);
+  }
+
+  private static string ThresholdColor(string key, double value)
+  {
+    var k = key.ToLowerInvariant();
+    foreach (var (pattern, (warn, crit, invertAbove)) in Thresholds)
+    {
+      if (!k.Contains(pattern)) continue;
+      bool critical = invertAbove ? value >= crit : value <= crit;
+      bool warning = invertAbove ? value >= warn : value <= warn;
+      return critical ? ChartColors.Red : warning ? ChartColors.Amber : ChartColors.Cyan;
+    }
+    return ChartColors.Cyan;
+  }
+
+  private static object[]? ChartThresholds(string key)
+  {
+    var k = key.ToLowerInvariant();
+    foreach (var (pattern, (warn, crit, _)) in Thresholds)
+    {
+      if (!k.Contains(pattern)) continue;
+      return
+      [
+        new { value = warn, color = ChartColors.Amber, label = "Warning" },
+        new { value = crit, color = ChartColors.Red, label = "Critical" }
+      ];
+    }
+    return null;
+  }
+
+  private (DateTime start, DateTime end) GetWindow()
+  {
+    var end = DateTime.UtcNow;
+    var start = _timeRange switch
+    {
+      "5m" => end.AddMinutes(-5),
+      "24h" => end.AddHours(-24),
+      "7d" => end.AddDays(-7),
+      "30d" => end.AddDays(-30),
+      _ => end.AddHours(-1)
+    };
+    return (start, end);
+  }
+
+  private string GetResolution() => _timeRange switch
+  {
+    "24h" or "7d" => "Hour",
+    "30d" => "Day",
+    _ => "Minute"
+  };
+
+  private static string GetMetricCategory(string key)
+  {
+    if (string.IsNullOrEmpty(key)) return "Other";
+    var dot = key.IndexOf('.');
+    return dot > 0 ? key[..dot] : key;
+  }
+
+  private static string FormatCategoryLabel(string topCategory, string key)
+  {
+    var parts = key.Split('.');
+    return parts.Length < 3 ? TitleCase(topCategory) : TitleCase(topCategory) + " · " + TitleCase(parts[1]);
+  }
+
+  private static string TitleCase(string s)
+    => string.IsNullOrEmpty(s) ? s : System.Globalization.CultureInfo.CurrentCulture.TextInfo.ToTitleCase(s.Replace('_', ' '));
+
+  private string GetMetricLabel(string key)
+  {
+    if (_descriptors.TryGetValue(key, out var d) && !string.IsNullOrWhiteSpace(d.DisplayName))
+    {
+      return d.DisplayName!;
+    }
+    var parts = key.Split('.');
+    return parts.Length > 1 ? TitleCase(string.Join(" ", parts.Skip(1))) : key;
+  }
+
+  private static string UnitSuffix(Units unit) => unit switch
+  {
+    Units.Percent => "%",
+    Units.Megabytes => "MB",
+    Units.Milliseconds => "ms",
+    Units.Decibels => "dB",
+    Units.Frequency => "Hz",
+    Units.PerMinute => "/min",
+    _ => ""
+  };
+
+  private static string FormatScaled(double value)
+  {
+    var abs = Math.Abs(value);
+    if (abs < 10000) return value == Math.Floor(value) ? $"{value:F0}" : $"{value:F2}";
+    if (abs < 1_000_000) return $"{value / 1_000:F3} K";
+    if (abs < 1_000_000_000) return $"{value / 1_000_000:F3} M";
+    return $"{value / 1_000_000_000:F3} G";
+  }
+
+  private string FormatMetricValue(double value, string key) => UnitsFormatter.Format(value, GetUnitForKey(key));
+
+  public async ValueTask DisposeAsync()
+  {
+    _disposed = true;
+    _pollTimer?.Dispose();
+
+    if (_jsModule != null)
+    {
+      try { await _jsModule.InvokeVoidAsync("metricsChart.destroy", "metricsChartCanvas"); }
+      catch { /* circuit may already be gone */ }
+      try { await _jsModule.DisposeAsync(); }
+      catch { /* circuit may already be gone */ }
+    }
+  }
+}
