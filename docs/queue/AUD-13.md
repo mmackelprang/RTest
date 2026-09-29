@@ -127,3 +127,15 @@ is empty.
 a deprecated path would surface a fault for a source nobody uses. Removing the entry and its capture
 route is probably right, but that is a deprecation, not a bug fix, and it deserves its own
 justification rather than riding along with the Vinyl fix.
+
+---
+
+## ✅ Shipped 2026-09-29 — owner rulings and what changed
+
+**Rulings (owner, 2026-09-29):** a port that matches no capture device **also refuses** (the same rule as empty — never bind by enumeration order); the **"USB Audio" (GenericUSB) source stays unconfigured**, so it shows Error until a device is chosen. `Devices/Radio` is left to `AUD-16` (removal).
+
+**Measured on the box first:** capture devices in enumeration order are `USB Microphone Analog Stereo`, `Monitor of Built-in Audio Analog Stereo`, `Built-in Audio Analog Stereo`. Vinyl's port `"USB Microphone"` matches the first; GenericUSB's `AB13X` matched nothing and **fell back to device 0 — the same turntable input as Vinyl** — and the fallback did not skip `Monitor of …` loopbacks. The config store also holds case-duplicated keys (`devices:vinyl`/`devices:Vinyl`, `devices:radio`/`devices:Radio`).
+
+**Change:** `USBAudioSourceBase.SelectCaptureDevice` (pure, tested) picks the first non-loopback device whose name contains the port; empty → `PortNotConfigured`, no match → `NoMatch`, both refuse: one Warning naming the port and the physical inputs that exist, `USBCaptureDeviceNotFoundException`, source in Error, port released. An empty port is refused **before** it is reserved (two unconfigured sources used to collide on `""`).
+
+**A side effect worth recording:** `USBAudioSourceTests` configured `/dev/ttyUSB0/1/2`, matched no audio device, and passed only through the fallback — which on the dev box grabbed `Monitor of xrdp-sink`: the "Unable to init device Monitor of xrdp-sink" flake seen all day. They now configure the first physical input on the machine running them. The xrdp session's virtual devices still come and go under parallel load, so the class can still flake (now as "no capture device matches USBPort 'xrdp-source'"); alone it passes 25/25 repeatedly.

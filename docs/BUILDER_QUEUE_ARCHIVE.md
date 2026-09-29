@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (64)
+## Shipped rows (65)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2701,3 +2701,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-15.md`](queue/AUD-15.md)**
 
 ⭐ **NEW 2026-09-07 — the BT audio ring buffer runs EMPTY (`buffer: 0/384000`), 55 underruns and climbing, substituting silence into playback.** PipeWire `OnProcess` execution reaches **14.2 ms** against a 10.67 ms quantum. — [detail](queue/AUD-15.md)
+
+### AUD-79 — Cast audio alternated 21 ms of music with 21 ms of silence ("underwater").
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#718](https://github.com/mmackelprang/RTest/pull/718) (squash `56b6639`) — box re-measure 2026-09-29: tap writer 0.967× → 0.999×, 1,024-frame zero runs 70/3 s → 0; owner: *"I haven't heard the 'underwater' audio for the last couple of minutes. This is a definite improvement."* |
+| Plan | _fix shipped: pooled in-order flush queue in `BufferedTapModifier`; readers wait for data, keep-alive silence only after 250 ms writer idle_ |
+| Spec / handoff | _no spec doc — owner report 2026-09-29_ |
+| Depends on | — |
+| Branch | `fix/aud-79-cast-underwater` |
+
+**Detail: [`queue/AUD-79.md`](queue/AUD-79.md)**
+
+🟠 **NEW 2026-09-29 (owner report) — Bluetooth cast to a speaker sounded "underwater": the Cast stream alternated 21 ms of music with 21 ms of digital silence.** Measured by recording the Cast tap on the box: exact 1,024-frame audio/zero alternation, reader at 2.00× real time, writer at 0.967×. `BufferedTapModifier` dropped a batch whenever the previous ThreadPool flush had not run within 21 ms; `TappedOutputStream` spliced 4,096 bytes of keep-alive silence into the stream on every reader catch-up. — [detail](queue/AUD-79.md)
