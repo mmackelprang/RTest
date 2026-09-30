@@ -5,7 +5,7 @@ namespace Radio.API.Controllers;
 
 /// <summary>
 /// API controller for metrics data access.
-/// Provides endpoints for historical data and current snapshots.
+/// Provides endpoints for history, window summaries, keys, descriptors and UI events.
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
@@ -135,81 +135,6 @@ public class MetricsController : ControllerBase
     {
       _logger.LogError(ex, "Failed to retrieve metric window summaries");
       return StatusCode(500, "An error occurred while retrieving metric window summaries");
-    }
-  }
-
-  /// <summary>
-  /// Gets aggregate/current snapshot values for one or more metrics.
-  /// For counters: returns total sum across all time periods.
-  /// For gauges: returns the most recent value.
-  /// </summary>
-  /// <param name="keys">Comma-separated list of metric keys</param>
-  /// <param name="ct">Cancellation token</param>
-  /// <returns>Dictionary of metric keys to their aggregate values</returns>
-  [HttpGet("snapshots")]
-  [ProducesResponseType(typeof(IReadOnlyDictionary<string, double>), StatusCodes.Status200OK)]
-  [ProducesResponseType(StatusCodes.Status400BadRequest)]
-  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  public async Task<ActionResult<IReadOnlyDictionary<string, double>>> GetSnapshots(
-    [FromQuery] string keys,
-    CancellationToken ct = default)
-  {
-    if (string.IsNullOrWhiteSpace(keys))
-    {
-      return BadRequest("At least one metric key is required");
-    }
-
-    try
-    {
-      var keyList = keys.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-      var snapshots = await _metricsReader.GetCurrentSnapshotsAsync(keyList, ct);
-
-      return Ok(snapshots);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to retrieve metric snapshots");
-      return StatusCode(500, "An error occurred while retrieving metric snapshots");
-    }
-  }
-
-  /// <summary>
-  /// Gets the aggregate value for a single metric.
-  /// For counters: returns total sum across all time periods.
-  /// For gauges: returns the most recent value.
-  /// </summary>
-  /// <param name="key">The metric key</param>
-  /// <param name="ct">Cancellation token</param>
-  /// <returns>The aggregate value, or 404 if metric not found</returns>
-  [HttpGet("aggregate")]
-  [ProducesResponseType(typeof(double), StatusCodes.Status200OK)]
-  [ProducesResponseType(StatusCodes.Status404NotFound)]
-  [ProducesResponseType(StatusCodes.Status400BadRequest)]
-  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
-  public async Task<ActionResult<double>> GetAggregate(
-    [FromQuery] string key,
-    CancellationToken ct = default)
-  {
-    if (string.IsNullOrWhiteSpace(key))
-    {
-      return BadRequest("Metric key is required");
-    }
-
-    try
-    {
-      var value = await _metricsReader.GetAggregateAsync(key, ct);
-
-      if (value == null)
-      {
-        return NotFound($"Metric '{key}' not found");
-      }
-
-      return Ok(value.Value);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to retrieve aggregate for {Key}", key);
-      return StatusCode(500, "An error occurred while retrieving metric aggregate");
     }
   }
 

@@ -214,7 +214,7 @@ The unit suffix drives automatic formatting in the dashboard — see [Value Form
 
 No dashboard code changes are required for basic display. Once the backend records a metric:
 1. It appears in the API's `/api/metrics/keys` response
-2. The dashboard fetches snapshots for all available keys
+2. The Diagnostics tab's `/api/metrics/window` poll returns a summary for it
 3. It shows up in the appropriate category section with auto-formatted values
 
 ### Step 4 (optional): Promote to hero card
@@ -268,7 +268,7 @@ If a metric doesn't match either pattern, it's treated as a gauge (latest value 
 ## Auto-Refresh
 
 The dashboard refreshes automatically every **10 seconds**. On each tick:
-1. Fetches fresh snapshots for all metrics
+1. Fetches one `/api/metrics/window` summary for all metrics
 2. Re-fetches sparkline history for up to 20 metrics
 3. Recomputes gauge/counter display values
 4. Re-renders the canvas chart if a metric is selected
@@ -314,12 +314,12 @@ All metrics API endpoints are under `/api/metrics`:
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/metrics/keys` | List all metric key names |
-| `GET` | `/api/metrics/snapshots?keys=a,b,c` | Current values for specified keys |
+| `GET` | `/api/metrics/window?start=...&end=...&resolution=Minute` | One summary per metric for the window, one query (`UI-2`) |
+| `GET` | `/api/metrics/descriptors` | Registered metric descriptors (unit, category, thresholds) |
 | `GET` | `/api/metrics/history?key=X&start=...&end=...&resolution=Minute` | Time-series history |
-| `GET` | `/api/metrics/aggregate?key=X&start=...&end=...&resolution=Minute` | Aggregate stats (returns raw `double`) |
 | `POST` | `/api/metrics/event` | Record a UI event metric from the frontend |
 
-**Note**: The aggregate endpoint returns a raw `double`, not a `MetricAggregateDto`. The dashboard computes aggregate stats (count, avg, min, max, stdDev) client-side from history data.
+**Note**: `/api/metrics/snapshots` and `/api/metrics/aggregate` were removed by `AUD-82` (2026-09-30) — nothing called either after `UI-2`. The Diagnostics tab computes a selected metric's aggregate stats (count, avg, min, max, stdDev) client-side from its history.
 
 ---
 

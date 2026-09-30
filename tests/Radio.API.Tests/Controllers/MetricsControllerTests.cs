@@ -174,49 +174,6 @@ public class MetricsControllerTests
   }
 
   [Fact]
-  public async Task GetSnapshots_WithValidKeys_ReturnsData()
-  {
-    // Arrange
-    var keys = "audio.songs_played_total,system.cpu_temp_celsius";
-    var expectedData = new Dictionary<string, double>
-    {
-      ["audio.songs_played_total"] = 100.0,
-      ["system.cpu_temp_celsius"] = 45.5
-    };
-
-    _mockMetricsReader
-      .Setup(x => x.GetCurrentSnapshotsAsync(It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync(expectedData);
-
-    // Act
-    var result = await _controller.GetSnapshots(keys);
-
-    // Assert
-    var okResult = Assert.IsType<OkObjectResult>(result.Result);
-    var data = Assert.IsAssignableFrom<IReadOnlyDictionary<string, double>>(okResult.Value);
-    Assert.Equal(2, data.Count);
-  }
-
-  [Fact]
-  public async Task GetAggregate_WithValidKey_ReturnsValue()
-  {
-    // Arrange
-    var key = "audio.songs_played_total";
-    var expectedValue = 42.0;
-
-    _mockMetricsReader
-      .Setup(x => x.GetAggregateAsync(key, It.IsAny<CancellationToken>()))
-      .ReturnsAsync(expectedValue);
-
-    // Act
-    var result = await _controller.GetAggregate(key);
-
-    // Assert
-    var okResult = Assert.IsType<OkObjectResult>(result.Result);
-    Assert.Equal(expectedValue, okResult.Value);
-  }
-
-  [Fact]
   public void RecordUIEvent_WithTooLongEventName_ReturnsBadRequest()
   {
     // Arrange

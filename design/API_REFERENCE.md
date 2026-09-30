@@ -2060,62 +2060,6 @@ GET /api/metrics/history?key=audio.songs_played&start=2024-12-04T00:00:00Z&end=2
 
 ---
 
-### GET /api/metrics/snapshots
-
-Gets current/aggregate values for one or more metrics.
-
-**Query Parameters:**
-- `keys` (required): Comma-separated list of metric keys
-
-**Response:** 200 OK
-
-```json
-{
-  "audio.songs_played": 1523,
-  "audio.total_playtime_seconds": 45678,
-  "system.cpu_usage_percent": 23.5
-}
-```
-
-**Behavior:**
-- **Counters:** Returns total sum across all time periods
-- **Gauges:** Returns the most recent value
-
-**Error Responses:**
-- `400 Bad Request` - No keys provided
-- `500 Internal Server Error` - Failed to retrieve snapshots
-
-**Example:**
-```bash
-GET /api/metrics/snapshots?keys=audio.songs_played,audio.total_playtime_seconds
-```
-
----
-
-### GET /api/metrics/aggregate
-
-Gets aggregate statistics for a metric over a time range.
-
-**Query Parameters:**
-- `key` (required): Metric key
-- `start` (required): Start timestamp (ISO 8601)
-- `end` (required): End timestamp (ISO 8601)
-
-**Response:** 200 OK
-
-```json
-{
-  "count": 150,
-  "sum": 2250.5,
-  "average": 15.0,
-  "min": 5.2,
-  "max": 45.8,
-  "stdDev": 8.3
-}
-```
-
----
-
 ### GET /api/metrics/keys
 
 Gets all available metric keys.
@@ -2809,61 +2753,33 @@ const data = await response.json();
 
 ---
 
-#### Real-Time Gauge/Counter
+#### Current Values for Every Metric (Gauges and Counters)
 
-Use `/api/metrics/snapshots` for current values:
-
-```javascript
-// Get current songs played count
-const response = await fetch(
-  '/api/metrics/snapshots?keys=audio.songs_played'
-);
-const data = await response.json();
-
-// Display as counter: data["audio.songs_played"]
-// Update periodically (e.g., every 10 seconds)
-```
-
----
-
-#### Bar Chart (Aggregate Statistics)
-
-Use `/api/metrics/aggregate` for statistical summaries:
+Use `/api/metrics/window` — one request, one database query, one summary per metric for the window
+(`sum`, `sampleCount`, `min`, `max`, `latestAverage`, `latestTimestamp`, `bucketCount`). This is what
+the Settings → Diagnostics tab polls. *(`/api/metrics/snapshots` and `/api/metrics/aggregate` were
+removed by `AUD-82`, 2026-09-30: nothing called them after `UI-2`.)*
 
 ```javascript
-// Get playtime statistics for the last week
 const response = await fetch(
-  '/api/metrics/aggregate?key=audio.total_playtime_seconds' +
-  '&start=2024-11-27T00:00:00Z' +
-  '&end=2024-12-04T23:59:59Z'
+  '/api/metrics/window?start=2024-12-04T19:00:00Z&end=2024-12-04T20:00:00Z&resolution=Minute'
 );
-const data = await response.json();
-
-// data: { count, sum, average, min, max, stdDev }
-// Display as bar chart or summary cards
+const summaries = await response.json();
+// Counter: show summary.sum. Gauge: show summary.latestAverage.
 ```
 
 ---
 
 #### Multi-Metric Dashboard
 
-Combine multiple endpoints for comprehensive dashboards:
-
 ```javascript
-// 1. Get current snapshot values
-const snapshots = await fetch(
-  '/api/metrics/snapshots?keys=audio.songs_played,system.cpu_usage_percent,system.memory_usage_mb'
-);
+// 1. One summary per metric for the window
+const summaries = await fetch('/api/metrics/window?start=...&end=...&resolution=Minute');
 
-// 2. Get time-series for trending
+// 2. History for the one metric being charted
 const history = await fetch(
   '/api/metrics/history?key=audio.songs_played&start=...&end=...&resolution=Hour'
 );
-
-// Display:
-// - Snapshots as KPI cards (large numbers)
-// - History as trend line charts
-// - Aggregate stats as summary tables
 ```
 
 ---

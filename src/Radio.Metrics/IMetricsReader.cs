@@ -45,28 +45,6 @@ public interface IMetricsReader
     CancellationToken ct = default);
 
   /// <summary>
-  /// Gets a snapshot of current/aggregate values for multiple metrics.
-  /// For counters: returns total sum across all resolutions.
-  /// For gauges: returns the most recent value.
-  /// </summary>
-  /// <param name="keys">The metric keys to retrieve</param>
-  /// <param name="ct">Cancellation token</param>
-  /// <returns>Dictionary of metric keys to their current values</returns>
-  Task<IReadOnlyDictionary<string, double>> GetCurrentSnapshotsAsync(
-    IEnumerable<string> keys,
-    CancellationToken ct = default);
-
-  /// <summary>
-  /// Gets the aggregate value for a single metric.
-  /// For counters: returns total sum across all resolutions.
-  /// For gauges: returns the most recent value.
-  /// </summary>
-  /// <param name="key">The metric key</param>
-  /// <param name="ct">Cancellation token</param>
-  /// <returns>The aggregate value, or null if not found</returns>
-  Task<double?> GetAggregateAsync(string key, CancellationToken ct = default);
-
-  /// <summary>
   /// Lists all available metric keys in the system.
   /// </summary>
   /// <param name="ct">Cancellation token</param>
