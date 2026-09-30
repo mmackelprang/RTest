@@ -19,7 +19,6 @@ public class SourceTypeHelperTests
   [Theory]
   [InlineData("Radio")]
   [InlineData("RTLSDRCore")]
-  [InlineData("RF320")]
   [InlineData("Bluetooth")]
   public void HasDetail_ReturnsTrue_ForRadioFamilyAndBluetooth(string sourceType)
   {
@@ -55,7 +54,6 @@ public class SourceTypeHelperTests
   [Theory]
   [InlineData("Radio", "--source-radio")]
   [InlineData("RTLSDRCore", "--source-radio")]
-  [InlineData("RF320", "--source-radio")]
   [InlineData("Bluetooth", "--source-bluetooth")]
   [InlineData("FilePlayer", "--source-file")]
   [InlineData("File", "--source-file")]
@@ -89,12 +87,6 @@ public class SourceTypeHelperTests
   }
 
   [Fact]
-  public void IsRadioFamily_RF320_True()
-  {
-    SourceTypeHelper.IsRadioFamily("RF320").Should().BeTrue();
-  }
-
-  [Fact]
   public void IsRadioFamily_Bluetooth_False()
   {
     // Important boundary: Bluetooth has detail (HasDetail==true) but is NOT a
@@ -111,6 +103,7 @@ public class SourceTypeHelperTests
   [InlineData("TestTone")]
   [InlineData("Spotify")]
   [InlineData("UnknownFutureSource")]
+  [InlineData("RF320")] // AUD-16 removed the RF320 USB radio; its type string is no longer special
   public void IsRadioFamily_NonRadioSources_False(string sourceType)
   {
     SourceTypeHelper.IsRadioFamily(sourceType).Should().BeFalse();
@@ -125,7 +118,6 @@ public class SourceTypeHelperTests
     SourceTypeHelper.IsRadioFamily("radio").Should().BeTrue();
     SourceTypeHelper.IsRadioFamily("RADIO").Should().BeTrue();
     SourceTypeHelper.IsRadioFamily("rtlsdrcore").Should().BeTrue();
-    SourceTypeHelper.IsRadioFamily("rf320").Should().BeTrue();
   }
 
   [Fact]
@@ -157,12 +149,6 @@ public class SourceTypeHelperTests
   public void GetDetailRoute_RTLSDRCore_ReturnsRadioPanel()
   {
     SourceTypeHelper.GetDetailRoute("RTLSDRCore").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
-  }
-
-  [Fact]
-  public void GetDetailRoute_RF320_ReturnsRadioPanel()
-  {
-    SourceTypeHelper.GetDetailRoute("RF320").Should().Be(SourceTypeHelper.SourceDetailRoute.RadioPanel);
   }
 
   [Fact]

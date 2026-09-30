@@ -380,9 +380,10 @@ public class SourceSelectorServiceTests
   [Fact]
   public void CommitBand_OnATunerThatIgnoresIt_DoesNotClaimSuccess()
   {
-    // The RF320's SetBandAsync logs a warning and returns, so the absence of an exception is not
-    // evidence the band changed. Without the read-back the selector would go on to "restore" the
-    // new band's frequency onto a tuner still sitting on the old one.
+    // IRadioControl.SetBandAsync can complete without changing the band (the removed RF320 did), so
+    // the absence of an exception is not evidence the band changed. Without the read-back the
+    // selector would go on to "restore" the new band's frequency onto a tuner still sitting on the
+    // old one.
     using var h = new Harness();
     var radio = ActiveRadio(h);
     radio.IgnoresBandChanges = true;

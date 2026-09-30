@@ -889,10 +889,6 @@ public class RadioController : ControllerBase
       {
         deviceType = "RTLSDRCore";
       }
-      else if (radioSource is RadioAudioSource)
-      {
-        deviceType = "RF320";
-      }
       else
       {
         deviceType = "Unknown";
@@ -992,17 +988,6 @@ public class RadioController : ControllerBase
         SupportsEqualizer = false, // SDR doesn't have hardware EQ
         SupportsDeviceVolume = true,
         Description = "RTL-SDR Software Defined Radio - Full software control via USB dongle"
-      },
-      "RF320" => new RadioDeviceCapabilitiesDto
-      {
-        SupportsSoftwareControl = false,
-        SupportsFrequencyControl = false,
-        SupportsBandSwitching = false,
-        SupportsScanning = false,
-        SupportsGainControl = false,
-        SupportsEqualizer = true, // Device has hardware EQ
-        SupportsDeviceVolume = true, // Device has hardware volume
-        Description = "Raddy RF320 Bluetooth Radio - Bluetooth control with USB audio output"
       },
       _ => new RadioDeviceCapabilitiesDto
       {

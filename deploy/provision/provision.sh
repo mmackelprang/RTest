@@ -253,7 +253,7 @@ Still MANUAL (not automatable — see deploy/provision/README.md):
       NEVER pair the same device on hci1 (RotaryPhone voice) — boundary rule #8.
   * Secrets (machine-key-encrypted, not portable): re-enter AcoustID / Spotify /
       Google TTS keys via the System Config page.
-  * appsettings.Production.json hardware bindings (Devices.Radio.USBPort etc.) —
+  * appsettings.Production.json hardware bindings (Devices.Vinyl.USBPort etc.) —
       reconcile per README; discover the USB port id from the Devices page.
   * GV bridge (voice.google.com Chrome) is RotaryPhone-owned — provisioned by the
       RotaryPhone repo, NOT here. See README "GV bridge (cross-service)".

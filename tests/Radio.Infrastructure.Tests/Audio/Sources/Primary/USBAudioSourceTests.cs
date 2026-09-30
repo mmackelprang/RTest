@@ -12,7 +12,7 @@ using Radio.Infrastructure.Audio.SoundFlow;
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 
 /// <summary>
-/// Unit tests for USB audio sources (Radio, Vinyl, and Generic USB).
+/// Unit tests for USB audio sources (Vinyl and Generic USB).
 /// </summary>
 public class USBAudioSourceTests
 {
@@ -29,37 +29,25 @@ public class USBAudioSourceTests
       .FirstOrDefault(n => !n.StartsWith("Monitor of", StringComparison.OrdinalIgnoreCase));
   });
 
-  private static string RadioPort => PhysicalInput.Value ?? "no-physical-capture-device";
-  private static string VinylPort => RadioPort;
-  private static string GenericPort => RadioPort;
+  private static string VinylPort => PhysicalInput.Value ?? "no-physical-capture-device";
+  private static string GenericPort => VinylPort;
 
-  private readonly Mock<ILogger<RadioAudioSource>> _radioLoggerMock;
   private readonly Mock<ILogger<VinylAudioSource>> _vinylLoggerMock;
   private readonly Mock<ILogger<GenericUSBAudioSource>> _genericLoggerMock;
   private readonly Mock<IOptionsMonitor<DeviceOptions>> _deviceOptionsMock;
-  private readonly Mock<IOptionsMonitor<RadioOptions>> _radioOptionsMock;
   private readonly Mock<IOptionsMonitor<GenericSourcePreferences>> _genericPreferencesMock;
   private readonly Mock<IAudioDeviceManager> _deviceManagerMock;
   private readonly DeviceOptions _deviceOptions;
-  private readonly RadioOptions _radioOptions;
   private readonly GenericSourcePreferences _genericPreferences;
 
   public USBAudioSourceTests()
   {
-    _radioLoggerMock = new Mock<ILogger<RadioAudioSource>>();
     _vinylLoggerMock = new Mock<ILogger<VinylAudioSource>>();
     _genericLoggerMock = new Mock<ILogger<GenericUSBAudioSource>>();
 
     _deviceOptions = new DeviceOptions
     {
-      Radio = new RadioDeviceOptions { USBPort = RadioPort },
       Vinyl = new VinylDeviceOptions { USBPort = VinylPort }
-    };
-
-    _radioOptions = new RadioOptions
-    {
-      DefaultDevice = "RTLSDRCore",
-      DefaultDeviceVolume = 50
     };
 
     _genericPreferences = new GenericSourcePreferences { USBPort = "" };
@@ -67,86 +55,12 @@ public class USBAudioSourceTests
     _deviceOptionsMock = new Mock<IOptionsMonitor<DeviceOptions>>();
     _deviceOptionsMock.Setup(o => o.CurrentValue).Returns(_deviceOptions);
 
-    _radioOptionsMock = new Mock<IOptionsMonitor<RadioOptions>>();
-    _radioOptionsMock.Setup(o => o.CurrentValue).Returns(_radioOptions);
-
     _genericPreferencesMock = new Mock<IOptionsMonitor<GenericSourcePreferences>>();
     _genericPreferencesMock.Setup(o => o.CurrentValue).Returns(_genericPreferences);
 
     _deviceManagerMock = new Mock<IAudioDeviceManager>();
     _deviceManagerMock.Setup(d => d.IsUSBPortInUse(It.IsAny<string>())).Returns(false);
   }
-
-  #region RadioAudioSource Tests
-
-  [Fact]
-  public void RadioAudioSource_Constructor_SetsCorrectProperties()
-  {
-    // Act
-    var source = CreateRadioSource();
-
-    // Assert
-    Assert.Equal("Radio (RF320)", source.Name);
-    Assert.Equal(AudioSourceType.Radio, source.Type);
-    Assert.Equal(AudioSourceCategory.Primary, source.Category);
-    Assert.False(source.IsSeekable);
-    Assert.Null(source.Duration);
-    Assert.Equal(TimeSpan.Zero, source.Position);
-    Assert.Equal(AudioSourceState.Created, source.State);
-  }
-
-  [Fact]
-  public async Task RadioAudioSource_PlayAsync_InitializesAndPlays()
-  {
-    // Arrange
-    var source = CreateRadioSource();
-
-    // Act
-    await source.PlayAsync();
-
-    // Assert
-    Assert.Equal(AudioSourceState.Playing, source.State);
-    _deviceManagerMock.Verify(d => d.ReserveUSBPort(RadioPort, It.IsAny<string>()), Times.Once);
-  }
-
-  [Fact]
-  public async Task RadioAudioSource_PlayAsync_WhenPortInUse_ThrowsConflictException()
-  {
-    // Arrange
-    _deviceManagerMock.Setup(d => d.IsUSBPortInUse(RadioPort)).Returns(true);
-    var source = CreateRadioSource();
-
-    // Act & Assert
-    await Assert.ThrowsAsync<AudioDeviceConflictException>(() => source.PlayAsync());
-  }
-
-  [Fact]
-  public async Task RadioAudioSource_DisposeAsync_ReleasesUSBPort()
-  {
-    // Arrange
-    var source = CreateRadioSource();
-    await source.PlayAsync();
-
-    // Act
-    await source.DisposeAsync();
-
-    // Assert
-    _deviceManagerMock.Verify(d => d.ReleaseUSBPort(RadioPort), Times.Once);
-    Assert.Equal(AudioSourceState.Disposed, source.State);
-  }
-
-  [Fact]
-  public async Task RadioAudioSource_SeekAsync_ThrowsNotSupportedException()
-  {
-    // Arrange
-    var source = CreateRadioSource();
-
-    // Act & Assert
-    await Assert.ThrowsAsync<NotSupportedException>(
-      () => source.SeekAsync(TimeSpan.FromSeconds(10)));
-  }
-
-  #endregion
 
   #region VinylAudioSource Tests
 
@@ -204,6 +118,17 @@ public class USBAudioSourceTests
     // Assert
     _deviceManagerMock.Verify(d => d.ReleaseUSBPort(VinylPort), Times.Once);
     Assert.Equal(AudioSourceState.Disposed, source.State);
+  }
+
+  [Fact]
+  public async Task VinylAudioSource_SeekAsync_ThrowsNotSupportedException()
+  {
+    // Arrange
+    var source = CreateVinylSource();
+
+    // Act & Assert
+    await Assert.ThrowsAsync<NotSupportedException>(
+      () => source.SeekAsync(TimeSpan.FromSeconds(10)));
   }
 
   #endregion
@@ -333,67 +258,66 @@ public class USBAudioSourceTests
   public async Task AllUSBSources_PauseAsync_WhenPlaying_PausesPlayback()
   {
     // Arrange
-    var radio = CreateRadioSource();
     var vinyl = CreateVinylSource();
     var generic = CreateGenericSource();
 
-    await radio.PlayAsync();
     await vinyl.PlayAsync();
     await generic.InitializeWithPortAsync(GenericPort);
     await generic.PlayAsync();
 
     // Act
-    await radio.PauseAsync();
     await vinyl.PauseAsync();
     await generic.PauseAsync();
 
     // Assert
-    Assert.Equal(AudioSourceState.Paused, radio.State);
     Assert.Equal(AudioSourceState.Paused, vinyl.State);
     Assert.Equal(AudioSourceState.Paused, generic.State);
   }
+
+  // The state tests below exercise USBAudioSourceBase through VinylAudioSource. They used the RF320
+  // RadioAudioSource until AUD-16 removed it; the behaviour under test lives in the shared base.
 
   [Fact]
   public async Task AllUSBSources_ResumeAsync_WhenPaused_ResumesPlayback()
   {
     // Arrange
-    var radio = CreateRadioSource();
-    await radio.PlayAsync();
-    await radio.PauseAsync();
+    var vinyl = CreateVinylSource();
+    await vinyl.PlayAsync();
+    await vinyl.PauseAsync();
 
     // Act
-    await radio.ResumeAsync();
+    await vinyl.ResumeAsync();
 
     // Assert
-    Assert.Equal(AudioSourceState.Playing, radio.State);
+    Assert.Equal(AudioSourceState.Playing, vinyl.State);
   }
 
   [Fact]
   public async Task AllUSBSources_StopAsync_WhenPlaying_StopsPlayback()
   {
     // Arrange
-    var radio = CreateRadioSource();
-    await radio.PlayAsync();
+    var vinyl = CreateVinylSource();
+    await vinyl.PlayAsync();
 
     // Act
-    await radio.StopAsync();
+    await vinyl.StopAsync();
 
     // Assert
-    Assert.Equal(AudioSourceState.Stopped, radio.State);
+    Assert.Equal(AudioSourceState.Stopped, vinyl.State);
   }
 
   [Fact]
   public async Task AllUSBSources_StateChanged_EventRaised()
   {
     // Arrange
-    var radio = CreateRadioSource();
+    var vinyl = CreateVinylSource();
     var stateChanges = new List<AudioSourceState>();
-    radio.StateChanged += (s, e) => stateChanges.Add(e.NewState);
+    vinyl.StateChanged += (s, e) => stateChanges.Add(e.NewState);
 
     // Act
-    await radio.PlayAsync();
-    await radio.PauseAsync();
-    await radio.StopAsync();
+    await vinyl.PlayAsync();
+    await vinyl.PauseAsync();
+    await vinyl.StopAsync();
 
     // Assert
     Assert.Contains(AudioSourceState.Ready, stateChanges);
@@ -406,20 +330,20 @@ public class USBAudioSourceTests
   public async Task AllUSBSources_Operations_AfterDispose_ThrowObjectDisposedException()
   {
     // Arrange
-    var radio = CreateRadioSource();
-    await radio.DisposeAsync();
+    var vinyl = CreateVinylSource();
+    await vinyl.DisposeAsync();
 
     // Act & Assert
-    await Assert.ThrowsAsync<ObjectDisposedException>(() => radio.PlayAsync());
-    await Assert.ThrowsAsync<ObjectDisposedException>(() => radio.PauseAsync());
+    await Assert.ThrowsAsync<ObjectDisposedException>(() => vinyl.PlayAsync());
+    await Assert.ThrowsAsync<ObjectDisposedException>(() => vinyl.PauseAsync());
   }
 
   #endregion
 
   #region Cross-Source Contamination Tests
 
-  // USBAudioSourceBase.OnTrackIdentified is inherited by Vinyl, Radio (RF320),
-  // GenericUSB and Bluetooth. TrackIdentified is broadcast to EVERY subscriber,
+  // USBAudioSourceBase.OnTrackIdentified is inherited by Vinyl, GenericUSB and
+  // Bluetooth. TrackIdentified is broadcast to EVERY subscriber,
   // so the `State != Playing && State != Paused` check is only a proxy for
   // "am I active": a non-active source can sit in Playing/Paused and adopt
   // another source's track.
@@ -555,15 +479,6 @@ public class USBAudioSourceTests
   #endregion
 
   #region Helpers
-
-  private RadioAudioSource CreateRadioSource()
-  {
-    return new RadioAudioSource(
-      _radioLoggerMock.Object,
-      _deviceOptionsMock.Object,
-      _radioOptionsMock.Object,
-      _deviceManagerMock.Object);
-  }
 
   private VinylAudioSource CreateVinylSource()
   {
