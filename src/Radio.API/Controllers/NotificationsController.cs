@@ -33,7 +33,8 @@ public class NotificationsController : ControllerBase
   /// <param name="request">The announcement request.</param>
   /// <returns>
   /// 200 once the announcement has played to its end (the request waits for it); 200 with
-  /// <c>outcome: "interrupted"</c> if it was stopped part-way; 500 if it did not play (TTS-2).
+  /// <c>outcome: "interrupted"</c> if it was stopped, or replaced by another announcement (AUD-73) —
+  /// possibly before it spoke; 500 if it did not play (TTS-2).
   /// </returns>
   [HttpPost("announce")]
   [ProducesResponseType(StatusCodes.Status200OK)]
@@ -55,9 +56,10 @@ public class NotificationsController : ControllerBase
 
       // Priority is what this announcement is registered at with IDuckingService, and it is the
       // only request field left on the line once the body is a token. It does NOT decide preemption
-      // BETWEEN ANNOUNCEMENTS: a newer announcement replaces the one speaking whatever either
-      // priority is, and the replaced request returns 200 with outcome "interrupted"
-      // (AnnouncementService.BecomeActive, AUD-73). It DOES decide whether attended
+      // BETWEEN ANNOUNCEMENTS too (AUD-73, AnnouncementService.BecomeActive): a higher priority
+      // replaces a lower one, the newer of two equal priorities replaces the older, and a lower
+      // priority plays alongside a higher one rather than cutting it off. A replaced request returns
+      // 200 with outcome "interrupted" — including one replaced before it spoke. It also decides whether attended
       // playback (a voicemail) is preempted: EventPlaybackService observes the DuckingStateChanged
       // this route's StartDuckingAsync raises and compares the priority against
       // GvMedia:PreemptAtPriority.
@@ -75,7 +77,7 @@ public class NotificationsController : ControllerBase
       return outcome switch
       {
         AnnouncementOutcome.Completed => Ok(new { message = "Announcement played", outcome = "completed" }),
-        AnnouncementOutcome.Interrupted => Ok(new { message = "Announcement stopped before it finished", outcome = "interrupted" }),
+        AnnouncementOutcome.Interrupted => Ok(new { message = "Announcement stopped or replaced before it finished", outcome = "interrupted" }),
         _ => StatusCode(500, new { error = "Announcement did not play; see the radio-api log", outcome = "failed" })
       };
     }
