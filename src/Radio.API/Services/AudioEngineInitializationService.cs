@@ -99,6 +99,129 @@ public class AudioEngineInitializationService : IHostedService
     _bluetoothAutoSwitch = serviceProvider.GetService<BluetoothAutoSwitchService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
     _httpOutput = serviceProvider.GetService<HttpStreamOutput>();
+
+    // AUD-84 / AUD-37. A Cast speaker that drops mid-stream must not leave the cabinet
+    // muted: selecting Cast muted the local sink, and nothing else would ever unmute it.
+    if (_castOutput != null)
+    {
+      _castOutput.Disconnected += OnCastOutputDisconnected;
+    }
+  }
+
+  /// <summary>
+  /// The most recently started lost-Cast recovery, so a test can await it rather than
+  /// sleep. Nothing in production reads it.
+  /// </summary>
+  internal Task LastCastLossRecovery { get; private set; } = Task.CompletedTask;
+
+  private void OnCastOutputDisconnected(object? sender, ChromecastDisconnectedEventArgs e)
+  {
+    // Deliberate disconnects already go through the output gate, which chose the next
+    // output itself. Only a LOST connection needs rescuing.
+    if (!e.IsConnectionLost)
+    {
+      return;
+    }
+
+    try
+    {
+      // Queued, not awaited: this runs on the Cast output's loss-handling thread, which
+      // still has the dead client to close after raising the event.
+      LastCastLossRecovery = Task.Run(() => RestoreLocalOutputAfterCastLossAsync(e.Device?.FriendlyName, e.Reason));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Could not start local-output recovery after the Cast connection was lost");
+    }
+  }
+
+  /// <summary>
+  /// Switches the active output back to the local speakers after the Cast connection was
+  /// lost mid-stream (AUD-84): unmutes the local sink, and — through the output gate —
+  /// persists the local output as the current one, exactly as the startup fallback does.
+  /// Does nothing when the active output is no longer Cast, so a choice made in the UI
+  /// meanwhile is never overridden.
+  /// </summary>
+  internal async Task RestoreLocalOutputAfterCastLossAsync(string? deviceName, string? reason)
+  {
+    CancellationToken ct;
+    try
+    {
+      ct = _serviceStoppingCts.Token;
+      await _fallbackLock.WaitAsync(ct).ConfigureAwait(false);
+    }
+    catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException)
+    {
+      return; // Shutting down; the host's own teardown owns the outputs now.
+    }
+
+    try
+    {
+      // Null is treated as "still Cast" for the same reason ApplyLocalFallbackAsync does:
+      // failing open is what keeps the local sink from staying muted.
+      var active = _audioEngine.ActiveOutputId;
+      if (!string.IsNullOrEmpty(active) &&
+          !string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        _logger.LogInformation(
+          "Cast connection to {Device} was lost, but the active output is already {ActiveOutput} — leaving it",
+          deviceName ?? "<unknown device>", active);
+        return;
+      }
+
+      var target = await PickLocalOutputDeviceAsync(ct).ConfigureAwait(false);
+      if (target == null)
+      {
+        _logger.LogError(
+          "Cast connection to {Device} was lost and no local output device is available — cannot restore local audio",
+          deviceName ?? "<unknown device>");
+        return;
+      }
+
+      _logger.LogWarning(
+        "Cast connection to {Device} was lost ({Reason}) — switching to local output \"{DeviceName}\" ({DeviceId})",
+        deviceName ?? "<unknown device>", reason, target.Name, target.Id);
+
+      try
+      {
+        await _deviceManager.SetOutputDeviceAsync(target.Id, ct).ConfigureAwait(false);
+      }
+      catch (Exception ex) when (ex is not OperationCanceledException)
+      {
+        // Non-fatal, as in ApplyLocalFallbackAsync: the gate call below still unmutes.
+        _logger.LogWarning(ex, "Cast-loss recovery: could not select local output device {DeviceId}", target.Id);
+      }
+
+      await _audioEngine.SetActiveOutputAsync(target.Id, ct).ConfigureAwait(false);
+
+      _logger.LogInformation(
+        "Local output \"{DeviceName}\" restored and unmuted after the Cast connection was lost", target.Name);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      // Shutting down — leave state alone.
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to restore local output after the Cast connection was lost");
+    }
+    finally
+    {
+      try { _fallbackLock.Release(); }
+      catch (ObjectDisposedException) { /* raced shutdown disposal */ }
+    }
+  }
+
+  /// <summary>
+  /// The local output a Cast fallback lands on: the system default, else the first device.
+  /// One rule for both fallbacks (startup and lost-connection).
+  /// </summary>
+  private async Task<AudioDeviceInfo?> PickLocalOutputDeviceAsync(CancellationToken ct)
+  {
+    // Re-enumerated every time: a fallback can fire long after startup, when the device
+    // list may differ from the startup snapshot.
+    var devices = await _deviceManager.GetOutputDevicesAsync(ct).ConfigureAwait(false);
+    return devices.FirstOrDefault(d => d.IsDefault) ?? devices.FirstOrDefault();
   }
 
   /// <summary>
@@ -783,10 +906,7 @@ public class AudioEngineInitializationService : IHostedService
         return true;
       }
 
-      // Re-enumerate rather than reusing the startup snapshot — the watchdog can
-      // fire tens of seconds later, by which time the device list may differ.
-      var devices = await _deviceManager.GetOutputDevicesAsync(cancellationToken).ConfigureAwait(false);
-      var target = devices.FirstOrDefault(d => d.IsDefault) ?? devices.FirstOrDefault();
+      var target = await PickLocalOutputDeviceAsync(cancellationToken).ConfigureAwait(false);
       if (target == null)
       {
         // Nothing to unmute: with no output device there is no local playback
@@ -955,6 +1075,11 @@ public class AudioEngineInitializationService : IHostedService
     try
     {
       _logger.LogInformation("Stopping audio engine...");
+
+      if (_castOutput != null)
+      {
+        _castOutput.Disconnected -= OnCastOutputDisconnected;
+      }
 
       // Stop the Cast confirm-or-roll-back work before tearing anything down, so
       // its watchdog can't fire a fallback (and a config write) mid-shutdown.

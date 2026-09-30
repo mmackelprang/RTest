@@ -35,7 +35,7 @@ public class GoogleCastOutput : AudioOutputBase
   // comment said it guarded every read. It never did, and believing it makes the
   // unlocked dereferences described below look safer than they actually are.)
   //
-  // WHAT IT SERIALIZES: seven await-free critical sections, each touching
+  // WHAT IT SERIALIZES: eight await-free critical sections, each touching
   // _connectionGeneration and/or those three fields as one consistent unit:
   //     InitializeAsync         bump, install a fresh client, clear receiver+device
   //     ConnectAsync's claim    bump, snapshot _client
@@ -44,6 +44,10 @@ public class GoogleCastOutput : AudioOutputBase
   //     DisconnectAsync         bump, snapshot, clear receiver+device
   //     DisposeAsync            bump, snapshot _client (deliberately NOT clearing it)
   //     StopAsync               snapshot _client only — touches no generation
+  //     HandleConnectionLost    generation+published check, bump, snapshot, clear
+  //                             receiver+device (AUD-84; also leaves _client set)
+  // _publishedGeneration and the loss-watch pair (_lossWatchedClient/_lossWatchHandler)
+  // are written only inside these sections too, alongside the fields they describe.
   // Being await-free is the point: no writer can be preempted mid-swap, so no
   // reader THAT TAKES THE LOCK can observe a half-applied connection. Readers
   // that skip the lock get no such guarantee — see below for why that is sound.
@@ -67,8 +71,9 @@ public class GoogleCastOutput : AudioOutputBase
   //     PRECONDITION: _client IS NEVER SET BACK TO NULL. It is assigned in
   //     exactly two places — InitializeAsync and TryPublishConnectionAsync — and
   //     both assign a non-null client, so the field only ever moves null -> set
-  //     -> set, never set -> null. DisconnectAsync and DisposeAsync deliberately
-  //     leave it set (see the note in DisposeAsync). A reader that has ONCE
+  //     -> set, never set -> null. DisconnectAsync, DisposeAsync and
+  //     HandleConnectionLostAsync deliberately leave it set (see the note in
+  //     DisposeAsync). A reader that has ONCE
   //     observed non-null can therefore never subsequently observe null; it may
   //     see a stale or a newer client, but not a null one.
   //
@@ -120,6 +125,21 @@ public class GoogleCastOutput : AudioOutputBase
   // re-validates before publishing its result — if it changed, the attempt lost
   // the race and tears down what it built instead of overwriting the winner.
   private int _connectionGeneration;
+
+  // AUD-84. The generation whose connection is currently PUBLISHED (connected and
+  // visible through _connectedReceiver/ConnectedDevice), or -1 when none is. A loss
+  // report carries the generation it was armed for and is acted on only if it is
+  // both current AND published: a report for a connect still in flight, or for one
+  // already torn down, is stale. Written under _lifecycleLock; read unlocked only by
+  // StartDirectChannelAsync to arm the streaming loop's report, which is re-checked
+  // under the lock when it fires.
+  private int _publishedGeneration = -1;
+
+  // AUD-84. The ChromecastClient.Disconnected subscription for the published
+  // connection. Kept as a pair so it can be removed from exactly the client it was
+  // added to — a client is reused across connects. Written under _lifecycleLock.
+  private ChromecastClient? _lossWatchedClient;
+  private EventHandler? _lossWatchHandler;
 
   /// <summary>
   /// <b>Test seam (kind C — substitution).</b> Awaited inside <see cref="ConnectAsync"/>
@@ -307,6 +327,8 @@ public class GoogleCastOutput : AudioOutputBase
       try
       {
         _connectionGeneration++;
+        _publishedGeneration = -1;
+        UnwatchConnectionLoss_Locked();
         stale = _client;
         _client = new ChromecastClient();
         _connectedReceiver = null;
@@ -656,6 +678,16 @@ public class GoogleCastOutput : AudioOutputBase
         throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
       }
 
+      // AUD-84. Before every transport connect, never once per client: SharpCaster's own
+      // DisconnectAsync swaps the guarded heartbeat channel back for an unguarded one,
+      // and a client is reused across connects. The fault sink is bound to THIS attempt's
+      // generation, so a report from a connection that has since been replaced is stale.
+      var generationForFaults = myGeneration;
+      SharpCasterCallbackGuard.TryHarden(
+        client,
+        fault => ReportConnectionLost(generationForFaults, "a SharpCaster background send failed", fault),
+        _logger);
+
       if (ConnectRaceHookForTests != null)
       {
         await ConnectRaceHookForTests().ConfigureAwait(false);
@@ -742,6 +774,8 @@ public class GoogleCastOutput : AudioOutputBase
       _client = client;
       _connectedReceiver = receiver;
       ConnectedDevice = device;
+      _publishedGeneration = generation;
+      WatchForConnectionLoss_Locked(client, generation);
       Name = $"Cast: {device.FriendlyName}";
       return true;
     }
@@ -772,6 +806,8 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       _connectionGeneration++;
+      _publishedGeneration = -1;
+      UnwatchConnectionLoss_Locked();
       hadConnection = _connectedReceiver != null;
       client = _client;
       disconnectedDevice = ConnectedDevice;
@@ -908,9 +944,14 @@ public class GoogleCastOutput : AudioOutputBase
     // has no public RegisterChannel API, so we inject via reflection.
     RegisterCustomChannel(_client!, _directChannel);
 
-    // Create the streaming service and start sending audio
+    // Create the streaming service and start sending audio. The loss report is armed
+    // with the connection published now; HandleConnectionLostAsync re-checks it under
+    // the lock, so a report that outlives this connection is ignored.
+    var streamingGeneration = Volatile.Read(ref _publishedGeneration);
     _directStreaming = new DirectCastStreamingService(
-      _logger, _audioEngine, _directChannel, _options, _metricsCollector);
+      _logger, _audioEngine, _directChannel, _options, _metricsCollector,
+      onSendsFailing: fault => ReportConnectionLost(
+        streamingGeneration, "DirectChannel audio sends kept failing", fault));
     _directStreaming.SetTransportId(transportId);
     _directStreaming.Start();
 
@@ -1057,12 +1098,13 @@ public class GoogleCastOutput : AudioOutputBase
       State = AudioOutputState.Stopping;
       _logger.LogInformation("Stopping Google Cast output");
 
-      // Stop DirectChannel streaming if active
-      if (_directStreaming != null)
+      // Stop DirectChannel streaming if active. Taken with an exchange so this and
+      // HandleConnectionLostAsync, which can run concurrently, never both stop it.
+      var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
+      if (directStreaming != null)
       {
-        await _directStreaming.StopAsync();
-        await _directStreaming.DisposeAsync();
-        _directStreaming = null;
+        await directStreaming.StopAsync();
+        await directStreaming.DisposeAsync();
         _directChannel = null;
         _logger.LogInformation("DirectChannel streaming stopped");
       }
@@ -1935,6 +1977,163 @@ public class GoogleCastOutput : AudioOutputBase
     }
   }
 
+  /// <summary>
+  /// Subscribes to <paramref name="client"/>'s <c>Disconnected</c> event for the connection
+  /// being published, replacing any previous subscription. Caller holds <c>_lifecycleLock</c>.
+  /// </summary>
+  /// <remarks>
+  /// SharpCaster raises <c>Disconnected</c> from its own teardown, which it runs when its
+  /// heartbeat times out and when the receiver sends CLOSE — both of them a speaker going
+  /// away. It raises it for OUR disconnects too; those are told apart by generation, since
+  /// every deliberate teardown here bumps the generation before touching the client.
+  /// The handler runs inside SharpCaster's unguarded <c>async void HeartBeatTimedOut</c>
+  /// (see <see cref="SharpCasterCallbackGuard"/>), so it must not throw.
+  /// </remarks>
+  private void WatchForConnectionLoss_Locked(ChromecastClient client, int generation)
+  {
+    UnwatchConnectionLoss_Locked();
+    EventHandler handler = (_, _) => ReportConnectionLost(
+      generation, "the Cast connection closed (heartbeat timeout or the receiver closed it)", null);
+    client.Disconnected += handler;
+    _lossWatchedClient = client;
+    _lossWatchHandler = handler;
+  }
+
+  /// <summary>Removes the subscription added by <see cref="WatchForConnectionLoss_Locked"/>, if any. Caller holds <c>_lifecycleLock</c>.</summary>
+  private void UnwatchConnectionLoss_Locked()
+  {
+    if (_lossWatchedClient != null && _lossWatchHandler != null)
+    {
+      _lossWatchedClient.Disconnected -= _lossWatchHandler;
+    }
+
+    _lossWatchedClient = null;
+    _lossWatchHandler = null;
+  }
+
+  /// <summary>
+  /// Reports that the connection armed at <paramref name="generation"/> appears to be gone.
+  /// Never throws and never blocks: the work is queued, because callers include SharpCaster's
+  /// receive loop, its timer thread and our own streaming loop.
+  /// </summary>
+  /// <param name="generation">The connection generation the reporter was armed for.</param>
+  /// <param name="reason">What was observed, for the log line and the event.</param>
+  /// <param name="cause">The exception observed, if any.</param>
+  internal void ReportConnectionLost(int generation, string reason, Exception? cause)
+  {
+    try
+    {
+      LastConnectionLossHandling = Task.Run(() => HandleConnectionLostAsync(generation, reason, cause));
+    }
+    catch
+    {
+      // Nothing to do: this is called from places where an escape would end the process.
+    }
+  }
+
+  /// <summary>
+  /// <b>Test seam (kind B — observation).</b> The most recently queued loss-handling task, so a
+  /// test can await its completion instead of sleeping. Read by <c>GoogleCastOutputConnectionLossTests</c>.
+  /// Written on every report in production too; nothing there reads it.
+  /// </summary>
+  internal Task LastConnectionLossHandling { get; private set; } = Task.CompletedTask;
+
+  /// <summary>
+  /// Tears down a connection that was lost rather than closed: leaves <c>Streaming</c>, stops the
+  /// DirectChannel loop, raises <see cref="Disconnected"/> with
+  /// <see cref="ChromecastDisconnectedEventArgs.IsConnectionLost"/> set so the console can restore
+  /// its local speakers, and closes the client. Acts at most once per connection.
+  /// </summary>
+  private async Task HandleConnectionLostAsync(int generation, string reason, Exception? cause)
+  {
+    ChromecastClient? client;
+    ChromecastDeviceInfo? device;
+
+    try
+    {
+      await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    }
+    catch (ObjectDisposedException)
+    {
+      return; // Output disposed; nothing left to tear down.
+    }
+
+    try
+    {
+      // Current AND published. The generation bump below is what makes this once-only:
+      // every further report for this connection — a second guard fault, the client's
+      // own Disconnected when we close it below, the streaming loop — now finds a
+      // different generation and stops here.
+      if (_connectionGeneration != generation || _publishedGeneration != generation)
+      {
+        _logger.LogDebug(cause,
+          "Cast: loss report for connection generation {Generation} ignored — not the current connection ({Reason})",
+          generation, reason);
+        return;
+      }
+
+      _connectionGeneration++;
+      _publishedGeneration = -1;
+      UnwatchConnectionLoss_Locked();
+      client = _client;
+      device = ConnectedDevice;
+      _connectedReceiver = null;
+      ConnectedDevice = null;
+    }
+    finally
+    {
+      _lifecycleLock.Release();
+    }
+
+    _logger.LogWarning(cause,
+      "Cast: lost the connection to {Name} ({Reason}) — Cast output stopped",
+      device?.FriendlyName ?? "<unknown device>", reason);
+
+    IsEnabledInternal = false;
+    Name = "Google Cast Output";
+    // Error, not Ready: the output did not stop cleanly, and ConnectAsync recovers from Error
+    // by building a fresh ChromecastClient — which is what a dead socket calls for.
+    State = AudioOutputState.Error;
+
+    // Raised BEFORE the slow cleanup below, so the local speakers come back without waiting
+    // on it: stopping the streaming loop can take up to its 5 s cap when a send is stuck on
+    // the dead socket.
+    try
+    {
+      Disconnected?.Invoke(this, new ChromecastDisconnectedEventArgs
+      {
+        Device = device,
+        Reason = reason,
+        IsConnectionLost = true
+      });
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Cast: a Disconnected subscriber threw while handling a lost connection");
+    }
+
+    var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
+    if (directStreaming != null)
+    {
+      _directChannel = null;
+      try { await directStreaming.DisposeAsync().ConfigureAwait(false); }
+      catch (Exception ex) { _logger.LogDebug(ex, "Cast: error stopping DirectChannel streaming after connection loss"); }
+    }
+
+    try
+    {
+      UnsubscribeFromReceiverStatus(client);
+      if (client != null)
+      {
+        await client.DisconnectAsync().WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: error closing the client after connection loss");
+    }
+  }
+
   private async Task SetCastVolumeAsync(float volume)
   {
     if (_client == null || _connectedReceiver == null || State != AudioOutputState.Streaming)
@@ -2007,10 +2206,10 @@ public class GoogleCastOutput : AudioOutputBase
       }
     }
 
-    if (_directStreaming != null)
+    var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
+    if (directStreaming != null)
     {
-      await _directStreaming.DisposeAsync();
-      _directStreaming = null;
+      await directStreaming.DisposeAsync();
       _directChannel = null;
     }
 
@@ -2028,6 +2227,8 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       _connectionGeneration++;
+      _publishedGeneration = -1;
+      UnwatchConnectionLoss_Locked();
       client = _client;
       // Deliberately NOT nulled: several Start/stream helpers dereference
       // _client with `!` on the assumption it outlives the output, and nulling
@@ -2116,6 +2317,13 @@ public class ChromecastDisconnectedEventArgs : EventArgs
   /// Gets the reason for disconnection.
   /// </summary>
   public string? Reason { get; init; }
+
+  /// <summary>
+  /// True when the connection was lost rather than closed by this application — the
+  /// speaker lost power or Wi-Fi, stopped answering heartbeats, or closed the session
+  /// itself (AUD-84). False for a disconnect this application asked for.
+  /// </summary>
+  public bool IsConnectionLost { get; init; }
 }
 
 /// <summary>

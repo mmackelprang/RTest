@@ -67,6 +67,9 @@ public class AudioStateHubService : IAsyncDisposable
   public event Func<RadioStateDto, Task>? RadioStateChanged;
   public event Func<VolumeDto?, Task>? VolumeChanged;
   public event Func<Task>? SourceChanged;
+  /// <summary>Raised when the API's active output changes, carrying the new output id (null when
+  /// none). AUD-84: the server switches output on its own when a Cast speaker drops.</summary>
+  public event Func<string?, Task>? OutputChanged;
   public event Func<Task>? FingerprintStatusChanged;
   public event Func<Task>? PhoneCallStateChanged;
   /// <summary>Raised when the encoder's presence changes, carrying which transition occurred.
@@ -218,6 +221,14 @@ public class AudioStateHubService : IAsyncDisposable
       {
         _logger.LogDebug("Received SourceChanged event");
         await NotifyAsync(SourceChanged);
+      });
+
+      // AUD-84. The payload is a string id and may be null — a JSON null binds to default(T)
+      // whatever this file annotates, so the type argument says so.
+      _hubConnection.On<string?>("OutputChanged", async outputId =>
+      {
+        _logger.LogDebug("Received OutputChanged event: {OutputId}", outputId);
+        await NotifyAsync(OutputChanged, outputId);
       });
 
       // Server sends FingerprintStatusChanged with a FingerprintStatusDto payload —

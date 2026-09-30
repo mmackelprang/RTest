@@ -31,6 +31,7 @@ public class AudioStateUpdateService : BackgroundService
   private readonly IRotaryEncoderService? _encoderService;
   private readonly IEncoderFeedbackSink? _encoderFeedback;
   private readonly IEventPlaybackService? _eventPlayback;
+  private readonly IAudioEngine? _audioEngine;
   private string? _apiBaseUrl;
 
   /// <summary>
@@ -106,6 +107,11 @@ public class AudioStateUpdateService : BackgroundService
   // none -> source transition as if it were the first poll.
   private bool _hasObservedSource;
 
+  // AUD-84: the active output last broadcast as OutputChanged, and whether a baseline has been
+  // taken — the same two-field shape as the source fields above, for the same reason (UI-15).
+  private string? _lastActiveOutputId;
+  private bool _hasObservedOutput;
+
   // PR 2 of the Radio Controller Polish arc — caches the MatchId of the
   // fingerprint event currently anchored as the playing match. The
   // recognition stream in NowPlayingPanel binds against this to render the
@@ -133,6 +139,7 @@ public class AudioStateUpdateService : BackgroundService
     _audioManager = serviceProvider.GetService<IAudioManager>();
     _bluetoothService = serviceProvider.GetService<IBluetoothService>();
     _castOutput = serviceProvider.GetService<GoogleCastOutput>();
+    _audioEngine = serviceProvider.GetService<IAudioEngine>();
     _fingerprintService = serviceProvider.GetService<BackgroundIdentificationService>();
     _encoderService = serviceProvider.GetService<IRotaryEncoderService>();
     // GetService, not GetRequiredService: the encoder subsystem may not be registered at all, which
@@ -269,6 +276,9 @@ public class AudioStateUpdateService : BackgroundService
     // Check source changes (broadcasts SourceChanged for UI sync)
     await CheckSourceChangedAsync(activeSource, cancellationToken);
 
+    // Check output changes (broadcasts OutputChanged for UI sync)
+    await CheckActiveOutputChangedAsync(cancellationToken);
+
     // Check playback state changes
     await CheckPlaybackStateAsync(activeSource, cancellationToken);
 
@@ -309,6 +319,43 @@ public class AudioStateUpdateService : BackgroundService
       // ⚠ AFTER the send — see the ordering remark on the cache fields above (UI-13). The
       // first-poll baseline is taken in the early return above, where there is no send.
       _lastActiveSourceType = currentSourceType;
+    }
+  }
+
+  /// <summary>
+  /// Broadcasts <c>OutputChanged</c> with the engine's active output id whenever it changes.
+  /// </summary>
+  /// <remarks>
+  /// AUD-84. The server can now change the output on its own — a Cast speaker that drops is
+  /// replaced by the local speakers — and the Web UI only ever learned the output from its own
+  /// clicks, so without this the panel kept showing Cast over a console that was playing
+  /// locally. Polled rather than evented to match this loop's other checks; a 500 ms lag on a
+  /// fallback that itself takes seconds to detect is immaterial.
+  /// </remarks>
+  internal async Task CheckActiveOutputChangedAsync(CancellationToken cancellationToken)
+  {
+    if (_audioEngine == null)
+    {
+      return;
+    }
+
+    var current = _audioEngine.ActiveOutputId;
+
+    if (!_hasObservedOutput)
+    {
+      _lastActiveOutputId = current;
+      _hasObservedOutput = true;
+      return;
+    }
+
+    if (!string.Equals(current, _lastActiveOutputId, StringComparison.Ordinal))
+    {
+      await _hubContext.Clients.All
+        .SendAsync("OutputChanged", current, cancellationToken);
+      _logger.LogInformation("Broadcast OutputChanged: {OutputId}", current ?? "None");
+
+      // ⚠ AFTER the send (UI-13) — see the ordering remark on the cache fields above.
+      _lastActiveOutputId = current;
     }
   }
 
