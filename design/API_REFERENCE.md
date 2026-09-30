@@ -2060,59 +2060,42 @@ GET /api/metrics/history?key=audio.songs_played&start=2024-12-04T00:00:00Z&end=2
 
 ---
 
-### GET /api/metrics/snapshots
+### GET /api/metrics/window
 
-Gets current/aggregate values for one or more metrics.
+Summarises every metric in a time window from **one** database query (`UI-2`). This is what the
+Settings → Diagnostics tab polls.
 
 **Query Parameters:**
-- `keys` (required): Comma-separated list of metric keys
+- `start` (required): Start timestamp (ISO 8601)
+- `end` (required): End timestamp (ISO 8601); must be after `start`
+- `resolution` (optional): `Minute` (default), `Hour` or `Day` — the one bucket table that is read
 
-**Response:** 200 OK
+**Response:** 200 OK — one entry per metric with data in the window, ordered by key. A counter with no
+bucket in the window is still listed, with `sum: 0` and `bucketCount: 0`; a gauge with none is omitted.
 
 ```json
-{
-  "audio.songs_played": 1523,
-  "audio.total_playtime_seconds": 45678,
-  "system.cpu_usage_percent": 23.5
-}
+[
+  {
+    "key": "audio.buffer.underruns",
+    "type": "Counter",
+    "sum": 3,
+    "sampleCount": 3,
+    "min": 0,
+    "max": 2,
+    "latestAverage": 1,
+    "latestTimestamp": "2024-12-04T19:59:00+00:00",
+    "bucketCount": 2
+  }
+]
 ```
 
-**Behavior:**
-- **Counters:** Returns total sum across all time periods
-- **Gauges:** Returns the most recent value
+⚠ Only the named resolution's table is read. Rollup moves data from Minute to Hour after
+`RetentionMinuteData` (120 min) and from Hour to Day after `RetentionHourData` (48 h), so a window
+that spans a tier boundary sees only the part stored at the requested resolution.
 
 **Error Responses:**
-- `400 Bad Request` - No keys provided
-- `500 Internal Server Error` - Failed to retrieve snapshots
-
-**Example:**
-```bash
-GET /api/metrics/snapshots?keys=audio.songs_played,audio.total_playtime_seconds
-```
-
----
-
-### GET /api/metrics/aggregate
-
-Gets aggregate statistics for a metric over a time range.
-
-**Query Parameters:**
-- `key` (required): Metric key
-- `start` (required): Start timestamp (ISO 8601)
-- `end` (required): End timestamp (ISO 8601)
-
-**Response:** 200 OK
-
-```json
-{
-  "count": 150,
-  "sum": 2250.5,
-  "average": 15.0,
-  "min": 5.2,
-  "max": 45.8,
-  "stdDev": 8.3
-}
-```
+- `400 Bad Request` - `start` is not before `end`
+- `500 Internal Server Error` - Failed to retrieve window summaries
 
 ---
 
@@ -2809,61 +2792,35 @@ const data = await response.json();
 
 ---
 
-#### Real-Time Gauge/Counter
+#### Window Summary for Every Metric
 
-Use `/api/metrics/snapshots` for current values:
-
-```javascript
-// Get current songs played count
-const response = await fetch(
-  '/api/metrics/snapshots?keys=audio.songs_played'
-);
-const data = await response.json();
-
-// Display as counter: data["audio.songs_played"]
-// Update periodically (e.g., every 10 seconds)
-```
-
----
-
-#### Bar Chart (Aggregate Statistics)
-
-Use `/api/metrics/aggregate` for statistical summaries:
+Use `/api/metrics/window` — one request, one database query, one summary per metric **with data in the
+window** (an idle counter is reported with `sum: 0`; a gauge with no bucket in the window is left out).
+Fields: `key`, `type` (`"Counter"` / `"Gauge"`), `sum`, `sampleCount`, `min`, `max`, `latestAverage`,
+`latestTimestamp`, `bucketCount`. This is what the Settings → Diagnostics tab polls.
+*(`/api/metrics/snapshots` and `/api/metrics/aggregate` were removed by `AUD-82`, 2026-09-30: nothing
+called them after `UI-2`.)*
 
 ```javascript
-// Get playtime statistics for the last week
 const response = await fetch(
-  '/api/metrics/aggregate?key=audio.total_playtime_seconds' +
-  '&start=2024-11-27T00:00:00Z' +
-  '&end=2024-12-04T23:59:59Z'
+  '/api/metrics/window?start=2024-12-04T19:00:00Z&end=2024-12-04T20:00:00Z&resolution=Minute'
 );
-const data = await response.json();
-
-// data: { count, sum, average, min, max, stdDev }
-// Display as bar chart or summary cards
+const summaries = await response.json();
+// Counter: summary.sum is the total over the window. Gauge: summary.latestAverage is the newest bucket's average.
 ```
 
 ---
 
 #### Multi-Metric Dashboard
 
-Combine multiple endpoints for comprehensive dashboards:
-
 ```javascript
-// 1. Get current snapshot values
-const snapshots = await fetch(
-  '/api/metrics/snapshots?keys=audio.songs_played,system.cpu_usage_percent,system.memory_usage_mb'
-);
+// 1. One summary per metric for the window
+const summaries = await fetch('/api/metrics/window?start=...&end=...&resolution=Minute');
 
-// 2. Get time-series for trending
+// 2. History for the one metric being charted
 const history = await fetch(
   '/api/metrics/history?key=audio.songs_played&start=...&end=...&resolution=Hour'
 );
-
-// Display:
-// - Snapshots as KPI cards (large numbers)
-// - History as trend line charts
-// - Aggregate stats as summary tables
 ```
 
 ---

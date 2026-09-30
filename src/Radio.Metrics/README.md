@@ -74,7 +74,7 @@ public class DashboardService
 | Type | Description |
 |------|-------------|
 | `IMetricsCollector` | Collect counters and gauges via `Increment()` and `Gauge()` |
-| `IMetricsReader` | Query history, snapshots, aggregates, and metric keys |
+| `IMetricsReader` | Query history, window summaries, and metric keys |
 | `MetricPoint` | A single time-series data point with value, count, min/max/last |
 | `MetricType` | Counter (monotonic) or Gauge (variable) |
 | `MetricResolution` | Minute, Hour, or Day time buckets |

@@ -6,7 +6,7 @@ using Radio.Web.Models;
 namespace Radio.Web.Services.ApiClients;
 
 /// <summary>
-/// API client service for metrics and observability endpoints (5 endpoints)
+/// API client service for the metrics endpoints the Web UI reads and writes
 /// </summary>
 public class MetricsApiService
 {
@@ -70,49 +70,6 @@ public class MetricsApiService
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get metric window summaries");
-      return null;
-    }
-  }
-
-  /// <summary>
-  /// GET /api/metrics/snapshots - Gets current/aggregate values for one or more metrics
-  /// </summary>
-  public async Task<Dictionary<string, double>?> GetMetricSnapshotsAsync(
-    List<string> keys, 
-    CancellationToken cancellationToken = default)
-  {
-    try
-    {
-      var keysParam = string.Join(",", keys.Select(HttpUtility.UrlEncode));
-      return await _httpClient.GetFromJsonAsync<Dictionary<string, double>>($"/api/metrics/snapshots?keys={keysParam}", cancellationToken);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to get metric snapshots");
-      return null;
-    }
-  }
-
-  /// <summary>
-  /// GET /api/metrics/aggregate - Gets aggregate statistics for a metric over a time range
-  /// </summary>
-  public async Task<MetricAggregateDto?> GetMetricAggregateAsync(
-    string key, 
-    DateTime start, 
-    DateTime end, 
-    CancellationToken cancellationToken = default)
-  {
-    try
-    {
-      var query = $"?key={HttpUtility.UrlEncode(key)}" +
-                  $"&start={HttpUtility.UrlEncode(start.ToString("o"))}" +
-                  $"&end={HttpUtility.UrlEncode(end.ToString("o"))}";
-
-      return await _httpClient.GetFromJsonAsync<MetricAggregateDto>($"/api/metrics/aggregate{query}", cancellationToken);
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to get metric aggregate for {Key}", key);
       return null;
     }
   }
