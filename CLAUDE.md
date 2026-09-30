@@ -78,8 +78,8 @@ and `CoverArtPipelineIntegrationTests.CoverArtArchive_ReturnsValidUrl_ForKnownRe
 timeout, passes on re-run, and excluded by `build.yml:58`'s `Category!=Integration` filter, so CI
 never runs it).
 
-⚠ **The Release build baseline is 47 warnings, 0 errors on Windows, and 32 warnings, 0 errors on
-Linux** — both all `IDE0011`. *(Linux was 33 until 2026-09-28, when `ENC-22` deleted `SleepService.SetDisplayPowerAsync` and its one `IDE0011` with it — measured side by side against `main`. Windows is presumably 46 now for the same reason; re-measure there before relying on it.)* The Windows figure was measured on `main` 2026-09-06 while shipping
+⚠ **The Release build baseline is 46 warnings, 0 errors on Windows, and 32 warnings, 0 errors on
+Linux** — both all `IDE0011`. *(Each was one higher until 2026-09-28, when `ENC-22` deleted `SleepService.SetDisplayPowerAsync` and its one `IDE0011` with it — Linux measured side by side against `main` that day; Windows re-measured `--no-incremental` on `main` at `9628387` on 2026-09-29, 46/0, all 46 `IDE0011`.)* The Windows figure was first measured (as 47) on `main` 2026-09-06 while shipping
 `OPS-2`, with an identical warning histogram before and after the change; the Linux figure was
 measured twice on 2026-09-28 (SDK 10.0.401 and 10.0.112, `main` at `d1674e4d`) while setting up the
 Linux dev box. **They differ because `Radio.Infrastructure` builds two target frameworks on Windows
@@ -665,8 +665,8 @@ arrived within 200 ms" — is safe, and sometimes unavoidable. Say which one a t
 ## The merge gate — CI is advisory, your local gates are the truth
 
 **`main` branch protection is OFF. CI does not block a merge and is not supposed to.** The
-merge-blocking truth is the Builder's own local gates: `dotnet build -c Release` at the **47-warning,
-0-error** baseline, and `dotnet test` green apart from the known-failing set named above.
+merge-blocking truth is the Builder's own local gates: `dotnet build -c Release` at the **46-warning,
+0-error** baseline on Windows (32 on Linux — see *Build & Test Commands*), and `dotnet test` green apart from the known-failing set named above.
 
 This is stated in five workflow files — `build.yml:13`, `audit-configuration.yml:13`,
 `pages-docs.yml:11`, `todo-to-issues.yml:39`, and `llm-review.yml:20` — and **until 2026-09-09 it was
