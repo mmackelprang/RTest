@@ -488,7 +488,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   {
     if (_mediaPlayer == null)
     {
-      _logger.LogWarning("No MPRIS media player attached, cannot skip to next track. " +
+      _logger.LogWarning("No AVRCP media player (org.bluez.MediaPlayer1) attached, cannot skip to next track. " +
         "MediaPlayer D-Bus interface not found — phone may not expose AVRCP controller");
       return;
     }
@@ -507,7 +507,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   {
     if (_mediaPlayer == null)
     {
-      _logger.LogWarning("No MPRIS media player attached, cannot go to previous track. " +
+      _logger.LogWarning("No AVRCP media player (org.bluez.MediaPlayer1) attached, cannot go to previous track. " +
         "MediaPlayer D-Bus interface not found — phone may not expose AVRCP controller");
       return;
     }
@@ -3844,13 +3844,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       return;
     }
 
-    // MPRIS/BlueZ exposes album art via "ArtUrl" or "mpris:artUrl"
-    var artUrl = GetString(track, "ArtUrl");
-    if (string.IsNullOrEmpty(artUrl))
-    {
-      artUrl = GetString(track, "mpris:artUrl");
-    }
-
+    // No album art is read here, deliberately (AUD-17). The Track dict comes from BlueZ's
+    // org.bluez.MediaPlayer1, whose only cover-art attribute is ImgHandle — an AVRCP cover-art
+    // (OBEX BIP) handle, not a URL — and on the appliance the phone does not even publish that:
+    // no ImgHandle in Track and no ObexPort on the player (measured 2026-09-29). Resolving it would
+    // need BlueZ's experimental cover-art support on a stack RotaryPhone shares, which the owner
+    // declined 2026-09-30. Bluetooth album art on Linux comes from song recognition only.
     var meta = new BluetoothPlaybackMetadata
     {
       Title = GetString(track, "Title"),
@@ -3858,12 +3857,11 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       Album = GetString(track, "Album"),
       Duration = track.ContainsKey("Duration")
         ? TimeSpan.FromMilliseconds(Convert.ToUInt32(track["Duration"]))
-        : TimeSpan.Zero,
-      AlbumArtUrl = string.IsNullOrEmpty(artUrl) ? null : artUrl
+        : TimeSpan.Zero
     };
 
-    _logger.LogDebug("AVRCP metadata: {Title} by {Artist} (album: {Album}, art: {HasArt})",
-      meta.Title, meta.Artist, meta.Album, !string.IsNullOrEmpty(meta.AlbumArtUrl));
+    _logger.LogDebug("AVRCP metadata: {Title} by {Artist} (album: {Album})",
+      meta.Title, meta.Artist, meta.Album);
 
     // AUD-15 follow-up: a new title|artist is a track change, and the phone pauses the A2DP stream for a
     // moment around it. Tell the playback buffer, so that expected gap is not logged as a Warning. AVRCP

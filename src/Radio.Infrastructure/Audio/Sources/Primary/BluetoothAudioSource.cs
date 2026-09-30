@@ -131,20 +131,23 @@ public class BluetoothAudioSource : USBAudioSourceBase
   private readonly object _artCacheLock = new();
   //
   // Each entry remembers WHERE the art came from, because AUD-1's per-field rule treats
-  // the two differently: art AVRCP supplied is source metadata and an identification may
-  // never replace it; art an earlier identification supplied is not, so a later
-  // identification may refresh it (otherwise one misidentification would pin the wrong
-  // art to that AVRCP title|artist key for the life of the process).
+  // the two differently: art the Bluetooth service supplied is source metadata and an
+  // identification may never replace it; art an earlier identification supplied is not, so a
+  // later identification may refresh it (otherwise one misidentification would pin the wrong
+  // art to that AVRCP title|artist key for the life of the process). ⚠ On the appliance every
+  // entry is identification art: LinuxBluetoothService supplies no art (AUD-17), so FromSource is
+  // only ever true on Windows or under the mock service.
   private readonly Dictionary<string, ResolvedArt> _resolvedArtByTrack = new(StringComparer.OrdinalIgnoreCase);
   private readonly Queue<string> _resolvedArtOrder = new();
   private const int MaxResolvedArtEntries = 64;
 
   private readonly record struct ResolvedArt(string Url, bool FromSource);
 
-  // True while the AlbumArtUrl in MetadataInternal was supplied by AVRCP (directly, or
-  // restored from an AVRCP-sourced cache entry). Cleared whenever that art is removed or
-  // replaced by fingerprint art. Read by OnTrackIdentified to decide whether present art
-  // is source metadata (keep) or an earlier identification's (may be refreshed).
+  // True while the AlbumArtUrl in MetadataInternal was supplied by the Bluetooth service
+  // (directly, or restored from a source-supplied cache entry). Cleared whenever that art is
+  // removed or replaced by fingerprint art. Read by OnTrackIdentified to decide whether present
+  // art is source metadata (keep) or an earlier identification's (may be refreshed). Always
+  // false on the appliance, for the reason given above (AUD-17).
   private volatile bool _currentArtIsFromSource;
 
   // Monotonic counter bumped whenever the current track changes. Async art
@@ -1100,15 +1103,15 @@ public class BluetoothAudioSource : USBAudioSourceBase
       _btDuration = null;
     }
 
-    // Propagate album art URL from AVRCP if available.
+    // Propagate album art the Bluetooth service supplied with the track, if any.
     //
-    // AVRCP ArtUrl is usually a file:///data/data/com.android.<player>/cache/...
-    // URI on the PHONE'S local filesystem, which the browser cannot fetch. Route
-    // every remote URL through the album-art cache: it downloads the bytes (for
-    // http(s)://) or returns null (for file:// — HttpClient throws
-    // NotSupportedException, caught inside SaveFromUrlAsync). On null we leave
-    // AlbumArtUrl absent so the UI shows the fallback icon; SongRec, if it later
-    // identifies the track via OnTrackIdentified, will populate the art then.
+    // ⚠ On Linux — the appliance — there never is any: LinuxBluetoothService reads no art
+    // (BlueZ's org.bluez.MediaPlayer1 offers only an OBEX cover-art handle, and the phone does not
+    // publish even that), so e.AlbumArtUrl is always null there and the else-if below never runs.
+    // Bluetooth art on the appliance comes from song recognition (OnTrackIdentified). AUD-17.
+    // Only the Windows media-session watcher and the mock service ever set it. Whatever URL arrives
+    // goes through the album-art cache, which downloads http(s):// and returns null for anything it
+    // cannot fetch; on null AlbumArtUrl stays absent and SongRec may fill it later.
 
     // Always clear stale art from the previous song first (PlayHistoryTracker
     // reads AlbumArtUrl from source metadata, so leftover art must not leak).
@@ -1127,12 +1130,12 @@ public class BluetoothAudioSource : USBAudioSourceBase
     {
       if (_albumArtCache != null && _serviceScopeFactory != null)
       {
-        _ = CacheAvrcpArtAsync(e.AlbumArtUrl, e.Title, e.Artist);
+        _ = CacheSourceSuppliedArtAsync(e.AlbumArtUrl, e.Title, e.Artist);
       }
       else
       {
         Logger.LogWarning(
-          "AVRCP delivered ArtUrl '{Url}' but album-art cache or scope factory is null — " +
+          "Bluetooth service supplied album art '{Url}' but album-art cache or scope factory is null — " +
           "BT album art will not appear. Check DI registration of IAlbumArtCacheService.",
           e.AlbumArtUrl);
       }
@@ -1140,10 +1143,9 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     // If metadata is incomplete (no title or artist), request fingerprinting.
     // When UseShazamForAllSources is enabled, always fingerprint — on the appliance SongRec
-    // is the only source of BT cover art there is: AVRCP has never supplied any, because
-    // LinuxBluetoothService reads the MPRIS names ArtUrl/mpris:artUrl off a proxy on
-    // org.bluez.MediaPlayer1, which publishes ImgHandle (AUD-17). When SongRec does not
-    // identify the track either, the UI shows the fallback icon — accepted UX.
+    // is the only source of BT cover art there is: LinuxBluetoothService supplies none, because
+    // BlueZ offers no URL-shaped art and the phone publishes no cover-art handle (AUD-17). When
+    // SongRec does not identify the track either, the UI shows the fallback icon — accepted UX.
     //
     // This is a GATE only. What is done with the answer is decided per field in
     // OnTrackIdentified and is not configurable: since AUD-1 an identification may only
@@ -1234,12 +1236,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
 
     // Cover art by the same rule, but written by CacheAndSetCoverArtAsync rather than the
     // helper, because a remote URL must be downloaded into the local album-art cache
-    // before the browser can fetch it. On the appliance AVRCP has never supplied art
+    // before the browser can fetch it. On the appliance the Bluetooth service supplies no art
     // (AUD-17), and OnMetadataChanged removes the key on every AVRCP event unless the
     // resolved-art cache restores it — so for a track not yet resolved this fills every
     // time, which is the SongRec-sourced album art the gate exists to keep.
     //
-    // Art counts as SOURCE metadata only when AVRCP supplied it (_currentArtIsFromSource).
+    // Art counts as SOURCE metadata only when the Bluetooth service supplied it
+    // (_currentArtIsFromSource — never on the appliance, only on Windows or under the mock).
     // Art an earlier identification supplied is not, so it is refreshed by each later
     // identification exactly as it was before AUD-1 — a misidentified track's art is
     // corrected by the next correct identification instead of being pinned to the AVRCP
@@ -1304,13 +1307,18 @@ public class BluetoothAudioSource : USBAudioSourceBase
   }
 
   /// <summary>
-  /// Downloads the AVRCP-supplied album art URL into the local cache and
-  /// sets <see cref="StandardMetadataKeys.AlbumArtUrl"/> to the resulting
-  /// /api/albumart/... path. If the cache returns null (file:// URLs,
-  /// network errors, etc.) metadata is left without AlbumArtUrl and the
-  /// UI falls back to the default icon.
+  /// Downloads album art the Bluetooth service supplied with the track into the local cache and
+  /// sets <see cref="StandardMetadataKeys.AlbumArtUrl"/> to the resulting /api/albumart/... path.
+  /// If the cache returns null (anything that is not a fetchable http(s):// URL, network errors,
+  /// etc.) metadata is left without AlbumArtUrl and the UI falls back to the default icon.
   /// </summary>
-  private async Task CacheAvrcpArtAsync(string artUrl, string title, string artist)
+  /// <remarks>
+  /// ⚠ Never called on the appliance: LinuxBluetoothService supplies no art (AUD-17). Its callers are
+  /// the Windows media-session watcher and the mock service. ⚠ The Windows watcher supplies an
+  /// already-local /api/albumart/... path (or a data: URI), which this method hands to
+  /// SaveFromUrlAsync — whose HttpClient has no BaseAddress — so that art is dropped today (AUD-88).
+  /// </remarks>
+  private async Task CacheSourceSuppliedArtAsync(string artUrl, string title, string artist)
   {
     // Capture the track identity/generation at kickoff so a late-completing
     // download does not write onto a track that has since changed.
@@ -1323,7 +1331,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
       if (string.IsNullOrEmpty(localUrl))
       {
         Logger.LogDebug(
-          "AVRCP art URL not cacheable for '{Title}' by '{Artist}' (URL: {Url}); waiting for SongRec",
+          "Source-supplied art URL not cacheable for '{Title}' by '{Artist}' (URL: {Url}); waiting for SongRec",
           title, artist, artUrl);
         return;
       }
@@ -1341,7 +1349,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
         MetadataInternal[StandardMetadataKeys.AlbumArtUrl] = localUrl;
         _currentArtIsFromSource = true;
         Logger.LogInformation(
-          "Cached AVRCP album art for '{Title}' by '{Artist}': {LocalUrl}",
+          "Cached source-supplied album art for '{Title}' by '{Artist}': {LocalUrl}",
           title, artist, localUrl);
 
         await UpdateRecentPlayHistoryCoverArtAsync(localUrl, title, artist);
@@ -1349,13 +1357,13 @@ public class BluetoothAudioSource : USBAudioSourceBase
       else
       {
         Logger.LogDebug(
-          "Track changed while caching AVRCP art for '{Title}' by '{Artist}'; cached for reuse but not applied to live metadata",
+          "Track changed while caching source-supplied art for '{Title}' by '{Artist}'; cached for reuse but not applied to live metadata",
           title, artist);
       }
     }
     catch (Exception ex)
     {
-      Logger.LogWarning(ex, "Failed to cache AVRCP album art for '{Title}' by '{Artist}'", title, artist);
+      Logger.LogWarning(ex, "Failed to cache source-supplied album art for '{Title}' by '{Artist}'", title, artist);
     }
   }
 
