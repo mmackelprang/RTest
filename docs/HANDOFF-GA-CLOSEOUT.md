@@ -103,6 +103,13 @@ connection persists master volume) share `GoogleCastOutput`'s lock discipline; p
 together, then `AUD-38` (70 % push, knob dead-end) after, because reconnect decides where the volume
 push lives. `AUD-58`'s transport half belongs here too.
 
+⛔ **Updated 2026-09-30 after the owner's casting baseline (MEASURED, box on `b64c8cd`):** **`AUD-84`
+(🔴 P0, GA-blocking) leads this arc** — a Cast speaker dropping mid-stream crashes `radio-api` through
+an unhandled exception in SharpCaster's heartbeat timer, restarting the whole console. `AUD-37`'s
+"notice and fall back" follows it. `AUD-5` has shipped (#725), and `AUD-38` is superseded by
+`AUD-80` (#725) + `AUD-81` (console volume drives the speaker, owner-ruled 2026-09-30). Record:
+[`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) § Casting baseline.
+
 ### 2d. Logging & distortion, in `O4`/`O7` order (≈ 2–3 days)
 
 `LOG-5` (runtime level switch — *highest diagnostic value per hour in the whole document*) →
@@ -148,7 +155,10 @@ decision, not a build.
 closes) · `TEST-2` (P2) · `AUD-36` (dead `IdentificationIntervalSeconds`) · **`AUD-16` as a removal
 PR per D-D**: delete the RaddyRF320BT USB radio source, its protocol/config/docs surface and the
 `external/RaddyRF320BT` submodule; the RTL-SDR path is the only tuner afterwards. Check first that
-nothing in `Radio.Tools.AudioUAT` or the `SourceSelector` list still enumerates it.
+nothing in `Radio.Tools.AudioUAT` or the `SourceSelector` list still enumerates it. · **`AUD-17` as a removal PR** (owner ruling 2026-09-30, option A:
+*"AUD-17 recommendation is fine."*): delete the never-firing AVRCP cover-art read and
+`CacheAvrcpArtAsync`'s unreachable branch, fix the "MPRIS" comment and log strings; BT art keeps
+coming from song recognition. Scope in [`queue/AUD-17.md`](queue/AUD-17.md).
 
 ### 2j. Test & ops hygiene
 
