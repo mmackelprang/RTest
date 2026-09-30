@@ -65,9 +65,9 @@ Run from any shell that reaches the box. Record the times.
      curl -s -X PUT http://radio:5000/api/system/logging/levels/$n \
        -H 'Content-Type: application/json' -d '{"level":"Debug"}'; echo; done
    ```
-2. **Start the raw AVRCP status capture.** Leave it running for 3 minutes in its own terminal:
+2. **Start the raw AVRCP status capture.** Leave it running for 3 minutes in its own terminal. `sudo` is needed; as `mmack` the monitor is refused and falls back to eavesdropping, which misses signals:
    ```bash
-   ssh mmack@radio "timeout 180 dbus-monitor --system \"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.MediaPlayer1'\"" > aud77-dbus.txt
+   ssh mmack@radio "sudo -n timeout 180 dbus-monitor --system \"type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.MediaPlayer1'\"" > aud77-dbus.txt
    ```
 3. **Reproduce the order from 2026-09-29.**
    1. Phone Bluetooth **off**.
