@@ -25,7 +25,7 @@ The snapshot endpoint's aggregation reads rolled-up buckets in a way that counts
   *(`/opt/radio-console/data/metrics/metrics.db` also exists. It is an empty file from May and is not the live database.)*
 - The pre-merge reviewer was briefed to falsify this and could not. So the old `/snapshots` counter value was a correct lifetime total, capped by day retention (365 d). `UI-2`'s "found, not fixed" note (`queue/UI-2.md` § Assumptions 4) was the origin of the claim, and it now carries a pointer here.
 
-## ✅ SHIPPED — PR #TBD — both uncalled all-time endpoints deleted
+## ✅ SHIPPED — [#738](https://github.com/mmackelprang/RTest/pull/738) — both uncalled all-time endpoints deleted
 
 **No caller remained**, checked across `src`, `tests`, `tools`, `scripts`, `deploy`, `.razor` and `.js`, and in the RotaryPhone repo:
 
