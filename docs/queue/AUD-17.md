@@ -232,3 +232,20 @@ has no `BaseAddress`) returns null for it. This is dev-host only.
 - **Owner check left:** on a Bluetooth track, album art still appears about 15 s in (via song
   recognition). The owner's 2026-09-30 *"Bluetooth album art passes"* is the reference. The removed code
   shared a file with the live AVRCP metadata path, which is why this check is still worth doing.
+
+## 🔬 2026-09-30 — after deploy (agent, box `radio`)
+
+Measured by the batch B session that merged and deployed [#742](https://github.com/mmackelprang/RTest/pull/742)
+(squash `a86349f`); recorded here by the next Builder in the same batch.
+
+- **Deploy:** `Deploy-ToLinux.ps1` printed `Verified: API/Web is running commit a86349f` for both services
+  and `Kiosk is live`. `systemctl show radio-api radio-web -p NRestarts` was **0 before and 0 after**. The deploy's own stop/start resets that counter, so "0 after" covers the time since the 19:07 EDT start, not the deploy window.
+  Re-read 2026-09-30 ~19:20 EDT: `/api/health/version` still reports `a86349f`, `NRestarts=0` on both units.
+- **`/api/bluetooth/status`:** byte-identical before and after the deploy.
+- **`/api/sources`:** the same five primary sources before and after (`Radio`, `Vinyl`, `FilePlayer`,
+  `GenericUSB`, `Bluetooth`).
+- **Start-up Warnings:** the set logged after this deploy's start is a subset of the previous deploy's.
+- **Not exercised:** no phone was connected, so no Bluetooth track played and album art was not checked.
+
+**Owner check still open (the row stays ✅🔬):** play a Bluetooth track from the phone. Album art should
+still appear about 15 s in, through song recognition.
