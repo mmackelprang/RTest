@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (73)
+## Shipped rows (77)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2800,6 +2800,8 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 
 ✅🔬 **SHIPPED 2026-09-29: duration was already read; Position now extrapolates from the last AVRCP position while Playing (capped at duration, frozen on pause, re-anchored on each AVRCP update). Owner UAT at the panel outstanding.** 🟠 **NEW 2026-09-10 — in BT mode the console's position bar NEVER MOVES and disagrees with the phone.** Owner: *"the bar on the console **doesn't move at all** in BT mode."* Measured twice, 3 s apart, audio playing: `pos=00:01:34.6550000 dur=None pct=None playing=True`. ⛔ **Position FROZEN at a stale NON-ZERO value; duration null; percentage null.** ⭐ **Not zero — something set it ONCE and nothing updated it since**, which points at a one-shot read rather than a missing feature. — [detail](queue/AUD-29.md)
 
+📝 **Note 2026-09-30 — no seek slider in Bluetooth mode, by design.** Owner question: *"I don't see a slider for BT - should there be one?"* No. BlueZ's `org.bluez.MediaPlayer1` exposes `Position` **read-only** and offers only `Play` / `Pause` / `Stop` / `Next` / `Previous` / `FastForward` / `Rewind` (the last two press-and-hold); AVRCP has no absolute seek, and the BT source reports `SupportsSeek: false` (`IsSeekable => false` at `BluetoothAudioSource.cs:231`, mapped at `AudioDtoMapper.cs:65`). A non-draggable position bar is the correct control. Optional future idea, **not filed**: hold-to-fast-forward / hold-to-rewind buttons driving `FastForward` / `Rewind`.
+
 ### UI-2 — Metrics leaves the top nav and becomes Settings → Diagnostics, without the fan-out (with `UI-4`, `UI-5`).
 
 | Field | Value |
@@ -2827,3 +2829,59 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/UI-17.md`](queue/UI-17.md)**
 
 ✅🔬 **SHIPPED 2026-09-29 as [#715](https://github.com/mmackelprang/RTest/pull/715) + [#716](https://github.com/mmackelprang/RTest/pull/716) (tuner header removed: the frequency well was squeezed under the meter); owner UAT at the panel outstanding.** 🟠 NEW 2026-09-29 (owner request, GA) — the centre panel shows what each source needs.** One tab strip for every source: File Player Queue·History (Queue first when it has tracks); Vinyl/USB/Test Tone History only; Radio opens on Radio controls, toggles to History; Bluetooth opens on Connect when nothing is connected, History when connected. Stats (Total Plays/Top Track/Top Artist) behind a chip, off by default, persisted. Queue tab File Player only; the Queue pill shows the queue whatever the source. — [detail](queue/UI-17.md)
+
+### AUD-13 — A USB source fell back to the first capture device; it now binds only to an input whose name contains its port, and refuses otherwise.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#719](https://github.com/mmackelprang/RTest/pull/719) (squash `2006974`) — owner 2026-09-30 ([`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) evening batch §A): Vinyl *"Vinyl sounds fine - even through casting."*; and *"AUD-13 is ok as is."* — the owner accepted as is that the unconfigured "USB Audio" source refuses silently (no Error state, no toast; the previous source keeps playing, because the refusal fires during source creation). No follow-up row |
+| Plan | [`AUD-13-the-fallback-that-picks-the-first-jack.md`](../design/plans/AUD-13-the-fallback-that-picks-the-first-jack.md) · **0.5 d + two `curl`s** · ⛔ **NOT auto-mergeable** — it deliberately converts a working state into a failing one on a live appliance, and no gate can observe which jack made a sound · ⭐ **OWNER DECISION DISCHARGED 2026-09-08, and it dissolved the question rather than answering it.** ⚠ **The row's named defect is UNREACHABLE in production**: `USBPort: ""` never reaches `Contains("")` at `USBAudioSourceBase.cs:199` because `AudioSourceFactory.cs:158-162`/`:202-206` refuse a blank port, `RadioFactory.cs:336-339` returns false on one, and `SoundFlowDeviceManager.cs:250` throws `ArgumentException.ThrowIfNullOrEmpty` **22 lines earlier**. It read as true only because `USBAudioSourceTests.cs:58-59` **mocks the device manager away**, removing the backstop exactly where a reader watches the code run · ⚠ **The Radio half is do-nothing**: empty `Devices:Radio:USBPort` is correct, documented configuration — `SystemConfigPage.razor:280` already says *"Leave empty if using RTL-SDR"* · **The real defect is the same fallback reached by a NON-empty port** (`:207-214`): unmatched pattern → `captureDevices[0]`, ambiguous pattern → first match silently, zero devices → **system default** silently_ |
+| Spec / handoff | _no spec doc — confirmed by code reading 2026-09-06 while planning `AUD-11`_ · `USBAudioSourceBase.cs:198-203` · `src/Radio.API/appsettings.json:51`/`:54` |
+| Depends on | — _(no row dependency. **Touches `USBAudioSourceBase.cs`, shared by three sources.** Same area as `AUD-11`; neither blocks the other but expect anchors to move if both are in flight.)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-13.md`](queue/AUD-13.md)**
+
+✅🔬 **SHIPPED 2026-09-29 on `fix/aud-13-usb-port-refuses`: a USB source binds only to a physical input whose name contains its port; empty or unmatched refuses (Error + a Warning listing the inputs that exist). Owner rulings 2026-09-29: no-match also refuses; "USB Audio" stays unconfigured (it shows Error until a device is chosen). Owner check at the panel outstanding.** 🔬 **2026-09-30: merged as [#719](https://github.com/mmackelprang/RTest/pull/719) (squash `2006974`). Vinyl PASSED — owner: *"Vinyl sounds fine - even through casting."* USB Audio: the backend refuses correctly (agent pre-pass 2026-09-29: `no capture device matches USBPort "AB13X"`, then `Failed to create source: GenericUSB`), so it no longer plays the turntable — but the panel shows NO Error and no toast: the exception fires during source creation, so no source object exists to be in Error, and the previous source keeps playing. The configured port is `AB13X` (refused as no match), not empty. ⏳ Owner decision pending: accept as is, or surface the refusal (toast or an error state on the bubble).** ⭐ **NEW 2026-09-06 — `USBPort: ""` matches every device via `string.Contains("")`, so Radio, Vinyl and GenericUSB bind to whatever enumerates first, and the warning written to catch exactly this is unreachable.** — [detail](queue/AUD-13.md)
+
+### AUD-28 — The seek bar seeked on every drag frame, so scrubbing stuttered; it now seeks once, on release.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#722](https://github.com/mmackelprang/RTest/pull/722) (squash `60e68bc`, with `UI-16`) — owner UAT 2026-09-30, by ear at the panel: *"AUD-28 Passes."* Agent pre-pass 2026-09-29 verified the single seek on release by API position (see the dossier) |
+| Plan | _plan TBD **against the owner's ruling** — ⭐ **OWNER RULING 2026-09-25: SEEK-ON-RELEASE.** Commit the seek when the drag ends; **no debounce** (option 2 below is DECLINED). Accepted cost: **silence-then-jump, and scrub preview is lost.** The readout must still track the finger during the drag. See the dossier's 2026-09-25 section · ⛔ **A REGRESSION `AUD-24` INTRODUCED, and the row says so rather than softening it**: before that fix `SeekCoreAsync` assigned a field and returned, so dragging had **no audio effect and could not stutter**. The slider has **always** emitted continuously; nothing downstream ever acted on it. ⭐ **Same shape as `AUD-26`** — two rows in two days where repairing a dead mechanism exposed a live one. ⚠ **Do not read "new symptom after the fix" as "the fix was wrong"** · _(Superseded 2026-09-25 by the ruling above — kept for the reasoning:)_ ⛔ **THE OWNER'S PRESCRIPTION NAMES TWO DIFFERENT BEHAVIOURS AND A PLAN MUST CHOOSE EXPLICITLY**: (1) **commit on drag-END only** — silence then jump, ⭐ **removes scrub preview, which is a real feature**; (2) **debounce/throttle** — coarse scrubbing feedback retained. **Say which and why; do not silently pick the easier one** · ⚠ **Is the stutter the seeks, or the STOP/RESTART inside them?** ADR §14 Q3 licenses stop-and-restart-at-offset — **if each seek tears down and restarts the player, rate-limiting alone may not be enough. Measure first** · ⛔ **Do not fix a stutter by making the bar unresponsive** — if seeking defers to release, the READOUT must still track the finger, **which is how `AUD-24` started**_ · ⛔ **NOT auto-mergeable** — live audio path |
+| Spec / handoff | _no spec doc — ⭐ **A unit test CAN pin the invariant even though the symptom is audible: COUNT ENGINE SEEK CALLS PER GESTURE.** Simulate a drag emitting N intermediate values and assert the engine received **1** (drag-end) or **≤ k** (throttled). ⚠ **That test must FAIL on `9ca42590`, where it receives N — say so and show it** · ⚠ **`RadzenSlider` may expose a change-on-release event**, in which case this is a one-line binding change with no debounce logic at all — **check before writing any** · ⚠ **`VoicemailPlayer` has NO drag handler** (established in `AUD-24`) so is likely unaffected — **confirm, do not assume** · ⭐ **Cabinet gate: drag SLOWLY and also FAST** — a debounce tuned on slow drags can still admit a burst on a quick one_ |
+| Depends on | — _(no row dependency. **`AUD-24`** is the shipped parent — **its UAT PASSED; this is a follow-on, not a failure of it.** ⚠ **Sibling of `AUD-26`**, the other "a fix made a pre-existing defect observable" row.)_ |
+| Branch | `fix/aud-28-seek-debounce-on-drag` |
+
+**Detail: [`queue/AUD-28.md`](queue/AUD-28.md)**
+
+✅🔬 **SHIPPED 2026-09-29: a shared `SeekBar` sends exactly one seek on release (RadzenSlider 6.6.4 has no release event); the readout follows the finger while dragging; a tap still seeks. Owner UAT at the panel outstanding.** 🔬 **2026-09-30: merged as [#722](https://github.com/mmackelprang/RTest/pull/722) (squash `60e68bc`). Agent pre-pass 2026-09-29 ~22:47–22:57 EDT, verified by API position (console muted, not by ear): a slow 12-step drag left the position advancing normally, then ONE jump on release (to 65 %, where the finger stopped); a fast drag did not move it until release; a tap seeks; the readout followed the finger. Only the owner's by-ear check for stutter during a slow drag remains.** 🟠 **NEW 2026-09-10 — the seek bar seeks on EVERY drag frame, so scrubbing stutters.** Owner UAT: *"`AUD-24` works, but there are **lots of audio stutters when dragging**. We should not interrupt the currently playing stream until the drag completes and maybe 'debounces' for a few milliseconds."* ⭐ **`AUD-24` PASSED** — this is about what happens on the way there. — [detail](queue/AUD-28.md)
+
+### UI-16 — The voicemail progress bar could not be dragged and was hard to hit; it is now the shared `SeekBar`, seeking on release.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#722](https://github.com/mmackelprang/RTest/pull/722) (squash `60e68bc`, with `AUD-28`) — owner UAT 2026-09-30, the touch check: *"UI-16 passes."* Agent pre-pass 2026-09-29 verified one re-anchor on release (see the dossier). Unblocks `PHN-2` U5 |
+| Plan | _plan TBD — pointer events with seek-on-release (the `AUD-28` ruling for the file player applies by analogy: no debounce, commit when the drag ends), a touch target of at least ~44 px tall around the visible bar, and a visible thumb while dragging_ |
+| Spec / handoff | _no spec doc — owner UAT 2026-09-28, [result](uat/2026-09-28-phase1-console-checks/RESULT.md) check 1.6_ |
+| Depends on | — _(unblocks `PHN-2` U5)_ |
+| Branch | `fix/ui-16-voicemail-scrubber-drag` |
+
+**Detail: [`queue/UI-16.md`](queue/UI-16.md)**
+
+✅🔬 **SHIPPED 2026-09-29 with `AUD-28`: the voicemail scrubber is the same `SeekBar` — drag and tap seek on release, 48 px touch target, thumb grows while dragging. Owner UAT (`PHN-2` U5) outstanding.** 🔬 **2026-09-30: merged as [#722](https://github.com/mmackelprang/RTest/pull/722) (squash `60e68bc`). Agent pre-pass 2026-09-29 ~22:47–22:57 EDT on an already-read voicemail: the server's playback anchor (`broadcastAtUtc`) did not change during a six-step drag and was re-anchored exactly once on release (to 77 %, where the finger stopped); the label tracked the finger; a tap seeks. Only the owner's touch check — is the bar easy to grab with a finger — remains.** 🟠 **NEW 2026-09-28 — the voicemail progress bar cannot be dragged and is hard to hit, so `PHN-2` U5 (voicemail + seek) still cannot be run.** Owner at the cabinet: *"the progress bar on voicemails either doesn't allow dragging or is hard to grab. I wasn't able to test that."* Both halves are true of `VoicemailPlayer.razor`: `.vm-scrubber` binds `@onclick` only (`:71`, `OnScrubberClickAsync`) — no pointer-down/move/up, so a drag does nothing — and its visible target is the thin dock progress bar. — [detail](queue/UI-16.md)
+
+### AUD-74 — Ducking could "end" during a new attack, restoring full volume mid-duck; duck episodes are now numbered.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#723](https://github.com/mmackelprang/RTest/pull/723) (squash `866e333`) — owner UAT 2026-09-30, by ear: *"AUD-74 passes."* Agent pre-pass 2026-09-29 verified the duck held continuously across two announcements (see the dossier) |
+| Plan | _plan TBD — suppress the ended event for a cancelled release, or sequence-number duck episodes; test with `FakeTimeProvider` (house idiom)_ |
+| Spec / handoff | _no spec doc — found 2026-09-28 during Phase 2b_ |
+| Depends on | — |
+| Branch | `fix/aud-74-duck-release-race` |
+
+**Detail: [`queue/AUD-74.md`](queue/AUD-74.md)**
+
+✅🔬 **SHIPPED 2026-09-29: duck episodes are numbered; a release superseded mid-fade still reports its source left but with `IsDucking: true`, so full volume is not restored mid-attack. Owner check: two announcements close together no longer swell in between.** 🔬 **2026-09-30: merged as [#723](https://github.com/mmackelprang/RTest/pull/723) (squash `866e333`). Agent pre-pass 2026-09-29 ~22:47–22:57 EDT (console muted): two announcements 1.5 s apart, `duckingState` polled every ~150 ms — ducked to 20 % and held continuously through both (active events 1 → 2 → 1), ramping back only after the last ended; both returned `completed`. Only the owner's by-ear check remains: no swell, and both heard in full (the duck began releasing ~0.45 s before announcement one's request returned — relevant to `AUD-73`).** 🟡 **NEW 2026-09-28 (code read, AUD-26 reviewer) — ducking can "end" during a new attack, so full volume returns while the new duck is still ramping down.** When `StartDuckingAsync` cancels a release that is still fading, that release's `StopDuckingAsync` still raises ducking-ended; `AudioManager` then restores full volume mid-attack. Predates AUD-26. — [detail](queue/AUD-74.md)

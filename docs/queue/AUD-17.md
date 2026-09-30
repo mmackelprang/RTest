@@ -169,7 +169,7 @@ The row's first question was *"whether to fix it at all"*. Measured with the own
 
 So reading the right attribute would still read nothing: the cover-art channel is never negotiated. Making it negotiate means enabling BlueZ's experimental AVRCP cover-art support (`main.conf` `Experimental = true` and `obexd -E`) — a system-wide change to a Bluetooth stack RotaryPhone shares, so it goes through `RADIO-CONSOLE-BT-AUDIO-BOUNDARY.md` first, and even then the phone must support it.
 
-## Owner decision needed
+## Owner decision — ✅ answered 2026-09-30: A (see the last section)
 
 | Option | What it means |
 |---|---|
@@ -179,3 +179,15 @@ So reading the right attribute would still read nothing: the cover-art channel i
 ## 📝 2026-09-30 — owner: "Bluetooth album art passes" (via song recognition)
 
 Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch): *"Bluetooth album art passes."* The art arrives through song recognition (SongRec), not AVRCP — the trap described above — so **this does not close the row.** The A/B decision above (A: close the dead AVRCP cover-art path; B: experiment with BlueZ's experimental cover art) is still pending.
+
+## ✅ 2026-09-30 — owner ruling: option A, close the dead AVRCP cover-art path
+
+Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §D): *"AUD-17 recommendation is fine."* That is **option A**: close the dead AVRCP cover-art code path. BT album art continues to come from song recognition (SongRec), which the owner passed the same day. Option B (BlueZ experimental cover art) is declined; nothing goes to the boundary doc.
+
+**The row is now buildable as a small removal PR, sequenced with Phase 2i (confirm-or-close) in [`HANDOFF-GA-CLOSEOUT.md`](../HANDOFF-GA-CLOSEOUT.md).** Scope, from option A above:
+
+1. Remove the never-firing `ArtUrl` / `mpris:artUrl` read off the `org.bluez.MediaPlayer1` proxy (`LinuxBluetoothService.cs:2761-2765` as of 2026-09-08 — re-anchor by symbol before editing) and `CacheAvrcpArtAsync`'s unreachable branch.
+2. Fix the comments and the `:339` / `:358` log strings that say "MPRIS" about a BlueZ interface.
+3. Do not touch the SongRec art path, and ⛔ do not "correct" `queue/AUD-1.md:26` or `ROADMAP.md:133` (see the row's spec cell).
+
+**Verification:** the Release build stays at the host's baseline (`--no-incremental`); the suite is green apart from the known-failing set; after deploy, BT art still arrives via song recognition on a played track (the owner's 2026-09-30 pass is the reference). Deletion only, no new behaviour — ⚠ still confirm on the box that BT art appears, because the removed code shares a file with the live AVRCP metadata path.

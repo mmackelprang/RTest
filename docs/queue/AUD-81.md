@@ -22,3 +22,7 @@ Owner, 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening b
 2. **The interaction with `AUD-80`'s per-device remembered volume** (`AudioPreferences:CastDeviceVolumes`). Today it records levels set on the speaker and restores them on reconnect; once the console can set the level, the console's changes must be remembered there too, and a reconnect must not fight the slider.
 3. **The echo filter.** Every push to the speaker baselines the echo filter first (`AUD-80`), and `AUD-5` still lets external speaker changes reach master volume. A console → speaker → console loop is the obvious hazard; the design must show it cannot oscillate or re-persist an echo as master (the original `AUD-80` bug).
 4. Whether the local speakers mute or keep their own level while casting (from the question above).
+
+## 🔬 2026-09-30 — reconfirmed on the box (MEASURED)
+
+In the owner's casting baseline run 2026-09-30 (box on `b64c8cd`, Office speaker — a Google Home Mini — in `DirectChannel` mode), after `radio-api` had restarted and restored the Cast output: *"changing the volume on the console didn't affect the office speaker."* The behaviour this row describes is unchanged. The same run found [`AUD-84`](AUD-84.md) (a Cast speaker that drops mid-stream crashes `radio-api`), which touches the same client-lifetime code; see [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) § Casting baseline.

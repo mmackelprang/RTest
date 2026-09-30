@@ -149,3 +149,7 @@ Merged as [#719](https://github.com/mmackelprang/RTest/pull/719), squash `200697
 - **The configured port is `AB13X`, not empty** — so the refusal is the *no match* case, not *unconfigured*.
 
 ⏳ **Owner decision pending:** accept as is, or queue a small row to surface the refusal (a toast, or an error state on the source bubble). The row stays ✅🔬 until it is made.
+
+## ✅ Closed 2026-09-30 — owner accepted the silent refusal as is
+
+Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §A): *"AUD-13 is ok as is."* The unconfigured "USB Audio" source keeps refusing silently — no Error state and no toast; the tap looks like a no-op and the previous source keeps playing — and that is accepted. No follow-up row. Vinyl had already passed: *"Vinyl sounds fine - even through casting."* Merged as [#719](https://github.com/mmackelprang/RTest/pull/719), squash `2006974`. Archived.

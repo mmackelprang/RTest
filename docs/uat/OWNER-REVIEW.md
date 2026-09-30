@@ -17,7 +17,7 @@ Box state at the time of writing is in the last line of each section (`-VerifyOn
 - [ ] **AUD-73 (optional, 1 min):** send two long test notifications a second apart. Two voices at once = promote AUD-73 to P1.
 - [ ] **ENC-22 physical check:** the one thing the feasibility test could not prove — that a real knob turn is delivered while the panel is dark. **Built; the check and the enable step are in Phase 2g below.**
 - [ ] **OPS-3** (`BindsTo=` for radio-web) — owner reviews personally; not attempted autonomously.
-- [ ] **Casting** — deferred by you; `AUD-37`, `AUD-38`, `AUD-54`, `AUD-5` untouched.
+- [x] ✅ **Casting — baselined by you 2026-09-30** (box on `b64c8cd`; record in [`RETURN-CHECKLIST.md`](RETURN-CHECKLIST.md) § Casting baseline): `AUD-84` filed (🔴 P0 — a Cast drop crashes `radio-api`); `AUD-37` measured; `AUD-38` superseded by `AUD-80` + `AUD-81`; `AUD-54` given measured evidence; `AUD-5` passed and archived. *(Was: "deferred by you; `AUD-37`, `AUD-38`, `AUD-54`, `AUD-5` untouched.")*
 
 
 ## Phase 2d — logging
@@ -54,7 +54,7 @@ Shipped and deployed: `LOG-5` [#699](https://github.com/mmackelprang/RTest/pull/
 
   **Pass:** a line every ~10–12 s while playing, and none while paused. That silence is what `bt_stall_detect.py` depends on.
 - [ ] **UI-10 over a full day.** 30 minutes at 0 is strong but short, and CLAUDE.md warns against claiming a fix on a quiet hour. Tomorrow: `ssh mmack@radio "journalctl -u radio-web --since '-24h' --no-pager | grep -c 'Visualization hub reconnecting'"`. **Pass:** ≤ 5 in 24 h. The baselines were 535 on 2026-09-27, 56 in the hour before the fix, and 33 in the half-hour before it. Then UI-10 can move from ✅🔬 to the archive.
-- [ ] **Judgement calls I made; overrule if you disagree:**
+- [x] ✅ **Accepted 2026-09-30 — owner: *"The current judgement calls for #6 are fine."*** (`RETURN-CHECKLIST.md` §6 named the `LOG-2` carve-outs; the other two bullets here were not named there and are accepted by implication only) **Judgement calls I made; overrule if you disagree:**
   - `LOG-2` carve-outs: `Audio.Services` (source switching, announcements) and `Audio.SoundFlow` (device selection) stay at Information. Cast (`Audio.Outputs`) lines are now at Warning, so raise that namespace when casting work (2c) starts.
   - `LOG-2` lives in the shipped `appsettings.json`, not the Production overlay, because the overlay is seed-only.
   - `LOG-12`: the SDR drift line is a 5-minute tally, and a SongRec repeat is Information again after 10 minutes.
@@ -109,7 +109,7 @@ Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707)
   `ssh mmack@radio 'systemctl show radio-api -p ExecStopPost'` must print the `gdbus … PowerSaveMode <0>` argv.
 - [ ] **3. Real wake, by hand.** Let the console reach the sleep screen, wait 10 min for the panel to go dark, then turn a knob. **Pass:** the panel lights within ~2 s. The panel's own splash for ~2 s is expected. You land on the same sleep screen, and that first turn changes nothing. Repeat with a press.
 - [ ] **4. One overnight cycle.** Leave it on the sleep screen overnight. **Pass:** dark in the morning, and one knob wakes it.
-- [ ] **Judgement calls I made; overrule if you disagree:**
+- [x] ✅ **Accepted 2026-09-30 — owner: *"The current judgement calls for #6 are fine."*** **Judgement calls I made; overrule if you disagree:**
   - **Wake lights the sleep screen; it does not leave it.** This is the dossier's default. A second input then acts as it does on the lit sleep screen.
   - **Grace window:** for 2 s after a knob wake, all knob input is consumed. The panel is showing its splash, so a fast VOLUME spin that woke it must not change the volume unseen. Setting: `Sleep:WakeGraceMilliseconds`.
   - **Knob activity on the lit sleep screen restarts the countdown.** Touch cannot, because touch never reaches the API.
@@ -124,7 +124,7 @@ Shipped: ✅🔬 `ENC-22` [#707](https://github.com/mmackelprang/RTest/pull/707)
 - ✅ **Failure path, without a bad flash:** I ran the ENC-17 harness with the new `--drop-output-reports` flag, which behaves like pre-#11 firmware. The tier went `Transient → HardFault`, the Error reached `journalctl -u radio-api`, and the kiosk showed the toast *"Knob firmware is ignoring its settings — Volume is limited. The knob controller needs re-flashing with a RotaryUsb build that includes #11."* The Settings pill's label read *"Settings — knob firmware needs re-flashing, volume limited"*. After the harness exited, the real encoder came back `Passed` / `Configured`.
 - [ ] **Glance at System Config → Integrations → Rotary Encoders:** there is a new *Firmware:* line under *Saved to device*. **Pass:** it reads "processes settings ✓" in green. I checked the value through the API, not the rendered line.
 - [ ] **Next time you re-flash the Pico** (any reason), look at that line or the badge afterwards. That is the moment this exists for.
-- **Judgement call:** the check runs as a separate read-config *before* the configuration push. It does not infer the verdict from the push's own read-back, so "the firmware ignores writes" and "the config did not verify" can be told apart. On working firmware it costs one round-trip. On broken firmware the hard fault arrives after about 15 s instead of 7, with the volume clamp tight throughout.
+- ✅ **Accepted 2026-09-30 (owner: *"The current judgement calls for #6 are fine."*).** **Judgement call:** the check runs as a separate read-config *before* the configuration push. It does not infer the verdict from the push's own read-back, so "the firmware ignores writes" and "the config did not verify" can be told apart. On working firmware it costs one round-trip. On broken firmware the hard fault arrives after about 15 s instead of 7, with the volume clamp tight throughout.
 
 **Box state at the end of Phase 2g:**
 - Panel **on**.
