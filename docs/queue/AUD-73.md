@@ -83,3 +83,39 @@ The second-pass four:
 - Nothing *queues*; ADR-029 §6.2 rule 3.
 - `PhoneCallIntegrationService` stops announcements on `Ended`/`Idle` but not on `InCall`.
 - `PhoneIntegration` is not enabled on the box.
+
+## ✅ Deployed and agent-verified on `radio` 2026-09-30
+
+- **Deployed:** `main` at `41311b5` (squash of #739).
+  - The deploy exited 0 and printed:
+    - `Verified: API is running commit 41311b5`
+    - `Verified: Web is running commit 41311b5`
+    - `Kiosk is live (14 established connections to :5002…)`
+  - `NRestarts=0` before and after.
+- **How it was tested:** the box was left muted by the owner, so nothing was audible. Each run sent two `POST /api/notifications/announce` requests 1.5 s apart, with `duckingState` polled every 150 ms. The first message is 177 characters; the second is 25.
+
+| Priorities (first, second) | First returned | Second returned | Duck |
+|---|---|---|---|
+| 5, 5 (equal) | **`interrupted`** at 2.0 s | `completed` at 4.2 s | ducked 1.63 → 3.71 s, never 0 in between |
+| 9, 3 (lower second) | **`completed`** at 11.8 s | `completed` at 3.6 s, **alongside** | events 1 → 2 → 1, held 0.71 → 11.38 s |
+| 3, 9 (higher second) | **`interrupted`** at 1.8 s | `completed` at 4.0 s | ducked 0.54 → 3.53 s, never 0 in between |
+
+- **Duck start times vary** (0.54–1.63 s) with TTS synthesis latency for the same 177-character message. In the 5, 5 run the first announcement's duck (1.63 s) came after the second request (1.5 s) but before its replacement at ~2.0 s.
+- **Before the fix,** the 5, 5 run returned `completed` for both.
+- **File sink:** `Announcement interrupted: replaced by another announcement, or stopped` appears for each replaced one.
+- **Journal:** no `Error stopping/disposing announcement source` warnings.
+- **Audio state:** unchanged throughout. SDR 92.3 was Playing, volume 0.3, muted.
+
+**Owner, by ear (the one check left):** unmute and send two announcements through the API about 1.5 s apart, **not** with Send Test, which cannot overlap. For example:
+
+```bash
+curl -s -X POST http://radio:5000/api/notifications/announce -H 'Content-Type: application/json' -d '{"message":"This is a long first test announcement that should be cut off by the second one","priority":5}' &
+sleep 1.5
+curl -s -X POST http://radio:5000/api/notifications/announce -H 'Content-Type: application/json' -d '{"message":"Second announcement","priority":5}'
+```
+
+Pass if:
+- the first voice stops when the second starts, and the two are never heard together;
+- the music does not swell up between them.
+
+Also rule on [`AUD-87`](AUD-87.md).
