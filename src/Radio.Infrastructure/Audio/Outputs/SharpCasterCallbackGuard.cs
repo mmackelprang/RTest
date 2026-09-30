@@ -282,8 +282,15 @@ internal sealed class CastFaultContext : SynchronizationContext
 /// silent, the "PING already sent, still nothing" branch — the library's only heartbeat timeout,
 /// which raises the <c>StatusChanged</c> its client disconnects on — can never run. Re-arming
 /// after each elapse restores what the library evidently intended: PING after 10 s of silence,
-/// declare the connection dead 10 s after that. Any inbound message still restarts the timer and
-/// clears <c>_triedToPing</c> exactly as before, so a live speaker sees no change.
+/// declare the connection dead about 10 s after that PING has been written. Inbound traffic
+/// behaves exactly as before: a PONG, or any message on another channel, restarts the timer and
+/// clears <c>_triedToPing</c>; a PING from the receiver restarts the timer (after our PONG) but,
+/// as in the library, does not clear it. A live speaker therefore sees no change.
+/// <para>
+/// Not covered: <c>_triedToPing</c> is set only once the PING write COMPLETES. While a write is
+/// stalled on SharpCaster's send lock, each elapse queues another PING and the timeout never
+/// fires. In DirectChannel mode the streaming loop's 5 s stall detector covers that case.
+/// </para>
 /// </remarks>
 internal sealed class GuardedTimerInvoker : ISynchronizeInvoke
 {

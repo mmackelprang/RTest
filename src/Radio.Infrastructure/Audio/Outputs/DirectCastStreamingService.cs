@@ -62,8 +62,9 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   /// </summary>
   internal static readonly TimeSpan SendStallTimeout = TimeSpan.FromSeconds(5);
 
-  // Reset by Start() and by every successful send; otherwise written only by the streaming
-  // loop (and by tests calling ReportIfSendsKeepFailing directly).
+  // _consecutiveSendFailures is reset by Start() and by every successful send;
+  // _sendFailureReported only by Start(). Otherwise both are written only by the streaming
+  // loop (and by tests calling the Report* methods directly).
   private int _consecutiveSendFailures;
   private bool _sendFailureReported;
 
@@ -378,6 +379,12 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
       _logger.LogInformation(
         "DirectCast: Sent config to receiver — maxBufferAhead: {MaxBuf}, bufferBeforePlay: {BufPlay}",
         _options.DirectChannelMaxBufferAhead, _options.DirectChannelBufferBeforePlay);
+    }
+    catch (TimeoutException stalled)
+    {
+      _logger.LogWarning("DirectCast: config send stalled for {Timeout}s — reporting the connection lost",
+        SendStallTimeout.TotalSeconds);
+      ReportSendsFailing(stalled);
     }
     catch (Exception ex)
     {

@@ -105,10 +105,11 @@ public class GoogleCastOutputConnectionLossTests
   }
 
   [Fact]
-  public async Task LossReport_WhileNotStreaming_IsLeftToTheOperationInProgress_AndStaysArmed()
+  public async Task LossReport_WhileNotStreaming_IsDeferred_ThenReplayedOnceStreaming()
   {
     // Pre-merge review M1/M3: a report landing while StartAsync or a teardown owns the connection
-    // must not mark it Error underneath them, and must not use up the connection's one report.
+    // must not mark it Error underneath them. It must not be DROPPED either — several reporters
+    // fire only once — so StartAsync replays it on reaching Streaming.
     using var listener = StartLoopbackListener(out var port);
     await using var output = await ConnectedOutputAsync(port, streaming: false);
     var events = new List<ChromecastDisconnectedEventArgs>();
@@ -123,10 +124,11 @@ public class GoogleCastOutputConnectionLossTests
     Assert.NotEqual(AudioOutputState.Error, output.State);
 
     MarkStreaming(output);
-    output.ReportConnectionLost(generation, "while streaming", null);
+    output.ReplayDeferredConnectionLoss(); // what StartAsync does after setting Streaming
     await output.LastConnectionLossHandling.WaitAsync(HangGuard);
 
-    Assert.Equal("while streaming", Assert.Single(events).Reason);
+    Assert.Equal("while starting", Assert.Single(events).Reason);
+    Assert.Null(output.ConnectedDevice);
   }
 
   [Fact]

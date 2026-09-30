@@ -895,6 +895,10 @@ public class GoogleCastOutput : AudioOutputBase
       IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
 
+      // A loss reported while this method was still starting was deferred, not dropped:
+      // replay it now that there is a streaming output to rescue.
+      ReplayDeferredConnectionLoss();
+
       _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode}, setupMs: {SetupMs})",
         ConnectedDevice?.FriendlyName, _options.StreamingMode, startTimer.ElapsedMilliseconds);
     }
@@ -947,9 +951,10 @@ public class GoogleCastOutput : AudioOutputBase
     // Create the streaming service and start sending audio. The loss report is armed
     // with the connection published now; HandleConnectionLostAsync re-checks it under
     // the lock, so a report that outlives this connection is ignored. If nothing is
-    // published (-1) the report can never match and is in effect disarmed — which can
-    // only happen if the connection was torn down during StartAsync, and then this
-    // stream is stopped by that teardown's StopAsync/Disconnect path, not by a report.
+    // published (-1) the report can never match and is in effect disarmed. That happens
+    // only if the connection was torn down while StartAsync was running; stopping this
+    // stream is then up to whoever calls StopAsync next (DisconnectAsync does not stop
+    // it), which is a pre-existing gap of the Start/teardown race, not closed here.
     var streamingGeneration = Volatile.Read(ref _publishedGeneration);
     _directStreaming = new DirectCastStreamingService(
       _logger, _audioEngine, _directChannel, _options, _metricsCollector,
@@ -1017,7 +1022,10 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      if (await PushVolumeToDeviceAsync(_client!, target).ConfigureAwait(false))
+      // Bounded: on a connection whose socket write has stalled, this SET_VOLUME queues
+      // behind the stalled write on SharpCaster's send lock indefinitely, and StartAsync
+      // could not reach Streaming (and replay a deferred loss) until the TCP timeout.
+      if (await PushVolumeToDeviceAsync(_client!, target).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false))
       {
         _logger.LogInformation("Cast: Volume synced to {Volume:P0}", target);
       }
@@ -1987,10 +1995,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// <remarks>
   /// SharpCaster raises <c>Disconnected</c> from its own teardown, which it runs on a
   /// heartbeat timeout and on any CLOSE the receiver sends (the receiver app closing,
-  /// another sender taking over — not only a speaker going away). The heartbeat timeout
-  /// only fires at all because <see cref="GuardedTimerInvoker"/> re-arms SharpCaster's
-  /// one-shot timer after each elapse; the library itself never re-arms it after a PING
-  /// that goes unanswered. It raises it for OUR disconnects too; those are told apart by generation, since
+  /// another sender taking over — not only a speaker going away). Against a speaker that
+  /// has simply gone silent, the heartbeat timeout fires only because
+  /// <see cref="GuardedTimerInvoker"/> re-arms SharpCaster's one-shot timer after each
+  /// elapse; the library itself never re-arms it after a PING that goes unanswered. It raises it for OUR disconnects too; those are told apart by generation, since
   /// every deliberate teardown here bumps the generation before touching the client.
   /// The handler runs inside SharpCaster's unguarded <c>async void HeartBeatTimedOut</c>
   /// (see <see cref="SharpCasterCallbackGuard"/>), so it must not throw.
@@ -2046,6 +2054,26 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   internal Task LastConnectionLossHandling { get; private set; } = Task.CompletedTask;
 
+  /// <summary>A loss report that arrived while the output was not yet Streaming.</summary>
+  private sealed record DeferredConnectionLoss(int Generation, string Reason, Exception? Cause);
+
+  // Written by HandleConnectionLostAsync, taken (exchange) by ReplayDeferredConnectionLoss.
+  private DeferredConnectionLoss? _deferredLoss;
+
+  /// <summary>
+  /// Re-reports a loss that was deferred because the output was not yet Streaming. Called by
+  /// StartAsync once it sets Streaming. <c>internal</c> so a test can drive it: StartAsync
+  /// needs a launched receiver application.
+  /// </summary>
+  internal void ReplayDeferredConnectionLoss()
+  {
+    var deferred = Interlocked.Exchange(ref _deferredLoss, null);
+    if (deferred != null)
+    {
+      ReportConnectionLost(deferred.Generation, deferred.Reason, deferred.Cause);
+    }
+  }
+
   /// <summary>
   /// Tears down a connection that was lost rather than closed: leaves <c>Streaming</c>, stops the
   /// DirectChannel loop, raises <see cref="Disconnected"/> with
@@ -2056,6 +2084,7 @@ public class GoogleCastOutput : AudioOutputBase
   {
     ChromecastClient? client;
     ChromecastDeviceInfo? device;
+    var deferredNow = false;
 
     try
     {
@@ -2085,30 +2114,50 @@ public class GoogleCastOutput : AudioOutputBase
       // StopAsync / a device switch tearing it down — and that operation owns the outcome.
       // Acting here would race it: marking Error under a StartAsync that then sets Streaming
       // left a zombie stream nothing could report on, and marking Error under a device switch
-      // made its ConnectAsync throw (pre-merge review M1, M3). The generation is NOT consumed,
-      // so a later report — e.g. the streaming loop's, once StartAsync has finished — still acts.
+      // made its ConnectAsync throw (pre-merge review M1, M3). The report is DEFERRED, not
+      // dropped: several reporters fire only once (the client's Disconnected, the streaming
+      // loop's report), so dropping one could leave a dead connection nothing reports again.
+      // StartAsync replays it on reaching Streaming; if a teardown wins instead it bumps the
+      // generation, and the replayed report is then ignored as stale.
       if (State != AudioOutputState.Streaming)
       {
         _logger.LogInformation(cause,
-          "Cast: loss reported while the output is {State}, not Streaming — left to the operation in progress ({Reason})",
+          "Cast: loss reported while the output is {State}, not Streaming — deferred until it streams ({Reason})",
           State, reason);
-        return;
+        Interlocked.Exchange(ref _deferredLoss, new DeferredConnectionLoss(generation, reason, cause));
+        deferredNow = true;
+        client = null;
+        device = null;
       }
-
-      _connectionGeneration++;
-      _publishedGeneration = -1;
-      UnwatchConnectionLoss_Locked();
-      client = _client;
-      device = ConnectedDevice;
-      _connectedReceiver = null;
-      ConnectedDevice = null;
+      else
+      {
+        _connectionGeneration++;
+        _publishedGeneration = -1;
+        UnwatchConnectionLoss_Locked();
+        client = _client;
+        device = ConnectedDevice;
+        _connectedReceiver = null;
+        ConnectedDevice = null;
+      }
     }
     finally
     {
-      // Guarded: DisposeAsync disposes the lock right after its own release, and a report
-      // granted the semaphore in that window would otherwise fault on the way out.
+      // Guarded: DisposeAsync disposes the lock after its own release (with the client's
+      // disconnect in between), and a report granted the semaphore in that window would
+      // otherwise fault on the way out.
       try { _lifecycleLock.Release(); }
       catch (ObjectDisposedException) { /* output disposed */ }
+    }
+
+    if (deferredNow)
+    {
+      // StartAsync may have set Streaming and looked for a deferred report between the state
+      // check above and the write. Both sides take it with an exchange, so exactly one acts.
+      if (State == AudioOutputState.Streaming)
+      {
+        ReplayDeferredConnectionLoss();
+      }
+      return;
     }
 
     _logger.LogWarning(cause,

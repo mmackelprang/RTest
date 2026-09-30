@@ -141,9 +141,11 @@ public class AudioEngineInitializationService : IHostedService
   /// persists the local output as the current one, exactly as the startup fallback does.
   /// Does nothing when the active output is no longer Cast. On the production engine the
   /// check and the switch happen under one acquisition of the engine's output lock
-  /// (<see cref="SoundFlowAudioEngine.SetActiveOutputIfCurrentAsync"/>), so a choice made
-  /// in the UI while this was queued is not overridden; any other <see cref="IAudioEngine"/>
-  /// gets a check-then-switch with a window between the two.
+  /// (<see cref="SoundFlowAudioEngine.SetActiveOutputIfCurrentAsync"/>), so a switch to a
+  /// non-Cast output made in the UI while this was queued is not overridden. It cannot tell
+  /// "still the lost Cast session" from "Cast picked again" — a user who re-selects Cast in the
+  /// milliseconds between the loss and this running will have it switched back to local. Any
+  /// other <see cref="IAudioEngine"/> gets a check-then-switch with a window between the two.
   /// </summary>
   internal async Task RestoreLocalOutputAfterCastLossAsync(string? deviceName, string? reason)
   {
