@@ -113,7 +113,16 @@ public static class AudioServiceExtensions
     // Register device options resolver (reads config store, falls back to IOptionsMonitor)
     services.AddSingleton<DeviceOptionsResolver>();
 
-    // Register radio factory (singleton for device management)
+    // AUD-76: one gate for the one RTL-SDR dongle, shared by RadioFactory (which hands it to
+    // every SDRRadioAudioSource) and BandMapService. GetService for TimeProvider: nothing
+    // registers one in production and the constructor default is TimeProvider.System.
+    services.AddSingleton<SdrDeviceGate>(sp => new SdrDeviceGate(
+      sp.GetService<ILogger<SdrDeviceGate>>(),
+      sp.GetService<TimeProvider>()));
+
+    // Register radio factory (singleton for device management). Plain AddSingleton<T>: the
+    // container picks the constructor and fills the optional SdrDeviceGate parameter from
+    // the registration above (locked by ActiveSourceAccessorRegistrationTests).
     services.AddSingleton<RadioFactory>();
     services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());
 

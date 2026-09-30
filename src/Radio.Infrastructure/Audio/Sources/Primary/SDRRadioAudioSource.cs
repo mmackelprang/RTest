@@ -5,6 +5,7 @@ using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Configuration.Abstractions;
 using Radio.Configuration.Models;
@@ -20,9 +21,12 @@ namespace Radio.Infrastructure.Audio.Sources.Primary;
 /// Wraps RTLSDRCore.RadioReceiver and provides async IRadioControl interface.
 /// Translates RTLSDRCore events to Radio.Core events for unified API surface.
 /// </summary>
-public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces.Audio.IRadioControl
+public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces.Audio.IRadioControl, ILiveBandSweeper
 {
   private readonly RadioReceiver _radioReceiver;
+  private readonly SdrDeviceGate? _deviceGate;
+  // True between this source's gate claim in StartupAsync and its release.
+  private bool _holdsDeviceGate;
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly SoundFlowPlaybackService? _playbackService;
@@ -64,6 +68,10 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="configurationManager">Optional configuration manager for restoring persisted preferences.</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source (see <see cref="PrimaryAudioSourceBase.IsActiveSource"/>).</param>
+  /// <param name="deviceGate">
+  /// Optional SDR device gate (AUD-76). When supplied, <see cref="StartupAsync"/> claims it
+  /// before starting the receiver and <see cref="ShutdownAsync"/> releases it afterwards.
+  /// </param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
     RadioReceiver radioReceiver,
@@ -72,10 +80,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     BackgroundIdentificationService? identificationService = null,
     SoundFlowPlaybackService? playbackService = null,
     IConfigurationManager? configurationManager = null,
-    Func<IAudioSource?>? getActiveSource = null)
+    Func<IAudioSource?>? getActiveSource = null,
+    SdrDeviceGate? deviceGate = null)
     : base(logger, metricsCollector, getActiveSource)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
+    _deviceGate = deviceGate;
     _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
     _identificationService = identificationService;
     _playbackService = playbackService;
@@ -235,7 +245,35 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   public async Task<bool> StartupAsync(CancellationToken cancellationToken = default)
   {
-    return await Task.Run(() => _radioReceiver.Startup(), cancellationToken);
+    // AUD-76: take the dongle from any idle band sweep before opening it.
+    // The claim cancels the sweep and waits (bounded) for it to close its handle.
+    bool started;
+    try
+    {
+      if (_deviceGate != null)
+      {
+        // Set first: ClaimForRadioAsync marks the gate held before it awaits,
+        // so a cancelled wait must still release it below.
+        _holdsDeviceGate = true;
+        await _deviceGate.ClaimForRadioAsync(cancellationToken);
+      }
+
+      started = await Task.Run(() => _radioReceiver.Startup(), cancellationToken);
+    }
+    catch
+    {
+      ReleaseDeviceGateIfIdle();
+      throw;
+    }
+
+    // Startup also returns false when the receiver is already running; only
+    // release the claim when the receiver is not running.
+    if (!started)
+    {
+      ReleaseDeviceGateIfIdle();
+    }
+
+    return started;
   }
 
   /// <inheritdoc/>
@@ -247,7 +285,50 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       await StopScanAsync(cancellationToken);
     }
 
-    await Task.Run(() => _radioReceiver.Shutdown(), cancellationToken);
+    try
+    {
+      await Task.Run(() => _radioReceiver.Shutdown(), cancellationToken);
+    }
+    finally
+    {
+      ReleaseDeviceGateIfIdle();
+    }
+  }
+
+  /// <summary>
+  /// Releases this source's device-gate claim when it holds one and the
+  /// receiver is not running.
+  /// </summary>
+  private void ReleaseDeviceGateIfIdle()
+  {
+    if (_deviceGate != null && _holdsDeviceGate && !_radioReceiver.IsRunning)
+    {
+      _holdsDeviceGate = false;
+      _deviceGate.ReleaseFromRadio();
+    }
+  }
+
+  #endregion
+
+  #region ILiveBandSweeper (AUD-76)
+
+  /// <inheritdoc/>
+  public bool CanSweepLive => _radioReceiver.IsRunning && !_radioReceiver.IsScanning;
+
+  /// <inheritdoc/>
+  public Task<IReadOnlyList<RTLSDRCore.Sweep.ChannelLevel>> SweepLiveAsync(
+    IReadOnlyList<long> channels,
+    float gainDb,
+    int samplesPerMeasurement,
+    IProgress<RTLSDRCore.Sweep.BandSweepProgress>? progress,
+    CancellationToken cancellationToken)
+  {
+    // SweepChannels blocks for the whole sweep (~15 s), so give it its own thread.
+    return Task.Factory.StartNew(
+      () => _radioReceiver.SweepChannels(channels, gainDb, progress, cancellationToken, samplesPerMeasurement),
+      CancellationToken.None,
+      TaskCreationOptions.LongRunning,
+      TaskScheduler.Default);
   }
 
   #endregion
@@ -1006,6 +1087,11 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override Task ResumeCoreAsync(CancellationToken cancellationToken = default)
   {
+    // AUD-76: resume is the wake path, and a sweep started while asleep must
+    // not outlive it. The receiver keeps output silent until the sweep's own
+    // cleanup has retuned, so unmuting straight away is safe.
+    _radioReceiver.CancelSweep();
+
     // Unmute to "resume"
     IsMuted = false;
     return Task.CompletedTask;
@@ -1075,6 +1161,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 
     // Clean up scan resources
     _scanCts?.Dispose();
+
+    // AUD-76: do not leave the gate marked as held by a disposed source.
+    if (_deviceGate != null && _holdsDeviceGate)
+    {
+      _holdsDeviceGate = false;
+      _deviceGate.ReleaseFromRadio();
+    }
   }
 
   #endregion
