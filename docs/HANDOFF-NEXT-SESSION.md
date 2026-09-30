@@ -1,5 +1,7 @@
 # HANDOFF — Start here
 
+> ⏩⏩ **2026-09-29 EVENING — START WITH [`HANDOFF-2026-09-29.md`](HANDOFF-2026-09-29.md).** `main` at `d97ddb0`; the box runs `main` + the unmerged `AUD-14` fix (#726, held for the owner's phone UAT — **do not deploy `main` until #726 merges**). 2f is done apart from owner-dependent rows; 2h (`UI-2`) shipped. The owner's test list is the "Evening batch" section of [`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md). The banners below are history.
+
 > ⏸⏸ **PAUSED 2026-09-28 ~17:00 EDT for owner testing. Start with [`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md)** — box and `main` at `30e69df`; phases 0, 1, 2a, 2b, 2d, 2e, 2g done; **2f is next** per [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md). Linux build baseline is now **32/0**.
 >
 > ⭐⭐ **2026-09-28 — THE SEQUENCING AUTHORITY IS NOW [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md), owner-approved.**
