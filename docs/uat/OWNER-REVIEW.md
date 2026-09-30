@@ -17,7 +17,7 @@ Box state at the time of writing is in the last line of each section (`-VerifyOn
 - [ ] **AUD-73 (optional, 1 min):** send two long test notifications a second apart. Two voices at once = promote AUD-73 to P1.
 - [ ] **ENC-22 physical check:** the one thing the feasibility test could not prove — that a real knob turn is delivered while the panel is dark. **Built; the check and the enable step are in Phase 2g below.**
 - [ ] **OPS-3** (`BindsTo=` for radio-web) — owner reviews personally; not attempted autonomously.
-- [x] ✅ **Casting — baselined by you 2026-09-30** (box on `b64c8cd`; record in [`RETURN-CHECKLIST.md`](RETURN-CHECKLIST.md) § Casting baseline): `AUD-84` filed (🔴 P0 — a Cast drop crashes `radio-api`); `AUD-37` measured; `AUD-38` superseded by `AUD-80` + `AUD-81`; `AUD-54` given measured evidence; `AUD-5` passed and archived. *(Was: "deferred by you; `AUD-37`, `AUD-38`, `AUD-54`, `AUD-5` untouched.")*
+- [x] ✅ **Casting — baselined by you 2026-09-30** (box on `b64c8cd`; record in [`RETURN-CHECKLIST.md`](RETURN-CHECKLIST.md) § Casting baseline): `AUD-84` filed (🔴 P0 — a Cast drop crashes `radio-api`) — ✅ **fixed the same evening by #736 (`646be99`), owner-verified at the console and archived**; `AUD-37` measured; `AUD-38` superseded by `AUD-80` + `AUD-81`; `AUD-54` given measured evidence; `AUD-5` passed and archived. *(Was: "deferred by you; `AUD-37`, `AUD-38`, `AUD-54`, `AUD-5` untouched.")*
 
 
 ## Phase 2d — logging

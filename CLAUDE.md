@@ -71,7 +71,7 @@ grep -E "Passed!|Failed!|error" /tmp/test.log
 
 Read the **per-project summary lines** (`Passed! - Failed: 0, Passed: 141, ...`), one per test
 project — a single missed `Failed: 4` is the whole point of the gate. Known-failing on Windows and
-not a regression: four `SrcVariableResamplerTests` (`libsamplerate.so.0`, `TEST-5`),
+not a regression: six `SrcVariableResamplerTests` (`libsamplerate.so.0`, `TEST-5`; was four — re-measured 2026-09-30 by running the class alone on Windows, all six `DllNotFoundException`),
 `NwsObservationIntegrationTests.RealNwsCall_*` (live network, `Category=Integration`, CI-excluded),
 and `CoverArtPipelineIntegrationTests.CoverArtArchive_ReturnsValidUrl_ForKnownRecording` (added
 2026-09-06 — same shape: `Category=Integration`, live Cover Art Archive API, fails on a 15 s HTTP
