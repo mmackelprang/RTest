@@ -239,7 +239,7 @@ Measured by the batch B session that merged and deployed [#742](https://github.c
 (squash `a86349f`); recorded here by the next Builder in the same batch.
 
 - **Deploy:** `Deploy-ToLinux.ps1` printed `Verified: API/Web is running commit a86349f` for both services
-  and `Kiosk is live`. `systemctl show radio-api radio-web -p NRestarts` was **0 before and 0 after**.
+  and `Kiosk is live`. `systemctl show radio-api radio-web -p NRestarts` was **0 before and 0 after**. The deploy's own stop/start resets that counter, so "0 after" covers the time since the 19:07 EDT start, not the deploy window.
   Re-read 2026-09-30 ~19:20 EDT: `/api/health/version` still reports `a86349f`, `NRestarts=0` on both units.
 - **`/api/bluetooth/status`:** byte-identical before and after the deploy.
 - **`/api/sources`:** the same five primary sources before and after (`Radio`, `Vinyl`, `FilePlayer`,
