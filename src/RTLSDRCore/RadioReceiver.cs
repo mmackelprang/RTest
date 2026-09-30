@@ -4,6 +4,7 @@ using RTLSDRCore.DSP;
 using RTLSDRCore.Enums;
 using RTLSDRCore.Hardware;
 using RTLSDRCore.Models;
+using RTLSDRCore.Sweep;
 using Serilog;
 
 namespace RTLSDRCore;
@@ -67,6 +68,29 @@ namespace RTLSDRCore;
       // deficit caused by synchronous processing blocking the read loop.
       private BlockingCollection<IqSample[]>? _processingQueue;
       private Thread? _processingThread;
+
+      // Live band sweep (AUD-76). See SweepChannels for the rules.
+      // _tuneLock serialises every native SetFrequency / gain call made by
+      // SetFrequencyInternal, the sweep and Shutdown's close.
+      private readonly object _tuneLock = new();
+      // Guards _sweepCts and _isSweeping transitions.
+      private readonly object _sweepStateLock = new();
+      private CancellationTokenSource? _sweepCts;
+      private volatile bool _isSweeping;
+      // ORed into the squelch/mute check in ProcessSamples. Separate from the
+      // user's _isMuted so a sweep never changes what IsMuted reports.
+      private volatile bool _sweepMuted;
+      // Blocks still to be muted after a sweep ends — covers the USB block
+      // that was in flight across the final retune. Written by the sweep
+      // thread, consumed by the DSP thread.
+      private volatile int _sweepMuteTailBlocks;
+      // Receives a copy of each IQ block while a sweep runs; null otherwise.
+      private volatile Action<IqSample[]>? _sweepTap;
+      // Set while no sweep is running; Shutdown waits on it before closing.
+      private readonly ManualResetEventSlim _sweepIdle = new(initialState: true);
+
+      private const int SweepMuteTailBlockCount = 2;
+      private static readonly TimeSpan SweepIdleWaitTimeout = TimeSpan.FromSeconds(3);
 
       // Sample rate configuration
       private const int DefaultSdrSampleRate = 2_400_000;
@@ -240,6 +264,17 @@ namespace RTLSDRCore;
       // Cancel any ongoing scan
       CancelScan();
 
+              // Cancel any live band sweep and wait (bounded) for its
+              // cleanup to finish before the device is closed. The sweep
+              // never takes _lock, so waiting here while holding it cannot
+              // deadlock against the sweep's finally block.
+              CancelSweep();
+              if (!_sweepIdle.Wait(SweepIdleWaitTimeout))
+              {
+                  Logger.Warning("Band sweep did not finish within {Timeout}s of cancellation; shutting down anyway",
+                      SweepIdleWaitTimeout.TotalSeconds);
+              }
+
               SetState(ReceiverState.Stopping);
               Logger.Information("Shutting down receiver");
 
@@ -257,8 +292,11 @@ namespace RTLSDRCore;
               _processingCts?.Dispose();
               _processingCts = null;
 
-              _device.StopStreaming();
-              _device.Close();
+              lock (_tuneLock)
+              {
+                  _device.StopStreaming();
+                  _device.Close();
+              }
 
               SetState(ReceiverState.Stopped);
               Logger.Information("Receiver shutdown complete");
@@ -355,11 +393,20 @@ namespace RTLSDRCore;
           var oldFrequency = _currentFrequencyHz;
           _currentFrequencyHz = frequencyHz;
 
+          // A user tune wins over a live band sweep. The field is assigned
+          // first so the sweep's cleanup, which retunes to whatever
+          // _currentFrequencyHz holds when it runs, lands on this frequency.
+          CancelSweep();
+
           if (_device.IsOpen)
           {
               // rtlsdr_set_center_freq is safe to call while streaming —
               // no need to stop/restart the USB pipe for frequency changes.
-              var success = _device.SetFrequency(frequencyHz);
+              bool success;
+              lock (_tuneLock)
+              {
+                  success = _device.SetFrequency(frequencyHz);
+              }
 
               if (!success)
               {
@@ -410,6 +457,11 @@ namespace RTLSDRCore;
           _scanCts = new CancellationTokenSource();
           _isScanning = true;
           SetState(ReceiverState.Scanning);
+
+          // A seek scan cancels a live band sweep. This runs after
+          // _isScanning is set, and SweepChannels refuses to start while it
+          // is set, so a new sweep cannot slip in behind this cancel.
+          CancelSweep();
 
           try
           {
@@ -507,6 +559,9 @@ namespace RTLSDRCore;
       /// <inheritdoc/>
       public bool SetBand(BandType bandType, long? specificFrequency = null)
       {
+          // A band change cancels a live band sweep before streaming is paused.
+          CancelSweep();
+
           lock (_lock)
           {
               try
@@ -748,6 +803,296 @@ namespace RTLSDRCore;
 
       #endregion
 
+      #region Live Band Sweep
+
+      /// <summary>
+      /// True while <see cref="SweepChannels"/> is running.
+      /// </summary>
+      public bool IsSweeping => _isSweeping;
+
+      /// <summary>
+      /// Test seam: invoked on the sweep thread when a live sweep read finds
+      /// no IQ block queued and is about to wait for one. Lets tests deliver
+      /// blocks exactly when the sweep needs them instead of racing a clock.
+      /// </summary>
+      internal Action? SweepAwaitingSamples { get; set; }
+
+      /// <summary>
+      /// Test seam: invoked by <see cref="CancelSweep"/> right after it
+      /// cancels a running sweep, on the cancelling thread.
+      /// </summary>
+      internal Action? SweepCancelRequested { get; set; }
+
+      /// <summary>
+      /// Time a live sweep read waits for the next IQ block before the sweep
+      /// fails with <see cref="TimeoutException"/>.
+      /// </summary>
+      internal static TimeSpan SweepReadTimeout { get; } = TimeSpan.FromSeconds(2);
+
+      /// <summary>
+      /// Measures <paramref name="channels"/> using the running receiver's own
+      /// stream, then returns to the station that was playing. Blocks the
+      /// calling thread for the duration of the sweep.
+      /// </summary>
+      /// <remarks>
+      /// <para>
+      /// Hops are made with the device's <c>SetFrequency</c> directly, not
+      /// through the receiver's tuning methods: <see cref="CurrentFrequency"/>
+      /// does not change and <see cref="FrequencyChanged"/> is not raised by
+      /// the sweep. Output is silenced for the duration through a flag that is
+      /// separate from <see cref="IsMuted"/>. The device is put in manual gain
+      /// at <paramref name="gainDb"/> so levels are comparable across sweeps.
+      /// </para>
+      /// <para>
+      /// When the sweep ends — completed, cancelled or failed — the device is
+      /// retuned to the value of <see cref="CurrentFrequency"/> at that moment
+      /// (so a user tune made mid-sweep wins), the gain mode recorded in
+      /// <see cref="AutoGainEnabled"/> / <see cref="Gain"/> is re-applied, the
+      /// RDS decoder is reset, and the silencing flag is cleared last.
+      /// </para>
+      /// <para>
+      /// <see cref="SetFrequency"/>, <see cref="SetFrequencyInBand"/>, the
+      /// tune up/down methods, <see cref="SetBand"/>, a seek scan and
+      /// <see cref="Shutdown"/> all call <see cref="CancelSweep"/>.
+      /// </para>
+      /// </remarks>
+      /// <param name="channels">Channel centres to measure, in Hz.</param>
+      /// <param name="gainDb">Manual tuner gain used for the sweep, in dB.</param>
+      /// <param name="progress">Receives a report after each channel.</param>
+      /// <param name="ct">Cancels the sweep.</param>
+      /// <param name="samplesPerMeasurement">Samples per settling read and per measurement read.</param>
+      /// <returns>The measured channel levels.</returns>
+      /// <exception cref="InvalidOperationException">
+      /// The receiver is not in the <see cref="ReceiverState.Running"/> state, a
+      /// seek scan is running, or another sweep is running.
+      /// </exception>
+      /// <exception cref="OperationCanceledException">The sweep was cancelled.</exception>
+      /// <exception cref="TimeoutException">No IQ block arrived within <see cref="SweepReadTimeout"/>.</exception>
+      public IReadOnlyList<ChannelLevel> SweepChannels(
+          IReadOnlyList<long> channels,
+          float gainDb,
+          IProgress<BandSweepProgress>? progress,
+          CancellationToken ct,
+          int samplesPerMeasurement = BandSweeper.DefaultSamplesPerMeasurement)
+      {
+          ArgumentNullException.ThrowIfNull(channels);
+
+          CancellationTokenSource sweepCts;
+          lock (_sweepStateLock)
+          {
+              if (_state != ReceiverState.Running)
+              {
+                  throw new InvalidOperationException($"Receiver must be running to sweep (state {_state})");
+              }
+              if (_isScanning)
+              {
+                  throw new InvalidOperationException("Cannot sweep while a seek scan is running");
+              }
+              if (_isSweeping)
+              {
+                  throw new InvalidOperationException("A band sweep is already running");
+              }
+
+              sweepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+              _sweepCts = sweepCts;
+              _isSweeping = true;
+              _sweepIdle.Reset();
+          }
+
+          _sweepMuted = true;
+          LiveSweepTuner tuner = new(this, sweepCts.Token);
+          try
+          {
+              lock (_tuneLock)
+              {
+                  _device.SetGainMode(false);
+                  _device.SetGain(gainDb);
+              }
+
+              _sweepTap = tuner.Enqueue;
+              return BandSweeper.Sweep(tuner, channels, samplesPerMeasurement, progress, sweepCts.Token);
+          }
+          finally
+          {
+              _sweepTap = null;
+
+              lock (_tuneLock)
+              {
+                  // Read the field now: a user tune made during the sweep
+                  // assigned it before cancelling us, so it wins.
+                  _device.SetFrequency(_currentFrequencyHz);
+                  _device.SetGainMode(_autoGain);
+                  if (!_autoGain)
+                  {
+                      _device.SetGain(_manualGain);
+                  }
+              }
+
+              // Blocks already queued for DSP were captured on swept
+              // channels; drop them so they are neither played nor fed to RDS.
+              DrainProcessingQueue();
+              _rdsDecoder?.Reset();
+              tuner.Complete();
+
+              lock (_sweepStateLock)
+              {
+                  _sweepCts = null;
+                  _isSweeping = false;
+              }
+              sweepCts.Dispose();
+              _sweepIdle.Set();
+
+              _sweepMuteTailBlocks = SweepMuteTailBlockCount;
+              _sweepMuted = false;
+          }
+      }
+
+      /// <summary>
+      /// Requests cancellation of a running <see cref="SweepChannels"/> call.
+      /// Returns immediately; the sweep's own cleanup restores the station.
+      /// Does nothing when no sweep is running.
+      /// </summary>
+      public void CancelSweep()
+      {
+          lock (_sweepStateLock)
+          {
+              if (_sweepCts != null && !_sweepCts.IsCancellationRequested)
+              {
+                  Logger.Debug("Cancelling live band sweep");
+                  _sweepCts.Cancel();
+                  SweepCancelRequested?.Invoke();
+              }
+          }
+      }
+
+      /// <summary>
+      /// Returns true (and counts one down) while post-sweep tail blocks
+      /// remain to be silenced. Called only from the DSP thread.
+      /// </summary>
+      private bool ConsumeSweepMuteTail()
+      {
+          int remaining = _sweepMuteTailBlocks;
+          if (remaining <= 0)
+          {
+              return false;
+          }
+          _sweepMuteTailBlocks = remaining - 1;
+          return true;
+      }
+
+      private void DrainProcessingQueue()
+      {
+          BlockingCollection<IqSample[]>? queue = _processingQueue;
+          if (queue == null)
+          {
+              return;
+          }
+
+          try
+          {
+              while (queue.TryTake(out _))
+              {
+              }
+          }
+          catch (ObjectDisposedException)
+          {
+              // Shutdown disposed the queue concurrently — nothing to drain.
+          }
+      }
+
+      /// <summary>
+      /// <see cref="ISweepTuner"/> over the running receiver: hops with the
+      /// device directly and reads IQ blocks copied from the receiver's tap.
+      /// </summary>
+      private sealed class LiveSweepTuner : ISweepTuner
+      {
+          // Small bound: the sweep only needs the blocks after each retune.
+          // When full, the oldest block is dropped.
+          private const int QueueCapacity = 4;
+
+          private readonly RadioReceiver _owner;
+          private readonly CancellationToken _ct;
+          private readonly BlockingCollection<IqSample[]> _queue =
+              new(new ConcurrentQueue<IqSample[]>(), QueueCapacity);
+
+          public LiveSweepTuner(RadioReceiver owner, CancellationToken ct)
+          {
+              _owner = owner;
+              _ct = ct;
+          }
+
+          public int SampleRate => _owner._sdrSampleRate;
+
+          public bool Tune(long frequencyHz)
+          {
+              bool ok;
+              lock (_owner._tuneLock)
+              {
+                  // Checked inside the lock so no hop is issued after a
+                  // cancelling user tune has taken the lock.
+                  _ct.ThrowIfCancellationRequested();
+                  ok = _owner._device.SetFrequency(frequencyHz);
+              }
+
+              // Blocks queued before the retune belong to the previous channel.
+              while (_queue.TryTake(out _))
+              {
+              }
+
+              return ok;
+          }
+
+          public int Read(Span<IqSample> buffer, CancellationToken ct)
+          {
+              int filled = 0;
+              while (filled < buffer.Length)
+              {
+                  if (!_queue.TryTake(out IqSample[]? block))
+                  {
+                      _owner.SweepAwaitingSamples?.Invoke();
+                      if (!_queue.TryTake(out block, (int)SweepReadTimeout.TotalMilliseconds, ct))
+                      {
+                          throw new TimeoutException(
+                              $"No IQ samples from the receiver within {SweepReadTimeout.TotalSeconds}s during a band sweep");
+                      }
+                  }
+
+                  int count = Math.Min(block.Length, buffer.Length - filled);
+                  block.AsSpan(0, count).CopyTo(buffer.Slice(filled));
+                  filled += count;
+              }
+
+              return filled;
+          }
+
+          /// <summary>Called from the USB read thread via the receiver's tap.</summary>
+          public void Enqueue(IqSample[] samples)
+          {
+              // Copied because a device may reuse its block array between
+              // reads (MockSdrDevice does).
+              IqSample[] copy = (IqSample[])samples.Clone();
+              try
+              {
+                  while (!_queue.TryAdd(copy))
+                  {
+                      _queue.TryTake(out _);
+                  }
+              }
+              catch (InvalidOperationException)
+              {
+                  // Complete() already ran: the sweep has ended.
+              }
+          }
+
+          /// <summary>Stops accepting blocks.</summary>
+          public void Complete()
+          {
+              _queue.CompleteAdding();
+          }
+      }
+
+      #endregion
+
       #region Private Methods
 
       private void SetupSignalProcessing()
@@ -969,6 +1314,10 @@ namespace RTLSDRCore;
       return;
     }
 
+    // Live band sweep: hand the block to the sweep before the normal
+    // enqueue. _sweepTap is null outside a sweep.
+    _sweepTap?.Invoke(e.Samples);
+
     // Enqueue for async processing — returns immediately so the USB
     // read loop can issue the next rtlsdr_read_sync without waiting
     // for DSP processing to complete. If the queue is full (DSP can't
@@ -1048,7 +1397,10 @@ namespace RTLSDRCore;
           // underruns that appear as zero-filled gaps in the audio output. By delivering
           // a silence buffer of the expected size, the buffer stays fed and the mixer
           // can cross-fade cleanly when the signal returns.
-          if (_lastSignalStrength < _squelchThreshold || _isMuted)
+          // A live band sweep also silences output (_sweepMuted), and after it
+          // ends the next few blocks that would otherwise play are silenced
+          // too (ConsumeSweepMuteTail).
+          if (_lastSignalStrength < _squelchThreshold || _isMuted || _sweepMuted || ConsumeSweepMuteTail())
           {
               if (_expectedAudioOutputCount > 0 && AudioDataAvailable != null)
               {
