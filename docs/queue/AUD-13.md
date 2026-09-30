@@ -139,3 +139,13 @@ justification rather than riding along with the Vinyl fix.
 **Change:** `USBAudioSourceBase.SelectCaptureDevice` (pure, tested) picks the first non-loopback device whose name contains the port; empty → `PortNotConfigured`, no match → `NoMatch`, both refuse: one Warning naming the port and the physical inputs that exist, `USBCaptureDeviceNotFoundException`, source in Error, port released. An empty port is refused **before** it is reserved (two unconfigured sources used to collide on `""`).
 
 **A side effect worth recording:** `USBAudioSourceTests` configured `/dev/ttyUSB0/1/2`, matched no audio device, and passed only through the fallback — which on the dev box grabbed `Monitor of xrdp-sink`: the "Unable to init device Monitor of xrdp-sink" flake seen all day. They now configure the first physical input on the machine running them. The xrdp session's virtual devices still come and go under parallel load, so the class can still flake (now as "no capture device matches USBPort 'xrdp-source'"); alone it passes 25/25 repeatedly.
+
+## 🔬 2026-09-30 — Vinyl passed; USB Audio refuses silently; owner decision pending
+
+Merged as [#719](https://github.com/mmackelprang/RTest/pull/719), squash `2006974`.
+
+- **Vinyl — passed.** Owner 2026-09-30: *"Vinyl sounds fine - even through casting."* (Agent pre-pass 2026-09-29: switched, `Playing`, bound to its own port, `USB Microphone`.)
+- **USB Audio — the backend refuses correctly, but the panel shows nothing.** In the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear) ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §A): `no capture device matches USBPort "AB13X" — not binding to any input`, then `Failed to create source: GenericUSB`, so it **no longer plays the turntable** — the row's actual defect is fixed. But there is **no Error and no toast**: the tap looks like a no-op and the previous source keeps playing (sampled every 0.5 s for 4 s). The section above says the source "goes to Error"; it does not, because the exception fires during source **creation**, so no source object ever exists to be in Error.
+- **The configured port is `AB13X`, not empty** — so the refusal is the *no match* case, not *unconfigured*.
+
+⏳ **Owner decision pending:** accept as is, or queue a small row to surface the refusal (a toast, or an error state on the source bubble). The row stays ✅🔬 until it is made.

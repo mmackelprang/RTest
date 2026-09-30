@@ -99,3 +99,7 @@ path on the same file was 440 statements.
 7. Optional load check: with the tab open, `api.requests.api.Metrics.window` should rise by ~4/min and
    `api.requests.api.Metrics.history` should not move unless a tile is selected; switch to another tab
    and both stop.
+
+## ✅ Closed 2026-09-30 — agent-verified (not owner-run)
+
+Merged as [#728](https://github.com/mmackelprang/RTest/pull/728), squash `dffb55f` (with `UI-4` and `UI-5`, which had no queue rows of their own). Verified in the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear) — [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §A: no Metrics pill in the top nav; Diagnostics is the last Settings tab; tiles grouped by category with the 15 s header; tap a tile → chart, tap again → closed; switching to 1h changed the tiles and survived a reload; `/diagnostics` opens the panel. **Not done:** the physical DevTray triple-tap (step 4 above). **Minor findings, recorded there and not filed:** the chart's y-axis runs negative (`-41.8 ms` on Request Duration); the "Requests Api" tile always reads 0 because `api.requests.api` counts only bare `/api` (the real counts are in the per-route keys). Archived.

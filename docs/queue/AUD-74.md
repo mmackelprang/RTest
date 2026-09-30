@@ -26,3 +26,7 @@ When `StartDuckingAsync` cancels a release that is still fading, the cancelled r
   fade-step delays; no DI change needed.
 - Tests: `DuckingSupersededReleaseTests` — a release parked mid-fade on a `FakeTimeProvider` is
   cancelled by a new start and raises no `IsDucking:false`; an ordinary release still does.
+
+## 🔬 2026-09-30 — merged; ducking agent-verified; by-ear check remains
+
+Merged as [#723](https://github.com/mmackelprang/RTest/pull/723), squash `866e333`. In the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear) ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §B): two announcements 1.5 s apart, `duckingState` polled every ~150 ms — ducked to 20 % at 2.1 s and **held continuously** through both (active events 1 → 2 → 1), then ramped 28 → 54 → 79 → 100 % only after the last ended; both returned `completed`. **Only the owner's by-ear check remains:** no swell, and whether both were heard in full — the duck began releasing ~0.45 s before announcement one's request returned, which is relevant to `AUD-73`. The row stays ✅🔬 until then.

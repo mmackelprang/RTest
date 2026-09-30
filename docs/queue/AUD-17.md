@@ -175,3 +175,7 @@ So reading the right attribute would still read nothing: the cover-art channel i
 |---|---|
 | **A (recommended) — close the dead path** | Remove the never-firing `ArtUrl`/`mpris:artUrl` read and `CacheAvrcpArtAsync`'s unreachable branch; fix the "MPRIS" comments and log lines (`:339`, `:358`) that describe a BlueZ interface. BT art keeps coming from SongRec, which works (every BT track on 2026-09-29 got art ~15 s in; see `AUD-77` for the one straddled-sample miss). |
 | B — experiment | Enable BlueZ experimental cover art on the box behind the boundary-doc protocol, confirm the Pixel then publishes `ImgHandle`/`ObexPort`, and only then implement a BIP fetch. |
+
+## 📝 2026-09-30 — owner: "Bluetooth album art passes" (via song recognition)
+
+Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch): *"Bluetooth album art passes."* The art arrives through song recognition (SongRec), not AVRCP — the trap described above — so **this does not close the row.** The A/B decision above (A: close the dead AVRCP cover-art path; B: experiment with BlueZ's experimental cover art) is still pending.

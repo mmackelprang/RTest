@@ -119,3 +119,7 @@ there (same branch), not here. It also means `C-125`'s "other door" was open on 
 
 **User-visible change (plan §0.4):** connecting to a Cast device no longer snaps the console's volume
 slider to the speaker's level. External changes on the speaker still reach master volume.
+
+## ✅ Closed 2026-09-30 — owner Cast-volume UAT passed
+
+Merged as [#725](https://github.com/mmackelprang/RTest/pull/725), squash `1bb8b34` (with `AUD-80` and `UI-15`). Owner UAT 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §C): *"Cast volume works now."* Archived.

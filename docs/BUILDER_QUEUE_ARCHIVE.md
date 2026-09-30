@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (66)
+## Shipped rows (73)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2729,3 +2729,101 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-27.md`](queue/AUD-27.md)**
 
 🟠 **NEW 2026-09-10 — album art appears on identification, then VANISHES the instant pause is pressed.** Owner UAT: *"album art appears after ~20 seconds of playing, but disappears **immediately** when pause is pressed."* ⭐ **The appearing half is CONFIRMED WORKING** — `Cover art found for 'Heart and Soul' … /api/albumart/0f924e4c2dd0504e.jpg` captured live. **It is the disappearing half that is the defect: pausing is not stopping, and the metadata is still true of what is loaded.** — [detail](queue/AUD-27.md)
+
+### AUD-14 — A stale AVRCP watcher survived player re-attach; a removed `MediaPlayer1` now releases the attachment.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#726](https://github.com/mmackelprang/RTest/pull/726) (squash `b64c8cd`) — merged and deployed 2026-09-30; both services verified by SHA `b64c8cd`, kiosk live. Owner UAT 2026-09-30 (pause 30 s+ and resume, then disconnect/reconnect while playing): *"Re-attach worked fine."* |
+| Plan | _plan TBD_ · ⛔ **NOT auto-mergeable** — live audio path on a device event; UAT needs the owner's phone |
+| Spec / handoff | _no spec doc — found by the `AUD-12` investigation, argued for its own row in that plan's §7.1_ · `LinuxBluetoothService.cs:2536-2542`, `:929-932` · a 2026-07-16 note already records the missing `InterfacesRemoved` cleanup |
+| Depends on | — _(no row dependency, and **`AUD-12` must NOT wait for it.** This is *why* `AUD-12` ships `(State == Stopped && HasCapturePath)` rather than bare `Stopped`; if this lands first that guard becomes belt-and-braces rather than load-bearing.)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-14.md`](queue/AUD-14.md)**
+
+🔬 **BUILT 2026-09-29 on `fix/aud-14-stale-avrcp-watcher`, deployed to `radio` for UAT but NOT merged (live audio path; needs the owner's phone): a removed `MediaPlayer1` at the attached path now disposes the watcher and clears the attachment, so a re-added `player0` gets a full attach. UAT steps in the dossier.** ⭐ **NEW 2026-09-06 — a stale AVRCP watcher survives player re-attach and can raise `Playing` against a torn-down source.** The dedup at `:2539` returns *above* the `Dispose()` at `:2542`, and `OnInterfaceRemoved` never nulls `_mediaPlayer`. — [detail](queue/AUD-14.md)
+
+### AUD-5 — A Cast connection that was no longer current could persist its volume as the system master volume.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#725](https://github.com/mmackelprang/RTest/pull/725) (squash `1bb8b34`, with `AUD-80` and `UI-15`) — owner Cast-volume UAT 2026-09-30 ([`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) evening batch §C): *"Cast volume works now."* |
+| Plan | [`AUD-5-stale-cast-volume-persists-as-master.md`](../design/plans/AUD-5-stale-cast-volume-persists-as-master.md) · **0.5 d** · **both halves** (generation re-check + subscriber ignoring `IsInitialSync`) · ⚠ **run the plan's Task 1 forensic log read BEFORE the code lands** — Task 3 retires the message it greps for |
+| Spec / handoff | _no spec doc — the diagnosis is in this row_ · **provenance: PR #473's pre-merge review**, which found it while checking whether #473's own comment was true · the mechanism is now documented in-tree at [`GoogleCastOutput.cs:95-104`](../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs) · origin commit `b420edc` (2026-02-11) |
+| Depends on | — _(no row dependency; claimable now. **⚠ Touches `GoogleCastOutput.cs`, which PR #473 (`0870410`) reflowed: its header comment grew by exactly +66 lines, so EVERY anchor below `:32` in that file moved +66.** The citations in **this** row are already post-#473 and verified; any citation copied from the **`AUD-3`** row is pre-#473 and is not. Also touches `AudioStateUpdateService.cs`, which no other row claims. **No file overlap with `AUD-1`, `AUD-2` or `AUD-4`**, so it can run alongside any of them.)_ |
+| Branch | `fix/cast-initial-volume-sync-generation-check` |
+
+**Detail: [`queue/AUD-5.md`](queue/AUD-5.md)**
+
+✅🔬 **SHIPPED 2026-09-29 with `AUD-80`: the listener ignores initial-sync events (the load-bearing half) and `GoogleCastOutput` re-checks the connection generation before firing. Task 1 forensic read: 3 `initial: true` lines, all 2026-09-29 (Serilog writes lower case; the plan's `True` grep finds 0).** **A Cast connection that is no longer current can persist its volume as the system master volume.** — [detail](queue/AUD-5.md)
+
+### AUD-80 — Reconnecting to a Cast device did not keep the volume; the speaker now gets its own remembered level back.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#725](https://github.com/mmackelprang/RTest/pull/725) (squash `1bb8b34`, with `AUD-5` and `UI-15`) — owner Cast-volume UAT 2026-09-30: *"Cast volume works now."* Box cleanup done 2026-09-30: after a verified `.backup` (`/opt/radio-console/data/config/configuration.db.bak-20260930-aud80`, `integrity_check` ok, 134 rows), deleted exactly the three stale rows `audiopreferences:masterVolume` (75), `audiopreferences:currentOutput` (empty) and `audiopreferences:currentSource` (Radio), all dated 2026-03-10; 131 rows remain. `Key` is `TEXT PRIMARY KEY` with the default (BINARY, case-sensitive) collation, verified before deleting, so the live `AudioPreferences:*` keys were untouched. `audiopreferences:hiddenSources` kept deliberately. Follow-up: `AUD-81` (owner ruled 2026-09-30 that the console volume should drive the Cast speaker) |
+| Plan | _plan TBD — remember volume per Cast device (fallback: master), push it on connect; de-duplicate the case-split keys; design with `AUD-5`_ |
+| Spec / handoff | _no spec doc — owner request 2026-09-29_ |
+| Depends on | `AUD-5` |
+| Branch | `fix/aud-80-cast-volume-restore` |
+
+**Detail: [`queue/AUD-80.md`](queue/AUD-80.md)**
+
+✅🔬 **SHIPPED 2026-09-29. Real cause of "always loud": every connect pushed `GoogleCast.DefaultVolume` (70 %) to the speaker and the echo was saved as master volume. Now a per-device store (`AudioPreferences:CastDeviceVolumes`) restores the speaker's remembered level on connect; a new speaker keeps its own; the default is never pushed. The case-duplicated `audiopreferences:masterVolume` (75) is stale (written by the System Config page 2026-03-10) and never read. Owner check: set the speaker to 25 % on the speaker, reconnect → 25 %.** 🟠 **NEW 2026-09-29 (owner request) — reconnecting to a Cast device does not keep the volume; it comes back loud.** On every connect `SyncInitialVolumeAsync` adopts the SPEAKER's level as the console's master volume instead of restoring the console's; and the config store holds the master volume twice under case-different keys (`AudioPreferences:MasterVolume = 30`, `audiopreferences:masterVolume = 75`). — [detail](queue/AUD-80.md)
+
+### UI-15 — `isFirstRun` conflated "never seen a source" with "currently no source", so a `null → non-null` source change was not broadcast.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#725](https://github.com/mmackelprang/RTest/pull/725) (squash `1bb8b34`, with `AUD-5` and `AUD-80`) — **verified by unit tests only.** The defect is unreachable on the box (33 of 33 logged startups restore a source before the first poll, and `ActiveSource` cannot return to `null`), so no UAT can observe the change and none was run. The owner's Cast-volume pass on the same PR does not exercise this code |
+| Plan | _plan TBD — ⚠ **establish reachability on the box FIRST**: if `radio-api` always restores a source before the first poll, the startup case never fires and this row may close as "unreachable, documented". The fix itself is small (a separate `_hasObservedSource` sentinel so `null` can be an ordinary value) — ⛔ **do not "fix" it by broadcasting on the true first run**, that suppression is deliberate_ · likely auto-mergeable — no hardware, unit-testable, and `AudioStateUpdateServiceCacheOrderingTests` already carries the harness |
+| Spec / handoff | _no spec doc — found by the `UI-13` pre-merge review (finding `L5`) and confirmed by code reading 2026-09-09_ · ⛔ **NOT caused by `UI-13` and not worsened by it** — identical in both orderings, which is why it was filed rather than folded in · ⭐ **Same family as `AUD-12` / `GV-12` / `UI-13`: state that stops tracking reality with nothing reporting a fault** — the `LogInformation` sits inside the same suppressed branch, so nothing logs either |
+| Depends on | — _(no row dependency. ⚠ **Touches `CheckSourceChangedAsync`, which `UI-13` just rewrote** — rebase past it rather than re-deriving anchors, and **do not delete `TheFirstSourcePollEstablishesTheBaselineWithoutBroadcasting`**, which pins the genuine first run this row must not change. ⚠ **Two things the filer did NOT establish and must not be assumed**: whether `AudioManager._activeSource` can return to `null` after startup, and whether the missing broadcast is visible to the user who made the switch or only to other clients.)_ |
+| Branch | `fix/ui-15-first-run-conflates-no-source` |
+
+**Detail: [`queue/UI-15.md`](queue/UI-15.md)**
+
+✅🔬 **SHIPPED 2026-09-29: a separate `_hasObservedSource` flag marks the first poll, so "no source" after a first poll is no longer mistaken for "never seen". Unreachable on the box today (all 33 logged startups restore a source before the first poll) — fixed for correctness.** ⭐ **NEW 2026-09-09 — `isFirstRun` conflates "never seen a source" with "currently no source", so a real source change is silently NOT broadcast.** `CheckSourceChangedAsync` computes `isFirstRun` as `_lastActiveSourceType == null`, but `null` is also a legitimate observed value (`ActiveSource` is `IAudioSource?`), so **every `null → non-null` transition is suppressed as if it were the first poll**. — [detail](queue/UI-15.md)
+
+### AUD-29 — In Bluetooth mode the position bar never moved; the position now extrapolates between AVRCP events.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#724](https://github.com/mmackelprang/RTest/pull/724) (squash `524b4f3`) — owner UAT 2026-09-30: *"BT position bar updates as expected."* Follow-up filed: `AUD-83` — with no phone connected the Bluetooth source reports `Playing` and its position counter runs (agent pre-pass 2026-09-29), possibly this row's extrapolation ticking with no device |
+| Plan | _plan TBD — ⛔ **FIRST ESTABLISH WHETHER A MOVING BAR IS EVEN ACHIEVABLE OVER A2DP — do not assume it is.** Position would come from **AVRCP** (`org.bluez.MediaPlayer1`), and ⚠ **this repo has a documented history of reading the WRONG PROPERTY off that exact interface** — `AUD-17` is a row about a path that **has never executed**. ⛔ **If it is not achievable, the right fix may be to STOP SHOWING A POSITION BAR in BT mode** — a control that cannot work should not be displayed as though it can, which is the class this repo has spent the week removing. **"Hide it" is a legitimate outcome and must be priced against "make it work"** · ⚠ **Where does the stale `00:01:34.655` come from?** One-shot read, or **a leftover from a PREVIOUS SOURCE — which would be cross-source contamination and considerably more serious** · ⚠ **`duration` is null when the phone knows it** — AVRCP exposes it; if reachable and unread that is a smaller separable fix that alone makes `pct` renderable_ · ⛔ **NOT auto-mergeable** — user-visible surface, and the answer may be to remove a control |
+| Spec / handoff | _no spec doc — ⭐ **THE EXACT INVERSE OF `AUD-24`, and the pair is instructive**: `AUD-24` = the clock advanced honestly while **seek did nothing**; this = **the clock is frozen** while audio plays. **Both tell the user something untrue about position; the failures are mirror images** · ⭐ **Assert the PRESENCE of advancement** — read `position` twice ≥3 s apart during confirmed playback and assert it **increased**. ⚠ **A test asserting `position != null` PASSES TODAY** — the value is non-null and wrong, which is the whole defect · ⛔ **Beware a vacuous run**: `AUD-10`'s degradation lets BT audio be **silently dead while state says `Playing`** — confirm `🔬 PipeWire OnProcess` is climbing **and** no `No audio data captured` warnings before trusting any position reading_ |
+| Depends on | — _(no row dependency. ⚠ **Read `AUD-17` before touching AVRCP** — it is the precedent for reading the wrong property off `org.bluez.MediaPlayer1`. ⚠ **`AUD-10` can make any BT observation vacuous.**)_ |
+| Branch | `fix/aud-29-bt-position-never-advances` |
+
+**Detail: [`queue/AUD-29.md`](queue/AUD-29.md)**
+
+✅🔬 **SHIPPED 2026-09-29: duration was already read; Position now extrapolates from the last AVRCP position while Playing (capped at duration, frozen on pause, re-anchored on each AVRCP update). Owner UAT at the panel outstanding.** 🟠 **NEW 2026-09-10 — in BT mode the console's position bar NEVER MOVES and disagrees with the phone.** Owner: *"the bar on the console **doesn't move at all** in BT mode."* Measured twice, 3 s apart, audio playing: `pos=00:01:34.6550000 dur=None pct=None playing=True`. ⛔ **Position FROZEN at a stale NON-ZERO value; duration null; percentage null.** ⭐ **Not zero — something set it ONCE and nothing updated it since**, which points at a one-shot read rather than a missing feature. — [detail](queue/AUD-29.md)
+
+### UI-2 — Metrics leaves the top nav and becomes Settings → Diagnostics, without the fan-out (with `UI-4`, `UI-5`).
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#728](https://github.com/mmackelprang/RTest/pull/728) (squash `dffb55f`, with `UI-4` and `UI-5`, which had no queue rows of their own) — **agent-verified, not owner-run:** agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box ([`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) evening batch §A): no Metrics pill; Diagnostics is the last Settings tab; tile → chart → close; a range change survived a reload; `/diagnostics` lands on the panel. Not done: the physical DevTray triple-tap. Minor findings recorded there, not filed: the chart's y-axis runs negative; the "Requests Api" tile always reads 0 (`api.requests.api` counts only bare `/api`) |
+| Plan | _shipped; see the dossier_ |
+| Spec / handoff | _`HANDOFF-GA-PUNCH-LIST.md` `UI-2`/`UI-4`/`UI-5`, D11, D13_ |
+| Depends on | — |
+| Branch | `feat/ui-2-diagnostics-under-settings` |
+
+**Detail: [`queue/UI-2.md`](queue/UI-2.md)**
+
+✅🔬 **SHIPPED 2026-09-29 (with `UI-4`, `UI-5`; owner direction D11, D13) — Metrics leaves the top nav and becomes Settings → Diagnostics.** New `GET /api/metrics/window` (one SQL statement): open 44 → 3 requests, poll 41 → 1, ~480 SQL statements per poll → 1, every 15 s only while the tab shows. Per-tile sparklines trimmed (tap a tile for its chart); per-route API counters behind a toggle. `/diagnostics` opens the tab; `/metrics` and `/diagnostic` 404; DevTray "Fingerprint events" → `/diagnostics`. Owner UAT outstanding. — [detail](queue/UI-2.md)
+
+### UI-17 — The centre panel shows what each source needs.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#715](https://github.com/mmackelprang/RTest/pull/715) (squash `52bf2ea`) + [#716](https://github.com/mmackelprang/RTest/pull/716) (squash `0a97f31`) — **agent-verified, not owner-run:** agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box ([`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) evening batch §A): per-source default views; Bluetooth with nothing connected opens on CONNECT; the Queue pill on Radio shows the queue with no ⋮ and the radio keeps playing; the Stats chip is off by default and persists across a reload. Findings: the no-device Bluetooth `Playing` state is filed as `AUD-83`; History's top track "KFM/EBK (feat. Ca…" looks like an accumulated fingerprint misidentification (recorded, not filed) |
+| Plan | _spec in the dossier; replaces the layout-level `RadioPanelToggleService` swap_ |
+| Spec / handoff | _owner conversation 2026-09-29_ |
+| Depends on | — |
+| Branch | `feat/ui-17-centre-panel-per-source` |
+
+**Detail: [`queue/UI-17.md`](queue/UI-17.md)**
+
+✅🔬 **SHIPPED 2026-09-29 as [#715](https://github.com/mmackelprang/RTest/pull/715) + [#716](https://github.com/mmackelprang/RTest/pull/716) (tuner header removed: the frequency well was squeezed under the meter); owner UAT at the panel outstanding.** 🟠 NEW 2026-09-29 (owner request, GA) — the centre panel shows what each source needs.** One tab strip for every source: File Player Queue·History (Queue first when it has tracks); Vinyl/USB/Test Tone History only; Radio opens on Radio controls, toggles to History; Bluetooth opens on Connect when nothing is connected, History when connected. Stats (Total Plays/Top Track/Top Artist) behind a chip, off by default, persisted. Queue tab File Player only; the Queue pill shows the queue whatever the source. — [detail](queue/UI-17.md)
