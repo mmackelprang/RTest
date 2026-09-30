@@ -151,7 +151,8 @@ decision, not a build.
 
 ### 2i. Confirm-or-close (each ≤ ½ day, may end in no code)
 
-`AUD-21` (BT disconnect reason — does BlueZ even supply one?) · `GV-10` (falsified as ours; owner
+~~`AUD-21` (BT disconnect reason — does BlueZ even supply one?)~~ ✅ **closed 2026-09-30 as CONFIRM,
+no code:** BlueZ does supply a reason, and #340 already surfaces it. The evidence is on the punch-list row · `GV-10` (falsified as ours; owner
 closes) · `TEST-2` (P2) · `AUD-36` (dead `IdentificationIntervalSeconds`) · **`AUD-16` as a removal
 PR per D-D**: delete the RaddyRF320BT USB radio source, its protocol/config/docs surface and the
 `external/RaddyRF320BT` submodule; the RTL-SDR path is the only tuner afterwards. Check first that
