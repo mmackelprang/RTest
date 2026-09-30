@@ -55,10 +55,9 @@ public class NotificationsController : ControllerBase
 
       // Priority is what this announcement is registered at with IDuckingService, and it is the
       // only request field left on the line once the body is a token. It does NOT decide preemption
-      // BETWEEN ANNOUNCEMENTS: AnnouncementService.SetActiveSource cancels the previous
-      // announcement's CancellationTokenSource without consulting either priority — ⚠ and nothing
-      // observes that token (AnnounceAsync waits on the caller's token, not on _activeCts), so by
-      // code read a second announcement does not stop the first. It DOES decide whether attended
+      // BETWEEN ANNOUNCEMENTS: a newer announcement replaces the one speaking whatever either
+      // priority is, and the replaced request returns 200 with outcome "interrupted"
+      // (AnnouncementService.BecomeActive, AUD-73). It DOES decide whether attended
       // playback (a voicemail) is preempted: EventPlaybackService observes the DuckingStateChanged
       // this route's StartDuckingAsync raises and compares the priority against
       // GvMedia:PreemptAtPriority.
