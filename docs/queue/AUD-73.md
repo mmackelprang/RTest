@@ -100,6 +100,7 @@ The second-pass four:
 | 9, 3 (lower second) | **`completed`** at 11.8 s | `completed` at 3.6 s, **alongside** | events 1 → 2 → 1, held 0.71 → 11.38 s |
 | 3, 9 (higher second) | **`interrupted`** at 1.8 s | `completed` at 4.0 s | ducked 0.54 → 3.53 s, never 0 in between |
 
+- **Duck start times vary** (0.54–1.63 s) with TTS synthesis latency for the same 177-character message. In the 5, 5 run the first announcement's duck (1.63 s) came after the second request (1.5 s) but before its replacement at ~2.0 s.
 - **Before the fix,** the 5, 5 run returned `completed` for both.
 - **File sink:** `Announcement interrupted: replaced by another announcement, or stopped` appears for each replaced one.
 - **Journal:** no `Error stopping/disposing announcement source` warnings.
