@@ -312,13 +312,14 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   // -----------------------------------------------------------------------
-  // BT album-art tests — verify AVRCP fast path + SongRec fallback routing.
+  // BT album-art tests — source-supplied art routing + SongRec art routing.
   //
-  // Bug A regression: file:// AVRCP URLs (the common Spotify/YouTube Music
-  // case on Android) must not be propagated raw to the browser. The fix
-  // routes every AVRCP ArtUrl through AlbumArtCacheService.SaveFromUrlAsync,
-  // which returns null for file:// (HttpClient throws NotSupportedException,
-  // caught internally) and a /api/albumart/{hash}.{ext} URL for http(s)://.
+  // Art the Bluetooth service supplies (BluetoothPlaybackMetadata.AlbumArtUrl) goes through
+  // AlbumArtCacheService.SaveFromUrlAsync, which returns null for anything it cannot fetch
+  // (file://, relative paths — HttpClient throws, caught internally) and a
+  // /api/albumart/{hash}.{ext} URL for http(s)://. ⚠ No real service reaches that path on the
+  // appliance: LinuxBluetoothService supplies no art (AUD-17). These tests drive it through the
+  // mock service to pin the platform-neutral contract.
   // -----------------------------------------------------------------------
 
   /// <summary>
@@ -1259,7 +1260,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     var (bt, id) = await PlayActiveSourceAsync(cacheMock.Object);
     RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", albumArtUrl: "https://example.com/existing.jpg");
-    // A plain refresh of the same track with no art: the cache restores the AVRCP art.
+    // A plain refresh of the same track with no art: the cache restores the source-supplied art (mock service; no real producer on Linux, AUD-17).
     RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
     Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
 

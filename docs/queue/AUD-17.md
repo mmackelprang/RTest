@@ -191,3 +191,44 @@ Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening ba
 3. Do not touch the SongRec art path, and ⛔ do not "correct" `queue/AUD-1.md:26` or `ROADMAP.md:133` (see the row's spec cell).
 
 **Verification:** the Release build stays at the host's baseline (`--no-incremental`); the suite is green apart from the known-failing set; after deploy, BT art still arrives via song recognition on a played track (the owner's 2026-09-30 pass is the reference). Deletion only, no new behaviour — ⚠ still confirm on the box that BT art appears, because the removed code shares a file with the live AVRCP metadata path.
+
+## ✅🔬 2026-09-30 — shipped (Builder, Phase 2i): the dead read is gone; the consumer was not dead
+
+**Removed:** `LinuxBluetoothService.UpdateMetadata`'s `ArtUrl` / `mpris:artUrl` read. In its place is
+a comment saying why Linux reads no art: `org.bluez.MediaPlayer1` offers only the OBEX handle
+`ImgHandle`; BlueZ exposed neither `ImgHandle` nor `ObexPort` on the box (2026-09-29, experimental cover art off — whether the phone would offer it is untested); and the owner
+declined option B. **Linux now never sets `BluetoothPlaybackMetadata.AlbumArtUrl`**, and the property's
+new XML doc says so. The two `"No MPRIS media player attached"` warnings (formerly `:339`/`:358`, now
+`:491`/`:510`) name `org.bluez.MediaPlayer1` instead. `FingerprintingOptions`' remark, which quoted
+the MPRIS names, is corrected too.
+
+### ⚠ The row's premise was half wrong: `CacheAvrcpArtAsync` was not unreachable
+
+It was unreachable **on Linux**, but it is a platform-neutral consumer of `AlbumArtUrl`, and two other
+producers feed it:
+- `WindowsMediaSessionWatcher`, from the SMTC thumbnail;
+- `MockBluetoothService`, through which `AUD-1`'s *"source-supplied art is never replaced by an
+  identification"* tests (`Aud1_AvrcpArt_RestoredFromCache_IsStillNotReplaced`,
+  `Aud1_ArtAlreadyInPlace_IsNotReplaced`, `MetadataChanged_WithHttpsArtUrl_*`,
+  `MetadataChanged_WithFileSchemeArtUrl_*`) run.
+
+Deleting it would have removed the only producer of source-supplied art. That would leave `AUD-1`'s
+source-art rule, in the fingerprinting fill path this row was told not to touch, as constant-false
+code with no tests. So it is **kept, renamed `CacheSourceSuppliedArtAsync`**, and its comments and log
+lines now say it never runs on the appliance. The fill path (`OnTrackIdentified`,
+`CacheAndSetCoverArtUrlAsync`) received comment edits only.
+
+**Found along the way → [`AUD-88`](AUD-88.md):** on Windows the consumer silently drops the SMTC art. The
+watcher hands on an already-local `/api/albumart/...` path, and `SaveFromUrlAsync` (whose `HttpClient`
+has no `BaseAddress`) returns null for it. This is dev-host only.
+
+### Verification
+
+- Release build `--no-incremental`: **46 warnings, 0 errors** (Windows baseline, unchanged). The suite is
+  green apart from the six known `SrcVariableResamplerTests`.
+- **No new test.** The removed read is inside a private method on a D-Bus proxy path that has no seam,
+  and the kept consumer's behaviour is unchanged and already covered by the tests named above.
+- **After deploy (agent):** the post-deploy evidence is recorded in the next section once it is taken.
+- **Owner check left:** on a Bluetooth track, album art still appears about 15 s in (via song
+  recognition). The owner's 2026-09-30 *"Bluetooth album art passes"* is the reference. The removed code
+  shared a file with the live AVRCP metadata path, which is why this check is still worth doing.

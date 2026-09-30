@@ -1,5 +1,11 @@
 # Fix: BT album art does not display in UI (cache the AVRCP URL + remove the MusicBrainz fallback)
 
+> ⚠ **Historical, and superseded on its AVRCP half by `AUD-17` (2026-09-30).** The Linux service never
+> supplied an art URL. It read MPRIS names that `org.bluez.MediaPlayer1` does not publish, and that
+> read has now been removed. `CacheAvrcpArtAsync` is now `CacheSourceSuppliedArtAsync`, and its log
+> lines say "source-supplied" rather than "AVRCP". The `journalctl` grep recipes below match nothing
+> on a current build. See [`docs/queue/AUD-17.md`](../../docs/queue/AUD-17.md).
+
 > **For Claude:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
 
 **Branch:** `fix/bt-album-art` (off `main`, PR back to `main`)

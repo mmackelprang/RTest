@@ -1144,7 +1144,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
     // If metadata is incomplete (no title or artist), request fingerprinting.
     // When UseShazamForAllSources is enabled, always fingerprint — on the appliance SongRec
     // is the only source of BT cover art there is: LinuxBluetoothService supplies none, because
-    // BlueZ offers no URL-shaped art and the phone publishes no cover-art handle (AUD-17). When
+    // BlueZ offers no URL-shaped art and here exposes no cover-art handle either (AUD-17). When
     // SongRec does not identify the track either, the UI shows the fallback icon — accepted UX.
     //
     // This is a GATE only. What is done with the answer is decided per field in

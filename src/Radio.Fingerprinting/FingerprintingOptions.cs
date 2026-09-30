@@ -30,7 +30,7 @@ public sealed class FingerprintingOptions
   /// ⚠ <b>Do not set this false on the appliance.</b> Bluetooth fingerprinting then hard-returns for
   /// any track whose AVRCP supplied a title and artist, so those tracks never get cover art. The
   /// Bluetooth service supplies <b>no</b> cover art there: BlueZ's <c>org.bluez.MediaPlayer1</c> offers
-  /// only an OBEX cover-art handle (<c>ImgHandle</c>), the phone does not publish even that, and the
+  /// only an OBEX cover-art handle (<c>ImgHandle</c>), BlueZ does not expose even that here (experimental cover art is off), and the
   /// service reads none (AUD-17). SongRec is the only art source Bluetooth has.
   /// </para>
   /// <para>

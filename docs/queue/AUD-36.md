@@ -52,3 +52,24 @@ production config for zero functional gain.
   against the section JSON captured verbatim from the box — the load keeps the stored values, and a save
   no longer writes the key. **Mutation-checked:** adding `UnmappedMemberHandling = Disallow` to the
   client's options fails the load test; re-adding the DTO property fails the save test; each on its own.
+
+## ✅ 2026-09-30 — merged, deployed, verified on the box → archived
+
+[#741](https://github.com/mmackelprang/RTest/pull/741), squash `b2073bb`. `main` was deployed from a
+detached checkout: `Verified: API is running commit b2073bb`, `Verified: Web is running commit b2073bb`,
+`Kiosk is live (10 established connections to :5002)`. `NRestarts` was 0 before and 0 after. Agent
+checks:
+
+- **The start-up line changed as intended.** From the file sink, the line before and after the deploy:
+  `18:35:02 … Background identification service started (interval: 30s, sample duration: 15s)` →
+  `18:53:14 … Background identification service started (sample duration: 15s, idle poll: 1000ms)`.
+  The old line reported the store's `30`, a value nothing used.
+- **The orphan is harmless in practice.** `GET /api/configuration/fingerprinting` still returns
+  `identificationIntervalSeconds: 30`, because the store row survives as predicted. The System Config
+  page, driven by Playwright at 1920x720 (Settings → Configuration → Fingerprinting), shows **no
+  interval field** and loads the stored values: *Enabled* ✓, *Use Shazam for All Sources* ✓ (the
+  box's `true`, not the DTO default `false`), sample 15, confidence 0.65, duplicate window 5. There were
+  zero console errors.
+- **The owner's state was untouched.** SDR radio at 92.3 FM, volume 0.3, muted, before and after.
+
+**Nothing is left for the owner. Archived.**

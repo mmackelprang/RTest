@@ -3846,10 +3846,12 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
 
     // No album art is read here, deliberately (AUD-17). The Track dict comes from BlueZ's
     // org.bluez.MediaPlayer1, whose only cover-art attribute is ImgHandle — an AVRCP cover-art
-    // (OBEX BIP) handle, not a URL — and on the appliance the phone does not even publish that:
-    // no ImgHandle in Track and no ObexPort on the player (measured 2026-09-29). Resolving it would
-    // need BlueZ's experimental cover-art support on a stack RotaryPhone shares, which the owner
-    // declined 2026-09-30. Bluetooth album art on Linux comes from song recognition only.
+    // (OBEX BIP) handle, not a URL — and on the appliance BlueZ does not expose even that: no
+    // ImgHandle in Track and no ObexPort on the player (measured 2026-09-29), with BlueZ's
+    // experimental cover-art support off and obexd running without -E. Whether the phone would offer
+    // cover art with that enabled is untested. Enabling it would change a Bluetooth stack RotaryPhone
+    // shares, and the owner declined that 2026-09-30. Bluetooth album art on Linux comes from song
+    // recognition only.
     var meta = new BluetoothPlaybackMetadata
     {
       Title = GetString(track, "Title"),

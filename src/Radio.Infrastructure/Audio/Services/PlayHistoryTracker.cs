@@ -726,7 +726,8 @@ public class PlayHistoryTracker : IDisposable
         return;
       }
 
-      // Use album art from the AVRCP event data (not from btSrc.Metadata, which may
+      // Use album art the Bluetooth service supplied with the event — none on Linux, the appliance,
+      // since its service reads no art (AUD-17) — and not from btSrc.Metadata, which may
       // still contain stale art from the previous song — the tracker handler fires
       // before BluetoothAudioSource.OnMetadataChanged clears it due to subscription order).
       // Art from MusicBrainz/SongRec lookups will update the entry later via OnTrackIdentified.
