@@ -4,6 +4,8 @@
 
 🔴 **P0 — GA-blocking.** Filed 2026-09-30 from the owner's casting baseline run. **MEASURED on the box, not code-read.**
 
+✅ **SHIPPED AND OWNER-VERIFIED 2026-09-30 — [#736](https://github.com/mmackelprang/RTest/pull/736), squash `646be99`; archived.** See [§ Resolution](#resolution-2026-09-30) at the foot of this file.
+
 ## Provenance
 
 The owner ran a casting baseline at the console on 2026-09-30, box on `b64c8cd` (= `main`, both services SHA-verified that day). Record: [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) § Casting baseline. Evidence below is from `journalctl -u radio-api` and `systemctl show` on `radio`, read the same afternoon.
@@ -75,3 +77,52 @@ A speaker losing power or Wi-Fi is ordinary household behaviour (a Chromecast au
 - `AUD-81` — the console volume does not reach the speaker; reconfirmed in the same run.
 - `AUD-80` ✅ ([#725](https://github.com/mmackelprang/RTest/pull/725)) — the remembered per-device volume that made the restart look like a reconnect.
 - `OPS-3` — `BindsTo=` for `radio-web`; relevant to how the UI behaves when `radio-api` dies.
+- `AUD-85` — picking Cast erases the saved default Cast speaker; found during this row's owner re-pick.
+
+## Resolution (2026-09-30)
+
+**Shipped as [#736](https://github.com/mmackelprang/RTest/pull/736)** (branch `fix/aud-84-cast-heartbeat-crash`, squash `646be99`). The branch build `079d46c` was deployed for the owner's UAT; after the merge, `main` `646be99` was deployed 2026-09-30 and verified on both services (`Verified: API/Web is running commit 646be99`, `Kiosk is live`).
+
+### What the fix does (from the Builder's report)
+
+- **The cause, confirmed:** SharpCaster 3.0.0's `HeartbeatChannel.TimerElapsed` is an `async void` `System.Timers.Timer` handler, so a Broken-pipe `IOException` from its PING write escaped to the thread pool and aborted the process.
+- **The guard:** new `src/Radio.Infrastructure/Audio/Outputs/SharpCasterCallbackGuard.cs` installs a `SynchronizationContext` that captures and reports exceptions from SharpCaster's `async void` callbacks — the heartbeat timer via its public `SynchronizingObject`, the PONG/CLOSE handlers via overriding subclasses. It is re-applied on every connect, and it **re-arms SharpCaster's one-shot heartbeat timer** so its timeout can fire against a silent peer (the library never re-arms it after an unanswered PING).
+- **Noticing the loss:** `GoogleCastOutput` treats a guard fault, SharpCaster `Disconnected`, or DirectChannel send failures (10 consecutive, or one send stalled > 5 s) as a lost connection — once per connection, only while `Streaming` (a loss seen during `StartAsync` is held and replayed) — and goes to `State = Error`, raises `Disconnected(IsConnectionLost = true)`, stops the stream and closes the client.
+- **Falling back:** `AudioEngineInitializationService` switches to the default local device via `SoundFlowAudioEngine.SetActiveOutputIfCurrentAsync` (check-and-switch under one lock), which unmutes local and persists it; the API broadcasts `OutputChanged` and the UI chip follows.
+
+So this row's claim ("does not crash") **and** `AUD-37`'s "notices and falls back" both shipped here. `AUD-37`'s reconnect half did not (below).
+
+### Gates (Windows)
+
+- Build: 46 warnings / 0 errors, `--no-incremental`.
+- Tests: all projects green except **six** `SrcVariableResamplerTests` (`libsamplerate.so.0`, `TEST-5`). ⚠ `CLAUDE.md`'s known-failing list says "four"; the Builder measured six. `CLAUDE.md` was not edited by this record — flagged for the coordinator.
+- 16 mutation checks, each failing its test.
+- Review: 3 MEDIUM, then 2 MEDIUM on re-review, all fixed.
+
+### Owner UAT (at the console, 2026-09-30, box on `079d46c`)
+
+Unplugged the Office speaker (Google Home Mini) while casting. Owner, verbatim: *"powered up speaker again - audio started playing on console after disconnection."* then *"Re-picked Cast, it's playing on the office speaker again"*.
+
+Box evidence (MEASURED, EDT):
+
+```
+17:31:42 WRN DirectCast: send of chunk seq 232 stalled for 5s — reporting the connection lost
+Cast: lost the connection to "Office speaker" ("DirectChannel audio sends kept failing") — Cast output stopped
+Cast connection to "Office speaker" was lost (...) — switching to local output "Soundbar" ("out:Built-in Audio Analog Stereo")
+```
+
+- Fallback ≈ 5 s after the unplug (the DirectChannel stall detector fired first).
+- `systemctl show radio-api -p NRestarts` stayed **0**.
+- **Zero** `Unhandled exception` lines since the deploy.
+
+The re-pick of Cast is where [`AUD-85`](AUD-85.md) was found: the pick succeeded, but it erased the saved default Cast speaker.
+
+### Deferred follow-ups (recorded, not filed as rows)
+
+1. **No auto-reconnect when the speaker returns.** `AUD-37`'s remaining half (punch list §4.2): the owner had to re-pick Cast by hand.
+2. **HttpMp3 mode:** a write blocked on SharpCaster's send lock never times out. DirectChannel — the production mode — is covered by the stall detector; HttpMp3 is not. Carried on `AUD-37`.
+3. A Warning `No Chromecast device connected` is logged on teardown after a loss — noise at Warning, on a box where journald volume correlates with distortion.
+4. A millisecond race in the fallback cannot distinguish "the Cast that was lost" from "Cast re-picked". Documented in code.
+5. If the device the fallback picks is hidden by display settings, the output chip matches nothing.
+6. **Pre-existing:** SharpCaster's receive loop drops messages with an unknown `type` (and calls `Debugger.Break()`), so DirectChannel `pong` replies never reach `DirectCastAudioChannel`. Relevant to `AUD-54`(2) (punch list §5), which attributes frozen `LastRttMs` to channel re-registration after a Stop/Start; if the Builder's reading holds, pongs would not arrive even on the first connection. Not verified on the box.
+7. **Pre-existing:** stale `MainLayout.razor` line citations (`:387`, `:388`, `:399`, `:484`, `:1415`) in docs and comments.

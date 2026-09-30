@@ -103,7 +103,7 @@ connection persists master volume) share `GoogleCastOutput`'s lock discipline; p
 together, then `AUD-38` (70 % push, knob dead-end) after, because reconnect decides where the volume
 push lives. `AUD-58`'s transport half belongs here too.
 
-⛔ **Updated 2026-09-30 after the owner's casting baseline (MEASURED, box on `b64c8cd`):** **`AUD-84`
+✅ **`AUD-84` below is FIXED — #736 (`646be99`), owner-verified 2026-09-30 (unplug → fallback to local in ~5 s, no restart), archived. The Cast arc now starts from `AUD-85` (picking Cast erases the default speaker), `AUD-37`'s auto-reconnect half, `AUD-54` and `AUD-81`.** ⛔ **Updated 2026-09-30 after the owner's casting baseline (MEASURED, box on `b64c8cd`):** **`AUD-84`
 (🔴 P0, GA-blocking) leads this arc** — a Cast speaker dropping mid-stream crashes `radio-api` through
 an unhandled exception in SharpCaster's heartbeat timer, restarting the whole console. `AUD-37`'s
 "notice and fall back" follows it. `AUD-5` has shipped (#725), and `AUD-38` is superseded by
