@@ -161,6 +161,14 @@ nothing in `Radio.Tools.AudioUAT` or the `SourceSelector` list still enumerates 
 `CacheAvrcpArtAsync`'s unreachable branch, fix the "MPRIS" comment and log strings; BT art keeps
 coming from song recognition. Scope in [`queue/AUD-17.md`](queue/AUD-17.md).
 
+**Status 2026-09-30 (batch B):**
+- ✅ `AUD-36` archived ([#741](https://github.com/mmackelprang/RTest/pull/741)).
+- ✅🔬 `AUD-17` shipped ([#742](https://github.com/mmackelprang/RTest/pull/742)). The owner's BT
+  album-art check is left.
+- ✅🔬 `AUD-16` built on `fix/aud-16-remove-rf320`. Neither `Radio.Tools.AudioUAT` nor the source
+  selector enumerates the RF320 any more. It is not yet deployed; the box checks are in
+  [`queue/AUD-16.md`](queue/AUD-16.md).
+
 ### 2j. Test & ops hygiene
 
 `TEST-10` (wall-clock race, `TEST-4` shape) · `TEST-5` (document the Windows-only resampler
