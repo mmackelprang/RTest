@@ -1493,7 +1493,6 @@ Before running Phase 9 tests, ensure the following configuration is set in `apps
   "Fingerprinting": {
     "Enabled": true,
     "SampleDurationSeconds": 15,
-    "IdentificationIntervalSeconds": 30,
     "MinimumConfidenceThreshold": 0.5,
     "DuplicateSuppressionMinutes": 5,
     "DatabasePath": "./data/fingerprints.db",

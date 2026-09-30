@@ -468,7 +468,6 @@ All configurable values that affect latency:
     }
   },
   "Fingerprinting": {
-    "IdentificationIntervalSeconds": 30,
     "SampleDurationSeconds": 15,
     "DuplicateSuppressionMinutes": 5,
     "MinimumConfidenceThreshold": 0.5
