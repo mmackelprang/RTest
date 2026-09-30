@@ -223,13 +223,8 @@ public class AudioStateHubService : IAsyncDisposable
         await NotifyAsync(SourceChanged);
       });
 
-      // AUD-84. The payload is a string id and may be null — a JSON null binds to default(T)
-      // whatever this file annotates, so the type argument says so.
-      _hubConnection.On<string?>("OutputChanged", async outputId =>
-      {
-        _logger.LogDebug("Received OutputChanged event: {OutputId}", outputId);
-        await NotifyAsync(OutputChanged, outputId);
-      });
+      // ⛔ A null here is DATA, not a contract violation (ADR-033). See OnOutputChangedMessageAsync.
+      _hubConnection.On<string?>("OutputChanged", OnOutputChangedMessageAsync);
 
       // Server sends FingerprintStatusChanged with a FingerprintStatusDto payload —
       // accept and discard it so SignalR dispatches the message.
@@ -476,16 +471,17 @@ public class AudioStateHubService : IAsyncDisposable
   /// </summary>
   /// <remarks>
   /// ⚠⚠ THIS BELONGS HERE AND NOT IN <see cref="NotifyAsync{T}"/>, AND THE DIFFERENCE IS A REAL
-  /// DEFECT, NOT A STYLE PREFERENCE (queue row `UI-12` §0.5). Three events on this class are TYPED to
-  /// accept null — NowPlayingChanged (:60), VolumeChanged (:68) and EventPlaybackChanged (:90) — and
-  /// none of the three may be dropped. NotifyAsync&lt;T&gt;'s T is erased to a type parameter and
+  /// DEFECT, NOT A STYLE PREFERENCE (queue row `UI-12` §0.5). Four events on this class are TYPED to
+  /// accept null — NowPlayingChanged (:60), VolumeChanged (:68), OutputChanged (:72, `AUD-84`) and
+  /// EventPlaybackChanged (:93) — and none of the four may be dropped. NotifyAsync&lt;T&gt;'s T is erased to a type parameter and
   /// cannot tell them apart from the four non-nullable ones this guard serves, so a null check there
   /// would silently drop a working broadcast: the exact defect `UI-12` was filed to avoid causing.
   ///
-  /// ⚠ The three events declared Func&lt;T?, Task&gt; — NowPlayingChanged, VolumeChanged and
-  /// EventPlaybackChanged — must NOT route through here; their nulls are data. ⚠ AND THE THREE ARE
-  /// NOT EQUIVALENT: each of OnNowPlayingMessageAsync, OnVolumeMessageAsync and
-  /// OnEventPlaybackMessageAsync states what its own null means, beside the code that dispatches it.
+  /// ⚠ The four events declared Func&lt;T?, Task&gt; — NowPlayingChanged, VolumeChanged,
+  /// OutputChanged and EventPlaybackChanged — must NOT route through here; their nulls are data.
+  /// ⚠ AND THE FOUR ARE NOT EQUIVALENT: each of OnNowPlayingMessageAsync, OnVolumeMessageAsync,
+  /// OnOutputChangedMessageAsync and OnEventPlaybackMessageAsync states what its own null means,
+  /// beside the code that dispatches it.
   /// Gated since `UI-14` by AudioStateHubServicePassThroughTests.
   ///
   /// ⛔ Do NOT "simplify" this by moving the check down into the fan-out.
@@ -531,8 +527,8 @@ public class AudioStateHubService : IAsyncDisposable
   /// </summary>
   /// <remarks>
   /// ⚠ The rejection path sits on a documented 20 Hz route, which is why it is throttled at all.
-  /// EncoderHudChanged reaches this at up to 20 Hz while a knob is moving (its declaration at :79-82;
-  /// the server sends it at AudioStateUpdateService.cs:1114-1115). And src/Radio.Web/appsettings.json
+  /// EncoderHudChanged reaches this at up to 20 Hz while a knob is moving (its declaration at :82-85;
+  /// the server sends it from AudioStateUpdateService.OnEncoderHudChanged). And src/Radio.Web/appsettings.json
   /// puts MinimumLevel.Default at Information (:50-51) with NO restrictedToMinimumLevel on the Console
   /// sink (:64-68) — unlike Radio.API since LOG-11 — so under systemd every Warning from this process
   /// lands in `journalctl -u radio-web`, on a box where log volume correlates with audible audio
@@ -612,8 +608,8 @@ public class AudioStateHubService : IAsyncDisposable
   /// <summary>Applies one "EncoderHudChanged" broadcast. ⚠ internal for the test seam.</summary>
   /// <remarks>
   /// No log line per message — this arrives at up to 20 Hz while a knob is moving (ENC-4; the server
-  /// coalesces to ≥ 50 ms before sending, AudioStateUpdateService.cs:1114-1115). The rejection path in
-  /// <see cref="AcceptPayload{T}"/> does log, on a payload that sender cannot produce — :1115 builds
+  /// coalesces to ≥ 50 ms before sending, AudioStateUpdateService.OnEncoderHudChanged). The rejection path in
+  /// <see cref="AcceptPayload{T}"/> does log, on a payload that sender cannot produce — that method builds
   /// its anonymous object inline — and is throttled per event name so that an untyped wire which DOES
   /// produce one cannot flood the journal at 20 Hz.
   /// </remarks>
@@ -628,7 +624,7 @@ public class AudioStateHubService : IAsyncDisposable
   }
 
   // ---------------------------------------------------------------------------------------------
-  // The three events where NULL IS DATA. ⛔ None of these may grow an AcceptPayload call, and
+  // The four events where NULL IS DATA. ⛔ None of these may grow an AcceptPayload call, and
   // NotifyAsync<T> below must never grow a null check — that is the `UI-12` §0.5 / ADR-033 defect,
   // and `UI-14` exists because the realistic form of it passed the entire suite until these seams
   // made it observable.
@@ -715,6 +711,20 @@ public class AudioStateHubService : IAsyncDisposable
   {
     _logger.LogDebug("Received VolumeChanged event");
     await NotifyAsync(VolumeChanged, dto);
+  }
+
+  /// <summary>Applies one "OutputChanged" broadcast (AUD-84). ⚠ internal for the test seam.</summary>
+  /// <remarks>
+  /// ⛔ A NULL PAYLOAD IS DATA BY DECLARATION — <c>Func&lt;string?, Task&gt;</c>. The producer,
+  /// <c>AudioStateUpdateService.CheckActiveOutputChangedAsync</c>, sends the engine's
+  /// <c>ActiveOutputId</c>, which is null until an output has been selected; a change back to null
+  /// is not produced by any path today, but the declaration and the dispatch agree so one would not
+  /// be discarded at the boundary. The subscriber (MainLayout) ignores a null id.
+  /// </remarks>
+  internal async Task OnOutputChangedMessageAsync(string? outputId)
+  {
+    _logger.LogDebug("Received OutputChanged event: {OutputId}", outputId);
+    await NotifyAsync(OutputChanged, outputId);
   }
 
   /// <summary>Applies one "EventPlaybackChanged" broadcast. ⚠ internal for the test seam.</summary>

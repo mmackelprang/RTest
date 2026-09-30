@@ -28,6 +28,7 @@ public class AudioStateHubServiceEventDeclarationCensusTests
   [
     nameof(AudioStateHubService.EventPlaybackChanged),
     nameof(AudioStateHubService.NowPlayingChanged),
+    nameof(AudioStateHubService.OutputChanged),
     nameof(AudioStateHubService.VolumeChanged),
   ];
 
