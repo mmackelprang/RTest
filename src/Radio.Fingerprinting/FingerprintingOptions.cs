@@ -47,8 +47,9 @@ public sealed class FingerprintingOptions
 
   /// <summary>
   /// Duration of audio to capture for fingerprinting (seconds). A cycle that captured audio starts the
-  /// next one immediately, so this capture length is what paces the loop while a source is playing
-  /// (the SongRec failure back-off and <see cref="IdlePollIntervalMs"/> pace it otherwise). There is no
+  /// next one as soon as recognition (and any cover-art download) finishes, so while a source is playing
+  /// the loop is paced by this capture length plus SongRec's latency, not by a fixed wait. The SongRec
+  /// failure back-off and <see cref="IdlePollIntervalMs"/> add waits of their own. There is no
   /// separate "interval between attempts" setting: <c>IdentificationIntervalSeconds</c> was read by
   /// nothing but a start-up log line and was removed (AUD-36).
   /// </summary>

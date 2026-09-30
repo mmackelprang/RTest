@@ -141,7 +141,7 @@ public class BackgroundIdentificationService : BackgroundService
   }
 
   /// <summary>
-  /// Requests an immediate identification cycle, bypassing the normal interval wait.
+  /// Requests an immediate identification cycle, cutting short the loop's current idle or back-off wait.
   /// Called by sources when a track changes or new incomplete metadata is received.
   /// </summary>
   public void RequestImmediateIdentification()
@@ -250,7 +250,7 @@ public class BackgroundIdentificationService : BackgroundService
       }
       catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested)
       {
-        _logger.LogDebug("Identification interval interrupted by immediate request");
+        _logger.LogDebug("Identification wait interrupted by immediate request");
         _delayCts = null;
       }
       catch (OperationCanceledException)

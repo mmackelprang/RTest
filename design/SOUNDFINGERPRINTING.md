@@ -872,8 +872,8 @@ public class BackgroundIdentificationService : BackgroundService
             }
 
             // As built, there is no fixed interval here: a cycle that captured audio starts the next
-            // one at once (the capture length paces it), an idle cycle waits IdlePollIntervalMs, and
-            // SongRec failures back off. The IdentificationIntervalSeconds this sketch once used was
+            // one as soon as recognition finishes (capture length plus SongRec latency paces it), an
+            // idle cycle waits IdlePollIntervalMs, and SongRec failures back off. The IdentificationIntervalSeconds this sketch once used was
             // never honoured by the real loop and was removed (AUD-36).
         }
     }
