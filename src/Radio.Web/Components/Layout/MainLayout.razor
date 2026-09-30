@@ -385,6 +385,7 @@
       HubService.NowPlayingChanged += OnNowPlayingChanged;
       HubService.QueueChanged += OnQueueChanged;
       HubService.SourceChanged += OnSourceChanged;
+      HubService.OutputChanged += OnOutputChanged;
       HubService.SleepStateChanged += OnSleepStateChanged;
       HubService.VolumeChanged += OnVolumeChanged;
       DeviceDisplayState.DisplaySettingsChanged += OnDeviceDisplaySettingsChanged;
@@ -1186,6 +1187,30 @@
     await InvokeAsync(StateHasChanged);
   }
 
+  /// <summary>
+  /// AUD-84. The API changed the active output without this circuit asking — today, only when a
+  /// Cast speaker drops and the console falls back to its local speakers. Before this the output
+  /// chip went on showing Cast over a console that was playing locally, because the layout only
+  /// ever learned the output from its own clicks. A null id (no output reported) changes nothing.
+  /// </summary>
+  private Task OnOutputChanged(string? outputId)
+  {
+    return InvokeAsync(() =>
+    {
+      if (string.IsNullOrEmpty(outputId) || outputId == _selectedOutputId)
+      {
+        return;
+      }
+
+      _selectedOutputId = outputId;
+      if (!outputId.Equals("google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        _showCastDropdown = false;
+      }
+      StateHasChanged();
+    });
+  }
+
   private Task OnSleepStateChanged(bool isSleeping)
   {
     // PR 6 / handoff §P2·1: server-pushed SleepStateChanged drives a route
@@ -1569,6 +1594,7 @@
     HubService.NowPlayingChanged -= OnNowPlayingChanged;
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
+    HubService.OutputChanged -= OnOutputChanged;
     HubService.SleepStateChanged -= OnSleepStateChanged;
     HubService.VolumeChanged -= OnVolumeChanged;
     DeviceDisplayState.DisplaySettingsChanged -= OnDeviceDisplaySettingsChanged;

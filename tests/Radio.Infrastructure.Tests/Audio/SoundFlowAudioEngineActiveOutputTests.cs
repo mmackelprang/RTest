@@ -308,6 +308,47 @@ public class SoundFlowAudioEngineActiveOutputTests
 
   // --- helpers ---
 
+  // --- AUD-84: the conditional switch the lost-Cast recovery uses ---------------------------------
+
+  [Fact]
+  public async Task SetActiveOutputIfCurrentAsync_WhenCastIsStillActive_Switches()
+  {
+    var (engine, _, _, _) = BuildEngine(castState: AudioOutputState.Streaming);
+    await engine.SetActiveOutputAsync("google-cast");
+
+    var switched = await engine.SetActiveOutputIfCurrentAsync("google-cast", "playback-1");
+
+    Assert.True(switched);
+    Assert.Equal("playback-1", engine.ActiveOutputId);
+    Assert.False(engine.IsLocalOutputMuted);
+  }
+
+  [Fact]
+  public async Task SetActiveOutputIfCurrentAsync_WhenTheUserAlreadyMovedOn_LeavesTheirChoice()
+  {
+    // Pre-merge review M1: the recovery must not replace a choice committed while it was queued.
+    var (engine, _, _, configMock) = BuildEngine();
+    await engine.SetActiveOutputAsync("hdmi-1");
+    configMock.Invocations.Clear();
+
+    var switched = await engine.SetActiveOutputIfCurrentAsync("google-cast", "playback-1");
+
+    Assert.False(switched);
+    Assert.Equal("hdmi-1", engine.ActiveOutputId);
+    configMock.Verify(c => c.SetValueAsync(
+      It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task SetActiveOutputIfCurrentAsync_WhenNoOutputWasEverReported_FailsOpenAndSwitches()
+  {
+    var (engine, _, _, _) = BuildEngine();
+    engine.SetLocalOutputMuted(true);
+
+    Assert.True(await engine.SetActiveOutputIfCurrentAsync("google-cast", "playback-1"));
+    Assert.False(engine.IsLocalOutputMuted);
+  }
+
   private static (SoundFlowAudioEngine engine,
                   Mock<IAudioOutput> castMock,
                   Mock<IAudioOutput> httpMock,

@@ -30,7 +30,9 @@ namespace Radio.Web.Tests.Services;
 /// completion before anything is asserted, so each observation is a fact about control flow.
 ///
 /// 📌 What these do NOT prove: that a null can ever arrive. It cannot — each of the three events has
-/// exactly one server-side sender and none can produce one (`UI-14` §0.4). These pin the BOUNDARY's
+/// exactly one server-side sender and none can produce one (`UI-14` §0.4). OutputChanged (`AUD-84`,
+/// added later) is sent only when the engine's active output CHANGES, and no path sets that back to
+/// null once an output has been selected. These pin the BOUNDARY's
 /// behaviour if one ever does, which is the same standing ADR-033 gives the rejection tests.
 /// </remarks>
 public class AudioStateHubServicePassThroughTests
@@ -172,6 +174,38 @@ public class AudioStateHubServicePassThroughTests
   }
 
   [Fact]
+  public async Task NullOutputChangedPayloadReachesEverySubscriberAsNull()
+  {
+    // AUD-84. Declared Func<string?, Task>: null is data, dispatched like any other id.
+    var sink = new List<(LogLevel Level, string Message)>();
+    var hub = NewHub(sink);
+    var order = new List<int>();
+    var seen = new string?[] { "x", "x" };
+
+    hub.OutputChanged += d => { order.Add(1); seen[0] = d; return Task.CompletedTask; };
+    hub.OutputChanged += d => { order.Add(2); seen[1] = d; return Task.CompletedTask; };
+
+    await hub.OnOutputChangedMessageAsync(null);
+
+    Assert.Equal([1, 2], order);
+    Assert.All(seen, s => Assert.Null(s));
+  }
+
+  [Fact]
+  public async Task NonNullOutputChangedPayloadIsDispatchedUnchanged()
+  {
+    var sink = new List<(LogLevel Level, string Message)>();
+    var hub = NewHub(sink);
+    string? seen = null;
+
+    hub.OutputChanged += d => { seen = d; return Task.CompletedTask; };
+
+    await hub.OnOutputChangedMessageAsync("speakers");
+
+    Assert.Equal("speakers", seen);
+  }
+
+  [Fact]
   public async Task NonNullEventPlaybackPayloadIsDispatchedUnchanged()
   {
     var sink = new List<(LogLevel Level, string Message)>();
@@ -199,8 +233,8 @@ public class AudioStateHubServicePassThroughTests
   /// WORDING. That narrowing was right for a test that runs a real dispatch with subscribers attached,
   /// where an unrelated legitimate warning could appear later and fail the test for the wrong reason.
   /// Here no subscribers are attached and each seam's whole body is one LogDebug plus one NotifyAsync
-  /// over an empty invocation list — there is no legitimate INFORMATION-OR-ABOVE line these three
-  /// lines can emit. ⚠ The threshold is Information, not Warning, and the Information half is the more
+  /// over an empty invocation list — there is no legitimate INFORMATION-OR-ABOVE line these seam
+  /// calls can emit. ⚠ The threshold is Information, not Warning, and the Information half is the more
   /// consequential one (see the sink note below); an earlier revision of this remark justified only
   /// the Warning half. If a future edit adds either, this test failing IS the intended conversation,
   /// not a false positive:
@@ -217,11 +251,12 @@ public class AudioStateHubServicePassThroughTests
     await hub.OnNowPlayingMessageAsync(null);
     await hub.OnVolumeMessageAsync(null);
     await hub.OnEventPlaybackMessageAsync(null);
+    await hub.OnOutputChangedMessageAsync(null);
 
     // ⭐ PROVE THE INSTRUMENT BEFORE TRUSTING ITS SILENCE. This is the one assertion in this file an
     // EMPTY sink would satisfy, so confirm the sink is wired before reading its quiet as news — the
     // same standard AudioStateHubServiceEventDeclarationCensusTests states above its own verdict.
-    // The three seams each emit one LogDebug, so a live sink cannot be empty here.
+    // The four seams each emit one LogDebug, so a live sink cannot be empty here.
     Assert.Contains(sink, e => e.Level == LogLevel.Debug);
     Assert.DoesNotContain(sink, e => e.Level >= LogLevel.Information);
   }

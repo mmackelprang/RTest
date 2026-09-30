@@ -43,6 +43,30 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   private readonly DirectCastAudioChannel _channel;
   private readonly GoogleCastOutputOptions _options;
   private readonly IMetricsCollector? _metricsCollector;
+  private readonly Action<Exception>? _onSendsFailing;
+
+  /// <summary>
+  /// How many sends in a row must fail before <c>onSendsFailing</c> is called. Each failure is
+  /// followed by a 100 ms back-off, so this is a little over one second of undelivered audio. A
+  /// Cast socket write that has failed is not expected to recover (the stream has faulted), so
+  /// this threshold only guards against treating one odd, non-transport exception as a loss.
+  /// </summary>
+  internal const int ConsecutiveSendFailuresBeforeReport = 10;
+
+  /// <summary>
+  /// A single send that has not completed after this long is treated as a lost connection and
+  /// reported at once (AUD-84, pre-merge review M2). A speaker that vanishes without a TCP reset
+  /// does not make writes FAIL: they succeed into the kernel's send buffer until it fills, then
+  /// block until the retransmission timeout, which is minutes. A healthy send on the LAN takes
+  /// milliseconds.
+  /// </summary>
+  internal static readonly TimeSpan SendStallTimeout = TimeSpan.FromSeconds(5);
+
+  // _consecutiveSendFailures is reset by Start() and by every successful send;
+  // _sendFailureReported only by Start(). Otherwise both are written only by the streaming
+  // loop (and by tests calling the Report* methods directly).
+  private int _consecutiveSendFailures;
+  private bool _sendFailureReported;
 
   private string? _transportId;
   private Stream? _streamReader;
@@ -99,18 +123,26 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   /// <param name="channel">The custom Cast channel for sending audio messages.</param>
   /// <param name="options">Google Cast output configuration.</param>
   /// <param name="metricsCollector">Optional metrics collector for recording streaming metrics.</param>
+  /// <param name="onSendsFailing">
+  /// Called once, from the streaming loop, when <see cref="ConsecutiveSendFailuresBeforeReport"/>
+  /// sends in a row have failed or one send has stalled past <see cref="SendStallTimeout"/> — the connection to the device is almost certainly gone (AUD-84).
+  /// Must return quickly and must not call back into <see cref="StopAsync"/> synchronously: the
+  /// loop waits on it. An exception it throws is logged and ignored.
+  /// </param>
   public DirectCastStreamingService(
     ILogger logger,
     IAudioEngine audioEngine,
     DirectCastAudioChannel channel,
     GoogleCastOutputOptions options,
-    IMetricsCollector? metricsCollector = null)
+    IMetricsCollector? metricsCollector = null,
+    Action<Exception>? onSendsFailing = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _channel = channel;
     _options = options;
     _metricsCollector = metricsCollector;
+    _onSendsFailing = onSendsFailing;
 
     // Subscribe to incoming messages from the receiver (pong, status, etc.)
     _channel.MessageReceived += OnChannelMessageReceived;
@@ -226,6 +258,8 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     _totalChunksSent = 0;
     _totalBytesSent = 0;
     _sendErrors = 0;
+    _consecutiveSendFailures = 0;
+    _sendFailureReported = false;
 
     // Log output tap diagnostics to help debug data flow issues
     if (_audioEngine is SoundFlowAudioEngine sfEngine)
@@ -341,10 +375,16 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         maxBufferAhead = _options.DirectChannelMaxBufferAhead,
         bufferBeforePlay = _options.DirectChannelBufferBeforePlay
       });
-      await _channel.SendMessageAsync(configMsg, _transportId!);
+      await _channel.SendMessageAsync(configMsg, _transportId!).WaitAsync(SendStallTimeout, ct);
       _logger.LogInformation(
         "DirectCast: Sent config to receiver — maxBufferAhead: {MaxBuf}, bufferBeforePlay: {BufPlay}",
         _options.DirectChannelMaxBufferAhead, _options.DirectChannelBufferBeforePlay);
+    }
+    catch (TimeoutException stalled)
+    {
+      _logger.LogWarning("DirectCast: config send stalled for {Timeout}s — reporting the connection lost",
+        SendStallTimeout.TotalSeconds);
+      ReportSendsFailing(stalled);
     }
     catch (Exception ex)
     {
@@ -452,7 +492,8 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         // Send over the Cast channel
         try
         {
-          await _channel.SendMessageAsync(message, _transportId!);
+          await _channel.SendMessageAsync(message, _transportId!).WaitAsync(SendStallTimeout, ct);
+          _consecutiveSendFailures = 0;
           Interlocked.Increment(ref _totalChunksSent);
           Interlocked.Add(ref _totalBytesSent, message.Length);
           _lastChunkTime = DateTime.UtcNow;
@@ -474,6 +515,16 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         {
           break;
         }
+        catch (TimeoutException stalled)
+        {
+          // The send is still parked on the socket (and holds SharpCaster's send lock, so every
+          // later send would queue behind it). No point counting to ten.
+          Interlocked.Increment(ref _sendErrors);
+          _logger.LogWarning("DirectCast: send of chunk seq {Seq} stalled for {Timeout}s — reporting the connection lost",
+            seq, SendStallTimeout.TotalSeconds);
+          ReportSendsFailing(stalled);
+          await Task.Delay(100, ct);
+        }
         catch (Exception ex)
         {
           Interlocked.Increment(ref _sendErrors);
@@ -484,6 +535,8 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
               "DirectCast: Failed to send chunk seq {Seq} (error #{ErrorCount})",
               seq, _sendErrors);
           }
+
+          ReportIfSendsKeepFailing(ex);
 
           await Task.Delay(100, ct);
         }
@@ -499,6 +552,44 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
     }
 
     _logger.LogInformation("DirectCast: Streaming loop ended");
+  }
+
+  /// <summary>
+  /// Counts a failed send and, on the <see cref="ConsecutiveSendFailuresBeforeReport"/>th in a
+  /// row, calls <c>onSendsFailing</c> — once per streaming session. <c>internal</c> so a test can
+  /// drive it: the loop that calls it needs a live audio engine tap.
+  /// </summary>
+  internal void ReportIfSendsKeepFailing(Exception failure)
+  {
+    _consecutiveSendFailures++;
+    if (_consecutiveSendFailures < ConsecutiveSendFailuresBeforeReport)
+    {
+      return;
+    }
+
+    ReportSendsFailing(failure);
+  }
+
+  /// <summary>
+  /// Calls <c>onSendsFailing</c> at most once per streaming session. <c>internal</c> for the
+  /// same reason as <see cref="ReportIfSendsKeepFailing"/>.
+  /// </summary>
+  internal void ReportSendsFailing(Exception failure)
+  {
+    if (_sendFailureReported)
+    {
+      return;
+    }
+
+    _sendFailureReported = true;
+    try
+    {
+      _onSendsFailing?.Invoke(failure);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "DirectCast: the send-failure callback threw");
+    }
   }
 
   /// <summary>
