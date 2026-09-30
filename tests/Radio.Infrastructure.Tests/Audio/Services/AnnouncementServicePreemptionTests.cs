@@ -147,8 +147,10 @@ public class AnnouncementServicePreemptionTests
     Assert.Equal(AnnouncementOutcome.Interrupted, firstOutcome);
     Assert.False(first.Playing.IsCompleted, "the superseded announcement must never start playing");
     Assert.False(secondTask.IsCompleted, "the newer announcement must still be speaking");
-    // Its duck registration is released, so it does not hold the music down after returning.
-    lock (_duckLog) { Assert.Contains("stop first", _duckLog); }
+    // It is refused BEFORE it ducks: a duck it never needed would raise DuckingStateChanged(Started),
+    // which EventPlaybackService reads as a preemption signal. MUTATION: delete the IsSuperseded
+    // pre-check in AnnounceAsync — BecomeActive still refuses it, but only after "start first"; red.
+    lock (_duckLog) { Assert.DoesNotContain("start first", _duckLog); }
 
     await service.StopAsync();
     Assert.Equal(AnnouncementOutcome.Interrupted, await secondTask.WaitAsync(HangGuard));
@@ -212,6 +214,90 @@ public class AnnouncementServicePreemptionTests
 
     await service.StopAsync();
     Assert.Equal(AnnouncementOutcome.Interrupted, await importantTask.WaitAsync(HangGuard));
+  }
+
+  [Fact]
+  public async Task StopReachesAnAnnouncementStillSynthesising()
+  {
+    // A hang-up while the caller's name is still being synthesised must stop it from playing
+    // afterwards. MUTATION: drop the stop-generation comparison in IsSupersededLocked — the
+    // announcement then plays after the stop; red.
+    var releaseSynthesis = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var late = new FakeSource("late", completesOnPlay: PlaybackCompletionReason.EndOfContent);
+    var factory = new Mock<ITTSFactory>();
+    factory
+      .Setup(f => f.CreateAsync(It.IsAny<string>(), It.IsAny<TTSParameters>(), It.IsAny<CancellationToken>()))
+      .Returns<string, TTSParameters?, CancellationToken>(async (_, _, _) =>
+      {
+        await releaseSynthesis.Task;
+        return late.Object;
+      });
+    var service = CreateService(factory);
+
+    var lateTask = service.AnnounceAsync("incoming call from someone");
+    await service.StopAsync();
+    releaseSynthesis.SetResult();
+
+    Assert.Equal(AnnouncementOutcome.Interrupted, await lateTask.WaitAsync(HangGuard));
+    Assert.False(late.Playing.IsCompleted, "an announcement asked for before a stop must not play after it");
+  }
+
+  [Fact]
+  public async Task StopAndTheAnnouncementsOwnCleanupStopAndDisposeTheSourceOnce()
+  {
+    // StopAsync cleans up the playing source and wakes the announcing call, which cleans up too.
+    // A second stop/dispose of a real source throws ObjectDisposedException, logged at Warning.
+    // MUTATION: remove the _cleanedUp guard in CleanupSourceAsync — StopAsync is then called twice; red.
+    var speaking = new FakeSource("speaking", completesOnPlay: null);
+    var service = CreateService(FactoryReturning(speaking.Object));
+
+    var task = service.AnnounceAsync("a long one");
+    await speaking.Playing.WaitAsync(HangGuard);
+    await service.StopAsync();
+
+    Assert.Equal(AnnouncementOutcome.Interrupted, await task.WaitAsync(HangGuard));
+    speaking.Mock.Verify(s => s.StopAsync(It.IsAny<CancellationToken>()), Times.Once);
+    speaking.Mock.Verify(s => s.DisposeAsync(), Times.Once);
+  }
+
+  [Fact]
+  public async Task ACallWhoseCallerAlreadyCancelledDoesNotTakeOver()
+  {
+    // Cancelled by its own caller while synthesising: it must return without replacing the
+    // announcement that is speaking. MUTATION: delete token.ThrowIfCancellationRequested() before
+    // BecomeActive in AnnounceAsync — the cancelled call then replaces the speaker; red.
+    var speaking = new FakeSource("speaking", completesOnPlay: null);
+    var abandoned = new FakeSource("abandoned", completesOnPlay: null);
+    using var callerCts = new CancellationTokenSource();
+
+    var calls = 0;
+    var factory = new Mock<ITTSFactory>();
+    factory
+      .Setup(f => f.CreateAsync(It.IsAny<string>(), It.IsAny<TTSParameters>(), It.IsAny<CancellationToken>()))
+      .Returns<string, TTSParameters?, CancellationToken>((_, _, _) =>
+      {
+        if (Interlocked.Increment(ref calls) == 1)
+        {
+          return Task.FromResult(speaking.Object);
+        }
+        // Returns normally even though its caller has now cancelled: synthesis that ignored the token.
+        callerCts.Cancel();
+        return Task.FromResult(abandoned.Object);
+      });
+    var service = CreateService(factory);
+
+    var speakingTask = service.AnnounceAsync("the one speaking");
+    await speaking.Playing.WaitAsync(HangGuard);
+
+    var abandonedOutcome = await service.AnnounceAsync("abandoned", cancellationToken: callerCts.Token)
+      .WaitAsync(HangGuard);
+
+    Assert.Equal(AnnouncementOutcome.Interrupted, abandonedOutcome);
+    Assert.False(abandoned.Playing.IsCompleted, "a cancelled call must not start playing");
+    Assert.False(speaking.PlayToken.IsCancellationRequested, "a cancelled call must not replace the speaker");
+
+    await service.StopAsync();
+    Assert.Equal(AnnouncementOutcome.Interrupted, await speakingTask.WaitAsync(HangGuard));
   }
 
   private Mock<ITTSFactory> FactoryReturning(params IEventAudioSource[] sources)

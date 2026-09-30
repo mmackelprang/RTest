@@ -55,11 +55,11 @@ public class NotificationsController : ControllerBase
       var priority = Math.Clamp(request.Priority ?? 8, 1, 10);
 
       // Priority is what this announcement is registered at with IDuckingService, and it is the
-      // only request field left on the line once the body is a token. It does NOT decide preemption
-      // BETWEEN ANNOUNCEMENTS too (AUD-73, AnnouncementService.BecomeActive): a higher priority
-      // replaces a lower one, the newer of two equal priorities replaces the older, and a lower
-      // priority plays alongside a higher one rather than cutting it off. A replaced request returns
-      // 200 with outcome "interrupted" — including one replaced before it spoke. It also decides whether attended
+      // only request field left on the line once the body is a token. It DOES decide preemption
+      // between announcements (AUD-73, AnnouncementService.BecomeActive): a higher priority replaces
+      // a lower one, the newer of two equal priorities replaces the older, and a lower priority plays
+      // alongside a higher one rather than cutting it off. A replaced request returns 200 with outcome
+      // "interrupted", including one replaced before it spoke. It also decides whether attended
       // playback (a voicemail) is preempted: EventPlaybackService observes the DuckingStateChanged
       // this route's StartDuckingAsync raises and compares the priority against
       // GvMedia:PreemptAtPriority.

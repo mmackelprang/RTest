@@ -51,6 +51,9 @@ public enum AnnouncementOutcome
   /// <summary>The announcement played to its end.</summary>
   Completed = 1,
 
-  /// <summary>The announcement started but was stopped or cancelled before it ended.</summary>
+  /// <summary>
+  /// The announcement was stopped, cancelled or replaced by another announcement before it ended —
+  /// possibly before it started playing at all (AUD-73).
+  /// </summary>
   Interrupted = 2
 }
