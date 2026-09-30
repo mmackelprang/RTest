@@ -42,14 +42,22 @@ So the row's defect was real, and the dead token in `SetActiveSource` was the on
 - **What a replaced call does:** it unwinds through its own cleanup (stop ducking, stop, dispose) and returns `Interrupted`. The API returns `200 {"outcome":"interrupted"}`. The message is now "stopped or replaced before it finished", because a call can be replaced before it speaks.
 - **AUD-74 is kept.** The new announcement **ducks before it takes over**, so the duck is held across the handover and the count goes 1 → 2 → 1.
 
-**Review fixes, from two review passes:**
+**Review fixes, from two review passes.** Second pass:
+- `StopAsync` now also reaches an announcement still synthesising or ducking, through a stop generation.
+- A replaced registration is flagged and can never re-add itself.
+- Registrations are removed before the release fade.
+- Ducking uses the caller's token, so a replacement cannot leave a fade half-applied.
+- A source disposed by `StopAsync` just before `PlayAsync` reads as `Interrupted`, not `Failed`.
+- The controller comment, which said the opposite of the code, is fixed.
+
+First pass:
 - Cleanup runs once per source (`ConditionalWeakTable`). `StopAsync` and the owning call used to both stop and dispose the same source.
 - `PlaySoundWithAnnouncementAsync` stays registered between the ring and the name, so a hang-up or a replacement still reaches the name while it is being synthesised.
 - A superseded call checks before ducking, so it does not raise `DuckingStateChanged(Started)`, which `EventPlaybackService` reads as a preemption signal.
 - A call whose caller already cancelled cannot take over.
 - The phase-2 duck comment is corrected. The duck is released between the ring and the name. That predates this change and is not fixed here.
 
-**Tests:** `AnnouncementServicePreemptionTests` has five tests, covering replace, duck-held handover, a late-synthesised older one giving way, a lower priority not cutting off a higher one, and a higher one replacing a lower one even when it was requested first. Four falsifying mutations were each run and each went red:
+**Tests:** `AnnouncementServicePreemptionTests` has eight tests. The second pass added three: stop reaches a call still synthesising; stop and the owner's cleanup stop and dispose the source once; a caller-cancelled call does not take over. The first five cover replace, duck-held handover, a late-synthesised older one giving way, a lower priority not cutting off a higher one, and a higher one replacing a lower one even when it was requested first. Eight falsifying mutations were each run and each went red. The first four:
 
 | Mutation | Tests that went red |
 |---|---|
@@ -60,7 +68,16 @@ So the row's defect was real, and the dead token in `SetActiveSource` was the on
 
 **Not covered by a unit test:** preemption inside `PlaySoundWithAnnouncementAsync`. `AudioFileEventSourceFactory` is concrete and not mockable.
 
-**For the owner to overrule if wanted:** the lower-priority-plays-alongside rule, above. It is documented in `design/INTEGRATIONS.md` § *How Audio Ducking Works*.
+The second-pass four:
+
+| Mutation | Tests that went red |
+|---|---|
+| Ignore the stop generation | 1 |
+| Remove the cleanup guard | 1 |
+| Remove the caller-cancel check | 1 |
+| Remove the pre-duck supersede check | 1 |
+
+**For the owner:** the lower-priority-plays-alongside rule is filed as decision row **[`AUD-87`](AUD-87.md)**. So is the new equal-priority collision: a doorbell at 8 cuts off the phone's caller name at 8. It is documented in `design/INTEGRATIONS.md` § *How Audio Ducking Works*.
 
 **Still true and out of scope:**
 - Nothing *queues*; ADR-029 §6.2 rule 3.
