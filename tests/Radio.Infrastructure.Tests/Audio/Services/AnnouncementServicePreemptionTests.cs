@@ -9,7 +9,8 @@ using Radio.Infrastructure.Audio.Sources.Events;
 namespace Radio.Infrastructure.Tests.Audio.Services;
 
 /// <summary>
-/// AUD-73: a newer announcement replaces the one speaking; it does not play on top of it.
+/// AUD-73: overlapping announcements are arbitrated — a newer one of the same priority, or a higher
+/// priority, replaces the one speaking; a lower priority plays alongside and never cuts it off.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -20,7 +21,7 @@ namespace Radio.Infrastructure.Tests.Audio.Services;
 /// can only make a correct build slower, never red.
 /// </para>
 /// <para>
-/// Before the fix, <c>SetActiveSource</c> cancelled a token that nothing awaited. Measured on the box
+/// Before the fix, the single-slot <c>SetActiveSource</c> cancelled a token that nothing awaited. Measured on the box
 /// on <c>af9bc2b</c>: two requests 1.5 s apart both returned "completed", with two events ducked at
 /// once.
 /// </para>
@@ -62,8 +63,8 @@ public class AnnouncementServicePreemptionTests
   [Fact]
   public async Task ASecondAnnouncementInterruptsTheFirst()
   {
-    // MUTATION: make BecomeActive not cancel the replaced CTS (the pre-fix behaviour, in effect) and
-    // the first announcement never returns — the HangGuard fires.
+    // MUTATION: make BecomeActive not cancel the replaced registrations (the pre-fix behaviour, in
+    // effect) and the first announcement never returns — the HangGuard fires.
     var first = new FakeSource("first", completesOnPlay: null);
     var second = new FakeSource("second", completesOnPlay: PlaybackCompletionReason.EndOfContent);
     var service = CreateService(FactoryReturning(first.Object, second.Object));
@@ -115,8 +116,8 @@ public class AnnouncementServicePreemptionTests
   {
     // "Newer" is the order requests ARRIVED in. The first request's TTS is held until the second
     // is already speaking; when it is released, the first must give way, not take over.
-    // MUTATION: drop the `_activeArrival > arrival` check in BecomeActive — the first then plays
-    // (Playing fires) and the second is interrupted; red on both counts.
+    // MUTATION: make IsSupersededLocked always false — the first then plays and replaces the
+    // second; red.
     var releaseFirstSynthesis = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
     var first = new FakeSource("first", completesOnPlay: PlaybackCompletionReason.EndOfContent);
     var second = new FakeSource("second", completesOnPlay: null);
@@ -151,6 +152,66 @@ public class AnnouncementServicePreemptionTests
 
     await service.StopAsync();
     Assert.Equal(AnnouncementOutcome.Interrupted, await secondTask.WaitAsync(HangGuard));
+  }
+
+  [Fact]
+  public async Task ALowerPriorityAnnouncementDoesNotCutOffAHigherOne()
+  {
+    // A priority-3 notification arriving during a priority-9 announcement plays alongside it, as
+    // every overlap did before AUD-73; it must not silence the more important one.
+    // MUTATION: make Outranks ignore priority (arrival only) — the 9 is then cancelled; red.
+    var important = new FakeSource("important", completesOnPlay: null);
+    var minor = new FakeSource("minor", completesOnPlay: PlaybackCompletionReason.EndOfContent);
+    var service = CreateService(FactoryReturning(important.Object, minor.Object));
+
+    var importantTask = service.AnnounceAsync("the caller's name", priority: 9);
+    await important.Playing.WaitAsync(HangGuard);
+
+    var minorOutcome = await service.AnnounceAsync("a timer", priority: 3).WaitAsync(HangGuard);
+
+    Assert.Equal(AnnouncementOutcome.Completed, minorOutcome);
+    Assert.False(important.PlayToken.IsCancellationRequested, "the higher-priority announcement was cut off");
+
+    await service.StopAsync();
+    Assert.Equal(AnnouncementOutcome.Interrupted, await importantTask.WaitAsync(HangGuard));
+  }
+
+  [Fact]
+  public async Task AHigherPriorityAnnouncementReplacesALowerOneEvenIfRequestedFirst()
+  {
+    // Priority outranks arrival: a 9 whose TTS finished late still replaces the 3 that started while
+    // it was synthesising. MUTATION: make Outranks compare arrival only — the 9 then plays on top of
+    // the 3 instead of replacing it, and the 3 never returns (HangGuard); red.
+    var releaseImportant = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var important = new FakeSource("important", completesOnPlay: null);
+    var minor = new FakeSource("minor", completesOnPlay: null);
+
+    var calls = 0;
+    var factory = new Mock<ITTSFactory>();
+    factory
+      .Setup(f => f.CreateAsync(It.IsAny<string>(), It.IsAny<TTSParameters>(), It.IsAny<CancellationToken>()))
+      .Returns<string, TTSParameters?, CancellationToken>(async (_, _, _) =>
+      {
+        if (Interlocked.Increment(ref calls) == 1)
+        {
+          await releaseImportant.Task;
+          return important.Object;
+        }
+        return minor.Object;
+      });
+    var service = CreateService(factory);
+
+    var importantTask = service.AnnounceAsync("security alert", priority: 9);
+    var minorTask = service.AnnounceAsync("a timer", priority: 3);
+    await minor.Playing.WaitAsync(HangGuard);
+
+    releaseImportant.SetResult();
+    await important.Playing.WaitAsync(HangGuard);
+
+    Assert.Equal(AnnouncementOutcome.Interrupted, await minorTask.WaitAsync(HangGuard));
+
+    await service.StopAsync();
+    Assert.Equal(AnnouncementOutcome.Interrupted, await importantTask.WaitAsync(HangGuard));
   }
 
   private Mock<ITTSFactory> FactoryReturning(params IEventAudioSource[] sources)

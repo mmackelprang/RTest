@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.Logging;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Utilities;
@@ -11,8 +12,8 @@ namespace Radio.Infrastructure.Audio.Services;
 /// and can chain a sound file before the TTS announcement.
 /// </summary>
 /// <remarks>
-/// One announcement speaks at a time: a newer one replaces the one speaking, which returns
-/// <see cref="AnnouncementOutcome.Interrupted"/> (AUD-73). See <see cref="BecomeActive"/>.
+/// Overlapping announcements are arbitrated by priority (AUD-73); see <see cref="BecomeActive"/>. An
+/// announcement that is stopped or replaced returns <see cref="AnnouncementOutcome.Interrupted"/>.
 /// </remarks>
 public class AnnouncementService : IAnnouncementService
 {
@@ -22,14 +23,14 @@ public class AnnouncementService : IAnnouncementService
   private readonly AudioFileEventSourceFactory _audioFileFactory;
   private readonly object _lock = new();
 
-  // The announcement currently speaking, the CancellationTokenSource its own AnnounceAsync /
-  // PlaySoundWithAnnouncementAsync call waits on, and the order in which that call ARRIVED. The three
-  // fields are guarded by _lock. The CTS is owned (created and disposed) by the call that registered
-  // it; other code only cancels it (AUD-73).
-  private IEventAudioSource? _activeSource;
-  private CancellationTokenSource? _activeCts;
-  private long _activeArrival;
+  // One entry per announcement call that has become active and not yet returned; guarded by _lock.
+  // More than one is present only while a lower-priority announcement plays alongside a higher one.
+  private readonly List<Registration> _active = [];
   private long _arrivalCounter;
+
+  // Sources whose cleanup has started. StopAsync and the announcing call can both reach the same
+  // source; the second to arrive must not stop or dispose it again. Weak, so nothing is retained.
+  private readonly ConditionalWeakTable<IEventAudioSource, object> _cleanedUp = new();
 
   public AnnouncementService(
     ILogger<AnnouncementService> logger,
@@ -52,14 +53,12 @@ public class AnnouncementService : IAnnouncementService
     _logger.LogInformation("Announcing: {Message} (priority {Priority})",
       LogSafeText.For(message), priority);
 
-    // AUD-73: a newer announcement replaces this one. The arrival number is taken before any await,
-    // so "newer" means "asked for later", not "finished synthesising first": a long message whose TTS
-    // takes longer must not cut off a short one requested after it.
-    var arrival = Interlocked.Increment(ref _arrivalCounter);
-
-    // Linked to the caller's token, and the token this call actually waits on. It is cancelled by the
-    // caller, by StopAsync, or by a newer announcement taking over (BecomeActive).
+    // AUD-73. The arrival number is taken before any await, so "newer" means "asked for later", not
+    // "finished synthesising first": a long message whose TTS takes longer must not cut off a short
+    // one of the same priority requested after it. The CTS is linked to the caller's token and is the
+    // token this call actually waits on; StopAsync and a newer or higher-priority announcement cancel it.
     using var announcementCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    var registration = new Registration(announcementCts, Interlocked.Increment(ref _arrivalCounter), priority);
     var token = announcementCts.Token;
 
     IEventAudioSource? ttsSource = null;
@@ -67,6 +66,15 @@ public class AnnouncementService : IAnnouncementService
     {
       // Create TTS event source
       ttsSource = await _ttsFactory.CreateAsync(message, cancellationToken: token);
+
+      // Checked before ducking as well as in BecomeActive: an announcement that will not play must not
+      // raise DuckingStateChanged(Started), which EventPlaybackService reads as a preemption signal.
+      if (IsSuperseded(registration))
+      {
+        _logger.LogInformation("Announcement not played: a newer one of the same priority is already speaking");
+        return AnnouncementOutcome.Interrupted;
+      }
+
       _duckingService.SetPriority(ttsSource, priority);
 
       // Duck BEFORE taking over. The announcement being replaced releases its own duck registration
@@ -75,9 +83,10 @@ public class AnnouncementService : IAnnouncementService
       // swell AUD-74 removed). Registered first, the count goes 1 -> 2 -> 1.
       await _duckingService.StartDuckingAsync(ttsSource, token);
 
-      if (!BecomeActive(ttsSource, announcementCts, arrival))
+      token.ThrowIfCancellationRequested();
+      if (!BecomeActive(registration, ttsSource))
       {
-        _logger.LogInformation("Announcement not played: a newer announcement is already speaking");
+        _logger.LogInformation("Announcement not played: a newer one of the same priority is already speaking");
         return AnnouncementOutcome.Interrupted;
       }
 
@@ -85,7 +94,7 @@ public class AnnouncementService : IAnnouncementService
       // raises PlaybackCompleted(Error) — TTSEventSource does so synchronously inside PlayAsync when
       // there is no playback device — and treating every completion as success is how a failed
       // announcement came back as 200 "Announcement played". RunContinuationsAsynchronously because
-      // the token registration below can complete it on a newer announcement's thread, and this
+      // the token registration below can complete it on another announcement's thread, and this
       // method's unwinding must not run there.
       var completionTcs = new TaskCompletionSource<PlaybackCompletionReason>(
         TaskCreationOptions.RunContinuationsAsynchronously);
@@ -119,7 +128,7 @@ public class AnnouncementService : IAnnouncementService
     catch (OperationCanceledException) when (token.IsCancellationRequested)
     {
       // Only a cancellation of THIS announcement's token is an interruption: the caller's, StopAsync's
-      // or a newer announcement's. Any other OperationCanceledException — above all
+      // or a replacing announcement's. Any other OperationCanceledException — above all
       // TaskCanceledException from TTSFactory's HttpClient timeout — is a failure and falls through to
       // the arm below, logged at Error (TTS-2 review).
       if (cancellationToken.IsCancellationRequested)
@@ -128,7 +137,7 @@ public class AnnouncementService : IAnnouncementService
       }
       else
       {
-        _logger.LogInformation("Announcement interrupted by a newer announcement or a stop");
+        _logger.LogInformation("Announcement interrupted: replaced by another announcement, or stopped");
       }
       return AnnouncementOutcome.Interrupted;
     }
@@ -143,7 +152,7 @@ public class AnnouncementService : IAnnouncementService
       {
         await CleanupSourceAsync(ttsSource);
       }
-      ClearActiveSource(ttsSource);
+      Unregister(registration);
     }
   }
 
@@ -162,10 +171,11 @@ public class AnnouncementService : IAnnouncementService
     _logger.LogInformation("Playing sound '{Sound}' then announcing: {Message} (priority {Priority})",
       soundPath, LogSafeText.For(message), priority);
 
-    // AUD-73: the same replaced-by-newer rule as AnnounceAsync, with one arrival and one token for both
-    // phases. The ring and the name that follows it are one announcement.
-    var arrival = Interlocked.Increment(ref _arrivalCounter);
+    // AUD-73: the same arbitration as AnnounceAsync, with ONE registration for both phases. It stays
+    // registered between them, so StopAsync or a replacing announcement still reaches this call while
+    // the name is being synthesised after the ring.
     using var announcementCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    var registration = new Registration(announcementCts, Interlocked.Increment(ref _arrivalCounter), priority);
     var token = announcementCts.Token;
 
     IEventAudioSource? soundSource = null;
@@ -174,14 +184,21 @@ public class AnnouncementService : IAnnouncementService
     {
       // Phase 1: Play the sound file with ducking
       soundSource = await _audioFileFactory.CreateFromFileAsync(soundPath, token);
+      if (IsSuperseded(registration))
+      {
+        _logger.LogInformation("Sound + announcement not played: a newer one of the same priority is already speaking");
+        return;
+      }
+
       _duckingService.SetPriority(soundSource, priority);
 
       // Duck before taking over, for the reason given in AnnounceAsync.
       await _duckingService.StartDuckingAsync(soundSource, token);
 
-      if (!BecomeActive(soundSource, announcementCts, arrival))
+      token.ThrowIfCancellationRequested();
+      if (!BecomeActive(registration, soundSource))
       {
-        _logger.LogInformation("Sound + announcement not played: a newer announcement is already speaking");
+        _logger.LogInformation("Sound + announcement not played: a newer one of the same priority is already speaking");
         return;
       }
 
@@ -196,18 +213,21 @@ public class AnnouncementService : IAnnouncementService
       }
 
       await CleanupSourceAsync(soundSource);
-      ClearActiveSource(soundSource);
+      SetRegisteredSource(registration, null);
       soundSource = null;
 
-      // Phase 2: Play the TTS announcement (ducking still active from same priority level)
+      // Phase 2: Play the TTS announcement. ⚠ The sound's duck was released just above, before this
+      // one registers, so the music starts to come back up between the ring and the name. That
+      // predates AUD-73 and is not fixed here.
       ttsSource = await _ttsFactory.CreateAsync(message, cancellationToken: token);
       _duckingService.SetPriority(ttsSource, priority);
 
       await _duckingService.StartDuckingAsync(ttsSource, token);
 
-      if (!BecomeActive(ttsSource, announcementCts, arrival))
+      token.ThrowIfCancellationRequested();
+      if (!BecomeActive(registration, ttsSource))
       {
-        _logger.LogInformation("Announcement after sound not played: a newer announcement is already speaking");
+        _logger.LogInformation("Announcement after sound not played: a newer one of the same priority is already speaking");
         return;
       }
 
@@ -241,99 +261,133 @@ public class AnnouncementService : IAnnouncementService
       {
         await CleanupSourceAsync(ttsSource);
       }
-      ClearActiveSource(ttsSource ?? soundSource);
+      Unregister(registration);
     }
   }
 
   /// <inheritdoc />
+  /// <remarks>
+  /// Stops every announcement that has become active. The source is stopped here, before this
+  /// returns; cancelling the token also wakes the announcing call, which unwinds and returns
+  /// <see cref="AnnouncementOutcome.Interrupted"/>. An announcement still synthesising or ducking,
+  /// not yet active, is not reached — as before AUD-73.
+  /// </remarks>
   public async Task StopAsync(CancellationToken cancellationToken = default)
   {
-    IEventAudioSource? source;
-    CancellationTokenSource? cts;
-
+    Registration[] stopping;
     lock (_lock)
     {
-      source = _activeSource;
-      cts = _activeCts;
+      stopping = [.. _active];
     }
 
-    // Wakes the announcing call, which then unwinds and runs its own cleanup as well.
-    CancelQuietly(cts);
-
-    if (source != null)
+    foreach (var registration in stopping)
     {
-      await CleanupSourceAsync(source);
-      ClearActiveSource(source);
+      CancelQuietly(registration.Cts);
+      var source = registration.Source;
+      if (source != null)
+      {
+        await CleanupSourceAsync(source);
+      }
     }
 
     _logger.LogDebug("Announcement stopped");
   }
 
   /// <summary>
-  /// Makes <paramref name="source"/> the active announcement and cancels the one it replaces, unless
-  /// the active announcement ARRIVED later than this one. In that case nothing changes and this
-  /// returns false: the caller was superseded before it spoke and must not play.
+  /// Makes <paramref name="registration"/> active with <paramref name="source"/> as what it is playing,
+  /// and cancels every active announcement it outranks. Returns false, changing nothing, when a NEWER
+  /// announcement of the SAME priority is already active: this one was superseded before it spoke.
   /// </summary>
   /// <remarks>
-  /// AUD-73. Before this, the method cancelled a token that no playback path waited on, so a second
-  /// announcement played on top of the first. Measured on the box 2026-09-30 on <c>af9bc2b</c>: two
-  /// requests 1.5 s apart both returned "completed", with two events ducked at once for 1.7 s. The
-  /// cancelled token is now the one the replaced call is awaiting, and that call unwinds through its
-  /// own cleanup (stop ducking, stop, dispose). Priority is not consulted: the newest announcement
-  /// wins, the same replace rule ADR-029 §6.2 set for attended playback.
+  /// <para>
+  /// AUD-73. Before this, the single-slot "cancel" cancelled a token that no playback path waited on, so
+  /// a second announcement played on top of the first. Measured on the box 2026-09-30 on
+  /// <c>af9bc2b</c>: two requests 1.5 s apart both returned "completed", with two events ducked at once
+  /// for 1.7 s.
+  /// </para>
+  /// <para>
+  /// The rules, with "higher" meaning a larger priority number:
+  /// a higher-priority announcement replaces a lower one; at equal priority the one requested later
+  /// replaces the earlier (ADR-029 §6.2 rule 1's "replace", applied to announcements); a
+  /// lower-priority announcement never cuts off a higher one — it plays alongside it, which is what
+  /// every overlapping announcement did before AUD-73, so the one case this change does not decide is
+  /// left as it was. A replaced call unwinds through its own cleanup (stop ducking, stop, dispose).
+  /// </para>
   /// </remarks>
-  private bool BecomeActive(IEventAudioSource source, CancellationTokenSource cts, long arrival)
+  private bool BecomeActive(Registration registration, IEventAudioSource source)
   {
-    CancellationTokenSource? replaced = null;
+    List<Registration> replaced = [];
     lock (_lock)
     {
-      if (_activeSource != null && _activeArrival > arrival)
+      if (IsSupersededLocked(registration))
       {
         return false;
       }
 
-      // Phase 2 of PlaySoundWithAnnouncementAsync registers again under its own CTS; it must not
-      // cancel itself.
-      if (!ReferenceEquals(_activeCts, cts))
+      foreach (var other in _active)
       {
-        replaced = _activeCts;
+        if (!ReferenceEquals(other, registration) && Outranks(registration, other))
+        {
+          replaced.Add(other);
+        }
       }
 
-      _activeSource = source;
-      _activeCts = cts;
-      _activeArrival = arrival;
+      _active.RemoveAll(replaced.Contains);
+      registration.Source = source;
+      if (!_active.Contains(registration))
+      {
+        _active.Add(registration);
+      }
     }
 
-    // Outside the lock: Cancel runs the replaced call's token callbacks on this thread.
-    CancelQuietly(replaced);
+    // Outside the lock: Cancel runs each replaced call's token callbacks on this thread.
+    foreach (var other in replaced)
+    {
+      CancelQuietly(other.Cts);
+    }
     return true;
   }
 
-  private void ClearActiveSource(IEventAudioSource? expected)
+  private bool IsSuperseded(Registration registration)
   {
     lock (_lock)
     {
-      if (expected != null && _activeSource == expected)
-      {
-        _activeSource = null;
-        _activeCts = null;
-        _activeArrival = 0;
-      }
+      return IsSupersededLocked(registration);
+    }
+  }
+
+  private bool IsSupersededLocked(Registration registration) =>
+    _active.Any(other => !ReferenceEquals(other, registration)
+      && other.Priority == registration.Priority
+      && other.Arrival > registration.Arrival);
+
+  private static bool Outranks(Registration a, Registration b) =>
+    a.Priority > b.Priority || (a.Priority == b.Priority && a.Arrival > b.Arrival);
+
+  private void SetRegisteredSource(Registration registration, IEventAudioSource? source)
+  {
+    lock (_lock)
+    {
+      registration.Source = source;
+    }
+  }
+
+  private void Unregister(Registration registration)
+  {
+    lock (_lock)
+    {
+      _active.Remove(registration);
+      registration.Source = null;
     }
   }
 
   /// <summary>
-  /// Cancels a CTS captured from <c>_activeCts</c>. Its owner disposes it when its call returns, and
-  /// that can happen between the capture and this call if the announcement ended on its own at the
-  /// same moment. Nothing is left to stop then, so the disposal is not an error.
+  /// Cancels a CTS taken from a registration. Its owner disposes it when its call returns, and that
+  /// can happen between reading the registration and this call if the announcement ended on its own
+  /// at the same moment. Nothing is left to stop then, so the disposal is not an error.
   /// </summary>
-  private static void CancelQuietly(CancellationTokenSource? cts)
+  private static void CancelQuietly(CancellationTokenSource cts)
   {
-    if (cts == null)
-    {
-      return;
-    }
-
     try
     {
       cts.Cancel();
@@ -344,8 +398,17 @@ public class AnnouncementService : IAnnouncementService
     }
   }
 
+  /// <summary>
+  /// Stops ducking for, stops and disposes <paramref name="source"/> — once. A second call for the
+  /// same source (StopAsync and the announcing call's own cleanup, racing) returns immediately.
+  /// </summary>
   private async Task CleanupSourceAsync(IEventAudioSource source)
   {
+    if (!_cleanedUp.TryAdd(source, new object()))
+    {
+      return;
+    }
+
     try
     {
       await _duckingService.StopDuckingAsync(source);
@@ -372,5 +435,14 @@ public class AnnouncementService : IAnnouncementService
     {
       _logger.LogWarning(ex, "Error disposing announcement source");
     }
+  }
+
+  /// <summary>One announcement call's claim on the speaker. Mutable fields are guarded by _lock.</summary>
+  private sealed class Registration(CancellationTokenSource cts, long arrival, int priority)
+  {
+    public CancellationTokenSource Cts { get; } = cts;
+    public long Arrival { get; } = arrival;
+    public int Priority { get; } = priority;
+    public IEventAudioSource? Source { get; set; }
   }
 }
