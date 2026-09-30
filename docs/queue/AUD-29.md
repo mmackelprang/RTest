@@ -85,3 +85,9 @@ no `No audio data captured` warnings) before trusting a position reading.
 Tests (`BluetoothAudioSourceTests`, `FakeTimeProvider`): advances from the last AVRCP position; capped at the duration; frozen across a pause and resumed from the frozen value; re-anchored by a new AVRCP position (a seek on the phone). All four fail with `Position` returning the anchor verbatim.
 
 **UAT:** play a track over Bluetooth; the console's position bar moves and tracks the phone's within a second or two; pause on the phone and it stops; seek on the phone and it jumps to match on the next AVRCP update.
+
+## ✅ Closed 2026-09-30 — owner UAT passed
+
+Merged as [#724](https://github.com/mmackelprang/RTest/pull/724), squash `524b4f3`. Owner UAT 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §B): *"BT position bar updates as expected."* Archived.
+
+**Follow-up filed: [`AUD-83`](AUD-83.md).** In the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear), with no phone connected the Bluetooth source reported `Playing` (`bluetoothDevices: []`) and the panel's position counter ran (0:04) — possibly this row's extrapolation ticking with no device.

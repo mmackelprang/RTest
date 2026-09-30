@@ -127,3 +127,7 @@ Built against the 2026-09-25 ruling: **seek on release, no debounce.**
   one `OnDragEnd` per gesture at the release position, none for right click or disabled.
 - **Cabinet gate still open:** drag slowly and fast across a playing file and listen — expected is
   silence-then-jump with no stutter.
+
+## 🔬 2026-09-30 — merged; agent-verified by position; by-ear check remains
+
+Merged as [#722](https://github.com/mmackelprang/RTest/pull/722), squash `60e68bc`. In the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear) ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §A): a slow 12-step drag while playing left the API position advancing normally (0:03 → 0:07) the whole time, then **one jump on release** to 1:20.6 (65 %, where the finger stopped); a fast drag did not move it while held, and release went to 0:37.8 (30 %); a tap at 10 % → 0:13; the on-screen time followed the finger (1:19 mid-drag). **Only the owner's by-ear check remains:** listen for stutter during a slow drag. The row stays ✅🔬 until then.

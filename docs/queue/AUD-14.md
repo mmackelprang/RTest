@@ -230,3 +230,7 @@ sample and one non-recurrence.**
 Tests (`MediaPlayerDetachTests`): removing the attached player disposes its watcher and clears the attachment (fails with the detach call removed); removing a player at another path leaves the attachment alone. `AdapterScopingTests` and `CaptureNodeFollowTests` unchanged and green.
 
 **UAT (owner, with the phone):** play over Bluetooth; pause on the phone for 30 s+ (long enough for BlueZ to drop `player0`, per `AUD-10`) and resume; then disconnect and reconnect the phone while it is playing. Pass = the console follows play/pause and track changes after each, and `radio-api`'s file sink shows `Media player removed from BlueZ at … — detached` followed by `Attached to Media Player at …`.
+
+## ✅ Closed 2026-09-30 — merged, deployed, owner UAT passed
+
+Merged as [#726](https://github.com/mmackelprang/RTest/pull/726), squash `b64c8cd`, and deployed to `radio`: both services verified by SHA `b64c8cd`, kiosk live. Owner UAT 2026-09-30 (the steps above, [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §B): *"Re-attach worked fine."* Archived.

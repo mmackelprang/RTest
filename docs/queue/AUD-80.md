@@ -106,3 +106,11 @@ level the speaker is at (no 70 % push) and remembers it; from then on reconnects
 
 **Keying caveat:** `Id` is the device URI (`https://<ip>/`), so a DHCP address change makes a speaker look new
 (it then keeps its own level — the safe fallback).
+
+## ✅ Closed 2026-09-30 — owner UAT passed; box cleanup done
+
+Merged as [#725](https://github.com/mmackelprang/RTest/pull/725), squash `1bb8b34` (with `AUD-5` and `UI-15`). Owner UAT 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §C): *"Cast volume works now."*
+
+**The one-off cleanup above was run on 2026-09-30.** A `.backup` was taken first to `/opt/radio-console/data/config/configuration.db.bak-20260930-aud80` and verified (`integrity_check` ok, 134 rows). Before deleting, `Key` was confirmed to be `TEXT PRIMARY KEY` with the default (BINARY, case-sensitive) collation, so the correctly-cased live `AudioPreferences:*` keys could not match. Exactly three rows were deleted, all dated 2026-03-10: `audiopreferences:masterVolume` (75), `audiopreferences:currentOutput` (empty), `audiopreferences:currentSource` (Radio). 131 rows remain. `audiopreferences:hiddenSources` was kept deliberately, as advised above.
+
+Follow-up: `AUD-81` — the owner ruled on 2026-09-30 that the console volume should drive the Cast speaker; its design must account for this row's per-device store. Archived.
