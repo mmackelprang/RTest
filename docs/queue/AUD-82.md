@@ -48,3 +48,21 @@ The snapshot endpoint's aggregation reads rolled-up buckets in a way that counts
 - `src/Radio.Metrics/README.md`.
 
 **Found, filed as `AUD-86`:** a `/window` request reads one resolution table, so the Diagnostics 24h range (Hour table) misses the newest ~2 h, which are still Minute rows. The 7d range sees only the 2–48 h band. The deleted all-time endpoint was the only read that crossed tiers.
+
+## ✅ Deployed and agent-verified on `radio` 2026-09-30
+
+- **Deployed:** `main` at `af9bc2b` (squash of #738).
+  - `Deploy-ToLinux.ps1` exited 0 and printed:
+    - `Verified: API is running commit af9bc2b`
+    - `Verified: Web is running commit af9bc2b`
+    - `Kiosk is live (12 established connections to :5002, radio-kiosk.service=active)`
+  - `NRestarts=0` before and after.
+- **On the box:**
+  - `GET /api/metrics/snapshots?keys=system.cpu_usage_percent` → **404**.
+  - `GET /api/metrics/aggregate?key=system.cpu_usage_percent` → **404**.
+  - `GET /api/metrics/keys` → 200.
+  - `GET /api/metrics/window` (last hour, Minute) → **200**, 214 summaries.
+  - `GET http://localhost:5002/diagnostics` → 200.
+- **Audio state:** restored by the service on restart. SDR 92.3 was Playing, volume 0.3, muted, as before the deploy.
+
+**Nothing is left for the owner.** Ready to archive.
