@@ -171,7 +171,7 @@ RadioConsole.sln
 ├── src/Radio.Core              # Domain interfaces, models, events (no dependencies)
 ├── src/Radio.Infrastructure    # Audio engine, BT, Cast, sources, outputs, DI wiring
 │   ├── Audio/SoundFlow/        # Engine, mixer, device manager, tapped output stream
-│   ├── Audio/Sources/          # Primary (Radio, BT, File, Vinyl, USB) + Event (TTS, AudioFile)
+│   ├── Audio/Sources/          # Primary (SDR radio, BT, File, Vinyl, USB) + Event (TTS, AudioFile)
 │   ├── Audio/Outputs/          # Local, GoogleCast, HttpStream
 │   ├── Audio/Fingerprinting/   # SoundFlowAudioTap, FingerprintDbContext (12-table SQLite)
 │   ├── Platform/Bluetooth/     # Linux (BlueZ D-Bus) + Windows (WinRT)
@@ -196,8 +196,7 @@ RadioConsole.sln
 │   └── Radio.IntegrationTests      # Cross-cutting integration tests
 ├── tools/                      # AudioUAT, ConfigurationManager CLIs
 ├── deploy/                     # Pi deployment scripts, systemd services
-├── design/                     # Architecture docs, decision log, work log
-└── RaddyRF320BT/               # Git submodule for vintage radio protocol
+└── design/                     # Architecture docs, decision log, work log
 ```
 
 ## Architecture
@@ -205,7 +204,7 @@ RadioConsole.sln
 **Layered Architecture:**
 - **Core** - Pure domain (interfaces: IAudioEngine, IAudioSource, IConfigurationStore, IBluetoothService, etc.)
 - **Extracted Libraries** - Standalone NuGet packages: Configuration, Fingerprinting, Metrics, AudioAnalysis, RTLSDRCore
-- **Infrastructure** - SoundFlow wrapper, device management, outputs (Local/Cast/HTTP), sources (Radio/SDR/File/BT/TTS), Bluetooth (Linux BlueZ + Windows WinRT), DI wiring
+- **Infrastructure** - SoundFlow wrapper, device management, outputs (Local/Cast/HTTP), sources (SDR radio/File/BT/TTS), Bluetooth (Linux BlueZ + Windows WinRT), DI wiring
 - **API** - REST endpoints under `/api/*`, SignalR hubs at `/hubs/visualization` and `/hubs/audio`
 - **Web** - Blazor Server UI, 12 pages, shared components, SignalR client
 
@@ -219,7 +218,7 @@ RadioConsole.sln
 
 **Audio Pipeline:**
 ```
-Sources (Radio/SDR/File/BT/TTS) → Master Mixer → Modifiers (Balance, FingerprintTap, Viz)
+Sources (SDR radio/File/BT/TTS) → Master Mixer → Modifiers (Balance, FingerprintTap, Viz)
                                                 ↓
                                      Playback Device (local speakers)
                                      TappedOutputStream → HTTP Stream → Google Cast
