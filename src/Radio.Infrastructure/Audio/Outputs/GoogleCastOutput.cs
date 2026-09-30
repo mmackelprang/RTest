@@ -90,7 +90,7 @@ public class GoogleCastOutput : AudioOutputBase
   //     snapshot it under the lock at each of those sites first.
   //
   // _connectedReceiver and ConnectedDevice ARE cleared (InitializeAsync,
-  // DisconnectAsync), so unlocked reads of those two can legitimately see null.
+  // DisconnectAsync — which DisposeAsync calls — and HandleConnectionLostAsync), so unlocked reads of those two can legitimately see null.
   // That is safe only because no unlocked site dereferences them —
   // _connectedReceiver is read purely as an "is anything connected" flag, and
   // ConnectedDevice only through `?.`. Keep it that way.
@@ -120,8 +120,8 @@ public class GoogleCastOutput : AudioOutputBase
   // above.
   private readonly SemaphoreSlim _lifecycleLock = new(1, 1);
 
-  // Bumped by anything that supersedes an in-flight connect: a newer connect, a
-  // disconnect, or disposal. A connect captures this when it starts and
+  // Bumped by anything that supersedes an in-flight connect: InitializeAsync, a newer
+  // connect, a disconnect, disposal, or a handled connection loss (AUD-84). A connect captures this when it starts and
   // re-validates before publishing its result — if it changed, the attempt lost
   // the race and tears down what it built instead of overwriting the winner.
   private int _connectionGeneration;
@@ -946,7 +946,10 @@ public class GoogleCastOutput : AudioOutputBase
 
     // Create the streaming service and start sending audio. The loss report is armed
     // with the connection published now; HandleConnectionLostAsync re-checks it under
-    // the lock, so a report that outlives this connection is ignored.
+    // the lock, so a report that outlives this connection is ignored. If nothing is
+    // published (-1) the report can never match and is in effect disarmed — which can
+    // only happen if the connection was torn down during StartAsync, and then this
+    // stream is stopped by that teardown's StopAsync/Disconnect path, not by a report.
     var streamingGeneration = Volatile.Read(ref _publishedGeneration);
     _directStreaming = new DirectCastStreamingService(
       _logger, _audioEngine, _directChannel, _options, _metricsCollector,
@@ -1982,9 +1985,12 @@ public class GoogleCastOutput : AudioOutputBase
   /// being published, replacing any previous subscription. Caller holds <c>_lifecycleLock</c>.
   /// </summary>
   /// <remarks>
-  /// SharpCaster raises <c>Disconnected</c> from its own teardown, which it runs when its
-  /// heartbeat times out and when the receiver sends CLOSE — both of them a speaker going
-  /// away. It raises it for OUR disconnects too; those are told apart by generation, since
+  /// SharpCaster raises <c>Disconnected</c> from its own teardown, which it runs on a
+  /// heartbeat timeout and on any CLOSE the receiver sends (the receiver app closing,
+  /// another sender taking over — not only a speaker going away). The heartbeat timeout
+  /// only fires at all because <see cref="GuardedTimerInvoker"/> re-arms SharpCaster's
+  /// one-shot timer after each elapse; the library itself never re-arms it after a PING
+  /// that goes unanswered. It raises it for OUR disconnects too; those are told apart by generation, since
   /// every deliberate teardown here bumps the generation before touching the client.
   /// The handler runs inside SharpCaster's unguarded <c>async void HeartBeatTimedOut</c>
   /// (see <see cref="SharpCasterCallbackGuard"/>), so it must not throw.
@@ -2013,8 +2019,10 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Reports that the connection armed at <paramref name="generation"/> appears to be gone.
-  /// Never throws and never blocks: the work is queued, because callers include SharpCaster's
-  /// receive loop, its timer thread and our own streaming loop.
+  /// Never throws and never blocks: the work is queued, because callers run on threads that must
+  /// not wait on it — the guard's fault context (a thread-pool work item, or the timer/receive-loop
+  /// thread for a synchronous throw), SharpCaster's teardown raising <c>Disconnected</c>, and our
+  /// own streaming loop.
   /// </summary>
   /// <param name="generation">The connection generation the reporter was armed for.</param>
   /// <param name="reason">What was observed, for the log line and the event.</param>
@@ -2072,6 +2080,21 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
+      // Only a STREAMING output is rescued. Any other state means an operation of ours is
+      // mid-flight on this connection — StartAsync still launching the receiver, or the gate's
+      // StopAsync / a device switch tearing it down — and that operation owns the outcome.
+      // Acting here would race it: marking Error under a StartAsync that then sets Streaming
+      // left a zombie stream nothing could report on, and marking Error under a device switch
+      // made its ConnectAsync throw (pre-merge review M1, M3). The generation is NOT consumed,
+      // so a later report — e.g. the streaming loop's, once StartAsync has finished — still acts.
+      if (State != AudioOutputState.Streaming)
+      {
+        _logger.LogInformation(cause,
+          "Cast: loss reported while the output is {State}, not Streaming — left to the operation in progress ({Reason})",
+          State, reason);
+        return;
+      }
+
       _connectionGeneration++;
       _publishedGeneration = -1;
       UnwatchConnectionLoss_Locked();
@@ -2082,7 +2105,10 @@ public class GoogleCastOutput : AudioOutputBase
     }
     finally
     {
-      _lifecycleLock.Release();
+      // Guarded: DisposeAsync disposes the lock right after its own release, and a report
+      // granted the semaphore in that window would otherwise fault on the way out.
+      try { _lifecycleLock.Release(); }
+      catch (ObjectDisposedException) { /* output disposed */ }
     }
 
     _logger.LogWarning(cause,
@@ -2320,8 +2346,8 @@ public class ChromecastDisconnectedEventArgs : EventArgs
 
   /// <summary>
   /// True when the connection was lost rather than closed by this application — the
-  /// speaker lost power or Wi-Fi, stopped answering heartbeats, or closed the session
-  /// itself (AUD-84). False for a disconnect this application asked for.
+  /// speaker lost power or Wi-Fi (a write to it failed or stalled, or it stopped answering
+  /// heartbeats), or the receiver closed the session itself (AUD-84). False for a disconnect this application asked for.
   /// </summary>
   public bool IsConnectionLost { get; init; }
 }

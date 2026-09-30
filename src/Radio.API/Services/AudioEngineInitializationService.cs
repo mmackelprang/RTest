@@ -139,8 +139,11 @@ public class AudioEngineInitializationService : IHostedService
   /// Switches the active output back to the local speakers after the Cast connection was
   /// lost mid-stream (AUD-84): unmutes the local sink, and — through the output gate —
   /// persists the local output as the current one, exactly as the startup fallback does.
-  /// Does nothing when the active output is no longer Cast, so a choice made in the UI
-  /// meanwhile is never overridden.
+  /// Does nothing when the active output is no longer Cast. On the production engine the
+  /// check and the switch happen under one acquisition of the engine's output lock
+  /// (<see cref="SoundFlowAudioEngine.SetActiveOutputIfCurrentAsync"/>), so a choice made
+  /// in the UI while this was queued is not overridden; any other <see cref="IAudioEngine"/>
+  /// gets a check-then-switch with a window between the two.
   /// </summary>
   internal async Task RestoreLocalOutputAfterCastLossAsync(string? deviceName, string? reason)
   {
@@ -182,17 +185,32 @@ public class AudioEngineInitializationService : IHostedService
         "Cast connection to {Device} was lost ({Reason}) — switching to local output \"{DeviceName}\" ({DeviceId})",
         deviceName ?? "<unknown device>", reason, target.Name, target.Id);
 
+      if (_audioEngine is SoundFlowAudioEngine gate)
+      {
+        if (!await gate.SetActiveOutputIfCurrentAsync("google-cast", target.Id, ct).ConfigureAwait(false))
+        {
+          _logger.LogInformation(
+            "Cast-loss recovery abandoned: the active output moved to {ActiveOutput} while it was queued",
+            _audioEngine.ActiveOutputId);
+          return;
+        }
+      }
+      else
+      {
+        await _audioEngine.SetActiveOutputAsync(target.Id, ct).ConfigureAwait(false);
+      }
+
+      // After the gate, not before it as in ApplyLocalFallbackAsync: this also persists
+      // CurrentOutput, and must not do so for a switch the gate declined above.
       try
       {
         await _deviceManager.SetOutputDeviceAsync(target.Id, ct).ConfigureAwait(false);
       }
       catch (Exception ex) when (ex is not OperationCanceledException)
       {
-        // Non-fatal, as in ApplyLocalFallbackAsync: the gate call below still unmutes.
+        // Non-fatal: the gate has already unmuted the local sink and persisted the output.
         _logger.LogWarning(ex, "Cast-loss recovery: could not select local output device {DeviceId}", target.Id);
       }
-
-      await _audioEngine.SetActiveOutputAsync(target.Id, ct).ConfigureAwait(false);
 
       _logger.LogInformation(
         "Local output \"{DeviceName}\" restored and unmuted after the Cast connection was lost", target.Name);

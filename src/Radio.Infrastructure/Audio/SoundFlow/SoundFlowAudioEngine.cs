@@ -195,6 +195,57 @@ public class SoundFlowAudioEngine : IAudioEngine
     await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
     try
     {
+      await ApplyActiveOutputLockedAsync(outputId, cancellationToken).ConfigureAwait(false);
+    }
+    finally
+    {
+      _activeOutputLock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Switches to <paramref name="outputId"/> only if the active output is still
+  /// <paramref name="expectedCurrent"/> (or none has been reported), checking and switching
+  /// under ONE acquisition of the output lock — the same discipline as
+  /// <see cref="TryCommitCastConnectAsync"/>.
+  /// </summary>
+  /// <remarks>
+  /// AUD-84. The lost-Cast recovery uses this so it cannot override a choice the user made
+  /// while the recovery was queued: a check of <see cref="ActiveOutputId"/> followed by a
+  /// separate <see cref="SetActiveOutputAsync"/> leaves a window in which the user's switch
+  /// commits and the recovery then replaces it (pre-merge review finding M1).
+  /// </remarks>
+  /// <returns>True when the switch was made; false when the active output had moved on.</returns>
+  public async Task<bool> SetActiveOutputIfCurrentAsync(
+    string expectedCurrent, string outputId, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(outputId))
+    {
+      throw new ArgumentException("outputId is required", nameof(outputId));
+    }
+
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      var current = _activeOutputId;
+      if (current != null && !string.Equals(current, expectedCurrent, StringComparison.OrdinalIgnoreCase))
+      {
+        return false;
+      }
+
+      await ApplyActiveOutputLockedAsync(outputId, cancellationToken).ConfigureAwait(false);
+      return true;
+    }
+    finally
+    {
+      _activeOutputLock.Release();
+    }
+  }
+
+  /// <summary>The body of the output gate. Caller holds <c>_activeOutputLock</c>.</summary>
+  private async Task ApplyActiveOutputLockedAsync(string outputId, CancellationToken cancellationToken)
+  {
+    {
       var previous = _activeOutputId;
       _logger.LogInformation(
         "SetActiveOutputAsync: {Previous} -> {Next}", previous ?? "<none>", outputId);
@@ -267,10 +318,6 @@ public class SoundFlowAudioEngine : IAudioEngine
 
       _activeOutputId = outputId;
       await PersistActiveOutputAsync(outputId, cancellationToken).ConfigureAwait(false);
-    }
-    finally
-    {
-      _activeOutputLock.Release();
     }
   }
 

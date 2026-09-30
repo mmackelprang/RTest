@@ -99,6 +99,7 @@ internal static class SharpCasterCallbackGuard
       var connection = new GuardedConnectionChannel(context) { Client = client };
 
       var replaced = new List<IChromecastChannel>(existing.Count);
+      var retired = new List<HeartbeatChannel>();
       var sawHeartbeat = false;
       var sawConnection = false;
       foreach (var channel in existing)
@@ -106,12 +107,7 @@ internal static class SharpCasterCallbackGuard
         switch (channel)
         {
           case HeartbeatChannel oldHeartbeat:
-            // The old channel's timer may still be armed — a client reused for a second connect is
-            // never passed through DisconnectAsync first. Left running, it would ping on the new
-            // connection and, after a missed PONG, raise the StatusChanged that makes the client
-            // disconnect itself. Dispose stops it.
-            oldHeartbeat.StopTimeoutTimer();
-            oldHeartbeat.Dispose();
+            retired.Add(oldHeartbeat);
             if (!sawHeartbeat)
             {
               replaced.Add(heartbeat);
@@ -144,6 +140,18 @@ internal static class SharpCasterCallbackGuard
       // Channels on its own thread, and a reference swap is the only change it cannot observe
       // half-done.
       channelsProperty.SetValue(client, replaced);
+
+      // Only now, once the swap has happened, are the old heartbeat channels retired. Their
+      // timers may still be armed — a reused client need not have been through DisconnectAsync
+      // first — and left running one would ping on the new connection and, after a missed PONG,
+      // raise the StatusChanged that makes the client disconnect itself. Dispose stops it.
+      // Done after validation so a failed TryHarden leaves the client untouched.
+      foreach (var oldHeartbeat in retired)
+      {
+        oldHeartbeat.StopTimeoutTimer();
+        oldHeartbeat.Dispose();
+      }
+
       return true;
     }
     catch (Exception ex)
@@ -264,8 +272,19 @@ internal sealed class CastFaultContext : SynchronizationContext
 /// <summary>
 /// The <see cref="ISynchronizeInvoke"/> handed to SharpCaster's heartbeat timer. The timer calls
 /// <see cref="BeginInvoke"/> instead of the handler directly; this runs the handler immediately, on
-/// the timer's own thread, with a <see cref="CastFaultContext"/> installed.
+/// the timer's own thread, with a <see cref="CastFaultContext"/> installed — and then re-arms the
+/// timer if the handler left it stopped.
 /// </summary>
+/// <remarks>
+/// <b>Why the re-arm (AUD-84, pre-merge review M2).</b> SharpCaster's timer is one-shot
+/// (<c>AutoReset = false</c>). Its handler sends a PING and sets <c>_triedToPing</c>, but never
+/// restarts the timer; only an inbound message does. So against a speaker that has simply gone
+/// silent, the "PING already sent, still nothing" branch — the library's only heartbeat timeout,
+/// which raises the <c>StatusChanged</c> its client disconnects on — can never run. Re-arming
+/// after each elapse restores what the library evidently intended: PING after 10 s of silence,
+/// declare the connection dead 10 s after that. Any inbound message still restarts the timer and
+/// clears <c>_triedToPing</c> exactly as before, so a live speaker sees no change.
+/// </remarks>
 internal sealed class GuardedTimerInvoker : ISynchronizeInvoke
 {
   private readonly CastFaultContext _context;
@@ -283,7 +302,25 @@ internal sealed class GuardedTimerInvoker : ISynchronizeInvoke
   {
     object? result = null;
     _context.Run(() => result = method.DynamicInvoke(args));
+    Rearm(args);
     return new CompletedResult(result);
+  }
+
+  private static void Rearm(object?[]? args)
+  {
+    // The timer passes itself as the sender. Enabled is false here unless the handler (or an
+    // inbound message racing it) already restarted it.
+    if (args is { Length: > 0 } && args[0] is System.Timers.Timer timer && !timer.Enabled)
+    {
+      try
+      {
+        timer.Start();
+      }
+      catch (ObjectDisposedException)
+      {
+        // The channel was retired or its client disconnected; nothing left to keep alive.
+      }
+    }
   }
 
   /// <inheritdoc />
