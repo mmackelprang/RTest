@@ -24,6 +24,13 @@ public class BluetoothPlaybackMetadata
   public string Artist { get; init; } = string.Empty;
   public string Album { get; init; } = string.Empty;
   public TimeSpan Duration { get; init; } = TimeSpan.Zero;
+
+  /// <summary>
+  /// Cover art the platform supplied with the track, when it supplies any. <b>Always null on Linux</b>
+  /// (the appliance): BlueZ offers no URL-shaped art on <c>org.bluez.MediaPlayer1</c> and the service
+  /// does not read one (AUD-17), so Bluetooth art there comes from song recognition. The Windows media
+  /// session watcher sets it from the SMTC thumbnail; the mock service sets whatever a test passes.
+  /// </summary>
   public string? AlbumArtUrl { get; init; }
 }
 

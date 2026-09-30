@@ -312,13 +312,14 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   }
 
   // -----------------------------------------------------------------------
-  // BT album-art tests — verify AVRCP fast path + SongRec fallback routing.
+  // BT album-art tests — source-supplied art routing + SongRec art routing.
   //
-  // Bug A regression: file:// AVRCP URLs (the common Spotify/YouTube Music
-  // case on Android) must not be propagated raw to the browser. The fix
-  // routes every AVRCP ArtUrl through AlbumArtCacheService.SaveFromUrlAsync,
-  // which returns null for file:// (HttpClient throws NotSupportedException,
-  // caught internally) and a /api/albumart/{hash}.{ext} URL for http(s)://.
+  // Art the Bluetooth service supplies (BluetoothPlaybackMetadata.AlbumArtUrl) goes through
+  // AlbumArtCacheService.SaveFromUrlAsync, which returns null for anything it cannot fetch
+  // (file://, relative paths — HttpClient throws, caught internally) and a
+  // /api/albumart/{hash}.{ext} URL for http(s)://. ⚠ No real service reaches that path on the
+  // appliance: LinuxBluetoothService supplies no art (AUD-17). These tests drive it through the
+  // mock service to pin the platform-neutral contract.
   // -----------------------------------------------------------------------
 
   /// <summary>
@@ -368,14 +369,14 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       serviceScopeFactory: BuildScopeFactory(),
       albumArtCache: cacheMock.Object);
 
-    // Act — simulate AVRCP metadata with a phone-local file:// URI (the
-    // common case from Spotify/YouTube Music on Android — Track.ArtUrl
-    // points to the phone's app cache directory, unreachable from the browser).
+    // Act — the Bluetooth service supplies a file:// art URI, which the browser cannot fetch.
+    // No real service produces this today (LinuxBluetoothService supplies no art, AUD-17); it
+    // pins the platform-neutral consumer's negative case through the mock service.
     _mockBluetooth.SimulateMetadataChange(
       "Song", "Artist",
       albumArtUrl: "file:///data/data/com.android.spotify/cache/art.jpg");
 
-    // Allow the fire-and-forget CacheAvrcpArtAsync task to complete.
+    // Allow the fire-and-forget CacheSourceSuppliedArtAsync task to complete.
     await Task.Delay(200);
 
     // Assert — AlbumArtUrl must NOT be set to the raw file:// URL. It must
@@ -412,12 +413,12 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
       serviceScopeFactory: BuildScopeFactory(),
       albumArtCache: cacheMock.Object);
 
-    // Act — AVRCP metadata with an https:// art URL (rare from phones, common
-    // from local-music players that expose art via MPRIS).
+    // Act — the Bluetooth service supplies an https:// art URL. No real service does today
+    // (Linux supplies none, AUD-17); this pins the platform-neutral consumer via the mock.
     _mockBluetooth.SimulateMetadataChange(
       "Song", "Artist",
       albumArtUrl: "https://example.com/art.jpg");
-    await Task.Delay(200);  // let the fire-and-forget CacheAvrcpArtAsync complete
+    await Task.Delay(200);  // let the fire-and-forget CacheSourceSuppliedArtAsync complete
 
     // Assert — metadata holds the cache's relative URL (browser-fetchable).
     Assert.True(_source.Metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art));
@@ -1259,7 +1260,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
     var (bt, id) = await PlayActiveSourceAsync(cacheMock.Object);
     RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica", albumArtUrl: "https://example.com/existing.jpg");
-    // A plain refresh of the same track with no art: the cache restores the AVRCP art.
+    // A plain refresh of the same track with no art: the cache restores the source-supplied art (mock service; no real producer on Linux, AUD-17).
     RaiseAvrcp(bt, "Enter Sandman (Remastered)", "Metallica");
     Assert.Equal("/api/albumart/existing.jpg", _source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
 
@@ -1270,10 +1271,10 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
 
   /// <summary>
   /// Art the source already has is not replaced — whether SongRec offers different art or
-  /// none at all. ⚠ Honest scope: AVRCP has never supplied art on the appliance (AUD-17),
-  /// so the live route into "art already in place" is the resolved-art cache restoring art
-  /// on an AVRCP refresh of a known track, not a phone. The https path used here is real
-  /// for MPRIS-exposing local players, and the invariant is the same either way.
+  /// none at all. ⚠ Honest scope: the Bluetooth service supplies no art on the appliance
+  /// (AUD-17), so there this rule never fires — art restored from the resolved-art cache there is
+  /// always identification art, which a later identification may refresh. The https path used here
+  /// goes through the mock service and pins the platform-neutral contract.
   /// </summary>
   [Theory]
   [InlineData("/api/albumart/songrec.jpg")]
