@@ -13,19 +13,36 @@ ones above it established. Detail and the "what I already verified" record for e
 
 **What is on the box:** `7dd34b5` = `main` (`dffb55f`) **plus the unmerged `AUD-14` fix** (PR #726, held for your phone test). So `-VerifyOnly` against `main` will report a mismatch until #726 merges — that is expected. The audio output is on the **built-in speakers** (switched from the console at 16:57), not Cast.
 
+> **Agent pre-pass, 2026-09-29 ~22:47–22:57 EDT (Windows dev machine).** Everything below that a
+> machine can check was driven against the box (`7dd34b5`, both services SHA-verified): a separate
+> 1920×720 browser on `radio:5002`, the API, and one bounded journal read. The master was **muted the
+> whole time** (it was already muted at 0.12), so nothing was judged by ear. State was restored
+> afterwards: Radio 97.7 playing, 0.12 muted, output Soundbar, Diagnostics range 5m, Stats chip off.
+> **Side effects you may notice:** play history gained "Vinyl 22:50" and "Sgt. Pepper's 22:52"; the
+> file player's queue position moved. Evidence screenshots are in the gitignored `.playwright-mcp/`
+> on that machine.
+
+### ⭐ Your morning order (about 30 min)
+
+1. **Re-attach, `AUD-14` (section B) — then tell me to merge #726.** It is the only open PR, and `main` cannot be deployed until it merges.
+2. **Cast volume (section C)** — not run by the agent: it needs the speaker's own volume set by hand, and Cast audio bypasses the console mute, so it would have played aloud in the office at night.
+3. **BT position bar, `AUD-29` (section B)** — needs the phone; do it in the same sitting as item 1.
+4. **By-ear only:** Vinyl with a record on (USB inputs), a slow file-player drag for stutter (file player seek), two announcements for the swell *and* for whether both are heard in full (announcements).
+5. **Decide on the `AUD-13` finding below** (USB Audio gives no feedback) and glance at the minor findings.
+
 ### A. At the panel, no phone needed (10 min)
-- [ ] **Diagnostics (`UI-2`, #728):** no Metrics pill in the top nav; Settings has **Diagnostics** as its last tab; tiles grouped by category, header "Updates every 15 s while open"; tap a tile → its chart, tap again → closed; 5m/1h/24h changes the tiles and survives a reload; DevTray → Fingerprint events lands on Diagnostics.
-- [ ] **File player seek (`AUD-28`, #722):** drag the seek bar slowly, then fast, across a playing track — no stutter while dragging, one jump on release; the time follows your finger; a tap still seeks; the transport bar layout looks right.
-- [ ] **Voicemail scrubber (`UI-16`, #722 — `PHN-2` U5):** play a voicemail; drag and tap both move the audio; the bar is easy to grab.
-- [ ] **USB inputs (`AUD-13`, #719):** Vinyl still plays the turntable; **USB Audio shows Error** (unconfigured, as you ruled).
-- [ ] **Centre panel (`UI-17`, #715/#716 — still outstanding from this afternoon):** each source's default view; the Stats chip (off by default, survives reload); Queue pill on Radio shows the queue with no ⋮ menu and the radio keeps playing; Bluetooth with nothing connected opens on Connect.
+- [x] **Diagnostics (`UI-2`, #728)** — ✅ **agent-verified.** No Metrics pill in the top nav; Diagnostics is the last Settings tab; tiles grouped by category; header "Updates every 15 s while open"; tap a tile → chart with count/avg/min/max, tap again → closed; switching to 1h changed the tiles and **1h survived a reload** (read from `aria-pressed`), restored to 5m; `/diagnostics` (the DevTray card's target, per `DevTray.razor:355`) opens the panel. *Not done: the physical DevTray triple-tap.* **Minor findings:** the chart's y-axis runs negative (`-41.8 ms` on Request Duration); the **"Requests Api" tile always reads 0** because `api.requests.api` counts only bare `/api` — the real counts live in per-route keys (`api.requests.api.Audio.nowplaying`, …), so the tile is a mislabelled, near-useless key rather than a counting bug.
+- [x] **File player seek (`AUD-28`, #722)** — ✅ **agent-verified by position, not by ear.** Slow 12-step drag while playing: the API position kept advancing normally (0:03 → 0:07) the whole time, then **one jump on release** to 1:20.6 (= 65 %, where the finger stopped). Fast drag: no movement while held, release → 0:37.8 (30 %). Tap at 10 % → 0:13. The on-screen time followed the finger (1:19 mid-drag). **Yours:** listen for stutter during a slow drag, and whether the transport layout looks right.
+- [x] **Voicemail scrubber (`UI-16`, #722 — `PHN-2` U5)** — ✅ **agent-verified.** On an already-read voicemail: the server's playback anchor (`broadcastAtUtc`) **did not change once during a six-step drag** and changed exactly once on release, to 16.19 s (= 77 %, where the finger stopped); the label tracked the finger (0:04 → 0:14); a tap at 30 % → 6.3 s on the server. **Yours:** is the bar easy to grab with a finger.
+- [ ] **USB inputs (`AUD-13`, #719)** — ⚠ **half passes.** Vinyl: switched, `Playing`, bound to its own port (`USB Microphone`) — whether it *sounds* right needs a record on. USB Audio: the backend refuses correctly (`no capture device matches USBPort "AB13X" — not binding to any input`, then `Failed to create source: GenericUSB`), so it **no longer silently plays the turntable** — the actual bug is fixed. **But the panel shows nothing:** no Error, no toast; the tap looks like a no-op and the previous source keeps playing (sampled every 0.5 s for 4 s). #719 says the source "goes to Error", but the exception fires during *creation*, so no source object ever exists to be in Error. Also: the configured port is `AB13X`, not empty — refused as *no match*, not as *unconfigured*. **Decide:** accept as is, or queue a small row to surface the refusal (a toast, or an error state on the bubble).
+- [x] **Centre panel (`UI-17`, #715/#716)** — ✅ **agent-verified.** Radio: RADIO / HISTORY (+ QUEUE when opened). Vinyl: history with the Stats chip. File Player: QUEUE · 31 / HISTORY with the ⋮. Bluetooth with nothing connected: **opens on CONNECT** (paired phone listed, Scan button). Queue pill on Radio: QUEUE · 31 tab, **no ⋮**, radio stayed `Playing`. Stats chip: **off by default, on survived a reload**, turned back off; stats render. **Minor findings:** with no phone connected the Bluetooth source reports `Playing` and its position counter runs (0:04) — possibly `AUD-29`'s extrapolation ticking with no device, worth a look during B1; History stats' **top track is "KFM/EBK (feat. Ca…"**, which looks like a fingerprinting misidentification that has accumulated plays.
 
 ### B. With your phone on Bluetooth (15 min)
-- [ ] **Position bar (`AUD-29`, #724):** play a track — the console's bar moves with the phone; pause on the phone and it stops; seek on the phone and it jumps to match.
+- [ ] **Position bar (`AUD-29`, #724):** play a track — the console's bar moves with the phone; pause on the phone and it stops; seek on the phone and it jumps to match. *(Also check: does the bar still tick with the phone **dis**connected? See the centre-panel finding in section A.)*
 - [ ] **Re-attach (`AUD-14`, #726 — then tell me to merge it):** pause on the phone for 30 s+ and resume; then disconnect and reconnect the phone while playing. Pass = the console follows play/pause/track after each.
-- [ ] **Announcements (`AUD-74`, #723):** two test announcements close together — the music must not swell back to full volume between them.
+- [x] **Announcements (`AUD-74`, #723)** — ✅ **ducking agent-verified; by-ear still yours.** Two announcements 1.5 s apart, `duckingState` polled every ~150 ms: ducked to 20 % at 2.1 s and **held continuously** through both (active events 1 → 2 → 1), then ramped 28 → 54 → 79 → 100 % only after the last ended. Both returned `completed`. **Yours, by ear:** no swell, and whether *both* were heard in full — the duck began releasing ~0.45 s before announcement one's request returned, which is relevant to `AUD-73`.
 
-### C. Cast volume (`AUD-80` + `AUD-5`, #725) — 5 min
+### C. Cast volume (`AUD-80` + `AUD-5`, #725) — 5 min — not run by the agent (see the morning order)
 - [ ] Switch output to the Office speaker. Set the **speaker's** volume to about 25 % **on the speaker or Google Home** (the console cannot change it — see `AUD-81`). Disconnect Cast, reconnect: it comes back at 25 %, not loud. Repeat once after a `radio-api` restart. (The very first reconnect after the deploy keeps whatever the speaker is at, because nothing is remembered yet.)
 
 ### D. Decisions only you can make
