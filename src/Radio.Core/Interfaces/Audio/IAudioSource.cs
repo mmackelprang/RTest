@@ -55,8 +55,10 @@ public enum AudioSourceType
 {
   /// <summary>
   /// The radio tuner — the RTL-SDR (<c>SDRRadioAudioSource</c>).
-  /// Do not rename or reorder: the name <c>Radio</c> is persisted on deployed boxes
-  /// (the <c>AudioPreferences:CurrentSource</c> config row and <c>PlayHistory</c> rows).
+  /// Do not rename or reorder: the name <c>Radio</c> is persisted on deployed boxes as the
+  /// <c>AudioPreferences:CurrentSource</c> config row, parsed back by name at start-up. (PlayHistory's
+  /// <c>Source=Radio</c> is the separate <c>PlaySource.Radio</c>, mapped from this value by
+  /// <c>PlayHistoryTracker</c>.)
   /// </summary>
   Radio,
 

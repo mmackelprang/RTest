@@ -225,7 +225,7 @@ The audio system (Phase 2) provides:
 | Gain Control | ✅ AGC/Manual |
 | Power Management | ✅ Software |
 | Equalizer | ❌ No hardware EQ |
-| Device Volume | ❌ Software only |
+| Device Volume | ✅ Software (no hardware volume) |
 
 **RTL-SDR Audio Integration:**
 - Real-time PCM audio at 48kHz F32 format via `SDRAudioDataProvider`

@@ -791,7 +791,8 @@ When the file sink is configured:
 | `Spotify.LibrespotPath` | `string` | `/usr/bin/librespot` | Path to the librespot executable (used when Mode is Integrated) |
 
 A `Devices:Radio` entry (the RF320 USB radio's port, removed by `AUD-16`) may still exist in a
-deployed `appsettings.Production.json` or config store. Nothing binds or reads it; it is inert.
+deployed `appsettings.Production.json` or config store. It is still loaded into configuration (and
+`GET /api/configuration/devices` still returns it), but it matches no property, so it is ignored.
 
 **Spotify Mode Options:**
 - **RemoteControl**: Uses Spotify Connect API (no audio data flows through app)

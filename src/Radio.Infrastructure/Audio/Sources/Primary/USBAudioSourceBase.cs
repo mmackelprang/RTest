@@ -369,7 +369,7 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         // SoundFlowPlaybackService keys on ordinal equality, so AudioManager's gain and ducking
         // lookups missed. AUD-2. This one line covers the two concrete sources that reach it:
         // VinylAudioSource and GenericUSBAudioSource. BluetoothAudioSource also
-        // derives from this class but overrides PlayCoreAsync without calling base (:268), so it
+        // derives from this class but overrides PlayCoreAsync without calling base, so it
         // does not reach this line and was fixed separately by 2bbd0eb5.
         _playbackId = Id;
 
