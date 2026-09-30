@@ -66,6 +66,9 @@ path on the same file was 440 statements.
 4. **Found, not fixed:** the snapshot endpoint (`GetAggregateAsync` for counters) sums `ValueSum`
    across the Minute, Hour **and** Day tables, so rolled-up data is counted more than once. Nothing in
    the UI calls it any more; it still backs `/api/metrics/snapshots` and `/aggregate`.
+   ⛔ **Refuted 2026-09-30 by `AUD-82`:** the rollup *moves* rows (INSERT + DELETE in one transaction), so no
+   data sits in two tables and nothing was counted twice. Both endpoints were deleted anyway (no callers) —
+   see [`AUD-82`](AUD-82.md) § Correction.
 
 ## Tests
 

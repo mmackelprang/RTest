@@ -267,13 +267,11 @@ If a metric doesn't match either pattern, it's treated as a gauge (latest value 
 
 ## Auto-Refresh
 
-The dashboard refreshes automatically every **10 seconds**. On each tick:
-1. Fetches one `/api/metrics/window` summary for all metrics
-2. Re-fetches sparkline history for up to 20 metrics
-3. Recomputes gauge/counter display values
-4. Re-renders the canvas chart if a metric is selected
-
-The refresh timer is disposed on page navigation (via `IAsyncDisposable`).
+The Diagnostics tab (Settings → Diagnostics) re-reads every **15 seconds**
+(`DiagnosticsPanel.PollInterval`). Each tick is one `/api/metrics/window` request, plus one
+`/api/metrics/history` request only while a tile is selected (for its chart). A tick that arrives
+while a poll is still in flight is skipped, and the poll runs only while the Diagnostics tab is the
+showing tab — leaving the tab unmounts the panel and stops it.
 
 ---
 

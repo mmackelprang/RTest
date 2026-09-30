@@ -2060,6 +2060,45 @@ GET /api/metrics/history?key=audio.songs_played&start=2024-12-04T00:00:00Z&end=2
 
 ---
 
+### GET /api/metrics/window
+
+Summarises every metric in a time window from **one** database query (`UI-2`). This is what the
+Settings → Diagnostics tab polls.
+
+**Query Parameters:**
+- `start` (required): Start timestamp (ISO 8601)
+- `end` (required): End timestamp (ISO 8601); must be after `start`
+- `resolution` (optional): `Minute` (default), `Hour` or `Day` — the one bucket table that is read
+
+**Response:** 200 OK — one entry per metric with data in the window, ordered by key. A counter with no
+bucket in the window is still listed, with `sum: 0` and `bucketCount: 0`; a gauge with none is omitted.
+
+```json
+[
+  {
+    "key": "audio.buffer.underruns",
+    "type": "Counter",
+    "sum": 3,
+    "sampleCount": 3,
+    "min": 0,
+    "max": 2,
+    "latestAverage": 1,
+    "latestTimestamp": "2024-12-04T19:59:00+00:00",
+    "bucketCount": 2
+  }
+]
+```
+
+⚠ Only the named resolution's table is read. Rollup moves data from Minute to Hour after
+`RetentionMinuteData` (120 min) and from Hour to Day after `RetentionHourData` (48 h), so a window
+that spans a tier boundary sees only the part stored at the requested resolution.
+
+**Error Responses:**
+- `400 Bad Request` - `start` is not before `end`
+- `500 Internal Server Error` - Failed to retrieve window summaries
+
+---
+
 ### GET /api/metrics/keys
 
 Gets all available metric keys.
@@ -2753,19 +2792,21 @@ const data = await response.json();
 
 ---
 
-#### Current Values for Every Metric (Gauges and Counters)
+#### Window Summary for Every Metric
 
-Use `/api/metrics/window` — one request, one database query, one summary per metric for the window
-(`sum`, `sampleCount`, `min`, `max`, `latestAverage`, `latestTimestamp`, `bucketCount`). This is what
-the Settings → Diagnostics tab polls. *(`/api/metrics/snapshots` and `/api/metrics/aggregate` were
-removed by `AUD-82`, 2026-09-30: nothing called them after `UI-2`.)*
+Use `/api/metrics/window` — one request, one database query, one summary per metric **with data in the
+window** (an idle counter is reported with `sum: 0`; a gauge with no bucket in the window is left out).
+Fields: `key`, `type` (`"Counter"` / `"Gauge"`), `sum`, `sampleCount`, `min`, `max`, `latestAverage`,
+`latestTimestamp`, `bucketCount`. This is what the Settings → Diagnostics tab polls.
+*(`/api/metrics/snapshots` and `/api/metrics/aggregate` were removed by `AUD-82`, 2026-09-30: nothing
+called them after `UI-2`.)*
 
 ```javascript
 const response = await fetch(
   '/api/metrics/window?start=2024-12-04T19:00:00Z&end=2024-12-04T20:00:00Z&resolution=Minute'
 );
 const summaries = await response.json();
-// Counter: show summary.sum. Gauge: show summary.latestAverage.
+// Counter: summary.sum is the total over the window. Gauge: summary.latestAverage is the newest bucket's average.
 ```
 
 ---
