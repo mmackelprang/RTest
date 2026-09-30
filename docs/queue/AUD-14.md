@@ -220,3 +220,13 @@ sighting.**
 disconnect* seen in run 1 did not recur here — run 2's disconnect happened **before** the pause, not
 after. ⛔ **Do not carry "the starvation causes the disconnect" forward; it now has one supporting
 sample and one non-recurrence.**
+
+---
+
+## Built 2026-09-29 on `fix/aud-14-stale-avrcp-watcher` — awaiting the owner's disconnect/reconnect UAT
+
+`OnInterfaceRemoved` now handles a removed `org.bluez.MediaPlayer1` before its `Device1`-only early return: if the path is the one we are attached to, `DetachMediaPlayer` disposes `_playerPropertiesWatcher` and clears `_mediaPlayer` and `_mediaPlayerPath` under `_mediaPlayerLock`. The next `InterfacesAdded` for `player0` therefore does a full attach — new watcher, initial `Status`/`Track` read — which addresses both consequences in the row (the stale watcher, and an already-playing phone never reporting its status). The dedup in `AttachMediaPlayerAsync` is left as it is: with the attachment released on removal, its "already attached" return now only fires when it is true.
+
+Tests (`MediaPlayerDetachTests`): removing the attached player disposes its watcher and clears the attachment (fails with the detach call removed); removing a player at another path leaves the attachment alone. `AdapterScopingTests` and `CaptureNodeFollowTests` unchanged and green.
+
+**UAT (owner, with the phone):** play over Bluetooth; pause on the phone for 30 s+ (long enough for BlueZ to drop `player0`, per `AUD-10`) and resume; then disconnect and reconnect the phone while it is playing. Pass = the console follows play/pause and track changes after each, and `radio-api`'s file sink shows `Media player removed from BlueZ at … — detached` followed by `Attached to Media Player at …`.
