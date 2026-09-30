@@ -930,7 +930,7 @@ The System Configuration page (`/system` > Configuration tab) exposes all major 
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DefaultDevice` | string | "RTLSDRCore" | Radio hardware backend ("RTLSDRCore" or "RF320") |
+| `DefaultDevice` | string | "RTLSDRCore" | Radio hardware backend. "RTLSDRCore" is the only supported value |
 | `DefaultFMFrequencyMHz` | double | 101.5 | Startup FM frequency |
 | `DefaultAMFrequencyKHz` | double | 1000.0 | Startup AM frequency |
 | `DefaultFMStepMHz` | double | 0.1 | FM tuning step size |

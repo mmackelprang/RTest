@@ -958,42 +958,31 @@ float volume = btEndpoint.AudioEndpointVolume.MasterVolumeLevelScalar; // 0.0-1.
 ## 2. Radio Device Switching (API)
 
 **Status:** Validates request, returns device info, does not switch
-**Added:** 2026-02-11
-**Priority:** Low — RF320 is the only radio hardware; SDR radio uses a separate source
+**Added:** 2026-02-11 · **Revised:** 2026-09-30 (`AUD-16`)
+**Priority:** None today — `RTLSDRCore` is the only radio device type, so there is nothing to switch to
 
 ### What Exists
 
 | File | What's There |
 |------|-------------|
-| `Radio.API/Controllers/RadioController.cs:845-858` | `POST /api/radio/device/select` — validates device type, checks availability via `_radioFactory.IsDeviceAvailable()`, returns `RadioDeviceInfoDto` with `IsActive = false` |
+| `Radio.API/Controllers/RadioController.cs` | `POST /api/radio/devices/select` — validates device type, checks availability via `_radioFactory.IsDeviceAvailable()`, returns `RadioDeviceInfoDto` with `IsActive = false`. Any type other than `RTLSDRCore` (including the removed `RF320`) is unavailable and returns 400. |
 
 ### What's Needed
 
-The controller needs to call `AudioManager.GetOrCreateSourceAsync(AudioSourceType.Radio)` with the selected device type. This requires:
+Nothing while the RTL-SDR is the only tuner. This becomes work only if a second radio device type is
+added: the controller would then need `AudioManager.GetOrCreateSourceAsync(AudioSourceType.Radio)` to
+build the selected type via `IRadioFactory.CreateRadioSource(deviceType)`.
 
-1. `IRadioFactory.CreateRadioSource(deviceType)` already exists and works
-2. The `AudioManager` would need a way to recreate the Radio source with a different device type (currently the source is cached — switching device type requires evicting the cached source)
-3. Consider: should switching radio device type stop the current radio and create a new one, or hot-swap?
-
-**Gotchas:**
-- The current `_sourceCache` in AudioManager uses `AudioSourceType` as key — both RTL-SDR and RF320 are `AudioSourceType.Radio`. Switching between them requires cache eviction and source disposal.
-- RF320 requires physical power — software can't start it. SDR can be started/stopped programmatically.
+**Gotchas (for that future second type):**
+- `AudioManager`'s `_sourceCache` is keyed by `AudioSourceType`, and every tuner reports `AudioSourceType.Radio`. Switching device type requires evicting and disposing the cached source.
 
 ---
 
-## 3. RF320 Radio Software Control
+## 3. RF320 Radio Software Control — removed
 
-**Status:** Fully stubbed — hardware limitation, not a software gap
-**Added:** 2026-02-11
-**Priority:** None — this is a hardware constraint, not future work
-
-### What Exists
-
-`Radio.Infrastructure/Audio/Sources/Primary/RadioAudioSource.cs` — The RF320BT is a vintage Bluetooth-controlled radio with USB audio output. It has no software-controllable tuner. All control methods (`SetFrequencyAsync`, `StepFrequencyUpAsync`, `SetBandAsync`, `StartScanAsync`, `TogglePowerStateAsync`, etc.) are no-ops that log warnings.
-
-**This is intentional and permanent.** The RF320 can only be controlled via its physical knobs and the RaddyRF320BT Bluetooth protocol (separate git submodule). If SDR radio support is the active device, these methods are handled by `SDRRadioAudioSource` which fully implements them.
-
-No further action needed unless a new radio hardware type is added.
+**Status:** Closed 2026-09-30 by `AUD-16` (owner ruling D-D). The Raddy RF320 USB radio source
+(`RadioAudioSource`), its config surface and the `external/RaddyRF320BT` submodule were deleted, so there
+is no RF320 stub left in the code. The section number is kept so references to later sections stay valid.
 
 ---
 

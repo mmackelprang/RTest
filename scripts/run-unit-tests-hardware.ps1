@@ -3,7 +3,7 @@
 # Usage: .\run-unit-tests-hardware.ps1
 #
 # IMPORTANT: This requires real radio hardware to be connected.
-# Tests will interact with actual USB radio devices (RTL-SDR, RF320).
+# Tests will interact with actual USB radio devices (RTL-SDR).
 #
 
 $ErrorActionPreference = "Stop"

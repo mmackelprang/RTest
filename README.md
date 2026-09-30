@@ -13,7 +13,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
 | 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
 | 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
-| 3 - Audio Sources | ✅ Completed | Radio (RF320 + RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
+| 3 - Audio Sources | ✅ Completed | Radio (RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
 | 4 - Event Sources | ✅ Completed | TTS (Google/Azure), Audio File Events |
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
@@ -111,7 +111,6 @@ RadioConsole/
 │   ├── common/              # Shared service files (radio-api, radio-web)
 │   ├── raspberry-pi/        # Pi-specific setup scripts
 │   └── debian-x64/          # x64 Linux setup scripts
-└── RaddyRF320BT/            # Git submodule for vintage radio protocol
 ```
 
 ## Configuration System
@@ -205,9 +204,7 @@ The audio system (Phase 2) provides:
 
 ### Primary Audio Sources
 
-- **Radio**: Two device types supported via radio factory (`IRadioFactory`)
-  - **RTLSDRCore (SDR Radio)**: Software-defined radio with full frequency control, band switching, scanning, gain control, and power management via RTL-SDR USB dongle
-  - **RF320 (Bluetooth/USB)**: Limited software control, Bluetooth for commands, USB for audio output
+- **Radio**: RTL-SDR software-defined radio (`RTLSDRCore`, created by `IRadioFactory`) with full frequency control, band switching, scanning, gain control, and power management via an RTL-SDR USB dongle
 - **Vinyl**: USB turntable input
 - **File Player**: MP3, FLAC, WAV, OGG, AAC, M4A, WMA playback with playlist support and audio fingerprinting
 - **Bluetooth A2DP**: Receive audio from phones/tablets via A2DP with AVRCP metadata, volume sync, and album art
@@ -216,20 +213,19 @@ The audio system (Phase 2) provides:
 ### Radio Device Factory
 
 **Device Types:**
-- `RTLSDRCore`: Software-defined radio (full software control via USB dongle)
-- `RF320`: Bluetooth/USB radio (hardware control only)
+- `RTLSDRCore`: Software-defined radio (full software control via USB dongle) — the only supported radio device. The Raddy RF320 USB radio was removed (`AUD-16`); any other device type is reported unavailable.
 
-**Radio Capabilities:**
+**Radio Capabilities (RTLSDRCore):**
 
-| Feature | RTLSDRCore (SDR) | RF320 (Bluetooth/USB) |
-|---------|------------------|----------------------|
-| Software Frequency Control | ✅ Full range | ❌ Hardware only |
-| Band Switching | ✅ Software | ❌ Physical button |
-| Scanning | ✅ Automated | ❌ Physical button |
-| Gain Control | ✅ AGC/Manual | ❌ N/A |
-| Power Management | ✅ Software | ❌ Physical button |
-| Equalizer | ❌ No hardware EQ | ✅ Hardware EQ |
-| Device Volume | ❌ Software only | ✅ Hardware volume |
+| Feature | RTLSDRCore (SDR) |
+|---------|------------------|
+| Software Frequency Control | ✅ Full range |
+| Band Switching | ✅ Software |
+| Scanning | ✅ Automated |
+| Gain Control | ✅ AGC/Manual |
+| Power Management | ✅ Software |
+| Equalizer | ❌ No hardware EQ |
+| Device Volume | ❌ Software only |
 
 **RTL-SDR Audio Integration:**
 - Real-time PCM audio at 48kHz F32 format via `SDRAudioDataProvider`
