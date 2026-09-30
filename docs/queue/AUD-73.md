@@ -29,7 +29,7 @@ The owner ran the return-checklist item "two announcements at once" (two long te
 
 So the row's defect was real, and the dead token in `SetActiveSource` was the only thing meant to stop the first announcement. ADR-029 §6.2 rule 1 already described announcements as having *"`AnnouncementService`'s existing single-slot cancel"*. That cancel never worked.
 
-## ✅ SHIPPED — PR #TBD — overlapping announcements are arbitrated
+## ✅ SHIPPED — [#739](https://github.com/mmackelprang/RTest/pull/739) — overlapping announcements are arbitrated
 
 **`AnnouncementService` now tracks every announcement call that has become active.** Each call has its own linked `CancellationTokenSource`, and the call actually waits on it. `BecomeActive` decides which announcement plays when two overlap:
 
