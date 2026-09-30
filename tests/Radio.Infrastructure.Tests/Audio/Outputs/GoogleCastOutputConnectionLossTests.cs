@@ -20,8 +20,10 @@ namespace Radio.Infrastructure.Tests.Audio.Outputs;
 /// <remarks>
 /// The connection is established the way <c>GoogleCastOutputConcurrencyTests</c> does it: a
 /// loopback listener satisfies the reachability probe and the transport/status overrides stand in
-/// for a Cast handshake no fake socket can complete. Everything after that — the guard installed
-/// by ConnectAsync, the generation checks, the teardown — is the real code.
+/// for a Cast handshake no fake socket can complete. The output is then put in <c>Streaming</c> by
+/// setting its state directly, because StartAsync needs a launched receiver application; loss
+/// handling acts only on a streaming output. Everything after that — the guard installed by
+/// ConnectAsync, the generation checks, the teardown — is the real code.
 /// No assertion races a wall clock: each test waits on the event being raised, or on
 /// <c>LastConnectionLossHandling</c> completing. Timeouts are hang guards only.
 /// </remarks>
@@ -103,10 +105,38 @@ public class GoogleCastOutputConnectionLossTests
   }
 
   [Fact]
+  public async Task LossReport_WhileNotStreaming_IsLeftToTheOperationInProgress_AndStaysArmed()
+  {
+    // Pre-merge review M1/M3: a report landing while StartAsync or a teardown owns the connection
+    // must not mark it Error underneath them, and must not use up the connection's one report.
+    using var listener = StartLoopbackListener(out var port);
+    await using var output = await ConnectedOutputAsync(port, streaming: false);
+    var events = new List<ChromecastDisconnectedEventArgs>();
+    output.Disconnected += (_, e) => { lock (events) { events.Add(e); } };
+    var generation = PublishedGeneration(output);
+
+    output.ReportConnectionLost(generation, "while starting", null);
+    await output.LastConnectionLossHandling.WaitAsync(HangGuard);
+
+    Assert.Empty(events);
+    Assert.Equal("cast-a", output.ConnectedDevice?.Id);
+    Assert.NotEqual(AudioOutputState.Error, output.State);
+
+    MarkStreaming(output);
+    output.ReportConnectionLost(generation, "while streaming", null);
+    await output.LastConnectionLossHandling.WaitAsync(HangGuard);
+
+    Assert.Equal("while streaming", Assert.Single(events).Reason);
+  }
+
+  [Fact]
   public async Task DeliberateDisconnect_IsNotReportedAsLost_EvenWhenTheClientThenRaisesDisconnected()
   {
-    // Our own teardown makes SharpCaster raise Disconnected too. That must not be mistaken for
-    // a lost speaker — the console would otherwise override the output the user just chose.
+    // SharpCaster raises Disconnected from its own teardown, which our deliberate disconnect runs.
+    // (Here the client has no socket, so its DisconnectAsync raises nothing and the event is raised
+    // by hand below.) It must not be mistaken for a lost speaker, or the console would override the
+    // output the user just chose. What stops it in this test is DisconnectAsync removing the
+    // subscription; the generation check behind that is pinned by the superseded-generation test.
     using var listener = StartLoopbackListener(out var port);
     await using var output = await ConnectedOutputAsync(port);
     var client = ClientOf(output);
@@ -145,12 +175,29 @@ public class GoogleCastOutputConnectionLossTests
     {
       service.ReportIfSendsKeepFailing(new IOException("Broken pipe"));
     }
+    service.ReportSendsFailing(new TimeoutException("stalled"));
     Assert.Equal(1, reports);
+  }
+
+  [Fact]
+  public void DirectChannelStalledSend_IsReportedImmediately()
+  {
+    var reports = new List<Exception>();
+    var service = new DirectCastStreamingService(
+      NullLogger.Instance,
+      new Mock<IAudioEngine>().Object,
+      new DirectCastAudioChannel("urn:x-cast:test.audio", NullLogger.Instance),
+      new GoogleCastOutputOptions(),
+      onSendsFailing: reports.Add);
+
+    service.ReportSendsFailing(new TimeoutException("stalled"));
+
+    Assert.IsType<TimeoutException>(Assert.Single(reports));
   }
 
   // --- helpers ---
 
-  private static async Task<GoogleCastOutput> ConnectedOutputAsync(int port)
+  private static async Task<GoogleCastOutput> ConnectedOutputAsync(int port, bool streaming = true)
   {
     var options = new AudioOutputOptions();
     options.GoogleCast.CacheFilePath =
@@ -170,7 +217,18 @@ public class GoogleCastOutputConnectionLossTests
     });
 
     Assert.Equal("cast-a", output.ConnectedDevice?.Id);
+    if (streaming)
+    {
+      MarkStreaming(output);
+    }
     return output;
+  }
+
+  /// <summary>Stands in for StartAsync, which needs a launched receiver application.</summary>
+  private static void MarkStreaming(GoogleCastOutput output)
+  {
+    typeof(AudioOutputBase).GetProperty(nameof(AudioOutputBase.State))!.SetValue(output, AudioOutputState.Streaming);
+    Assert.Equal(AudioOutputState.Streaming, output.State);
   }
 
   private static TaskCompletionSource<ChromecastDisconnectedEventArgs> CaptureLoss(GoogleCastOutput output)

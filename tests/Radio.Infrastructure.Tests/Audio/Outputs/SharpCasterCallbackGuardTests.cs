@@ -59,6 +59,26 @@ public class SharpCasterCallbackGuardTests
   }
 
   [Fact]
+  public async Task HeartbeatAgainstASilentSpeaker_TimesOut()
+  {
+    // Pre-merge review M2. Writes SUCCEED (a vanished peer without a TCP reset) and nothing comes
+    // back. SharpCaster's one-shot timer sends one PING and is never re-armed, so its timeout
+    // branch, the StatusChanged its client disconnects on, could never run. The guard re-arms it.
+    var client = new ChromecastClient();
+    PlantTransport(client, new SilentSslStream());
+    Assert.True(SharpCasterCallbackGuard.TryHarden(client, _ => { }, NullLogger.Instance));
+
+    var timedOut = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    client.HeartbeatChannel.StatusChanged += (_, _) => timedOut.TrySetResult();
+
+    HeartbeatTimer(client.HeartbeatChannel).Interval = 1;
+    client.HeartbeatChannel.StartTimeoutTimer();
+
+    await timedOut.Task.WaitAsync(HangGuard);
+    client.HeartbeatChannel.Dispose();
+  }
+
+  [Fact]
   public async Task PongReplyToAPing_OnABrokenTransport_IsReportedInsteadOfThrown()
   {
     // The second async-void heartbeat entry point: the receive loop hands a PING to
@@ -173,11 +193,27 @@ public class SharpCasterCallbackGuardTests
     return client;
   }
 
-  internal static void PlantBrokenTransport(ChromecastClient client)
+  /// <summary>An SslStream whose writes succeed and go nowhere: a peer that is silently gone.</summary>
+  private sealed class SilentSslStream : SslStream
+  {
+    public SilentSslStream()
+      : base(new MemoryStream())
+    {
+    }
+
+    public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+    {
+      return ValueTask.CompletedTask;
+    }
+  }
+
+  internal static void PlantBrokenTransport(ChromecastClient client) => PlantTransport(client, new BrokenPipeSslStream());
+
+  private static void PlantTransport(ChromecastClient client, SslStream stream)
   {
     var field = typeof(ChromecastClient).GetField("_stream", BindingFlags.NonPublic | BindingFlags.Instance);
     Assert.NotNull(field);
-    field!.SetValue(client, new BrokenPipeSslStream());
+    field!.SetValue(client, stream);
   }
 
   private static System.Timers.Timer HeartbeatTimer(HeartbeatChannel channel)
