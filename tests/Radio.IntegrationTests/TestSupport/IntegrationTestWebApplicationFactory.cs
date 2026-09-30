@@ -101,7 +101,6 @@ public class IntegrationTestWebApplicationFactory : WebApplicationFactory<Progra
         ["Database:FingerprintsSubdirectory"] = "fingerprints",
         ["Database:FingerprintsFileName"] = "fingerprints.db",
         ["Fingerprinting:Enabled"] = UseMockFingerprinting ? "true" : "false",
-        ["Fingerprinting:IdentificationIntervalSeconds"] = "30",
         ["Fingerprinting:SampleDurationSeconds"] = "10",
         ["Logging:LogLevel:Default"] = "Warning"
       });

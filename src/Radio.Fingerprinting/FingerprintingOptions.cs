@@ -45,11 +45,14 @@ public sealed class FingerprintingOptions
   /// </remarks>
   public bool UseShazamForAllSources { get; set; } = false;
 
-  /// <summary>Duration of audio to capture for fingerprinting (seconds).</summary>
+  /// <summary>
+  /// Duration of audio to capture for fingerprinting (seconds). A cycle that captured audio starts the
+  /// next one immediately, so this capture length is what paces the loop while a source is playing
+  /// (the SongRec failure back-off and <see cref="IdlePollIntervalMs"/> pace it otherwise). There is no
+  /// separate "interval between attempts" setting: <c>IdentificationIntervalSeconds</c> was read by
+  /// nothing but a start-up log line and was removed (AUD-36).
+  /// </summary>
   public int SampleDurationSeconds { get; set; } = 15;
-
-  /// <summary>Interval between identification attempts (seconds).</summary>
-  public int IdentificationIntervalSeconds { get; set; } = 15;
 
   /// <summary>
   /// How long (ms, minimum 100) the identification loop waits before checking again when a cycle captured

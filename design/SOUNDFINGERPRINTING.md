@@ -386,9 +386,6 @@ public sealed class FingerprintingOptions
     /// <summary>Duration of audio to capture for fingerprinting (seconds).</summary>
     public int SampleDurationSeconds { get; set; } = 15;
 
-    /// <summary>Interval between identification attempts (seconds).</summary>
-    public int IdentificationIntervalSeconds { get; set; } = 30;
-
     /// <summary>Minimum confidence threshold for accepting a match (0.0 to 1.0).</summary>
     public double MinimumConfidenceThreshold { get; set; } = 0.5;
 
@@ -874,9 +871,10 @@ public class BackgroundIdentificationService : BackgroundService
                 _logger.LogError(ex, "Error during audio identification");
             }
 
-            await Task.Delay(
-                TimeSpan.FromSeconds(_options.Value.IdentificationIntervalSeconds), 
-                stoppingToken);
+            // As built, there is no fixed interval here: a cycle that captured audio starts the next
+            // one at once (the capture length paces it), an idle cycle waits IdlePollIntervalMs, and
+            // SongRec failures back off. The IdentificationIntervalSeconds this sketch once used was
+            // never honoured by the real loop and was removed (AUD-36).
         }
     }
 
@@ -1150,7 +1148,6 @@ Add the following configuration section to appsettings.json:
   "Fingerprinting": {
     "Enabled": true,
     "SampleDurationSeconds": 15,
-    "IdentificationIntervalSeconds": 30,
     "MinimumConfidenceThreshold": 0.5,
     "DuplicateSuppressionMinutes": 5,
     "DatabasePath": "./data/fingerprints.db",

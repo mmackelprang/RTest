@@ -434,7 +434,6 @@ Integration tests use a dedicated configuration file:
   },
   "Fingerprinting": {
     "Enabled": true,
-    "IdentificationIntervalSeconds": 30,
     "SampleDurationSeconds": 10
   },
   "Logging": {

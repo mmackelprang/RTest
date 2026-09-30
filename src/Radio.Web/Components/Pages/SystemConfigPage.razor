@@ -735,10 +735,6 @@
                 <small>Audio sample length for fingerprinting</small>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="4">
-                <RadzenNumeric TValue="int" @bind-Value="_fingerprintingConfig.IdentificationIntervalSeconds" Min="10" Max="300" Placeholder="Identification Interval (s)" Style="width:100%" />
-                <small>Time between identification attempts</small>
-              </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="4">
                 <RadzenNumeric TValue="double" @bind-Value="_fingerprintingConfig.MinimumConfidenceThreshold" Min="(decimal)0.0" Max="(decimal)1.0" Step="(decimal)0.05" Placeholder="Min Confidence" Style="width:100%" />
                 <small>0.0 - 1.0 confidence threshold</small>
               </RadzenColumn>

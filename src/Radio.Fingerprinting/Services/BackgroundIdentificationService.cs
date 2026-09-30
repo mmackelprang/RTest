@@ -185,9 +185,9 @@ public class BackgroundIdentificationService : BackgroundService
     }
 
     _logger.LogInformation(
-      "Background identification service started (interval: {Interval}s, sample duration: {Duration}s)",
-      _options.IdentificationIntervalSeconds,
-      _options.SampleDurationSeconds);
+      "Background identification service started (sample duration: {Duration}s, idle poll: {IdlePollMs}ms)",
+      _options.SampleDurationSeconds,
+      Math.Max(100, _options.IdlePollIntervalMs));
 
     // Initial delay to let the audio engine initialize
     await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);

@@ -345,7 +345,6 @@ Audio fingerprinting identifies songs playing on Radio or Vinyl sources using Ac
   "Fingerprinting": {
     "Enabled": true,
     "SampleDurationSeconds": 15,
-    "IdentificationIntervalSeconds": 30,
     "MinimumConfidenceThreshold": 0.5,
     "DuplicateSuppressionMinutes": 5,
     "DatabasePath": "./data/fingerprints/fingerprints.db",
@@ -857,7 +856,6 @@ When the file sink is configured:
 |----------|------|---------|-------------|
 | `Enabled` | `bool` | `true` | Enable or disable automatic fingerprinting |
 | `SampleDurationSeconds` | `int` | `15` | Duration of audio to capture for fingerprinting (seconds) |
-| `IdentificationIntervalSeconds` | `int` | `15` | Interval between identification attempts (seconds) |
 | `MinimumConfidenceThreshold` | `double` | `0.5` | Minimum confidence threshold for accepting a match (0.0 to 1.0) |
 | `DuplicateSuppressionMinutes` | `int` | `5` | Minutes to suppress duplicate identifications of the same track |
 | `HighConfidenceDuplicateSuppressionMinutes` | `int` | `30` | Minutes to suppress duplicates for high-confidence matches (score > 0.9) |

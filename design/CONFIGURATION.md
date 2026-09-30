@@ -958,7 +958,6 @@ The System Configuration page (`/system` > Configuration tab) exposes all major 
 |----------|------|---------|-------------|
 | `Enabled` | bool | true | Enable audio fingerprinting |
 | `SampleDurationSeconds` | int | 15 | Audio sample length for fingerprinting |
-| `IdentificationIntervalSeconds` | int | 30 | Time between identification attempts |
 | `MinimumConfidenceThreshold` | double | 0.5 | Minimum match confidence (0.0-1.0) |
 | `DuplicateSuppressionMinutes` | int | 5 | Ignore re-identification within this window |
 | `FpcalcPath` | string | "" | Path to fpcalc binary (blank = auto-detect) |
