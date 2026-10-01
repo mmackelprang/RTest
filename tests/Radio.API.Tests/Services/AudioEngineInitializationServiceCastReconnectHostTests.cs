@@ -196,6 +196,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     // connect replaces ours while the reconnect is checking the receiver; the reconnect then
     // stands down and must leave the user's connection standing.
     using var listener = StartListener();
+    _engine.AttachOutputCoordination(_castOutput, null, null); // so a tear-down would reach it
     var service = CreateService();
     var users = Device(Port(listener)) with { FriendlyName = "Office speaker (user)" };
     service.ReceiverApplicationsReadOverride = async (cast, ct) =>
@@ -216,6 +217,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   public async Task TearDown_WithNothingOfOursPublished_LeavesAUsersConnectionAlone()
   {
     using var listener = StartListener();
+    _engine.AttachOutputCoordination(_castOutput, null, null); // so a tear-down would reach it
     var host = CreateService().CreateProductionCastReconnectHost();
     await _castOutput.InitializeAsync();
     var users = Device(Port(listener));
