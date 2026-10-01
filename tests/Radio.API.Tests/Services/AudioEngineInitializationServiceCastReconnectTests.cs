@@ -279,8 +279,12 @@ public class AudioEngineInitializationServiceCastReconnectTests
 
     await service.CancelCastReconnectAsync().WaitAsync(HangGuard);
 
-    Assert.True(service.CastReconnectTask.IsCompleted);
-    Assert.Equal(CastReconnectOutcome.Cancelled, await service.CastReconnectTask);
+    // Awaited under the hang guard, not asserted IsCompleted: CancelCastReconnectAsync waits at
+    // most the REAL 3 s CastReconnectCancelBound, so on a starved runner the watcher's exit could
+    // land after it returns. That timing dependency could only fail this test, never pass a broken
+    // cancel — a watcher that ignored the cancel stays parked on the fake clock (never advanced
+    // here) and this wait times out.
+    Assert.Equal(CastReconnectOutcome.Cancelled, await service.CastReconnectTask.WaitAsync(HangGuard));
     Assert.Equal(0, _host.Probes);
   }
 
