@@ -40,6 +40,31 @@ silence.
 Options 2-4 change the cabinet's hardware. That is the owner's call. Option 1 can be built on its own,
 and is worth doing whatever is decided about the others.
 
+## 2026-10-01 — option 1's UI is designed and ready to build once this is decided
+
+The Designer's preset-bar spec
+([`design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md`](../design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md)
+§6, §7, and its PR 4 in §10) recommends option 1 as **"shown disabled with the reason"**:
+
+- **Band pill:** dimmed to 0.4 opacity (the project's disabled convention), with the range sub-label
+  replaced by **`UNAVAILABLE`**.
+- **Tap:** does **not** switch band; it shows a toast with the reason the BAND view already shows (the
+  band map's `UnavailableReason`, rendered at `VisualizerPanel.razor:153-155`; the spec's example is
+  *"The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit."*).
+- **AM/SW preset cards** in the new bar (`UI-20`): dimmed the same way, meta `… · unavailable`, tap shows
+  the same toast.
+- **Hiding is rejected** (options 2-4 would bring the bands back, and hiding orphans AM/SW presets);
+  **keep-as-is is rejected** (it tunes into silence without saying why).
+
+⛔ **The owner has NOT decided this.** It was the spec's §9 Q4 and was left open on 2026-10-01. No row was
+minted for the UI; it belongs to this row once decided. `UI-20` deliberately leaves AM and SW behaving
+exactly as today, just in one row.
+
+⚠ **Data gap for the Planner:** the band list the panel reads (`RadioBandModel`, projected by
+`RadioBandService.cs:35-48` from `BandPresets`) has **no "receivable" flag**. Only the band-map data knows
+(`Mappable`, `UnavailableReason`, from `AUD-91`). Where the band button gets that from — the band list,
+the band-map endpoint, or a shared source both read — is a Planner / Architect question, not a design one.
+
 ## Verification
 
 For option 1: the panel shows AM/SW as unavailable on this tuner, and nothing tunes into silence
@@ -50,3 +75,4 @@ view's AM map shows it as a peak (that view would then need an AM channel plan, 
 
 - `AUD-91` — the band-aware sweep and BAND view, whose feasibility pass measured this.
 - `AUD-76` — the FM band map (*"AM/shortwave: no direct-sampling support, so FM is the target"*).
+- [`UI-20`](UI-20.md) — the preset bar and one-row bands; leaves AM/SW as they are until this is decided.
