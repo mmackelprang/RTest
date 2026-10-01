@@ -927,41 +927,18 @@
 
     try
     {
-      // Switch to the Cast output first
-      var outputSuccess = await DevicesApi.SetOutputDeviceAsync(outputId);
-      if (!outputSuccess)
-      {
-        Logger.LogWarning("Failed to switch to Cast output");
-        return;
-      }
+      // AUD-85: one request only. The connect endpoint itself promotes Cast through the
+      // output gate, so there is no preceding SetOutputDeviceAsync("google-cast") — that
+      // would start the API's own auto-connect and race this one.
+      var outcome = await CastDefaultPick.ConnectAsync(DevicesApi, _defaultCastDevice!, Logger);
 
-      // Try to connect to the default Cast device
-      Logger.LogInformation("Auto-connecting to default Cast device: {DeviceName}", _defaultCastDevice!.Name);
-      var connectSuccess = await DevicesApi.ConnectToCastDeviceAsync(_defaultCastDevice);
-
-      if (connectSuccess)
+      if (outcome == CastDefaultPickOutcome.Failed)
       {
-        Logger.LogInformation("Auto-connected to Cast device: {DeviceName}", _defaultCastDevice.Name);
-      }
-      else
-      {
-        // Device not reachable — clear default and open dialog for manual selection
-        Logger.LogWarning("Failed to auto-connect to {DeviceName}, clearing default", _defaultCastDevice.Name);
-        await DevicesApi.ClearDefaultCastDeviceAsync();
-        _defaultCastDevice = null;
-        UpdateCastOutputDisplayName();
+        // AUD-85: a failed request is not evidence the device is gone, so the saved
+        // default is kept. Open the dropdown so the user can pick a device, as the
+        // no-default path does.
         _showCastDropdown = true;
-        StateHasChanged();
       }
-    }
-    catch (Exception ex)
-    {
-      Logger.LogError(ex, "Error auto-connecting to Cast device");
-      await DevicesApi.ClearDefaultCastDeviceAsync();
-      _defaultCastDevice = null;
-      UpdateCastOutputDisplayName();
-      _showCastDropdown = true;
-      StateHasChanged();
     }
     finally
     {
