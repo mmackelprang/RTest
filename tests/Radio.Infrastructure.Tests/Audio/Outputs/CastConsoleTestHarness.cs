@@ -271,13 +271,19 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
     return true;
   }
 
-  /// <summary>Raises a receiver status the way SharpCaster does.</summary>
-  public void RaiseStatus(double level, bool muted = false)
+  /// <summary>
+  /// Raises a receiver status the way SharpCaster does — with the speaker's volume step when
+  /// <paramref name="stepInterval"/> is given (a real speaker reports it in every status).
+  /// </summary>
+  public void RaiseStatus(double level, bool muted = false, double? stepInterval = null)
   {
     var handler = typeof(GoogleCastOutput).GetMethod(
       "OnReceiverStatusChanged", BindingFlags.NonPublic | BindingFlags.Instance);
     Assert.NotNull(handler);
-    var status = new ChromecastStatus { Volume = new() { Level = level, Muted = muted } };
+    var status = new ChromecastStatus
+    {
+      Volume = new() { Level = level, Muted = muted, StepInterval = stepInterval }
+    };
     handler!.Invoke(Output, new object?[] { null, status });
   }
 

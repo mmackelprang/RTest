@@ -80,14 +80,19 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.32f, external.Volume, 3);
   }
 
-  // Hostile review F3. A speaker that quantises to 1/15 (≈ 0.0667) reports our 0.437 as 0.4667 —
-  // 0.03 from it, and 0.033 from the 0.50 pushed after it. Neither is within 0.01 of a single
-  // push; both lie between our pushes, which is what now makes them echoes.
+  // Hostile review F3, corrected by re-review M2. A speaker that quantises to 1/15 (≈ 0.0667)
+  // reports our 0.437 as 0.4667 and our 0.50 as 0.5333 — and says so: StepInterval 1/15 in every
+  // status. 0.4667 lies between our pushes; 0.5333, the final level of the move, is an extreme of
+  // the range and needs the step-derived tolerance (an earlier revision raised a bare 0.50 here,
+  // which a 1/15 speaker never reports).
+  private const double FifteenStep = 1.0 / 15.0;
+
   [Fact]
   public async Task ACoarselyQuantisedEcho_BetweenRecentPushes_IsAbsorbed_NotWrittenBack()
   {
     await using var h = new CastConsoleTestHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
+    h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep); // 0.40: no change; the step is known
     var target = h.Target();
     var rememberedBefore = h.Store.Remembered.Count;
 
@@ -95,15 +100,127 @@ public class GoogleCastOutputConsoleVolumeTests
     await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
 
     h.Time.Advance(TimeSpan.FromSeconds(1));
-    h.RaiseStatus(7.0 / 15.0); // 0.4667: the device's rounding of 0.437
-    h.RaiseStatus(0.50);       // the second push, confirmed
-    h.RaiseStatus(0.44);
-    h.RaiseStatus(0.43);
+    h.RaiseStatus(7 * FifteenStep, stepInterval: FifteenStep); // 0.4667: the device's rounding of 0.437
+    h.RaiseStatus(8 * FifteenStep, stepInterval: FifteenStep); // 0.5333: its rounding of 0.50
 
     Assert.Empty(h.External);
     Assert.DoesNotContain(
       h.Store.Remembered.Skip(rememberedBefore),
-      r => Math.Abs(r.Volume - 7f / 15f) < 0.001f);
+      r => Math.Abs(r.Volume - 7f / 15f) < 0.001f || Math.Abs(r.Volume - 8f / 15f) < 0.001f);
+  }
+
+  // Re-review M2 (a): one detent — a single push, and the only echo the speaker sends is its
+  // quantised version of it, 0.033 away. Without the step-derived tolerance this was an EXTERNAL
+  // change on every single-detent move: master rewritten, AUD-80 remembering 0.5333.
+  [Fact]
+  public async Task ASingleDetentPush_OnAOneFifteenthStepSpeaker_HasItsQuantisedEchoAbsorbed()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
+    var target = h.Target();
+    var rememberedBefore = h.Store.Remembered.Count;
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+    h.RaiseStatus(8 * FifteenStep, stepInterval: FifteenStep);
+
+    Assert.Empty(h.External);
+    Assert.Equal(0.50f, h.Output.KnownSpeakerLevel, 3);
+    Assert.DoesNotContain(
+      h.Store.Remembered.Skip(rememberedBefore),
+      r => Math.Abs(r.Volume - 8f / 15f) < 0.001f);
+  }
+
+  // Re-review M2 (b): the wider tolerance is half a step, not a licence. A change made on the
+  // speaker a step or more beyond our pushes' echoes is still reported (AUD-5).
+  [Fact]
+  public async Task OnAOneFifteenthStepSpeaker_AChangeMoreThanAStepOutsideTheRange_IsStillReported()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
+    var target = h.Target();
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.437f, target.Generation);
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+    h.Time.Advance(TimeSpan.FromSeconds(1)); // still inside the echo window
+
+    h.RaiseStatus(9 * FifteenStep, stepInterval: FifteenStep); // 0.60: one step past the 0.5333 echo
+    Assert.Equal(9f / 15f, Assert.Single(h.External).Volume, 3);
+
+    h.RaiseStatus(5 * FifteenStep, stepInterval: FifteenStep); // 0.3333: below the range
+    Assert.Equal(2, h.External.Count);
+    Assert.Equal(5f / 15f, h.External[^1].Volume, 3);
+  }
+
+  // Re-review M2 (c): a speaker that reports no step (or a nonsense one) keeps the 0.01 tolerance.
+  // Its coarse echo of a single push is therefore still read as external — the known limit.
+  [Theory]
+  [InlineData(null)]
+  [InlineData(0.5)] // above MaxSpeakerStepInterval: ignored
+  public async Task WithNoUsableStepReported_TheEchoToleranceFallsBackTo001(double? stepInterval)
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    h.RaiseStatus(0.40, stepInterval: stepInterval);
+    var target = h.Target();
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+    h.RaiseStatus(0.505, stepInterval: stepInterval); // within 0.01: an echo
+    Assert.Empty(h.External);
+
+    h.RaiseStatus(8 * FifteenStep, stepInterval: stepInterval); // 0.033 away: external
+    Assert.Equal(8f / 15f, Assert.Single(h.External).Volume, 3);
+  }
+
+  // Re-review M2: the step belongs to the speaker, so a new connection forgets it.
+  [Fact]
+  public async Task TheSpeakerStep_IsForgotten_OnANewConnection()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
+
+    await h.Output.DisconnectAsync();
+    await h.ConnectAsync("cast-b", reportedLevel: 0.40f); // reports no step
+    var target = h.Target();
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+    h.RaiseStatus(8 * FifteenStep);
+    Assert.Equal(8f / 15f, Assert.Single(h.External).Volume, 3);
+  }
+
+  // Re-review L1. A console push that timed out stays in flight (and in the echo memory) until
+  // SharpCaster gives up, up to 35 s. It used to stretch the echo RANGE for all that time: with a
+  // later push at 0.70, a genuine speaker change to 0.50 lay "between our pushes" and was absorbed.
+  // A push in flight longer than EchoWindow now matches only its own echo, by point tolerance.
+  [Fact]
+  public async Task AStaleInFlightPush_DoesNotWidenTheEchoRange_ButStillMatchesItsOwnEcho()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+
+    var timeoutArmed = h.Time.WatchForTimer(TimeSpan.FromSeconds(5)); // ConsoleCommandTimeout
+    var held = CastConsoleTestHarness.NewTcs();
+    h.VolumeGate = held;
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;
+    await timeoutArmed.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+    h.Time.Advance(TimeSpan.FromSeconds(6)); // the push times out; its send stays in flight
+    Assert.True((await burst).Failed);
+
+    h.VolumeGate = null;
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.70f, target.Generation);
+
+    h.RaiseStatus(0.50); // changed on the speaker: between the stale 0.30 and the fresh 0.70
+    Assert.Equal(0.50f, Assert.Single(h.External).Volume, 3);
+
+    h.RaiseStatus(0.30); // the stale push's own late confirmation: still an echo
+    h.RaiseStatus(0.70); // the fresh push's confirmation
+    Assert.Single(h.External);
+
+    held.SetResult();
   }
 
   [Fact]
