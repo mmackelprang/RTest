@@ -120,6 +120,110 @@ public static class ChannelPowerMeter
   }
 
   /// <summary>
+  /// Returns one level per channel, in dB, from a single set of FFT frames of
+  /// <paramref name="samples"/> (AUD-91: several narrowband channels per capture).
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// Channel <c>c</c> is the mean power of the bins whose frequency <c>f</c> satisfies
+  /// <c>|f − offsetsHz[c]| &lt;= halfWindowHz</c> and <c>|f| &gt; dcExcludeHz</c>, over all
+  /// frames. Bins span <c>−sampleRate/2</c> to just under <c>+sampleRate/2</c>, so a window that
+  /// reaches past either edge is measured over the bins inside it only.
+  /// </para>
+  /// <para>
+  /// Bins are visited in the same order, and their powers summed with the same arithmetic, as
+  /// <see cref="MeasureDbfs"/>. For a single offset of 0 the result is therefore identical to
+  /// <c>MeasureDbfs(samples, sampleRate, halfWindowHz, dcExcludeHz)</c>.
+  /// </para>
+  /// </remarks>
+  /// <param name="samples">IQ samples captured at <paramref name="sampleRate"/>.</param>
+  /// <param name="sampleRate">Sample rate in Hz.</param>
+  /// <param name="offsetsHz">Each channel's centre as an offset from the tuned centre, in Hz.</param>
+  /// <param name="halfWindowHz">Half-width of each channel's measured window, in Hz.</param>
+  /// <param name="dcExcludeHz">Bins with <c>|f| &lt;= dcExcludeHz</c> are not measured for any channel.</param>
+  /// <returns>
+  /// One level per entry of <paramref name="offsetsHz"/>, each <see cref="FloorDb"/> when there is
+  /// no full frame, no bin in that channel's window, or zero power in it.
+  /// </returns>
+  public static float[] MeasureChannelsDbfs(
+    ReadOnlySpan<IqSample> samples,
+    int sampleRate,
+    IReadOnlyList<long> offsetsHz,
+    int halfWindowHz,
+    int dcExcludeHz)
+  {
+    if (sampleRate <= 0)
+    {
+      throw new ArgumentOutOfRangeException(nameof(sampleRate), "Sample rate must be positive.");
+    }
+    ArgumentNullException.ThrowIfNull(offsetsHz);
+
+    int channelCount = offsetsHz.Count;
+    float[] levels = new float[channelCount];
+    Array.Fill(levels, FloorDb);
+
+    int frames = samples.Length / FftSize;
+    if (frames == 0 || channelCount == 0)
+    {
+      return levels;
+    }
+
+    double binWidthHz = (double)sampleRate / FftSize;
+    float[] re = new float[FftSize];
+    float[] im = new float[FftSize];
+    double[] powerSums = new double[channelCount];
+    long[] binCounts = new long[channelCount];
+
+    for (int frame = 0; frame < frames; frame++)
+    {
+      ReadOnlySpan<IqSample> block = samples.Slice(frame * FftSize, FftSize);
+
+      for (int n = 0; n < FftSize; n++)
+      {
+        int target = BitReverse[n];
+        float w = Window[n];
+        re[target] = block[n].I * w;
+        im[target] = block[n].Q * w;
+      }
+
+      Transform(re, im);
+
+      for (int k = 0; k < FftSize; k++)
+      {
+        int signedBin = k < FftSize / 2 ? k : k - FftSize;
+        double frequency = signedBin * binWidthHz;
+        if (Math.Abs(frequency) <= dcExcludeHz)
+        {
+          continue;
+        }
+
+        double power = ((double)re[k] * re[k] + (double)im[k] * im[k]) / WindowPowerNorm;
+        for (int c = 0; c < channelCount; c++)
+        {
+          if (Math.Abs(frequency - offsetsHz[c]) > halfWindowHz)
+          {
+            continue;
+          }
+          powerSums[c] += power;
+          binCounts[c]++;
+        }
+      }
+    }
+
+    for (int c = 0; c < channelCount; c++)
+    {
+      if (binCounts[c] == 0 || powerSums[c] <= 0.0)
+      {
+        continue;
+      }
+      double db = 10.0 * Math.Log10(powerSums[c] / binCounts[c]);
+      levels[c] = db < FloorDb ? FloorDb : (float)db;
+    }
+
+    return levels;
+  }
+
+  /// <summary>
   /// In-place iterative radix-2 decimation-in-time FFT. Inputs must already
   /// be in bit-reversed order.
   /// </summary>
