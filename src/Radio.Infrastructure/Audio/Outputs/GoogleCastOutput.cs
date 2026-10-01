@@ -3596,6 +3596,15 @@ public class GoogleCastOutput : AudioOutputBase
       // first, so the speaker ends at the console's level either way.
       if (next.Muted == _lastSetMute && (next.Muted || !HasHeldConsoleVolume()))
       {
+        if (!next.Muted)
+        {
+          // Hostile review L3: nothing to send, but the speaker is unmuted under an unmuted console,
+          // so nothing of ours is left to release either — clear the mark and the device record, as
+          // an acknowledged unmute does. Left behind, the record would let a later connection that
+          // finds the speaker muted by its owner re-arm the mark (F11) and unmute the owner's mute.
+          await ReleaseConsoleMuteRecordAsync(next.Generation).ConfigureAwait(false);
+        }
+
         continue;
       }
 
@@ -3682,6 +3691,21 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     return (applied, appliedLevelBeforeUnmute);
+  }
+
+  /// <summary>
+  /// Clears the "muted by console" mark of connection <paramref name="generation"/> and, while it is
+  /// still the published connection, forgets the console-mute record of its device (hostile review L3).
+  /// Sends nothing.
+  /// </summary>
+  private async Task ReleaseConsoleMuteRecordAsync(int generation)
+  {
+    Interlocked.CompareExchange(ref _consoleMutedGeneration, -1, generation);
+    var connection = await SnapshotPublishedConnectionAsync().ConfigureAwait(false);
+    if (connection != null && connection.Generation == generation)
+    {
+      ForgetConsoleMute(connection.Device.Id);
+    }
   }
 
   private bool HasHeldConsoleVolume()

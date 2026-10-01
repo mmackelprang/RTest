@@ -919,6 +919,43 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Empty(h.External);
   }
 
+  // Hostile review L3. The set-up of the test above leaves the speaker unmuted (by our level) yet
+  // still marked, and recorded, as muted for the console: the re-assert was dropped. The console's
+  // unmute then has nothing to send ("already unmuted") — and used to leave the mark and the record
+  // behind, so a later connection finding the speaker muted by its owner would re-arm the mark
+  // (F11) and the activation reconcile would unmute the owner's mute.
+  [Fact]
+  public async Task AConsoleUnmuteSkippedAsAlreadyUnmuted_StillReleasesTheConsoleMute()
+  {
+    await using var h = NewHarness();
+    var armed = false;
+    var reads = 0;
+    h.Output.AttachConsoleFollower(() => armed && Interlocked.Increment(ref reads) == 1, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.LevelCommandUnmutes = false; // the device's reply is raised by hand below (see ConsoleMutedAfterALevelPushAsync)
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    armed = true;
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // the premise: still marked, though unmuted
+    Assert.False(h.Output.KnownSpeakerMuted);
+    h.ClearCommands();
+
+    await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation);
+
+    Assert.Empty(h.Commands);                       // nothing to send: already unmuted
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+
+    await h.Output.DisconnectAsync();
+    Assert.Empty(h.Commands);                       // nothing of ours to release at the teardown
+
+    // The record is forgotten too: the owner mutes it later, and a reconnect does not claim it.
+    await h.ConnectAsync(reportedLevel: 0.45f, reportedMuted: true, streaming: false);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
   // Hostile review M3. The console mute drain has one pending slot, latest wins. A re-assert queued
   // while a console UNMUTE was waiting there used to replace it; the re-assert is then dropped (the
   // console is unmuted by its turn), so the console's unmute — and the held level it carries — was
