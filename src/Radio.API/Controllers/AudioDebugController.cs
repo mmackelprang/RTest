@@ -11,9 +11,12 @@ namespace Radio.API.Controllers;
 /// <para>
 /// When the underlying buffer becomes available, replace the stub with
 /// a real WAV serializer: grab the last 5 s from the tap, prefix a WAV
-/// header, return as <c>application/octet-stream</c>. The DevTray opens
-/// the URL in a new tab, so any 200/file download will trigger the
-/// browser's save-as dialog.
+/// header, return as <c>application/octet-stream</c> with a
+/// <c>Content-Disposition</c> file name. Since UI-26 the DevTray does NOT open
+/// this URL in the browser (on the kiosk that stranded the panel on this
+/// endpoint's JSON): Radio.Web's <c>SystemApiService.DumpAudioFrameAsync</c>
+/// fetches it server-side, shows a non-2xx response's <c>error</c> field in
+/// the tray card, and hands a 2xx body to the page as a blob download.
 /// </para>
 /// <para>
 /// <b>Authorization:</b> no auth policy exists in this project today
