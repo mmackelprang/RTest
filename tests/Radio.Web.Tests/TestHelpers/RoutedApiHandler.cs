@@ -24,7 +24,11 @@ public sealed class RoutedApiHandler : HttpMessageHandler
   private readonly List<RecordedRequest> _requests = [];
 
   /// <summary>One request as the handler saw it.</summary>
-  public sealed record RecordedRequest(HttpMethod Method, string Path, string? Body);
+  public sealed record RecordedRequest(HttpMethod Method, string Path, string? Body)
+  {
+    /// <summary>The query string, with its leading <c>?</c>, or empty. Routing ignores it.</summary>
+    public string Query { get; init; } = string.Empty;
+  }
 
   /// <summary>Every request received so far, in arrival order.</summary>
   public IReadOnlyList<RecordedRequest> Requests
@@ -67,7 +71,7 @@ public sealed class RoutedApiHandler : HttpMessageHandler
     (HttpStatusCode Status, string? Body) answer;
     lock (_sync)
     {
-      _requests.Add(new RecordedRequest(request.Method, path, body));
+      _requests.Add(new RecordedRequest(request.Method, path, body) { Query = request.RequestUri?.Query ?? string.Empty });
       if (!_routes.TryGetValue((request.Method, path), out answer))
       {
         answer = (HttpStatusCode.NotFound, null);

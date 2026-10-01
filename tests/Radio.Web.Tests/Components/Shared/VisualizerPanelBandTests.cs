@@ -32,12 +32,14 @@ public class VisualizerPanelBandTests : TestContext
 {
   private readonly FakeTimeProvider _clock = new();
   private readonly RoutedApiHandler _api = new();
+  private readonly BunitJSModuleInterop _module;
 
   public VisualizerPanelBandTests()
   {
     Services.AddHermeticTestRig();
     JSInterop.Mode = JSRuntimeMode.Loose;
     BunitJSModuleInterop module = JSInterop.SetupModule("./js/visualizer.js");
+    _module = module;
     module.Mode = JSRuntimeMode.Loose;
     module.Setup<bool>("visualizer.init", _ => true).SetResult(true);
 
@@ -406,5 +408,211 @@ public class VisualizerPanelBandTests : TestContext
 
     IndexOf(HttpMethod.Post, "/api/radio/frequency").Should().Be(-1);
     cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("Could not switch to the radio"));
+  }
+
+  // ── per band (AUD-91) ────────────────────────────────────────────────────
+
+  /// <summary>
+  /// A map response for a non-FM band, with the axis fields the API sends for it
+  /// (BandMapController.WithAxis). <paramref name="channels"/> null: no scan yet.
+  /// </summary>
+  private static object BandMap(
+    string band, long displayMin, long displayMax, long first, long last, long spacing,
+    IEnumerable<object>? channels = null, bool mappable = true, string? reason = null, object? sweep = null) => new
+  {
+    band,
+    mappable,
+    unavailableReason = reason,
+    displayMinHz = displayMin,
+    displayMaxHz = displayMax,
+    firstChannelHz = first,
+    lastChannelHz = last,
+    channelSpacingHz = spacing,
+    scannedAtUtc = channels == null ? (DateTimeOffset?)null : DateTimeOffset.UtcNow.AddSeconds(-180),
+    ageSeconds = channels == null ? (double?)null : 180.0,
+    channels = channels ?? Array.Empty<object>(),
+    sweep = sweep ?? Sweep(),
+  };
+
+  private static object WbMap() => BandMap("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000,
+    Enumerable.Range(0, 7).Select(i => (object)new { frequencyHz = 162_400_000L + i * 25_000L, levelDbfs = i == 3 ? -30f : -60f }));
+
+  /// <summary>AIR channels 117.900–118.200 MHz at -60 dB, with a station at 118.050.</summary>
+  private static object AirMap()
+  {
+    var channels = new List<object>();
+    for (long hz = 117_900_000; hz <= 118_200_000; hz += 25_000)
+    {
+      channels.Add(new { frequencyHz = hz, levelDbfs = hz == 118_050_000 ? -30f : -60f });
+    }
+
+    return BandMap("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000, channels);
+  }
+
+  private const string AmReason =
+    "The AM Broadcast band (530–1,710 kHz) is below this tuner's 24 MHz lower limit and cannot be scanned.";
+
+  private static object AmMap() =>
+    BandMap("AM", 530_000, 1_710_000, 530_000, 1_710_000, 10_000, mappable: false, reason: AmReason);
+
+  private static RadioStateDto HubState(string band, double frequencyHz) => new(
+    Frequency: frequencyHz, Band: band, Step: 25_000, SignalStrength: 50, IsScanning: false, ScanDirection: null,
+    ScanStopThreshold: -36.0, Gain: 0, AutoGain: false, Equalizer: "Normal", DeviceVolume: 50);
+
+  private Task RaiseRadioStateAsync(IRenderedComponent<VisualizerPanel> cut, RadioStateDto dto) =>
+    cut.InvokeAsync(() => HubEventFire.FireAsync(
+      Services.GetRequiredService<AudioStateHubService>(), nameof(AudioStateHubService.RadioStateChanged), dto));
+
+  private string[] AxisLabels(IRenderedComponent<VisualizerPanel> cut) =>
+    cut.FindAll(".visualizer-axis.is-band span").Select(s => s.TextContent).ToArray();
+
+  /// <summary>The model of the last <c>visualizer.drawBandMap</c> call, as the JSON the browser receives.</summary>
+  private JsonElement LastDrawModel()
+  {
+    JSRuntimeInvocation draw = _module.Invocations["visualizer.drawBandMap"].Last();
+    return JsonSerializer.SerializeToElement(draw.Arguments[1], JsonSerializerOptions.Web);
+  }
+
+  [Fact]
+  public void FmMap_DrawModel_KeepsAud76sGridlinesAndBarWidth()
+  {
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => _module.Invocations["visualizer.drawBandMap"].Should().NotBeEmpty());
+    JsonElement model = LastDrawModel();
+    model.GetProperty("channelsAcross").GetDouble().Should().Be(102.5, "AUD-76 drew bars width / 102.5 * 0.5 wide");
+    model.GetProperty("grid").EnumerateArray().Select(g => g.GetDouble()).Should().Equal(
+      new[] { 88.0, 92, 96, 100, 104, 108 }.Select(mhz => (mhz - 87.5) / 20.5),
+      (a, b) => Math.Abs(a - b) < 1e-12);
+    cut.Find(".band-status-band").TextContent.Should().Be("FM");
+    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the FM band");
+  }
+
+  [Fact]
+  public void WbMap_DrawsWbTicks_AndNamesTheBand()
+  {
+    GetJson("/api/radio/bandmap", WbMap());
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("162.40", "162.45", "162.50", "162.55"));
+    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the WB band");
+    cut.Find(".visualizer-canvas").GetAttribute("aria-label").Should().Be("WB band map. Tap a station to tune.");
+    cut.Find(".band-status-band").TextContent.Should().Be("WB");
+    cut.Find(".band-status-age").TextContent.Should().Be("scanned 3 min ago");
+    LastDrawModel().GetProperty("grid").GetArrayLength().Should().Be(4);
+  }
+
+  [Fact]
+  public async Task AmMap_DisablesScan_ShowsTheReason_AndATapTunesNothing()
+  {
+    GetJson("/api/radio/bandmap", AmMap());
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-empty-title").TextContent.Should().Be("AM can't be scanned on this radio"));
+    cut.Find(".band-empty-sub").TextContent.Should().Be(AmReason);
+    cut.Markup.Should().NotContain("No scan yet");
+    cut.Find(".band-scan-btn").HasAttribute("disabled").Should().BeTrue();
+    AxisLabels(cut).Should().Equal("600", "800", "1000", "1200", "1400", "1600");
+
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(0.5));
+
+    IndexOf(HttpMethod.Post, "/api/radio/frequency").Should().Be(-1, "AM cannot be mapped, so there is nothing to tap");
+    IndexOf(HttpMethod.Post, "/api/sources").Should().Be(-1);
+  }
+
+  [Fact]
+  public async Task AirMap_Tap_TunesWithTheBand()
+  {
+    GetJson("/api/radio/bandmap", AirMap());
+    GetJson("/api/radio/state", FmState(118_000_000, band: "AIR"));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+
+    // 40 kHz below the station: inside AIR's ±50 kHz snap, so the tap lands on it.
+    BandAxis air = new("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000);
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(air.HzToFraction(118_010_000)));
+
+    int tuneAt = IndexOf(HttpMethod.Post, "/api/radio/frequency");
+    tuneAt.Should().BeGreaterThanOrEqualTo(0);
+    JsonElement body = JsonDocument.Parse(_api.Requests[tuneAt].Body!).RootElement;
+    body.GetProperty("frequency").GetDouble().Should().Be(118_050_000);
+    body.GetProperty("band").GetString().Should().Be("AIR");
+    cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("Tuning 118.050 AIR"));
+  }
+
+  [Fact]
+  public async Task FmMap_Tap_SendsTheAud76BodyWithNoBand()
+  {
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+    GetJson("/api/radio/state", FmState(101_100_000));
+    var cut = RenderBand();
+
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(FmBandMath.HzToFraction(99_200_000)));
+
+    int tuneAt = IndexOf(HttpMethod.Post, "/api/radio/frequency");
+    tuneAt.Should().BeGreaterThanOrEqualTo(0);
+    _api.Requests[tuneAt].Body.Should().Be("{\"frequency\":99500000}");
+  }
+
+  [Fact]
+  public void Scan_PostsTheShownBand()
+  {
+    GetJson("/api/radio/bandmap", WbMap());
+    _api.Route(HttpMethod.Post, "/api/radio/bandmap/scan", HttpStatusCode.Accepted, "{}");
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+
+    cut.Find(".band-scan-btn").Click();
+
+    cut.WaitForAssertion(() => IndexOf(HttpMethod.Post, "/api/radio/bandmap/scan").Should().BeGreaterThanOrEqualTo(0));
+    _api.Requests[IndexOf(HttpMethod.Post, "/api/radio/bandmap/scan")].Query.Should().Be("?band=WB");
+  }
+
+  [Fact]
+  public async Task HubBandChange_ReReadsTheMapAtOnce_ButOncePerChange()
+  {
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("88", "92", "96", "100", "104", "108"));
+    int readsBefore = MapReads();
+
+    // The owner picks AIR in the radio control panel; the API now answers for AIR.
+    GetJson("/api/radio/bandmap", AirMap());
+    await RaiseRadioStateAsync(cut, HubState("AIR", 118_000_000));
+
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135"));
+    MapReads().Should().Be(readsBefore + 1, "the band change re-reads the map without waiting for the timer");
+
+    // Telemetry ticks repeat the state; a new frequency in the same band moves only the marker.
+    await RaiseRadioStateAsync(cut, HubState("AIR", 118_000_000));
+    await RaiseRadioStateAsync(cut, HubState("AIR", 118_050_000));
+    MapReads().Should().Be(readsBefore + 1, "only a band change re-reads the map");
+  }
+
+  [Fact]
+  public async Task HubFrequencyChange_SameBand_MovesTheStationMarker()
+  {
+    GetJson("/api/radio/bandmap", AirMap());
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+    int readsBefore = MapReads();
+
+    await RaiseRadioStateAsync(cut, HubState("AIR", 122_500_000));
+
+    LastDrawModel().GetProperty("station").GetDouble().Should().Be(0.5);
+    MapReads().Should().Be(readsBefore);
+  }
+
+  [Fact]
+  public void SweepOfAnotherBand_NamesThatBand()
+  {
+    object sweep = new { isSweeping = true, band = "AIR", trigger = "request", path = "idle", progress = 0.4, estimatedSecondsRemaining = 12.0 };
+    GetJson("/api/radio/bandmap", BandMap("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000, sweep: sweep));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-status-scanning").TextContent.Should().Be("Scanning AIR… 12 s"));
+    cut.Find(".band-empty-title").TextContent.Should().Be("No scan yet", "the sweep running is not of the band shown");
   }
 }
