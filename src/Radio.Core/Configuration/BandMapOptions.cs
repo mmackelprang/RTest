@@ -1,7 +1,8 @@
 namespace Radio.Core.Configuration;
 
 /// <summary>
-/// Options for the FM band map sweep (AUD-76), bound from the <c>BandMap</c> section.
+/// Options for the band map sweeps (AUD-76; every mappable band since AUD-91), bound from the
+/// <c>BandMap</c> section.
 /// </summary>
 public sealed class BandMapOptions
 {
@@ -15,7 +16,8 @@ public sealed class BandMapOptions
   public int InitialDelaySeconds { get; set; } = 120;
 
   /// <summary>
-  /// Interval between timer evaluations, in minutes; a map older than this is due for a rescan.
+  /// Interval between timer evaluations, in minutes; a map of the radio's current band older than
+  /// this is due for a rescan.
   /// Default 60.
   /// </summary>
   public int RescanIntervalMinutes { get; set; } = 60;
