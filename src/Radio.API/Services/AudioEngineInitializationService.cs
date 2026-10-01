@@ -878,6 +878,17 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     /// inside it — its 250 ms post-launch delay — would set <c>Error</c> on a connection whose
     /// receiver app is already launched. A cancellation is decided after it returns (review M3).
     /// </summary>
+    /// <remarks>
+    /// What <see cref="CancellationToken.None"/> gives up: a user action that cancels the watcher
+    /// cannot interrupt the start, so a launch that outlasts <c>CancelCastReconnectAsync</c>'s
+    /// bound is still running when the user's teardown runs. That is covered by
+    /// <c>GoogleCastOutput.StartAsync</c>'s own generation guard (AUD-37, final review M-1): a start
+    /// whose connection was torn down or replaced meanwhile abandons itself before it starts the
+    /// DirectChannel send loop or sets <c>Streaming</c>, removes what it created, and returns with
+    /// <c>State</c> as the teardown left it — up to the narrow window that guard documents
+    /// (<c>StartIsStillCurrentAsync</c>). The ownership check after the start turns that into the
+    /// superseded outcome here.
+    /// </remarks>
     private async Task StartOwnConnectionAsync(
       GoogleCastOutput cast, ChromecastDeviceInfo ours, bool isDirectChannel, CancellationToken ct)
     {
@@ -892,6 +903,10 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       {
         await cast.StartAsync(automaticAttempt: true, CancellationToken.None).ConfigureAwait(false);
       }
+
+      // A start abandoned because our connection was taken over returns normally, not Streaming:
+      // report it as superseded (or cancelled), not as a start that failed.
+      ThrowUnlessStillOurs(cast, ct);
 
       if (cast.State != AudioOutputState.Streaming)
       {

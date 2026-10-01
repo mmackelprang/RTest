@@ -242,6 +242,22 @@ public class GoogleCastOutput : AudioOutputBase
   /// Null (and therefore free) in production.
   /// </summary>
   internal Func<Task<bool>>? CastStopApplicationOverrideForTests { get; set; }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the receiver-application launch inside
+  /// <see cref="StartAsync(bool, CancellationToken)"/> (AUD-37, final review M-1): returns the
+  /// launch status, or throws. Set by <c>GoogleCastOutputStartSupersededTests</c> and
+  /// <c>AudioEngineInitializationServiceCastReconnectHostTests</c>.
+  /// <b>Why the real path is unreachable:</b> no fake socket speaks the Cast protocol, so offline
+  /// the LAUNCH waits out SharpCaster's 30 s response timeout and the start never gets past it.
+  /// Awaiting inside the delegate is also how a test holds a start at the launch, where a
+  /// teardown can overtake it in production.
+  /// <b>NOT covered by this seam:</b> the device launching the application and SharpCaster's
+  /// status parsing. Everything after the launch — the mode branch, the start-time mute, the
+  /// DirectChannel registration and streaming, and the generation guard — is real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task<ChromecastStatus?>>? CastLaunchApplicationOverrideForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -1434,6 +1450,14 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
+    // AUD-37 (final review M-1): the connection this start is for. A teardown (DisconnectAsync,
+    // InitializeAsync, a handled loss, disposal) or a newer connect changes it, and the start
+    // then abandons itself at its next check instead of streaming on a connection nobody owns —
+    // see StartIsStillCurrentAsync for exactly where the checks are and what they leave open.
+    var startGeneration = Volatile.Read(ref _publishedGeneration);
+    var startDeviceName = ConnectedDevice?.FriendlyName;
+    DirectChannelStart? directStart = null;
+
     try
     {
       var startTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -1442,23 +1466,32 @@ public class GoogleCastOutput : AudioOutputBase
       if (_client != null)
       {
         // Launch the receiver application (default CC1AD845 or custom receiver)
-        var launchStatus = await _client.LaunchApplicationAsync(_options.ApplicationId);
+        var launchStatus = CastLaunchApplicationOverrideForTests != null
+          ? await CastLaunchApplicationOverrideForTests().ConfigureAwait(false)
+          : await _client.LaunchApplicationAsync(_options.ApplicationId);
         _logger.LogInformation("Cast: Receiver launched on {Device} ({LaunchMs}ms)",
           ConnectedDevice?.FriendlyName, startTimer.ElapsedMilliseconds);
 
         // Allow receiver to start initializing before sending commands
         await Task.Delay(250, cancellationToken);
 
+        // The launch is the long network wait; nothing of this start's own exists yet.
+        await ThrowIfStartSupersededAsync(startGeneration).ConfigureAwait(false);
+
         // Branch on streaming mode
         if (string.Equals(_options.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase))
         {
-          await StartDirectChannelAsync(launchStatus, cancellationToken);
+          directStart = await StartDirectChannelAsync(launchStatus, startGeneration, cancellationToken);
         }
         else
         {
           await StartHttpMp3Async(cancellationToken);
         }
       }
+
+      // Every mode's path, the no-client one included: never mark Streaming (nor enabled) a
+      // connection that was torn down or replaced while this start was on the network.
+      await ThrowIfStartSupersededAsync(startGeneration).ConfigureAwait(false);
 
       IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
@@ -1467,6 +1500,17 @@ public class GoogleCastOutput : AudioOutputBase
 
       _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode}, setupMs: {SetupMs})",
         ConnectedDevice?.FriendlyName, _options.StreamingMode, startTimer.ElapsedMilliseconds);
+    }
+    catch (CastStartSupersededException)
+    {
+      // Not a failure, and State is left as the teardown set it (Ready, Stopped or Error) — Error
+      // here would overwrite it. Returns normally, as the start did before this check existed, so
+      // no caller sees a new exception; a caller that needs to know reads State (the reconnect
+      // host re-checks that the connection is still its own).
+      await AbandonSupersededStartAsync(directStart).ConfigureAwait(false);
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Information,
+        "Cast: start on {Name} abandoned — its connection was closed or replaced while it was starting",
+        startDeviceName ?? "<unknown device>");
     }
     catch (Exception ex)
     {
@@ -1508,15 +1552,21 @@ public class GoogleCastOutput : AudioOutputBase
   /// Starts the DirectChannel streaming mode: sends Base64-encoded WAV chunks
   /// directly over a custom Cast message bus, bypassing HTTP entirely.
   /// </summary>
-  private async Task StartDirectChannelAsync(
+  /// <returns>
+  /// What this start created and published in <c>_directStreaming</c>/<c>_directChannel</c>, so a
+  /// start found superseded after this returns can remove exactly that; null on the HttpMp3
+  /// fallbacks.
+  /// </returns>
+  private async Task<DirectChannelStart?> StartDirectChannelAsync(
     Sharpcaster.Models.ChromecastStatus.ChromecastStatus? launchStatus,
+    int startGeneration,
     CancellationToken cancellationToken)
   {
     if (_audioEngine == null)
     {
       _logger.LogWarning("Cast: DirectChannel mode requires audio engine — call SetAudioEngine() first. Falling back to HttpMp3.");
       await StartHttpMp3Async(cancellationToken);
-      return;
+      return null;
     }
 
     // Extract the transport ID from the launched application status.
@@ -1526,7 +1576,7 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogWarning("Cast: Could not get transport ID from launch status — falling back to HttpMp3");
       await StartHttpMp3Async(cancellationToken);
-      return;
+      return null;
     }
 
     _logger.LogInformation(
@@ -1534,37 +1584,151 @@ public class GoogleCastOutput : AudioOutputBase
       transportId, _options.DirectChannelNamespace, _options.DirectChannelChunkSizeMs);
 
     // Create the custom audio channel and wire it to the client.
-    _directChannel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
-    _directChannel.Client = _client!;
+    var channel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
+    channel.Client = _client!;
+    _directChannel = channel;
 
     // Register the channel with SharpCaster's internal channel list (replacing any earlier
     // one for this namespace) so SharpCaster routes our namespace to it. SharpCaster v3.0.0
     // has no public RegisterChannel API, so we inject via reflection. Routing to the channel
     // is not delivery: SharpCaster drops the receiver's `pong` before OnMessageReceived —
     // see the remarks on RegisterCustomChannel.
-    RegisterCustomChannel(_client!, _directChannel);
+    RegisterCustomChannel(_client!, channel);
 
-    // Create the streaming service and start sending audio. The loss report is armed
-    // with the connection published now; HandleConnectionLostAsync re-checks it under
-    // the lock, so a report that outlives this connection is ignored. If nothing is
-    // published (-1) the report can never match and is in effect disarmed. That happens
-    // only if the connection was torn down while StartAsync was running; stopping this
-    // stream is then up to whoever calls StopAsync next (DisconnectAsync does not stop
-    // it), which is a pre-existing gap of the Start/teardown race, not closed here.
-    var streamingGeneration = Volatile.Read(ref _publishedGeneration);
-    _directStreaming = new DirectCastStreamingService(
-      _logger, _audioEngine, _directChannel, _options, _metricsCollector,
+    // Create the streaming service. Its loss report is armed with the generation this start
+    // is for; HandleConnectionLostAsync re-checks it under the lock, so a report that outlives
+    // this connection is ignored. A start whose connection is torn down or replaced meanwhile
+    // never starts this loop (the check just below), or stops it again (StartAsync's check
+    // before Streaming) — see StartIsStillCurrentAsync for the window those checks leave.
+    var streaming = new DirectCastStreamingService(
+      _logger, _audioEngine, channel, _options, _metricsCollector,
       onSendsFailing: fault => ReportConnectionLost(
-        streamingGeneration, "DirectChannel audio sends kept failing", fault));
-    _directStreaming.SetTransportId(transportId);
+        startGeneration, "DirectChannel audio sends kept failing", fault));
+    streaming.SetTransportId(transportId);
+    _directStreaming = streaming;
+    var created = new DirectChannelStart(streaming, channel);
 
     // AUD-81: mute for a muted console BEFORE the first chunk is sent. Repeated (as a no-op,
     // the speaker then being muted) by SyncVolumeAfterStartAsync below.
     await MuteForConsoleAtStartAsync().ConfigureAwait(false);
-    _directStreaming.Start();
+
+    // AUD-37 (final review M-1): after the mute, before the first chunk. The mute is a network
+    // round-trip, and a teardown that overtook it must not find a send loop started after it.
+    if (!await StartIsStillCurrentAsync(startGeneration).ConfigureAwait(false))
+    {
+      await AbandonSupersededStartAsync(created).ConfigureAwait(false);
+      throw new CastStartSupersededException();
+    }
+
+    streaming.Start();
 
     // Sync volume to Cast device
     await SyncVolumeAfterStartAsync();
+    return created;
+  }
+
+  /// <summary>What one DirectChannel start created (AUD-37, final review M-1).</summary>
+  private sealed record DirectChannelStart(DirectCastStreamingService Streaming, DirectCastAudioChannel Channel);
+
+  /// <summary>
+  /// Thrown inside <see cref="StartAsync(bool, CancellationToken)"/> when its connection was torn
+  /// down or replaced while it was starting; caught there and never escapes it.
+  /// </summary>
+  private sealed class CastStartSupersededException : Exception
+  {
+    public CastStartSupersededException()
+      : base("The Cast connection this start was for was closed or replaced while it was starting")
+    {
+    }
+  }
+
+  /// <summary>
+  /// AUD-37 (final review M-1). True while <paramref name="startGeneration"/> is still the
+  /// published, current connection — read under <c>_lifecycleLock</c>, so it is ordered against
+  /// every teardown's generation bump. False after disposal.
+  /// </summary>
+  /// <remarks>
+  /// <para><see cref="StartAsync(bool, CancellationToken)"/> checks this three times: after the
+  /// launch (before anything of its own exists), before the DirectChannel send loop's
+  /// <c>Start()</c> (after the start-time mute), and before it sets <c>IsEnabled</c> and
+  /// <c>Streaming</c> on every mode's path. A start that fails a check removes the DirectChannel
+  /// streaming service and channel it created (<see cref="AbandonSupersededStartAsync"/>) and
+  /// returns without touching <c>State</c>.</para>
+  /// <para>What it does NOT close: the checks are not held across the steps they precede (the
+  /// <c>State</c> setter raises <c>StateChanged</c>, which must not run under the lock). A
+  /// teardown whose generation bump lands between the last check and the <c>Streaming</c>
+  /// assignment — no await separates them — still leaves that start's stream running; the
+  /// teardown's own later <c>State</c> write then applies. Nor does it undo what the network
+  /// already received: a superseded start's receiver application stays launched, and on HttpMp3
+  /// its media load may already have been sent.</para>
+  /// </remarks>
+  private async Task<bool> StartIsStillCurrentAsync(int startGeneration)
+  {
+    try
+    {
+      await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    }
+    catch (ObjectDisposedException)
+    {
+      return false;
+    }
+
+    try
+    {
+      return startGeneration >= 0 &&
+        _publishedGeneration == startGeneration &&
+        _connectionGeneration == startGeneration;
+    }
+    finally
+    {
+      try { _lifecycleLock.Release(); }
+      catch (ObjectDisposedException) { /* output disposed */ }
+    }
+  }
+
+  private async Task ThrowIfStartSupersededAsync(int startGeneration)
+  {
+    if (!await StartIsStillCurrentAsync(startGeneration).ConfigureAwait(false))
+    {
+      throw new CastStartSupersededException();
+    }
+  }
+
+  /// <summary>
+  /// AUD-37 (final review M-1). Removes what a superseded start created, as
+  /// <see cref="StopAsync"/> does: stops and disposes its streaming service if it is still the
+  /// published one (an exchange, so this and a concurrent StopAsync or loss handling never both
+  /// stop it), and unregisters its channel by reference — a no-op if a newer start's channel has
+  /// replaced it. Leaves anything another start created alone. Never throws.
+  /// </summary>
+  private async Task AbandonSupersededStartAsync(DirectChannelStart? created)
+  {
+    if (created == null)
+    {
+      return;
+    }
+
+    try
+    {
+      if (ReferenceEquals(Interlocked.CompareExchange(ref _directStreaming, null, created.Streaming), created.Streaming))
+      {
+        try
+        {
+          await created.Streaming.StopAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+          await created.Streaming.DisposeAsync().ConfigureAwait(false);
+        }
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: error stopping the DirectChannel streaming of an abandoned start");
+    }
+
+    Interlocked.CompareExchange(ref _directChannel, null, created.Channel);
+    UnregisterCustomChannel(created.Channel);
   }
 
   /// <summary>

@@ -264,6 +264,41 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
+  public async Task AWatcherStartOvertakenByAUserTeardown_LeavesNoStreamingOutput_AndReportsSuperseded()
+  {
+    // AUD-37 (final review M-1). The host's start runs uninterruptibly (CancellationToken.None), so
+    // a user's teardown that runs once CancelCastReconnectAsync's 3 s bound has passed can overtake
+    // a slow launch. Before GoogleCastOutput.StartAsync's generation guard, the start went on to
+    // Streaming on the torn-down connection and the host — no longer the owner — left it there.
+    // The launch is held at its seam while the teardown runs to completion: a rendezvous, not a race.
+    using var listener = StartListener();
+    var launchEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var launchGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    SetCastSeam("CastLaunchApplicationOverrideForTests",
+      (Func<Task<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>>)(async () =>
+      {
+        launchEntered.TrySetResult();
+        await launchGate.Task;
+        return new Sharpcaster.Models.ChromecastStatus.ChromecastStatus();
+      }));
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = (_, _) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    var host = service.CreateProductionCastReconnectHost();
+
+    var attempt = host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None);
+    await launchEntered.Task.WaitAsync(HangGuard);
+
+    await _castOutput.DisconnectAsync().WaitAsync(HangGuard); // the user's teardown
+    launchGate.SetResult();
+
+    // Superseded, not failed: the watcher ends CastBusy on this, not with its "retrying" Warning.
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(() => attempt.WaitAsync(HangGuard));
+    Assert.Equal(AudioOutputState.Ready, _castOutput.State);
+    Assert.False(_castOutput.IsEnabled);
+    Assert.Null(_castOutput.ConnectedDevice);
+  }
+
+  [Fact]
   public async Task AWatcherAttemptWhoseConnectFails_LogsNothingAtWarningOrAbove()
   {
     // Review M3: the watcher logs the episode's one Warning itself; the output's own line for an
