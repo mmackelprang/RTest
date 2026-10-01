@@ -15,6 +15,10 @@ The live sweep path (`RadioReceiver.SweepChannels`, [`AUD-76`](AUD-76.md) PR 1) 
 manual** gain for the measurement and restores the gain *mode* in its `finally`. So 28 is the sweep's
 own value. What the state is reporting now is the open question.
 
+**Reproduced 2026-09-30 on `9ee77af` (the `AUD-76` PR 2 UAT).** After a requested live scan,
+`/api/radio/state` read `autoGain: true, gain: 28`. The radio panel's AGC readout showed **28.0 dB** next to
+AUTO, so the value is user-visible. Switching source and back reset it to `gain: 0`.
+
 ## Belief, unverified
 
 The likely cause is cosmetic. `rtlsdr_get_tuner_gain` (or the receiver's cached gain field) still
