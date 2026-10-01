@@ -205,6 +205,37 @@ public class PresetSelectorServiceTests
   }
 
   [Fact]
+  public void Rows_OrderBandsByName_NotByEnumValue_AndCarryThePresetIdTheBarMatchesOn()
+  {
+    // UI-21. The preset bar mirrors this list's highlight, and "turn three detents" has to land on
+    // the third card the user can see, so this order and PresetBar.OrderLikeKnob's must be one
+    // order. The Web half of the pin is PresetBarTests.OrderLikeKnob_IsBandOrdinalThenSlot_ThenCreatedAt:
+    // the same six presets, the same expected sequence. The bands are chosen so that sorting by name
+    // and sorting by the enum disagree (the enum runs AM FM WB VHF SW AIR) — the AM/FM test above
+    // passes either way.
+    //
+    // The bar matches by id, not position (PresetBar.KnobPresetIdOf), so every row id must be the
+    // prefix followed by the preset's own Id — the same Id the bar's cards carry.
+    using var h = new Harness();
+    var t0 = DateTimeOffset.UnixEpoch;
+    h.Bank.Seed("wb1", RadioBand.WB, 162_400_000, t0.AddMinutes(1));
+    h.Bank.Seed("vhf1", RadioBand.VHF, 150_000_000, t0.AddMinutes(2));
+    h.Bank.Seed("fm2", RadioBand.FM, 94_900_000, t0.AddMinutes(9));
+    h.Bank.Seed("am1", RadioBand.AM, 710_000, t0.AddMinutes(3));
+    h.Bank.Seed("fm1", RadioBand.FM, 90_300_000, t0.AddMinutes(4));
+    h.Bank.Seed("air1", RadioBand.AIR, 120_000_000, t0.AddMinutes(5));
+
+    h.Selector.Turn(1);
+
+    Assert.Equal(
+      new[] { "air1", "am1", "fm1", "fm2", "vhf1", "wb1" },
+      h.Rows.Select(r => r.Primary).ToArray());
+    Assert.Equal(
+      h.Rows.Select(r => Harness.RowIdOf(h.Bank.Presets.Single(p => p.Name == r.Primary))),
+      h.Rows.Select(r => r.Id));
+  }
+
+  [Fact]
   public void Rows_CarryThePerBandOrdinal_SoTwoBandsCanBothShowSlotOne()
   {
     // The plan's D-1. Ordinals are per band, so two rows reading "01" is honest rather than a bug —

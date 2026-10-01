@@ -66,6 +66,9 @@ public class RadioControlPanelTests : TestContext
     // the standard options pipeline so the binder returns a default-valued
     // monitor; tests never override these values.
     Services.AddOptions<RdsScrollOptions>();
+
+    // UI-21 — the preset bar reads the PRESETS knob's highlight off the HUD singleton.
+    Services.AddSingleton<Radio.Web.Services.EncoderHudService>();
   }
 
   protected override void Dispose(bool disposing)
