@@ -9,33 +9,50 @@ using Radio.API.Models;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
+using Radio.Infrastructure.Audio.SoundFlow;
 using IRadioConfigurationManager = Radio.Configuration.Abstractions.IConfigurationManager;
 
 namespace Radio.API.Tests.Controllers;
 
 /// <summary>
 /// AUD-85: <c>POST /api/devices/cast/connect</c> treats a connect for the device already
-/// streaming as success, and answers 409 — not 500 — when the Cast output is busy connecting.
+/// streaming as success, answers 409 — not 500 — when the Cast output is mid-transition, and
+/// does not report success (or save the default) when Cast is not live after the output gate.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Uses a real <see cref="GoogleCastOutput"/> placed into the state under test by reflection on
 /// its non-public setters (<c>State</c>, <c>ConnectedDevice</c>), the same approach
 /// <c>AudioEngineInitializationServiceCastLossTests</c> takes for its event: Radio.API.Tests has no
 /// access to Radio.Infrastructure internals, and no production seam was added for this.
-/// The audio engine is not supplied, so the gate promotion (<c>SetActiveOutputAsync</c>) is not
-/// exercised here; the default-device save is, through the configuration manager mock.
+/// </para>
+/// <para>
+/// The output-gate tests use a bare, never-initialised <see cref="SoundFlowAudioEngine"/> (no native
+/// device is opened) with mocked virtual outputs attached. The engine's own Cast reference is a
+/// mock rather than the controller's <see cref="GoogleCastOutput"/>, so the gate never drives the
+/// real output's network paths; the speaker loss is simulated by flipping the real output's state
+/// from inside the gate's HTTP-output activation, which runs before the gate's Cast activation.
+/// </para>
+/// <para>
+/// The post-gate check on the full connect path (after a real <c>ConnectAsync</c>/<c>StartAsync</c>)
+/// is not covered here: reaching it needs a successful <c>ConnectAsync</c>, which needs a Cast
+/// receiver on the network, and the output's test seams are internal to Radio.Infrastructure.
+/// Both paths share <c>RestoreLocalIfCastNotLiveAsync</c>.
+/// </para>
 /// </remarks>
-public class DevicesControllerCastConnectTests
+public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
 {
   private const string DeviceId = "https://192.168.0.25/";
 
   private readonly Mock<IRadioConfigurationManager> _config = new();
   private readonly GoogleCastOutput _castOutput;
+  private readonly string _cacheFilePath;
 
   public DevicesControllerCastConnectTests()
   {
+    _cacheFilePath = Path.Combine(Path.GetTempPath(), $"cast-cache-{Guid.NewGuid():N}.json");
     var options = new AudioOutputOptions();
-    options.GoogleCast.CacheFilePath = Path.Combine(Path.GetTempPath(), $"cast-cache-{Guid.NewGuid():N}.json");
+    options.GoogleCast.CacheFilePath = _cacheFilePath;
     _castOutput = new GoogleCastOutput(NullLogger<GoogleCastOutput>.Instance, Options.Create(options));
 
     _config
@@ -43,15 +60,23 @@ public class DevicesControllerCastConnectTests
       .Returns(Task.CompletedTask);
   }
 
+  public async ValueTask DisposeAsync()
+  {
+    await _castOutput.DisposeAsync();
+    try
+    {
+      File.Delete(_cacheFilePath);
+    }
+    catch (IOException)
+    {
+      // Best effort: a leftover temp file is harmless.
+    }
+  }
+
   [Fact]
   public async Task Connect_WhenAlreadyStreamingToSameDevice_Returns200_WithoutReconnecting()
   {
-    var device = new ChromecastDeviceInfo
-    {
-      Id = DeviceId, FriendlyName = "Test speaker", IpAddress = "192.168.0.25", Port = 8009, Model = "Nest Audio"
-    };
-    SetConnectedDevice(device);
-    SetState(AudioOutputState.Streaming);
+    var device = StreamToTestDevice();
 
     var result = await CreateController().ConnectToCastDevice(Request(), CancellationToken.None);
 
@@ -59,8 +84,42 @@ public class DevicesControllerCastConnectTests
     // A reconnect would have stopped the stream (ConnectAsync stops a streaming output first).
     Assert.Equal(AudioOutputState.Streaming, _castOutput.State);
     Assert.Same(device, _castOutput.ConnectedDevice);
-    _config.Verify(c => c.SetValueAsync(
-      It.IsAny<string>(), "AudioPreferences:DefaultCastDeviceId", DeviceId, It.IsAny<CancellationToken>()), Times.Once);
+    VerifyDefaultSaved(Times.Once());
+  }
+
+  [Fact]
+  public async Task Connect_WhenAlreadyStreamingToSameDevice_WithEngine_PromotesCast_Returns200()
+  {
+    StreamToTestDevice();
+    var (engine, _) = CreateEngine();
+
+    var result = await CreateController(audioEngine: engine).ConnectToCastDevice(Request(), CancellationToken.None);
+
+    Assert.IsType<OkObjectResult>(result);
+    Assert.Equal("google-cast", engine.ActiveOutputId);
+    VerifyDefaultSaved(Times.Once());
+  }
+
+  [Fact]
+  public async Task Connect_WhenCastIsLostDuringThePromotion_Returns502_RestoresLocal_AndKeepsDefaultUnsaved()
+  {
+    StreamToTestDevice();
+    var (engine, http) = CreateEngine();
+    // The gate activates the HTTP output before the Cast output. Losing the speaker there stands
+    // in for AUD-84's deferred loss replaying while Cast is being promoted.
+    http.Setup(h => h.StartAsync(It.IsAny<CancellationToken>()))
+      .Callback(() => SetState(AudioOutputState.Error))
+      .Returns(Task.CompletedTask);
+
+    var result = await CreateController(audioEngine: engine).ConnectToCastDevice(Request(), CancellationToken.None);
+
+    var error = Assert.IsAssignableFrom<ObjectResult>(result);
+    Assert.Equal(StatusCodes.Status502BadGateway, error.StatusCode);
+    // Back on local: the device manager reports no selection, so the fallback id is "default",
+    // the same target DisconnectFromCastDevice restores.
+    Assert.Equal("default", engine.ActiveOutputId);
+    Assert.False(engine.IsLocalOutputMuted);
+    VerifyDefaultSaved(Times.Never());
   }
 
   [Fact]
@@ -97,7 +156,54 @@ public class DevicesControllerCastConnectTests
       It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
-  private DevicesController CreateController(IAudioManager? audioManager = null)
+  private ChromecastDeviceInfo StreamToTestDevice()
+  {
+    var device = new ChromecastDeviceInfo
+    {
+      Id = DeviceId, FriendlyName = "Test speaker", IpAddress = "192.168.0.25", Port = 8009, Model = "Nest Audio"
+    };
+    SetConnectedDevice(device);
+    SetState(AudioOutputState.Streaming);
+    return device;
+  }
+
+  private void VerifyDefaultSaved(Times times) =>
+    _config.Verify(c => c.SetValueAsync(
+      It.IsAny<string>(), "AudioPreferences:DefaultCastDeviceId", DeviceId, It.IsAny<CancellationToken>()), times);
+
+  /// <summary>
+  /// A bare engine (never initialised, so no native device) with mocked Cast and HTTP outputs
+  /// attached to its output gate. Both start Ready; the Cast mock reports Streaming once started.
+  /// </summary>
+  private static (SoundFlowAudioEngine Engine, Mock<IAudioOutput> Http) CreateEngine()
+  {
+    var engineOptions = new Mock<IOptions<AudioEngineOptions>>();
+    engineOptions.Setup(o => o.Value).Returns(new AudioEngineOptions { EnableHotPlugDetection = false });
+    var prefs = new Mock<IOptionsMonitor<AudioPreferences>>();
+    prefs.Setup(p => p.CurrentValue).Returns(new AudioPreferences());
+    var outputOptions = new Mock<IOptionsMonitor<AudioOutputOptions>>();
+    outputOptions.Setup(o => o.CurrentValue).Returns(new AudioOutputOptions());
+
+    var engine = new SoundFlowAudioEngine(
+      NullLogger<SoundFlowAudioEngine>.Instance,
+      engineOptions.Object,
+      new SoundFlowMasterMixer(NullLogger<SoundFlowMasterMixer>.Instance),
+      new SoundFlowDeviceManager(
+        NullLogger<SoundFlowDeviceManager>.Instance,
+        new Mock<IRadioConfigurationManager>().Object,
+        prefs.Object,
+        outputOptions.Object));
+
+    var cast = new Mock<IAudioOutput>();
+    cast.SetupGet(c => c.State).Returns(AudioOutputState.Streaming);
+    var http = new Mock<IAudioOutput>();
+    http.SetupGet(h => h.State).Returns(AudioOutputState.Ready);
+    engine.AttachOutputCoordination(cast.Object, http.Object, configManager: null);
+    return (engine, http);
+  }
+
+  private DevicesController CreateController(
+    IAudioManager? audioManager = null, SoundFlowAudioEngine? audioEngine = null)
   {
     var prefs = new Mock<IOptionsMonitor<AudioPreferences>>();
     prefs.SetupGet(p => p.CurrentValue).Returns(new AudioPreferences());
@@ -109,6 +215,7 @@ public class DevicesControllerCastConnectTests
       prefs.Object,
       Options.Create(new AudioOutputOptions()),
       audioManager: audioManager,
+      audioEngine: audioEngine,
       castOutput: _castOutput);
   }
 

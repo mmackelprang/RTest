@@ -581,6 +581,13 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
+  /// Prefix of the <see cref="InvalidOperationException"/> message <see cref="ConnectAsync"/> throws
+  /// when its state guard refuses to connect (AUD-85). Callers match on this constant, not on a
+  /// copy of the text, so the throw site and the match cannot drift apart.
+  /// </summary>
+  public const string ConnectRefusedByStatePrefix = "Cannot connect in state";
+
+  /// <summary>
   /// Connects to a specific Chromecast device.
   /// </summary>
   /// <param name="device">The device to connect to.</param>
@@ -609,7 +616,7 @@ public class GoogleCastOutput : AudioOutputBase
     if (State != AudioOutputState.Ready && State != AudioOutputState.Stopped)
     {
       throw new InvalidOperationException(
-        $"Cannot connect in state {State}. Output must be in Ready or Stopped state.");
+        $"{ConnectRefusedByStatePrefix} {State}. Output must be in Ready or Stopped state.");
     }
 
     State = AudioOutputState.Connecting;

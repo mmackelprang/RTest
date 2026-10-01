@@ -548,10 +548,15 @@ public class DevicesController : ControllerBase
   /// </summary>
   /// <remarks>
   /// Returns 200 without reconnecting when the output is already streaming to the requested
-  /// device (it still promotes Cast through the output gate and re-saves the default).
-  /// Returns 409 when the output is busy connecting — either observed before the attempt, or
-  /// reported by <see cref="GoogleCastOutput.ConnectAsync"/> refusing to run in its current
-  /// state. A 409 says another connect is in flight; it is not evidence the device is unreachable.
+  /// device (it still re-saves the default, and promotes Cast through the output gate when an
+  /// audio engine is available).
+  /// Returns 409 when the Cast output is mid-transition — observed as <c>Connecting</c> before
+  /// the attempt, or reported by <see cref="GoogleCastOutput.ConnectAsync"/>'s state guard refusing
+  /// whatever state it found (Connecting, Stopping, Initializing, ...). A 409 is not evidence the
+  /// device is unreachable.
+  /// Returns 502 when Cast is not streaming to the requested device once the output gate has run —
+  /// the speaker was lost while connecting or starting. Local output is restored if Cast is still
+  /// the active output, and the default is not saved.
   /// </remarks>
   /// <param name="request">The Cast device to connect to.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
@@ -560,6 +565,7 @@ public class DevicesController : ControllerBase
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
   [ProducesResponseType(StatusCodes.Status409Conflict)]
+  [ProducesResponseType(StatusCodes.Status502BadGateway)]
   [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
   public async Task<IActionResult> ConnectToCastDevice(
     [FromBody] ConnectCastDeviceRequest request,
@@ -588,15 +594,21 @@ public class DevicesController : ControllerBase
     }
 
     // AUD-85: already streaming to the requested device — reconnecting would stop and
-    // restart the stream for nothing. Promote and re-save as a successful connect would.
-    if (_castOutput.State == AudioOutputState.Streaming &&
-        string.Equals(_castOutput.ConnectedDevice?.Id, request.DeviceId, StringComparison.Ordinal))
+    // restart the stream for nothing. Promote (when an engine is available) and re-save as a
+    // successful connect would.
+    if (IsCastStreamingTo(request.DeviceId))
     {
       try
       {
         if (_audioEngine != null)
         {
           await _audioEngine.SetActiveOutputAsync("google-cast", cancellationToken);
+        }
+
+        var lost = await RestoreLocalIfCastNotLiveAsync(request, cancellationToken);
+        if (lost != null)
+        {
+          return lost;
         }
 
         await SaveDefaultCastDeviceAsync(request.DeviceId, request.Name ?? "Cast Device");
@@ -720,17 +732,26 @@ public class DevicesController : ControllerBase
         await _audioEngine.SetActiveOutputAsync("google-cast", cancellationToken);
       }
 
+      // AUD-85 (review M1): a speaker lost during the connect or start replays its deferred
+      // loss; the lost-Cast recovery then saw the output still local and left it, and the
+      // promotion above made a dead Cast output active. Undo that rather than report success.
+      var lost = await RestoreLocalIfCastNotLiveAsync(request, cancellationToken);
+      if (lost != null)
+      {
+        return lost;
+      }
+
       // Save as default Cast device for auto-connect
       await SaveDefaultCastDeviceAsync(request.DeviceId, request.Name ?? "Cast Device");
 
       _logger.LogInformation("Connected to Cast device: {Name}, audio streaming started (local output muted)", request.Name);
       return Ok(new { message = "Connected to Cast device", device = request.Name });
     }
-    catch (InvalidOperationException ex) when (ex.Message.StartsWith("Cannot connect in state", StringComparison.Ordinal))
+    catch (InvalidOperationException ex) when (ex.Message.StartsWith(GoogleCastOutput.ConnectRefusedByStatePrefix, StringComparison.Ordinal))
     {
-      // AUD-85: GoogleCastOutput.ConnectAsync refused because the output was not in a
-      // connectable state when it checked — for example, another connect that began after
-      // the Connecting check above. That message is thrown only by ConnectAsync's state guard.
+      // AUD-85: GoogleCastOutput.ConnectAsync's state guard refused because the output was
+      // mid-transition when it checked — for example, another connect that began after the
+      // Connecting check above. The prefix is the constant that guard's message is built from.
       _logger.LogWarning("Cast connect refused by output state: {Reason}", ex.Message);
       return Conflict(new { error = "Cast output is busy; try again shortly", details = ex.Message });
     }
@@ -739,6 +760,59 @@ public class DevicesController : ControllerBase
       _logger.LogError(ex, "Error connecting to Cast device: {Name}", request.Name);
       return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
     }
+  }
+
+  /// <summary>True when the Cast output is streaming to the device with <paramref name="deviceId"/>.</summary>
+  private bool IsCastStreamingTo(string deviceId) =>
+    _castOutput != null &&
+    _castOutput.State == AudioOutputState.Streaming &&
+    string.Equals(_castOutput.ConnectedDevice?.Id, deviceId, StringComparison.Ordinal);
+
+  /// <summary>
+  /// AUD-85 (review M1). Called after the output gate has promoted Cast. When Cast is not in fact
+  /// streaming to the requested device, switches back to the local output — the same target
+  /// <see cref="DisconnectFromCastDevice"/> restores — if Cast is still the active output, and
+  /// returns a 502 for the caller to send. Returns null when Cast is live.
+  /// </summary>
+  /// <remarks>
+  /// The switch back is conditional on Cast still being the active output
+  /// (<see cref="SoundFlowAudioEngine.SetActiveOutputIfCurrentAsync"/>), so it cannot override an
+  /// output the user picked in the meantime. Without an audio engine nothing was promoted and
+  /// nothing is switched; the 502 is still returned.
+  /// </remarks>
+  private async Task<IActionResult?> RestoreLocalIfCastNotLiveAsync(
+    ConnectCastDeviceRequest request, CancellationToken cancellationToken)
+  {
+    if (IsCastStreamingTo(request.DeviceId))
+    {
+      return null;
+    }
+
+    var state = _castOutput?.State;
+    _logger.LogWarning(
+      "Cast device {Name} is not streaming after promotion (output state {State}); switching back to local output if Cast is still active",
+      request.Name, state);
+
+    var restored = false;
+    try
+    {
+      var fallbackOutputId = _deviceManager.GetSelectedOutputDeviceId() ?? "default";
+      if (_audioEngine != null)
+      {
+        restored = await _audioEngine.SetActiveOutputIfCurrentAsync("google-cast", fallbackOutputId, cancellationToken);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to restore local output after the Cast device was lost");
+    }
+
+    return StatusCode(StatusCodes.Status502BadGateway, new
+    {
+      error = "Cast device is not streaming after connecting; it may have been lost",
+      state = state?.ToString(),
+      localOutputRestored = restored
+    });
   }
 
   /// <summary>
