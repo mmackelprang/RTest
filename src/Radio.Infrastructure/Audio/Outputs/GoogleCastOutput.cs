@@ -2657,28 +2657,53 @@ public class GoogleCastOutput : AudioOutputBase
       _lastSetMute = deviceMuted;
     }
 
-    // AUD-81 follow-up (D1.3). The speaker reports itself UNMUTED (a change from the muted
-    // baseline, and not the echo of an unmute of ours) while the console is muted and the speaker
-    // is muted for it, and the status's level is the echo of a level push of ours
-    // (IsRecentVolumePush: in flight, or completed within EchoWindow). That is the unmute a level
-    // change causes on this speaker (box UAT 2026-10-01), not the owner's: it is NOT reported (it
-    // would unmute the console through AudioStateUpdateService, and clear the muted-by-console
-    // mark) and the mute is re-asserted, once for this status. How it is told from the owner's own
-    // unmute, precisely: by the level. An unmute whose status carries a level that is not the echo
-    // of a recent push of ours — every unmute more than EchoWindow after our last level push
-    // completed, or one that comes with a level change made on the speaker — is external and
-    // handled below exactly as before (AUD-5). What that gives up: the owner unmuting on the
-    // speaker WITHOUT changing its level, within EchoWindow of a level push of ours, is re-muted;
-    // the console is muted at that moment, so the re-mute matches it.
-    if (muteChanged && !deviceMuted && volumeEcho && IsSpeakerMutedByConsole && IsConsoleMutedNow())
+    // AUD-81 follow-up — the level-echo unmute rule. The speaker reports itself UNMUTED (a change
+    // from the muted baseline, and not the echo of an unmute of ours) at a level that is the echo of
+    // one of OUR level pushes (IsRecentVolumePush: in flight, or completed within EchoWindow). A
+    // SET_VOLUME that changes the level unmutes this speaker, and SharpCaster raises its reply
+    // status before the send completes (box UAT 2026-10-01), so this is the unmute our own command
+    // caused. It is NEVER reported as external and NEVER changes the console's mute — whoever muted
+    // the speaker, and whatever IsSpeakerMutedByConsole says at this instant (a console mute's
+    // acknowledgement can still be on its way: hostile review M2). Only the baseline follows the
+    // device (_lastSetMute = false): no _externalChangeSerial bump, no queued target dropped, no
+    // "changed externally" line. Then:
+    //   - the console is muted: the mute is re-asserted, once for this status, through the console
+    //     mute drain (dropped if the console is unmuted by its turn);
+    //   - otherwise the console is unmuted, so the speaker's unmute matches it: whatever this
+    //     application had muted for the console is released (mark cleared, device record
+    //     forgotten), exactly as an acknowledged console unmute does. This is the path a console
+    //     unmute takes when its held level unmutes the speaker before the SET_MUTE false (hostile
+    //     review M1): the volume drain still records the level as sent (no serial bump), so AUD-80
+    //     remembers it, and the mute drain still sends the explicit unmute, so the outcome does not
+    //     depend on whether the device unmutes on a level change.
+    // How it is told from the owner's own unmute, precisely: by the level. An unmute whose status
+    // carries a level that is not the echo of a recent push of ours — every unmute more than
+    // EchoWindow after our last level push completed, or one that comes with a level change made on
+    // the speaker — is external and handled below exactly as before (AUD-5). What that gives up:
+    // the owner unmuting on the speaker WITHOUT changing its level, within EchoWindow of a level
+    // push of ours, is re-muted under a muted console (which matches the console), and is not
+    // reported under an unmuted one (the console is already unmuted, so there is nothing to sync).
+    if (muteChanged && !deviceMuted && volumeEcho)
     {
       // The baseline tells the truth (the device is unmuted), so the mute drain does send the
       // mute rather than skipping it as "already muted".
       _lastSetMute = false;
-      _logger.LogDebug(
-        "Cast: speaker reported unmuted at {Volume:P0}, the echo of our own level push, under a muted console — re-asserting the mute",
-        deviceVolume);
-      ReassertConsoleMute();
+      if (IsConsoleMutedNow())
+      {
+        _logger.LogDebug(
+          "Cast: speaker reported unmuted at {Volume:P0}, the echo of our own level push, under a muted console — re-asserting the mute",
+          deviceVolume);
+        ReassertConsoleMute();
+      }
+      else
+      {
+        Interlocked.Exchange(ref _consoleMutedGeneration, -1);
+        ForgetConsoleMute(ConnectedDevice?.Id);
+        _logger.LogDebug(
+          "Cast: speaker reported unmuted at {Volume:P0}, the echo of our own level push, under an unmuted console — not an external change",
+          deviceVolume);
+      }
+
       return;
     }
 
@@ -3563,7 +3588,14 @@ public class GoogleCastOutput : AudioOutputBase
 
         // A newer request (the console muted again while the level was on the network) wins; this
         // unmute is not sent, so there is no unmuted moment between the two.
-        if (superseded || !_lastSetMute)
+        // Hostile review M1: when a held level WAS applied, the explicit unmute is sent even though
+        // the baseline may already show the speaker unmuted — the device unmutes on a level change
+        // and its reply arrives before the level's send completes (the level-echo rule in
+        // OnReceiverStatusChanged keeps that reply away from the console). Sending it anyway makes the
+        // outcome the same whether or not a device unmutes on a level change, and an unmute of an
+        // unmuted speaker is harmless. Without a held level, an unmuted baseline still means there is
+        // nothing to send.
+        if (superseded || (!_lastSetMute && levelBeforeUnmute == null))
         {
           continue;
         }

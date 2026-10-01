@@ -771,12 +771,20 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.True(h.Output.KnownSpeakerMuted);
 
     consoleMuted = false;
+    var rememberedBefore = h.Store.Remembered.Count;
     var result = await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation);
 
     Assert.True(result.Acknowledged);
     Assert.Equal(0.60f, result.LevelBeforeUnmute!.Value, 3);
     Assert.Equal(new[] { "mute", "vol", "unmute" }, h.Kinds());
     Assert.Equal(0.60f, Assert.Single(h.VolumeSends()), 3);
+
+    // Hostile review M1 (on the device model the level unmutes the speaker first): still remembered
+    // for AUD-80 once, as the level the speaker now holds, and never reported as a speaker change.
+    Assert.Equal(new[] { ("cast-a", 0.60f) }, h.Store.Remembered.Skip(rememberedBefore).ToList());
+    Assert.Equal(0.60f, h.Output.KnownSpeakerLevel, 3);
+    Assert.Empty(h.External);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
   // The AUD-80 restore on connect, to a speaker the read found MUTED (on its own side here): the

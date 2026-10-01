@@ -448,6 +448,13 @@ public class CastConsoleVolumeFollowerTests
     var line = Assert.Single(log.Lines(), l => l.StartsWith("Cast: console unmuted", StringComparison.Ordinal));
     Assert.StartsWith("Cast: console unmuted → speaker Speaker cast-a at 45", line);
     Assert.EndsWith(", unmuted", line);
+
+    // Hostile review M1: on the device model the held level unmutes the speaker and its reply
+    // arrives before the level's send completes. That reply is our own command's echo — never a
+    // change made on the speaker, so nothing is reported or logged as one.
+    Assert.Empty(h.External);
+    Assert.DoesNotContain(h.OutputLog.Lines(), l => l.Line.Contains("changed externally"));
+    Assert.False(h.DeviceMuted);
   }
 
   // The console moves back to the speaker's own level while muted: nothing is sent for that, so an
