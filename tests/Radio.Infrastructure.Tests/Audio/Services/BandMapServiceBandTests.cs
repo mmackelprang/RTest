@@ -171,6 +171,65 @@ public sealed class BandMapServiceBandTests : IDisposable
   }
 
   [Fact]
+  public async Task Request_ForAnotherBand_WhileASweepRuns_IsOtherBandSweeping_AndStartsNothing()
+  {
+    Tuning = new BandMapTuning("FM", 101_100_000);
+    await _gate.ClaimForRadioAsync();
+    _live.CanSweepLive = true;
+    _live.Block = new TaskCompletionSource();
+    BandMapService service = CreateService();
+
+    BandSweepRequestResult fm = service.RequestSweep("FM");
+    await _live.Entered.Task.WaitAsync(FailSafe);
+    BandSweepRequestResult wb = service.RequestSweep("WB");
+    BandSweepRequestResult sameBand = service.RequestSweep("fm");
+    _live.Block.SetResult();
+    await Settle(service);
+
+    Assert.Equal(BandSweepRequestOutcome.Started, fm.Outcome);
+    Assert.Equal(BandSweepRequestOutcome.Unavailable, wb.Outcome);
+    Assert.Equal(BandMapService.ReasonOtherBandSweeping, wb.Reason);
+    // The status names the band that is running, for the 409's message.
+    Assert.True(wb.Status.IsSweeping);
+    Assert.Equal("FM", wb.Status.Band);
+    Assert.Equal(BandSweepRequestOutcome.AlreadyRunning, sameBand.Outcome);
+    Assert.Null(sameBand.Reason);
+    Assert.Equal("FM", Assert.Single(_live.Plans).Band);
+    Assert.Null(service.GetMap("WB"));
+    // The refusal is not recorded: the last outcome is the FM sweep's.
+    Assert.Equal("FM", service.GetStatus().Last!.Band);
+    Assert.Equal(BandSweepResults.Completed, service.GetStatus().Last!.Result);
+  }
+
+  [Fact]
+  public async Task Timer_TreatsAFreshVhfMapAsDue_OnceTheRadioHasLeftItsWindow()
+  {
+    Tuning = new BandMapTuning("VHF", 146_523_000);
+    BandMapService service = CreateService();
+    service.RequestSweep();
+    await Settle(service);
+    Assert.Single(_devices);
+    Assert.Equal(145_525_000, service.GetMap("VHF")!.RangeMinHz);
+
+    // Still inside the stored window: a fresh map is not due.
+    Tuning = new BandMapTuning("VHF", 146_900_000);
+    service.OnTimerTick();
+    await Settle(service);
+    Assert.Single(_devices);
+
+    // The radio moved its VHF window: the map is seconds old but no longer covers it.
+    Tuning = new BandMapTuning("VHF", 162_000_000);
+    service.OnTimerTick();
+    await Settle(service);
+
+    Assert.Equal(2, _devices.Count);
+    BandMap map = service.GetMap("VHF")!;
+    Assert.Equal(161_000_000, map.RangeMinHz);
+    Assert.Equal(163_000_000, map.RangeMaxHz);
+    Assert.Equal(BandSweepTriggers.Timer, map.Trigger);
+  }
+
+  [Fact]
   public void Request_ForAnUnmappableBand_IsUnavailable_TouchesNothing_AndIsNotRecorded()
   {
     Tuning = new BandMapTuning("FM", 101_100_000);

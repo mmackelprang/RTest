@@ -248,6 +248,34 @@ public sealed class BandMapControllerBandTests : IDisposable
     Assert.Equal(1161, dto.Channels.Count);
   }
 
+  [Fact]
+  public async Task Scan_OtherBand_WhileASweepRuns_Returns409NamingTheRunningBand_SameBandReturns202()
+  {
+    await _gate.ClaimForRadioAsync();
+    TaskCompletionSource release = new();
+    BlockingSweeper live = new(release.Task);
+    Mock<IOptionsMonitor<BandMapOptions>> monitor = new();
+    monitor.Setup(m => m.CurrentValue).Returns(_options);
+    _service = new BandMapService(
+      NullLogger<BandMapService>.Instance, monitor.Object, new BandMapStore(_root, NullLogger.Instance), _gate,
+      () => live, timeProvider: _time, currentTuning: () => Tuning);
+    BandMapController controller = new(_service);
+
+    // The running sweep is recorded under the service's lock before Scan returns, so no wait is needed.
+    ObjectResult started = Assert.IsAssignableFrom<ObjectResult>(controller.Scan("AIR").Result);
+    ObjectResult other = Assert.IsAssignableFrom<ObjectResult>(controller.Scan("WB").Result);
+    ObjectResult same = Assert.IsAssignableFrom<ObjectResult>(controller.Scan("air").Result);
+    release.SetResult();
+    Assert.True(SpinWait.SpinUntil(() => !_service.GetStatus().IsSweeping, TimeSpan.FromSeconds(30)), "sweep did not finish");
+
+    Assert.Equal(StatusCodes.Status202Accepted, started.StatusCode);
+    Assert.Equal(StatusCodes.Status409Conflict, other.StatusCode);
+    string? error = other.Value!.GetType().GetProperty("error")!.GetValue(other.Value) as string;
+    Assert.Equal("The AIR band is being scanned; try again when it finishes", error);
+    Assert.Equal(StatusCodes.Status202Accepted, same.StatusCode);
+    Assert.Null(_service.GetMap("WB"));
+  }
+
   private sealed class BlockingSweeper : ILiveBandSweeper
   {
     private readonly Task _release;

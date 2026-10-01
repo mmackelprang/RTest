@@ -59,9 +59,12 @@ public class BandMapController : ControllerBase
   /// </summary>
   /// <param name="band">Band code (AM, FM, SW, AIR, WB, VHF); omitted for the radio's current band.</param>
   /// <returns>The sweep status.</returns>
-  /// <response code="202">A sweep was started, or one was already running.</response>
+  /// <response code="202">A sweep of the band was started, or one of the same band was already running.</response>
   /// <response code="400">The band is not a band code.</response>
-  /// <response code="409">The band cannot be scanned on this tuner, or the SDR device is busy.</response>
+  /// <response code="409">
+  /// The band cannot be scanned on this tuner, a sweep of another band is running (the error names
+  /// it), the radio cannot be swept right now, or the SDR device is busy.
+  /// </response>
   /// <response code="503">Sweeps are disabled, or no SDR device is available.</response>
   [HttpPost("scan")]
   [ProducesResponseType(typeof(BandSweepStatusDto), StatusCodes.Status202Accepted)]
@@ -97,6 +100,10 @@ public class BandMapController : ControllerBase
         new { error = "No SDR device is available" }),
       BandMapService.ReasonRadioBusy => Conflict(new { error = "The radio cannot be swept right now" }),
       BandMapService.ReasonBandNotReceivable => Conflict(new { error = "This band cannot be scanned" }),
+      BandMapService.ReasonOtherBandSweeping => Conflict(new
+      {
+        error = $"The {result.Status.Band ?? "other"} band is being scanned; try again when it finishes",
+      }),
       _ => Conflict(new { error = "The SDR device is busy" }),
     };
   }
