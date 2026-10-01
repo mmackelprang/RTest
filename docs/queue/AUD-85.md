@@ -51,6 +51,16 @@ Two parties both connect the Cast device on one pick:
 - **and/or** have the UI treat "already connecting / already connected to the same device" as success, rather than clearing the default. A 500 caused by a busy state is not evidence the device is unreachable.
 - Either way, clearing a user's saved preference should require evidence the device is actually gone, not any failed request.
 
+### ⚠ A second path that clears the default, by design: Stop Casting (noted 2026-10-01, batch D)
+
+Separate from the race above, and **existing behaviour, not a defect found in a measurement**. The owner may not want it, so it is recorded here for the plan to decide:
+
+- **Stop Casting** in the Cast dropdown (`src/Radio.Web/Components/Shared/CastDeviceDropdown.razor:301-325`) calls `DevicesApi.DisconnectFromCastDeviceAsync()`. On success it invokes `OnDisconnect` (`:324`).
+- `OnDisconnect` is bound to `MainLayout.OnCastDeviceDisconnected` (`src/Radio.Web/Components/Layout/MainLayout.razor:106`). That method calls `DevicesApi.ClearDefaultCastDeviceAsync()` (`:1139-1146`) every time, and it is the code's explicit intent.
+- So **every deliberate Stop Casting erases the saved default Cast speaker.** The next Cast pick then opens the dropdown instead of the one-tap reconnect, and a restart cannot restore Cast.
+
+Line numbers were read on `main` at `45a220e`. Whether "stop casting" should also mean "forget this speaker" is an owner question. If the answer is no, the fix belongs in this row's plan, since it is the same preference being cleared by a different path.
+
 ## Verification
 
 ⛔ **NOT auto-mergeable** — output-selection path; needs an owner Cast-pick check.
