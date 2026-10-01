@@ -284,9 +284,10 @@
   }
 </div>
 
-@* UI-24: the three text-entry dialogs are anchored to the top of the screen (design-system.css §20a)
-   so the in-app keyboard, which covers the bottom 364 px while it is up, never hides the field or
-   its buttons. They were centred, which put both under it. *@
+@* UI-24: the three text-entry dialogs hang from the top of the content area (design-system.css §20a;
+   measured: card from y = 144, buttons end at y = 307) so the in-app keyboard, which covers everything
+   below y = 348 while it is up, never hides the field or its buttons. They were centred, which put both
+   under it. *@
 @if (_isFrequencyDialogOpen)
 {
   <div class="overlay kiosk-entry-overlay" @onclick="CloseFrequencyDialog">

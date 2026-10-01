@@ -19,8 +19,8 @@ namespace Radio.Web.Tests.Components;
 /// <para>
 /// The kiosk types with <c>js/virtual-keyboard.js</c>: GNOME's own on-screen keyboard never opens for
 /// Chrome on this box (<c>docs/uat/2026-08-03-osk-wayland-viability/REPORT.md</c>). That keyboard is
-/// fixed to the bottom of the screen, does not resize the page, and is 364 px tall (QWERTY) or 352
-/// (numpad) — so on the 720 px panel everything below y ≈ 356 is hidden while it is up. Centred
+/// fixed to the bottom of the screen and does not resize the page; measured in Chromium at 1920×720 its
+/// top edge is at y = 348 (QWERTY) or y = 360 (numpad), and everything below is hidden while it is up. Centred
 /// dialogs put their field and buttons there; the owner found it on the Rename dialog.
 /// </para>
 ///

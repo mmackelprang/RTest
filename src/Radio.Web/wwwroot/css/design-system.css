@@ -1526,13 +1526,17 @@ body::-webkit-scrollbar,
  *
  * The kiosk types with the in-app keyboard (js/virtual-keyboard.js — GNOME's own OSK never opens for
  * Chrome on this box: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md). That keyboard is fixed to
- * the bottom of the screen and does not resize the page: the QWERTY layout is 364 px tall and the
- * numpad 352, so on the 720 px panel everything below y ≈ 356 is covered while it is up. A dialog
- * centred on the screen put its text field and its buttons exactly there.
+ * the bottom of the screen and does not resize the page. Measured in Chromium at 1920×720, its top
+ * edge is at y = 348 for the QWERTY layout and y = 360 for the numpad; everything below is covered
+ * while it is up. A centred dialog put its text field and its buttons exactly there.
  *
- * So any dialog that holds a text field is anchored to the top instead — always, not only while the
- * keyboard is up, so it never jumps under the finger that tapped the field. Hand-built overlays use
- * the overlay + card pair; Radzen DialogService dialogs pass CssClass = "kiosk-entry-dialog".
+ * So any dialog that holds a text field hangs from the top of the area it overlays instead — always,
+ * not only while the keyboard is up, so it never jumps under the finger that tapped the field.
+ * Hand-built overlays use the overlay + card pair; Radzen DialogService dialogs pass
+ * CssClass = "kiosk-entry-dialog". Measured: Radzen dialogs start at y = 24. The radio panel's
+ * overlays sit inside an ancestor that contains fixed-position descendants, so they cover the
+ * content area below the 120 px top bar and their card starts at y = 144; its buttons end at
+ * y = 307, 41 px above the QWERTY keyboard.
  * ─────────────────────────────────────────────────────────────────────────── */
 
 .kiosk-entry-overlay {

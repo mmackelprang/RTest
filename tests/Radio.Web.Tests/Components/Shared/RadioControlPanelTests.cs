@@ -1088,7 +1088,7 @@ public class RadioControlPanelTests : TestContext
   public void TextEntryDialogs_AreTopAnchored_ClearOfTheKeyboard(string dialog, string title)
   {
     // UI-24, owner (Rename dialog, UI-20 UAT check 5): "the keyboard occludes the dialog". The
-    // in-app keyboard covers the bottom 364 px of the 720 px panel; these dialogs were centred
+    // in-app keyboard covers everything below y = 348 of the 720 px panel; these dialogs were centred
     // overlays with inline align-items:center, which put the field and its buttons under it. They
     // now use the shared top-anchored overlay (design-system.css §20a — pinned by
     // TextEntryDialogPlacementTests), so the markup must carry those classes and no inline
