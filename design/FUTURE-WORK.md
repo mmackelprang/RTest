@@ -6,6 +6,116 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
+## All-band reception — the hardware needed to make AM (MW) and shortwave work (`AUD-94`)
+
+**Status:** Roadmap only. **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
+many AM stations nearby."* then *"Spec out what HW I would need to make all the bands work, and add that to
+the roadmap."* No code or hardware change is planned until the owner schedules it. Roadmap entry:
+[`docs/ROADMAP.md`](../docs/ROADMAP.md) § Queued → *All-band reception*.
+
+### Why today's radio can't do it (measured, not inferred)
+
+The appliance's tuner is a generic RTL2832U dongle with a **Rafael Micro R820T** (`0bda:2838`; journal line
+`Found Rafael Micro R820T tuner`; stock `librtlsdr2 2.0.1`). Measured on `radio` during `AUD-91`
+(2026-10-01, console muted), via the radio's own tuning:
+
+| Band | Result |
+|---|---|
+| AM 600 / 1000 / 1400 / 1710 kHz | signal 0, rssi −60, `[R82XX] PLL not locked!` on every tune |
+| SW 5 / 10 / 15 MHz | signal 0, PLL not locked |
+| SW 23 / 25 MHz | signal 0 |
+| SW 27 / 29 MHz | signal 17 / −49.8 dBu — the noise floor |
+| AIR, WB, VHF | tune normally (signal 45 / 39 / 49, no PLL warning) |
+
+The R820T's synthesiser cannot lock below ~24 MHz, so **no AM or SW station is receivable at any signal
+strength** — this is not a sensitivity problem an antenna can fix. The software side is closer than the
+hardware: `RTLSDRCore/DSP/AmDemodulator.cs` already exists. What is missing is an HF signal path, and the
+library has no direct-sampling or upconverter-offset support (`RtlSdrDevice.cs:102-104` hard-codes
+24 MHz – 1.766 GHz).
+
+### Requirements for any option
+
+1. Cover **AM 530–1710 kHz, SW 1.6–30 MHz, FM 87.5–108, AIR 108–137, WB 162.40–162.55, VHF 30–300 MHz**.
+2. **Switch between HF and VHF automatically, per band, from software.** It is a sealed cabinet — a manual
+   pass-through switch is not acceptable.
+3. Stay on a `librtlsdr`-compatible API if at all possible (`RTLSDRCore` is a P/Invoke wrapper around it);
+   a different SDR family (SDRplay, Airspy) would mean a new device layer.
+4. Fit the box's USB budget and the cabinet; no new mains supply if avoidable.
+
+### Option A — one HF-capable RTL-SDR dongle (recommended *if* obtainable)
+
+- **What:** an RTL-SDR Blog dongle with a **built-in HF upconverter** that the driver switches in
+  automatically below ~28.8 MHz — "simply tune to an HF frequency and it functions normally", no direct
+  sampling. The original **RTL-SDR Blog V4 (R828D, 500 kHz – 1.766 GHz, 1 PPM TCXO, bias tee, single SMA)
+  is now discontinued** — the R828D supply ran out. Its announced successor, the **RTL-SDR Blog V4 Lite
+  (R828S)**, is *expected* to keep the V4's HF upconverter architecture but with simplified VHF/UHF
+  filtering and limited production; its HF coverage was **not confirmed** in the sources checked
+  (2026-10-01). A "Blog V5" is in early scoping. ⚠ **Verify HF coverage and availability at purchase time.**
+- **Cost:** ~US$30–45 for the dongle (V4 pricing was $29.95 dongle-only / $39.95 with antennas at launch;
+  later $44.95).
+- **Box change:** replace the stock `librtlsdr2` with the **RTL-SDR Blog driver fork** (the V4 required it;
+  the V4 Lite needs updated Blog or Osmocom drivers and identifies via EEPROM strings `RTLSDRBlog` / `V4L`).
+  That is a system-library change on the appliance — plan it with `deploy/provision/` so it is reproducible.
+- **Why preferred:** one device, one antenna input, the driver does the HF switching — closest to "it just
+  works" and the least code.
+
+### Option B — keep today's dongle for VHF, add a second dongle permanently behind an HF upconverter
+
+- **What:** leave the current R820T dongle on FM / AIR / WB / VHF exactly as it is. Add a **second RTL-SDR
+  dongle** with an **HF upconverter permanently in front of it** — e.g. **Nooelec Ham It Up Plus v2**
+  (125 MHz LO, TCXO, covers down to 300 Hz; ⚠ its upconvert/pass-through switch is **manual**, so it must
+  stay in upconvert mode and be dedicated to HF) or **Airspy SpyVerter R2** (120 MHz LO; measured as the
+  lowest noise floor and best SNR of the common upconverters). Software tunes the HF dongle at
+  `f + LO` and labels the result `f`.
+- **Cost:** upconverter ~US$50–100 + second dongle ~US$30 (+ USB port).
+- **Software:** per-band **device selection** (two RTL devices, chosen by serial; the band-map
+  `SdrDeviceGate` and the radio both need to know which device owns which band) plus a configurable LO
+  offset. More code than A, but no system-library swap and the current FM path is untouched.
+- **Variant (verify first):** a single dongle with a *software-controllable* bias tee (RTL-SDR Blog
+  V3/V4-class) powering an upconverter that passes VHF through when unpowered — would give automatic
+  switching on one dongle. Not confirmed for any specific upconverter; check before relying on it.
+
+### Not recommended
+
+- **Direct sampling on the current dongle:** requires soldering the antenna to the RTL2832U's Q-branch
+  pins plus a software mode switch; poor sensitivity and a hardware mod inside the cabinet.
+- **Manual upconverter switching on a single dongle:** violates requirement 2.
+
+### Antennas (needed for A or B — the FM antenna will be weak on MW)
+
+- **MW + SW:** an **active wideband loop** (e.g. the MLA-30+ class, ~100 kHz–30 MHz, USB-powered) placed
+  away from the N100 and switching supplies, or a long wire (several metres; outdoors is far better) with a
+  9:1 unun. MW reception indoors in a cabinet will be modest — the owner notes few AM stations nearby.
+- **Sharing one input (option A):** HF and VHF antennas into one SMA need an **HF/VHF diplexer**; option B
+  avoids this (each dongle has its own antenna).
+- Expect noise from the PC and LED/switching supplies; ferrite chokes on the antenna feed and USB cable.
+
+### Software work once hardware exists (estimates)
+
+| Item | A | B |
+|---|---|---|
+| Replace the hard-coded 24 MHz – 1.766 GHz range (`RtlSdrDevice.cs:102-104`) with the device's real range; per-band "receivable" flag (also unblocks `AUD-94`'s UI) | ✓ | ✓ |
+| Band-map sweep plans: AM 118 channels @ 10 kHz; SW the broadcast segments (49/41/31/25/19/16 m) @ 5 kHz | ✓ | ✓ |
+| AM channel-power window (FM's `ChannelPowerMeter` uses 8–80 kHz; AM needs ~±5 kHz) | ✓ | ✓ |
+| Verify AM demod quality (`AmDemodulator`) and AGC on real MW/SW stations | ✓ | ✓ |
+| Driver fork install in `deploy/provision/` + UAT | ✓ | — |
+| Per-band device selection (two dongles), LO offset config, gate ownership per device | — | ✓ |
+| **Estimate** | **~2 days** | **~3–4 days** |
+
+Everything above the radio — the BAND view, signal-colour bars (`UI-22`), the preset bar (`UI-20`/`UI-21`)
+and the knob — works unchanged once a band can be swept, which is what makes all bands consistent.
+
+### Sources (checked 2026-10-01)
+
+- RTL-SDR Blog V4 user guide — HF without direct sampling; updated drivers required: <https://www.rtl-sdr.com/V4/>
+- V4 specs (500 kHz–1.766 GHz, R828D, built-in upconverter, TCXO, bias tee) and launch pricing: <https://www.cnx-software.com/2023/08/17/rtl-sdr-blog-v4-dongle-launched-with-rafeal-r828d-tuner-chip/>
+- V4 end of line: <https://www.hackster.io/news/rtl-sdr-com-announces-the-end-of-the-line-for-its-popular-rtl-sdr-blog-v4-software-defined-radio-76f628f18e0d>
+- V4 Lite (R828S): <https://www.sdrstore.eu/rtl-sdr-blog-v4-lite-r828s-driver-update-changes/>, <https://www.sdrstore.eu/rtl-sdr-blog-v4-end-of-life-v4-lite-explained/>
+- Ham It Up Plus v2 (125 MHz, manual pass-through): <https://www.nooelec.com/store/ham-it-up-plus.html>
+- SpyVerter review (noise floor / SNR): <https://www.rtl-sdr.com/review-of-the-spyverter-upconverter/>
+
+---
+
 ## Skeleton shimmer (`UX-1`) — two things measured, or deliberately not measured, and NOT shipped
 
 **Filed 2026-09-09 by `UX-1`, which shipped the amplitude change only.** The row raised the shimmer's

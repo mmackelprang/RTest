@@ -65,6 +65,19 @@ exactly as today, just in one row.
 (`Mappable`, `UnavailableReason`, from `AUD-91`). Where the band button gets that from — the band list,
 the band-map endpoint, or a shared source both read — is a Planner / Architect question, not a design one.
 
+## 2026-10-01 — hardware deferred; the full hardware spec is on the roadmap
+
+**Owner:** *"We're not going to change hardware now. There are not many AM stations nearby."* Asked
+whether the current hardware and software would capture or play decent AM/SW stations, the answer
+(measured, see above) is no: the R820T cannot lock below ~24 MHz, so no AM or SW station is receivable at
+any strength. **Owner:** *"Spec out what HW I would need to make all the bands work, and add that to the
+roadmap."* → the spec is [`design/FUTURE-WORK.md` § All-band reception](../../design/FUTURE-WORK.md)
+(options A: one HF-capable RTL-SDR Blog dongle — V4 discontinued, V4 Lite expected to keep HF, verify at
+purchase; B: a second dongle permanently behind an HF upconverter; plus an HF/MW antenna) and the roadmap
+entry is [`docs/ROADMAP.md`](../ROADMAP.md) § Queued → *All-band reception*. Options 2–4 above are
+therefore deferred until the owner buys hardware. **Still open:** option 1 (show AM/SW as unavailable in
+the panel) — the owner has not ruled on it.
+
 ## Verification
 
 For option 1: the panel shows AM/SW as unavailable on this tuner, and nothing tunes into silence
