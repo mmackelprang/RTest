@@ -394,19 +394,27 @@ public class CastConsoleVolumeFollowerTests
   {
     await using var h = new CastConsoleTestHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
-    var (mixer, follower) = Build(h, 0.50f); // anchor would be (0.50, 0.40)
+    var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
     var masterWrites = ResyncLikeAudioStateUpdateService(h.Output, mixer);
     h.ClearCommands();
 
-    h.RaiseStatus(0.505); // within 0.01 of master: no master write
+    // A first move establishes the non-identity anchor (0.50, 0.40): 0.45 → 0.36.
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+    Assert.Equal(0.36f, Assert.Single(h.VolumeSends()), 3);
+    h.ClearCommands();
+
+    h.Time.Advance(TimeSpan.FromSeconds(5)); // past the echo window of that push
+    h.RaiseStatus(0.455); // set on the speaker, within 0.01 of master: no master write
     Assert.Equal(0, masterWrites());
 
-    mixer.MasterVolume = 0.51f;
+    mixer.MasterVolume = 0.46f;
     await follower.LastVolumeBurst;
 
-    // From (0.50, 0.505): 0.505 + (0.495 / 0.5) * 0.01 = 0.5149 — not (0.50, 0.40)'s 0.412.
-    Assert.Equal(0.5149f, Assert.Single(h.VolumeSends()), 3);
+    // From (0.45, 0.455): 0.455 + (0.545 / 0.55) * 0.01 = 0.4649 — not the stale (0.50, 0.40)
+    // curve's 0.368, which would drop the speaker nine points on a one-point console move.
+    Assert.Equal(0.4649f, Assert.Single(h.VolumeSends()), 3);
   }
 
   // --- pre-merge review M3: the start-up window ---
