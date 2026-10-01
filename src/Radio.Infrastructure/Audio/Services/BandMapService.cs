@@ -150,6 +150,11 @@ public sealed class BandMapService : IHostedService, IDisposable
     }
   }
 
+  /// <summary>
+  /// Age of <paramref name="map"/> by this service's clock, or null when <paramref name="map"/> is null.
+  /// </summary>
+  public TimeSpan? GetAge(BandMap? map) => map == null ? null : _time.GetUtcNow() - map.ScannedAtUtc;
+
   /// <summary>Test rendezvous: the running sweep's task, or the last one's once it has finished.</summary>
   internal Task RunningSweep
   {
