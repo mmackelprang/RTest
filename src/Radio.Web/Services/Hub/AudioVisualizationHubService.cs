@@ -29,6 +29,13 @@ public class AudioVisualizationHubService : IAsyncDisposable
   public event Func<WaveformDataDto, Task>? OnWaveformData;
   public event Func<VisualizationDataDto, Task>? OnVisualizationData;
 
+  /// <summary>
+  /// UI-30. Raised when the connection may have changed state: connected (first connect, a retry-loop
+  /// connect, or a reconnect), reconnecting, closed, or stopped. Carries no value — read
+  /// <see cref="IsConnected"/> — because a handler can run after a later change has already landed.
+  /// </summary>
+  public event Func<Task>? ConnectionStateChanged;
+
   // Track active group subscriptions so we can re-subscribe on reconnect
   private readonly HashSet<string> _activeSubscriptions = new();
   private readonly object _subscriptionLock = new();
@@ -37,7 +44,15 @@ public class AudioVisualizationHubService : IAsyncDisposable
   private static DateTime _lastDisconnectLogUtc = DateTime.MinValue;
   private static readonly TimeSpan DisconnectLogInterval = TimeSpan.FromSeconds(10);
 
-  public bool IsConnected => _hubConnection?.State == HubConnectionState.Connected;
+  public bool IsConnected => IsConnectedOverride ?? _hubConnection?.State == HubConnectionState.Connected;
+
+  /// <summary>
+  /// Test seam (UI-30): when set, <see cref="IsConnected"/> reports this instead of the connection's state.
+  /// Production never sets it. bUnit tests cannot reach a live hub, so without it the connected branch of
+  /// any component that reads <see cref="IsConnected"/> is unreachable from a test. It changes nothing else:
+  /// subscriptions and on-demand reads still check the real connection.
+  /// </summary>
+  internal bool? IsConnectedOverride { get; set; }
   public HubConnectionState ConnectionState => _hubConnection?.State ?? HubConnectionState.Disconnected;
 
   private readonly IHubConnectionTransport? _transport;
@@ -123,13 +138,14 @@ public class AudioVisualizationHubService : IAsyncDisposable
           HubReconnectLogging.LogReconnecting(_logger, exception, "Visualization");
         }
 
-        return Task.CompletedTask;
+        return RaiseConnectionStateChangedAsync();
       };
 
       _hubConnection.Reconnected += async connectionId =>
       {
         _lastDisconnectLogUtc = DateTime.MinValue; // Reset throttle
         _logger.LogInformation("Visualization hub reconnected with ID: {ConnectionId}", connectionId);
+        await RaiseConnectionStateChangedAsync();
 
         // Re-subscribe to all active groups — SignalR group membership is per-connection,
         // so after reconnect (new ConnectionId) the old memberships are gone.
@@ -174,13 +190,14 @@ public class AudioVisualizationHubService : IAsyncDisposable
           _logger.LogWarning(exception, "Visualization hub connection closed");
         }
 
-        return Task.CompletedTask;
+        return RaiseConnectionStateChangedAsync();
       };
 
       try
       {
         await _hubConnection.StartAsync(cancellationToken);
         _logger.LogInformation("Connected to AudioVisualizationHub");
+        await RaiseConnectionStateChangedAsync();
       }
       catch (Exception ex)
       {
@@ -229,6 +246,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
           await _hubConnection.StartAsync(ct);
           _logger.LogInformation("Connected to AudioVisualizationHub at {Url} (retry #{Attempt})", hubUrl, attempt + 1);
           await ReplaySubscriptionsAsync();
+          await RaiseConnectionStateChangedAsync();
           return;
         }
         catch (Exception ex)
@@ -287,6 +305,8 @@ public class AudioVisualizationHubService : IAsyncDisposable
     {
       _connectionLock.Release();
     }
+
+    await RaiseConnectionStateChangedAsync();
   }
 
   // Subscription methods.
@@ -511,6 +531,28 @@ public class AudioVisualizationHubService : IAsyncDisposable
       catch (Exception ex)
       {
         _logger.LogError(ex, "Exception in {EventName} event handler", eventName);
+      }
+    }
+  }
+
+  /// <summary>Raises <see cref="ConnectionStateChanged"/>; one handler's exception does not stop the rest.</summary>
+  private async Task RaiseConnectionStateChangedAsync()
+  {
+    Func<Task>? handlers = ConnectionStateChanged;
+    if (handlers == null)
+    {
+      return;
+    }
+
+    foreach (Func<Task> handler in handlers.GetInvocationList().Cast<Func<Task>>())
+    {
+      try
+      {
+        await handler();
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Exception in ConnectionStateChanged event handler");
       }
     }
   }
