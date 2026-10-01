@@ -689,6 +689,43 @@ public class GoogleCastOutputConsoleVolumeTests
 
     Assert.Equal(new[] { "mute" }, h.Kinds());
     Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Null(h.Output.HeldConsoleVolume(h.Target().Generation)); // nothing owed at the unmute either
+  }
+
+  // The same rule for a speaker muted on its own side under an unmuted console: it already holds
+  // the level, so nothing is sent — a SET_VOLUME (and the re-mute it would need) is avoided.
+  [Fact]
+  public async Task AfterStart_ASpeakerMutedOnItsOwnSide_AtTheSameLevel_GetsNoCommandAtAll()
+  {
+    await using var h = new CastConsoleTestHarness();
+    h.Output.AttachConsoleFollower(() => false, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Empty(h.Commands);
+    Assert.True(h.Output.KnownSpeakerMuted);
+  }
+
+  // A speaker muted on its own side whose level is owed (the restore on connect failed): the push
+  // is unavoidable here (the console is not muted, so nothing will release a held level), and the
+  // mute is re-asserted straight after it.
+  [Fact]
+  public async Task AfterStart_ALevelPushToASpeakerMutedOnItsOwnSide_IsFollowedByAMuteReassert()
+  {
+    await using var h = new CastConsoleTestHarness();
+    h.Output.AttachConsoleFollower(() => false, NullLogger.Instance);
+    h.Store.Volumes["cast-a"] = 0.60f;
+    h.FailNextVolume = new TimeoutException("restore lost");
+    await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Equal(new[] { "vol", "mute" }, h.Kinds());
+    Assert.Equal(0.60f, h.VolumeSends()[0], 3);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
   // D1 (c). The after-start push has a DIFFERENT level to apply (the AUD-80 restore on connect
