@@ -648,7 +648,9 @@ public class DevicesController : ControllerBase
   /// the attempt, or reported by <see cref="GoogleCastOutput.ConnectAsync(ChromecastDeviceInfo, CancellationToken)"/>'s state guard refusing
   /// whatever state it found (Connecting, Stopping, Initializing, ...). A 409 is not evidence the
   /// device is unreachable. When that refusal follows this call's own stop of a stream to another
-  /// device, local output is restored as on the 500 path below.
+  /// device, local output is restored as on the 500 path below — unless the guard refused
+  /// <c>Connecting</c> or <c>Streaming</c>: another party's connect then owns the output, and
+  /// restoring local would tear it down.
   /// Returns 502 when Cast is not streaming to the requested device once the output gate has run —
   /// for example because the speaker was lost while connecting or starting, the connect was
   /// superseded by another, or there is no audio engine to promote through. Local output is
@@ -872,14 +874,28 @@ public class DevicesController : ControllerBase
       // mid-transition when it checked — for example, another connect that began after the
       // Connecting check above. The prefix is the constant that guard's message is built from.
       // The guard runs after ConnectAsync's stop-before-switch. So when Cast was streaming on
-      // entry (a device switch), this call may itself have stopped the user's stream, and nothing
-      // guarantees whoever moved the state will restore local if its own connect fails (review
-      // LOW-1). In that case the same restore as the 500 path runs: it switches to local only
-      // while Cast is still the active output and the Cast output is not Streaming, so a party
-      // that has since got Cast streaming is left alone. Otherwise this call stopped nothing,
-      // and nothing is restored.
+      // entry (a device switch), this call may itself have stopped the user's stream (review
+      // LOW-1).
+      //
+      // What happens next depends on the state the guard refused, which the exception carries
+      // (read at the refusal, not now). Connecting or Streaming: another party is mid-connect, or
+      // has got Cast streaming, and the outcome is theirs. Nothing is restored, because switching
+      // to local here leaves Cast through the gate, whose tear-down stops a Connecting output and
+      // whose disconnect supersedes that party's in-flight connect (re-review MEDIUM-A: a
+      // double-tap on one speaker while streaming to another failed both requests). If that
+      // party's connect then fails, local is restored only if its own failure path does it: this
+      // endpoint's 500/502 paths do; the fire-and-forget auto-connect of POST /api/devices/output
+      // does not (it never did), so Cast can then stay active with local muted.
+      //
+      // Any other refused state (Stopping, Error, ...; or none recorded): the same restore as the
+      // 500 path, which switches to local only while Cast is still the active output and the Cast
+      // output is not Streaming. Not streaming on entry: this call stopped nothing, and nothing
+      // is restored.
       _logger.LogWarning("Cast connect refused by output state: {Reason}", ex.Message);
-      if (castWasStreamingOnEntry)
+      var anotherPartyOwnsTheOutput =
+        GoogleCastOutput.TryGetConnectRefusedState(ex, out var refusedState) &&
+        refusedState is AudioOutputState.Connecting or AudioOutputState.Streaming;
+      if (castWasStreamingOnEntry && !anotherPartyOwnsTheOutput)
       {
         await RestoreLocalAfterFailedConnectAsync();
       }

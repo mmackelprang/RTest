@@ -151,32 +151,52 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
   }
 
   [Fact]
-  public async Task Connect_SwitchingDevicesWhileCastIsActive_RefusedAfterItsOwnStop_Returns409_AndRestoresLocal()
+  public async Task Connect_SwitchingDevicesWhileCastIsActive_RefusedAsStoppingAfterItsOwnStop_Returns409_AndRestoresLocal()
   {
     // Review LOW-1. Cast is the active output, streaming to another speaker. The connect's
-    // stop-before-switch stops that stream; another party then moves the state before the guard,
-    // which refuses. This call stopped the user's stream, so it must not leave Cast active with
-    // local muted and nothing playing.
+    // stop-before-switch stops that stream; another party then moves the state to Stopping (a
+    // disconnect) before the guard, which refuses. Nobody is connecting, and this call stopped the
+    // user's stream, so it must not leave Cast active with local muted and nothing playing.
     StreamToTestDevice(id: "https://192.168.0.99/");
     var (engine, _) = CreateEngine();
     await engine.SetActiveOutputAsync("google-cast", CancellationToken.None);
-    var moved = false;
-    _castOutput.StateChanged += (_, e) =>
-    {
-      if (e.NewState == AudioOutputState.Stopped && !moved)
-      {
-        moved = true;
-        SetState(AudioOutputState.Connecting); // the other party, between the stop and the guard
-      }
-    };
+    var moved = MoveStateRightAfterTheStop(AudioOutputState.Stopping);
 
     var result = await CreateController(audioEngine: engine).ConnectToCastDevice(Request(), CancellationToken.None);
 
     var conflict = Assert.IsAssignableFrom<ObjectResult>(result);
     Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
-    Assert.True(moved);
+    Assert.True(moved());
     Assert.Equal("default", engine.ActiveOutputId);
     Assert.False(engine.IsLocalOutputMuted);
+    VerifyDefaultSaved(Times.Never());
+  }
+
+  [Fact]
+  public async Task Connect_SwitchingDevicesWhileCastIsActive_RefusedByAnotherConnectAfterItsOwnStop_Returns409_AndLeavesThatConnectAlone()
+  {
+    // Re-review MEDIUM-A: a double-tap on speaker B while streaming to A, as one deterministic
+    // interleaving. Both requests saw Streaming on entry; the first's stop-before-switch has
+    // stopped A and its connect to B is in flight (Connecting) when the second's guard refuses.
+    // Here the stop is the second request's own, and the first request's connect is the state set
+    // right after it — the same state its guard sees. Restoring local now would leave Cast through
+    // the gate, which stops the Connecting output and supersedes that in-flight connect: both
+    // requests would fail. The connecting party owns the outcome; this request leaves it alone.
+    StreamToTestDevice(id: "https://192.168.0.99/");
+    var (engine, _, engineCast) = CreateEngineWithCast();
+    await engine.SetActiveOutputAsync("google-cast", CancellationToken.None);
+    var moved = MoveStateRightAfterTheStop(AudioOutputState.Connecting);
+
+    var result = await CreateController(audioEngine: engine).ConnectToCastDevice(Request(), CancellationToken.None);
+
+    var conflict = Assert.IsAssignableFrom<ObjectResult>(result);
+    Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+    Assert.True(moved());
+    // Cast stays the active output, local stays muted, and the gate's tear-down never ran.
+    Assert.Equal("google-cast", engine.ActiveOutputId);
+    Assert.True(engine.IsLocalOutputMuted);
+    engineCast.Verify(c => c.StopAsync(It.IsAny<CancellationToken>()), Times.Never);
+    Assert.Equal(AudioOutputState.Connecting, _castOutput.State);
     VerifyDefaultSaved(Times.Never());
   }
 
@@ -225,6 +245,25 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
     return device;
   }
 
+  /// <summary>
+  /// Sets the real Cast output to <paramref name="state"/> as soon as it first reaches Stopped —
+  /// that is, inside <c>ConnectAsync</c>'s stop-before-switch, before its state guard runs: another
+  /// party moving the state in that window. Returns whether it has fired.
+  /// </summary>
+  private Func<bool> MoveStateRightAfterTheStop(AudioOutputState state)
+  {
+    var moved = false;
+    _castOutput.StateChanged += (_, e) =>
+    {
+      if (e.NewState == AudioOutputState.Stopped && !moved)
+      {
+        moved = true;
+        SetState(state);
+      }
+    };
+    return () => moved;
+  }
+
   private void VerifyDefaultSaved(Times times) =>
     _config.Verify(c => c.SetValueAsync(
       It.IsAny<string>(), "AudioPreferences:DefaultCastDeviceId", DeviceId, It.IsAny<CancellationToken>()), times);
@@ -234,6 +273,13 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
   /// attached to its output gate. Both start Ready; the Cast mock reports Streaming once started.
   /// </summary>
   private static (SoundFlowAudioEngine Engine, Mock<IAudioOutput> Http) CreateEngine()
+  {
+    var (engine, http, _) = CreateEngineWithCast();
+    return (engine, http);
+  }
+
+  /// <summary><see cref="CreateEngine"/>, also returning the engine's Cast output mock.</summary>
+  private static (SoundFlowAudioEngine Engine, Mock<IAudioOutput> Http, Mock<IAudioOutput> Cast) CreateEngineWithCast()
   {
     var engineOptions = new Mock<IOptions<AudioEngineOptions>>();
     engineOptions.Setup(o => o.Value).Returns(new AudioEngineOptions { EnableHotPlugDetection = false });
@@ -257,7 +303,7 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
     var http = new Mock<IAudioOutput>();
     http.SetupGet(h => h.State).Returns(AudioOutputState.Ready);
     engine.AttachOutputCoordination(cast.Object, http.Object, configManager: null);
-    return (engine, http);
+    return (engine, http, cast);
   }
 
   private DevicesController CreateController(
