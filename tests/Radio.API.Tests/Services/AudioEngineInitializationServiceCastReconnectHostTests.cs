@@ -164,6 +164,8 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     var service = CreateService();
     service.ReceiverApplicationsReadOverride = (_, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "2DB7CC49" });
     var host = service.CreateProductionCastReconnectHost();
+    var states = new List<AudioOutputState>();
+    _castOutput.StateChanged += (_, e) => states.Add(e.NewState);
 
     var ex = await Assert.ThrowsAsync<CastSpeakerInUseException>(
       () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
@@ -171,6 +173,12 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     Assert.Contains("2DB7CC49", ex.Message);
     Assert.Null(_castOutput.ConnectedDevice);                          // our channel closed
     Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);    // nothing launched
+
+    // Never Streaming at any point, so no media STOP can have been sent: GoogleCastOutput.StopAsync
+    // is a no-op unless the output is Streaming (AudioOutputBase.ValidateCanStop), and nothing was
+    // launched to stop. Whether DisconnectAsync itself sends anything is SharpCaster's behaviour
+    // (it does not, in 3.0.0), which no offline test can observe.
+    Assert.DoesNotContain(AudioOutputState.Streaming, states);
   }
 
   [Fact]

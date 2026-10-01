@@ -177,7 +177,13 @@ internal interface ICastReconnectHost
 /// bound) is refused by <c>GoogleCastOutput.ConnectAsync</c> while the watcher's is
 /// <c>Connecting</c>, and that refusal is the user's request failing (AUD-85). A choice of
 /// output made in that moment is caught by the atomic, conditional switch back to Cast, which
-/// refuses. The run's only output change is that conditional switch.
+/// refuses. The run makes output selections in exactly two places: that switch back to Cast
+/// (conditional on no selection since the drop), and — only when that switch throws —
+/// <see cref="ICastReconnectHost.RestoreLocalOutputAsync"/>, which re-applies the recovery's local
+/// output through the gate when it is still the active output (a selection of its own: on the
+/// production engine it bumps the epoch, re-applies the mute state and persists). Separately, when a
+/// run ends <see cref="CastReconnectOutcome.LostAgainAfterSwitch"/> its owner re-runs the AUD-84
+/// recovery, which may switch the output to local.
 /// </para>
 /// <para>
 /// A full connect is attempted only after the speaker has answered two probes in a row (the
