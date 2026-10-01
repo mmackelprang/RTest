@@ -834,7 +834,7 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (!hadConnection)
     {
-      // Debug, not Warning (AUD-54 (7), AUD-84 follow-up 3): this is the normal outcome of a
+      // Debug, not Warning (AUD-54 ②, AUD-84 follow-up 3): this is the normal outcome of a
       // teardown after a handled connection loss, which has already cleared the connection.
       _logger.LogDebug("Disconnect requested but no Chromecast device is connected");
       return;
@@ -1085,8 +1085,9 @@ public class GoogleCastOutput : AudioOutputBase
   /// <para>
   /// The swap is a single reference assignment, so the receive loop enumerates either the old
   /// array or the new one, never a half-built one. It is not ordered against SharpCaster's own
-  /// rebuild of the list in <c>RecreateHeartbeatChannel</c> (run by its DisconnectAsync); a
-  /// collision there can lose one of the two writes.
+  /// rebuild of the list in <c>RecreateHeartbeatChannel</c> (run by its DisconnectAsync), nor
+  /// against <c>SharpCasterCallbackGuard.TryHarden</c>, which also rewrites it; a collision with
+  /// either can lose one of the two writes.
   /// </para>
   /// <c>internal</c> so a test can drive it against a real, unconnected
   /// <see cref="ChromecastClient"/>.
@@ -1205,12 +1206,21 @@ public class GoogleCastOutput : AudioOutputBase
 
       // Stop DirectChannel streaming if active. Taken with an exchange so this and
       // HandleConnectionLostAsync, which can run concurrently, never both stop it.
+      // The channel is taken together with the streaming service, before the (up to 5 s)
+      // stop, and released in a finally, so a throwing StopAsync still unregisters it.
       var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
       if (directStreaming != null)
       {
-        await directStreaming.StopAsync();
-        await directStreaming.DisposeAsync();
-        UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
+        var directChannel = Interlocked.Exchange(ref _directChannel, null);
+        try
+        {
+          await directStreaming.StopAsync();
+        }
+        finally
+        {
+          await directStreaming.DisposeAsync();
+          UnregisterCustomChannel(directChannel);
+        }
         _logger.LogInformation("DirectChannel streaming stopped");
       }
 
@@ -1233,8 +1243,9 @@ public class GoogleCastOutput : AudioOutputBase
         var mediaChannel = stopClient.GetChannel<MediaChannel>();
         if (mediaChannel != null && mediaChannel.MediaStatus == null)
         {
-          // AUD-54 (7). No media status has been received on this client, so there is no media
-          // session to stop — the normal case in DirectChannel mode, which never loads media.
+          // AUD-54 ②. This client holds no current media status (none was ever received, or
+          // SharpCaster cleared it after a failed media send or an empty MEDIA_STATUS), so there
+          // is no media session to stop — the normal case in DirectChannel mode, which never loads media.
           // SharpCaster 3.0.0's MediaChannel.StopAsync would throw InvalidOperationException
           // ("MediaSessionID is not available") here before sending anything, which logged a
           // Warning on every DirectChannel teardown.
@@ -1472,6 +1483,13 @@ public class GoogleCastOutput : AudioOutputBase
         // 3s covers the typical gap between source switch ("No Track")
         // and actual track metadata being available (~2s).
         await Task.Delay(3000, linkedCts.Token);
+
+        // Re-checked after the wait: a StopAsync that ran between the Streaming check at the
+        // top of this method and the debounce lock found nothing pending to cancel.
+        if (State != AudioOutputState.Streaming)
+        {
+          return;
+        }
 
         // The linked token, so a stop or disconnect that cancels the pending update also
         // abandons the wait on a reload already under way. It cannot recall a LOAD that
@@ -2470,8 +2488,15 @@ public class GoogleCastOutput : AudioOutputBase
     var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
     if (directStreaming != null)
     {
-      await directStreaming.DisposeAsync();
-      UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
+      var directChannel = Interlocked.Exchange(ref _directChannel, null);
+      try
+      {
+        await directStreaming.DisposeAsync();
+      }
+      finally
+      {
+        UnregisterCustomChannel(directChannel);
+      }
     }
 
     CancelPendingMetadataUpdate();
