@@ -64,17 +64,21 @@ public class DevicesControllerCastConnectTests
   }
 
   [Fact]
-  public async Task Connect_WhenOutputIsConnecting_Returns409_AndSavesNothing()
+  public async Task Connect_WhenOutputIsConnecting_Returns409_AndLeavesTheBusyOutputAlone()
   {
     SetState(AudioOutputState.Connecting);
+    var audioManager = new Mock<IAudioManager>();
 
-    var result = await CreateController().ConnectToCastDevice(Request(), CancellationToken.None);
+    var result = await CreateController(audioManager.Object).ConnectToCastDevice(Request(), CancellationToken.None);
 
     var conflict = Assert.IsAssignableFrom<ObjectResult>(result);
     Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
     Assert.Equal(AudioOutputState.Connecting, _castOutput.State);
     _config.Verify(c => c.SetValueAsync(
       It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    // Refused before the connect preparation: the now-playing metadata push (which reads the
+    // active source) never ran against an output another party is connecting.
+    audioManager.VerifyGet(m => m.ActiveSource, Times.Never);
   }
 
   [Fact]
@@ -93,7 +97,7 @@ public class DevicesControllerCastConnectTests
       It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
-  private DevicesController CreateController()
+  private DevicesController CreateController(IAudioManager? audioManager = null)
   {
     var prefs = new Mock<IOptionsMonitor<AudioPreferences>>();
     prefs.SetupGet(p => p.CurrentValue).Returns(new AudioPreferences());
@@ -104,6 +108,7 @@ public class DevicesControllerCastConnectTests
       _config.Object,
       prefs.Object,
       Options.Create(new AudioOutputOptions()),
+      audioManager: audioManager,
       castOutput: _castOutput);
   }
 
