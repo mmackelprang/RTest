@@ -4043,16 +4043,31 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
-    var abandon = new CancellationTokenSource();
+    // Hostile review L4. The client is created here, not inside the attempt, so that an attempt
+    // abandoned on the bound — ConnectChromecast can hang — is still closed: its socket would
+    // otherwise stay open (and its heartbeat running) until the connect gave up by itself.
+    using var abandon = new CancellationTokenSource();
+    var client = CastFreshConnectionOverrideForTests == null ? NewShortLivedClient() : null;
+    var attempt = FreshConnectionUnmuteCoreAsync(receiver, client, device.Id, abandon.Token);
     FreshUnmuteOutcome outcome;
     try
     {
-      outcome = await FreshConnectionUnmuteCoreAsync(receiver, device.Id, abandon.Token)
-        .WaitAsync(FreshConnectionUnmuteTimeout, _timeProvider).ConfigureAwait(false);
+      outcome = await attempt.WaitAsync(FreshConnectionUnmuteTimeout, _timeProvider).ConfigureAwait(false);
     }
     catch (Exception ex)
     {
       abandon.Cancel();
+      // The abandoned attempt keeps running; whatever it throws later is observed, not left to the
+      // unobserved-task handler.
+      _ = attempt.ContinueWith(
+        t => _logger.LogDebug(t.Exception, "Cast: the abandoned unmute connection failed after its bound"),
+        CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+        TaskScheduler.Default);
+      if (client != null)
+      {
+        _ = CloseShortLivedClientAsync(client);
+      }
+
       ConsoleLogger.LogInformation(
         "Cast: speaker {Name} left muted — it could not be reached over a new connection to unmute it ({Error}); " +
         "unmute it on the speaker or in Google Home",
@@ -4095,22 +4110,20 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// The fresh connection itself: connect (no launch), decide on its status, maybe unmute, close.
+  /// <paramref name="client"/> is null only when the test seam stands in for the connection.
   /// Throws what the connect or the unmute throws.
   /// </summary>
   private async Task<FreshUnmuteOutcome> FreshConnectionUnmuteCoreAsync(
-    ChromecastReceiver receiver, string deviceId, CancellationToken abandoned)
+    ChromecastReceiver receiver, ChromecastClient? client, string deviceId, CancellationToken abandoned)
   {
-    if (CastFreshConnectionOverrideForTests is { } fake)
+    if (client == null)
     {
+      var fake = CastFreshConnectionOverrideForTests
+        ?? throw new InvalidOperationException("no client and no test connection");
       return await DecideFreshUnmuteAsync(
         await fake.Connect(receiver).ConfigureAwait(false), fake.Unmute, deviceId, abandoned).ConfigureAwait(false);
     }
 
-    var client = new ChromecastClient();
-    // AUD-84: SharpCaster's heartbeat-timeout handler is async void; unguarded, a throw there ends
-    // the process. A fault on this throwaway connection matters to nothing else.
-    SharpCasterCallbackGuard.TryHarden(
-      client, fault => _logger.LogDebug(fault, "Cast: fault on the short-lived unmute connection"), _logger);
     try
     {
       var status = await client.ConnectChromecast(receiver).ConfigureAwait(false);
@@ -4123,14 +4136,32 @@ public class GoogleCastOutput : AudioOutputBase
     }
     finally
     {
-      try
-      {
-        await client.DisconnectAsync().ConfigureAwait(false);
-      }
-      catch (Exception ex)
-      {
-        _logger.LogDebug(ex, "Cast: error closing the short-lived unmute connection");
-      }
+      // A second close after an abandon's is harmless: both are guarded.
+      await CloseShortLivedClientAsync(client).ConfigureAwait(false);
+    }
+  }
+
+  /// <summary>A client for the short-lived unmute connection, with SharpCaster's callbacks guarded.</summary>
+  private ChromecastClient NewShortLivedClient()
+  {
+    var client = new ChromecastClient();
+    // AUD-84: SharpCaster's heartbeat-timeout handler is async void; unguarded, a throw there ends
+    // the process. A fault on this throwaway connection matters to nothing else.
+    SharpCasterCallbackGuard.TryHarden(
+      client, fault => _logger.LogDebug(fault, "Cast: fault on the short-lived unmute connection"), _logger);
+    return client;
+  }
+
+  /// <summary>Closes the short-lived unmute connection. Never throws.</summary>
+  private async Task CloseShortLivedClientAsync(ChromecastClient client)
+  {
+    try
+    {
+      await client.DisconnectAsync().ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: error closing the short-lived unmute connection");
     }
   }
 
