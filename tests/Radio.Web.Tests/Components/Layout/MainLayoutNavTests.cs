@@ -102,6 +102,31 @@ public class MainLayoutNavTests : TestContext
     Assert.Contains("nav-active", settings.GetAttribute("class") ?? string.Empty);
   }
 
+  /// <summary>
+  /// UI-25: the triple-tap callback carries the tap point, and the layout hands the tray a placement
+  /// under it. Toggling again closes; reopening elsewhere moves it.
+  /// </summary>
+  [Fact]
+  public async Task DevTrayGesture_OpensTheTrayUnderTheTap_AndFollowsANewTap()
+  {
+    var cut = RenderLayout();
+
+    await cut.InvokeAsync(() => cut.Instance.ToggleDevTray(1200, 30, 1920, 720));
+    var tray = cut.Find(".dev-tray");
+    Assert.Contains("is-open", tray.GetAttribute("class") ?? string.Empty);
+    Assert.Contains("left:960px", tray.GetAttribute("style") ?? string.Empty);
+    Assert.Contains("top:42px", tray.GetAttribute("style") ?? string.Empty);
+
+    await cut.InvokeAsync(() => cut.Instance.ToggleDevTray(1200, 30, 1920, 720));
+    Assert.DoesNotContain("is-open", cut.Find(".dev-tray").GetAttribute("class") ?? string.Empty);
+
+    await cut.InvokeAsync(() => cut.Instance.ToggleDevTray(1100, 50, 1920, 720));
+    tray = cut.Find(".dev-tray");
+    Assert.Contains("is-open", tray.GetAttribute("class") ?? string.Empty);
+    Assert.Contains("left:860px", tray.GetAttribute("style") ?? string.Empty);
+    Assert.Contains("top:62px", tray.GetAttribute("style") ?? string.Empty);
+  }
+
   private sealed class StubOptionsMonitor<T> : IOptionsMonitor<T>
   {
     public StubOptionsMonitor(T value) => CurrentValue = value;

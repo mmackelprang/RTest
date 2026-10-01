@@ -1,10 +1,10 @@
+@using System.Globalization
 @inject AudioApiService AudioApi
 @inject SystemApiService SystemApi
 @inject AudioStateHubService AudioState
 @inject VisualizerTelemetryService VizTelemetry
 @inject NavigationManager Nav
 @inject IJSRuntime JS
-@inject IConfiguration Configuration
 @inject ILogger<DevTray> Logger
 @implements IDisposable
 
@@ -12,10 +12,19 @@
   DevTray (handoff §P2·2, PR 6 of the design tightening arc).
 
   Hidden developer surface revealed by a 3-tap gesture on the invisible
-  hit area left of the Home pill (see dev-gesture.js + MainLayout). When open it
-  slides down with a backdrop blur and presents a 2×3 grid of diagnostic
-  actions, plus a full-width "Verbose logs" toggle (LOG-5) beneath it. Auto-locks after 30 seconds of no interaction so the tray never
-  sits unlocked in a kiosk that was triple-tapped accidentally.
+  hit area left of the Home pill (see dev-gesture.js + MainLayout). Since UI-25 it opens under the
+  point that was tapped (DevTrayPlacement), not in a fixed corner. Inside: a strip of live
+  read-only readings, then a grid of action cards. Auto-locks after 30 seconds of no interaction so
+  the tray never sits unlocked in a kiosk that was triple-tapped accidentally.
+
+  UI-25: actions and readings are styled as different kinds of thing. Every action is a raised,
+  accent-bordered card with an icon and a pressed state; readings are flat text with no border and
+  are not buttons at all.
+
+  UI-26: NO card navigates the browser away from the app. The kiosk has no tabs, address bar or back
+  button, so a page outside the app is a page a finger cannot leave. File-shaped results are fetched
+  server-side and saved with a blob download (fileDownload.downloadFromStream), and every outcome —
+  success or failure — is written into the card that was tapped.
 
   Why a component instead of just an overlay:
     - The "Updates: NN/sec" reading needs a live SignalR-style subscription
@@ -26,7 +35,8 @@
       pill (PR 2). Folding it into a real surface keeps the topbar clean.
 *@
 
-<div class="dev-tray @(IsOpen ? "is-open" : "")"
+<div class="dev-tray @(IsOpen ? "is-open" : "") @(Placement?.OpensAbove == true ? "opens-above" : "")"
+     style="@TrayStyle"
      role="dialog"
      aria-label="Dev tray"
      aria-hidden="@(IsOpen ? "false" : "true")">
@@ -37,70 +47,81 @@
             @onclick="HandleCloseAsync"
             aria-label="Close dev tray">×</button>
   </div>
+
+  @* Read-only readings. Plain elements, not buttons, so nothing about them invites a tap. *@
+  <div class="dev-tray-readouts">
+    <div class="dev-readout" aria-label="Visualizer updates per second">
+      <span class="dev-readout-label">Updates</span>
+      <span class="dev-readout-value">@_updatesPerSecond/sec</span>
+    </div>
+    <div class="dev-readout" aria-label="Engine state">
+      <span class="dev-readout-label">Engine state</span>
+      <span class="dev-readout-value">@_engineState</span>
+    </div>
+  </div>
+
   <div class="dev-tray-grid">
     <button type="button"
-            class="dev-card"
+            class="dev-card dev-card--action"
             @onclick="MarkDistortionAsync"
+            disabled="@_distortionBusy"
             aria-label="Mark audio distortion">
-      <div class="dev-card-label">Mark distortion</div>
-      @if (!string.IsNullOrEmpty(_distortionStatus))
-      {
-        <div class="dev-card-value">@_distortionStatus</div>
-      }
+      <span class="dev-card-head">
+        <span class="dev-card-label">Mark distortion</span>
+        <span class="dev-card-icon" aria-hidden="true"><RadzenIcon Icon="flag" /></span>
+      </span>
+      @StatusLine(_distortion, "logs an audio-state snapshot")
     </button>
 
     <button type="button"
-            class="dev-card"
-            disabled
-            aria-label="Visualizer updates per second">
-      <div class="dev-card-label">Updates</div>
-      <div class="dev-card-value">@_updatesPerSecond/sec</div>
-    </button>
-
-    <button type="button"
-            class="dev-card"
+            class="dev-card dev-card--action"
             @onclick="DumpAudioFrameAsync"
+            disabled="@_dumpBusy"
             aria-label="Dump audio frame">
-      <div class="dev-card-label">Dump audio frame</div>
-      @if (!string.IsNullOrEmpty(_dumpStatus))
-      {
-        <div class="dev-card-value">@_dumpStatus</div>
-      }
+      <span class="dev-card-head">
+        <span class="dev-card-label">Dump audio frame</span>
+        <span class="dev-card-icon" aria-hidden="true"><RadzenIcon Icon="download" /></span>
+      </span>
+      @StatusLine(_dump, "asks the API for a WAV")
     </button>
 
     <button type="button"
-            class="dev-card"
+            class="dev-card dev-card--action"
             @onclick="DownloadLogsAsync"
+            disabled="@_logsBusy"
             aria-label="Download logs">
-      <div class="dev-card-label">Download logs</div>
+      <span class="dev-card-head">
+        <span class="dev-card-label">Download logs</span>
+        <span class="dev-card-icon" aria-hidden="true"><RadzenIcon Icon="download" /></span>
+      </span>
+      @StatusLine(_logs, "last hour · .zip")
     </button>
 
     <button type="button"
-            class="dev-card"
+            class="dev-card dev-card--action"
             @onclick="ViewFingerprintEvents"
             aria-label="View fingerprint events">
-      <div class="dev-card-label">Fingerprint events</div>
-    </button>
-
-    <button type="button"
-            class="dev-card"
-            disabled
-            aria-label="Engine state">
-      <div class="dev-card-label">Engine state</div>
-      <div class="dev-card-value">@_engineState</div>
+      <span class="dev-card-head">
+        <span class="dev-card-label">Fingerprint events</span>
+        <span class="dev-card-icon" aria-hidden="true"><RadzenIcon Icon="chevron_right" /></span>
+      </span>
+      @StatusLine(null, "opens Diagnostics")
     </button>
 
     @* LOG-5: flips radio-api's Radio / Radio.* log levels between configuration and Debug at
        runtime, without a restart. "Off" resets every switch to configuration, so it also undoes a
        change made directly through the endpoint. *@
     <button type="button"
-            class="dev-card dev-card--wide"
+            class="dev-card dev-card--action dev-card--wide @(_logVerbose ? "is-on" : "")"
             @onclick="ToggleVerboseLoggingAsync"
             disabled="@_logBusy"
             aria-pressed="@(_logVerbose ? "true" : "false")"
             aria-label="Toggle verbose logging">
-      <div class="dev-card-label">Verbose logs</div>
-      <div class="dev-card-value">@_logStatus</div>
+      <span class="dev-card-head">
+        <span class="dev-card-label">Verbose logs</span>
+        <span class="dev-card-icon" aria-hidden="true"><RadzenIcon Icon="@(_logVerbose ? "toggle_on" : "toggle_off")" /></span>
+      </span>
+      <span class="dev-card-status">@_logStatus</span>
     </button>
   </div>
 </div>
@@ -110,6 +131,12 @@
   [Parameter] public bool IsOpen { get; set; }
 
   /// <summary>
+  /// Where to open (UI-25), computed by the parent from the tap that opened the tray. Null keeps the
+  /// stylesheet's default position — the top-right corner, as before UI-25.
+  /// </summary>
+  [Parameter] public DevTrayPlacement? Placement { get; set; }
+
+  /// <summary>
   /// Raised when the user explicitly closes the tray (× button) or the
   /// auto-lock timer elapses. Parent should set its own state to closed.
   /// </summary>
@@ -117,11 +144,32 @@
 
   private const int AutoLockSeconds = 30;
 
+  // Bounds the two file fetches. Under SystemApiService's HttpClient timeout (30 s) so a slow API
+  // reads "timed out" rather than "unreachable".
+  private static readonly TimeSpan FileCallTimeout = TimeSpan.FromSeconds(25);
+
+  private enum StatusKind { Busy, Ok, Error }
+
+  /// <summary>The outcome line a card shows after it was tapped.</summary>
+  private sealed record CardStatus(string Text, StatusKind Kind)
+  {
+    public string CssClass => Kind switch
+    {
+      StatusKind.Ok => "is-ok",
+      StatusKind.Error => "is-error",
+      _ => "is-busy",
+    };
+  }
+
   private int _updatesPerSecond;
   private string _engineState = "—";
   private string _autoLockRemaining = "0:30";
-  private string _distortionStatus = string.Empty;
-  private string _dumpStatus = string.Empty;
+  private CardStatus? _distortion;
+  private CardStatus? _dump;
+  private CardStatus? _logs;
+  private bool _distortionBusy;
+  private bool _dumpBusy;
+  private bool _logsBusy;
   private string _logStatus = "—";
   private bool _logVerbose;
   private bool _logBusy;
@@ -129,6 +177,38 @@
   private DateTime _lastInteractionUtc = DateTime.UtcNow;
   private bool _disposed;
   private bool _wasOpen;
+
+  // Width and open height come from DevTrayPlacement so the placement maths and the rendered box
+  // share one definition. The CSS custom property drives .dev-tray.is-open's max-height.
+  private string TrayStyle
+  {
+    get
+    {
+      var style = FormattableString.Invariant(
+        $"width:{DevTrayPlacement.WidthPx}px;--dev-tray-open-h:{DevTrayPlacement.MaxHeightPx}px;");
+      if (Placement is { } p)
+      {
+        style += FormattableString.Invariant($"left:{p.Left:0.#}px;right:auto;");
+        style += p.Top is double top
+          ? FormattableString.Invariant($"top:{top:0.#}px;bottom:auto;")
+          : FormattableString.Invariant($"bottom:{p.Bottom:0.#}px;top:auto;");
+      }
+      return style;
+    }
+  }
+
+  // A card's second line: its outcome once tapped, else a short low-contrast hint saying what it does.
+  private RenderFragment StatusLine(CardStatus? status, string hint) => __builder =>
+  {
+    if (status is null)
+    {
+      <span class="dev-card-hint">@hint</span>
+    }
+    else
+    {
+      <span class="dev-card-status @status.CssClass" aria-live="polite">@status.Text</span>
+    }
+  };
 
   protected override void OnInitialized()
   {
@@ -154,6 +234,11 @@
       _lastInteractionUtc = DateTime.UtcNow;
       _autoLockRemaining = FormatRemaining(AutoLockSeconds);
       UpdateEngineState();
+      // Last session's outcomes are stale on a fresh open. A card still mid-call keeps its line so
+      // the result lands where the operator expects it.
+      if (!_distortionBusy) _distortion = null;
+      if (!_dumpBusy) _dump = null;
+      if (!_logsBusy) _logs = null;
       // Re-read on every open: the levels may have been changed through the endpoint, or reset by
       // an API restart, since the tray last looked.
       _ = InvokeAsync(RefreshLogStateOnOpenAsync);
@@ -223,66 +308,119 @@
   private async Task MarkDistortionAsync()
   {
     RecordInteraction();
-    _distortionStatus = "marking…";
+    if (_distortionBusy) return;
+    _distortionBusy = true;
+    _distortion = new CardStatus("marking…", StatusKind.Busy);
     StateHasChanged();
     try
     {
       var ok = await AudioApi.ReportDistortionAsync();
-      _distortionStatus = ok ? "marked" : "failed";
+      _distortion = ok
+        ? new CardStatus("marked", StatusKind.Ok)
+        : new CardStatus("failed — radio-api did not accept it", StatusKind.Error);
     }
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "DevTray: failed to mark distortion");
-      _distortionStatus = "error";
+      _distortion = new CardStatus("error", StatusKind.Error);
     }
-    StateHasChanged();
+    finally
+    {
+      _distortionBusy = false;
+      if (!_disposed) StateHasChanged();
+    }
   }
 
-  private async Task DumpAudioFrameAsync()
+  private Task DumpAudioFrameAsync() =>
+    RunFileActionAsync(
+      ct => SystemApi.DumpAudioFrameAsync(ct),
+      "dumping…",
+      busy => _dumpBusy = busy,
+      status => _dump = status,
+      () => _dumpBusy);
+
+  private Task DownloadLogsAsync() =>
+    RunFileActionAsync(
+      ct => SystemApi.DownloadLogsAsync("1h", ct),
+      "fetching…",
+      busy => _logsBusy = busy,
+      status => _logs = status,
+      () => _logsBusy);
+
+  /// <summary>
+  /// UI-26. Fetch a file from radio-api on the server side, then either save it in the page (blob
+  /// download — no navigation) or explain the failure in the card. The browser is never pointed at
+  /// radio-api, so neither an error body nor an unreachable host can replace the app on screen.
+  /// </summary>
+  private async Task RunFileActionAsync(
+    Func<CancellationToken, Task<ApiFileResult>> fetch,
+    string busyText,
+    Action<bool> setBusy,
+    Action<CardStatus> setStatus,
+    Func<bool> isBusy)
   {
     RecordInteraction();
-    _dumpStatus = "dumping…";
+    if (isBusy()) return;
+    setBusy(true);
+    setStatus(new CardStatus(busyText, StatusKind.Busy));
     StateHasChanged();
     try
     {
-      // The audio-frame dump endpoint is a debug surface served by the API
-      // tier. The endpoint URL is opened in a new tab so the response (a
-      // .wav download or JSON metadata payload) is captured by the browser.
-      // The server-side endpoint (/api/audio/debug/dump-frame) is a planned
-      // follow-up; the card surfaces the action now so the UI contract is
-      // stable, and clicking it before the endpoint exists shows a 404 in
-      // the new tab — non-destructive.
-      var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
-      var url = $"{apiBase}/api/audio/debug/dump-frame";
-      await JS.InvokeVoidAsync("open", url, "_blank");
-      _dumpStatus = "opened";
+      ApiFileResult result;
+      using (var cts = new CancellationTokenSource(FileCallTimeout))
+      {
+        result = await fetch(cts.Token);
+      }
+      setStatus(await SaveOrExplainAsync(result));
     }
     catch (Exception ex)
     {
-      Logger.LogWarning(ex, "DevTray: failed to open audio-frame dump");
-      _dumpStatus = "error";
+      Logger.LogWarning(ex, "DevTray: file action failed");
+      setStatus(new CardStatus("error", StatusKind.Error));
     }
-    StateHasChanged();
+    finally
+    {
+      setBusy(false);
+      // The fetch can take up to FileCallTimeout; restart the auto-lock window so the result stays
+      // on screen long enough to be read.
+      RecordInteraction();
+      if (!_disposed) StateHasChanged();
+    }
   }
 
-  private async Task DownloadLogsAsync()
+  private async Task<CardStatus> SaveOrExplainAsync(ApiFileResult result)
   {
-    RecordInteraction();
+    if (!result.Success || result.Content is null)
+    {
+      var reason = result.Error ?? "failed";
+      return new CardStatus(result.StatusCode is int code ? $"{code} · {reason}" : reason, StatusKind.Error);
+    }
+
+    var fileName = result.FileName ?? "download.bin";
+    bool handedOver;
     try
     {
-      // Served by SystemLogsController.DownloadLogs ([Route("api/system/logs")] +
-      // [HttpGet("download")]). This comment previously described the endpoint as "a planned
-      // follow-up" that would 404 — it has been implemented since, and a comment claiming a
-      // working feature is broken sends the next reader chasing a defect that does not exist.
-      var apiBase = (Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl).TrimEnd('/');
-      var url = $"{apiBase}/api/system/logs/download?period=1h";
-      await JS.InvokeVoidAsync("open", url, "_blank");
+      using var stream = new MemoryStream(result.Content, writable: false);
+      using var streamRef = new DotNetStreamReference(stream);
+      handedOver = await JS.InvokeAsync<bool>("fileDownload.downloadFromStream", fileName, streamRef);
     }
     catch (Exception ex)
     {
-      Logger.LogWarning(ex, "DevTray: failed to open log download");
+      Logger.LogWarning(ex, "DevTray: browser save failed");
+      handedOver = false;
     }
+
+    return handedOver
+      ? new CardStatus($"downloaded {fileName} · {FormatSize(result.Content.Length)}", StatusKind.Ok)
+      : new CardStatus("fetched, but the browser did not save it", StatusKind.Error);
   }
+
+  internal static string FormatSize(long bytes) => bytes switch
+  {
+    < 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes} B"),
+    < 1024 * 1024 => string.Create(CultureInfo.InvariantCulture, $"{bytes / 1024.0:0.#} KB"),
+    _ => string.Create(CultureInfo.InvariantCulture, $"{bytes / (1024.0 * 1024.0):0.#} MB"),
+  };
 
   // Bounds each logging-endpoint call so a hung API cannot leave the card disabled for HttpClient's
   // 100 s default.
@@ -357,7 +495,8 @@
     RecordInteraction();
     // UI-5 / UI-2: the fingerprint.* tiles live in Settings → Diagnostics, which /diagnostics opens
     // directly. There is no fingerprint-only view; the card lands on the whole panel, where the
-    // FINGERPRINT group is one of the categories.
+    // FINGERPRINT group is one of the categories. An in-app route: the topbar stays on screen, so
+    // this is not a UI-26 trap.
     Nav.NavigateTo("/diagnostics");
   }
 

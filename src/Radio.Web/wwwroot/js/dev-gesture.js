@@ -3,8 +3,8 @@
 // Listens for taps on the invisible hit area left of the Home pill in the
 // topbar nav row (element marked with `data-dev-gesture`). Three taps inside a
 // 1.5-second window call back into Blazor via DotNetObjectReference to toggle
-// the dev tray. Anything less than three taps is silently discarded after the
-// window lapses.
+// the dev tray, passing where the third tap landed (UI-25). Anything less
+// than three taps is silently discarded after the window lapses.
 //
 // Loaded as an ES module from MainLayout.OnAfterRenderAsync:
 //   const m = await JSRuntime.InvokeAsync("import", "./js/dev-gesture.js");
@@ -21,7 +21,7 @@ const REQUIRED_TAPS = 3;
 let dotNetRef = null;
 let hitArea = null;
 
-function onTap() {
+function onTap(event) {
   const now = Date.now();
   // Drop entries older than the window so a slow tap stream never
   // accumulates a false-positive trigger.
@@ -32,7 +32,12 @@ function onTap() {
     if (dotNetRef) {
       // Fire-and-forget — the Blazor side toggles tray state and re-renders.
       // Errors here are non-fatal (e.g. circuit was torn down mid-gesture).
-      dotNetRef.invokeMethodAsync('ToggleDevTray').catch(function () { /* ignore */ });
+      // UI-25: the third tap's viewport coordinates and the viewport size go with it, so the tray
+      // opens under the point that was pressed (DevTrayPlacement does the clamping). A touch tap
+      // reaches here as a synthesized click, which carries the touch point in clientX/clientY.
+      dotNetRef.invokeMethodAsync('ToggleDevTray',
+        event.clientX, event.clientY, window.innerWidth, window.innerHeight)
+        .catch(function () { /* ignore */ });
     }
   }
 }

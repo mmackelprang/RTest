@@ -3945,17 +3945,27 @@ body {
 }
 
 
-/* ─── §Q  Dev Tray (PR 6 / handoff §P2·2) ─────────────────────────────────── *
+/* ─── §Q  Dev Tray (PR 6 / handoff §P2·2; UI-25, UI-26) ─────────────────── *
  *
- * Hidden developer surface activated by a 3-tap gesture in the top-right
- * corner of the topbar (see .dev-gesture-hit). Slides down from the top edge
- * with a backdrop blur and drop shadow; auto-locks after 30 seconds of no
- * interaction (state lives in DevTray.razor, CSS just animates max-height).
+ * Hidden developer surface opened by a 3-tap gesture on the invisible slot
+ * left of the Home pill (see .dev-gesture-hit). Auto-locks after 30 seconds of
+ * no interaction (state lives in DevTray.razor; CSS animates max-height).
  *
- * The cards are a 2×3 grid of touch targets — each hosts one diagnostic
- * action (Mark distortion, Dump audio frame, Download logs, Fingerprint
- * events) or a read-only metric (Updates/sec, Engine state) — plus a
- * full-width fourth row for the LOG-5 "Verbose logs" toggle.
+ * UI-25 — position. The tray opens UNDER THE TAP that opened it: DevTray.razor
+ * writes left/top (or left/bottom when it flips above), width, and the open
+ * height (--dev-tray-open-h) inline from DevTrayPlacement, which is the one
+ * definition of all four. top:0/right:0 below is only the fallback for a
+ * render with no placement. Closed, the tray is visibility:hidden as well as
+ * zero-height, so its border cannot paint a hairline (or catch a tap) wherever
+ * it was last anchored.
+ *
+ * UI-25 — what is tappable. Two kinds of thing, styled apart:
+ *   - .dev-card        ACTIONS. Raised surface, accent border, accent icon at
+ *                      the right, pressed state. ≥58px tall (the kiosk's
+ *                      dialog-button size).
+ *   - .dev-readout     READINGS (Updates/sec, Engine state). Flat text in a
+ *                      strip under the header — no border, no surface, and not
+ *                      a <button> at all.
  * ─────────────────────────────────────────────────────────────────────────── */
 .dev-tray {
   position: fixed;
@@ -3967,20 +3977,24 @@ body {
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--surface-separator);
-  border-radius: 0 0 0 12px;
-  box-shadow: -4px 4px 24px rgba(0, 0, 0, 0.4);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  transition: max-height 240ms ease-out;
+  visibility: hidden;
+  /* visibility flips only after the close animation has finished. */
+  transition: max-height 240ms ease-out, visibility 0s linear 240ms;
   z-index: 9998; /* one below the sleep screen so /sleep always wins */
 }
 
 .dev-tray.is-open {
-  /* 480, not 400: LOG-5 added a fourth, full-width row beneath the 2×3 grid. */
-  max-height: 480px;
+  max-height: var(--dev-tray-open-h, 440px);
+  overflow-y: auto;
+  visibility: visible;
+  transition: max-height 240ms ease-out, visibility 0s;
 }
 
 .dev-tray-header {
-  padding: 12px 16px;
+  padding: 4px 4px 4px 16px;
   border-bottom: 1px solid var(--surface-separator);
   font-family: var(--font-mono);
   font-size: 11px;
@@ -3998,26 +4012,65 @@ body {
   gap: 8px;
 }
 
+/* The way out, so it gets a full touch target rather than a 20px glyph. */
 .dev-tray-close {
+  width: var(--touch-min);
+  height: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
-  border: none;
-  color: var(--text-medium);
-  font-size: 20px;
+  border: 1px solid var(--surface-separator);
+  color: var(--text-high);
+  font-size: 24px;
   line-height: 1;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
-  transition: color 0.15s ease, background 0.15s ease;
+  padding: 0;
+  border-radius: 8px;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
 }
-.dev-tray-close:hover {
-  color: var(--text-high);
+.dev-tray-close:hover,
+.dev-tray-close:active {
   background: var(--surface-hover);
+  border-color: var(--text-low);
+}
+.dev-tray-close:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* Readings: flat, borderless, not buttons. */
+.dev-tray-readouts {
+  display: flex;
+  gap: var(--sp-6);
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+.dev-readout {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.dev-readout-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-medium);
+}
+
+.dev-readout-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  color: var(--text-high);
 }
 
 .dev-tray-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(4, 1fr);
   gap: 8px;
   padding: 12px;
 }
@@ -4027,41 +4080,92 @@ body {
   grid-column: 1 / -1;
 }
 
+/* Actions. */
 .dev-card {
-  background: var(--surface-elevated);
-  border: 1px solid var(--surface-separator);
-  border-radius: 8px;
-  padding: 12px;
-  text-align: left;
-  cursor: pointer;
-  color: var(--text-medium);
-  transition: background 0.15s ease, border-color 0.15s ease;
-  min-height: 56px;
+  min-height: 64px;
+  padding: 10px 12px;
   display: flex;
   flex-direction: column;
+  justify-content: center;
   gap: 4px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--accent-primary);
+  border: 1px solid color-mix(in srgb, var(--accent-primary) 45%, transparent);
+  border-radius: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 2px 6px rgba(0, 0, 0, 0.35);
+  text-align: left;
+  color: var(--text-high);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 60ms ease;
 }
 .dev-card:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: var(--text-low);
+  background: var(--accent-dim);
+  border-color: var(--accent-primary);
 }
+.dev-card:active:not(:disabled) {
+  background: var(--accent-surface);
+  border-color: var(--accent-primary);
+  box-shadow: none;
+  transform: scale(0.98);
+}
+.dev-card:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+/* Disabled only while its own request is in flight — still an action, just busy. */
 .dev-card:disabled {
-  cursor: default;
+  cursor: progress;
+  opacity: 0.7;
+}
+.dev-card.is-on {
+  background: var(--accent-surface);
+  border-color: var(--accent-primary);
+}
+
+.dev-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .dev-card-label {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  color: var(--text-high);
+}
+
+.dev-card-icon {
+  display: inline-flex;
+  color: var(--accent-primary);
+  flex-shrink: 0;
+}
+.dev-card-icon .rzi {
+  font-size: 22px !important;
+  width: 22px;
+  height: 22px;
+}
+
+/* What the card does, until it has been tapped. */
+.dev-card-hint {
+  font-size: 12px;
   color: var(--text-medium);
 }
 
-.dev-card-value {
+/* What happened when it was tapped (UI-26: results land here, never on another page). */
+.dev-card-status {
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: 13px;
   color: var(--text-high);
+  overflow-wrap: anywhere;
 }
+.dev-card-status.is-busy  { color: var(--text-medium); }
+.dev-card-status.is-ok    { color: var(--signal-green); }
+.dev-card-status.is-error { color: var(--signal-red); }
 
 
 /* ─── §R  Dev Gesture Hit Area (PR 6) ─────────────────────────────────────── *

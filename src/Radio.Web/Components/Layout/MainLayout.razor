@@ -291,8 +291,10 @@
        - <DevTray> stays mounted but renders closed (max-height: 0) until
          _isDevTrayOpen flips. Mounting unconditionally keeps the
          VisualizerTelemetryService subscription alive so the "Updates: NN/sec"
-         card has fresh values the moment the tray slides open. *@
-  <DevTray IsOpen="@_isDevTrayOpen" OnClose="@CloseDevTrayAsync" />
+         card has fresh values the moment the tray slides open.
+       - UI-25: it opens under the tap that opened it. dev-gesture.js passes the tap point and the
+         viewport size; DevTrayPlacement turns those into a clamped position. *@
+  <DevTray IsOpen="@_isDevTrayOpen" Placement="@_devTrayPlacement" OnClose="@CloseDevTrayAsync" />
 
   @* Task #15 PR E item #47 — gain-popover click-away backdrop.
        Mounted at the layout root (outside .page-transition) so the
@@ -354,6 +356,7 @@
   private DotNetObjectReference<MainLayout>? _devTrayRef;
   private IJSObjectReference? _devGestureModule;
   private bool _isDevTrayOpen;
+  private DevTrayPlacement? _devTrayPlacement;
 
   private AudioSourceDto? ActiveSource =>
     _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
@@ -543,13 +546,20 @@
   /// <summary>
   /// Called from JS (dev-gesture.js) when the user triple-taps the invisible
   /// hit area left of the Home pill within 1.5s. Toggles the DevTray open/closed.
+  /// UI-25: the arguments are the third tap's point and the viewport size, in CSS pixels; opening
+  /// places the tray under that point. Closing leaves the last placement alone — the closed tray is
+  /// invisible wherever it sits.
   /// </summary>
   [JSInvokable]
-  public Task ToggleDevTray()
+  public Task ToggleDevTray(double tapX, double tapY, double viewportWidth, double viewportHeight)
   {
     return InvokeAsync(() =>
     {
       _isDevTrayOpen = !_isDevTrayOpen;
+      if (_isDevTrayOpen)
+      {
+        _devTrayPlacement = DevTrayPlacement.ForTap(tapX, tapY, viewportWidth, viewportHeight);
+      }
       StateHasChanged();
     });
   }
