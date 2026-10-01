@@ -446,7 +446,9 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// (output picker switching to soundbar / http-stream) or on engine
   /// shutdown.
   ///
-  /// Best-effort: capped at 5 s, swallows exceptions, never blocks the gate.
+  /// Best-effort: runs under a 5 s token, swallows exceptions, never blocks the gate. The token
+  /// is not a strict cap: the console-mute release (with its own app-stop and unmute timeouts)
+  /// and SharpCaster's <c>ChromecastClient.DisconnectAsync</c> do not observe it.
   /// Shares the same shutdown sequence used by AudioEngineInitializationService.StopAsync.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
@@ -491,6 +493,54 @@ public class SoundFlowAudioEngine : IAudioEngine
     catch (Exception ex)
     {
       _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Warning, ex, "Graceful Cast tear-down failed; continuing");
+    }
+  }
+
+  /// <summary>
+  /// <see cref="TearDownCastOutputAsync"/>, but only while Cast is NOT the active output, checking
+  /// and tearing down under ONE acquisition of the output lock — the same discipline as
+  /// <see cref="TryCommitCastConnectAsync"/>.
+  /// </summary>
+  /// <remarks>
+  /// AUD-85 (pre-merge review MEDIUM-2). The Cast reconnect watcher, cancelled after its connect,
+  /// removes its connection unless Cast is the active output. As a separate read of
+  /// <see cref="ActiveOutputId"/> followed by a tear-down, a gate call promoting Cast could land
+  /// between the two: Cast became active (local muted) and the watcher then disconnected the only
+  /// connection there was. Under the lock, a promotion either completes first — and this declines —
+  /// or waits until the tear-down has finished, so whatever it reads afterwards is the torn-down
+  /// state, not a connection about to vanish.
+  /// </remarks>
+  /// <param name="shouldTearDown">
+  /// Evaluated under the lock, after the active-output check; the tear-down runs only when it
+  /// returns true (the watcher's "the published connection is still ours").
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token for the lock wait and the tear-down.</param>
+  /// <param name="automaticAttempt">As for <see cref="TearDownCastOutputAsync"/>.</param>
+  /// <returns>
+  /// False, having done nothing, when Cast is the active output. True otherwise — whether or not
+  /// <paramref name="shouldTearDown"/> let the tear-down run.
+  /// </returns>
+  public async Task<bool> TearDownCastOutputUnlessActiveAsync(
+    Func<bool> shouldTearDown, CancellationToken cancellationToken, bool automaticAttempt = false)
+  {
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      if (string.Equals(_activeOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return false;
+      }
+
+      if (shouldTearDown())
+      {
+        await TearDownCastOutputAsync(cancellationToken, automaticAttempt).ConfigureAwait(false);
+      }
+
+      return true;
+    }
+    finally
+    {
+      _activeOutputLock.Release();
     }
   }
 

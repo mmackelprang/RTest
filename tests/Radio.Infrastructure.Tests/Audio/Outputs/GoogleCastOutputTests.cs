@@ -215,6 +215,29 @@ public class GoogleCastOutputTests
   }
 
   [Fact]
+  public async Task ConnectAsync_StateGuardRefusal_CarriesTheRefusedState()
+  {
+    // AUD-85 re-review MEDIUM-A: DevicesController decides whether to restore local from the state
+    // the guard refused, not from a later read.
+    var output = CreateOutput();
+    var device = new ChromecastDeviceInfo
+    {
+      Id = "test-device",
+      FriendlyName = "Test Device",
+      IpAddress = "192.168.1.100",
+      Port = 8009,
+      Model = "Chromecast"
+    };
+
+    var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => output.ConnectAsync(device));
+
+    Assert.StartsWith(GoogleCastOutput.ConnectRefusedByStatePrefix, ex.Message, StringComparison.Ordinal);
+    Assert.True(GoogleCastOutput.TryGetConnectRefusedState(ex, out var refused));
+    Assert.Equal(AudioOutputState.Created, refused);
+    Assert.False(GoogleCastOutput.TryGetConnectRefusedState(new InvalidOperationException("other"), out _));
+  }
+
+  [Fact]
   public async Task DisposeAsync_SetsDisposedState()
   {
     var output = CreateOutput();

@@ -28,6 +28,7 @@ public class CastReconnectWatcherTests
 
   private readonly SignalingTimeProvider _time = new();
   private readonly FakeHost _host = new();
+  private CastReconnectWatcher? _watcher; // the one the last Start() made
 
   [Fact]
   public async Task SpeakerAnswersFromTheThirdProbe_ConfirmsOnceThenConnectsAndSwitchesBackToCast()
@@ -352,6 +353,113 @@ public class CastReconnectWatcherTests
   }
 
   [Fact]
+  public async Task CancelledByACastConnectPickOfThisDevice_KeepsTheConnectionAndSwitchesBackToCast()
+  {
+    // AUD-85 review MEDIUM-1. POST cast/connect for the device being reconnected marks the cancel
+    // as a pick of it and waits for the run. It promotes only afterwards, so the active output is
+    // still local here — before the fix the run tore down the very speaker the user picked.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.OnConnect = _ =>
+    {
+      _watcher!.KeepConnectionForCastPick();
+      cts.Cancel();
+    };
+    var reported = false;
+
+    var outcome = await DriveAsync(Start(ct: cts.Token, onConnected: _ => reported = true));
+
+    Assert.Equal(CastReconnectOutcome.Reconnected, outcome);
+    Assert.Equal(new[] { "connect", "keep-for-pick", "switch" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(Mark, _host.SwitchedWith); // conditional on no selection since the drop, as ever
+    Assert.Equal(0, _host.TearDowns);
+    Assert.False(reported); // the user's pick, not a watcher-made reconnect: not counted
+  }
+
+  [Fact]
+  public async Task CancelledByACastConnectPickOfThisDevice_WhenTheConnectionCannotBeKept_RemovesIt()
+  {
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.KeepResult = false;
+    _host.OnConnect = _ =>
+    {
+      _watcher!.KeepConnectionForCastPick();
+      cts.Cancel();
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.Cancelled, outcome);
+    Assert.Equal(new[] { "connect", "keep-for-pick", "teardown" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(0, _host.Switches);
+  }
+
+  [Fact]
+  public async Task CancelledByACastConnectPickOfThisDevice_LostAgainAfterTheSwitch_SwitchesBackToLocalItself()
+  {
+    // AUD-85 re-review MEDIUM-B. The keep path started the connection while local was active; the
+    // speaker dropped before the switch (its loss recovery saw local and declined); the switch made
+    // Cast active and muted local; Cast is not streaming. The owner re-runs the AUD-84 recovery
+    // only for an uncancelled run, and this one was cancelled — so the run must put local back
+    // itself, or the console is left silent.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.CastStreaming = false;
+    _host.SwitchMakesCastActive = true;
+    _host.OnConnect = _ =>
+    {
+      _watcher!.KeepConnectionForCastPick();
+      cts.Cancel();
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.LostAgainAfterSwitch, outcome);
+    Assert.Equal(
+      new[] { "connect", "keep-for-pick", "switch", "switch-to-local" },
+      _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(Mark, _host.SwitchedToLocalWith);
+    Assert.Equal(Mark.LocalOutputId, _host.Active); // back on the recovery's local output
+    Assert.Null(_host.RestoredWith); // not the switch-threw restore
+  }
+
+  [Fact]
+  public async Task NotCancelled_LostAgainAfterTheSwitch_LeavesTheLocalSwitchToTheOwnersRecovery()
+  {
+    // The uncancelled path is unchanged: the owner re-runs the AUD-84 recovery for this outcome
+    // (which starts the next watcher), so the run itself does not switch.
+    _host.Reachable = _ => true;
+    _host.CastStreaming = false;
+    _host.SwitchMakesCastActive = true;
+
+    var outcome = await DriveAsync(Start());
+
+    Assert.Equal(CastReconnectOutcome.LostAgainAfterSwitch, outcome);
+    Assert.DoesNotContain("switch-to-local", _host.Calls);
+  }
+
+  [Fact]
+  public async Task CancelledWhileACastPromotionLandsBetweenTheCheckAndTheTearDown_KeepsTheConnection()
+  {
+    // AUD-85 review MEDIUM-2. The watcher reads the active output (local), then — before its
+    // tear-down — a gate call promotes Cast and mutes local. Tearing down then would leave Cast
+    // active with no connection: a silent console. The tear-down is conditional and atomic with the
+    // gate; it declines, and the connection is kept for that Cast choice.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.OnConnect = _ => cts.Cancel(); // a user action cancelled the run while it was connecting
+    _host.OnConditionalTearDown = () => _host.Active = "google-cast"; // the promotion lands here
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.OutputChangedByUser, outcome);
+    Assert.Equal(new[] { "connect", "teardown-declined", "keep" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(0, _host.TearDowns);
+    Assert.Equal(0, _host.Switches);
+  }
+
+  [Fact]
   public async Task ASupersededConnect_StandsDownAsCastBusy_WithoutTouchingTheCastOutput()
   {
     // Review M2: not our token — a newer connect or a disconnect took the output while ours was on
@@ -478,7 +586,7 @@ public class CastReconnectWatcherTests
     Action? onFailureWarned = null)
   {
     _host.Clock = _time;
-    var watcher = new CastReconnectWatcher(
+    var watcher = _watcher = new CastReconnectWatcher(
       _host, Device(), Mark, schedule ?? DefaultSchedule, _time, logger ?? NullLogger.Instance, start, onConnected,
       onFailureWarned);
     var started = _time.GetUtcNow();
@@ -599,6 +707,9 @@ public class CastReconnectWatcherTests
     public bool CastStreaming = true;
     public string? Active = "speakers";
     public bool SwitchResult = true;
+
+    /// <summary>When set, a successful switch makes <see cref="Active"/> google-cast, as the gate does.</summary>
+    public bool SwitchMakesCastActive;
     public Func<int, bool> Reachable = _ => false;
     public Func<int, Exception?> ConnectFailure = _ => null;
     public Exception? SwitchFailure;
@@ -650,6 +761,11 @@ public class CastReconnectWatcherTests
       Switches++;
       Calls.Add("switch");
       SwitchedWith = mark;
+      if (SwitchFailure == null && SwitchResult && SwitchMakesCastActive)
+      {
+        Active = "google-cast";
+      }
+
       return SwitchFailure != null ? Task.FromException<bool>(SwitchFailure) : Task.FromResult(SwitchResult);
     }
 
@@ -667,12 +783,48 @@ public class CastReconnectWatcherTests
       return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Runs at the start of the conditional tear-down, before its active-output check: where a
+    /// test lands a gate promotion "between the watcher's read and its tear-down".
+    /// </summary>
+    public Action? OnConditionalTearDown;
+
+    public Task<bool> TearDownCastUnlessCastActiveAsync()
+    {
+      OnConditionalTearDown?.Invoke();
+      if (string.Equals(Active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        Calls.Add("teardown-declined");
+        return Task.FromResult(false);
+      }
+
+      TearDowns++;
+      Calls.Add("teardown");
+      return Task.FromResult(true);
+    }
+
     public bool KeepResult = true;
 
-    public Task<bool> TryKeepForCastChoiceAsync()
+    public Task<bool> TryKeepForCastChoiceAsync(bool castPickPending)
     {
-      Calls.Add("keep");
+      Calls.Add(castPickPending ? "keep-for-pick" : "keep");
       return Task.FromResult(KeepResult);
+    }
+
+    public CastRecoveryMark? SwitchedToLocalWith;
+
+    /// <summary>Behaves as the production gate's conditional switch: only while Cast is active.</summary>
+    public Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark)
+    {
+      Calls.Add("switch-to-local");
+      SwitchedToLocalWith = mark;
+      if (!string.Equals(Active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return Task.FromResult(false);
+      }
+
+      Active = mark.LocalOutputId;
+      return Task.FromResult(true);
     }
   }
 }

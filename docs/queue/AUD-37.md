@@ -2,7 +2,7 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md) · punch-list row: [`HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §4.2
 
-✅ **MERGED 2026-10-02 on the owner's validation — PR [#751](https://github.com/mmackelprang/RTest/pull/751).** Owner, 2026-10-02, on the owner script below: *"#1 - I validated this yestarday. This passes."* Which build the owner ran it on is not recorded here. Before the merge, `origin/main` `3f97d19` was merged into the branch and the full gates were re-run (see § Reviews and gates). The HttpMp3 stalled-write gap stays open on the punch-list row.
+✅ **MERGED 2026-10-02 on the owner's validation — PR [#751](https://github.com/mmackelprang/RTest/pull/751).** Owner, 2026-10-02, on the owner script below: *"#1 - I validated this yestarday. This passes."* ⚠ That validation **could not have exercised this code**: the box ran `6ab5b74` from 2026-10-01 13:05 EDT, which does not contain `AUD-37`, so the row was merged without a test of the merged code. The coordinator then deployed `main` `75c9a39` (which contains `d5ea6ed`; both services SHA-verified, kiosk live) and the owner re-ran the unplug / replug test on it — ✅ **owner, 2026-10-02: *"AUD-37 passed."*** That is the validation of record. Before the merge, `origin/main` `3f97d19` was merged into the branch and the full gates were re-run (see § Reviews and gates). The HttpMp3 stalled-write gap stays open on the punch-list row.
 
 _(Was: 🔬 **BUILT 2026-10-01 (batch D), HELD for the owner: PR #751 is open and NOT merged.**)_ The owner script below needs a speaker physically unplugged and replugged. Nothing in this row was run on the box. Firewall changes are ruled out, so there is no agent-side way to drop a speaker.
 
@@ -19,6 +19,7 @@ _(Was: 🔬 **BUILT 2026-10-01 (batch D), HELD for the owner: PR #751 is open an
 - Option `GoogleCast.AutoReconnect` turns it off.
 
 **It yields to the user.** `DevicesController` cancels the watcher first in `SetOutputDevice`, `ConnectToCastDevice` and `DisconnectFromCastDevice` (`ICastReconnectControl.CancelCastReconnectAsync`, bounded at 3 s). After that bound the user's action proceeds. The watcher then acts only on a connection it published itself (it checks ownership after connect, before confirm and before start). It removes that connection, **unless** the user's action made Cast the active output, in which case it keeps it. A pick of another output while the speaker is away logs `Cast: no longer trying to reconnect to "<name>" — stopped by a user output or Cast action`.
+Since `AUD-85`, `ConnectToCastDevice` (`cast/connect`) uses its own pick-aware cancel with an explicit same-device keep and a 15 s wait, so the "keeps it only when Cast is already the active output" rule above applies to `SetOutputDevice`, `DisconnectFromCastDevice`, and a `cast/connect` pick of a different device. See [`AUD-85`](AUD-85.md) § As built.
 
 **A start overtaken by a teardown abandons itself.** `GoogleCastOutput.StartAsync` re-checks its connection's generation three times (after the launch, before the DirectChannel send loop, and before `Streaming`). If a user's teardown replaced the connection mid-start, it stops what it created instead of streaming into a closed socket.
 

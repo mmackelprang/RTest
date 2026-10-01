@@ -392,6 +392,95 @@ public class AudioEngineInitializationServiceCastReconnectTests
     Assert.Equal("speakers", _active);
   }
 
+  [Fact]
+  public async Task ACastPickOfTheDeviceBeingReconnected_WaitsForTheRun_WhichKeepsItsConnectionAndSwitchesToIt()
+  {
+    // AUD-85 review MEDIUM-1. The watcher's connect is parked (SharpCaster ignores the token). The
+    // pick must neither give up at the short bound nor have the run tear the speaker down.
+    _host.Reachable = true;
+    _host.ConnectGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var service = CreateService();
+    service.CastPickReconnectWaitBound = TimeSpan.FromMinutes(5); // outlasts any runner; the gate decides
+    service.CastReconnectCancelBound = TimeSpan.Zero;               // proves the pick does not use it
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    await DriveUntilAsync(_host.ConnectEntered.Task);
+    var run = service.CastReconnectTask;
+
+    var pick = service.CancelCastReconnectForCastPickAsync("cast-a");
+    Assert.False(pick.IsCompleted); // waiting on the run, which is parked on the gate
+
+    _host.ConnectGate.SetResult();
+    Assert.True(await pick.WaitAsync(HangGuard));
+
+    Assert.Equal(CastReconnectOutcome.Reconnected, await run.WaitAsync(HangGuard));
+    Assert.True(_host.KeptForPick);
+    Assert.Equal(1, _host.Switches);
+    Assert.Equal(0, _host.TearDowns);
+    Assert.Equal("google-cast", _active);
+  }
+
+  [Fact]
+  public async Task ACastPickOfAnotherDevice_WaitsForTheRun_WhichRemovesItsOwnConnection()
+  {
+    _host.Reachable = true;
+    _host.ConnectGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var service = CreateService();
+    service.CastPickReconnectWaitBound = TimeSpan.FromMinutes(5);
+    service.CastReconnectCancelBound = TimeSpan.Zero;
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    await DriveUntilAsync(_host.ConnectEntered.Task);
+    var run = service.CastReconnectTask;
+
+    var pick = service.CancelCastReconnectForCastPickAsync("cast-b");
+    Assert.False(pick.IsCompleted);
+
+    _host.ConnectGate.SetResult();
+    Assert.True(await pick.WaitAsync(HangGuard));
+
+    Assert.Equal(CastReconnectOutcome.Cancelled, await run.WaitAsync(HangGuard));
+    Assert.Null(_host.KeptForPick);
+    Assert.Equal(0, _host.Switches);
+    Assert.Equal(1, _host.TearDowns);
+    Assert.Equal("speakers", _active);
+  }
+
+  [Fact]
+  public async Task ACastPickWhoseWaitRunsOut_ReportsTheRunStillGoing_AndTheRunStillKeepsItsConnectionForThePick()
+  {
+    // The connect stays parked past the bound: the pick is told the run is still going (the
+    // controller then answers 409 and touches nothing). Safe direction for the real-time bound: the
+    // run cannot finish while the gate is held, so a slow runner only delays the false.
+    _host.Reachable = true;
+    _host.ConnectGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var service = CreateService();
+    service.CastPickReconnectWaitBound = TimeSpan.FromMilliseconds(100);
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    await DriveUntilAsync(_host.ConnectEntered.Task);
+    var run = service.CastReconnectTask;
+
+    Assert.False(await service.CancelCastReconnectForCastPickAsync("cast-a").WaitAsync(HangGuard));
+    Assert.False(run.IsCompleted);
+
+    _host.ConnectGate.SetResult();
+    Assert.Equal(CastReconnectOutcome.Reconnected, await run.WaitAsync(HangGuard));
+    Assert.Equal(0, _host.TearDowns);
+    Assert.Equal("google-cast", _active);
+  }
+
+  [Fact]
+  public async Task ACastPickWithNoWatcherRunning_ReturnsAtOnce()
+  {
+    var service = CreateService();
+
+    Assert.True(await service.CancelCastReconnectForCastPickAsync("cast-a").WaitAsync(HangGuard));
+  }
+
   // --- helpers ---
 
   private AudioEngineInitializationService CreateService(
@@ -558,14 +647,42 @@ public class AudioEngineInitializationServiceCastReconnectTests
       return Task.CompletedTask;
     }
 
+    public Task<bool> TearDownCastUnlessCastActiveAsync()
+    {
+      if (string.Equals(Engine!._active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return Task.FromResult(false);
+      }
+
+      Interlocked.Increment(ref TearDowns);
+      return Task.FromResult(true);
+    }
+
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
 
     public int Keeps;
 
-    public Task<bool> TryKeepForCastChoiceAsync()
+    public bool? KeptForPick;
+
+    public Task<bool> TryKeepForCastChoiceAsync(bool castPickPending)
     {
+      KeptForPick = castPickPending;
       Interlocked.Increment(ref Keeps);
       return Task.FromResult(ConnectedDeviceId != null);
+    }
+
+    public int SwitchesToLocal;
+
+    public async Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark)
+    {
+      Interlocked.Increment(ref SwitchesToLocal);
+      if (!string.Equals(Engine!._active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return false;
+      }
+
+      await Engine._engine.Object.SetActiveOutputAsync(mark.LocalOutputId, CancellationToken.None);
+      return true;
     }
   }
 }
