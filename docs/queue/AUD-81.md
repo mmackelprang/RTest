@@ -42,8 +42,12 @@ In the owner's casting baseline run 2026-09-30 (box on `b64c8cd`, Office speaker
 
 **Mute.**
 - Console **mute** mutes the speaker while casting, and a console that is already muted mutes the speaker as the stream starts.
-- **Nothing auto-unmutes.** Console unmute unmutes only a speaker the console muted.
-- A console-muted speaker is **unmuted on a deliberate teardown**, never on a connection loss. It is unmuted only **after** our receiver application is confirmed stopped, so a muted console can never release audio to the room. If the stop cannot be confirmed within 3 s, the speaker is left muted and an Information line says so.
+- **Nothing auto-unmutes.** The speaker is unmuted in three cases only:
+  1. A deliberate console unmute while Cast is the active output (`CastConsoleVolumeFollower.cs:243-248`). This unmutes the speaker whoever muted it.
+  2. The reconcile when the gate makes Cast the active output, and only for a speaker this application muted for the console (`:284`).
+  3. The teardown rule below.
+- A console mute is pushed to any streaming Cast connection, even before the gate has marked Cast active. That is the safe direction.
+- A console-muted speaker is **unmuted on a deliberate teardown**, never on a connection loss. It is unmuted only **after** our receiver application is confirmed stopped, so a muted console can never release audio to the room. If the stop cannot be confirmed within 3 s, the speaker is left muted and an Information line says so (`GoogleCastOutput.cs:3288`).
 - **Mute is never stored** in `AudioPreferences`.
 
 **Surfaces.**
