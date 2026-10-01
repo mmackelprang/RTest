@@ -2498,6 +2498,35 @@ body {
   color: var(--accent-primary);
 }
 
+/* UI-22: the colour key for the bars, after the age — "· ▮ weak ▮ fair ▮ strong". 11px against the
+   line's 12px, so it reads as a key rather than as status. Swatch colours are the tokens
+   visualizer.js's drawBandMap paints the bars with; grey (noise) is deliberately not keyed. */
+.band-legend {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: 11px;
+  color: var(--text-medium);
+}
+
+.band-legend-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.band-legend-swatch {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.band-legend-swatch.is-weak   { background: var(--signal-blue); }
+.band-legend-swatch.is-fair   { background: var(--accent-primary); }
+.band-legend-swatch.is-strong { background: var(--signal-green); }
+
 .band-status-message {
   color: var(--text-high);
   white-space: nowrap;
