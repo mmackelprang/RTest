@@ -2527,11 +2527,20 @@ public class GoogleCastOutput : AudioOutputBase
     {
       try
       {
-        await SendMuteToDeviceAsync(client, true)
-          .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false);
-        _logger.LogInformation(
-          "Cast: speaker {Name} was muted — muted again after setting its volume to {Volume:P0}",
-          ConnectedDevice?.FriendlyName, volume);
+        // Hostile review L1: "muted again" only when the SET_MUTE was actually sent.
+        if (await SendMuteToDeviceAsync(client, true)
+              .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
+        {
+          _logger.LogInformation(
+            "Cast: speaker {Name} was muted — muted again after setting its volume to {Volume:P0}",
+            ConnectedDevice?.FriendlyName, volume);
+        }
+        else
+        {
+          _logger.LogWarning(
+            "Cast: could not mute {Name} again after setting its volume (no receiver channel) — a volume change can unmute it",
+            ConnectedDevice?.FriendlyName);
+        }
       }
       catch (Exception ex)
       {
@@ -3668,6 +3677,17 @@ public class GoogleCastOutput : AudioOutputBase
         if (next.Muted)
         {
           Interlocked.CompareExchange(ref _consoleMuteInFlightGeneration, -1, connection.Generation);
+        }
+
+        if (next.Reassert)
+        {
+          // Hostile review L2: a re-assert is sent once, for one status, and is not retried, so a
+          // failed one leaves the speaker unmuted under a muted console until something else mutes
+          // it. Said at Warning on the follower's logger, which the shipped log configuration keeps.
+          ConsoleLogger.LogWarning(
+            "Cast: speaker {Name} was unmuted by a volume change while the console is muted and could not be muted again — " +
+            "toggle the console's mute, or mute it on the speaker",
+            connection.Device.FriendlyName);
         }
 
         continue;

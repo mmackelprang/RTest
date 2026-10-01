@@ -919,6 +919,32 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Empty(h.External);
   }
 
+  // Hostile review L2. A re-assert is sent once and not retried; a failed one used to leave only a
+  // Debug-level trace under …Audio.Outputs (held at Warning by LOG-2). It is a Warning on the
+  // follower's logger now.
+  [Fact]
+  public async Task AFailedMuteReassert_IsLoggedAsAWarningOnTheConsoleLog()
+  {
+    await using var h = NewHarness();
+    var log = new RecordingLogger();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, log);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.LevelCommandUnmutes = false; // the device's reply is raised by hand below (see ConsoleMutedAfterALevelPushAsync)
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    consoleMuted = true;
+
+    h.FailNextMute = new TimeoutException("closed");
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Warning && l.Line.Contains("could not be muted again"));
+    Assert.DoesNotContain(log.Lines(), l => l.Line.Contains("muted it again"));
+    Assert.Empty(h.External);
+  }
+
   // Hostile review L3. The set-up of the test above leaves the speaker unmuted (by our level) yet
   // still marked, and recorded, as muted for the console: the re-assert was dropped. The console's
   // unmute then has nothing to send ("already unmuted") — and used to leave the mark and the record
