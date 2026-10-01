@@ -107,7 +107,25 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     {
       _castOutput.Disconnected += OnCastOutputDisconnected;
     }
+
+    // AUD-81. Resolved here only to construct it at startup: it subscribes to the master mixer in
+    // its constructor, and nothing else depends on it, so a lazy singleton would never be built.
+    // Failure is logged, not thrown — the console must still start if the follower cannot.
+    try
+    {
+      CastVolumeFollower = serviceProvider.GetService<CastConsoleVolumeFollower>();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Cast console-volume follower unavailable — the console volume will not reach a Cast speaker");
+    }
   }
+
+  /// <summary>
+  /// The AUD-81 follower, held so its singleton is constructed at startup. Null when it is not
+  /// registered or could not be built.
+  /// </summary>
+  internal CastConsoleVolumeFollower? CastVolumeFollower { get; }
 
   /// <summary>
   /// The most recently started lost-Cast recovery, so a test can await it rather than
