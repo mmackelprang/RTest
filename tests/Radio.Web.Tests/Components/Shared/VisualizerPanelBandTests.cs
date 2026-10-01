@@ -459,9 +459,21 @@ public class VisualizerPanelBandTests : TestContext
     Frequency: frequencyHz, Band: band, Step: 25_000, SignalStrength: 50, IsScanning: false, ScanDirection: null,
     ScanStopThreshold: -36.0, Gain: 0, AutoGain: false, Equalizer: "Normal", DeviceVolume: 50);
 
-  private Task RaiseRadioStateAsync(IRenderedComponent<VisualizerPanel> cut, RadioStateDto dto) =>
-    cut.InvokeAsync(() => HubEventFire.FireAsync(
+  /// <summary>
+  /// Raises a broadcast and waits until the panel has finished handling it. The handler returns to the
+  /// hub at once and works afterwards, so the rendezvous is the panel's own count, not the raise.
+  /// </summary>
+  private async Task RaiseRadioStateAsync(IRenderedComponent<VisualizerPanel> cut, RadioStateDto dto)
+  {
+    int handled = cut.Instance.CompletedRadioStateUpdates;
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
       Services.GetRequiredService<AudioStateHubService>(), nameof(AudioStateHubService.RadioStateChanged), dto));
+    cut.WaitForAssertion(() => cut.Instance.CompletedRadioStateUpdates.Should().BeGreaterThan(handled),
+      TimeSpan.FromSeconds(5));
+  }
+
+  private int DrawCalls() =>
+    _module.Invocations["visualizer.drawBandMap"].Count;
 
   private string[] AxisLabels(IRenderedComponent<VisualizerPanel> cut) =>
     cut.FindAll(".visualizer-axis.is-band span").Select(s => s.TextContent).ToArray();
@@ -496,7 +508,7 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("162.40", "162.45", "162.50", "162.55"));
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("162.40", "162.45", "162.50", "162.55 MHz"));
     cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the WB band");
     cut.Find(".visualizer-canvas").GetAttribute("aria-label").Should().Be("WB band map. Tap a station to tune.");
     cut.Find(".band-status-band").TextContent.Should().Be("WB");
@@ -510,11 +522,11 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/radio/bandmap", AmMap());
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => cut.Find(".band-empty-title").TextContent.Should().Be("AM can't be scanned on this radio"));
+    cut.WaitForAssertion(() => cut.Find(".band-empty-title").TextContent.Should().Be("AM is out of this radio's range"));
     cut.Find(".band-empty-sub").TextContent.Should().Be(AmReason);
     cut.Markup.Should().NotContain("No scan yet");
     cut.Find(".band-scan-btn").HasAttribute("disabled").Should().BeTrue();
-    AxisLabels(cut).Should().Equal("600", "800", "1000", "1200", "1400", "1600");
+    AxisLabels(cut).Should().Equal("600", "800", "1000", "1200", "1400", "1600 kHz");
 
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(0.5));
 
@@ -530,7 +542,7 @@ public class VisualizerPanelBandTests : TestContext
     var cut = RenderBand();
     cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
 
-    // 40 kHz below the station: inside AIR's ±50 kHz snap, so the tap lands on it.
+    // 40 kHz below the station: inside AIR's snap, so the tap lands on it.
     BandAxis air = new("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000);
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(air.HzToFraction(118_010_000)));
 
@@ -539,7 +551,40 @@ public class VisualizerPanelBandTests : TestContext
     JsonElement body = JsonDocument.Parse(_api.Requests[tuneAt].Body!).RootElement;
     body.GetProperty("frequency").GetDouble().Should().Be(118_050_000);
     body.GetProperty("band").GetString().Should().Be("AIR");
-    cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("Tuning 118.050 AIR"));
+    cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("Tuning 118.050 MHz AIR"));
+  }
+
+  [Fact]
+  public async Task AirMap_TapThreeHundredKhzFromAStation_TunesTheStation()
+  {
+    // AIR's two-spacing snap (±50 kHz) is about ±1.5 px across 29 MHz; 2% of the span (±580 kHz) is a
+    // window a finger can hit.
+    GetJson("/api/radio/bandmap", AirMap());
+    GetJson("/api/radio/state", FmState(118_000_000, band: "AIR"));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+
+    BandAxis air = new("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000);
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(air.HzToFraction(118_350_000)));
+
+    int tuneAt = IndexOf(HttpMethod.Post, "/api/radio/frequency");
+    tuneAt.Should().BeGreaterThanOrEqualTo(0);
+    JsonDocument.Parse(_api.Requests[tuneAt].Body!).RootElement.GetProperty("frequency").GetDouble()
+      .Should().Be(118_050_000);
+  }
+
+  [Fact]
+  public async Task WbMap_Tap_NamesTheStationExactlyWithItsUnit()
+  {
+    GetJson("/api/radio/bandmap", WbMap());
+    GetJson("/api/radio/state", FmState(162_400_000, band: "WB"));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+
+    BandAxis wb = new("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000);
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(wb.HzToFraction(162_475_000)));
+
+    cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("Tuning 162.475 MHz WB"));
   }
 
   [Fact]
@@ -581,7 +626,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/radio/bandmap", AirMap());
     await RaiseRadioStateAsync(cut, HubState("AIR", 118_000_000));
 
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135"));
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135 MHz"));
     MapReads().Should().Be(readsBefore + 1, "the band change re-reads the map without waiting for the timer");
 
     // Telemetry ticks repeat the state; a new frequency in the same band moves only the marker.
@@ -629,5 +674,143 @@ public class VisualizerPanelBandTests : TestContext
 
     cut.WaitForAssertion(() => cut.Find(".band-status-scanning").TextContent.Should().Be("Scanning AIR… 12 s"));
     cut.Find(".band-empty-title").TextContent.Should().Be("No scan yet", "the sweep running is not of the band shown");
+  }
+
+  // ── review fixes (AUD-91) ────────────────────────────────────────────────
+
+  [Fact]
+  public async Task HubBroadcast_ReturnsToTheHubAtOnce_WhileTheMapReadIsStillInFlight()
+  {
+    // The hub calls its subscribers one after another; a handler that awaited the map read would hold
+    // every subscriber after it until the API answered.
+    var cut = RenderBand();
+    int readsBefore = MapReads();
+    TaskCompletionSource release = _api.Hold(HttpMethod.Get, "/api/radio/bandmap");
+    GetJson("/api/radio/bandmap", AirMap());
+
+    Task raise = HubEventFire.FireAsync(
+      Services.GetRequiredService<AudioStateHubService>(), nameof(AudioStateHubService.RadioStateChanged),
+      HubState("AIR", 118_000_000));
+
+    cut.WaitForAssertion(() => MapReads().Should().Be(readsBefore + 1), TimeSpan.FromSeconds(5));
+    raise.IsCompleted.Should().BeTrue("the handler must not hold the hub while its map read is pending");
+
+    release.SetResult();
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135 MHz"),
+      TimeSpan.FromSeconds(5));
+  }
+
+  [Fact]
+  public async Task HubRepeatedTick_SameFrequency_DoesNotRedraw()
+  {
+    GetJson("/api/radio/bandmap", AirMap());
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+    await RaiseRadioStateAsync(cut, HubState("AIR", 122_500_000));
+    int draws = DrawCalls();
+
+    // A telemetry tick repeating the state: up to twice a second, and AIR's map is ~1161 levels.
+    await RaiseRadioStateAsync(cut, HubState("AIR", 122_500_000));
+
+    DrawCalls().Should().Be(draws);
+  }
+
+  [Fact]
+  public async Task HubVhfFrequencyOutsideTheWindow_ReReadsTheMap_OncePerWindow()
+  {
+    GetJson("/api/radio/bandmap", BandMap("VHF", 161_400_000, 163_400_000, 161_400_000, 163_400_000, 12_500));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("VHF"));
+    int readsBefore = MapReads();
+
+    // Inside the window: a marker move, no read.
+    await RaiseRadioStateAsync(cut, HubState("VHF", 162_000_000));
+    MapReads().Should().Be(readsBefore);
+
+    // Outside it: one read, however many ticks repeat it while the API still answers the old window.
+    await RaiseRadioStateAsync(cut, HubState("VHF", 170_000_000));
+    await RaiseRadioStateAsync(cut, HubState("VHF", 170_000_000));
+    await RaiseRadioStateAsync(cut, HubState("VHF", 170_012_500));
+    MapReads().Should().Be(readsBefore + 1);
+
+    // The API's window has followed the radio: the next read brings it, and it is drawn.
+    GetJson("/api/radio/bandmap", BandMap("VHF", 169_000_000, 171_000_000, 169_000_000, 171_000_000, 12_500));
+    await RaiseRadioStateAsync(cut, HubState("VHF", 172_500_000));
+    MapReads().Should().Be(readsBefore + 1, "the window shown has not changed, so its read is not repeated");
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("169.0", "169.5", "170.0", "170.5", "171.0 MHz"),
+      TimeSpan.FromSeconds(5));
+
+    await RaiseRadioStateAsync(cut, HubState("VHF", 172_500_000));
+    MapReads().Should().Be(readsBefore + 3, "a new window shown re-arms the out-of-window read");
+  }
+
+  [Fact]
+  public void BeforeTheFirstMapRead_NoBandIsNamed()
+  {
+    TaskCompletionSource release = _api.Hold(HttpMethod.Get, "/api/radio/bandmap");
+    var cut = RenderComponent<VisualizerPanel>(p => p.Add(x => x.Clock, _clock));
+    cut.WaitForAssertion(() =>
+    {
+      cut.FindAll(".band-overlay").Should().HaveCount(1);
+      MapReads().Should().BeGreaterThanOrEqualTo(1, "the first map read is in flight");
+    }, TimeSpan.FromSeconds(5));
+
+    cut.FindAll(".band-status-band").Should().BeEmpty("the band is not known until a map has been read");
+    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the band");
+
+    release.SetResult();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("FM"), TimeSpan.FromSeconds(5));
+  }
+
+  [Fact]
+  public void MapWithoutAUsableAxis_IsStillNamedForItsBand()
+  {
+    // Drawn on FM's axis for want of its own, but it is WB's map.
+    GetJson("/api/radio/bandmap", BandMap("WB", 0, 0, 0, 0, 0));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the WB band");
+  }
+
+  [Fact]
+  public void WbMap_DrawsNeitherFmPresetsNorAnFmStationMarker()
+  {
+    GetJson("/api/radio/bandmap", WbMap());
+    GetJson("/api/radio/state", FmState(162_475_000, band: "FM"));
+    // The FM preset and the FM station sit at frequencies inside WB's plot, so only the band keeps
+    // them off it.
+    GetJson("/api/radio/presets", new object[]
+    {
+      new { id = "1", name = "FMX", band = "FM", frequency = 162_450_000.0 },
+      new { id = "2", name = "NOAA", band = "WB", frequency = 162_475_000.0 },
+    });
+
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+
+    JsonElement model = LastDrawModel();
+    model.GetProperty("station").ValueKind.Should().Be(JsonValueKind.Null, "the radio is on FM, not WB");
+    model.GetProperty("presets").EnumerateArray().Select(p => p.GetProperty("label").GetString())
+      .Should().Equal(new[] { "NOAA" }, "only the shown band's presets are drawn");
+  }
+
+  [Fact]
+  public async Task Dispose_UnsubscribesFromTheHub_AndALaterBroadcastDoesNothing()
+  {
+    var cut = RenderBand();
+    AudioStateHubService hub = Services.GetRequiredService<AudioStateHubService>();
+    HubEventFire.InvocationListOf<Func<RadioStateDto, Task>>(hub, nameof(AudioStateHubService.RadioStateChanged))
+      .Should().Contain(d => d.Target is VisualizerPanel);
+    int readsBefore = MapReads();
+
+    DisposeComponents();
+
+    HubEventFire.InvocationListOf<Func<RadioStateDto, Task>>(hub, nameof(AudioStateHubService.RadioStateChanged))
+      .Should().NotContain(d => d.Target is VisualizerPanel);
+    await HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged), HubState("AIR", 118_000_000));
+    MapReads().Should().Be(readsBefore);
   }
 }

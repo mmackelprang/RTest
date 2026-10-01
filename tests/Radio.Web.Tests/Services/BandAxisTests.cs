@@ -15,8 +15,11 @@ public class BandAxisTests
   // The axes the API sends (BandMapController.WithAxis), per band.
   private static readonly BandAxis Wb = new("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000);
   private static readonly BandAxis Air = new("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000);
-  // A VHF window centred on 162.40625 MHz: its edges are on the 12.5 kHz grid but not on a round number.
-  private static readonly BandAxis Vhf = new("VHF", 161_406_250, 163_406_250, 161_406_250, 163_406_250, 12_500);
+  // VHF windows as the API produces them: ±1 MHz around a channel of the 12.5 kHz grid. This one is
+  // centred on 162.4 MHz, so neither edge is a tick; VhfOnTheHalf is centred on 162.5 MHz, a 0.5 MHz
+  // multiple, so both edges are.
+  private static readonly BandAxis Vhf = new("VHF", 161_400_000, 163_400_000, 161_400_000, 163_400_000, 12_500);
+  private static readonly BandAxis VhfOnTheHalf = new("VHF", 161_500_000, 163_500_000, 161_500_000, 163_500_000, 12_500);
   private static readonly BandAxis Am = new("AM", 530_000, 1_710_000, 530_000, 1_710_000, 10_000);
   private static readonly BandAxis Sw = new("SW", 1_600_000, 30_000_000, 1_600_000, 30_000_000, 5_000);
 
@@ -109,6 +112,10 @@ public class BandAxisTests
   }
 
   [Fact]
+  public void Vhf_WindowOnAHalfMHz_TicksAtBothEdges() =>
+    Labels(VhfOnTheHalf).Should().Equal("161.5", "162.0", "162.5", "163.0", "163.5");
+
+  [Fact]
   public void Am_TicksInKhz()
   {
     Labels(Am).Should().Equal("600", "800", "1000", "1200", "1400", "1600");
@@ -142,10 +149,11 @@ public class BandAxisTests
     Air.NearestChannelHz(hz).Should().Be(expected);
 
   [Theory]
-  [InlineData(162_010_000, 162_006_250)]
-  [InlineData(162_000_000, 162_006_250)] // 47.5 steps from the edge: rounds up
-  [InlineData(161_412_000, 161_406_250)]
-  public void Vhf_NearestChannel_IsOnTheWindowsGrid_NotOnRoundNumbers(double hz, long expected) =>
+  [InlineData(162_010_000, 162_012_500)]
+  [InlineData(162_006_250, 162_012_500)] // exactly between: rounds up
+  [InlineData(161_000_000, 161_400_000)] // below the window: clamped to its first channel
+  [InlineData(164_000_000, 163_400_000)] // above: its last
+  public void Vhf_NearestChannel_IsOnTheWindowsGrid(double hz, long expected) =>
     Vhf.NearestChannelHz(hz).Should().Be(expected);
 
   [Fact]
@@ -157,17 +165,18 @@ public class BandAxisTests
   }
 
   [Fact]
-  public void SnapWindow_IsTwoChannelSpacings()
+  public void SnapWindow_IsTwoSpacingsOrTwoPercentOfTheSpan_WhicheverIsWider_ButFmKeepsTwoSpacings()
   {
-    Wb.SnapWindowHz.Should().Be(50_000);
-    Air.SnapWindowHz.Should().Be(50_000);
-    Vhf.SnapWindowHz.Should().Be(25_000);
+    Wb.SnapWindowHz.Should().Be(50_000, "2% of WB's 175 kHz is 3.5 kHz, less than two 25 kHz spacings");
+    Air.SnapWindowHz.Should().Be(580_000, "2% of AIR's 29 MHz");
+    Vhf.SnapWindowHz.Should().Be(40_000, "2% of VHF's 2 MHz window");
+    BandAxis.Fm.SnapWindowHz.Should().Be(400_000, "FM keeps AUD-76's ±0.4 MHz, not 2% of 20.5 MHz");
   }
 
   // ── tap snap ─────────────────────────────────────────────────────────────
 
   [Fact]
-  public void Air_TapWithin50kHzOfAPeak_TunesThePeak()
+  public void Air_TapNearAPeak_TunesThePeak()
   {
     List<BandMapChannelDto> map = Map(Air, (118_050_000, -30f));
 
@@ -176,12 +185,31 @@ public class BandAxisTests
   }
 
   [Fact]
-  public void Air_TapBeyond50kHzOfAPeak_TunesTheNearestChannel()
+  public void Air_TapThreeHundredKhzFromAPeak_TunesThePeak()
+  {
+    // ±50 kHz is ±1.5 px across AIR's 29 MHz; 300 kHz is a near miss a finger makes.
+    List<BandMapChannelDto> map = Map(Air, (118_050_000, -30f));
+
+    Air.ResolveTapTarget(118_350_000, map).Should().Be(118_050_000);
+    Air.ResolveTapTarget(117_750_000, map).Should().Be(118_050_000);
+  }
+
+  [Fact]
+  public void Air_TapBeyondTheSnapOfAPeak_TunesTheNearestChannel()
   {
     List<BandMapChannelDto> map = Map(Air, (118_050_000, -30f));
 
-    // 70 kHz above the peak: outside ±50 kHz, so the nearest channel wins.
-    Air.ResolveTapTarget(118_120_000, map).Should().Be(118_125_000);
+    // 640 kHz above the peak: outside ±580 kHz, so the nearest channel wins.
+    Air.ResolveTapTarget(118_690_000, map).Should().Be(118_700_000);
+  }
+
+  [Fact]
+  public void Wb_TapSnapStaysAtTwoSpacings()
+  {
+    List<BandMapChannelDto> map = Map(Wb, (162_400_000, -30f));
+
+    Wb.ResolveTapTarget(162_450_000, map).Should().Be(162_400_000, "50 kHz from the peak");
+    Wb.ResolveTapTarget(162_460_000, map).Should().Be(162_450_000, "60 kHz from the peak: nearest channel");
   }
 
   [Fact]
@@ -193,11 +221,52 @@ public class BandAxisTests
   }
 
   [Fact]
-  public void Vhf_TapSnapsWithin25kHz_OnTheWindowsGrid()
+  public void Vhf_TapSnapsWithin40kHz_OnTheWindowsGrid()
   {
-    List<BandMapChannelDto> map = Map(Vhf, (162_406_250, -30f));
+    List<BandMapChannelDto> map = Map(Vhf, (162_412_500, -30f));
 
-    Vhf.ResolveTapTarget(162_385_000, map).Should().Be(162_406_250, "21.25 kHz from the peak");
-    Vhf.ResolveTapTarget(162_370_000, map).Should().Be(162_368_750, "36.25 kHz from the peak: nearest channel");
+    Vhf.ResolveTapTarget(162_380_000, map).Should().Be(162_412_500, "32.5 kHz from the peak");
+    Vhf.ResolveTapTarget(162_360_000, map).Should().Be(162_362_500, "52.5 kHz from the peak: nearest channel");
+  }
+
+  // ── axis labels ──────────────────────────────────────────────────────────
+
+  private static (string Text, BandAxisLabelAlign Align)[] Strip(BandAxis axis) =>
+    axis.Labels().Select(l => (l.Text, l.Align)).ToArray();
+
+  [Fact]
+  public void FmLabels_AreAud76s_With108EndAligned_AndNoUnit()
+  {
+    Strip(BandAxis.Fm).Should().Equal(
+      ("88", BandAxisLabelAlign.Center), ("92", BandAxisLabelAlign.Center), ("96", BandAxisLabelAlign.Center),
+      ("100", BandAxisLabelAlign.Center), ("104", BandAxisLabelAlign.Center), ("108", BandAxisLabelAlign.End));
+    BandAxis.Fm.Labels().Select(l => l.Fraction)
+      .Should().Equal(BandAxis.Fm.Ticks().Select(t => BandAxis.Fm.HzToFraction(t.Hz)));
+  }
+
+  [Fact]
+  public void WbLabels_LastCarriesTheUnit_AndIsCentred()
+  {
+    // 162.55 MHz is 93% across WB's plot: not at its edge.
+    Strip(Wb).Should().Equal(
+      ("162.40", BandAxisLabelAlign.Center), ("162.45", BandAxisLabelAlign.Center),
+      ("162.50", BandAxisLabelAlign.Center), ("162.55 MHz", BandAxisLabelAlign.Center));
+  }
+
+  [Fact]
+  public void VhfLabels_OnAWindowWhoseEdgesAreTicks_AreAlignedInsideThePlot()
+  {
+    Strip(VhfOnTheHalf).Should().Equal(
+      ("161.5", BandAxisLabelAlign.Start), ("162.0", BandAxisLabelAlign.Center), ("162.5", BandAxisLabelAlign.Center),
+      ("163.0", BandAxisLabelAlign.Center), ("163.5 MHz", BandAxisLabelAlign.End));
+  }
+
+  [Fact]
+  public void LastLabel_CarriesTheBandsUnit()
+  {
+    Air.Labels()[^1].Text.Should().Be("135 MHz");
+    Am.Labels()[^1].Text.Should().Be("1600 kHz");
+    Am.Labels()[0].Text.Should().Be("600");
+    Sw.Labels()[^1].Should().Be(new BandAxisLabel(1.0, "30 MHz", BandAxisLabelAlign.End));
   }
 }
