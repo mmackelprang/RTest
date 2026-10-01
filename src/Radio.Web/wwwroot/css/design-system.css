@@ -1284,6 +1284,35 @@ html, body {
   border-radius: 18px;
 }
 
+/* UI-20 (spec §7): the Home radio panel's skeleton has the panel's real silhouette — six band
+   pills in one 56 px row, and the preset bar's four 60 px cards along the bottom — so nothing
+   jumps when the state arrives. */
+.skeleton-panel-bands {
+  display: flex;
+  gap: 2px;
+}
+
+.skeleton-panel-band {
+  flex: 1;
+  height: 56px;
+  border-radius: 3px;
+}
+
+/* Card ghosts start where the real cards do: 74 px in from the panel edge (bar padding 8 + arrow
+   58 + gap 8, as .rcp-bar-track), less the skeleton's own 16 px padding = 58. */
+.skeleton-panel-bar {
+  display: flex;
+  gap: 6px;
+  margin-top: auto;
+  padding: 0 58px;
+}
+
+.skeleton-panel-preset {
+  flex: 1;
+  height: 60px;
+  border-radius: 6px;
+}
+
 .skeleton-freq-well {
   height: 100px;
   border-radius: 8px;
@@ -4124,8 +4153,8 @@ body {
   grid-template-columns: 130px 1fr;
   gap: 12px;
   align-items: stretch;
+  /* UI-20: full tuner-column width, edge-aligned with the band row (was max-width 420). */
   width: 100%;
-  max-width: 420px;
   padding: 6px;
   background: var(--surface-inset);
   border-radius: 4px;
@@ -4531,8 +4560,8 @@ body {
   background: var(--surface-elevated, rgba(255, 255, 255, 0.03));
   border: 1px solid var(--surface-separator);
   border-radius: 8px;
+  /* UI-20: full tuner-column width (was max-width 420) — the marquee gains ~210 px of text. */
   width: 100%;
-  max-width: 420px;
   box-sizing: border-box;
 }
 
@@ -4777,6 +4806,10 @@ body {
    slot numbers are always visible (not hover-only), and the save action is a
    long-press on the active band pill instead of a separate button. The header
    carries the "PRESETS · n saved" count + a "HOLD <band> TO SAVE" hint.
+
+   UI-20 replaced the rail with a horizontal bar (spec 2026-10-01 §4.5): the
+   rail's one-row .rcp-preset-item grid and its 18 px kebab are gone; the bar
+   card keeps the rail's colours and active treatment.
 */
 
 .rcp-presets-count {
@@ -4809,181 +4842,372 @@ body {
   border: 1px solid color-mix(in srgb, var(--signal-amber) 25%, transparent);
 }
 
-/* Preset row — grid layout: slot (22px) | name+band stack (1fr) | freq (64px) | kebab (24px).
-   Kebab column added by the LED-font + preset-affordances hot-fix off PR #371
-   so each row exposes a Rename / Delete affordance without consuming the
-   row's tap target. Long-press on the row also opens the kebab menu —
-   mirrors the band-pill long-press-to-save gesture from PR 3. */
-.rcp-preset-item {
-  display: grid;
-  /* Proposal A (HANDOFF-saved-station-display §5): freq column 64px → auto
-     (intrinsic) so a 4-6 char freq like "90.3" takes ~34px instead of a hard-
-     reserved 64px, handing ~30px back to the station name. */
-  grid-template-columns: 22px 1fr auto 24px;
-  gap: 8px;
-  align-items: center;
+/* ── Preset bar (UI-20) ──────────────────────────────────────────────────────
+   Height budget (spec §4.2): border 1 + padding 6 + caption 12 + gap 4 + cards 60
+   + padding 6 = 89 px. Inner width at 1920×720 is 666 px:
+   arrow 58 + 8 + viewport 534 (4 × 129 cards + 3 × 6 gaps) + 8 + arrow 58.
+   Colours are the rail's: #0b0b0d ground, --surface-separator top rule. */
+.rcp-bar {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   padding: 6px 8px;
-  margin-bottom: 4px;
+  background: #0b0b0d;
+  border-top: 1px solid var(--surface-separator);
+}
+
+.rcp-bar-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 12px;
+}
+
+/* Spec §8 leaves the caption's --text-low (≈2.6:1 at 9 px on #0b0b0d) open to raising for AA; the
+   count and the "1–4 of 8" position are now the bar's only orientation, so they get --text-medium,
+   the hold hint's colour. */
+.rcp-bar-caption .rcp-presets-count {
+  color: var(--text-medium);
+}
+
+.rcp-bar-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  height: 60px;
+}
+
+/* Arrows: console push-buttons with the tune buttons' bevel (.rcp-tune-btn), 58 × 60 — above
+   --touch-min. Disabled at the ends at the project's 0.4 convention but never removed, so the row
+   never reflows (spec §4.5). */
+.rcp-bar-arrow {
+  flex: 0 0 58px;
+  height: 60px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 6px;
+  color: var(--signal-amber);
+  background: linear-gradient(180deg, #161618 0%, #0f0f11 100%);
+  border: 1px solid #222225;
+  border-bottom: 2px solid #0a0a0c;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: all 80ms ease;
+}
+
+.rcp-bar-arrow .rzi {
+  font-size: 30px;
+}
+
+.rcp-bar-arrow:not(.is-disabled):hover {
+  border-color: rgba(240, 168, 48, 0.25);
+  background: linear-gradient(180deg, #1a1a1d 0%, #131315 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 8px rgba(240, 168, 48, 0.08);
+}
+
+.rcp-bar-arrow:not(.is-disabled):active {
+  transform: translateY(1px);
+  border-bottom-width: 1px;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+}
+
+.rcp-bar-arrow.is-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.rcp-bar-arrow:focus-visible {
+  outline: 1px solid var(--signal-amber);
+  outline-offset: 1px;
+}
+
+/* "Your station is this way": 6 px amber dot in the arrow's outer top corner (spec §4.5). */
+.rcp-bar-dot {
+  position: absolute;
+  top: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal-amber);
+  box-shadow: 0 0 6px rgba(240, 168, 48, 0.6);
+}
+
+.rcp-bar-prev .rcp-bar-dot {
+  left: 6px;
+}
+
+.rcp-bar-next .rcp-bar-dot {
+  right: 6px;
+}
+
+/* Native horizontal swipe, snapping to card starts; no scrollbar — the 2 px track below shows
+   position instead. */
+.rcp-bar-viewport {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+
+.rcp-bar-viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.rcp-bar-item {
+  flex: 0 0 129px;
+  height: 60px;
+  position: relative;
+  scroll-snap-align: start;
+}
+
+/* Band groups: where the band changes, the 6 px gap widens to 14 with a hairline in the middle. */
+.rcp-bar-item.is-group-start {
+  margin-left: 8px;
+}
+
+.rcp-bar-item.is-group-start::before {
+  content: '';
+  position: absolute;
+  /* Whole pixels: at -7.5 the 1 px line straddled a pixel edge and rendered as two half-strength
+     pixels of an already faint colour. -7 puts it in the middle of the 14 px gap. */
+  left: -7px;
+  top: 8px;
+  bottom: 8px;
+  width: 1px;
+  background: var(--surface-separator);
+}
+
+/* The empty / error message takes the room the cards would. */
+.rcp-bar-item.rcp-bar-item-wide {
+  flex: 1 0 264px;
+}
+
+/* Card — PresetCard Variant.Bar. 129 × 60; name up to two lines, then the meta line pinned to
+   the bottom so frequencies line up whether a name takes one line or two. */
+.rcp-bar-card {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 2px;
+  padding: 5px 8px;
+  overflow: hidden;
   background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
   border: 1px solid var(--surface-separator);
   border-radius: 6px;
   cursor: pointer;
-  transition: all 80ms ease;
+  user-select: none;
   -webkit-tap-highlight-color: transparent;
+  transition: all 80ms ease;
 }
 
-.rcp-preset-item:hover {
+.rcp-bar-card:hover {
   border-color: color-mix(in srgb, var(--signal-amber) 25%, var(--surface-separator));
   background: color-mix(in srgb, var(--signal-amber) 4%, var(--surface-elevated, rgba(255, 255, 255, 0.02)));
 }
 
-.rcp-preset-item.is-active {
+.rcp-bar-card:active {
+  transform: translateY(1px);
+}
+
+/* Inset: the viewport clips vertically (overflow-y: hidden) and the cards fill its 60 px, so an
+   outset ring would lose its top and bottom. Same for ＋ SAVE and the retry card below. */
+.rcp-bar-card:focus-visible {
+  outline: 1px solid var(--signal-amber);
+  outline-offset: -2px;
+}
+
+/* Active: the rail's treatment — amber border, 8 % amber fill, and a 3 px inset amber left bar as
+   the cue that does not rely on colour alone; the ordinal turns amber too. */
+.rcp-bar-card.is-active {
   border-color: var(--signal-amber);
   background: color-mix(in srgb, var(--signal-amber) 8%, transparent);
-  /* Non-color-dependent active cue (a11y, handoff §7): 3px amber inset left
-     bar, mirrors the border-left pattern used elsewhere. Inset box-shadow
-     avoids reflowing the grid the way border-left would. The amber slot
-     number (below) stays as a second redundant cue. */
   box-shadow: inset 3px 0 0 0 var(--signal-amber);
 }
 
-.rcp-preset-slot {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-align: right;
-  color: var(--text-low);
-  /* Slot number is always visible per handoff acceptance "not hover-only or
-     20%-opacity ghosts". */
-  opacity: 1;
-}
-
-.rcp-preset-item.is-active .rcp-preset-slot {
-  color: var(--signal-amber);
-}
-
-.rcp-preset-text {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-/* Override the legacy `.rcp-preset-name` (which had right-padding for an
-   absolute slot badge) — under the grid layout the slot has its own column. */
-.rcp-preset-item .rcp-preset-name {
-  /* Proposal A §5: name is the primary field — 14px (up from 12px),
-     high-contrast, single line, fits ~20-24 chars before ellipsis. */
+.rcp-bar-card-name {
   font-size: 14px;
   font-weight: 500;
+  line-height: 1.2;
   color: var(--text-high);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.rcp-bar-card-name.rcp-bar-card-name-freq {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Meta "06 · FM 92.30". --text-medium, not --text-low: at 10 px --text-low is ~2.2:1 on
+   --surface-elevated and fails AA (spec §4.5, a deliberate deviation from Proposal A's slot
+   colour in this variant only). */
+.rcp-bar-card-meta {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-medium);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  padding-right: 0;
-  line-height: 1.25;
 }
 
-/* No-name preset: the frequency is promoted to the primary line. Mono (not
-   LED), high-contrast, 14px to match the name slot it replaces (handoff §6). */
-.rcp-preset-item .rcp-preset-name.rcp-preset-name-freq {
-  font-family: var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
+.rcp-bar-card.is-active .rcp-bar-card-ordinal {
+  color: var(--signal-amber);
 }
 
-/* Override legacy `.rcp-preset-band` (which was inline-amber inside the freq
-   row); under the grid it lives below the name as a dim mono sub-line. */
-.rcp-preset-item .rcp-preset-text .rcp-preset-band {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.1em;
-  color: var(--text-low);
-  margin-left: 0;
-  text-shadow: none;
-  line-height: 1.25;
-}
-
-/* Proposal A §5: freq is the SECONDARY datum — de-styled from the old amber
-   LED/Orbitron "display chrome" to a small dim mono tail. Mono (was --font-led),
-   11px (was 13px), weight 500 (was 700), --text-medium (was --signal-amber),
-   no glow (text-shadow removed). tabular-nums keeps the column aligned. */
-.rcp-preset-item .rcp-preset-freq {
-  font-family: var(--font-mono);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-  text-align: right;
-  color: var(--text-medium);
-  text-shadow: none;
-  margin-top: 0;
-  line-height: 1.25;
-}
-
-/* Active state (handoff §6): freq lifts from dim to high-contrast, but stays
-   mono / no-glow — the active cue is the border + slot + left bar, NOT a
-   glowing freq. The name color does NOT change on active (kept high-contrast). */
-.rcp-preset-item.is-active .rcp-preset-freq {
-  color: var(--text-high);
-  text-shadow: none;
-}
-
-/* Empty next-slot placeholder. Dashed border, dim hint text spans columns 2-3. */
-.rcp-preset-empty {
-  border-style: dashed;
-  opacity: 0.55;
-  cursor: default;
-}
-
-.rcp-preset-empty:hover {
-  /* Don't react to hover — the row is intentionally inert. */
-  background: var(--surface-elevated, rgba(255, 255, 255, 0.02));
-  border-color: var(--surface-separator);
-  border-style: dashed;
-}
-
-.rcp-preset-empty-hint {
-  /* Spans from column 2 through the kebab cell — the empty placeholder has
-     no kebab affordance so this lets the hint fill the row. The grid is
-     now 4-column (slot | text | freq | kebab) after the PR #371 hot-fix
-     added the kebab cell. */
-  grid-column: 2 / 5;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.10em;
-  text-transform: uppercase;
-  color: var(--text-low);
-}
-
-/* Kebab affordance — small text-low ⋮ button that opens the Rename / Delete
-   popover. Lives in the 4th grid column on .rcp-preset-item. Click bubbles
-   are stopped at the markup level so tapping the kebab opens the menu
-   without also firing the row's "load preset" handler. Added by the
-   LED-font + preset-affordances hot-fix off PR #371. */
-.rcp-preset-kebab {
+/* ＋ SAVE — the next-slot placeholder, tappable by owner decision Q2. Dashed like the rail's
+   placeholder, but at full opacity in amber, because it is now a control rather than a hint. */
+.rcp-bar-save {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 5px 8px;
   background: transparent;
-  border: none;
-  color: var(--text-low);
-  font-size: 18px;
-  line-height: 1;
-  padding: 2px 4px;
+  border: 1px dashed color-mix(in srgb, var(--signal-amber) 45%, var(--surface-separator));
+  border-radius: 6px;
+  color: var(--signal-amber);
+  font: inherit;
+  text-align: left;
   cursor: pointer;
-  border-radius: 4px;
-  transition: background 80ms ease, color 80ms ease;
   -webkit-tap-highlight-color: transparent;
-  /* Right-align inside the column; the column itself is fixed-width so the
-     kebab sits flush with the row's right edge. */
-  justify-self: end;
 }
 
-.rcp-preset-kebab:hover {
-  background: color-mix(in srgb, var(--signal-amber) 12%, transparent);
-  color: var(--text-high);
+.rcp-bar-save:hover {
+  background: color-mix(in srgb, var(--signal-amber) 6%, transparent);
 }
 
-.rcp-preset-kebab:focus-visible {
+.rcp-bar-save:active {
+  transform: translateY(1px);
+}
+
+.rcp-bar-save:focus-visible {
   outline: 1px solid var(--signal-amber);
-  outline-offset: 1px;
+  outline-offset: -2px;
+}
+
+.rcp-bar-save-label {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+/* Empty and error states (spec §7). */
+.rcp-bar-msg {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px dashed var(--surface-separator);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  text-align: left;
+  color: var(--text-medium);
+}
+
+.rcp-bar-msg-title {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--text-medium);
+}
+
+.rcp-bar-msg-sub {
+  font-size: 10px;
+  color: var(--text-medium);
+}
+
+.rcp-bar-msg.is-error {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--signal-red) 40%, var(--surface-separator));
+  cursor: pointer;
+  font: inherit;
+  font-family: var(--font-mono);
+}
+
+.rcp-bar-msg.is-error .rcp-bar-msg-title {
+  color: var(--signal-red);
+  /* Sentence case (spec §7 copy); the wide tracking is for the uppercase empty-state title. */
+  letter-spacing: 0.02em;
+}
+
+.rcp-bar-msg.is-error:hover {
+  background: color-mix(in srgb, var(--signal-red) 6%, transparent);
+}
+
+.rcp-bar-msg.is-error:active {
+  transform: translateY(1px);
+}
+
+.rcp-bar-msg.is-error:focus-visible {
+  outline: 1px solid var(--signal-red);
+  outline-offset: -2px;
+}
+
+.rcp-bar-ghost {
+  width: 100%;
+  height: 100%;
+  border-radius: 6px;
+}
+
+/* 2 px position track in the bar's bottom padding, under the viewport only. The thumb's offset and
+   width are written by preset-bar.js; it shows only when there is something to scroll. */
+.rcp-bar-track {
+  position: absolute;
+  left: 74px;
+  right: 74px;
+  bottom: 2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--surface-separator);
+  opacity: 0;
+}
+
+.rcp-bar.is-scrollable .rcp-bar-track {
+  opacity: 1;
+}
+
+.rcp-bar-thumb {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--rcp-bar-thumb-left, 0);
+  width: var(--rcp-bar-thumb-width, 100%);
+  border-radius: 1px;
+  background: var(--text-low);
 }
 
 /* Preset menu overlay — full-viewport dim with a centered card carrying
@@ -5038,14 +5262,6 @@ body {
 
 .rcp-preset-menu-danger:hover {
   background: color-mix(in srgb, var(--rz-danger) 12%, transparent);
-}
-
-/* Suppress the legacy `::before` counter badge that the inline <style> defines
-   on .rcp-preset-item. Under the new grid layout slot numbers come from a real
-   .rcp-preset-slot element, so the pseudo-element would otherwise paint a
-   duplicate (and misaligned) ordinal in the top-right corner. */
-.rcp-preset-item::before {
-  content: none;
 }
 
 /* Shared PresetCard — Card variant (Radio page 480px presets panel). Proposal A
@@ -6981,9 +7197,11 @@ body {
   flex-direction: column;
 }
 
-/* Ordinal · glyph · text · secondary · marker. Echoes .rcp-preset-item's
-   22px 1fr auto 24px (:4276) with a glyph column added, so the on-screen preset
-   bank and the knob's list line their columns up. */
+/* Ordinal · glyph · text · secondary · marker. Echoed the presets rail's
+   .rcp-preset-item grid (22px 1fr auto 24px) with a glyph column added, so the
+   rail and the knob's list lined their columns up. UI-20 replaced that rail with
+   a horizontal bar, so there is no on-screen column left to align with; the
+   columns are kept as the overlay's own layout. */
 .encoder-selector-row {
   position: relative;
   display: grid;

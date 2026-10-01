@@ -1,0 +1,543 @@
+@using Radio.Web.Models
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+@* UI-20 — the preset bar along the bottom of the radio panel (spec
+   docs/design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md §4.5, owner decisions
+   Q1–Q3). It replaced the 210 px right-hand rail.
+
+   Division of labour: this component decides — which arrow is disabled, where the off-screen
+   dot goes, whether a manual scroll is still holding off auto-scroll, what to reveal on a band
+   change — and wwwroot/js/preset-bar.js measures and scrolls. The decisions are here so they can
+   be tested against a FakeTimeProvider; the browser is the only thing that knows which cards are
+   on screen, so it reports that back through OnViewportChanged.
+
+   Gestures that change presets (recall, long-press for Rename / Delete, the save dialog) stay in
+   RadioControlPanel, which owns the menu, dialogs and API calls; this component only raises the
+   callbacks. *@
+
+<section class="rcp-bar" role="region" aria-label="Presets" @ref="_barEl">
+  <div class="rcp-bar-caption">
+    <span class="rcp-presets-count">@CaptionLeft</span>
+    @if (IsPaged)
+    {
+      @* Not a live region (spec §8): swiping must not chatter. *@
+      <span class="rcp-presets-count rcp-bar-position">@PositionText</span>
+    }
+    else if (!string.IsNullOrEmpty(CurrentBand) && Presets is { Count: > 0 })
+    {
+      <span class="rcp-presets-hint">HOLD <kbd>@CurrentBand</kbd> TO SAVE</span>
+    }
+  </div>
+
+  <div class="rcp-bar-row">
+    @ArrowButton(-1)
+
+    <div class="rcp-bar-viewport" role="list" id="@_listId" @ref="_viewportEl">
+      @if (LoadFailed)
+      {
+        @* Spec §7: a failed read is said, not shown as a false "no presets". *@
+        <div role="listitem" class="rcp-bar-item rcp-bar-item-wide" data-item="0">
+          <button type="button" class="rcp-bar-msg is-error" @onclick="OnRetry">
+            <span class="rcp-bar-msg-title">Couldn't load presets</span>
+            <span class="rcp-bar-msg-sub">tap to retry</span>
+          </button>
+        </div>
+      }
+      else if (Presets == null)
+      {
+        @for (var i = 0; i < VisibleCards; i++)
+        {
+          <div class="rcp-bar-item" aria-hidden="true"><div class="skeleton-loading rcp-bar-ghost"></div></div>
+        }
+      }
+      else
+      {
+        @if (Presets.Count == 0)
+        {
+          <div role="listitem" class="rcp-bar-item rcp-bar-item-wide" data-item="@EmptyMessageIndex">
+            <div class="rcp-bar-msg is-empty">
+              <span class="rcp-bar-msg-title">NO STATIONS SAVED</span>
+              <span class="rcp-bar-msg-sub">hold @(string.IsNullOrEmpty(CurrentBand) ? "the band button" : CurrentBand), or hold the PRESETS knob, to save what's playing</span>
+            </div>
+          </div>
+        }
+        @foreach (var item in _items)
+        {
+          if (item.Preset is { } preset)
+          {
+            <div role="listitem" class="rcp-bar-item @(item.IsGroupStart ? "is-group-start" : "")"
+                 data-item="@item.Index" @key="preset.Id">
+              <PresetCard Variant="PresetCardVariant.Bar"
+                          PresetId="@preset.Id"
+                          Name="@preset.Name"
+                          Frequency="@preset.Frequency"
+                          Band="@preset.Band"
+                          SlotNumber="@preset.SlotNumber"
+                          IsActive="@(preset.Id == ActivePresetId)"
+                          AriaDescribedBy="@_holdHintId"
+                          OnSelect="OnSelect"
+                          OnPointerDown="OnPointerDown"
+                          OnPointerUp="OnPointerUp"
+                          OnPointerCancel="OnPointerCancel" />
+            </div>
+          }
+          else
+          {
+            @* Owner decision Q2: the next-slot placeholder is a tappable ＋ SAVE that opens the same
+               dialog as holding the band button. The parent only asks for it when the station
+               playing is not already saved — the active card is the confirmation then. *@
+            <div role="listitem" class="rcp-bar-item @(item.IsGroupStart ? "is-group-start" : "")"
+                 data-item="@item.Index" @key="SaveItemKey">
+              <button type="button" class="rcp-bar-save" @onclick="OnSave"
+                      aria-label="@($"Save {SavePlaceholderLabel} as a preset")"
+                      title="@($"Save {SavePlaceholderLabel} — or hold {CurrentBand}")">
+                <span class="rcp-bar-save-label">＋ SAVE</span>
+                <span class="rcp-bar-card-meta">@SavePlaceholderLabel</span>
+              </button>
+            </div>
+          }
+        }
+      }
+    </div>
+
+    @ArrowButton(1)
+  </div>
+
+  <div class="rcp-bar-track" aria-hidden="true"><div class="rcp-bar-thumb"></div></div>
+  <span id="@_holdHintId" class="visually-hidden">Hold for rename or delete</span>
+</section>
+
+@code {
+  /// <summary>Cards the viewport is sized for (owner decision Q1: four wider cards).</summary>
+  internal const int VisibleCards = 4;
+
+  /// <summary>
+  /// Spec §4.5: no auto-scroll within 10 s of a manual swipe or arrow tap — browsing must not be
+  /// pulled away by a tune. <c>internal</c> so the tests advance the fake clock by this value rather
+  /// than by a copied literal.
+  /// </summary>
+  internal static readonly TimeSpan ManualScrollHold = TimeSpan.FromSeconds(10);
+
+  /// <summary>Hold an arrow this long before it starts repeating — the console's long-press threshold.</summary>
+  internal static readonly TimeSpan RepeatDelay =
+    TimeSpan.FromMilliseconds(Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs);
+
+  /// <summary>Then one page this often while it stays held (spec §4.5).</summary>
+  internal static readonly TimeSpan RepeatInterval = TimeSpan.FromMilliseconds(400);
+
+  private const string SaveItemKey = "__save__";
+
+  /// <summary>Presets in display order — <see cref="OrderLikeKnob"/>. Null while the first read is in flight.</summary>
+  [Parameter] public IReadOnlyList<RadioPresetDto>? Presets { get; set; }
+  /// <summary>The last read failed and there is no earlier list to show.</summary>
+  [Parameter] public bool LoadFailed { get; set; }
+  /// <summary>The tuned band ("FM"); the save placeholder belongs to its group.</summary>
+  [Parameter] public string? CurrentBand { get; set; }
+  /// <summary>The preset matching what is tuned (the knob's IsCurrent test), or null.</summary>
+  [Parameter] public string? ActivePresetId { get; set; }
+  /// <summary>Render the ＋ SAVE card at the end of the current band's group.</summary>
+  [Parameter] public bool ShowSavePlaceholder { get; set; }
+  /// <summary>What ＋ SAVE would save, e.g. "FM 92.30".</summary>
+  [Parameter] public string? SavePlaceholderLabel { get; set; }
+
+  [Parameter] public EventCallback<string> OnSelect { get; set; }
+  [Parameter] public EventCallback<string> OnPointerDown { get; set; }
+  [Parameter] public EventCallback<string> OnPointerUp { get; set; }
+  [Parameter] public EventCallback OnPointerCancel { get; set; }
+  [Parameter] public EventCallback OnSave { get; set; }
+  [Parameter] public EventCallback OnRetry { get; set; }
+
+  /// <summary>
+  /// The clock the manual-scroll hold and the arrow auto-repeat run on. A parameter rather than
+  /// <c>@inject</c> because neither host registers a <see cref="TimeProvider"/> — the same seam
+  /// <c>VisualizerPanel.Clock</c> uses. Production never sets it.
+  /// </summary>
+  [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  /// <summary>One entry per scrollable card. <see cref="Preset"/> is null for the ＋ SAVE card.</summary>
+  internal sealed record BarItem(int Index, RadioPresetDto? Preset, string Band, bool IsGroupStart);
+
+  private readonly string _listId = $"rcp-bar-list-{Guid.NewGuid():N}";
+  private readonly string _holdHintId = $"rcp-bar-hold-{Guid.NewGuid():N}";
+  private ElementReference _barEl;
+  private ElementReference _viewportEl;
+  private IJSObjectReference? _module;
+  private DotNetObjectReference<PresetBar>? _dotnet;
+  private List<BarItem> _items = new();
+
+  // What the browser last reported (OnViewportChanged). Until the first report, assume the strip
+  // sits at its start showing the first VisibleCards items — which is how it first lays out.
+  private bool _measured;
+  private int _first;
+  private int _last;
+  private bool _atStart = true;
+  private bool _atEnd = true;
+
+  private DateTimeOffset? _lastManualAt;
+  private bool _initialRevealDone;
+  private string? _revealedBand;
+  private string? _revealedActiveId;
+
+  private ITimer? _repeatTimer;
+  private int _repeatDirection;
+  private int _pressGeneration;
+  private bool _disposed;
+
+  /// <summary>
+  /// The bar's order, and the PRESETS knob's: band, then the per-band slot ordinal. The knob
+  /// composes its rows this way at <c>PresetSelectorService.cs:364-370</c> and says why at
+  /// <c>:262-263</c> — "the knob's list and the list the user can see are the same list in the same
+  /// order". It compares band names ordinally, so this does too; the slot is the API's
+  /// <c>SlotNumber</c>, derived the same way (per band, by CreatedAt). Never put the current band
+  /// first — that is done by scrolling (spec §4.7).
+  /// </summary>
+  public static List<RadioPresetDto> OrderLikeKnob(IEnumerable<RadioPresetDto> presets) =>
+    presets
+      .OrderBy(p => p.Band, StringComparer.Ordinal)
+      .ThenBy(p => p.SlotNumber)
+      .ThenBy(p => p.CreatedAt)
+      .ToList();
+
+  protected override void OnParametersSet()
+  {
+    _items = BuildItems();
+    if (!_measured)
+    {
+      _first = 0;
+      _last = Math.Min(VisibleCards, ScrollItemCount) - 1;
+      _atStart = true;
+      _atEnd = ScrollItemCount <= VisibleCards;
+    }
+  }
+
+  private List<BarItem> BuildItems()
+  {
+    var items = new List<BarItem>();
+    if (LoadFailed || Presets == null)
+    {
+      return items;
+    }
+
+    var bands = Presets.Select(p => (Preset: (RadioPresetDto?)p, p.Band)).ToList();
+    if (ShowSavePlaceholder && !string.IsNullOrEmpty(CurrentBand))
+    {
+      // At the end of the current band's group — exactly where a new save will appear. With no
+      // presets in that band, where its group would sort to.
+      var lastInBand = bands.FindLastIndex(x => string.Equals(x.Band, CurrentBand, StringComparison.OrdinalIgnoreCase));
+      var at = lastInBand >= 0
+        ? lastInBand + 1
+        : bands.FindIndex(x => string.CompareOrdinal(x.Band, CurrentBand) > 0);
+      bands.Insert(at < 0 ? bands.Count : at, (null, CurrentBand));
+    }
+
+    // In the empty state the "no stations saved" card takes index 0, so the cards after it shift.
+    var offset = Presets.Count == 0 ? 1 : 0;
+    for (var i = 0; i < bands.Count; i++)
+    {
+      var groupStart = i > 0 && !string.Equals(bands[i].Band, bands[i - 1].Band, StringComparison.OrdinalIgnoreCase);
+      items.Add(new BarItem(i + offset, bands[i].Preset, bands[i].Band, groupStart));
+    }
+    return items;
+  }
+
+  private int EmptyMessageIndex => 0;
+
+  /// <summary>Everything the viewport scrolls through, including the empty / error message cards.</summary>
+  private int ScrollItemCount =>
+    LoadFailed ? 1 : Presets == null ? 0 : _items.Count + (Presets.Count == 0 ? 1 : 0);
+
+  private int ActiveIndex =>
+    ActivePresetId == null ? -1 : _items.FindIndex(x => x.Preset?.Id == ActivePresetId);
+
+  private string CaptionLeft =>
+    LoadFailed || Presets == null ? "PRESETS" : $"PRESETS · {Presets.Count} saved";
+
+  /// <summary>More than fits: the caption trades the hold hint for the position (spec §4.5).</summary>
+  internal bool IsPaged => !LoadFailed && Presets is { Count: > 0 } && !(_atStart && _atEnd);
+
+  /// <summary>"1–4 of 8": the fully visible presets, counted among presets only (＋ SAVE is not one).</summary>
+  internal string PositionText
+  {
+    get
+    {
+      var total = Presets?.Count ?? 0;
+      var visible = _items.Where(x => x.Preset != null && x.Index >= _first && x.Index <= _last).ToList();
+      if (visible.Count == 0)
+      {
+        return $"of {total}";
+      }
+      var from = _items.Count(x => x.Preset != null && x.Index < visible[0].Index) + 1;
+      return $"{from}–{from + visible.Count - 1} of {total}";
+    }
+  }
+
+  private bool IsArrowDisabled(int direction) => direction < 0 ? _atStart : _atEnd;
+
+  /// <summary>Which arrow, if any, points at the off-screen playing preset: -1, +1 or 0.</summary>
+  internal int ActiveDotDirection
+  {
+    get
+    {
+      var active = ActiveIndex;
+      if (active < 0 || _last < 0)
+      {
+        return 0;
+      }
+      return active < _first ? -1 : active > _last ? 1 : 0;
+    }
+  }
+
+  internal bool InManualHold =>
+    _lastManualAt is { } at && Clock.GetUtcNow() - at < ManualScrollHold;
+
+  private RenderFragment ArrowButton(int direction) => __builder =>
+  {
+    var disabled = IsArrowDisabled(direction);
+    var dot = ActiveDotDirection == direction;
+    var dotId = $"{_listId}-dot{(direction < 0 ? "prev" : "next")}";
+    <button type="button"
+            class="rcp-bar-arrow @(direction < 0 ? "rcp-bar-prev" : "rcp-bar-next") @(disabled ? "is-disabled" : "")"
+            aria-label="@(direction < 0 ? "Previous presets" : "Next presets")"
+            aria-controls="@_listId"
+            aria-disabled="@(disabled ? "true" : "false")"
+            aria-describedby="@(dot ? dotId : null)"
+            @onpointerdown="@(e => ArrowPointerDownAsync(direction, e))"
+            @onpointerup="StopRepeat"
+            @onpointerleave="StopRepeat"
+            @onpointercancel="StopRepeat"
+            @onclick="@(e => ArrowClickAsync(direction, e))">
+      <RadzenIcon Icon="@(direction < 0 ? "keyboard_arrow_left" : "keyboard_arrow_right")" aria-hidden="true" />
+      @if (dot)
+      {
+        <span class="rcp-bar-dot" aria-hidden="true"></span>
+        <span id="@dotId" class="visually-hidden">Playing preset is to the @(direction < 0 ? "left" : "right")</span>
+      }
+    </button>
+  };
+
+  // ── Arrows: tap = one page, hold = repeat ────────────────────────────────────────────────
+
+  /// <summary>
+  /// A pointer press pages once at once, then — while still held — again every
+  /// <see cref="RepeatInterval"/> after <see cref="RepeatDelay"/>. Paging on press rather than on
+  /// click is what lets one gesture be both "tap" and "hold" without paging twice.
+  /// </summary>
+  /// <para>
+  /// The repeat is armed only after the first page's interop call returns, and Blazor Server does
+  /// not hold the next browser event back while a handler awaits — so a quick tap's pointerup can
+  /// arrive, and run <see cref="StopRepeat"/>, before there is a timer to stop. The press
+  /// generation closes that: <see cref="StopRepeat"/> moves it on, and a press whose generation
+  /// moved during the await never arms its timer. Ticks carry their generation too, so one already
+  /// queued for an earlier press does nothing.
+  /// </para>
+  internal async Task ArrowPointerDownAsync(int direction, PointerEventArgs e)
+  {
+    if (e.Button > 0 || IsArrowDisabled(direction))
+    {
+      return;
+    }
+    StopRepeat();
+    var generation = _pressGeneration;
+    await PageAsync(direction);
+    if (generation != _pressGeneration || _disposed)
+    {
+      return;
+    }
+    _repeatDirection = direction;
+    _repeatTimer = Clock.CreateTimer(_ => _ = InvokeAsync(() => RepeatTickAsync(generation)), null, RepeatDelay, RepeatInterval);
+  }
+
+  private async Task RepeatTickAsync(int generation)
+  {
+    if (generation != _pressGeneration || _repeatTimer == null)
+    {
+      return;
+    }
+    if (IsArrowDisabled(_repeatDirection))
+    {
+      StopRepeat();
+      return;
+    }
+    await PageAsync(_repeatDirection);
+  }
+
+  internal void StopRepeat()
+  {
+    _pressGeneration++;
+    _repeatTimer?.Dispose();
+    _repeatTimer = null;
+  }
+
+  /// <summary>
+  /// Keyboard activation only (<c>Detail == 0</c>): a pointer press already paged in
+  /// <see cref="ArrowPointerDownAsync"/>, and the click that follows it must not page again.
+  /// </summary>
+  private async Task ArrowClickAsync(int direction, MouseEventArgs e)
+  {
+    if (e.Detail == 0 && !IsArrowDisabled(direction))
+    {
+      await PageAsync(direction);
+    }
+  }
+
+  private async Task PageAsync(int direction)
+  {
+    _lastManualAt = Clock.GetUtcNow();
+    if (_module != null)
+    {
+      try
+      {
+        await _module.InvokeVoidAsync("page", _viewportEl, direction);
+      }
+      catch (Exception ex) when (IsInteropFailure(ex))
+      {
+      }
+    }
+  }
+
+  // ── Browser → component ──────────────────────────────────────────────────────────────────
+
+  /// <summary>The browser's report of what is fully on screen, sent whenever it changes.</summary>
+  [JSInvokable]
+  public async Task OnViewportChanged(int first, int last, bool atStart, bool atEnd)
+  {
+    _measured = true;
+    _first = first;
+    _last = last;
+    _atStart = atStart;
+    _atEnd = atEnd;
+    await InvokeAsync(StateHasChanged);
+  }
+
+  /// <summary>The user scrolled the strip (swipe, drag, wheel) — hold auto-scroll off.</summary>
+  [JSInvokable]
+  public void OnManualScroll() => _lastManualAt = Clock.GetUtcNow();
+
+  // ── Keeping the playing preset in view ───────────────────────────────────────────────────
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      try
+      {
+        var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/preset-bar.js");
+        if (_disposed)
+        {
+          // Disposed while the import was in flight: wire nothing up, and release what arrived.
+          if (module != null)
+          {
+            await module.DisposeAsync();
+          }
+          return;
+        }
+        if (module != null)
+        {
+          _dotnet = DotNetObjectReference.Create(this);
+          await module.InvokeVoidAsync("init", _viewportEl, _barEl, _dotnet);
+        }
+        _module = module;
+      }
+      catch (Exception ex) when (IsInteropFailure(ex))
+      {
+        // The bar still renders and every control still works; it just cannot measure or scroll.
+        return;
+      }
+    }
+
+    // Renders that land while the import is still in flight (the parent re-renders on every
+    // radio-state tick) must not spend the reveal decision: ChooseReveal records what it decided
+    // about, so a decision taken with no module to act on would be lost — and the first placement
+    // on the current band with it. The first-render continuation above decides once it can act.
+    if (_module == null)
+    {
+      return;
+    }
+
+    var (target, smooth) = ChooseReveal();
+    if (target >= 0)
+    {
+      try
+      {
+        await _module.InvokeVoidAsync("reveal", _viewportEl, target, smooth);
+      }
+      catch (Exception ex) when (IsInteropFailure(ex))
+      {
+      }
+    }
+  }
+
+  /// <summary>Interop failures the bar survives: a gone circuit, a JS error, an interop timeout.</summary>
+  private static bool IsInteropFailure(Exception ex) =>
+    ex is JSDisconnectedException or JSException or TaskCanceledException;
+
+  /// <summary>
+  /// What to scroll into view after this render, if anything (spec §4.5).
+  /// <list type="bullet">
+  /// <item>First render with cards: the band target, instantly.</item>
+  /// <item>The band changed: the band target, smoothly. Not subject to the manual hold — switching
+  /// band is itself a deliberate act, and leaving the strip on the old band would show the wrong
+  /// group.</item>
+  /// <item>Otherwise the playing preset changed: reveal it, unless a manual scroll or arrow tap
+  /// happened within <see cref="ManualScrollHold"/>.</item>
+  /// </list>
+  /// Returns the item index, or -1 for nothing.
+  /// </summary>
+  internal (int Target, bool Smooth) ChooseReveal()
+  {
+    if (_items.Count == 0)
+    {
+      return (-1, false);
+    }
+
+    var bandChanged = !string.Equals(_revealedBand, CurrentBand, StringComparison.OrdinalIgnoreCase);
+    var activeChanged = _revealedActiveId != ActivePresetId;
+    _revealedBand = CurrentBand;
+    _revealedActiveId = ActivePresetId;
+
+    if (!_initialRevealDone)
+    {
+      _initialRevealDone = true;
+      return (BandTarget(), false);
+    }
+    if (bandChanged)
+    {
+      return (BandTarget(), true);
+    }
+    if (activeChanged && ActiveIndex >= 0 && !InManualHold)
+    {
+      return (ActiveIndex, true);
+    }
+    return (-1, false);
+  }
+
+  /// <summary>The playing preset, else the first card of the current band's group (which is the ＋ SAVE card when the band has no presets), else nothing.</summary>
+  private int BandTarget()
+  {
+    if (ActiveIndex >= 0)
+    {
+      return ActiveIndex;
+    }
+    var first = _items.FirstOrDefault(x => string.Equals(x.Band, CurrentBand, StringComparison.OrdinalIgnoreCase));
+    return first?.Index ?? -1;
+  }
+
+  public async ValueTask DisposeAsync()
+  {
+    _disposed = true;
+    StopRepeat();
+    if (_module != null)
+    {
+      try
+      {
+        await _module.InvokeVoidAsync("dispose", _viewportEl);
+        await _module.DisposeAsync();
+      }
+      catch (Exception ex) when (IsInteropFailure(ex))
+      {
+      }
+    }
+    _dotnet?.Dispose();
+  }
+}
