@@ -31,7 +31,10 @@ internal enum CastReconnectOutcome
   /// <summary>The output was moved back to Cast, but the new connection was already lost again.</summary>
   LostAgainAfterSwitch,
 
-  /// <summary>The conditional switch back to Cast threw; the Cast connection was torn down.</summary>
+  /// <summary>
+  /// The conditional switch back to Cast threw (the new Cast connection was then torn down), or
+  /// a host call failed unexpectedly.
+  /// </summary>
   SwitchFailed
 }
 
@@ -106,11 +109,15 @@ internal interface ICastReconnectHost
 /// </summary>
 /// <remarks>
 /// <para>
-/// One run of <see cref="RunAsync"/> is one watcher. The owning service guarantees there is
-/// never more than one at a time; this class guarantees a run never connects while the user
-/// has moved the output, or while anyone else owns the Cast output (connected, connecting,
-/// starting or stopping), and that its only output change is the atomic, conditional switch
-/// back to Cast.
+/// One run of <see cref="RunAsync"/> is one watcher. The owning service starts a replacement only
+/// after the previous run has finished, so two never act at once. Immediately before connecting,
+/// a run checks that no output has been chosen since the drop and that nobody else owns the Cast
+/// output (connected, connecting or stopping). Those are checks, not locks: a choice made in the
+/// moment between the check and the connect is caught afterwards by the atomic, conditional
+/// switch back to Cast (which then refuses, and the new connection is torn down), and a
+/// connect started by someone else in that moment is refused by <c>GoogleCastOutput.ConnectAsync</c>
+/// for whichever party comes second while the other is still <c>Connecting</c>. The run's only
+/// output change is that conditional switch.
 /// </para>
 /// <para>
 /// Every wait goes through the injected <see cref="TimeProvider"/>, so tests drive the backoff
@@ -235,9 +242,10 @@ internal sealed class CastReconnectWatcher
           var active = _host.ActiveOutputId;
           if (string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase))
           {
-            // The user picked Cast while this connect was in flight. Their own connect could not
-            // run beside ours (the output was Connecting), so the connection standing now is the
-            // one serving their choice; tearing it down would leave Cast selected and silent.
+            // The user picked Cast while this reconnect was in flight. Their own connect was either
+            // refused (ours was still Connecting) or replaced ours once it was up; either way the
+            // connection standing now serves their choice, and tearing it down would leave Cast
+            // selected and silent.
             _logger.LogInformation(
               "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — leaving the connection to that choice",
               name);

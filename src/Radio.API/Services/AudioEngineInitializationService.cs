@@ -476,7 +476,7 @@ public class AudioEngineInitializationService : IHostedService
         _svc._logger.LogDebug(ex, "Cast reconnect: could not read the device cache; probing the last known address");
       }
 
-      // The same ports GoogleCastOutput.ConnectAsync will try, in the same order.
+      // The same ports, in the same order, as GoogleCastOutput.FindReachablePortAsync.
       var ports = target.Port == StandardCastPort
         ? new[] { StandardCastPort }
         : new[] { StandardCastPort, target.Port };
@@ -519,9 +519,23 @@ public class AudioEngineInitializationService : IHostedService
 
       _svc.PushNowPlayingMetadataToCast();
 
-      // A throw here means our connect did not publish a connection (or another party owns the
-      // output) — nothing of ours to tear down.
-      await cast.ConnectAsync(device, ct).ConfigureAwait(false);
+      try
+      {
+        await cast.ConnectAsync(device, ct).ConfigureAwait(false);
+      }
+      catch
+      {
+        // ConnectAsync marks Error on any failure inside its own attempt, and a failure after it
+        // published the connection (a Connected handler throwing, say) leaves that connection
+        // standing — ours to remove. Its refusal to start because another party is mid-connect
+        // throws before it touches State, leaving their Connecting alone, and is not ours to undo.
+        if (cast.State == AudioOutputState.Error && cast.ConnectedDevice != null)
+        {
+          await TearDownCastAsync().ConfigureAwait(false);
+        }
+
+        throw;
+      }
 
       try
       {
