@@ -583,6 +583,50 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
+  public async Task ReInitialisingTheOutput_EndsAHoldPlacedForTheConnectionItDiscards()
+  {
+    // LOW: a hold belongs to its connection. Re-initialising discards that connection.
+    using var listener = StartListener();
+    await _castOutput.InitializeAsync();
+    await _castOutput.ConnectAsync(Device(Port(listener)), HeldConnect, CancellationToken.None).WaitAsync(HangGuard);
+    Assert.True(_castOutput.IsHoldingForReceiverConfirmation);
+    _castLog.ThrowWhen = m => m.StartsWith("Starting Google Cast output"); // a failed start: Error
+    await Assert.ThrowsAsync<InvalidOperationException>(() => _castOutput.StartAsync().WaitAsync(HangGuard));
+    _castLog.ThrowWhen = null;
+    Assert.Equal(AudioOutputState.Error, _castOutput.State);
+
+    await _castOutput.InitializeAsync().WaitAsync(HangGuard);
+
+    Assert.False(_castOutput.IsHoldingForReceiverConfirmation);
+  }
+
+  [Fact]
+  public async Task AHandledConnectionLoss_EndsAHoldPlacedForTheLostConnection()
+  {
+    // LOW. Only a Streaming output's loss is handled, and a held connection streams only if a
+    // caller starts it unconfirmed — no caller does; this pins the clear for one that would.
+    using var listener = StartListener();
+    await _castOutput.InitializeAsync();
+    await _castOutput.ConnectAsync(Device(Port(listener)), HeldConnect, CancellationToken.None).WaitAsync(HangGuard);
+    typeof(GoogleCastOutput).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(_castOutput, null);
+    await _castOutput.StartAsync().WaitAsync(HangGuard);
+    Assert.Equal(AudioOutputState.Streaming, _castOutput.State);
+    Assert.True(_castOutput.IsHoldingForReceiverConfirmation);
+
+    typeof(GoogleCastOutput)
+      .GetMethod("ReportConnectionLost", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .Invoke(_castOutput, new object?[] { _castOutput.PublishedConnectionGeneration, "test", null });
+    await ((Task)typeof(GoogleCastOutput)
+      .GetProperty("LastConnectionLossHandling", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .GetValue(_castOutput)!).WaitAsync(HangGuard);
+
+    Assert.Equal(AudioOutputState.Error, _castOutput.State); // the loss was handled
+    Assert.False(_castOutput.IsHoldingForReceiverConfirmation);
+  }
+
+  private static readonly CastConnectOptions HeldConnect = new() { HoldUntilReceiverConfirmed = true, AutomaticAttempt = true };
+
+  [Fact]
   public async Task ASwitchToCastThatThrowsAfterMutingLocal_IsUndoneByRestoringTheLocalOutput()
   {
     // Review M2: the gate mutes local, then activates the HTTP and Cast outputs. A throw there

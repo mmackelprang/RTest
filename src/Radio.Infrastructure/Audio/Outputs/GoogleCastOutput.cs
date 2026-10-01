@@ -461,7 +461,8 @@ public class GoogleCastOutput : AudioOutputBase
   private float _connectionVolume = float.NaN;
 
   // AUD-37 (review M5). True between a CastConnectOptions.HoldUntilReceiverConfirmed connect's
-  // claim and ConfirmReceiverAvailable (or the next connect's claim, or a disconnect). While it
+  // claim and ConfirmReceiverAvailable (or the next connect's claim, a disconnect, a handled
+  // connection loss, or a re-initialise). While it
   // is set, OnReceiverStatusChanged absorbs status into the echo-filter baseline but neither
   // reports nor remembers it: the receiver may be running another sender's session, and its
   // volume is not ours. Read from SharpCaster's callback thread, hence volatile.
@@ -606,6 +607,8 @@ public class GoogleCastOutput : AudioOutputBase
       {
         _connectionGeneration++;
         _publishedGeneration = -1;
+        // AUD-37: a hold belongs to the connection it was placed for, which this discards.
+        _holdingForReceiverConfirmation = false;
         UnwatchConnectionLoss_Locked();
         stale = _client;
         _client = new ChromecastClient();
@@ -3336,6 +3339,8 @@ public class GoogleCastOutput : AudioOutputBase
       {
         _connectionGeneration++;
         _publishedGeneration = -1;
+        // AUD-37: a hold belongs to the connection it was placed for, which is gone.
+        _holdingForReceiverConfirmation = false;
         UnwatchConnectionLoss_Locked();
         client = _client;
         device = ConnectedDevice;
