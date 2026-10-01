@@ -225,7 +225,7 @@ Suggested branch: `feat/aud-91-band-aware-sweep`.
 
 ## Shipped: [#753](https://github.com/mmackelprang/RTest/pull/753), squash `27ddec4`
 
-**Gates on the final branch HEAD (`46a705f`):**
+**Gates on the final code commit (`46a705f`; the PR head `0b5af22` adds only the PR number to the queue):**
 - `dotnet build RadioConsole.sln -c Release --no-incremental`: 46 warnings / 0 errors (Windows).
 - Full `dotnet test`: every project green apart from the known set. Infrastructure 2192/2200 (the six
   `SrcVariableResamplerTests` failed, 2 skipped), Web 1459, API 541, RTLSDRCore 280, Core 186,
@@ -267,7 +267,7 @@ errors.
 | SW | "SW is out of this radio's range" + reason; Scan disabled; axis 5 … 30 MHz | API → 409 | — | — | — |
 | WB | axis 162.40 … 162.55 MHz | live, 312 ms, completed | `wb.json`, 7 channels | WB 162.400, step 25 kHz, muted: unchanged | 162.550 → state WB 162.550 ✅ |
 | AIR | axis 110 … 135 MHz | live, 30.1 s, completed | `air.json`, 1,161 | AIR 108.000, step 25 kHz: unchanged | 124.050 → state AIR 124.050 ✅ |
-| VHF | window 145.525–147.525 MHz around 146.520; axis 146.0 … 147.5 MHz | live, 2.4 s, completed | `vhf.json`, 161 | VHF 146.520, step 12.5 kHz: unchanged | 146.6625 → state VHF 146.6625 ✅ |
+| VHF | window 145.525–147.525 MHz (146.520 rounded to the 12.5 kHz grid, 146.525, ±1 MHz); axis 146.0 … 147.5 MHz | live, 2.4 s, completed | `vhf.json`, 161 | VHF 146.520, step 12.5 kHz: unchanged | 146.6625 → state VHF 146.6625 ✅ |
 | FM | axis 88 … 108, as `AUD-76` | live, 20.8 s, completed | `fm.json`, 101 | FM 108.000, step 100 kHz: unchanged | 100.1 → state FM 100.1 ✅; a tap at 100.4 snapped to 100.1 ✅ |
 
 Screenshots are in the session scratchpad (`aud91-screens/`), not committed:
