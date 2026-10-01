@@ -868,7 +868,7 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Prefix of the <see cref="InvalidOperationException"/> message <see cref="ConnectAsync"/> throws
+  /// Prefix of the <see cref="InvalidOperationException"/> message <see cref="ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/> throws
   /// when its state guard refuses to connect (AUD-85). Callers match on this constant, not on a
   /// copy of the text, so the throw site and the match cannot drift apart.
   /// </summary>

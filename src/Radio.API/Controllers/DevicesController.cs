@@ -632,7 +632,7 @@ public class DevicesController : ControllerBase
   /// device (it still re-saves the default, and promotes Cast through the output gate when an
   /// audio engine is available).
   /// Returns 409 when the Cast output is mid-transition — observed as <c>Connecting</c> before
-  /// the attempt, or reported by <see cref="GoogleCastOutput.ConnectAsync"/>'s state guard refusing
+  /// the attempt, or reported by <see cref="GoogleCastOutput.ConnectAsync(ChromecastDeviceInfo, CancellationToken)"/>'s state guard refusing
   /// whatever state it found (Connecting, Stopping, Initializing, ...). A 409 is not evidence the
   /// device is unreachable.
   /// Returns 502 when Cast is not streaming to the requested device once the output gate has run —
