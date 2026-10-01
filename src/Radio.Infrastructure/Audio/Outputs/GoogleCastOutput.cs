@@ -389,10 +389,18 @@ public class GoogleCastOutput : AudioOutputBase
   // instead of leaving a speaker nobody will unmute under an unmuted console. Cleared by an
   // acknowledged console unmute or teardown unmute of that device, by an unmute observed on it,
   // and by a connection to it whose initial read shows it unmuted. One slot: muting a different
-  // device for the console replaces it. In-process only, never persisted: after a radio-api
-  // restart it is gone, and a speaker left muted by a lost connection before the restart is
-  // treated like one muted on its own side (not unmuted for the console). Guarded by
-  // _consoleMuteLock.
+  // device for the console replaces it — and so does the late acknowledgement of a console mute
+  // whose connection has since been superseded (the drain records the device it sent to). In-process
+  // only, never persisted: after a radio-api restart it is gone, and a speaker left muted by a lost
+  // connection before the restart is treated like one muted on its own side (not unmuted for the
+  // console). Guarded by _consoleMuteLock.
+  //
+  // What it cannot tell (hostile re-review L2/L3): "still muted by us" from "unmuted, then muted
+  // again by the owner on the speaker while we were disconnected" — nothing was observed in
+  // between — so in that case the re-armed mark lets the activation reconcile unmute an owner's
+  // mute. And it is keyed by ChromecastDeviceInfo.Id, which can differ between the cached and the
+  // live record of one speaker (ConnectAsync's "matched by IP (ID mismatch)" path): a reconnect
+  // through the other Id misses the recall, and the speaker stays muted — the safe direction.
   private string? _consoleMutedDeviceId;
 
   // AUD-81: set once by CastConsoleVolumeFollower. The console's mute state, read when

@@ -685,6 +685,8 @@ public class CastConsoleVolumeFollowerTests
     Assert.False(h.Output.IsSpeakerMutedByConsole);
 
     // Forgotten: lost again, and found muted next time (now by someone else) — not ours to unmute.
+    // This half is a GUARD, not a mutation target: it passes without F11 too (with no recall at
+    // all nothing re-arms the mark), and pins that the recall, once cleared, stays cleared.
     h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
     await h.Output.LastConnectionLossHandling;
     _activeOutput = "out:Built-in Audio Analog Stereo";
@@ -695,6 +697,9 @@ public class CastConsoleVolumeFollowerTests
     Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // A GUARD, not a mutation target: it passes without F11 by design (with no recall nothing is
+  // re-armed anywhere). It pins that the recall is keyed by device, so it never re-arms — and a
+  // reconcile never unmutes — a different speaker the owner muted.
   [Fact]
   public async Task AConsoleMuteOrphanedOnOneSpeaker_IsNeverReleasedOnADifferentSpeaker()
   {
