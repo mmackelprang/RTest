@@ -43,6 +43,10 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   public TaskCompletionSource? VolumeGate { get; set; }
   public TaskCompletionSource VolumeSendEntered { get; private set; } = NewTcs();
 
+  /// <summary>The same rendezvous for SET_MUTE.</summary>
+  public TaskCompletionSource? MuteGate { get; set; }
+  public TaskCompletionSource MuteSendEntered { get; private set; } = NewTcs();
+
   /// <summary>When set, the next SET_VOLUME throws it.</summary>
   public Exception? FailNextVolume { get; set; }
 
@@ -92,13 +96,19 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
         throw fail;
       }
     };
-    Output.CastSetMuteOverrideForTests = m =>
+    Output.CastSetMuteOverrideForTests = async m =>
     {
       lock (_commandsLock)
       {
         Commands.Add(("mute", 0f, m));
       }
-      return Task.CompletedTask;
+
+      var gate = MuteGate;
+      MuteSendEntered.TrySetResult();
+      if (gate != null)
+      {
+        await gate.Task;
+      }
     };
     Output.CastStopApplicationOverrideForTests = () =>
     {
@@ -196,6 +206,7 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
       Commands.Clear();
     }
     VolumeSendEntered = NewTcs();
+    MuteSendEntered = NewTcs();
   }
 
   /// <summary>Raises a receiver status the way SharpCaster does.</summary>
@@ -213,6 +224,7 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   public async ValueTask DisposeAsync()
   {
     VolumeGate?.TrySetResult();
+    MuteGate?.TrySetResult();
     await Output.DisposeAsync();
     _listener.Stop();
   }

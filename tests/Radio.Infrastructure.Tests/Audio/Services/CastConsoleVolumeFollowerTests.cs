@@ -24,21 +24,29 @@ namespace Radio.Infrastructure.Tests.Audio.Services;
 public class CastConsoleVolumeFollowerTests
 {
   private string? _activeOutput = "google-cast";
+  private readonly Mock<IAudioEngine> _engine = new();
 
   private (SoundFlowMasterMixer Mixer, CastConsoleVolumeFollower Follower) Build(
     CastConsoleTestHarness h, float initialMaster)
   {
     var mixer = new SoundFlowMasterMixer(NullLogger<SoundFlowMasterMixer>.Instance) { MasterVolume = initialMaster };
-    var engine = new Mock<IAudioEngine>();
-    engine.SetupGet(e => e.ActiveOutputId).Returns(() => _activeOutput);
+    _engine.SetupGet(e => e.ActiveOutputId).Returns(() => _activeOutput);
     var follower = new CastConsoleVolumeFollower(
-      NullLogger<CastConsoleVolumeFollower>.Instance, mixer, engine.Object, h.Output);
+      NullLogger<CastConsoleVolumeFollower>.Instance, mixer, _engine.Object, h.Output);
     return (mixer, follower);
   }
 
+  /// <summary>What the output gate does after a switch: record it, then raise the event.</summary>
+  private void SwitchActiveOutput(string outputId)
+  {
+    _activeOutput = outputId;
+    _engine.Raise(e => e.ActiveOutputChanged += null, _engine.Object, outputId);
+  }
+
   /// <summary>
-  /// What AudioStateUpdateService does with an external speaker change. Returns a counter of the
-  /// master writes it made.
+  /// What AudioStateUpdateService.OnCastVolumeChanged does with an external speaker change: the
+  /// level only when the speaker's level changed (and differs by more than 0.01), the mute always.
+  /// Returns a counter of the master-volume writes it made.
   /// </summary>
   private static Func<int> ResyncLikeAudioStateUpdateService(GoogleCastOutput output, SoundFlowMasterMixer mixer)
   {
@@ -50,7 +58,7 @@ public class CastConsoleVolumeFollowerTests
         return;
       }
 
-      if (Math.Abs(mixer.MasterVolume - e.Volume) > 0.01f)
+      if (e.VolumeChanged && Math.Abs(mixer.MasterVolume - e.Volume) > 0.01f)
       {
         Interlocked.Increment(ref writes);
         mixer.MasterVolume = e.Volume;
@@ -75,15 +83,20 @@ public class CastConsoleVolumeFollowerTests
     await follower.LastVolumeBurst;
     Assert.Empty(h.Commands);
 
-    // Streaming but a local output is active (startup restore, switching, AUD-84 fallback).
+    // Streaming but a local output is active (startup restore, switching, AUD-84 fallback, or
+    // the gate not yet having recorded google-cast). The volume and an UNmute are not pushed.
+    // (Pre-merge review M3 changed one thing here: a MUTE now is — the safe direction — so this
+    // no longer asserts that nothing at all is sent; AMuteReachesAStreamingSpeaker… covers it.)
     h.MarkStreaming();
     _activeOutput = "out:Built-in Audio Analog Stereo";
     mixer.MasterVolume = 0.30f;
     mixer.IsMuted = true;
+    await follower.LastMutePush;
     mixer.IsMuted = false;
     await follower.LastVolumeBurst;
     await follower.LastMutePush;
-    Assert.Empty(h.Commands);
+    Assert.Empty(h.VolumeSends());
+    Assert.Equal(new[] { true }, h.MuteSends());
 
     // Both: the console now drives the speaker.
     _activeOutput = "google-cast";
@@ -277,6 +290,176 @@ public class CastConsoleVolumeFollowerTests
 
     Assert.Equal(new[] { true }, h.MuteSends());
     Assert.Equal("mute", h.Commands[0].Kind);
+  }
+
+  // --- pre-merge review M1: loop safety from an explicit marker, not float equality ---
+
+  // A console move landing between GoogleCastOutput clearing its queued target and raising
+  // CastVolumeChanged makes KnownSpeakerLevel that new target, not the speaker's level — so the
+  // re-synced master write no longer "equals the speaker", and before the marker the follower
+  // mapped the speaker's own level through the curve and pushed it back.
+  [Fact]
+  public async Task TheMasterWriteOfASpeakerChange_IsNeverPushedBack_EvenWhenTheKnownLevelHasMovedOn()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f); // anchor (0.50, 0.40): not the identity
+    using var _ = follower;
+    var target = h.Target();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var concurrent = Task.CompletedTask;
+    var moved = false;
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync && !moved)
+      {
+        moved = true;
+        concurrent = h.Output.SetDeviceVolumeFromConsoleAsync(0.33f, target.Generation);
+      }
+    };
+    var masterWrites = ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    h.ClearCommands();
+
+    h.RaiseStatus(0.55); // changed on the speaker
+
+    Assert.Equal(1, masterWrites());
+    Assert.Equal(0.55f, mixer.MasterVolume, 3);
+
+    h.VolumeGate.SetResult();
+    await concurrent;
+    await follower.LastVolumeBurst;
+    Assert.Equal(new[] { 0.33f }, h.VolumeSends()); // only the concurrent move; nothing mapped from 0.55
+  }
+
+  // A speaker-side mute while a non-identity burst is queued: the event's level is just what the
+  // speaker reported beside the mute. Copying it into master moved the console's volume, and the
+  // follower then mapped it through the anchor and pushed (a speaker-side mute halved the volume).
+  [Fact]
+  public async Task AMuteOnlySpeakerChange_AfterNonIdentityPushes_PushesNothing_AndLeavesMasterAlone()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    var masterWrites = ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    h.ClearCommands();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    mixer.MasterVolume = 0.45f;                  // → 0.36, held in flight
+    await h.VolumeSendEntered.Task;
+    mixer.MasterVolume = 0.47f;                  // → 0.376, queued
+
+    h.RaiseStatus(0.36, muted: true);            // muted on the speaker, reporting our in-flight level
+
+    h.VolumeGate.SetResult();
+    await follower.LastVolumeBurst;
+
+    Assert.True(mixer.IsMuted);                  // the mute reached the console
+    Assert.Equal(0.47f, mixer.MasterVolume, 3);  // its level did not
+    Assert.Equal(0, masterWrites());
+    Assert.Equal(0.36f, Assert.Single(h.VolumeSends()), 3); // the queued target dropped; nothing pushed back
+    Assert.Empty(h.MuteSends());
+  }
+
+  // A device that quantises (reports 0.46 for a pushed 0.4567) confirms our push within the echo
+  // filter's 0.01 but outside the follower's 0.001 same-level check. Reported beside a mute, that
+  // used to become a master write that the follower mapped and pushed.
+  [Fact]
+  public async Task AQuantisedReportOfOurPush_BesideASpeakerMute_PushesNothing()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f); // anchor (0.50, 0.40); upper slope 1.2
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    h.ClearCommands();
+
+    mixer.MasterVolume = 0.5473f;            // → 0.4 + 1.2 * 0.0473 = 0.45676
+    await follower.LastVolumeBurst;
+    var pushed = Assert.Single(h.VolumeSends());
+    Assert.Equal(0.4568f, pushed, 3);
+
+    h.RaiseStatus(0.46, muted: true);        // the device's quantised confirmation, plus a mute
+
+    await follower.LastVolumeBurst;
+    await follower.LastMutePush;
+    Assert.Single(h.VolumeSends());
+    Assert.Equal(0.5473f, mixer.MasterVolume, 4);
+    Assert.True(mixer.IsMuted);
+  }
+
+  [Fact]
+  public async Task ASpeakerChangeTooSmallToMoveMaster_StillReanchorsTheCurve()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f); // anchor would be (0.50, 0.40)
+    using var _ = follower;
+    var masterWrites = ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    h.ClearCommands();
+
+    h.RaiseStatus(0.505); // within 0.01 of master: no master write
+    Assert.Equal(0, masterWrites());
+
+    mixer.MasterVolume = 0.51f;
+    await follower.LastVolumeBurst;
+
+    // From (0.50, 0.505): 0.505 + (0.495 / 0.5) * 0.01 = 0.5149 — not (0.50, 0.40)'s 0.412.
+    Assert.Equal(0.5149f, Assert.Single(h.VolumeSends()), 3);
+  }
+
+  // --- pre-merge review M3: the start-up window ---
+
+  [Fact]
+  public async Task AMuteReachesAStreamingSpeaker_BeforeTheGateRecordsCast_ButAnUnmuteWaitsForIt()
+  {
+    await using var h = new CastConsoleTestHarness();
+    _activeOutput = "out:Built-in Audio Analog Stereo"; // the gate records google-cast only later
+    await h.ConnectAsync(reportedLevel: 0.40f);         // streaming
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    h.ClearCommands();
+
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    Assert.Equal(new[] { true }, h.MuteSends());
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+
+    mixer.IsMuted = false; // not pushed yet: Cast is not the active output
+    await follower.LastMutePush;
+    Assert.Equal(new[] { true }, h.MuteSends());
+
+    // The gate makes Cast active: the speaker this application muted is unmuted to match.
+    SwitchActiveOutput("google-cast");
+    await follower.LastMutePush;
+    Assert.Equal(new[] { true, false }, h.MuteSends());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  [Fact]
+  public async Task AConsoleMuteMadeBeforeStreaming_IsReconciledWhenTheGateMakesCastActive()
+  {
+    await using var h = new CastConsoleTestHarness();
+    _activeOutput = "out:Built-in Audio Analog Stereo";
+    await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+
+    mixer.IsMuted = true; // not streaming yet: nothing to drive
+    await follower.LastMutePush;
+    h.ClearCommands();
+
+    h.MarkStreaming();
+    SwitchActiveOutput("google-cast");
+    await follower.LastMutePush;
+
+    Assert.Equal(new[] { true }, h.MuteSends());
+
+    // A second activation with nothing to reconcile sends nothing.
+    SwitchActiveOutput("google-cast");
+    await follower.LastMutePush;
+    Assert.Equal(new[] { true }, h.MuteSends());
   }
 
   [Fact]

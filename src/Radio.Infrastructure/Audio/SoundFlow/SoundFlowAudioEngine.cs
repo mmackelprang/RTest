@@ -71,6 +71,9 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// <inheritdoc/>
   public event EventHandler<AudioDeviceChangedEventArgs>? DeviceChanged;
 
+  /// <inheritdoc/>
+  public event EventHandler<string>? ActiveOutputChanged;
+
   /// <summary>
   /// Raised after a playback device switch completes, so that services holding
   /// active SoundComponents can re-attach them to the new device's mixer.
@@ -317,6 +320,17 @@ public class SoundFlowAudioEngine : IAudioEngine
       }
 
       _activeOutputId = outputId;
+
+      // AUD-81: never let a subscriber fail the switch.
+      try
+      {
+        ActiveOutputChanged?.Invoke(this, outputId);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "An ActiveOutputChanged subscriber threw");
+      }
+
       await PersistActiveOutputAsync(outputId, cancellationToken).ConfigureAwait(false);
     }
   }

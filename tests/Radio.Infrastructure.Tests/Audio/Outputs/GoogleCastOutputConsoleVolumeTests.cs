@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
 using Xunit;
@@ -479,5 +480,208 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(AudioOutputState.Error, h.Output.State);
     Assert.Equal(new[] { true }, h.MuteSends());
     Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // Pre-merge review M2: the echo baseline survived across connections, so after a console-muted
+  // speaker was LOST, _lastSetMute was still true; a reconnect whose initial read failed then
+  // skipped the start-time mute ("already muted") and streamed unmuted under a muted console.
+  [Fact]
+  public async Task AReconnectWhoseInitialReadFails_StillMutesTheSpeakerForAMutedConsole()
+  {
+    await using var h = new CastConsoleTestHarness();
+    h.Output.AttachConsoleFollower(() => true, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+
+    h.Output.ReportConnectionLost(target.Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    h.ClearCommands();
+
+    // The same speaker again; its status cannot be read, so its mute state is unknown.
+    await h.ConnectAsync(statusRead: () => Task.FromException<(float, bool)?>(new TimeoutException("no answer")));
+    Assert.False(h.Output.KnownSpeakerMuted);
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Equal(new[] { true }, h.MuteSends());
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // Pre-merge review M3 (a): the start-time mute runs before Streaming, and the follower ignores
+  // the console until Streaming, so a mute made in between was lost.
+  [Fact]
+  public async Task AConsoleMuteMadeWhileTheStreamWasStarting_IsAppliedOnReachingStreaming()
+  {
+    await using var h = new CastConsoleTestHarness();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
+
+    await h.Output.SyncVolumeAfterStartAsync(); // the start-time mute: console not muted yet
+    consoleMuted = true;                         // muted in the window
+    h.ClearCommands();
+
+    h.MarkStreaming();
+    await h.Output.OnReachedStreamingAsync();
+
+    Assert.Equal(new[] { true }, h.MuteSends());
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // Pre-merge review L1/L2: the drain wrote _connectionVolume (and remembered it) unconditionally
+  // when its send completed, overwriting a change the speaker reported meanwhile.
+  [Fact]
+  public async Task AnExternalChangeWhileAPushIsInFlight_IsNotOverwrittenWhenThePushCompletes()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;   // 0.30 in flight
+    h.RaiseStatus(0.55);             // changed on the speaker meanwhile
+    h.VolumeGate.SetResult();
+    var result = await burst;
+
+    Assert.Equal(0.55f, h.Output.KnownSpeakerLevel, 3);
+    Assert.Equal(0.55f, h.Store.Volumes["cast-a"], 3);
+    Assert.Null(result.AppliedLevel);
+  }
+
+  [Fact]
+  public async Task APushThatCompletesAfterANewConnection_IsNotRecordedForEitherConnection()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var target = h.Target();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;
+
+    await h.Output.DisconnectAsync();
+    await h.ConnectAsync("cast-b", reportedLevel: 0.80f);
+    h.VolumeGate.SetResult();
+    await burst;
+
+    Assert.Equal(0.80f, h.Output.KnownSpeakerLevel, 3);
+    Assert.DoesNotContain(h.Store.Remembered, r => Math.Abs(r.Volume - 0.30f) < 0.001f);
+  }
+
+  // Pre-merge review L3: the echo window ran from a send's START, and the sends it covers are
+  // bounded at up to 10 s, so a slow send's confirmation could arrive after its entry expired.
+  [Fact]
+  public async Task TheConfirmationOfASlowPush_IsAnEcho_ForAsLongAsTheSendIsInFlight_AndTheWindowAfter()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;
+
+    h.RaiseStatus(0.55);                      // a speaker change moves the baseline off 0.30
+    h.Time.Advance(TimeSpan.FromSeconds(8));  // the send is still in flight, 8 s after it began
+    h.RaiseStatus(0.30);                      // the device confirms our push
+    Assert.Single(h.External);
+
+    h.VolumeGate.SetResult();
+    await burst;
+
+    h.Time.Advance(TimeSpan.FromSeconds(2));  // within EchoWindow of the send's COMPLETION
+    h.RaiseStatus(0.55);
+    h.RaiseStatus(0.30);
+    Assert.Equal(new[] { 0.55f, 0.55f }, h.External.Select(e => e.Volume).ToArray());
+
+    // Anti-vacuity: once the window after completion has passed, 0.30 is a real change.
+    h.Time.Advance(TimeSpan.FromSeconds(4));
+    h.RaiseStatus(0.55);
+    h.RaiseStatus(0.30);
+    Assert.Equal(0.30f, h.External[^1].Volume, 3);
+  }
+
+  // Pre-merge review L4: console mutes were not coalesced, so a burst of toggles queued one
+  // SET_MUTE each and the "muted by console" mark followed whichever finished last.
+  [Fact]
+  public async Task ConsoleMutes_AreCoalesced_LatestWins_AndTheMarkFollowsTheLastSent()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    h.MuteGate = CastConsoleTestHarness.NewTcs();
+    var first = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    await h.MuteSendEntered.Task; // true in flight
+    var second = h.Output.SetDeviceMuteFromConsoleAsync(false, target.Generation);
+    var third = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    var fourth = h.Output.SetDeviceMuteFromConsoleAsync(false, target.Generation);
+    h.MuteGate.SetResult();
+
+    Assert.False(await first);  // a later request won the burst
+    Assert.False(await third);
+    Assert.True(await second);
+    Assert.True(await fourth);
+    Assert.Equal(new[] { true, false }, h.MuteSends());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.False(h.Output.KnownSpeakerMuted);
+  }
+
+  // Pre-merge review L5: SharpCaster raises the live read's GET_STATUS response as a
+  // ReceiverStatusChanged too, which reached OnReceiverStatusChanged as an EXTERNAL change — a
+  // diagnostic read could move master volume.
+  [Fact]
+  public async Task AStatusArrivingDuringTheLiveRead_IsBaselineOnly_NeverAnExternalChange()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+
+    h.Output.CastStatusReadOverrideForTests = () =>
+    {
+      h.RaiseStatus(0.55, muted: true);
+      return Task.FromResult<(float, bool)?>((0.55f, true));
+    };
+    var reading = await h.Output.ReadSpeakerVolumeAsync();
+
+    Assert.NotNull(reading);
+    Assert.Empty(h.External);
+
+    h.RaiseStatus(0.55, muted: true); // the baseline holds it
+    Assert.Empty(h.External);
+
+    h.RaiseStatus(0.20, muted: true); // anti-vacuity: after the read, a change is reported
+    Assert.Equal(0.20f, Assert.Single(h.External).Volume, 3);
+  }
+
+  // Pre-merge review M1: every reported change makes the speaker's report the known level and
+  // drops queued console targets — a mute-only one too — and says whether the LEVEL changed.
+  [Fact]
+  public async Task AMuteOnlyExternalChange_DropsTheQueuedTarget_AndIsMarkedAsNotALevelChange()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;                                   // 0.30 in flight
+    Assert.Same(burst, h.Output.SetDeviceVolumeFromConsoleAsync(0.36f, target.Generation)); // 0.36 queued
+
+    // Muted on the speaker, which reports the level of our in-flight push beside it.
+    h.RaiseStatus(0.30, muted: true);
+
+    var e = Assert.Single(h.External);
+    Assert.False(e.VolumeChanged);
+    Assert.True(e.IsMuted);
+    Assert.Equal(0.30f, h.Output.KnownSpeakerLevel, 3); // the speaker's report, not the queued 0.36
+
+    h.VolumeGate.SetResult();
+    await burst;
+    Assert.Equal(new[] { 0.30f }, h.VolumeSends()); // the queued 0.36 was dropped
   }
 }
