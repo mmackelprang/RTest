@@ -106,6 +106,10 @@ public class CustomWebApplicationFactory<TProgram> : WebApplicationFactory<TProg
         ["Metrics:DatabasePath"] = Path.Combine(data, "metrics.db"),
         ["Fingerprinting:DatabasePath"] = Path.Combine(data, "fingerprints.db"),
         ["Diagnostics:CaptureBaseDirectory"] = Path.Combine(data, "diagnostics"),
+        // AUD-76: no band sweep in a test host — no timer evaluation, and an explicit scan
+        // request answers "disabled" instead of enumerating real RTL-SDR hardware. The hosted
+        // registration is also removed below; this covers the service when resolved directly.
+        ["BandMap:Enabled"] = "false",
       });
     });
 

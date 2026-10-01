@@ -63,6 +63,34 @@ public class ActiveSourceAccessorRegistrationTests
   }
 
   [Fact]
+  public void RadioFactory_ResolvedFromContainer_ReceivesTheSdrDeviceGateSingleton()
+  {
+    // AUD-76: the gate is an OPTIONAL constructor parameter, so a missing
+    // registration would leave RTL-SDR sources ungated with no error. The
+    // factory must hold the same instance everything else resolves.
+    var services = BuildMinimalContainer();
+    services.AddSingleton<SdrDeviceGate>();
+    services.AddSingleton<RadioFactory>();
+    var provider = services.BuildServiceProvider();
+
+    var factory = provider.GetRequiredService<RadioFactory>();
+
+    Assert.NotNull(factory.DeviceGate);
+    Assert.Same(provider.GetRequiredService<SdrDeviceGate>(), factory.DeviceGate);
+  }
+
+  [Fact]
+  public void AddSoundFlowAudio_RegistersSdrDeviceGateAsSingleton()
+  {
+    var services = new ServiceCollection();
+
+    services.AddSoundFlowAudio(new ConfigurationBuilder().Build());
+
+    ServiceDescriptor gate = Assert.Single(services, d => d.ServiceType == typeof(SdrDeviceGate));
+    Assert.Equal(ServiceLifetime.Singleton, gate.Lifetime);
+  }
+
+  [Fact]
   public void ActiveSourceAccessor_ReturnsAudioManagerActiveSource()
   {
     // The registered delegate must actually read through to the audio manager,

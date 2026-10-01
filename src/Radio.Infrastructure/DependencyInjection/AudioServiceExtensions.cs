@@ -113,7 +113,34 @@ public static class AudioServiceExtensions
     // Register device options resolver (reads config store, falls back to IOptionsMonitor)
     services.AddSingleton<DeviceOptionsResolver>();
 
-    // Register radio factory (singleton for device management)
+    // AUD-76: one gate for the one RTL-SDR dongle, shared by RadioFactory (which hands it to
+    // every SDRRadioAudioSource) and BandMapService. GetService for TimeProvider: nothing
+    // registers one in production and the constructor default is TimeProvider.System.
+    services.AddSingleton<SdrDeviceGate>(sp => new SdrDeviceGate(
+      sp.GetService<ILogger<SdrDeviceGate>>(),
+      sp.GetService<TimeProvider>()));
+
+    // AUD-76: FM band map sweeps. Singleton + AddHostedService(factory) so controllers resolve
+    // the same instance the host starts. The radio source and ISleepService are resolved per
+    // call through delegates: the audio manager is built lazily, and ISleepService is
+    // registered by the API host after this method runs.
+    services.Configure<BandMapOptions>(configuration.GetSection(BandMapOptions.SectionName));
+    services.AddSingleton<BandMapService>(sp => new BandMapService(
+      sp.GetRequiredService<ILogger<BandMapService>>(),
+      sp.GetRequiredService<IOptionsMonitor<BandMapOptions>>(),
+      new BandMapStore(
+        (sp.GetService<IOptions<DatabaseOptions>>()?.Value ?? new DatabaseOptions()).RootPath,
+        sp.GetRequiredService<ILogger<BandMapStore>>()),
+      sp.GetRequiredService<SdrDeviceGate>(),
+      () => sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) as ILiveBandSweeper,
+      () => sp.GetService<ISleepService>(),
+      deviceFactory: null,
+      timeProvider: sp.GetService<TimeProvider>()));
+    services.AddHostedService(sp => sp.GetRequiredService<BandMapService>());
+
+    // Register radio factory (singleton for device management). Plain AddSingleton<T>: the
+    // container picks the constructor and fills the optional SdrDeviceGate parameter from
+    // the registration above (locked by ActiveSourceAccessorRegistrationTests).
     services.AddSingleton<RadioFactory>();
     services.AddSingleton<IRadioFactory>(sp => sp.GetRequiredService<RadioFactory>());
 

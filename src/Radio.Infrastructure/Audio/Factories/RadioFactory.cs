@@ -5,6 +5,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Fingerprinting;
+using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Primary;
 using Radio.Infrastructure.Configuration;
@@ -34,6 +35,7 @@ public class RadioFactory : IRadioFactory
   private readonly DeviceOptionsResolver? _deviceOptionsResolver;
   private readonly Radio.Configuration.Abstractions.IConfigurationManager? _configurationManager;
   private readonly Func<IAudioSource?>? _getActiveSource;
+  private readonly SdrDeviceGate? _deviceGate;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -68,6 +70,7 @@ public class RadioFactory : IRadioFactory
   /// <param name="deviceOptionsResolver">Optional resolver for config store device options.</param>
   /// <param name="configurationManager">Optional configuration manager for preference restoration.</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source, handed to every created source.</param>
+  /// <param name="deviceGate">Optional SDR device gate handed to every created RTL-SDR source (AUD-76).</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
@@ -80,7 +83,8 @@ public class RadioFactory : IRadioFactory
     IMetricsCollector? metricsCollector = null,
     DeviceOptionsResolver? deviceOptionsResolver = null,
     Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null,
-    Func<IAudioSource?>? getActiveSource = null)
+    Func<IAudioSource?>? getActiveSource = null,
+    SdrDeviceGate? deviceGate = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
@@ -94,6 +98,7 @@ public class RadioFactory : IRadioFactory
     _deviceOptionsResolver = deviceOptionsResolver;
     _configurationManager = configurationManager;
     _getActiveSource = getActiveSource;
+    _deviceGate = deviceGate;
   }
 
   /// <summary>
@@ -102,6 +107,13 @@ public class RadioFactory : IRadioFactory
   /// unwired accessor silently restores the cross-source contamination bug.
   /// </summary>
   internal Func<IAudioSource?>? GetActiveSourceAccessor => _getActiveSource;
+
+  /// <summary>
+  /// Gets the SDR device gate handed to every created RTL-SDR source. Exposed for
+  /// tests that verify DI hands the factory the same gate instance the band-map
+  /// service uses.
+  /// </summary>
+  internal SdrDeviceGate? DeviceGate => _deviceGate;
 
   /// <inheritdoc/>
   public IPrimaryAudioSource CreateRadioSource(string deviceType)
@@ -201,7 +213,8 @@ public class RadioFactory : IRadioFactory
         _identificationService,
         _playbackService,
         _configurationManager,
-        _getActiveSource);
+        _getActiveSource,
+        _deviceGate);
 
       _logger.LogInformation("Successfully created RTL-SDR radio source");
       return source;
