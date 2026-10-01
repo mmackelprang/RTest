@@ -68,10 +68,29 @@ public class AudioStateUpdateServiceCastVolumeTests
     svc.Dispose();
   }
 
+  // AUD-81, pre-merge review M1: a mute changed on the speaker arrives with whatever level the
+  // speaker reported beside it — possibly a quantised echo of a console push. Copying that level
+  // moved the console's volume because the speaker was muted.
+  [Fact]
+  public void AMuteOnlyCastChange_CopiesTheMute_ButNeverTheLevel()
+  {
+    var audio = new Mock<IAudioManager>();
+    audio.SetupGet(a => a.MasterVolume).Returns(ExistingMasterVolume);
+    audio.SetupGet(a => a.IsMuted).Returns(false);
+
+    var svc = CreateServiceWithAudioManager(audio.Object, new CapturingLoggerProvider());
+
+    RaiseCastVolumeChanged(svc, ArrivingVolume, muted: true, initial: false, volumeChanged: false);
+
+    audio.VerifySet(a => a.MasterVolume = It.IsAny<float>(), Times.Never);
+    audio.VerifySet(a => a.IsMuted = true, Times.Once); // anti-vacuity: the mute still lands
+    svc.Dispose();
+  }
+
   // --- helpers ---
 
   private static void RaiseCastVolumeChanged(
-    AudioStateUpdateService svc, float volume, bool muted, bool initial)
+    AudioStateUpdateService svc, float volume, bool muted, bool initial, bool volumeChanged = true)
   {
     var method = typeof(AudioStateUpdateService).GetMethod(
       "OnCastVolumeChanged",
@@ -80,7 +99,10 @@ public class AudioStateUpdateServiceCastVolumeTests
     method!.Invoke(svc, new object?[]
     {
       null,
-      new CastVolumeChangedEventArgs { Volume = volume, IsMuted = muted, IsInitialSync = initial }
+      new CastVolumeChangedEventArgs
+      {
+        Volume = volume, IsMuted = muted, IsInitialSync = initial, VolumeChanged = volumeChanged
+      }
     });
   }
 

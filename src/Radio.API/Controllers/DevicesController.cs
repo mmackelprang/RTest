@@ -356,6 +356,10 @@ public class DevicesController : ControllerBase
     var tapDiag = _audioEngine?.GetOutputTapDiagnostics();
     var pipelineDiag = _audioEngine?.GetPipelineDiagnostics();
 
+    // AUD-81 (hostile review F8): read once. KnownSpeakerLevel can change between two reads, and
+    // a NaN reaching System.Text.Json throws, turning this endpoint into a 500.
+    float knownSpeakerLevel = _castOutput?.KnownSpeakerLevel ?? float.NaN;
+
     return Ok(new
     {
       fingerprintTap = new
@@ -381,6 +385,11 @@ public class DevicesController : ControllerBase
       {
         state = _castOutput?.State.ToString(),
         connectedDevice = _castOutput?.ConnectedDevice?.FriendlyName,
+        // AUD-81: this output's own view of the speaker, not a live read — for that, see
+        // GET /api/devices/cast/volume. Null when the level is unknown.
+        speakerLevel = float.IsNaN(knownSpeakerLevel) ? (float?)null : knownSpeakerLevel,
+        speakerMuted = _castOutput?.KnownSpeakerMuted,
+        speakerMutedByConsole = _castOutput?.IsSpeakerMutedByConsole,
         directChannel = _castOutput?.DirectStreaming != null ? new
         {
           isStreaming = _castOutput.DirectStreaming.IsStreaming,
@@ -398,6 +407,66 @@ public class DevicesController : ControllerBase
         playbackDeviceActive = pipelineDiag?.PlaybackDeviceActive ?? false,
         modifierCount = pipelineDiag?.ModifierCount ?? 0,
       }
+    });
+  }
+
+  /// <summary>
+  /// Reads the connected Cast speaker's volume and mute LIVE (a bounded, 3 s Cast status read),
+  /// beside the level this application last set or observed (AUD-81). Read-only: it changes
+  /// nothing and fires no volume event.
+  /// </summary>
+  /// <returns>
+  /// 200 with <c>{ deviceName, level, muted, knownLevel, knownMuted, mutedByConsole }</c>;
+  /// 404 when there is no Cast output; 409 when Cast is not streaming to a connected speaker;
+  /// 504 when the speaker does not answer in time; 502 when the read fails.
+  /// </returns>
+  [HttpGet("cast/volume")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  [ProducesResponseType(StatusCodes.Status502BadGateway)]
+  [ProducesResponseType(StatusCodes.Status504GatewayTimeout)]
+  public async Task<IActionResult> GetCastSpeakerVolume(CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return NotFound(new { error = "Google Cast output not available" });
+    }
+
+    CastSpeakerVolumeReading? reading;
+    try
+    {
+      reading = await _castOutput.ReadSpeakerVolumeAsync(cancellationToken);
+    }
+    catch (TimeoutException)
+    {
+      return StatusCode(StatusCodes.Status504GatewayTimeout,
+        new { error = "The Cast speaker did not answer the status read within 3 s" });
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast speaker volume read failed");
+      return StatusCode(StatusCodes.Status502BadGateway,
+        new { error = "The Cast speaker status read failed", details = ex.Message });
+    }
+
+    if (reading == null)
+    {
+      return Conflict(new { error = "Cast is not streaming to a connected speaker" });
+    }
+
+    return Ok(new
+    {
+      deviceName = reading.DeviceName,
+      level = reading.Level,
+      muted = reading.Muted,
+      knownLevel = reading.KnownLevel,
+      knownMuted = reading.KnownMuted,
+      mutedByConsole = reading.MutedByConsole,
     });
   }
 

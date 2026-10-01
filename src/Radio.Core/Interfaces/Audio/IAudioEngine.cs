@@ -91,6 +91,14 @@ public interface IAudioEngine : IAsyncDisposable
   string? ActiveOutputId { get; }
 
   /// <summary>
+  /// Raised after <see cref="ActiveOutputId"/> has been set by an output switch, with the new id.
+  /// Raised synchronously inside the switch, so handlers must be quick and must not call
+  /// <see cref="SetActiveOutputAsync"/> (AUD-81: the Cast console follower reconciles the
+  /// console's mute onto the speaker when Cast becomes the active output).
+  /// </summary>
+  event EventHandler<string>? ActiveOutputChanged;
+
+  /// <summary>
   /// Atomically switches the active audio output. Exactly one output is active
   /// at any time: either a local playback device (identified by its MiniAudio
   /// device id), or one of the virtual outputs "google-cast" / "http-stream".
