@@ -142,7 +142,7 @@ public class GoogleCastOutput : AudioOutputBase
   private EventHandler? _lossWatchHandler;
 
   /// <summary>
-  /// <b>Test seam (kind C — substitution).</b> Awaited inside <see cref="ConnectAsync"/>
+  /// <b>Test seam (kind C — substitution).</b> Awaited inside <see cref="ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/>
   /// after the receiver has been resolved but before the network connect, which is
   /// precisely where the connect/teardown race used to corrupt state. Set by
   /// <c>GoogleCastOutputConcurrencyTests</c> (<c>:51</c>, <c>:116</c>).
@@ -234,6 +234,13 @@ public class GoogleCastOutput : AudioOutputBase
   // status callback, so accessed through Volatile (a float write is atomic; a float?
   // would not be).
   private float _connectionVolume = float.NaN;
+
+  // AUD-37 (review M5). True between a CastConnectOptions.HoldUntilReceiverConfirmed connect's
+  // claim and ConfirmReceiverAvailable (or the next connect's claim, or a disconnect). While it
+  // is set, OnReceiverStatusChanged absorbs status into the echo-filter baseline but neither
+  // reports nor remembers it: the receiver may be running another sender's session, and its
+  // volume is not ours. Read from SharpCaster's callback thread, hence volatile.
+  private volatile bool _holdingForReceiverConfirmation;
 
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
@@ -601,10 +608,22 @@ public class GoogleCastOutput : AudioOutputBase
   /// <param name="device">The device to connect to.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task ConnectAsync(ChromecastDeviceInfo device, CancellationToken cancellationToken = default)
+  public Task ConnectAsync(ChromecastDeviceInfo device, CancellationToken cancellationToken = default) =>
+    ConnectAsync(device, CastConnectOptions.Default, cancellationToken);
+
+  /// <summary>
+  /// Connects to a specific Chromecast device, as <paramref name="options"/> says.
+  /// </summary>
+  /// <param name="device">The device to connect to.</param>
+  /// <param name="options">How to connect; <see cref="CastConnectOptions.Default"/> is a user's connect.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  public async Task ConnectAsync(
+    ChromecastDeviceInfo device, CastConnectOptions options, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     ArgumentNullException.ThrowIfNull(device);
+    ArgumentNullException.ThrowIfNull(options);
 
     // Recover from Error state by reinitializing
     if (State == AudioOutputState.Error)
@@ -651,6 +670,10 @@ public class GoogleCastOutput : AudioOutputBase
       {
         myGeneration = ++_connectionGeneration;
         client = _client;
+
+        // AUD-37 (review M5). Set with the claim: every connect states its own hold, so a hold
+        // cannot outlive the attempt that asked for it into a later connect's connection.
+        _holdingForReceiverConfirmation = options.HoldUntilReceiverConfirmed;
       }
       finally
       {
@@ -756,7 +779,7 @@ public class GoogleCastOutput : AudioOutputBase
 
       // Read initial device volume. The generation goes with it: the read is a
       // network round-trip, and this connection can be superseded inside it.
-      await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
+      await SyncInitialVolumeAsync(client, myGeneration, device, options.HoldUntilReceiverConfirmed).ConfigureAwait(false);
 
       Connected?.Invoke(this, new ChromecastConnectedEventArgs { Device = device });
 
@@ -834,6 +857,26 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
+  /// AUD-37 (review M5). Ends the hold a <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/>
+  /// connect placed: the caller has established the receiver is free for us. From here receiver
+  /// status changes are reported and remembered as for any connection, and the remembered level
+  /// the connect held back is still this connection's level, which
+  /// <see cref="SyncVolumeAfterStartAsync"/> pushes when <c>StartAsync</c> has launched our receiver
+  /// application and started streaming.
+  /// Pushes nothing itself. A no-op when no hold is in place.
+  /// </summary>
+  public void ConfirmReceiverAvailable()
+  {
+    _holdingForReceiverConfirmation = false;
+  }
+
+  /// <summary>
+  /// AUD-37 (review M5). True while the current connection was made with
+  /// <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/> and not yet confirmed.
+  /// </summary>
+  public bool IsHoldingForReceiverConfirmation => _holdingForReceiverConfirmation;
+
+  /// <summary>
   /// Publishes a completed connection, but only if this attempt is still the
   /// current one. Returns false when a newer connect, a disconnect, or disposal
   /// superseded it while it was on the network — in which case the caller owns
@@ -890,6 +933,7 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _connectionGeneration++;
       _publishedGeneration = -1;
+      _holdingForReceiverConfirmation = false;
       UnwatchConnectionLoss_Locked();
       hadConnection = _connectedReceiver != null;
       client = _client;
@@ -1959,7 +2003,14 @@ public class GoogleCastOutput : AudioOutputBase
   /// it does and does not guarantee.
   /// </param>
   /// <param name="device">The device connected to; its <c>Id</c> keys the volume memory.</param>
-  private async Task SyncInitialVolumeAsync(ChromecastClient client, int generation, ChromecastDeviceInfo device)
+  /// <param name="holdForConfirmation">
+  /// AUD-37 (review M5): the connect was made with <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/>.
+  /// The remembered level becomes this connection's level but is NOT pushed (a receiver busy with
+  /// another sender must not have its volume changed), and a never-seen device's own reading is
+  /// adopted for this connection but not remembered.
+  /// </param>
+  private async Task SyncInitialVolumeAsync(
+    ChromecastClient client, int generation, ChromecastDeviceInfo device, bool holdForConfirmation)
   {
     try
     {
@@ -2031,7 +2082,15 @@ public class GoogleCastOutput : AudioOutputBase
       if (remembered is float target)
       {
         Volatile.Write(ref _connectionVolume, target);
-        if (reading == null || Math.Abs(reading.Value.Volume - target) > 0.01f)
+        if (holdForConfirmation)
+        {
+          // Review M5: not yet known to be ours. _connectionVolume holds the target, so the push
+          // after our receiver app launches (SyncVolumeAfterStartAsync) applies it then.
+          _logger.LogDebug(
+            "Cast: holding remembered volume {Volume:P0} for {Name} until the receiver is confirmed free",
+            target, device.FriendlyName);
+        }
+        else if (reading == null || Math.Abs(reading.Value.Volume - target) > 0.01f)
         {
           try
           {
@@ -2054,7 +2113,11 @@ public class GoogleCastOutput : AudioOutputBase
       else if (reading != null)
       {
         Volatile.Write(ref _connectionVolume, reading.Value.Volume);
-        _volumeStore?.Remember(device.Id, reading.Value.Volume);
+        if (!holdForConfirmation)
+        {
+          // Under a hold the reading may be another sender's level, which is not ours to keep.
+          _volumeStore?.Remember(device.Id, reading.Value.Volume);
+        }
       }
       else
       {
@@ -2210,6 +2273,18 @@ public class GoogleCastOutput : AudioOutputBase
 
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
+
+    if (_holdingForReceiverConfirmation)
+    {
+      // AUD-37 (review M5). The connection is not yet known to be ours: the receiver may be
+      // serving another sender, whose volume and mute changes must not reach the console (the
+      // CastVolumeChanged subscriber writes master volume and mute) nor this device's remembered
+      // level. Absorbed into the baseline so that, once confirmed, only a change made after the
+      // confirmation is reported.
+      _lastSetVolume = deviceVolume;
+      _lastSetMute = deviceMuted;
+      return;
+    }
 
     // Filter out echo events from our own SetVolume/SetMute calls
     if (_suppressNextVolumeEvent)
@@ -2698,6 +2773,29 @@ public class CastVolumeChangedEventArgs : EventArgs
   /// Gets whether this is the initial sync after connecting (not an external change).
   /// </summary>
   public bool IsInitialSync { get; init; }
+}
+
+/// <summary>
+/// AUD-37. How <see cref="GoogleCastOutput.ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/>
+/// connects. <see cref="Default"/> is a user's connect, unchanged from before.
+/// </summary>
+public sealed record CastConnectOptions
+{
+  /// <summary>A user's connect: no hold.</summary>
+  public static CastConnectOptions Default { get; } = new();
+
+  /// <summary>
+  /// Review M5: the connect is made before the caller knows the receiver is free for us (the
+  /// reconnect watcher connects, then reads the receiver's running applications). Until
+  /// <see cref="GoogleCastOutput.ConfirmReceiverAvailable"/> — or the next connect, or a
+  /// disconnect — the connection holds: the device's remembered volume is not pushed (it stays
+  /// the connection's level, for the push after our receiver app launches), a never-seen
+  /// device's reading is not remembered, and receiver status changes are neither reported
+  /// through <see cref="GoogleCastOutput.CastVolumeChanged"/> nor remembered. The initial-sync
+  /// event still fires, flagged <c>IsInitialSync</c>. Expressed as a property of the connect so
+  /// that any later initial-sync machinery can honour the same flag.
+  /// </summary>
+  public bool HoldUntilReceiverConfirmed { get; init; }
 }
 
 /// <summary>

@@ -26,13 +26,15 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
 
   private readonly SoundFlowAudioEngine _engine = CreateBareEngine();
   private readonly Mock<IAudioDeviceManager> _deviceManager = new();
+  private readonly FakeVolumeStore _volumes = new(); // empty unless a test remembers a level
   private readonly GoogleCastOutput _castOutput;
 
   public AudioEngineInitializationServiceCastReconnectHostTests()
   {
     var options = new AudioOutputOptions();
     options.GoogleCast.CacheFilePath = Path.Combine(Path.GetTempPath(), $"cast-cache-{Guid.NewGuid():N}.json");
-    _castOutput = new GoogleCastOutput(NullLogger<GoogleCastOutput>.Instance, Options.Create(options));
+    _castOutput = new GoogleCastOutput(
+      NullLogger<GoogleCastOutput>.Instance, Options.Create(options), volumeStore: _volumes);
 
     _deviceManager
       .Setup(d => d.GetOutputDevicesAsync(It.IsAny<CancellationToken>()))
@@ -182,6 +184,79 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
+  public async Task ABusySpeaker_GetsNoVolumeCommand_AndItsStatusDoesNotReachTheConsole()
+  {
+    // Review M5. The reconnect connects before it reads the receiver's applications. Before the
+    // fix that connect pushed the remembered (AUD-80) volume to the speaker — jumping another
+    // sender's volume — and any status the speaker sent while our channel was open was reported
+    // as an external change, which AudioStateUpdateService writes into master volume and mute.
+    using var listener = StartListener();
+    _volumes.Volumes["cast-a"] = 0.25f;
+    var pushes = new List<float>();
+    SetCastSeam("CastSetVolumeOverrideForTests", (Func<float, Task>)(v => { pushes.Add(v); return Task.CompletedTask; }));
+    SetCastSeam("CastStatusReadOverrideForTests",
+      (Func<Task<(float Volume, bool Muted)?>>)(() => Task.FromResult<(float Volume, bool Muted)?>((0.70f, false))));
+    var published = new List<CastVolumeChangedEventArgs>();
+    _castOutput.CastVolumeChanged += (_, e) => published.Add(e);
+
+    var service = CreateService();
+    var heldDuringTheRead = false;
+    service.ReceiverApplicationsReadOverride = (cast, _) =>
+    {
+      // The pre-confirmation window: the other sender changes the volume and mutes.
+      heldDuringTheRead = cast.IsHoldingForReceiverConfirmation;
+      RaiseReceiverStatus(0.40, muted: true);
+      return Task.FromResult<IReadOnlyList<string>>(new[] { "2DB7CC49" });
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<CastSpeakerInUseException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    Assert.True(heldDuringTheRead);
+    Assert.Empty(pushes);
+    Assert.DoesNotContain(published, e => !e.IsInitialSync);
+    Assert.Equal(0.25f, _volumes.Volumes["cast-a"], 3);
+  }
+
+  [Fact]
+  public async Task AFreeSpeaker_EndsTheHoldBeforeOurAppIsStarted()
+  {
+    // Review M5, the other half: once the receiver is known to be free the hold ends, so the
+    // start's after-launch push (SyncVolumeAfterStartAsync, which applies the held remembered
+    // level — GoogleCastOutputVolumeMemoryTests covers that push) and later status reports run
+    // as for any connection.
+    //
+    // No offline receiver can be launched: StartAsync's LaunchApplicationAsync on the unconnected
+    // SharpCaster client waits out its 30 s response timeout. So the read override also clears
+    // GoogleCastOutput._client (private, hence reflection), which StartAsync treats as "nothing to
+    // launch" and goes straight to Streaming. The hold, the confirmation and the host's sequence
+    // are real; the launch and the after-launch push are not exercised here.
+    using var listener = StartListener();
+    _volumes.Volumes["cast-a"] = 0.25f;
+    var pushes = new List<float>();
+    SetCastSeam("CastSetVolumeOverrideForTests", (Func<float, Task>)(v => { pushes.Add(v); return Task.CompletedTask; }));
+    var service = CreateService();
+    var heldDuringTheRead = false;
+    service.ReceiverApplicationsReadOverride = (cast, _) =>
+    {
+      heldDuringTheRead = cast.IsHoldingForReceiverConfirmation;
+      typeof(GoogleCastOutput)
+        .GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!
+        .SetValue(cast, null);
+      return Task.FromResult<IReadOnlyList<string>>(new[] { "E8C28D3C" }); // the idle screen: free
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard);
+
+    Assert.Equal(AudioOutputState.Streaming, _castOutput.State);
+    Assert.True(heldDuringTheRead);
+    Assert.False(_castOutput.IsHoldingForReceiverConfirmation);
+    Assert.Empty(pushes); // nothing pushed at connect time
+  }
+
+  [Fact]
   public async Task ReceiverStatusUnreadable_IsTreatedAsBusy()
   {
     using var listener = StartListener();
@@ -314,6 +389,34 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   private static int Port(TcpListener listener) => ((IPEndPoint)listener.LocalEndpoint).Port;
+
+  /// <summary>Sets one of GoogleCastOutput's labelled kind-C seams (internal, hence reflection).</summary>
+  private void SetCastSeam(string name, object value) =>
+    typeof(GoogleCastOutput)
+      .GetProperty(name, BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(_castOutput, value);
+
+  /// <summary>Raises a receiver status the way SharpCaster does (private handler, hence reflection).</summary>
+  private void RaiseReceiverStatus(double level, bool muted)
+  {
+    var handler = typeof(GoogleCastOutput).GetMethod(
+      "OnReceiverStatusChanged", BindingFlags.NonPublic | BindingFlags.Instance)!;
+    var status = new Sharpcaster.Models.ChromecastStatus.ChromecastStatus
+    {
+      Volume = new() { Level = level, Muted = muted }
+    };
+    handler.Invoke(_castOutput, new object?[] { null, status });
+  }
+
+  private sealed class FakeVolumeStore : ICastDeviceVolumeStore
+  {
+    public Dictionary<string, float> Volumes { get; } = new();
+
+    public Task<float?> GetVolumeAsync(string deviceId, CancellationToken cancellationToken = default) =>
+      Task.FromResult<float?>(Volumes.TryGetValue(deviceId, out var v) ? v : null);
+
+    public void Remember(string deviceId, float volume) => Volumes[deviceId] = volume;
+  }
 
   private static int ClosedLoopbackPort()
   {

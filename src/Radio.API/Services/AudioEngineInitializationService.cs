@@ -610,6 +610,8 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 
+    private static readonly CastConnectOptions HoldUntilConfirmed = new() { HoldUntilReceiverConfirmed = true };
+
     private readonly AudioEngineInitializationService _svc;
     private bool _startedHttpOutput;
 
@@ -720,7 +722,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
       try
       {
-        await cast.ConnectAsync(ours, ct).ConfigureAwait(false);
+        // Review M5: held until the receiver is known to be free — no remembered volume pushed to
+        // it, and no status from it reported to the console, while it may be serving another sender.
+        await cast.ConnectAsync(ours, HoldUntilConfirmed, ct).ConfigureAwait(false);
       }
       catch
       {
@@ -734,6 +738,11 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       // Review M5: never take the speaker from someone else. Connecting only opened a channel to
       // the receiver; launching our app (StartAsync) is what would end another sender's session.
       await StandDownIfReceiverInUseAsync(cast, castOptions.ApplicationId, ct).ConfigureAwait(false);
+
+      // Free: end the hold. The remembered level is still the connection's level, and the start
+      // below pushes it after launching our receiver app (GoogleCastOutput.SyncVolumeAfterStartAsync,
+      // on the DirectChannel path and on the HttpMp3 path when a stream URL is set).
+      cast.ConfirmReceiverAvailable();
 
       try
       {
