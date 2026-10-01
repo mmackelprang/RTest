@@ -151,6 +151,36 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
   }
 
   [Fact]
+  public async Task Connect_SwitchingDevicesWhileCastIsActive_RefusedAfterItsOwnStop_Returns409_AndRestoresLocal()
+  {
+    // Review LOW-1. Cast is the active output, streaming to another speaker. The connect's
+    // stop-before-switch stops that stream; another party then moves the state before the guard,
+    // which refuses. This call stopped the user's stream, so it must not leave Cast active with
+    // local muted and nothing playing.
+    StreamToTestDevice(id: "https://192.168.0.99/");
+    var (engine, _) = CreateEngine();
+    await engine.SetActiveOutputAsync("google-cast", CancellationToken.None);
+    var moved = false;
+    _castOutput.StateChanged += (_, e) =>
+    {
+      if (e.NewState == AudioOutputState.Stopped && !moved)
+      {
+        moved = true;
+        SetState(AudioOutputState.Connecting); // the other party, between the stop and the guard
+      }
+    };
+
+    var result = await CreateController(audioEngine: engine).ConnectToCastDevice(Request(), CancellationToken.None);
+
+    var conflict = Assert.IsAssignableFrom<ObjectResult>(result);
+    Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
+    Assert.True(moved);
+    Assert.Equal("default", engine.ActiveOutputId);
+    Assert.False(engine.IsLocalOutputMuted);
+    VerifyDefaultSaved(Times.Never());
+  }
+
+  [Fact]
   public async Task Connect_WhenOutputIsConnecting_Returns409_AndLeavesTheBusyOutputAlone()
   {
     SetState(AudioOutputState.Connecting);

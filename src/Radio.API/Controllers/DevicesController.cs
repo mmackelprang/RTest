@@ -647,7 +647,8 @@ public class DevicesController : ControllerBase
   /// Returns 409 when the Cast output is mid-transition — observed as <c>Connecting</c> before
   /// the attempt, or reported by <see cref="GoogleCastOutput.ConnectAsync(ChromecastDeviceInfo, CancellationToken)"/>'s state guard refusing
   /// whatever state it found (Connecting, Stopping, Initializing, ...). A 409 is not evidence the
-  /// device is unreachable.
+  /// device is unreachable. When that refusal follows this call's own stop of a stream to another
+  /// device, local output is restored as on the 500 path below.
   /// Returns 502 when Cast is not streaming to the requested device once the output gate has run —
   /// for example because the speaker was lost while connecting or starting, the connect was
   /// superseded by another, or there is no audio engine to promote through. Local output is
@@ -736,6 +737,9 @@ public class DevicesController : ControllerBase
         return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
       }
     }
+
+    // Streaming (to another device) on entry: ConnectAsync's stop-before-switch stops it.
+    var castWasStreamingOnEntry = _castOutput.State == AudioOutputState.Streaming;
 
     try
     {
@@ -867,11 +871,19 @@ public class DevicesController : ControllerBase
       // AUD-85: GoogleCastOutput.ConnectAsync's state guard refused because the output was
       // mid-transition when it checked — for example, another connect that began after the
       // Connecting check above. The prefix is the constant that guard's message is built from.
-      // No local restore here: this call stopped nothing of its own. The guard runs after
-      // ConnectAsync's stop-before-switch, but that stop always ends in Stopped, which the guard
-      // accepts — so a refusal after a stop means another party moved the state in between, and
-      // that party owns the output now; switching to local would race it.
+      // The guard runs after ConnectAsync's stop-before-switch. So when Cast was streaming on
+      // entry (a device switch), this call may itself have stopped the user's stream, and nothing
+      // guarantees whoever moved the state will restore local if its own connect fails (review
+      // LOW-1). In that case the same restore as the 500 path runs: it switches to local only
+      // while Cast is still the active output and the Cast output is not Streaming, so a party
+      // that has since got Cast streaming is left alone. Otherwise this call stopped nothing,
+      // and nothing is restored.
       _logger.LogWarning("Cast connect refused by output state: {Reason}", ex.Message);
+      if (castWasStreamingOnEntry)
+      {
+        await RestoreLocalAfterFailedConnectAsync();
+      }
+
       return Conflict(new { error = "Cast output is busy; try again shortly", details = ex.Message });
     }
     catch (Exception ex)
