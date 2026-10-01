@@ -272,8 +272,16 @@ public class AudioEngineInitializationService : IHostedService
     Task.FromResult(CastReconnectOutcome.Cancelled);
 
   /// <summary>
-  /// <b>Test seam.</b> The clock the reconnect watcher waits on. Defaults to a
-  /// <see cref="TimeProvider"/> registered in DI, else <see cref="TimeProvider.System"/>.
+  /// The clock the reconnect watcher waits on: a <see cref="TimeProvider"/> registered in DI,
+  /// else <see cref="TimeProvider.System"/>.
+  /// <para>
+  /// <b>Test seam (kind C — substitution).</b> Set by <c>AudioEngineInitializationServiceCastReconnectTests</c>
+  /// and <c>AudioEngineInitializationServiceCastReconnectHostTests</c> to a fake clock.
+  /// <b>Why the real path is unreachable:</b> the backoff runs 5 s to 30 min of real waits, which a
+  /// unit test cannot sit through, and sleeping against them races the watcher's own timers.
+  /// <b>NOT covered by this seam:</b> nothing beyond the clock — the waits, backoff and window
+  /// arithmetic are the real ones, driven by fake time.
+  /// </para>
   /// </summary>
   internal TimeProvider ReconnectTimeProvider
   {
@@ -282,12 +290,25 @@ public class AudioEngineInitializationService : IHostedService
   }
 
   /// <summary>
-  /// <b>Test seam.</b> Replaces the production probe/connect/switch implementation the watcher
-  /// drives. Null in production.
+  /// Replaces the probe/connect/switch implementation the watcher drives. Null in production,
+  /// where the watcher gets <see cref="ServiceCastReconnectHost"/>.
+  /// <para>
+  /// <b>Test seam (kind C — substitution).</b> Set by <c>AudioEngineInitializationServiceCastReconnectTests</c>
+  /// and <c>AudioEngineInitializationServiceCastReconnectHostTests.Recovery_HandsTheWatcherTheEpochOfItsOwnSwitch</c>.
+  /// <b>Why the real path is unreachable:</b> a reconnect needs a Cast receiver to answer a TCP
+  /// probe and complete a Cast handshake and receiver launch; no fake socket does.
+  /// <b>NOT covered by this seam:</b> <c>ServiceCastReconnectHost.ConnectAndStartAsync</c> (the
+  /// source wiring, connect, start and its own tear-down on failure) and its HTTP-stream wiring —
+  /// only a box UAT covers those. Its epoch checks, idle check and probe are tested directly
+  /// through <see cref="CreateProductionCastReconnectHost"/>.
+  /// </para>
   /// </summary>
   internal ICastReconnectHost? CastReconnectHostOverride { get; set; }
 
-  /// <summary><b>Test seam.</b> The production host, so its engine-facing checks can be tested directly.</summary>
+  /// <summary>
+  /// The production host, exposed so its engine-facing checks can be tested directly. Test-only
+  /// (kind A — visibility): production constructs the same object in <see cref="StartCastReconnectWatcher"/>.
+  /// </summary>
   internal ICastReconnectHost CreateProductionCastReconnectHost() => new ServiceCastReconnectHost(this);
 
   /// <summary>

@@ -99,6 +99,31 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
+  public async Task ACastOutputThatSomeoneElseConnected_IsNotIdle_EvenWhileReady()
+  {
+    // AUD-85: connected but not yet started (state Ready) is exactly the moment a manual pick is
+    // between its ConnectAsync and StartAsync. The state alone reads "idle"; the connected
+    // device is what says the output is taken. The transport is substituted through
+    // GoogleCastOutput's labelled kind-C seam (internal to Radio.Infrastructure, hence
+    // reflection): no fake socket can complete a Cast handshake.
+    using var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    await _castOutput.InitializeAsync();
+    typeof(GoogleCastOutput)
+      .GetProperty("ConnectTransportOverrideForTests", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(_castOutput, (Func<Sharpcaster.Models.ChromecastReceiver, Task>)(_ => Task.CompletedTask));
+    typeof(GoogleCastOutput)
+      .GetProperty("CastStatusReadOverrideForTests", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(_castOutput, (Func<Task<(float Volume, bool Muted)?>>)(() => Task.FromResult<(float Volume, bool Muted)?>(null)));
+    await _castOutput.ConnectAsync(Device(((IPEndPoint)listener.LocalEndpoint).Port)).WaitAsync(HangGuard);
+    var host = CreateService().CreateProductionCastReconnectHost();
+
+    Assert.Equal(AudioOutputState.Ready, _castOutput.State);
+    Assert.NotNull(_castOutput.ConnectedDevice);
+    Assert.False(host.IsCastIdle);
+  }
+
+  [Fact]
   public async Task Probe_AnsweringPort_ReturnsTheDevice_ClosedPort_ReturnsNull()
   {
     // Loopback only: a listening port answers, a closed one is refused (on Windows a refused
