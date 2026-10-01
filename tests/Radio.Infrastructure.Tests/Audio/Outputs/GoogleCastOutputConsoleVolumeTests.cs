@@ -982,6 +982,34 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // Hostile review (round 3) LOW-2. L3's release applies only when this connection has actually seen
+  // the speaker unmuted. On a reconnect whose initial read failed, the "not muted" baseline is the
+  // reset value, not an observation: a console unmute skipped against it used to forget the device's
+  // console-mute record, so a later connection finding the speaker still muted (by us) no longer
+  // re-armed the mark (F11), and nothing would unmute it for the console.
+  [Fact]
+  public async Task AConsoleUnmuteSkippedOnAnUnreadSpeaker_KeepsTheConsoleMuteRecord()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, h.Target().Generation));
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+
+    // The same speaker again; its status cannot be read, so its mute state is unknown.
+    await h.ConnectAsync(statusRead: () => Task.FromException<(float, bool)?>(new TimeoutException("no answer")));
+    consoleMuted = false;
+    h.ClearCommands();
+
+    await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, h.Target().Generation);
+
+    Assert.Empty(h.Commands);                               // unchanged: nothing sent on the unknown baseline
+    await h.Output.DisconnectAsync();
+    Assert.True(await StillRecordedAsMutedForTheConsoleAsync(h)); // the record survives, so F11 re-arms
+  }
+
   // Hostile review M3. The console mute drain has one pending slot, latest wins. A re-assert queued
   // while a console UNMUTE was waiting there used to replace it; the re-assert is then dropped (the
   // console is unmuted by its turn), so the console's unmute — and the held level it carries — was

@@ -403,6 +403,13 @@ public class GoogleCastOutput : AudioOutputBase
   // Interlocked/Volatile only.
   private int _consoleMutedGeneration = -1;
 
+  // AUD-81 (hostile review round 3, LOW-2): true once this connection has OBSERVED the speaker's mute
+  // state — an initial read, a receiver status, or a SET_MUTE of ours that was sent — so that
+  // _lastSetMute is an observation rather than the "not muted" ResetSpeakerStateForNewConnection
+  // sets. Reset per connection. A status raised by a handler left attached to a torn-down client
+  // can set it for the next connection (C-126, as for RememberVolume). Volatile only.
+  private bool _speakerMuteObserved;
+
   // AUD-81 (hostile review F11): the ChromecastDeviceInfo.Id of the speaker this application last
   // muted for the console and has not seen unmuted since, or null. Unlike the generation mark
   // above it survives a LOST connection — a lost speaker stays muted — so that a later connection
@@ -1076,6 +1083,7 @@ public class GoogleCastOutput : AudioOutputBase
   {
     _lastSetVolume = -1f;
     _lastSetMute = false;
+    Volatile.Write(ref _speakerMuteObserved, false);
     Volatile.Write(ref _speakerStepInterval, float.NaN);
     Interlocked.Exchange(ref _consoleMutedGeneration, -1);
 
@@ -2310,6 +2318,7 @@ public class GoogleCastOutput : AudioOutputBase
         // volume, through the other door.
         _lastSetVolume = reading.Value.Volume;
         _lastSetMute = reading.Value.Muted;
+        Volatile.Write(ref _speakerMuteObserved, true);
 
         _logger.LogInformation(
           "Cast device initial volume: {Volume:P0}, Muted: {Muted}",
@@ -2628,6 +2637,8 @@ public class GoogleCastOutput : AudioOutputBase
 
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
+    // LOW-2: every branch below leaves _lastSetMute holding what the device just said.
+    Volatile.Write(ref _speakerMuteObserved, true);
 
     // Hostile re-review M2: before any branch, so the initial sync's own status supplies it too.
     NoteSpeakerStepInterval(status.Volume.StepInterval);
@@ -3645,12 +3656,16 @@ public class GoogleCastOutput : AudioOutputBase
       // first, so the speaker ends at the console's level either way.
       if (next.Muted == _lastSetMute && (next.Muted || !HasHeldConsoleVolume()))
       {
-        if (!next.Muted)
+        if (!next.Muted && Volatile.Read(ref _speakerMuteObserved))
         {
           // Hostile review L3: nothing to send, but the speaker is unmuted under an unmuted console,
           // so nothing of ours is left to release either — clear the mark and the device record, as
           // an acknowledged unmute does. Left behind, the record would let a later connection that
           // finds the speaker muted by its owner re-arm the mark (F11) and unmute the owner's mute.
+          // Round-3 LOW-2: only when this connection has OBSERVED the speaker unmuted. After a failed
+          // initial read the "not muted" baseline is only the per-connection reset, and the speaker
+          // may still be muted by us; forgetting the record then would stop a later connection that
+          // finds it muted from re-arming the mark, and nothing would unmute it for the console.
           await ReleaseConsoleMuteRecordAsync(next.Generation).ConfigureAwait(false);
         }
 
@@ -4322,17 +4337,21 @@ public class GoogleCastOutput : AudioOutputBase
       if (CastSetMuteOverrideForTests != null)
       {
         await CastSetMuteOverrideForTests(muted).ConfigureAwait(false);
-        return true;
       }
-
-      var receiverChannel = client.GetChannel<ReceiverChannel>();
-      if (receiverChannel == null)
+      else
       {
-        _lastSetMute = previous;
-        return false;
+        var receiverChannel = client.GetChannel<ReceiverChannel>();
+        if (receiverChannel == null)
+        {
+          _lastSetMute = previous;
+          return false;
+        }
+
+        await receiverChannel.SetMute(muted).ConfigureAwait(false);
       }
 
-      await receiverChannel.SetMute(muted).ConfigureAwait(false);
+      // LOW-2: the speaker acknowledged this state, so the baseline is now an observation.
+      Volatile.Write(ref _speakerMuteObserved, true);
       return true;
     }
     catch
