@@ -21,6 +21,9 @@ namespace Radio.Web.Tests.Components.Layout;
 /// AUD-85, at the layout: tapping the Cast pill with a saved default Cast device sends only the
 /// connect — no <c>POST /api/devices/output</c>, which starts the API's own competing auto-connect —
 /// and a failed connect leaves the saved default alone (no <c>DELETE /api/devices/cast/default</c>).
+/// Review H1: after a failed connect the Cast dropdown must not show the default as connected (its
+/// row stays selectable, and there is no Stop Casting row that would clear the default), and the
+/// next tap on the Cast pill retries the connect.
 /// Rendering set-up mirrors <see cref="MainLayoutNavTests"/>; the devices client is backed by a
 /// <see cref="RoutedApiHandler"/> so every request the layout sends is recorded.
 /// </summary>
@@ -29,7 +32,9 @@ public class MainLayoutCastPickTests : TestContext
   private const string ConnectPath = "/api/devices/cast/connect";
   private const string DefaultCastPath = "/api/devices/cast/default";
   private const string OutputPath = "/api/devices/output";
+  private const string CachedCastPath = "/api/devices/cast/cached";
   private const string CastPill = "button[aria-label='Cast device picker']";
+  private const string CastRow = ".cast-device-row";
 
   private static readonly CastDeviceDto SavedDefault =
     new("https://192.168.0.25/", "Test speaker", "192.168.0.25", 8009, "Nest Audio");
@@ -115,10 +120,50 @@ public class MainLayoutCastPickTests : TestContext
     Assert.Single(requests, r => r.Method == HttpMethod.Post && r.Path == ConnectPath);
     Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Delete && r.Path == DefaultCastPath);
     Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post && r.Path == OutputPath);
-    // The dropdown opens for a manual pick, and the layout still holds the saved default.
-    var dropdown = cut.FindComponent<CastDeviceDropdown>().Instance;
-    Assert.True(dropdown.IsOpen);
-    Assert.Equal(SavedDefault, dropdown.ConnectedDevice);
+    // The dropdown opens for a manual pick — and, since the connect failed, says nothing is
+    // connected: no connected banner, and no Stop Casting row (which would clear the default).
+    var dropdown = cut.FindComponent<CastDeviceDropdown>();
+    Assert.True(dropdown.Instance.IsOpen);
+    Assert.Null(dropdown.Instance.ConnectedDevice);
+    Assert.Empty(dropdown.FindAll(".cast-stop-row"));
+    Assert.DoesNotContain("cast_connected", dropdown.Markup, StringComparison.Ordinal);
+  }
+
+  [Fact]
+  public async Task CastPick_ConnectFails_TheDefaultsRowInTheDropdownIsSelectable()
+  {
+    var devices = DevicesWithSavedDefault(HttpStatusCode.InternalServerError)
+      .Get(CachedCastPath, new List<CastDeviceDto> { SavedDefault });
+    var cut = RenderLayout(devices);
+
+    await TapCastAsync(cut);
+
+    // Rendezvous on the observation: the row renders once the dropdown has loaded its cache.
+    var row = cut.WaitForElement(CastRow, TimeSpan.FromSeconds(30));
+    Assert.Contains(SavedDefault.Name, row.TextContent, StringComparison.Ordinal);
+    Assert.DoesNotContain("pointer-events: none", row.GetAttribute("style") ?? "", StringComparison.Ordinal);
+
+    await row.ClickAsync(new MouseEventArgs());
+
+    // The row was not short-circuited as "already connected": it sent its own connect.
+    var requests = devices.Requests;
+    Assert.Equal(2, requests.Count(r => r.Method == HttpMethod.Post && r.Path == ConnectPath));
+    Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Delete && r.Path == DefaultCastPath);
+  }
+
+  [Fact]
+  public async Task CastPick_ConnectFails_ASecondTapRetriesTheOneTapConnect()
+  {
+    var devices = DevicesWithSavedDefault(HttpStatusCode.Conflict);
+    var cut = RenderLayout(devices);
+
+    await TapCastAsync(cut);
+    await TapCastAsync(cut);
+
+    var requests = devices.Requests;
+    Assert.Equal(2, requests.Count(r => r.Method == HttpMethod.Post && r.Path == ConnectPath));
+    Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Delete && r.Path == DefaultCastPath);
+    Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post && r.Path == OutputPath);
   }
 
   [Fact]
@@ -133,7 +178,26 @@ public class MainLayoutCastPickTests : TestContext
     Assert.Single(requests, r => r.Method == HttpMethod.Post && r.Path == ConnectPath);
     Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Post && r.Path == OutputPath);
     Assert.DoesNotContain(requests, r => r.Method == HttpMethod.Delete && r.Path == DefaultCastPath);
-    Assert.False(cut.FindComponent<CastDeviceDropdown>().Instance.IsOpen);
+    var dropdown = cut.FindComponent<CastDeviceDropdown>();
+    Assert.False(dropdown.Instance.IsOpen);
+    Assert.Equal(SavedDefault, dropdown.Instance.ConnectedDevice);
+  }
+
+  [Fact]
+  public async Task CastPick_ConnectSucceeds_ASecondTapOpensTheDropdownShowingTheDeviceConnected()
+  {
+    var devices = DevicesWithSavedDefault(HttpStatusCode.OK);
+    var cut = RenderLayout(devices);
+
+    await TapCastAsync(cut);
+    await TapCastAsync(cut);
+
+    // Cast is active, so the second tap toggles the dropdown rather than reconnecting.
+    Assert.Single(devices.Requests, r => r.Method == HttpMethod.Post && r.Path == ConnectPath);
+    var dropdown = cut.FindComponent<CastDeviceDropdown>();
+    Assert.True(dropdown.Instance.IsOpen);
+    Assert.Equal(SavedDefault, dropdown.Instance.ConnectedDevice);
+    Assert.Single(dropdown.FindAll(".cast-stop-row"));
   }
 
   private sealed class StubOptionsMonitor<T> : IOptionsMonitor<T>
