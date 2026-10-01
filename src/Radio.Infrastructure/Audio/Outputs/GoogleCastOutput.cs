@@ -1404,8 +1404,9 @@ public class GoogleCastOutput : AudioOutputBase
     //      speaker is not marked as the console's, but a level would still unmute it under the
     //      muted console). The level is held and sent, before the unmute, when the console is
     //      unmuted — so there is no unmute window under a muted console at all.
-    //   3. Otherwise the level is pushed; if the speaker was muted (on its own side, under an
-    //      unmuted console) the mute is re-asserted straight after it (PushVolumeKeepingMuteAsync).
+    //   3. Otherwise the level is pushed; if the speaker was muted on its own side (under an
+    //      unmuted console) the mute is re-asserted straight after it. A mute that was the
+    //      console's is not re-asserted under an unmuted console (PushVolumeKeepingMuteAsync).
     if (_lastSetMute)
     {
       if (Math.Abs(_lastSetVolume - target) <= EchoLevelTolerance)
@@ -2381,9 +2382,11 @@ public class GoogleCastOutput : AudioOutputBase
         {
           try
           {
-            // AUD-81 follow-up: a speaker the read found muted (on its own side, or still muted
-            // from an earlier console mute — RecallConsoleMuteAsync above) is muted again straight
-            // after this push, which unmutes it (box UAT 2026-10-01). In the connect order
+            // AUD-81 follow-up: this push unmutes a muted speaker (box UAT 2026-10-01). A speaker
+            // the read found muted is muted again straight after it — unless the mute was the
+            // console's (RecallConsoleMuteAsync above re-armed the mark) and the console is unmuted
+            // now: then it is not re-muted, and if the push left it unmuted the mark and the device
+            // record are released (see PushVolumeKeepingMuteAsync). In the connect order
             // (ConnectAsync, then StartAsync) no audio of ours is streaming to this connection yet;
             // a StartAsync racing this connect is not excluded, and is what the mute after the
             // push bounds.
@@ -2510,7 +2513,9 @@ public class GoogleCastOutput : AudioOutputBase
   /// <summary>
   /// <see cref="PushVolumeToDeviceAsync"/>, then — when this output's baseline had the speaker
   /// muted before the push, unless that mute was the console's and the console is unmuted now
-  /// (hostile review round 3, LOW-1) — a SET_MUTE true straight after it (AUD-81 follow-up). A
+  /// (hostile review round 3, LOW-1; in that case, if the push left the speaker unmuted, the
+  /// console mute's mark and device record are released instead, round 4 MEDIUM-1) — a SET_MUTE
+  /// true straight after it (AUD-81 follow-up). A
   /// SET_VOLUME that changes the level unmutes the speaker (measured on a Google Home Mini, box UAT
   /// 2026-10-01). Used only by the two pushes that are not console moves and cannot be held for a
   /// console unmute: the AUD-80 restore on connect and the after-start push. For those, the speaker's
@@ -2526,14 +2531,41 @@ public class GoogleCastOutput : AudioOutputBase
     // Hostile review (round 3) LOW-1: decided from the state BEFORE the push. A speaker whose mute
     // was the console's (the mark — e.g. re-armed by F11 after a lost connection) is not muted again
     // when the console is unmuted now: the console wants it unmuted. Re-muting it would leave it
-    // silent under an unmuted console, and on a device that unmutes on a level change the level's
-    // reply has already released the mark (the level-echo rule), so nothing would unmute it again.
-    // Without the re-mute, either the level unmuted it or it is still muted and still marked, and
-    // the activation reconcile unmutes it.
-    var reMute = _lastSetMute && !(IsSpeakerMutedByConsole && !IsConsoleMutedNow());
+    // silent under an unmuted console.
+    // Round-4 MEDIUM-1: after the push, one of two things is true.
+    //   - The baseline shows the speaker UNMUTED (_lastSetMute false): the level unmuted it, as the
+    //     console is. The mark and the device record are released here, for the marked connection,
+    //     exactly as an acknowledged console unmute releases them. On the after-start push the
+    //     level-echo rule in OnReceiverStatusChanged has usually done this already (harmless to
+    //     repeat); on the AUD-80 restore it has NOT — that push runs inside the initial sync, whose
+    //     replies only re-baseline — so without this the mark and the record outlived the mute, and
+    //     a later teardown or F11 re-arm could unmute a mute the owner made afterwards.
+    //   - The baseline still shows it muted (a device that does not unmute on a level change, or a
+    //     reply that has not arrived by the time the send completes): the mark is left, and the
+    //     follower's activation reconcile unmutes it — when that reconcile runs, i.e. when the output
+    //     gate makes Cast the active output (OnActiveOutputChanged). A reconnect while Cast is
+    //     already the active output (e.g. the wasStreaming restart) does not run it, and the speaker
+    //     then stays muted and marked until the console's mute is next toggled.
+    var markedGeneration = Volatile.Read(ref _consoleMutedGeneration);
+    var leftForConsole = _lastSetMute && markedGeneration >= 0 && !IsConsoleMutedNow();
+    var reMute = _lastSetMute && !leftForConsole;
     if (!await PushVolumeToDeviceAsync(client, volume).ConfigureAwait(false))
     {
       return false;
+    }
+
+    if (leftForConsole && !_lastSetMute)
+    {
+      try
+      {
+        await ReleaseConsoleMuteRecordAsync(markedGeneration).ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        // ObjectDisposedException from the lifecycle lock when disposal races this push. The level
+        // was sent; a disposed output has nothing left to release.
+        _logger.LogDebug(ex, "Cast: could not release the console mute record after setting the volume");
+      }
     }
 
     if (reMute)
@@ -2637,8 +2669,9 @@ public class GoogleCastOutput : AudioOutputBase
 
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
-    // LOW-2: every branch below leaves _lastSetMute holding what the device just said.
-    Volatile.Write(ref _speakerMuteObserved, true);
+    // LOW-2: every branch below leaves _lastSetMute holding what the device just said, and sets
+    // _speakerMuteObserved only AFTER that baseline write (round-4 L-a), so a reader that sees the
+    // flag never sees the per-connection "not muted" reset in its place.
 
     // Hostile re-review M2: before any branch, so the initial sync's own status supplies it too.
     NoteSpeakerStepInterval(status.Volume.StepInterval);
@@ -2661,6 +2694,7 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _lastSetVolume = deviceVolume;
       _lastSetMute = deviceMuted;
+      Volatile.Write(ref _speakerMuteObserved, true);
       _logger.LogDebug(
         "Cast status during an initial sync or a diagnostic read: {Volume:P0}, Muted: {Muted} — baseline only, not an external change",
         deviceVolume, deviceMuted);
@@ -2732,6 +2766,9 @@ public class GoogleCastOutput : AudioOutputBase
     // and nothing re-asserted the mute. muteEcho implies the baseline was muted before this status,
     // and a redundant re-assert under a muted console is harmless (the speaker is meant to be muted);
     // under an unmuted console an echoed unmute is exactly what it looks like and is left alone.
+    // What this gives up, in addition to the above (round-4 L-e): under a muted console, an owner's
+    // unmute on the speaker within EchoWindow (3 s) of an acknowledged unmute of ours, at the level
+    // of a recent push of ours, is now re-muted as well — which matches the console.
     // The echo memory is not narrowed to the latest mute command instead: an out-of-order or late
     // reply to an earlier unmute would then read as external and could unmute the console.
     if (!deviceMuted && volumeEcho && (muteChanged || (muteEcho && IsConsoleMutedNow())))
@@ -2739,6 +2776,7 @@ public class GoogleCastOutput : AudioOutputBase
       // The baseline tells the truth (the device is unmuted), so the mute drain does send the
       // mute rather than skipping it as "already muted".
       _lastSetMute = false;
+      Volatile.Write(ref _speakerMuteObserved, true);
       if (IsConsoleMutedNow())
       {
         _logger.LogDebug(
@@ -2760,11 +2798,14 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (!volumeChanged && !muteChanged)
     {
+      // _lastSetMute == deviceMuted here: either it already was (no mute change), or muteEcho set it.
+      Volatile.Write(ref _speakerMuteObserved, true);
       return;
     }
 
     _lastSetVolume = deviceVolume;
     _lastSetMute = deviceMuted;
+    Volatile.Write(ref _speakerMuteObserved, true);
 
     // AUD-81 (pre-merge review M1). On EVERY reported change — a mute-only one too — the
     // speaker's own report becomes the connection's level, and console targets still queued are

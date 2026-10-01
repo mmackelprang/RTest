@@ -1332,6 +1332,58 @@ public class GoogleCastOutputConsoleVolumeTests
     }
   }
 
+  // Round-4 MEDIUM-1: the same, but the AUD-80 restore on connect SUCCEEDS. That push runs inside
+  // the initial sync, whose replies only re-baseline, so the level-echo rule never sees the level's
+  // reply. On the device model the speaker ended unmuted with the mark and the device record still
+  // set — a later reconnect finding the speaker muted by its owner then re-armed the mark (F11), and
+  // a reconcile or teardown could unmute the owner's mute. The push now releases them itself.
+  [Fact]
+  public async Task TheRestoreOnConnect_ReleasesTheConsoleMuteRecord_WhenItUnmutesASpeakerMutedForTheConsole()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var first = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, first.Generation));
+    h.Output.ReportConnectionLost(first.Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+
+    consoleMuted = false;                       // unmuted while nothing could reach the speaker
+    h.Store.Volumes["cast-a"] = 0.60f;          // a remembered level that differs from the speaker's
+    h.ClearCommands();
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true); // F11 re-arms; the restore succeeds
+
+    Assert.Equal(new[] { "vol" }, h.Kinds());   // the restored level, and no re-mute after it
+    Assert.Equal(new[] { 0.60f }, h.VolumeSends());
+    Assert.Empty(h.External);
+    Assert.False(consoleMuted);
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);              // the level unmuted it, as the console is
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+    }
+    else
+    {
+      // Still muted and still marked: the activation reconcile (stood in for here) unmutes it.
+      var target = h.Target();
+      Assert.True(h.DeviceMuted);
+      Assert.True(target.SpeakerMuted);
+      Assert.True(h.Output.IsSpeakerMutedByConsole);
+      Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(false, target.Generation));
+      Assert.False(h.DeviceMuted);
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+    }
+
+    // The device record is forgotten: a later connection that finds the speaker muted (by its owner
+    // now) does not re-arm the mark.
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    await h.ConnectAsync(reportedLevel: 0.60f, reportedMuted: true);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Empty(h.External);
+  }
+
   // Pre-merge review M3 (a): the start-time mute runs before Streaming, and the follower ignores
   // the console until Streaming, so a mute made in between was lost.
   [Fact]
