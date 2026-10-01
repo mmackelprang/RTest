@@ -109,6 +109,31 @@ public class GoogleCastOutputConsoleVolumeTests
       r => Math.Abs(r.Volume - 7f / 15f) < 0.001f || Math.Abs(r.Volume - 8f / 15f) < 0.001f);
   }
 
+  // Round-3 review MEDIUM-1: a level that only the RANGE rule can recognise. With no step known
+  // the tolerance is 0.01, so 0.45 is 0.05 from both pushes and no point match can absorb it;
+  // it lies between them, inside the echo window, so it is an echo (an intermediate level the
+  // speaker reported while ramping). Replacing the range check with `false` fails this test.
+  [Fact]
+  public async Task ALevelBetweenTwoRecentPushes_FarFromBoth_IsAbsorbedByTheRangeRuleAlone()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.40f, target.Generation);
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+    h.Time.Advance(TimeSpan.FromSeconds(1)); // inside the 3 s echo window
+
+    h.RaiseStatus(0.45);
+    Assert.Empty(h.External);
+
+    // A level in the same range once the window has passed is a change made on the speaker
+    // (0.47: at least 0.02 from 0.45 and from 0.50, so not a "no change" against either baseline).
+    h.Time.Advance(TimeSpan.FromSeconds(4));
+    h.RaiseStatus(0.47);
+    Assert.Equal(0.47f, Assert.Single(h.External).Volume, 3);
+  }
+
   // Re-review M2 (a): one detent — a single push, and the only echo the speaker sends is its
   // quantised version of it, 0.033 away. Without the step-derived tolerance this was an EXTERNAL
   // change on every single-detent move: master rewritten, AUD-80 remembering 0.5333.

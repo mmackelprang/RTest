@@ -322,8 +322,9 @@ public class GoogleCastOutput : AudioOutputBase
 
   // Hostile re-review M2: the volume step the connected speaker reports in its receiver status
   // (SharpCaster 3.0.0 Volume.StepInterval — e.g. 0.05, or 1/15 on a 15-detent speaker), or NaN
-  // while it has reported none. A speaker rounds every SET_VOLUME to a multiple of it, so the echo
-  // of our 0.50 on a 1/15 speaker is 0.5333. Taken from every receiver status (the initial read's
+  // while it has reported none. In the Cast protocol it is the speaker's own up/down increment; a
+  // speaker that ALSO quantises SET_VOLUME to it would report our 0.50 on a 1/15 step as 0.5333.
+  // That rounding is assumed device behaviour, not measured on the box's speakers. Taken from every receiver status (the initial read's
   // included) and from the initial read itself; a status without one leaves it as it was. Values
   // outside (0, MaxSpeakerStepInterval] are ignored, so a nonsense report cannot widen the echo
   // tolerance into absorbing every change. Reset per connection (ResetSpeakerStateForNewConnection).
@@ -2306,7 +2307,10 @@ public class GoogleCastOutput : AudioOutputBase
       if (remembered is float target)
       {
         Volatile.Write(ref _connectionVolume, target);
-        if (reading == null || Math.Abs(reading.Value.Volume - target) > 0.01f)
+        // EchoLevelTolerance, not a bare 0.01: a speaker that quantises to its step reports a
+        // remembered 0.50 as e.g. 0.5333 on every reconnect, which is the same level, not a
+        // reason to push it again (round-3 review LOW-1). The read noted the step first.
+        if (reading == null || Math.Abs(reading.Value.Volume - target) > EchoLevelTolerance)
         {
           try
           {
