@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
@@ -245,7 +246,7 @@ public class RadioControlPanelTests : TestContext
     var clipState = BuildState(signalStrength: 100, clip: true, rssiDbu: 0.0);
     var cut = RenderPanel(clipState);
 
-    var pills = cut.FindAll(".rcp-clip-pill");
+    var pills = cut.FindAll(".rcp-clip-pill.is-on");
     Assert.Single(pills);
     Assert.Equal("CLIP", pills[0].TextContent.Trim());
   }
@@ -256,7 +257,74 @@ public class RadioControlPanelTests : TestContext
     var state = BuildState(signalStrength: 70, clip: false, rssiDbu: -18.0);
     var cut = RenderPanel(state);
 
-    Assert.Empty(cut.FindAll(".rcp-clip-pill"));
+    // UI-27: the pill stays in the DOM and is hidden by the stylesheet — see
+    // Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn for the half bUnit cannot see.
+    Assert.Single(cut.FindAll(".rcp-clip-pill"));
+    Assert.Empty(cut.FindAll(".rcp-clip-pill.is-on"));
+  }
+
+  [Theory]
+  [InlineData(false, false)]
+  [InlineData(true, false)]
+  [InlineData(false, true)]
+  [InlineData(true, true)]
+  public void MeterHeader_HasTheSameElements_WithAndWithoutClip(bool clip, bool scanning)
+  {
+    // UI-27, owner: "when the CLIP tag appears above the signal strength bar, it causes the whole
+    // screen to shift by a couple of pixels". Inserting the pill made the header 3 px taller
+    // (measured: 16.5 → 19.5 px) and moved everything below the meter. Now CLIP changes one class
+    // and nothing else: the header holds the same elements in the same order either way, so CLIP
+    // cannot add a box to the header's layout or take one away. (One render per bUnit context,
+    // hence one expected shape per scan state rather than a with/without comparison in one test.)
+    var state = BuildState(signalStrength: 100, clip: clip, rssiDbu: -20.0, scanStopThreshold: -10.0) with
+    {
+      IsScanning = scanning,
+      ScanDirection = scanning ? "up" : null,
+    };
+    var cut = RenderPanel(state);
+    var header = cut.Find(".rcp-meter-header");
+    var shape = string.Join("|", header.QuerySelectorAll("*").Select(e =>
+      $"{e.TagName}.{string.Join(".", e.ClassList.Where(c => c != "is-on").OrderBy(c => c, StringComparer.Ordinal))}"));
+
+    var expected = (scanning ? "SPAN.|SPAN.rcp-scanning|" : "SPAN.|")
+      + "SPAN.rcp-meter-readout|SPAN.rcp-clip-pill|SPAN.rcp-meter-dbu";
+    shape.Should().Be(expected);
+    header.QuerySelector(".rcp-clip-pill")!.ClassList.Contains("is-on").Should().Be(clip);
+  }
+
+  [Fact]
+  public void Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn()
+  {
+    // bUnit computes no styles, so the geometry half of UI-27 is pinned in the stylesheet: the pill
+    // is out of flow (absolute, against the readout), hidden by visibility rather than display —
+    // display:none would take its box away and put it back, which is the shift — and shown only by
+    // .is-on. Measured in Chromium at 1920×720: header 16.5 px and every rect below it identical with
+    // CLIP off, CLIP on, scanning and both.
+    var css = File.ReadAllText(LocateDesignSystemCss());
+    var pill = Regex.Match(css, @"\n\.rcp-clip-pill\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    var on = Regex.Match(css, @"\n\.rcp-clip-pill\.is-on\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    var readout = Regex.Match(css, @"\n\.rcp-meter-readout\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+
+    pill.Should().Contain("position: absolute");
+    pill.Should().Contain("visibility: hidden");
+    pill.Should().NotContain("display: none");
+    on.Should().Contain("visibility: visible");
+    readout.Should().Contain("position: relative", "the pill is placed against the readout, not some outer box");
+  }
+
+  private static string LocateDesignSystemCss()
+  {
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 10 && dir != null; i++)
+    {
+      var candidate = Path.Combine(dir, "src", "Radio.Web", "wwwroot", "css", "design-system.css");
+      if (File.Exists(candidate))
+      {
+        return candidate;
+      }
+      dir = Path.GetDirectoryName(dir);
+    }
+    throw new FileNotFoundException("design-system.css not found by walking up from test base dir");
   }
 
   [Fact]

@@ -4102,9 +4102,21 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* UI-27: the CLIP pill is positioned against this box. */
+  position: relative;
 }
 
+/* UI-27: the pill takes no part in layout. It is 19.5 px tall against the header's 16.5, so while it
+   was inserted in flow the header grew 3 px every time it appeared and everything below the meter
+   moved down with it. It is now out of flow, to the left of the readout and centred on it, and is
+   always rendered — .is-on shows it — so CLIP appearing or clearing changes no element's box. */
 .rcp-clip-pill {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  visibility: hidden;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
@@ -4116,6 +4128,10 @@ body {
   background: rgba(248, 113, 113, 0.10);
   color: var(--signal-red);
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.rcp-clip-pill.is-on {
+  visibility: visible;
 }
 
 .rcp-meter-dbu {
