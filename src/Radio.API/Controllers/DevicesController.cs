@@ -356,6 +356,10 @@ public class DevicesController : ControllerBase
     var tapDiag = _audioEngine?.GetOutputTapDiagnostics();
     var pipelineDiag = _audioEngine?.GetPipelineDiagnostics();
 
+    // AUD-81 (hostile review F8): read once. KnownSpeakerLevel can change between two reads, and
+    // a NaN reaching System.Text.Json throws, turning this endpoint into a 500.
+    float knownSpeakerLevel = _castOutput?.KnownSpeakerLevel ?? float.NaN;
+
     return Ok(new
     {
       fingerprintTap = new
@@ -383,9 +387,7 @@ public class DevicesController : ControllerBase
         connectedDevice = _castOutput?.ConnectedDevice?.FriendlyName,
         // AUD-81: this output's own view of the speaker, not a live read — for that, see
         // GET /api/devices/cast/volume. Null when the level is unknown.
-        speakerLevel = _castOutput == null || float.IsNaN(_castOutput.KnownSpeakerLevel)
-          ? (float?)null
-          : _castOutput.KnownSpeakerLevel,
+        speakerLevel = float.IsNaN(knownSpeakerLevel) ? (float?)null : knownSpeakerLevel,
         speakerMuted = _castOutput?.KnownSpeakerMuted,
         speakerMutedByConsole = _castOutput?.IsSpeakerMutedByConsole,
         directChannel = _castOutput?.DirectStreaming != null ? new
