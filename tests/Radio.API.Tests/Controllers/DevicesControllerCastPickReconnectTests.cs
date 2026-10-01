@@ -185,6 +185,23 @@ public sealed class DevicesControllerCastPickReconnectTests : IAsyncDisposable
     VerifyDefaultSaved(Times.Never());
   }
 
+  [Fact]
+  public async Task AnInvalidPick_Returns400_WithoutCancellingTheRunOrMarkingItsCancelAsAPick()
+  {
+    // AUD-85 re-review LOW-1. The request names a device but no address: refused before the
+    // reconnect is touched. Cancelling would have ended the watcher's episode and — for a request
+    // naming the device being reconnected — set its keep-for-pick flag for a pick that never
+    // connects anything.
+    var request = Request();
+    request.IpAddress = "";
+
+    var result = await CreateController().ConnectToCastDevice(request, CancellationToken.None).WaitAsync(HangGuard);
+
+    Assert.IsType<BadRequestObjectResult>(result);
+    _reconnect.Verify(r => r.CancelCastReconnectForCastPickAsync(It.IsAny<string?>()), Times.Never);
+    _reconnect.Verify(r => r.CancelCastReconnectAsync(), Times.Never);
+  }
+
   // --- helpers (as DevicesControllerCastConnectTests) ---
 
   private ChromecastDeviceInfo StreamToTestDevice()

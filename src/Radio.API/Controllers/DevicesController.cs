@@ -638,7 +638,8 @@ public class DevicesController : ControllerBase
   /// Connects to a specific Google Cast device.
   /// </summary>
   /// <remarks>
-  /// First waits (up to 15 s) for a running Cast reconnect watcher (AUD-37) to finish; a watcher
+  /// Returns 503 (no Cast output) or 400 (no DeviceId or IpAddress) before anything else.
+  /// Then waits (up to 15 s) for a running Cast reconnect watcher (AUD-37) to finish; a watcher
   /// reconnecting the requested device keeps its connection for this pick, so the request then
   /// takes the already-streaming path. Returns 409 when the watcher is still running at the bound.
   /// Returns 200 without reconnecting when the output is already streaming to the requested
@@ -672,12 +673,9 @@ public class DevicesController : ControllerBase
     [FromBody] ConnectCastDeviceRequest request,
     CancellationToken cancellationToken)
   {
-    // AUD-85 (review MEDIUM-1). Before anything reads the Cast output: a reconnect watcher still
-    // running owns it, and a read taken while it connects (State Connecting, or a connection about
-    // to be torn down) answers for the watcher, not for the user. A watcher reconnecting this same
-    // device keeps its connection for the pick and switches to it, which the already-streaming
-    // path below then reports as 200.
-    var reconnectFinished = await FinishCastReconnectForCastPickAsync(request.DeviceId);
+    // Pure request validation first (AUD-85 re-review LOW-1): neither check reads the Cast
+    // output's state, and a request refused here must not cancel the reconnect watcher or mark
+    // its cancel as a pick of some device.
     if (_castOutput == null)
     {
       return StatusCode(503, new { error = "Google Cast output not available" });
@@ -689,6 +687,12 @@ public class DevicesController : ControllerBase
       return BadRequest(new { error = "DeviceId and IpAddress are required" });
     }
 
+    // AUD-85 (review MEDIUM-1). Before anything reads the Cast output: a reconnect watcher still
+    // running owns it, and a read taken while it connects (State Connecting, or a connection about
+    // to be torn down) answers for the watcher, not for the user. A watcher reconnecting this same
+    // device keeps its connection for the pick and switches to it, which the already-streaming
+    // path below then reports as 200.
+    var reconnectFinished = await FinishCastReconnectForCastPickAsync(request.DeviceId);
     if (!reconnectFinished)
     {
       // The watcher is still inside a step that ignores cancellation. Nothing here has touched

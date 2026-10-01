@@ -36,16 +36,16 @@ public class DevicesControllerCastReconnectTests : IClassFixture<CustomWebApplic
   }
 
   [Fact]
-  public async Task ConnectToCastDevice_CancelsTheReconnectFirst_AsAPickOfItsDevice()
+  public async Task ConnectToCastDevice_WithNoCastOutput_Returns503_WithoutTouchingTheReconnect()
   {
-    // AUD-85 (review MEDIUM-1): the pick-aware cancel, which keeps a same-device reconnect's
-    // connection and waits the longer bound — not the short one. Behaviour:
-    // DevicesControllerCastPickReconnectTests.
-    _reconnect.Setup(r => r.CancelCastReconnectForCastPickAsync(It.IsAny<string?>())).ReturnsAsync(true);
+    // AUD-85 (re-review LOW-1): request validation precedes the cancel. A valid request's
+    // pick-aware cancel — which keeps a same-device reconnect's connection and waits the longer
+    // bound, not the short one — is covered by DevicesControllerCastPickReconnectTests.
+    var result = await CreateController().ConnectToCastDevice(
+      new ConnectCastDeviceRequest { DeviceId = "cast-a", IpAddress = "192.0.2.10" }, CancellationToken.None);
 
-    await CreateController().ConnectToCastDevice(new ConnectCastDeviceRequest { DeviceId = "cast-a" }, CancellationToken.None);
-
-    _reconnect.Verify(r => r.CancelCastReconnectForCastPickAsync("cast-a"), Times.Once);
+    Assert.Equal(503, Assert.IsAssignableFrom<Microsoft.AspNetCore.Mvc.ObjectResult>(result).StatusCode);
+    _reconnect.Verify(r => r.CancelCastReconnectForCastPickAsync(It.IsAny<string?>()), Times.Never);
     _reconnect.Verify(r => r.CancelCastReconnectAsync(), Times.Never);
   }
 
@@ -74,7 +74,8 @@ public class DevicesControllerCastReconnectTests : IClassFixture<CustomWebApplic
     var preferences = new Mock<IOptionsMonitor<AudioPreferences>>();
     preferences.SetupGet(p => p.CurrentValue).Returns(new AudioPreferences());
 
-    // No audio engine and no Cast output: each action returns early (400/503) — after the cancel.
+    // No audio engine and no Cast output: each action returns early (400/503) — after the cancel,
+    // except cast/connect, which validates first (AUD-85 re-review LOW-1).
     return new DevicesController(
       NullLogger<DevicesController>.Instance,
       new Mock<IAudioDeviceManager>().Object,
