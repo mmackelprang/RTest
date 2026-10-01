@@ -6,6 +6,9 @@ using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
+using Sharpcaster;
+using Sharpcaster.Channels;
+using Sharpcaster.Models;
 using Sharpcaster.Models.ChromecastStatus;
 using Xunit;
 
@@ -74,7 +77,13 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
       }
     };
 
-    Output.ConnectTransportOverrideForTests = _ => Task.CompletedTask;
+    Output.ConnectTransportOverrideForTests = async _ =>
+    {
+      if (DuringTransportConnect is { } during)
+      {
+        await during();
+      }
+    };
     Output.CastSetVolumeOverrideForTests = async v =>
     {
       lock (_commandsLock)
@@ -207,6 +216,59 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
     }
     VolumeSendEntered = NewTcs();
     MuteSendEntered = NewTcs();
+  }
+
+  /// <summary>
+  /// Runs inside the substituted transport connect, i.e. while <c>ConnectAsync</c> is on the
+  /// network and before it publishes — where a status for a reused client can arrive.
+  /// </summary>
+  public Func<Task>? DuringTransportConnect { get; set; }
+
+  /// <summary>
+  /// Makes <paramref name="deviceId"/> a live-discovered device, so <c>ConnectAsync</c> takes the
+  /// path that REUSES the output's current client instead of building a fresh one.
+  /// </summary>
+  public void RegisterLiveReceiver(string deviceId)
+  {
+    var field = typeof(GoogleCastOutput).GetField("_discoveredReceivers", BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(field);
+    var map = (System.Collections.Concurrent.ConcurrentDictionary<string, ChromecastReceiver>)field!.GetValue(Output)!;
+    map[deviceId] = new ChromecastReceiver
+    {
+      DeviceUri = new Uri($"https://127.0.0.1:{_port}"),
+      Port = _port,
+      Name = $"Speaker {deviceId}",
+      Model = "test"
+    };
+  }
+
+  /// <summary>The output's current <see cref="ChromecastClient"/> (its <c>_client</c> field).</summary>
+  public ChromecastClient? CurrentClient()
+  {
+    var field = typeof(GoogleCastOutput).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(field);
+    return (ChromecastClient?)field!.GetValue(Output);
+  }
+
+  /// <summary>
+  /// Raises a receiver status through <paramref name="client"/>'s own
+  /// <see cref="ReceiverChannel.ReceiverStatusChanged"/> event — so it reaches the output only if
+  /// its handler is actually attached there. Returns false when nothing is attached.
+  /// </summary>
+  public static bool RaiseStatusThroughClient(ChromecastClient client, double level, bool muted = false)
+  {
+    var channel = client.GetChannel<ReceiverChannel>();
+    Assert.NotNull(channel);
+    var field = typeof(ReceiverChannel).GetField("ReceiverStatusChanged", BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(field);
+    if (field!.GetValue(channel) is not Delegate handlers)
+    {
+      return false;
+    }
+
+    var status = new ChromecastStatus { Volume = new() { Level = level, Muted = muted } };
+    handlers.DynamicInvoke(channel, status);
+    return true;
   }
 
   /// <summary>Raises a receiver status the way SharpCaster does.</summary>

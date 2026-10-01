@@ -277,9 +277,11 @@ public class GoogleCastOutput : AudioOutputBase
   private float _lastSetVolume = -1f;
   private bool _lastSetMute;
 
-  // AUD-81 (connect race): the generation whose initial sync is still in progress, or -1.
-  // Set by ConnectAsync BEFORE it subscribes to receiver status, cleared (for that generation
-  // only) on every exit from its subscribe + SyncInitialVolumeAsync block. While it is set,
+  // AUD-81 (connect race): the generation whose connect — including its initial sync — is still
+  // in progress, or -1. Set by ConnectAsync at its claim, before any network work (hostile review
+  // F1: a reused client still carries the handler, so a status can arrive during the transport
+  // connect), and cleared (for that generation only) on every exit from the block that runs from
+  // the claim through SyncInitialVolumeAsync. While it is set,
   // OnReceiverStatusChanged treats a status as part of the initial sync: it re-baselines the
   // echo filter and reports nothing. Measured on the box: SharpCaster raises
   // ReceiverStatusChanged for the GET_STATUS response on its receive thread, racing the
@@ -796,6 +798,17 @@ public class GoogleCastOutput : AudioOutputBase
       // Claim this attempt. Anything that supersedes it (another connect, a
       // disconnect, disposal) bumps the generation, and the commit below then
       // abandons rather than publishing over the winner.
+      //
+      // AUD-81 (connect race; hostile review F1). The initial-sync mark is set HERE, at the
+      // claim, before any network work — not after the publish. On a live-discovered device the
+      // claim reuses _client, whose ReceiverChannel still carries OnReceiverStatusChanged from
+      // the previous connection; a RECEIVER_STATUS arriving during ConnectChromecast, or between
+      // the publish (which resets the echo baseline to its sentinels) and the subscribe, would
+      // otherwise be compared with the previous speaker's baseline or with the sentinels and
+      // reported as an EXTERNAL change — written to master volume, or unmuting a muted console.
+      // While the mark is set such a status only re-baselines. It is cleared in the finally
+      // below for THIS generation only (compare-and-swap), on every exit from the block: a
+      // superseded or failed connect clears its own mark, and never lifts a newer connect's.
       int myGeneration;
       ChromecastClient? client;
       await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -803,114 +816,112 @@ public class GoogleCastOutput : AudioOutputBase
       {
         myGeneration = ++_connectionGeneration;
         client = _client;
+        Volatile.Write(ref _initialSyncPendingGeneration, myGeneration);
       }
       finally
       {
         _lifecycleLock.Release();
       }
 
-      _logger.LogInformation(
-        "Connecting to Chromecast: {Name} at {IP}:{Port}",
-        device.FriendlyName, device.IpAddress, device.Port);
-
-      // Resolve the receiver into a LOCAL, so a concurrent teardown clearing
-      // _connectedReceiver cannot null it out from under the connect below.
-      // Try live discovery first by exact ID, then by IP (IDs can differ due to
-      // URI normalization).
-      ChromecastReceiver? receiver;
-      if (_discoveredReceivers.TryGetValue(device.Id, out receiver))
-      {
-        _logger.LogDebug("Using live ChromecastReceiver from discovery (matched by ID)");
-      }
-      else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out receiver))
-      {
-        _logger.LogInformation("Live ChromecastReceiver matched by IP {IP} (ID mismatch: cached={CachedId}, live={LiveId})",
-          device.IpAddress, device.Id, receiver.DeviceUri);
-      }
-      else
-      {
-        // Device is from persistent cache, not live discovery.
-        // Verify reachability with a TCP connect check before attempting full connection.
-        var connectPort = await FindReachablePortAsync(device, cancellationToken).ConfigureAwait(false);
-
-        var deviceUri = new Uri($"https://{device.IpAddress}:{connectPort}");
-        _logger.LogInformation("TCP check passed, creating ChromecastReceiver from cache: {Uri}", deviceUri);
-
-        // Create a fresh ChromecastClient for cached connections to avoid stale
-        // socket state. Built locally and only published at commit time.
-        var stale = client;
-        client = new ChromecastClient();
-        if (stale != null)
-        {
-          try { await stale.DisconnectAsync().ConfigureAwait(false); }
-          catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client for cached connection"); }
-        }
-
-        receiver = new ChromecastReceiver
-        {
-          DeviceUri = deviceUri,
-          Port = connectPort,
-          Name = device.FriendlyName,
-          Model = device.Model
-        };
-      }
-
-      if (client == null)
-      {
-        throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
-      }
-
-      // AUD-84. Before every transport connect, never once per client: SharpCaster's own
-      // DisconnectAsync swaps the guarded heartbeat channel back for an unguarded one,
-      // and a client is reused across connects. The fault sink is bound to THIS attempt's
-      // generation, so a report from a connection that has since been replaced is stale.
-      var generationForFaults = myGeneration;
-      SharpCasterCallbackGuard.TryHarden(
-        client,
-        fault => ReportConnectionLost(generationForFaults, "a SharpCaster background send failed", fault),
-        _logger);
-
-      if (ConnectRaceHookForTests != null)
-      {
-        await ConnectRaceHookForTests().ConfigureAwait(false);
-      }
-
-      _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", receiver.DeviceUri);
-      if (ConnectTransportOverrideForTests != null)
-      {
-        await ConnectTransportOverrideForTests(receiver).ConfigureAwait(false);
-      }
-      else
-      {
-        await client.ConnectChromecast(receiver).ConfigureAwait(false);
-      }
-
-      // Publish only if nothing superseded us while we were on the network.
-      if (!await TryPublishConnectionAsync(myGeneration, client, receiver, device, cancellationToken).ConfigureAwait(false))
-      {
-        _logger.LogWarning(
-          "Cast connect to {Name} was superseded while connecting — discarding this connection",
-          device.FriendlyName);
-        try { await client.DisconnectAsync().ConfigureAwait(false); }
-        catch (Exception ex) { _logger.LogDebug(ex, "Error discarding superseded Cast connection"); }
-
-        // Hand the state machine back to the winner. Returning while still
-        // Connecting would leave the output permanently unusable — and losing
-        // this race is the NORMAL outcome of a teardown during startup
-        // auto-connect, not an edge case.
-        State = AudioOutputState.Ready;
-        return;
-      }
-
-      // AUD-81 (connect race). Marked BEFORE subscribing: the device answers the status
-      // read below with a status that SharpCaster also raises as ReceiverStatusChanged, on
-      // its own thread, possibly before the read's continuation has primed the echo
-      // baseline. Until this block exits, such a status is part of the initial sync, never
-      // an external change. Cleared in the finally for THIS generation only, so a newer
-      // connect's mark is not lifted by an older one finishing.
-      Volatile.Write(ref _initialSyncPendingGeneration, myGeneration);
       try
       {
+        _logger.LogInformation(
+          "Connecting to Chromecast: {Name} at {IP}:{Port}",
+          device.FriendlyName, device.IpAddress, device.Port);
+
+        // Resolve the receiver into a LOCAL, so a concurrent teardown clearing
+        // _connectedReceiver cannot null it out from under the connect below.
+        // Try live discovery first by exact ID, then by IP (IDs can differ due to
+        // URI normalization).
+        ChromecastReceiver? receiver;
+        if (_discoveredReceivers.TryGetValue(device.Id, out receiver))
+        {
+          _logger.LogDebug("Using live ChromecastReceiver from discovery (matched by ID)");
+        }
+        else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out receiver))
+        {
+          _logger.LogInformation("Live ChromecastReceiver matched by IP {IP} (ID mismatch: cached={CachedId}, live={LiveId})",
+            device.IpAddress, device.Id, receiver.DeviceUri);
+        }
+        else
+        {
+          // Device is from persistent cache, not live discovery.
+          // Verify reachability with a TCP connect check before attempting full connection.
+          var connectPort = await FindReachablePortAsync(device, cancellationToken).ConfigureAwait(false);
+
+          var deviceUri = new Uri($"https://{device.IpAddress}:{connectPort}");
+          _logger.LogInformation("TCP check passed, creating ChromecastReceiver from cache: {Uri}", deviceUri);
+
+          // Create a fresh ChromecastClient for cached connections to avoid stale
+          // socket state. Built locally and only published at commit time.
+          var stale = client;
+          client = new ChromecastClient();
+          if (stale != null)
+          {
+            try { await stale.DisconnectAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client for cached connection"); }
+          }
+
+          receiver = new ChromecastReceiver
+          {
+            DeviceUri = deviceUri,
+            Port = connectPort,
+            Name = device.FriendlyName,
+            Model = device.Model
+          };
+        }
+
+        if (client == null)
+        {
+          throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
+        }
+
+        // AUD-84. Before every transport connect, never once per client: SharpCaster's own
+        // DisconnectAsync swaps the guarded heartbeat channel back for an unguarded one,
+        // and a client is reused across connects. The fault sink is bound to THIS attempt's
+        // generation, so a report from a connection that has since been replaced is stale.
+        var generationForFaults = myGeneration;
+        SharpCasterCallbackGuard.TryHarden(
+          client,
+          fault => ReportConnectionLost(generationForFaults, "a SharpCaster background send failed", fault),
+          _logger);
+
+        if (ConnectRaceHookForTests != null)
+        {
+          await ConnectRaceHookForTests().ConfigureAwait(false);
+        }
+
+        _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", receiver.DeviceUri);
+        if (ConnectTransportOverrideForTests != null)
+        {
+          await ConnectTransportOverrideForTests(receiver).ConfigureAwait(false);
+        }
+        else
+        {
+          await client.ConnectChromecast(receiver).ConfigureAwait(false);
+        }
+
+        // Publish only if nothing superseded us while we were on the network.
+        if (!await TryPublishConnectionAsync(myGeneration, client, receiver, device, cancellationToken).ConfigureAwait(false))
+        {
+          _logger.LogWarning(
+            "Cast connect to {Name} was superseded while connecting — discarding this connection",
+            device.FriendlyName);
+          try { await client.DisconnectAsync().ConfigureAwait(false); }
+          catch (Exception ex) { _logger.LogDebug(ex, "Error discarding superseded Cast connection"); }
+
+          // Hand the state machine back to the winner. Returning while still
+          // Connecting would leave the output permanently unusable — and losing
+          // this race is the NORMAL outcome of a teardown during startup
+          // auto-connect, not an edge case.
+          State = AudioOutputState.Ready;
+          return;
+        }
+
+        // Still under the initial-sync mark set at the claim: the device answers the status
+        // read below with a status that SharpCaster also raises as ReceiverStatusChanged, on
+        // its own thread, possibly before the read's continuation has primed the echo
+        // baseline. Such a status is part of the initial sync, never an external change.
         // Subscribe to receiver status changes for bidirectional volume sync
         SubscribeToReceiverStatus(client);
 
@@ -2436,7 +2447,9 @@ public class GoogleCastOutput : AudioOutputBase
     // remembered, no queued console target dropped. Reporting it was how a connect unmuted a
     // muted console (it compared against the -1f sentinel, so it looked external).
     // What this gives up: a genuine change made on the speaker inside that window is absorbed
-    // into the baseline rather than reported. When the read itself fails, the device state is
+    // into the baseline rather than reported. The window runs from the connect's claim (hostile
+    // review F1), so it covers the transport connect too — on a reused client that includes a
+    // change made on the previously connected speaker while the next connect is in progress. When the read itself fails, the device state is
     // still unknown to subscribers (no initial-sync event), as before — but the baseline now
     // holds what the device said, so its next identical status is not mistaken for a change.
     // Pre-merge review L5: the same for a status arriving while a diagnostic live read

@@ -126,6 +126,56 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.55f, Assert.Single(h.External).Volume, 3);
   }
 
+  // Hostile review F1. A live-discovered device makes ConnectAsync REUSE the output's client, and
+  // that client's ReceiverChannel still carries OnReceiverStatusChanged from the previous
+  // connection. A status arriving while the next connect is on the network used to be compared
+  // with the previous speaker's baseline (here: muted at 0.40) and reported as an EXTERNAL change
+  // — unmuting the muted console and remembering 0.75. The status is raised through the reused
+  // client's own event, from inside the transport connect: strictly before the publish, every time.
+  [Fact]
+  public async Task AStatusRaisedDuringAReusedClientsTransportConnect_IsPartOfTheInitialSync_NeverExternal()
+  {
+    await using var h = new CastConsoleTestHarness();
+    h.RegisterLiveReceiver("cast-a");
+    h.RegisterLiveReceiver("cast-b");
+
+    // Mirrors AudioStateUpdateService.OnCastVolumeChanged, as above.
+    var consoleMuted = true;
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync)
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f, reportedMuted: true, streaming: false);
+    var client = h.CurrentClient();
+    Assert.NotNull(client);
+
+    var delivered = new List<bool>();
+    h.DuringTransportConnect = () =>
+    {
+      delivered.Add(CastConsoleTestHarness.RaiseStatusThroughClient(client!, 0.75, muted: false));
+      return Task.CompletedTask;
+    };
+    await h.ConnectAsync("cast-b", reportedLevel: 0.75f, reportedMuted: false, streaming: false);
+    h.DuringTransportConnect = null;
+
+    // The premise: the client was reused, and the status really reached the output's handler.
+    Assert.Same(client, h.CurrentClient());
+    Assert.Equal(new[] { true }, delivered);
+
+    Assert.Empty(h.External);
+    Assert.True(consoleMuted);
+    Assert.DoesNotContain(h.Store.Remembered, r => r.DeviceId == "cast-a" && Math.Abs(r.Volume - 0.75f) < 0.001f);
+
+    // Anti-vacuity: once the connect is over, a real change on the speaker is still reported —
+    // through the same client, so the handler is attached exactly once (one event, not two).
+    Assert.True(CastConsoleTestHarness.RaiseStatusThroughClient(client!, 0.55, muted: false));
+    Assert.Equal(0.55f, Assert.Single(h.External).Volume, 3);
+  }
+
   [Fact]
   public async Task AStatusRaisedDuringAFailedInitialRead_IsAbsorbed_NotReportedAsExternal()
   {
