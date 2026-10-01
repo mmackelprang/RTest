@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
@@ -16,10 +17,19 @@ namespace Radio.Infrastructure.Tests.Audio.Outputs;
 /// </remarks>
 public class GoogleCastOutputConsoleVolumeTests
 {
+  /// <summary>
+  /// Whether the harness models the measured device (a level change unmutes a muted speaker, the
+  /// reply status raised inside the send — <see cref="CastConsoleTestHarness.LevelCommandUnmutes"/>).
+  /// Off here; <see cref="GoogleCastOutputConsoleVolumeTests_OnTheDeviceModel"/> runs every test with it on.
+  /// </summary>
+  protected virtual bool OnTheDeviceModel => false;
+
+  private CastConsoleTestHarness NewHarness() => new(OnTheDeviceModel);
+
   [Fact]
   public async Task ABurstOfConsoleChanges_IsCoalesced_LatestWins_AndRememberedOnce()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -53,7 +63,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task LateAndOutOfOrderConfirmations_OfConsolePushes_AreEchoes_NotExternalChanges()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -90,7 +100,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ACoarselyQuantisedEcho_BetweenRecentPushes_IsAbsorbed_NotWrittenBack()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep); // 0.40: no change; the step is known
     var target = h.Target();
@@ -116,7 +126,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ALevelBetweenTwoRecentPushes_FarFromBoth_IsAbsorbedByTheRangeRuleAlone()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -140,7 +150,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ASingleDetentPush_OnAOneFifteenthStepSpeaker_HasItsQuantisedEchoAbsorbed()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
     var target = h.Target();
@@ -161,7 +171,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task OnAOneFifteenthStepSpeaker_AChangeMoreThanAStepOutsideTheRange_IsStillReported()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
     var target = h.Target();
@@ -185,7 +195,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [InlineData(0.5)] // above MaxSpeakerStepInterval: ignored
   public async Task WithNoUsableStepReported_TheEchoToleranceFallsBackTo001(double? stepInterval)
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(0.40, stepInterval: stepInterval);
     var target = h.Target();
@@ -202,7 +212,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheSpeakerStep_IsForgotten_OnANewConnection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
 
@@ -222,7 +232,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStaleInFlightPush_DoesNotWidenTheEchoRange_ButStillMatchesItsOwnEcho()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -253,7 +263,7 @@ public class GoogleCastOutputConsoleVolumeTests
   {
     // Guard, not a mutation target: within 0.01 of the one push, so recognised by both the old
     // single-push rule and the range rule.
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -267,7 +277,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AGenuineExternalChange_OutsideTheRangeOfRecentPushes_IsStillReported_WithinTheWindow()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -293,7 +303,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusRaisedDuringTheInitialRead_IsPartOfTheInitialSync_AndNeverUnmutesTheConsole()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
 
     // Mirrors AudioStateUpdateService.OnCastVolumeChanged: an initial sync is ignored; any other
     // event's mute state is written to the console.
@@ -339,7 +349,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusRaisedDuringAReusedClientsTransportConnect_IsPartOfTheInitialSync_NeverExternal()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.RegisterLiveReceiver("cast-a");
     h.RegisterLiveReceiver("cast-b");
 
@@ -383,7 +393,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusRaisedDuringAFailedInitialRead_IsAbsorbed_NotReportedAsExternal()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
 
     // The read itself yields nothing (no volume in the response), but the device's status
     // still arrived as an event while it was in flight.
@@ -403,7 +413,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalChange_IsReported_UpdatesTheKnownLevelFirst_AndIsRemembered()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
 
     float? knownWhenFired = null;
@@ -427,7 +437,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalChange_DropsAQueuedConsoleTarget_AndBecomesTheKnownLevel()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -453,7 +463,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsoleTargetForASupersededConnection_IsNeverSent()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var oldTarget = h.Target();
 
@@ -475,7 +485,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task NothingIsSent_WhenTheOutputIsNotStreaming()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
     Assert.Null(h.Output.GetConsoleVolumeTarget());
     h.ClearCommands();
@@ -490,7 +500,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AFailedPush_IsReportedOnce_AndTheKnownLevelIsUnchanged()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     var rememberedBefore = h.Store.Remembered.Count;
@@ -507,7 +517,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheLiveRead_ReportsTheSpeakersStatus_BesideTheKnownLevel_AndChangesNothing()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     Assert.Null(await h.Output.ReadSpeakerVolumeAsync()); // nothing connected
 
     await h.ConnectAsync(reportedLevel: 0.40f);
@@ -533,7 +543,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsoleMuteWhileCasting_MutesTheSpeaker_AndADeliberateStopUnmutesIt()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -543,12 +553,23 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.True(h.Output.IsSpeakerMutedByConsole);
     Assert.True(h.Output.KnownSpeakerMuted);
 
-    // The level still follows the slider while muted.
+    // No console follower is attached, so the console's own mute is unknown and the level is sent.
+    // (With a muted console it is held instead — see UnderAMutedConsole_… and the follower tests.)
     await h.Output.SetDeviceVolumeFromConsoleAsync(0.25f, target.Generation);
+
+    if (OnTheDeviceModel)
+    {
+      // That level unmuted the speaker (its reply arrived inside the send), and the console — as
+      // far as this output can tell — is not muted: the unmute matches it, so nothing is left to
+      // release at the stop. It is not reported as a change made on the speaker either.
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+      Assert.False(h.Output.KnownSpeakerMuted);
+      Assert.Empty(h.External);
+    }
 
     await h.Output.StopAsync();
 
-    Assert.Equal(new[] { true, false }, h.MuteSends());
+    Assert.Equal(OnTheDeviceModel ? new[] { true } : new[] { true, false }, h.MuteSends());
     Assert.Equal(new[] { 0.25f }, h.VolumeSends());
     Assert.False(h.Output.IsSpeakerMutedByConsole);
 
@@ -560,7 +581,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ADeliberateDisconnect_UnmutesASpeakerTheConsoleMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -575,7 +596,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ATeardownSendsNoUnmute_WhenTheConsoleNeverMutedTheSpeaker()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true); // muted on the speaker itself
     h.ClearCommands();
 
@@ -592,7 +613,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStop_StopsTheReceiverApplication_BeforeUnmutingASpeakerTheConsoleMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -609,7 +630,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [InlineData(true)]  // the stop threw (socket closed, timed out)
   public async Task WhenTheReceiverApplicationCannotBeConfirmedStopped_TheSpeakerIsLeftMuted(bool throws)
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -640,7 +661,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task WithNoReceiverStatusEverReceived_ATeardownLeavesTheConsoleMutedSpeakerMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -662,7 +683,7 @@ public class GoogleCastOutputConsoleVolumeTests
   public async Task ADisconnectWithoutAStop_StopsTheReceiverApplication_BeforeTheUnmute()
   {
     // DisposeAsync and the device-switch path can reach DisconnectAsync while still streaming.
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -673,26 +694,505 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(new[] { "mute", "appstop", "unmute" }, h.Kinds());
   }
 
+  // The after-start push used to re-send the speaker's own level after the start-time mute. Since
+  // the AUD-81 follow-up a muted speaker that already holds the level gets no SET_VOLUME at all
+  // (box UAT 2026-10-01: a level change unmutes it; re-sending its own level is not needed).
   [Fact]
-  public async Task AMutedConsole_MutesTheSpeakerBeforeTheAfterStartVolumeSync()
+  public async Task AMutedConsole_MutesTheSpeakerAtStart_AndSendsNoLevelItAlreadyHolds()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Output.AttachConsoleFollower(() => true, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GoogleCastOutputConsoleVolumeTests>());
     await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: false);
     h.ClearCommands();
 
     await h.Output.SyncVolumeAfterStartAsync();
 
-    Assert.Equal(("mute", 0f, true), h.Commands[0]);
-    Assert.Equal("vol", h.Commands[1].Kind);
+    Assert.Equal(new[] { "mute" }, h.Kinds());
     Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Null(h.Output.HeldConsoleVolume(h.Target().Generation)); // nothing owed at the unmute either
+  }
+
+  // The same rule for a speaker muted on its own side under an unmuted console: it already holds
+  // the level, so nothing is sent — a SET_VOLUME (and the re-mute it would need) is avoided.
+  [Fact]
+  public async Task AfterStart_ASpeakerMutedOnItsOwnSide_AtTheSameLevel_GetsNoCommandAtAll()
+  {
+    await using var h = NewHarness();
+    h.Output.AttachConsoleFollower(() => false, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Empty(h.Commands);
+    Assert.True(h.Output.KnownSpeakerMuted);
+  }
+
+  // A speaker muted on its own side whose level is owed (the restore on connect failed): the push
+  // is unavoidable here (the console is not muted, so nothing will release a held level), and the
+  // mute is re-asserted straight after it.
+  [Fact]
+  public async Task AfterStart_ALevelPushToASpeakerMutedOnItsOwnSide_IsFollowedByAMuteReassert()
+  {
+    await using var h = NewHarness();
+    h.Output.AttachConsoleFollower(() => false, NullLogger.Instance);
+    h.Store.Volumes["cast-a"] = 0.60f;
+    h.FailNextVolume = new TimeoutException("restore lost");
+    await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Equal(new[] { "vol", "mute" }, h.Kinds());
+    Assert.Equal(0.60f, h.VolumeSends()[0], 3);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // D1 (c). The after-start push has a DIFFERENT level to apply (the AUD-80 restore on connect
+  // failed, so the remembered level is still owed) while the console is muted. Sending it would
+  // unmute the speaker while our audio streams; it is held, and the console's unmute sends it
+  // before the unmute.
+  [Fact]
+  public async Task UnderAMutedConsole_TheAfterStartLevelIsHeld_NotSent_AndGoesOutBeforeTheUnmute()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    h.Store.Volumes["cast-a"] = 0.60f;
+    h.FailNextVolume = new TimeoutException("restore lost"); // the restore on connect fails
+    await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: false);
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Equal(new[] { "mute" }, h.Kinds());            // no SET_VOLUME under the muted console
+    var target = h.Target();
+    Assert.Equal(0.60f, h.Output.HeldConsoleVolume(target.Generation)!.Value, 3);
+    Assert.True(h.Output.KnownSpeakerMuted);
+
+    consoleMuted = false;
+    var rememberedBefore = h.Store.Remembered.Count;
+    var result = await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation);
+
+    Assert.True(result.Acknowledged);
+    Assert.Equal(0.60f, result.LevelBeforeUnmute!.Value, 3);
+    Assert.Equal(new[] { "mute", "vol", "unmute" }, h.Kinds());
+    Assert.Equal(0.60f, Assert.Single(h.VolumeSends()), 3);
+
+    // Hostile review M1 (on the device model the level unmutes the speaker first): still remembered
+    // for AUD-80 once, as the level the speaker now holds, and never reported as a speaker change.
+    Assert.Equal(new[] { ("cast-a", 0.60f) }, h.Store.Remembered.Skip(rememberedBefore).ToList());
+    Assert.Equal(0.60f, h.Output.KnownSpeakerLevel, 3);
+    Assert.Empty(h.External);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // Hostile review H1. The console is muted and the speaker is muted on its OWN side, so the
+  // start-time mute is skipped (already muted) and the speaker is not marked as the console's. The
+  // after-start push has a different level owed (the restore on connect failed). It used to be
+  // pushed (step 3): on the device the level unmutes the speaker, the reply was reported as an
+  // external unmute, and AudioStateUpdateService UNMUTED THE CONSOLE — by our own command. Now the
+  // level is held: nothing is sent, the speaker stays muted, and the console's unmute releases it.
+  [Fact]
+  public async Task UnderAMutedConsole_ASpeakerMutedOnItsOwnSide_GetsNoLevelAfterStart_AndTheConsoleStaysMuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    // Mirrors AudioStateUpdateService.OnCastVolumeChanged: a non-initial event's mute is written
+    // to the console.
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync)
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+    h.Store.Volumes["cast-a"] = 0.60f;
+    h.FailNextVolume = new TimeoutException("restore lost"); // the restore on connect fails
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true);
+    Assert.False(h.Output.IsSpeakerMutedByConsole); // muted on its own side: not the console's
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.Empty(h.Commands);                       // no SET_VOLUME (and so nothing to re-mute)
+    Assert.Equal(0.60f, h.Output.HeldConsoleVolume(h.Target().Generation)!.Value, 3);
+    Assert.True(consoleMuted);
+    Assert.Empty(h.External);
+    Assert.True(h.DeviceMuted);
+    Assert.True(h.Output.KnownSpeakerMuted);
+
+    // The console's unmute sends the held level first, then the unmute (whoever muted the speaker).
+    consoleMuted = false;
+    var result = await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, h.Target().Generation);
+    Assert.True(result.Acknowledged);
+    Assert.Equal(new[] { "vol", "unmute" }, h.Kinds());
+    Assert.False(h.DeviceMuted);
+    Assert.Empty(h.External);
+  }
+
+  // The AUD-80 restore on connect, to a speaker the read found MUTED (on its own side here): the
+  // SET_VOLUME unmutes it, so the mute is re-asserted straight after it.
+  [Fact]
+  public async Task TheRestoreOnConnect_ToAMutedSpeaker_IsFollowedByAMuteReassert()
+  {
+    await using var h = NewHarness();
+    h.Store.Volumes["cast-a"] = 0.60f;
+
+    await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
+
+    Assert.Equal(new[] { "vol", "mute" }, h.Kinds());
+    Assert.True(h.Output.KnownSpeakerMuted);
+    Assert.False(h.Output.IsSpeakerMutedByConsole); // muted on its own side: not claimed
+  }
+
+  /// <summary>
+  /// A console-muted speaker with a level push of ours still recent: the console is unmuted while
+  /// the push is sent (it was in flight when the console muted), then muted. Returns the console's
+  /// mute switch, now true; commands cleared.
+  /// </summary>
+  private static async Task ConsoleMutedAfterALevelPushAsync(CastConsoleTestHarness h)
+  {
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    // The device model is off for this push: these tests raise the device's reply to it
+    // themselves, at the moment they choose (on the model it would arrive inside the send, while
+    // the console still reads unmuted).
+    var model = h.LevelCommandUnmutes;
+    h.LevelCommandUnmutes = false;
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    h.LevelCommandUnmutes = model;
+    consoleMuted = true;
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Equal(new[] { "mute", "vol" }, h.Kinds());
+    h.ClearCommands();
+  }
+
+  // D1 (d). The speaker reports itself unmuted, at the level we just pushed, under a muted console:
+  // the unmute our level push caused. Not an external change (it would unmute the console); the
+  // mute is re-asserted.
+  [Fact]
+  public async Task AnUnmuteEchoingOurOwnLevelPush_UnderAMutedConsole_IsReassertedAsMuted_NotReported()
+  {
+    await using var h = NewHarness();
+    await ConsoleMutedAfterALevelPushAsync(h);
+
+    h.Time.Advance(TimeSpan.FromSeconds(1)); // inside EchoWindow of the 0.45 push
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.Empty(h.External);
+    Assert.Equal(new[] { "mute" }, h.Kinds());
+    Assert.True(h.Output.KnownSpeakerMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // D1 (d), the race: the console is unmuted between the status and the re-assert's turn on the
+  // mute drain. The re-assert is then not sent — the console's own unmute is the last word. Driven
+  // by the console-state reads, not by timing: the status handler's read sees the console muted,
+  // and every later read (the drain's) sees it unmuted.
+  [Fact]
+  public async Task AMuteReassert_IsNotSent_WhenTheConsoleWasUnmutedBeforeItsTurn()
+  {
+    await using var h = NewHarness();
+    var armed = false;
+    var reads = 0;
+    h.Output.AttachConsoleFollower(() => armed && Interlocked.Increment(ref reads) == 1, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.LevelCommandUnmutes = false; // the device's reply is raised by hand below (see ConsoleMutedAfterALevelPushAsync)
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    h.ClearCommands();
+    armed = true;
+
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.Equal(2, Volatile.Read(ref reads)); // the status saw "muted", the drain "unmuted"
+    Assert.Empty(h.Commands);
+    Assert.Empty(h.External);
+  }
+
+  // Hostile review L2. A re-assert is sent once and not retried; a failed one used to leave only a
+  // Debug-level trace under …Audio.Outputs (held at Warning by LOG-2). It is a Warning on the
+  // follower's logger now.
+  [Fact]
+  public async Task AFailedMuteReassert_IsLoggedAsAWarningOnTheConsoleLog()
+  {
+    await using var h = NewHarness();
+    var log = new RecordingLogger();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, log);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.LevelCommandUnmutes = false; // the device's reply is raised by hand below (see ConsoleMutedAfterALevelPushAsync)
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    consoleMuted = true;
+
+    h.FailNextMute = new TimeoutException("closed");
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Warning && l.Line.Contains("could not be muted again"));
+    Assert.DoesNotContain(log.Lines(), l => l.Line.Contains("muted it again"));
+    Assert.Empty(h.External);
+  }
+
+  // Hostile review L3. The set-up of the test above leaves the speaker unmuted (by our level) yet
+  // still marked, and recorded, as muted for the console: the re-assert was dropped. The console's
+  // unmute then has nothing to send ("already unmuted") — and used to leave the mark and the record
+  // behind, so a later connection finding the speaker muted by its owner would re-arm the mark
+  // (F11) and the activation reconcile would unmute the owner's mute.
+  [Fact]
+  public async Task AConsoleUnmuteSkippedAsAlreadyUnmuted_StillReleasesTheConsoleMute()
+  {
+    await using var h = NewHarness();
+    var armed = false;
+    var reads = 0;
+    h.Output.AttachConsoleFollower(() => armed && Interlocked.Increment(ref reads) == 1, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.LevelCommandUnmutes = false; // the device's reply is raised by hand below (see ConsoleMutedAfterALevelPushAsync)
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    armed = true;
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // the premise: still marked, though unmuted
+    Assert.False(h.Output.KnownSpeakerMuted);
+    h.ClearCommands();
+
+    await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation);
+
+    Assert.Empty(h.Commands);                       // nothing to send: already unmuted
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+
+    await h.Output.DisconnectAsync();
+    Assert.Empty(h.Commands);                       // nothing of ours to release at the teardown
+
+    // The record is forgotten too: the owner mutes it later, and a reconnect does not claim it.
+    await h.ConnectAsync(reportedLevel: 0.45f, reportedMuted: true, streaming: false);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  // Hostile review (round 3) LOW-2. L3's release applies only when this connection has actually seen
+  // the speaker unmuted. On a reconnect whose initial read failed, the "not muted" baseline is the
+  // reset value, not an observation: a console unmute skipped against it used to forget the device's
+  // console-mute record, so a later connection finding the speaker still muted (by us) no longer
+  // re-armed the mark (F11), and nothing would unmute it for the console.
+  [Fact]
+  public async Task AConsoleUnmuteSkippedOnAnUnreadSpeaker_KeepsTheConsoleMuteRecord()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, h.Target().Generation));
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+
+    // The same speaker again; its status cannot be read, so its mute state is unknown.
+    await h.ConnectAsync(statusRead: () => Task.FromException<(float, bool)?>(new TimeoutException("no answer")));
+    consoleMuted = false;
+    h.ClearCommands();
+
+    await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, h.Target().Generation);
+
+    Assert.Empty(h.Commands);                               // unchanged: nothing sent on the unknown baseline
+    await h.Output.DisconnectAsync();
+    Assert.True(await StillRecordedAsMutedForTheConsoleAsync(h)); // the record survives, so F11 re-arms
+  }
+
+  // Hostile review M3. The console mute drain has one pending slot, latest wins. A re-assert queued
+  // while a console UNMUTE was waiting there used to replace it; the re-assert is then dropped (the
+  // console is unmuted by its turn), so the console's unmute — and the held level it carries — was
+  // lost. Driven by the mute gate: the re-assert is raised while a console mute holds the drain.
+  [Fact]
+  public async Task AMuteReassert_NeverReplacesAPendingConsoleUnmute()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation); // a recent level push of ours
+    h.ClearCommands();
+
+    consoleMuted = true;
+    h.MuteGate = CastConsoleTestHarness.NewTcs();
+    var mute = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    await h.MuteSendEntered.Task;                                    // the console mute holds the drain
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation); // held: the console is muted
+    Assert.Equal(0.50f, h.Output.HeldConsoleVolume(target.Generation)!.Value, 3);
+
+    consoleMuted = false;
+    var unmute = h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation); // pending
+
+    // The speaker reports itself unmuted at our 0.45 while the console mute is still being sent, at
+    // a moment the console reads muted (it was muted again, and that mute is not queued yet): the
+    // level-echo rule re-asserts the mute while the console's unmute waits in the slot. The console
+    // reads unmuted again from then on.
+    consoleMuted = true;
+    h.RaiseStatus(0.45, muted: false);
+    consoleMuted = false;
+
+    h.MuteGate.SetResult();
+    await mute;
+    var result = await unmute;
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.True(result.Acknowledged);
+    Assert.Equal(0.50f, result.LevelBeforeUnmute!.Value, 3);
+    Assert.Equal(new[] { "mute", "vol", "unmute" }, h.Kinds());
+    Assert.Null(h.Output.HeldConsoleVolume(target.Generation));
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.False(h.DeviceMuted);
+    Assert.Empty(h.External);
+  }
+
+  // Hostile review M2. A console mute while a console level is waiting on SharpCaster's send lock:
+  // the SET_MUTE reaches the device first (it mutes), then the SET_VOLUME (it unmutes the speaker
+  // again), and the level's reply arrives BEFORE the mute's acknowledgement has been processed — so
+  // the speaker is not yet marked muted by the console. That reply used to be reported as an
+  // external unmute: the console was unmuted, and the drain then set a stale mark. Driven by the
+  // gates, not by timing: the level is released while the mute's reply is still held.
+  [Fact]
+  public async Task AConsoleMute_RacingALevelOnTheSendLock_EndsWithTheSpeakerMuted_AndTheConsoleMuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    // Mirrors AudioStateUpdateService.OnCastVolumeChanged: a non-initial event's mute is written
+    // to the console.
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync)
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    await h.VolumeSendEntered.Task;                 // 0.45 waits on the send lock
+
+    consoleMuted = true;                            // the console mutes
+    h.MuteGate = CastConsoleTestHarness.NewTcs();
+    var mute = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    await h.MuteSendEntered.Task;                   // the SET_MUTE reached the device; its reply is held
+    Assert.False(h.Output.IsSpeakerMutedByConsole); // not acknowledged yet
+
+    h.VolumeGate.SetResult();                       // the level reaches the device
+    await burst;
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);                  // the premise: the level unmuted it
+    }
+
+    h.MuteGate.SetResult();
+    Assert.True(await mute);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.True(consoleMuted);
+    Assert.Empty(h.External);
+    Assert.True(h.DeviceMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.True(h.Output.KnownSpeakerMuted);
+    Assert.Equal(
+      OnTheDeviceModel ? new[] { "vol", "mute", "mute" } : new[] { "vol", "mute" },
+      h.Kinds());
+  }
+
+  // Hostile review (round 3) M-A. The race above, within EchoWindow of an ACKNOWLEDGED console
+  // unmute. The level's reply (unmuted, at our level) then also matches that earlier SET_MUTE false
+  // in the echo memory, so it used to be classed as the echo of the unmute: the baseline moved to
+  // "unmuted", the level-echo rule never ran, nothing re-asserted the mute, and the speaker stayed
+  // unmuted under the muted console. Driven by the gates and the fake clock, not by timing.
+  [Fact]
+  public async Task AConsoleMute_RacingALevel_SoonAfterAConsoleUnmute_EndsWithTheSpeakerMuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync)
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+
+    consoleMuted = true;
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    consoleMuted = false;
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(false, target.Generation)); // acknowledged at t0
+    h.ClearCommands();
+    h.Time.Advance(TimeSpan.FromSeconds(2));         // still inside EchoWindow of that unmute
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    await h.VolumeSendEntered.Task;                  // 0.45 passed the drain's mute check; waits on the send lock
+
+    consoleMuted = true;                             // the console mutes
+    h.MuteGate = CastConsoleTestHarness.NewTcs();
+    var mute = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    await h.MuteSendEntered.Task;                    // the SET_MUTE reached the device first
+
+    h.VolumeGate.SetResult();                        // then the level: it unmutes the speaker
+    await burst;
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);                   // the premise
+    }
+
+    h.MuteGate.SetResult();
+    Assert.True(await mute);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.True(consoleMuted);
+    Assert.Empty(h.External);
+    Assert.True(h.DeviceMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Equal(
+      OnTheDeviceModel ? new[] { "vol", "mute", "mute" } : new[] { "vol", "mute" },
+      h.Kinds());
+  }
+
+  // D1 (e). The owner unmutes on the speaker itself, outside any echo window of our level pushes:
+  // handled as an external change exactly as before (AUD-5) — reported, mark cleared, nothing sent.
+  [Fact]
+  public async Task AnOwnerUnmuteOutsideTheEchoWindow_IsStillAnExternalChange()
+  {
+    await using var h = NewHarness();
+    await ConsoleMutedAfterALevelPushAsync(h);
+
+    h.Time.Advance(TimeSpan.FromSeconds(5)); // past EchoWindow of the 0.45 push
+    h.RaiseStatus(0.45, muted: false);
+    await h.Output.LastMuteReassertForTests;
+
+    var external = Assert.Single(h.External);
+    Assert.False(external.IsMuted);
+    Assert.Empty(h.Commands);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
   [Fact]
   public async Task StreamingStart_NeverUnmutesASpeaker_AndDoesNotClaimOneMutedOnItsOwnSide()
   {
     // Console not muted, speaker muted on its own side: left alone.
-    await using (var h = new CastConsoleTestHarness())
+    await using (var h = NewHarness())
     {
       h.Output.AttachConsoleFollower(() => false, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GoogleCastOutputConsoleVolumeTests>());
       await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
@@ -705,7 +1205,7 @@ public class GoogleCastOutputConsoleVolumeTests
     }
 
     // Console muted, speaker already muted: nothing sent, and not marked as ours to release.
-    await using (var h = new CastConsoleTestHarness())
+    await using (var h = NewHarness())
     {
       h.Output.AttachConsoleFollower(() => true, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GoogleCastOutputConsoleVolumeTests>());
       await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
@@ -722,7 +1222,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalMute_IsNotPushedBack_AndItsConfirmationOfOurMuteIsAnEcho()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -749,7 +1249,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ALostConnection_ClearsTheConsoleMuteMark_WithoutSendingAnUnmute()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -769,7 +1269,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AReconnectWhoseInitialReadFails_StillMutesTheSpeakerForAMutedConsole()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Output.AttachConsoleFollower(() => true, NullLogger.Instance);
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
@@ -789,12 +1289,107 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.True(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // Hostile review (round 3) LOW-1. A speaker still muted from an earlier console mute (lost while
+  // the console was muted; F11 re-arms the mark on reconnect), with the console unmuted meanwhile.
+  // The AUD-80 restore fails, so the after-start push sends the level. That push used to re-mute
+  // the speaker straight after it — on the device model after the level-echo rule had already
+  // released the mark (the console is unmuted), leaving the speaker silent under an unmuted
+  // console with nothing left to unmute it. A mute that was the console's is not re-asserted under
+  // an unmuted console: either the level unmuted the speaker, or it is still muted and still marked,
+  // so the activation reconcile unmutes it.
+  [Fact]
+  public async Task TheAfterStartPush_DoesNotReMuteASpeakerMutedForTheConsole_OnceTheConsoleIsUnmuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.Output.ReportConnectionLost(target.Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+
+    consoleMuted = false;                       // unmuted while nothing could reach the speaker
+    h.Store.Volumes["cast-a"] = 0.60f;          // a remembered level that differs from the speaker's
+    h.FailNextVolume = new TimeoutException("restore failed");
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true);
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // the premise: F11 re-armed the mark
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Equal(new[] { "vol" }, h.Kinds());
+    Assert.Empty(h.External);
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);              // the level unmuted it, as the console is
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+    }
+    else
+    {
+      Assert.True(h.DeviceMuted);               // still muted, and still the console's to unmute
+      Assert.True(h.Output.IsSpeakerMutedByConsole);
+    }
+  }
+
+  // Round-4 MEDIUM-1: the same, but the AUD-80 restore on connect SUCCEEDS. That push runs inside
+  // the initial sync, whose replies only re-baseline, so the level-echo rule never sees the level's
+  // reply. On the device model the speaker ended unmuted with the mark and the device record still
+  // set — a later reconnect finding the speaker muted by its owner then re-armed the mark (F11), and
+  // a reconcile or teardown could unmute the owner's mute. The push now releases them itself.
+  [Fact]
+  public async Task TheRestoreOnConnect_ReleasesTheConsoleMuteRecord_WhenItUnmutesASpeakerMutedForTheConsole()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var first = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, first.Generation));
+    h.Output.ReportConnectionLost(first.Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+
+    consoleMuted = false;                       // unmuted while nothing could reach the speaker
+    h.Store.Volumes["cast-a"] = 0.60f;          // a remembered level that differs from the speaker's
+    h.ClearCommands();
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true); // F11 re-arms; the restore succeeds
+
+    Assert.Equal(new[] { "vol" }, h.Kinds());   // the restored level, and no re-mute after it
+    Assert.Equal(new[] { 0.60f }, h.VolumeSends());
+    Assert.Empty(h.External);
+    Assert.False(consoleMuted);
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);              // the level unmuted it, as the console is
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+    }
+    else
+    {
+      // Still muted and still marked: the activation reconcile (stood in for here) unmutes it.
+      var target = h.Target();
+      Assert.True(h.DeviceMuted);
+      Assert.True(target.SpeakerMuted);
+      Assert.True(h.Output.IsSpeakerMutedByConsole);
+      Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(false, target.Generation));
+      Assert.False(h.DeviceMuted);
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+    }
+
+    // The device record is forgotten: a later connection that finds the speaker muted (by its owner
+    // now) does not re-arm the mark.
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    await h.ConnectAsync(reportedLevel: 0.60f, reportedMuted: true);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Empty(h.External);
+  }
+
   // Pre-merge review M3 (a): the start-time mute runs before Streaming, and the follower ignores
   // the console until Streaming, so a mute made in between was lost.
   [Fact]
   public async Task AConsoleMuteMadeWhileTheStreamWasStarting_IsAppliedOnReachingStreaming()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var consoleMuted = false;
     h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
     await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
@@ -815,7 +1410,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalChangeWhileAPushIsInFlight_IsNotOverwrittenWhenThePushCompletes()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -835,7 +1430,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task APushThatCompletesAfterANewConnection_IsNotRecordedForEitherConnection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -863,7 +1458,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheConfirmationOfASlowPush_IsAnEcho_ForAsLongAsTheSendIsInFlight_AndTheWindowAfter()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -899,7 +1494,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsolePush_TimesOutOnTheInjectedClock()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -923,7 +1518,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ATeardownReceiverApplicationStop_TimesOutOnTheInjectedClock_AndLeavesTheSpeakerMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -946,7 +1541,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ATeardownUnmute_TimesOutOnTheInjectedClock()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -960,8 +1555,176 @@ public class GoogleCastOutputConsoleVolumeTests
     h.Time.Advance(TimeSpan.FromSeconds(3));
     await stop.WaitAsync(TimeSpan.FromSeconds(30)); // returns while the unmute is still held
 
-    Assert.Equal(new[] { "mute", "appstop", "unmute" }, h.Kinds());
+    // Since the AUD-81 follow-up (D2) a timed-out teardown unmute is retried over a fresh
+    // connection (the harness's default: speaker muted, nothing running).
+    Assert.Equal(new[] { "mute", "appstop", "unmute", "fresh", "fresh-unmute" }, h.Kinds());
     h.MuteGate.SetResult();
+  }
+
+  // --- AUD-81 follow-up D2: the teardown unmute when stopping our app closes the connection ---
+
+  /// <summary>
+  /// Casting to cast-a with the console muted (the speaker muted for it), and a console logger
+  /// attached. Returns the logger; commands cleared.
+  /// </summary>
+  private static async Task<RecordingLogger> CastingUnderAMutedConsoleAsync(CastConsoleTestHarness h)
+  {
+    var log = new RecordingLogger();
+    h.Output.AttachConsoleFollower(() => true, log);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, h.Target().Generation));
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    h.ClearCommands();
+    return log;
+  }
+
+  /// <summary>
+  /// Whether the output still records cast-a as muted for the console: a reconnect whose initial
+  /// read shows it muted re-arms the mark only then (F11).
+  /// </summary>
+  private static async Task<bool> StillRecordedAsMutedForTheConsoleAsync(CastConsoleTestHarness h)
+  {
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true, streaming: false);
+    return h.Output.IsSpeakerMutedByConsole;
+  }
+
+  // D2 (a). Measured on the box 2026-10-01: stopping our receiver application made the speaker
+  // close our connection, and the unmute sent after it timed out — the speaker could stay muted.
+  [Fact]
+  public async Task WhenTheAppStopClosesTheConnection_TheUnmuteIsSentOverAFreshConnection()
+  {
+    await using var h = NewHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TaskCanceledException("Client disconnected before receiving response.");
+
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh", "fresh-unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("unmuted over a new connection"));
+    Assert.DoesNotContain(log.Lines(), l => l.Line.Contains("could not unmute"));
+    Assert.False(await StillRecordedAsMutedForTheConsoleAsync(h)); // the record was cleared
+  }
+
+  // D2 (a'): a fresh status that already shows the speaker unmuted sends nothing and clears the record.
+  [Fact]
+  public async Task AFreshConnectionThatFindsTheSpeakerUnmuted_SendsNothing_AndClearsTheRecord()
+  {
+    await using var h = NewHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TimeoutException("closed");
+    h.FreshConnect = () => Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+      CastConsoleTestHarness.FreshStatus(muted: false));
+
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh" }, h.Kinds());
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("already unmuted after closing"));
+    Assert.False(await StillRecordedAsMutedForTheConsoleAsync(h));
+  }
+
+  // D2 (b). The fresh connection still shows OUR receiver application running: unmuting could
+  // release its audio under a muted console (H1), so the speaker is left muted, and said so.
+  [Fact]
+  public async Task AFreshConnectionThatStillShowsOurApplication_DoesNotUnmute()
+  {
+    await using var h = NewHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TimeoutException("closed");
+    h.FreshConnect = () => Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+      CastConsoleTestHarness.FreshStatus(muted: true, runningAppId: h.Output.Options.ApplicationId));
+
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh" }, h.Kinds());
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("still shows our receiver application running"));
+    Assert.True(await StillRecordedAsMutedForTheConsoleAsync(h)); // kept: still the console's mute
+  }
+
+  // D2 (c). The speaker cannot be reached at all: bounded at 5 s on the injected clock, logged,
+  // and the speaker left muted (the record kept for a later connection).
+  [Fact]
+  public async Task AnUnreachableSpeaker_IsGivenUpOnTheInjectedClock_AndLeftMuted()
+  {
+    await using var h = NewHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TimeoutException("closed");
+    var never = new TaskCompletionSource<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+      TaskCreationOptions.RunContinuationsAsynchronously);
+    h.FreshConnect = () => never.Task;
+
+    var timeoutArmed = h.Time.WatchForTimer(TimeSpan.FromSeconds(5)); // FreshConnectionUnmuteTimeout
+    var stop = h.Output.StopAsync();
+    await timeoutArmed.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+    h.Time.Advance(TimeSpan.FromSeconds(6));
+    await stop.WaitAsync(TimeSpan.FromSeconds(30));
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh" }, h.Kinds());
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("could not be reached over a new connection"));
+    Assert.True(await StillRecordedAsMutedForTheConsoleAsync(h));
+    never.SetResult(null);
+  }
+
+  // Hostile review L6 (a). On the box the speaker closes our connection when our application stops,
+  // and the loss is reported while the stop is still tearing down ("loss reported while the output
+  // is Stopping"). An unmute on that connection can only time out — 2 s wasted on every
+  // console-muted Stop — so a teardown whose connection is already reported lost goes straight to
+  // the fresh connection.
+  [Fact]
+  public async Task ATeardownWhoseConnectionIsAlreadyReportedLost_UnmutesOverAFreshConnectionDirectly()
+  {
+    await using var h = NewHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    var generation = h.Target().Generation;
+    h.AppStop = () =>
+    {
+      h.Output.ReportConnectionLost(generation, "the receiver closed the connection", null);
+      return Task.FromResult(true);
+    };
+
+    await h.Output.StopAsync();
+    await h.Output.LastConnectionLossHandling;
+
+    Assert.Equal(new[] { "appstop", "fresh", "fresh-unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("unmuted over a new connection"));
+  }
+
+  // Hostile review L6 (b). The loss is reported while the old connection's unmute is on the wire: the
+  // teardown stops waiting for it and goes to the fresh connection. The fake clock is never advanced,
+  // so the 2 s TeardownUnmuteTimeout cannot be what ended the wait.
+  [Fact]
+  public async Task ALossReportedDuringTheTeardownUnmute_EndsTheWait_AndUnmutesOverAFreshConnection()
+  {
+    await using var h = NewHarness();
+    await CastingUnderAMutedConsoleAsync(h);
+    var generation = h.Target().Generation;
+
+    h.MuteGate = CastConsoleTestHarness.NewTcs(); // the old connection never answers the unmute
+    var stop = h.Output.StopAsync();
+    await h.MuteSendEntered.Task;
+    h.Output.ReportConnectionLost(generation, "the receiver closed the connection", null);
+    await stop.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+    await h.Output.LastConnectionLossHandling;
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh", "fresh-unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    h.MuteGate.SetResult();
+  }
+
+  // D2 (d). A connection LOSS never unmutes — not on the old connection, and not over a new one.
+  [Fact]
+  public async Task ALostConnection_NeverTriesAnUnmuteOverAFreshConnection()
+  {
+    await using var h = NewHarness();
+    await CastingUnderAMutedConsoleAsync(h);
+
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    await h.Output.StopAsync();
+    await h.Output.DisconnectAsync();
+
+    Assert.Empty(h.Commands);
   }
 
   // Pre-merge review L4: console mutes were not coalesced, so a burst of toggles queued one
@@ -969,7 +1732,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ConsoleMutes_AreCoalesced_LatestWins_AndTheMarkFollowsTheLastSent()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -997,7 +1760,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusArrivingDuringTheLiveRead_IsBaselineOnly_NeverAnExternalChange()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
 
     h.Output.CastStatusReadOverrideForTests = () =>
@@ -1022,7 +1785,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AMuteOnlyExternalChange_DropsTheQueuedTarget_AndIsMarkedAsNotALevelChange()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -1044,4 +1807,14 @@ public class GoogleCastOutputConsoleVolumeTests
     await burst;
     Assert.Equal(new[] { 0.30f }, h.VolumeSends()); // the queued 0.36 was dropped
   }
+}
+
+/// <summary>
+/// Every <see cref="GoogleCastOutputConsoleVolumeTests"/> test again, on the device model measured on
+/// the box (AUD-81 follow-up): a SET_VOLUME that changes the level unmutes a muted speaker, and the
+/// reply status reaches the output before the send completes.
+/// </summary>
+public class GoogleCastOutputConsoleVolumeTests_OnTheDeviceModel : GoogleCastOutputConsoleVolumeTests
+{
+  protected override bool OnTheDeviceModel => true;
 }
