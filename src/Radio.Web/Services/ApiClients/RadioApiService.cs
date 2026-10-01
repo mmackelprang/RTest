@@ -343,6 +343,73 @@ public class RadioApiService
     }
   }
 
+  /// <summary>
+  /// Reads the stored FM band map and the sweep status (<c>GET /api/radio/bandmap</c>, AUD-76).
+  /// </summary>
+  /// <returns>The map, or null when the API could not be read.</returns>
+  /// <remarks>
+  /// A failure logs at Debug, not Error: the visualizer's BAND view polls this once a second while a
+  /// sweep runs, and on <c>radio-web</c> every level at Information and above reaches journald.
+  /// </remarks>
+  public async Task<BandMapResponseDto?> GetBandMapAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<BandMapResponseDto>("/api/radio/bandmap", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Could not read the band map");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Requests a band sweep (<c>POST /api/radio/bandmap/scan</c>, AUD-76). The API answers 202 when a
+  /// sweep started or was already running, 409 when the SDR device is busy and 503 when sweeps are
+  /// disabled or there is no SDR device; the last two carry an <c>error</c> message, returned here.
+  /// </summary>
+  public async Task<BandScanRequestResult> RequestBandScanAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      using HttpResponseMessage response = await _httpClient.PostAsync("/api/radio/bandmap/scan", null, cancellationToken);
+      if (response.IsSuccessStatusCode)
+      {
+        return new BandScanRequestResult(true, (int)response.StatusCode, null);
+      }
+
+      return new BandScanRequestResult(false, (int)response.StatusCode, await ReadErrorAsync(response, cancellationToken));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Band scan request failed");
+      return new BandScanRequestResult(false, 0, null);
+    }
+  }
+
+  /// <summary>Reads <c>{"error": "..."}</c> from a failed response; null when there is none.</summary>
+  private static async Task<string?> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+  {
+    try
+    {
+      System.Text.Json.JsonElement body =
+        await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken);
+      if (body.ValueKind == System.Text.Json.JsonValueKind.Object
+        && body.TryGetProperty("error", out System.Text.Json.JsonElement error)
+        && error.ValueKind == System.Text.Json.JsonValueKind.String)
+      {
+        return error.GetString();
+      }
+    }
+    catch (Exception)
+    {
+      // No body, or not JSON: the status code alone is the answer.
+    }
+
+    return null;
+  }
+
   public async Task<List<RadioDeviceDto>?> GetAvailableDevicesAsync(CancellationToken cancellationToken = default)
   {
     try
