@@ -555,8 +555,12 @@ public class DevicesController : ControllerBase
   /// whatever state it found (Connecting, Stopping, Initializing, ...). A 409 is not evidence the
   /// device is unreachable.
   /// Returns 502 when Cast is not streaming to the requested device once the output gate has run —
-  /// the speaker was lost while connecting or starting. Local output is restored if Cast is still
-  /// the active output, and the default is not saved.
+  /// for example because the speaker was lost while connecting or starting, the connect was
+  /// superseded by another, or there is no audio engine to promote through. Local output is
+  /// restored if Cast is still the active output, and the default is not saved.
+  /// Returns 500 when the connect throws. If Cast was already the active output (a device switch)
+  /// and is no longer streaming, local output is restored first, so a failed switch does not
+  /// leave the console on a muted local output behind a dead Cast output.
   /// </remarks>
   /// <param name="request">The Cast device to connect to.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
@@ -619,6 +623,7 @@ public class DevicesController : ControllerBase
       catch (Exception ex)
       {
         _logger.LogError(ex, "Error promoting already-connected Cast device: {Name}", request.Name);
+        await RestoreLocalAfterFailedConnectAsync();
         return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
       }
     }
@@ -733,8 +738,9 @@ public class DevicesController : ControllerBase
       }
 
       // AUD-85 (review M1): a speaker lost during the connect or start replays its deferred
-      // loss; the lost-Cast recovery then saw the output still local and left it, and the
-      // promotion above made a dead Cast output active. Undo that rather than report success.
+      // loss. The lost-Cast recovery is queued and can see the output still local (it may also
+      // run only after the gate) — and if it left it, the promotion above made a dead Cast output
+      // active. Undo that rather than report success.
       var lost = await RestoreLocalIfCastNotLiveAsync(request, cancellationToken);
       if (lost != null)
       {
@@ -752,13 +758,55 @@ public class DevicesController : ControllerBase
       // AUD-85: GoogleCastOutput.ConnectAsync's state guard refused because the output was
       // mid-transition when it checked — for example, another connect that began after the
       // Connecting check above. The prefix is the constant that guard's message is built from.
+      // No local restore here: this call stopped nothing of its own. The guard runs after
+      // ConnectAsync's stop-before-switch, but that stop always ends in Stopped, which the guard
+      // accepts — so a refusal after a stop means another party moved the state in between, and
+      // that party owns the output now; switching to local would race it.
       _logger.LogWarning("Cast connect refused by output state: {Reason}", ex.Message);
       return Conflict(new { error = "Cast output is busy; try again shortly", details = ex.Message });
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Error connecting to Cast device: {Name}", request.Name);
+      // AUD-85 (re-review M-a): switching devices while Cast is active stops the current stream
+      // before connecting the new one, so a failed switch leaves the active output google-cast
+      // with local muted and nothing playing. Put local back before answering.
+      await RestoreLocalAfterFailedConnectAsync();
       return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
+    }
+  }
+
+  /// <summary>
+  /// AUD-85 (re-review M-a). After a connect threw: when Cast is still the active output but the
+  /// Cast output is not streaming, switches back to the local output (the same target
+  /// <see cref="RestoreLocalIfCastNotLiveAsync"/> uses), conditionally on Cast still being active.
+  /// Never throws — it runs inside a catch whose 500 must still be returned.
+  /// </summary>
+  /// <remarks>
+  /// Uses <see cref="CancellationToken.None"/> deliberately: the failure being handled may be the
+  /// request's own cancellation (the client gave up), and an aborted request must not leave the
+  /// console silent.
+  /// </remarks>
+  private async Task RestoreLocalAfterFailedConnectAsync()
+  {
+    try
+    {
+      if (_audioEngine == null ||
+          !string.Equals(_audioEngine.ActiveOutputId, "google-cast", StringComparison.Ordinal) ||
+          _castOutput?.State == AudioOutputState.Streaming)
+      {
+        return;
+      }
+
+      var fallbackOutputId = _deviceManager.GetSelectedOutputDeviceId() ?? "default";
+      var switched = await _audioEngine.SetActiveOutputIfCurrentAsync("google-cast", fallbackOutputId, CancellationToken.None);
+      _logger.LogWarning(
+        "Cast connect failed with Cast active and not streaming (output state {State}); switched to local output {Output}: {Switched}",
+        _castOutput?.State, fallbackOutputId, switched);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to restore local output after a failed Cast connect");
     }
   }
 
@@ -793,13 +841,13 @@ public class DevicesController : ControllerBase
       "Cast device {Name} is not streaming after promotion (output state {State}); switching back to local output if Cast is still active",
       request.Name, state);
 
-    var restored = false;
+    var switchedToLocal = false;
     try
     {
       var fallbackOutputId = _deviceManager.GetSelectedOutputDeviceId() ?? "default";
       if (_audioEngine != null)
       {
-        restored = await _audioEngine.SetActiveOutputIfCurrentAsync("google-cast", fallbackOutputId, cancellationToken);
+        switchedToLocal = await _audioEngine.SetActiveOutputIfCurrentAsync("google-cast", fallbackOutputId, cancellationToken);
       }
     }
     catch (Exception ex)
@@ -811,7 +859,10 @@ public class DevicesController : ControllerBase
     {
       error = "Cast device is not streaming after connecting; it may have been lost",
       state = state?.ToString(),
-      localOutputRestored = restored
+      // True only when THIS call switched the active output from Cast to local. False does not
+      // mean local is inactive: the output may already have been local (for example, the
+      // lost-Cast recovery switched it first), or there is no audio engine, or the switch threw.
+      switchedToLocal
     });
   }
 

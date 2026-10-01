@@ -18,6 +18,7 @@ namespace Radio.API.Tests.Controllers;
 /// AUD-85: <c>POST /api/devices/cast/connect</c> treats a connect for the device already
 /// streaming as success, answers 409 — not 500 — when the Cast output is mid-transition, and
 /// does not report success (or save the default) when Cast is not live after the output gate.
+/// A device switch that throws while Cast is the active output puts local output back (re-review M-a).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -123,6 +124,33 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
   }
 
   [Fact]
+  public async Task Connect_SwitchingDevicesWhileCastIsActive_ConnectThrows_Returns500_AndRestoresLocal()
+  {
+    // Cast is the active output, streaming to another speaker; the request is for this one.
+    StreamToTestDevice(id: "https://192.168.0.99/");
+    var (engine, _) = CreateEngine();
+    await engine.SetActiveOutputAsync("google-cast", CancellationToken.None);
+    Assert.True(engine.IsLocalOutputMuted);
+
+    // A cancelled request token makes the switch fail at a deterministic point AFTER the old
+    // stream was stopped: ConnectAsync's stop-before-switch ends in Stopped (its lock wait throws
+    // and its catch still stops), then the connect's own lock wait throws, leaving Error. It also
+    // stands in for a real failure mode — the client giving up mid-switch.
+    using var cancelled = new CancellationTokenSource();
+    cancelled.Cancel();
+
+    var result = await CreateController(audioEngine: engine).ConnectToCastDevice(Request(), cancelled.Token);
+
+    var error = Assert.IsAssignableFrom<ObjectResult>(result);
+    Assert.Equal(StatusCodes.Status500InternalServerError, error.StatusCode);
+    Assert.Equal(AudioOutputState.Error, _castOutput.State);
+    // Not left on a dead Cast output with local muted: back on the same fallback the 502 path uses.
+    Assert.Equal("default", engine.ActiveOutputId);
+    Assert.False(engine.IsLocalOutputMuted);
+    VerifyDefaultSaved(Times.Never());
+  }
+
+  [Fact]
   public async Task Connect_WhenOutputIsConnecting_Returns409_AndLeavesTheBusyOutputAlone()
   {
     SetState(AudioOutputState.Connecting);
@@ -156,11 +184,11 @@ public sealed class DevicesControllerCastConnectTests : IAsyncDisposable
       It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
   }
 
-  private ChromecastDeviceInfo StreamToTestDevice()
+  private ChromecastDeviceInfo StreamToTestDevice(string id = DeviceId)
   {
     var device = new ChromecastDeviceInfo
     {
-      Id = DeviceId, FriendlyName = "Test speaker", IpAddress = "192.168.0.25", Port = 8009, Model = "Nest Audio"
+      Id = id, FriendlyName = "Test speaker", IpAddress = "192.168.0.25", Port = 8009, Model = "Nest Audio"
     };
     SetConnectedDevice(device);
     SetState(AudioOutputState.Streaming);
