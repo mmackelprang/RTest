@@ -201,9 +201,12 @@ public class GoogleCastOutput : AudioOutputBase
   private DirectCastAudioChannel? _directChannel;
 
   // Cache discovered receivers to use the original objects for connection
-  // Indexed by device ID (DeviceUri.ToString()) and also by IP address for fallback matching
-  private readonly Dictionary<string, ChromecastReceiver> _discoveredReceivers = new();
-  private readonly Dictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
+  // Indexed by device ID (DeviceUri.ToString()) and also by IP address for fallback matching.
+  // AUD-54 (6): concurrent discoveries write these while a connect reads them, so they are
+  // concurrent dictionaries. Each single operation is atomic; the two maps are NOT updated as
+  // one unit, so a reader can see a device in one and not yet (or no longer) in the other.
+  private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ChromecastReceiver> _discoveredReceivers = new();
+  private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
   private CastNowPlayingMetadata? _nowPlayingMetadata;
 
   // Metadata update debounce: when metadata changes rapidly (source switch
@@ -216,6 +219,13 @@ public class GoogleCastOutput : AudioOutputBase
   private float _lastSetVolume = -1f;
   private bool _lastSetMute;
   private bool _suppressNextVolumeEvent;
+
+  // AUD-54 (1). The ReceiverChannel that currently carries OnReceiverStatusChanged, so
+  // SubscribeToReceiverStatus can detach it from there before attaching it elsewhere.
+  // Read and written only inside _receiverStatusSubscriptionLock, which guards nothing else
+  // and is never held across an await.
+  private ReceiverChannel? _receiverStatusSubscribedChannel;
+  private readonly object _receiverStatusSubscriptionLock = new();
 
   // AUD-80: the level the current connection should hold on the device — the volume
   // remembered for it, else the level it reported when first seen, else NaN (unknown).
@@ -342,6 +352,7 @@ public class GoogleCastOutput : AudioOutputBase
       // Network work happens on the snapshot, outside the lock.
       if (stale != null)
       {
+        UnsubscribeFromReceiverStatus(stale);
         try { await stale.DisconnectAsync().ConfigureAwait(false); }
         catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client during reinit"); }
       }
@@ -464,10 +475,10 @@ public class GoogleCastOutput : AudioOutputBase
     {
       if (cachedDevices.TryGetValue(key, out var stale))
       {
-        _discoveredReceiversByIp.Remove(stale.Device.IpAddress);
+        _discoveredReceiversByIp.TryRemove(stale.Device.IpAddress, out _);
       }
       cachedDevices.Remove(key);
-      _discoveredReceivers.Remove(key);
+      _discoveredReceivers.TryRemove(key, out _);
     }
 
     // Save merged cache
@@ -819,9 +830,13 @@ public class GoogleCastOutput : AudioOutputBase
       _lifecycleLock.Release();
     }
 
+    CancelPendingMetadataUpdate();
+
     if (!hadConnection)
     {
-      _logger.LogWarning("No Chromecast device connected");
+      // Debug, not Warning (AUD-54 ②, AUD-84 follow-up 3): this is the normal outcome of a
+      // teardown after a handled connection loss, which has already cleared the connection.
+      _logger.LogDebug("Disconnect requested but no Chromecast device is connected");
       return;
     }
 
@@ -943,9 +958,11 @@ public class GoogleCastOutput : AudioOutputBase
     _directChannel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
     _directChannel.Client = _client!;
 
-    // Register the channel with SharpCaster's internal channel list so incoming
-    // messages on our namespace get routed to OnMessageReceived. SharpCaster v3.0.0
-    // has no public RegisterChannel API, so we inject via reflection.
+    // Register the channel with SharpCaster's internal channel list (replacing any earlier
+    // one for this namespace) so SharpCaster routes our namespace to it. SharpCaster v3.0.0
+    // has no public RegisterChannel API, so we inject via reflection. Routing to the channel
+    // is not delivery: SharpCaster drops the receiver's `pong` before OnMessageReceived —
+    // see the remarks on RegisterCustomChannel.
     RegisterCustomChannel(_client!, _directChannel);
 
     // Create the streaming service and start sending audio. The loss report is armed
@@ -1037,63 +1054,139 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Registers a custom channel with SharpCaster's internal channel list via reflection.
-  /// SharpCaster v3.0.0 has no public API for this, but the Channels property is a
-  /// List&lt;IChromecastChannel&gt; that we can append to.
+  /// Registers a custom channel with SharpCaster's internal channel list via reflection,
+  /// REPLACING any channel already registered for the same namespace. SharpCaster v3.0.0 has
+  /// no public API for this; its private <c>Channels</c> property is an
+  /// <c>IEnumerable&lt;IChromecastChannel&gt;</c> that we swap for a new array.
   /// </summary>
-  private void RegisterCustomChannel(ChromecastClient client, DirectCastAudioChannel channel)
+  /// <remarks>
+  /// <para>
+  /// AUD-54 (2). This used to append, so every StartAsync on a reused client added one more
+  /// <see cref="DirectCastAudioChannel"/> for the namespace. SharpCaster's receive loop
+  /// (<c>ChromecastClient.Receive</c>) routes an inbound message to
+  /// <c>Channels.FirstOrDefault(c =&gt; c.Namespace == castMessage.Namespace)</c> — the FIRST
+  /// match — so after one Stop/Start the live streaming service's channel was never the one
+  /// chosen. Replacing by namespace keeps exactly one channel per namespace, and the
+  /// <c>total channels</c> count in the log line stays constant across Stop/Start.
+  /// </para>
+  /// <para>
+  /// What this does NOT fix (verified by decompiling SharpCaster 3.0.0, <c>lib/net9.0</c>):
+  /// even the first channel never receives the receiver's <c>pong</c>. In
+  /// <c>ChromecastClient.Receive</c>, after choosing the channel, a message is dispatched to
+  /// <c>OnMessageReceived</c> only if its <c>type</c> is a key of the private
+  /// <c>MessageTypes</c> dictionary, built with the default (case-sensitive) comparer from the
+  /// <c>Type</c> of SharpCaster's own registered messages (<c>PongMessage</c>'s is
+  /// <c>"PONG"</c>). Our receiver sends <c>type: 'pong'</c>, which is not a key, so the loop
+  /// takes its else branch — a log call when the client has a logger (ours has none) and
+  /// <c>Debugger.Break()</c> — and the message is never delivered. It does still restart the
+  /// heartbeat timeout, which runs for any non-heartbeat channel's message before the type check.
+  /// So <c>DirectCastStreamingService.LastRttMs</c> stays 0 regardless of this method.
+  /// </para>
+  /// <para>
+  /// The swap is a single reference assignment, so the receive loop enumerates either the old
+  /// array or the new one, never a half-built one. It is not ordered against SharpCaster's own
+  /// rebuild of the list in <c>RecreateHeartbeatChannel</c> (run by its DisconnectAsync), nor
+  /// against <c>SharpCasterCallbackGuard.TryHarden</c>, which also rewrites it; a collision with
+  /// either can lose one of the two writes.
+  /// </para>
+  /// <c>internal</c> so a test can drive it against a real, unconnected
+  /// <see cref="ChromecastClient"/>.
+  /// </remarks>
+  internal void RegisterCustomChannel(ChromecastClient client, DirectCastAudioChannel channel)
   {
     try
     {
-      // SharpCaster stores channels as IEnumerable<IChromecastChannel> backed by an array.
-      // We need to replace it with a new array that includes our custom channel.
-      var prop = client.GetType().GetProperty("Channels",
-        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-      if (prop == null)
+      if (!TryRewriteChannels(client, existing =>
+          existing.Where(ch => !(ch is Sharpcaster.Interfaces.IChromecastChannel c && c.Namespace == channel.Namespace))
+            .Append(channel)
+            .ToList(), out var count))
       {
-        _logger.LogWarning("Cast: Could not find Channels property on ChromecastClient");
         return;
-      }
-
-      var existing = prop.GetValue(client) as System.Collections.IEnumerable;
-      if (existing == null)
-      {
-        _logger.LogWarning("Cast: Channels property is null");
-        return;
-      }
-
-      // Build a new list from existing channels + our custom one
-      var newList = new List<object>();
-      foreach (var ch in existing)
-      {
-        newList.Add(ch);
-      }
-      newList.Add(channel);
-
-      // Convert to array of the interface type
-      var interfaceType = prop.PropertyType.GetGenericArguments().FirstOrDefault();
-      if (interfaceType != null)
-      {
-        var arr = Array.CreateInstance(interfaceType, newList.Count);
-        for (int i = 0; i < newList.Count; i++)
-        {
-          arr.SetValue(newList[i], i);
-        }
-        prop.SetValue(client, arr);
-      }
-      else
-      {
-        // Fallback: set as List
-        prop.SetValue(client, newList);
       }
 
       _logger.LogInformation("Cast: Registered custom channel for namespace {Ns} (total channels: {Count})",
-        channel.Namespace, newList.Count);
+        channel.Namespace, count);
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Cast: Failed to register custom channel via reflection");
     }
+  }
+
+  /// <summary>
+  /// Removes <paramref name="channel"/> (by reference) from the client it was registered on, if
+  /// it is still there. Never throws. A no-op when the channel has no client or was already
+  /// replaced. <c>internal</c> for the same reason as <see cref="RegisterCustomChannel"/>.
+  /// </summary>
+  internal void UnregisterCustomChannel(DirectCastAudioChannel? channel)
+  {
+    var client = channel?.Client;
+    if (channel == null || client == null)
+    {
+      return;
+    }
+
+    try
+    {
+      var removed = false;
+      if (TryRewriteChannels(client, existing =>
+          {
+            var kept = existing.Where(ch => !ReferenceEquals(ch, channel)).ToList();
+            removed = kept.Count != existing.Count;
+            return kept;
+          }, out var count) && removed)
+      {
+        _logger.LogDebug("Cast: Unregistered custom channel for namespace {Ns} (total channels: {Count})",
+          channel.Namespace, count);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: Failed to unregister custom channel via reflection");
+    }
+  }
+
+  /// <summary>
+  /// Replaces SharpCaster's private <c>Channels</c> with <paramref name="rewrite"/>'s result,
+  /// as an array of the property's element type. False (with a Warning) when the property
+  /// cannot be found or read.
+  /// </summary>
+  private bool TryRewriteChannels(ChromecastClient client, Func<List<object>, List<object>> rewrite, out int count)
+  {
+    count = 0;
+    var prop = client.GetType().GetProperty("Channels",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    if (prop == null)
+    {
+      _logger.LogWarning("Cast: Could not find Channels property on ChromecastClient");
+      return false;
+    }
+
+    if (prop.GetValue(client) is not System.Collections.IEnumerable existing)
+    {
+      _logger.LogWarning("Cast: Channels property is null");
+      return false;
+    }
+
+    var newList = rewrite(existing.Cast<object>().ToList());
+
+    var interfaceType = prop.PropertyType.GetGenericArguments().FirstOrDefault();
+    if (interfaceType != null)
+    {
+      var arr = Array.CreateInstance(interfaceType, newList.Count);
+      for (int i = 0; i < newList.Count; i++)
+      {
+        arr.SetValue(newList[i], i);
+      }
+      prop.SetValue(client, arr);
+    }
+    else
+    {
+      prop.SetValue(client, newList);
+    }
+
+    count = newList.Count;
+    return true;
   }
 
   /// <inheritdoc />
@@ -1109,14 +1202,25 @@ public class GoogleCastOutput : AudioOutputBase
       State = AudioOutputState.Stopping;
       _logger.LogInformation("Stopping Google Cast output");
 
+      CancelPendingMetadataUpdate();
+
       // Stop DirectChannel streaming if active. Taken with an exchange so this and
       // HandleConnectionLostAsync, which can run concurrently, never both stop it.
+      // The channel is taken together with the streaming service, before the (up to 5 s)
+      // stop, and released in a finally, so a throwing StopAsync still unregisters it.
       var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
       if (directStreaming != null)
       {
-        await directStreaming.StopAsync();
-        await directStreaming.DisposeAsync();
-        _directChannel = null;
+        var directChannel = Interlocked.Exchange(ref _directChannel, null);
+        try
+        {
+          await directStreaming.StopAsync();
+        }
+        finally
+        {
+          await directStreaming.DisposeAsync();
+          UnregisterCustomChannel(directChannel);
+        }
         _logger.LogInformation("DirectChannel streaming stopped");
       }
 
@@ -1137,7 +1241,17 @@ public class GoogleCastOutput : AudioOutputBase
       if (stopClient != null)
       {
         var mediaChannel = stopClient.GetChannel<MediaChannel>();
-        if (mediaChannel != null)
+        if (mediaChannel != null && mediaChannel.MediaStatus == null)
+        {
+          // AUD-54 ②. This client holds no current media status (none was ever received, or
+          // SharpCaster cleared it after a failed media send or an empty MEDIA_STATUS), so there
+          // is no media session to stop — the normal case in DirectChannel mode, which never loads media.
+          // SharpCaster 3.0.0's MediaChannel.StopAsync would throw InvalidOperationException
+          // ("MediaSessionID is not available") here before sending anything, which logged a
+          // Warning on every DirectChannel teardown.
+          _logger.LogDebug("Cast: no media session on this connection — skipping media stop");
+        }
+        else if (mediaChannel != null)
         {
           try
           {
@@ -1166,6 +1280,13 @@ public class GoogleCastOutput : AudioOutputBase
           {
             _logger.LogDebug("Cast: No active media session to stop (MediaSessionId is null)");
           }
+          catch (InvalidOperationException ioe)
+            when (ioe.Message.Contains("MediaSessionID is not available", StringComparison.Ordinal))
+          {
+            // The media status was cleared between the check above and the call (a failed
+            // media send clears it). Thrown before anything is sent, so nothing was stopped.
+            _logger.LogDebug("Cast: no media session to stop (media status cleared), ignoring");
+          }
           catch (Exception ex)
           {
             // SharpCaster's MediaChannel.StopAsync → SendAsync can throw once the
@@ -1186,7 +1307,11 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
+      // AUD-54 (4). The same end state as the success path. Steps outside the media-stop
+      // try (stopping the DirectChannel loop, taking the lock) can throw, and leaving
+      // IsEnabledInternal true here was exactly what the media-stop catch exists to prevent.
       _logger.LogError(ex, "Failed to stop Google Cast output");
+      IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
     }
   }
@@ -1241,6 +1366,22 @@ public class GoogleCastOutput : AudioOutputBase
     if (_client == null)
     {
       return new { success = false, error = "Not connected to a Cast device" };
+    }
+
+    // AUD-54 (3). This relaunches the receiver application on the connected device. On a
+    // live session that hands the device a new transport id while the DirectChannel loop keeps
+    // sending to the old one, so it is refused while an operation of ours owns the session.
+    // A StartAsync still launching the receiver leaves the state at Ready until it reaches
+    // Streaming, so this check does not see that window.
+    var state = State;
+    if (state is AudioOutputState.Streaming or AudioOutputState.Connecting or AudioOutputState.Stopping)
+    {
+      return new
+      {
+        success = false,
+        error = $"Cast output is {state} — stop casting before running a test playback, " +
+                "because the test relaunches the receiver app and would break the live session."
+      };
     }
 
     try
@@ -1317,16 +1458,18 @@ public class GoogleCastOutput : AudioOutputBase
 
     // Debounce: cancel any pending metadata reload and schedule a new one.
     // This ensures rapid changes coalesce into a single Cast media reload.
+    // AUD-54 (6): the linked source is built INSIDE the lock, from the CTS this call just
+    // installed. Reading the field after the lock (as this used to) could pick up a CTS that a
+    // concurrent update or CancelPendingMetadataUpdate had already disposed.
+    CancellationTokenSource linkedCts;
     lock (_debounceLock)
     {
       _metadataDebouncesCts?.Cancel();
       _metadataDebouncesCts?.Dispose();
-      _metadataDebouncesCts = new CancellationTokenSource();
+      var debounceCts = new CancellationTokenSource();
+      _metadataDebouncesCts = debounceCts;
+      linkedCts = CancellationTokenSource.CreateLinkedTokenSource(debounceCts.Token, cancellationToken);
     }
-
-    var debounceCts = _metadataDebouncesCts;
-    var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-      debounceCts?.Token ?? CancellationToken.None, cancellationToken);
 
     _logger.LogDebug("Cast metadata update debounced: {Title} - {Artist}", title, artist);
 
@@ -1341,7 +1484,17 @@ public class GoogleCastOutput : AudioOutputBase
         // and actual track metadata being available (~2s).
         await Task.Delay(3000, linkedCts.Token);
 
-        await LoadMediaWithRecoveryAsync(cancellationToken);
+        // Re-checked after the wait: a StopAsync that ran between the Streaming check at the
+        // top of this method and the debounce lock found nothing pending to cancel.
+        if (State != AudioOutputState.Streaming)
+        {
+          return;
+        }
+
+        // The linked token, so a stop or disconnect that cancels the pending update also
+        // abandons the wait on a reload already under way. It cannot recall a LOAD that
+        // SharpCaster has already written to the socket.
+        await LoadMediaWithRecoveryAsync(linkedCts.Token);
         _logger.LogInformation(
           "Cast metadata updated: {Title} - {Artist}", title, artist);
       }
@@ -1358,6 +1511,22 @@ public class GoogleCastOutput : AudioOutputBase
         linkedCts.Dispose();
       }
     }, CancellationToken.None);
+  }
+
+  /// <summary>
+  /// Cancels a metadata reload still waiting out its debounce (AUD-54 (6)), so it cannot fire
+  /// a media LOAD after the stream it was meant for has been stopped or disconnected. Called by
+  /// StopAsync, DisconnectAsync, HandleConnectionLostAsync and DisposeAsync. Idempotent. A
+  /// reload already past its debounce is only told to stop waiting; see the call site.
+  /// </summary>
+  private void CancelPendingMetadataUpdate()
+  {
+    lock (_debounceLock)
+    {
+      _metadataDebouncesCts?.Cancel();
+      _metadataDebouncesCts?.Dispose();
+      _metadataDebouncesCts = null;
+    }
   }
 
   /// <summary>
@@ -1635,6 +1804,17 @@ public class GoogleCastOutput : AudioOutputBase
   /// <c>_client</c> so the caller's snapshot is used — a concurrent connect or
   /// teardown may already have swapped the field.
   /// </param>
+  /// <remarks>
+  /// AUD-54 (1). A client is reused when the next device was live-discovered, so a second
+  /// connect used to attach <see cref="OnReceiverStatusChanged"/> a second time to the same
+  /// <see cref="ReceiverChannel"/>, and a disconnect removed only one of the two. This method
+  /// now removes the handler from the channel it was last attached to (which may belong to an
+  /// older client that was replaced without being unsubscribed) and from this channel, then
+  /// attaches it once. Within these two methods, at most one channel carries the handler at a
+  /// time. It does not order this call against a teardown that runs between a connect's publish
+  /// and its subscribe; a handler attached after such a teardown stays until the next subscribe
+  /// or unsubscribe.
+  /// </remarks>
   private void SubscribeToReceiverStatus(ChromecastClient? client)
   {
     if (client == null)
@@ -1643,11 +1823,25 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     var receiverChannel = client.GetChannel<ReceiverChannel>();
-    if (receiverChannel != null)
+    if (receiverChannel == null)
     {
-      receiverChannel.ReceiverStatusChanged += OnReceiverStatusChanged;
-      _logger.LogDebug("Subscribed to Cast receiver status changes for volume sync");
+      return;
     }
+
+    lock (_receiverStatusSubscriptionLock)
+    {
+      if (_receiverStatusSubscribedChannel != null)
+      {
+        _receiverStatusSubscribedChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+      }
+
+      // Removing before adding makes a repeat subscribe on the same channel a no-op.
+      receiverChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+      receiverChannel.ReceiverStatusChanged += OnReceiverStatusChanged;
+      _receiverStatusSubscribedChannel = receiverChannel;
+    }
+
+    _logger.LogDebug("Subscribed to Cast receiver status changes for volume sync");
   }
 
   /// <summary>
@@ -1662,9 +1856,18 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     var receiverChannel = client.GetChannel<ReceiverChannel>();
-    if (receiverChannel != null)
+    if (receiverChannel == null)
+    {
+      return;
+    }
+
+    lock (_receiverStatusSubscriptionLock)
     {
       receiverChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+      if (ReferenceEquals(_receiverStatusSubscribedChannel, receiverChannel))
+      {
+        _receiverStatusSubscribedChannel = null;
+      }
     }
   }
 
@@ -2169,6 +2372,7 @@ public class GoogleCastOutput : AudioOutputBase
     // Error, not Ready: the output did not stop cleanly, and ConnectAsync recovers from Error
     // by building a fresh ChromecastClient — which is what a dead socket calls for.
     State = AudioOutputState.Error;
+    CancelPendingMetadataUpdate();
 
     // Raised BEFORE the slow cleanup below, so the local speakers come back without waiting
     // on it: stopping the streaming loop can take up to its 5 s cap when a send is stuck on
@@ -2190,7 +2394,7 @@ public class GoogleCastOutput : AudioOutputBase
     var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
     if (directStreaming != null)
     {
-      _directChannel = null;
+      UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
       try { await directStreaming.DisposeAsync().ConfigureAwait(false); }
       catch (Exception ex) { _logger.LogDebug(ex, "Cast: error stopping DirectChannel streaming after connection loss"); }
     }
@@ -2284,16 +2488,18 @@ public class GoogleCastOutput : AudioOutputBase
     var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
     if (directStreaming != null)
     {
-      await directStreaming.DisposeAsync();
-      _directChannel = null;
+      var directChannel = Interlocked.Exchange(ref _directChannel, null);
+      try
+      {
+        await directStreaming.DisposeAsync();
+      }
+      finally
+      {
+        UnregisterCustomChannel(directChannel);
+      }
     }
 
-    lock (_debounceLock)
-    {
-      _metadataDebouncesCts?.Cancel();
-      _metadataDebouncesCts?.Dispose();
-      _metadataDebouncesCts = null;
-    }
+    CancelPendingMetadataUpdate();
 
     // Final generation bump so a connect still in flight discards itself rather
     // than publishing onto a disposed output, and take the client as a snapshot.
