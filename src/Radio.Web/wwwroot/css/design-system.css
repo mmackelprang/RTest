@@ -5070,8 +5070,12 @@ body {
   position: absolute;
   left: 6px;
   right: 6px;
-  /* Inside the card's 1 px border: the viewport clips vertically, so nothing below 60 px shows. */
-  bottom: 1px;
+  /* 3 px up, not 1: inside the card's 1 px border with a 2 px dark gap above it. --source-radio and
+     --signal-amber are the same colour, so at 1 px the bar fused with the playing card's amber
+     border into one 3 px edge and "the knob is on the playing card" read as just "playing". The gap
+     also keeps it off the inset focus ring (outline-offset -2). The same offset on every card, so the
+     mark does not jump 2 px as the knob crosses the playing card. */
+  bottom: 3px;
   height: 2px;
   border-radius: 1px;
   background: var(--row-accent, var(--accent-primary));
