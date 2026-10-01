@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (88)
+## Shipped rows (89)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3039,3 +3039,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/UI-27.md`](queue/UI-27.md)**
 
 ✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01** with [`UI-24`](queue/UI-24.md). Merged as [#761](https://github.com/mmackelprang/RTest/pull/761) (squash `4d483ff`). The branch build `6ab5b74` was deployed to `radio` and SHA-verified for the owner's panel UAT before merge. Owner: *"These all pass"*. ⚠ The cause predated `UI-20`: the pill had been inserted on demand since #367. 🟡 **NEW 2026-10-01 (owner: *"when the `CLIP` tag appears above the signal strength bar, it causes the whole screen to "shift" by a couple of pixels"*) — the CLIP pill moves the radio panel.** Inserted on demand, the 19.5 px pill made the 16.5 px RSSI header 3 px taller and everything below moved (measured live; since #367, not `UI-20`). — [detail](queue/UI-27.md)
+
+### AUD-77 — BT album art was lost across a track change; closed by owner validation with no code (the cause of the fix is inferred, not established).
+
+| Field | Value |
+|---|---|
+| Status | ✅ closed, no code change — owner validation 2026-10-02: *"#3 - I validated this yesterday - it passes."* Likely fixed by `AUD-14` (#726, `b64c8cd`) — an inference, see below |
+| Plan | _owner script in the dossier: reproduce with `Radio.Infrastructure.Audio` + `…Platform.Bluetooth` at Debug (`LOG-5`), then the `Bluetooth playback status:` lines plus a raw `dbus-monitor` capture decide between three causes (no AVRCP `Playing` edge, an unknown status mapped to `Stopped`, or the bit cleared). Fix only after that_ _(never run — closed first)_ |
+| Spec / handoff | _no spec doc — found 2026-09-29_ |
+| Depends on | `AUD-33` |
+| Branch | `fix/aud-77-bt-art-straddled-sample` _(docs only: the investigation, no code)_ |
+
+**Detail: [`queue/AUD-77.md`](queue/AUD-77.md)**
+
+✅ **CLOSED BY OWNER VALIDATION 2026-10-02, NO CODE.** Owner: *"#3 - I validated this yesterday - it passes."* Nothing was built for this row; the investigation below is the whole of the work. ⚠ **INFERENCE, not established:** the likely reason it passes now is `AUD-14` ([#726](https://github.com/mmackelprang/RTest/pull/726), squash `b64c8cd`, merged and deployed 2026-09-30). It fixed a stale AVRCP watcher that survived a player re-attach, which can leave the BT source stuck in `Ready` with no `Playing` edge — the mechanism this row's investigation found (the source sat in `Ready` for the whole of "APT."). Supporting, not proving: the 2026-09-29 observation ran on `24b6ce7`, an `AUD-15` branch build that does not have `b64c8cd` in its history. No phone session, `dbus-monitor` capture or Debug-level log read was done to confirm it, so which of the dossier's causes (a)/(b)/(c) it was is still unknown. 🟡 **INVESTIGATED 2026-09-30, NOT BUILT — held for a phone session.** The missing re-identification is **not** in the fingerprint pipeline: the 2026-09-29 file sink shows the BT source sat in **`Ready` from 15:58:10 to 16:00:51** while "APT." played, and the identification loop only samples a `Playing` source. The one sample taken was correctly dropped as pre-track (`AUD-33`). A sibling of `AUD-12`'s stall. _Filed 2026-09-29 as "BT album art is lost when the recognition sample straddles a track change"._ — [detail](queue/AUD-77.md)

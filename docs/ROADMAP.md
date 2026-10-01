@@ -224,8 +224,8 @@ so the BAND view, signal colours, preset bar and knob behave the same on all of 
 - **Plus an HF/MW antenna** (active wideband loop or long wire).
 
 **Status**: owner decided 2026-10-01 not to change hardware now (*"There are not many AM stations
-nearby"*). Picks up when the owner buys hardware. Until then, `AUD-94`'s software-only option (show AM/SW as
-unavailable in the panel) remains an open owner decision.
+nearby"*). Picks up when the owner buys hardware. **2026-10-02:** `AUD-94`'s software-only option (show AM/SW as
+unavailable in the panel) is declined for now — owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."* AM/SW stay as they are until then.
 
 ### Voice control — Home Assistant Assist integration (queued 2026-08-09)
 
