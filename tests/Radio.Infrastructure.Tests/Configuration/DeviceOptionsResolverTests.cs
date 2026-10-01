@@ -20,7 +20,6 @@ public class DeviceOptionsResolverTests
     _optionsMonitor = new Mock<IOptionsMonitor<DeviceOptions>>();
     _optionsMonitor.Setup(x => x.CurrentValue).Returns(new DeviceOptions
     {
-      Radio = new RadioDeviceOptions { USBPort = "fallback-radio" },
       Vinyl = new VinylDeviceOptions { USBPort = "fallback-vinyl" },
     });
 
@@ -33,8 +32,6 @@ public class DeviceOptionsResolverTests
   [Fact]
   public async Task GetDeviceOptionsAsync_ReadsFromConfigStore()
   {
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Radio", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync("{\"usbPort\":\"AB13X\"}");
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync("{\"usbPort\":\"TurntableUSB\"}");
 
@@ -42,7 +39,6 @@ public class DeviceOptionsResolverTests
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    Assert.Equal("AB13X", result.Radio.USBPort);
     Assert.Equal("TurntableUSB", result.Vinyl.USBPort);
   }
 
@@ -56,7 +52,6 @@ public class DeviceOptionsResolverTests
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    Assert.Equal("fallback-radio", result.Radio.USBPort);
     Assert.Equal("fallback-vinyl", result.Vinyl.USBPort);
   }
 
@@ -67,7 +62,6 @@ public class DeviceOptionsResolverTests
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    Assert.Equal("fallback-radio", result.Radio.USBPort);
     Assert.Equal("fallback-vinyl", result.Vinyl.USBPort);
   }
 
@@ -81,31 +75,12 @@ public class DeviceOptionsResolverTests
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    Assert.Equal("fallback-radio", result.Radio.USBPort);
-  }
-
-  [Fact]
-  public async Task GetRadioUSBPortAsync_ReturnsConfigStoreValue()
-  {
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Radio", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync("{\"usbPort\":\"AB13X\"}");
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync((string?)null);
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Cast", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync((string?)null);
-
-    var resolver = new DeviceOptionsResolver(_logger, _optionsMonitor.Object, _configManager.Object);
-
-    var port = await resolver.GetRadioUSBPortAsync();
-
-    Assert.Equal("AB13X", port);
+    Assert.Equal("fallback-vinyl", result.Vinyl.USBPort);
   }
 
   [Fact]
   public async Task GetVinylUSBPortAsync_ReturnsConfigStoreValue()
   {
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Radio", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync((string?)null);
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync("{\"usbPort\":\"TurntableUSB\"}");
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Cast", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
@@ -121,10 +96,8 @@ public class DeviceOptionsResolverTests
   [Fact]
   public async Task GetDeviceOptionsAsync_HandlesInvalidJson_GracefullyFallsBack()
   {
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Radio", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync("not-valid-json");
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync((string?)null);
+      .ReturnsAsync("not-valid-json");
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Cast", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync((string?)null);
 
@@ -132,37 +105,32 @@ public class DeviceOptionsResolverTests
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    // Invalid JSON for Radio falls back to IOptionsMonitor value
-    Assert.Equal("fallback-radio", result.Radio.USBPort);
+    // Invalid JSON for Vinyl falls back to IOptionsMonitor value
+    Assert.Equal("fallback-vinyl", result.Vinyl.USBPort);
   }
 
   [Fact]
-  public async Task GetDeviceOptionsAsync_MixesConfigStoreAndFallback()
+  public async Task GetDeviceOptionsAsync_ReadsLowercaseKey_WhenExactKeyIsAbsent()
   {
-    // Radio configured in config store, Vinyl not
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Radio", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync("{\"usbPort\":\"AB13X\"}");
+    // The Web UI posts camelCase JSON, so a UI save writes "devices:vinyl", not "devices:Vinyl".
     _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync((string?)null);
-    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:Cast", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync((string?)null);
+    _configManager.Setup(x => x.GetValueAsync<string>("sqlite", "devices:vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync("{\"usbPort\":\"TurntableUSB\"}");
 
     var resolver = new DeviceOptionsResolver(_logger, _optionsMonitor.Object, _configManager.Object);
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    Assert.Equal("AB13X", result.Radio.USBPort);
-    Assert.Equal("fallback-vinyl", result.Vinyl.USBPort);
+    Assert.Equal("TurntableUSB", result.Vinyl.USBPort);
   }
 
   [Fact]
   public async Task GetDeviceOptionsAsync_UsesJsonConfigStoreId_WhenNotSqlite()
   {
     _configManager.Setup(x => x.CurrentStoreType).Returns(ConfigurationStoreType.Json);
-    _configManager.Setup(x => x.GetValueAsync<string>("config", "devices:Radio", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync("{\"usbPort\":\"AB13X\"}");
     _configManager.Setup(x => x.GetValueAsync<string>("config", "devices:Vinyl", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync((string?)null);
+      .ReturnsAsync("{\"usbPort\":\"TurntableUSB\"}");
     _configManager.Setup(x => x.GetValueAsync<string>("config", "devices:Cast", It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
       .ReturnsAsync((string?)null);
 
@@ -170,6 +138,6 @@ public class DeviceOptionsResolverTests
 
     var result = await resolver.GetDeviceOptionsAsync();
 
-    Assert.Equal("AB13X", result.Radio.USBPort);
+    Assert.Equal("TurntableUSB", result.Vinyl.USBPort);
   }
 }

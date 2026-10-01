@@ -117,8 +117,8 @@ public sealed class SqliteConfigurationProvider : ConfigurationProvider
 
   /// <summary>
   /// Flattens a JSON object/array value into hierarchical configuration keys.
-  /// E.g., key="devices:Radio", value={"USBPort":"AB13X"}
-  ///   → data["devices:Radio:USBPort"] = "AB13X"
+  /// E.g., key="devices:Vinyl", value={"USBPort":"USB Microphone"}
+  ///   → data["devices:Vinyl:USBPort"] = "USB Microphone"
   /// </summary>
   private static void FlattenJson(string prefix, string json, Dictionary<string, string?> data)
   {

@@ -278,10 +278,6 @@
                 </RadzenAlert>
               </RadzenColumn>
               <RadzenColumn Size="12" SizeMD="6">
-                <RadzenTextBox @bind-Value="_deviceOptions.Radio.USBPort" Placeholder="Radio USB Audio (RF320 only)" Style="width:100%" />
-                <small>Leave empty if using RTL-SDR. Only set for RF320 USB audio capture.</small>
-              </RadzenColumn>
-              <RadzenColumn Size="12" SizeMD="6">
                 <RadzenTextBox @bind-Value="_deviceOptions.Vinyl.USBPort" Placeholder="Vinyl Audio Device" Style="width:100%" />
                 <small>USB audio device name pattern for turntable (e.g., USB Microphone)</small>
               </RadzenColumn>
@@ -2150,7 +2146,7 @@
   };
   private static readonly List<DropDownItem> _radioDeviceOptions = new()
   {
-    new("RTL-SDR", "RTLSDRCore"), new("Raddy RF320", "RF320")
+    new("RTL-SDR", "RTLSDRCore")
   };
   private static readonly List<DropDownItem> _audioQualityOptions = new()
   {
@@ -2937,8 +2933,7 @@
       if (success)
       {
         NotificationService.Notify(NotificationSeverity.Success, "Success", "Device configuration saved successfully");
-        Logger.LogInformation("Device configuration updated: Radio USB={RadioUSB}, Vinyl USB={VinylUSB}", 
-          _deviceOptions.Radio.USBPort, _deviceOptions.Vinyl.USBPort);
+        Logger.LogInformation("Device configuration updated: Vinyl USB={VinylUSB}", _deviceOptions.Vinyl.USBPort);
         StateHasChanged(); // Refresh UI to reflect any server-side normalizations
       }
       else

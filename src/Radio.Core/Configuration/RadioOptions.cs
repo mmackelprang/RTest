@@ -13,7 +13,8 @@ public class RadioOptions
 
   /// <summary>
   /// Gets or sets the default radio device type.
-  /// Supported values: "RTLSDRCore", "RF320"
+  /// The only supported value is "RTLSDRCore". Any other value is unavailable, so
+  /// <c>RadioFactory.GetDefaultDeviceType</c> falls back to the first available device.
   /// </summary>
   public string DefaultDevice { get; set; } = "RTLSDRCore";
 

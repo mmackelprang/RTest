@@ -36,7 +36,8 @@ internal sealed class FakeRadioSource : IAudioSource, IRadioControl
 
   /// <summary>
   /// When true, <see cref="SetBandAsync"/> records the call and leaves <see cref="CurrentBand"/>
-  /// alone — the RF320's behaviour, where the band selector is a physical switch.
+  /// alone — a tuner that completes <c>SetBandAsync</c> without switching (as the RF320 USB radio,
+  /// removed by AUD-16, did).
   /// </summary>
   public bool IgnoresBandChanges { get; set; }
 

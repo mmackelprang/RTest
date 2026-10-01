@@ -52,10 +52,10 @@ public class DeviceOptionsResolver
       var storeId = _configManager.CurrentStoreType == ConfigurationStoreType.Sqlite
         ? "sqlite" : "config";
 
+      // Only the keys named here are read. A store that still holds the removed RF320's
+      // "devices:radio" / "devices:Radio" rows is not an error: nothing asks for them.
       var result = new DeviceOptions
       {
-        Radio = await ResolveNestedAsync<RadioDeviceOptions>(storeId, "devices:Radio", ct)
-                ?? fallback.Radio ?? new RadioDeviceOptions(),
         Vinyl = await ResolveNestedAsync<VinylDeviceOptions>(storeId, "devices:Vinyl", ct)
                 ?? fallback.Vinyl ?? new VinylDeviceOptions(),
       };
@@ -67,15 +67,6 @@ public class DeviceOptionsResolver
       _logger.LogWarning(ex, "Failed to read DeviceOptions from config store, using appsettings fallback");
       return fallback;
     }
-  }
-
-  /// <summary>
-  /// Gets just the Radio USB port, reading from config store first.
-  /// </summary>
-  public async Task<string> GetRadioUSBPortAsync(CancellationToken ct = default)
-  {
-    var options = await GetDeviceOptionsAsync(ct);
-    return options.Radio?.USBPort ?? "";
   }
 
   /// <summary>
@@ -118,14 +109,14 @@ public class DeviceOptionsResolver
 
   /// <summary>
   /// Reads a nested object from the config store, where the value is stored as
-  /// serialized JSON (e.g., key "devices:Radio" → value '{"usbPort":"AB13X"}').
+  /// serialized JSON (e.g., key "devices:Vinyl" → value '{"usbPort":"USB Microphone"}').
   /// Tries the exact key first, then a lowercase variant, since the config controller
   /// preserves the casing from the JSON payload.
   /// </summary>
   private async Task<T?> ResolveNestedAsync<T>(string storeId, string key, CancellationToken ct)
     where T : class
   {
-    // Try exact key first (e.g., "devices:Radio"), then lowercase (e.g., "devices:radio")
+    // Try exact key first (e.g., "devices:Vinyl"), then lowercase (e.g., "devices:vinyl")
     var raw = await _configManager!.GetValueAsync<string>(storeId, key, ct: ct);
     if (string.IsNullOrWhiteSpace(raw))
     {

@@ -16,7 +16,8 @@ namespace Radio.Infrastructure.Tests.Audio.Sources;
 ///
 /// <para>
 /// The SOURCE overlay composes its band rows from this list, so a tuner that over-reports puts a
-/// row on screen whose commit does nothing. These two assertions are what stop that.
+/// row on screen whose commit does nothing. This assertion is what stops that for the RTL-SDR,
+/// the only tuner since AUD-16 removed the RF320 USB radio.
 /// </para>
 /// </summary>
 public class RadioControlCapabilityTests
@@ -26,23 +27,6 @@ public class RadioControlCapabilityTests
     var monitor = new Mock<IOptionsMonitor<RadioOptions>>();
     monitor.Setup(o => o.CurrentValue).Returns(new RadioOptions());
     return monitor;
-  }
-
-  [Fact]
-  public void Rf320_ReportsFmOnly_BecauseItsBandSetterIsANoOp()
-  {
-    var deviceOptions = new Mock<IOptionsMonitor<DeviceOptions>>();
-    deviceOptions.Setup(o => o.CurrentValue).Returns(new DeviceOptions());
-
-    var source = new RadioAudioSource(
-      Mock.Of<ILogger<RadioAudioSource>>(),
-      deviceOptions.Object,
-      RadioOptionsMonitor().Object,
-      Mock.Of<IAudioDeviceManager>());
-
-    // RadioAudioSource.SetBandAsync logs a warning and returns without touching the device, so any
-    // band beyond FM would be a row the overlay offers and the tuner ignores.
-    Assert.Equal(new[] { RadioBand.FM }, source.SupportedBands);
   }
 
   [Fact]

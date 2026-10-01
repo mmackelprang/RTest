@@ -61,7 +61,7 @@ public class RadioSourceCreationTest : IPhaseTest
 
   public string TestId => "P3-001";
   public string TestName => "Radio Source Creation";
-  public string Description => "Create USB radio source and verify initialization";
+  public string Description => "Enumerate capture devices and verify the device manager's USB port reservation";
   public int Phase => 3;
 
   public RadioSourceCreationTest(IServiceProvider serviceProvider)

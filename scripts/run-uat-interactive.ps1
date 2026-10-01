@@ -15,7 +15,7 @@ Write-Host ""
 Write-Host "Interactive User Acceptance Testing Tool" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "IMPORTANT:" -ForegroundColor Red
-Write-Host "   - This requires real radio hardware (RTL-SDR, RF320, etc.)" -ForegroundColor Yellow
+Write-Host "   - This requires real radio hardware (RTL-SDR)" -ForegroundColor Yellow
 Write-Host "   - Audio output devices must be configured" -ForegroundColor Yellow
 Write-Host "   - Tests will produce audible audio output" -ForegroundColor Yellow
 Write-Host ""

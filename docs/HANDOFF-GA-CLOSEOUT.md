@@ -161,6 +161,18 @@ nothing in `Radio.Tools.AudioUAT` or the `SourceSelector` list still enumerates 
 `CacheAvrcpArtAsync`'s unreachable branch, fix the "MPRIS" comment and log strings; BT art keeps
 coming from song recognition. Scope in [`queue/AUD-17.md`](queue/AUD-17.md).
 
+**Status 2026-09-30 (batch B; `AUD-16` updated 2026-10-01):**
+- ✅ `AUD-36` archived ([#741](https://github.com/mmackelprang/RTest/pull/741)).
+- ✅🔬 `AUD-17` shipped ([#742](https://github.com/mmackelprang/RTest/pull/742)). The owner's BT
+  album-art check is left.
+- ✅ `AUD-16` archived ([#743](https://github.com/mmackelprang/RTest/pull/743), squash `a4bad7c`).
+  Neither `Radio.Tools.AudioUAT` nor the source selector enumerates the RF320 any more. Owner:
+  *"merge and deploy AUD-16"*. It was deployed 2026-09-30 ~21:51 EDT and SHA-verified on both services,
+  with the kiosk live. **It was agent-verified on the box, not owner-run.** `/api/radio/devices` lists
+  only `RTLSDRCore`, the RF320 field and dropdown option are gone, the sources switch, and the SDR
+  came back on 92.3 FM. Evidence is in [`queue/AUD-16.md`](queue/AUD-16.md); nothing is left for the
+  owner.
+
 ### 2j. Test & ops hygiene
 
 `TEST-10` (wall-clock race, `TEST-4` shape) · `TEST-5` (document the Windows-only resampler

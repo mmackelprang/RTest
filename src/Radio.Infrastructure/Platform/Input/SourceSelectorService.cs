@@ -240,11 +240,12 @@ public sealed class SourceSelectorService : IDisposable
   /// Sets the band and restores that band's last-tuned frequency.
   ///
   /// <para>
-  /// The read-back is not defensive noise. <c>RadioAudioSource.SetBandAsync</c> logs a warning and
-  /// returns <c>Task.CompletedTask</c> — it succeeds and does nothing — so a commit that trusted the
-  /// absence of an exception would report a band change that never happened. The row for such a band
-  /// is normally dimmed by <c>SupportedBands</c> composition and never reaches here; this covers a
-  /// tuner swapped underneath a composed list.
+  /// The read-back is deliberate. <see cref="IRadioControl.SetBandAsync"/> does not promise that the
+  /// band changed: a tuner may complete the call without switching (the RF320 USB radio, removed by
+  /// AUD-16, did exactly that), so a commit that trusted the absence of an exception could report a
+  /// band change that never happened. The row for an unsupported band is normally dimmed by
+  /// <c>SupportedBands</c> composition and never reaches here; this covers a tuner swapped underneath
+  /// a composed list, or one that silently declines.
   /// </para>
   /// </summary>
   private async Task ApplyBandAsync(IRadioControl radio, RadioBand band)

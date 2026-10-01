@@ -593,7 +593,6 @@ public class QueueHistoryPanelTests : TestContext
   [InlineData("TestTone", 3, false, QueueHistoryPanel.TabHistory)]
   [InlineData("RTLSDRCore", 3, false, QueueHistoryPanel.TabRadio)]
   [InlineData("Radio", 0, false, QueueHistoryPanel.TabRadio)]
-  [InlineData("RF320", 0, false, QueueHistoryPanel.TabRadio)]
   [InlineData("Bluetooth", 3, false, QueueHistoryPanel.TabBluetooth)]
   [InlineData("Bluetooth", 3, true, QueueHistoryPanel.TabHistory)]
   [InlineData(null, 3, false, QueueHistoryPanel.TabHistory)]

@@ -221,26 +221,10 @@ public class UpdateConfigurationRequest
 public class DeviceOptionsDto
 {
   /// <summary>
-  /// Gets or sets the radio device options.
-  /// </summary>
-  public RadioDeviceOptionsDto Radio { get; set; } = new();
-
-  /// <summary>
   /// Gets or sets the vinyl device options.
   /// </summary>
   public VinylDeviceOptionsDto Vinyl { get; set; } = new();
 
-}
-
-/// <summary>
-/// Radio device USB port configuration.
-/// </summary>
-public class RadioDeviceOptionsDto
-{
-  /// <summary>
-  /// Gets or sets the USB port path for the radio device.
-  /// </summary>
-  public string USBPort { get; set; } = "/dev/ttyUSB0";
 }
 
 /// <summary>

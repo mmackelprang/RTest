@@ -24,8 +24,8 @@ public static class RadioStateMapper
   // the dedicated <see cref="RadioStateDto.Clip"/> flag plus the
   // <see cref="RadioStateDto.RssiDbu"/> calibrated readout.
   //
-  // The fit is linear because no calibrated curve is exposed by the RTL-SDR
-  // or RF320 drivers — see the plan's open question #1. 0% → -60 dBu (noise
+  // The fit is linear because the RTL-SDR driver exposes no calibrated
+  // curve — see the plan's open question #1. 0% → -60 dBu (noise
   // floor), 100% → 0 dBu (full-scale reference).
 
   public const double SignalMinDbu = -60.0;

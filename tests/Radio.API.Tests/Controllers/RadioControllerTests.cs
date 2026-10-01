@@ -778,29 +778,22 @@ public class RadioControllerTests : IClassFixture<CustomWebApplicationFactory<Pr
     }
   }
 
+  /// <summary>
+  /// AUD-16 removed the RF320 USB radio. Its device-type string is now an ordinary unknown type:
+  /// never listed, and refused by select with the same 400 as any other unavailable type.
+  /// </summary>
   [Fact]
-  public async Task DeviceCapabilities_RF320_HasExpectedFeatures()
+  public async Task RemovedRf320DeviceType_IsNotListed_AndSelectReturnsBadRequest()
   {
-    // Act
-    var response = await _client.GetAsync("/api/radio/devices");
-
-    // Assert
-    Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-    var deviceList = await response.Content.ReadFromJsonAsync<RadioDeviceListDto>();
+    var listResponse = await _client.GetAsync("/api/radio/devices");
+    Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+    var deviceList = await listResponse.Content.ReadFromJsonAsync<RadioDeviceListDto>();
     Assert.NotNull(deviceList);
+    Assert.DoesNotContain(deviceList.Devices, d => d.DeviceType == "RF320");
 
-    var rf320 = deviceList.Devices.FirstOrDefault(d => d.DeviceType == "RF320");
-    if (rf320 != null)
-    {
-      // RF320 has limited software control (Bluetooth/USB audio only)
-      Assert.False(rf320.Capabilities.SupportsSoftwareControl);
-      Assert.False(rf320.Capabilities.SupportsFrequencyControl);
-      Assert.False(rf320.Capabilities.SupportsBandSwitching);
-      Assert.False(rf320.Capabilities.SupportsScanning);
-      Assert.False(rf320.Capabilities.SupportsGainControl);
-      Assert.True(rf320.Capabilities.SupportsEqualizer); // Hardware EQ
-      Assert.True(rf320.Capabilities.SupportsDeviceVolume); // Hardware volume
-    }
+    var selectResponse = await _client.PostAsJsonAsync(
+      "/api/radio/devices/select", new SelectRadioDeviceRequest { DeviceType = "RF320" });
+    Assert.Equal(HttpStatusCode.BadRequest, selectResponse.StatusCode);
   }
 
   #endregion

@@ -16,19 +16,16 @@ namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 public class StandardMetadataTests : IDisposable
 {
   private readonly Mock<ILogger<FilePlayerAudioSource>> _filePlayerLoggerMock;
-  private readonly Mock<ILogger<RadioAudioSource>> _radioLoggerMock;
   private readonly Mock<ILogger<VinylAudioSource>> _vinylLoggerMock;
   private readonly Mock<IOptionsMonitor<FilePlayerOptions>> _filePlayerOptionsMock;
   private readonly Mock<IOptionsMonitor<FilePlayerPreferences>> _filePlayerPreferencesMock;
   private readonly Mock<IOptionsMonitor<DeviceOptions>> _deviceOptionsMock;
-  private readonly Mock<IOptionsMonitor<RadioOptions>> _radioOptionsMock;
   private readonly Mock<IAudioDeviceManager> _deviceManagerMock;
   private readonly string _testDir;
 
   public StandardMetadataTests()
   {
     _filePlayerLoggerMock = new Mock<ILogger<FilePlayerAudioSource>>();
-    _radioLoggerMock = new Mock<ILogger<RadioAudioSource>>();
     _vinylLoggerMock = new Mock<ILogger<VinylAudioSource>>();
     _deviceManagerMock = new Mock<IAudioDeviceManager>();
 
@@ -54,21 +51,11 @@ public class StandardMetadataTests : IDisposable
 
     var deviceOptions = new DeviceOptions
     {
-      Radio = new RadioDeviceOptions { USBPort = "test-radio-port" },
       Vinyl = new VinylDeviceOptions { USBPort = "test-vinyl-port" }
     };
 
     _deviceOptionsMock = new Mock<IOptionsMonitor<DeviceOptions>>();
     _deviceOptionsMock.Setup(o => o.CurrentValue).Returns(deviceOptions);
-
-    var radioOptions = new RadioOptions
-    {
-      DefaultDevice = "RTLSDRCore",
-      DefaultDeviceVolume = 50
-    };
-
-    _radioOptionsMock = new Mock<IOptionsMonitor<RadioOptions>>();
-    _radioOptionsMock.Setup(o => o.CurrentValue).Returns(radioOptions);
 
     // Setup device manager to indicate ports are not in use
     _deviceManagerMock.Setup(m => m.IsUSBPortInUse(It.IsAny<string>())).Returns(false);
@@ -191,34 +178,6 @@ public class StandardMetadataTests : IDisposable
   }
 
   [Fact]
-  public async Task RadioAudioSource_UsesStandardMetadataKeys()
-  {
-    // Arrange
-    var source = new RadioAudioSource(
-      _radioLoggerMock.Object,
-      _deviceOptionsMock.Object,
-      _radioOptionsMock.Object,
-      _deviceManagerMock.Object);
-
-    // Act
-    try
-    {
-      await source.PlayAsync();
-    }
-    catch
-    {
-      // Expected to fail due to missing actual device, but metadata should still be set
-    }
-
-    // Assert - Standard keys should exist with defaults
-    Assert.Contains(StandardMetadataKeys.Title, source.Metadata.Keys);
-    Assert.Equal("Radio", source.Metadata[StandardMetadataKeys.Title]);
-    Assert.Equal(StandardMetadataKeys.DefaultArtist, source.Metadata[StandardMetadataKeys.Artist]);
-    Assert.Equal(StandardMetadataKeys.DefaultAlbum, source.Metadata[StandardMetadataKeys.Album]);
-    Assert.Equal(StandardMetadataKeys.DefaultAlbumArtUrl, source.Metadata[StandardMetadataKeys.AlbumArtUrl]);
-  }
-
-  [Fact]
   public async Task VinylAudioSource_UsesStandardMetadataKeys()
   {
     // Arrange
@@ -246,20 +205,6 @@ public class StandardMetadataTests : IDisposable
   }
 
   [Fact]
-  public void RadioAudioSource_Metadata_IsObjectType()
-  {
-    // Arrange
-    var source = new RadioAudioSource(
-      _radioLoggerMock.Object,
-      _deviceOptionsMock.Object,
-      _radioOptionsMock.Object,
-      _deviceManagerMock.Object);
-
-    // Assert - Verify metadata is IReadOnlyDictionary<string, object>
-    Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(source.Metadata);
-  }
-
-  [Fact]
   public void VinylAudioSource_Metadata_IsObjectType()
   {
     // Arrange
@@ -272,7 +217,7 @@ public class StandardMetadataTests : IDisposable
     Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(source.Metadata);
   }
 
-  // Note: Tests for fingerprinting integration with RadioAudioSource, VinylAudioSource, and FilePlayerAudioSource
+  // Note: Tests for fingerprinting integration with VinylAudioSource and FilePlayerAudioSource
   // require an actual BackgroundIdentificationService instance since it's a sealed class.
   // The integration is tested through integration tests with the full service stack.
   // Unit tests verify that:
