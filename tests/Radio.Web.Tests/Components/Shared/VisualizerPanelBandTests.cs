@@ -700,6 +700,39 @@ public class VisualizerPanelBandTests : TestContext
       TimeSpan.FromSeconds(5));
   }
 
+  private string[] AxisLabelClasses(IRenderedComponent<VisualizerPanel> cut) =>
+    cut.FindAll(".visualizer-axis.is-band span").Select(s => s.GetAttribute("class") ?? "").ToArray();
+
+  [Fact]
+  public void Axis_LabelClasses_FmOnlyItsLastIsEndAligned()
+  {
+    var cut = RenderBand();
+
+    AxisLabelClasses(cut).Should().Equal("", "", "", "", "", "is-edge-end");
+  }
+
+  [Fact]
+  public void Axis_LabelClasses_VhfWindowWithTicksAtBothEdges()
+  {
+    GetJson("/api/radio/bandmap", BandMap("VHF", 161_500_000, 163_500_000, 161_500_000, 163_500_000, 12_500));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("161.5", "162.0", "162.5", "163.0", "163.5 MHz"));
+    AxisLabelClasses(cut).Should().Equal("is-edge-start", "", "", "", "is-edge-end");
+  }
+
+  [Fact]
+  public void Axis_LabelClasses_WbLastLabelIsCentred()
+  {
+    GetJson("/api/radio/bandmap", WbMap());
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().HaveCount(4));
+    AxisLabelClasses(cut).Should().Equal("", "", "", "");
+  }
+
   [Fact]
   public async Task HubRepeatedTick_SameFrequency_DoesNotRedraw()
   {
