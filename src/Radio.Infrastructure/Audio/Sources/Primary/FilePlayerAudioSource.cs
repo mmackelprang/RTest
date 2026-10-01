@@ -536,7 +536,8 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       return;
     }
 
-    // Update preference
+    // UI-28: write the store BEFORE the in-memory value. See PersistPlaybackModeAsync.
+    await PersistPlaybackModeAsync(nameof(FilePlayerPreferences.Shuffle), enabled.ToString());
     _preferences.CurrentValue.Shuffle = enabled;
     Logger.LogInformation("Shuffle mode set to {Enabled}", enabled);
 
@@ -610,20 +611,81 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <inheritdoc/>
-  public override Task SetRepeatModeAsync(RepeatMode mode, CancellationToken cancellationToken = default)
+  public override async Task SetRepeatModeAsync(RepeatMode mode, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
 
     if (_preferences.CurrentValue.Repeat == mode)
     {
       Logger.LogDebug("Repeat mode already set to {Mode}", mode);
-      return Task.CompletedTask;
+      return;
     }
 
+    // UI-28: write the store BEFORE the in-memory value. See PersistPlaybackModeAsync.
+    await PersistPlaybackModeAsync(nameof(FilePlayerPreferences.Repeat), mode.ToString());
     _preferences.CurrentValue.Repeat = mode;
     Logger.LogInformation("Repeat mode set to {Mode}", mode);
-    
-    return Task.CompletedTask;
+  }
+
+  /// <summary>
+  /// UI-28. Writes one shuffle/repeat key straight to the configuration store.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// <see cref="IsShuffleEnabled"/> and <see cref="RepeatMode"/> read <c>_preferences.CurrentValue</c>, and
+  /// that object is a cache, not storage: every <c>IConfigurationManager.SetValueAsync</c> anywhere in the
+  /// process reloads the SQLite configuration provider, and the options monitor then rebuilds
+  /// <c>CurrentValue</c> from configuration. Before this write existed, Shuffle and Repeat lived only in
+  /// the cached object until <c>PreferencesPersistenceService</c>'s next 30-second save, so any reload in
+  /// that window put them back to their stored values. Measured on the box 2026-10-01: the Web queue panel's
+  /// <c>queue.state</c> save (one per <c>QueueChanged</c>, and toggling shuffle reorders the queue) reloaded
+  /// within 1–10 s of each toggle; the next position broadcast then showed the buttons off, and Repeat had
+  /// genuinely stopped applying.
+  /// </para>
+  /// <para>
+  /// Written with <c>IConfigurationStore.SetEntriesAsync</c>, which does not itself reload, so this write
+  /// does not wipe the other values that still live only in <c>CurrentValue</c> (the song position, for
+  /// one). The store is written first so that a reload which starts after the write reads the new value.
+  /// A reload already in flight when the write lands can still read the old one; that window is the time
+  /// between the provider's SQLite read and its change token firing.
+  /// </para>
+  /// <para>
+  /// A store failure is logged and swallowed: the in-memory value is still set, so the toggle works until
+  /// the next reload, which is how it behaved before this method existed.
+  /// </para>
+  /// </remarks>
+  private async Task PersistPlaybackModeAsync(string property, string value)
+  {
+    if (_configurationManager == null)
+    {
+      return;
+    }
+
+    try
+    {
+      var mainStoreId = _configurationManager.CurrentStoreType ==
+        Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
+
+      IConfigurationStore store;
+      try
+      {
+        store = await _configurationManager.GetStoreAsync(mainStoreId);
+      }
+      catch
+      {
+        store = await _configurationManager.CreateStoreAsync(mainStoreId);
+      }
+
+      await store.SetEntriesAsync(new List<ConfigurationEntry>
+      {
+        new() { Key = $"{FilePlayerPreferences.SectionName}:{property}", Value = value }
+      });
+      await store.SaveAsync();
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Failed to persist {Property} to the configuration store", property);
+    }
   }
 
   /// <inheritdoc/>
