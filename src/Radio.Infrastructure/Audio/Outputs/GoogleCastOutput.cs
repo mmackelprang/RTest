@@ -951,9 +951,11 @@ public class GoogleCastOutput : AudioOutputBase
     _directChannel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
     _directChannel.Client = _client!;
 
-    // Register the channel with SharpCaster's internal channel list so incoming
-    // messages on our namespace get routed to OnMessageReceived. SharpCaster v3.0.0
-    // has no public RegisterChannel API, so we inject via reflection.
+    // Register the channel with SharpCaster's internal channel list (replacing any earlier
+    // one for this namespace) so SharpCaster routes our namespace to it. SharpCaster v3.0.0
+    // has no public RegisterChannel API, so we inject via reflection. Routing to the channel
+    // is not delivery: SharpCaster drops the receiver's `pong` before OnMessageReceived —
+    // see the remarks on RegisterCustomChannel.
     RegisterCustomChannel(_client!, _directChannel);
 
     // Create the streaming service and start sending audio. The loss report is armed
@@ -1045,63 +1047,138 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// Registers a custom channel with SharpCaster's internal channel list via reflection.
-  /// SharpCaster v3.0.0 has no public API for this, but the Channels property is a
-  /// List&lt;IChromecastChannel&gt; that we can append to.
+  /// Registers a custom channel with SharpCaster's internal channel list via reflection,
+  /// REPLACING any channel already registered for the same namespace. SharpCaster v3.0.0 has
+  /// no public API for this; its private <c>Channels</c> property is an
+  /// <c>IEnumerable&lt;IChromecastChannel&gt;</c> that we swap for a new array.
   /// </summary>
-  private void RegisterCustomChannel(ChromecastClient client, DirectCastAudioChannel channel)
+  /// <remarks>
+  /// <para>
+  /// AUD-54 (2). This used to append, so every StartAsync on a reused client added one more
+  /// <see cref="DirectCastAudioChannel"/> for the namespace. SharpCaster's receive loop
+  /// (<c>ChromecastClient.Receive</c>) routes an inbound message to
+  /// <c>Channels.FirstOrDefault(c =&gt; c.Namespace == castMessage.Namespace)</c> — the FIRST
+  /// match — so after one Stop/Start the live streaming service's channel was never the one
+  /// chosen. Replacing by namespace keeps exactly one channel per namespace, and the
+  /// <c>total channels</c> count in the log line stays constant across Stop/Start.
+  /// </para>
+  /// <para>
+  /// What this does NOT fix (verified by decompiling SharpCaster 3.0.0, <c>lib/net9.0</c>):
+  /// even the first channel never receives the receiver's <c>pong</c>. In
+  /// <c>ChromecastClient.Receive</c>, after choosing the channel, a message is dispatched to
+  /// <c>OnMessageReceived</c> only if its <c>type</c> is a key of the private
+  /// <c>MessageTypes</c> dictionary, built with the default (case-sensitive) comparer from the
+  /// <c>Type</c> of SharpCaster's own registered messages (<c>PongMessage</c>'s is
+  /// <c>"PONG"</c>). Our receiver sends <c>type: 'pong'</c>, which is not a key, so the loop
+  /// takes its else branch — a log call when the client has a logger (ours has none) and
+  /// <c>Debugger.Break()</c> — and the message is never delivered. It does still restart the
+  /// heartbeat timeout, which runs for any non-heartbeat channel's message before the type check.
+  /// So <c>DirectCastStreamingService.LastRttMs</c> stays 0 regardless of this method.
+  /// </para>
+  /// <para>
+  /// The swap is a single reference assignment, so the receive loop enumerates either the old
+  /// array or the new one, never a half-built one. It is not ordered against SharpCaster's own
+  /// rebuild of the list in <c>RecreateHeartbeatChannel</c> (run by its DisconnectAsync); a
+  /// collision there can lose one of the two writes.
+  /// </para>
+  /// <c>internal</c> so a test can drive it against a real, unconnected
+  /// <see cref="ChromecastClient"/>.
+  /// </remarks>
+  internal void RegisterCustomChannel(ChromecastClient client, DirectCastAudioChannel channel)
   {
     try
     {
-      // SharpCaster stores channels as IEnumerable<IChromecastChannel> backed by an array.
-      // We need to replace it with a new array that includes our custom channel.
-      var prop = client.GetType().GetProperty("Channels",
-        System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-      if (prop == null)
+      if (!TryRewriteChannels(client, existing =>
+          existing.Where(ch => !(ch is Sharpcaster.Interfaces.IChromecastChannel c && c.Namespace == channel.Namespace))
+            .Append(channel)
+            .ToList(), out var count))
       {
-        _logger.LogWarning("Cast: Could not find Channels property on ChromecastClient");
         return;
-      }
-
-      var existing = prop.GetValue(client) as System.Collections.IEnumerable;
-      if (existing == null)
-      {
-        _logger.LogWarning("Cast: Channels property is null");
-        return;
-      }
-
-      // Build a new list from existing channels + our custom one
-      var newList = new List<object>();
-      foreach (var ch in existing)
-      {
-        newList.Add(ch);
-      }
-      newList.Add(channel);
-
-      // Convert to array of the interface type
-      var interfaceType = prop.PropertyType.GetGenericArguments().FirstOrDefault();
-      if (interfaceType != null)
-      {
-        var arr = Array.CreateInstance(interfaceType, newList.Count);
-        for (int i = 0; i < newList.Count; i++)
-        {
-          arr.SetValue(newList[i], i);
-        }
-        prop.SetValue(client, arr);
-      }
-      else
-      {
-        // Fallback: set as List
-        prop.SetValue(client, newList);
       }
 
       _logger.LogInformation("Cast: Registered custom channel for namespace {Ns} (total channels: {Count})",
-        channel.Namespace, newList.Count);
+        channel.Namespace, count);
     }
     catch (Exception ex)
     {
       _logger.LogWarning(ex, "Cast: Failed to register custom channel via reflection");
     }
+  }
+
+  /// <summary>
+  /// Removes <paramref name="channel"/> (by reference) from the client it was registered on, if
+  /// it is still there. Never throws. A no-op when the channel has no client or was already
+  /// replaced. <c>internal</c> for the same reason as <see cref="RegisterCustomChannel"/>.
+  /// </summary>
+  internal void UnregisterCustomChannel(DirectCastAudioChannel? channel)
+  {
+    var client = channel?.Client;
+    if (channel == null || client == null)
+    {
+      return;
+    }
+
+    try
+    {
+      var removed = false;
+      if (TryRewriteChannels(client, existing =>
+          {
+            var kept = existing.Where(ch => !ReferenceEquals(ch, channel)).ToList();
+            removed = kept.Count != existing.Count;
+            return kept;
+          }, out var count) && removed)
+      {
+        _logger.LogDebug("Cast: Unregistered custom channel for namespace {Ns} (total channels: {Count})",
+          channel.Namespace, count);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: Failed to unregister custom channel via reflection");
+    }
+  }
+
+  /// <summary>
+  /// Replaces SharpCaster's private <c>Channels</c> with <paramref name="rewrite"/>'s result,
+  /// as an array of the property's element type. False (with a Warning) when the property
+  /// cannot be found or read.
+  /// </summary>
+  private bool TryRewriteChannels(ChromecastClient client, Func<List<object>, List<object>> rewrite, out int count)
+  {
+    count = 0;
+    var prop = client.GetType().GetProperty("Channels",
+      System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+    if (prop == null)
+    {
+      _logger.LogWarning("Cast: Could not find Channels property on ChromecastClient");
+      return false;
+    }
+
+    if (prop.GetValue(client) is not System.Collections.IEnumerable existing)
+    {
+      _logger.LogWarning("Cast: Channels property is null");
+      return false;
+    }
+
+    var newList = rewrite(existing.Cast<object>().ToList());
+
+    var interfaceType = prop.PropertyType.GetGenericArguments().FirstOrDefault();
+    if (interfaceType != null)
+    {
+      var arr = Array.CreateInstance(interfaceType, newList.Count);
+      for (int i = 0; i < newList.Count; i++)
+      {
+        arr.SetValue(newList[i], i);
+      }
+      prop.SetValue(client, arr);
+    }
+    else
+    {
+      prop.SetValue(client, newList);
+    }
+
+    count = newList.Count;
+    return true;
   }
 
   /// <inheritdoc />
@@ -1124,7 +1201,7 @@ public class GoogleCastOutput : AudioOutputBase
       {
         await directStreaming.StopAsync();
         await directStreaming.DisposeAsync();
-        _directChannel = null;
+        UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
         _logger.LogInformation("DirectChannel streaming stopped");
       }
 
@@ -2232,7 +2309,7 @@ public class GoogleCastOutput : AudioOutputBase
     var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
     if (directStreaming != null)
     {
-      _directChannel = null;
+      UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
       try { await directStreaming.DisposeAsync().ConfigureAwait(false); }
       catch (Exception ex) { _logger.LogDebug(ex, "Cast: error stopping DirectChannel streaming after connection loss"); }
     }
@@ -2327,7 +2404,7 @@ public class GoogleCastOutput : AudioOutputBase
     if (directStreaming != null)
     {
       await directStreaming.DisposeAsync();
-      _directChannel = null;
+      UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
     }
 
     lock (_debounceLock)
