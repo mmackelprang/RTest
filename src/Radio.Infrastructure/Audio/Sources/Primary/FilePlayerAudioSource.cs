@@ -643,11 +643,22 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// genuinely stopped applying.
   /// </para>
   /// <para>
+  /// <b>Every case variant of the key is written, not only <c>FilePlayerPreferences:{property}</c>.</b> The
+  /// System Config page saves this section through <c>ConfigurationController</c>, which lowercases the
+  /// section (<c>fileplayerpreferences:shuffle</c>). SQLite keys are case-sensitive, so both rows exist; the
+  /// configuration provider's keys are not, so whichever row it reads last wins. On the box (2026-10-02) the
+  /// lowercase rows from 2026-02-12 sort after the PascalCase ones and hold <c>false</c> / <c>Off</c>, so
+  /// writing the PascalCase key alone would have changed nothing a reload reads. Writing every variant makes
+  /// the read order irrelevant.
+  /// </para>
+  /// <para>
   /// Written with <c>IConfigurationStore.SetEntriesAsync</c>, which does not itself reload, so this write
   /// does not wipe the other values that still live only in <c>CurrentValue</c> (the song position, for
   /// one). The store is written first so that a reload which starts after the write reads the new value.
-  /// A reload already in flight when the write lands can still read the old one; that window is the time
-  /// between the provider's SQLite read and its change token firing.
+  /// Two windows remain, each milliseconds wide: a reload already in flight when the write lands can still
+  /// read the old value (the time between the provider's SQLite read and its change token firing), and
+  /// <c>PreferencesPersistenceService</c>, which serialises <c>CurrentValue</c> before awaiting its own
+  /// write, can land that older snapshot after this write if a toggle falls between the two.
   /// </para>
   /// <para>
   /// A store failure is logged and swallowed: the in-memory value is still set, so the toggle works until
@@ -676,10 +687,17 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
 
-      await store.SetEntriesAsync(new List<ConfigurationEntry>
-      {
-        new() { Key = $"{FilePlayerPreferences.SectionName}:{property}", Value = value }
-      });
+      string key = $"{FilePlayerPreferences.SectionName}:{property}";
+      IReadOnlyList<ConfigurationEntry> existing = await store.GetAllEntriesAsync(ConfigurationReadMode.Raw);
+      List<ConfigurationEntry> writes = existing
+        .Select(e => e.Key)
+        .Where(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+        .Append(key)
+        .Distinct(StringComparer.Ordinal)
+        .Select(k => new ConfigurationEntry { Key = k, Value = value })
+        .ToList();
+
+      await store.SetEntriesAsync(writes);
       await store.SaveAsync();
     }
     catch (Exception ex)

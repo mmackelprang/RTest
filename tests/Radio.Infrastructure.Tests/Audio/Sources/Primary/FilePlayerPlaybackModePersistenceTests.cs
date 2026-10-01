@@ -27,8 +27,10 @@ namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
 /// </para>
 /// <para>
 /// This fixture reproduces that chain with the real options machinery: a configuration provider whose
-/// <c>Load</c> reads a dictionary standing in for the SQLite table (and flattens JSON arrays as
-/// <c>SqliteConfigurationProvider</c> does), and a mocked store whose writes land in the same dictionary.
+/// <c>Load</c> reads a table standing in for the SQLite one (and flattens JSON arrays as
+/// <c>SqliteConfigurationProvider</c> does), and a mocked store whose writes land in the same table. Like
+/// SQLite, the table's keys are case-sensitive and kept in insertion order; like the provider, a load folds
+/// them case-insensitively, so the row read last wins.
 /// <see cref="StoreBackedProvider.Reload"/> is what <c>ConfigStoreChangeNotifier.NotifyReload</c> does to the
 /// real provider. No timers are involved, so nothing here waits on a clock.
 /// </para>
@@ -58,6 +60,9 @@ public class FilePlayerPlaybackModePersistenceTests : IDisposable
       .Callback<IEnumerable<ConfigurationEntry>, CancellationToken>((entries, _) => _provider.Write(entries))
       .Returns(Task.CompletedTask);
     _store.Setup(s => s.SaveAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+    _store
+      .Setup(s => s.GetAllEntriesAsync(It.IsAny<ConfigurationReadMode>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(() => _provider.Rows());
 
     _testDir = Path.Combine(Path.GetTempPath(), $"FilePlayerModeTests_{Guid.NewGuid():N}");
     Directory.CreateDirectory(_testDir);
@@ -145,6 +150,30 @@ public class FilePlayerPlaybackModePersistenceTests : IDisposable
   }
 
   [Fact]
+  public async Task ALowercaseRowReadAfterThePascalCaseOne_DoesNotUndoTheToggle()
+  {
+    // The box's table, 2026-10-02: PascalCase rows written by PreferencesPersistenceService, and lowercase
+    // rows from a System Config save (ConfigurationController lowercases the section) inserted after them.
+    // The provider folds keys case-insensitively, so the lowercase row is the one a reload keeps.
+    _provider.Write(new[]
+    {
+      new ConfigurationEntry { Key = "FilePlayerPreferences:Shuffle", Value = "False" },
+      new ConfigurationEntry { Key = "FilePlayerPreferences:Repeat", Value = "Off" },
+      new ConfigurationEntry { Key = "fileplayerpreferences:shuffle", Value = "false" },
+      new ConfigurationEntry { Key = "fileplayerpreferences:repeat", Value = "Off" },
+    });
+    _provider.Reload();
+    await using var source = CreateSource(_configManager.Object);
+
+    await source.SetShuffleAsync(true);
+    await source.SetRepeatModeAsync(RepeatMode.All);
+    _provider.Reload();
+
+    Assert.True(source.IsShuffleEnabled, "the lowercase row is read last; it must carry the new value too");
+    Assert.Equal(RepeatMode.All, source.RepeatMode);
+  }
+
+  [Fact]
   public async Task StoreFailure_StillTogglesInMemory_AndDoesNotThrow()
   {
     _store
@@ -171,11 +200,14 @@ public class FilePlayerPlaybackModePersistenceTests : IDisposable
     Assert.Equal(RepeatMode.One, source.RepeatMode);
   }
 
-  /// <summary>Stands in for the SQLite table <c>SqliteConfigurationProvider</c> reads.</summary>
+  /// <summary>
+  /// Stands in for the SQLite table <c>SqliteConfigurationProvider</c> reads: case-sensitive keys (SQLite's
+  /// <c>TEXT PRIMARY KEY</c>), rows in insertion order, an update keeping its row's place.
+  /// </summary>
   private sealed class StoreBackedProvider : ConfigurationProvider
   {
     private readonly object _gate = new();
-    private readonly Dictionary<string, string?> _table = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<(string Key, string Value)> _table = [];
 
     /// <summary>A store write. Like <c>IConfigurationStore.SetEntriesAsync</c>, it does not reload.</summary>
     public void Write(IEnumerable<ConfigurationEntry> entries)
@@ -184,13 +216,30 @@ public class FilePlayerPlaybackModePersistenceTests : IDisposable
       {
         foreach (ConfigurationEntry entry in entries)
         {
-          _table[entry.Key] = entry.Value;
+          int i = _table.FindIndex(r => string.Equals(r.Key, entry.Key, StringComparison.Ordinal));
+          if (i >= 0)
+          {
+            _table[i] = (entry.Key, entry.Value);
+          }
+          else
+          {
+            _table.Add((entry.Key, entry.Value));
+          }
         }
+      }
+    }
+
+    public IReadOnlyList<ConfigurationEntry> Rows()
+    {
+      lock (_gate)
+      {
+        return _table.Select(r => new ConfigurationEntry { Key = r.Key, Value = r.Value }).ToList();
       }
     }
 
     public override void Load()
     {
+      // Case-insensitive like the real provider's Data: of two rows differing only in case, the later wins.
       var data = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
       lock (_gate)
       {

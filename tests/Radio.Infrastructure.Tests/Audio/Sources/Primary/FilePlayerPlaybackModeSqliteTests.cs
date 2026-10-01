@@ -106,6 +106,27 @@ public sealed class FilePlayerPlaybackModeSqliteTests : IAsyncDisposable
   }
 
   [Fact]
+  public async Task TheBoxsLowercaseRows_DoNotUndoTheToggle()
+  {
+    // The rows found on the box (2026-10-02), in the box's order: PascalCase first (rowids 11-12), the
+    // System Config page's lowercase copies after them (rowids 30-31, written 2026-02-12).
+    await _store.SetEntryAsync("FilePlayerPreferences:Shuffle", "False");
+    await _store.SetEntryAsync("FilePlayerPreferences:Repeat", "Off");
+    await _store.SetEntryAsync("fileplayerpreferences:shuffle", "false");
+    await _store.SetEntryAsync("fileplayerpreferences:repeat", "Off");
+    _notifier.NotifyReload();
+    await using var source = CreateSource();
+
+    await source.SetShuffleAsync(true);
+    await source.SetRepeatModeAsync(RepeatMode.All);
+    await UnrelatedConfigWriteAsync();
+
+    Assert.True(source.IsShuffleEnabled);
+    Assert.Equal(RepeatMode.All, source.RepeatMode);
+    Assert.Equal("True", (await _store.GetEntryAsync("fileplayerpreferences:shuffle"))?.Value);
+  }
+
+  [Fact]
   public async Task TheStoredStrings_AreThePreferencesPersistenceServiceShape()
   {
     // PreferencesPersistenceService writes the same keys every 30 s (JsonElement.ToString of a bool is
