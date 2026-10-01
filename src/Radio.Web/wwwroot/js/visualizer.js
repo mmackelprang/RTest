@@ -367,9 +367,12 @@ export const visualizer = {
   // by the same fraction) and the tap handler (which reports x / width) line up with what is drawn.
   // Text the owner reads ("No scan yet", the age, "Scanning…") is Blazor markup, not drawn here.
 
-  // Space reserved above the plot: the markup status bar + Scan button, then two preset-label lanes.
+  // Space reserved above the plot: the markup status bar + Scan button (64px, the height of
+  // .band-overlay in design-system.css), then two preset-label lanes, then room for the station caret
+  // (9px tall) so it does not overprint a label in the second lane.
   bandTopReserve: 64,
   bandLabelLane: 18,
+  bandCaretGap: 12,
 
   // Reads a design token from the canvas's computed style, with a fallback for a missing token.
   token: function (canvas, name, fallback) {
@@ -395,7 +398,7 @@ export const visualizer = {
     ctx.fillRect(0, 0, width, height);
 
     const labelTop = this.bandTopReserve;
-    const plotTop = labelTop + this.bandLabelLane * 2 + 4;
+    const plotTop = labelTop + this.bandLabelLane * 2 + this.bandCaretGap;
     const plotBottom = height - 2;
     const plotHeight = Math.max(1, plotBottom - plotTop);
     const xOf = (f) => f * width;
@@ -497,6 +500,8 @@ export const visualizer = {
 
   // Reports a tap on the plot to .NET as a fraction of the canvas width (0 = 87.5, 1 = 108 MHz).
   // pointerup covers touch and mouse alike; one handler per canvas, replaced on re-registration.
+  // A tap inside the top bar (status text + Scan button) is ignored: the bar passes pointer events
+  // through to the canvas, so without this a near-miss on Scan would retune the radio.
   registerBandTap: function (canvasId, dotNetRef) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
@@ -505,7 +510,9 @@ export const visualizer = {
     const canvas = canvasData.canvas;
     const handler = (e) => {
       const rect = canvas.getBoundingClientRect();
-      if (rect.width <= 0) return;
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const yCanvas = (e.clientY - rect.top) * (canvas.height / rect.height);
+      if (yCanvas < this.bandTopReserve) return;
       const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
       dotNetRef.invokeMethodAsync('OnBandTap', fraction).catch(() => { /* circuit gone */ });
     };

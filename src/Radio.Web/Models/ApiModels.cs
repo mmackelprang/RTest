@@ -469,6 +469,26 @@ public sealed record BandSweepOutcomeDto(
 /// <param name="Error">The API's <c>error</c> message, or null.</param>
 public sealed record BandScanRequestResult(bool Accepted, int StatusCode, string? Error);
 
+/// <summary>What a read of <c>GET /api/radio/state</c> established (AUD-76).</summary>
+public enum RadioStateReadStatus
+{
+  /// <summary>200: the radio is the active source; the state is attached.</summary>
+  Active,
+
+  /// <summary>400: the API answered that the radio is not the active source.</summary>
+  NotActive,
+
+  /// <summary>Anything else — a network failure, a timeout, a 5xx, an unreadable body. Nothing is known.</summary>
+  Unavailable
+}
+
+/// <summary>
+/// The result of <see cref="Radio.Web.Services.ApiClients.RadioApiService.ReadStateAsync"/>. Unlike
+/// <c>GetStateAsync</c>, which answers null for both "not the active source" and "could not ask", this
+/// keeps the two apart, so a caller can act on the first without acting on the second.
+/// </summary>
+public sealed record RadioStateRead(RadioStateReadStatus Status, RadioStateDto? State);
+
 // Configuration API DTOs
 public class AudioConfigurationDto
 {

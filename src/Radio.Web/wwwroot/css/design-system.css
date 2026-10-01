@@ -2444,8 +2444,9 @@ body {
 }
 
 .band-status-scanning {
+  /* Full opacity, deliberately not ambientPulse: this countdown is the one status the owner
+     needs to read while a sweep runs, and the pulse's 30–60% opacity drops it below 4:1. */
   color: var(--accent-primary);
-  animation: ambientPulse 3s ease-in-out infinite;
 }
 
 .band-status-message {
@@ -2459,31 +2460,28 @@ body {
   color: var(--signal-red);
 }
 
+/* Matches the existing Scan button (.bt-scan-button, §BT) — outlined in the accent, accent-dim on
+   hover, faded when disabled — except that it is 48px tall (--touch-min), not 44px. */
 .band-scan-btn {
   pointer-events: auto;
   flex: 0 0 auto;
   min-width: 96px;
   min-height: var(--touch-min);
   padding: 0 var(--sp-5);
-  background: var(--surface-raised);
-  border: 1px solid var(--surface-separator);
+  background: transparent;
+  border: 1px solid var(--accent-primary);
   border-radius: 6px;
   color: var(--accent-primary);
   font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.10em;
+  font-size: 13px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: background var(--anim-duration-fast) var(--anim-ease-standard),
-              color var(--anim-duration-fast) var(--anim-ease-standard);
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
 }
 
-.band-scan-btn:hover:not(:disabled) {
-  background: var(--surface-hover);
-  color: var(--accent-hover);
-}
-
+.band-scan-btn:hover:not(:disabled),
 .band-scan-btn:active:not(:disabled) {
   background: var(--accent-dim);
 }
@@ -2494,8 +2492,16 @@ body {
 }
 
 .band-scan-btn:disabled {
-  color: var(--text-low);
-  cursor: default;
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The BAND canvas is a tap target (tap-to-tune), styled like the seek bar's hit area. */
+.visualizer-canvas.is-band {
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* "No scan yet": centred like .visualizer-waiting, and likewise transparent
@@ -2521,7 +2527,7 @@ body {
 .band-empty-sub {
   margin-top: var(--sp-2);
   font-size: 13px;
-  color: var(--text-low);
+  color: var(--text-medium);
 }
 
 /* ─── §29  Metric Tile + Sparkline (PR 4) ─────────────────────────────────── */

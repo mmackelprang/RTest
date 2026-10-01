@@ -215,17 +215,45 @@ public class VisualizerPanelBandTests : TestContext
 
   // ── refresh cadence ──────────────────────────────────────────────────────
 
+  private int MapReads() => _api.Requests.Count(r => r.Method == HttpMethod.Get && r.Path == "/api/radio/bandmap");
+
   [Fact]
   public void Idle_RefreshesOnTheThirtySecondCadence()
   {
     var cut = RenderBand();
     int start = cut.Instance.CompletedBandRefreshes;
+    int readsBefore = MapReads();
 
+    // The negative check counts requests, which the routed handler records when a GET arrives — not
+    // completed cycles, which finish after the round trip and so would hide an early fire for longer.
+    // Its direction: it can MISS an early fire whose request had not reached the handler yet when the
+    // count is read, but it cannot fail spuriously — nothing but a fired timer sends a map read here.
     _clock.Advance(VisualizerPanel.BandIdleRefresh - TimeSpan.FromSeconds(1));
-    cut.Instance.CompletedBandRefreshes.Should().Be(start, "the idle cadence has not elapsed");
+    MapReads().Should().Be(readsBefore, "the idle cadence has not elapsed");
 
     _clock.Advance(TimeSpan.FromSeconds(1));
     WaitForRefreshes(cut, start + 1);
+    MapReads().Should().Be(readsBefore + 1);
+  }
+
+  [Fact]
+  public void MapReadFails_WhileSweeping_DropsToTheIdleCadence()
+  {
+    GetJson("/api/radio/bandmap", EmptyMap(isSweeping: true, remaining: 12));
+    var cut = RenderBand();
+    int start = cut.Instance.CompletedBandRefreshes;
+
+    // The API goes away mid-sweep. The kept map still says "sweeping"; the cadence must not.
+    _api.Route(HttpMethod.Get, "/api/radio/bandmap", HttpStatusCode.ServiceUnavailable, null);
+    _clock.Advance(VisualizerPanel.BandSweepingRefresh);
+    WaitForRefreshes(cut, start + 1);
+    int readsAfterFailure = MapReads();
+
+    _clock.Advance(VisualizerPanel.BandIdleRefresh - TimeSpan.FromSeconds(1));
+    MapReads().Should().Be(readsAfterFailure, "a failed read drops polling to the idle cadence");
+
+    _clock.Advance(TimeSpan.FromSeconds(1));
+    WaitForRefreshes(cut, start + 2);
   }
 
   [Fact]
@@ -252,7 +280,9 @@ public class VisualizerPanelBandTests : TestContext
 
     _clock.Advance(VisualizerPanel.BandIdleRefresh * 4);
 
-    // The timer is disposed synchronously when BAND is left, so a fake-clock advance cannot fire it.
+    // No further reads. This does not tell the two guards apart — the timer is disposed when BAND is
+    // left, and a callback that fired anyway would return early on !_bandActive — it shows that
+    // together they stop the polling.
     _api.Requests.Count(r => r.Path == "/api/radio/bandmap").Should().Be(requestsAfterLeaving);
   }
 
@@ -297,19 +327,73 @@ public class VisualizerPanelBandTests : TestContext
   }
 
   [Fact]
-  public async Task Tap_RadioOnAnotherBand_SelectsFmBeforeTuning()
+  public async Task Tap_RadioOnAnotherBand_TunesTheFmFrequencyWithoutASeparateBandSwitch()
   {
+    // RadioReceiver.SetFrequency selects the band containing the frequency itself; a SetBand("FM")
+    // first would restart the stream twice.
     GetJson("/api/radio/state", FmState(1_010_000, band: "AM"));
     var cut = RenderBand();
 
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(FmBandMath.HzToFraction(95_060_000)));
 
-    int bandAt = IndexOf(HttpMethod.Post, "/api/radio/band");
+    IndexOf(HttpMethod.Post, "/api/radio/band").Should().Be(-1);
+    IndexOf(HttpMethod.Post, "/api/sources").Should().Be(-1, "the radio was the active source");
     int tuneAt = IndexOf(HttpMethod.Post, "/api/radio/frequency");
-    bandAt.Should().BeGreaterThanOrEqualTo(0);
-    tuneAt.Should().BeGreaterThan(bandAt);
+    tuneAt.Should().BeGreaterThanOrEqualTo(0);
     JsonDocument.Parse(_api.Requests[tuneAt].Body!).RootElement.GetProperty("frequency").GetDouble()
       .Should().Be(95_100_000, "with no map the tap snaps to the nearest channel");
+  }
+
+  [Fact]
+  public async Task Tap_StateReadFails_NeitherSwitchesNorTunes()
+  {
+    // A 500 is not "the radio is not active": switching on it would re-select a radio that may be
+    // playing. The tap does nothing and says why.
+    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.InternalServerError, null);
+    var cut = RenderBand();
+
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(0.5));
+
+    IndexOf(HttpMethod.Post, "/api/sources").Should().Be(-1);
+    IndexOf(HttpMethod.Post, "/api/radio/frequency").Should().Be(-1);
+    cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("The radio API is not reachable"));
+  }
+
+  [Fact]
+  public async Task Tap_DuringASeekScan_StopsTheScanBeforeTuning()
+  {
+    _api.Post("/api/radio/scan/stop");
+    var scanning = new Dictionary<string, object?>
+    {
+      ["frequency"] = 101_100_000.0, ["band"] = "FM", ["step"] = 200_000, ["signalStrength"] = 50,
+      ["isScanning"] = true, ["scanDirection"] = "Up", ["scanStopThreshold"] = -36.0, ["gain"] = 0,
+      ["autoGain"] = false, ["equalizer"] = "Normal", ["deviceVolume"] = 50,
+    };
+    GetJson("/api/radio/state", scanning);
+    var cut = RenderBand();
+
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(FmBandMath.HzToFraction(95_100_000)));
+
+    int stopAt = IndexOf(HttpMethod.Post, "/api/radio/scan/stop");
+    int tuneAt = IndexOf(HttpMethod.Post, "/api/radio/frequency");
+    stopAt.Should().BeGreaterThanOrEqualTo(0, "a running seek scan would move off the tapped station");
+    tuneAt.Should().BeGreaterThan(stopAt);
+  }
+
+  [Fact]
+  public async Task TuneMessage_IsClearedWhenItsLifetimeEnds_NotOnTheIdleCadence()
+  {
+    GetJson("/api/radio/state", FmState(101_100_000));
+    var cut = RenderBand();
+
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(FmBandMath.HzToFraction(95_100_000)));
+    cut.WaitForAssertion(() => cut.Find(".band-status-message").TextContent.Should().Be("Tuning 95.1 FM"));
+    int cycles = cut.Instance.CompletedBandRefreshes;
+
+    _clock.Advance(VisualizerPanel.BandMessageLifetime);
+
+    WaitForRefreshes(cut, cycles + 1);
+    cut.WaitForAssertion(() => cut.FindAll(".band-status-message").Should().BeEmpty());
   }
 
   [Fact]

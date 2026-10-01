@@ -84,6 +84,16 @@ public class FmBandMathTests
     FmBandMath.ResolveTapTarget(Hz(101.35), map).Should().Be(101_100_000);
   }
 
+  [Fact]
+  public void Tap_WithOnlyTheShadowInTheWindow_SnapsToTheNearestChannel_NotTheShadow()
+  {
+    // The case the test above cannot tell apart from "stronger wins": here the station (101.1) is
+    // 0.52 MHz from the tap, outside the window, and only its shadow (101.3, 22 dB above the floor) is
+    // inside. Without the neighbour rule the shadow would count as a peak and win the tap.
+    var map = Map((101.1, -25f), (101.3, -38f));
+    FmBandMath.ResolveTapTarget(Hz(101.62), map).Should().Be(101_700_000);
+  }
+
   [Theory]
   [InlineData(0.0, 87_900_000)]
   [InlineData(-5.0, 87_900_000)]

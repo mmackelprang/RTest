@@ -92,7 +92,8 @@
       and the skeleton's z-index sits above the canvas until the @if
       flips and the skeleton unmounts.
     *@
-    <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas @(IsBandMode ? "is-band" : "")"></canvas>
+    <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas @(IsBandMode ? "is-band" : "")"
+            aria-label="@(IsBandMode ? "FM band map. Tap a station to tune." : null)"></canvas>
 
     @if (!_isInitialized)
     {
@@ -102,9 +103,11 @@
     {
       @* BAND's text lives in markup over the canvas, not on it: it is what the owner reads and what
          the tests assert. The bar and the empty state ignore pointer events except on the button, so
-         a tap anywhere on the plot still reaches the canvas's tap handler. *@
+         a tap on the plot below the bar reaches the canvas's tap handler; visualizer.js ignores taps
+         that land inside the bar itself. Only the tune/scan message is a live region — the countdown
+         re-renders every second while a sweep runs and would be announced on each tick. *@
       <div class="band-overlay">
-        <div class="band-status" aria-live="polite">
+        <div class="band-status">
           @if (_bandMap?.Sweep.IsSweeping == true)
           {
             <span class="band-status-scanning">@BandMapText.FormatScanning(_bandMap.Sweep.EstimatedSecondsRemaining, _bandMap.Sweep.Progress)</span>
@@ -115,7 +118,8 @@
           }
           @if (_bandMessage != null)
           {
-            <span class="band-status-message @(_bandMessageIsError ? "is-error" : "")">@_bandMessage</span>
+            <span class="band-status-message @(_bandMessageIsError ? "is-error" : "")"
+                  role="@(_bandMessageIsError ? "alert" : "status")">@_bandMessage</span>
           }
         </div>
         <button type="button"
@@ -186,7 +190,10 @@
   /// <summary>How often BAND re-reads the map, the station and the presets when no sweep runs.</summary>
   internal static readonly TimeSpan BandIdleRefresh = TimeSpan.FromSeconds(30);
 
-  /// <summary>How long a tune/scan message stays up; it is cleared by the first refresh after this.</summary>
+  /// <summary>
+  /// How long a tune/scan message stays up. The refresh timer is armed for no later than the message's
+  /// expiry while one is showing, and the refresh it fires clears it.
+  /// </summary>
   internal static readonly TimeSpan BandMessageLifetime = TimeSpan.FromSeconds(4);
 
   /// <summary>The source type <c>POST /api/sources</c> takes for the radio — what MainLayout sends.</summary>
@@ -225,6 +232,16 @@
   private bool _bandMessageIsError;
   private DateTimeOffset _bandMessageExpiresAt;
   private DotNetObjectReference<VisualizerPanel>? _selfRef;
+
+  // True when the last map read failed. The kept map may still say "sweeping", and polling once a
+  // second against an API that is down would only add load and log lines; this drops to the idle
+  // cadence until a read succeeds.
+  private bool _bandMapReadFailed;
+
+  // Refreshes can overlap — a timer refresh in flight when a tap or Scan starts its own. Each takes a
+  // number, and only the newest applies its results, so an older read cannot land last and overwrite
+  // a newer one (e.g. hide a sweep that a Scan has just started).
+  private int _bandRefreshSeq;
 
   /// <summary>
   /// BAND refresh cycles that have run to completion — refreshed, rendered, and re-armed the timer.
@@ -276,6 +293,7 @@
   {
     try
     {
+      VisualizationMode modeBeforePreferences = _currentMode;
       await LoadPreferencesAsync();
 
       if (!VisualizationHub.IsConnected)
@@ -283,6 +301,23 @@
 
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
+
+      // The preference read is an HTTP call, and the first render does not wait for it: when it is
+      // slow, OnAfterRenderAsync has already initialised the canvas and subscribed to the DEFAULT
+      // mode's hub stream. Move that subscription to the saved mode here. (When the read wins the
+      // race, OnAfterRenderAsync subscribes to the saved mode itself and there is nothing to move.)
+      if (_isInitialized && _currentMode != modeBeforePreferences)
+      {
+        VisualizationMode savedMode = _currentMode;
+        _currentMode = modeBeforePreferences;
+        await UnsubscribeFromCurrentMode();
+        _currentMode = savedMode;
+        await SubscribeToCurrentMode();
+        if (!IsBandMode)
+        {
+          await RequestInitialData();
+        }
+      }
 
       // ⚠ There is deliberately no remote mode subscription here. ENC-9a added one against the
       // server's VisualizationModeChanged broadcast; ENC-7 then removed the only thing that could
@@ -304,8 +339,9 @@
       Logger.LogError(ex, "Error initializing VisualizerPanel");
     }
 
-    // BAND needs no canvas to load its data, so a saved BAND preference starts loading now; the
-    // first draw happens once visualizer.init has succeeded (OnAfterRenderAsync).
+    // BAND needs no canvas to load its data, so a saved BAND preference starts loading now. If the
+    // canvas is already initialised this also draws and registers the tap handler; otherwise
+    // OnAfterRenderAsync does both once visualizer.init has succeeded.
     if (IsBandMode)
     {
       await StartBandAsync();
@@ -489,12 +525,16 @@
 
   // ── BAND ────────────────────────────────────────────────────────────────
 
-  /// <summary>Loads the map, the station and the presets, and arms the refresh timer.</summary>
+  /// <summary>
+  /// Loads the map, the station and the presets, arms the refresh timer, and registers the canvas tap
+  /// handler (a no-op until the canvas is initialised; OnAfterRenderAsync registers it then).
+  /// </summary>
   private async Task StartBandAsync()
   {
     _bandActive = true;
     await RefreshBandAsync(includePresets: true);
     CompleteBandCycle();
+    await RegisterBandTapAsync();
   }
 
   /// <summary>Stops the refresh timer and releases the canvas tap handler.</summary>
@@ -506,11 +546,6 @@
     await UnregisterBandTapAsync();
   }
 
-  /// <summary>
-  /// Re-arms the one-shot refresh timer: <see cref="BandSweepingRefresh"/> while a sweep runs, else
-  /// <see cref="BandIdleRefresh"/>. One-shot and re-armed after each refresh, so a slow API can never
-  /// stack refreshes up.
-  /// </summary>
   /// <summary>Ends a refresh cycle: re-arms the timer, then counts the cycle.</summary>
   private void CompleteBandCycle()
   {
@@ -518,6 +553,13 @@
     CompletedBandRefreshes++;
   }
 
+  /// <summary>
+  /// Re-arms the one-shot refresh timer: <see cref="BandSweepingRefresh"/> while the last successful
+  /// map read showed a sweep, else <see cref="BandIdleRefresh"/> — and no later than the expiry of a
+  /// message that is showing. The timer is one-shot and every arm disposes the previous one, so at
+  /// most one timer exists and timer refreshes cannot stack up behind a slow API. (A tap or Scan
+  /// refresh can still overlap a timer refresh; <see cref="_bandRefreshSeq"/> handles that.)
+  /// </summary>
   private void ArmBandTimer()
   {
     _bandTimer?.Dispose();
@@ -527,7 +569,13 @@
       return;
     }
 
-    TimeSpan due = _bandMap?.Sweep.IsSweeping == true ? BandSweepingRefresh : BandIdleRefresh;
+    TimeSpan due = !_bandMapReadFailed && _bandMap?.Sweep.IsSweeping == true ? BandSweepingRefresh : BandIdleRefresh;
+    if (_bandMessage != null)
+    {
+      TimeSpan untilExpiry = _bandMessageExpiresAt - Clock.GetUtcNow();
+      due = untilExpiry < due ? (untilExpiry > TimeSpan.Zero ? untilExpiry : TimeSpan.Zero) : due;
+    }
+
     _bandTimer = Clock.CreateTimer(_ => _ = InvokeAsync(OnBandTimerAsync), null, due, Timeout.InfiniteTimeSpan);
   }
 
@@ -546,28 +594,48 @@
   /// <summary>
   /// One BAND refresh: the map and the radio state (for the station marker), plus the presets when
   /// asked; then redraw and re-render. Each read degrades on its own — a failed preset read keeps the
-  /// previous presets, a failed map read keeps the previous map.
+  /// previous presets, a failed map read keeps the previous map (and drops the cadence to idle), and a
+  /// failed state read keeps the previous station marker.
   /// </summary>
   private async Task RefreshBandAsync(bool includePresets)
   {
+    int seq = ++_bandRefreshSeq;
+
+    // Cleared before any await, so that neither a stale (discarded) refresh nor a failed one can leave
+    // an expired message in place — ArmBandTimer would then re-arm at zero and refresh in a loop.
+    if (_bandMessage != null && Clock.GetUtcNow() >= _bandMessageExpiresAt)
+    {
+      _bandMessage = null;
+    }
+
     try
     {
       Task<BandMapResponseDto?> mapTask = RadioApi.GetBandMapAsync();
-      Task<RadioStateDto?> stateTask = RadioApi.GetStateAsync();
+      Task<RadioStateRead> stateTask = RadioApi.ReadStateAsync();
       Task<List<RadioPresetDto>?> presetsTask = includePresets
-        ? RadioApi.GetPresetsAsync()
+        ? RadioApi.GetPresetsForPollAsync()
         : Task.FromResult<List<RadioPresetDto>?>(null);
       await Task.WhenAll(mapTask, stateTask, presetsTask);
 
-      _bandMap = await mapTask ?? _bandMap;
-      // GetStateAsync answers null when the radio is not the active source (400): no station marker.
-      _radioState = await stateTask;
-      _presets = await presetsTask ?? _presets;
-
-      if (_bandMessage != null && Clock.GetUtcNow() >= _bandMessageExpiresAt)
+      if (seq != _bandRefreshSeq)
       {
-        _bandMessage = null;
+        // A newer refresh started while this one was in flight; its results win.
+        return;
       }
+
+      BandMapResponseDto? map = await mapTask;
+      _bandMapReadFailed = map == null;
+      _bandMap = map ?? _bandMap;
+      RadioStateRead state = await stateTask;
+      // The station marker needs the state; with the radio not active (400) there is none. When the
+      // read failed outright, keep the last known station rather than blanking the marker.
+      _radioState = state.Status switch
+      {
+        RadioStateReadStatus.Active => state.State,
+        RadioStateReadStatus.NotActive => null,
+        _ => _radioState,
+      };
+      _presets = await presetsTask ?? _presets;
 
       if (!_isDisposed && _bandActive)
       {
@@ -632,7 +700,9 @@
 
   private async Task RegisterBandTapAsync()
   {
-    if (_bandTapRegistered || !_isInitialized || _jsModule == null || _isDisposed)
+    // IsBandMode is re-checked because callers await before getting here: the user can pick another
+    // mode while BAND is still loading, and the handler must not be left registered outside BAND.
+    if (_bandTapRegistered || !_isInitialized || _jsModule == null || _isDisposed || !IsBandMode)
     {
       return;
     }
@@ -679,10 +749,16 @@
   }
 
   /// <summary>
-  /// Tunes the radio to <paramref name="frequencyHz"/>, switching to the radio source first when it is
-  /// not the active one and selecting the FM band first when the radio is on another band. A second
-  /// tap while one tune is in flight is ignored.
+  /// Tunes the radio to <paramref name="frequencyHz"/>, switching to the radio source first when the
+  /// API says it is not the active one (400 from <c>/api/radio/state</c>), and stopping a running seek
+  /// scan first. A state read that fails for any other reason tunes nothing and switches nothing. A
+  /// second tap while one tune is in flight is ignored.
   /// </summary>
+  /// <remarks>
+  /// No band is selected first: <c>RadioReceiver.SetFrequency</c> picks the band that contains the
+  /// frequency (FM for 87.9–107.9, which precedes VHF in <c>BandPresets.AllBands</c>), and a separate
+  /// <c>SetBand("FM")</c> would restart the stream twice and briefly tune the FM band's lower edge.
+  /// </remarks>
   internal async Task TuneToAsync(long frequencyHz)
   {
     if (_tuneInFlight)
@@ -694,10 +770,16 @@
     string mhz = BandMapText.FormatMhz(frequencyHz);
     try
     {
-      // The same gate SetFrequency uses: /api/radio/state answers 400 (null here) unless the radio
-      // is the active source.
-      RadioStateDto? state = await RadioApi.GetStateAsync();
-      if (state == null)
+      RadioStateRead read = await RadioApi.ReadStateAsync();
+      if (read.Status == RadioStateReadStatus.Unavailable)
+      {
+        // Not "not active" — unknown. Switching source on a transient failure would re-select a
+        // radio that is already playing, so do nothing and say why.
+        ShowBandMessage("The radio API is not reachable", isError: true);
+        return;
+      }
+
+      if (read.Status == RadioStateReadStatus.NotActive)
       {
         if (!await SourcesApi.SwitchSourceAsync(RadioSourceType))
         {
@@ -708,12 +790,12 @@
         // Let the source pills follow at once rather than on the API's next state poll — the same
         // nudge MainLayout sends after its own switch.
         await AudioStateHub.NotifySourceChangedAsync();
-        state = await RadioApi.GetStateAsync();
       }
-
-      if (state != null && !IsFm(state.Band))
+      else if (read.State?.IsScanning == true)
       {
-        await RadioApi.SetBandAsync("FM");
+        // A seek scan still running would move off the tapped station a moment later — the hazard
+        // PresetSelectorService guards against the same way.
+        await RadioApi.StopScanAsync();
       }
 
       if (await RadioApi.SetFrequencyAsync(frequencyHz))
@@ -770,6 +852,8 @@
     _bandMessage = message;
     _bandMessageIsError = isError;
     _bandMessageExpiresAt = Clock.GetUtcNow() + BandMessageLifetime;
+    // Re-arm so the message is cleared on time even on a path that returns without a refresh.
+    ArmBandTimer();
     StateHasChanged();
   }
 
