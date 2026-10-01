@@ -834,7 +834,9 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (!hadConnection)
     {
-      _logger.LogWarning("No Chromecast device connected");
+      // Debug, not Warning (AUD-54 (7), AUD-84 follow-up 3): this is the normal outcome of a
+      // teardown after a handled connection loss, which has already cleared the connection.
+      _logger.LogDebug("Disconnect requested but no Chromecast device is connected");
       return;
     }
 
@@ -1229,7 +1231,16 @@ public class GoogleCastOutput : AudioOutputBase
       if (stopClient != null)
       {
         var mediaChannel = stopClient.GetChannel<MediaChannel>();
-        if (mediaChannel != null)
+        if (mediaChannel != null && mediaChannel.MediaStatus == null)
+        {
+          // AUD-54 (7). No media status has been received on this client, so there is no media
+          // session to stop — the normal case in DirectChannel mode, which never loads media.
+          // SharpCaster 3.0.0's MediaChannel.StopAsync would throw InvalidOperationException
+          // ("MediaSessionID is not available") here before sending anything, which logged a
+          // Warning on every DirectChannel teardown.
+          _logger.LogDebug("Cast: no media session on this connection — skipping media stop");
+        }
+        else if (mediaChannel != null)
         {
           try
           {
@@ -1257,6 +1268,13 @@ public class GoogleCastOutput : AudioOutputBase
           catch (ArgumentNullException)
           {
             _logger.LogDebug("Cast: No active media session to stop (MediaSessionId is null)");
+          }
+          catch (InvalidOperationException ioe)
+            when (ioe.Message.Contains("MediaSessionID is not available", StringComparison.Ordinal))
+          {
+            // The media status was cleared between the check above and the call (a failed
+            // media send clears it). Thrown before anything is sent, so nothing was stopped.
+            _logger.LogDebug("Cast: no media session to stop (media status cleared), ignoring");
           }
           catch (Exception ex)
           {
