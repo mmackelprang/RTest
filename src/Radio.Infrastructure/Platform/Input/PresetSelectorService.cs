@@ -57,12 +57,15 @@ namespace Radio.Infrastructure.Platform.Input;
 /// </summary>
 public sealed class PresetSelectorService : IDisposable
 {
+  // A wire contract, not only an internal tag: the Web's preset bar (UI-21) strips this prefix off
+  // the highlighted row to find the card the knob is pointing at (PresetBar.KnobPresetRowPrefix). The
+  // remainder must stay the preset's own Id — the same Id GET /api/radio/presets returns.
   private const string PresetIdPrefix = "preset:";
 
   /// <summary>
   /// How close two frequencies must be, in hertz, to count as the same station. The same tolerance
   /// <c>RadioControlPanel.IsActivePreset</c> uses, so the knob's current marker and the on-screen
-  /// rail's <c>.is-active</c> cue cannot disagree about the same row.
+  /// preset bar's <c>.is-active</c> cue cannot disagree about the same row.
   /// </summary>
   private const double SameStationHertz = 1.0;
 
@@ -259,11 +262,12 @@ public sealed class PresetSelectorService : IDisposable
   /// </para>
   ///
   /// <para>
-  /// Ordering matches the on-screen rail exactly — band, then the per-band slot ordinal — so the
-  /// knob's list and the list the user can see are the same list in the same order. Note the three
-  /// orderings already in this stack: the repository sorts by Name, RadioControlPanel re-sorts by
-  /// band/slot/created, and RadioPage sorts by CreatedAt. This follows RadioControlPanel, because
-  /// that is the bank this knob is a remote control for.
+  /// Ordering matches the on-screen preset bar exactly — band, then the per-band slot ordinal — so
+  /// the knob's list and the list the user can see are the same list in the same order. Note the
+  /// three orderings already in this stack: the repository sorts by Name, RadioControlPanel orders
+  /// band/slot/created through <c>PresetBar.OrderLikeKnob</c> (UI-20), and RadioPage sorts by
+  /// CreatedAt. This follows RadioControlPanel, because that is the bank this knob is a remote
+  /// control for.
   /// </para>
   /// </summary>
   private async Task RefreshAsync(bool publish = true)
@@ -326,7 +330,7 @@ public sealed class PresetSelectorService : IDisposable
     }
   }
 
-  /// <summary>One row per saved station, in the on-screen rail's order.</summary>
+  /// <summary>One row per saved station, in the on-screen preset bar's order.</summary>
   private static List<EncoderSelectorRow> ComposeRows(
     IReadOnlyList<RadioPreset> presets,
     IRadioControl? live) =>
@@ -351,7 +355,7 @@ public sealed class PresetSelectorService : IDisposable
       .ToList();
 
   /// <summary>
-  /// The bank in the order the on-screen rail shows it, each preset paired with its <b>per-band</b>
+  /// The bank in the order the on-screen preset bar shows it, each preset paired with its <b>per-band</b>
   /// ordinal.
   ///
   /// <para>

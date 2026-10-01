@@ -76,9 +76,19 @@ engraving's keyword relights the banner on a knob that is correct.
 
 **PRESETS saves; it never overwrites.** A hold appends to the existing bank — the same bank the touchscreen
 shows — and reports the per-band slot the bank then derives. Replacement and deletion stay on the touchscreen
-behind the kebab, where they have a confirmation and an undo. Three boundaries are reported rather than
+behind a long-press on the card in the preset bar (`UI-20` removed the kebab), where they have a confirmation and an undo. Three boundaries are reported rather than
 swallowed: `Only radio stations can be saved` on a non-radio source, `ALREADY SAVED · slot NN` for a station
 already in the bank, and `PRESETS FULL` at the 50-preset cap.
+
+**The preset bar follows the PRESETS knob while its list is open (`UI-21`).** The radio panel's preset bar
+marks the card the knob is pointing at (a 2 px amber bar along the card's bottom, over a `--surface-hover`
+wash) and scrolls it into view on every detent; when the list leaves the screen — idle dismiss, another
+card replacing it, or a commit/failure/notice line replacing the list — the mark clears and the strip
+returns to the playing preset, unless the user swiped the strip in the last 10 s. No API change: the bar
+reads the same `EncoderHudService` payload the overlay draws (every row plus `HighlightIndex`) and matches
+**by preset id**, so the knob's row ids (`preset:{RadioPreset.Id}`, `PresetSelectorService.PresetIdPrefix`)
+are a wire contract with `PresetBar.KnobPresetRowPrefix` — change one, change both. The two lists' order
+(band name, then per-band slot) is pinned from both sides by tests with the same six presets.
 
 **Visualization kept its capability and lost its only writer — both halves matter.** `ENC-7` removed
 `VisualizationModeService` from the router. The **capability is unaffected**: Home's six-segment picker changes

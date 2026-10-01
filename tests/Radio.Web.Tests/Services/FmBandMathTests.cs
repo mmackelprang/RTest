@@ -161,4 +161,104 @@ public class FmBandMathTests
   {
     FmBandMath.NormalizeLevels([]).Should().BeEmpty();
   }
+
+  // ── UI-22: colour tiers ──────────────────────────────────────────────────
+
+  private static BandSignalTier TierAt(List<BandMapChannelDto> map, double mhz) =>
+    FmBandMath.SignalTiers(map)[map.FindIndex(c => c.FrequencyHz == (long)Math.Round(mhz * 1_000_000))];
+
+  // The map's median is the noise floor, -60: a handful of raised channels does not move it. The dB
+  // figures are written out rather than taken from the constants, so a change to a threshold fails here.
+  [Theory]
+  [InlineData(-54.1f, BandSignalTier.Noise)]   //  5.9 dB above
+  [InlineData(-54.0f, BandSignalTier.Weak)]    //  6   — the peak rule's prominence belongs to Weak
+  [InlineData(-48.1f, BandSignalTier.Weak)]    // 11.9
+  [InlineData(-48.0f, BandSignalTier.Fair)]    // 12
+  [InlineData(-40.1f, BandSignalTier.Fair)]    // 19.9
+  [InlineData(-40.0f, BandSignalTier.Strong)]  // 20
+  [InlineData(-10.0f, BandSignalTier.Strong)]  // 50
+  public void Tiers_AtEachBoundary(float level, BandSignalTier expected)
+  {
+    TierAt(Map((99.5, level)), 99.5).Should().Be(expected);
+  }
+
+  [Fact]
+  public void Tiers_TheNoiseFloorItself_IsNoise()
+  {
+    TierAt(Map((99.5, -30f)), 95.1).Should().Be(BandSignalTier.Noise);
+  }
+
+  [Fact]
+  public void Tiers_AFlatDeadMap_IsAllNoise()
+  {
+    // Every channel at the median, whatever the absolute level: nothing stands above the noise.
+    List<BandMapChannelDto> dead = Map().Select(c => c with { LevelDbfs = -25f }).ToList();
+    FmBandMath.SignalTiers(dead).Should().OnlyContain(t => t == BandSignalTier.Noise).And.HaveCount(dead.Count);
+  }
+
+  [Fact]
+  public void Tiers_FollowTheMedian_NotTheDisplayHeight()
+  {
+    // The busiest channel is drawn full height (here exactly MinDisplaySpanDb above the floor), but
+    // 10 dB above the median is still weak; on a busier map the same height would be strong.
+    var map = Map((99.5, Noise + 10f));
+    FmBandMath.NormalizeLevels(map)[map.FindIndex(c => c.FrequencyHz == 99_500_000)].Should().Be(1);
+    TierAt(map, 99.5).Should().Be(BandSignalTier.Weak);
+  }
+
+  [Fact]
+  public void Tiers_AreMeasuredFromTheMedian_NotFromTheDisplayFloor()
+  {
+    // A busy map whose median (-50) is well above its low percentile (-60, the display floor). Measured
+    // from the floor, -44 would be 16 dB up (fair) and the -50 bed 10 dB up (weak); from the median they
+    // are 6 dB (weak) and 0 dB (noise).
+    BandMapChannelDto[] channels =
+    [
+      new(88_100_000, -60f), new(88_300_000, -60f), new(88_500_000, -60f), new(88_700_000, -60f),
+      new(88_900_000, -50f), new(89_100_000, -50f), new(89_300_000, -50f), new(89_500_000, -50f), new(89_700_000, -50f),
+      new(89_900_000, -44f),
+    ];
+
+    BandSignalTier[] tiers = FmBandMath.SignalTiers(channels);
+    tiers[9].Should().Be(BandSignalTier.Weak);
+    tiers[4..9].Should().OnlyContain(t => t == BandSignalTier.Noise);
+  }
+
+  [Fact]
+  public void Tiers_AreInTheOrderGiven()
+  {
+    // Unsorted input: the tiers line up with the channels as passed, as NormalizeLevels' heights do.
+    BandMapChannelDto[] channels =
+    [
+      new(99_500_000, -30f), new(88_100_000, -60f), new(101_100_000, -50f), new(95_100_000, -60f), new(90_100_000, -60f),
+    ];
+
+    FmBandMath.SignalTiers(channels).Should().Equal(
+      BandSignalTier.Strong, BandSignalTier.Noise, BandSignalTier.Weak, BandSignalTier.Noise, BandSignalTier.Noise);
+  }
+
+  [Fact]
+  public void Tiers_AChannelExactlyAtTheProminence_IsAPeakToTheTapAndWeakToTheColour()
+  {
+    // Every peak the tap snaps to is coloured weak or above, even one exactly at the prominence (spec
+    // §5.1). Not the reverse: a coloured shadow beside a stronger station is not a peak.
+    var map = Map((99.5, Noise + 6f));
+    FmBandMath.ResolveTapTarget(Hz(99.2), map).Should().Be(99_500_000);
+    TierAt(map, 99.5).Should().Be(BandSignalTier.Weak);
+  }
+
+  [Fact]
+  public void Tiers_NumberedAsVisualizerJsIndexesItsColours()
+  {
+    // drawBandMap's tierColours is [--text-low, --signal-blue, --accent-primary, --signal-green],
+    // indexed by these values; renumbering the enum would recolour every bar without failing anything else.
+    new[] { BandSignalTier.Noise, BandSignalTier.Weak, BandSignalTier.Fair, BandSignalTier.Strong }
+      .Select(t => (int)t).Should().Equal(0, 1, 2, 3);
+  }
+
+  [Fact]
+  public void Tiers_Empty_IsEmpty()
+  {
+    FmBandMath.SignalTiers([]).Should().BeEmpty();
+  }
 }

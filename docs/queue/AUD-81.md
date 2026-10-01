@@ -159,3 +159,27 @@ In the owner's casting baseline run 2026-09-30 (box on `b64c8cd`, Office speaker
   - New kind-C seam: `CastFreshConnectionOverrideForTests`.
 
 **Still box-only:** whether the fresh connection actually reaches the speaker after it closed ours, and whether its unmute lands.
+
+## ✅🔬 Silent box re-UAT after #750 — 2026-10-01 05:10 EDT (agent-run, not owner-run)
+
+**Setup.** The box ran `590c40d` (#750), deployed and SHA-verified on both services, kiosk live. `radio-api` was active since 05:09:49 EDT, with `NRestarts` 0 before and after. `Radio.Infrastructure.Audio` was raised to Information for the run and reset afterwards. The source was stopped and the console muted (volume 0.3). The speaker was the Office speaker (`https://192.168.86.25/`, Google Home Mini, DirectChannel). Nothing audible was played. All values were read through the API.
+
+Times are EDT.
+
+1. **The first connect after the deploy restart left the console muted** (the `30a3524c` bug stays fixed). `POST /api/devices/cast/connect` returned 200. `GET /api/audio/volume` then showed `isMuted:true`, and `GET /api/devices/cast/volume` showed `level 0.3, muted true, mutedByConsole true`. The log has `05:10:13.723 Cast: console is muted → speaker Office speaker muted as casting starts`.
+2. **D1 is fixed on the hardware: volume moves under a muted console are held.** The console went to 0.45 (05:10:18), 0.2 and 0.35. After each move the speaker read `level 0.3, muted true, mutedByConsole true`. No level command was sent, and no `Cast: console volume … → speaker` line was logged for these moves. In the #749 run, the same 30→45 % move unmuted the speaker.
+3. **Console unmute applies the held level, then unmutes.** The log has `05:10:28.568 Cast: console unmuted → speaker Office speaker at 35 %, unmuted`, and the speaker read `level 0.35, muted false`.
+4. **Volume follows while unmuted.** The console went to 0.3, the log has `05:10:29.590 Cast: console volume 30 % → speaker 30 % on Office speaker`, and the speaker read `level 0.3`.
+5. **Console mute mutes the speaker.** The log has `05:10:30.675 Cast: console muted → speaker Office speaker muted`, and the speaker read `muted true, mutedByConsole true`.
+6. **D2 on Stop Casting.**
+   - 05:10:36.368: DirectChannel stopped.
+   - 05:10:36.572: the speaker closed our connection (`Cast: loss reported while the output is "Stopping" …`), so the old-connection unmute was skipped.
+   - 05:10:36.698: `Cast: speaker Office speaker is already unmuted after closing (read over a new connection)`.
+   - ⭐ **This settles the #749 run's open question.** This Google Home Mini **clears its own mute when our receiver application ends**. The fresh-connection read confirms that rather than assuming it.
+7. **No echo reached the console.** There were zero `Synced volume/mute` lines from deploy to the end of the run.
+8. **`AudioPreferences:CastDeviceVolumes`** holds `"https://192.168.86.25/":0.3`, last written 09:10:29.56Z, which is the final level of the run. The other devices are unchanged (Kids room 0.5, AudioCast1 0.2916609).
+9. Also seen: `Stop requested but output is not streaming (state: "Ready")` at 05:10:36.805. That is [`AUD-93`](AUD-93.md), unchanged by this row.
+
+**Restored afterwards:** SDR Radio 92.3 FM playing, volume 0.3, muted, output Soundbar, no default Cast device (the connect had saved one, and `DELETE /api/devices/cast/default` cleared it), and log levels reset.
+
+**Owner check outstanding (by ear, with audio playing):** while casting, turning the console's volume knob changes the speaker; console mute silences the speaker; and turning the knob while muted keeps it silent.

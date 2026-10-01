@@ -9,20 +9,18 @@ namespace Radio.Web.Tests.Components.Shared;
 /// <summary>
 /// bUnit tests for the shared <see cref="PresetCard"/> component — the single
 /// saved-station renderer (Proposal A, HANDOFF-saved-station-display). One
-/// component, two variants (Rail = Home PRESETS rail compact row; Card = Radio
-/// page 480px card) so the two surfaces can't drift.
+/// component, two variants (Bar = the Home radio panel's preset bar, UI-20;
+/// Card = Radio page 480px card) so the two surfaces can't drift.
 ///
 /// Contract under test:
-///   - Rail + name → .rcp-preset-name carries the name, .rcp-preset-freq the
-///     unit-less frequency value (no "MHz" in the row face).
-///   - Rail + no name → .rcp-preset-name.rcp-preset-name-freq promotes the
-///     frequency to the primary line; the freq tail is empty.
+///   - Bar + name → .rcp-bar-card-name carries the name; the meta line reads
+///     "01 · FM 90.30" — ordinal, band, unit-less frequency.
+///   - Bar + no name → the frequency is the primary line and the meta line drops it.
+///   - Bar has no kebab (owner decision Q3); its aria label speaks the unit.
 ///   - Card + name → .preset-card-name carries the name, .preset-card-freq the
 ///     unit-less value.
-///   - IsActive → root carries .is-active (both variants).
+///   - IsActive → root carries .is-active (both variants); Bar adds aria-current.
 ///   - OnSelect fires with the PresetId on click (both variants).
-///   - OnKebab fires on the rail kebab; rail row title carries the full name +
-///     full MHz/kHz unit.
 /// </summary>
 public class PresetCardTests : TestContext
 {
@@ -33,69 +31,96 @@ public class PresetCardTests : TestContext
   }
 
   [Fact]
-  public void Rail_WithName_RendersNameAndUnitlessFreq()
+  public void Bar_WithName_RendersNameThenOrdinalBandAndUnitlessFreq()
   {
     var cut = RenderComponent<PresetCard>(p => p
-      .Add(x => x.Variant, PresetCardVariant.Rail)
+      .Add(x => x.Variant, PresetCardVariant.Bar)
       .Add(x => x.PresetId, "p1")
       .Add(x => x.Name, "KEXP Seattle")
       .Add(x => x.Frequency, 90_300_000)
       .Add(x => x.Band, "FM")
       .Add(x => x.SlotNumber, 1));
 
-    cut.Find(".rcp-preset-name").TextContent.Trim().Should().Be("KEXP Seattle");
-    // Unit-less value in the row face: "90.30", NOT "90.30 MHz".
-    var freq = cut.Find(".rcp-preset-freq").TextContent.Trim();
-    freq.Should().Be("90.30");
-    freq.Should().NotContain("MHz");
+    cut.Find(".rcp-bar-card-name").TextContent.Trim().Should().Be("KEXP Seattle");
+    var meta = cut.Find(".rcp-bar-card-meta").TextContent.Trim();
+    meta.Should().Be("01 · FM 90.30");
+    meta.Should().NotContain("MHz", "the card face carries the value; the unit is in the tooltip and aria label");
   }
 
   [Fact]
-  public void Rail_NoName_PromotesFreqToPrimaryLine()
+  public void Bar_NoName_PromotesFreqToPrimaryLine_AndDropsItFromTheMeta()
   {
     var cut = RenderComponent<PresetCard>(p => p
-      .Add(x => x.Variant, PresetCardVariant.Rail)
+      .Add(x => x.Variant, PresetCardVariant.Bar)
       .Add(x => x.PresetId, "p2")
       .Add(x => x.Name, "   ")
       .Add(x => x.Frequency, 88_500_000)
-      .Add(x => x.Band, "FM"));
+      .Add(x => x.Band, "FM")
+      .Add(x => x.SlotNumber, 3));
 
-    // The primary line carries the freq with the promotion class.
-    var primary = cut.Find(".rcp-preset-name.rcp-preset-name-freq");
-    primary.TextContent.Trim().Should().Be("88.50");
-
-    // The dim freq tail is present but empty (keeps the 4-column grid intact).
-    cut.Find(".rcp-preset-freq").TextContent.Trim().Should().BeEmpty();
+    cut.Find(".rcp-bar-card-name.rcp-bar-card-name-freq").TextContent.Trim().Should().Be("88.50");
+    cut.Find(".rcp-bar-card-meta").TextContent.Trim().Should().Be("03 · FM");
   }
 
   [Fact]
-  public void Rail_RowTitle_CarriesFullNameAndUnit()
+  public void Bar_Title_CarriesFullNameAndUnit()
   {
     var cut = RenderComponent<PresetCard>(p => p
-      .Add(x => x.Variant, PresetCardVariant.Rail)
+      .Add(x => x.Variant, PresetCardVariant.Bar)
       .Add(x => x.PresetId, "p3")
       .Add(x => x.Name, "Classic Vinyl Rock Channel")
       .Add(x => x.Frequency, 105_100_000)
       .Add(x => x.Band, "FM"));
 
-    var title = cut.Find(".rcp-preset-item").GetAttribute("title") ?? string.Empty;
-    title.Should().Contain("Classic Vinyl Rock Channel", "long names truncate visually but the tooltip has the full name");
-    title.Should().Contain("105.10 MHz", "the tooltip carries the full unit even though the row face drops it");
+    var title = cut.Find(".rcp-bar-card").GetAttribute("title") ?? string.Empty;
+    title.Should().Contain("Classic Vinyl Rock Channel", "a name past two lines is clamped visually but the tooltip has all of it");
+    title.Should().Contain("105.10 MHz", "the tooltip carries the full unit even though the card face drops it");
   }
 
   [Fact]
-  public void Rail_AmRowTitle_UsesKhzUnit()
+  public void Bar_AriaLabel_SpeaksOrdinalNameAndUnit_AndNowPlayingWhenActive()
   {
     var cut = RenderComponent<PresetCard>(p => p
-      .Add(x => x.Variant, PresetCardVariant.Rail)
+      .Add(x => x.Variant, PresetCardVariant.Bar)
       .Add(x => x.PresetId, "p4")
+      .Add(x => x.Name, "Rock 92.3")
+      .Add(x => x.Frequency, 92_300_000)
+      .Add(x => x.Band, "FM")
+      .Add(x => x.SlotNumber, 6)
+      .Add(x => x.IsActive, true));
+
+    var card = cut.Find(".rcp-bar-card");
+    card.GetAttribute("aria-label").Should().Be("Preset 6, Rock 92.3, FM 92.30 megahertz, now playing");
+    card.GetAttribute("aria-current").Should().Be("true");
+  }
+
+  [Fact]
+  public void Bar_AmAriaLabel_SpeaksKilohertz_AndInactiveCarriesNoAriaCurrent()
+  {
+    var cut = RenderComponent<PresetCard>(p => p
+      .Add(x => x.Variant, PresetCardVariant.Bar)
+      .Add(x => x.PresetId, "p5")
       .Add(x => x.Name, "AM 1010")
       .Add(x => x.Frequency, 1_010_000)
-      .Add(x => x.Band, "AM"));
+      .Add(x => x.Band, "AM")
+      .Add(x => x.SlotNumber, 1));
 
-    cut.Find(".rcp-preset-freq").TextContent.Trim().Should().Be("1010");
-    (cut.Find(".rcp-preset-item").GetAttribute("title") ?? string.Empty)
-      .Should().Contain("1010 kHz");
+    var card = cut.Find(".rcp-bar-card");
+    card.GetAttribute("aria-label").Should().Be("Preset 1, AM 1010, AM 1010 kilohertz");
+    card.HasAttribute("aria-current").Should().BeFalse();
+  }
+
+  [Fact]
+  public void Bar_HasNoKebab()
+  {
+    var cut = RenderComponent<PresetCard>(p => p
+      .Add(x => x.Variant, PresetCardVariant.Bar)
+      .Add(x => x.PresetId, "p6")
+      .Add(x => x.Name, "KEXP")
+      .Add(x => x.Frequency, 90_300_000)
+      .Add(x => x.Band, "FM"));
+
+    cut.FindAll("button").Should().BeEmpty();
   }
 
   [Fact]
@@ -128,7 +153,7 @@ public class PresetCardTests : TestContext
   }
 
   [Theory]
-  [InlineData(PresetCardVariant.Rail, "rcp-preset-item")]
+  [InlineData(PresetCardVariant.Bar, "rcp-bar-card")]
   [InlineData(PresetCardVariant.Card, "preset-card")]
   public void IsActive_AddsActiveClass(PresetCardVariant variant, string rootClass)
   {
@@ -144,20 +169,39 @@ public class PresetCardTests : TestContext
   }
 
   [Fact]
-  public void Rail_OnSelect_FiresWithPresetId()
+  public void Bar_OnSelect_FiresWithPresetId()
   {
     string? selected = null;
     var cut = RenderComponent<PresetCard>(p => p
-      .Add(x => x.Variant, PresetCardVariant.Rail)
-      .Add(x => x.PresetId, "sel-rail")
+      .Add(x => x.Variant, PresetCardVariant.Bar)
+      .Add(x => x.PresetId, "sel-bar")
       .Add(x => x.Name, "KEXP")
       .Add(x => x.Frequency, 90_300_000)
       .Add(x => x.Band, "FM")
       .Add(x => x.OnSelect, (string id) => { selected = id; }));
 
-    cut.Find(".rcp-preset-item").Click();
+    cut.Find(".rcp-bar-card").Click();
 
-    selected.Should().Be("sel-rail");
+    selected.Should().Be("sel-bar");
+  }
+
+  [Fact]
+  public void Bar_EnterAndSpace_FireOnSelect_OtherKeysDoNot()
+  {
+    var selected = new List<string>();
+    var cut = RenderComponent<PresetCard>(p => p
+      .Add(x => x.Variant, PresetCardVariant.Bar)
+      .Add(x => x.PresetId, "kbd")
+      .Add(x => x.Name, "KEXP")
+      .Add(x => x.Frequency, 90_300_000)
+      .Add(x => x.Band, "FM")
+      .Add(x => x.OnSelect, (string id) => { selected.Add(id); }));
+
+    cut.Find(".rcp-bar-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "a" });
+    selected.Should().BeEmpty();
+    cut.Find(".rcp-bar-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" });
+    cut.Find(".rcp-bar-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = " " });
+    selected.Should().Equal("kbd", "kbd");
   }
 
   [Fact]
@@ -175,23 +219,6 @@ public class PresetCardTests : TestContext
     cut.Find(".preset-card").Click();
 
     selected.Should().Be("sel-card");
-  }
-
-  [Fact]
-  public void Rail_Kebab_FiresOnKebabWithPresetId()
-  {
-    string? kebabId = null;
-    var cut = RenderComponent<PresetCard>(p => p
-      .Add(x => x.Variant, PresetCardVariant.Rail)
-      .Add(x => x.PresetId, "keb-1")
-      .Add(x => x.Name, "KEXP")
-      .Add(x => x.Frequency, 90_300_000)
-      .Add(x => x.Band, "FM")
-      .Add(x => x.OnKebab, (string id) => { kebabId = id; }));
-
-    cut.Find(".rcp-preset-kebab").Click();
-
-    kebabId.Should().Be("keb-1");
   }
 
   [Fact]

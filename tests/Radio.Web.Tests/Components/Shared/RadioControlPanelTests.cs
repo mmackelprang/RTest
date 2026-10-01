@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
@@ -66,6 +67,9 @@ public class RadioControlPanelTests : TestContext
     // the standard options pipeline so the binder returns a default-valued
     // monitor; tests never override these values.
     Services.AddOptions<RdsScrollOptions>();
+
+    // UI-21 — the preset bar reads the PRESETS knob's highlight off the HUD singleton.
+    Services.AddSingleton<Radio.Web.Services.EncoderHudService>();
   }
 
   protected override void Dispose(bool disposing)
@@ -242,7 +246,7 @@ public class RadioControlPanelTests : TestContext
     var clipState = BuildState(signalStrength: 100, clip: true, rssiDbu: 0.0);
     var cut = RenderPanel(clipState);
 
-    var pills = cut.FindAll(".rcp-clip-pill");
+    var pills = cut.FindAll(".rcp-clip-pill.is-on");
     Assert.Single(pills);
     Assert.Equal("CLIP", pills[0].TextContent.Trim());
   }
@@ -253,7 +257,79 @@ public class RadioControlPanelTests : TestContext
     var state = BuildState(signalStrength: 70, clip: false, rssiDbu: -18.0);
     var cut = RenderPanel(state);
 
-    Assert.Empty(cut.FindAll(".rcp-clip-pill"));
+    // UI-27: the pill stays in the DOM and is hidden by the stylesheet — see
+    // Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn for the half bUnit cannot see.
+    Assert.Single(cut.FindAll(".rcp-clip-pill"));
+    Assert.Empty(cut.FindAll(".rcp-clip-pill.is-on"));
+  }
+
+  [Theory]
+  [InlineData(false, false)]
+  [InlineData(true, false)]
+  [InlineData(false, true)]
+  [InlineData(true, true)]
+  public void MeterHeader_HasTheSameElements_WithAndWithoutClip(bool clip, bool scanning)
+  {
+    // UI-27, owner: "when the CLIP tag appears above the signal strength bar, it causes the whole
+    // screen to shift by a couple of pixels". Inserting the pill made the header 3 px taller
+    // (measured: 16.5 → 19.5 px) and moved everything below the meter. Now CLIP changes one class
+    // and nothing else: the header holds the same elements in the same order either way, so CLIP
+    // cannot add a box to the header's layout or take one away. (One render per bUnit context,
+    // hence one expected shape per scan state rather than a with/without comparison in one test.)
+    var state = BuildState(signalStrength: 100, clip: clip, rssiDbu: -20.0, scanStopThreshold: -10.0) with
+    {
+      IsScanning = scanning,
+      ScanDirection = scanning ? "up" : null,
+    };
+    var cut = RenderPanel(state);
+    var header = cut.Find(".rcp-meter-header");
+    var shape = string.Join("|", header.QuerySelectorAll("*").Select(e =>
+      $"{e.TagName}.{string.Join(".", e.ClassList.Where(c => c != "is-on").OrderBy(c => c, StringComparer.Ordinal))}"));
+
+    var expected = (scanning ? "SPAN.|SPAN.rcp-scanning|" : "SPAN.|")
+      + "SPAN.rcp-meter-readout|SPAN.rcp-clip-pill|SPAN.rcp-meter-dbu";
+    shape.Should().Be(expected);
+    header.QuerySelector(".rcp-clip-pill")!.ClassList.Contains("is-on").Should().Be(clip);
+  }
+
+  [Fact]
+  public void Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn()
+  {
+    // bUnit computes no styles, so the geometry half of UI-27 is pinned in the stylesheet: the pill
+    // is out of flow (absolute, against the readout), hidden by visibility rather than display —
+    // display:none would take its box away and put it back, which is the shift — and shown only by
+    // .is-on. Measured in Chromium at 1920×720: header 16.5 px and every rect below it identical with
+    // CLIP off, CLIP on, scanning and both.
+    var css = File.ReadAllText(LocateDesignSystemCss());
+    var pill = Regex.Match(css, @"\n\.rcp-clip-pill\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    var on = Regex.Match(css, @"\n\.rcp-clip-pill\.is-on\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    var readout = Regex.Match(css, @"\n\.rcp-meter-readout\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+
+    pill.Should().Contain("position: absolute");
+    // Where it sits once out of flow: left of the dBu readout and centred on it. Without these it
+    // would land on top of the readout.
+    pill.Should().Contain("right: calc(100% + 6px)");
+    pill.Should().Contain("top: 50%");
+    pill.Should().Contain("transform: translateY(-50%)");
+    pill.Should().Contain("visibility: hidden");
+    pill.Should().NotContain("display: none");
+    on.Should().Contain("visibility: visible");
+    readout.Should().Contain("position: relative", "the pill is placed against the readout, not some outer box");
+  }
+
+  private static string LocateDesignSystemCss()
+  {
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 10 && dir != null; i++)
+    {
+      var candidate = Path.Combine(dir, "src", "Radio.Web", "wwwroot", "css", "design-system.css");
+      if (File.Exists(candidate))
+      {
+        return candidate;
+      }
+      dir = Path.GetDirectoryName(dir);
+    }
+    throw new FileNotFoundException("design-system.css not found by walking up from test base dir");
   }
 
   [Fact]
@@ -851,14 +927,16 @@ public class RadioControlPanelTests : TestContext
       "track text is just the RT when PS is empty — no prefix, no separator");
   }
 
+  // ─── UI-20: the preset bar (spec 2026-10-01 §4.5) ─────────────────────────
+  // These pin what the panel decides and wires — which presets reach the bar, in
+  // what order, when ＋ SAVE shows, and that recall / save / rename / delete still
+  // reach the API through the bar's cards. Paging, the arrows, the off-screen dot
+  // and auto-scroll belong to PresetBar and are pinned in PresetBarTests.
+
   [Fact]
-  public void PresetsHeader_ShowsTotalSavedCount()
+  public void PresetsCaption_ShowsTotalSavedCount()
   {
-    // Hot-fix off PR #371: the header counter dropped the per-band "N of CAP"
-    // form (which was confusing once the list itself stopped filtering by
-    // band) and now shows the total saved count across all bands. The empty
-    // placeholder remains scoped to the current band's capacity — tested
-    // separately.
+    // Hot-fix off PR #371: the total across all bands, never "N of CAP".
     var state = BuildState();
     var presets = new[]
     {
@@ -867,87 +945,112 @@ public class RadioControlPanelTests : TestContext
     };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
 
-    var count = cut.Find(".rcp-presets-count");
-    Assert.Contains("PRESETS", count.TextContent);
-    Assert.Contains("2 saved", count.TextContent);
-    // The old "of CAP" form must be gone — defends against a regression.
-    Assert.DoesNotContain(" of ", count.TextContent);
+    var count = cut.Find(".rcp-bar-caption .rcp-presets-count");
+    count.TextContent.Trim().Should().Be("PRESETS · 2 saved");
   }
 
   [Fact]
-  public void PresetsHeader_ShowsHoldBandHint()
+  public void PresetsCaption_ShowsHoldBandHint_WhenEverythingFits()
   {
     var state = BuildState();
-    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
-
-    var hint = cut.Find(".rcp-presets-hint");
-    Assert.Contains("HOLD", hint.TextContent);
-    Assert.Contains("TO SAVE", hint.TextContent);
-    var kbd = hint.QuerySelector("kbd");
-    Assert.NotNull(kbd);
-    Assert.Equal("FM", kbd!.TextContent.Trim());
-  }
-
-  [Fact]
-  public void PresetRow_GridLayout_SlotNameBandFreq()
-  {
-    var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-    };
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
 
-    // Each preset row carries the three grid children: slot, text stack, freq.
-    var rows = cut.FindAll(".rcp-preset-item");
-    var realRows = rows.Where(r => !r.ClassList.Contains("rcp-preset-empty")).ToList();
-    Assert.Single(realRows);
-    var row = realRows[0];
-
-    Assert.Equal("01", row.QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
-    Assert.Equal("KQED", row.QuerySelector(".rcp-preset-name")!.TextContent.Trim());
-    Assert.Equal("FM", row.QuerySelector(".rcp-preset-band")!.TextContent.Trim());
-    Assert.Contains("88.50", row.QuerySelector(".rcp-preset-freq")!.TextContent);
+    var hint = cut.Find(".rcp-bar-caption .rcp-presets-hint");
+    Assert.Contains("HOLD", hint.TextContent);
+    Assert.Contains("TO SAVE", hint.TextContent);
+    Assert.Equal("FM", hint.QuerySelector("kbd")!.TextContent.Trim());
   }
 
   [Fact]
-  public void ActivePreset_GetsIsActiveClass_WhenFrequencyMatches()
+  public void PresetCard_ShowsNameThenOrdinalBandAndFrequency()
   {
-    // Station is tuned to 88.5 MHz; one preset matches, the other doesn't.
+    var state = BuildState();
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
+
+    var card = cut.Find(".rcp-bar-card");
+    card.QuerySelector(".rcp-bar-card-name")!.TextContent.Trim().Should().Be("KQED");
+    card.QuerySelector(".rcp-bar-card-meta")!.TextContent.Trim().Should().Be("01 · FM 88.50");
+  }
+
+  [Fact]
+  public void ActivePreset_IsTheOneMatchingBandAndFrequency()
+  {
+    // The knob's IsCurrent test: band equal and |Δf| < 1 Hz.
     var state = BuildState(frequency: 88_500_000);
     var presets = new[]
     {
       BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
       BuildPreset("p2", "KCBS", 99_700_000, "FM", 2),
+      BuildPreset("p3", "Same freq, other band", 88_500_000, "VHF", 1),
     };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
 
-    var actives = cut.FindAll(".rcp-preset-item.is-active");
-    Assert.Single(actives);
-    Assert.Equal("01", actives[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
+    var actives = cut.FindAll(".rcp-bar-card.is-active");
+    actives.Should().ContainSingle();
+    actives[0].GetAttribute("data-preset-id").Should().Be("p1");
+    actives[0].GetAttribute("aria-current").Should().Be("true");
   }
 
   [Fact]
-  public void EmptyPlaceholder_Renders_WhenBelowCapacity()
+  public void Presets_ShowAllBands_InTheKnobsOrder()
   {
-    var state = BuildState();
+    // Hot-fix off PR #371: every band is shown, never filtered to the tuned one.
+    // UI-20 / spec §4.7: and in the PRESETS knob's order — band (ordinal), then the
+    // per-band slot — so "turn three detents" lands on the third card the user can
+    // see (PresetSelectorService.cs:364-370). The API returns them in any order.
+    var state = BuildState(band: "FM");
     var presets = new[]
     {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("wb1", "Weather", 162_550_000, "WB", 1),
+      BuildPreset("fm2", "FM two", 99_700_000, "FM", 2),
+      BuildPreset("am1", "AM one", 740_000, "AM", 1),
+      BuildPreset("fm1", "FM one", 88_500_000, "FM", 1),
+      BuildPreset("air1", "Tower", 118_300_000, "AIR", 1),
+      BuildPreset("vhf1", "Repeater", 146_520_000, "VHF", 1),
     };
-    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16), BuildAmBand() });
 
-    var empties = cut.FindAll(".rcp-preset-empty");
-    Assert.Single(empties);
-    // Empty placeholder is the NEXT slot (slot 2 after the first preset).
-    Assert.Equal("02", empties[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
-    Assert.Contains("EMPTY", empties[0].QuerySelector(".rcp-preset-empty-hint")!.TextContent);
+    var ids = cut.FindAll(".rcp-bar-card").Select(e => e.GetAttribute("data-preset-id")).ToList();
+    ids.Should().Equal("air1", "am1", "fm1", "fm2", "vhf1", "wb1");
   }
 
   [Fact]
-  public void EmptyPlaceholder_Hidden_WhenAtCapacity()
+  public void SaveCard_Renders_AtTheEndOfTheCurrentBandsGroup_WhenUnsavedAndBelowCapacity()
   {
-    // Build exactly 4 presets and a band with capacity 4 (WB capacity per spec).
+    // Owner decision Q2: a tappable ＋ SAVE for the next free slot of the CURRENT
+    // band, sitting where the new preset will land — after FM's last card, before WB.
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var presets = new[]
+    {
+      BuildPreset("fm1", "KQED", 88_500_000, "FM", 1),
+      BuildPreset("am1", "KCBS-AM", 740_000, "AM", 1),
+      BuildPreset("wb1", "Weather", 162_550_000, "WB", 1),
+    };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16), BuildAmBand(16) });
+
+    var order = cut.FindAll(".rcp-bar-viewport > [data-item]")
+      .Select(e => e.QuerySelector(".rcp-bar-card")?.GetAttribute("data-preset-id") ?? (e.QuerySelector(".rcp-bar-save") != null ? "SAVE" : "?"))
+      .ToList();
+    order.Should().Equal("am1", "fm1", "SAVE", "wb1");
+    cut.Find(".rcp-bar-save .rcp-bar-card-meta").TextContent.Trim().Should().Be("FM 92.30");
+  }
+
+  [Fact]
+  public void SaveCard_Hidden_WhenWhatIsPlayingIsAlreadySaved()
+  {
+    // The active card is the confirmation; a ＋ SAVE beside it would offer a duplicate.
+    var state = BuildState(band: "FM", frequency: 88_500_000);
+    var presets = new[] { BuildPreset("fm1", "KQED", 88_500_000, "FM", 1) };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    cut.FindAll(".rcp-bar-save").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void SaveCard_Hidden_WhenTheBandIsAtCapacity()
+  {
     var state = BuildState(band: "WB", frequency: 162_500_000);
     var presets = Enumerable.Range(1, 4)
       .Select(i => BuildPreset($"p{i}", $"NOAA {i}", 162_400_000 + (i * 25_000), "WB", i))
@@ -968,117 +1071,201 @@ public class RadioControlPanelTests : TestContext
     };
     var cut = RenderPanel(state, presets: presets, bands: new[] { wb });
 
-    Assert.Empty(cut.FindAll(".rcp-preset-empty"));
+    cut.FindAll(".rcp-bar-save").Should().BeEmpty();
   }
 
   [Fact]
-  public void Presets_ShowAllBands_NotFilteredByCurrentBand()
+  public void SaveCard_Tap_OpensTheSaveDialog()
   {
-    // Hot-fix off PR #371: user couldn't find their saved WB preset while
-    // tuned to FM. The list now shows ALL saved presets across all bands;
-    // the per-row .rcp-preset-band sub-line carries the band context so
-    // cross-band visibility is navigable.
-    var state = BuildState(band: "FM");
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-      BuildPreset("p2", "KCBS-AM", 740_000, "AM", 1),
-      BuildPreset("p3", "WX-Sierra", 162_550_000, "WB", 1),
-    };
-    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(), BuildAmBand() });
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand(16) });
 
-    var names = cut.FindAll(".rcp-preset-item:not(.rcp-preset-empty) .rcp-preset-name")
-      .Select(e => e.TextContent.Trim()).ToList();
-    Assert.Contains("KQED", names);
-    Assert.Contains("KCBS-AM", names);
-    Assert.Contains("WX-Sierra", names);
+    cut.FindAll("h6").Select(h => h.TextContent).Should().NotContain("Save Preset");
+    cut.Find(".rcp-bar-save").Click();
+
+    cut.FindAll("h6").Select(h => h.TextContent).Should().Contain("Save Preset");
   }
 
-  [Fact]
-  public void EmptyPlaceholder_ScopedToCurrentBand_WhenOtherBandSavedPresetsExist()
+  [Theory]
+  [InlineData("frequency", "Set Frequency")]
+  [InlineData("save", "Save Preset")]
+  [InlineData("rename", "Rename Preset")]
+  public void TextEntryDialogs_AreTopAnchored_ClearOfTheKeyboard(string dialog, string title)
   {
-    // Hot-fix off PR #371: even though the list shows all bands, the empty
-    // placeholder still scopes to the CURRENT band so saving stays in-band.
-    // FM is current; one FM preset saved (capacity 16); AM has its own
-    // preset that should NOT count toward the empty slot calculation.
-    var state = BuildState(band: "FM");
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-      BuildPreset("p2", "KCBS-AM", 740_000, "AM", 1),
-    };
-    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16), BuildAmBand(16) });
-
-    var empties = cut.FindAll(".rcp-preset-empty");
-    Assert.Single(empties);
-    // Slot 2 — second FM preset, NOT the third row in the (mixed-band) list.
-    Assert.Equal("02", empties[0].QuerySelector(".rcp-preset-slot")!.TextContent.Trim());
-    Assert.Contains("FM", empties[0].QuerySelector(".rcp-preset-empty-hint")!.TextContent);
-  }
-
-  [Fact]
-  public void PresetRow_RendersKebabButton()
-  {
-    // Hot-fix off PR #371: each row carries a trailing ⋮ button that opens
-    // the Rename / Delete menu. Verifies the kebab is on EVERY real preset
-    // row (the empty placeholder has no kebab — it isn't actionable).
-    var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-      BuildPreset("p2", "KCBS", 99_700_000, "FM", 2),
-    };
+    // UI-24, owner (Rename dialog, UI-20 UAT check 5): "the keyboard occludes the dialog". The
+    // in-app keyboard covers everything below y = 348 of the 720 px panel; these dialogs were centred
+    // overlays with inline align-items:center, which put the field and its buttons under it. They
+    // now use the shared top-anchored overlay (design-system.css §20a — pinned by
+    // TextEntryDialogPlacementTests), so the markup must carry those classes and no inline
+    // placement of its own that could override them.
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var presets = dialog == "rename" ? new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) } : null;
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
 
-    var realRows = cut.FindAll(".rcp-preset-item:not(.rcp-preset-empty)");
-    Assert.Equal(2, realRows.Count);
-    foreach (var row in realRows)
+    switch (dialog)
     {
-      var kebab = row.QuerySelector(".rcp-preset-kebab");
-      Assert.NotNull(kebab);
-      Assert.Equal("⋮", kebab!.TextContent.Trim());
+      case "frequency":
+        cut.Find(".rcp-freq-well .display-frequency").Click();
+        break;
+      case "save":
+        cut.Find(".rcp-bar-save").Click();
+        break;
+      default:
+        LongPressCard(cut, "p1");
+        cut.FindAll(".rcp-preset-menu-item")[0].Click();
+        break;
     }
+
+    var overlay = cut.FindAll(".kiosk-entry-overlay").Should().ContainSingle().Subject;
+    overlay.GetAttribute("style").Should().BeNull("placement comes from the shared class, not an inline override");
+    var card = overlay.QuerySelector(":scope > .kiosk-entry-card");
+    card.Should().NotBeNull();
+    card!.QuerySelector("h6")!.TextContent.Trim().Should().Be(title);
+    card.QuerySelector("input").Should().NotBeNull("the field the keyboard types into is in the anchored card");
+    card.QuerySelectorAll(".kiosk-entry-actions > button").Should().HaveCount(2);
   }
 
   [Fact]
-  public void PresetKebabClick_OpensActionMenu()
+  public void NoPresets_ShowsTheEmptyCard_AndTheSaveCard()
   {
-    // Hot-fix off PR #371: clicking the kebab opens the action popover with
-    // Rename + Delete options. The popover is rendered via @if on the
-    // _actionMenuPresetId field so it materialises after the click.
-    var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-    };
-    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand(16) });
 
+    cut.Find(".rcp-bar-caption .rcp-presets-count").TextContent.Trim().Should().Be("PRESETS · 0 saved");
+    cut.Find(".rcp-bar-msg.is-empty").TextContent.Should().Contain("NO STATIONS SAVED");
+    cut.FindAll(".rcp-bar-save").Should().ContainSingle();
+    cut.FindAll(".rcp-bar-arrow").Should().OnlyContain(a => a.GetAttribute("aria-disabled") == "true");
+  }
+
+  [Fact]
+  public void FailedPresetRead_ShowsRetryCard_NotAFalseEmpty_AndRetryReReads()
+  {
+    // Spec §7: a failed read used to render "NO PRESETS" — a false empty.
+    var state = BuildState();
+    var handler = UseRadioState(state, bands: new[] { BuildFmBand() });
+    handler.FailPresets = true;
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-msg.is-error").Should().ContainSingle(),
+      TimeSpan.FromSeconds(2));
+
+    cut.Find(".rcp-bar-caption .rcp-presets-count").TextContent.Trim().Should().Be("PRESETS");
+    cut.Markup.Should().NotContain("NO STATIONS SAVED");
+    cut.Find(".rcp-bar-msg.is-error").TextContent.Should().Contain("Couldn't load presets");
+
+    handler.FailPresets = false;
+    var readsBefore = handler.RecordedCalls.Count(c => c.Method == "GET" && c.Path == "/api/radio/presets");
+    cut.Find(".rcp-bar-msg.is-error").Click();
+
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-msg.is-error").Should().BeEmpty(), TimeSpan.FromSeconds(2));
+    handler.RecordedCalls.Count(c => c.Method == "GET" && c.Path == "/api/radio/presets")
+      .Should().Be(readsBefore + 1);
+  }
+
+  [Fact]
+  public void FailedRefresh_AfterAGoodRead_KeepsTheListOnScreen()
+  {
+    // Spec §7's error card is for "no list at all". A refresh that fails after a save must not
+    // replace presets the user can still see with an error.
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var handler = UseRadioState(state, presets, new[] { BuildFmBand(16) });
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-card").Should().ContainSingle(), TimeSpan.FromSeconds(2));
+
+    handler.FailPresets = true;
+    cut.Find(".rcp-bar-save").Click();
+    cut.FindAll("button").Single(b => b.TextContent.Trim() == "Save").Click();
+
+    cut.WaitForAssertion(() => handler.RecordedCalls.Count(c => c.Method == "GET" && c.Path == "/api/radio/presets").Should().Be(2),
+      TimeSpan.FromSeconds(2));
+    cut.FindAll(".rcp-bar-card").Should().ContainSingle();
+    cut.FindAll(".rcp-bar-msg.is-error").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void PresetCard_Tap_RecallsThePreset()
+  {
+    var state = BuildState();
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var handler = UseRadioState(state, presets, new[] { BuildFmBand() });
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-card").Should().ContainSingle(), TimeSpan.FromSeconds(2));
+
+    cut.Find(".rcp-bar-card").Click();
+
+    cut.WaitForAssertion(() => handler.RecordedCalls.Should().Contain(c => c.Method == "POST" && c.Path == "/api/radio/presets/p1/load"),
+      TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void PresetCard_HasNoKebab()
+  {
+    // Owner decision Q3: the 18 px ⋮ (far under the 48 px touch minimum) left the bar.
+    var state = BuildState();
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
+
+    cut.FindAll(".rcp-bar-card button").Should().BeEmpty();
+    cut.Markup.Should().NotContain("⋮");
+  }
+
+  /// <summary>
+  /// Long-presses a preset card through its real markup: pointerdown, then the
+  /// recorded press time rewound past the 600 ms threshold, then pointerup — the
+  /// same elapsed-ms branch a real hold takes, without sleeping.
+  /// </summary>
+  private static void LongPressCard(IRenderedComponent<RadioControlPanel> cut, string presetId)
+  {
+    var card = cut.Find($".rcp-bar-card[data-preset-id='{presetId}']");
+    card.PointerDown();
+    typeof(RadioControlPanel)
+      .GetField("_presetPointerDownAt", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(cut.Instance, DateTime.UtcNow.AddMilliseconds(-700));
+    cut.Find($".rcp-bar-card[data-preset-id='{presetId}']").PointerUp();
+  }
+
+  [Fact]
+  public void PresetCard_LongPress_OpensRenameDeleteMenu_AndSwallowsTheRecall()
+  {
+    var state = BuildState();
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var handler = UseRadioState(state, presets, new[] { BuildFmBand() });
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-card").Should().ContainSingle(), TimeSpan.FromSeconds(2));
     Assert.Empty(cut.FindAll(".rcp-preset-menu"));
 
-    var kebab = cut.Find(".rcp-preset-kebab");
-    kebab.Click();
+    LongPressCard(cut, "p1");
+    // The click the browser synthesises after the hold must not ALSO tune the preset.
+    cut.Find(".rcp-bar-card").Click();
 
-    var menu = cut.Find(".rcp-preset-menu");
-    Assert.NotNull(menu);
     var items = cut.FindAll(".rcp-preset-menu-item");
-    Assert.Equal(2, items.Count);
-    Assert.Contains("Rename", items[0].TextContent);
-    Assert.Contains("Delete", items[1].TextContent);
+    items.Should().HaveCount(2);
+    items[0].TextContent.Should().Contain("Rename");
+    items[1].TextContent.Should().Contain("Delete");
+    handler.RecordedCalls.Should().NotContain(c => c.Path == "/api/radio/presets/p1/load");
+  }
+
+  [Fact]
+  public void PresetCard_ShortPress_DoesNotOpenTheMenu()
+  {
+    var state = BuildState();
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
+
+    cut.Find(".rcp-bar-card").PointerDown();
+    cut.Find(".rcp-bar-card").PointerUp();
+
+    cut.FindAll(".rcp-preset-menu").Should().BeEmpty();
   }
 
   [Fact]
   public void PresetMenuOverlayClick_ClosesActionMenu()
   {
-    // Clicking the overlay (background of the menu) closes the menu — same
-    // dismiss pattern as the save/rename dialogs.
     var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-    };
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
 
-    cut.Find(".rcp-preset-kebab").Click();
+    LongPressCard(cut, "p1");
     Assert.Single(cut.FindAll(".rcp-preset-menu"));
 
     cut.Find(".rcp-preset-menu-overlay").Click();
@@ -1088,26 +1275,17 @@ public class RadioControlPanelTests : TestContext
   [Fact]
   public void PresetActionMenu_HasMenuRole()
   {
-    // Polisher pass on PR #373: a11y. The popover surface must announce as a
-    // menu (role=menu + aria-label), and each item must carry role=menuitem
-    // so screen readers traverse the actions correctly. The kebab button
-    // itself is already an accessible <button> with aria-label.
+    // Polisher pass on PR #373: role=menu + aria-label, items role=menuitem.
     var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-    };
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
 
-    cut.Find(".rcp-preset-kebab").Click();
+    LongPressCard(cut, "p1");
 
     var menu = cut.Find(".rcp-preset-menu");
     Assert.Equal("menu", menu.GetAttribute("role"));
     Assert.False(string.IsNullOrWhiteSpace(menu.GetAttribute("aria-label")));
-
-    var items = cut.FindAll(".rcp-preset-menu-item");
-    Assert.Equal(2, items.Count);
-    foreach (var item in items)
+    foreach (var item in cut.FindAll(".rcp-preset-menu-item"))
     {
       Assert.Equal("menuitem", item.GetAttribute("role"));
     }
@@ -1116,47 +1294,103 @@ public class RadioControlPanelTests : TestContext
   [Fact]
   public void PresetActionMenu_EscKey_ClosesMenu()
   {
-    // Polisher pass on PR #373: the inline-CSS comment at design-system.css
-    // promises "Esc / overlay tap closes" — overlay tap was wired but Esc
-    // wasn't. After this fix, a keydown of "Escape" on the overlay dismisses
-    // the menu (the overlay is tabindex=0 so it can receive keyboard events,
-    // and Esc from focused menu items bubbles up).
     var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-    };
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
     var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
 
-    cut.Find(".rcp-preset-kebab").Click();
+    LongPressCard(cut, "p1");
     Assert.Single(cut.FindAll(".rcp-preset-menu"));
 
-    var overlay = cut.Find(".rcp-preset-menu-overlay");
-    overlay.KeyDown(new KeyboardEventArgs { Key = "Escape" });
+    cut.Find(".rcp-preset-menu-overlay").KeyDown(new KeyboardEventArgs { Key = "Escape" });
 
     Assert.Empty(cut.FindAll(".rcp-preset-menu"));
   }
 
   [Fact]
-  public void PresetMenuRenameClick_OpensRenameDialogPrefilled()
+  public void PresetMenuRename_OpensPrefilledDialog_AndSaveCallsTheApi()
   {
-    // The Rename action transitions from the popover into a text-entry
-    // dialog pre-filled with the preset's current name (one-keystroke
-    // small-edit UX).
     var state = BuildState();
-    var presets = new[]
-    {
-      BuildPreset("p1", "KQED", 88_500_000, "FM", 1),
-    };
-    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var handler = UseRadioState(state, presets, new[] { BuildFmBand(16) });
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-card").Should().ContainSingle(), TimeSpan.FromSeconds(2));
 
-    cut.Find(".rcp-preset-kebab").Click();
-    var renameItem = cut.FindAll(".rcp-preset-menu-item")[0];
-    renameItem.Click();
+    LongPressCard(cut, "p1");
+    cut.FindAll(".rcp-preset-menu-item")[0].Click();
 
-    // Menu closes, rename dialog opens.
     Assert.Empty(cut.FindAll(".rcp-preset-menu"));
     Assert.Single(cut.FindAll(".rcp-preset-rename-card"));
+    typeof(RadioControlPanel).GetField("_renamePresetName", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .GetValue(cut.Instance).Should().Be("KQED");
+
+    cut.FindAll(".rcp-preset-rename-card button").Single(b => b.TextContent.Contains("Save")).Click();
+    cut.WaitForAssertion(() => handler.RecordedCalls.Should().Contain(c => c.Method == "PUT" && c.Path == "/api/radio/presets/p1"),
+      TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void PresetMenuDelete_CallsTheApi()
+  {
+    var state = BuildState();
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var handler = UseRadioState(state, presets, new[] { BuildFmBand(16) });
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-card").Should().ContainSingle(), TimeSpan.FromSeconds(2));
+
+    LongPressCard(cut, "p1");
+    cut.FindAll(".rcp-preset-menu-item")[1].Click();
+
+    cut.WaitForAssertion(() => handler.RecordedCalls.Should().Contain(c => c.Method == "DELETE" && c.Path == "/api/radio/presets/p1"),
+      TimeSpan.FromSeconds(2));
+    Assert.Empty(cut.FindAll(".rcp-preset-menu"));
+  }
+
+  [Fact]
+  public void LoadingSkeleton_IsThePanelShape()
+  {
+    // Until the state arrives the panel shows the RadioPanel skeleton (one-row bands + bar), not
+    // RadioPage's Radio shape.
+
+    var handler = new HttpClient(new NeverRespondsHandler()) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
+    Services.AddSingleton(_ => new RadioApiService(handler, NullLogger<RadioApiService>.Instance));
+
+    var cut = RenderComponent<RadioControlPanel>();
+
+    cut.Find(".skeleton").ClassList.Should().Contain("skeleton-radio-panel");
+  }
+
+  [Fact]
+  public void BandPills_SitOnOneRow()
+  {
+    // UI-20 (spec §2.2, §4.3): six equal pills on one row. Layout cannot be measured in
+    // bUnit — the box measurement in docs/queue/UI-20.md is the real evidence — so this
+    // pins the two rules that produce it: the group never wraps, and each pill shares the
+    // row equally.
+    var state = BuildState();
+    var cut = RenderPanel(state, bands: new[] { BuildFmBand(), BuildAmBand() });
+
+    var css = System.Text.RegularExpressions.Regex.Replace(cut.Markup, @"\s+", " ");
+    css.Should().MatchRegex(@"\.rcp-band-group \{[^}]*flex-wrap: nowrap;");
+    css.Should().MatchRegex(@"\.rcp-band-group \.rcp-band-btn \{ flex: 1 1 0;[^}]*min-width: var\(--touch-min\); \}");
+  }
+
+  [Theory]
+  [InlineData(-40.0, ".rcp-scanning", "SCANNING UP")]
+  [InlineData(-20.0, ".rcp-scan-signal", "SIGNAL −20 dBu")]
+  public void ScanIndicator_SitsInTheMeterHeader_NotItsOwnRow(double rssiDbu, string selector, string text)
+  {
+    // Spec §4.4: as its own row the indicator pushed the AGC row out of the clipped
+    // tuner column. In the RSSI header it takes no height.
+    var state = BuildState(rssiDbu: rssiDbu, scanStopThreshold: -30.0) with
+    {
+      IsScanning = true,
+      ScanDirection = "up",
+    };
+    var cut = RenderPanel(state);
+
+    var chip = cut.Find($".rcp-meter-header {selector}");
+    chip.TextContent.Trim().Should().Be(text);
+    cut.FindAll($".rcp-tuner > {selector}").Should().BeEmpty();
   }
 
   [Fact]
@@ -1230,6 +1464,13 @@ public class RadioControlPanelTests : TestContext
     return cls.Contains("seg-green") || cls.Contains("seg-amber") || cls.Contains("seg-red");
   }
 
+  /// <summary>A handler whose requests never complete — holds the panel in its loading state.</summary>
+  private sealed class NeverRespondsHandler : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+      new TaskCompletionSource<HttpResponseMessage>().Task;
+  }
+
   /// <summary>
   /// Tiny HTTP stub that returns a fixed <see cref="RadioStateDto"/> for
   /// <c>/api/radio/state</c> and configurable arrays for the auxiliary
@@ -1248,6 +1489,9 @@ public class RadioControlPanelTests : TestContext
 
     /// <summary>Recorded outbound calls — useful for tests that pin user-gesture wiring.</summary>
     public List<(string Method, string Path, string? Body)> RecordedCalls { get; } = new();
+
+    /// <summary>When set, <c>GET /api/radio/presets</c> answers 500 (the failed-read state).</summary>
+    public bool FailPresets { get; set; }
 
     public RadioStateStubHandler(
       RadioStateDto state,
@@ -1274,11 +1518,15 @@ public class RadioControlPanelTests : TestContext
       var response = (method, path) switch
       {
         ("GET", "/api/radio/state") => Ok(_state),
-        ("GET", "/api/radio/presets") => Ok(_presets),
+        ("GET", "/api/radio/presets") => FailPresets
+          ? new HttpResponseMessage(HttpStatusCode.InternalServerError)
+          : Ok(_presets),
         ("GET", "/api/RadioBands") => Ok(_bands),
         // POST endpoints — return 200 so the API client treats them as success;
         // the panel still re-fetches state which lands on our stubbed GET.
         ("POST", _) => new HttpResponseMessage(HttpStatusCode.OK),
+        ("PUT", _) => new HttpResponseMessage(HttpStatusCode.OK),
+        ("DELETE", _) => new HttpResponseMessage(HttpStatusCode.OK),
         _ => new HttpResponseMessage(HttpStatusCode.NotFound),
       };
       return response;

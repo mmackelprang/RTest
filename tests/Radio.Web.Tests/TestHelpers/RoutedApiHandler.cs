@@ -24,7 +24,11 @@ public sealed class RoutedApiHandler : HttpMessageHandler
   private readonly List<RecordedRequest> _requests = [];
 
   /// <summary>One request as the handler saw it.</summary>
-  public sealed record RecordedRequest(HttpMethod Method, string Path, string? Body);
+  public sealed record RecordedRequest(HttpMethod Method, string Path, string? Body)
+  {
+    /// <summary>The query string, with its leading <c>?</c>, or empty. Routing ignores it.</summary>
+    public string Query { get; init; } = string.Empty;
+  }
 
   /// <summary>Every request received so far, in arrival order.</summary>
   public IReadOnlyList<RecordedRequest> Requests
@@ -56,6 +60,23 @@ public sealed class RoutedApiHandler : HttpMessageHandler
     return this;
   }
 
+  /// <summary>
+  /// Holds every answer to <c><paramref name="method"/> <paramref name="path"/></c> until the returned
+  /// source is completed. The request is recorded when it arrives, before the hold, so a test can
+  /// wait for it to be in flight. Complete it before the test ends.
+  /// </summary>
+  public TaskCompletionSource Hold(HttpMethod method, string path)
+  {
+    TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    lock (_sync)
+    {
+      _holds[(method, path)] = release.Task;
+    }
+    return release;
+  }
+
+  private readonly Dictionary<(HttpMethod Method, string Path), Task> _holds = new();
+
   protected override async Task<HttpResponseMessage> SendAsync(
     HttpRequestMessage request, CancellationToken cancellationToken)
   {
@@ -65,12 +86,28 @@ public sealed class RoutedApiHandler : HttpMessageHandler
       : await request.Content.ReadAsStringAsync(cancellationToken);
 
     (HttpStatusCode Status, string? Body) answer;
+    Task? hold;
     lock (_sync)
     {
-      _requests.Add(new RecordedRequest(request.Method, path, body));
+      _requests.Add(new RecordedRequest(request.Method, path, body) { Query = request.RequestUri?.Query ?? string.Empty });
+      _holds.TryGetValue((request.Method, path), out hold);
       if (!_routes.TryGetValue((request.Method, path), out answer))
       {
         answer = (HttpStatusCode.NotFound, null);
+      }
+    }
+
+    if (hold != null)
+    {
+      await hold;
+
+      // Read again after the hold, so a test can change the answer while the request is held.
+      lock (_sync)
+      {
+        if (!_routes.TryGetValue((request.Method, path), out answer))
+        {
+          answer = (HttpStatusCode.NotFound, null);
+        }
       }
     }
 

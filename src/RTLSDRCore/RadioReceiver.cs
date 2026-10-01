@@ -866,7 +866,7 @@ namespace RTLSDRCore;
       #region Live Band Sweep
 
       /// <summary>
-      /// True while <see cref="SweepChannels"/> is running.
+      /// True while <see cref="SweepChannels"/> or <see cref="SweepPlan"/> is running.
       /// </summary>
       public bool IsSweeping => _isSweeping;
 
@@ -958,6 +958,74 @@ namespace RTLSDRCore;
           ArgumentNullException.ThrowIfNull(channels);
           BandSweeper.ThrowIfInvalidSamplesPerMeasurement(samplesPerMeasurement);
 
+          return RunLiveSweep(
+              plan: null,
+              gainDb,
+              ct,
+              (tuner, token) => BandSweeper.Sweep(tuner, channels, samplesPerMeasurement, progress, token));
+      }
+
+      /// <summary>
+      /// Measures every channel of <paramref name="plan"/> using the running receiver's own
+      /// stream, then returns to the station that was playing (AUD-91). Blocks the calling
+      /// thread for the duration of the sweep.
+      /// </summary>
+      /// <remarks>
+      /// Runs under exactly the rules of <see cref="SweepChannels"/> (the two share one body):
+      /// the sweep-only silencing, manual gain, the retune to <see cref="CurrentFrequency"/> and
+      /// the gain-mode restore when it ends, cancellation by a user tune, band, gain, seek-scan
+      /// or shutdown, and the dropped block after each hop. Each hop is one tune of the plan;
+      /// see <see cref="BandSweeper.Sweep(ISweepTuner, BandSweepPlan, int, IProgress{BandSweepProgress}?, CancellationToken)"/>.
+      /// </remarks>
+      /// <param name="plan">The band's sweep plan.</param>
+      /// <param name="gainDb">Manual tuner gain used for the sweep, in dB.</param>
+      /// <param name="progress">Receives a report after each tune.</param>
+      /// <param name="ct">Cancels the sweep.</param>
+      /// <param name="samplesPerMeasurement">Samples per settling read and per measurement read.</param>
+      /// <returns>The measured channel levels.</returns>
+      /// <exception cref="ArgumentOutOfRangeException">
+      /// <paramref name="samplesPerMeasurement"/> fails
+      /// <see cref="BandSweeper.IsValidSamplesPerMeasurement"/>. Checked before anything else is touched.
+      /// </exception>
+      /// <exception cref="InvalidOperationException">
+      /// The receiver is not in the <see cref="ReceiverState.Running"/> state, a seek scan is
+      /// running, another sweep is running, or the receiver's IQ sample rate is lower than
+      /// <see cref="BandSweepPlan.SampleRate"/>. Checked before anything else is touched.
+      /// </exception>
+      /// <exception cref="OperationCanceledException">The sweep was cancelled.</exception>
+      /// <exception cref="TimeoutException">No IQ block arrived within <see cref="SweepReadTimeout"/>.</exception>
+      public IReadOnlyList<ChannelLevel> SweepPlan(
+          BandSweepPlan plan,
+          float gainDb,
+          IProgress<BandSweepProgress>? progress,
+          CancellationToken ct,
+          int samplesPerMeasurement = BandSweeper.DefaultSamplesPerMeasurement)
+      {
+          ArgumentNullException.ThrowIfNull(plan);
+          BandSweeper.ThrowIfInvalidSamplesPerMeasurement(samplesPerMeasurement);
+
+          return RunLiveSweep(
+              plan,
+              gainDb,
+              ct,
+              (tuner, token) => BandSweeper.Sweep(tuner, plan, samplesPerMeasurement, progress, token));
+      }
+
+      /// <summary>
+      /// The body shared by <see cref="SweepChannels"/> and <see cref="SweepPlan"/>: registers
+      /// the sweep, silences output, sets manual gain, installs the IQ tap, runs
+      /// <paramref name="sweep"/>, and restores everything in the <c>finally</c>.
+      /// </summary>
+      /// <param name="plan">When not null, the receiver's sample rate is checked against it under the state lock.</param>
+      /// <param name="gainDb">Manual tuner gain used for the sweep, in dB.</param>
+      /// <param name="ct">Cancels the sweep.</param>
+      /// <param name="sweep">Runs the sweep over the live tuner with the sweep's own token.</param>
+      private IReadOnlyList<ChannelLevel> RunLiveSweep(
+          BandSweepPlan? plan,
+          float gainDb,
+          CancellationToken ct,
+          Func<ISweepTuner, CancellationToken, IReadOnlyList<ChannelLevel>> sweep)
+      {
           CancellationTokenSource sweepCts;
           lock (_sweepStateLock)
           {
@@ -972,6 +1040,10 @@ namespace RTLSDRCore;
               if (_isSweeping)
               {
                   throw new InvalidOperationException("A band sweep is already running");
+              }
+              if (plan != null)
+              {
+                  BandSweeper.ThrowIfSampleRateTooLow(_sdrSampleRate, plan);
               }
 
               sweepCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -991,7 +1063,7 @@ namespace RTLSDRCore;
               }
 
               _sweepTap = tuner.Enqueue;
-              return BandSweeper.Sweep(tuner, channels, samplesPerMeasurement, progress, sweepCts.Token);
+              return sweep(tuner, sweepCts.Token);
           }
           finally
           {
@@ -1033,7 +1105,7 @@ namespace RTLSDRCore;
       }
 
       /// <summary>
-      /// Requests cancellation of a running <see cref="SweepChannels"/> call.
+      /// Requests cancellation of a running <see cref="SweepChannels"/> or <see cref="SweepPlan"/> call.
       /// Returns immediately; the sweep's own cleanup restores the station.
       /// Does nothing when no sweep is running.
       /// </summary>

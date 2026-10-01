@@ -206,6 +206,27 @@ Selected as a follow-up after the cast/BT Phase 1+2 tranche revealed that the pr
 
 ## Queued (intent recorded, not yet scoped)
 
+### All-band reception — AM (MW) and shortwave need new hardware (queued 2026-10-01)
+
+**Goal**: make every band in the radio control panel (AM, FM, SW, AIR, WB, VHF) receivable and scannable,
+so the BAND view, signal colours, preset bar and knob behave the same on all of them.
+
+**Why it needs hardware**: the appliance's R820T tuner cannot lock below ~24 MHz — measured during `AUD-91`
+(AM and SW read signal 0 with `PLL not locked!`), so no AM or SW station is receivable at any strength.
+
+**Options** (full spec, prices and sources in
+[`design/FUTURE-WORK.md` § All-band reception](../design/FUTURE-WORK.md)):
+- **A (recommended if obtainable):** one RTL-SDR Blog dongle with a built-in, driver-switched HF upconverter
+  (the V4 is discontinued; its successor V4 Lite is expected to keep HF — verify at purchase) + the Blog
+  driver fork on the box. ~US$30–45; ~2 days of software.
+- **B:** keep today's dongle for VHF; add a second dongle permanently behind an HF upconverter (Ham It Up
+  Plus v2 or SpyVerter R2). ~US$80–130; ~3–4 days of software (per-band device selection, LO offset).
+- **Plus an HF/MW antenna** (active wideband loop or long wire).
+
+**Status**: owner decided 2026-10-01 not to change hardware now (*"There are not many AM stations
+nearby"*). Picks up when the owner buys hardware. Until then, `AUD-94`'s software-only option (show AM/SW as
+unavailable in the panel) remains an open owner decision.
+
 ### Voice control — Home Assistant Assist integration (queued 2026-08-09)
 
 **Goal**: hands-free voice control of the console ("play vinyl", "tune to 98.5", "cast to the living room", "what song is this?") with spoken responses routed through the console's own ducking/TTS event pipeline. The touchscreen stays owned by the Blazor UI — voice state (listening/processing/responding) renders as Blazor overlay components we build, not a separate voice UI.

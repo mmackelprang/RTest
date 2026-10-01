@@ -50,4 +50,34 @@ public class BandMapTextTests
     BandMapText.FormatMhz(99_500_000).Should().Be("99.5");
     BandMapText.FormatMhz(107_900_000).Should().Be("107.9");
   }
+
+  // ── AUD-91 ───────────────────────────────────────────────────────────────
+
+  [Fact]
+  public void FormatScanning_AnotherBand_NamesIt()
+  {
+    BandMapText.FormatScanning(12.0, 0.4, "AIR").Should().Be("Scanning AIR… 12 s");
+    BandMapText.FormatScanning(null, 0.4, "AIR").Should().Be("Scanning AIR… 40%");
+    BandMapText.FormatScanning(null, 0, "AIR").Should().Be("Scanning AIR…");
+  }
+
+  [Theory]
+  [InlineData(99_500_000, "FM", "99.5")]
+  [InlineData(162_475_000, "WB", "162.475")]
+  [InlineData(118_025_000, "AIR", "118.025")]
+  [InlineData(162_000_000, "VHF", "162.000")]
+  [InlineData(162_412_500, "VHF", "162.4125")] // a 12.5 kHz channel needs a fourth decimal
+  [InlineData(118_100_000, "AIR", "118.100")]
+  [InlineData(1_010_000, "AM", "1010")]
+  public void FormatFrequency_PerBand(double hz, string band, string expected) =>
+    BandMapText.FormatFrequency(hz, band).Should().Be(expected);
+
+  [Theory]
+  [InlineData(99_500_000, "FM", "99.5 FM")]
+  [InlineData(162_475_000, "WB", "162.475 MHz WB")]
+  [InlineData(118_100_000, "AIR", "118.100 MHz AIR")]
+  [InlineData(162_412_500, "VHF", "162.4125 MHz VHF")]
+  [InlineData(1_010_000, "AM", "1010 kHz AM")]
+  public void FormatStation_FmAsAud76_OtherBandsExactWithTheUnit(double hz, string band, string expected) =>
+    BandMapText.FormatStation(hz, band).Should().Be(expected);
 }

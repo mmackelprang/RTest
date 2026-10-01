@@ -3,9 +3,32 @@ using Radio.Web.Models;
 namespace Radio.Web.Services;
 
 /// <summary>
-/// Pure arithmetic behind the visualizer's BAND view (AUD-76): the plotted frequency range, the US FM
-/// channel plan, display normalisation of the band map's relative levels, and the tap-to-tune rule.
-/// Kept out of the component so every rule here is unit-tested without a renderer.
+/// A channel's colour on the BAND map (UI-22), by how far it stands above the map's median. The values
+/// are what <c>visualizer.js</c>'s <c>drawBandMap</c> receives as each level's <c>t</c> and indexes its
+/// colours by — <c>--text-low</c>, <c>--signal-blue</c>, <c>--accent-primary</c>, <c>--signal-green</c>
+/// — so they must not be renumbered without changing that list too.
+/// </summary>
+public enum BandSignalTier
+{
+  /// <summary>Below <see cref="FmBandMath.PeakProminenceDb"/> above the median: no station. Grey.</summary>
+  Noise = 0,
+
+  /// <summary>From <see cref="FmBandMath.PeakProminenceDb"/> to <see cref="FmBandMath.FairSignalDb"/>. Blue.</summary>
+  Weak = 1,
+
+  /// <summary>From <see cref="FmBandMath.FairSignalDb"/> to <see cref="FmBandMath.StrongSignalDb"/>. Cyan, the map's colour before UI-22.</summary>
+  Fair = 2,
+
+  /// <summary>At least <see cref="FmBandMath.StrongSignalDb"/> above the median. Green.</summary>
+  Strong = 3,
+}
+
+/// <summary>
+/// Pure arithmetic behind the visualizer's BAND view (AUD-76): the FM plot range, the US FM channel
+/// plan, display normalisation of the band map's relative levels (any band), the bars' signal-strength
+/// colour tiers (any band, UI-22), and the FM tap-to-tune rule. Since AUD-91 the axis and tap arithmetic is <see cref="BandAxis"/>'s, and the FM members here
+/// delegate to <see cref="BandAxis.Fm"/>. Kept out of the component so every rule is unit-tested
+/// without a renderer.
 /// </summary>
 public static class FmBandMath
 {
@@ -35,6 +58,22 @@ public static class FmBandMath
   public const double PeakProminenceDb = 6.0;
 
   /// <summary>
+  /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Fair"/>
+  /// (cyan) rather than <see cref="BandSignalTier.Weak"/> (blue), in dB (UI-22). Provisional when the
+  /// owner chose the ramp (spec Q5). Kept unchanged after the tier split of the box's four stored maps was
+  /// counted on 2026-10-01 (recorded in <c>docs/queue/UI-22.md</c>); the owner's look at the panel is
+  /// the check that fixes it.
+  /// </summary>
+  public const double FairSignalDb = 12.0;
+
+  /// <summary>
+  /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Strong"/>
+  /// (green), in dB (UI-22). Provisional and counted against the box's maps exactly as
+  /// <see cref="FairSignalDb"/> was.
+  /// </summary>
+  public const double StrongSignalDb = 20.0;
+
+  /// <summary>
   /// Smallest level span the display stretches to full height, in dB. Without it a map of nothing
   /// but noise (a dead antenna, say) would be stretched until its 1–2 dB ripple looked like stations.
   /// </summary>
@@ -47,76 +86,32 @@ public static class FmBandMath
   public const double DisplayFloorPercentile = 0.10;
 
   /// <summary>Converts a frequency to its horizontal position on the plot, 0 (87.5) to 1 (108.0).</summary>
-  public static double HzToFraction(double hz) => (hz - PlotMinHz) / (PlotMaxHz - PlotMinHz);
+  public static double HzToFraction(double hz) => BandAxis.Fm.HzToFraction(hz);
 
   /// <summary>Converts a horizontal plot position (clamped to 0–1) to a frequency in Hz.</summary>
-  public static double FractionToHz(double fraction)
-  {
-    double f = double.IsNaN(fraction) ? 0 : Math.Clamp(fraction, 0.0, 1.0);
-    return PlotMinHz + (f * (PlotMaxHz - PlotMinHz));
-  }
+  public static double FractionToHz(double fraction) => BandAxis.Fm.FractionToHz(fraction);
 
   /// <summary>
   /// The US FM channel (87.9 … 107.9 MHz, 200 kHz apart) nearest <paramref name="hz"/>, clamped to
   /// the band's first and last channels. A frequency exactly between two channels rounds up.
   /// </summary>
-  public static long NearestChannelHz(double hz)
-  {
-    double steps = Math.Round((hz - FirstChannelHz) / ChannelSpacingHz, MidpointRounding.AwayFromZero);
-    long maxSteps = (LastChannelHz - FirstChannelHz) / ChannelSpacingHz;
-    long clamped = Math.Clamp((long)steps, 0, maxSteps);
-    return FirstChannelHz + (clamped * ChannelSpacingHz);
-  }
+  public static long NearestChannelHz(double hz) => BandAxis.Fm.NearestChannelHz(hz);
 
   /// <summary>
   /// The frequency a tap at <paramref name="tappedHz"/> tunes to: the strongest <em>peak</em> within
   /// ±<see cref="SnapWindowHz"/>, else the nearest channel. With no map at all it is the nearest channel.
   /// </summary>
   /// <remarks>
-  /// A channel is a peak when its level is at least that of both neighbours in the map (a missing
-  /// neighbour at the band edge counts as lower) <b>and</b> at least <see cref="PeakProminenceDb"/>
-  /// above the map's median level. Two peaks in the window: the stronger wins; equal levels: the one
-  /// nearer the tap. The neighbour rule also absorbs adjacent-channel aliasing (AUD-76 PR 1, M3):
-  /// a shadow 200 kHz from a strong station is lower than the station, so it is never the peak.
+  /// The rule is <see cref="BandAxis.ResolveTapTarget"/> on <see cref="BandAxis.Fm"/>, whose snap window
+  /// (two channel spacings) is <see cref="SnapWindowHz"/>. A channel is a peak when its level is at least
+  /// that of both neighbours in the map (a missing neighbour at the band edge counts as lower) <b>and</b>
+  /// at least <see cref="PeakProminenceDb"/> above the map's median level. Two peaks in the window: the
+  /// stronger wins; equal levels: the one nearer the tap. The neighbour rule also absorbs
+  /// adjacent-channel aliasing (AUD-76 PR 1, M3): a shadow 200 kHz from a strong station is lower than
+  /// the station, so it is never the peak.
   /// </remarks>
-  public static long ResolveTapTarget(double tappedHz, IReadOnlyList<BandMapChannelDto>? channels)
-  {
-    long fallback = NearestChannelHz(tappedHz);
-    if (channels == null || channels.Count == 0)
-    {
-      return fallback;
-    }
-
-    BandMapChannelDto[] sorted = channels.OrderBy(c => c.FrequencyHz).ToArray();
-    double threshold = Median(sorted.Select(c => (double)c.LevelDbfs)) + PeakProminenceDb;
-
-    BandMapChannelDto? best = null;
-    for (int i = 0; i < sorted.Length; i++)
-    {
-      BandMapChannelDto c = sorted[i];
-      if (Math.Abs(c.FrequencyHz - tappedHz) > SnapWindowHz + 0.5)
-      {
-        continue;
-      }
-
-      double left = i > 0 ? sorted[i - 1].LevelDbfs : double.NegativeInfinity;
-      double right = i < sorted.Length - 1 ? sorted[i + 1].LevelDbfs : double.NegativeInfinity;
-      bool isPeak = c.LevelDbfs >= left && c.LevelDbfs >= right && c.LevelDbfs >= threshold;
-      if (!isPeak)
-      {
-        continue;
-      }
-
-      if (best == null
-        || c.LevelDbfs > best.LevelDbfs
-        || (c.LevelDbfs == best.LevelDbfs && Math.Abs(c.FrequencyHz - tappedHz) < Math.Abs(best.FrequencyHz - tappedHz)))
-      {
-        best = c;
-      }
-    }
-
-    return best?.FrequencyHz ?? fallback;
-  }
+  public static long ResolveTapTarget(double tappedHz, IReadOnlyList<BandMapChannelDto>? channels) =>
+    BandAxis.Fm.ResolveTapTarget(tappedHz, channels);
 
   /// <summary>
   /// Maps the map's relative levels to display heights, 0 to 1, in the order given. The
@@ -135,6 +130,41 @@ public static class FmBandMath
     double span = Math.Max(levels.Max() - floor, MinDisplaySpanDb);
     return levels.Select(l => Math.Clamp((l - floor) / span, 0.0, 1.0)).ToArray();
   }
+
+  /// <summary>
+  /// Each channel's colour tier on the BAND map (UI-22), in the order given: how far its level stands
+  /// above the map's median — the same noise estimate the peak rule measures
+  /// <see cref="PeakProminenceDb"/> from. Below that it is <see cref="BandSignalTier.Noise"/>; from it,
+  /// <see cref="BandSignalTier.Weak"/>; from <see cref="FairSignalDb"/>, <see cref="BandSignalTier.Fair"/>;
+  /// from <see cref="StrongSignalDb"/>, <see cref="BandSignalTier.Strong"/>. Each threshold belongs to the
+  /// tier above it.
+  /// </summary>
+  /// <remarks>
+  /// Keyed to the median, not to the display height from <see cref="NormalizeLevels"/>: that height is
+  /// stretched per map, so the same bar height is 10 dB on a dead map and 40 dB on a busy one. A tier is
+  /// decided per channel by its level alone, not by the peak rule, so a strong station's adjacent-channel
+  /// shadow can be coloured too. The comparison is written as the peak rule writes it — level against
+  /// median plus threshold — so every channel the tap treats as a peak is coloured
+  /// <see cref="BandSignalTier.Weak"/> or above, a channel at exactly <see cref="PeakProminenceDb"/>
+  /// included. The reverse does not hold: a peak must also be at least as strong as both neighbours, so
+  /// a coloured shadow next to a stronger station is not one.
+  /// </remarks>
+  public static BandSignalTier[] SignalTiers(IReadOnlyList<BandMapChannelDto> channels)
+  {
+    if (channels.Count == 0)
+    {
+      return [];
+    }
+
+    double median = Median(channels.Select(c => (double)c.LevelDbfs));
+    return channels.Select(c => TierOf(c.LevelDbfs, median)).ToArray();
+  }
+
+  private static BandSignalTier TierOf(double level, double median) =>
+    level >= median + StrongSignalDb ? BandSignalTier.Strong
+    : level >= median + FairSignalDb ? BandSignalTier.Fair
+    : level >= median + PeakProminenceDb ? BandSignalTier.Weak
+    : BandSignalTier.Noise;
 
   /// <summary>Median of <paramref name="values"/> (mean of the middle two for an even count); 0 when empty.</summary>
   public static double Median(IEnumerable<double> values)

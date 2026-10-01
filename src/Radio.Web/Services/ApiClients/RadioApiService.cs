@@ -91,11 +91,19 @@ public class RadioApiService
     }
   }
 
-  public async Task<bool> SetFrequencyAsync(double frequency, CancellationToken cancellationToken = default)
+  /// <summary>
+  /// Tunes the radio (<c>POST /api/radio/frequency</c>). With <paramref name="band"/>, the API tunes inside
+  /// that band in one retune (AUD-91); without it the body is <c>{"frequency":…}</c> alone, as before, and
+  /// the API infers the band from the frequency.
+  /// </summary>
+  public async Task<bool> SetFrequencyAsync(double frequency, string? band = null, CancellationToken cancellationToken = default)
   {
     try
     {
-      var response = await _httpClient.PostAsJsonAsync("/api/radio/frequency", new { frequency }, cancellationToken);
+      // Two shapes rather than one with a null band: the band-less body stays byte-for-byte what it was.
+      HttpResponseMessage response = band == null
+        ? await _httpClient.PostAsJsonAsync("/api/radio/frequency", new { frequency }, cancellationToken)
+        : await _httpClient.PostAsJsonAsync("/api/radio/frequency", new { frequency, band }, cancellationToken);
       return response.IsSuccessStatusCode;
     }
     catch (Exception ex)
@@ -392,18 +400,21 @@ public class RadioApiService
   }
 
   /// <summary>
-  /// Reads the stored FM band map and the sweep status (<c>GET /api/radio/bandmap</c>, AUD-76).
+  /// Reads a band's stored map, its axis and the sweep status (<c>GET /api/radio/bandmap</c>, AUD-76;
+  /// per band since AUD-91).
   /// </summary>
+  /// <param name="band">Band code; null for the radio's current band, which the API resolves.</param>
+  /// <param name="cancellationToken">Cancels the read.</param>
   /// <returns>The map, or null when the API could not be read.</returns>
   /// <remarks>
   /// A failure logs at Debug, not Error: the visualizer's BAND view polls this once a second while a
   /// sweep runs, and on <c>radio-web</c> every level at Information and above reaches journald.
   /// </remarks>
-  public async Task<BandMapResponseDto?> GetBandMapAsync(CancellationToken cancellationToken = default)
+  public async Task<BandMapResponseDto?> GetBandMapAsync(string? band = null, CancellationToken cancellationToken = default)
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<BandMapResponseDto>("/api/radio/bandmap", cancellationToken);
+      return await _httpClient.GetFromJsonAsync<BandMapResponseDto>(WithBand("/api/radio/bandmap", band), cancellationToken);
     }
     catch (Exception ex)
     {
@@ -414,14 +425,18 @@ public class RadioApiService
 
   /// <summary>
   /// Requests a band sweep (<c>POST /api/radio/bandmap/scan</c>, AUD-76). The API answers 202 when a
-  /// sweep started or was already running, 409 when the SDR device is busy and 503 when sweeps are
-  /// disabled or there is no SDR device; the last two carry an <c>error</c> message, returned here.
+  /// sweep started or was already running, 409 when the band cannot be scanned on this tuner or the SDR
+  /// device is busy, 503 when sweeps are disabled or there is no SDR device, and 400 for an unknown band;
+  /// the failures carry an <c>error</c> message, returned here.
   /// </summary>
-  public async Task<BandScanRequestResult> RequestBandScanAsync(CancellationToken cancellationToken = default)
+  /// <param name="band">Band code to sweep; null for the radio's current band, which the API resolves.</param>
+  /// <param name="cancellationToken">Cancels the request.</param>
+  public async Task<BandScanRequestResult> RequestBandScanAsync(string? band = null, CancellationToken cancellationToken = default)
   {
     try
     {
-      using HttpResponseMessage response = await _httpClient.PostAsync("/api/radio/bandmap/scan", null, cancellationToken);
+      using HttpResponseMessage response =
+        await _httpClient.PostAsync(WithBand("/api/radio/bandmap/scan", band), null, cancellationToken);
       if (response.IsSuccessStatusCode)
       {
         return new BandScanRequestResult(true, (int)response.StatusCode, null);
@@ -435,6 +450,10 @@ public class RadioApiService
       return new BandScanRequestResult(false, 0, null);
     }
   }
+
+  /// <summary>Appends <c>?band=</c> when a band is given; the path alone otherwise.</summary>
+  private static string WithBand(string path, string? band) =>
+    band == null ? path : $"{path}?band={Uri.EscapeDataString(band)}";
 
   /// <summary>Reads <c>{"error": "..."}</c> from a failed response; null when there is none.</summary>
   private static async Task<string?> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)

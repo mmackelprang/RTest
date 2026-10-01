@@ -46,6 +46,10 @@ public class HomePageTests : TestContext
     // Radzen services (full registration needed for RadzenTabs in QueueHistoryPanel)
     Services.AddRadzenComponents();
 
+    // RadioControlPanel's preset bar reads the PRESETS knob off the HUD singleton (UI-21). Unused
+    // while the panel has no radio state, but registered so a test that stubs one does not fail on DI.
+    Services.AddSingleton<Radio.Web.Services.EncoderHudService>();
+
     // HTTP clients for API services
     Services.AddHttpClient<AudioApiService>();
     Services.AddHttpClient<SystemApiService>();
