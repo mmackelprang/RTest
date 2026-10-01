@@ -48,7 +48,20 @@ Sweep: unit tests over channel stepping, cancellation on radio activation, and t
 
 **Pre-merge review** (hostile, session model): no HIGH. Fixed: M1 (two gate tests raced the real 3 s timeout → never-advanced `FakeTimeProvider`), M2 (gate could be released with the device still open after a failed start or a dispose), M4 (the live path could measure a block read across a hop → the first block after each hop is dropped before the settling read), M5 (a sleep sweep was not reliably cancelled on wake → the run checks `IsSleeping` after every channel), and L1–L5, L7, L8, L10–L12. Not fixed: M3 — see below; L6 (the gate is one flag, correct while there is one radio source — documented), L9 (signal-strength gauges keep firing during a live sweep), L13 (log volume — about six Information lines per idle sweep).
 
-⚠ **M3, open until measured on the box: adjacent-channel aliasing.** At 240 kS/s a station 200 kHz away aliases into the measured window, attenuated only by the RTL2832U's decimation filter, so a strong station may cast "shadow" peaks at ±0.2 MHz. PR 2's tap snaps to the strongest peak within ±0.4 MHz, which absorbs it for tuning; the map's appearance is what the box measurement decides.
+⚠ **M3, open until measured on the box: adjacent-channel aliasing.** At 240 kS/s a station 200 kHz away aliases into the measured window, attenuated only by the RTL2832U's decimation filter, so a strong station may cast "shadow" peaks at ±0.2 MHz. PR 2's tap snaps to the strongest peak within ±0.4 MHz, which absorbs it for tuning; the map's appearance is what the box measurement decides. *(Measured after deploy, below.)*
+
+### PR 1 — box UAT evidence (Builder, 2026-09-30, deployed `6c33ec3`)
+
+Recorded by the PR 1 Builder after the deploy; copied here by the PR 2 Builder.
+
+- **Timer while the radio plays:** the 120 s evaluation logged `skipped, reason: radio-playing`.
+- **Live scan (radio playing):** 101 channels in **21.0 s**; returned to **92.3** with RDS **WKRR**; volume **0.3** and muted **unchanged**; the `dropping IQ batch` count was **31 → 31** (no new drops).
+- **Idle scan (FilePlayer active, dongle idle):** 101 channels in **18.9 s**, agreeing with the live scan within ~1–2 dB. Strongest: **100.1 (−28.9)**, **101.1 (−30.3)**, then 98.5, 99.5, 98.7, 97.7, 105.1.
+- **Presets against the map:** 92.3, 105.1, 97.7 (stored as 97.745), 105.5 and 106.9 are local peaks **5–21 dB** above their neighbours. 91.5 is above the floor but not always a peak.
+- **Switching to Radio mid idle sweep:** `POST /api/sources {Radio}` returned 200 in **0.75 s**; gate claim at 20:51:53.916; sweep `cancelled (radio-claimed)` at 20:51:53.980; the radio played 92.3, signal 100, RDS WKRR; the previous map was kept.
+- **M3 aliasing, measured:** channels 0.2 MHz from a strong station read ~20–30 dB below it but up to ~9 dB above the floor — visible as shoulders on the map, and absorbed for tuning by the ±0.4 MHz snap and its neighbour rule.
+- **Sleep-triggered sweep:** unit-tested only; not exercised on the box.
+- **Found:** after a sweep `/api/radio/state` reports `gain: 28` with `autoGain: true` (it was 0 before). Believed cosmetic — `rtlsdr_get_tuner_gain` returning the last manual value — but **not measured**. Filed as [`AUD-90`](AUD-90.md).
 
 ## PR 2 — the BAND view, touch-to-tune, Fall/VU removal (Builder, 2026-09-30)
 
