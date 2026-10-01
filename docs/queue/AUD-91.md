@@ -222,3 +222,80 @@ returns to the station; and switching to Radio mid-sweep, which must still play 
 **Owner UAT per band at the console.**
 
 Suggested branch: `feat/aud-91-band-aware-sweep`.
+
+## Shipped: [#753](https://github.com/mmackelprang/RTest/pull/753), squash `27ddec4`
+
+**Gates on the final branch HEAD (`46a705f`):**
+- `dotnet build RadioConsole.sln -c Release --no-incremental`: 46 warnings / 0 errors (Windows).
+- Full `dotnet test`: every project green apart from the known set. Infrastructure 2192/2200 (the six
+  `SrcVariableResamplerTests` failed, 2 skipped), Web 1459, API 541, RTLSDRCore 280, Core 186,
+  Configuration 115, Fingerprinting 112 (+1 skipped), Integration 31 (+2 skipped), AudioAnalysis 35,
+  Metrics 28, Web.E2E 28. `NwsObservationIntegrationTests.RealNwsCall_*` failed on the first run and
+  passed on this one.
+
+Deployed from `main`: `Verified: API is running commit 27ddec4`, `Verified: Web is running commit
+27ddec4`, `Kiosk is live (14 established connections to :5002)`. `NRestarts` was 0/0 before and after.
+
+### Final consolidated review
+
+No HIGH findings and no FM regression; band, frequency and step after a sweep were traced clean.
+- **Fixed before merge:** L4 (a band-change read that superseded the opening read could leave the
+  preset ticks empty) and L5 (three comments claimed more than the code does).
+- **M1, mirror images.** Grouped tunes place channels in mirror pairs, so an IQ image could ghost onto
+  the paired channel. **Not observed on the box:** in the WB map, the strongest station, 162.550 at
+  −47.6 dB, mirrors onto 162.425, which read −67.3 dB, about 1 dB above the −68 dB floor. That is at
+  least 20 dB of image rejection, below the view's 6 dB peak threshold.
+- **M2, ppm offset.** The ±4 kHz window assumes no crystal error, and no correction is applied. **Not
+  biting at 162 MHz:** both WB carriers (162.550, 162.400) landed in their own windows with neighbours
+  at the floor.
+- Neither M1 nor M2 has been checked on AIR or VHF signals of known frequency. Those are part of the
+  owner's "are the AIR/VHF maps useful" check.
+- **LOW, deferred:**
+  - L3: a Scan racing a VHF → other band change can map 30–32 MHz.
+  - L6: the timer's AM/SW skip overwrites the last sweep outcome.
+  - L7: the noise floor may ripple at group edges.
+
+### Silent UAT on the box (2026-10-01, `27ddec4`, console muted, no Cast)
+
+Playwright (Python, headless Chromium, 1920×720) against `http://radio:5002`. Each band was selected
+with `POST /api/radio/band`, then BAND was opened and **Scan was clicked in the UI**. Zero console
+errors.
+
+| Band | View | Scan | Stored | Radio after sweep | Tap the strongest peak |
+|---|---|---|---|---|---|
+| AM | "AM is out of this radio's range" + the API reason; Scan disabled; axis 600 … 1600 kHz | API `scan?band=AM` → 409, same reason | — | — | — |
+| SW | "SW is out of this radio's range" + reason; Scan disabled; axis 5 … 30 MHz | API → 409 | — | — | — |
+| WB | axis 162.40 … 162.55 MHz | live, 312 ms, completed | `wb.json`, 7 channels | WB 162.400, step 25 kHz, muted: unchanged | 162.550 → state WB 162.550 ✅ |
+| AIR | axis 110 … 135 MHz | live, 30.1 s, completed | `air.json`, 1,161 | AIR 108.000, step 25 kHz: unchanged | 124.050 → state AIR 124.050 ✅ |
+| VHF | window 145.525–147.525 MHz around 146.520; axis 146.0 … 147.5 MHz | live, 2.4 s, completed | `vhf.json`, 161 | VHF 146.520, step 12.5 kHz: unchanged | 146.6625 → state VHF 146.6625 ✅ |
+| FM | axis 88 … 108, as `AUD-76` | live, 20.8 s, completed | `fm.json`, 101 | FM 108.000, step 100 kHz: unchanged | 100.1 → state FM 100.1 ✅; a tap at 100.4 snapped to 100.1 ✅ |
+
+Screenshots are in the session scratchpad (`aud91-screens/`), not committed:
+`am-out-of-range`, `sw-out-of-range`, `wb-map`, `wb-after-tap`, `air-map`, `air-after-tap`, `vhf-map`,
+`vhf-after-tap`, `fm-map`, `fm-after-tap`, `fm-snap`.
+
+⚠ **A second actor drove the box at the same time.** From 08:52:43 to 08:58:23 EDT something else
+switched the visualizer to BAND, switched bands, requested an AIR scan (08:53:08, completed, 1,161
+channels) and tapped AIR and FM peaks. All its connections came from `127.0.0.1`, which suggests the
+kiosk Chrome driven over CDP through ssh. It was not this Builder's script. Its band switches
+cancelled this UAT's first AIR and FM sweeps (`cancelled (interrupted)`), which is the designed
+behaviour: a user band change cancels a live sweep. AIR and FM were re-run after four quiet minutes,
+and the table above is from that re-run. Two `Failed to set gain mode: error -9` and one
+`Failed to set frequency … error -9` (USB pipe stall, retried) appeared in the API log during the
+interleaved switching. None appeared in the quiet re-run.
+
+**Seen, not filed:**
+- On WB and VHF, the last axis label ("162.55 MHz", "147.5 MHz") looks clipped at the bottom-right
+  edge in the screenshots. Part of the owner's look check.
+- `gain: 28` with `autoGain: true` throughout: `AUD-90`.
+
+**Left on the box:**
+- `bandmap/` now holds `air.json`, `fm.json`, `vhf.json` and `wb.json`; the new files are harmless.
+- The owner state was restored: SDR Radio 92.3 FM, step 100 kHz, volume 0.3, muted, Soundbar, no
+  default Cast device (404).
+- `ui.visualizer.defaultMode` is `Band`. Its value before the session is not known, because the
+  other actor wrote it first.
+
+**Owner checks outstanding:**
+- Per band, the look and touch of the BAND view at the panel.
+- Whether the AIR and VHF maps are useful.
