@@ -154,7 +154,53 @@ public class GoogleCastOutputLifecycleTests
     Assert.Null(PendingMetadataDebounceOrNull(output));
   }
 
+  [Fact]
+  public async Task Stop_WithNoMediaSessionOnTheConnection_LogsNothingAtWarning()
+  {
+    // DirectChannel never loads media, so the client has no media status and SharpCaster's
+    // MediaChannel.StopAsync throws "MediaSessionID is not available". Measured on the box as a
+    // Warning on every teardown, where journald volume correlates with audio distortion.
+    var logger = new CapturingLogger<GoogleCastOutput>();
+    await using var output = await InitializedOutputAsync(logger, o => o.StreamingMode = "DirectChannel");
+    SeedLiveReceiver(output, "cast-a", "10.0.0.1");
+    await output.ConnectAsync(Device("cast-a", "10.0.0.1"));
+    MarkStreaming(output);
+    logger.Entries.Clear();
+
+    await output.StopAsync();
+
+    Assert.Equal(AudioOutputState.Stopped, output.State);
+    Assert.Empty(logger.AtOrAbove(LogLevel.Warning));
+  }
+
+  [Fact]
+  public async Task Disconnect_AfterAHandledConnectionLoss_LogsNothingAtWarning()
+  {
+    // AUD-84 follow-up 3: the loss handler has already cleared the connection, so the
+    // teardown that follows finds nothing connected. That is expected, not a warning.
+    var logger = new CapturingLogger<GoogleCastOutput>();
+    await using var output = await InitializedOutputAsync(logger);
+    SeedLiveReceiver(output, "cast-a", "10.0.0.1");
+    await output.ConnectAsync(Device("cast-a", "10.0.0.1"));
+    MarkStreaming(output);
+
+    output.ReportConnectionLost(PublishedGeneration(output), "test loss", null);
+    await output.LastConnectionLossHandling.WaitAsync(TimeSpan.FromSeconds(15));
+    Assert.Null(output.ConnectedDevice);
+    logger.Entries.Clear();
+
+    await output.DisconnectAsync();
+
+    Assert.Empty(logger.AtOrAbove(LogLevel.Warning));
+  }
+
   // --- helpers ---
+
+  private static int PublishedGeneration(GoogleCastOutput output)
+  {
+    var field = typeof(GoogleCastOutput).GetField("_publishedGeneration", BindingFlags.NonPublic | BindingFlags.Instance);
+    return (int)field!.GetValue(output)!;
+  }
 
   private static async Task<GoogleCastOutput> StreamingOutputWithPendingMetadataUpdateAsync()
   {
