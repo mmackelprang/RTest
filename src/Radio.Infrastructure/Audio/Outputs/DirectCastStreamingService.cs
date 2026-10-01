@@ -253,6 +253,11 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
       throw new InvalidOperationException("Transport ID not set. Call SetTransportId() first.");
     }
 
+    // A previous run whose loop ended on its own and that was never stopped still holds its
+    // reader and CTS; release them before replacing them.
+    Interlocked.Exchange(ref _streamReader, null)?.Dispose();
+    Interlocked.Exchange(ref _cts, null)?.Dispose();
+
     _cts = new CancellationTokenSource();
     _sequenceNumber = 0;
     _totalChunksSent = 0;
@@ -306,26 +311,36 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
   }
 
   /// <summary>
-  /// Stops streaming and releases the stream reader.
+  /// Stops streaming and releases the stream reader and cancellation source. Idempotent.
   /// </summary>
+  /// <remarks>
+  /// AUD-54 (5). This used to return at once when <see cref="IsStreaming"/> was false — which
+  /// is also the state after the loop ended on its own (its catch-all swallows the exception) —
+  /// so the reader was never disposed and stayed registered with the tapped output stream. The
+  /// reader and CTS are now released whenever they are held, whether or not the loop is still
+  /// running. Each is taken with an exchange, so two concurrent calls release each at most once.
+  /// </remarks>
   public async Task StopAsync()
   {
-    if (!IsStreaming)
+    var streamingTask = _streamingTask;
+    if (streamingTask != null && !streamingTask.IsCompleted)
     {
-      return;
-    }
+      _logger.LogInformation(
+        "DirectCast: Stopping streaming — sent {Chunks} chunks, {Bytes} bytes, {Errors} errors",
+        _totalChunksSent, _totalBytesSent, _sendErrors);
 
-    _logger.LogInformation(
-      "DirectCast: Stopping streaming — sent {Chunks} chunks, {Bytes} bytes, {Errors} errors",
-      _totalChunksSent, _totalBytesSent, _sendErrors);
-
-    _cts?.Cancel();
-
-    if (_streamingTask != null)
-    {
       try
       {
-        await _streamingTask.WaitAsync(TimeSpan.FromSeconds(5));
+        _cts?.Cancel();
+      }
+      catch (ObjectDisposedException)
+      {
+        // A concurrent StopAsync already released it.
+      }
+
+      try
+      {
+        await streamingTask.WaitAsync(TimeSpan.FromSeconds(5));
       }
       catch (TimeoutException)
       {
@@ -336,12 +351,23 @@ public sealed class DirectCastStreamingService : IAsyncDisposable
         // Expected
       }
     }
+    else if (_streamReader != null)
+    {
+      _logger.LogInformation(
+        "DirectCast: Streaming loop had already ended — releasing its reader (sent {Chunks} chunks, {Errors} errors)",
+        _totalChunksSent, _sendErrors);
+    }
 
-    _streamReader?.Dispose();
-    _streamReader = null;
-    _cts?.Dispose();
-    _cts = null;
+    Interlocked.Exchange(ref _streamReader, null)?.Dispose();
+    Interlocked.Exchange(ref _cts, null)?.Dispose();
   }
+
+  /// <summary>
+  /// <b>Test seam (kind B — observation).</b> The streaming loop's task, so a test can await the
+  /// loop ending on its own instead of sleeping. Read by <c>DirectCastStreamingServiceTests</c>.
+  /// Nothing in production reads it.
+  /// </summary>
+  internal Task? StreamingTaskForTests => _streamingTask;
 
   /// <summary>
   /// Main streaming loop. Reads raw PCM audio and sends it directly over the
