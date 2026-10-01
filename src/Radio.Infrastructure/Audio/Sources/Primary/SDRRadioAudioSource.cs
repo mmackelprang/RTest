@@ -1088,9 +1088,12 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <inheritdoc/>
   protected override Task ResumeCoreAsync(CancellationToken cancellationToken = default)
   {
-    // AUD-76: resume is the wake path, and a sweep started while asleep must
-    // not outlive it. The receiver keeps output silent until the sweep's own
-    // cleanup has retuned, so unmuting straight away is safe.
+    // AUD-76: a resume cancels any live band sweep. This is not the only wake
+    // signal — SleepService.WakeAsync resumes the source only when it was
+    // playing before sleep and is paused — so BandMapService also cancels a
+    // sleep-triggered sweep once ISleepService.IsSleeping reads false after a
+    // channel. The receiver keeps output silent until the sweep's own cleanup
+    // has retuned, so unmuting straight away is safe.
     _radioReceiver.CancelSweep();
 
     // Unmute to "resume"

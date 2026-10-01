@@ -50,7 +50,10 @@ public sealed record BandSweepRequestResult(BandSweepRequestOutcome Outcome, str
 /// <item>Radio holds the gate: a timer evaluation sweeps through the live path only while
 /// <see cref="ISleepService.IsSleeping"/> is true and the source reports
 /// <see cref="ILiveBandSweeper.CanSweepLive"/>; otherwise it records a skip.
-/// <see cref="ISleepService.IsSleepScreenVisible"/> is not consulted.</item>
+/// <see cref="ISleepService.IsSleepScreenVisible"/> is not consulted. Such a sleep-triggered
+/// sweep is cancelled after the first channel at which <see cref="ISleepService.IsSleeping"/>
+/// reads false.</item>
+/// <item>A timer evaluation starts no sweep while <see cref="BandMapOptions.Enabled"/> is false.</item>
 /// <item><see cref="RequestSweep"/> starts a sweep through whichever path is available, including
 /// the live path while the radio is playing.</item>
 /// <item>At most one sweep runs at a time: the decision to start one and the record of the
@@ -95,6 +98,8 @@ public sealed class BandMapService : IHostedService, IDisposable
   private BandSweepOutcome? _last;
   private SweepRun? _running;
   private Task _sweepTask = Task.CompletedTask;
+  // Last invalid SamplesPerMeasurement value warned about; null before any warning.
+  private int? _warnedSamplesPerMeasurement;
 
   /// <summary>Creates the service and loads any stored map.</summary>
   /// <param name="logger">Logger.</param>
@@ -286,6 +291,15 @@ public sealed class BandMapService : IHostedService, IDisposable
         return;
       }
 
+      // Enabled is re-read on every evaluation: switching it off at runtime stops timer
+      // sweeps; the timer keeps evaluating so switching it back on resumes them.
+      if (!options.Enabled)
+      {
+        _logger.LogDebug("Band map timer: sweeps are disabled (BandMap:Enabled=false)");
+        ArmTimerLocked(interval);
+        return;
+      }
+
       if (_running != null)
       {
         // Re-armed when the running sweep finishes.
@@ -318,6 +332,7 @@ public sealed class BandMapService : IHostedService, IDisposable
   /// <returns>Null when a sweep was started; otherwise why not.</returns>
   private string? TryStartLocked(bool isRequest, BandMapOptions options)
   {
+    int samplesPerMeasurement = EffectiveSamplesPerMeasurementLocked(options);
     SdrDeviceGate.SweepLease? lease = _gate.TryAcquireForSweep();
     if (lease != null)
     {
@@ -339,7 +354,7 @@ public sealed class BandMapService : IHostedService, IDisposable
       }
 
       SweepRun idleRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Timer, BandSweepPaths.Idle);
-      _sweepTask = Task.Run(() => RunIdle(idleRun, lease, device, options));
+      _sweepTask = Task.Run(() => RunIdle(idleRun, lease, device, options, samplesPerMeasurement));
       return null;
     }
 
@@ -361,8 +376,32 @@ public sealed class BandMapService : IHostedService, IDisposable
     }
 
     SweepRun liveRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Sleep, BandSweepPaths.Live);
-    _sweepTask = Task.Run(() => RunLiveAsync(liveRun, live, options));
+    _sweepTask = Task.Run(() => RunLiveAsync(liveRun, live, options, samplesPerMeasurement));
     return null;
+  }
+
+  /// <summary>
+  /// <see cref="BandMapOptions.SamplesPerMeasurement"/>, or
+  /// <see cref="BandSweeper.DefaultSamplesPerMeasurement"/> when the configured value fails
+  /// <see cref="BandSweeper.IsValidSamplesPerMeasurement"/>. Warns once per distinct invalid
+  /// value. Must be called holding <c>_lock</c>.
+  /// </summary>
+  private int EffectiveSamplesPerMeasurementLocked(BandMapOptions options)
+  {
+    int configured = options.SamplesPerMeasurement;
+    if (BandSweeper.IsValidSamplesPerMeasurement(configured))
+    {
+      return configured;
+    }
+
+    if (_warnedSamplesPerMeasurement != configured)
+    {
+      _warnedSamplesPerMeasurement = configured;
+      _logger.LogWarning(
+        "BandMap:SamplesPerMeasurement {Configured} is invalid (must be at least {Minimum} and a multiple of {Multiple}); using {Default}",
+        configured, ChannelPowerMeter.FftSize, BandSweeper.SamplesPerMeasurementMultiple, BandSweeper.DefaultSamplesPerMeasurement);
+    }
+    return BandSweeper.DefaultSamplesPerMeasurement;
   }
 
   private SweepRun BeginRunLocked(string trigger, string path)
@@ -373,130 +412,205 @@ public sealed class BandMapService : IHostedService, IDisposable
     return run;
   }
 
-  private void RunIdle(SweepRun run, SdrDeviceGate.SweepLease lease, ISdrDevice device, BandMapOptions options)
+  private void RunIdle(SweepRun run, SdrDeviceGate.SweepLease lease, ISdrDevice device, BandMapOptions options, int samplesPerMeasurement)
   {
     IReadOnlyList<ChannelLevel>? levels = null;
-    string result;
+    string result = BandSweepResults.Failed;
     string? reason = null;
     Exception? failure = null;
-    CancellationToken leaseToken = lease.Token;
 
+    // Anything escaping the body still reaches Finish, which clears _running and re-arms the timer.
     try
     {
-      using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(leaseToken, _stopCts.Token);
+      CancellationToken leaseToken = lease.Token;
       try
       {
-        // Declared inside the try so the device is closed and disposed before
-        // the lease is released below.
-        using DeviceSweepTuner tuner = new(device, options.SweepGainDb);
-        tuner.Open();
-        levels = BandSweeper.Sweep(tuner, FmChannelPlan.Channels, options.SamplesPerMeasurement, run, linked.Token);
-        result = BandSweepResults.Completed;
+        using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(leaseToken, _stopCts.Token);
+        try
+        {
+          // Declared inside the try so the device is closed and disposed before
+          // the lease is released below.
+          using DeviceSweepTuner tuner = new(device, options.SweepGainDb);
+          // A radio claim may already have cancelled the lease: do not open the device then.
+          linked.Token.ThrowIfCancellationRequested();
+          tuner.Open();
+          levels = BandSweeper.Sweep(tuner, FmChannelPlan.Channels, samplesPerMeasurement, run, linked.Token);
+          result = BandSweepResults.Completed;
+        }
+        catch (OperationCanceledException) when (linked.IsCancellationRequested)
+        {
+          result = BandSweepResults.Cancelled;
+          reason = leaseToken.IsCancellationRequested ? "radio-claimed" : "service-stopping";
+        }
+        catch (Exception ex)
+        {
+          result = BandSweepResults.Failed;
+          reason = ExceptionReason(ex);
+          failure = ex;
+        }
       }
-      catch (OperationCanceledException) when (linked.IsCancellationRequested)
+      finally
       {
-        result = BandSweepResults.Cancelled;
-        reason = leaseToken.IsCancellationRequested ? "radio-claimed" : "service-stopping";
+        lease.Dispose();
       }
-      catch (Exception ex)
-      {
-        result = BandSweepResults.Failed;
-        reason = ex.Message;
-        failure = ex;
-      }
-    }
-    finally
-    {
-      lease.Dispose();
-    }
-
-    Finish(run, result, reason, levels, failure, options);
-  }
-
-  private async Task RunLiveAsync(SweepRun run, ILiveBandSweeper live, BandMapOptions options)
-  {
-    IReadOnlyList<ChannelLevel>? levels = null;
-    string result;
-    string? reason = null;
-    Exception? failure = null;
-
-    try
-    {
-      levels = await live.SweepLiveAsync(
-        FmChannelPlan.Channels, options.SweepGainDb, options.SamplesPerMeasurement, run, _stopCts.Token).ConfigureAwait(false);
-      result = BandSweepResults.Completed;
-    }
-    catch (OperationCanceledException)
-    {
-      // The receiver cancels its own sweep on a user tune, band change, seek scan, wake or shutdown.
-      result = BandSweepResults.Cancelled;
-      reason = _stopCts.IsCancellationRequested ? "service-stopping" : "interrupted";
     }
     catch (Exception ex)
     {
+      levels = null;
       result = BandSweepResults.Failed;
-      reason = ex.Message;
+      reason = ExceptionReason(ex);
       failure = ex;
     }
 
     Finish(run, result, reason, levels, failure, options);
   }
 
-  private void Finish(
-    SweepRun run, string result, string? reason, IReadOnlyList<ChannelLevel>? levels, Exception? failure, BandMapOptions options)
+  private async Task RunLiveAsync(SweepRun run, ILiveBandSweeper live, BandMapOptions options, int samplesPerMeasurement)
   {
-    TimeSpan duration = _time.GetElapsedTime(run.StartTimestamp);
-    int measured = levels?.Count ?? 0;
-    if (result == BandSweepResults.Completed && measured == 0)
-    {
-      result = BandSweepResults.Failed;
-      reason = "no-channels-measured";
-    }
+    IReadOnlyList<ChannelLevel>? levels = null;
+    string result = BandSweepResults.Failed;
+    string? reason = null;
+    Exception? failure = null;
+    bool woke = false;
 
-    BandMap? newMap = null;
-    if (result == BandSweepResults.Completed)
+    // Anything escaping the body still reaches Finish, which clears _running and re-arms the timer.
+    try
     {
-      newMap = new BandMap
+      using CancellationTokenSource runCts = CancellationTokenSource.CreateLinkedTokenSource(_stopCts.Token);
+      if (run.Trigger == BandSweepTriggers.Sleep)
       {
-        Band = "FM",
-        ScannedAtUtc = _time.GetUtcNow(),
-        Channels = levels!.Select(l => new BandMapChannel(l.FrequencyHz, l.LevelDbfs)).ToArray(),
-        Trigger = run.Trigger,
-        Path = run.Path,
-      };
+        // A sleep-triggered sweep must not outlive the sleep. Waking does not
+        // necessarily resume the source (SleepService resumes it only when it
+        // was playing before sleep and is paused), so the source's own cancel
+        // on resume is not enough: check IsSleeping after every channel.
+        run.AfterChannel = () =>
+        {
+          if (_sleepService()?.IsSleeping == false && !woke)
+          {
+            woke = true;
+            _logger.LogInformation("Console woke during a sleep-triggered band sweep; cancelling it");
+            runCts.Cancel();
+          }
+        };
+      }
 
       try
       {
-        _store.Save(newMap);
+        levels = await live.SweepLiveAsync(
+          FmChannelPlan.Channels, options.SweepGainDb, samplesPerMeasurement, run, runCts.Token).ConfigureAwait(false);
+        result = BandSweepResults.Completed;
       }
-      catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+      catch (OperationCanceledException)
       {
-        _logger.LogWarning(ex, "Band map could not be written to {Path}; keeping it in memory only", _store.FilePath);
+        // The receiver cancels its own sweep on a user tune, band change, gain change, seek
+        // scan, source resume or shutdown; this service cancels it on stop and, for a
+        // sleep-triggered sweep, once IsSleeping reads false after a channel.
+        result = BandSweepResults.Cancelled;
+        reason = woke ? "woke" : _stopCts.IsCancellationRequested ? "service-stopping" : "interrupted";
+      }
+      catch (Exception ex)
+      {
+        result = BandSweepResults.Failed;
+        reason = ExceptionReason(ex);
+        failure = ex;
+      }
+      finally
+      {
+        run.AfterChannel = null;
       }
     }
-
-    BandSweepOutcome outcome = new()
+    catch (Exception ex)
     {
-      Trigger = run.Trigger,
-      Path = run.Path,
-      StartedAtUtc = run.StartedAtUtc,
-      DurationMs = (long)duration.TotalMilliseconds,
-      Result = result,
-      Reason = reason,
-      ChannelsMeasured = measured,
-    };
+      levels = null;
+      result = BandSweepResults.Failed;
+      reason = ExceptionReason(ex);
+      failure = ex;
+    }
 
-    lock (_lock)
+    Finish(run, result, reason, levels, failure, options);
+  }
+
+  /// <summary>
+  /// <see cref="BandSweepOutcome.Reason"/> for a failure. Only the exception type: the
+  /// outcome is served by an unauthenticated endpoint, and the message goes to the log.
+  /// </summary>
+  private static string ExceptionReason(Exception ex) => $"exception:{ex.GetType().Name}";
+
+  /// <summary>
+  /// Records the outcome, stores a completed map, clears the running sweep and re-arms the
+  /// timer. The last three happen even when building or storing the result throws.
+  /// </summary>
+  private void Finish(
+    SweepRun run, string result, string? reason, IReadOnlyList<ChannelLevel>? levels, Exception? failure, BandMapOptions options)
+  {
+    TimeSpan duration = TimeSpan.Zero;
+    int measured = 0;
+    BandMap? newMap = null;
+    BandSweepOutcome outcome;
+    try
     {
-      if (newMap != null)
+      duration = _time.GetElapsedTime(run.StartTimestamp);
+      measured = levels?.Count ?? 0;
+      if (result == BandSweepResults.Completed && measured == 0)
       {
-        _map = newMap;
+        result = BandSweepResults.Failed;
+        reason = "no-channels-measured";
       }
-      _last = outcome;
-      _running = null;
-      if (!_stopping)
+
+      if (result == BandSweepResults.Completed)
       {
-        ArmTimerLocked(RescanInterval(options));
+        BandMap map = new()
+        {
+          Band = "FM",
+          ScannedAtUtc = _time.GetUtcNow(),
+          Channels = levels!.Select(l => new BandMapChannel(l.FrequencyHz, l.LevelDbfs)).ToArray(),
+          Trigger = run.Trigger,
+          Path = run.Path,
+        };
+
+        try
+        {
+          _store.Save(map);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+          _logger.LogWarning(ex, "Band map could not be written to {Path}; keeping it in memory only", _store.FilePath);
+        }
+        newMap = map;
+      }
+    }
+    catch (Exception ex)
+    {
+      newMap = null;
+      result = BandSweepResults.Failed;
+      reason = ExceptionReason(ex);
+      failure = ex;
+    }
+    finally
+    {
+      outcome = new BandSweepOutcome
+      {
+        Trigger = run.Trigger,
+        Path = run.Path,
+        StartedAtUtc = run.StartedAtUtc,
+        DurationMs = (long)duration.TotalMilliseconds,
+        Result = result,
+        Reason = reason,
+        ChannelsMeasured = measured,
+      };
+
+      lock (_lock)
+      {
+        if (newMap != null)
+        {
+          _map = newMap;
+        }
+        _last = outcome;
+        _running = null;
+        if (!_stopping)
+        {
+          ArmTimerLocked(RescanInterval(options));
+        }
       }
     }
 
@@ -598,6 +712,13 @@ public sealed class BandMapService : IHostedService, IDisposable
 
     public int ChannelsDone => Volatile.Read(ref _channelsDone);
 
-    public void Report(BandSweepProgress value) => Volatile.Write(ref _channelsDone, value.ChannelsDone);
+    /// <summary>Invoked after each channel's progress is recorded, on the reporting thread; null when unused.</summary>
+    public Action? AfterChannel { get; set; }
+
+    public void Report(BandSweepProgress value)
+    {
+      Volatile.Write(ref _channelsDone, value.ChannelsDone);
+      AfterChannel?.Invoke();
+    }
   }
 }

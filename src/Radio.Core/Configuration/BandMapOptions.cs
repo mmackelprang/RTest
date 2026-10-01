@@ -23,6 +23,10 @@ public sealed class BandMapOptions
   /// <summary>Fixed manual tuner gain used by every sweep, in dB. Default 28.0.</summary>
   public float SweepGainDb { get; set; } = 28.0f;
 
-  /// <summary>IQ samples per settling read and per measurement read. Default 16384.</summary>
+  /// <summary>
+  /// IQ samples per settling read and per measurement read. Default 16384. Must be at least
+  /// 2048 (one FFT frame) and a multiple of 256; an invalid value is replaced by the default,
+  /// with a warning.
+  /// </summary>
   public int SamplesPerMeasurement { get; set; } = 16384;
 }

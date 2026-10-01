@@ -351,6 +351,172 @@ public sealed class BandMapServiceTests : IDisposable
     await service.StopAsync(CancellationToken.None);
   }
 
+  private BandMap SavePreviousMap()
+  {
+    BandMap previous = new()
+    {
+      Band = "FM",
+      ScannedAtUtc = _time.GetUtcNow().AddDays(-1),
+      Channels = new[] { new BandMapChannel(90_100_000, -40f) },
+      Trigger = BandSweepTriggers.Timer,
+      Path = BandSweepPaths.Idle,
+    };
+    new BandMapStore(_root, NullLogger.Instance).Save(previous);
+    return previous;
+  }
+
+  [Fact]
+  public async Task SleepTriggeredLiveSweep_ConsoleWakesMidSweep_IsCancelledAfterThatChannel_KeepsPreviousMap()
+  {
+    BandMap previous = SavePreviousMap();
+    await _gate.ClaimForRadioAsync();
+    bool sleeping = true;
+    _sleep.Setup(s => s.IsSleeping).Returns(() => sleeping);
+    _live.CanSweepLive = true;
+    int lastChannel = 0;
+    _live.OnChannel = n =>
+    {
+      lastChannel = n;
+      if (n == 5)
+      {
+        // Woken without the source being resumed (SleepService resumes it
+        // only when it was playing before sleep and is paused).
+        sleeping = false;
+      }
+    };
+    BandMapService service = CreateService();
+    await service.StartAsync(CancellationToken.None);
+
+    _time.Advance(TimeSpan.FromSeconds(_options.InitialDelaySeconds));
+    await Settle(service);
+
+    BandSweepOutcome last = service.GetStatus().Last!;
+    Assert.Equal(BandSweepTriggers.Sleep, last.Trigger);
+    Assert.Equal(BandSweepResults.Cancelled, last.Result);
+    Assert.Equal("woke", last.Reason);
+    Assert.Equal(5, lastChannel);
+    BandMap kept = Assert.IsType<BandMap>(service.CurrentMap);
+    Assert.Equal(previous.ScannedAtUtc, kept.ScannedAtUtc);
+  }
+
+  [Fact]
+  public async Task RequestedLiveSweep_WhileAwake_IsNotCancelledByTheSleepCheck()
+  {
+    await _gate.ClaimForRadioAsync();
+    _sleep.Setup(s => s.IsSleeping).Returns(false);
+    _live.CanSweepLive = true;
+    _live.OnChannel = _ => { };
+    BandMapService service = CreateService();
+
+    service.RequestSweep();
+    await Settle(service);
+
+    Assert.Equal(BandSweepResults.Completed, service.GetStatus().Last!.Result);
+  }
+
+  [Fact]
+  public async Task Timer_AfterEnabledIsSwitchedOffAtRuntime_StartsNoSweep()
+  {
+    BandMapService service = CreateService();
+    await service.StartAsync(CancellationToken.None);
+    _options.Enabled = false;
+
+    _time.Advance(TimeSpan.FromSeconds(_options.InitialDelaySeconds));
+    await Settle(service);
+
+    Assert.Empty(_devices);
+    Assert.Null(service.GetStatus().Last);
+  }
+
+  [Fact]
+  public async Task UnexpectedErrorWhileFinishing_StillClearsTheRun_RecordsFailure_AndReArmsTimer()
+  {
+    BandMap previous = SavePreviousMap();
+    await _gate.ClaimForRadioAsync();
+    _sleep.Setup(s => s.IsSleeping).Returns(true);
+    _live.CanSweepLive = true;
+    // A null entry makes building the map throw inside Finish.
+    _live.Result = new ChannelLevel[] { null! };
+    BandMapService service = CreateService();
+    await service.StartAsync(CancellationToken.None);
+
+    _time.Advance(TimeSpan.FromSeconds(_options.InitialDelaySeconds));
+    await Settle(service);
+
+    BandSweepStatus status = service.GetStatus();
+    Assert.False(status.IsSweeping);
+    Assert.Equal(BandSweepResults.Failed, status.Last!.Result);
+    Assert.Equal("exception:NullReferenceException", status.Last.Reason);
+    Assert.Equal(previous.ScannedAtUtc, service.CurrentMap!.ScannedAtUtc);
+
+    // The timer was re-armed: the next evaluation runs another sweep.
+    _live.Result = null;
+    _time.Advance(TimeSpan.FromMinutes(_options.RescanIntervalMinutes));
+    await Settle(service);
+    Assert.Equal(2, _live.Calls);
+    Assert.Equal(BandSweepResults.Completed, service.GetStatus().Last!.Result);
+  }
+
+  [Fact]
+  public async Task FailedSweep_ReasonCarriesOnlyTheExceptionType_NotItsMessage()
+  {
+    await _gate.ClaimForRadioAsync();
+    _live.CanSweepLive = true;
+    _live.Throw = new InvalidOperationException("/opt/radio-console/secret detail");
+    BandMapService service = CreateService();
+
+    service.RequestSweep();
+    await Settle(service);
+
+    BandSweepOutcome last = service.GetStatus().Last!;
+    Assert.Equal(BandSweepResults.Failed, last.Result);
+    Assert.Equal("exception:InvalidOperationException", last.Reason);
+  }
+
+  [Theory]
+  [InlineData(1024)]
+  [InlineData(3000)]
+  public async Task InvalidSamplesPerMeasurement_FallsBackToTheDefault(int configured)
+  {
+    await _gate.ClaimForRadioAsync();
+    _live.CanSweepLive = true;
+    _options.SamplesPerMeasurement = configured;
+    BandMapService service = CreateService();
+
+    service.RequestSweep();
+    await Settle(service);
+
+    Assert.Equal(BandSweeper.DefaultSamplesPerMeasurement, _live.LastSamplesPerMeasurement);
+    Assert.Equal(BandSweepResults.Completed, service.GetStatus().Last!.Result);
+  }
+
+  [Fact]
+  public async Task IdleSweep_LeaseCancelledBeforeOpen_NeverOpensTheDevice()
+  {
+    Task? claim = null;
+    DeviceFactory = () =>
+    {
+      FakeSweepDevice device = new(_gate);
+      _devices.Add(device);
+      // The radio claims the gate after the lease is granted but before the sweep runs.
+      claim = _gate.ClaimForRadioAsync();
+      return device;
+    };
+    BandMapService service = CreateService();
+
+    service.RequestSweep();
+    await Settle(service);
+    await claim!.WaitAsync(FailSafe);
+
+    FakeSweepDevice device = Assert.Single(_devices);
+    Assert.Equal(0, device.Opens);
+    Assert.True(device.Disposed);
+    Assert.False(_gate.IsLeasedForSweep);
+    BandSweepOutcome last = service.GetStatus().Last!;
+    Assert.Equal(BandSweepResults.Cancelled, last.Result);
+    Assert.Equal("radio-claimed", last.Reason);
+  }
+
   private sealed class FakeLiveSweeper : ILiveBandSweeper
   {
     private int _calls;
@@ -363,17 +529,42 @@ public sealed class BandMapServiceTests : IDisposable
 
     public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    /// <summary>When set, channels are reported one by one: cancellation is checked, then this runs, then progress is reported.</summary>
+    public Action<int>? OnChannel { get; set; }
+
+    /// <summary>When set, the sweep throws this instead of returning.</summary>
+    public Exception? Throw { get; set; }
+
+    /// <summary>When set, returned instead of the computed levels.</summary>
+    public IReadOnlyList<ChannelLevel>? Result { get; set; }
+
+    public int LastSamplesPerMeasurement { get; private set; }
+
     public async Task<IReadOnlyList<ChannelLevel>> SweepLiveAsync(
       IReadOnlyList<long> channels, float gainDb, int samplesPerMeasurement,
       IProgress<BandSweepProgress>? progress, CancellationToken cancellationToken)
     {
       Interlocked.Increment(ref _calls);
+      LastSamplesPerMeasurement = samplesPerMeasurement;
       Entered.TrySetResult();
       if (Block != null)
       {
         await Block.Task.WaitAsync(cancellationToken);
       }
-      return channels.Select(hz => new ChannelLevel(hz, hz == LiveStationHz ? -20f : -70f)).ToArray();
+      if (Throw != null)
+      {
+        throw Throw;
+      }
+      if (OnChannel != null)
+      {
+        for (int i = 0; i < channels.Count; i++)
+        {
+          cancellationToken.ThrowIfCancellationRequested();
+          OnChannel(i + 1);
+          progress?.Report(new BandSweepProgress(i + 1, channels.Count));
+        }
+      }
+      return Result ?? channels.Select(hz => new ChannelLevel(hz, hz == LiveStationHz ? -20f : -70f)).ToArray();
     }
   }
 
@@ -418,8 +609,11 @@ public sealed class BandMapServiceTests : IDisposable
       remove { }
     }
 
+    public int Opens { get; private set; }
+
     public bool Open()
     {
+      Opens++;
       IsOpen = true;
       return true;
     }

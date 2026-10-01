@@ -181,6 +181,17 @@ public sealed class BandMapControllerTests : IDisposable, IClassFixture<CustomWe
     Assert.True(json.RootElement.GetProperty("sweep").TryGetProperty("isSweeping", out _));
   }
 
+  [Fact]
+  public async Task Scan_InTestHost_IsDisabled_SoNoSweepTouchesHardware()
+  {
+    HttpClient client = _factory.CreateClient();
+
+    HttpResponseMessage response = await client.PostAsync("/api/radio/bandmap/scan", content: null);
+
+    Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+    Assert.Contains(BandMapService.ReasonDisabled, await response.Content.ReadAsStringAsync());
+  }
+
   private sealed class FakeLiveSweeper : ILiveBandSweeper
   {
     private int _calls;
