@@ -271,6 +271,39 @@ public class PresetBarKnobMirrorTests : TestContext
   }
 
   [Fact]
+  public void ARadioStateTick_WhileTheKnobsListIsUp_DoesNotPullASwipeBackToTheKnobsCard()
+  {
+    // The re-publish case above never reaches ChooseReveal — the bar does not re-render for an
+    // unchanged mirror. The panel, though, re-renders the bar on every radio-state tick (~500 ms), and
+    // that render must not treat "the knob's list is up" as "reveal the knob's card again".
+    var presets = EightFm();
+    var cut = RenderBar(presets, active: "f1");
+    Publish(cut, KnobPreview(presets, 3));
+    ManualScroll(cut);
+    var before = Reveals.Count;
+
+    cut.SetParametersAndRender(p => p.Add(x => x.Presets, presets.ToList()));
+    cut.SetParametersAndRender(p => p.Add(x => x.Presets, presets.ToList()));
+
+    Reveals.Should().HaveCount(before);
+    Highlighted(cut).Should().Equal("f4");
+  }
+
+  [Fact]
+  public void AStaleKnobRow_DoesNotHoldTheStrip_AgainstAPlayingPresetChange()
+  {
+    // A knob row with no card is not a mirror, so it must not hijack the reveal rules either: the
+    // playing preset changing still brings it into view.
+    var presets = EightFm();
+    var cut = RenderBar(presets, active: "f1");
+    Publish(cut, KnobPreview(new[] { "gone" }, 0));
+
+    cut.SetParametersAndRender(p => p.Add(x => x.ActivePresetId, "f6"));
+
+    Reveals.Last().Arguments[1].Should().Be(5);
+  }
+
+  [Fact]
   public void AnotherCardReplacingTheKnobsList_ClearsTheMark()
   {
     // The HUD shows one card at a time: a volume turn replaces the PRESETS overlay on screen, so the
