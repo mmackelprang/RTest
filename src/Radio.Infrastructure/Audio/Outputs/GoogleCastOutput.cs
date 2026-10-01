@@ -299,13 +299,6 @@ public class GoogleCastOutput : AudioOutputBase
   private ReceiverChannel? _receiverStatusSubscribedChannel;
   private readonly object _receiverStatusSubscriptionLock = new();
 
-  // AUD-54 (1). The ReceiverChannel that currently carries OnReceiverStatusChanged, so
-  // SubscribeToReceiverStatus can detach it from there before attaching it elsewhere.
-  // Read and written only inside _receiverStatusSubscriptionLock, which guards nothing else
-  // and is never held across an await.
-  private ReceiverChannel? _receiverStatusSubscribedChannel;
-  private readonly object _receiverStatusSubscriptionLock = new();
-
   // AUD-80: the level the current connection should hold on the device — the volume
   // remembered for it, else the level it reported when first seen, else NaN (unknown).
   // SyncVolumeAfterStartAsync pushes this after the receiver app launches; NaN means
