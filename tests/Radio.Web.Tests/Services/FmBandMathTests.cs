@@ -207,6 +207,24 @@ public class FmBandMathTests
   }
 
   [Fact]
+  public void Tiers_AreMeasuredFromTheMedian_NotFromTheDisplayFloor()
+  {
+    // A busy map whose median (-50) is well above its low percentile (-60, the display floor). Measured
+    // from the floor, -44 would be 16 dB up (fair) and the -50 bed 10 dB up (weak); from the median they
+    // are 6 dB (weak) and 0 dB (noise).
+    BandMapChannelDto[] channels =
+    [
+      new(88_100_000, -60f), new(88_300_000, -60f), new(88_500_000, -60f), new(88_700_000, -60f),
+      new(88_900_000, -50f), new(89_100_000, -50f), new(89_300_000, -50f), new(89_500_000, -50f), new(89_700_000, -50f),
+      new(89_900_000, -44f),
+    ];
+
+    BandSignalTier[] tiers = FmBandMath.SignalTiers(channels);
+    tiers[9].Should().Be(BandSignalTier.Weak);
+    tiers[4..9].Should().OnlyContain(t => t == BandSignalTier.Noise);
+  }
+
+  [Fact]
   public void Tiers_AreInTheOrderGiven()
   {
     // Unsorted input: the tiers line up with the channels as passed, as NormalizeLevels' heights do.
