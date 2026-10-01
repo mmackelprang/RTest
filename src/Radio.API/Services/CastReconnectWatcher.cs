@@ -90,9 +90,10 @@ internal readonly record struct CastReconnectSchedule(
 internal readonly record struct CastReconnectStart(long WindowStartTimestamp, TimeSpan FirstDelay, bool FailureWarned = false);
 
 /// <summary>
-/// Thrown by <see cref="ICastReconnectHost.ConnectAndStartAsync"/> when the speaker answered but
-/// is running another sender's application (or its status could not be read). The host has
-/// already removed its own connection.
+/// Thrown by <see cref="ICastReconnectHost.ConnectAndStartAsync"/> when the speaker answered and
+/// its status positively shows another sender's application running. A status that could not be
+/// read is a failed attempt instead, retried (review M4). The host has already removed its own
+/// connection.
 /// </summary>
 internal sealed class CastSpeakerInUseException : Exception
 {

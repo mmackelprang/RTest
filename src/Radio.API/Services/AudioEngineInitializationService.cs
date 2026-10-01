@@ -952,9 +952,15 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       }
       catch (Exception ex)
       {
-        // Unknown is treated as busy: launching blind is exactly what could end someone's session.
+        // Unknown is never launched on — launching blind is exactly what could end someone's
+        // session — but nor is it "in use" (review M4): a speaker still booting, whose GET_STATUS
+        // times out, or a connection lost during the read, is the common cause, and ending the
+        // episode for good on it gave up on a speaker that was coming back. So it is a failed
+        // attempt: our held channel is closed (no Cast message — see DisconnectOwnAsync) and the
+        // watcher retries at the backoff cap, under its one-Warning-per-episode rule. Only a
+        // positively identified foreign application (below) ends the reconnecting.
         await DisconnectOwnAsync(cast).ConfigureAwait(false);
-        throw new CastSpeakerInUseException("its receiver status could not be read", ex);
+        throw new InvalidOperationException($"its receiver status could not be read: {ex.Message}", ex);
       }
 
       if (!IsCastReceiverFreeForUs(running, ourApplicationId))

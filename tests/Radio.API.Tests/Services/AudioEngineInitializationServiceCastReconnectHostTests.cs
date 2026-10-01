@@ -330,19 +330,78 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
-  public async Task ReceiverStatusUnreadable_IsTreatedAsBusy()
+  public async Task ReceiverStatusUnreadable_SendsNothing_AndIsAFailedAttemptNotAnInUseSpeaker()
   {
+    // Review M4. Unknown is never launched on (no commands, our channel closed), but it is a failed
+    // attempt the watcher retries — a booting speaker whose GET_STATUS times out is the common
+    // cause — not CastSpeakerInUseException, which ends the episode for good.
     using var listener = StartListener();
+    _volumes.Volumes["cast-a"] = 0.25f;
+    var pushes = new List<float>();
+    SetCastSeam("CastSetVolumeOverrideForTests", (Func<float, Task>)(v => { pushes.Add(v); return Task.CompletedTask; }));
     var service = CreateService();
     service.ReceiverApplicationsReadOverride = (_, _) =>
       Task.FromException<IReadOnlyList<string>>(new TimeoutException("no RECEIVER_STATUS"));
     var host = service.CreateProductionCastReconnectHost();
 
-    await Assert.ThrowsAsync<CastSpeakerInUseException>(
+    var ex = await Assert.ThrowsAnyAsync<Exception>(
       () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
 
+    Assert.IsNotType<CastSpeakerInUseException>(ex);
+    Assert.IsNotAssignableFrom<OperationCanceledException>(ex);
+    Assert.Contains("could not be read", ex.Message);
     Assert.Null(_castOutput.ConnectedDevice);
     Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);
+    Assert.Empty(pushes);
+  }
+
+  [Fact]
+  public async Task ReceiverStatusUnreadable_TheWatcherKeepsTryingAndReconnectsWhenItIsReadable()
+  {
+    // Review M4, end to end through the real watcher and host: the first attempt's read times out,
+    // the second finds the receiver free — the episode continues to a reconnect rather than ending
+    // "in use by another app". One Warning for the failed attempt, as for any failed attempt.
+    using var listener = StartListener();
+    await _engine.SetActiveOutputAsync("speakers");
+    var mark = new CastRecoveryMark("speakers", _engine.OutputSelectionEpoch);
+    var service = CreateService();
+    service.CastProbeStandardPort = Port(listener);
+    var reads = 0;
+    service.ReceiverApplicationsReadOverride = (cast, _) =>
+    {
+      if (++reads == 1)
+      {
+        return Task.FromException<IReadOnlyList<string>>(new TimeoutException("no RECEIVER_STATUS"));
+      }
+
+      typeof(GoogleCastOutput).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cast, null);
+      return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    };
+    var time = new CastReconnectWatcherTests.SignalingTimeProvider();
+    var log = new CastReconnectWatcherTests.ListLogger();
+    var watcher = new CastReconnectWatcher(
+      service.CreateProductionCastReconnectHost(), Device(Port(listener)), mark,
+      new CastReconnectSchedule(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(60), TimeSpan.FromMinutes(30)),
+      time, log);
+
+    var run = Task.Run(() => watcher.RunAsync(CancellationToken.None));
+    for (var waits = 0; !run.IsCompleted; waits++)
+    {
+      Assert.True(waits < 20, "the watcher never stopped");
+      var next = time.NextTimerAsync();
+      await Task.WhenAny(next, run).WaitAsync(HangGuard);
+      if (!run.IsCompleted)
+      {
+        time.Advance(await next);
+      }
+    }
+
+    Assert.Equal(CastReconnectOutcome.Reconnected, await run);
+    Assert.Equal(2, reads);
+    Assert.Equal("google-cast", _engine.ActiveOutputId);
+    Assert.Equal(AudioOutputState.Streaming, _castOutput.State);
+    var warning = Assert.Single(log.Entries, e => e.Level >= LogLevel.Warning);
+    Assert.Contains("could not be read", warning.Message);
   }
 
   [Fact]
@@ -504,8 +563,10 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     _engine.AttachOutputCoordination(_castOutput, null, null); // so the tear-down reaches it
     using var cts = new CancellationTokenSource();
     var service = CreateService();
-    service.ReceiverApplicationsReadOverride = async (_, ct) =>
+    service.ReceiverApplicationsReadOverride = async (cast, ct) =>
     {
+      // As in the Cast-pick test, so a start, if one were made, would reach Streaming offline.
+      typeof(GoogleCastOutput).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cast, null);
       await cts.CancelAsync();
       ct.ThrowIfCancellationRequested();
       return Array.Empty<string>();
