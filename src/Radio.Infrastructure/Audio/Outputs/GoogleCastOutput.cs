@@ -300,7 +300,9 @@ public class GoogleCastOutput : AudioOutputBase
   // AUD-81: every level and mute this application sent to the device, kept while the send is
   // in flight and for EchoWindow after it completes, from any path (console follow, AUD-80
   // restore, after-start sync, start-time mute, teardown). A status matching one of them is the
-  // device confirming our own command, even when it arrives late or out of order. Guarded by
+  // device confirming our own command, even when it arrives late or out of order. For a level,
+  // "matching" means lying within the range the recent levels span, widened by
+  // EchoLevelTolerance (hostile review F3; see IsRecentVolumePush). Guarded by
   // _echoLock, which guards nothing else and is never held across an await.
   //
   // Pre-merge review L3: the window used to run from the send's START only, and the sends it
@@ -310,6 +312,10 @@ public class GoogleCastOutput : AudioOutputBase
   // never completed (SharpCaster gives up on a response after 30 s).
   private static readonly TimeSpan EchoWindow = TimeSpan.FromSeconds(3);
   private static readonly TimeSpan EchoInFlightLimit = TimeSpan.FromSeconds(35);
+
+  // How far beyond the range of recent pushes a reported level may lie and still be recognised
+  // as their echo (see IsRecentVolumePush). The same 0.01 the baseline comparison uses.
+  private const float EchoLevelTolerance = 0.01f;
   private readonly TimeProvider _timeProvider;
   private readonly object _echoLock = new();
   private readonly List<EchoPush<float>> _recentVolumePushes = new();
@@ -2466,8 +2472,10 @@ public class GoogleCastOutput : AudioOutputBase
 
     // AUD-81. A level or mute that this application sent within EchoWindow is the device
     // confirming our own command — even when the confirmation is late, or a later push has
-    // already moved the baseline on — so it is not an external change. The baseline follows
-    // the device. Anything else is compared with the baseline as before.
+    // already moved the baseline on — so it is not an external change. For the level that means
+    // anywhere within the range our recent pushes span, ±0.01 (F3: a device may round our level
+    // more coarsely than 0.01; see IsRecentVolumePush for what that does and does not cover).
+    // The baseline follows the device. Anything else is compared with the baseline as before.
     var volumeEcho = IsRecentVolumePush(deviceVolume);
     var muteEcho = deviceMuted != _lastSetMute && IsRecentMutePush(deviceMuted);
 
@@ -3500,15 +3508,42 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
-  /// True when <paramref name="level"/> is within 0.01 of a level whose send is in flight or
-  /// completed within the last <see cref="EchoWindow"/>.
+  /// True when <paramref name="level"/> lies within the closed range spanned by the levels whose
+  /// sends are in flight or completed within the last <see cref="EchoWindow"/> — from the lowest
+  /// to the highest of them — widened by <see cref="EchoLevelTolerance"/> at each end. False when
+  /// there are none.
   /// </summary>
+  /// <remarks>
+  /// <para>Hostile review F3. This used to be "within 0.01 of one recent push", so a speaker that
+  /// quantises more coarsely than 0.01 reported our own push as an external change — master volume
+  /// rewritten and AUD-80 remembering it. A level between two of our recent pushes is now an echo
+  /// however the device rounded it: during a console drag (0.437 then 0.50) a 1/15-step speaker's
+  /// 0.4667 is recognised.</para>
+  /// <para>What it does NOT recognise: a SINGLE recent push (or the extremes of several) reported
+  /// more than <see cref="EchoLevelTolerance"/> beyond it — 0.437 reported as 0.4667 with nothing
+  /// above it in the window still reads as external. And what it gives up: a genuine change made
+  /// on the speaker within the window that lands inside the range is absorbed, not reported.
+  /// Changes outside the range are reported as before (AUD-5).</para>
+  /// </remarks>
   private bool IsRecentVolumePush(float level)
   {
     lock (_echoLock)
     {
       PruneEchoMemory_Locked();
-      return _recentVolumePushes.Exists(p => Math.Abs(p.Value - level) <= 0.01f);
+      if (_recentVolumePushes.Count == 0)
+      {
+        return false;
+      }
+
+      float lowest = float.MaxValue;
+      float highest = float.MinValue;
+      foreach (EchoPush<float> push in _recentVolumePushes)
+      {
+        lowest = Math.Min(lowest, push.Value);
+        highest = Math.Max(highest, push.Value);
+      }
+
+      return level >= lowest - EchoLevelTolerance && level <= highest + EchoLevelTolerance;
     }
   }
 

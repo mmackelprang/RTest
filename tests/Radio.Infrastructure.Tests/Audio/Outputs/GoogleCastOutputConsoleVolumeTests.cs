@@ -80,6 +80,68 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.32f, external.Volume, 3);
   }
 
+  // Hostile review F3. A speaker that quantises to 1/15 (≈ 0.0667) reports our 0.437 as 0.4667 —
+  // 0.03 from it, and 0.033 from the 0.50 pushed after it. Neither is within 0.01 of a single
+  // push; both lie between our pushes, which is what now makes them echoes.
+  [Fact]
+  public async Task ACoarselyQuantisedEcho_BetweenRecentPushes_IsAbsorbed_NotWrittenBack()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    var rememberedBefore = h.Store.Remembered.Count;
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.437f, target.Generation);
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+
+    h.Time.Advance(TimeSpan.FromSeconds(1));
+    h.RaiseStatus(7.0 / 15.0); // 0.4667: the device's rounding of 0.437
+    h.RaiseStatus(0.50);       // the second push, confirmed
+    h.RaiseStatus(0.44);
+    h.RaiseStatus(0.43);
+
+    Assert.Empty(h.External);
+    Assert.DoesNotContain(
+      h.Store.Remembered.Skip(rememberedBefore),
+      r => Math.Abs(r.Volume - 7f / 15f) < 0.001f);
+  }
+
+  [Fact]
+  public async Task AFineQuantisedEcho_OfASinglePush_IsAbsorbed()
+  {
+    // Guard, not a mutation target: within 0.01 of the one push, so recognised by both the old
+    // single-push rule and the range rule.
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.437f, target.Generation);
+    h.RaiseStatus(0.44);
+    h.RaiseStatus(0.43);
+
+    Assert.Empty(h.External);
+  }
+
+  [Fact]
+  public async Task AGenuineExternalChange_OutsideTheRangeOfRecentPushes_IsStillReported_WithinTheWindow()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.437f, target.Generation);
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation);
+    h.Time.Advance(TimeSpan.FromSeconds(1)); // still inside the 3 s echo window
+
+    h.RaiseStatus(0.70); // above the range: changed on the speaker
+    Assert.Equal(0.70f, Assert.Single(h.External).Volume, 3);
+    Assert.Equal(0.70f, h.Store.Volumes["cast-a"], 3);
+
+    h.RaiseStatus(0.30); // below the range
+    Assert.Equal(2, h.External.Count);
+    Assert.Equal(0.30f, h.External[^1].Volume, 3);
+  }
+
   // AUD-81 connect race, measured on the box: SharpCaster raises the GET_STATUS response as a
   // ReceiverStatusChanged event on its receive thread, and it beat the continuation that primes
   // the echo baseline — so the handler compared against the -1f sentinel, fired an EXTERNAL
