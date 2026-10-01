@@ -397,8 +397,10 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   {
     CancellationTokenSource? cts;
     Task<CastReconnectOutcome> run;
+    string? deviceId;
     lock (_reconnectGate)
     {
+      deviceId = _reconnectEpisode?.DeviceId;
       // An explicit user action: whatever drops next starts a fresh window, uncapped.
       _reconnectEpisode = null;
       _watcherReconnects.Clear();
@@ -410,6 +412,16 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     {
       return;
     }
+
+    // Logged only when a watcher was still running, so the controller calling this on every
+    // output and Cast action adds no line otherwise. A user's pick of another output reaches the
+    // watcher through here (DevicesController cancels first), so without this line the file sink
+    // would show nothing for "the user moved on" — the watcher's own "no longer trying" line only
+    // fires for an output change it observes itself. A Cast pick that lands while the watcher
+    // has already connected may still keep that connection (see the watcher's keep branch).
+    _logger.LogInformation(
+      "Cast: no longer trying to reconnect to {DeviceId} — stopped by a user output or Cast action",
+      deviceId ?? "(unknown device)");
 
     try
     {

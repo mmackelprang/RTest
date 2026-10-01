@@ -340,13 +340,23 @@ public class AudioEngineInitializationServiceCastReconnectTests
   public async Task CancelCastReconnect_DuringTheWait_EndsTheWatcherBeforeItProbes()
   {
     // Review M1: a user's output or Cast action takes the Cast output over from the watcher.
-    var service = CreateService();
+    var log = new CastReconnectWatcherTests.ListLogger<AudioEngineInitializationService>();
+    var service = CreateService(logger: log);
+
+    // With no watcher running, a user action logs nothing (the controller calls this every time).
+    await service.CancelCastReconnectAsync().WaitAsync(HangGuard);
+    Assert.DoesNotContain(log.Entries, e => e.Message.Contains("no longer trying to reconnect"));
 
     RaiseLoss(service);
     await service.LastCastLossRecovery.WaitAsync(HangGuard);
     await _time.NextTimerAsync().WaitAsync(HangGuard); // the watcher is in its first wait
 
     await service.CancelCastReconnectAsync().WaitAsync(HangGuard);
+
+    // The owner's script reads this line from the file sink: a user's pick of another output
+    // while the speaker is away ends the reconnect visibly, at Information.
+    Assert.Single(log.Entries, e => e.Level == LogLevel.Information
+      && e.Message.Contains("no longer trying to reconnect"));
 
     // Awaited under the hang guard, not asserted IsCompleted: CancelCastReconnectAsync waits at
     // most the REAL 3 s CastReconnectCancelBound, so on a starved runner the watcher's exit could
