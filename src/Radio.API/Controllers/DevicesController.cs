@@ -32,6 +32,7 @@ public class DevicesController : ControllerBase
   private readonly IRadioConfigurationManager _configurationManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly IOptions<AudioOutputOptions> _audioOutputOptions;
+  private readonly Radio.API.Services.ICastReconnectControl? _castReconnect;
 
   /// <summary>
   /// Initializes a new instance of the DevicesController.
@@ -46,7 +47,8 @@ public class DevicesController : ControllerBase
     SoundFlowAudioEngine? audioEngine = null,
     LocalAudioOutput? localOutput = null,
     GoogleCastOutput? castOutput = null,
-    HttpStreamOutput? httpOutput = null)
+    HttpStreamOutput? httpOutput = null,
+    Radio.API.Services.ICastReconnectControl? castReconnect = null)
   {
     _logger = logger;
     _deviceManager = deviceManager;
@@ -58,7 +60,16 @@ public class DevicesController : ControllerBase
     _localOutput = localOutput;
     _castOutput = castOutput;
     _httpOutput = httpOutput;
+    _castReconnect = castReconnect;
   }
+
+  /// <summary>
+  /// AUD-37 (review M1). Takes the Cast output over from the automatic reconnect before a user's
+  /// own output or Cast action touches it, so the reconnect is never a second connecting party
+  /// (AUD-85). Bounded (3 s) and never throws.
+  /// </summary>
+  private Task CancelCastReconnectAsync() =>
+    _castReconnect?.CancelCastReconnectAsync() ?? Task.CompletedTask;
 
   /// <summary>
   /// Gets all available audio output devices.
@@ -184,6 +195,7 @@ public class DevicesController : ControllerBase
   [ProducesResponseType(StatusCodes.Status404NotFound)]
   public async Task<IActionResult> SetOutputDevice([FromBody] SetOutputDeviceRequest request)
   {
+    await CancelCastReconnectAsync();
     try
     {
       if (string.IsNullOrWhiteSpace(request.DeviceId))
@@ -626,6 +638,7 @@ public class DevicesController : ControllerBase
     [FromBody] ConnectCastDeviceRequest request,
     CancellationToken cancellationToken)
   {
+    await CancelCastReconnectAsync();
     if (_castOutput == null)
     {
       return StatusCode(503, new { error = "Google Cast output not available" });
@@ -769,6 +782,7 @@ public class DevicesController : ControllerBase
   [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
   public async Task<IActionResult> DisconnectFromCastDevice(CancellationToken cancellationToken)
   {
+    await CancelCastReconnectAsync();
     if (_castOutput == null)
     {
       return StatusCode(503, new { error = "Google Cast output not available" });

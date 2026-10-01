@@ -538,6 +538,39 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.30f, h.Output.KnownSpeakerLevel, 3);
   }
 
+  // AUD-37 review MEDIUM: the reconnect watcher's read of the running applications is a GET_STATUS
+  // whose reply SharpCaster also raises as ReceiverStatusChanged. Like ReadSpeakerVolumeAsync, it is
+  // counted in _diagnosticReadsPending, so that reply only re-baselines — even on a connection that
+  // is not held. Mutation-checked: without the increment the reply is reported as external.
+  [Fact]
+  public async Task TheRunningApplicationsRead_ItsStatusReply_IsNeverAnExternalChange()
+  {
+    await using var h = NewHarness();
+    await Assert.ThrowsAsync<InvalidOperationException>(() => h.Output.GetRunningApplicationIdsAsync());
+
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    h.ClearCommands();
+
+    h.Output.ReceiverApplicationsStatusReadOverrideForTests = () =>
+    {
+      h.RaiseStatus(0.55, muted: true); // the reply, raised before the read completes
+      return Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+        CastConsoleTestHarness.FreshStatus(muted: true, runningAppId: "OTHERAPP"));
+    };
+
+    var running = await h.Output.GetRunningApplicationIdsAsync();
+
+    Assert.Equal(new[] { "OTHERAPP" }, running);
+    Assert.Empty(h.External);
+    Assert.Empty(h.Commands);
+    Assert.Equal(0.40f, h.Output.KnownSpeakerLevel, 3); // the connection's level is untouched
+    Assert.True(h.Output.KnownSpeakerMuted);            // the echo baseline follows the reply
+
+    // The read is over: the next change on the speaker is external again.
+    h.RaiseStatus(0.20, muted: true);
+    Assert.Single(h.External);
+  }
+
   // --- mute ---
 
   [Fact]

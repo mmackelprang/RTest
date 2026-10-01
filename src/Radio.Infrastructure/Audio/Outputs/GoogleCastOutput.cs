@@ -156,7 +156,7 @@ public class GoogleCastOutput : AudioOutputBase
   private EventHandler? _lossWatchHandler;
 
   /// <summary>
-  /// <b>Test seam (kind C — substitution).</b> Awaited inside <see cref="ConnectAsync"/>
+  /// <b>Test seam (kind C — substitution).</b> Awaited inside <see cref="ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/>
   /// after the receiver has been resolved but before the network connect, which is
   /// precisely where the connect/teardown race used to corrupt state. Set by
   /// <c>GoogleCastOutputConcurrencyTests</c> (<c>:51</c>, <c>:116</c>).
@@ -242,6 +242,22 @@ public class GoogleCastOutput : AudioOutputBase
   /// Null (and therefore free) in production.
   /// </summary>
   internal Func<Task<bool>>? CastStopApplicationOverrideForTests { get; set; }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the receiver-application launch inside
+  /// <see cref="StartAsync(bool, CancellationToken)"/> (AUD-37, final review M-1): returns the
+  /// launch status, or throws. Set by <c>GoogleCastOutputStartSupersededTests</c> and
+  /// <c>AudioEngineInitializationServiceCastReconnectHostTests</c>.
+  /// <b>Why the real path is unreachable:</b> no fake socket speaks the Cast protocol, so offline
+  /// the LAUNCH waits out SharpCaster's 30 s response timeout and the start never gets past it.
+  /// Awaiting inside the delegate is also how a test holds a start at the launch, where a
+  /// teardown can overtake it in production.
+  /// <b>NOT covered by this seam:</b> the device launching the application and SharpCaster's
+  /// status parsing. Everything after the launch — the mode branch, the start-time mute, the
+  /// DirectChannel registration and streaming, and the generation guard — is real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task<ChromecastStatus?>>? CastLaunchApplicationOverrideForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -460,6 +476,14 @@ public class GoogleCastOutput : AudioOutputBase
   // would not be).
   private float _connectionVolume = float.NaN;
 
+  // AUD-37 (review M5). True between a CastConnectOptions.HoldUntilReceiverConfirmed connect's
+  // claim and ConfirmReceiverAvailable (or the next connect's claim, a disconnect, a handled
+  // connection loss, or a re-initialise). While it
+  // is set, OnReceiverStatusChanged absorbs status into the echo-filter baseline but neither
+  // reports nor remembers it: the receiver may be running another sender's session, and its
+  // volume is not ours. Read from SharpCaster's callback thread, hence volatile.
+  private volatile bool _holdingForReceiverConfirmation;
+
   /// <inheritdoc />
   protected override ILogger Logger => _logger;
 
@@ -494,6 +518,21 @@ public class GoogleCastOutput : AudioOutputBase
   /// Gets the currently connected Chromecast device information.
   /// </summary>
   public ChromecastDeviceInfo? ConnectedDevice { get; private set; }
+
+  /// <summary>
+  /// AUD-37. The generation of the connection currently published, or -1 when none is. A
+  /// lock-free read, so only good for an ownership check by a caller that compares it with
+  /// <see cref="ConnectionGeneration"/> and its own <see cref="ConnectedDevice"/> reference.
+  /// </summary>
+  public int PublishedConnectionGeneration => Volatile.Read(ref _publishedGeneration);
+
+  /// <summary>
+  /// AUD-37. The newest connection generation: bumped by every connect attempt's claim and by
+  /// every disconnect, loss or re-initialise. Greater than <see cref="PublishedConnectionGeneration"/>
+  /// while a newer connect is in flight or after the published connection was taken down.
+  /// A lock-free read.
+  /// </summary>
+  public int ConnectionGeneration => Volatile.Read(ref _connectionGeneration);
 
   /// <summary>
   /// Gets the Google Cast output options for external inspection (e.g., by controllers
@@ -584,6 +623,8 @@ public class GoogleCastOutput : AudioOutputBase
       {
         _connectionGeneration++;
         _publishedGeneration = -1;
+        // AUD-37: a hold belongs to the connection it was placed for, which this discards.
+        _holdingForReceiverConfirmation = false;
         UnwatchConnectionLoss_Locked();
         stale = _client;
         _client = new ChromecastClient();
@@ -832,10 +873,22 @@ public class GoogleCastOutput : AudioOutputBase
   /// <param name="device">The device to connect to.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task ConnectAsync(ChromecastDeviceInfo device, CancellationToken cancellationToken = default)
+  public Task ConnectAsync(ChromecastDeviceInfo device, CancellationToken cancellationToken = default) =>
+    ConnectAsync(device, CastConnectOptions.Default, cancellationToken);
+
+  /// <summary>
+  /// Connects to a specific Chromecast device, as <paramref name="options"/> says.
+  /// </summary>
+  /// <param name="device">The device to connect to.</param>
+  /// <param name="options">How to connect; <see cref="CastConnectOptions.Default"/> is a user's connect.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  public async Task ConnectAsync(
+    ChromecastDeviceInfo device, CastConnectOptions options, CancellationToken cancellationToken = default)
   {
     ThrowIfDisposed();
     ArgumentNullException.ThrowIfNull(device);
+    ArgumentNullException.ThrowIfNull(options);
 
     // Recover from Error state by reinitializing
     if (State == AudioOutputState.Error)
@@ -859,6 +912,10 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     State = AudioOutputState.Connecting;
+
+    // AUD-37 (M4). A client this attempt built for itself (the cached-device path); never
+    // published unless the attempt succeeds, so on failure nothing else would close it.
+    ChromecastClient? attemptClient = null;
 
     // Everything from here on must leave State somewhere recoverable. Connecting
     // is a dead end for this class: ConnectAsync refuses to run unless the state
@@ -890,6 +947,10 @@ public class GoogleCastOutput : AudioOutputBase
         myGeneration = ++_connectionGeneration;
         client = _client;
         Volatile.Write(ref _initialSyncPendingGeneration, myGeneration);
+
+        // AUD-37 (review M5). Set with the claim: every connect states its own hold, so a hold
+        // cannot outlive the attempt that asked for it into a later connect's connection.
+        _holdingForReceiverConfirmation = options.HoldUntilReceiverConfirmed;
       }
       finally
       {
@@ -929,6 +990,7 @@ public class GoogleCastOutput : AudioOutputBase
           // socket state. Built locally and only published at commit time.
           var stale = client;
           client = new ChromecastClient();
+          attemptClient = client;
           if (stale != null)
           {
             try { await stale.DisconnectAsync().ConfigureAwait(false); }
@@ -1000,7 +1062,7 @@ public class GoogleCastOutput : AudioOutputBase
 
         // Read initial device volume. The generation goes with it: the read is a
         // network round-trip, and this connection can be superseded inside it.
-        await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
+        await SyncInitialVolumeAsync(client, myGeneration, device, options.HoldUntilReceiverConfirmed).ConfigureAwait(false);
       }
       finally
       {
@@ -1024,11 +1086,163 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to connect to Chromecast: {Name}", device.FriendlyName);
+      // AUD-37 (review M3): an automatic retry's failure is expected and its caller reports it;
+      // at Error it would reach journald on every attempt.
+      _logger.Log(
+        options.AutomaticAttempt ? LogLevel.Debug : LogLevel.Error,
+        ex, "Failed to connect to Chromecast: {Name}", device.FriendlyName);
       State = AudioOutputState.Error;
+
+      // AUD-37 (M4). A client built by this attempt and never published would otherwise be
+      // left open: if ConnectChromecast got past its TLS handshake, SharpCaster has started
+      // its receive loop and heartbeat timer, which the callback guard re-arms after every
+      // elapse. Not awaited, so the caller sees the failure at once — DisconnectAsync stops
+      // the heartbeat synchronously, before its first await.
+      if (attemptClient != null && !ReferenceEquals(attemptClient, Volatile.Read(ref _client)))
+      {
+        _ = DiscardUnpublishedClientAsync(attemptClient);
+      }
+
       throw;
     }
   }
+
+  /// <summary>
+  /// AUD-37 (M4). Closes a client a failed connect built and never published. Bounded and
+  /// never throws: on a client whose transport never came up, SharpCaster's DisconnectAsync
+  /// awaits a receive loop that was never started, after it has already stopped the heartbeat
+  /// and disposed the socket — so the bound only abandons that final await.
+  /// </summary>
+  private async Task DiscardUnpublishedClientAsync(ChromecastClient client)
+  {
+    try
+    {
+      await client.DisconnectAsync().WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: closing the client of a failed connect did not complete cleanly");
+    }
+  }
+
+  /// <summary>
+  /// AUD-37. Asks the connected receiver which applications it is running, fresh from the
+  /// device. Throws when no device is connected or the read fails or times out (10 s).
+  /// </summary>
+  /// <returns>The running applications' ids; empty when nothing is running.</returns>
+  /// <remarks>
+  /// The client is taken from the published connection as one snapshot under <c>_lifecycleLock</c>
+  /// (AUD-81's <see cref="SnapshotPublishedConnectionAsync"/>), never from unlocked reads of
+  /// <c>_client</c> and <c>_connectedReceiver</c>. SharpCaster raises the GET_STATUS response as a
+  /// <c>ReceiverStatusChanged</c> too, so the read is counted in <c>_diagnosticReadsPending</c> from
+  /// before the request until the read itself completes (not when the 10 s bound gives up), as
+  /// <see cref="ReadSpeakerVolumeAsync"/> does: its reply only re-baselines the echo filter and is
+  /// never reported as an external change.
+  /// </remarks>
+  public async Task<IReadOnlyList<string>> GetRunningApplicationIdsAsync(CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+
+    var connection = await SnapshotPublishedConnectionAsync().ConfigureAwait(false)
+      ?? throw new InvalidOperationException("No Chromecast device connected");
+
+    Interlocked.Increment(ref _diagnosticReadsPending);
+    Task<ChromecastStatus?> read;
+    try
+    {
+      read = ReceiverApplicationsStatusReadOverrideForTests != null
+        ? ReceiverApplicationsStatusReadOverrideForTests()
+        : connection.Client.ReceiverChannel.GetChromecastStatusAsync();
+    }
+    catch
+    {
+      Interlocked.Decrement(ref _diagnosticReadsPending);
+      throw;
+    }
+
+    _ = read.ContinueWith(
+      _ => Interlocked.Decrement(ref _diagnosticReadsPending),
+      CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    var status = await read.WaitAsync(TimeSpan.FromSeconds(10), _timeProvider, cancellationToken).ConfigureAwait(false)
+      ?? throw new InvalidOperationException("The Cast receiver returned no status");
+
+    return status.Applications?
+      .Select(a => a.AppId)
+      .Where(id => !string.IsNullOrEmpty(id))
+      .ToList() ?? new List<string>();
+  }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Stands in for the receiver channel's GET_STATUS in
+  /// <see cref="GetRunningApplicationIdsAsync"/>. <b>Why the real path is unreachable:</b> no fake
+  /// socket speaks the Cast protocol. <b>NOT covered by this seam:</b> SharpCaster's request and its
+  /// status parsing. The connection snapshot, the <c>_diagnosticReadsPending</c> bracketing, the bound
+  /// and the result mapping are real. Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task<ChromecastStatus?>>? ReceiverApplicationsStatusReadOverrideForTests { get; set; }
+
+  /// <summary>
+  /// AUD-37 (review M5). Ends the hold a <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/>
+  /// connect placed: the caller has established the receiver is free for us. From here receiver
+  /// status changes are reported and remembered as for any connection, and the remembered level
+  /// the connect held back is still this connection's level, which
+  /// <see cref="SyncVolumeAfterStartAsync"/> pushes when <c>StartAsync</c> has launched our receiver
+  /// application and started streaming.
+  /// Pushes nothing itself. A no-op when no hold is in place.
+  /// <para>AUD-81 (F11): the console-mute recall the held connect deferred runs here, before the
+  /// hold ends and before <c>StartAsync</c>'s start-time mute and the after-start push read the mark.
+  /// It uses the speaker's mute as this connection last observed it (the initial read, or a status
+  /// absorbed during the hold), and only when it observed one: after a failed initial read nothing
+  /// is re-armed, as for an unheld connect.</para>
+  /// </summary>
+  public void ConfirmReceiverAvailable()
+  {
+    if (!_holdingForReceiverConfirmation)
+    {
+      return;
+    }
+
+    string? recalledName = null;
+    try
+    {
+      _lifecycleLock.Wait();
+      try
+      {
+        var connection = SnapshotPublishedConnection_Locked();
+        // Round-4 M-1 order: the flag first, then the baseline, so a true flag is never paired with
+        // the per-connection "not muted" reset.
+        if (connection != null && Volatile.Read(ref _speakerMuteObserved) &&
+            RecallConsoleMute_Locked(connection.Generation, connection.Device.Id, _lastSetMute))
+        {
+          recalledName = connection.Device.FriendlyName;
+        }
+      }
+      finally
+      {
+        _lifecycleLock.Release();
+      }
+    }
+    catch (ObjectDisposedException)
+    {
+      // Disposed: nothing to recall.
+    }
+    finally
+    {
+      _holdingForReceiverConfirmation = false;
+    }
+
+    if (recalledName != null)
+    {
+      LogConsoleMuteRecalled(recalledName);
+    }
+  }
+
+  /// <summary>
+  /// AUD-37 (review M5). True while the current connection was made with
+  /// <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/> and not yet confirmed.
+  /// </summary>
+  public bool IsHoldingForReceiverConfirmation => _holdingForReceiverConfirmation;
 
   /// <summary>
   /// Publishes a completed connection, but only if this attempt is still the
@@ -1112,7 +1326,19 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task DisconnectAsync(CancellationToken cancellationToken = default)
+  public Task DisconnectAsync(CancellationToken cancellationToken = default) =>
+    DisconnectAsync(automaticAttempt: false, cancellationToken);
+
+  /// <summary>
+  /// Disconnects from the currently connected Chromecast device.
+  /// </summary>
+  /// <param name="automaticAttempt">
+  /// AUD-37 (review M3): the reconnect watcher's tear-down; a failure is logged at Debug instead
+  /// of Error. It is still thrown.
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  public async Task DisconnectAsync(bool automaticAttempt, CancellationToken cancellationToken)
   {
     ThrowIfDisposed();
 
@@ -1125,6 +1351,7 @@ public class GoogleCastOutput : AudioOutputBase
     ChromecastDeviceInfo? disconnectedDevice;
     ChromecastReceiver? disconnectedReceiver;
     bool hadConnection;
+    bool wasHeld;
     int closedGeneration;
     await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
     try
@@ -1132,6 +1359,8 @@ public class GoogleCastOutput : AudioOutputBase
       closedGeneration = _publishedGeneration;
       _connectionGeneration++;
       _publishedGeneration = -1;
+      wasHeld = _holdingForReceiverConfirmation;
+      _holdingForReceiverConfirmation = false;
       UnwatchConnectionLoss_Locked();
       hadConnection = _connectedReceiver != null;
       disconnectedReceiver = _connectedReceiver;
@@ -1163,7 +1392,14 @@ public class GoogleCastOutput : AudioOutputBase
       // no-op — StopAsync has released it — but DisposeAsync reaches here without a StopAsync,
       // and a release StopAsync could not complete (receiver application not confirmed stopped)
       // is retried here. Either way the application is stopped before any unmute.
-      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice, disconnectedReceiver).ConfigureAwait(false);
+      // AUD-37 (review M5): never for a connection still held for receiver confirmation — the
+      // reconnect watcher's stand-down from a receiver busy with another sender. That connection
+      // was never ours to mute (the F11 recall waits for the confirmation), and the stand-down
+      // must send no Cast message at all: no application stop, no unmute.
+      if (!wasHeld)
+      {
+        await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice, disconnectedReceiver).ConfigureAwait(false);
+      }
 
       UnsubscribeFromReceiverStatus(client);
 
@@ -1185,13 +1421,25 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error disconnecting from Chromecast");
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Error, ex, "Error disconnecting from Chromecast");
       throw;
     }
   }
 
   /// <inheritdoc />
-  public override async Task StartAsync(CancellationToken cancellationToken = default)
+  public override Task StartAsync(CancellationToken cancellationToken = default) =>
+    StartAsync(automaticAttempt: false, cancellationToken);
+
+  /// <summary>
+  /// <see cref="StartAsync(CancellationToken)"/>, for a caller that says whether this is an
+  /// automatic retry.
+  /// </summary>
+  /// <param name="automaticAttempt">
+  /// AUD-37 (review M3): the reconnect watcher's start; a failure is logged at Debug instead of
+  /// Error (the watcher reports it). It is still thrown.
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  public async Task StartAsync(bool automaticAttempt, CancellationToken cancellationToken)
   {
     ValidateCanStart();
 
@@ -1202,6 +1450,14 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
+    // AUD-37 (final review M-1): the connection this start is for. A teardown (DisconnectAsync,
+    // InitializeAsync, a handled loss, disposal) or a newer connect changes it, and the start
+    // then abandons itself at its next check instead of streaming on a connection nobody owns —
+    // see StartIsStillCurrentAsync for exactly where the checks are and what they leave open.
+    var startGeneration = Volatile.Read(ref _publishedGeneration);
+    var startDeviceName = ConnectedDevice?.FriendlyName;
+    DirectChannelStart? directStart = null;
+
     try
     {
       var startTimer = System.Diagnostics.Stopwatch.StartNew();
@@ -1210,23 +1466,32 @@ public class GoogleCastOutput : AudioOutputBase
       if (_client != null)
       {
         // Launch the receiver application (default CC1AD845 or custom receiver)
-        var launchStatus = await _client.LaunchApplicationAsync(_options.ApplicationId);
+        var launchStatus = CastLaunchApplicationOverrideForTests != null
+          ? await CastLaunchApplicationOverrideForTests().ConfigureAwait(false)
+          : await _client.LaunchApplicationAsync(_options.ApplicationId);
         _logger.LogInformation("Cast: Receiver launched on {Device} ({LaunchMs}ms)",
           ConnectedDevice?.FriendlyName, startTimer.ElapsedMilliseconds);
 
         // Allow receiver to start initializing before sending commands
         await Task.Delay(250, cancellationToken);
 
+        // The launch is the long network wait; nothing of this start's own exists yet.
+        await ThrowIfStartSupersededAsync(startGeneration).ConfigureAwait(false);
+
         // Branch on streaming mode
         if (string.Equals(_options.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase))
         {
-          await StartDirectChannelAsync(launchStatus, cancellationToken);
+          directStart = await StartDirectChannelAsync(launchStatus, startGeneration, cancellationToken);
         }
         else
         {
           await StartHttpMp3Async(cancellationToken);
         }
       }
+
+      // Every mode's path, the no-client one included: never mark Streaming (nor enabled) a
+      // connection that was torn down or replaced while this start was on the network.
+      await ThrowIfStartSupersededAsync(startGeneration).ConfigureAwait(false);
 
       IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
@@ -1236,16 +1501,27 @@ public class GoogleCastOutput : AudioOutputBase
       _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode}, setupMs: {SetupMs})",
         ConnectedDevice?.FriendlyName, _options.StreamingMode, startTimer.ElapsedMilliseconds);
     }
+    catch (CastStartSupersededException)
+    {
+      // Not a failure, and State is left as the teardown set it (Ready, Stopped or Error) — Error
+      // here would overwrite it. Returns normally, as the start did before this check existed, so
+      // no caller sees a new exception; a caller that needs to know reads State (the reconnect
+      // host re-checks that the connection is still its own).
+      await AbandonSupersededStartAsync(directStart).ConfigureAwait(false);
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Information,
+        "Cast: start on {Name} abandoned — its connection was closed or replaced while it was starting",
+        startDeviceName ?? "<unknown device>");
+    }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to start Google Cast output");
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Error, ex, "Failed to start Google Cast output");
       State = AudioOutputState.Error;
       throw;
     }
   }
 
   /// <summary>
-  /// What <see cref="StartAsync"/> does the moment the output is <c>Streaming</c>. Never throws.
+  /// What <see cref="StartAsync(bool, CancellationToken)"/> does the moment the output is <c>Streaming</c>. Never throws.
   /// </summary>
   /// <remarks>
   /// <para>Replays a connection loss reported while the start was still running: it was
@@ -1255,7 +1531,7 @@ public class GoogleCastOutput : AudioOutputBase
   /// (nothing is driven before <c>Streaming</c>), so a console mute made in between would
   /// otherwise be lost and the speaker would play out loud under a muted console. From here on
   /// the follower sees every change itself. A no-op when the speaker is already muted.</para>
-  /// <para><c>internal</c> so a test can drive it: the <see cref="StartAsync"/> that calls it
+  /// <para><c>internal</c> so a test can drive it: the <see cref="StartAsync(bool, CancellationToken)"/> that calls it
   /// needs a launched receiver application, which no offline test can produce.</para>
   /// </remarks>
   internal async Task OnReachedStreamingAsync()
@@ -1276,15 +1552,21 @@ public class GoogleCastOutput : AudioOutputBase
   /// Starts the DirectChannel streaming mode: sends Base64-encoded WAV chunks
   /// directly over a custom Cast message bus, bypassing HTTP entirely.
   /// </summary>
-  private async Task StartDirectChannelAsync(
+  /// <returns>
+  /// What this start created and published in <c>_directStreaming</c>/<c>_directChannel</c>, so a
+  /// start found superseded after this returns can remove exactly that; null on the HttpMp3
+  /// fallbacks.
+  /// </returns>
+  private async Task<DirectChannelStart?> StartDirectChannelAsync(
     Sharpcaster.Models.ChromecastStatus.ChromecastStatus? launchStatus,
+    int startGeneration,
     CancellationToken cancellationToken)
   {
     if (_audioEngine == null)
     {
       _logger.LogWarning("Cast: DirectChannel mode requires audio engine — call SetAudioEngine() first. Falling back to HttpMp3.");
       await StartHttpMp3Async(cancellationToken);
-      return;
+      return null;
     }
 
     // Extract the transport ID from the launched application status.
@@ -1294,7 +1576,7 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogWarning("Cast: Could not get transport ID from launch status — falling back to HttpMp3");
       await StartHttpMp3Async(cancellationToken);
-      return;
+      return null;
     }
 
     _logger.LogInformation(
@@ -1302,37 +1584,154 @@ public class GoogleCastOutput : AudioOutputBase
       transportId, _options.DirectChannelNamespace, _options.DirectChannelChunkSizeMs);
 
     // Create the custom audio channel and wire it to the client.
-    _directChannel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
-    _directChannel.Client = _client!;
+    var channel = new DirectCastAudioChannel(_options.DirectChannelNamespace, _logger);
+    channel.Client = _client!;
+    _directChannel = channel;
 
     // Register the channel with SharpCaster's internal channel list (replacing any earlier
     // one for this namespace) so SharpCaster routes our namespace to it. SharpCaster v3.0.0
     // has no public RegisterChannel API, so we inject via reflection. Routing to the channel
     // is not delivery: SharpCaster drops the receiver's `pong` before OnMessageReceived —
     // see the remarks on RegisterCustomChannel.
-    RegisterCustomChannel(_client!, _directChannel);
+    RegisterCustomChannel(_client!, channel);
 
-    // Create the streaming service and start sending audio. The loss report is armed
-    // with the connection published now; HandleConnectionLostAsync re-checks it under
-    // the lock, so a report that outlives this connection is ignored. If nothing is
-    // published (-1) the report can never match and is in effect disarmed. That happens
-    // only if the connection was torn down while StartAsync was running; stopping this
-    // stream is then up to whoever calls StopAsync next (DisconnectAsync does not stop
-    // it), which is a pre-existing gap of the Start/teardown race, not closed here.
-    var streamingGeneration = Volatile.Read(ref _publishedGeneration);
-    _directStreaming = new DirectCastStreamingService(
-      _logger, _audioEngine, _directChannel, _options, _metricsCollector,
+    // Create the streaming service. Its loss report is armed with the generation this start
+    // is for; HandleConnectionLostAsync re-checks it under the lock, so a report that outlives
+    // this connection is ignored. A start whose connection is torn down or replaced meanwhile
+    // never starts this loop (the check just below), or stops it again (StartAsync's check
+    // before Streaming) — see StartIsStillCurrentAsync for the window those checks leave.
+    var streaming = new DirectCastStreamingService(
+      _logger, _audioEngine, channel, _options, _metricsCollector,
       onSendsFailing: fault => ReportConnectionLost(
-        streamingGeneration, "DirectChannel audio sends kept failing", fault));
-    _directStreaming.SetTransportId(transportId);
+        startGeneration, "DirectChannel audio sends kept failing", fault));
+    streaming.SetTransportId(transportId);
+    _directStreaming = streaming;
+    var created = new DirectChannelStart(streaming, channel);
 
     // AUD-81: mute for a muted console BEFORE the first chunk is sent. Repeated (as a no-op,
     // the speaker then being muted) by SyncVolumeAfterStartAsync below.
     await MuteForConsoleAtStartAsync().ConfigureAwait(false);
-    _directStreaming.Start();
+
+    // AUD-37 (final review M-1): after the mute, before the first chunk. The mute is a network
+    // round-trip, and a teardown that overtook it must not find a send loop started after it.
+    if (!await StartIsStillCurrentAsync(startGeneration).ConfigureAwait(false))
+    {
+      await AbandonSupersededStartAsync(created).ConfigureAwait(false);
+      throw new CastStartSupersededException();
+    }
+
+    streaming.Start();
 
     // Sync volume to Cast device
     await SyncVolumeAfterStartAsync();
+    return created;
+  }
+
+  /// <summary>What one DirectChannel start created (AUD-37, final review M-1).</summary>
+  private sealed record DirectChannelStart(DirectCastStreamingService Streaming, DirectCastAudioChannel Channel);
+
+  /// <summary>
+  /// Thrown inside <see cref="StartAsync(bool, CancellationToken)"/> when its connection was torn
+  /// down or replaced while it was starting; caught there and never escapes it.
+  /// </summary>
+  private sealed class CastStartSupersededException : Exception
+  {
+    public CastStartSupersededException()
+      : base("The Cast connection this start was for was closed or replaced while it was starting")
+    {
+    }
+  }
+
+  /// <summary>
+  /// AUD-37 (final review M-1). True while <paramref name="startGeneration"/> is still the
+  /// published, current connection — read under <c>_lifecycleLock</c>, so it is ordered against
+  /// every teardown's generation bump. False after disposal.
+  /// </summary>
+  /// <remarks>
+  /// <para><see cref="StartAsync(bool, CancellationToken)"/> checks this three times: after the
+  /// launch (before anything of its own exists), before the DirectChannel send loop's
+  /// <c>Start()</c> (after the start-time mute), and before it sets <c>IsEnabled</c> and
+  /// <c>Streaming</c> on every mode's path. A start that fails a check removes the DirectChannel
+  /// streaming service and channel it created (<see cref="AbandonSupersededStartAsync"/>) and
+  /// returns without touching <c>State</c>.</para>
+  /// <para>What it does NOT close: the checks are not held across the steps they precede (the
+  /// <c>State</c> setter raises <c>StateChanged</c>, which must not run under the lock). A
+  /// teardown whose generation bump lands between the last check and the <c>Streaming</c>
+  /// assignment — no await separates them — still leaves that start's stream running; the
+  /// teardown's own later <c>State</c> write then applies. Nor does it undo what the network
+  /// already received: a superseded start's receiver application stays launched, and on HttpMp3
+  /// its media load may already have been sent.</para>
+  /// </remarks>
+  private async Task<bool> StartIsStillCurrentAsync(int startGeneration)
+  {
+    try
+    {
+      await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    }
+    catch (ObjectDisposedException)
+    {
+      return false;
+    }
+
+    try
+    {
+      return startGeneration >= 0 &&
+        _publishedGeneration == startGeneration &&
+        _connectionGeneration == startGeneration;
+    }
+    finally
+    {
+      try { _lifecycleLock.Release(); }
+      catch (ObjectDisposedException) { /* output disposed */ }
+    }
+  }
+
+  private async Task ThrowIfStartSupersededAsync(int startGeneration)
+  {
+    if (!await StartIsStillCurrentAsync(startGeneration).ConfigureAwait(false))
+    {
+      throw new CastStartSupersededException();
+    }
+  }
+
+  /// <summary>
+  /// AUD-37 (final review M-1). Removes what a superseded start created, as
+  /// <see cref="StopAsync"/> does: clears the published streaming field only if it still holds
+  /// this start's service (an exchange — a newer start's service is left in place), then ALWAYS
+  /// stops and disposes this start's own service, and unregisters its channel by reference — a
+  /// no-op if a newer start's channel has replaced it. Stopping unconditionally matters when a
+  /// newer start has already overwritten the field: the exchange then fails, and skipping the
+  /// stop would leave this start's send loop running with its reader held (start-guard review
+  /// M1). Both calls are idempotent (StopAsync releases its reader and CTS by exchange;
+  /// DisposeAsync is guarded by its disposed flag), so a concurrent StopAsync or loss handling
+  /// that already took the service makes this a no-op. Never throws.
+  /// </summary>
+  private async Task AbandonSupersededStartAsync(DirectChannelStart? created)
+  {
+    if (created == null)
+    {
+      return;
+    }
+
+    try
+    {
+      Interlocked.CompareExchange(ref _directStreaming, null, created.Streaming);
+      try
+      {
+        await created.Streaming.StopAsync().ConfigureAwait(false);
+      }
+      finally
+      {
+        await created.Streaming.DisposeAsync().ConfigureAwait(false);
+      }
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: error stopping the DirectChannel streaming of an abandoned start");
+    }
+
+    Interlocked.CompareExchange(ref _directChannel, null, created.Channel);
+    UnregisterCustomChannel(created.Channel);
   }
 
   /// <summary>
@@ -2292,7 +2691,14 @@ public class GoogleCastOutput : AudioOutputBase
   /// it does and does not guarantee.
   /// </param>
   /// <param name="device">The device connected to; its <c>Id</c> keys the volume memory.</param>
-  private async Task SyncInitialVolumeAsync(ChromecastClient client, int generation, ChromecastDeviceInfo device)
+  /// <param name="holdForConfirmation">
+  /// AUD-37 (review M5): the connect was made with <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/>.
+  /// The remembered level becomes this connection's level but is NOT pushed (a receiver busy with
+  /// another sender must not have its volume changed), and a never-seen device's own reading is
+  /// adopted for this connection but not remembered.
+  /// </param>
+  private async Task SyncInitialVolumeAsync(
+    ChromecastClient client, int generation, ChromecastDeviceInfo device, bool holdForConfirmation)
   {
     try
     {
@@ -2354,11 +2760,14 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
-      if (reading != null)
+      if (reading != null && !holdForConfirmation)
       {
         // AUD-81 (F11): before StartAsync's start-time mute and the follower's activation
         // reconcile, both of which read IsSpeakerMutedByConsole. Changes no device state and
         // raises nothing, so the initial sync still never reaches the console's mute.
+        // AUD-37 (review M5): under a hold it waits for ConfirmReceiverAvailable. A receiver that
+        // turns out to be busy with another sender is never marked as muted for the console, so the
+        // stand-down's DisconnectAsync can never try to stop an application or unmute it.
         await RecallConsoleMuteAsync(generation, device, reading.Value.Muted).ConfigureAwait(false);
       }
 
@@ -2375,10 +2784,21 @@ public class GoogleCastOutput : AudioOutputBase
       if (remembered is float target)
       {
         Volatile.Write(ref _connectionVolume, target);
+        if (holdForConfirmation)
+        {
+          // AUD-37 review M5: not yet known to be ours — no SET_VOLUME (which would also unmute a
+          // muted speaker, AUD-81) to a receiver that may be serving another sender.
+          // _connectionVolume holds the target, so the push after our receiver app launches
+          // (SyncVolumeAfterStartAsync, under AUD-81's muted-console and mute-keeping rules)
+          // applies it then.
+          _logger.LogDebug(
+            "Cast: holding remembered volume {Volume:P0} for {Name} until the receiver is confirmed free",
+            target, device.FriendlyName);
+        }
         // EchoLevelTolerance, not a bare 0.01: a speaker that quantises to its step reports a
         // remembered 0.50 as e.g. 0.5333 on every reconnect, which is the same level, not a
         // reason to push it again (round-3 review LOW-1). The read noted the step first.
-        if (reading == null || Math.Abs(reading.Value.Volume - target) > EchoLevelTolerance)
+        else if (reading == null || Math.Abs(reading.Value.Volume - target) > EchoLevelTolerance)
         {
           try
           {
@@ -2409,7 +2829,11 @@ public class GoogleCastOutput : AudioOutputBase
       else if (reading != null)
       {
         Volatile.Write(ref _connectionVolume, reading.Value.Volume);
-        _volumeStore?.Remember(device.Id, reading.Value.Volume);
+        if (!holdForConfirmation)
+        {
+          // Under a hold the reading may be another sender's level, which is not ours to keep.
+          _volumeStore?.Remember(device.Id, reading.Value.Volume);
+        }
       }
       else
       {
@@ -2678,6 +3102,16 @@ public class GoogleCastOutput : AudioOutputBase
     // Hostile re-review M2: before any branch, so the initial sync's own status supplies it too.
     NoteSpeakerStepInterval(status.Volume.StepInterval);
 
+    // AUD-37 (review M5). While a HoldUntilReceiverConfirmed connect is not yet confirmed, the
+    // connection is not yet known to be ours: the receiver may be serving another sender, whose
+    // volume and mute changes must not reach the console (the CastVolumeChanged subscriber writes
+    // master volume and mute) nor this device's remembered level. Absorbed into the baseline, in
+    // the same baseline-only branch as AUD-81's initial sync, so that, once confirmed, only a
+    // change made after the confirmation is reported. The hold covers the whole window from the
+    // connect's claim to ConfirmReceiverAvailable (or a teardown), which outlasts the initial-sync
+    // mark: the watcher reads the running applications after the connect returns.
+    var holding = _holdingForReceiverConfirmation;
+
     // AUD-81 (connect race). A status that arrives while a connection's initial sync is in
     // progress is the device answering that sync — typically SharpCaster raising the
     // GET_STATUS response as an event, concurrently with the read's own continuation. It
@@ -2692,13 +3126,15 @@ public class GoogleCastOutput : AudioOutputBase
     // holds what the device said, so its next identical status is not mistaken for a change.
     // Pre-merge review L5: the same for a status arriving while a diagnostic live read
     // (ReadSpeakerVolumeAsync) is in flight — SharpCaster raises its response the same way.
-    if (Volatile.Read(ref _initialSyncPendingGeneration) != -1 || Volatile.Read(ref _diagnosticReadsPending) > 0)
+    if (holding
+        || Volatile.Read(ref _initialSyncPendingGeneration) != -1
+        || Volatile.Read(ref _diagnosticReadsPending) > 0)
     {
       _lastSetVolume = deviceVolume;
       _lastSetMute = deviceMuted;
       Volatile.Write(ref _speakerMuteObserved, true);
       _logger.LogDebug(
-        "Cast status during an initial sync or a diagnostic read: {Volume:P0}, Muted: {Muted} — baseline only, not an external change",
+        "Cast status during an initial sync, a diagnostic read or a receiver-confirmation hold: {Volume:P0}, Muted: {Muted} — baseline only, not an external change",
         deviceVolume, deviceMuted);
       return;
     }
@@ -3070,6 +3506,8 @@ public class GoogleCastOutput : AudioOutputBase
       {
         _connectionGeneration++;
         _publishedGeneration = -1;
+        // AUD-37: a hold belongs to the connection it was placed for, which is gone.
+        _holdingForReceiverConfirmation = false;
         UnwatchConnectionLoss_Locked();
         client = _client;
         device = ConnectedDevice;
@@ -3938,32 +4376,11 @@ public class GoogleCastOutput : AudioOutputBase
   /// </remarks>
   private async Task RecallConsoleMuteAsync(int generation, ChromecastDeviceInfo device, bool speakerMuted)
   {
-    var rearmed = false;
+    bool rearmed;
     await _lifecycleLock.WaitAsync().ConfigureAwait(false);
     try
     {
-      if (_publishedGeneration != generation || _connectionGeneration != generation)
-      {
-        return;
-      }
-
-      lock (_consoleMuteLock)
-      {
-        if (!string.Equals(_consoleMutedDeviceId, device.Id, StringComparison.Ordinal))
-        {
-          return;
-        }
-
-        if (speakerMuted)
-        {
-          Volatile.Write(ref _consoleMutedGeneration, generation);
-          rearmed = true;
-        }
-        else
-        {
-          _consoleMutedDeviceId = null;
-        }
-      }
+      rearmed = RecallConsoleMute_Locked(generation, device.Id, speakerMuted);
     }
     finally
     {
@@ -3972,11 +4389,43 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (rearmed)
     {
-      ConsoleLogger.LogInformation(
-        "Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console",
-        device.FriendlyName);
+      LogConsoleMuteRecalled(device.FriendlyName);
     }
   }
+
+  /// <summary>
+  /// The decision behind <see cref="RecallConsoleMuteAsync"/>. Caller holds <c>_lifecycleLock</c>.
+  /// Await-free. Returns true when the mark was re-armed.
+  /// </summary>
+  private bool RecallConsoleMute_Locked(int generation, string deviceId, bool speakerMuted)
+  {
+    if (_publishedGeneration != generation || _connectionGeneration != generation)
+    {
+      return false;
+    }
+
+    lock (_consoleMuteLock)
+    {
+      if (!string.Equals(_consoleMutedDeviceId, deviceId, StringComparison.Ordinal))
+      {
+        return false;
+      }
+
+      if (speakerMuted)
+      {
+        Volatile.Write(ref _consoleMutedGeneration, generation);
+        return true;
+      }
+
+      _consoleMutedDeviceId = null;
+      return false;
+    }
+  }
+
+  private void LogConsoleMuteRecalled(string deviceName) =>
+    ConsoleLogger.LogInformation(
+      "Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console",
+      deviceName);
 
   /// <summary>
   /// Before a deliberate teardown of connection <paramref name="generation"/>: if this
@@ -4786,6 +5235,35 @@ public class CastVolumeChangedEventArgs : EventArgs
   /// default, so a producer that does not distinguish keeps the old meaning.
   /// </summary>
   public bool VolumeChanged { get; init; } = true;
+}
+
+/// <summary>
+/// AUD-37. How <see cref="GoogleCastOutput.ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/>
+/// connects. <see cref="Default"/> is a user's connect, unchanged from before.
+/// </summary>
+public sealed record CastConnectOptions
+{
+  /// <summary>A user's connect: no hold.</summary>
+  public static CastConnectOptions Default { get; } = new();
+
+  /// <summary>
+  /// Review M5: the connect is made before the caller knows the receiver is free for us (the
+  /// reconnect watcher connects, then reads the receiver's running applications). Until
+  /// <see cref="GoogleCastOutput.ConfirmReceiverAvailable"/> — or the next connect, or a
+  /// disconnect — the connection holds: the device's remembered volume is not pushed (it stays
+  /// the connection's level, for the push after our receiver app launches), a never-seen
+  /// device's reading is not remembered, and receiver status changes are neither reported
+  /// through <see cref="GoogleCastOutput.CastVolumeChanged"/> nor remembered. The initial-sync
+  /// event still fires, flagged <c>IsInitialSync</c>. Expressed as a property of the connect so
+  /// that any later initial-sync machinery can honour the same flag.
+  /// </summary>
+  public bool HoldUntilReceiverConfirmed { get; init; }
+
+  /// <summary>
+  /// Review M3: an automatic retry (the reconnect watcher's), whose failure is expected and is
+  /// reported by its caller. The connect's own failure line is logged at Debug instead of Error.
+  /// </summary>
+  public bool AutomaticAttempt { get; init; }
 }
 
 /// <summary>

@@ -109,7 +109,10 @@ public class AudioEngineInitializationServiceCastLossTests
       preferences.Object,
       new Mock<IMasterMixer>().Object,
       Options.Create(new BluetoothOptions { Enabled = false, EnableOnStartup = false }),
-      Options.Create(new AudioOutputOptions()),
+      // AUD-37's reconnect watcher is off here: these tests are about the fallback itself, and a
+      // watcher left running would probe the device address on the real clock after the test.
+      // The watcher is covered by AudioEngineInitializationServiceCastReconnectTests.
+      Options.Create(new AudioOutputOptions { GoogleCast = { AutoReconnect = false } }),
       provider.Object);
   }
 
