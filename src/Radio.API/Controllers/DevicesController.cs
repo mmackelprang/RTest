@@ -74,9 +74,10 @@ public class DevicesController : ControllerBase
   /// <summary>
   /// AUD-85 (review MEDIUM-1). The Cast pick's version of <see cref="CancelCastReconnectAsync"/>:
   /// a watcher reconnecting the picked device keeps its connection for the pick, and the wait is
-  /// long enough (15 s) to let a reconnect that ignores cancellation finish. True when no watcher
-  /// is still running; false when the bound passed first — the Cast output is then still the
-  /// watcher's, and the caller must not read or touch it. Never throws.
+  /// longer (15 s) — a budget sized for the parts of a reconnect that ignore cancellation, not a
+  /// guarantee they finish inside it. True when no watcher is still running; false when the bound
+  /// passed first — the Cast output is then still the watcher's, and the caller must not read or
+  /// touch it. Never throws.
   /// </summary>
   private Task<bool> FinishCastReconnectForCastPickAsync(string? deviceId) =>
     _castReconnect?.CancelCastReconnectForCastPickAsync(deviceId) ?? Task.FromResult(true);

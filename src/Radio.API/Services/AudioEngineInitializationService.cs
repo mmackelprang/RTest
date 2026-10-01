@@ -357,11 +357,13 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   /// <remarks>
   /// AUD-85 (review MEDIUM-1). Longer than <see cref="CastReconnectCancelBound"/> because a Cast pick
   /// must not race the watcher's connect, and the parts of a reconnect that ignore cancellation
-  /// outlast 3 s: SharpCaster's <c>ConnectChromecast</c> has no bound of its own, and the
+  /// can outlast 3 s: SharpCaster's <c>ConnectChromecast</c> has no bound of its own, and the
   /// uninterruptible start's media load waits up to 10 s (<c>GoogleCastOutput</c>'s
-  /// <c>LoadAsync(...).WaitAsync(10 s)</c>). Capped at 15 s — half of Radio.Web's 30 s timeout for this request
-  /// (<c>Radio.Web/Program.cs</c>, the <c>DevicesApiService</c> client) — so a pick that waited the
-  /// whole bound still has the other half for its own connect and start before the UI gives up.
+  /// <c>LoadAsync(...).WaitAsync(10 s)</c>). 15 s is a budget, not a guarantee: with no bound on
+  /// <c>ConnectChromecast</c>, a run can still be going when it passes (the pick then answers 409).
+  /// It is half of Radio.Web's 30 s timeout for this request (<c>Radio.Web/Program.cs</c>, the
+  /// <c>DevicesApiService</c> client), leaving the other half as a budget for the pick's own connect
+  /// and start — which nothing bounds to fit it either.
   /// Not <c>StartupConnectTimeoutSeconds</c> (40 s): that outlasts the UI's request.
   /// </remarks>
   internal TimeSpan CastPickReconnectWaitBound { get; set; } = TimeSpan.FromSeconds(15);
@@ -445,7 +447,11 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
       // AUD-85 (review MEDIUM-1): a Cast pick of the very device the watcher is reconnecting must
       // not have the run tear that connection down; the watcher keeps it and switches back to Cast.
-      // Marked before the cancel below, so the run sees it whenever it observes the cancellation.
+      // Marked before the cancel below. When this call is the one that cancels the run, the run
+      // therefore sees the mark whenever it observes that cancellation. When an earlier action
+      // already cancelled it (cts.IsCancellationRequested), the run may have read the mark — on its
+      // cancelled-after-connect path — before it was set here, or ended without reading it; the
+      // mark then changes nothing and the run ends as that earlier cancel left it.
       var watcher = _reconnectWatcher;
       if (pickedDeviceId != null && watcher != null && cts != null &&
           string.Equals(watcher.DeviceId, pickedDeviceId, StringComparison.Ordinal))
@@ -1211,7 +1217,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
           if (unlessCastActive)
           {
             // Ownership re-checked under the lock: a connect may have replaced ours while this
-            // waited for it. Stop + disconnect, capped at 5 s, never throws.
+            // waited for it. Stop + disconnect under the engine's 5 s token; never throws. Not
+            // strictly capped at 5 s: the console-mute release (with its own app-stop and unmute
+            // timeouts) and SharpCaster's client.DisconnectAsync do not observe that token.
             var ours = false;
             if (!await engine.TearDownCastOutputUnlessActiveAsync(
                   () => ours = OwnsPublishedConnection(cast), CancellationToken.None, automaticAttempt: true)
@@ -1229,7 +1237,8 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
           }
           else
           {
-            // Stop + disconnect, capped at 5 s, never throws.
+            // Stop + disconnect under the engine's 5 s token (not strictly capped — see above);
+            // never throws.
             await engine.TearDownCastOutputAsync(CancellationToken.None, automaticAttempt: true).ConfigureAwait(false);
           }
         }

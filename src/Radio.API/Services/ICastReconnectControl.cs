@@ -13,6 +13,15 @@ public interface ICastReconnectControl
   /// keeps that connection for the Cast choice. Also ends the current reconnect episode, so the
   /// next drop starts a fresh window. Never throws.
   /// </summary>
+  /// <remarks>
+  /// The run it cancels may already carry the mark of an earlier
+  /// <see cref="CancelCastReconnectForCastPickAsync"/> of its own device that answered false (the
+  /// pick returned 409) — the mark is not cleared. Such a run, once its connect comes back, keeps
+  /// and starts its connection while the local output is still active; its switch back to Cast is
+  /// conditional on no output selection since the drop, so after this call's action (an output
+  /// selection) it is refused, and the run then tears the connection down. Until then Cast can play
+  /// beside the local output.
+  /// </remarks>
   Task CancelCastReconnectAsync();
 
   /// <summary>
@@ -23,11 +32,13 @@ public interface ICastReconnectControl
   /// started and switched to (conditional on no output selection since the drop) rather than torn
   /// down, so the pick finds Cast already streaming to its device. A watcher reconnecting another
   /// device is cancelled as usual and removes its own connection.</item>
-  /// <item>It waits longer — up to 15 s, long enough for the parts of a reconnect that ignore
-  /// cancellation — and reports whether the run finished: true when no watcher is still running
+  /// <item>It waits longer — up to 15 s, a budget sized for the parts of a reconnect that ignore
+  /// cancellation, which they are not guaranteed to fit — and reports whether the run finished:
+  /// true when no watcher is still running
   /// (including when there was none); false when the bound passed first. A caller seeing false
   /// must not touch the Cast output, which the run still holds; a same-device run that comes out
-  /// later still keeps its connection and switches to it.</item>
+  /// later still keeps its connection and switches to it (conditionally, as above; and if Cast is
+  /// not streaming once switched, it switches back to the local output itself).</item>
   /// </list>
   /// Also ends the current reconnect episode. Never throws.
   /// </summary>

@@ -446,7 +446,9 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// (output picker switching to soundbar / http-stream) or on engine
   /// shutdown.
   ///
-  /// Best-effort: capped at 5 s, swallows exceptions, never blocks the gate.
+  /// Best-effort: runs under a 5 s token, swallows exceptions, never blocks the gate. The token
+  /// is not a strict cap: the console-mute release (with its own app-stop and unmute timeouts)
+  /// and SharpCaster's <c>ChromecastClient.DisconnectAsync</c> do not observe it.
   /// Shares the same shutdown sequence used by AudioEngineInitializationService.StopAsync.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
