@@ -670,5 +670,19 @@ public class AudioEngineInitializationServiceCastReconnectTests
       Interlocked.Increment(ref Keeps);
       return Task.FromResult(ConnectedDeviceId != null);
     }
+
+    public int SwitchesToLocal;
+
+    public async Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark)
+    {
+      Interlocked.Increment(ref SwitchesToLocal);
+      if (!string.Equals(Engine!._active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return false;
+      }
+
+      await Engine._engine.Object.SetActiveOutputAsync(mark.LocalOutputId, CancellationToken.None);
+      return true;
+    }
   }
 }

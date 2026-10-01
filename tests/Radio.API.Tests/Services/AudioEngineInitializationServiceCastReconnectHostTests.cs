@@ -775,6 +775,32 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     Assert.True(_engine.IsLocalOutputMuted);
   }
 
+  [Fact]
+  public async Task SwitchFromCastToLocal_WithCastActive_SwitchesToTheRecoveryOutputAndUnmutes()
+  {
+    // AUD-85 re-review MEDIUM-B: the keep-for-pick path's own way back after a lost-again switch.
+    await _engine.SetActiveOutputAsync("google-cast");
+    Assert.True(_engine.IsLocalOutputMuted);
+    var host = CreateService().CreateProductionCastReconnectHost();
+
+    Assert.True(await host.SwitchFromCastToLocalAsync(new CastRecoveryMark("speakers", 0)).WaitAsync(HangGuard));
+
+    Assert.Equal("speakers", _engine.ActiveOutputId);
+    Assert.False(_engine.IsLocalOutputMuted);
+  }
+
+  [Fact]
+  public async Task SwitchFromCastToLocal_LeavesAnotherOutputAlone()
+  {
+    // Conditional on Cast still being active: an output picked in the meantime stays picked.
+    await _engine.SetActiveOutputAsync("hdmi");
+    var host = CreateService().CreateProductionCastReconnectHost();
+
+    Assert.False(await host.SwitchFromCastToLocalAsync(new CastRecoveryMark("speakers", 0)).WaitAsync(HangGuard));
+
+    Assert.Equal("hdmi", _engine.ActiveOutputId);
+  }
+
   // --- helpers ---
 
   /// <summary>
@@ -924,5 +950,6 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     public Task<bool> TearDownCastUnlessCastActiveAsync() => Task.FromResult(true);
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
     public Task<bool> TryKeepForCastChoiceAsync(bool castPickPending) => Task.FromResult(false);
+    public Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark) => Task.FromResult(false);
   }
 }

@@ -1323,6 +1323,35 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         }
       }
     }
+
+    public async Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark)
+    {
+      var engine = _svc._audioEngine;
+      try
+      {
+        if (engine is SoundFlowAudioEngine gate)
+        {
+          // Checked and switched under one acquisition of the output lock: an output picked since
+          // the read is left alone.
+          return await gate.SetActiveOutputIfCurrentAsync("google-cast", mark.LocalOutputId, CancellationToken.None)
+            .ConfigureAwait(false);
+        }
+
+        // Any other engine: check-then-act, with a window between the two.
+        if (!string.Equals(engine.ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+        {
+          return false;
+        }
+
+        await engine.SetActiveOutputAsync(mark.LocalOutputId, CancellationToken.None).ConfigureAwait(false);
+        return true;
+      }
+      catch (Exception ex)
+      {
+        _svc._logger.LogWarning(ex, "Cast reconnect: could not switch back to the local output after the kept connection was lost");
+        return false;
+      }
+    }
   }
 
   /// <summary>

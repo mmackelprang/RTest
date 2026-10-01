@@ -396,6 +396,50 @@ public class CastReconnectWatcherTests
   }
 
   [Fact]
+  public async Task CancelledByACastConnectPickOfThisDevice_LostAgainAfterTheSwitch_SwitchesBackToLocalItself()
+  {
+    // AUD-85 re-review MEDIUM-B. The keep path started the connection while local was active; the
+    // speaker dropped before the switch (its loss recovery saw local and declined); the switch made
+    // Cast active and muted local; Cast is not streaming. The owner re-runs the AUD-84 recovery
+    // only for an uncancelled run, and this one was cancelled — so the run must put local back
+    // itself, or the console is left silent.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.CastStreaming = false;
+    _host.SwitchMakesCastActive = true;
+    _host.OnConnect = _ =>
+    {
+      _watcher!.KeepConnectionForCastPick();
+      cts.Cancel();
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.LostAgainAfterSwitch, outcome);
+    Assert.Equal(
+      new[] { "connect", "keep-for-pick", "switch", "switch-to-local" },
+      _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(Mark, _host.SwitchedToLocalWith);
+    Assert.Equal(Mark.LocalOutputId, _host.Active); // back on the recovery's local output
+    Assert.Null(_host.RestoredWith); // not the switch-threw restore
+  }
+
+  [Fact]
+  public async Task NotCancelled_LostAgainAfterTheSwitch_LeavesTheLocalSwitchToTheOwnersRecovery()
+  {
+    // The uncancelled path is unchanged: the owner re-runs the AUD-84 recovery for this outcome
+    // (which starts the next watcher), so the run itself does not switch.
+    _host.Reachable = _ => true;
+    _host.CastStreaming = false;
+    _host.SwitchMakesCastActive = true;
+
+    var outcome = await DriveAsync(Start());
+
+    Assert.Equal(CastReconnectOutcome.LostAgainAfterSwitch, outcome);
+    Assert.DoesNotContain("switch-to-local", _host.Calls);
+  }
+
+  [Fact]
   public async Task CancelledWhileACastPromotionLandsBetweenTheCheckAndTheTearDown_KeepsTheConnection()
   {
     // AUD-85 review MEDIUM-2. The watcher reads the active output (local), then — before its
@@ -663,6 +707,9 @@ public class CastReconnectWatcherTests
     public bool CastStreaming = true;
     public string? Active = "speakers";
     public bool SwitchResult = true;
+
+    /// <summary>When set, a successful switch makes <see cref="Active"/> google-cast, as the gate does.</summary>
+    public bool SwitchMakesCastActive;
     public Func<int, bool> Reachable = _ => false;
     public Func<int, Exception?> ConnectFailure = _ => null;
     public Exception? SwitchFailure;
@@ -714,6 +761,11 @@ public class CastReconnectWatcherTests
       Switches++;
       Calls.Add("switch");
       SwitchedWith = mark;
+      if (SwitchFailure == null && SwitchResult && SwitchMakesCastActive)
+      {
+        Active = "google-cast";
+      }
+
       return SwitchFailure != null ? Task.FromException<bool>(SwitchFailure) : Task.FromResult(SwitchResult);
     }
 
@@ -757,6 +809,22 @@ public class CastReconnectWatcherTests
     {
       Calls.Add(castPickPending ? "keep-for-pick" : "keep");
       return Task.FromResult(KeepResult);
+    }
+
+    public CastRecoveryMark? SwitchedToLocalWith;
+
+    /// <summary>Behaves as the production gate's conditional switch: only while Cast is active.</summary>
+    public Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark)
+    {
+      Calls.Add("switch-to-local");
+      SwitchedToLocalWith = mark;
+      if (!string.Equals(Active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return Task.FromResult(false);
+      }
+
+      Active = mark.LocalOutputId;
+      return Task.FromResult(true);
     }
   }
 }

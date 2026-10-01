@@ -190,6 +190,17 @@ internal interface ICastReconnectHost
   /// muted by a switch that muted it before failing. Best-effort; never throws.
   /// </summary>
   Task RestoreLocalOutputAsync(CastRecoveryMark mark);
+
+  /// <summary>
+  /// AUD-85 (re-review MEDIUM-B). Switches the active output from Cast to the recovery's local
+  /// output (<see cref="CastRecoveryMark.LocalOutputId"/>) only while Cast is the active output (on
+  /// the production engine, also when no active output has been reported) — there checked and
+  /// switched atomically
+  /// (<c>SoundFlowAudioEngine.SetActiveOutputIfCurrentAsync</c>), so an output picked in the meantime
+  /// is left alone. Leaving Cast through the gate tears the Cast output down. Starts no watcher.
+  /// True when it switched. Best-effort; never throws.
+  /// </summary>
+  Task<bool> SwitchFromCastToLocalAsync(CastRecoveryMark mark);
 }
 
 /// <summary>
@@ -219,13 +230,17 @@ internal interface ICastReconnectHost
 /// it, atomically with the output gate (review M3; AUD-85 review MEDIUM-2).
 /// After its connect returns, the run checks before each step that the connection is still the one
 /// its connect published: a superseded connect returns normally with nothing of ours published
-/// (review M2). The run makes output selections in exactly two places: that switch back to Cast
-/// (conditional on no selection since the drop), and — only when that switch throws —
+/// (review M2). The run makes output selections in exactly three places: that switch back to Cast
+/// (conditional on no selection since the drop); — only when that switch throws —
 /// <see cref="ICastReconnectHost.RestoreLocalOutputAsync"/>, which re-applies the recovery's local
 /// output through the gate when it is still the active output (a selection of its own: on the
-/// production engine it bumps the epoch, re-applies the mute state and persists). Separately, when a
-/// run ends <see cref="CastReconnectOutcome.LostAgainAfterSwitch"/> its owner re-runs the AUD-84
-/// recovery, which may switch the output to local.
+/// production engine it bumps the epoch, re-applies the mute state and persists); and — only on the
+/// cancelled path that keeps the connection for a Cast pick of this device, when Cast is not
+/// streaming after the switch — <see cref="ICastReconnectHost.SwitchFromCastToLocalAsync"/>, which
+/// switches from Cast to the recovery's local output while Cast is still the active output (AUD-85
+/// re-review MEDIUM-B). Separately, when an uncancelled run ends
+/// <see cref="CastReconnectOutcome.LostAgainAfterSwitch"/> its owner re-runs the AUD-84 recovery,
+/// which may switch the output to local.
 /// </para>
 /// <para>
 /// A full connect is attempted only after the speaker has answered two probes in a row (the
@@ -522,7 +537,9 @@ internal sealed class CastReconnectWatcher
   /// <c>POST /api/devices/cast/connect</c> through <c>ICastReconnectControl.CancelCastReconnectForCastPickAsync</c>,
   /// which then waits for this run): the host keeps and starts the connection, and the run switches
   /// the output back to Cast exactly as an uncancelled reconnect would — conditional on no output
-  /// selection since the drop — so the pick finds Cast streaming to its device and answers 200.</item>
+  /// selection since the drop — so the pick finds Cast streaming to its device and answers 200.
+  /// If Cast is not streaming once that switch has gone through, the run itself switches the output
+  /// from Cast back to the recovery's local output (<see cref="ICastReconnectHost.SwitchFromCastToLocalAsync"/>).</item>
   /// <item>Cast is the active output — a promotion through the gate, e.g. <c>POST /api/devices/output</c>
   /// with <c>google-cast</c>, which cancels with the short bound and then promotes: the connection is
   /// what serves that choice, and the host keeps (and starts) it, as the refused-switch branch does
@@ -550,7 +567,22 @@ internal sealed class CastReconnectWatcher
 
         // Not recorded as a watcher-made reconnect (_onConnected): the pick is the user's own
         // action, and it has already reset the episode and the hourly count.
-        return await SwitchBackToCastAsync(name).ConfigureAwait(false);
+        var outcome = await SwitchBackToCastAsync(name).ConfigureAwait(false);
+        if (outcome == CastReconnectOutcome.LostAgainAfterSwitch)
+        {
+          // AUD-85 (re-review MEDIUM-B). The speaker dropped again after this path started the
+          // connection while local was active, and the switch then made Cast active and muted
+          // local. On an uncancelled run the owner re-runs the AUD-84 recovery for this outcome;
+          // this run was cancelled, and the owner does not. So the run switches back to the
+          // recovery's local output itself — only while Cast is still the active output, and
+          // without starting another watcher, which would race the pick's own connect.
+          var restored = await _host.SwitchFromCastToLocalAsync(_mark).ConfigureAwait(false);
+          _logger.LogInformation(
+            "Cast: \"{Name}\" dropped again right after the pick kept its connection — switched back to the local output: {Restored}",
+            name, restored);
+        }
+
+        return outcome;
       }
 
       _logger.LogDebug(
