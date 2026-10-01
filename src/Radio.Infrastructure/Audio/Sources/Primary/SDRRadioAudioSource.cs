@@ -332,6 +332,22 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
       TaskScheduler.Default);
   }
 
+  /// <inheritdoc/>
+  public Task<IReadOnlyList<RTLSDRCore.Sweep.ChannelLevel>> SweepLiveAsync(
+    RTLSDRCore.Sweep.BandSweepPlan plan,
+    float gainDb,
+    int samplesPerMeasurement,
+    IProgress<RTLSDRCore.Sweep.BandSweepProgress>? progress,
+    CancellationToken cancellationToken)
+  {
+    // SweepPlan blocks for the whole sweep, so give it its own thread, as SweepChannels gets.
+    return Task.Factory.StartNew(
+      () => _radioReceiver.SweepPlan(plan, gainDb, progress, cancellationToken, samplesPerMeasurement),
+      CancellationToken.None,
+      TaskCreationOptions.LongRunning,
+      TaskScheduler.Default);
+  }
+
   #endregion
 
   #region IRadioControl Frequency Control
@@ -498,6 +514,39 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     {
       ["band"] = band.ToString().ToLowerInvariant()
     });
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// One <c>RadioReceiver.SetBand(type, hz)</c> call. The range check comes first because
+  /// <c>SetBand</c> clamps an out-of-range frequency into the band without reporting it.
+  /// </remarks>
+  public async Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
+  {
+    RTLSDRCore.Enums.BandType rtlBandType = MapBandTypeToRTLSDR(band);
+    RTLSDRCore.Models.RadioBand preset = RTLSDRCore.Bands.BandPresets.GetBand(rtlBandType);
+    if (!preset.ContainsFrequency(frequency.Hertz))
+    {
+      throw new ArgumentOutOfRangeException(nameof(frequency),
+        $"{frequency.ToDisplayString()} is outside the {band} band");
+    }
+
+    bool bandChanged = _radioReceiver.CurrentBand.Type != rtlBandType;
+    bool success = await Task.Run(() => _radioReceiver.SetBand(rtlBandType, frequency.Hertz), cancellationToken);
+    if (!success)
+    {
+      throw new ArgumentOutOfRangeException(nameof(frequency),
+        $"Failed to tune to {frequency.ToDisplayString()} in the {band} band");
+    }
+
+    if (bandChanged)
+    {
+      _frequencyStep = new Frequency(_radioReceiver.CurrentBand.DefaultStepHz);
+      MetricsCollector?.Increment("radio.band_changes", 1.0, new Dictionary<string, string>
+      {
+        ["band"] = band.ToString().ToLowerInvariant()
+      });
+    }
   }
 
   #endregion

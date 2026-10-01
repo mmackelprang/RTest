@@ -135,6 +135,23 @@ public interface IRadioControl
   Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default);
 
   /// <summary>
+  /// Tunes to <paramref name="frequency"/> inside <paramref name="band"/> in one retune (AUD-91).
+  /// Unlike <see cref="SetFrequencyAsync"/>, the band is not inferred from the frequency, so a
+  /// frequency where bands overlap (VHF contains FM, AIR and WB) stays in the band asked for.
+  /// When the band changes, <see cref="FrequencyStep"/> becomes that band's default step, as
+  /// <see cref="SetBandAsync"/> does.
+  /// </summary>
+  /// <param name="band">The band to tune in.</param>
+  /// <param name="frequency">The frequency, which must lie inside <paramref name="band"/>'s range.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the asynchronous operation.</returns>
+  /// <exception cref="ArgumentOutOfRangeException">
+  /// <paramref name="frequency"/> is outside <paramref name="band"/>'s range (checked before
+  /// anything is tuned), or the tune failed.
+  /// </exception>
+  Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Gets the frequency step size used for tuning up/down.
   /// The step is stored in Hertz (Hz) to avoid unit ambiguity.
   /// </summary>
