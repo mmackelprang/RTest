@@ -2630,7 +2630,8 @@
     };
 
     var result = await DialogService.OpenAsync<Radio.Web.Components.Dialogs.FileBrowserDialog>("Select Audio File", parameters,
-      new Radzen.DialogOptions { ShowClose = true, CloseDialogOnEsc = true });
+      // UI-24: the browser has path and search fields — top-anchored, clear of the in-app keyboard.
+      new Radzen.DialogOptions { ShowClose = true, CloseDialogOnEsc = true, CssClass = Radio.Web.Components.Dialogs.KioskEntryDialog.CssClass });
 
     if (result is string selectedPath)
     {

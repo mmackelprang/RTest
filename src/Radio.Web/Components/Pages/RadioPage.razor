@@ -164,19 +164,18 @@
 
 @if (_isFrequencyDialogOpen)
 {
-  <!-- Frequency Set Dialog (CSS overlay) -->
-  <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;"
-       @onclick="CloseFrequencyDialog">
-    <div style="background: var(--surface-raised, #1e1e1e); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 400px;"
-         @onclick:stopPropagation="true">
-      <h6 style="margin: 0 0 16px 0;">Set Frequency</h6>
+  <!-- Frequency Set Dialog (CSS overlay). UI-24: top-anchored, clear of the in-app keyboard
+       (design-system.css §20a). -->
+  <div class="kiosk-entry-overlay" @onclick="CloseFrequencyDialog">
+    <div class="kiosk-entry-card" @onclick:stopPropagation="true">
+      <h6>Set Frequency</h6>
       <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
                      Placeholder="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
                      Min="@((decimal)GetMinFrequency())"
                      Max="@((decimal)GetMaxFrequency())"
                      Step="@GetDialogStep().ToString()"
                      Style="width: 100%;" inputmode="decimal" />
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+      <div class="kiosk-entry-actions">
         <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Text="Cancel"
                       Click="CloseFrequencyDialog" />
         <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Text="Set"
@@ -188,16 +187,14 @@
 
 @if (_isSavePresetDialogOpen)
 {
-  <!-- Save Preset Dialog (CSS overlay) -->
-  <div style="position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 9999; display: flex; justify-content: center; align-items: center;"
-       @onclick="CloseSavePresetDialog">
-    <div style="background: var(--surface-raised, #1e1e1e); border-radius: 12px; padding: 24px; min-width: 320px; max-width: 400px;"
-         @onclick:stopPropagation="true">
-      <h6 style="margin: 0 0 16px 0;">Save Preset</h6>
+  <!-- Save Preset Dialog (CSS overlay). UI-24: top-anchored, as above. -->
+  <div class="kiosk-entry-overlay" @onclick="CloseSavePresetDialog">
+    <div class="kiosk-entry-card" @onclick:stopPropagation="true">
+      <h6>Save Preset</h6>
       <RadzenTextBox @bind-Value="_presetName"
                      Placeholder="Preset Name"
                      Style="width: 100%;" />
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+      <div class="kiosk-entry-actions">
         <RadzenButton Variant="Variant.Text" ButtonStyle="ButtonStyle.Light" Text="Cancel"
                       Click="CloseSavePresetDialog" />
         <RadzenButton Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary" Text="Save"

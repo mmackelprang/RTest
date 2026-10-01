@@ -1522,6 +1522,64 @@ body::-webkit-scrollbar,
 }
 
 
+/* ─── §20a  Text-entry dialogs sit at the top (UI-24) ─────────────────────── *
+ *
+ * The kiosk types with the in-app keyboard (js/virtual-keyboard.js — GNOME's own OSK never opens for
+ * Chrome on this box: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md). That keyboard is fixed to
+ * the bottom of the screen and does not resize the page: the QWERTY layout is 364 px tall and the
+ * numpad 352, so on the 720 px panel everything below y ≈ 356 is covered while it is up. A dialog
+ * centred on the screen put its text field and its buttons exactly there.
+ *
+ * So any dialog that holds a text field is anchored to the top instead — always, not only while the
+ * keyboard is up, so it never jumps under the finger that tapped the field. Hand-built overlays use
+ * the overlay + card pair; Radzen DialogService dialogs pass CssClass = "kiosk-entry-dialog".
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.kiosk-entry-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: var(--sp-6);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.kiosk-entry-card {
+  min-width: 320px;
+  max-width: 480px;
+  padding: var(--sp-6);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.kiosk-entry-card h6 {
+  margin: 0 0 var(--sp-3);
+}
+
+.kiosk-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* 58 px, as the preset bar's arrows and the kiosk's own dialogs: these are pressed with a finger. */
+.kiosk-entry-actions .rz-button {
+  min-height: 58px;
+  min-width: 96px;
+}
+
+/* Radzen positions .rz-dialog absolutely inside a full-screen flex wrapper and centres it there; a
+   top offset overrides the centring. */
+.rz-dialog.kiosk-entry-dialog {
+  top: var(--sp-6);
+}
+
+
 /* ─── §21  Queue Drag-and-Drop ────────────────────────────────────────────── */
 
 .queue-drop-container {

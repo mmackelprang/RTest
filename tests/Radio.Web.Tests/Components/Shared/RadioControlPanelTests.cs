@@ -1081,6 +1081,45 @@ public class RadioControlPanelTests : TestContext
     cut.FindAll("h6").Select(h => h.TextContent).Should().Contain("Save Preset");
   }
 
+  [Theory]
+  [InlineData("frequency", "Set Frequency")]
+  [InlineData("save", "Save Preset")]
+  [InlineData("rename", "Rename Preset")]
+  public void TextEntryDialogs_AreTopAnchored_ClearOfTheKeyboard(string dialog, string title)
+  {
+    // UI-24, owner (Rename dialog, UI-20 UAT check 5): "the keyboard occludes the dialog". The
+    // in-app keyboard covers the bottom 364 px of the 720 px panel; these dialogs were centred
+    // overlays with inline align-items:center, which put the field and its buttons under it. They
+    // now use the shared top-anchored overlay (design-system.css §20a — pinned by
+    // TextEntryDialogPlacementTests), so the markup must carry those classes and no inline
+    // placement of its own that could override them.
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var presets = dialog == "rename" ? new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) } : null;
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    switch (dialog)
+    {
+      case "frequency":
+        cut.Find(".rcp-freq-well .display-frequency").Click();
+        break;
+      case "save":
+        cut.Find(".rcp-bar-save").Click();
+        break;
+      default:
+        LongPressCard(cut, "p1");
+        cut.FindAll(".rcp-preset-menu-item")[0].Click();
+        break;
+    }
+
+    var overlay = cut.FindAll(".kiosk-entry-overlay").Should().ContainSingle().Subject;
+    overlay.GetAttribute("style").Should().BeNull("placement comes from the shared class, not an inline override");
+    var card = overlay.QuerySelector(":scope > .kiosk-entry-card");
+    card.Should().NotBeNull();
+    card!.QuerySelector("h6")!.TextContent.Trim().Should().Be(title);
+    card.QuerySelector("input").Should().NotBeNull("the field the keyboard types into is in the anchored card");
+    card.QuerySelectorAll(".kiosk-entry-actions > button").Should().HaveCount(2);
+  }
+
   [Fact]
   public void NoPresets_ShowsTheEmptyCard_AndTheSaveCard()
   {

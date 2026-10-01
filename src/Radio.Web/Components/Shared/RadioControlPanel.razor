@@ -284,16 +284,19 @@
   }
 </div>
 
+@* UI-24: the three text-entry dialogs are anchored to the top of the screen (design-system.css §20a)
+   so the in-app keyboard, which covers the bottom 364 px while it is up, never hides the field or
+   its buttons. They were centred, which put both under it. *@
 @if (_isFrequencyDialogOpen)
 {
-  <div class="overlay" style="@(_isFrequencyDialogOpen ? "display:flex" : "display:none"); position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;" @onclick="CloseFrequencyDialog">
-    <div style="min-width: 300px; background: var(--rz-base-background-color, #1e1e2e); border-radius: 8px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);" @onclick:stopPropagation="true">
-      <h6 style="margin-bottom: 12px;">Set Frequency</h6>
+  <div class="overlay kiosk-entry-overlay" @onclick="CloseFrequencyDialog">
+    <div class="kiosk-entry-card" @onclick:stopPropagation="true">
+      <h6>Set Frequency</h6>
       <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
                      Placeholder="@(_radioState?.Band == "AM" ? "Frequency (kHz)" : "Frequency (MHz)")"
                      Min="@((decimal)GetMinFrequency())" Max="@((decimal)GetMaxFrequency())" Step="@GetDialogStep().ToString()"
                      Style="width: 100%;" inputmode="decimal" />
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+      <div class="kiosk-entry-actions">
         <RadzenButton Variant="Variant.Text" Click="CloseFrequencyDialog" Text="Cancel" />
         <RadzenButton ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled"
                       Click="SetFrequencyAsync" Text="Set" />
@@ -304,12 +307,12 @@
 
 @if (_isSavePresetDialogOpen)
 {
-  <div class="overlay" style="@(_isSavePresetDialogOpen ? "display:flex" : "display:none"); position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;" @onclick="CloseSavePresetDialog">
-    <div style="min-width: 300px; background: var(--rz-base-background-color, #1e1e2e); border-radius: 8px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);" @onclick:stopPropagation="true">
-      <h6 style="margin-bottom: 12px;">Save Preset</h6>
+  <div class="overlay kiosk-entry-overlay" @onclick="CloseSavePresetDialog">
+    <div class="kiosk-entry-card" @onclick:stopPropagation="true">
+      <h6>Save Preset</h6>
       <RadzenTextBox @bind-Value="_presetName"
                      Placeholder="Preset Name" Style="width: 100%;" />
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+      <div class="kiosk-entry-actions">
         <RadzenButton Variant="Variant.Text" Click="CloseSavePresetDialog" Text="Cancel" />
         <RadzenButton ButtonStyle="ButtonStyle.Warning" Variant="Variant.Filled"
                       Click="SavePresetAsync" Text="Save" />
@@ -320,12 +323,12 @@
 
 @if (_isRenamePresetDialogOpen)
 {
-  <div class="overlay" style="display:flex; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:9999; justify-content:center; align-items:center;" @onclick="CloseRenamePresetDialog">
-    <div class="rcp-preset-rename-card" style="min-width: 320px; background: var(--rz-base-background-color, #1e1e2e); border-radius: 8px; padding: 24px; box-shadow: 0 8px 32px rgba(0,0,0,0.6);" @onclick:stopPropagation="true">
-      <h6 style="margin-bottom: 12px;">Rename Preset</h6>
+  <div class="overlay kiosk-entry-overlay" @onclick="CloseRenamePresetDialog">
+    <div class="kiosk-entry-card rcp-preset-rename-card" @onclick:stopPropagation="true">
+      <h6>Rename Preset</h6>
       <RadzenTextBox @bind-Value="_renamePresetName"
                      Placeholder="Preset Name" Style="width: 100%;" />
-      <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;">
+      <div class="kiosk-entry-actions">
         <RadzenButton Variant="Variant.Text" Click="CloseRenamePresetDialog" Text="Cancel" />
         <RadzenButton ButtonStyle="ButtonStyle.Primary" Variant="Variant.Filled"
                       Click="RenamePresetAsync" Text="Save" />
