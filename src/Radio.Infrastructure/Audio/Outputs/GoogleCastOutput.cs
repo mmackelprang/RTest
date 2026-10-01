@@ -2716,9 +2716,13 @@ public class GoogleCastOutput : AudioOutputBase
     // carries a level that is not the echo of a recent push of ours — every unmute more than
     // EchoWindow after our last level push completed, or one that comes with a level change made on
     // the speaker — is external and handled below exactly as before (AUD-5). What that gives up:
-    // the owner unmuting on the speaker WITHOUT changing its level, within EchoWindow of a level
-    // push of ours, is re-muted under a muted console (which matches the console), and is not
-    // reported under an unmuted one (the console is already unmuted, so there is nothing to sync).
+    // the owner unmuting on the speaker WITHOUT changing its level, while a level push of ours is
+    // still in flight or within EchoWindow after it completed, is re-muted under a muted console
+    // (which matches the console), and is not reported under an unmuted one (the console is already
+    // unmuted, so there is nothing to sync). "In flight" can be long (round-3 LOW-4): a SET_VOLUME
+    // that was abandoned (timed out, never answered) stays in the echo memory as in flight for up to
+    // EchoInFlightLimit (35 s), and for all that time an owner's unmute at that same level is
+    // swallowed this way.
     //
     // Hostile review (round 3) M-A: the rule also runs when the unmute DID match an unmute of ours
     // (muteEcho), provided the console is muted now. The echo memory matches any SET_MUTE false of
