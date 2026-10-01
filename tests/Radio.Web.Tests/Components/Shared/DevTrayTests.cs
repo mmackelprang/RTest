@@ -23,8 +23,9 @@ namespace Radio.Web.Tests.Components.Shared;
 /// component directly with <c>IsOpen=true</c> and assert:
 ///
 /// <list type="bullet">
-///   <item>Seven action cards exist (Verbose logs, from LOG-5, plus Mark distortion, Updates, Dump audio
-///         frame, Download logs, Fingerprint events, Engine state).</item>
+///   <item>Five action cards (Mark distortion, Dump audio frame, Download logs, Fingerprint events, and
+///         LOG-5's Verbose logs) and two read-only readings (Updates, Engine state) exist, and since
+///         UI-25 the two kinds are rendered as different elements with different affordances.</item>
 ///   <item>The "Updates" card reflects the current
 ///         <see cref="VisualizerTelemetryService.UpdatesPerSecond"/> value
 ///         and updates when the singleton publishes a new value.</item>
@@ -109,11 +110,11 @@ public class DevTrayTests : TestContext
   }
 
   [Fact]
-  public void DevTray_Open_RendersAllSevenCards()
+  public void DevTray_Open_RendersFiveActionsAndTwoReadings()
   {
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
-    var cards = cut.FindAll(".dev-card");
-    cards.Count.Should().Be(7);
+    cut.FindAll(".dev-card").Count.Should().Be(5);
+    cut.FindAll(".dev-readout").Count.Should().Be(2);
   }
 
   [Fact]
@@ -122,7 +123,7 @@ public class DevTrayTests : TestContext
     // The six handoff labels (plus LOG-5's Verbose logs) are part of the acceptance criteria — every one
     // must surface so an operator can identify the action at a glance.
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
-    var labels = cut.FindAll(".dev-card-label").Select(e => e.TextContent.Trim()).ToList();
+    var labels = cut.FindAll(".dev-card-label, .dev-readout-label").Select(e => e.TextContent.Trim()).ToList();
     labels.Should().Contain("Mark distortion");
     labels.Should().Contain("Updates");
     labels.Should().Contain("Dump audio frame");
@@ -137,14 +138,18 @@ public class DevTrayTests : TestContext
   /// Settings → Diagnostics, where the <c>fingerprint.*</c> tiles live.
   /// </summary>
   [Fact]
-  public void FingerprintEventsCard_NavigatesToDiagnostics()
+  public void FingerprintEventsCard_NavigatesToDiagnostics_AndClosesTheTray()
   {
     var nav = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
-    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+    var closed = 0;
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.OnClose, Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => { closed++; })));
 
     cut.Find("button[aria-label='View fingerprint events']").Click();
 
     new Uri(nav.Uri).AbsolutePath.Should().Be("/diagnostics");
+    closed.Should().Be(1, "the tray must not float over the page it just opened");
   }
 
   [Fact]
@@ -185,9 +190,7 @@ public class DevTrayTests : TestContext
 
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
 
-    var updatesCard = cut.FindAll(".dev-card")
-      .First(c => c.QuerySelector(".dev-card-label")?.TextContent.Trim() == "Updates");
-    updatesCard.QuerySelector(".dev-card-value")!.TextContent.Trim().Should().Be("42/sec");
+    Readout(cut, "Updates").Should().Be("42/sec");
   }
 
   [Fact]
@@ -199,13 +202,11 @@ public class DevTrayTests : TestContext
     telemetry.SetUpdatesPerSecond(10);
 
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
-    cut.Find(".dev-card-value").TextContent.Should().Contain("10/sec");
+    Readout(cut, "Updates").Should().Be("10/sec");
 
     await cut.InvokeAsync(() => telemetry.SetUpdatesPerSecond(77));
 
-    var updatesCard = cut.FindAll(".dev-card")
-      .First(c => c.QuerySelector(".dev-card-label")?.TextContent.Trim() == "Updates");
-    updatesCard.QuerySelector(".dev-card-value")!.TextContent.Trim().Should().Be("77/sec");
+    Readout(cut, "Updates").Should().Be("77/sec");
   }
 
   [Fact]
@@ -241,26 +242,48 @@ public class DevTrayTests : TestContext
     // proxy for "is the audio engine reachable". In a unit-test rig with no
     // running hub it reads "Disconnected".
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
-    var card = cut.FindAll(".dev-card")
-      .First(c => c.QuerySelector(".dev-card-label")?.TextContent.Trim() == "Engine state");
-    card.QuerySelector(".dev-card-value")!.TextContent.Trim().Should().Be("Disconnected");
+    Readout(cut, "Engine state").Should().Be("Disconnected");
   }
 
   [Fact]
-  public void DevTray_ReadOnlyCards_AreDisabled()
+  public void DevTray_ReadOnlyReadings_AreNotButtons_AndCarryNoActionAffordance()
   {
-    // The "Updates" and "Engine state" cards are read-only telemetry surfaces
-    // — they must not be tappable buttons that look like actions.
+    // UI-25. "Updates" and "Engine state" are read-only telemetry. They used to be disabled
+    // <button class="dev-card">s styled exactly like the actions; now they are not buttons at all
+    // and carry none of the action classes, so nothing about them invites a tap.
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
 
-    var updatesCard = cut.FindAll(".dev-card")
-      .First(c => c.QuerySelector(".dev-card-label")?.TextContent.Trim() == "Updates");
-    updatesCard.HasAttribute("disabled").Should().BeTrue();
-
-    var engineCard = cut.FindAll(".dev-card")
-      .First(c => c.QuerySelector(".dev-card-label")?.TextContent.Trim() == "Engine state");
-    engineCard.HasAttribute("disabled").Should().BeTrue();
+    foreach (var reading in cut.FindAll(".dev-readout"))
+    {
+      reading.TagName.Should().NotBe("BUTTON");
+      reading.Closest("button").Should().BeNull();
+      reading.ClassList.Should().NotContain("dev-card");
+      reading.QuerySelector(".dev-card-icon").Should().BeNull();
+    }
   }
+
+  [Fact]
+  public void DevTray_EveryAction_IsAnEnabledButtonWithTheActionAffordance()
+  {
+    // UI-25. Every tappable card is a <button> carrying the action class (raised, accent-bordered,
+    // pressed state in design-system.css §Q) and an accent icon, and is enabled at rest.
+    var cut = RenderOpenAndSettled();
+
+    var actions = cut.FindAll(".dev-card");
+    actions.Should().HaveCount(5);
+    foreach (var card in actions)
+    {
+      card.TagName.Should().Be("BUTTON");
+      card.ClassList.Should().Contain("dev-card--action");
+      card.QuerySelector(".dev-card-icon").Should().NotBeNull();
+      card.HasAttribute("disabled").Should().BeFalse();
+    }
+  }
+
+  private static string Readout(IRenderedComponent<DevTray> cut, string label) =>
+    cut.FindAll(".dev-readout")
+      .First(r => r.QuerySelector(".dev-readout-label")?.TextContent.Trim() == label)
+      .QuerySelector(".dev-readout-value")!.TextContent.Trim();
 
   // ─── Task #15 PR B (handoff item #17): auto-lock after 30s of inactivity ──
   //
@@ -332,13 +355,206 @@ public class DevTrayTests : TestContext
       "interaction must reset the auto-lock window — close handler must not fire");
   }
 
+  // ── UI-25: the tray opens where it was tapped ─────────────────────────────────────────────────
+
+  [Fact]
+  public void Placement_Below_IsWrittenInline()
+  {
+    var placement = DevTrayPlacement.ForPress(1200, 30, 30, 1920, 720);
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.Placement, placement));
+
+    var style = cut.Find(".dev-tray").GetAttribute("style") ?? string.Empty;
+    style.Should().Contain("left:960px").And.Contain("top:38px").And.Contain("right:auto").And.Contain("bottom:auto");
+    style.Should().Contain("width:480px").And.Contain("--dev-tray-open-h:440px");
+  }
+
+  [Fact]
+  public void Placement_Above_IsWrittenAsABottomOffset()
+  {
+    var placement = DevTrayPlacement.ForPress(900, 650, 650, 1920, 720);
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.Placement, placement));
+
+    var style = cut.Find(".dev-tray").GetAttribute("style") ?? string.Empty;
+    style.Should().Contain("bottom:78px").And.Contain("top:auto").And.Contain("left:660px");
+  }
+
+  [Fact]
+  public void NoPlacement_LeavesTheStylesheetDefaultPosition()
+  {
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+    var style = cut.Find(".dev-tray").GetAttribute("style") ?? string.Empty;
+    style.Should().NotContain("left:").And.NotContain("top:").And.NotContain("bottom:");
+  }
+
+  // ── UI-26: no action may navigate the kiosk away from the app ─────────────────────────────────
+
+  private const string DownloadFn = "fileDownload.downloadFromStream";
+
+  private static AngleSharp.Dom.IElement Card(IRenderedComponent<DevTray> cut, string ariaLabel) =>
+    cut.Find($"button[aria-label='{ariaLabel}']");
+
+  private static AngleSharp.Dom.IElement? Status(IRenderedComponent<DevTray> cut, string ariaLabel) =>
+    Card(cut, ariaLabel).QuerySelector(".dev-card-status");
+
+  private string StartUri() =>
+    Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>().Uri;
+
+  private void AssertStayedInTheApp(string startUri)
+  {
+    // The trap was JS window.open(<radio-api url>, "_blank"). Nothing may call open or touch
+    // location, and the circuit's own location must not move.
+    var identifiers = JSInterop.Invocations.Select(i => i.Identifier).ToList();
+    identifiers.Should().NotContain("open");
+    identifiers.Should().NotContain(id => id.Contains("location", StringComparison.OrdinalIgnoreCase));
+    StartUri().Should().Be(startUri);
+  }
+
+  private static HttpResponseMessage Json(System.Net.HttpStatusCode code, string body) =>
+    new(code) { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
+
+  private static HttpResponseMessage FileResponse(string name, byte[] bytes)
+  {
+    var response = new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new ByteArrayContent(bytes) };
+    response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("application/octet-stream");
+    response.Content.Headers.ContentDisposition =
+      new System.Net.Http.Headers.ContentDispositionHeaderValue("attachment") { FileName = name };
+    return response;
+  }
+
+  [Fact]
+  public void DumpAudioFrame_Api501_ShowsTheApisReasonInTheCard_AndStaysInTheApp()
+  {
+    // Today's API: AudioDebugController.DumpAudioFrame is a deliberate 501 stub, and this is its body's
+    // shape. Before UI-26 the kiosk was sent to this JSON in a new window it could not leave.
+    _loggingApi.FileResponder = _ => Json((System.Net.HttpStatusCode)501,
+      """{"error":"Audio-frame dump not yet implemented.","reason":"long text","tracked":"#23"}""");
+    var start = StartUri();
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    Card(cut, "Dump audio frame").Click();
+
+    cut.WaitForAssertion(() =>
+      Status(cut, "Dump audio frame")!.TextContent.Trim()
+        .Should().Be("501 · Audio-frame dump not yet implemented"));
+    Status(cut, "Dump audio frame")!.ClassList.Should().Contain("is-error");
+    Card(cut, "Dump audio frame").HasAttribute("disabled")
+      .Should().BeFalse("the card must be tappable again — the error is recoverable in place");
+    JSInterop.Invocations.Select(i => i.Identifier).Should().NotContain(DownloadFn);
+    AssertStayedInTheApp(start);
+  }
+
+  [Fact]
+  public void DumpAudioFrame_Success_SavesInPage_AndReportsNameAndSize()
+  {
+    var wav = new byte[] { 0x52, 0x49, 0x46, 0x46 };
+    _loggingApi.FileResponder = _ => FileResponse("frame-0001.wav", wav);
+    JSInterop.Setup<bool>(DownloadFn, _ => true).SetResult(true);
+    var start = StartUri();
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    Card(cut, "Dump audio frame").Click();
+
+    cut.WaitForAssertion(() =>
+      Status(cut, "Dump audio frame")!.TextContent.Trim().Should().Be("sent to downloads · 4 B"));
+    Status(cut, "Dump audio frame")!.ClassList.Should().Contain("is-ok");
+    Card(cut, "Dump audio frame").QuerySelector(".dev-card-detail")!.TextContent.Trim().Should().Be("frame-0001.wav");
+    JSInterop.Invocations.Where(i => i.Identifier == DownloadFn)
+      .Should().ContainSingle().Which.Arguments[0].Should().Be("frame-0001.wav");
+    AssertStayedInTheApp(start);
+  }
+
+  [Fact]
+  public void DownloadLogs_Success_SavesInPage_AndReportsNameAndSize()
+  {
+    _loggingApi.FileResponder = path => path == "/api/system/logs/download"
+      ? FileResponse("radio-logs-1h-20261001-120000.zip", new byte[2048])
+      : null;
+    JSInterop.Setup<bool>(DownloadFn, _ => true).SetResult(true);
+    var start = StartUri();
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    Card(cut, "Download logs").Click();
+
+    cut.WaitForAssertion(() =>
+      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("sent to downloads · 2 KB"));
+    Status(cut, "Download logs")!.ClassList.Should().Contain("is-ok");
+    Card(cut, "Download logs").QuerySelector(".dev-card-detail")!.TextContent.Trim()
+      .Should().Be("radio-logs-1h-20261001-120000.zip");
+    _loggingApi.FileRequests.Should().ContainSingle().Which.Should().Be("/api/system/logs/download?period=1h");
+    AssertStayedInTheApp(start);
+  }
+
+  [Fact]
+  public void DownloadLogs_ApiDown_SaysSoInTheCard_AndStaysInTheApp()
+  {
+    // The case window.open handled worst: an unreachable host is a browser error page.
+    _loggingApi.FilesUnreachable = true;
+    var start = StartUri();
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    Card(cut, "Download logs").Click();
+
+    cut.WaitForAssertion(() =>
+      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("radio-api unreachable"));
+    Status(cut, "Download logs")!.ClassList.Should().Contain("is-error");
+    AssertStayedInTheApp(start);
+  }
+
+  [Fact]
+  public void DownloadLogs_Api404_ShowsOnlyTheErrorField_NotTheServerPath()
+  {
+    // The logs 404 body carries a server-side path; only its "error" field may reach the screen.
+    _loggingApi.FileResponder = _ => Json(System.Net.HttpStatusCode.NotFound,
+      """{"error":"Logs directory not found","path":"/opt/radio-console/logs"}""");
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    Card(cut, "Download logs").Click();
+
+    cut.WaitForAssertion(() =>
+      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("404 · Logs directory not found"));
+    cut.Markup.Should().NotContain("/opt/radio-console");
+  }
+
+  [Fact]
+  public void DownloadLogs_BrowserRefusesTheSave_SaysSo()
+  {
+    _loggingApi.FileResponder = _ => FileResponse("radio-logs.zip", new byte[10]);
+    JSInterop.Setup<bool>(DownloadFn, _ => true).SetResult(false);
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    Card(cut, "Download logs").Click();
+
+    cut.WaitForAssertion(() =>
+      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("failed · the browser would not take the file"));
+    Status(cut, "Download logs")!.ClassList.Should().Contain("is-error");
+  }
+
+  [Fact]
+  public void FileResults_AreClearedOnTheNextOpen()
+  {
+    _loggingApi.FilesUnreachable = true;
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+    Card(cut, "Download logs").Click();
+    cut.WaitForAssertion(() => Status(cut, "Download logs")!.ClassList.Should().Contain("is-error"));
+
+    cut.SetParametersAndRender(p => p.Add(x => x.IsOpen, false));
+    cut.SetParametersAndRender(p => p.Add(x => x.IsOpen, true));
+
+    Status(cut, "Download logs").Should().BeNull();
+    Card(cut, "Download logs").QuerySelector(".dev-card-hint")!.TextContent.Trim().Should().Be("last hour · .zip");
+  }
+
   // ── LOG-5: Verbose logs card ──────────────────────────────────────────────────────────────────
 
   private IRenderedComponent<DevTray> RenderOpenAndSettled()
   {
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
     // The first open fires a GET; wait on its rendered result, not on time.
-    cut.WaitForAssertion(() => LogValue(cut).Should().NotBe("—"));
+    cut.WaitForAssertion(() => LogValue(cut).Should().NotBe("checking…"));
     return cut;
   }
 
@@ -346,7 +562,7 @@ public class DevTrayTests : TestContext
     cut.FindAll(".dev-card").First(c => c.GetAttribute("aria-label") == "Toggle verbose logging");
 
   private static string LogValue(IRenderedComponent<DevTray> cut) =>
-    LogCard(cut).QuerySelector(".dev-card-value")!.TextContent.Trim();
+    LogCard(cut).QuerySelector(".dev-card-status")!.TextContent.Trim();
 
   [Fact]
   public void VerboseLogs_OnOpen_ReadsTheApisState()
@@ -409,6 +625,17 @@ public class DevTrayTests : TestContext
 
     public bool Unreachable { get; set; }
 
+    /// <summary>UI-26: answers the two file endpoints; null falls through to 404.</summary>
+    public Func<string, HttpResponseMessage?>? FileResponder { get; set; }
+
+    /// <summary>UI-26: when set, the file endpoints throw as if radio-api were down.</summary>
+    public bool FilesUnreachable { get; set; }
+
+    private readonly List<string> _fileRequests = new();
+
+    /// <summary>UI-26: path and query of every request to the two file endpoints.</summary>
+    public IReadOnlyList<string> FileRequests { get { lock (_sync) { return _fileRequests.ToList(); } } }
+
     public IReadOnlyList<(string, string)> Puts { get { lock (_sync) { return _puts.ToList(); } } }
 
     public int Resets { get { lock (_sync) { return _resets; } } }
@@ -423,6 +650,18 @@ public class DevTrayTests : TestContext
       }
 
       var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
+      if (path is "/api/audio/debug/dump-frame" or "/api/system/logs/download")
+      {
+        lock (_sync)
+        {
+          _fileRequests.Add(request.RequestUri!.PathAndQuery);
+        }
+        if (FilesUnreachable)
+        {
+          throw new HttpRequestException("unreachable");
+        }
+        return FileResponder?.Invoke(path) ?? new HttpResponseMessage(System.Net.HttpStatusCode.NotFound);
+      }
       const string prefix = "/api/system/logging/levels";
       lock (_sync)
       {
