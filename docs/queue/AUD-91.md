@@ -146,7 +146,22 @@ through `/api/radio/band` and `/api/radio/frequency` and reading `/api/radio/sta
 - Side finding: tuning with `POST /api/radio/frequency` into another band leaves the **previous band's
   step** in place (`step` read 25000 on FM after a WB to FM tune). `SetBandAsync` updates the step;
   `SetFrequencyAsync` does not. The BAND view's non-FM tap goes through the new band-explicit tune,
-  which updates it.
+  which updates it. **Confirmed a real bug by reading the code, filed as [`AUD-95`](AUD-95.md):**
+  `SDRRadioAudioSource.SetFrequencyAsync` calls `RadioReceiver.SetFrequency`, which switches the
+  receiver's band through `FindBandForFrequency` → `SetBand`, but the source's `_frequencyStep` is only
+  reset by `SetBandAsync` and `TuneInBandAsync`. So the step buttons then move by the old band's step.
+
+### The measurements in one table
+
+| Band | Frequencies tried | `signalStrength` / `rssiDbu` | librtlsdr | Verdict |
+|---|---|---|---|---|
+| AM | 600, 1000, 1400, 1710 kHz | 0 / −60 (floor) | `[R82XX] PLL not locked!` every tune | not receivable |
+| SW | 5, 10, 15 MHz | 0 | `PLL not locked!` | not receivable |
+| SW | 23, 25 MHz | 0 | no warning | nothing heard |
+| SW | 27.185, 29 MHz | 17 / −49.8 | no warning | tuner works; noise floor |
+| AIR | 108.000 MHz | 45 / −33 | no warning | tunes |
+| WB | 162.400 MHz | 39 / −36.6 | no warning | tunes |
+| VHF | 162.400 MHz | 49 / −30.6 | no warning | tunes |
 
 Direct sampling was judged **not small**: it needs P/Invoke for `rtlsdr_set_direct_sampling`, a
 different capture rate and DC handling, and, above all, hardware this dongle does not have. It is
@@ -185,9 +200,13 @@ deferred to [`AUD-94`](AUD-94.md) as an owner decision, not built here.
   /api/radio/frequency` takes an optional `band`. With it, the radio tunes inside that band in one retune
   (VHF overlaps FM, AIR and WB, so frequency alone would land in the wrong band). Without it, behaviour is
   unchanged.
-- **Tap-to-tune** snaps to the strongest peak within two channel spacings (±0.4 MHz on FM, as before;
-  ±50 kHz on WB and AIR; ±25 kHz on VHF). FM taps tune exactly as `AUD-76` did; other bands tune with the
-  explicit band.
+- **Tap-to-tune** snaps to the strongest peak within a window, else the nearest channel. On FM the
+  window is two channel spacings, **±400 kHz, unchanged from `AUD-76`**. On every other band it is
+  **max(2 channel spacings, 2% of the plotted span)**: AIR ±580 kHz (2% of 29 MHz), VHF ±40 kHz (2% of
+  its 2 MHz window), WB ±50 kHz (two 25 kHz spacings beat 2% of its 175 kHz span). Two spacings alone
+  would be about ±1.5 px on AIR's 29 MHz axis, too narrow to hit with a finger
+  (`src/Radio.Web/Services/BandAxis.cs`, `SnapWindowHz`, `SnapSpanFraction`). FM taps tune exactly as
+  `AUD-76` did; other bands tune with the explicit band.
 - **The live-sweep discipline is unchanged for every band.** That covers the sweep-only mute, no
   `FrequencyChanged`, the retune to `_currentFrequencyHz`, cancellation on a user action, and the gain
   restore. ⚠ The AIR live sweep is ~30 s muted, and like FM's 21 s it can log the fingerprint
