@@ -32,11 +32,15 @@ function onTap(event) {
     if (dotNetRef) {
       // Fire-and-forget — the Blazor side toggles tray state and re-renders.
       // Errors here are non-fatal (e.g. circuit was torn down mid-gesture).
-      // UI-25: the third tap's viewport coordinates and the viewport size go with it, so the tray
-      // opens under the point that was pressed (DevTrayPlacement does the clamping). A touch tap
-      // reaches here as a synthesized click, which carries the touch point in clientX/clientY.
+      // UI-25: the third tap's x, the pressed slot's top and bottom edges, and the viewport size
+      // go with it, so the tray opens under the area that was pressed without covering the nav
+      // row (DevTrayPlacement does the maths). A touch tap reaches here as a synthesized click,
+      // which carries the touch point in clientX. ⚠ The argument count must match
+      // MainLayout.ToggleDevTray — a mismatch is swallowed by the catch below and the gesture
+      // silently stops opening the tray.
+      const r = event.currentTarget.getBoundingClientRect();
       dotNetRef.invokeMethodAsync('ToggleDevTray',
-        event.clientX, event.clientY, window.innerWidth, window.innerHeight)
+        event.clientX, r.top, r.bottom, window.innerWidth, window.innerHeight)
         .catch(function () { /* ignore */ });
     }
   }

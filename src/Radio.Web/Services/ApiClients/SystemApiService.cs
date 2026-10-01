@@ -224,8 +224,11 @@ public class SystemApiService
   // the server side of the circuit, so the browser is never sent to radio-api: the tray shows the
   // outcome and, on success, the page saves the bytes as a blob download.
 
-  /// <summary>Longest error text returned for display; the tray card has room for about three lines.</summary>
-  internal const int MaxErrorLength = 140;
+  /// <summary>
+  /// Longest error text returned for display. A tray card's status line is clamped to three lines of
+  /// about 25 monospace characters, and the card prefixes the status code (<c>"501 · "</c>), so 64 fits.
+  /// </summary>
+  internal const int MaxErrorLength = 64;
 
   /// <summary>Fetches radio-api's zipped log files for <paramref name="period"/> (<c>5m</c>/<c>1h</c>/<c>24h</c>/<c>7d</c>).</summary>
   public Task<ApiFileResult> DownloadLogsAsync(string period = "1h", CancellationToken cancellationToken = default) =>
@@ -255,16 +258,21 @@ public class SystemApiService
       var name = (disposition?.FileNameStar ?? disposition?.FileName)?.Trim('"');
       return ApiFileResult.Ok((int)response.StatusCode, SafeFileName(name, fallbackFileName), content);
     }
-    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    catch (OperationCanceledException)
     {
+      // Either the caller's token, or HttpClient's own 30 s timeout — which surfaces as a
+      // TaskCanceledException with the caller's token NOT cancelled. Both mean the API was too slow.
       return ApiFileResult.Failed(null, "timed out waiting for radio-api");
+    }
+    catch (HttpRequestException ex)
+    {
+      _logger.LogWarning(ex, "DevTray file fetch failed");
+      return ApiFileResult.Failed(null, "radio-api unreachable");
     }
     catch (Exception ex)
     {
-      // HttpClient's own 30 s timeout surfaces as a TaskCanceledException with the caller's token
-      // NOT cancelled, so it lands here rather than above — "unreachable" covers both.
       _logger.LogWarning(ex, "DevTray file fetch failed");
-      return ApiFileResult.Failed(null, "radio-api unreachable");
+      return ApiFileResult.Failed(null, "request to radio-api failed");
     }
   }
 
@@ -304,7 +312,8 @@ public class SystemApiService
     {
       message = string.IsNullOrWhiteSpace(response.ReasonPhrase) ? "request failed" : response.ReasonPhrase;
     }
-    message = message.Trim();
+    // The tray's own lines carry no full stop; drop the API's so the two read as one voice.
+    message = message.Trim().TrimEnd('.');
     return message.Length <= MaxErrorLength ? message : message[..(MaxErrorLength - 1)] + "…";
   }
 

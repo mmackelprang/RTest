@@ -35,7 +35,7 @@
       pill (PR 2). Folding it into a real surface keeps the topbar clean.
 *@
 
-<div class="dev-tray @(IsOpen ? "is-open" : "") @(Placement?.OpensAbove == true ? "opens-above" : "")"
+<div class="dev-tray @(IsOpen ? "is-open" : "")"
      style="@TrayStyle"
      role="dialog"
      aria-label="Dev tray"
@@ -50,11 +50,11 @@
 
   @* Read-only readings. Plain elements, not buttons, so nothing about them invites a tap. *@
   <div class="dev-tray-readouts">
-    <div class="dev-readout" aria-label="Visualizer updates per second">
+    <div class="dev-readout">
       <span class="dev-readout-label">Updates</span>
       <span class="dev-readout-value">@_updatesPerSecond/sec</span>
     </div>
-    <div class="dev-readout" aria-label="Engine state">
+    <div class="dev-readout">
       <span class="dev-readout-label">Engine state</span>
       <span class="dev-readout-value">@_engineState</span>
     </div>
@@ -150,8 +150,11 @@
 
   private enum StatusKind { Busy, Ok, Error }
 
-  /// <summary>The outcome line a card shows after it was tapped.</summary>
-  private sealed record CardStatus(string Text, StatusKind Kind)
+  /// <summary>
+  /// The outcome a card shows after it was tapped: one status line, plus an optional single-line
+  /// detail (the saved file's name).
+  /// </summary>
+  private sealed record CardStatus(string Text, StatusKind Kind, string? Detail = null)
   {
     public string CssClass => Kind switch
     {
@@ -170,7 +173,7 @@
   private bool _distortionBusy;
   private bool _dumpBusy;
   private bool _logsBusy;
-  private string _logStatus = "—";
+  private string _logStatus = "checking…";
   private bool _logVerbose;
   private bool _logBusy;
   private Timer? _autoLockTimer;
@@ -207,6 +210,10 @@
     else
     {
       <span class="dev-card-status @status.CssClass" aria-live="polite">@status.Text</span>
+      @if (status.Detail is not null)
+      {
+        <span class="dev-card-detail">@status.Detail</span>
+      }
     }
   };
 
@@ -317,12 +324,12 @@
       var ok = await AudioApi.ReportDistortionAsync();
       _distortion = ok
         ? new CardStatus("marked", StatusKind.Ok)
-        : new CardStatus("failed — radio-api did not accept it", StatusKind.Error);
+        : new CardStatus("failed · radio-api did not accept it", StatusKind.Error);
     }
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "DevTray: failed to mark distortion");
-      _distortion = new CardStatus("error", StatusKind.Error);
+      _distortion = new CardStatus("failed · unexpected error", StatusKind.Error);
     }
     finally
     {
@@ -376,7 +383,7 @@
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "DevTray: file action failed");
-      setStatus(new CardStatus("error", StatusKind.Error));
+      setStatus(new CardStatus("failed · unexpected error", StatusKind.Error));
     }
     finally
     {
@@ -410,9 +417,12 @@
       handedOver = false;
     }
 
+    // "Sent", not "saved": true from the page means the download was handed to the browser. Whether
+    // it then lands on disk silently, asks where to save, or is blocked is browser policy, which
+    // nothing here can observe. On the kiosk it lands in the box user's Downloads folder.
     return handedOver
-      ? new CardStatus($"downloaded {fileName} · {FormatSize(result.Content.Length)}", StatusKind.Ok)
-      : new CardStatus("fetched, but the browser did not save it", StatusKind.Error);
+      ? new CardStatus($"sent to downloads · {FormatSize(result.Content.Length)}", StatusKind.Ok, fileName)
+      : new CardStatus("failed · the browser would not take the file", StatusKind.Error);
   }
 
   internal static string FormatSize(long bytes) => bytes switch
@@ -490,14 +500,16 @@
     }
   }
 
-  private void ViewFingerprintEvents()
+  private async Task ViewFingerprintEvents()
   {
     RecordInteraction();
     // UI-5 / UI-2: the fingerprint.* tiles live in Settings → Diagnostics, which /diagnostics opens
     // directly. There is no fingerprint-only view; the card lands on the whole panel, where the
     // FINGERPRINT group is one of the categories. An in-app route: the topbar stays on screen, so
-    // this is not a UI-26 trap.
+    // this is not a UI-26 trap. The tray closes as it goes, rather than floating over the page it
+    // just opened.
     Nav.NavigateTo("/diagnostics");
+    await OnClose.InvokeAsync();
   }
 
   public void Dispose()

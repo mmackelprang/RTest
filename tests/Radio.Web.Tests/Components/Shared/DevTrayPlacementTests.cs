@@ -5,8 +5,9 @@ using Xunit;
 namespace Radio.Web.Tests.Components.Shared;
 
 /// <summary>
-/// UI-25: the DevTray opens under the point that was tapped, clamped into the viewport with a
-/// margin, and flips above the tap when there is no room below. The kiosk is 1920x720.
+/// UI-25: the DevTray opens under the area that was pressed — centred on the tap's x, hanging below the
+/// pressed element — clamped into the viewport with a margin, and flips above the element when there
+/// is no room below. The kiosk is 1920x720. Most cases press a bare point (top == bottom).
 /// </summary>
 public class DevTrayPlacementTests
 {
@@ -18,7 +19,7 @@ public class DevTrayPlacementTests
   [Fact]
   public void TapInTheTopbar_OpensBelowTheTap_CentredOnIt()
   {
-    var p = DevTrayPlacement.ForTap(1200, 30, 1920, 720);
+    var p = DevTrayPlacement.ForPress(1200, 30, 30, 1920, 720);
 
     p.Left.Should().Be(1200 - W / 2);
     p.Top.Should().Be(30 + G);
@@ -30,8 +31,8 @@ public class DevTrayPlacementTests
   public void TwoDifferentTapPoints_GiveTwoDifferentPlacements()
   {
     // The owner's check: tap in two places, the tray follows.
-    var a = DevTrayPlacement.ForTap(1150, 20, 1920, 720);
-    var b = DevTrayPlacement.ForTap(1210, 50, 1920, 720);
+    var a = DevTrayPlacement.ForPress(1150, 20, 20, 1920, 720);
+    var b = DevTrayPlacement.ForPress(1210, 50, 50, 1920, 720);
 
     b.Left.Should().Be(a.Left + 60);
     b.Top.Should().Be(a.Top + 30);
@@ -40,19 +41,19 @@ public class DevTrayPlacementTests
   [Fact]
   public void TapNearTheLeftEdge_ClampsToTheMargin()
   {
-    DevTrayPlacement.ForTap(40, 30, 1920, 720).Left.Should().Be(M);
+    DevTrayPlacement.ForPress(40, 30, 30, 1920, 720).Left.Should().Be(M);
   }
 
   [Fact]
   public void TapNearTheRightEdge_ClampsSoTheTrayEndsAtTheMargin()
   {
-    DevTrayPlacement.ForTap(1900, 30, 1920, 720).Left.Should().Be(1920 - M - W);
+    DevTrayPlacement.ForPress(1900, 30, 30, 1920, 720).Left.Should().Be(1920 - M - W);
   }
 
   [Fact]
   public void TapLowOnTheScreen_FlipsAbove_WithTheTraysBottomEdgeJustAboveTheTap()
   {
-    var p = DevTrayPlacement.ForTap(900, 650, 1920, 720);
+    var p = DevTrayPlacement.ForPress(900, 650, 650, 1920, 720);
 
     p.OpensAbove.Should().BeTrue();
     p.Top.Should().BeNull();
@@ -65,7 +66,7 @@ public class DevTrayPlacementTests
   {
     // below + H == vh − margin is the boundary; it must still open below.
     var tapY = 720 - M - H - G;
-    var p = DevTrayPlacement.ForTap(900, tapY, 1920, 720);
+    var p = DevTrayPlacement.ForPress(900, tapY, tapY, 1920, 720);
 
     p.OpensAbove.Should().BeFalse();
     p.Top.Should().Be(tapY + G);
@@ -75,7 +76,7 @@ public class DevTrayPlacementTests
   public void NoRoomOnEitherSide_StaysOnScreen()
   {
     // 500 px tall: neither 440 px below nor above a mid-screen tap fits.
-    var p = DevTrayPlacement.ForTap(900, 250, 1920, 500);
+    var p = DevTrayPlacement.ForPress(900, 250, 250, 1920, 500);
 
     p.OpensAbove.Should().BeFalse();
     p.Top.Should().Be(500 - M - H);
@@ -85,7 +86,7 @@ public class DevTrayPlacementTests
   [Fact]
   public void ViewportNarrowerThanTheTray_KeepsTheLeftMargin()
   {
-    DevTrayPlacement.ForTap(200, 30, 400, 720).Left.Should().Be(M);
+    DevTrayPlacement.ForPress(200, 30, 30, 400, 720).Left.Should().Be(M);
   }
 
   [Theory]
@@ -94,9 +95,39 @@ public class DevTrayPlacementTests
   [InlineData(-1, 720)]
   public void NonsenseViewport_FallsBackToTheKioskPanel(double vw, double vh)
   {
-    var p = DevTrayPlacement.ForTap(1900, 30, vw, vh);
+    var p = DevTrayPlacement.ForPress(1900, 30, 30, vw, vh);
 
     p.Left.Should().Be(1920 - M - W);
     p.Top.Should().Be(30 + G);
+  }
+
+  [Fact]
+  public void PressedElement_OpensBelowItsBottomEdge_NotBelowTheTapPoint()
+  {
+    // The kiosk case: the gesture slot spans y 3..59 in the nav row; the tray must clear the row.
+    var p = DevTrayPlacement.ForPress(1040, 3, 59, 1920, 720);
+
+    p.Top.Should().Be(59 + G);
+    p.Left.Should().Be(1040 - W / 2);
+  }
+
+  [Fact]
+  public void PressedElement_FlipsAboveItsTopEdge()
+  {
+    var p = DevTrayPlacement.ForPress(900, 600, 656, 1920, 720);
+
+    p.OpensAbove.Should().BeTrue();
+    p.Bottom.Should().Be(720 - (600 - G));
+  }
+
+  [Fact]
+  public void PressOutsideTheViewport_IsClampedIn()
+  {
+    var high = DevTrayPlacement.ForPress(900, -50, -50, 1920, 720);
+    high.Top.Should().Be(0 + G);
+
+    var low = DevTrayPlacement.ForPress(900, 900, 900, 1920, 720);
+    low.OpensAbove.Should().BeTrue();
+    low.Bottom.Should().Be(720 - (720 - G));
   }
 }

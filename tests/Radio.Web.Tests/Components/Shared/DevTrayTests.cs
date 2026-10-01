@@ -138,14 +138,18 @@ public class DevTrayTests : TestContext
   /// Settings → Diagnostics, where the <c>fingerprint.*</c> tiles live.
   /// </summary>
   [Fact]
-  public void FingerprintEventsCard_NavigatesToDiagnostics()
+  public void FingerprintEventsCard_NavigatesToDiagnostics_AndClosesTheTray()
   {
     var nav = Services.GetRequiredService<Microsoft.AspNetCore.Components.NavigationManager>();
-    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+    var closed = 0;
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.OnClose, Microsoft.AspNetCore.Components.EventCallback.Factory.Create(this, () => { closed++; })));
 
     cut.Find("button[aria-label='View fingerprint events']").Click();
 
     new Uri(nav.Uri).AbsolutePath.Should().Be("/diagnostics");
+    closed.Should().Be(1, "the tray must not float over the page it just opened");
   }
 
   [Fact]
@@ -356,28 +360,26 @@ public class DevTrayTests : TestContext
   [Fact]
   public void Placement_Below_IsWrittenInline()
   {
-    var placement = DevTrayPlacement.ForTap(1200, 30, 1920, 720);
+    var placement = DevTrayPlacement.ForPress(1200, 30, 30, 1920, 720);
     var cut = RenderComponent<DevTray>(p => p
       .Add(x => x.IsOpen, true)
       .Add(x => x.Placement, placement));
 
     var style = cut.Find(".dev-tray").GetAttribute("style") ?? string.Empty;
-    style.Should().Contain("left:960px").And.Contain("top:42px").And.Contain("right:auto").And.Contain("bottom:auto");
+    style.Should().Contain("left:960px").And.Contain("top:38px").And.Contain("right:auto").And.Contain("bottom:auto");
     style.Should().Contain("width:480px").And.Contain("--dev-tray-open-h:440px");
-    cut.Find(".dev-tray").ClassList.Should().NotContain("opens-above");
   }
 
   [Fact]
   public void Placement_Above_IsWrittenAsABottomOffset()
   {
-    var placement = DevTrayPlacement.ForTap(900, 650, 1920, 720);
+    var placement = DevTrayPlacement.ForPress(900, 650, 650, 1920, 720);
     var cut = RenderComponent<DevTray>(p => p
       .Add(x => x.IsOpen, true)
       .Add(x => x.Placement, placement));
 
     var style = cut.Find(".dev-tray").GetAttribute("style") ?? string.Empty;
-    style.Should().Contain("bottom:82px").And.Contain("top:auto").And.Contain("left:660px");
-    cut.Find(".dev-tray").ClassList.Should().Contain("opens-above");
+    style.Should().Contain("bottom:78px").And.Contain("top:auto").And.Contain("left:660px");
   }
 
   [Fact]
@@ -437,7 +439,7 @@ public class DevTrayTests : TestContext
 
     cut.WaitForAssertion(() =>
       Status(cut, "Dump audio frame")!.TextContent.Trim()
-        .Should().Be("501 · Audio-frame dump not yet implemented."));
+        .Should().Be("501 · Audio-frame dump not yet implemented"));
     Status(cut, "Dump audio frame")!.ClassList.Should().Contain("is-error");
     Card(cut, "Dump audio frame").HasAttribute("disabled")
       .Should().BeFalse("the card must be tappable again — the error is recoverable in place");
@@ -457,8 +459,9 @@ public class DevTrayTests : TestContext
     Card(cut, "Dump audio frame").Click();
 
     cut.WaitForAssertion(() =>
-      Status(cut, "Dump audio frame")!.TextContent.Trim().Should().Be("downloaded frame-0001.wav · 4 B"));
+      Status(cut, "Dump audio frame")!.TextContent.Trim().Should().Be("sent to downloads · 4 B"));
     Status(cut, "Dump audio frame")!.ClassList.Should().Contain("is-ok");
+    Card(cut, "Dump audio frame").QuerySelector(".dev-card-detail")!.TextContent.Trim().Should().Be("frame-0001.wav");
     JSInterop.Invocations.Where(i => i.Identifier == DownloadFn)
       .Should().ContainSingle().Which.Arguments[0].Should().Be("frame-0001.wav");
     AssertStayedInTheApp(start);
@@ -477,9 +480,11 @@ public class DevTrayTests : TestContext
     Card(cut, "Download logs").Click();
 
     cut.WaitForAssertion(() =>
-      Status(cut, "Download logs")!.TextContent.Trim()
-        .Should().Be("downloaded radio-logs-1h-20261001-120000.zip · 2 KB"));
+      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("sent to downloads · 2 KB"));
     Status(cut, "Download logs")!.ClassList.Should().Contain("is-ok");
+    Card(cut, "Download logs").QuerySelector(".dev-card-detail")!.TextContent.Trim()
+      .Should().Be("radio-logs-1h-20261001-120000.zip");
+    _loggingApi.FileRequests.Should().ContainSingle().Which.Should().Be("/api/system/logs/download?period=1h");
     AssertStayedInTheApp(start);
   }
 
@@ -524,7 +529,7 @@ public class DevTrayTests : TestContext
     Card(cut, "Download logs").Click();
 
     cut.WaitForAssertion(() =>
-      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("fetched, but the browser did not save it"));
+      Status(cut, "Download logs")!.TextContent.Trim().Should().Be("failed · the browser would not take the file"));
     Status(cut, "Download logs")!.ClassList.Should().Contain("is-error");
   }
 
@@ -549,7 +554,7 @@ public class DevTrayTests : TestContext
   {
     var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
     // The first open fires a GET; wait on its rendered result, not on time.
-    cut.WaitForAssertion(() => LogValue(cut).Should().NotBe("—"));
+    cut.WaitForAssertion(() => LogValue(cut).Should().NotBe("checking…"));
     return cut;
   }
 
@@ -626,6 +631,11 @@ public class DevTrayTests : TestContext
     /// <summary>UI-26: when set, the file endpoints throw as if radio-api were down.</summary>
     public bool FilesUnreachable { get; set; }
 
+    private readonly List<string> _fileRequests = new();
+
+    /// <summary>UI-26: path and query of every request to the two file endpoints.</summary>
+    public IReadOnlyList<string> FileRequests { get { lock (_sync) { return _fileRequests.ToList(); } } }
+
     public IReadOnlyList<(string, string)> Puts { get { lock (_sync) { return _puts.ToList(); } } }
 
     public int Resets { get { lock (_sync) { return _resets; } } }
@@ -642,6 +652,10 @@ public class DevTrayTests : TestContext
       var path = Uri.UnescapeDataString(request.RequestUri!.AbsolutePath);
       if (path is "/api/audio/debug/dump-frame" or "/api/system/logs/download")
       {
+        lock (_sync)
+        {
+          _fileRequests.Add(request.RequestUri!.PathAndQuery);
+        }
         if (FilesUnreachable)
         {
           throw new HttpRequestException("unreachable");
