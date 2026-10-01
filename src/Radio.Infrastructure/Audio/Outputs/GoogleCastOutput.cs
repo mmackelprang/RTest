@@ -1271,7 +1271,11 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
+      // AUD-54 (4). The same end state as the success path. Steps outside the media-stop
+      // try (stopping the DirectChannel loop, taking the lock) can throw, and leaving
+      // IsEnabledInternal true here was exactly what the media-stop catch exists to prevent.
       _logger.LogError(ex, "Failed to stop Google Cast output");
+      IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
     }
   }

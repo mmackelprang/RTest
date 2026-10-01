@@ -109,6 +109,25 @@ public class GoogleCastOutputLifecycleTests
     Assert.Equal("cast-a", output.ConnectedDevice?.Id);
   }
 
+  [Fact]
+  public async Task Stop_WhenAStepOutsideTheMediaStopThrows_StillLeavesTheOutputDisabled()
+  {
+    // A pre-cancelled token makes StopAsync's lock wait throw — one of the steps that sits
+    // outside the media-stop try and lands in the outer catch.
+    await using var output = await InitializedOutputAsync(configure: o => o.Enabled = true);
+    SeedLiveReceiver(output, "cast-a", "10.0.0.1");
+    await output.ConnectAsync(Device("cast-a", "10.0.0.1"));
+    MarkStreaming(output);
+    Assert.True(output.IsEnabled);
+
+    using var cancelled = new CancellationTokenSource();
+    cancelled.Cancel();
+    await output.StopAsync(cancelled.Token);
+
+    Assert.Equal(AudioOutputState.Stopped, output.State);
+    Assert.False(output.IsEnabled);
+  }
+
   // --- helpers ---
 
   private static T ReadProperty<T>(object anonymous, string name)
