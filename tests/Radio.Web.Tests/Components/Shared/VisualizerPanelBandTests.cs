@@ -1102,6 +1102,22 @@ public class VisualizerPanelBandTests : TestContext
   }
 
   [Fact]
+  public async Task ATapOnTheDisabledBandTab_SavesNothing()
+  {
+    // A browser does not deliver a click to a disabled button, but a tap can land in the moment between the
+    // radio going away and the re-render. The screen would stay right anyway (the reconcile shows Spectrum);
+    // what the guard in SelectMode prevents is BAND being saved as the preference by a tab the user could
+    // not see was off.
+    GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
+    var cut = RenderWithRadioNotActive();
+
+    await cut.InvokeAsync(() => Tab(cut, "BAND").Click());
+
+    PreferenceWrites().Should().BeEmpty();
+    IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
+  }
+
+  [Fact]
   public async Task StartupReadFails_ThenARadioStateBroadcast_EnablesAndShowsBand()
   {
     // radio-web up before radio-api, or an API restart while the kiosk reloads: the start-up read fails, so
