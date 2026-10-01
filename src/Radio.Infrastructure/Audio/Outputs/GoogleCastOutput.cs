@@ -1391,11 +1391,13 @@ public class GoogleCastOutput : AudioOutputBase
     //      this level (within EchoLevelTolerance of the level last set or observed) is left alone:
     //      re-sending its own level is what this push used to do on every start, and it does not
     //      need to happen.
-    //   2. A speaker muted for a console that is still muted gets NO level now: the level is held
-    //      and sent, before the unmute, when the console is unmuted — so there is no unmute window
-    //      under a muted console at all.
-    //   3. Otherwise the level is pushed; if the speaker was muted (on its own side) the mute is
-    //      re-asserted straight after it (PushVolumeKeepingMuteAsync).
+    //   2. A muted speaker under a console that is muted gets NO level now — whoever muted the
+    //      speaker (hostile review H1: muted on its own side, the start-time mute is skipped and the
+    //      speaker is not marked as the console's, but a level would still unmute it under the
+    //      muted console). The level is held and sent, before the unmute, when the console is
+    //      unmuted — so there is no unmute window under a muted console at all.
+    //   3. Otherwise the level is pushed; if the speaker was muted (on its own side, under an
+    //      unmuted console) the mute is re-asserted straight after it (PushVolumeKeepingMuteAsync).
     if (_lastSetMute)
     {
       if (Math.Abs(_lastSetVolume - target) <= EchoLevelTolerance)
@@ -1406,7 +1408,7 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
-      if (IsSpeakerMutedByConsole && IsConsoleMutedNow())
+      if (IsConsoleMutedNow())
       {
         HoldConsoleVolume(target, Volatile.Read(ref _publishedGeneration), float.NaN);
         ConsoleLogger.LogInformation(

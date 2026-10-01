@@ -787,6 +787,52 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // Hostile review H1. The console is muted and the speaker is muted on its OWN side, so the
+  // start-time mute is skipped (already muted) and the speaker is not marked as the console's. The
+  // after-start push has a different level owed (the restore on connect failed). It used to be
+  // pushed (step 3): on the device the level unmutes the speaker, the reply was reported as an
+  // external unmute, and AudioStateUpdateService UNMUTED THE CONSOLE — by our own command. Now the
+  // level is held: nothing is sent, the speaker stays muted, and the console's unmute releases it.
+  [Fact]
+  public async Task UnderAMutedConsole_ASpeakerMutedOnItsOwnSide_GetsNoLevelAfterStart_AndTheConsoleStaysMuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    // Mirrors AudioStateUpdateService.OnCastVolumeChanged: a non-initial event's mute is written
+    // to the console.
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync)
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+    h.Store.Volumes["cast-a"] = 0.60f;
+    h.FailNextVolume = new TimeoutException("restore lost"); // the restore on connect fails
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true);
+    Assert.False(h.Output.IsSpeakerMutedByConsole); // muted on its own side: not the console's
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.Empty(h.Commands);                       // no SET_VOLUME (and so nothing to re-mute)
+    Assert.Equal(0.60f, h.Output.HeldConsoleVolume(h.Target().Generation)!.Value, 3);
+    Assert.True(consoleMuted);
+    Assert.Empty(h.External);
+    Assert.True(h.DeviceMuted);
+    Assert.True(h.Output.KnownSpeakerMuted);
+
+    // The console's unmute sends the held level first, then the unmute (whoever muted the speaker).
+    consoleMuted = false;
+    var result = await h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, h.Target().Generation);
+    Assert.True(result.Acknowledged);
+    Assert.Equal(new[] { "vol", "unmute" }, h.Kinds());
+    Assert.False(h.DeviceMuted);
+    Assert.Empty(h.External);
+  }
+
   // The AUD-80 restore on connect, to a speaker the read found MUTED (on its own side here): the
   // SET_VOLUME unmutes it, so the mute is re-asserted straight after it.
   [Fact]
