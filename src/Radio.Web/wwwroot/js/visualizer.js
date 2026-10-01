@@ -33,16 +33,10 @@ export const visualizer = {
       ctx: ctx,
       width: width,
       height: height,
-      // Dynamic VU meter scaling
-      recentPeaks: [],
-      scaleFactor: 1.0,
-      lastScaleUpdate: Date.now(),
-      targetScaleFactor: 1.0,
-      // Spectrogram/waterfall history (circular buffer of spectrum columns)
-      spectrogramHistory: [],
-      spectrogramMaxColumns: width,
       // Phase scope decay buffer
-      phaseScopeBuffer: null
+      phaseScopeBuffer: null,
+      // BAND (AUD-76): the canvas tap handler while BAND is shown, so it can be removed
+      bandTapHandler: null
     };
 
     console.log(`Initialized canvas ${canvasId} (${width}x${height})`);
@@ -58,46 +52,6 @@ export const visualizer = {
     ctx.clearRect(0, 0, width, height);
   },
 
-  // Update dynamic VU meter scaling
-  updateDynamicScaling: function (canvasData, maxPeak) {
-    const now = Date.now();
-    
-    // Add current peak to history (we keep roughly the last 8 seconds of peaks)
-    canvasData.recentPeaks.push({ value: maxPeak, time: now });
-    
-    // Remove peaks older than 8 seconds
-    const cutoffTime = now - 8000;
-    canvasData.recentPeaks = canvasData.recentPeaks.filter(p => p.time >= cutoffTime);
-    
-    // Hard cap on history size to avoid memory growth at extremely high update rates
-    const maxRecentPeaks = 600; // ~8 seconds at 75+ updates/sec; adjust if needed
-    if (canvasData.recentPeaks.length > maxRecentPeaks) {
-      const excess = canvasData.recentPeaks.length - maxRecentPeaks;
-      // Remove the oldest entries, keep the most recent ones
-      canvasData.recentPeaks.splice(0, excess);
-    }
-    
-    // Update scale factor every 2 seconds
-    if (now - canvasData.lastScaleUpdate >= 2000 && canvasData.recentPeaks.length > 0) {
-      // Calculate average maximum peak over the recent window
-      const avgMax = canvasData.recentPeaks.reduce((sum, p) => sum + p.value, 0) / canvasData.recentPeaks.length;
-      
-      // Target scale so average max reaches ~80% of display (but don't scale below 1.0)
-      if (avgMax > 0.1) { // Only scale if there's meaningful audio
-        canvasData.targetScaleFactor = Math.max(1.0, 0.8 / avgMax);
-      } else {
-        // Reset to 1.0 when audio is very quiet
-        canvasData.targetScaleFactor = 1.0;
-      }
-      
-      canvasData.lastScaleUpdate = now;
-    }
-    
-    // Smooth transition to target scale factor (ease-in-out)
-    const transitionSpeed = 0.05; // Slower = smoother
-    canvasData.scaleFactor += (canvasData.targetScaleFactor - canvasData.scaleFactor) * transitionSpeed;
-  },
-
   // Lazy-resize: fix canvas if it was initialized before parent had layout
   ensureCanvasSize: function (canvasData) {
     if (canvasData.width > 0 && canvasData.height > 0) return;
@@ -108,134 +62,6 @@ export const visualizer = {
     canvasData.canvas.height = h;
     canvasData.width = w;
     canvasData.height = h;
-  },
-
-  // Draw VU meter
-  drawVUMeter: function (canvasId, leftPeak, rightPeak, leftRms, rightRms, isClipping) {
-    const canvasData = this.canvases[canvasId];
-    if (!canvasData) return;
-    this.ensureCanvasSize(canvasData);
-
-    // Validate and clamp inputs
-    leftPeak = Math.max(0, Math.min(1, leftPeak || 0));
-    rightPeak = Math.max(0, Math.min(1, rightPeak || 0));
-    leftRms = Math.max(0, Math.min(1, leftRms || 0));
-    rightRms = Math.max(0, Math.min(1, rightRms || 0));
-    
-    // Update dynamic scaling based on peak values
-    const maxPeak = Math.max(leftPeak, rightPeak);
-    this.updateDynamicScaling(canvasData, maxPeak);
-    
-    // Apply scale factor to peak and RMS values
-    const scaleFactor = canvasData.scaleFactor;
-    leftPeak = Math.min(1.0, leftPeak * scaleFactor);
-    rightPeak = Math.min(1.0, rightPeak * scaleFactor);
-    leftRms = Math.min(1.0, leftRms * scaleFactor);
-    rightRms = Math.min(1.0, rightRms * scaleFactor);
-
-    const { ctx, width, height } = canvasData;
-    
-    // Clear canvas
-    ctx.fillStyle = '#0A0A0C';
-    ctx.fillRect(0, 0, width, height);
-
-    const meterWidth = width * 0.45;
-    const meterHeight = height * 0.7;
-    const meterX = width * 0.025;
-    const meterY = (height - meterHeight) / 2;
-    const spacing = width * 0.05;
-
-    // Draw left meter
-    this.drawMeter(ctx, meterX, meterY, meterWidth, meterHeight, leftPeak, leftRms, isClipping, 'Left');
-    
-    // Draw right meter
-    this.drawMeter(ctx, meterX + meterWidth + spacing, meterY, meterWidth, meterHeight, rightPeak, rightRms, isClipping, 'Right');
-    
-  },
-
-  drawMeter: function (ctx, x, y, width, height, peak, rms, isClipping, label) {
-    // Draw background
-    ctx.fillStyle = '#101012';
-    ctx.fillRect(x, y, width, height);
-
-    // Draw border
-    ctx.strokeStyle = '#1F1F22';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, width, height);
-
-    // Calculate bar heights
-    const peakHeight = height * peak;
-    const rmsHeight = height * rms;
-
-    // Helper function to get meter color based on height percentage
-    // Green (#4ADE80) → Amber (#F0A830) → Red (#F87171)
-    const getMeterColor = (percentage) => {
-      if (percentage < 0.6) {
-        // Green to Amber
-        const t = percentage / 0.6;
-        const r = Math.floor(74 + (240 - 74) * t);
-        const g = Math.floor(222 + (168 - 222) * t);
-        const b = Math.floor(128 + (48 - 128) * t);
-        return `rgb(${r}, ${g}, ${b})`;
-      }
-      else if (percentage < 0.85) {
-        // Amber to Red
-        const t = (percentage - 0.6) / 0.25;
-        const r = Math.floor(240 + (248 - 240) * t);
-        const g = Math.floor(168 + (113 - 168) * t);
-        const b = Math.floor(48 + (113 - 48) * t);
-        return `rgb(${r}, ${g}, ${b})`;
-      }
-      else {
-        // Hot red
-        return `rgb(248, 113, 113)`;
-      }
-    };
-
-    // Draw RMS bar with rainbow gradient (dimmer)
-    ctx.globalAlpha = 0.5;
-    for (let i = 0; i < rmsHeight; i++) {
-      const currentY = y + height - i;
-      const percentage = i / height;
-      const color = getMeterColor(percentage);
-      
-      ctx.fillStyle = color;
-      ctx.fillRect(x + width * 0.1, currentY, width * 0.35, 1);
-    }
-
-    // Draw peak bar with rainbow gradient (brighter)
-    ctx.globalAlpha = 1.0;
-    for (let i = 0; i < peakHeight; i++) {
-      const currentY = y + height - i;
-      const percentage = i / height;
-      const color = getMeterColor(percentage);
-
-      ctx.fillStyle = color;
-      ctx.fillRect(x + width * 0.55, currentY, width * 0.35, 1);
-    }
-
-    // Draw peak hold indicator
-    const peakY = y + height - peakHeight;
-    ctx.fillStyle = isClipping ? '#F87171' : '#F0EFF4';
-    ctx.fillRect(x + width * 0.1, peakY - 2, width * 0.8, 4);
-
-    // Draw label
-    ctx.fillStyle = '#F0EFF4';
-    ctx.font = '16px Inter, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(label, x + width / 2, y - 10);
-
-    // Draw scale markers
-    ctx.fillStyle = '#4B5563';
-    ctx.font = '10px Inter, sans-serif';
-    ctx.textAlign = 'right';
-    
-    const markers = [0, -6, -12, -18, -24, -30, -40, -60];
-    markers.forEach(db => {
-      const linearValue = Math.pow(10, db / 20);
-      const markerY = y + height * (1 - linearValue);
-      ctx.fillText(`${db}`, x - 5, markerY + 3);
-    });
   },
 
   // Draw waveform
@@ -380,74 +206,6 @@ export const visualizer = {
         ctx.fillText(label, labelX, height - 5);
       }
     });
-  },
-
-  // Draw spectrogram/waterfall — scrolling frequency-time heatmap
-  drawSpectrogram: function (canvasId, magnitudes, frequencies) {
-    const canvasData = this.canvases[canvasId];
-    if (!canvasData || !magnitudes || magnitudes.length === 0) return;
-    this.ensureCanvasSize(canvasData);
-
-    const { ctx, width, height } = canvasData;
-
-    // Add current spectrum as a new column
-    const barCount = Math.min(magnitudes.length, 128);
-    canvasData.spectrogramHistory.push(magnitudes.slice(0, barCount));
-    canvasData.spectrogramMaxColumns = width;
-    if (canvasData.spectrogramHistory.length > width)
-      canvasData.spectrogramHistory.shift();
-
-    // Draw the full spectrogram
-    ctx.fillStyle = '#0A0A0C';
-    ctx.fillRect(0, 0, width, height);
-
-    const cols = canvasData.spectrogramHistory;
-    const colWidth = Math.max(1, width / cols.length);
-
-    for (let x = 0; x < cols.length; x++) {
-      const col = cols[x];
-      const rowHeight = height / col.length;
-      for (let y = 0; y < col.length; y++) {
-        const mag = col[y];
-        if (mag < 0.01) continue; // Skip near-silent bins
-
-        // Heatmap: black → deep blue → cyan → yellow → white
-        const intensity = Math.min(1, mag * 1.5);
-        let r, g, b;
-        if (intensity < 0.25) {
-          const t = intensity / 0.25;
-          r = 0; g = 0; b = Math.floor(80 * t);
-        } else if (intensity < 0.5) {
-          const t = (intensity - 0.25) / 0.25;
-          r = 0; g = Math.floor(200 * t); b = 80 + Math.floor(148 * t);
-        } else if (intensity < 0.75) {
-          const t = (intensity - 0.5) / 0.25;
-          r = Math.floor(240 * t); g = 200 + Math.floor(30 * t); b = Math.floor(228 * (1 - t));
-        } else {
-          const t = (intensity - 0.75) / 0.25;
-          r = 240 + Math.floor(15 * t); g = 230 + Math.floor(25 * t); b = Math.floor(200 * t);
-        }
-
-        ctx.fillStyle = `rgb(${r},${g},${b})`;
-        // Frequency axis: low at bottom, high at top
-        ctx.fillRect(x * colWidth, height - (y + 1) * rowHeight, colWidth + 0.5, rowHeight + 0.5);
-      }
-    }
-
-    // Frequency axis labels
-    if (frequencies && frequencies.length > 0) {
-      ctx.fillStyle = 'rgba(240,239,244,0.5)';
-      ctx.font = '10px Inter, sans-serif';
-      ctx.textAlign = 'right';
-      const labelCount = 5;
-      for (let i = 0; i < labelCount; i++) {
-        const freqIdx = Math.floor(i * (barCount - 1) / (labelCount - 1));
-        const freq = frequencies[Math.min(freqIdx, frequencies.length - 1)];
-        const labelY = height - (freqIdx / barCount) * height;
-        const label = freq < 1000 ? `${Math.round(freq)}Hz` : `${(freq / 1000).toFixed(1)}k`;
-        ctx.fillText(label, width - 4, labelY + 3);
-      }
-    }
   },
 
   // Draw circular spectrum — radial frequency bars from center
@@ -598,6 +356,177 @@ export const visualizer = {
     ctx.fillText('R', centerX + scale * 0.7, centerY - scale * 0.5);
   },
 
+  // ── BAND (AUD-76): the stored FM band map ─────────────────────────────────
+  //
+  // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync):
+  //   levels:   [{ f, v }]  channel position 0..1 across 87.5–108 MHz, normalised height 0..1
+  //   station:  f | null    the tuned station (FM, radio active), else null
+  //   presets:  [{ f, label }] FM presets, ascending
+  //   sweeping: bool
+  // x = f * width exactly, with no side padding, so the MHz axis strip under the canvas (positioned
+  // by the same fraction) and the tap handler (which reports x / width) line up with what is drawn.
+  // Text the owner reads ("No scan yet", the age, "Scanning…") is Blazor markup, not drawn here.
+
+  // Space reserved above the plot: the markup status bar + Scan button (64px, the height of
+  // .band-overlay in design-system.css), then two preset-label lanes, then room for the station caret
+  // (9px tall) so it does not overprint a label in the second lane.
+  bandTopReserve: 64,
+  bandLabelLane: 18,
+  bandCaretGap: 12,
+
+  // Reads a design token from the canvas's computed style, with a fallback for a missing token.
+  token: function (canvas, name, fallback) {
+    const value = getComputedStyle(canvas).getPropertyValue(name).trim();
+    return value || fallback;
+  },
+
+  drawBandMap: function (canvasId, model) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData) return;
+    this.ensureCanvasSize(canvasData);
+
+    const { canvas, ctx, width, height } = canvasData;
+    const accent = this.token(canvas, '--accent-primary', '#5CD4E8');
+    const station = this.token(canvas, '--source-radio', '#F0A830');
+    const textMedium = this.token(canvas, '--text-medium', '#B5BCC9');
+    const textLow = this.token(canvas, '--text-low', '#4B5563');
+    const separator = this.token(canvas, '--surface-separator', '#1F1F22');
+    const background = this.token(canvas, '--surface-inset', '#0A0A0C');
+    const monoFont = this.token(canvas, '--font-mono', 'monospace');
+
+    ctx.fillStyle = background;
+    ctx.fillRect(0, 0, width, height);
+
+    const labelTop = this.bandTopReserve;
+    const plotTop = labelTop + this.bandLabelLane * 2 + this.bandCaretGap;
+    const plotBottom = height - 2;
+    const plotHeight = Math.max(1, plotBottom - plotTop);
+    const xOf = (f) => f * width;
+    const yOf = (v) => plotBottom - v * plotHeight;
+
+    // MHz gridlines, matching the axis strip's 88/92/96/100/104/108.
+    ctx.strokeStyle = separator;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (const mhz of [88, 92, 96, 100, 104, 108]) {
+      const x = Math.round(xOf((mhz - 87.5) / 20.5)) + 0.5;
+      ctx.moveTo(x, plotTop);
+      ctx.lineTo(x, plotBottom);
+    }
+    ctx.stroke();
+
+    // Signal: a filled trace through the channel centres, plus a bar per channel so isolated
+    // stations read as stations rather than as the slope between two points.
+    const levels = (model && model.levels) || [];
+    if (levels.length > 0) {
+      const fill = ctx.createLinearGradient(0, plotTop, 0, plotBottom);
+      fill.addColorStop(0, this.withAlpha(accent, 0.45));
+      fill.addColorStop(1, this.withAlpha(accent, 0.04));
+
+      ctx.beginPath();
+      ctx.moveTo(xOf(levels[0].f), plotBottom);
+      for (const p of levels) ctx.lineTo(xOf(p.f), yOf(p.v));
+      ctx.lineTo(xOf(levels[levels.length - 1].f), plotBottom);
+      ctx.closePath();
+      ctx.fillStyle = fill;
+      ctx.fill();
+
+      const barWidth = Math.max(2, (width / 102.5) * 0.5);
+      ctx.fillStyle = accent;
+      for (const p of levels) {
+        const h = p.v * plotHeight;
+        if (h < 1) continue;
+        ctx.fillRect(xOf(p.f) - barWidth / 2, plotBottom - h, barWidth, h);
+      }
+    }
+
+    // Presets: a dashed tick down the plot and a short label in one of two lanes. A label that
+    // would overlap the previous one in both lanes is skipped; its tick is still drawn.
+    const presets = (model && model.presets) || [];
+    ctx.font = `11px ${monoFont}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const laneRight = [-Infinity, -Infinity];
+    for (const p of presets) {
+      const x = xOf(p.f);
+      ctx.strokeStyle = textLow;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(Math.round(x) + 0.5, plotTop);
+      ctx.lineTo(Math.round(x) + 0.5, plotBottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      const label = p.label || '';
+      const w = ctx.measureText(label).width;
+      const left = Math.min(Math.max(x - w / 2, 2), width - w - 2);
+      for (let lane = 0; lane < 2; lane++) {
+        if (left >= laneRight[lane] + 6) {
+          ctx.fillStyle = textMedium;
+          ctx.fillText(label, left + w / 2, labelTop + this.bandLabelLane * lane + this.bandLabelLane / 2);
+          laneRight[lane] = left + w;
+          break;
+        }
+      }
+    }
+
+    // Current station: a solid line in the radio source colour with a downward caret on top.
+    if (model && typeof model.station === 'number') {
+      const x = Math.round(xOf(model.station)) + 0.5;
+      ctx.strokeStyle = station;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(x, plotTop);
+      ctx.lineTo(x, plotBottom);
+      ctx.stroke();
+      ctx.fillStyle = station;
+      ctx.beginPath();
+      ctx.moveTo(x - 7, plotTop - 9);
+      ctx.lineTo(x + 7, plotTop - 9);
+      ctx.lineTo(x, plotTop);
+      ctx.closePath();
+      ctx.fill();
+      ctx.lineWidth = 1;
+    }
+  },
+
+  // Converts a #RRGGBB token to rgba() with the given alpha; other forms are returned unchanged.
+  withAlpha: function (color, alpha) {
+    const m = /^#([0-9a-f]{6})$/i.exec(color);
+    if (!m) return color;
+    const n = parseInt(m[1], 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  },
+
+  // Reports a tap on the plot to .NET as a fraction of the canvas width (0 = 87.5, 1 = 108 MHz).
+  // pointerup covers touch and mouse alike; one handler per canvas, replaced on re-registration.
+  // A tap inside the top bar (status text + Scan button) is ignored: the bar passes pointer events
+  // through to the canvas, so without this a near-miss on Scan would retune the radio.
+  registerBandTap: function (canvasId, dotNetRef) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData) return;
+    this.unregisterBandTap(canvasId);
+
+    const canvas = canvasData.canvas;
+    const handler = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const yCanvas = (e.clientY - rect.top) * (canvas.height / rect.height);
+      if (yCanvas < this.bandTopReserve) return;
+      const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      dotNetRef.invokeMethodAsync('OnBandTap', fraction).catch(() => { /* circuit gone */ });
+    };
+    canvas.addEventListener('pointerup', handler);
+    canvasData.bandTapHandler = handler;
+  },
+
+  unregisterBandTap: function (canvasId) {
+    const canvasData = this.canvases[canvasId];
+    if (!canvasData || !canvasData.bandTapHandler) return;
+    canvasData.canvas.removeEventListener('pointerup', canvasData.bandTapHandler);
+    canvasData.bandTapHandler = null;
+  },
+
   interpolateColor: function (color1, color2, t) {
     const hex1 = color1.replace('#', '');
     const hex2 = color2.replace('#', '');
@@ -617,11 +546,10 @@ export const visualizer = {
     return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
   },
 
-  // Reset spectrogram and phase scope buffers
+  // Reset the phase scope buffer
   resetBuffers: function (canvasId) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
-    canvasData.spectrogramHistory = [];
     canvasData.phaseScopeBuffer = null;
     canvasData.phaseScopePeak = null;
   },
@@ -632,6 +560,7 @@ export const visualizer = {
       cancelAnimationFrame(this.animationFrames[canvasId]);
       delete this.animationFrames[canvasId];
     }
+    this.unregisterBandTap(canvasId);
     delete this.canvases[canvasId];
     console.log(`Disposed canvas ${canvasId}`);
   }

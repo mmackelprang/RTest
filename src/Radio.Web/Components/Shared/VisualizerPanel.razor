@@ -4,10 +4,13 @@
 @inject IJSRuntime JS
 @inject ILogger<VisualizerPanel> Logger
 @inject ConfigurationApiService ConfigApi
+@inject RadioApiService RadioApi
+@inject SourcesApiService SourcesApi
+@inject AudioStateHubService AudioStateHub
 @implements IAsyncDisposable
 
 @*
-  VisualizerPanel — full-bleed visualizer with promoted 6-segment mode picker.
+  VisualizerPanel — full-bleed visualizer with a 5-segment mode picker.
 
   PR 4 rework (handoff §P1·3):
     • Replaced the floating chip group with a full-width header — 44px tall,
@@ -20,24 +23,16 @@
     • Frequency-band axis labels live in a 16px strip under the canvas
       (mono 10px, low-contrast).
 
-  Hot-fix (post-PR 4): the picker exposes all six modes the underlying
-  visualizer.js module supports — VU / Wave / Spectrum / Fall (Spectrogram)
-  / Ring (Circular) / Phase (PhaseScope). The handoff spec referenced only
-  three modes because the spec author worked from a 3-mode screenshot, but
-  the enum, JS draw calls, and SignalR subscribe paths were always wired
-  for all six.
+  AUD-76 PR 2: the picker is Wave / Spectrum / BAND / Ring / Phase. BAND (the
+  stored FM band map, touch-to-tune) took Fall's position; Fall (the audio
+  spectrogram) and VU were removed. BAND reads /api/radio/bandmap on a timer
+  and subscribes to no hub stream. The default mode is Spectrum.
 *@
 
 <div class="viz-panel">
-  <!-- 6-segment mode picker header -->
+  <!-- 5-segment mode picker header -->
   <div class="visualizer-header">
     <div class="visualizer-mode-picker" role="tablist" aria-label="Visualizer mode">
-      <button class="visualizer-mode @(_currentMode == VisualizationMode.VUMeter ? "is-active" : "")"
-              type="button"
-              @onclick="@(() => SelectMode(VisualizationMode.VUMeter))"
-              role="tab"
-              aria-selected="@(_currentMode == VisualizationMode.VUMeter ? "true" : "false")"
-              aria-label="VU meter mode">VU</button>
       <button class="visualizer-mode @(_currentMode == VisualizationMode.Waveform ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.Waveform))"
@@ -50,12 +45,12 @@
               role="tab"
               aria-selected="@(_currentMode == VisualizationMode.Spectrum ? "true" : "false")"
               aria-label="Spectrum mode">Spectrum</button>
-      <button class="visualizer-mode @(_currentMode == VisualizationMode.Spectrogram ? "is-active" : "")"
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.Band ? "is-active" : "")"
               type="button"
-              @onclick="@(() => SelectMode(VisualizationMode.Spectrogram))"
+              @onclick="@(() => SelectMode(VisualizationMode.Band))"
               role="tab"
-              aria-selected="@(_currentMode == VisualizationMode.Spectrogram ? "true" : "false")"
-              aria-label="Spectrogram (falling spectrum) mode">Fall</button>
+              aria-selected="@(_currentMode == VisualizationMode.Band ? "true" : "false")"
+              aria-label="FM band map mode">BAND</button>
       <button class="visualizer-mode @(_currentMode == VisualizationMode.Circular ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.Circular))"
@@ -97,23 +92,71 @@
       and the skeleton's z-index sits above the canvas until the @if
       flips and the skeleton unmounts.
     *@
-    <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas"></canvas>
+    <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas @(IsBandMode ? "is-band" : "")"
+            aria-label="@(IsBandMode ? "FM band map. Tap a station to tune." : null)"></canvas>
 
-    @if (_isInitialized && !_hasReceivedData)
+    @if (!_isInitialized)
+    {
+      <Skeleton Shape="Skeleton.SkeletonShape.Visualizer" />
+    }
+    else if (IsBandMode)
+    {
+      @* BAND's text lives in markup over the canvas, not on it: it is what the owner reads and what
+         the tests assert. The bar and the empty state ignore pointer events except on the button, so
+         a tap on the plot below the bar reaches the canvas's tap handler; visualizer.js ignores taps
+         that land inside the bar itself. Only the tune/scan message is a live region — the countdown
+         re-renders every second while a sweep runs and would be announced on each tick. *@
+      <div class="band-overlay">
+        <div class="band-status">
+          @if (_bandMap?.Sweep.IsSweeping == true)
+          {
+            <span class="band-status-scanning">@BandMapText.FormatScanning(_bandMap.Sweep.EstimatedSecondsRemaining, _bandMap.Sweep.Progress)</span>
+          }
+          else if (HasBandMap)
+          {
+            <span class="band-status-age">scanned @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
+          }
+          @if (_bandMessage != null)
+          {
+            <span class="band-status-message @(_bandMessageIsError ? "is-error" : "")"
+                  role="@(_bandMessageIsError ? "alert" : "status")">@_bandMessage</span>
+          }
+        </div>
+        <button type="button"
+                class="band-scan-btn"
+                disabled="@(_bandMap?.Sweep.IsSweeping == true || _scanRequestInFlight)"
+                aria-label="Scan the FM band"
+                @onclick="RequestScanAsync">Scan</button>
+      </div>
+
+      @if (!HasBandMap && _bandMap?.Sweep.IsSweeping != true)
+      {
+        <div class="band-empty">
+          <div class="band-empty-title">No scan yet</div>
+          <div class="band-empty-sub">The band is swept automatically a few minutes after start-up, or tap Scan.</div>
+        </div>
+      }
+    }
+    else if (!_hasReceivedData)
     {
       <div class="visualizer-waiting" aria-live="polite">
         <RadzenIcon Icon="graphic_eq" Style="font-size: 64px; color: var(--text-low); margin-bottom: 8px;" />
         <div style="font-size: 16px; color: var(--text-low);">Waiting for audio data...</div>
       </div>
     }
-    else if (!_isInitialized)
-    {
-      <Skeleton Shape="Skeleton.SkeletonShape.Visualizer" />
-    }
   </div>
 
-  <!-- Frequency-band axis strip (visible in spectrum-family modes) -->
-  @if (IsSpectrumMode)
+  <!-- Axis strip: audio frequency bands for the spectrum modes, MHz for BAND -->
+  @if (IsBandMode)
+  {
+    <div class="visualizer-axis is-band" aria-hidden="true">
+      @foreach (int mhz in BandAxisMhz)
+      {
+        <span style="left: @AxisLeftPercent(mhz)%">@mhz</span>
+      }
+    </div>
+  }
+  else if (IsSpectrumMode)
   {
     <div class="visualizer-axis" aria-hidden="true">
       <span>375 Hz</span>
@@ -125,46 +168,156 @@
 </div>
 
 @code {
-  private enum VisualizationMode
+  /// <summary>
+  /// The visualizer's modes. <c>internal</c> so the saved-preference mapping is unit-testable.
+  /// VU and Spectrogram ("Fall") were removed by AUD-76; see <see cref="ParseSavedMode"/>.
+  /// </summary>
+  internal enum VisualizationMode
   {
-    VUMeter,
     Waveform,
     Spectrum,
-    Spectrogram,
+    Band,
     Circular,
     PhaseScope
   }
 
-  private VisualizationMode _currentMode = VisualizationMode.VUMeter;
+  /// <summary>
+  /// How often BAND re-reads the map while a sweep runs, so the "Scanning… N s" countdown moves.
+  /// <c>internal</c> so tests advance the fake clock by the production value.
+  /// </summary>
+  internal static readonly TimeSpan BandSweepingRefresh = TimeSpan.FromSeconds(1);
+
+  /// <summary>How often BAND re-reads the map, the station and the presets when no sweep runs.</summary>
+  internal static readonly TimeSpan BandIdleRefresh = TimeSpan.FromSeconds(30);
+
+  /// <summary>
+  /// How long a tune/scan message stays up. The refresh timer is armed for no later than the message's
+  /// expiry while one is showing, and the refresh it fires clears it.
+  /// </summary>
+  internal static readonly TimeSpan BandMessageLifetime = TimeSpan.FromSeconds(4);
+
+  /// <summary>The source type <c>POST /api/sources</c> takes for the radio — what MainLayout sends.</summary>
+  internal const string RadioSourceType = "Radio";
+
+  private static readonly int[] BandAxisMhz = [88, 92, 96, 100, 104, 108];
+
+  /// <summary>
+  /// The clock BAND's refresh timer is armed against. Production never sets this. A parameter rather
+  /// than <c>@inject</c> because neither host registers a <see cref="TimeProvider"/> — the same
+  /// reasoning as DiagnosticsPanel's <c>Clock</c>.
+  /// </summary>
+  [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  private VisualizationMode _currentMode = VisualizationMode.Spectrum;
   private bool _isInitialized;
   private bool _isDisposed;
   private bool _hasReceivedData;
   private IJSObjectReference? _jsModule;
 
-  // Updates/sec telemetry — counted in HandleLevelData/HandleWaveformData/
-  // HandleSpectrumData and sampled every second by _telemetryTimer.
+  // Updates/sec telemetry — counted in HandleWaveformData/HandleSpectrumData
+  // and sampled every second by _telemetryTimer.
   private int _frameCountSinceLastSample;
   private System.Threading.Timer? _telemetryTimer;
+
+  // ── BAND state ──
+  private BandMapResponseDto? _bandMap;
+  private RadioStateDto? _radioState;
+  private List<RadioPresetDto>? _presets;
+  private ITimer? _bandTimer;
+  private bool _bandActive;
+  private bool _bandTapRegistered;
+  private bool _scanRequestInFlight;
+  private bool _tuneInFlight;
+  private string? _bandMessage;
+  private bool _bandMessageIsError;
+  private DateTimeOffset _bandMessageExpiresAt;
+  private DotNetObjectReference<VisualizerPanel>? _selfRef;
+
+  // True when the last map read failed. The kept map may still say "sweeping", and polling once a
+  // second against an API that is down would only add load and log lines; this drops to the idle
+  // cadence until a read succeeds.
+  private bool _bandMapReadFailed;
+
+  // Refreshes can overlap — a timer refresh in flight when a tap or Scan starts its own. Each takes a
+  // number, and only the newest applies its results, so an older read cannot land last and overwrite
+  // a newer one (e.g. hide a sweep that a Scan has just started).
+  private int _bandRefreshSeq;
+
+  /// <summary>
+  /// BAND refresh cycles that have run to completion — refreshed, rendered, and re-armed the timer.
+  /// Tests rendezvous on this rather than on the request being sent, because the cycle's tail finishes
+  /// after the requests are recorded, and a fake-clock advance before the re-arm would fire nothing.
+  /// </summary>
+  internal int CompletedBandRefreshes { get; private set; }
 
   // Spectrum-family modes share the freq-band axis strip beneath the canvas.
   // Picker buttons compare _currentMode directly — no per-button helper needed.
   private bool IsSpectrumMode =>
     _currentMode == VisualizationMode.Spectrum ||
-    _currentMode == VisualizationMode.Spectrogram ||
     _currentMode == VisualizationMode.Circular;
+
+  private bool IsBandMode => _currentMode == VisualizationMode.Band;
+
+  private bool HasBandMap => _bandMap != null && _bandMap.Channels.Count > 0;
+
+  private static string AxisLeftPercent(int mhz) =>
+    (FmBandMath.HzToFraction(mhz * 1_000_000.0) * 100).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+  /// <summary>
+  /// Maps a saved <c>ui.visualizer/defaultMode</c> value to a mode. AUD-76 removed two modes, and a
+  /// preference naming either must still land somewhere sensible: <c>Spectrogram</c> ("Fall") becomes
+  /// <see cref="VisualizationMode.Band"/>, which took its place in the picker; <c>VUMeter</c>, anything
+  /// unparseable and null become <see cref="VisualizationMode.Spectrum"/>, the new default.
+  /// </summary>
+  internal static VisualizationMode ParseSavedMode(string? saved)
+  {
+    if (string.Equals(saved, "Spectrogram", StringComparison.OrdinalIgnoreCase))
+    {
+      return VisualizationMode.Band;
+    }
+
+    // Enum.TryParse also accepts numeric strings ("2"), which would select by ordinal and shift
+    // whenever the enum changes; only names are honoured.
+    if (saved != null
+      && Enum.TryParse(saved, ignoreCase: true, out VisualizationMode mode)
+      && Enum.IsDefined(mode)
+      && !int.TryParse(saved, out _))
+    {
+      return mode;
+    }
+
+    return VisualizationMode.Spectrum;
+  }
 
   protected override async Task OnInitializedAsync()
   {
     try
     {
+      VisualizationMode modeBeforePreferences = _currentMode;
       await LoadPreferencesAsync();
 
       if (!VisualizationHub.IsConnected)
         await VisualizationHub.StartAsync();
 
-      VisualizationHub.OnLevelData += HandleLevelData;
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
+
+      // The preference read is an HTTP call, and the first render does not wait for it: when it is
+      // slow, OnAfterRenderAsync has already initialised the canvas and subscribed to the DEFAULT
+      // mode's hub stream. Move that subscription to the saved mode here. (When the read wins the
+      // race, OnAfterRenderAsync subscribes to the saved mode itself and there is nothing to move.)
+      if (_isInitialized && _currentMode != modeBeforePreferences)
+      {
+        VisualizationMode savedMode = _currentMode;
+        _currentMode = modeBeforePreferences;
+        await UnsubscribeFromCurrentMode();
+        _currentMode = savedMode;
+        await SubscribeToCurrentMode();
+        if (!IsBandMode)
+        {
+          await RequestInitialData();
+        }
+      }
 
       // ⚠ There is deliberately no remote mode subscription here. ENC-9a added one against the
       // server's VisualizationModeChanged broadcast; ENC-7 then removed the only thing that could
@@ -185,6 +338,14 @@
     {
       Logger.LogError(ex, "Error initializing VisualizerPanel");
     }
+
+    // BAND needs no canvas to load its data, so a saved BAND preference starts loading now. If the
+    // canvas is already initialised this also draws and registers the tap handler; otherwise
+    // OnAfterRenderAsync does both once visualizer.init has succeeded.
+    if (IsBandMode)
+    {
+      await StartBandAsync();
+    }
   }
 
   protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -200,7 +361,17 @@
         {
           _isInitialized = true;
           await SubscribeToCurrentMode();
-          await RequestInitialData();
+          if (IsBandMode)
+          {
+            await RegisterBandTapAsync();
+            await DrawBandAsync();
+          }
+          else
+          {
+            await RequestInitialData();
+          }
+
+          StateHasChanged();
         }
       }
       catch (Exception ex)
@@ -214,6 +385,11 @@
   {
     if (_currentMode == mode) return;
 
+    if (IsBandMode)
+    {
+      await StopBandAsync();
+    }
+
     await UnsubscribeFromCurrentMode();
     _currentMode = mode;
     await SubscribeToCurrentMode();
@@ -223,13 +399,22 @@
       try
       {
         await _jsModule.InvokeVoidAsync("visualizer.clear", WebConstants.ElementIds.VisualizerCanvas);
-        // Reset spectrogram/phase buffers when switching modes
+        // Reset the phase-scope buffer when switching modes
         await _jsModule.InvokeVoidAsync("visualizer.resetBuffers", WebConstants.ElementIds.VisualizerCanvas);
       }
       catch (Exception ex) { Logger.LogError(ex, "Error clearing canvas"); }
     }
 
-    await RequestInitialData();
+    if (IsBandMode)
+    {
+      await StartBandAsync();
+      await RegisterBandTapAsync();
+    }
+    else
+    {
+      await RequestInitialData();
+    }
+
     await SavePreferenceAsync("defaultMode", _currentMode.ToString());
     StateHasChanged();
   }
@@ -240,14 +425,15 @@
     {
       switch (_currentMode)
       {
-        case VisualizationMode.VUMeter: await VisualizationHub.SubscribeToLevelsAsync(); break;
         case VisualizationMode.Waveform:
         case VisualizationMode.PhaseScope:
           await VisualizationHub.SubscribeToWaveformAsync(); break;
         case VisualizationMode.Spectrum:
-        case VisualizationMode.Spectrogram:
         case VisualizationMode.Circular:
           await VisualizationHub.SubscribeToSpectrumAsync(); break;
+        case VisualizationMode.Band:
+          // BAND reads the stored map over REST on its own timer; it has no hub stream.
+          break;
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error subscribing to {Mode}", _currentMode); }
@@ -259,14 +445,14 @@
     {
       switch (_currentMode)
       {
-        case VisualizationMode.VUMeter: await VisualizationHub.UnsubscribeFromLevelsAsync(); break;
         case VisualizationMode.Waveform:
         case VisualizationMode.PhaseScope:
           await VisualizationHub.UnsubscribeFromWaveformAsync(); break;
         case VisualizationMode.Spectrum:
-        case VisualizationMode.Spectrogram:
         case VisualizationMode.Circular:
           await VisualizationHub.UnsubscribeFromSpectrumAsync(); break;
+        case VisualizationMode.Band:
+          break;
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error unsubscribing from {Mode}", _currentMode); }
@@ -278,17 +464,12 @@
     {
       switch (_currentMode)
       {
-        case VisualizationMode.VUMeter:
-          var levels = await VisualizationHub.GetLevelsAsync();
-          if (levels != null) await HandleLevelData(levels);
-          break;
         case VisualizationMode.Waveform:
         case VisualizationMode.PhaseScope:
           var waveform = await VisualizationHub.GetWaveformAsync();
           if (waveform != null) await HandleWaveformData(waveform);
           break;
         case VisualizationMode.Spectrum:
-        case VisualizationMode.Spectrogram:
         case VisualizationMode.Circular:
           var spectrum = await VisualizationHub.GetSpectrumAsync();
           if (spectrum != null) await HandleSpectrumData(spectrum);
@@ -296,23 +477,6 @@
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error requesting initial visualization data"); }
-  }
-
-  private async Task HandleLevelData(LevelDataDto data)
-  {
-    if (_isDisposed || !_isInitialized || _jsModule == null || _currentMode != VisualizationMode.VUMeter) return;
-    System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
-    var wasFirst = !_hasReceivedData;
-    _hasReceivedData = true;
-    try
-    {
-      await _jsModule.InvokeVoidAsync("visualizer.drawVUMeter",
-        WebConstants.ElementIds.VisualizerCanvas, data.LeftPeak, data.RightPeak, data.LeftRms, data.RightRms, data.IsClipping);
-      if (wasFirst) await InvokeAsync(StateHasChanged);
-    }
-    catch (TaskCanceledException) { }
-    catch (OperationCanceledException) { }
-    catch (Exception ex) { Logger.LogError(ex, "Error drawing VU meter"); }
   }
 
   private async Task HandleWaveformData(WaveformDataDto data)
@@ -341,19 +505,15 @@
   {
     if (_isDisposed || !_isInitialized || _jsModule == null) return;
     if (_currentMode != VisualizationMode.Spectrum &&
-        _currentMode != VisualizationMode.Spectrogram &&
         _currentMode != VisualizationMode.Circular) return;
     System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
     try
     {
-      var method = _currentMode switch
-      {
-        VisualizationMode.Spectrogram => "visualizer.drawSpectrogram",
-        VisualizationMode.Circular => "visualizer.drawCircularSpectrum",
-        _ => "visualizer.drawSpectrum"
-      };
+      var method = _currentMode == VisualizationMode.Circular
+        ? "visualizer.drawCircularSpectrum"
+        : "visualizer.drawSpectrum";
       await _jsModule.InvokeVoidAsync(method,
         WebConstants.ElementIds.VisualizerCanvas, data.Magnitudes, data.Frequencies);
       if (wasFirst) await InvokeAsync(StateHasChanged);
@@ -363,6 +523,342 @@
     catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum/{Mode}", _currentMode); }
   }
 
+  // ── BAND ────────────────────────────────────────────────────────────────
+
+  /// <summary>
+  /// Loads the map, the station and the presets, arms the refresh timer, and registers the canvas tap
+  /// handler (a no-op until the canvas is initialised; OnAfterRenderAsync registers it then).
+  /// </summary>
+  private async Task StartBandAsync()
+  {
+    _bandActive = true;
+    await RefreshBandAsync(includePresets: true);
+    CompleteBandCycle();
+    await RegisterBandTapAsync();
+  }
+
+  /// <summary>Stops the refresh timer and releases the canvas tap handler.</summary>
+  private async Task StopBandAsync()
+  {
+    _bandActive = false;
+    _bandTimer?.Dispose();
+    _bandTimer = null;
+    await UnregisterBandTapAsync();
+  }
+
+  /// <summary>Ends a refresh cycle: re-arms the timer, then counts the cycle.</summary>
+  private void CompleteBandCycle()
+  {
+    ArmBandTimer();
+    CompletedBandRefreshes++;
+  }
+
+  /// <summary>
+  /// Re-arms the one-shot refresh timer: <see cref="BandSweepingRefresh"/> while the last successful
+  /// map read showed a sweep, else <see cref="BandIdleRefresh"/> — and no later than the expiry of a
+  /// message that is showing. The timer is one-shot and every arm disposes the previous one, so at
+  /// most one timer exists and timer refreshes cannot stack up behind a slow API. (A tap or Scan
+  /// refresh can still overlap a timer refresh; <see cref="_bandRefreshSeq"/> handles that.)
+  /// </summary>
+  private void ArmBandTimer()
+  {
+    _bandTimer?.Dispose();
+    _bandTimer = null;
+    if (_isDisposed || !_bandActive)
+    {
+      return;
+    }
+
+    TimeSpan due = !_bandMapReadFailed && _bandMap?.Sweep.IsSweeping == true ? BandSweepingRefresh : BandIdleRefresh;
+    if (_bandMessage != null)
+    {
+      TimeSpan untilExpiry = _bandMessageExpiresAt - Clock.GetUtcNow();
+      due = untilExpiry < due ? (untilExpiry > TimeSpan.Zero ? untilExpiry : TimeSpan.Zero) : due;
+    }
+
+    _bandTimer = Clock.CreateTimer(_ => _ = InvokeAsync(OnBandTimerAsync), null, due, Timeout.InfiniteTimeSpan);
+  }
+
+  private async Task OnBandTimerAsync()
+  {
+    if (_isDisposed || !_bandActive)
+    {
+      return;
+    }
+
+    // Presets change rarely; re-read them on the idle cadence only, not every second of a sweep.
+    await RefreshBandAsync(includePresets: _bandMap?.Sweep.IsSweeping != true);
+    CompleteBandCycle();
+  }
+
+  /// <summary>
+  /// One BAND refresh: the map and the radio state (for the station marker), plus the presets when
+  /// asked; then redraw and re-render. Each read degrades on its own — a failed preset read keeps the
+  /// previous presets, a failed map read keeps the previous map (and drops the cadence to idle), and a
+  /// failed state read keeps the previous station marker.
+  /// </summary>
+  private async Task RefreshBandAsync(bool includePresets)
+  {
+    int seq = ++_bandRefreshSeq;
+
+    // Cleared before any await, so that neither a stale (discarded) refresh nor a failed one can leave
+    // an expired message in place — ArmBandTimer would then re-arm at zero and refresh in a loop.
+    if (_bandMessage != null && Clock.GetUtcNow() >= _bandMessageExpiresAt)
+    {
+      _bandMessage = null;
+    }
+
+    try
+    {
+      Task<BandMapResponseDto?> mapTask = RadioApi.GetBandMapAsync();
+      Task<RadioStateRead> stateTask = RadioApi.ReadStateAsync();
+      Task<List<RadioPresetDto>?> presetsTask = includePresets
+        ? RadioApi.GetPresetsForPollAsync()
+        : Task.FromResult<List<RadioPresetDto>?>(null);
+      await Task.WhenAll(mapTask, stateTask, presetsTask);
+
+      if (seq != _bandRefreshSeq)
+      {
+        // A newer refresh started while this one was in flight; its results win.
+        return;
+      }
+
+      BandMapResponseDto? map = await mapTask;
+      _bandMapReadFailed = map == null;
+      _bandMap = map ?? _bandMap;
+      RadioStateRead state = await stateTask;
+      // The station marker needs the state; with the radio not active (400) there is none. When the
+      // read failed outright, keep the last known station rather than blanking the marker.
+      _radioState = state.Status switch
+      {
+        RadioStateReadStatus.Active => state.State,
+        RadioStateReadStatus.NotActive => null,
+        _ => _radioState,
+      };
+      _presets = await presetsTask ?? _presets;
+
+      if (!_isDisposed && _bandActive)
+      {
+        await DrawBandAsync();
+        StateHasChanged();
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Band map refresh failed");
+    }
+  }
+
+  /// <summary>
+  /// Hands the canvas a drawing model in plot coordinates (0–1 across 87.5–108 MHz), so the JS stays
+  /// arithmetic-free: normalised channel heights, the station marker (FM only, radio active), and the
+  /// FM presets as labelled ticks.
+  /// </summary>
+  private async Task DrawBandAsync()
+  {
+    if (_isDisposed || !_isInitialized || _jsModule == null || !IsBandMode)
+    {
+      return;
+    }
+
+    IReadOnlyList<BandMapChannelDto> channels = _bandMap?.Channels ?? Array.Empty<BandMapChannelDto>();
+    double[] heights = FmBandMath.NormalizeLevels(channels);
+    object[] levels = channels
+      .Select((c, i) => (object)new { f = FmBandMath.HzToFraction(c.FrequencyHz), v = heights[i] })
+      .ToArray();
+
+    double? station = _radioState != null && IsFm(_radioState.Band) && InPlot(_radioState.Frequency)
+      ? FmBandMath.HzToFraction(_radioState.Frequency)
+      : null;
+
+    object[] presets = (_presets ?? [])
+      .Where(p => IsFm(p.Band) && InPlot(p.Frequency))
+      .OrderBy(p => p.Frequency)
+      .Select(p => (object)new { f = FmBandMath.HzToFraction(p.Frequency), label = PresetLabel(p) })
+      .ToArray();
+
+    try
+    {
+      await _jsModule.InvokeVoidAsync("visualizer.drawBandMap", WebConstants.ElementIds.VisualizerCanvas,
+        new { levels, station, presets, sweeping = _bandMap?.Sweep.IsSweeping == true });
+    }
+    catch (TaskCanceledException) { }
+    catch (OperationCanceledException) { }
+    catch (Exception ex) { Logger.LogWarning(ex, "Error drawing the band map"); }
+  }
+
+  private static bool IsFm(string? band) => string.Equals(band, "FM", StringComparison.OrdinalIgnoreCase);
+
+  private static bool InPlot(double hz) => hz >= FmBandMath.PlotMinHz && hz <= FmBandMath.PlotMaxHz;
+
+  /// <summary>A preset's tick label: its name when short, else its frequency.</summary>
+  private static string PresetLabel(RadioPresetDto preset)
+  {
+    string name = preset.Name?.Trim() ?? string.Empty;
+    return name.Length is > 0 and <= 8 ? name : BandMapText.FormatMhz(preset.Frequency);
+  }
+
+  private async Task RegisterBandTapAsync()
+  {
+    // IsBandMode is re-checked because callers await before getting here: the user can pick another
+    // mode while BAND is still loading, and the handler must not be left registered outside BAND.
+    if (_bandTapRegistered || !_isInitialized || _jsModule == null || _isDisposed || !IsBandMode)
+    {
+      return;
+    }
+
+    try
+    {
+      _selfRef ??= DotNetObjectReference.Create(this);
+      await _jsModule.InvokeVoidAsync("visualizer.registerBandTap", WebConstants.ElementIds.VisualizerCanvas, _selfRef);
+      _bandTapRegistered = true;
+    }
+    catch (Exception ex) { Logger.LogWarning(ex, "Could not register the band tap handler"); }
+  }
+
+  private async Task UnregisterBandTapAsync()
+  {
+    if (!_bandTapRegistered || _jsModule == null)
+    {
+      return;
+    }
+
+    _bandTapRegistered = false;
+    try
+    {
+      await _jsModule.InvokeVoidAsync("visualizer.unregisterBandTap", WebConstants.ElementIds.VisualizerCanvas);
+    }
+    catch (Exception ex) { Logger.LogDebug(ex, "Could not unregister the band tap handler"); }
+  }
+
+  /// <summary>
+  /// A tap on the band plot, as a fraction of its width (0 = 87.5 MHz, 1 = 108 MHz). Resolved by
+  /// <see cref="FmBandMath.ResolveTapTarget"/> and tuned by <see cref="TuneToAsync"/>. A tap during a
+  /// sweep is allowed: the API cancels the sweep and the user's tune wins (AUD-76 PR 1).
+  /// </summary>
+  [JSInvokable]
+  public Task OnBandTap(double fraction)
+  {
+    if (_isDisposed || !IsBandMode)
+    {
+      return Task.CompletedTask;
+    }
+
+    long target = FmBandMath.ResolveTapTarget(FmBandMath.FractionToHz(fraction), _bandMap?.Channels);
+    return InvokeAsync(() => TuneToAsync(target));
+  }
+
+  /// <summary>
+  /// Tunes the radio to <paramref name="frequencyHz"/>, switching to the radio source first when the
+  /// API says it is not the active one (400 from <c>/api/radio/state</c>), and stopping a running seek
+  /// scan first. A state read that fails for any other reason tunes nothing and switches nothing. A
+  /// second tap while one tune is in flight is ignored.
+  /// </summary>
+  /// <remarks>
+  /// No band is selected first: <c>RadioReceiver.SetFrequency</c> picks the band that contains the
+  /// frequency (FM for 87.9–107.9, which precedes VHF in <c>BandPresets.AllBands</c>), and a separate
+  /// <c>SetBand("FM")</c> would restart the stream twice and briefly tune the FM band's lower edge.
+  /// </remarks>
+  internal async Task TuneToAsync(long frequencyHz)
+  {
+    if (_tuneInFlight)
+    {
+      return;
+    }
+
+    _tuneInFlight = true;
+    string mhz = BandMapText.FormatMhz(frequencyHz);
+    try
+    {
+      RadioStateRead read = await RadioApi.ReadStateAsync();
+      if (read.Status == RadioStateReadStatus.Unavailable)
+      {
+        // Not "not active" — unknown. Switching source on a transient failure would re-select a
+        // radio that is already playing, so do nothing and say why.
+        ShowBandMessage("The radio API is not reachable", isError: true);
+        return;
+      }
+
+      if (read.Status == RadioStateReadStatus.NotActive)
+      {
+        if (!await SourcesApi.SwitchSourceAsync(RadioSourceType))
+        {
+          ShowBandMessage("Could not switch to the radio", isError: true);
+          return;
+        }
+
+        // Let the source pills follow at once rather than on the API's next state poll — the same
+        // nudge MainLayout sends after its own switch.
+        await AudioStateHub.NotifySourceChangedAsync();
+      }
+      else if (read.State?.IsScanning == true)
+      {
+        // A seek scan still running would move off the tapped station a moment later — the hazard
+        // PresetSelectorService guards against the same way.
+        await RadioApi.StopScanAsync();
+      }
+
+      if (await RadioApi.SetFrequencyAsync(frequencyHz))
+      {
+        ShowBandMessage($"Tuning {mhz} FM", isError: false);
+      }
+      else
+      {
+        ShowBandMessage($"Could not tune to {mhz} FM", isError: true);
+      }
+
+      await RefreshBandAsync(includePresets: false);
+      CompleteBandCycle();
+    }
+    finally
+    {
+      _tuneInFlight = false;
+    }
+  }
+
+  /// <summary>
+  /// The Scan button: <c>POST /api/radio/bandmap/scan</c>. On 202 the map is re-read at once, which
+  /// shows the sweep overlay and switches the timer to the one-second cadence; on 409/503 the API's
+  /// reason is shown.
+  /// </summary>
+  private async Task RequestScanAsync()
+  {
+    if (_scanRequestInFlight)
+    {
+      return;
+    }
+
+    _scanRequestInFlight = true;
+    try
+    {
+      BandScanRequestResult result = await RadioApi.RequestBandScanAsync();
+      if (!result.Accepted)
+      {
+        ShowBandMessage(result.Error ?? (result.StatusCode == 0 ? "The radio API is not reachable" : "Scan unavailable"),
+          isError: true);
+      }
+
+      await RefreshBandAsync(includePresets: false);
+      CompleteBandCycle();
+    }
+    finally
+    {
+      _scanRequestInFlight = false;
+    }
+  }
+
+  private void ShowBandMessage(string message, bool isError)
+  {
+    _bandMessage = message;
+    _bandMessageIsError = isError;
+    _bandMessageExpiresAt = Clock.GetUtcNow() + BandMessageLifetime;
+    // Re-arm so the message is cleared on time even on a path that returns without a refresh.
+    ArmBandTimer();
+    StateHasChanged();
+  }
+
+  // ── preferences / dispose ───────────────────────────────────────────────
+
   private async Task LoadPreferencesAsync()
   {
     try
@@ -370,8 +866,7 @@
       var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.visualizer");
       if (prefs != null && prefs.TryGetValue("defaultMode", out var modeObj) && modeObj != null)
       {
-        if (Enum.TryParse<VisualizationMode>(modeObj.ToString(), out var mode))
-          _currentMode = mode;
+        _currentMode = ParseSavedMode(modeObj.ToString());
       }
     }
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to load visualizer preferences"); }
@@ -391,7 +886,10 @@
     // Publish a final zero so subscribers don't see a stale value after dispose.
     try { Telemetry.SetUpdatesPerSecond(0); } catch { /* ignore */ }
 
-    VisualizationHub.OnLevelData -= HandleLevelData;
+    _bandActive = false;
+    _bandTimer?.Dispose();
+    _bandTimer = null;
+
     VisualizationHub.OnWaveformData -= HandleWaveformData;
     VisualizationHub.OnSpectrumData -= HandleSpectrumData;
 
@@ -399,10 +897,13 @@
 
     if (_jsModule != null)
     {
+      await UnregisterBandTapAsync();
       try { await _jsModule.InvokeVoidAsync("visualizer.dispose", WebConstants.ElementIds.VisualizerCanvas); }
       catch { /* ignore */ }
       try { await _jsModule.DisposeAsync(); }
       catch { /* ignore */ }
     }
+
+    _selfRef?.Dispose();
   }
 }

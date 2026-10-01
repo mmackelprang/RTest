@@ -2295,7 +2295,7 @@ body {
 .visualizer-mode-picker {
   flex: 1;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   height: 44px;
 }
 
@@ -2391,6 +2391,143 @@ body {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.05em;
+}
+
+/* BAND (AUD-76): the MHz labels sit at their frequency's position, the same
+   fraction of the width the canvas plots them at, rather than spaced evenly. */
+.visualizer-axis.is-band {
+  position: relative;
+  display: block;
+  padding: 0;
+}
+
+.visualizer-axis.is-band span {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.visualizer-axis.is-band span:last-child {
+  transform: translate(-100%, -50%);
+  padding-right: var(--sp-1);
+}
+
+/* BAND overlay: status line (age / "Scanning…" / tune feedback) on the left,
+   the Scan button on the right. The bar passes pointer events through so a
+   tap anywhere on the plot reaches the canvas; only the button takes them.
+   Its 64px height is the space visualizer.js reserves above the plot
+   (bandTopReserve). */
+.band-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3) 0 var(--sp-4);
+  pointer-events: none;
+}
+
+.band-status {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+}
+
+.band-status-scanning {
+  /* Full opacity, deliberately not ambientPulse: this countdown is the one status the owner
+     needs to read while a sweep runs, and the pulse's 30–60% opacity drops it below 4:1. */
+  color: var(--accent-primary);
+}
+
+.band-status-message {
+  color: var(--text-high);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.band-status-message.is-error {
+  color: var(--signal-red);
+}
+
+/* Matches the existing Scan button (.bt-scan-button, §BT) — outlined in the accent, accent-dim on
+   hover, faded when disabled — except that it is 48px tall (--touch-min), not 44px. */
+.band-scan-btn {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  min-width: 96px;
+  min-height: var(--touch-min);
+  padding: 0 var(--sp-5);
+  background: transparent;
+  border: 1px solid var(--accent-primary);
+  border-radius: 6px;
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background var(--anim-duration-fast) var(--anim-ease-standard);
+}
+
+.band-scan-btn:hover:not(:disabled),
+.band-scan-btn:active:not(:disabled) {
+  background: var(--accent-dim);
+}
+
+.band-scan-btn:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+.band-scan-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* The BAND canvas is a tap target (tap-to-tune), styled like the seek bar's hit area. */
+.visualizer-canvas.is-band {
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* "No scan yet": centred like .visualizer-waiting, and likewise transparent
+   to taps so the plot stays touchable underneath. */
+.band-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  text-align: center;
+  pointer-events: none;
+}
+
+.band-empty-title {
+  font-family: var(--font-mono);
+  font-size: 16px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+}
+
+.band-empty-sub {
+  margin-top: var(--sp-2);
+  font-size: 13px;
+  color: var(--text-medium);
 }
 
 /* ─── §29  Metric Tile + Sparkline (PR 4) ─────────────────────────────────── */

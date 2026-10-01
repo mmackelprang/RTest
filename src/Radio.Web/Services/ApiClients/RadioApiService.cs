@@ -54,6 +54,43 @@ public class RadioApiService
     }
   }
 
+  /// <summary>
+  /// Reads <c>GET /api/radio/state</c>, keeping "the radio is not the active source" (400) apart from
+  /// "the state could not be read" (anything else). Used by the visualizer's BAND view (AUD-76), which
+  /// switches source only on the first and must not on the second.
+  /// </summary>
+  /// <remarks>
+  /// Failures log at Debug, not Error: BAND polls this once a second while a sweep runs, and on
+  /// <c>radio-web</c> every level at Information and above reaches journald.
+  /// </remarks>
+  public async Task<RadioStateRead> ReadStateAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      using HttpResponseMessage response = await _httpClient.GetAsync("/api/radio/state", cancellationToken);
+      if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+      {
+        return new RadioStateRead(RadioStateReadStatus.NotActive, null);
+      }
+
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogDebug("Radio state read answered {StatusCode}", (int)response.StatusCode);
+        return new RadioStateRead(RadioStateReadStatus.Unavailable, null);
+      }
+
+      RadioStateDto? state = await response.Content.ReadFromJsonAsync<RadioStateDto>(cancellationToken);
+      return state == null
+        ? new RadioStateRead(RadioStateReadStatus.Unavailable, null)
+        : new RadioStateRead(RadioStateReadStatus.Active, state);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Could not read the radio state");
+      return new RadioStateRead(RadioStateReadStatus.Unavailable, null);
+    }
+  }
+
   public async Task<bool> SetFrequencyAsync(double frequency, CancellationToken cancellationToken = default)
   {
     try
@@ -263,7 +300,18 @@ public class RadioApiService
     }
   }
 
-  public async Task<List<RadioPresetDto>?> GetPresetsAsync(CancellationToken cancellationToken = default)
+  public Task<List<RadioPresetDto>?> GetPresetsAsync(CancellationToken cancellationToken = default) =>
+    GetPresetsCoreAsync(LogLevel.Error, cancellationToken);
+
+  /// <summary>
+  /// <see cref="GetPresetsAsync"/> for a poll: a failure logs at Debug, because the visualizer's BAND
+  /// view (AUD-76) re-reads the presets every 30 s and <c>radio-web</c>'s Information and above reach
+  /// journald.
+  /// </summary>
+  public Task<List<RadioPresetDto>?> GetPresetsForPollAsync(CancellationToken cancellationToken = default) =>
+    GetPresetsCoreAsync(LogLevel.Debug, cancellationToken);
+
+  private async Task<List<RadioPresetDto>?> GetPresetsCoreAsync(LogLevel failureLevel, CancellationToken cancellationToken)
   {
     try
     {
@@ -271,7 +319,7 @@ public class RadioApiService
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to get presets");
+      _logger.Log(failureLevel, ex, "Failed to get presets");
       return null;
     }
   }
@@ -341,6 +389,73 @@ public class RadioApiService
       _logger.LogError(ex, "Failed to rename preset {Id}", id);
       return false;
     }
+  }
+
+  /// <summary>
+  /// Reads the stored FM band map and the sweep status (<c>GET /api/radio/bandmap</c>, AUD-76).
+  /// </summary>
+  /// <returns>The map, or null when the API could not be read.</returns>
+  /// <remarks>
+  /// A failure logs at Debug, not Error: the visualizer's BAND view polls this once a second while a
+  /// sweep runs, and on <c>radio-web</c> every level at Information and above reaches journald.
+  /// </remarks>
+  public async Task<BandMapResponseDto?> GetBandMapAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      return await _httpClient.GetFromJsonAsync<BandMapResponseDto>("/api/radio/bandmap", cancellationToken);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Could not read the band map");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Requests a band sweep (<c>POST /api/radio/bandmap/scan</c>, AUD-76). The API answers 202 when a
+  /// sweep started or was already running, 409 when the SDR device is busy and 503 when sweeps are
+  /// disabled or there is no SDR device; the last two carry an <c>error</c> message, returned here.
+  /// </summary>
+  public async Task<BandScanRequestResult> RequestBandScanAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      using HttpResponseMessage response = await _httpClient.PostAsync("/api/radio/bandmap/scan", null, cancellationToken);
+      if (response.IsSuccessStatusCode)
+      {
+        return new BandScanRequestResult(true, (int)response.StatusCode, null);
+      }
+
+      return new BandScanRequestResult(false, (int)response.StatusCode, await ReadErrorAsync(response, cancellationToken));
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Band scan request failed");
+      return new BandScanRequestResult(false, 0, null);
+    }
+  }
+
+  /// <summary>Reads <c>{"error": "..."}</c> from a failed response; null when there is none.</summary>
+  private static async Task<string?> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+  {
+    try
+    {
+      System.Text.Json.JsonElement body =
+        await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken);
+      if (body.ValueKind == System.Text.Json.JsonValueKind.Object
+        && body.TryGetProperty("error", out System.Text.Json.JsonElement error)
+        && error.ValueKind == System.Text.Json.JsonValueKind.String)
+      {
+        return error.GetString();
+      }
+    }
+    catch (Exception)
+    {
+      // No body, or not JSON: the status code alone is the answer.
+    }
+
+    return null;
   }
 
   public async Task<List<RadioDeviceDto>?> GetAvailableDevicesAsync(CancellationToken cancellationToken = default)

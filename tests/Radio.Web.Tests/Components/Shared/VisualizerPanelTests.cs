@@ -19,24 +19,22 @@ namespace Radio.Web.Tests.Components.Shared;
 /// bUnit tests for the <see cref="VisualizerPanel"/> mode picker.
 ///
 /// PR 4 of the design tightening arc (handoff §P1·3) promoted the mode
-/// picker from a floating chip group into a full-width header. The
-/// original spec referenced only three modes (VU / Wave / Spectrum)
-/// because the spec author worked from a 3-mode screenshot, but the
-/// underlying <c>VisualizationMode</c> enum, the JS visualizer module,
-/// and the SignalR subscribe / unsubscribe paths were always wired for
-/// six modes:
+/// picker from a floating chip group into a full-width header with six
+/// segments. AUD-76 then replaced Fall (the audio spectrogram) with BAND
+/// (the stored FM band map) in the same position and removed VU, leaving
+/// five:
 ///
 /// <list type="bullet">
-///   <item>VU (VUMeter)</item>
 ///   <item>Wave (Waveform)</item>
-///   <item>Spectrum (Spectrum)</item>
-///   <item>Fall (Spectrogram)</item>
+///   <item>Spectrum (Spectrum) — the default</item>
+///   <item>BAND (Band)</item>
 ///   <item>Ring (Circular)</item>
 ///   <item>Phase (PhaseScope)</item>
 /// </list>
 ///
-/// These tests lock the contract that all six segments render in the
-/// header and that clicking each segment activates that segment.
+/// These tests lock the contract that exactly those five segments render
+/// in the header and that clicking each segment activates that segment.
+/// BAND's own behaviour is in <see cref="VisualizerPanelBandTests"/>.
 /// </summary>
 public class VisualizerPanelTests : TestContext
 {
@@ -69,6 +67,15 @@ public class VisualizerPanelTests : TestContext
     // swallows preference-load exceptions and stays at its default mode.
     Services.AddHttpClient<ConfigurationApiService>();
 
+    // BAND (AUD-76) reads the radio API and may switch sources; hermetic like the rest.
+    Services.AddHttpClient<RadioApiService>();
+    Services.AddHttpClient<SourcesApiService>();
+    Services.AddSingleton(sp =>
+      new AudioStateHubService(
+        NullLogger<AudioStateHubService>.Instance,
+        sp.GetRequiredService<IConfiguration>(),
+        transport: new OfflineHubTransport()));
+
     // The hub services connect lazily; without a server they stay
     // disconnected. The panel handles that path (IsConnected=false → dot
     // stays red, no data callbacks fire).
@@ -93,52 +100,70 @@ public class VisualizerPanelTests : TestContext
   }
 
   [Fact]
-  public void ModePicker_RendersExactlySixModeButtons()
+  public void ModePicker_RendersExactlyFiveModeButtons()
   {
-    // The picker exposes every mode the visualizer.js module supports.
-    // A regression in PR 4 dropped Fall / Ring / Phase from the UI even
-    // though the wiring (enum, JS calls, subscribe paths) was intact —
-    // this test locks against that regression returning.
+    // AUD-76 removed VU and replaced Fall with BAND. A regression in PR 4 once dropped segments
+    // from the UI while the wiring was intact — this locks the count both ways.
     var cut = RenderComponent<VisualizerPanel>();
-    cut.FindAll(".visualizer-mode").Count.Should().Be(6);
+    cut.FindAll(".visualizer-mode").Count.Should().Be(5);
   }
 
   [Fact]
-  public void ModePicker_RendersAllSixLabelsInOrder()
+  public void ModePicker_RendersAllFiveLabelsInOrder()
   {
-    // Visual order matches the handoff sequence (primary → secondary):
-    // VU, Wave, Spectrum, Fall, Ring, Phase.
+    // BAND sits where Fall was; VU is gone.
     var cut = RenderComponent<VisualizerPanel>();
     var labels = cut.FindAll(".visualizer-mode")
       .Select(e => e.TextContent.Trim())
       .ToList();
-    labels.Should().Equal("VU", "Wave", "Spectrum", "Fall", "Ring", "Phase");
+    labels.Should().Equal("Wave", "Spectrum", "BAND", "Ring", "Phase");
   }
 
   [Fact]
-  public void ModePicker_DefaultsToVuModeActive()
+  public void ModePicker_DefaultsToSpectrumModeActive()
   {
-    // _currentMode defaults to VUMeter when no saved preference loads
-    // (the config call fails in the test rig and is swallowed).
+    // _currentMode defaults to Spectrum when no saved preference loads
+    // (the config call fails in the test rig and is swallowed). AUD-76: it was VU.
     var cut = RenderComponent<VisualizerPanel>();
     var buttons = cut.FindAll(".visualizer-mode").ToList();
-    (buttons[0].GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-    buttons[0].GetAttribute("aria-selected").Should().Be("true");
+    var spectrum = buttons.Single(b => b.TextContent.Trim() == "Spectrum");
+    (spectrum.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+    spectrum.GetAttribute("aria-selected").Should().Be("true");
 
-    foreach (var b in buttons.Skip(1))
+    foreach (var b in buttons.Where(b => b != spectrum))
     {
       (b.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
       b.GetAttribute("aria-selected").Should().Be("false");
     }
   }
 
-  [Fact]
-  public void ModePicker_FallButton_HasSpectrogramAriaLabel()
+  [Theory]
+  [InlineData("Spectrogram", "Band")]
+  [InlineData("spectrogram", "Band")]
+  [InlineData("VUMeter", "Spectrum")]
+  [InlineData("garbage", "Spectrum")]
+  [InlineData("", "Spectrum")]
+  [InlineData(null, "Spectrum")]
+  [InlineData("2", "Spectrum")]
+  [InlineData("Band", "Band")]
+  [InlineData("Waveform", "Waveform")]
+  [InlineData("Circular", "Circular")]
+  [InlineData("PhaseScope", "PhaseScope")]
+  [InlineData("Spectrum", "Spectrum")]
+  public void SavedPreference_MapsRemovedModesOntoTheirSuccessors(string? saved, string expected)
   {
-    // Fall is the user-facing label for VisualizationMode.Spectrogram.
+    // AUD-76 removed two modes that a saved ui.visualizer/defaultMode can still name: "Spectrogram"
+    // (Fall) lands on BAND, which took its place; "VUMeter" and anything unreadable land on the new
+    // default, Spectrum. A numeric string is not a mode name and must not select by ordinal.
+    VisualizerPanel.ParseSavedMode(saved).ToString().Should().Be(expected);
+  }
+
+  [Fact]
+  public void ModePicker_BandButton_HasBandMapAriaLabel()
+  {
     var cut = RenderComponent<VisualizerPanel>();
-    var fall = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Fall");
-    (fall.GetAttribute("aria-label") ?? string.Empty).Should().ContainAll("Spectrogram", "mode");
+    var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
+    (band.GetAttribute("aria-label") ?? string.Empty).Should().ContainAll("band", "mode");
   }
 
   [Fact]
@@ -160,13 +185,13 @@ public class VisualizerPanelTests : TestContext
   }
 
   [Fact]
-  public void ModePicker_ClickingFall_ActivatesFallSegment()
+  public void ModePicker_ClickingBand_ActivatesBandSegment()
   {
-    // Clicking Fall flips _currentMode to Spectrogram. The is-active class
-    // and aria-selected attribute should move from VU to Fall.
+    // Clicking BAND flips _currentMode to Band. The is-active class
+    // and aria-selected attribute should move from Spectrum to BAND.
     var cut = RenderComponent<VisualizerPanel>();
-    var fall = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Fall");
-    fall.Click();
+    var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
+    band.Click();
 
     // SelectMode assigns _currentMode only after `await UnsubscribeFromCurrentMode()`,
     // so the re-render is not guaranteed to have happened when Click() returns. See
@@ -174,13 +199,13 @@ public class VisualizerPanelTests : TestContext
     // for rather than raced.
     cut.WaitForAssertion(() =>
     {
-      var fallAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Fall");
-      (fallAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-      fallAfter.GetAttribute("aria-selected").Should().Be("true");
+      var bandAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
+      (bandAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
+      bandAfter.GetAttribute("aria-selected").Should().Be("true");
 
-      var vuAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "VU");
-      (vuAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
-      vuAfter.GetAttribute("aria-selected").Should().Be("false");
+      var spectrumAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Spectrum");
+      (spectrumAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
+      spectrumAfter.GetAttribute("aria-selected").Should().Be("false");
     }, timeout: TimeSpan.FromSeconds(2));
   }
 
@@ -237,9 +262,9 @@ public class VisualizerPanelTests : TestContext
     hubEvents.Should().NotContain("VisualizationModeChanged");
 
     // And the capability itself still works locally - see ModePicker_ClickingPhase_ActivatesPhaseSegment
-    // above, which drives the six-segment picker and is what the owner actually uses.
+    // above, which drives the five-segment picker and is what the owner actually uses.
     var cut = RenderComponent<VisualizerPanel>();
-    cut.FindAll(".visualizer-mode").Count.Should().Be(6);
+    cut.FindAll(".visualizer-mode").Count.Should().Be(5);
   }
 
   [Fact]
