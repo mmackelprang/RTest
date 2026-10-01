@@ -337,13 +337,22 @@
   private List<AudioDeviceDto> _availableOutputs = new();
   private string? _selectedSourceId = null;
   private string? _selectedOutputId = null;
+  // AUD-85 (re-review M-b). The active output as the server last reported it — every OutputChanged
+  // broadcast (recorded even when it equals _selectedOutputId, which during a pick is only an
+  // optimistic guess), and every output-switching call the API answered with success. Null until
+  // the first such report. A failed pick restores the selection from this, not blindly from what
+  // was selected before the pick: the API may have ended on Cast even though this circuit's request
+  // failed (a client-side timeout while the API completed, or a 502 whose restore could not run).
+  private string? _serverOutputId = null;
   // The saved default Cast device — what a one-tap Cast pick connects to. NOT a claim that it is
   // connected: since AUD-85 a failed pick keeps the default.
   private CastDeviceDto? _defaultCastDevice;
   // The Cast device this layout believes is connected, and what the Cast dropdown shows as such.
-  // Set by a successful pick or dropdown selection, or when the active output is google-cast
-  // (page load, OutputChanged) and a default is known; cleared on a failed pick, on Stop Casting,
-  // and whenever the active output moves off Cast (AUD-85 review H1).
+  // Set by a successful pick or dropdown selection, or when an OutputChanged broadcast reports
+  // google-cast and a default is known; cleared on a failed pick that does not end on Cast, on Stop
+  // Casting, and whenever the active output moves off Cast (AUD-85 review H1). Page load can only
+  // clear it: it reads /api/devices/output/default, the device manager's default local output
+  // device, which is never google-cast.
   private CastDeviceDto? _connectedCastDevice;
   private bool _isCastConnecting;
   private bool _showCastDropdown;
@@ -799,7 +808,10 @@
   /// AUD-85 review H1. Keeps <see cref="_connectedCastDevice"/> in line with the active output:
   /// off Cast, nothing is connected; on Cast, the device already recorded as connected stands,
   /// or else the saved default (the device the API connects to when it restores Cast).
-  /// Called where the active output is learned from the API, never before a pick's connect returns.
+  /// Called after <see cref="_selectedOutputId"/> changes: from an OutputChanged broadcast and from
+  /// this layout's own output switches (which can set it), from page load (which can only clear it,
+  /// since the device it reads there is never google-cast), and after a failed pick — never before a
+  /// pick's connect returns.
   /// </summary>
   private void SyncConnectedCastDeviceToOutput()
   {
@@ -884,6 +896,7 @@
       if (success)
       {
         _selectedOutputId = newOutputId;
+        _serverOutputId = newOutputId;
         SyncConnectedCastDeviceToOutput();
         Logger.LogInformation("Switched audio output to: {OutputId}", newOutputId);
       }
@@ -934,6 +947,7 @@
       if (success)
       {
         _selectedOutputId = device.Id;
+        _serverOutputId = device.Id;
         SyncConnectedCastDeviceToOutput();
         Logger.LogInformation("Switched audio output via picker to: {Name} ({Id})", device.Name, device.Id);
       }
@@ -966,16 +980,20 @@
       if (outcome == CastDefaultPickOutcome.Connected)
       {
         _connectedCastDevice = device;
+        _serverOutputId = outputId;
       }
       else
       {
         // AUD-85: a failed request is not evidence the device is gone, so the saved
-        // default is kept — but nothing is connected, so the dropdown must not say it is
-        // (review H1). The output selection goes back to what it was, so the next tap on the
-        // Cast pill retries this one-tap connect instead of only toggling the dropdown.
-        // The dropdown opens so the user can pick a device, as the no-default path does.
+        // default is kept — but this request connected nothing, so the dropdown must not say
+        // it did (review H1). The output selection goes back to what the server last reported
+        // (re-review M-b) — which may be Cast, if the API completed after this request gave up
+        // or its restore could not run — and otherwise to what it was before the pick, so the
+        // next tap on the Cast pill retries this one-tap connect instead of only toggling the
+        // dropdown. The dropdown opens so the user can pick a device, as the no-default path does.
         _connectedCastDevice = null;
-        _selectedOutputId = previousOutputId;
+        _selectedOutputId = _serverOutputId ?? previousOutputId;
+        SyncConnectedCastDeviceToOutput();
         _showCastDropdown = true;
       }
     }
@@ -1152,6 +1170,7 @@
     // After a failed one-tap pick the output selection was put back, so record Cast here too.
     _connectedCastDevice = selectedDevice;
     _selectedOutputId = "google-cast";
+    _serverOutputId = "google-cast";
     UpdateCastOutputDisplayName();
     StateHasChanged();
   }
@@ -1209,8 +1228,9 @@
   }
 
   /// <summary>
-  /// AUD-84. The API changed the active output without this circuit asking — today, only when a
-  /// Cast speaker drops and the console falls back to its local speakers. Before this the output
+  /// AUD-84. The server's broadcast of the engine's active output, sent whenever it changes —
+  /// including when the API changed it without this circuit asking, as when a Cast speaker drops
+  /// and the console falls back to its local speakers. Before this the output
   /// chip went on showing Cast over a console that was playing locally, because the layout only
   /// ever learned the output from its own clicks. A null id (no output reported) changes nothing.
   /// </summary>
@@ -1218,7 +1238,17 @@
   {
     return InvokeAsync(() =>
     {
-      if (string.IsNullOrEmpty(outputId) || outputId == _selectedOutputId)
+      if (string.IsNullOrEmpty(outputId))
+      {
+        return;
+      }
+
+      // AUD-85 (re-review M-b): recorded BEFORE the equality check. During a Cast pick
+      // _selectedOutputId is already an optimistic "google-cast", so a server report of Cast would
+      // otherwise be dropped here, and a pick that then fails could not know the server ended on Cast.
+      _serverOutputId = outputId;
+
+      if (outputId == _selectedOutputId)
       {
         return;
       }

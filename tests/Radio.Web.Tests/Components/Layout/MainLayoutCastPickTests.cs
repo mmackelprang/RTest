@@ -24,6 +24,8 @@ namespace Radio.Web.Tests.Components.Layout;
 /// Review H1: after a failed connect the Cast dropdown must not show the default as connected (its
 /// row stays selectable, and there is no Stop Casting row that would clear the default), and the
 /// next tap on the Cast pill retries the connect.
+/// Re-review M-b: an OutputChanged broadcast received during a pick is honoured when the pick fails,
+/// and OutputChanged keeps the dropdown's connected device in line with the active output.
 /// Rendering set-up mirrors <see cref="MainLayoutNavTests"/>; the devices client is backed by a
 /// <see cref="RoutedApiHandler"/> so every request the layout sends is recorded.
 /// </summary>
@@ -39,7 +41,7 @@ public class MainLayoutCastPickTests : TestContext
   private static readonly CastDeviceDto SavedDefault =
     new("https://192.168.0.25/", "Test speaker", "192.168.0.25", 8009, "Nest Audio");
 
-  private IRenderedComponent<Radio.Web.Components.Layout.MainLayout> RenderLayout(RoutedApiHandler devices)
+  private IRenderedComponent<Radio.Web.Components.Layout.MainLayout> RenderLayout(HttpMessageHandler devices)
   {
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
@@ -198,6 +200,103 @@ public class MainLayoutCastPickTests : TestContext
     Assert.True(dropdown.Instance.IsOpen);
     Assert.Equal(SavedDefault, dropdown.Instance.ConnectedDevice);
     Assert.Single(dropdown.FindAll(".cast-stop-row"));
+  }
+
+  [Fact]
+  public async Task CastPick_ServerReportsCastDuringThePick_ThenTheConnectFails_TheSelectionStaysOnCast()
+  {
+    // Re-review M-b: the API ended on Cast (e.g. it completed after this request gave up) and
+    // broadcast OutputChanged("google-cast") while the pick was in flight — when the layout's
+    // selection was already an optimistic "google-cast". The failed connect must not then put the
+    // selection back to the local output the server is no longer on.
+    AudioStateHubService? hub = null;
+    var routes = DevicesWithSavedDefault(HttpStatusCode.InternalServerError);
+    var devices = new BeforeConnectHandler(routes, () => FireOutputChangedAsync(hub!, "google-cast"));
+    var cut = RenderLayout(devices);
+    hub = WaitForOutputChangedSubscriber(cut);
+
+    await TapCastAsync(cut);
+
+    Assert.Equal(1, devices.ConnectsSeen);
+    Assert.Equal("google-cast", cut.FindComponent<OutputPickerDropdown>().Instance.CurrentOutputId);
+    // On Cast, the dropdown shows the device the API restores Cast to as connected.
+    Assert.Equal(SavedDefault, cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+    Assert.DoesNotContain(routes.Requests, r => r.Method == HttpMethod.Delete && r.Path == DefaultCastPath);
+  }
+
+  [Fact]
+  public async Task OutputChanged_ToCast_TheDropdownShowsTheSavedDefaultAsConnected()
+  {
+    var devices = DevicesWithSavedDefault(HttpStatusCode.OK);
+    var cut = RenderLayout(devices);
+    // The subscription is made after the outputs and the saved default have loaded, so waiting for
+    // it also means the default is known.
+    var hub = WaitForOutputChangedSubscriber(cut);
+    Assert.Null(cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+
+    await FireOutputChangedAsync(hub, "google-cast");
+
+    Assert.Equal("google-cast", cut.FindComponent<OutputPickerDropdown>().Instance.CurrentOutputId);
+    Assert.Equal(SavedDefault, cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+  }
+
+  [Fact]
+  public async Task OutputChanged_FromCastToLocal_ClearsTheConnectedDevice()
+  {
+    var devices = DevicesWithSavedDefault(HttpStatusCode.OK);
+    var cut = RenderLayout(devices);
+    var hub = WaitForOutputChangedSubscriber(cut);
+    await TapCastAsync(cut);
+    Assert.Equal(SavedDefault, cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+
+    await FireOutputChangedAsync(hub, "local-1");
+
+    Assert.Equal("local-1", cut.FindComponent<OutputPickerDropdown>().Instance.CurrentOutputId);
+    Assert.Null(cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+  }
+
+  /// <summary>
+  /// The layout subscribes to OutputChanged only after its hub start, which can complete after
+  /// the first render; rendezvous on the subscription rather than on time.
+  /// </summary>
+  private AudioStateHubService WaitForOutputChangedSubscriber(
+    IRenderedComponent<Radio.Web.Components.Layout.MainLayout> cut)
+  {
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+    cut.WaitForAssertion(
+      () => Assert.NotEmpty(HubEventFire.InvocationListOf<Func<string?, Task>>(hub, nameof(AudioStateHubService.OutputChanged))),
+      TimeSpan.FromSeconds(30));
+    return hub;
+  }
+
+  private static Task FireOutputChangedAsync(AudioStateHubService hub, string outputId) =>
+    HubEventFire.FireAsync<string?>(hub, nameof(AudioStateHubService.OutputChanged), outputId);
+
+  /// <summary>
+  /// Runs a callback when the connect request arrives, before it is answered — the window in which
+  /// a server broadcast can land while a pick is in flight. The callback runs on the thread pool
+  /// so the layout's click handler has yielded the renderer and the broadcast's InvokeAsync can run.
+  /// </summary>
+  private sealed class BeforeConnectHandler : DelegatingHandler
+  {
+    private readonly Func<Task> _beforeConnect;
+    private int _connectsSeen;
+
+    public BeforeConnectHandler(HttpMessageHandler inner, Func<Task> beforeConnect) : base(inner) =>
+      _beforeConnect = beforeConnect;
+
+    public int ConnectsSeen => Volatile.Read(ref _connectsSeen);
+
+    protected override async Task<HttpResponseMessage> SendAsync(
+      HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+      if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath == ConnectPath)
+      {
+        Interlocked.Increment(ref _connectsSeen);
+        await Task.Run(_beforeConnect, cancellationToken);
+      }
+      return await base.SendAsync(request, cancellationToken);
+    }
   }
 
   private sealed class StubOptionsMonitor<T> : IOptionsMonitor<T>
