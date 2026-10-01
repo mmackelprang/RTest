@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Radio.Core.Configuration;
 using Radio.Infrastructure.Audio.Services;
@@ -18,7 +19,9 @@ public class SDRRadioAudioSourceDeviceGateTests
 {
   private readonly List<string> _events = new();
   private readonly Mock<ISdrDevice> _device = new();
-  private readonly SdrDeviceGate _gate = new();
+  // A never-advanced fake clock: the gate's lease-release timeout cannot
+  // fire, so a claim that waits on a lease completes only when it is disposed.
+  private readonly SdrDeviceGate _gate = new(timeProvider: new FakeTimeProvider());
   private bool _startStreamingResult = true;
 
   public SDRRadioAudioSourceDeviceGateTests()

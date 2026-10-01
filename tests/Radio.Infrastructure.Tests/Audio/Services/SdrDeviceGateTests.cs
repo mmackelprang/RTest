@@ -26,7 +26,9 @@ public class SdrDeviceGateTests
   [Fact]
   public async Task ClaimForRadio_CancelsLiveLease_AndCompletesOnlyWhenLeaseIsDisposed()
   {
-    SdrDeviceGate gate = new();
+    // A never-advanced fake clock: the claim's release timeout cannot fire,
+    // so only the lease's disposal can complete it.
+    SdrDeviceGate gate = new(timeProvider: new FakeTimeProvider());
     SdrDeviceGate.SweepLease lease = gate.TryAcquireForSweep()!;
     Assert.NotNull(lease);
 
