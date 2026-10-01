@@ -25,7 +25,15 @@ namespace Radio.Infrastructure.Audio.Services;
 /// number; the local speakers' mute while casting is the output gate's business.</para>
 /// <para><b>Mapping.</b> <see cref="CastConsoleVolumeCurve"/>, anchored lazily per connection at
 /// (the console level just before the first change on that connection, the speaker's level then).
-/// A new connection re-anchors, and so does every change reported by the speaker.</para>
+/// A new connection re-anchors, and so does every change reported by the speaker. So does a console
+/// move UP that starts below the anchor's console level when the anchor's lower segment is steeper
+/// than <see cref="CastConsoleVolumeCurve.MaxUpperSlope"/> (hostile review F2): it re-anchors at
+/// (the console level it starts from, the level the curve gave that), so that move is mapped by an
+/// upper segment, whose slope is capped. Moves down are mapped by the current anchor unchanged. The
+/// price is hysteresis on such a connection: after moving down and back up, the speaker does NOT
+/// return to the original speaker level at the original console level — it is lower, because the
+/// way back up is less steep than the way down was. A change made on the speaker, or a new
+/// connection, re-anchors from the speaker's real level.</para>
 /// <para><b>Loop safety rests on an explicit marker, not on float equality</b> (pre-merge review
 /// M1). <c>AudioStateUpdateService</c> copies a change made on the speaker into master volume and
 /// mute synchronously inside <c>GoogleCastOutput.CastVolumeChanged</c>, and the Cast output
@@ -158,6 +166,25 @@ public sealed class CastConsoleVolumeFollower : IDisposable
           anchor = new Anchor(target.Generation, previous, target.SpeakerLevel);
           _anchor = anchor;
         }
+        else if (volume > previous && previous < anchor.Console && IsSteeperThanTheUpperCap(anchor))
+        {
+          // Hostile review F2. Moving UP from a lower segment steeper than MaxUpperSlope (its
+          // slope is s0/m0 — 8 for an anchor at (0.10, 0.80)), which used to apply upward too:
+          // one detent up after a move down raised the speaker 8 points. Re-anchor at the current
+          // point — the previous console level and the level the curve gave it — so the move is
+          // mapped by the new anchor's upper segment, whose slope is capped at MaxUpperSlope.
+          // Continuous, and console 0 stays silent (the new anchor's lower segment still runs to
+          // (0, 0)) — with one exception: when the previous level is at or below
+          // CastConsoleVolumeCurve.LowAnchorLimit the new anchor maps with the identity, so the
+          // speaker goes to the console's level, which from the bottom of a lower segment this
+          // steep is a step up smaller than the console's own move, or a step DOWN (the safe
+          // direction). A lower segment no steeper than the cap is left alone: moving up along
+          // it already rises at most MaxUpperSlope times the step, and re-anchoring it would
+          // only add hysteresis.
+          anchor = new Anchor(
+            target.Generation, previous, CastConsoleVolumeCurve.Map(previous, anchor.Console, anchor.Speaker));
+          _anchor = anchor;
+        }
 
         var speaker = CastConsoleVolumeCurve.Map(volume, anchor.Console, anchor.Speaker);
         var burst = _cast.SetDeviceVolumeFromConsoleAsync(speaker, target.Generation, volume);
@@ -174,6 +201,17 @@ public sealed class CastConsoleVolumeFollower : IDisposable
       _logger.LogWarning(ex, "Cast: could not apply the console volume to the speaker");
     }
   }
+
+  /// <summary>
+  /// True when <paramref name="anchor"/>'s lower segment (slope s0/m0) is steeper than
+  /// <see cref="CastConsoleVolumeCurve.MaxUpperSlope"/>. False for an anchor the curve maps with
+  /// the identity (unknown speaker level, or a console anchor at or below
+  /// <see cref="CastConsoleVolumeCurve.LowAnchorLimit"/>), which has no lower segment.
+  /// </summary>
+  private static bool IsSteeperThanTheUpperCap(Anchor anchor) =>
+    anchor.Console > CastConsoleVolumeCurve.LowAnchorLimit
+    && !float.IsNaN(anchor.Speaker)
+    && anchor.Speaker > CastConsoleVolumeCurve.MaxUpperSlope * anchor.Console;
 
   /// <summary>
   /// A change reported by the speaker: re-anchor at (current master, the speaker's level), so

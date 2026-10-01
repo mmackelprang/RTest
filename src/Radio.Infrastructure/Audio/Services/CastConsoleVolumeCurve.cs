@@ -23,8 +23,13 @@ namespace Radio.Infrastructure.Audio.Services;
 /// speaker itself (its buttons, Google Home) re-anchors the curve, as does a new connection.</para>
 /// <para><b>Why the lower segment is not capped.</b> A curve from (0, 0) to (m0, s0) with every
 /// slope at most 3 exists only when s0 ≤ 3·m0, so a cap there must give up either continuity or
-/// "console 0 is silent". Neither is worth it: the lower segment is steep only toward silence,
-/// which is the safe direction.</para>
+/// "console 0 is silent". This curve keeps both, and its lower segment is therefore as steep as
+/// s0/m0 in BOTH directions: by itself it would map a move back up along that segment at the same
+/// slope (anchor (0.10, 0.80), down to 0.05, then each one-point step up raises the speaker 8
+/// points). The curve is a pure function and does not prevent that; the caller does —
+/// <c>CastConsoleVolumeFollower</c> re-anchors at the current point before an upward move that
+/// starts on a lower segment steeper than <see cref="MaxUpperSlope"/> (hostile review F2), so the
+/// steep slope is only ever applied toward silence.</para>
 /// <para>Degenerate anchors: an unknown speaker level (NaN) or a console anchor at or below
 /// <see cref="LowAnchorLimit"/> gives the identity (from a near-silent console, any jump is toward
 /// quiet levels).</para>

@@ -122,6 +122,81 @@ public class CastConsoleVolumeFollowerTests
     Assert.Equal(0.36f, h.Store.Volumes["cast-a"], 3);
   }
 
+  // Hostile review F2. Anchor (0.10, 0.80): the lower segment's slope is 8. Moving down along it is
+  // the safe direction; moving back up along it raised the speaker 8 points per one-point detent.
+  [Fact]
+  public async Task DownThenOneDetentUp_OnASteepLowerSegment_RaisesTheSpeakerAtMostThreeTimesTheStep()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.80f); // speaker at 80 %
+    var (mixer, follower) = Build(h, 0.10f);   // console at 10 %
+    using var _ = follower;
+    h.ClearCommands();
+
+    mixer.MasterVolume = 0.05f;
+    await follower.LastVolumeBurst;
+    Assert.Equal(0.40f, Assert.Single(h.VolumeSends()), 3); // 0.80 * 0.05 / 0.10
+
+    mixer.MasterVolume = 0.06f;
+    await follower.LastVolumeBurst;
+    var sends = h.VolumeSends();
+    Assert.Equal(2, sends.Count);
+    var rise = sends[1] - sends[0];
+    Assert.True(rise > 0f, $"an upward console move must not lower the speaker here (rise {rise})");
+    Assert.True(
+      rise <= CastConsoleVolumeCurve.MaxUpperSlope * 0.01f + 0.0001f,
+      $"one detent up raised the speaker {rise:F4}, more than {CastConsoleVolumeCurve.MaxUpperSlope} times the step");
+
+    // The documented hysteresis: back at the original console level, the speaker is below where
+    // it started on this connection.
+    mixer.MasterVolume = 0.10f;
+    await follower.LastVolumeBurst;
+    Assert.True(h.VolumeSends()[^1] < 0.80f);
+
+    // And console 0 is still silent.
+    mixer.MasterVolume = 0f;
+    await follower.LastVolumeBurst;
+    Assert.Equal(0f, h.VolumeSends()[^1], 4);
+  }
+
+  [Fact]
+  public async Task TheFirstMoveFromASteepAnchor_NeverJumps_InEitherDirection()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.80f);
+    var (mixer, follower) = Build(h, 0.10f);
+    using var _ = follower;
+    h.ClearCommands();
+
+    // Up first: the upper segment from (0.10, 0.80), slope (1 - 0.80) / (1 - 0.10) ≈ 0.22.
+    mixer.MasterVolume = 0.11f;
+    await follower.LastVolumeBurst;
+    var up = Assert.Single(h.VolumeSends());
+    Assert.InRange(up - 0.80f, 0f, CastConsoleVolumeCurve.MaxUpperSlope * 0.01f + 0.0001f);
+    Assert.Equal(0.80f + 0.2f / 0.9f * 0.01f, up, 4);
+  }
+
+  [Fact]
+  public async Task OnALowerSegmentNoSteeperThanTheCap_UpAndDownRetraceTheSameCurve()
+  {
+    // Anchor (0.50, 0.40): the lower segment's slope is 0.8, under the cap, so it is not
+    // re-anchored — going down and back up returns the speaker to exactly where it was.
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    h.ClearCommands();
+
+    mixer.MasterVolume = 0.30f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.50f;
+    await follower.LastVolumeBurst;
+
+    var sends = h.VolumeSends();
+    Assert.Equal(0.24f, sends[0], 3);
+    Assert.Equal(0.40f, sends[^1], 3);
+  }
+
   [Fact]
   public async Task AMasterLevelEqualToTheSpeakers_PushesNothing_AndReanchorsToIdentity()
   {
