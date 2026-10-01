@@ -162,7 +162,12 @@ if (OperatingSystem.IsLinux())
 }
 
 // Add the audio engine initialization service (must run first)
-builder.Services.AddHostedService<AudioEngineInitializationService>();
+// Registered as a singleton as well (AUD-37): DevicesController resolves it as
+// ICastReconnectControl to cancel the Cast auto-reconnect before a user's own output or Cast
+// action. AddHostedService<T>() alone would not make the instance resolvable.
+builder.Services.AddSingleton<AudioEngineInitializationService>();
+builder.Services.AddSingleton<ICastReconnectControl>(sp => sp.GetRequiredService<AudioEngineInitializationService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<AudioEngineInitializationService>());
 
 // Add the visualization broadcast background service
 builder.Services.AddHostedService<VisualizationBroadcastService>();

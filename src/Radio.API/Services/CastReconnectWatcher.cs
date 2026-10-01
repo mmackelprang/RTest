@@ -25,22 +25,35 @@ internal enum CastReconnectOutcome
   /// <summary>The reconnect window ran out without the speaker coming back.</summary>
   GaveUp,
 
-  /// <summary>Cancelled: the service is stopping, or a newer drop replaced this watcher.</summary>
+  /// <summary>Cancelled: the service is stopping, a user action took over, or a newer drop replaced this watcher.</summary>
   Cancelled,
 
   /// <summary>The output was moved back to Cast, but the new connection was already lost again.</summary>
   LostAgainAfterSwitch,
 
   /// <summary>
-  /// The conditional switch back to Cast threw (the new Cast connection was then torn down), or
-  /// a host call failed unexpectedly.
+  /// The conditional switch back to Cast threw (the new Cast connection was then torn down and
+  /// the local output restored), or a host call failed unexpectedly.
   /// </summary>
-  SwitchFailed
+  SwitchFailed,
+
+  /// <summary>
+  /// The speaker is back but running another sender's application; the watcher stood down for
+  /// good rather than replace that session with ours.
+  /// </summary>
+  SpeakerInUse
 }
 
 /// <summary>The backoff schedule for <see cref="CastReconnectWatcher"/>.</summary>
-internal readonly record struct CastReconnectSchedule(TimeSpan InitialDelay, TimeSpan MaxDelay, TimeSpan Window)
+internal readonly record struct CastReconnectSchedule(
+  TimeSpan InitialDelay, TimeSpan MaxDelay, TimeSpan Window, TimeSpan Stability)
 {
+  /// <summary>A schedule with the default 120 s stability period.</summary>
+  public CastReconnectSchedule(TimeSpan initialDelay, TimeSpan maxDelay, TimeSpan window)
+    : this(initialDelay, maxDelay, window, TimeSpan.FromSeconds(120))
+  {
+  }
+
   /// <summary>Builds a schedule from configuration, clamping nonsense values to something sane.</summary>
   public static CastReconnectSchedule From(Radio.Core.Configuration.GoogleCastOutputOptions options)
   {
@@ -52,7 +65,36 @@ internal readonly record struct CastReconnectSchedule(TimeSpan InitialDelay, Tim
     }
 
     var window = TimeSpan.FromMinutes(Math.Max(1, options.AutoReconnectWindowMinutes));
-    return new CastReconnectSchedule(initial, max, window);
+    var stability = TimeSpan.FromSeconds(Math.Max(0, options.AutoReconnectStabilitySeconds));
+    return new CastReconnectSchedule(initial, max, window, stability);
+  }
+
+  /// <summary>Doubles <paramref name="delay"/>, clamped to <see cref="MaxDelay"/>.</summary>
+  public TimeSpan Next(TimeSpan delay)
+  {
+    var next = delay + delay;
+    return next > MaxDelay ? MaxDelay : next;
+  }
+}
+
+/// <summary>
+/// Where a watcher's window and backoff begin. A fresh drop starts both now; a drop soon after
+/// a watcher-made reconnect continues the earlier window and backoff (AUD-37, review H1).
+/// </summary>
+/// <param name="WindowStartTimestamp">A <see cref="TimeProvider.GetTimestamp"/> value.</param>
+/// <param name="FirstDelay">The first wait.</param>
+internal readonly record struct CastReconnectStart(long WindowStartTimestamp, TimeSpan FirstDelay);
+
+/// <summary>
+/// Thrown by <see cref="ICastReconnectHost.ConnectAndStartAsync"/> when the speaker answered but
+/// is running another sender's application (or its status could not be read). The host has
+/// already removed its own connection.
+/// </summary>
+internal sealed class CastSpeakerInUseException : Exception
+{
+  public CastSpeakerInUseException(string message, Exception? inner = null)
+    : base(message, inner)
+  {
   }
 }
 
@@ -86,9 +128,11 @@ internal interface ICastReconnectHost
   Task<ChromecastDeviceInfo?> ProbeAsync(ChromecastDeviceInfo device, CancellationToken ct);
 
   /// <summary>
-  /// Wires the audio source for the configured streaming mode, connects and starts the Cast
-  /// output. Throws on failure, having torn down any connection it made itself. It does not
-  /// touch the active output — the local speakers keep playing until the switch.
+  /// Wires the audio source for the configured streaming mode, connects, checks the receiver is
+  /// free for us, and starts the Cast output. Throws on failure, having torn down any connection
+  /// it made itself; throws <see cref="CastSpeakerInUseException"/> when another application
+  /// holds the receiver. It does not touch the active output — the local speakers keep playing
+  /// until the switch.
   /// </summary>
   Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct);
 
@@ -98,8 +142,19 @@ internal interface ICastReconnectHost
   /// </summary>
   Task<bool> TrySwitchToCastAsync(CastRecoveryMark mark, CancellationToken ct);
 
-  /// <summary>Stops and disconnects the Cast output. Best-effort; never throws.</summary>
+  /// <summary>
+  /// Stops and disconnects the Cast connection this host's own connect published — and only
+  /// that one: a connection someone else has made (or is making) since is left alone.
+  /// Best-effort; never throws.
+  /// </summary>
   Task TearDownCastAsync();
+
+  /// <summary>
+  /// After a switch to Cast threw: if the active output is not Cast, re-applies the recovery's
+  /// local output through the gate (when it is still the active one), so local is not left
+  /// muted by a switch that muted it before failing. Best-effort; never throws.
+  /// </summary>
+  Task RestoreLocalOutputAsync(CastRecoveryMark mark);
 }
 
 /// <summary>
@@ -112,29 +167,49 @@ internal interface ICastReconnectHost
 /// One run of <see cref="RunAsync"/> is one watcher. The owning service starts a replacement only
 /// after the previous run has finished, so two never act at once. Immediately before connecting,
 /// a run checks that no output has been chosen since the drop and that nobody else owns the Cast
-/// output (connected, connecting or stopping). Those are checks, not locks: a choice made in the
-/// moment between the check and the connect is caught afterwards by the atomic, conditional
-/// switch back to Cast (which then refuses, and the new connection is torn down), and a
-/// connect started by someone else in that moment is refused by <c>GoogleCastOutput.ConnectAsync</c>
-/// for whichever party comes second while the other is still <c>Connecting</c>. The run's only
-/// output change is that conditional switch.
+/// output (connected, connecting or stopping). Those are checks, not locks. Two things cover the
+/// moment between a check and the connect. First, the user-facing output and Cast actions
+/// (<c>DevicesController</c>) cancel the watcher and wait for it — up to a bound, after which they
+/// proceed regardless — before touching Cast. Second, the watcher only ever tears down a
+/// connection its own connect published and that no newer connect has claimed since, so a
+/// connection someone else made is never removed by it. Neither makes a collision impossible:
+/// a user connect that starts while the watcher's connect is still on the network (past the
+/// bound) is refused by <c>GoogleCastOutput.ConnectAsync</c> while the watcher's is
+/// <c>Connecting</c>, and that refusal is the user's request failing (AUD-85). A choice of
+/// output made in that moment is caught by the atomic, conditional switch back to Cast, which
+/// refuses. The run's only output change is that conditional switch.
+/// </para>
+/// <para>
+/// A full connect is attempted only after the speaker has answered two probes in a row (the
+/// second a short confirmation wait after the first), and after a failed full connect the next
+/// waits at the backoff cap — a speaker that answers TCP but fails the Cast handshake is
+/// retried at most once a minute.
 /// </para>
 /// <para>
 /// Every wait goes through the injected <see cref="TimeProvider"/>, so tests drive the backoff
 /// with a fake clock instead of racing real delays (CLAUDE.md § Test Timing).
 /// </para>
 /// <para>
-/// Per-probe logging is Debug on purpose: a speaker that stays away for the whole window would
-/// otherwise put a line in journald every minute for half an hour, on a box where journal
-/// volume correlates with audible distortion.
+/// The watcher's own per-probe and per-attempt lines are Debug: a speaker that stays away for the
+/// whole window would otherwise put a line in journald every minute for half an hour, on a box
+/// where journal volume correlates with audible distortion. <b>That does not make a failing
+/// attempt quiet.</b> Each failed full connect also passes through <c>GoogleCastOutput</c>, which
+/// logs it at Error (<c>Failed to connect to Chromecast</c>, and <c>Failed to start Google Cast
+/// output</c> when the launch fails); those are left as they are because the same code logs a
+/// user's own failed connect. Worst case — a speaker that answers TCP and fails every handshake
+/// for the whole default window — is about 30 attempts, one or two Error lines each.
 /// </para>
 /// </remarks>
 internal sealed class CastReconnectWatcher
 {
+  private const int AnswersBeforeConnecting = 2;
+
   private readonly ICastReconnectHost _host;
   private readonly ChromecastDeviceInfo _device;
   private readonly CastRecoveryMark _mark;
   private readonly CastReconnectSchedule _schedule;
+  private readonly CastReconnectStart? _start;
+  private readonly Action<TimeSpan>? _onConnected;
   private readonly TimeProvider _time;
   private readonly ILogger _logger;
 
@@ -144,7 +219,9 @@ internal sealed class CastReconnectWatcher
     CastRecoveryMark mark,
     CastReconnectSchedule schedule,
     TimeProvider time,
-    ILogger logger)
+    ILogger logger,
+    CastReconnectStart? start = null,
+    Action<TimeSpan>? onConnected = null)
   {
     _host = host;
     _device = device;
@@ -152,7 +229,16 @@ internal sealed class CastReconnectWatcher
     _schedule = schedule;
     _time = time;
     _logger = logger;
+    _start = start;
+    _onConnected = onConnected;
+    NextDelay = start?.FirstDelay ?? schedule.InitialDelay;
   }
+
+  /// <summary>
+  /// The first wait a watcher continuing this one's window should use: the backoff this run
+  /// has reached, doubled (or the cap, after a failed connect).
+  /// </summary>
+  public TimeSpan NextDelay { get; private set; }
 
   /// <summary>Runs the watcher to one of the <see cref="CastReconnectOutcome"/>s. Never throws.</summary>
   public async Task<CastReconnectOutcome> RunAsync(CancellationToken ct)
@@ -162,9 +248,12 @@ internal sealed class CastReconnectWatcher
       "Cast: will try to reconnect to \"{Name}\" when it returns (backoff up to {MaxBackoff} s, for {Window} min)",
       name, (int)_schedule.MaxDelay.TotalSeconds, (int)_schedule.Window.TotalMinutes);
 
-    var started = _time.GetTimestamp();
-    var delay = _schedule.InitialDelay;
+    var started = _start?.WindowStartTimestamp ?? _time.GetTimestamp();
+    var backoff = _start?.FirstDelay ?? _schedule.InitialDelay; // the exponential schedule's step
+    var wait = backoff;                                           // the next wait actually taken
     var attempt = 0;
+    var answers = 0;
+    NextDelay = _schedule.Next(backoff);
 
     try
     {
@@ -172,7 +261,7 @@ internal sealed class CastReconnectWatcher
       {
         // No wait may END past the window: a probe that starts after it is a probe the
         // configuration said not to make.
-        if (_time.GetElapsedTime(started) + delay > _schedule.Window)
+        if (_time.GetElapsedTime(started) + wait > _schedule.Window)
         {
           _logger.LogInformation(
             "Cast: \"{Name}\" did not come back within {Window} min — giving up on reconnecting; pick Cast again to reconnect",
@@ -180,12 +269,8 @@ internal sealed class CastReconnectWatcher
           return CastReconnectOutcome.GaveUp;
         }
 
-        await Task.Delay(delay, _time, ct).ConfigureAwait(false);
+        await Task.Delay(wait, _time, ct).ConfigureAwait(false);
         attempt++;
-
-        // Double, then clamp to the cap.
-        var next = delay + delay;
-        delay = next > _schedule.MaxDelay ? _schedule.MaxDelay : next;
 
         if (StandDownBeforeConnecting(name) is { } early)
         {
@@ -196,6 +281,19 @@ internal sealed class CastReconnectWatcher
         if (target == null)
         {
           _logger.LogDebug("Cast: reconnect probe {Attempt} — \"{Name}\" not reachable yet", attempt, name);
+          answers = 0;
+          backoff = _schedule.Next(backoff);
+          wait = backoff;
+          NextDelay = _schedule.Next(backoff);
+          continue;
+        }
+
+        if (++answers < AnswersBeforeConnecting)
+        {
+          // One answer is not yet a speaker that is back: one still booting answers TCP and
+          // fails the Cast handshake. Confirm shortly, without advancing the backoff.
+          _logger.LogDebug("Cast: reconnect probe {Attempt} — \"{Name}\" answered; confirming", attempt, name);
+          wait = _schedule.InitialDelay < backoff ? _schedule.InitialDelay : backoff;
           continue;
         }
 
@@ -215,13 +313,35 @@ internal sealed class CastReconnectWatcher
         {
           throw;
         }
+        catch (CastSpeakerInUseException ex)
+        {
+          _logger.LogInformation(
+            "Cast: \"{Name}\" is in use by another app — not reconnecting ({Detail})", name, ex.Message);
+          return CastReconnectOutcome.SpeakerInUse;
+        }
         catch (Exception ex)
         {
           // The device answered TCP but the Cast session would not come up (still booting,
-          // receiver app not ready). Keep backing off.
+          // receiver app not ready). Retry no more than once per backoff cap from here on.
           _logger.LogDebug(ex, "Cast: reconnect attempt {Attempt} to \"{Name}\" failed; will retry", attempt, name);
+          backoff = _schedule.MaxDelay;
+          wait = backoff;
+          NextDelay = backoff;
           continue;
         }
+
+        if (ct.IsCancellationRequested)
+        {
+          // Cancelled while the connect was on the network (SharpCaster does not observe the
+          // token): a user action or shutdown owns the outputs now. Remove only what we made.
+          _logger.LogDebug("Cast: reconnect to \"{Name}\" cancelled after connecting — removing that connection", name);
+          await _host.TearDownCastAsync().ConfigureAwait(false);
+          return CastReconnectOutcome.Cancelled;
+        }
+
+        // The owner records the reconnect (and where the backoff got to) before the switch, so a
+        // drop of this connection is recognised as part of the same episode however soon it comes.
+        _onConnected?.Invoke(NextDelay);
 
         bool switched;
         try
@@ -234,6 +354,10 @@ internal sealed class CastReconnectWatcher
         {
           _logger.LogWarning(ex, "Cast: reconnected to \"{Name}\" but could not switch the output back to Cast", name);
           await _host.TearDownCastAsync().ConfigureAwait(false);
+
+          // The gate mutes local before activating the Cast/HTTP outputs; a throw there leaves
+          // the active output local and muted.
+          await _host.RestoreLocalOutputAsync(_mark).ConfigureAwait(false);
           return CastReconnectOutcome.SwitchFailed;
         }
 
@@ -242,10 +366,8 @@ internal sealed class CastReconnectWatcher
           var active = _host.ActiveOutputId;
           if (string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase))
           {
-            // The user picked Cast while this reconnect was in flight. Their own connect was either
-            // refused (ours was still Connecting) or replaced ours once it was up; either way the
-            // connection standing now serves their choice, and tearing it down would leave Cast
-            // selected and silent.
+            // Someone picked Cast since the drop. Nothing is torn down: if the connection
+            // standing is ours, it is now the one serving that choice; if it is not, it is theirs.
             _logger.LogInformation(
               "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — leaving the connection to that choice",
               name);

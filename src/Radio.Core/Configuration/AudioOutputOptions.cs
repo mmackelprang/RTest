@@ -180,6 +180,14 @@ public class GoogleCastOutputOptions
   public int AutoReconnectWindowMinutes { get; set; } = 30;
 
   /// <summary>
+  /// AUD-37. How long a connection the auto-reconnect made must stay up before it counts as
+  /// stable. A speaker that drops again sooner continues the same reconnect window and
+  /// backoff instead of starting a fresh one, so one that accepts the session and then dies
+  /// is given up on when the original window ends. Default: 120 seconds.
+  /// </summary>
+  public int AutoReconnectStabilitySeconds { get; set; } = 120;
+
+  /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
   /// </summary>
   public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";

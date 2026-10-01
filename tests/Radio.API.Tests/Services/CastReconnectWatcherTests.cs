@@ -29,20 +29,38 @@ public class CastReconnectWatcherTests
   private readonly FakeHost _host = new();
 
   [Fact]
-  public async Task SpeakerAnswersOnTheThirdProbe_ConnectsThenSwitchesBackToCast()
+  public async Task SpeakerAnswersFromTheThirdProbe_ConfirmsOnceThenConnectsAndSwitchesBackToCast()
   {
     _host.Reachable = probe => probe >= 3;
 
     var outcome = await DriveAsync(Start());
 
     Assert.Equal(CastReconnectOutcome.Reconnected, outcome);
-    Assert.Equal(3, _host.Probes);
+    // Probe 3 is the first answer; probe 4, a short confirmation wait later, is the second.
+    Assert.Equal(4, _host.Probes);
+    Assert.Equal(new[] { 5, 10, 20, 5 }, _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray());
     Assert.Equal(1, _host.Connects);
     Assert.Equal(1, _host.Switches);
     Assert.Equal(Mark, _host.SwitchedWith);
     Assert.Equal(0, _host.TearDowns);
     // Connect strictly before the switch: the switch is what moves the output to Cast.
-    Assert.Equal(new[] { "probe", "probe", "probe", "connect", "switch" }, _host.Calls);
+    Assert.Equal(new[] { "probe", "probe", "probe", "probe", "connect", "switch" }, _host.Calls);
+  }
+
+  [Fact]
+  public async Task ASingleAnswerFollowedBySilence_NeverConnects()
+  {
+    // Review M3: one answer is a speaker that may still be booting; only two in a row connect.
+    _host.Reachable = probe => probe == 2;
+    var schedule = DefaultSchedule with { Window = TimeSpan.FromMinutes(2) };
+
+    var outcome = await DriveAsync(Start(schedule));
+
+    Assert.Equal(CastReconnectOutcome.GaveUp, outcome);
+    Assert.Equal(0, _host.Connects);
+    // The confirmation wait after the answer does not advance the backoff: 5, 10, then the
+    // 5 s confirmation, then 20 (not 40).
+    Assert.Equal(new[] { 5, 10, 5, 20 }, _time.DueTimes.Take(4).Select(d => (int)d.TotalSeconds).ToArray());
   }
 
   [Fact]
@@ -180,7 +198,7 @@ public class CastReconnectWatcherTests
   }
 
   [Fact]
-  public async Task ConnectFails_KeepsBackingOffAndReconnectsOnALaterProbe()
+  public async Task ConnectFails_RetriesAtTheBackoffCapAndReconnectsOnALaterProbe()
   {
     _host.Reachable = _ => true;
     _host.ConnectFailure = connect => connect == 1 ? new InvalidOperationException("receiver not ready") : null;
@@ -189,7 +207,105 @@ public class CastReconnectWatcherTests
 
     Assert.Equal(CastReconnectOutcome.Reconnected, outcome);
     Assert.Equal(2, _host.Connects);
-    Assert.Equal(new[] { 5, 10 }, _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray());
+    // First answer, 5 s confirmation, failed connect — then straight to the 60 s cap (review M3).
+    Assert.Equal(new[] { 5, 5, 60 }, _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray());
+  }
+
+  [Fact]
+  public async Task ConnectKeepsFailing_AttemptsAtMostOncePerBackoffCap()
+  {
+    // Review M3: a speaker that answers TCP but fails every Cast handshake.
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ => new InvalidOperationException("handshake failed");
+    var schedule = DefaultSchedule with { Window = TimeSpan.FromMinutes(10) };
+
+    var outcome = await DriveAsync(Start(schedule));
+
+    Assert.Equal(CastReconnectOutcome.GaveUp, outcome);
+    var waits = _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray();
+    Assert.Equal(new[] { 5, 5 }, waits.Take(2).ToArray());
+    Assert.All(waits.Skip(2), w => Assert.Equal(60, w));
+    // 10 s to the first connect, then one per minute while a wait still fits in 600 s: 1 + 9.
+    Assert.Equal(10, _host.Connects);
+  }
+
+  [Fact]
+  public async Task SpeakerRunningAnotherApp_StandsDownForGoodWithoutSwitching()
+  {
+    // Review M5: the host found another sender's app on the receiver and removed our connection.
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ => new CastSpeakerInUseException("running 2DB7CC49");
+
+    var outcome = await DriveAsync(Start());
+
+    Assert.Equal(CastReconnectOutcome.SpeakerInUse, outcome);
+    Assert.Equal(1, _host.Connects);
+    Assert.Equal(0, _host.Switches);
+    Assert.Equal(2, _host.Probes); // and no probing after it
+  }
+
+  [Fact]
+  public async Task SwitchToCastThrows_TearsDownThenRestoresTheLocalOutput()
+  {
+    // Review M2: the gate mutes local before activating Cast; a throw there must not leave it muted.
+    _host.Reachable = _ => true;
+    _host.SwitchFailure = new InvalidOperationException("HTTP stream would not start");
+
+    var outcome = await DriveAsync(Start());
+
+    Assert.Equal(CastReconnectOutcome.SwitchFailed, outcome);
+    Assert.Equal(new[] { "connect", "switch", "teardown", "restore" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(Mark, _host.RestoredWith);
+  }
+
+  [Fact]
+  public async Task CancelledWhileTheConnectWasOnTheNetwork_RemovesItsConnectionAndDoesNotSwitch()
+  {
+    // Review L1: the connect does not observe cancellation; the run must check before switching.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.OnConnect = _ => cts.Cancel();
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.Cancelled, outcome);
+    Assert.Equal(0, _host.Switches);
+    Assert.Equal(new[] { "connect", "teardown" }, _host.Calls.Where(c => c != "probe").ToArray());
+  }
+
+  [Fact]
+  public async Task ContinuingAnEpisode_StartsAtTheInheritedBackoffAndKeepsTheOriginalWindow()
+  {
+    // Review H1: the window began four minutes ago and the backoff had reached 40 s.
+    var schedule = DefaultSchedule with { Window = TimeSpan.FromMinutes(5) };
+    var windowStart = _time.GetTimestamp();
+    _time.Advance(TimeSpan.FromMinutes(4));
+
+    var outcome = await DriveAsync(Start(schedule, start: new CastReconnectStart(windowStart, TimeSpan.FromSeconds(40))));
+
+    Assert.Equal(CastReconnectOutcome.GaveUp, outcome);
+    // 240 + 40 = 280 s fits; the next wait (60 s) would end at 340 s, past the 300 s window.
+    Assert.Equal(new[] { 40 }, _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray());
+  }
+
+  [Fact]
+  public async Task Reconnecting_ReportsTheBackoffReachedAfterConnectingAndBeforeSwitching()
+  {
+    _host.Reachable = probe => probe >= 3;
+    TimeSpan? reported = null;
+    var callsAtReport = 0;
+
+    var outcome = await DriveAsync(Start(onConnected: next =>
+    {
+      reported = next;
+      callsAtReport = _host.Calls.Count;
+    }));
+
+    Assert.Equal(CastReconnectOutcome.Reconnected, outcome);
+    // The backoff reached 20 s (5, 10, 20); a continuing watcher starts at 40 s.
+    Assert.Equal(TimeSpan.FromSeconds(40), reported);
+    Assert.Equal("connect", _host.Calls[callsAtReport - 1]);
+    Assert.Equal("switch", _host.Calls[callsAtReport]);
   }
 
   [Fact]
@@ -219,11 +335,15 @@ public class CastReconnectWatcherTests
 
   // --- helpers ---
 
-  private Task<CastReconnectOutcome> Start(CastReconnectSchedule? schedule = null, CancellationToken ct = default)
+  private Task<CastReconnectOutcome> Start(
+    CastReconnectSchedule? schedule = null,
+    CancellationToken ct = default,
+    CastReconnectStart? start = null,
+    Action<TimeSpan>? onConnected = null)
   {
     _host.Clock = _time;
     var watcher = new CastReconnectWatcher(
-      _host, Device(), Mark, schedule ?? DefaultSchedule, _time, NullLogger.Instance);
+      _host, Device(), Mark, schedule ?? DefaultSchedule, _time, NullLogger.Instance, start, onConnected);
     var started = _time.GetUtcNow();
     _host.StartedAt = started;
     return Task.Run(() => watcher.RunAsync(ct));
@@ -298,7 +418,10 @@ public class CastReconnectWatcherTests
     public bool SwitchResult = true;
     public Func<int, bool> Reachable = _ => false;
     public Func<int, Exception?> ConnectFailure = _ => null;
+    public Exception? SwitchFailure;
     public Action<int>? OnProbe;
+    public Action<int>? OnConnect;
+    public CastRecoveryMark? RestoredWith;
 
     public int Probes;
     public int Connects;
@@ -334,6 +457,7 @@ public class CastReconnectWatcherTests
     {
       var connect = ++Connects;
       Calls.Add("connect");
+      OnConnect?.Invoke(connect);
       var failure = ConnectFailure(connect);
       return failure == null ? Task.CompletedTask : Task.FromException(failure);
     }
@@ -343,7 +467,14 @@ public class CastReconnectWatcherTests
       Switches++;
       Calls.Add("switch");
       SwitchedWith = mark;
-      return Task.FromResult(SwitchResult);
+      return SwitchFailure != null ? Task.FromException<bool>(SwitchFailure) : Task.FromResult(SwitchResult);
+    }
+
+    public Task RestoreLocalOutputAsync(CastRecoveryMark mark)
+    {
+      Calls.Add("restore");
+      RestoredWith = mark;
+      return Task.CompletedTask;
     }
 
     public Task TearDownCastAsync()

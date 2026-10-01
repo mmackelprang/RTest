@@ -271,6 +271,21 @@ public class GoogleCastOutput : AudioOutputBase
   public ChromecastDeviceInfo? ConnectedDevice { get; private set; }
 
   /// <summary>
+  /// AUD-37. The generation of the connection currently published, or -1 when none is. A
+  /// lock-free read, so only good for an ownership check by a caller that compares it with
+  /// <see cref="ConnectionGeneration"/> and its own <see cref="ConnectedDevice"/> reference.
+  /// </summary>
+  public int PublishedConnectionGeneration => Volatile.Read(ref _publishedGeneration);
+
+  /// <summary>
+  /// AUD-37. The newest connection generation: bumped by every connect attempt's claim and by
+  /// every disconnect, loss or re-initialise. Greater than <see cref="PublishedConnectionGeneration"/>
+  /// while a newer connect is in flight or after the published connection was taken down.
+  /// A lock-free read.
+  /// </summary>
+  public int ConnectionGeneration => Volatile.Read(ref _connectionGeneration);
+
+  /// <summary>
   /// Gets the Google Cast output options for external inspection (e.g., by controllers
   /// to determine the streaming mode).
   /// </summary>
@@ -614,6 +629,10 @@ public class GoogleCastOutput : AudioOutputBase
 
     State = AudioOutputState.Connecting;
 
+    // AUD-37 (M4). A client this attempt built for itself (the cached-device path); never
+    // published unless the attempt succeeds, so on failure nothing else would close it.
+    ChromecastClient? attemptClient = null;
+
     // Everything from here on must leave State somewhere recoverable. Connecting
     // is a dead end for this class: ConnectAsync refuses to run unless the state
     // is Ready/Stopped, and ValidateCanInitialize only accepts Created/Error — so
@@ -669,6 +688,7 @@ public class GoogleCastOutput : AudioOutputBase
         // socket state. Built locally and only published at commit time.
         var stale = client;
         client = new ChromecastClient();
+        attemptClient = client;
         if (stale != null)
         {
           try { await stale.DisconnectAsync().ConfigureAwait(false); }
@@ -757,8 +777,60 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogError(ex, "Failed to connect to Chromecast: {Name}", device.FriendlyName);
       State = AudioOutputState.Error;
+
+      // AUD-37 (M4). A client built by this attempt and never published would otherwise be
+      // left open: if ConnectChromecast got past its TLS handshake, SharpCaster has started
+      // its receive loop and heartbeat timer, which the callback guard re-arms after every
+      // elapse. Not awaited, so the caller sees the failure at once — DisconnectAsync stops
+      // the heartbeat synchronously, before its first await.
+      if (attemptClient != null && !ReferenceEquals(attemptClient, Volatile.Read(ref _client)))
+      {
+        _ = DiscardUnpublishedClientAsync(attemptClient);
+      }
+
       throw;
     }
+  }
+
+  /// <summary>
+  /// AUD-37 (M4). Closes a client a failed connect built and never published. Bounded and
+  /// never throws: on a client whose transport never came up, SharpCaster's DisconnectAsync
+  /// awaits a receive loop that was never started, after it has already stopped the heartbeat
+  /// and disposed the socket — so the bound only abandons that final await.
+  /// </summary>
+  private async Task DiscardUnpublishedClientAsync(ChromecastClient client)
+  {
+    try
+    {
+      await client.DisconnectAsync().WaitAsync(TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: closing the client of a failed connect did not complete cleanly");
+    }
+  }
+
+  /// <summary>
+  /// AUD-37. Asks the connected receiver which applications it is running, fresh from the
+  /// device. Throws when no device is connected or the read fails or times out (10 s).
+  /// </summary>
+  /// <returns>The running applications' ids; empty when nothing is running.</returns>
+  public async Task<IReadOnlyList<string>> GetRunningApplicationIdsAsync(CancellationToken cancellationToken = default)
+  {
+    var client = Volatile.Read(ref _client);
+    if (client == null || Volatile.Read(ref _connectedReceiver) == null)
+    {
+      throw new InvalidOperationException("No Chromecast device connected");
+    }
+
+    var status = await client.ReceiverChannel.GetChromecastStatusAsync()
+      .WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false)
+      ?? throw new InvalidOperationException("The Cast receiver returned no status");
+
+    return status.Applications?
+      .Select(a => a.AppId)
+      .Where(id => !string.IsNullOrEmpty(id))
+      .ToList() ?? new List<string>();
   }
 
   /// <summary>

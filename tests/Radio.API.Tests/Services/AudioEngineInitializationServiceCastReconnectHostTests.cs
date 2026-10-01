@@ -128,8 +128,11 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   {
     // Loopback only: a listening port answers, a closed one is refused (on Windows a refused
     // loopback connect can take ~2 s to report, inside the probe's 3 s per-port timeout).
-    // Assumes nothing on this machine listens on 8009, the port the probe tries first.
-    var host = CreateService().CreateProductionCastReconnectHost();
+    // The port the probe tries first is pointed at one just closed (review L2: 8009 may be in
+    // use on the test machine, which would make the "closed" device read as reachable).
+    var service = CreateService();
+    service.CastProbeStandardPort = ClosedLoopbackPort();
+    var host = service.CreateProductionCastReconnectHost();
     using var listener = new TcpListener(IPAddress.Loopback, 0);
     listener.Start();
     var device = Device(((IPEndPoint)listener.LocalEndpoint).Port);
@@ -142,7 +145,174 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     Assert.Null(refused);
   }
 
+  [Theory]
+  [InlineData(new string[0], true)]
+  [InlineData(new[] { "CC1AD845" }, true)]        // our own receiver, still up from before the drop
+  [InlineData(new[] { "e8c28d3c" }, true)]        // the Backdrop idle screen
+  [InlineData(new[] { "2DB7CC49" }, false)]       // another sender's app
+  [InlineData(new[] { "CC1AD845", "2DB7CC49" }, false)]
+  public void ReceiverFreeForUs_OnlyWhenNothingButOursOrTheIdleScreenRuns(string[] running, bool free)
+  {
+    Assert.Equal(free, AudioEngineInitializationService.IsCastReceiverFreeForUs(running, "CC1AD845"));
+  }
+
+  [Fact]
+  public async Task ReceiverRunningAnotherApp_StandsDownWithoutLaunching_AndRemovesOurConnection()
+  {
+    // Review M5: launching our receiver would end the other sender's session.
+    using var listener = StartListener();
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = (_, _) => Task.FromResult<IReadOnlyList<string>>(new[] { "2DB7CC49" });
+    var host = service.CreateProductionCastReconnectHost();
+
+    var ex = await Assert.ThrowsAsync<CastSpeakerInUseException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    Assert.Contains("2DB7CC49", ex.Message);
+    Assert.Null(_castOutput.ConnectedDevice);                          // our channel closed
+    Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);    // nothing launched
+  }
+
+  [Fact]
+  public async Task ReceiverStatusUnreadable_IsTreatedAsBusy()
+  {
+    using var listener = StartListener();
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = (_, _) =>
+      Task.FromException<IReadOnlyList<string>>(new TimeoutException("no RECEIVER_STATUS"));
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<CastSpeakerInUseException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    Assert.Null(_castOutput.ConnectedDevice);
+    Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);
+  }
+
+  [Fact]
+  public async Task AConnectionSomeoneElseMadeAfterOurs_IsNotTornDownByTheReconnect()
+  {
+    // Review M1: the watcher tears down only what its own connect published. Here a user's
+    // connect replaces ours while the reconnect is checking the receiver; the reconnect then
+    // stands down and must leave the user's connection standing.
+    using var listener = StartListener();
+    var service = CreateService();
+    var users = Device(Port(listener)) with { FriendlyName = "Office speaker (user)" };
+    service.ReceiverApplicationsReadOverride = async (cast, ct) =>
+    {
+      await cast.ConnectAsync(users, ct);
+      return new[] { "2DB7CC49" };
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<CastSpeakerInUseException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+    await host.TearDownCastAsync().WaitAsync(HangGuard); // and a later tear-down by the watcher
+
+    Assert.Same(users, _castOutput.ConnectedDevice);
+  }
+
+  [Fact]
+  public async Task TearDown_WithNothingOfOursPublished_LeavesAUsersConnectionAlone()
+  {
+    using var listener = StartListener();
+    var host = CreateService().CreateProductionCastReconnectHost();
+    await _castOutput.InitializeAsync();
+    var users = Device(Port(listener));
+    await _castOutput.ConnectAsync(users).WaitAsync(HangGuard);
+
+    await host.TearDownCastAsync().WaitAsync(HangGuard);
+
+    Assert.Same(users, _castOutput.ConnectedDevice);
+  }
+
+  [Fact]
+  public async Task OurOwnConnection_IsTornDown()
+  {
+    // The control for the two tests above: the same stand-down with nobody else connecting.
+    using var listener = StartListener();
+    var service = CreateService();
+    ChromecastDeviceInfo? connected = null;
+    service.ReceiverApplicationsReadOverride = (cast, _) =>
+    {
+      connected = cast.ConnectedDevice;
+      return Task.FromResult<IReadOnlyList<string>>(new[] { "2DB7CC49" });
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<CastSpeakerInUseException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    Assert.NotNull(connected);                // ours was published before the check…
+    Assert.Null(_castOutput.ConnectedDevice); // …and removed after it
+  }
+
+  [Fact]
+  public async Task ASwitchToCastThatThrowsAfterMutingLocal_IsUndoneByRestoringTheLocalOutput()
+  {
+    // Review M2: the gate mutes local, then activates the HTTP and Cast outputs. A throw there
+    // leaves the active output local — and muted.
+    var http = new Mock<IAudioOutput>();
+    http.SetupGet(h => h.State).Returns(AudioOutputState.Created);
+    http.Setup(h => h.InitializeAsync(It.IsAny<CancellationToken>()))
+      .ThrowsAsync(new InvalidOperationException("port in use"));
+    _engine.AttachOutputCoordination(null, http.Object, null);
+    await _engine.SetActiveOutputAsync("speakers");
+    var mark = new CastRecoveryMark("speakers", _engine.OutputSelectionEpoch);
+    var host = CreateService().CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<InvalidOperationException>(() => host.TrySwitchToCastAsync(mark, CancellationToken.None));
+    Assert.Equal("speakers", _engine.ActiveOutputId);
+    Assert.True(_engine.IsLocalOutputMuted); // the state the fix exists for
+
+    await host.RestoreLocalOutputAsync(mark).WaitAsync(HangGuard);
+
+    Assert.Equal("speakers", _engine.ActiveOutputId);
+    Assert.False(_engine.IsLocalOutputMuted);
+  }
+
+  [Fact]
+  public async Task RestoreLocal_LeavesACastOutputAlone()
+  {
+    await _engine.SetActiveOutputAsync("google-cast");
+    var host = CreateService().CreateProductionCastReconnectHost();
+
+    await host.RestoreLocalOutputAsync(new CastRecoveryMark("speakers", 0)).WaitAsync(HangGuard);
+
+    Assert.Equal("google-cast", _engine.ActiveOutputId);
+    Assert.True(_engine.IsLocalOutputMuted);
+  }
+
   // --- helpers ---
+
+  /// <summary>
+  /// A loopback listener for GoogleCastOutput's TCP reachability check, with the Cast transport
+  /// and status read substituted through its labelled kind-C seams (internal to
+  /// Radio.Infrastructure, hence reflection): no fake socket can complete a Cast handshake.
+  /// </summary>
+  private TcpListener StartListener()
+  {
+    var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    typeof(GoogleCastOutput)
+      .GetProperty("ConnectTransportOverrideForTests", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(_castOutput, (Func<Sharpcaster.Models.ChromecastReceiver, Task>)(_ => Task.CompletedTask));
+    typeof(GoogleCastOutput)
+      .GetProperty("CastStatusReadOverrideForTests", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(_castOutput, (Func<Task<(float Volume, bool Muted)?>>)(() => Task.FromResult<(float Volume, bool Muted)?>(null)));
+    return listener;
+  }
+
+  private static int Port(TcpListener listener) => ((IPEndPoint)listener.LocalEndpoint).Port;
+
+  private static int ClosedLoopbackPort()
+  {
+    var probe = new TcpListener(IPAddress.Loopback, 0);
+    probe.Start();
+    var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+    probe.Stop();
+    return port;
+  }
 
   private AudioEngineInitializationService CreateService()
   {
@@ -231,5 +401,6 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     public Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct) => Task.CompletedTask;
     public Task<bool> TrySwitchToCastAsync(CastRecoveryMark mark, CancellationToken ct) => Task.FromResult(false);
     public Task TearDownCastAsync() => Task.CompletedTask;
+    public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
   }
 }

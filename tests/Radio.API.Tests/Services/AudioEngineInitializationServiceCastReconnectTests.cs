@@ -189,6 +189,126 @@ public class AudioEngineInitializationServiceCastReconnectTests
     Assert.NotSame(first, service.CastReconnectTask);
   }
 
+  [Fact]
+  public async Task ASpeakerThatDropsRightAfterEveryReconnect_IsGivenUpOnWithinTheOriginalWindow()
+  {
+    // Review H1: each drop of a watcher-made reconnect used to start a fresh 30 min window at a
+    // fresh 5 s backoff, so a speaker that accepts the session and then dies cycled forever.
+    _host.Reachable = true;
+    var service = CreateService();
+    var droppedAt = _time.GetUtcNow();
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+
+    var outcomes = new List<CastReconnectOutcome>();
+    for (var cycle = 0; ; cycle++)
+    {
+      Assert.True(cycle < 100, "the reconnect never gave up on a flapping speaker");
+      var outcome = await DriveAsync(service.CastReconnectTask);
+      outcomes.Add(outcome);
+      if (outcome != CastReconnectOutcome.Reconnected)
+      {
+        break;
+      }
+
+      // Accepted the session, then died at once — the output is Cast, so the recovery runs.
+      RaiseLoss(service);
+      await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    }
+
+    Assert.Equal(CastReconnectOutcome.GaveUp, outcomes[^1]);
+    Assert.True(outcomes.Count > 5, $"only {outcomes.Count} cycles");
+    Assert.True(_time.GetUtcNow() - droppedAt <= TimeSpan.FromMinutes(30));
+
+    // Each watcher waits once at its backoff, then once for the 5 s confirmation. The backoff
+    // keeps growing across the cycles instead of restarting at 5 s.
+    var firstWaits = _time.DueTimes.Where((_, i) => i % 2 == 0).Select(d => (int)d.TotalSeconds).ToArray();
+    Assert.Equal(new[] { 5, 10, 20, 40, 60, 60 }, firstWaits.Take(6).ToArray());
+    Assert.All(firstWaits.Skip(4), w => Assert.Equal(60, w));
+  }
+
+  [Fact]
+  public async Task AReconnectThatStaysUpPastTheStabilityPeriod_LetsTheNextDropStartAFreshWindow()
+  {
+    _host.Reachable = true;
+    var service = CreateService();
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+
+    _time.Advance(TimeSpan.FromSeconds(121)); // the default stability period is 120 s
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+
+    // Second watcher started at 5 s again, not at the inherited 10 s.
+    Assert.Equal(new[] { 5, 5, 5, 5 }, _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray());
+  }
+
+  [Fact]
+  public async Task AUserActionEndsTheEpisode_TheNextDropStartsAFreshWindow()
+  {
+    _host.Reachable = true;
+    var service = CreateService();
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+
+    await service.CancelCastReconnectAsync().WaitAsync(HangGuard); // e.g. the user re-picked Cast
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+
+    Assert.Equal(new[] { 5, 5, 5, 5 }, _time.DueTimes.Select(d => (int)d.TotalSeconds).ToArray());
+  }
+
+  [Fact]
+  public async Task CancelCastReconnect_DuringTheWait_EndsTheWatcherBeforeItProbes()
+  {
+    // Review M1: a user's output or Cast action takes the Cast output over from the watcher.
+    var service = CreateService();
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    await _time.NextTimerAsync().WaitAsync(HangGuard); // the watcher is in its first wait
+
+    await service.CancelCastReconnectAsync().WaitAsync(HangGuard);
+
+    Assert.True(service.CastReconnectTask.IsCompleted);
+    Assert.Equal(CastReconnectOutcome.Cancelled, await service.CastReconnectTask);
+    Assert.Equal(0, _host.Probes);
+  }
+
+  [Fact]
+  public async Task CancelCastReconnect_DuringAConnectThatIgnoresCancellation_ReturnsAtTheBound_ThenTheWatcherRemovesItsConnection()
+  {
+    // Review M1 + L1. The watcher's connect is parked (a SharpCaster connect does not observe
+    // cancellation). The user's action must not wait on it indefinitely, and when the connect
+    // does come back the watcher must not switch the output — it removes what it made.
+    _host.Reachable = true;
+    _host.ConnectGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var service = CreateService();
+    service.CastReconnectCancelBound = TimeSpan.FromMilliseconds(200);
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    await DriveUntilAsync(_host.ConnectEntered.Task);
+
+    await service.CancelCastReconnectAsync().WaitAsync(HangGuard);
+    Assert.False(service.CastReconnectTask.IsCompleted); // still parked: the bound let the caller go
+
+    _host.ConnectGate.SetResult();
+    Assert.Equal(CastReconnectOutcome.Cancelled, await service.CastReconnectTask.WaitAsync(HangGuard));
+    Assert.Equal(0, _host.Switches);
+    Assert.Equal(1, _host.TearDowns);
+    Assert.Equal("speakers", _active);
+  }
+
   // --- helpers ---
 
   private AudioEngineInitializationService CreateService(bool autoReconnect = true)
@@ -239,18 +359,35 @@ public class AudioEngineInitializationServiceCastReconnectTests
 
   private async Task<CastReconnectOutcome> DriveAsync(Task<CastReconnectOutcome> run)
   {
+    await DriveUntilAsync(run);
+    return await run;
+  }
+
+  // A read of the next timer that a drive left pending when its run ended. Kept for the next
+  // drive rather than abandoned: an abandoned channel read would still take the next timer
+  // created, and the next drive would wait forever for one after it.
+  private Task<TimeSpan>? _pendingTimer;
+
+  /// <summary>
+  /// Advances the clock by each timer's due time, as each timer is created, until
+  /// <paramref name="until"/> completes. Bounded: a watcher that never stops fails the test.
+  /// </summary>
+  private async Task DriveUntilAsync(Task until)
+  {
     for (var waits = 0; ; waits++)
     {
       Assert.True(waits < 500, "the watcher never stopped");
-      var next = _time.NextTimerAsync();
-      await Task.WhenAny(next, run).WaitAsync(HangGuard);
+      var next = _pendingTimer ?? _time.NextTimerAsync();
+      _pendingTimer = null;
+      await Task.WhenAny(next, until).WaitAsync(HangGuard);
 
       // The run is checked first, not whichever WhenAny names: a run that ends by starting another
       // watcher (which creates a timer as it starts) completes both, and advancing that new
       // watcher's timer would drive work the caller never asked for.
-      if (run.IsCompleted)
+      if (until.IsCompleted)
       {
-        return await run;
+        _pendingTimer = next;
+        return;
       }
 
       _time.Advance(await next);
@@ -264,8 +401,14 @@ public class AudioEngineInitializationServiceCastReconnectTests
     public bool Reachable;
     public bool CastStreaming = true;
     public int Probes;
+    public int Switches;
+    public int TearDowns;
     public string? ConnectedDeviceId;
     public CastRecoveryMark? SwitchedWith;
+
+    /// <summary>When set, a connect parks here, ignoring cancellation, until the test completes it.</summary>
+    public TaskCompletionSource? ConnectGate;
+    public readonly TaskCompletionSource ConnectEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public bool IsStillOnRecoveryOutput(CastRecoveryMark mark) =>
       string.Equals(Engine!._active, mark.LocalOutputId, StringComparison.OrdinalIgnoreCase);
@@ -292,14 +435,20 @@ public class AudioEngineInitializationServiceCastReconnectTests
       return Reachable ? device : null;
     }
 
-    public Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct)
+    public async Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct)
     {
+      ConnectEntered.TrySetResult();
+      if (ConnectGate is { } gate)
+      {
+        await gate.Task;
+      }
+
       ConnectedDeviceId = device.Id;
-      return Task.CompletedTask;
     }
 
     public async Task<bool> TrySwitchToCastAsync(CastRecoveryMark mark, CancellationToken ct)
     {
+      Interlocked.Increment(ref Switches);
       SwitchedWith = mark;
       if (!IsStillOnRecoveryOutput(mark))
       {
@@ -310,6 +459,12 @@ public class AudioEngineInitializationServiceCastReconnectTests
       return true;
     }
 
-    public Task TearDownCastAsync() => Task.CompletedTask;
+    public Task TearDownCastAsync()
+    {
+      Interlocked.Increment(ref TearDowns);
+      return Task.CompletedTask;
+    }
+
+    public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
   }
 }
