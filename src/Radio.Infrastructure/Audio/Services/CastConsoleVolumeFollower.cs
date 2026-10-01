@@ -23,6 +23,10 @@ namespace Radio.Infrastructure.Audio.Services;
 /// the safe direction. When the gate does make <c>google-cast</c> active, the console's mute is
 /// reconciled onto the speaker once. Master volume keeps its meaning as the console's one volume
 /// number; the local speakers' mute while casting is the output gate's business.</para>
+/// <para><b>While the console is muted</b> (AUD-81 follow-up, box UAT 2026-10-01: a level change
+/// unmutes the speaker) volume moves keep following the curve here, but
+/// <see cref="GoogleCastOutput"/> holds the mapped level instead of sending it; the console's unmute
+/// sends the held level first and the unmute after it, logged as one line.</para>
 /// <para><b>Mapping.</b> <see cref="CastConsoleVolumeCurve"/>, anchored lazily per connection at
 /// (the console level just before the first change on that connection, the speaker's level then).
 /// A new connection re-anchors, and so does every change reported by the speaker. So does a console
@@ -156,8 +160,10 @@ public sealed class CastConsoleVolumeFollower : IDisposable
         if (!float.IsNaN(target.SpeakerLevel) && Math.Abs(volume - target.SpeakerLevel) <= SameLevelTolerance)
         {
           // The slider has reached the speaker's level. Nothing to send; from here the curve
-          // is the identity.
+          // is the identity. A level held while the console is muted is dropped too: the speaker
+          // already holds the level the console now asks for, and an unmute must not move it off.
           _anchor = new Anchor(target.Generation, volume, volume);
+          _cast.DiscardHeldConsoleVolume();
           return;
         }
 
@@ -335,7 +341,20 @@ public sealed class CastConsoleVolumeFollower : IDisposable
   {
     try
     {
-      if (await _cast.SetDeviceMuteFromConsoleAsync(muted, target.Generation).ConfigureAwait(false))
+      // An unmute first sends the level the console moved to while it was muted (GoogleCastOutput
+      // holds it: a level change unmutes the speaker), then the unmute.
+      var result = await _cast.SetDeviceMuteFromConsoleWithLevelAsync(muted, target.Generation).ConfigureAwait(false);
+      if (!result.Acknowledged)
+      {
+        return;
+      }
+
+      if (result.LevelBeforeUnmute is float level)
+      {
+        _logger.LogInformation(
+          "Cast: console unmuted → speaker {Name} at {Level:P0}, unmuted", target.DeviceName, level);
+      }
+      else
       {
         _logger.LogInformation(
           muted ? "Cast: console muted → speaker {Name} muted" : "Cast: console unmuted → speaker {Name} unmuted",

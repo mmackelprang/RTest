@@ -2,7 +2,6 @@ using System.Reflection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
-using Moq;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
@@ -29,6 +28,10 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   public TimerRendezvousFakeTimeProvider Time { get; } = new();
   public FakeCastVolumeStore Store { get; } = new();
 
+  /// <summary>Every line the output logs to its own logger (<c>…Audio.Outputs</c>).</summary>
+  public RecordingLogger OutputLog => _outputLogger.Inner;
+  private readonly RecordingLogger<GoogleCastOutput> _outputLogger = new();
+
   /// <summary>
   /// Every SET_VOLUME ("vol"), SET_MUTE ("mute") and receiver-application stop ("appstop") sent,
   /// in order.
@@ -53,15 +56,41 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   /// <summary>When set, the next SET_VOLUME throws it.</summary>
   public Exception? FailNextVolume { get; set; }
 
-  public CastConsoleTestHarness()
+  /// <summary>
+  /// <b>The device model</b> (AUD-81 follow-up, measured on the box 2026-10-01 on a Google Home Mini):
+  /// a SET_VOLUME that CHANGES the level UNMUTES a muted speaker, and SharpCaster raises the reply
+  /// RECEIVER_STATUS (muted:false, the echo level) on its receive thread BEFORE the request's task
+  /// completes. When true, the fake SET_VOLUME does exactly that: after its gate (the network) and
+  /// before it returns, if the modelled speaker is muted and the level differs from the level it
+  /// holds, it unmutes the model and raises <c>RaiseStatus(level, muted: false, step)</c> into the
+  /// output, with the step the test last reported. A SET_VOLUME of the level the speaker already
+  /// holds does not unmute it (also measured). A SET_MUTE that is not failed updates the model's
+  /// mute when it is sent; it raises no status (its echo is not part of what was measured). Every
+  /// status a test raises is the speaker's own report, so the model follows it. Off by default; the
+  /// <c>…_OnTheDeviceModel</c> test classes turn it on for every test they inherit.
+  /// </summary>
+  public bool LevelCommandUnmutes { get; set; }
+
+  /// <summary>The modelled speaker's mute (see <see cref="LevelCommandUnmutes"/>).</summary>
+  public bool DeviceMuted
   {
+    get { lock (_commandsLock) { return _deviceMuted; } }
+  }
+
+  private bool _deviceMuted;
+  private float _deviceLevel = float.NaN;
+  private double? _deviceStepInterval;
+
+  public CastConsoleTestHarness(bool levelCommandUnmutes = false)
+  {
+    LevelCommandUnmutes = levelCommandUnmutes;
     _listener = StartLoopbackListener(out _port);
     var options = new AudioOutputOptions();
     options.GoogleCast.DefaultVolume = 0.7f;
     options.GoogleCast.CacheFilePath =
       Path.Combine(Path.GetTempPath(), $"cast-cache-{Guid.NewGuid():N}.json");
     Output = new GoogleCastOutput(
-      new Mock<ILogger<GoogleCastOutput>>().Object,
+      _outputLogger,
       Options.Create(options),
       volumeStore: Store,
       timeProvider: Time);
@@ -104,6 +133,27 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
       {
         throw fail;
       }
+
+      // The device model: the reply status, raised inside the send, before it completes.
+      bool unmutedByLevel;
+      double? step;
+      lock (_commandsLock)
+      {
+        unmutedByLevel = LevelCommandUnmutes && _deviceMuted &&
+          (float.IsNaN(_deviceLevel) || Math.Abs(v - _deviceLevel) > 0.001f);
+        if (unmutedByLevel)
+        {
+          _deviceMuted = false;
+        }
+
+        _deviceLevel = v;
+        step = _deviceStepInterval;
+      }
+
+      if (unmutedByLevel)
+      {
+        RaiseStatus(v, muted: false, stepInterval: step);
+      }
     };
     Output.CastSetMuteOverrideForTests = async m =>
     {
@@ -112,13 +162,48 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
         Commands.Add(("mute", 0f, m));
       }
 
+      var fail = FailNextMute;
+      FailNextMute = null;
+      if (fail == null)
+      {
+        // The device model: a SET_MUTE reaches the speaker when it is sent; its gate holds only the
+        // reply. (A SET_VOLUME reaches it when ITS gate opens: there the gate stands for the request
+        // waiting on SharpCaster's send lock — the ordering a console mute racing a level needs.)
+        lock (_commandsLock)
+        {
+          _deviceMuted = m;
+        }
+      }
+
       var gate = MuteGate;
       MuteSendEntered.TrySetResult();
       if (gate != null)
       {
         await gate.Task;
       }
+
+      if (fail != null)
+      {
+        throw fail;
+      }
     };
+    Output.CastFreshConnectionOverrideForTests = (
+      _ =>
+      {
+        lock (_commandsLock)
+        {
+          Commands.Add(("fresh", 0f, false));
+        }
+        return FreshConnect();
+      },
+      () =>
+      {
+        lock (_commandsLock)
+        {
+          Commands.Add(("fresh-unmute", 0f, false));
+        }
+        return Task.CompletedTask;
+      });
     Output.CastStopApplicationOverrideForTests = () =>
     {
       lock (_commandsLock)
@@ -135,7 +220,26 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   /// </summary>
   public Func<Task<bool>> AppStop { get; set; } = () => Task.FromResult(true);
 
-  /// <summary>The kinds of every command sent, in order ("vol", "mute", "appstop").</summary>
+  /// <summary>When set, the next SET_MUTE throws it (after recording itself and passing the gate).</summary>
+  public Exception? FailNextMute { get; set; }
+
+  /// <summary>
+  /// The fresh, short-lived teardown connection's status (AUD-81 follow-up, D2): by default the
+  /// speaker is muted and no application is running. A test replaces it with another status, a
+  /// throw, or a task that never completes.
+  /// </summary>
+  public Func<Task<ChromecastStatus?>> FreshConnect { get; set; } = () => Task.FromResult<ChromecastStatus?>(FreshStatus(muted: true));
+
+  /// <summary>A receiver status as a fresh GET_STATUS returns it.</summary>
+  public static ChromecastStatus FreshStatus(bool muted, string? runningAppId = null) => new()
+  {
+    Volume = new() { Level = 0.40, Muted = muted },
+    Applications = runningAppId == null
+      ? null
+      : new System.Collections.ObjectModel.Collection<ChromecastApplication> { new() { AppId = runningAppId } }
+  };
+
+  /// <summary>The kinds of every command sent, in order ("vol", "mute", "unmute", "appstop", "fresh", "fresh-unmute").</summary>
   public List<string> Kinds()
   {
     lock (_commandsLock)
@@ -159,6 +263,15 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
     if (Output.State == AudioOutputState.Created)
     {
       await Output.InitializeAsync();
+    }
+
+    lock (_commandsLock)
+    {
+      // The device model's speaker is the one this connect reports (or, with a substituted read,
+      // an unmuted speaker at the reported level).
+      _deviceMuted = statusRead == null && reportedMuted;
+      _deviceLevel = reportedLevel;
+      _deviceStepInterval = null;
     }
 
     Output.CastStatusReadOverrideForTests =
@@ -277,6 +390,17 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   /// </summary>
   public void RaiseStatus(double level, bool muted = false, double? stepInterval = null)
   {
+    // A status is the speaker's own report, so the device model follows it.
+    lock (_commandsLock)
+    {
+      _deviceMuted = muted;
+      _deviceLevel = (float)level;
+      if (stepInterval != null)
+      {
+        _deviceStepInterval = stepInterval;
+      }
+    }
+
     var handler = typeof(GoogleCastOutput).GetMethod(
       "OnReceiverStatusChanged", BindingFlags.NonPublic | BindingFlags.Instance);
     Assert.NotNull(handler);
@@ -359,6 +483,48 @@ internal sealed class TimerRendezvousFakeTimeProvider : FakeTimeProvider
 
     return timer;
   }
+}
+
+/// <summary>Records every formatted log line with its level.</summary>
+internal sealed class RecordingLogger : ILogger
+{
+  private readonly object _lock = new();
+  private readonly List<(LogLevel Level, string Line)> _lines = new();
+
+  public List<(LogLevel Level, string Line)> Lines()
+  {
+    lock (_lock)
+    {
+      return _lines.ToList();
+    }
+  }
+
+  public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+  public bool IsEnabled(LogLevel logLevel) => true;
+
+  public void Log<TState>(
+    LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+  {
+    lock (_lock)
+    {
+      _lines.Add((logLevel, formatter(state, exception)));
+    }
+  }
+}
+
+/// <summary>A <see cref="RecordingLogger"/> for a typed logger.</summary>
+internal sealed class RecordingLogger<T> : ILogger<T>
+{
+  public RecordingLogger Inner { get; } = new();
+
+  public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+  public bool IsEnabled(LogLevel logLevel) => true;
+
+  public void Log<TState>(
+    LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+    Inner.Log(logLevel, eventId, state, exception, formatter);
 }
 
 /// <summary>An in-memory <see cref="ICastDeviceVolumeStore"/> that records every Remember call.</summary>

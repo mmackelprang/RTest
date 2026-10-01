@@ -27,6 +27,15 @@ public class CastConsoleVolumeFollowerTests
   private string? _activeOutput = "google-cast";
   private readonly Mock<IAudioEngine> _engine = new();
 
+  /// <summary>
+  /// Whether the harness models the measured device (a level change unmutes a muted speaker —
+  /// <see cref="CastConsoleTestHarness.LevelCommandUnmutes"/>). Off here;
+  /// <see cref="CastConsoleVolumeFollowerTests_OnTheDeviceModel"/> runs every test with it on.
+  /// </summary>
+  protected virtual bool OnTheDeviceModel => false;
+
+  private CastConsoleTestHarness NewHarness() => new(OnTheDeviceModel);
+
   private (SoundFlowMasterMixer Mixer, CastConsoleVolumeFollower Follower) Build(
     CastConsoleTestHarness h, float initialMaster, ILogger<CastConsoleVolumeFollower>? logger = null)
   {
@@ -101,7 +110,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task NothingIsPushed_UnlessCastIsTheActiveOutput_AndStreaming()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.50f, streaming: false);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -137,7 +146,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task TheFirstMove_ContinuesFromTheSpeakersLevel_NotTheConsoles()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f); // speaker at 40 %
     var (mixer, follower) = Build(h, 0.50f);   // console at 50 %
     using var _ = follower;
@@ -156,7 +165,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task DownThenOneDetentUp_OnASteepLowerSegment_RaisesTheSpeakerAtMostThreeTimesTheStep()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.80f); // speaker at 80 %
     var (mixer, follower) = Build(h, 0.10f);   // console at 10 %
     using var _ = follower;
@@ -191,7 +200,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task TheFirstMoveFromASteepAnchor_NeverJumps_InEitherDirection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.80f);
     var (mixer, follower) = Build(h, 0.10f);
     using var _ = follower;
@@ -210,7 +219,7 @@ public class CastConsoleVolumeFollowerTests
   {
     // Anchor (0.50, 0.40): the lower segment's slope is 0.8, under the cap, so it is not
     // re-anchored — going down and back up returns the speaker to exactly where it was.
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -229,7 +238,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AMasterLevelEqualToTheSpeakers_PushesNothing_AndReanchorsToIdentity()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -251,7 +260,7 @@ public class CastConsoleVolumeFollowerTests
   {
     // VolumeStepPercent defaults to 1, so one detent is one point. A 0.01 "already there"
     // tolerance would swallow it; SameLevelTolerance must not.
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.50f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -268,7 +277,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AnExternalSpeakerChange_ResyncsMaster_AndIsNotPushedBack()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -292,7 +301,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task ADraggedSlider_WithLateOutOfOrderConfirmations_NeverRewritesMaster_OrLoops()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.50f);
     var (mixer, follower) = Build(h, 0.50f); // identity: speaker and console both at 50 %
     using var _ = follower;
@@ -336,7 +345,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task ANewConnection_ReanchorsToItsOwnSpeakerLevel()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -358,7 +367,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task TheConsoleMute_DrivesTheSpeaker_WhileCasting_AndAnExternalMuteIsNotPushedBack()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -379,10 +388,102 @@ public class CastConsoleVolumeFollowerTests
     Assert.Equal(new[] { true, false }, h.MuteSends());
   }
 
+  // --- AUD-81 follow-up (box UAT 2026-10-01): a level change unmutes the speaker ---
+
+  // D1 (a). Measured on the box: console muted, console volume 30 % → 45 %, and the speaker (a
+  // Google Home Mini) came back unmuted under the muted console. No level may be sent while the
+  // console is muted.
+  [Fact]
+  public async Task WhileTheConsoleIsMuted_VolumeMoves_SendNoVolumeCommand_AndTheMuteStays()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var (mixer, follower) = Build(h, 0.30f); // identity
+    using var _ = follower;
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    h.ClearCommands();
+    var rememberedBefore = h.Store.Remembered.Count;
+
+    mixer.MasterVolume = 0.40f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+
+    Assert.Empty(h.Commands);                       // no SET_VOLUME, and no SET_MUTE either
+    Assert.True(h.Output.KnownSpeakerMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Equal(0.45f, h.Output.HeldConsoleVolume(h.Target().Generation)!.Value, 3); // the latest wins
+    Assert.Equal(0.30f, h.Output.KnownSpeakerLevel, 3); // the speaker does not hold it yet
+    Assert.Equal(rememberedBefore, h.Store.Remembered.Count); // not remembered while held
+  }
+
+  // D1 (b). On the console's unmute the held level goes FIRST, then the unmute.
+  [Fact]
+  public async Task TheConsoleUnmute_SendsTheLastHeldLevelFirst_ThenTheUnmute_AndRemembersItOnce()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var log = new ListLogger<CastConsoleVolumeFollower>();
+    var (mixer, follower) = Build(h, 0.30f, log);
+    using var _ = follower;
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    mixer.MasterVolume = 0.40f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+    h.ClearCommands();
+    var rememberedBefore = h.Store.Remembered.Count;
+
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    Assert.Equal(new[] { "vol", "unmute" }, h.Kinds());
+    Assert.Equal(0.45f, Assert.Single(h.VolumeSends()), 3);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Null(h.Output.HeldConsoleVolume(h.Target().Generation));
+    Assert.Equal(new[] { ("cast-a", 0.45f) }, h.Store.Remembered.Skip(rememberedBefore).ToList());
+    var line = Assert.Single(log.Lines(), l => l.StartsWith("Cast: console unmuted", StringComparison.Ordinal));
+    Assert.StartsWith("Cast: console unmuted → speaker Speaker cast-a at 45", line);
+    Assert.EndsWith(", unmuted", line);
+
+    // Hostile review M1: on the device model the held level unmutes the speaker and its reply
+    // arrives before the level's send completes. That reply is our own command's echo — never a
+    // change made on the speaker, so nothing is reported or logged as one.
+    Assert.Empty(h.External);
+    Assert.DoesNotContain(h.OutputLog.Lines(), l => l.Line.Contains("changed externally"));
+    Assert.False(h.DeviceMuted);
+  }
+
+  // The console moves back to the speaker's own level while muted: nothing is sent for that, so an
+  // older held level must not be applied at the unmute.
+  [Fact]
+  public async Task AHeldLevel_IsDropped_WhenTheConsoleComesBackToTheSpeakersLevel()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var (mixer, follower) = Build(h, 0.30f);
+    using var _ = follower;
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.30f; // the speaker's own level
+    await follower.LastVolumeBurst;
+    h.ClearCommands();
+
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    Assert.Equal(new[] { "unmute" }, h.Kinds());
+  }
+
   [Fact]
   public async Task AMutedConsole_MutesTheSpeakerWhenStreamingStarts_ThroughTheFollowersHook()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -405,7 +506,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task TheMasterWriteOfASpeakerChange_IsNeverPushedBack_EvenWhenTheKnownLevelHasMovedOn()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f); // anchor (0.50, 0.40): not the identity
     using var _ = follower;
@@ -442,7 +543,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AMuteOnlySpeakerChange_AfterNonIdentityPushes_PushesNothing_AndLeavesMasterAlone()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -472,7 +573,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AQuantisedReportOfOurPush_BesideASpeakerMute_PushesNothing()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f); // anchor (0.50, 0.40); upper slope 1.2
     using var _ = follower;
@@ -496,7 +597,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task ASpeakerChangeTooSmallToMoveMaster_StillReanchorsTheCurve()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -526,7 +627,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AMuteReachesAStreamingSpeaker_BeforeTheGateRecordsCast_ButAnUnmuteWaitsForIt()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     _activeOutput = "out:Built-in Audio Analog Stereo"; // the gate records google-cast only later
     await h.ConnectAsync(reportedLevel: 0.40f);         // streaming
     var (mixer, follower) = Build(h, 0.50f);
@@ -552,7 +653,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AConsoleMuteMadeBeforeStreaming_IsReconciledWhenTheGateMakesCastActive()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     _activeOutput = "out:Built-in Audio Analog Stereo";
     await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
     var (mixer, follower) = Build(h, 0.50f);
@@ -611,7 +712,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AConsoleMutedSpeaker_LostThenReconnected_IsUnmutedWhenTheConsoleWasUnmutedMeanwhile()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var log = new ListLogger<CastConsoleVolumeFollower>();
     var (mixer, follower) = Build(h, 0.50f, log);
@@ -645,7 +746,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AConsoleMutedSpeaker_LostThenReconnected_UnderAStillMutedConsole_StaysMuted_AndATeardownReleasesIt()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -669,7 +770,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AReconnectThatFindsTheSpeakerUnmuted_SendsNothing_AndForgetsTheConsoleMute()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -703,7 +804,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AConsoleMuteOrphanedOnOneSpeaker_IsNeverReleasedOnADifferentSpeaker()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     using var _ = follower;
@@ -723,7 +824,7 @@ public class CastConsoleVolumeFollowerTests
   [Fact]
   public async Task AfterDispose_MasterChangesAreIgnored()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var (mixer, follower) = Build(h, 0.50f);
     follower.Dispose();
@@ -736,4 +837,14 @@ public class CastConsoleVolumeFollowerTests
 
     Assert.Empty(h.Commands);
   }
+}
+
+/// <summary>
+/// Every <see cref="CastConsoleVolumeFollowerTests"/> test again, on the device model measured on the
+/// box (AUD-81 follow-up): a SET_VOLUME that changes the level unmutes a muted speaker, and the reply
+/// status reaches the output before the send completes.
+/// </summary>
+public class CastConsoleVolumeFollowerTests_OnTheDeviceModel : CastConsoleVolumeFollowerTests
+{
+  protected override bool OnTheDeviceModel => true;
 }
