@@ -798,7 +798,11 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to connect to Chromecast: {Name}", device.FriendlyName);
+      // AUD-37 (review M3): an automatic retry's failure is expected and its caller reports it;
+      // at Error it would reach journald on every attempt.
+      _logger.Log(
+        options.AutomaticAttempt ? LogLevel.Debug : LogLevel.Error,
+        ex, "Failed to connect to Chromecast: {Name}", device.FriendlyName);
       State = AudioOutputState.Error;
 
       // AUD-37 (M4). A client built by this attempt and never published would otherwise be
@@ -916,7 +920,19 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation.</returns>
-  public async Task DisconnectAsync(CancellationToken cancellationToken = default)
+  public Task DisconnectAsync(CancellationToken cancellationToken = default) =>
+    DisconnectAsync(automaticAttempt: false, cancellationToken);
+
+  /// <summary>
+  /// Disconnects from the currently connected Chromecast device.
+  /// </summary>
+  /// <param name="automaticAttempt">
+  /// AUD-37 (review M3): the reconnect watcher's tear-down; a failure is logged at Debug instead
+  /// of Error. It is still thrown.
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns>A task representing the async operation.</returns>
+  public async Task DisconnectAsync(bool automaticAttempt, CancellationToken cancellationToken)
   {
     ThrowIfDisposed();
 
@@ -980,13 +996,25 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Error disconnecting from Chromecast");
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Error, ex, "Error disconnecting from Chromecast");
       throw;
     }
   }
 
   /// <inheritdoc />
-  public override async Task StartAsync(CancellationToken cancellationToken = default)
+  public override Task StartAsync(CancellationToken cancellationToken = default) =>
+    StartAsync(automaticAttempt: false, cancellationToken);
+
+  /// <summary>
+  /// <see cref="StartAsync(CancellationToken)"/>, for a caller that says whether this is an
+  /// automatic retry.
+  /// </summary>
+  /// <param name="automaticAttempt">
+  /// AUD-37 (review M3): the reconnect watcher's start; a failure is logged at Debug instead of
+  /// Error (the watcher reports it). It is still thrown.
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  public async Task StartAsync(bool automaticAttempt, CancellationToken cancellationToken)
   {
     ValidateCanStart();
 
@@ -1035,7 +1063,7 @@ public class GoogleCastOutput : AudioOutputBase
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to start Google Cast output");
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Error, ex, "Failed to start Google Cast output");
       State = AudioOutputState.Error;
       throw;
     }
@@ -2796,6 +2824,12 @@ public sealed record CastConnectOptions
   /// that any later initial-sync machinery can honour the same flag.
   /// </summary>
   public bool HoldUntilReceiverConfirmed { get; init; }
+
+  /// <summary>
+  /// Review M3: an automatic retry (the reconnect watcher's), whose failure is expected and is
+  /// reported by its caller. The connect's own failure line is logged at Debug instead of Error.
+  /// </summary>
+  public bool AutomaticAttempt { get; init; }
 }
 
 /// <summary>

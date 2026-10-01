@@ -427,7 +427,13 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// Best-effort: capped at 5 s, swallows exceptions, never blocks the gate.
   /// Shares the same shutdown sequence used by AudioEngineInitializationService.StopAsync.
   /// </summary>
-  public async Task TearDownCastOutputAsync(CancellationToken cancellationToken)
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <param name="automaticAttempt">
+  /// AUD-37 (review M3): the Cast reconnect watcher's tear-down. The disconnect's and this
+  /// method's own failure lines are logged at Debug instead of Error/Warning. StopAsync's lines
+  /// are unchanged.
+  /// </param>
+  public async Task TearDownCastOutputAsync(CancellationToken cancellationToken, bool automaticAttempt = false)
   {
     if (_castOutput == null)
     {
@@ -455,14 +461,14 @@ public class SoundFlowAudioEngine : IAudioEngine
       // engine's _castOutput field typed as IAudioOutput? for testability.
       if (_castOutput is Radio.Infrastructure.Audio.Outputs.GoogleCastOutput cast)
       {
-        await cast.DisconnectAsync(castCts.Token).ConfigureAwait(false);
+        await cast.DisconnectAsync(automaticAttempt, castCts.Token).ConfigureAwait(false);
       }
 
       _logger.LogInformation("Cast output stopped + disconnected gracefully");
     }
     catch (Exception ex)
     {
-      _logger.LogWarning(ex, "Graceful Cast tear-down failed; continuing");
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Warning, ex, "Graceful Cast tear-down failed; continuing");
     }
   }
 

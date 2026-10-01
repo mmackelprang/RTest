@@ -24,17 +24,19 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
 {
   private static readonly TimeSpan HangGuard = TimeSpan.FromSeconds(15);
 
-  private readonly SoundFlowAudioEngine _engine = CreateBareEngine();
+  private readonly CastReconnectWatcherTests.ListLogger<SoundFlowAudioEngine> _engineLog = new();
+  private readonly CastReconnectWatcherTests.ListLogger<GoogleCastOutput> _castLog = new();
+  private readonly SoundFlowAudioEngine _engine;
   private readonly Mock<IAudioDeviceManager> _deviceManager = new();
   private readonly FakeVolumeStore _volumes = new(); // empty unless a test remembers a level
   private readonly GoogleCastOutput _castOutput;
 
   public AudioEngineInitializationServiceCastReconnectHostTests()
   {
+    _engine = CreateBareEngine(_engineLog);
     var options = new AudioOutputOptions();
     options.GoogleCast.CacheFilePath = Path.Combine(Path.GetTempPath(), $"cast-cache-{Guid.NewGuid():N}.json");
-    _castOutput = new GoogleCastOutput(
-      NullLogger<GoogleCastOutput>.Instance, Options.Create(options), volumeStore: _volumes);
+    _castOutput = new GoogleCastOutput(_castLog, Options.Create(options), volumeStore: _volumes);
 
     _deviceManager
       .Setup(d => d.GetOutputDevicesAsync(It.IsAny<CancellationToken>()))
@@ -257,6 +259,72 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
+  public async Task AWatcherAttemptWhoseConnectFails_LogsNothingAtWarningOrAbove()
+  {
+    // Review M3: the watcher logs the episode's one Warning itself; the output's own line for an
+    // automatic attempt is Debug, or every retry would reach journald.
+    using var listener = StartListener();
+    SetCastSeam("ConnectTransportOverrideForTests",
+      (Func<Sharpcaster.Models.ChromecastReceiver, Task>)(_ => Task.FromException(new IOException("handshake failed"))));
+    var host = CreateService().CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<IOException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    Assert.Contains(_castLog.Entries, e => e.Level == LogLevel.Debug && e.Message.StartsWith("Failed to connect to Chromecast"));
+    Assert.DoesNotContain(_castLog.Entries, e => e.Level >= LogLevel.Warning);
+  }
+
+  [Fact]
+  public async Task AWatcherAttemptWhoseStartAndTearDownFail_LogsNothingAtWarningOrAbove()
+  {
+    // Review M3. No offline receiver can be launched or refuse a disconnect, so both steps are
+    // failed by making the logging call that opens each one throw (ListLogger.ThrowWhen): the
+    // failure then lands in that method's own catch, which is the line under test.
+    using var listener = StartListener();
+    _engine.AttachOutputCoordination(_castOutput, null, null); // the tear-down goes through the engine
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = (_, _) => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    _castLog.ThrowWhen = m => m.StartsWith("Starting Google Cast output") || m.StartsWith("Disconnecting from Chromecast");
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAsync<InvalidOperationException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    // The three lines ran, at Debug…
+    Assert.Contains(_castLog.Entries, e => e.Level == LogLevel.Debug && e.Message.StartsWith("Failed to start Google Cast output"));
+    Assert.Contains(_castLog.Entries, e => e.Level == LogLevel.Debug && e.Message.StartsWith("Error disconnecting from Chromecast"));
+    Assert.Contains(_engineLog.Entries, e => e.Level == LogLevel.Debug && e.Message.StartsWith("Graceful Cast tear-down failed"));
+    // …and nothing from the output or the engine reached Warning.
+    Assert.DoesNotContain(_castLog.Entries, e => e.Level >= LogLevel.Warning);
+    Assert.DoesNotContain(_engineLog.Entries, e => e.Level >= LogLevel.Warning);
+  }
+
+  [Fact]
+  public async Task AUsersFailedConnectStartAndTearDown_StillLogErrorAndWarning()
+  {
+    // The control for the two tests above: the same failures, not automatic, keep their levels.
+    using var listener = StartListener();
+    _engine.AttachOutputCoordination(_castOutput, null, null);
+    await _castOutput.InitializeAsync();
+
+    SetCastSeam("ConnectTransportOverrideForTests",
+      (Func<Sharpcaster.Models.ChromecastReceiver, Task>)(_ => Task.FromException(new IOException("handshake failed"))));
+    await Assert.ThrowsAsync<IOException>(() => _castOutput.ConnectAsync(Device(Port(listener))).WaitAsync(HangGuard));
+    Assert.Contains(_castLog.Entries, e => e.Level == LogLevel.Error && e.Message.StartsWith("Failed to connect to Chromecast"));
+
+    SetCastSeam("ConnectTransportOverrideForTests", (Func<Sharpcaster.Models.ChromecastReceiver, Task>)(_ => Task.CompletedTask));
+    await _castOutput.ConnectAsync(Device(Port(listener))).WaitAsync(HangGuard);
+    _castLog.ThrowWhen = m => m.StartsWith("Starting Google Cast output") || m.StartsWith("Disconnecting from Chromecast");
+    await Assert.ThrowsAsync<InvalidOperationException>(() => _castOutput.StartAsync().WaitAsync(HangGuard));
+    await _engine.TearDownCastOutputAsync(CancellationToken.None).WaitAsync(HangGuard);
+
+    Assert.Contains(_castLog.Entries, e => e.Level == LogLevel.Error && e.Message.StartsWith("Failed to start Google Cast output"));
+    Assert.Contains(_castLog.Entries, e => e.Level == LogLevel.Error && e.Message.StartsWith("Error disconnecting from Chromecast"));
+    Assert.Contains(_engineLog.Entries, e => e.Level == LogLevel.Warning && e.Message.StartsWith("Graceful Cast tear-down failed"));
+  }
+
+  [Fact]
   public async Task ReceiverStatusUnreadable_IsTreatedAsBusy()
   {
     using var listener = StartListener();
@@ -467,7 +535,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     Model = "Google Home Mini"
   };
 
-  private static SoundFlowAudioEngine CreateBareEngine()
+  private static SoundFlowAudioEngine CreateBareEngine(ILogger<SoundFlowAudioEngine> logger)
   {
     var options = Options.Create(new AudioEngineOptions
     {
@@ -489,7 +557,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
       outputOptions.Object);
 
     return new SoundFlowAudioEngine(
-      NullLogger<SoundFlowAudioEngine>.Instance,
+      logger,
       options,
       new SoundFlowMasterMixer(NullLogger<SoundFlowMasterMixer>.Instance),
       deviceManager);

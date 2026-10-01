@@ -278,6 +278,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     public required long WindowStart { get; init; }
     public TimeSpan NextDelay { get; set; }
     public long? LastWatcherReconnect { get; set; }
+
+    // Review M3: a watcher of this episode has logged the episode's one failed-attempt Warning.
+    public bool FailureWarned { get; set; }
   }
 
   /// <summary>
@@ -469,7 +472,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         }
 
         episode.LastWatcherReconnect = null;
-        start = new CastReconnectStart(episode.WindowStart, episode.NextDelay);
+        start = new CastReconnectStart(episode.WindowStart, episode.NextDelay, episode.FailureWarned);
       }
       else
       {
@@ -496,7 +499,8 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         // Recorded as the connect succeeds, before the switch makes the output Cast: a loss
         // of this connection can be reported from that moment on, and its recovery must find
         // the episode already marked (review H1).
-        nextDelay => RecordWatcherReconnect(device, nextDelay));
+        nextDelay => RecordWatcherReconnect(device, nextDelay),
+        () => RecordFailureWarned(device));
 
       CastReconnectTask = Task.Run(() => RunCastReconnectWatcherAsync(watcher, previousRun, device, cts));
     }
@@ -573,6 +577,18 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     }
   }
 
+  private void RecordFailureWarned(ChromecastDeviceInfo device)
+  {
+    lock (_reconnectGate)
+    {
+      var episode = _reconnectEpisode;
+      if (episode != null && string.Equals(episode.DeviceId, device.Id, StringComparison.Ordinal))
+      {
+        episode.FailureWarned = true;
+      }
+    }
+  }
+
   private void RecordWatcherReconnect(ChromecastDeviceInfo device, TimeSpan nextDelay)
   {
     lock (_reconnectGate)
@@ -610,7 +626,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
 
-    private static readonly CastConnectOptions HoldUntilConfirmed = new() { HoldUntilReceiverConfirmed = true };
+    // Review M5: held until the receiver is confirmed free. Review M3: an automatic attempt, whose
+    // failure the watcher reports once per episode; the output logs it at Debug.
+    private static readonly CastConnectOptions WatcherConnect = new() { HoldUntilReceiverConfirmed = true, AutomaticAttempt = true };
 
     private readonly AudioEngineInitializationService _svc;
     private bool _startedHttpOutput;
@@ -724,7 +742,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       {
         // Review M5: held until the receiver is known to be free — no remembered volume pushed to
         // it, and no status from it reported to the console, while it may be serving another sender.
-        await cast.ConnectAsync(ours, HoldUntilConfirmed, ct).ConfigureAwait(false);
+        await cast.ConnectAsync(ours, WatcherConnect, ct).ConfigureAwait(false);
       }
       catch
       {
@@ -753,7 +771,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
         if (cast.State != AudioOutputState.Streaming)
         {
-          await cast.StartAsync(ct).ConfigureAwait(false);
+          await cast.StartAsync(automaticAttempt: true, ct).ConfigureAwait(false);
         }
 
         if (cast.State != AudioOutputState.Streaming)
@@ -816,7 +834,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         if (OwnsPublishedConnection(cast))
         {
           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-          await cast.DisconnectAsync(cts.Token).ConfigureAwait(false);
+          await cast.DisconnectAsync(automaticAttempt: true, cts.Token).ConfigureAwait(false);
         }
       }
       catch (Exception ex)
@@ -911,7 +929,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         if (_svc._audioEngine is SoundFlowAudioEngine engine)
         {
           // Stop + disconnect, capped at 5 s, never throws.
-          await engine.TearDownCastOutputAsync(CancellationToken.None).ConfigureAwait(false);
+          await engine.TearDownCastOutputAsync(CancellationToken.None, automaticAttempt: true).ConfigureAwait(false);
         }
         else
         {
@@ -921,7 +939,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
             await cast.StopAsync(cts.Token).ConfigureAwait(false);
           }
 
-          await cast.DisconnectAsync(cts.Token).ConfigureAwait(false);
+          await cast.DisconnectAsync(automaticAttempt: true, cts.Token).ConfigureAwait(false);
         }
 
         // HttpMp3 only: stop the HTTP stream this host started, unless an output that uses it

@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Time.Testing;
 using Radio.API.Services;
@@ -333,17 +334,60 @@ public class CastReconnectWatcherTests
     Assert.Equal(CastReconnectOutcome.LostAgainAfterSwitch, outcome);
   }
 
+  [Fact]
+  public async Task ConnectKeepsFailing_LogsOneWarningForTheEpisode_NotOnePerAttempt()
+  {
+    // Review M3: about one failed attempt a minute for the whole window. Only Warning and above
+    // reach journald from radio-api, so the episode gets one Warning and one give-up line.
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ => new InvalidOperationException("handshake failed");
+    var schedule = DefaultSchedule with { Window = TimeSpan.FromMinutes(10) };
+    var log = new ListLogger();
+    var warnedCallbacks = 0;
+
+    var outcome = await DriveAsync(Start(schedule, logger: log, onFailureWarned: () => warnedCallbacks++));
+
+    Assert.Equal(CastReconnectOutcome.GaveUp, outcome);
+    Assert.Equal(10, _host.Connects);
+    var loud = Assert.Single(log.Entries, e => e.Level >= LogLevel.Warning);
+    Assert.Equal(LogLevel.Warning, loud.Level);
+    Assert.Contains("handshake failed", loud.Message);
+    Assert.Equal(1, warnedCallbacks);
+    Assert.Contains(log.Entries, e => e.Level == LogLevel.Information && e.Message.Contains("giving up"));
+  }
+
+  [Fact]
+  public async Task ContinuingAnEpisodeThatAlreadyWarned_LogsNoFurtherWarning()
+  {
+    // Review M3: the Warning is the episode's, not each watcher's — a speaker that keeps taking
+    // the session and dropping it starts a new watcher each time within one episode.
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ => new InvalidOperationException("handshake failed");
+    var schedule = DefaultSchedule with { Window = TimeSpan.FromMinutes(5) };
+    var log = new ListLogger();
+
+    var outcome = await DriveAsync(Start(
+      schedule, logger: log, start: new CastReconnectStart(_time.GetTimestamp(), TimeSpan.FromSeconds(5), FailureWarned: true)));
+
+    Assert.Equal(CastReconnectOutcome.GaveUp, outcome);
+    Assert.True(_host.Connects > 1);
+    Assert.DoesNotContain(log.Entries, e => e.Level >= LogLevel.Warning);
+  }
+
   // --- helpers ---
 
   private Task<CastReconnectOutcome> Start(
     CastReconnectSchedule? schedule = null,
     CancellationToken ct = default,
     CastReconnectStart? start = null,
-    Action<TimeSpan>? onConnected = null)
+    Action<TimeSpan>? onConnected = null,
+    ILogger? logger = null,
+    Action? onFailureWarned = null)
   {
     _host.Clock = _time;
     var watcher = new CastReconnectWatcher(
-      _host, Device(), Mark, schedule ?? DefaultSchedule, _time, NullLogger.Instance, start, onConnected);
+      _host, Device(), Mark, schedule ?? DefaultSchedule, _time, logger ?? NullLogger.Instance, start, onConnected,
+      onFailureWarned);
     var started = _time.GetUtcNow();
     _host.StartedAt = started;
     return Task.Run(() => watcher.RunAsync(ct));
@@ -382,6 +426,52 @@ public class CastReconnectWatcherTests
     Port = 8009,
     Model = "Google Home Mini"
   };
+
+  /// <summary>
+  /// A logger that records every entry. <see cref="ThrowWhen"/>, when set, makes the logging call
+  /// for a matching message throw — a deterministic way to fail the step that logs it.
+  /// </summary>
+  internal class ListLogger : ILogger
+  {
+    private readonly List<(LogLevel Level, string Message)> _entries = new();
+
+    public Func<string, bool>? ThrowWhen { get; set; }
+
+    public IReadOnlyList<(LogLevel Level, string Message)> Entries
+    {
+      get
+      {
+        lock (_entries)
+        {
+          return _entries.ToList();
+        }
+      }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+      var message = formatter(state, exception);
+      lock (_entries)
+      {
+        _entries.Add((logLevel, message));
+      }
+
+      if (ThrowWhen?.Invoke(message) == true)
+      {
+        throw new InvalidOperationException($"injected failure at \"{message}\"");
+      }
+    }
+  }
+
+  /// <summary><see cref="ListLogger"/> for a component that takes an <see cref="ILogger{T}"/>.</summary>
+  internal sealed class ListLogger<T> : ListLogger, ILogger<T>
+  {
+  }
 
   /// <summary>A <see cref="FakeTimeProvider"/> that reports every timer it creates.</summary>
   internal sealed class SignalingTimeProvider : FakeTimeProvider

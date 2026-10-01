@@ -83,7 +83,11 @@ internal readonly record struct CastReconnectSchedule(
 /// </summary>
 /// <param name="WindowStartTimestamp">A <see cref="TimeProvider.GetTimestamp"/> value.</param>
 /// <param name="FirstDelay">The first wait.</param>
-internal readonly record struct CastReconnectStart(long WindowStartTimestamp, TimeSpan FirstDelay);
+/// <param name="FailureWarned">
+/// True when an earlier watcher of the same episode already logged the episode's one Warning
+/// for a failed attempt (review M3).
+/// </param>
+internal readonly record struct CastReconnectStart(long WindowStartTimestamp, TimeSpan FirstDelay, bool FailureWarned = false);
 
 /// <summary>
 /// Thrown by <see cref="ICastReconnectHost.ConnectAndStartAsync"/> when the speaker answered but
@@ -196,14 +200,18 @@ internal interface ICastReconnectHost
 /// with a fake clock instead of racing real delays (CLAUDE.md § Test Timing).
 /// </para>
 /// <para>
-/// The watcher's own per-probe and per-attempt lines are Debug: a speaker that stays away for the
-/// whole window would otherwise put a line in journald every minute for half an hour, on a box
-/// where journal volume correlates with audible distortion. <b>That does not make a failing
-/// attempt quiet.</b> Each failed full connect also passes through <c>GoogleCastOutput</c>, which
-/// logs it at Error (<c>Failed to connect to Chromecast</c>, and <c>Failed to start Google Cast
-/// output</c> when the launch fails); those are left as they are because the same code logs a
-/// user's own failed connect. Worst case — a speaker that answers TCP and fails every handshake
-/// for the whole default window — is about 30 attempts, one or two Error lines each.
+/// Logging (review M3). Only Warning and above reach journald from radio-api, on a box where
+/// journal volume correlates with audible distortion, and a speaker that fails every handshake
+/// for the default window is retried about 30 times. So the per-probe and per-attempt lines are
+/// Debug, and the host makes its attempts as automatic ones (<c>CastConnectOptions.AutomaticAttempt</c>,
+/// <c>StartAsync(automaticAttempt: true)</c>, <c>DisconnectAsync(automaticAttempt: true)</c>,
+/// <c>TearDownCastOutputAsync(..., automaticAttempt: true)</c>), for which <c>GoogleCastOutput</c>
+/// and the engine log their own failure lines at Debug instead of Error/Warning — a user's connect
+/// still logs Error. The watcher logs ONE Warning for the first failed full connect of an episode
+/// (carried across the watchers of an episode by <see cref="CastReconnectStart.FailureWarned"/>),
+/// and Information when it gives up or reconnects. Lines the automatic flag does not reach — a
+/// failing <c>InitializeAsync</c>, the HTTP output's own start, a superseded connect, and
+/// <c>StopAsync</c>'s media-stop lines on a tear-down after streaming began — keep their levels.
 /// </para>
 /// </remarks>
 internal sealed class CastReconnectWatcher
@@ -216,8 +224,10 @@ internal sealed class CastReconnectWatcher
   private readonly CastReconnectSchedule _schedule;
   private readonly CastReconnectStart? _start;
   private readonly Action<TimeSpan>? _onConnected;
+  private readonly Action? _onFailureWarned;
   private readonly TimeProvider _time;
   private readonly ILogger _logger;
+  private bool _failureWarned;
 
   public CastReconnectWatcher(
     ICastReconnectHost host,
@@ -227,7 +237,8 @@ internal sealed class CastReconnectWatcher
     TimeProvider time,
     ILogger logger,
     CastReconnectStart? start = null,
-    Action<TimeSpan>? onConnected = null)
+    Action<TimeSpan>? onConnected = null,
+    Action? onFailureWarned = null)
   {
     _host = host;
     _device = device;
@@ -237,6 +248,8 @@ internal sealed class CastReconnectWatcher
     _logger = logger;
     _start = start;
     _onConnected = onConnected;
+    _onFailureWarned = onFailureWarned;
+    _failureWarned = start?.FailureWarned ?? false;
     NextDelay = start?.FirstDelay ?? schedule.InitialDelay;
   }
 
@@ -330,6 +343,17 @@ internal sealed class CastReconnectWatcher
           // The device answered TCP but the Cast session would not come up (still booting,
           // receiver app not ready). Retry no more than once per backoff cap from here on.
           _logger.LogDebug(ex, "Cast: reconnect attempt {Attempt} to \"{Name}\" failed; will retry", attempt, name);
+          if (!_failureWarned)
+          {
+            // Review M3: the episode's one Warning. The output logged this attempt's failure at
+            // Debug, so without this line a speaker that never takes the session would leave
+            // nothing in journald.
+            _failureWarned = true;
+            _onFailureWarned?.Invoke();
+            _logger.LogWarning(
+              "Cast: \"{Name}\" answers but the Cast session would not come up ({Error}); retrying at most every {MaxBackoff} s for the rest of the {Window} min window — further failures are logged at Debug",
+              name, ex.Message, (int)_schedule.MaxDelay.TotalSeconds, (int)_schedule.Window.TotalMinutes);
+          }
           backoff = _schedule.MaxDelay;
           wait = backoff;
           NextDelay = backoff;
