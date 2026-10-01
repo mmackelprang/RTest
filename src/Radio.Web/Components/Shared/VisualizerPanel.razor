@@ -27,6 +27,12 @@
   stored FM band map, touch-to-tune) took Fall's position; Fall (the audio
   spectrogram) and VU were removed. BAND reads /api/radio/bandmap on a timer
   and subscribes to no hub stream. The default mode is Spectrum.
+
+  AUD-91: BAND shows the map of the radio's band (the band selected in the radio
+  control panel), which the API resolves when no band is asked for. The axis,
+  gridlines, bar width, markers and tap snap follow that band; AM and SW cannot
+  be scanned and say so. It follows a band change at once through
+  AudioStateHub.RadioStateChanged, not only on its timer.
 *@
 
 <div class="viz-panel">
@@ -50,7 +56,7 @@
               @onclick="@(() => SelectMode(VisualizationMode.Band))"
               role="tab"
               aria-selected="@(_currentMode == VisualizationMode.Band ? "true" : "false")"
-              aria-label="FM band map mode">BAND</button>
+              aria-label="Radio band map mode">BAND</button>
       <button class="visualizer-mode @(_currentMode == VisualizationMode.Circular ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.Circular))"
@@ -93,7 +99,7 @@
       flips and the skeleton unmounts.
     *@
     <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas @(IsBandMode ? "is-band" : "")"
-            aria-label="@(IsBandMode ? "FM band map. Tap a station to tune." : null)"></canvas>
+            aria-label="@(IsBandMode ? BandCanvasLabel : null)"></canvas>
 
     @if (!_isInitialized)
     {
@@ -108,14 +114,20 @@
          re-renders every second while a sweep runs and would be announced on each tick. *@
       <div class="band-overlay">
         <div class="band-status">
-          @if (_bandMap?.Sweep.IsSweeping == true)
-          {
-            <span class="band-status-scanning">@BandMapText.FormatScanning(_bandMap.Sweep.EstimatedSecondsRemaining, _bandMap.Sweep.Progress)</span>
-          }
-          else if (HasBandMap)
-          {
-            <span class="band-status-age">scanned @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
-          }
+          @* AUD-91: the shown band leads the line, so a map of another band is never mistaken for FM. *@
+          <div class="band-status-line">
+            <span class="band-status-band">@ShownBand</span>
+            @if (_bandMap?.Sweep.IsSweeping == true)
+            {
+              <span class="band-status-sep" aria-hidden="true">·</span>
+              <span class="band-status-scanning">@BandMapText.FormatScanning(_bandMap.Sweep.EstimatedSecondsRemaining, _bandMap.Sweep.Progress, IsSweepingOtherBand ? _bandMap.Sweep.Band : null)</span>
+            }
+            else if (HasBandMap)
+            {
+              <span class="band-status-sep" aria-hidden="true">·</span>
+              <span class="band-status-age">scanned @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
+            }
+          </div>
           @if (_bandMessage != null)
           {
             <span class="band-status-message @(_bandMessageIsError ? "is-error" : "")"
@@ -124,12 +136,19 @@
         </div>
         <button type="button"
                 class="band-scan-btn"
-                disabled="@(_bandMap?.Sweep.IsSweeping == true || _scanRequestInFlight)"
-                aria-label="Scan the FM band"
+                disabled="@(_bandMap?.Sweep.IsSweeping == true || _scanRequestInFlight || !IsShownBandMappable)"
+                aria-label="Scan the @ShownBand band"
                 @onclick="RequestScanAsync">Scan</button>
       </div>
 
-      @if (!HasBandMap && _bandMap?.Sweep.IsSweeping != true)
+      @if (!IsShownBandMappable)
+      {
+        <div class="band-empty is-unmappable">
+          <div class="band-empty-title">@ShownBand can't be scanned on this radio</div>
+          <div class="band-empty-sub">@(_bandMap?.UnavailableReason ?? "This band cannot be scanned.")</div>
+        </div>
+      }
+      else if (!HasBandMap && !IsSweepingShownBand)
       {
         <div class="band-empty">
           <div class="band-empty-title">No scan yet</div>
@@ -146,13 +165,13 @@
     }
   </div>
 
-  <!-- Axis strip: audio frequency bands for the spectrum modes, MHz for BAND -->
+  <!-- Axis strip: audio frequency bands for the spectrum modes; for BAND, the shown band's MHz (kHz on AM) -->
   @if (IsBandMode)
   {
     <div class="visualizer-axis is-band" aria-hidden="true">
-      @foreach (int mhz in BandAxisMhz)
+      @foreach (BandAxisTick tick in _bandAxis.Ticks())
       {
-        <span style="left: @AxisLeftPercent(mhz)%">@mhz</span>
+        <span style="left: @AxisLeftPercent(tick.Hz)%">@tick.Label</span>
       }
     </div>
   }
@@ -199,8 +218,6 @@
   /// <summary>The source type <c>POST /api/sources</c> takes for the radio — what MainLayout sends.</summary>
   internal const string RadioSourceType = "Radio";
 
-  private static readonly int[] BandAxisMhz = [88, 92, 96, 100, 104, 108];
-
   /// <summary>
   /// The clock BAND's refresh timer is armed against. Production never sets this. A parameter rather
   /// than <c>@inject</c> because neither host registers a <see cref="TimeProvider"/> — the same
@@ -221,6 +238,14 @@
 
   // ── BAND state ──
   private BandMapResponseDto? _bandMap;
+
+  // The axis of the band _bandMap describes; FM until a map has been read. Set with _bandMap.
+  private BandAxis _bandAxis = BandAxis.Fm;
+
+  // The band a RadioStateChanged broadcast last triggered a map re-read for, so the telemetry ticks
+  // that follow (several a second) do not each re-read it while that read is in flight. Cleared once a
+  // broadcast agrees with the band shown.
+  private string? _bandReadTriggeredFor;
   private RadioStateDto? _radioState;
   private List<RadioPresetDto>? _presets;
   private ITimer? _bandTimer;
@@ -260,8 +285,28 @@
 
   private bool HasBandMap => _bandMap != null && _bandMap.Channels.Count > 0;
 
-  private static string AxisLeftPercent(int mhz) =>
-    (FmBandMath.HzToFraction(mhz * 1_000_000.0) * 100).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+  /// <summary>The band code BAND is showing (FM until a map has been read).</summary>
+  private string ShownBand => _bandAxis.Band;
+
+  /// <summary>False when the API says the shown band cannot be scanned (AM, SW on this tuner).</summary>
+  private bool IsShownBandMappable => _bandMap?.Mappable != false;
+
+  /// <summary>A sweep is running and it is not known to be of another band (an older API names none).</summary>
+  private bool IsSweepingShownBand =>
+    _bandMap?.Sweep.IsSweeping == true && (_bandMap.Sweep.Band == null || SameBand(_bandMap.Sweep.Band, ShownBand));
+
+  /// <summary>A sweep is running of a band other than the one shown.</summary>
+  private bool IsSweepingOtherBand =>
+    _bandMap?.Sweep.IsSweeping == true && _bandMap.Sweep.Band != null && !SameBand(_bandMap.Sweep.Band, ShownBand);
+
+  private string BandCanvasLabel => IsShownBandMappable
+    ? $"{ShownBand} band map. Tap a station to tune."
+    : $"{ShownBand} band map.";
+
+  private static bool SameBand(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+  private string AxisLeftPercent(double hz) =>
+    (_bandAxis.HzToFraction(hz) * 100).ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
 
   /// <summary>
   /// Maps a saved <c>ui.visualizer/defaultMode</c> value to a mode. AUD-76 removed two modes, and a
@@ -301,6 +346,10 @@
 
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
+
+      // AUD-91: BAND follows the radio's band. A band picked in the radio control panel arrives here
+      // at once, rather than on BAND's next 30-second refresh. Ignored outside BAND.
+      AudioStateHub.RadioStateChanged += HandleRadioStateChangedAsync;
 
       // The preference read is an HTTP call, and the first render does not wait for it: when it is
       // slow, OnAfterRenderAsync has already initialised the canvas and subscribed to the DEFAULT
@@ -610,6 +659,7 @@
 
     try
     {
+      // No band: the API answers for the radio's band, which is the band BAND shows (AUD-91).
       Task<BandMapResponseDto?> mapTask = RadioApi.GetBandMapAsync();
       Task<RadioStateRead> stateTask = RadioApi.ReadStateAsync();
       Task<List<RadioPresetDto>?> presetsTask = includePresets
@@ -626,6 +676,7 @@
       BandMapResponseDto? map = await mapTask;
       _bandMapReadFailed = map == null;
       _bandMap = map ?? _bandMap;
+      _bandAxis = BandAxis.FromMap(_bandMap);
       RadioStateRead state = await stateTask;
       // The station marker needs the state; with the radio not active (400) there is none. When the
       // read failed outright, keep the last known station rather than blanking the marker.
@@ -650,9 +701,10 @@
   }
 
   /// <summary>
-  /// Hands the canvas a drawing model in plot coordinates (0–1 across 87.5–108 MHz), so the JS stays
-  /// arithmetic-free: normalised channel heights, the station marker (FM only, radio active), and the
-  /// FM presets as labelled ticks.
+  /// Hands the canvas a drawing model in plot coordinates (0–1 across the shown band's axis; 87.5–108 MHz
+  /// on FM), so the JS stays arithmetic-free: normalised channel heights, the gridline positions, the
+  /// axis span in channel spacings (for the bar width), the station marker (shown band, radio active),
+  /// and the shown band's presets as labelled ticks.
   /// </summary>
   private async Task DrawBandAsync()
   {
@@ -661,41 +713,81 @@
       return;
     }
 
-    IReadOnlyList<BandMapChannelDto> channels = _bandMap?.Channels ?? Array.Empty<BandMapChannelDto>();
+    BandAxis axis = _bandAxis;
+    IReadOnlyList<BandMapChannelDto> channels = IsShownBandMappable
+      ? _bandMap?.Channels ?? Array.Empty<BandMapChannelDto>()
+      : Array.Empty<BandMapChannelDto>();
     double[] heights = FmBandMath.NormalizeLevels(channels);
     object[] levels = channels
-      .Select((c, i) => (object)new { f = FmBandMath.HzToFraction(c.FrequencyHz), v = heights[i] })
+      .Select((c, i) => (object)new { f = axis.HzToFraction(c.FrequencyHz), v = heights[i] })
       .ToArray();
 
-    double? station = _radioState != null && IsFm(_radioState.Band) && InPlot(_radioState.Frequency)
-      ? FmBandMath.HzToFraction(_radioState.Frequency)
+    double? station = _radioState != null && SameBand(_radioState.Band, axis.Band) && axis.Contains(_radioState.Frequency)
+      ? axis.HzToFraction(_radioState.Frequency)
       : null;
 
     object[] presets = (_presets ?? [])
-      .Where(p => IsFm(p.Band) && InPlot(p.Frequency))
+      .Where(p => SameBand(p.Band, axis.Band) && axis.Contains(p.Frequency))
       .OrderBy(p => p.Frequency)
-      .Select(p => (object)new { f = FmBandMath.HzToFraction(p.Frequency), label = PresetLabel(p) })
+      .Select(p => (object)new { f = axis.HzToFraction(p.Frequency), label = PresetLabel(p, axis.Band) })
       .ToArray();
+
+    double[] grid = axis.Ticks().Select(t => axis.HzToFraction(t.Hz)).ToArray();
 
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawBandMap", WebConstants.ElementIds.VisualizerCanvas,
-        new { levels, station, presets, sweeping = _bandMap?.Sweep.IsSweeping == true });
+        new { levels, station, presets, grid, channelsAcross = axis.ChannelsAcross, sweeping = _bandMap?.Sweep.IsSweeping == true });
     }
     catch (TaskCanceledException) { }
     catch (OperationCanceledException) { }
     catch (Exception ex) { Logger.LogWarning(ex, "Error drawing the band map"); }
   }
 
-  private static bool IsFm(string? band) => string.Equals(band, "FM", StringComparison.OrdinalIgnoreCase);
-
-  private static bool InPlot(double hz) => hz >= FmBandMath.PlotMinHz && hz <= FmBandMath.PlotMaxHz;
-
-  /// <summary>A preset's tick label: its name when short, else its frequency.</summary>
-  private static string PresetLabel(RadioPresetDto preset)
+  /// <summary>A preset's tick label: its name when short, else its frequency as the band names it.</summary>
+  private static string PresetLabel(RadioPresetDto preset, string band)
   {
     string name = preset.Name?.Trim() ?? string.Empty;
-    return name.Length is > 0 and <= 8 ? name : BandMapText.FormatMhz(preset.Frequency);
+    return name.Length is > 0 and <= 8 ? name : BandMapText.FormatFrequency(preset.Frequency, band);
+  }
+
+  /// <summary>
+  /// A <c>RadioStateChanged</c> broadcast (AUD-91). Outside BAND it is ignored. A band other than the
+  /// one shown re-reads the map at once — once per band change, not once per broadcast, since telemetry
+  /// ticks repeat the state several times a second. The same band with a new frequency only moves the
+  /// station marker: a redraw, no API call.
+  /// </summary>
+  private Task HandleRadioStateChangedAsync(RadioStateDto dto) => InvokeAsync(() => ApplyRadioStateAsync(dto));
+
+  private async Task ApplyRadioStateAsync(RadioStateDto dto)
+  {
+    if (_isDisposed || !_bandActive)
+    {
+      return;
+    }
+
+    if (!SameBand(dto.Band, ShownBand))
+    {
+      // A read that fails leaves the old band shown; the next idle refresh retries it, not the next tick.
+      if (!SameBand(dto.Band, _bandReadTriggeredFor))
+      {
+        _bandReadTriggeredFor = dto.Band;
+        await RefreshBandAsync(includePresets: false);
+        CompleteBandCycle();
+      }
+
+      return;
+    }
+
+    _bandReadTriggeredFor = null;
+    bool markerMoved = _radioState == null
+      || _radioState.Frequency != dto.Frequency
+      || !SameBand(_radioState.Band, dto.Band);
+    _radioState = dto;
+    if (markerMoved)
+    {
+      await DrawBandAsync();
+    }
   }
 
   private async Task RegisterBandTapAsync()
@@ -732,20 +824,25 @@
   }
 
   /// <summary>
-  /// A tap on the band plot, as a fraction of its width (0 = 87.5 MHz, 1 = 108 MHz). Resolved by
-  /// <see cref="FmBandMath.ResolveTapTarget"/> and tuned by <see cref="TuneToAsync"/>. A tap during a
-  /// sweep is allowed: the API cancels the sweep and the user's tune wins (AUD-76 PR 1).
+  /// A tap on the band plot, as a fraction of its width (0 = the shown band's left edge, 87.5 MHz on
+  /// FM; 1 = its right edge). Resolved by <see cref="BandAxis.ResolveTapTarget"/> on the shown band's
+  /// axis and tuned in that band by <see cref="TuneToAsync"/>. A tap during a sweep is allowed: the API
+  /// cancels the sweep and the user's tune wins (AUD-76 PR 1). A tap on a band that cannot be scanned
+  /// tunes nothing — there is no map to tap.
   /// </summary>
   [JSInvokable]
   public Task OnBandTap(double fraction)
   {
-    if (_isDisposed || !IsBandMode)
+    if (_isDisposed || !IsBandMode || !IsShownBandMappable)
     {
       return Task.CompletedTask;
     }
 
-    long target = FmBandMath.ResolveTapTarget(FmBandMath.FractionToHz(fraction), _bandMap?.Channels);
-    return InvokeAsync(() => TuneToAsync(target));
+    // The axis is captured now, so the tune names the band the tap was made on even if a band change
+    // lands before it runs.
+    BandAxis axis = _bandAxis;
+    long target = axis.ResolveTapTarget(axis.FractionToHz(fraction), _bandMap?.Channels);
+    return InvokeAsync(() => TuneToAsync(target, axis.Band));
   }
 
   /// <summary>
@@ -755,11 +852,14 @@
   /// second tap while one tune is in flight is ignored.
   /// </summary>
   /// <remarks>
-  /// No band is selected first: <c>RadioReceiver.SetFrequency</c> picks the band that contains the
-  /// frequency (FM for 87.9–107.9, which precedes VHF in <c>BandPresets.AllBands</c>), and a separate
-  /// <c>SetBand("FM")</c> would restart the stream twice and briefly tune the FM band's lower edge.
+  /// No band is selected first. On FM the request carries no band, exactly as AUD-76 sent it:
+  /// <c>RadioReceiver.SetFrequency</c> picks the band that contains the frequency (FM for 87.9–107.9,
+  /// which precedes VHF in <c>BandPresets.AllBands</c>), and a separate <c>SetBand("FM")</c> would
+  /// restart the stream twice and briefly tune the FM band's lower edge. Every other band sends its
+  /// code with the frequency (AUD-91), so the API tunes inside that band in one retune: VHF overlaps
+  /// FM, AIR and WB, and the frequency alone would land a VHF tap in one of those.
   /// </remarks>
-  internal async Task TuneToAsync(long frequencyHz)
+  internal async Task TuneToAsync(long frequencyHz, string band = "FM")
   {
     if (_tuneInFlight)
     {
@@ -767,7 +867,7 @@
     }
 
     _tuneInFlight = true;
-    string mhz = BandMapText.FormatMhz(frequencyHz);
+    string station = $"{BandMapText.FormatFrequency(frequencyHz, band)} {band}";
     try
     {
       RadioStateRead read = await RadioApi.ReadStateAsync();
@@ -798,13 +898,13 @@
         await RadioApi.StopScanAsync();
       }
 
-      if (await RadioApi.SetFrequencyAsync(frequencyHz))
+      if (await RadioApi.SetFrequencyAsync(frequencyHz, BandAxis.IsFm(band) ? null : band))
       {
-        ShowBandMessage($"Tuning {mhz} FM", isError: false);
+        ShowBandMessage($"Tuning {station}", isError: false);
       }
       else
       {
-        ShowBandMessage($"Could not tune to {mhz} FM", isError: true);
+        ShowBandMessage($"Could not tune to {station}", isError: true);
       }
 
       await RefreshBandAsync(includePresets: false);
@@ -817,7 +917,9 @@
   }
 
   /// <summary>
-  /// The Scan button: <c>POST /api/radio/bandmap/scan</c>. On 202 the map is re-read at once, which
+  /// The Scan button: <c>POST /api/radio/bandmap/scan?band=</c> with the band shown (AUD-91), so a band
+  /// change between the render and the tap cannot scan a band the owner was not looking at; before any
+  /// map has been read, no band, and the API takes the radio's. On 202 the map is re-read at once, which
   /// shows the sweep overlay and switches the timer to the one-second cadence; on 409/503 the API's
   /// reason is shown.
   /// </summary>
@@ -831,7 +933,7 @@
     _scanRequestInFlight = true;
     try
     {
-      BandScanRequestResult result = await RadioApi.RequestBandScanAsync();
+      BandScanRequestResult result = await RadioApi.RequestBandScanAsync(_bandMap == null ? null : ShownBand);
       if (!result.Accepted)
       {
         ShowBandMessage(result.Error ?? (result.StatusCode == 0 ? "The radio API is not reachable" : "Scan unavailable"),
@@ -892,6 +994,7 @@
 
     VisualizationHub.OnWaveformData -= HandleWaveformData;
     VisualizationHub.OnSpectrumData -= HandleSpectrumData;
+    AudioStateHub.RadioStateChanged -= HandleRadioStateChangedAsync;
 
     await UnsubscribeFromCurrentMode();
 

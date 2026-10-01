@@ -2443,6 +2443,18 @@ body {
   color: var(--text-medium);
 }
 
+/* AUD-91: "WB · scanned 3 min ago" — the shown band, then the age or the sweep countdown. */
+.band-status-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  white-space: nowrap;
+}
+
+.band-status-band {
+  color: var(--text-high);
+}
+
 .band-status-scanning {
   /* Full opacity, deliberately not ambientPulse: this countdown is the one status the owner
      needs to read while a sweep runs, and the pulse's 30–60% opacity drops it below 4:1. */

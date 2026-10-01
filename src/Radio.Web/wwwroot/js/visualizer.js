@@ -356,12 +356,15 @@ export const visualizer = {
     ctx.fillText('R', centerX + scale * 0.7, centerY - scale * 0.5);
   },
 
-  // ── BAND (AUD-76): the stored FM band map ─────────────────────────────────
+  // ── BAND (AUD-76; per band since AUD-91): the stored band map ────────────
   //
-  // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync):
-  //   levels:   [{ f, v }]  channel position 0..1 across 87.5–108 MHz, normalised height 0..1
-  //   station:  f | null    the tuned station (FM, radio active), else null
-  //   presets:  [{ f, label }] FM presets, ascending
+  // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync) for the
+  // band shown (87.5–108 MHz on FM):
+  //   levels:   [{ f, v }]  channel position 0..1 across the band's axis, normalised height 0..1
+  //   station:  f | null    the tuned station (shown band, radio active), else null
+  //   presets:  [{ f, label }] the shown band's presets, ascending
+  //   grid:     [f]         gridline positions, the same fractions as the axis strip's labels
+  //   channelsAcross: number the axis span in channel spacings (102.5 on FM); a bar is half a spacing
   //   sweeping: bool
   // x = f * width exactly, with no side padding, so the MHz axis strip under the canvas (positioned
   // by the same fraction) and the tap handler (which reports x / width) line up with what is drawn.
@@ -404,12 +407,12 @@ export const visualizer = {
     const xOf = (f) => f * width;
     const yOf = (v) => plotBottom - v * plotHeight;
 
-    // MHz gridlines, matching the axis strip's 88/92/96/100/104/108.
+    // Gridlines, matching the axis strip's labels (88/92/96/100/104/108 on FM).
     ctx.strokeStyle = separator;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (const mhz of [88, 92, 96, 100, 104, 108]) {
-      const x = Math.round(xOf((mhz - 87.5) / 20.5)) + 0.5;
+    for (const g of (model && model.grid) || []) {
+      const x = Math.round(xOf(g)) + 0.5;
       ctx.moveTo(x, plotTop);
       ctx.lineTo(x, plotBottom);
     }
@@ -431,7 +434,8 @@ export const visualizer = {
       ctx.fillStyle = fill;
       ctx.fill();
 
-      const barWidth = Math.max(2, (width / 102.5) * 0.5);
+      const channelsAcross = (model && model.channelsAcross > 0) ? model.channelsAcross : 102.5;
+      const barWidth = Math.max(2, (width / channelsAcross) * 0.5);
       ctx.fillStyle = accent;
       for (const p of levels) {
         const h = p.v * plotHeight;
