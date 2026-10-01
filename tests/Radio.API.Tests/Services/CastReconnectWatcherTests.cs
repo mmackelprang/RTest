@@ -229,11 +229,16 @@ public class CastReconnectWatcherTests
     return Task.Run(() => watcher.RunAsync(ct));
   }
 
-  /// <summary>Advances the clock by each timer's due time, as each timer is created, until the run ends.</summary>
+  /// <summary>
+  /// Advances the clock by each timer's due time, as each timer is created, until the run ends.
+  /// Bounded: a watcher that never stops (no window, say) fails the test instead of spinning.
+  /// </summary>
   private async Task<CastReconnectOutcome> DriveAsync(Task<CastReconnectOutcome> run)
   {
-    while (true)
+    for (var waits = 0; ; waits++)
     {
+      Assert.True(waits < 500, "the watcher never stopped");
+
       var next = _time.NextTimerAsync();
       var first = await Task.WhenAny(next, run).WaitAsync(HangGuard);
       if (first == run)

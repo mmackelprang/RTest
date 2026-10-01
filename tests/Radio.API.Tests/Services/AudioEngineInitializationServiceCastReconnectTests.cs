@@ -126,6 +126,36 @@ public class AudioEngineInitializationServiceCastReconnectTests
   }
 
   [Fact]
+  public async Task ASecondDropWhileTheFirstWatcherIsMidProbe_TheReplacementWaitsForItToFinish()
+  {
+    // The first watcher is inside a step that does not observe cancellation (as a SharpCaster
+    // connect does not). Its replacement must not start acting until it comes out.
+    _host.ProbeGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var service = CreateService();
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    var first = service.CastReconnectTask;
+    _time.Advance(await _time.NextTimerAsync().WaitAsync(HangGuard));
+    await _host.ProbeEntered.Task.WaitAsync(HangGuard);
+
+    _active = "google-cast";
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+
+    // Bounded NEGATIVE check (CLAUDE.md § Test Timing): with the first watcher parked, a
+    // correct replacement creates no timer at all, so this cannot fail on a slow machine; a
+    // replacement that does not wait would create its first timer at once.
+    var early = _time.NextTimerAsync();
+    await Assert.ThrowsAsync<TimeoutException>(() => early.WaitAsync(TimeSpan.FromMilliseconds(500)));
+
+    _host.ProbeGate.SetResult();
+    Assert.Equal(CastReconnectOutcome.Cancelled, await first.WaitAsync(HangGuard));
+    await early.WaitAsync(HangGuard); // now the replacement starts its first wait
+    Assert.Equal(1, _host.Probes);
+  }
+
+  [Fact]
   public async Task ServiceStop_CancelsAWaitingWatcherPromptly()
   {
     var service = CreateService();
@@ -209,8 +239,9 @@ public class AudioEngineInitializationServiceCastReconnectTests
 
   private async Task<CastReconnectOutcome> DriveAsync(Task<CastReconnectOutcome> run)
   {
-    while (true)
+    for (var waits = 0; ; waits++)
     {
+      Assert.True(waits < 500, "the watcher never stopped");
       var next = _time.NextTimerAsync();
       var first = await Task.WhenAny(next, run).WaitAsync(HangGuard);
       if (first == run)
@@ -241,10 +272,20 @@ public class AudioEngineInitializationServiceCastReconnectTests
 
     public string? ActiveOutputId => Engine!._active;
 
-    public Task<ChromecastDeviceInfo?> ProbeAsync(ChromecastDeviceInfo device, CancellationToken ct)
+    /// <summary>When set, a probe parks here, ignoring cancellation, until the test completes it.</summary>
+    public TaskCompletionSource? ProbeGate;
+    public readonly TaskCompletionSource ProbeEntered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    public async Task<ChromecastDeviceInfo?> ProbeAsync(ChromecastDeviceInfo device, CancellationToken ct)
     {
       Interlocked.Increment(ref Probes);
-      return Task.FromResult(Reachable ? device : null);
+      ProbeEntered.TrySetResult();
+      if (ProbeGate is { } gate)
+      {
+        await gate.Task;
+      }
+
+      return Reachable ? device : null;
     }
 
     public Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct)
