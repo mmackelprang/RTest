@@ -110,10 +110,14 @@ public class PresetBarKnobMirrorTests : TestContext
 
   // ── Reading the knob off the HUD payload ────────────────────────────────────────────────
 
-  [Fact]
-  public void KnobPresetIdOf_ReadsTheHighlightedPresetRow()
+  [Theory]
+  [InlineData("SelectorPreview")]
+  [InlineData("SelectorBlocked")]
+  public void KnobPresetIdOf_ReadsTheHighlightedPresetRow_InThePhasesTheOverlayDrawsTheListIn(string phase)
   {
-    PresetBar.KnobPresetIdOf(KnobPreview(new[] { "a", "b", "c" }, 1)).Should().Be("b");
+    // EncoderSelectorOverlay draws the list with a highlighted row in both. The PRESETS knob only
+    // publishes Preview; Blocked is accepted so the bar follows the overlay's own rule.
+    PresetBar.KnobPresetIdOf(KnobPreview(new[] { "a", "b", "c" }, 1, phase)).Should().Be("b");
   }
 
   [Theory]
@@ -122,10 +126,11 @@ public class PresetBarKnobMirrorTests : TestContext
   [InlineData("SelectorNotice")]
   [InlineData("Value")]
   [InlineData("SomePhaseFromANewerApi")]
-  public void KnobPresetIdOf_OnlyThePreviewPhaseCounts(string phase)
+  public void KnobPresetIdOf_PhasesThatDoNotDrawTheList_AreNothing(string phase)
   {
     // The message phases still carry the rows and an index, but the overlay draws a line of text
-    // instead of the list — so there is no highlighted row on screen to mirror.
+    // instead of the list (EncoderSelectorOverlay.IsMessagePhase) — so there is no highlighted row on
+    // screen to mirror. An unknown phase draws nothing at all.
     PresetBar.KnobPresetIdOf(KnobPreview(new[] { "a", "b" }, 1, phase)).Should().BeNull();
   }
 
@@ -296,6 +301,29 @@ public class PresetBarKnobMirrorTests : TestContext
   }
 
   [Fact]
+  public void TurningOntoARowTheBarHasNoCardFor_DoesNotBounceTheStrip_AndClosingStillReturnsIt()
+  {
+    // Review M2. The knob's list is still open on such a row, so it must not read as the list
+    // closing: that would scroll back to the playing preset mid-turn, and the next detent would
+    // scroll forward again.
+    var presets = EightFm();
+    var cut = RenderBar(presets, active: "f1");
+    var rows = new[] { "f1", "f2", "gone", "f3", "f4", "f5", "f6", "f7", "f8" };
+    Publish(cut, KnobPreview(rows, 7)); // f7
+    var before = Reveals.Count;
+
+    Publish(cut, KnobPreview(rows, 2)); // "gone"
+
+    Highlighted(cut).Should().BeEmpty();
+    Reveals.Should().HaveCount(before, "the list is still open — nothing to return from yet");
+
+    DismissHud(cut);
+
+    Reveals.Should().HaveCount(before + 1);
+    Reveals.Last().Arguments[1].Should().Be(0, "the list closed, so back to f1, the playing preset");
+  }
+
+  [Fact]
   public void AStaleKnobRow_DoesNotHoldTheStrip_AgainstAPlayingPresetChange()
   {
     // A knob row with no card is not a mirror, so it must not hijack the reveal rules either: the
@@ -389,6 +417,8 @@ public class PresetBarKnobMirrorTests : TestContext
     DisposeComponents();
     _hud.Publish(KnobPreview(EightFm(), 3));
 
+    // Not the proof on its own: a handler left subscribed would still render nothing, because it
+    // checks the disposed flag first. The backing-field check below is what proves the unsubscribe.
     cut.RenderCount.Should().Be(renders);
     typeof(EncoderHudService)
       .GetField(nameof(EncoderHudService.StateChanged), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!

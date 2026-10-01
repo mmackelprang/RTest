@@ -45,8 +45,14 @@ public class PresetBarModuleLoadTests : TestContext
 
     cut.InvokeAsync(() => _runtime.CompleteImport());
 
-    cut.WaitForAssertion(() => _runtime.Module.Calls.Where(c => c.Identifier == "reveal").Should().ContainSingle());
-    var reveal = _runtime.Module.Calls.Single(c => c.Identifier == "reveal");
+    // Rendezvous on the call itself, not on WaitForAssertion: that re-checks only when the component
+    // renders, and the reveal is made from the import's continuation with no render after it — so a
+    // first check that ran a moment before the continuation failed at the timeout although the call
+    // arrived. Measured: 0/10 failures alone, a failure in a 201-test run (UI-21 build). Same idiom
+    // as DisposedWhileImporting_WiresNothingUp below.
+    SpinWait.SpinUntil(() => _runtime.Module.RevealCount > 0, TimeSpan.FromSeconds(5))
+      .Should().BeTrue("the reveal is made once the module can act");
+    var reveal = _runtime.Module.Snapshot().Single(c => c.Identifier == "reveal");
     reveal.Args[1].Should().Be(2, "WB's first card — a1 f1 w1 w2 — placed once the module can act");
     reveal.Args[2].Should().Be(false, "it is still the first placement, so not animated");
   }
@@ -93,6 +99,27 @@ public class PresetBarModuleLoadTests : TestContext
   {
     public List<(string Identifier, object?[] Args)> Calls { get; } = new();
     public bool Disposed { get; private set; }
+
+    /// <summary>Reveal calls so far, read under the same lock the writes take.</summary>
+    public int RevealCount
+    {
+      get
+      {
+        lock (Calls)
+        {
+          return Calls.Count(c => c.Identifier == "reveal");
+        }
+      }
+    }
+
+    /// <summary>A copy of the calls, taken under the lock.</summary>
+    public List<(string Identifier, object?[] Args)> Snapshot()
+    {
+      lock (Calls)
+      {
+        return Calls.ToList();
+      }
+    }
 
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
     {

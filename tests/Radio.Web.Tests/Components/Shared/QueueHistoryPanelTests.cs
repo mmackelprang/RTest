@@ -83,6 +83,10 @@ public class QueueHistoryPanelTests : TestContext
 
     // The Radio tab hosts RadioControlPanel, which reads these options.
     Services.AddOptions<RdsScrollOptions>();
+    // ...and, once it has radio state, the preset bar, which reads the PRESETS knob off the HUD
+    // singleton (UI-21). Unused while _radioState stays null, but registered so a test that stubs
+    // radio state here does not fail on DI.
+    Services.AddSingleton<Radio.Web.Services.EncoderHudService>();
 
     Services.AddScoped<CentrePanelViewService>();
 

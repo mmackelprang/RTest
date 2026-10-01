@@ -71,7 +71,9 @@
         {
           if (item.Preset is { } preset)
           {
-            <div role="listitem" class="rcp-bar-item @(item.IsGroupStart ? "is-group-start" : "") @(preset.Id == MirroredKnobPresetId ? "is-knob-highlight" : "")"
+            @* The raw knob id, not MirroredKnobPresetId: they differ only when no card matches, and
+               then nothing is marked either way — this way costs no list search per card. *@
+            <div role="listitem" class="rcp-bar-item @(item.IsGroupStart ? "is-group-start" : "") @(preset.Id == _knobPresetId ? "is-knob-highlight" : "")"
                  data-item="@item.Index" @key="preset.Id">
               <PresetCard Variant="PresetCardVariant.Bar"
                           PresetId="@preset.Id"
@@ -184,10 +186,13 @@
   private string? _revealedBand;
   private string? _revealedActiveId;
   private string? _revealedKnobId;
+  private bool _revealedKnobOpen;
 
   /// <summary>
   /// UI-21: the preset the PRESETS knob is pointing at, as read off the HUD — or null when its list
-  /// is not on screen. Written only on the renderer's thread (see <see cref="OnKnobHudChanged"/>).
+  /// is not on screen. Non-null whether or not the bar has a card for it: this is "the knob's list is
+  /// open", and <see cref="MirroredKnobPresetId"/> is "and the bar can show where it points". Written
+  /// only on the renderer's thread (see <see cref="OnKnobHudChanged"/>).
   /// </summary>
   private string? _knobPresetId;
 
@@ -224,12 +229,15 @@
   /// null when that card is not the knob's list.
   ///
   /// <para>
-  /// Only <c>SelectorPreview</c> counts, because that is the only phase in which the overlay draws
-  /// a highlighted row: the commit, failure and notice phases carry the rows too, but replace the
-  /// list with a line of text (<c>EncoderSelectorOverlay.IsMessagePhase</c>), so mirroring them would
-  /// mark a card the overlay is no longer showing. Any other card — a volume readout, the SOURCE
-  /// list — or no card at all also reads as null; the HUD shows one card at a time, so a different
-  /// card means the knob's list has gone from the screen.
+  /// The phases that count are the two in which <c>EncoderSelectorOverlay</c> draws the list with a
+  /// highlighted row: <c>SelectorPreview</c>, and <c>SelectorBlocked</c> (the list plus a flash on
+  /// that row). The PRESETS knob only ever publishes Preview — Blocked is the SOURCE knob's — so
+  /// Blocked is accepted to mirror the overlay's own rule, not because a preset card ever arrives in
+  /// it. The commit, failure and notice phases carry the rows too, but the overlay replaces the list
+  /// with a line of text in them (<c>EncoderSelectorOverlay.IsMessagePhase</c>), so mirroring them
+  /// would mark a card the overlay is no longer showing. Any other card — a volume readout, the
+  /// SOURCE list — or no card at all also reads as null; the HUD holds one card at a time, so a
+  /// different card means the knob's list has gone from the screen.
   /// </para>
   ///
   /// <para>
@@ -240,7 +248,7 @@
   /// </summary>
   internal static string? KnobPresetIdOf(EncoderHudDto? card)
   {
-    if (card is not { Phase: "SelectorPreview", Rows: { } rows })
+    if (card is not { Phase: "SelectorPreview" or "SelectorBlocked", Rows: { } rows })
     {
       return null;
     }
@@ -257,15 +265,18 @@
 
   protected override void OnInitialized()
   {
-    _knobPresetId = KnobPresetIdOf(KnobHud.Current);
+    // Subscribe first, then read: a publish landing between the two is then either seen by the read
+    // or delivered to the handler, never lost until the next detent.
     KnobHud.StateChanged += OnKnobHudChanged;
+    _knobPresetId = KnobPresetIdOf(KnobHud.Current);
   }
 
   /// <summary>
   /// EncoderHudService raises this from whichever thread published — the hub's, or a thread-pool
   /// thread for its dismissal timer — and for every card, including a volume knob turning at up to
-  /// 20 Hz. So the read is marshalled onto the renderer, and the bar re-renders only when the
-  /// mirrored preset actually changed. The singleton can raise concurrently with the unsubscribe in
+  /// 20 Hz. So the read is marshalled onto the renderer, and the bar re-renders only when the knob's
+  /// preset id (<see cref="_knobPresetId"/>) changed — including between two rows the bar has no
+  /// card for, which is cheap and rare. The singleton can raise concurrently with the unsubscribe in
   /// <see cref="DisposeAsync"/>, hence the flag, checked on both sides of the hop.
   /// </summary>
   private void OnKnobHudChanged()
@@ -293,7 +304,9 @@
   /// <summary>
   /// The knob's preset when the bar has a card for it, else null. A knob row the bar cannot show —
   /// a preset deleted since the knob read the bank, or one saved before the bar's own reload lands —
-  /// marks nothing and moves nothing, rather than holding the strip on a card that is not there.
+  /// marks nothing and is not revealed. The knob's list is still open, though, so landing on such a
+  /// row does not count as the list closing either (<see cref="ChooseReveal"/>): it triggers no
+  /// return to the playing preset, so turning across such a row does not bounce the strip.
   /// </summary>
   private string? MirroredKnobPresetId => KnobIndex >= 0 ? _knobPresetId : null;
 
@@ -589,8 +602,11 @@
   /// whenever the knob moves to a new card. Not subject to the manual hold: turning the knob is
   /// itself browsing, and the most recent thing the user did. Between moves nothing is revealed, so a
   /// swipe made while the knob's list is up is left alone.</item>
-  /// <item>The mirror has just ended (the list closed or left the screen): return to the band target
-  /// — the playing preset when there is one — unless the manual hold is running.</item>
+  /// <item>The knob's list has just gone — the overlay closed, another card replaced it, or the
+  /// overlay swapped the list for a line of text (a commit, a failure, a notice): return to the band
+  /// target — the playing preset when there is one — unless the manual hold is running. Keyed on the
+  /// knob's list being open (<see cref="_knobPresetId"/>), not on a card being mirrored, so turning
+  /// onto a row the bar has no card for does not count as the list going.</item>
   /// </list>
   /// Returns the item index, or -1 for nothing.
   /// </summary>
@@ -602,12 +618,15 @@
     }
 
     var knob = MirroredKnobPresetId;
+    var knobOpen = _knobPresetId != null;
     var bandChanged = !string.Equals(_revealedBand, CurrentBand, StringComparison.OrdinalIgnoreCase);
     var activeChanged = _revealedActiveId != ActivePresetId;
     var knobChanged = _revealedKnobId != knob;
+    var knobClosed = _revealedKnobOpen && !knobOpen;
     _revealedBand = CurrentBand;
     _revealedActiveId = ActivePresetId;
     _revealedKnobId = knob;
+    _revealedKnobOpen = knobOpen;
 
     if (!_initialRevealDone)
     {
@@ -618,7 +637,7 @@
     {
       return knobChanged || bandChanged ? (KnobIndex, true) : (-1, false);
     }
-    if (knobChanged && !bandChanged)
+    if (knobClosed && !bandChanged)
     {
       return InManualHold ? (-1, false) : (BandTarget(), true);
     }
