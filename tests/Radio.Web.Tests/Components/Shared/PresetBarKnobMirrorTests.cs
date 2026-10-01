@@ -140,14 +140,20 @@ public class PresetBarKnobMirrorTests : TestContext
   [Fact]
   public void KnobPresetIdOf_TheSourceKnobsList_NoCard_AndRowlessPayloads_AreNothing()
   {
-    var source = new EncoderHudDto
+    // Every row of the SOURCE list, highlighted in turn. "source:Spotify" matters: it is longer than
+    // the prefix, so only the prefix test — not the length test — keeps it from reading as preset
+    // "Spotify".
+    var rows = new List<EncoderSelectorRowDto>
     {
-      Phase = "SelectorPreview",
-      Title = "SOURCE",
-      Rows = new() { new() { Id = "band:FM", Primary = "FM" }, new() { Id = "source:Spotify", Primary = "Spotify" } },
-      HighlightIndex = 0,
+      new() { Id = "band:FM", Primary = "FM" },
+      new() { Id = "band:VHF", Primary = "VHF" },
+      new() { Id = "source:Spotify", Primary = "Spotify" },
     };
-    PresetBar.KnobPresetIdOf(source).Should().BeNull("the SOURCE knob's rows are band: and source:, never preset:");
+    for (var i = 0; i < rows.Count; i++)
+    {
+      var source = new EncoderHudDto { Phase = "SelectorPreview", Title = "SOURCE", Rows = rows, HighlightIndex = i };
+      PresetBar.KnobPresetIdOf(source).Should().BeNull($"the SOURCE knob's rows are band: and source:, never preset: ({rows[i].Id})");
+    }
     PresetBar.KnobPresetIdOf(null).Should().BeNull();
     PresetBar.KnobPresetIdOf(new EncoderHudDto { Phase = "SelectorPreview", Rows = null, HighlightIndex = 0 }).Should().BeNull();
     PresetBar.KnobPresetIdOf(KnobPreview(new[] { "" }, 0)).Should().BeNull("a bare prefix names no preset");
