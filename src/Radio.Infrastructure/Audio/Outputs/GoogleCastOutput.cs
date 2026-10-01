@@ -2902,7 +2902,11 @@ public class GoogleCastOutput : AudioOutputBase
     {
       // AUD-81 (hostile review L6): noted before anything else, so a teardown unmute waiting on this
       // connection stops waiting (see ReleaseConsoleMuteAsync).
-      Volatile.Write(ref _lastReportedLossGeneration, generation);
+      // Round-3 LOW-3: a full fence, not a release write. This and the teardown's write of
+      // _teardownLossWatch are each followed by a read of the other's field (a Dekker handshake);
+      // Volatile.Write/Read permit the store-load reordering that lets both sides miss each other,
+      // which would only cost the 2 s unmute timeout, but is closed anyway.
+      Interlocked.Exchange(ref _lastReportedLossGeneration, generation);
       if (Volatile.Read(ref _teardownLossWatch) is { } watch && watch.Generation == generation)
       {
         watch.Lost.TrySetResult();
@@ -2932,7 +2936,8 @@ public class GoogleCastOutput : AudioOutputBase
   // box 2026-10-01: stopping our receiver application makes the speaker close our connection, so
   // the teardown unmute on it can only time out (2 s). A loss already reported — or reported while
   // that unmute is on the wire — sends the teardown straight to the fresh connection instead.
-  // Volatile only.
+  // Written through Interlocked (a full fence: each write is followed by a read of the other
+  // field — round-3 LOW-3), read through Volatile.
   private int _lastReportedLossGeneration = -1;
   private TeardownLossWatch? _teardownLossWatch;
 
@@ -4000,7 +4005,9 @@ public class GoogleCastOutput : AudioOutputBase
 
     Exception? failure = null;
     var lossWatch = new TeardownLossWatch(generation);
-    Volatile.Write(ref _teardownLossWatch, lossWatch);
+    // Round-3 LOW-3: a full fence before the read of _lastReportedLossGeneration below (see
+    // ReportConnectionLost).
+    Interlocked.Exchange(ref _teardownLossWatch, lossWatch);
     try
     {
       if (Volatile.Read(ref _lastReportedLossGeneration) == generation)
