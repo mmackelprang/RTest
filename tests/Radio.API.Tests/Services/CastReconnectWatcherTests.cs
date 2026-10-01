@@ -240,8 +240,12 @@ public class CastReconnectWatcherTests
       Assert.True(waits < 500, "the watcher never stopped");
 
       var next = _time.NextTimerAsync();
-      var first = await Task.WhenAny(next, run).WaitAsync(HangGuard);
-      if (first == run)
+      await Task.WhenAny(next, run).WaitAsync(HangGuard);
+
+      // The run is checked first, not whichever WhenAny names: a run that ends by starting another
+      // watcher (which creates a timer as it starts) completes both, and advancing that new
+      // watcher's timer would drive work the caller never asked for.
+      if (run.IsCompleted)
       {
         return await run;
       }
