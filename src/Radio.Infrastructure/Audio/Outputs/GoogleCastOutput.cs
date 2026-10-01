@@ -2702,7 +2702,18 @@ public class GoogleCastOutput : AudioOutputBase
     // the owner unmuting on the speaker WITHOUT changing its level, within EchoWindow of a level
     // push of ours, is re-muted under a muted console (which matches the console), and is not
     // reported under an unmuted one (the console is already unmuted, so there is nothing to sync).
-    if (muteChanged && !deviceMuted && volumeEcho)
+    //
+    // Hostile review (round 3) M-A: the rule also runs when the unmute DID match an unmute of ours
+    // (muteEcho), provided the console is muted now. The echo memory matches any SET_MUTE false of
+    // ours within EchoWindow, not only the latest mute command, so a console mute racing a level
+    // within 3 s of an acknowledged console unmute (the SET_MUTE true reaching the device first,
+    // then the level unmuting it) had its level reply classed as the echo of that earlier unmute —
+    // and nothing re-asserted the mute. muteEcho implies the baseline was muted before this status,
+    // and a redundant re-assert under a muted console is harmless (the speaker is meant to be muted);
+    // under an unmuted console an echoed unmute is exactly what it looks like and is left alone.
+    // The echo memory is not narrowed to the latest mute command instead: an out-of-order or late
+    // reply to an earlier unmute would then read as external and could unmute the console.
+    if (!deviceMuted && volumeEcho && (muteChanged || (muteEcho && IsConsoleMutedNow())))
     {
       // The baseline tells the truth (the device is unmuted), so the mute drain does send the
       // mute rather than skipping it as "already muted".

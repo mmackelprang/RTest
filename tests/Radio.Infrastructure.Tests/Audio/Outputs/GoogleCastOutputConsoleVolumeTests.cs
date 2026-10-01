@@ -1081,6 +1081,63 @@ public class GoogleCastOutputConsoleVolumeTests
       h.Kinds());
   }
 
+  // Hostile review (round 3) M-A. The race above, within EchoWindow of an ACKNOWLEDGED console
+  // unmute. The level's reply (unmuted, at our level) then also matches that earlier SET_MUTE false
+  // in the echo memory, so it used to be classed as the echo of the unmute: the baseline moved to
+  // "unmuted", the level-echo rule never ran, nothing re-asserted the mute, and the speaker stayed
+  // unmuted under the muted console. Driven by the gates and the fake clock, not by timing.
+  [Fact]
+  public async Task AConsoleMute_RacingALevel_SoonAfterAConsoleUnmute_EndsWithTheSpeakerMuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (!e.IsInitialSync)
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+
+    consoleMuted = true;
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    consoleMuted = false;
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(false, target.Generation)); // acknowledged at t0
+    h.ClearCommands();
+    h.Time.Advance(TimeSpan.FromSeconds(2));         // still inside EchoWindow of that unmute
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    await h.VolumeSendEntered.Task;                  // 0.45 passed the drain's mute check; waits on the send lock
+
+    consoleMuted = true;                             // the console mutes
+    h.MuteGate = CastConsoleTestHarness.NewTcs();
+    var mute = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    await h.MuteSendEntered.Task;                    // the SET_MUTE reached the device first
+
+    h.VolumeGate.SetResult();                        // then the level: it unmutes the speaker
+    await burst;
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);                   // the premise
+    }
+
+    h.MuteGate.SetResult();
+    Assert.True(await mute);
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.True(consoleMuted);
+    Assert.Empty(h.External);
+    Assert.True(h.DeviceMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Equal(
+      OnTheDeviceModel ? new[] { "vol", "mute", "mute" } : new[] { "vol", "mute" },
+      h.Kinds());
+  }
+
   // D1 (e). The owner unmutes on the speaker itself, outside any echo window of our level pushes:
   // handled as an external change exactly as before (AUD-5) — reported, mark cleared, nothing sent.
   [Fact]
