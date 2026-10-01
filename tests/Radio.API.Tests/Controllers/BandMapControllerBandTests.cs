@@ -198,8 +198,9 @@ public sealed class BandMapControllerBandTests : IDisposable
     ObjectResult result = Assert.IsAssignableFrom<ObjectResult>(controller.Scan(band).Result);
 
     Assert.Equal(StatusCodes.Status409Conflict, result.StatusCode);
-    string body = System.Text.Json.JsonSerializer.Serialize(result.Value);
-    Assert.Contains("cannot be scanned", body);
+    BandSweepPlans.TryParseBandCode(band, out RTLSDRCore.Enums.BandType bandType);
+    string? error = result.Value!.GetType().GetProperty("error")!.GetValue(result.Value) as string;
+    Assert.Equal(BandSweepPlans.UnavailableReason(bandType), error);
     Assert.Null(_service!.GetStatus().Last);
   }
 
