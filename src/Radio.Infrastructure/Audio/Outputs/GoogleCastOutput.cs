@@ -354,6 +354,19 @@ public class GoogleCastOutput : AudioOutputBase
   private Task<CastConsoleVolumeResult>? _consoleVolumeDrain;
   private float _latestConsoleTarget = float.NaN;
 
+  // AUD-81 follow-up (box UAT 2026-10-01): a SET_VOLUME that CHANGES the level unmutes the
+  // speaker — measured on a Google Home Mini, which went from muted to unmuted under a muted console
+  // when the console moved 30 % → 45 % (a SET_VOLUME of the level it already held did not unmute it).
+  // So while the console is muted no level is sent: the drain parks the latest target here instead
+  // (latest wins), and the console's unmute sends it BEFORE the SET_MUTE false
+  // (ApplyHeldConsoleVolumeAsync), so the speaker comes back at the level the console asked for.
+  // A held level is NOT remembered for AUD-80 while held — the speaker does not hold it — but only
+  // when the drain that sends it completes, once per burst like any console level. Dropped by a
+  // change reported by the speaker (the newer truth, like a queued target), by a new connection, by
+  // a newer level actually sent, and by DiscardHeldConsoleVolume (the console came back to the
+  // speaker's own level). Guarded by _consoleVolumeLock.
+  private (float Level, int Generation, float ConsoleLevel)? _heldConsoleVolume;
+
   // AUD-81 (pre-merge review L1/L2): bumped, together with the _connectionVolume write, by every
   // external speaker change OnReceiverStatusChanged reports. The volume drain records a level it
   // sent as the connection's level only if no external change landed while that send was on the
@@ -364,8 +377,15 @@ public class GoogleCastOutput : AudioOutputBase
   // AUD-81 (pre-merge review L4): console-driven SET_MUTE coalescing, the same one-slot,
   // latest-wins drain as the volume's. Guarded by _consoleMuteLock, never held across an await.
   private readonly object _consoleMuteLock = new();
-  private (bool Muted, int Generation)? _pendingConsoleMute;
-  private Task<bool?>? _consoleMuteDrain;
+  private PendingConsoleMute? _pendingConsoleMute;
+  private Task<(bool? Applied, float? LevelBeforeUnmute)>? _consoleMuteDrain;
+
+  /// <summary>
+  /// A console mute request. <paramref name="Reassert"/>: a mute re-asserted because a level push
+  /// of ours unmuted the speaker (see <c>OnReceiverStatusChanged</c>) — sent only if the console is
+  /// still muted when its turn comes, so it can never land on a console unmuted meanwhile.
+  /// </summary>
+  private readonly record struct PendingConsoleMute(bool Muted, int Generation, bool Reassert);
 
   // AUD-81 (pre-merge review M1): set on the raising thread for exactly the duration of a
   // CastVolumeChanged raised for a change made ON THE SPEAKER. AudioStateUpdateService copies
@@ -1068,6 +1088,7 @@ public class GoogleCastOutput : AudioOutputBase
     lock (_consoleVolumeLock)
     {
       _pendingConsoleVolume = null;
+      _heldConsoleVolume = null;
       Volatile.Write(ref _latestConsoleTarget, float.NaN);
       Volatile.Write(ref _connectionVolume, float.NaN);
     }
@@ -1362,12 +1383,43 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
+    // AUD-81 follow-up (box UAT 2026-10-01): a SET_VOLUME that changes the level unmutes this
+    // speaker, and in DirectChannel our audio is already streaming by now. So, in this order:
+    //   1. A speaker known to be muted (for the console, or on its own side) that already holds
+    //      this level (within EchoLevelTolerance of the level last set or observed) is left alone:
+    //      re-sending its own level is what this push used to do on every start, and it does not
+    //      need to happen.
+    //   2. A speaker muted for a console that is still muted gets NO level now: the level is held
+    //      and sent, before the unmute, when the console is unmuted — so there is no unmute window
+    //      under a muted console at all.
+    //   3. Otherwise the level is pushed; if the speaker was muted (on its own side) the mute is
+    //      re-asserted straight after it (PushVolumeKeepingMuteAsync).
+    if (_lastSetMute)
+    {
+      if (Math.Abs(_lastSetVolume - target) <= EchoLevelTolerance)
+      {
+        _logger.LogDebug(
+          "Cast: {Name} is muted and already at {Volume:P0} — no volume sent after start",
+          ConnectedDevice?.FriendlyName, target);
+        return;
+      }
+
+      if (IsSpeakerMutedByConsole && IsConsoleMutedNow())
+      {
+        HoldConsoleVolume(target, Volatile.Read(ref _publishedGeneration), float.NaN);
+        ConsoleLogger.LogInformation(
+          "Cast: console is muted → volume {Volume:P0} for {Name} held until the console is unmuted",
+          target, ConnectedDevice?.FriendlyName);
+        return;
+      }
+    }
+
     try
     {
       // Bounded: on a connection whose socket write has stalled, this SET_VOLUME queues
       // behind the stalled write on SharpCaster's send lock indefinitely, and StartAsync
       // could not reach Streaming (and replay a deferred loss) until the TCP timeout.
-      if (await PushVolumeToDeviceAsync(_client!, target).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false))
+      if (await PushVolumeKeepingMuteAsync(_client!, target).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false))
       {
         _logger.LogInformation("Cast: Volume synced to {Volume:P0}", target);
       }
@@ -2314,7 +2366,13 @@ public class GoogleCastOutput : AudioOutputBase
         {
           try
           {
-            if (await PushVolumeToDeviceAsync(client, target).ConfigureAwait(false))
+            // AUD-81 follow-up: a speaker the read found muted (on its own side, or still muted
+            // from an earlier console mute — RecallConsoleMuteAsync above) is muted again straight
+            // after this push, which unmutes it (box UAT 2026-10-01). In the connect order
+            // (ConnectAsync, then StartAsync) no audio of ours is streaming to this connection yet;
+            // a StartAsync racing this connect is not excluded, and is what the mute after the
+            // push bounds.
+            if (await PushVolumeKeepingMuteAsync(client, target).ConfigureAwait(false))
             {
               effectiveVolume = target;
               _logger.LogInformation(
@@ -2432,6 +2490,45 @@ public class GoogleCastOutput : AudioOutputBase
     {
       CompleteEchoPush(echo);
     }
+  }
+
+  /// <summary>
+  /// <see cref="PushVolumeToDeviceAsync"/>, then — when this output's baseline had the speaker
+  /// muted before the push — a SET_MUTE true straight after it (AUD-81 follow-up). A SET_VOLUME that
+  /// changes the level unmutes the speaker (measured on a Google Home Mini, box UAT 2026-10-01), and
+  /// a level push of ours must not leave a muted speaker unmuted. Used by the pushes that cannot be
+  /// held for a console unmute: the AUD-80 restore on connect and the after-start push to a speaker
+  /// muted on its own side. Returns what the level push returned; a failed re-mute is logged at
+  /// Warning and does not fail the push. Bounded only by the caller (the re-mute by
+  /// <see cref="ConsoleCommandTimeout"/>).
+  /// </summary>
+  private async Task<bool> PushVolumeKeepingMuteAsync(ChromecastClient client, float volume)
+  {
+    var wasMuted = _lastSetMute;
+    if (!await PushVolumeToDeviceAsync(client, volume).ConfigureAwait(false))
+    {
+      return false;
+    }
+
+    if (wasMuted)
+    {
+      try
+      {
+        await SendMuteToDeviceAsync(client, true)
+          .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false);
+        _logger.LogInformation(
+          "Cast: speaker {Name} was muted — muted again after setting its volume to {Volume:P0}",
+          ConnectedDevice?.FriendlyName, volume);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex,
+          "Cast: could not mute {Name} again after setting its volume — a volume change can unmute it",
+          ConnectedDevice?.FriendlyName);
+      }
+    }
+
+    return true;
   }
 
   /// <summary>
@@ -2556,6 +2653,31 @@ public class GoogleCastOutput : AudioOutputBase
       _lastSetMute = deviceMuted;
     }
 
+    // AUD-81 follow-up (D1.3). The speaker reports itself UNMUTED (a change from the muted
+    // baseline, and not the echo of an unmute of ours) while the console is muted and the speaker
+    // is muted for it, and the status's level is the echo of a level push of ours
+    // (IsRecentVolumePush: in flight, or completed within EchoWindow). That is the unmute a level
+    // change causes on this speaker (box UAT 2026-10-01), not the owner's: it is NOT reported (it
+    // would unmute the console through AudioStateUpdateService, and clear the muted-by-console
+    // mark) and the mute is re-asserted, once for this status. How it is told from the owner's own
+    // unmute, precisely: by the level. An unmute whose status carries a level that is not the echo
+    // of a recent push of ours — every unmute more than EchoWindow after our last level push
+    // completed, or one that comes with a level change made on the speaker — is external and
+    // handled below exactly as before (AUD-5). What that gives up: the owner unmuting on the
+    // speaker WITHOUT changing its level, within EchoWindow of a level push of ours, is re-muted;
+    // the console is muted at that moment, so the re-mute matches it.
+    if (muteChanged && !deviceMuted && volumeEcho && IsSpeakerMutedByConsole && IsConsoleMutedNow())
+    {
+      // The baseline tells the truth (the device is unmuted), so the mute drain does send the
+      // mute rather than skipping it as "already muted".
+      _lastSetMute = false;
+      _logger.LogDebug(
+        "Cast: speaker reported unmuted at {Volume:P0}, the echo of our own level push, under a muted console — re-asserting the mute",
+        deviceVolume);
+      ReassertConsoleMute();
+      return;
+    }
+
     if (!volumeChanged && !muteChanged)
     {
       return;
@@ -2575,6 +2697,7 @@ public class GoogleCastOutput : AudioOutputBase
     lock (_consoleVolumeLock)
     {
       _pendingConsoleVolume = null;
+      _heldConsoleVolume = null;
       Volatile.Write(ref _latestConsoleTarget, float.NaN);
       Volatile.Write(ref _connectionVolume, deviceVolume);
       _externalChangeSerial++;
@@ -3110,10 +3233,26 @@ public class GoogleCastOutput : AudioOutputBase
         continue;
       }
 
+      // AUD-81 follow-up (D1.1). Checked per send, at send time: a level change unmutes the
+      // speaker (box UAT 2026-10-01), so while the console is muted the target is held, not sent,
+      // and goes out before the console's unmute (ApplyHeldConsoleVolumeAsync). Nothing is
+      // remembered for it here and the burst's result does not report it, so the follower logs
+      // nothing for a held move beyond this Debug line.
+      if (IsConsoleMutedNow())
+      {
+        HoldConsoleVolume(next.Level, next.Generation, next.ConsoleLevel);
+        _logger.LogDebug(
+          "Cast: console is muted — volume {Volume:P0} held, not sent (a level change would unmute the speaker)",
+          next.Level);
+        continue;
+      }
+
       int serialAtSend;
       lock (_consoleVolumeLock)
       {
         serialAtSend = _externalChangeSerial;
+        // A level actually being sent supersedes any older held one.
+        _heldConsoleVolume = null;
       }
 
       sends++;
@@ -3179,6 +3318,140 @@ public class GoogleCastOutput : AudioOutputBase
     return new CastConsoleVolumeResult(applied, appliedConsole, appliedDevice?.FriendlyName, sends, failure != null);
   }
 
+  /// <summary>Parks a console level while the console is muted (see <c>_heldConsoleVolume</c>). Latest wins.</summary>
+  private void HoldConsoleVolume(float level, int generation, float consoleLevel)
+  {
+    lock (_consoleVolumeLock)
+    {
+      _heldConsoleVolume = (level, generation, consoleLevel);
+    }
+  }
+
+  /// <summary>
+  /// The level held for a muted console on connection <paramref name="generation"/>, or null.
+  /// Not a live value of the speaker: the speaker does not hold it until the console is unmuted.
+  /// Read by the tests.
+  /// </summary>
+  internal float? HeldConsoleVolume(int generation)
+  {
+    lock (_consoleVolumeLock)
+    {
+      return _heldConsoleVolume is { } held && held.Generation == generation ? held.Level : null;
+    }
+  }
+
+  /// <summary>
+  /// Drops the level held for a muted console (AUD-81 follow-up). The follower calls it when the
+  /// console comes back to the speaker's own level, which it then sends nothing for — so an older
+  /// held level must not be applied at the unmute.
+  /// </summary>
+  public void DiscardHeldConsoleVolume()
+  {
+    lock (_consoleVolumeLock)
+    {
+      _heldConsoleVolume = null;
+    }
+  }
+
+  /// <summary>
+  /// Before a console unmute of connection <paramref name="generation"/> (AUD-81 follow-up, D1.1):
+  /// sends the level held while the console was muted, and waits for it — and for any console
+  /// burst already running, whose level must also land before the unmute. Returns the level the
+  /// burst applied, or null when nothing was sent (nothing held or running, the send failed, or
+  /// the console was muted again meanwhile and the level was held again). A held level for another
+  /// connection is dropped; one superseded by a newer queued target is dropped in its favour.
+  /// </summary>
+  private async Task<float?> ApplyHeldConsoleVolumeAsync(int generation)
+  {
+    Task<CastConsoleVolumeResult>? burst;
+    lock (_consoleVolumeLock)
+    {
+      if (_heldConsoleVolume is { } held)
+      {
+        _heldConsoleVolume = null;
+        if (held.Generation == generation && _pendingConsoleVolume == null)
+        {
+          _pendingConsoleVolume = held;
+          Volatile.Write(ref _latestConsoleTarget, held.Level);
+          _consoleVolumeDrain ??= Task.Run(DrainConsoleVolumeAsync);
+        }
+      }
+
+      burst = _consoleVolumeDrain;
+    }
+
+    if (burst == null)
+    {
+      return null;
+    }
+
+    try
+    {
+      return (await burst.ConfigureAwait(false)).AppliedLevel;
+    }
+    catch (Exception ex)
+    {
+      // The drain never throws; this is a guard, not a path.
+      _logger.LogDebug(ex, "Cast: the held console volume could not be applied before the unmute");
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// The console's mute state as the follower reports it; false when no follower is attached or
+  /// the read throws.
+  /// </summary>
+  private bool IsConsoleMutedNow()
+  {
+    try
+    {
+      return _isConsoleMuted?.Invoke() ?? false;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: could not read the console's mute state");
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// <b>Test seam (kind B — observation).</b> The most recent mute re-assert started by
+  /// <see cref="ReassertConsoleMute"/>. Read by <c>GoogleCastOutputConsoleVolumeTests</c>; nothing in
+  /// production reads it.
+  /// </summary>
+  internal Task LastMuteReassertForTests { get; private set; } = Task.CompletedTask;
+
+  /// <summary>
+  /// AUD-81 follow-up (D1.3): re-mutes the speaker of the console-muted connection after a level
+  /// push of ours unmuted it. Queued on the console mute drain as a re-assert, which is sent only if
+  /// the console is still muted when its turn comes — so a console unmute made meanwhile wins.
+  /// Bounded like any console mute (<see cref="ConsoleCommandTimeout"/>); one Information line on
+  /// success. Never throws.
+  /// </summary>
+  private void ReassertConsoleMute()
+  {
+    var generation = Volatile.Read(ref _consoleMutedGeneration);
+    var deviceName = ConnectedDevice?.FriendlyName;
+    LastMuteReassertForTests = ReassertAsync();
+
+    async Task ReassertAsync()
+    {
+      try
+      {
+        if ((await RequestConsoleMuteAsync(new PendingConsoleMute(true, generation, Reassert: true)).ConfigureAwait(false)).Acknowledged)
+        {
+          ConsoleLogger.LogInformation(
+            "Cast: speaker {Name} was unmuted by a volume change while the console is muted — muted it again",
+            deviceName);
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Cast: the mute re-assert did not complete");
+      }
+    }
+  }
+
   /// <summary>
   /// Sends the console's mute state to the speaker of connection <paramref name="generation"/>,
   /// coalesced like the volume (pre-merge review L4): at most one SET_MUTE is in flight per
@@ -3194,30 +3467,46 @@ public class GoogleCastOutput : AudioOutputBase
   /// <paramref name="muted"/>; false when nothing was sent, a later request in the same burst
   /// won, or the send failed. Failures are logged, never thrown.
   /// </returns>
-  public async Task<bool> SetDeviceMuteFromConsoleAsync(bool muted, int generation)
+  public async Task<bool> SetDeviceMuteFromConsoleAsync(bool muted, int generation) =>
+    (await SetDeviceMuteFromConsoleWithLevelAsync(muted, generation).ConfigureAwait(false)).Acknowledged;
+
+  /// <summary>
+  /// <see cref="SetDeviceMuteFromConsoleAsync"/>, also reporting the level sent just before an
+  /// unmute (AUD-81 follow-up): an unmute first sends the level held while the console was muted
+  /// (and waits for any console volume burst already running), then the SET_MUTE false, so the
+  /// speaker comes back at the level the console asked for.
+  /// </summary>
+  public Task<CastConsoleMuteResult> SetDeviceMuteFromConsoleWithLevelAsync(bool muted, int generation) =>
+    RequestConsoleMuteAsync(new PendingConsoleMute(muted, generation, Reassert: false));
+
+  private async Task<CastConsoleMuteResult> RequestConsoleMuteAsync(PendingConsoleMute request)
   {
-    Task<bool?> drain;
+    Task<(bool? Applied, float? LevelBeforeUnmute)> drain;
     lock (_consoleMuteLock)
     {
-      _pendingConsoleMute = (muted, generation);
+      _pendingConsoleMute = request;
       drain = _consoleMuteDrain ??= Task.Run(DrainConsoleMuteAsync);
     }
 
-    return await drain.ConfigureAwait(false) == muted;
+    var (applied, levelBeforeUnmute) = await drain.ConfigureAwait(false);
+    var acknowledged = applied == request.Muted;
+    return new CastConsoleMuteResult(acknowledged, acknowledged && !request.Muted ? levelBeforeUnmute : null);
   }
 
   /// <summary>
   /// Sends pending console mute states one at a time until none is left; returns the last state
-  /// the speaker acknowledged, or null. The sends are sequential, so the "muted by console" mark
-  /// is set and cleared in the order the speaker received them.
+  /// the speaker acknowledged (or null), and for an acknowledged unmute the level the held-level
+  /// send applied just before it (or null). The sends are sequential, so the "muted by console"
+  /// mark is set and cleared in the order the speaker received them.
   /// </summary>
-  private async Task<bool?> DrainConsoleMuteAsync()
+  private async Task<(bool? Applied, float? LevelBeforeUnmute)> DrainConsoleMuteAsync()
   {
     bool? applied = null;
+    float? appliedLevelBeforeUnmute = null;
 
     while (true)
     {
-      (bool Muted, int Generation) next;
+      PendingConsoleMute next;
       lock (_consoleMuteLock)
       {
         if (_pendingConsoleMute is not { } pending)
@@ -3230,7 +3519,20 @@ public class GoogleCastOutput : AudioOutputBase
         _pendingConsoleMute = null;
       }
 
-      if (State != AudioOutputState.Streaming || next.Muted == _lastSetMute)
+      if (State != AudioOutputState.Streaming)
+      {
+        continue;
+      }
+
+      if (next.Reassert && !IsConsoleMutedNow())
+      {
+        // D1.3: the console was unmuted after the re-assert was queued. Its own unmute wins.
+        continue;
+      }
+
+      // An unmute that is about to be skipped as "already unmuted" still sends a held level
+      // first, so the speaker ends at the console's level either way.
+      if (next.Muted == _lastSetMute && (next.Muted || !HasHeldConsoleVolume()))
       {
         continue;
       }
@@ -3239,6 +3541,28 @@ public class GoogleCastOutput : AudioOutputBase
       if (connection == null || connection.Generation != next.Generation)
       {
         continue;
+      }
+
+      float? levelBeforeUnmute = null;
+      if (!next.Muted)
+      {
+        // AUD-81 follow-up (D1.1): the level FIRST, then the unmute — a level sent after the
+        // unmute would play the first moments at the old level, and one sent while muted would
+        // unmute the speaker by itself (box UAT 2026-10-01).
+        levelBeforeUnmute = await ApplyHeldConsoleVolumeAsync(connection.Generation).ConfigureAwait(false);
+
+        bool superseded;
+        lock (_consoleMuteLock)
+        {
+          superseded = _pendingConsoleMute != null;
+        }
+
+        // A newer request (the console muted again while the level was on the network) wins; this
+        // unmute is not sent, so there is no unmuted moment between the two.
+        if (superseded || !_lastSetMute)
+        {
+          continue;
+        }
       }
 
       try
@@ -3268,9 +3592,18 @@ public class GoogleCastOutput : AudioOutputBase
       }
 
       applied = next.Muted;
+      appliedLevelBeforeUnmute = levelBeforeUnmute;
     }
 
-    return applied;
+    return (applied, appliedLevelBeforeUnmute);
+  }
+
+  private bool HasHeldConsoleVolume()
+  {
+    lock (_consoleVolumeLock)
+    {
+      return _heldConsoleVolume != null;
+    }
   }
 
   /// <summary>
@@ -3980,6 +4313,16 @@ public readonly record struct CastConsoleTarget(
 /// <param name="Failed">True when at least one send failed.</param>
 public sealed record CastConsoleVolumeResult(
   float? AppliedLevel, float AppliedConsoleLevel, string? DeviceName, int Sends, bool Failed);
+
+/// <summary>
+/// The outcome of a console mute or unmute request (AUD-81 follow-up).
+/// </summary>
+/// <param name="Acknowledged">True when the burst the request joined ended with the speaker
+/// acknowledging the requested state.</param>
+/// <param name="LevelBeforeUnmute">For an acknowledged unmute, the level sent to the speaker just
+/// before it — the level held while the console was muted, or a console burst that was still
+/// running — or null when none was sent.</param>
+public readonly record struct CastConsoleMuteResult(bool Acknowledged, float? LevelBeforeUnmute);
 
 /// <summary>
 /// A live read of the connected Cast speaker's volume (AUD-81), with this output's own view beside it.

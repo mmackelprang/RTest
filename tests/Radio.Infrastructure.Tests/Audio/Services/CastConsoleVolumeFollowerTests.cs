@@ -379,6 +379,91 @@ public class CastConsoleVolumeFollowerTests
     Assert.Equal(new[] { true, false }, h.MuteSends());
   }
 
+  // --- AUD-81 follow-up (box UAT 2026-10-01): a level change unmutes the speaker ---
+
+  // D1 (a). Measured on the box: console muted, console volume 30 % → 45 %, and the speaker (a
+  // Google Home Mini) came back unmuted under the muted console. No level may be sent while the
+  // console is muted.
+  [Fact]
+  public async Task WhileTheConsoleIsMuted_VolumeMoves_SendNoVolumeCommand_AndTheMuteStays()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var (mixer, follower) = Build(h, 0.30f); // identity
+    using var _ = follower;
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    h.ClearCommands();
+    var rememberedBefore = h.Store.Remembered.Count;
+
+    mixer.MasterVolume = 0.40f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+
+    Assert.Empty(h.Commands);                       // no SET_VOLUME, and no SET_MUTE either
+    Assert.True(h.Output.KnownSpeakerMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.Equal(0.45f, h.Output.HeldConsoleVolume(h.Target().Generation)!.Value, 3); // the latest wins
+    Assert.Equal(0.30f, h.Output.KnownSpeakerLevel, 3); // the speaker does not hold it yet
+    Assert.Equal(rememberedBefore, h.Store.Remembered.Count); // not remembered while held
+  }
+
+  // D1 (b). On the console's unmute the held level goes FIRST, then the unmute.
+  [Fact]
+  public async Task TheConsoleUnmute_SendsTheLastHeldLevelFirst_ThenTheUnmute_AndRemembersItOnce()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var log = new ListLogger<CastConsoleVolumeFollower>();
+    var (mixer, follower) = Build(h, 0.30f, log);
+    using var _ = follower;
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    mixer.MasterVolume = 0.40f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+    h.ClearCommands();
+    var rememberedBefore = h.Store.Remembered.Count;
+
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    Assert.Equal(new[] { "vol", "unmute" }, h.Kinds());
+    Assert.Equal(0.45f, Assert.Single(h.VolumeSends()), 3);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Null(h.Output.HeldConsoleVolume(h.Target().Generation));
+    Assert.Equal(new[] { ("cast-a", 0.45f) }, h.Store.Remembered.Skip(rememberedBefore).ToList());
+    var line = Assert.Single(log.Lines(), l => l.StartsWith("Cast: console unmuted", StringComparison.Ordinal));
+    Assert.StartsWith("Cast: console unmuted → speaker Speaker cast-a at 45", line);
+    Assert.EndsWith(", unmuted", line);
+  }
+
+  // The console moves back to the speaker's own level while muted: nothing is sent for that, so an
+  // older held level must not be applied at the unmute.
+  [Fact]
+  public async Task AHeldLevel_IsDropped_WhenTheConsoleComesBackToTheSpeakersLevel()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var (mixer, follower) = Build(h, 0.30f);
+    using var _ = follower;
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    mixer.MasterVolume = 0.45f;
+    await follower.LastVolumeBurst;
+    mixer.MasterVolume = 0.30f; // the speaker's own level
+    await follower.LastVolumeBurst;
+    h.ClearCommands();
+
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    Assert.Equal(new[] { "unmute" }, h.Kinds());
+  }
+
   [Fact]
   public async Task AMutedConsole_MutesTheSpeakerWhenStreamingStarts_ThroughTheFollowersHook()
   {
