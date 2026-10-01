@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (81)
+## Shipped rows (88)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2941,3 +2941,101 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/UI-23.md`](queue/UI-23.md)**
 
 ✅ **CLOSED, NO CODE, 2026-10-01.** The strip is a native horizontal scroller (`overflow-x: auto`, mandatory scroll-snap, `touch-action: pan-x`). Driven in Chromium with trusted input, touch drags scroll it and snap; only a mouse-type pointer cannot drag it, and nothing in the tap or long-press paths swallows a touch drag. Why the owner's first attempt seemed not to work is not established; the dossier names the one read-only probe to run if it recurs.
+
+### UI-22 — Signal strength had no colour on the BAND map; the bars now ramp grey → blue → cyan → green by dB above the map median.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#756](https://github.com/mmackelprang/RTest/pull/756) (squash `f30ed06`) — owner, after a look at the panel on the SHA-verified branch build `3747802`: *"UI-22 approved."* Thresholds kept at 12/20 dB; the owner accepted 92.3 showing "weak" (blue). After the last of the 2026-10-01 merges the box's tree is byte-identical to `main` `4d483ff` (it reports `6ab5b74`), so no redeploy was needed |
+| Plan | ✅ **MERGED #756 (`f30ed06`), owner-approved 2026-10-01.** Tiers in `FmBandMath.SignalTiers`; **12/20 kept** after counting the box's four stored maps (FM 74 grey / 17 blue / 8 cyan / 2 green; 92.3 is blue at 10.1 dB — see the dossier). Not archived yet. |
+| Spec / handoff | [spec](design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md) §5, Owner decisions Q5–Q6 |
+| Depends on | — |
+| Branch | `feat/ui-22-band-map-signal-colour` |
+
+**Detail: [`queue/UI-22.md`](queue/UI-22.md)**
+
+✅ **SHIPPED AND OWNER-APPROVED 2026-10-01.** Merged as [#756](https://github.com/mmackelprang/RTest/pull/756) (squash `f30ed06`). The branch build `3747802` was deployed to `radio` and SHA-verified for the owner's look before merge. Owner: *"UI-22 approved."* The tiers live in `FmBandMath.SignalTiers`, and **12/20 dB were kept** after counting the box's four stored maps (FM 74 grey / 17 blue / 8 cyan / 2 green); the owner accepted 92.3 showing "weak"/blue at 10.1 dB. Spec PR 3 of [`2026-10-01-radio-presets-bar-and-band-colour.md`](design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md). 🟢 **NEW 2026-10-01 (owner request) — colour the BAND map's bars by signal strength.** Owner: *"It also seems like the scan area could be color coded based on signal strength."* Cool ramp (owner decision): grey noise < 6 dB → blue 6–12 → cyan 12–20 → green ≥ 20 dB above the map median. The fill under the bars goes neutral grey; a small legend as page text in the status line; no extra mark for preset stations; colour-blind safe because height still encodes strength. ⚠ **12/20 dB are provisional** — verify against a real map on the box. Independent of `UI-20`; may ship first. — [detail](queue/UI-22.md)
+
+### UI-20 — The presets rail took 210 px and the band buttons wrapped; a preset bar now runs along the bottom of the radio panel and the six bands sit on one row.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#757](https://github.com/mmackelprang/RTest/pull/757) (squash `0af90f4`) — owner panel UAT 2026-10-01 on the SHA-verified branch build `3ff9cd5`: *"1 - passed. 2- passes, but I'd like to be able to "drag" the bar in addition to pressing the arrow keys. 3 - passes. 4 - passes. 5 - passes, but the keyboard occludes the dialog. 6 - passes. 7 - passes."* The two follow-ups became `UI-23` (closed, drag already works) and `UI-24`. No redeploy needed after merge: the box's tree is byte-identical to `main` `4d483ff` |
+| Plan | _built 2026-10-01 to the spec + owner decisions Q1–Q3; fit measured on the box first — no fallback needed ([dossier](queue/UI-20.md))_ |
+| Spec / handoff | [spec](design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md) §2–§4, §7, §8, Owner decisions Q1–Q3 |
+| Depends on | — |
+| Branch | `feat/ui-20-preset-bar` |
+
+**Detail: [`queue/UI-20.md`](queue/UI-20.md)**
+
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01.** Merged as [#757](https://github.com/mmackelprang/RTest/pull/757) (squash `0af90f4`). The branch build `3ff9cd5` was deployed to `radio` and SHA-verified for the owner's panel UAT before merge. Owner: *"1 - passed. 2- passes, but I'd like to be able to "drag" the bar in addition to pressing the arrow keys. 3 - passes. 4 - passes. 5 - passes, but the keyboard occludes the dialog. 6 - passes. 7 - passes."* The two follow-ups became [`UI-23`](queue/UI-23.md) (closed with no code: drag already works) and [`UI-24`](queue/UI-24.md) (shipped in #761). On the hidden `＋ SAVE` card while tuned to a preset, the owner: *"The behavior is fine. I had forgotten that I was tuned to a preset."* ⚠ A test-only race fix went in before merge: `ab7575a4` makes `PresetBarModuleLoadTests.RenderDuringTheImport_DoesNotLoseTheFirstPlacement` rendezvous on the module's "reveal" call instead of on a render that never comes; it had failed under full-suite load. No production change. Spec PR 1. 🟡 **NEW 2026-10-01 (owner request, GA-nice) — a preset bar along the bottom of the radio panel, and all six band buttons on one row.** Owner: *"I'd like to consider moving the preset column to a bar across the bottom of the radio with touchable arrow pushbuttons to scroll left and right. … hopefully providing enough horizontal space for all band buttons on one row …"* The 210 px rail goes; ◀/▶ 58×60 paging arrows (page step, hold-to-repeat, swipe-snap); four ~129×60 cards (name up to two lines, `06 · FM 92.30`); auto-scroll to the playing preset except within 10 s of a manual scroll; an amber dot on the arrow when the playing preset is off-screen; a tappable `＋ SAVE` empty-slot card (owner decision, reversing the long-press-only save); long-press a card for rename/delete (no `⋮`); six ~102×56 band buttons in one row. ⚠ **The vertical budget leaves ~9 px — measure on the box before building**; fallback: AGC on the tune/scan row (~66 px freed). ⚠ **Fixes a pre-existing clip:** during a tuner scan the SCANNING row (`RadioControlPanel.razor:156-171`, needs 36 px with 16 free) pushes the AGC row off the bottom; the text moves into the signal-meter header. — [detail](queue/UI-20.md)
+
+### UI-21 — The preset bar did not follow the PRESETS knob; it now mirrors the knob's highlight while the knob's list is open.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#758](https://github.com/mmackelprang/RTest/pull/758) (squash `7d2124e`) — owner panel UAT 2026-10-01 with the knob on the SHA-verified branch build `f77049b`: *"UI-21 knob checks all pass, merge it"*. No redeploy needed after merge: the box's tree is byte-identical to `main` `4d483ff` |
+| Plan | _built 2026-10-01 to spec §4.8 — 46/0, suite green bar the known set, 12/12 mutants killed, review + polish fixed ([dossier](queue/UI-21.md))_ |
+| Spec / handoff | [spec](design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md) §4.8 |
+| Depends on | `UI-20` |
+| Branch | `feat/ui-21-preset-bar-knob-mirror` |
+
+**Detail: [`queue/UI-21.md`](queue/UI-21.md)**
+
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01.** Merged as [#758](https://github.com/mmackelprang/RTest/pull/758) (squash `7d2124e`). The branch build `f77049b` was deployed to `radio` and SHA-verified for the owner's knob checks before merge. Owner: *"UI-21 knob checks all pass, merge it"*. No API or hub change. Spec PR 2. 🟢 **NEW 2026-10-01 — the preset bar mirrors the PRESETS knob's highlight while the knob's list is open.** The highlighted card scrolls into view with the overlay's highlight treatment, and clears when the overlay closes. ✅ **Data path confirmed by the Builder, no API/hub change:** the bar is a second subscriber to the Web's `EncoderHudService` singleton, which already carries every row and `HighlightIndex`; it matches by preset id (`preset:{id}` is now a documented wire contract). — [detail](queue/UI-21.md)
+
+### UI-25 — The DevTray was pinned to the top-right corner and its actions looked like readings; it now opens under the tap and marks what is tappable.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#760](https://github.com/mmackelprang/RTest/pull/760) (squash `e8183e8`, with `UI-26`) — owner panel UAT 2026-10-01 on the SHA-verified branch build `d0b2e42`: *"This all looks good."* (read by the coordinator as the DevTray checks passing; the same message reported the CLIP shift still visible, which was `UI-27`, not yet deployed). No redeploy needed after merge: the box's tree is byte-identical to `main` `4d483ff` |
+| Plan | _built 2026-10-01 from the owner's report; no Planner pass ([dossier](queue/UI-25.md))_ |
+| Spec / handoff | owner report (dossier) |
+| Depends on | — |
+| Branch | `fix/ui-25-26-devtray` |
+
+**Detail: [`queue/UI-25.md`](queue/UI-25.md)**
+
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01** with [`UI-26`](queue/UI-26.md). Merged as [#760](https://github.com/mmackelprang/RTest/pull/760) (squash `e8183e8`). The branch build `d0b2e42` was deployed to `radio` and SHA-verified for the owner's panel UAT before merge. Owner: *"This all looks good."* ⚠ The coordinator read this as the DevTray checks passing; the same message reported the CLIP shift still visible, which was `UI-27`, not yet deployed at the time. 🟡 **NEW 2026-10-01 (owner report at the panel) — the DevTray opens under the tap, and its actions look like actions.** Owner: *"For the debug tray - it should appear under the area pressed. … This dialog should clearly show which areas are \"actionable\" by a highlight or some other method."* The tray was pinned to the top-right corner while the triple-tap slot sits left of Home (#711). Now `dev-gesture.js` passes the third tap's x and the slot's edges; `DevTrayPlacement` hangs the tray just below the slot centred on the tap, clamps it 12 px inside the viewport and flips above when there is no room; a tap outside closes it. Actions are raised, accent-bordered buttons with an icon, a hint and a pressed state (≥ 64 px); the two read-only readings are a flat strip, not buttons; the × is a 56 px target. ⚠ There is still one 64 px gesture slot, so "under the area pressed" moves the tray by up to ~64 px. — [detail](queue/UI-25.md)
+
+### UI-26 — "Dump audio frame" stranded the kiosk on an error page it could not leave; both DevTray file cards now fetch server-side and report in the card.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#760](https://github.com/mmackelprang/RTest/pull/760) (squash `e8183e8`, with `UI-25`) — owner panel UAT 2026-10-01 on the SHA-verified branch build `d0b2e42`: *"This all looks good."* (read by the coordinator as the DevTray checks passing). No redeploy needed after merge: the box's tree is byte-identical to `main` `4d483ff` |
+| Plan | _built 2026-10-01 from the owner's report; no Planner pass ([dossier](queue/UI-26.md))_ |
+| Spec / handoff | owner report (dossier) |
+| Depends on | — |
+| Branch | `fix/ui-25-26-devtray` |
+
+**Detail: [`queue/UI-26.md`](queue/UI-26.md)**
+
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01** with [`UI-25`](queue/UI-25.md). Merged as [#760](https://github.com/mmackelprang/RTest/pull/760) (squash `e8183e8`). The branch build `d0b2e42` was deployed to `radio` and SHA-verified for the owner's panel UAT before merge. Owner: *"This all looks good."* (the coordinator's reading: the DevTray checks passed). "Dump Audio Frame" and "Download logs" no longer navigate away. ⚠ **The dump endpoint itself is still a 501 stub** (`AudioDebugController`): no audio-frame dump feature exists yet, and the card now says so in place. 🟠 **NEW 2026-10-01 (owner report at the panel; kiosk trap) — "Dump audio frame" left the kiosk on an error page it could not leave.** Owner: *"'Dump Audio Frame' brings up an error message in a new browser page that you can't get out of on the touchscreen. This is a perma-fail situation without restarting the web ui."* Root cause: the card `window.open()`ed `<ApiBaseUrl>/api/audio/debug/dump-frame`, which is a **deliberate 501 stub** (`AudioDebugController`), so Chrome rendered its JSON in a window with no back button. "Download logs" had the same shape (a 404 or an unreachable API would strand it too). Both are now fetched server-side; the outcome is written into the card (`501 · Audio-frame dump not yet implemented`), and a success is saved in-page from a blob — no navigation. No other stranding path exists in `src/Radio.Web`. The API is unchanged. — [detail](queue/UI-26.md)
+
+### UI-24 — Text-entry dialogs were centred under the in-app keyboard; they now hang from the top, clear of it.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#761](https://github.com/mmackelprang/RTest/pull/761) (squash `4d483ff`, with `UI-27`) — owner panel UAT 2026-10-01 on the SHA-verified branch build `6ab5b74`: *"These all pass"*. The box reports `6ab5b74`, and its tree is byte-identical to `main` `4d483ff` (verified by `git diff`), so no redeploy was needed |
+| Plan | _built 2026-10-01 — shared top-anchored overlay/card (§20a) on the panel's three and the Radio page's two; Radzen dialogs with text fields (Save Playlist, file browser ×2) via `KioskEntryDialog.CssClass`, raised above the top bar; a source guard for future call sites; 46/0, 17/17 mutants killed ([dossier](queue/UI-24.md))_ |
+| Spec / handoff | — |
+| Depends on | — |
+| Branch | `feat/ui-23-24-preset-bar-drag-osk` |
+
+**Detail: [`queue/UI-24.md`](queue/UI-24.md)**
+
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01** with [`UI-27`](queue/UI-27.md). Merged as [#761](https://github.com/mmackelprang/RTest/pull/761) (squash `4d483ff`). The branch build `6ab5b74` was deployed to `radio` and SHA-verified for the owner's panel UAT before merge. Owner: *"These all pass"*. Filed from `UI-20` UAT check 5; the same PR closed [`UI-23`](queue/UI-23.md) with no code. 🟡 **NEW 2026-10-01 (owner, `UI-20` UAT check 5: *"the keyboard occludes the dialog"*) — text-entry dialogs are hidden by the on-screen keyboard.** It is the in-app keyboard (`virtual-keyboard.js`; GNOME's never opens for Chrome here), fixed to the bottom with its top edge at y = 348 and not resizing the page. Every dialog holding a text field was centred, putting field and buttons under it. Pre-existing since #373. — [detail](queue/UI-24.md)
+
+### UI-27 — The CLIP pill moved the radio panel 3 px each time it appeared; it is now always rendered, out of flow.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#761](https://github.com/mmackelprang/RTest/pull/761) (squash `4d483ff`, with `UI-24`) — owner panel UAT 2026-10-01 on the SHA-verified branch build `6ab5b74`: *"These all pass"*. The box reports `6ab5b74`, and its tree is byte-identical to `main` `4d483ff` (verified by `git diff`), so no redeploy was needed |
+| Plan | _built 2026-10-01 — pill always rendered, out of flow, shown by `.is-on`; zero rect change across CLIP × scan chip; 7/7 mutants killed ([dossier](queue/UI-27.md))_ |
+| Spec / handoff | — |
+| Depends on | — |
+| Branch | `feat/ui-23-24-preset-bar-drag-osk` |
+
+**Detail: [`queue/UI-27.md`](queue/UI-27.md)**
+
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-01** with [`UI-24`](queue/UI-24.md). Merged as [#761](https://github.com/mmackelprang/RTest/pull/761) (squash `4d483ff`). The branch build `6ab5b74` was deployed to `radio` and SHA-verified for the owner's panel UAT before merge. Owner: *"These all pass"*. ⚠ The cause predated `UI-20`: the pill had been inserted on demand since #367. 🟡 **NEW 2026-10-01 (owner: *"when the `CLIP` tag appears above the signal strength bar, it causes the whole screen to "shift" by a couple of pixels"*) — the CLIP pill moves the radio panel.** Inserted on demand, the 19.5 px pill made the 16.5 px RSSI header 3 px taller and everything below moved (measured live; since #367, not `UI-20`). — [detail](queue/UI-27.md)

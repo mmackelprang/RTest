@@ -2,7 +2,7 @@
 
 **Surface:** Home page → centre panel → **Radio** tab (`RadioControlPanel.razor`), plus the visualizer's **BAND** view (`VisualizerPanel.razor`, `visualizer.js` `drawBandMap`).
 **Author:** Designer · **Date:** 2026-10-01 · **Consumer:** Planner
-**Status:** Owner-reviewed 2026-10-01. Five of the six §9 questions are decided (see **Owner decisions** below); Q4 (AM/SW) stays open as `AUD-94`. Queued as [`UI-20`](../queue/UI-20.md) (PR 1), [`UI-21`](../queue/UI-21.md) (PR 2) and [`UI-22`](../queue/UI-22.md) (PR 3); PR 4 is parked on [`AUD-94`](../queue/AUD-94.md).
+**Status:** Owner-reviewed 2026-10-01. Five of the six §9 questions are decided (see **Owner decisions** below); Q4 (AM/SW) stays open as `AUD-94`. ✅ **PRs 1–3 shipped 2026-10-01, each UAT'd by the owner at the panel and archived:** [`UI-20`](../queue/UI-20.md) (PR 1, [#757](https://github.com/mmackelprang/RTest/pull/757), squash `0af90f4`), [`UI-21`](../queue/UI-21.md) (PR 2, [#758](https://github.com/mmackelprang/RTest/pull/758), squash `7d2124e`) and [`UI-22`](../queue/UI-22.md) (PR 3, [#756](https://github.com/mmackelprang/RTest/pull/756), squash `f30ed06`; the 12/20 dB thresholds kept). PR 4 remains parked behind [`AUD-94`](../queue/AUD-94.md).
 
 ### Owner decisions (2026-10-01)
 
