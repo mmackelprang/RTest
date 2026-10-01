@@ -489,6 +489,33 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // Hostile review F4. The REAL StopReceiverApplicationAsync (the harness seam removed): this
+  // client's ReceiverChannel has never received a status, so nothing is known about what is
+  // running. That used to count as "nothing of ours is running" and the unmute was sent.
+  // Measured while writing this: SharpCaster's ReceiverChannel.ReceiverStatus is then NOT null —
+  // it is a default status whose Applications is null — so a null-status check alone did not
+  // catch it (the first version of this fix failed this test).
+  [Fact]
+  public async Task WithNoReceiverStatusEverReceived_ATeardownLeavesTheConsoleMutedSpeakerMuted()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+    h.Output.CastStopApplicationOverrideForTests = null;
+
+    // The premise, as SharpCaster 3.0.0 actually presents "never received": a default status
+    // object with no applications list — not a null status.
+    var held = h.CurrentClient()!.GetChannel<Sharpcaster.Channels.ReceiverChannel>()!.ReceiverStatus;
+    Assert.Null(held?.Applications);
+
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    await h.Output.DisconnectAsync();
+
+    Assert.Equal(new[] { "mute" }, h.Kinds());
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+  }
+
   [Fact]
   public async Task ADisconnectWithoutAStop_StopsTheReceiverApplication_BeforeTheUnmute()
   {

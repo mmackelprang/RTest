@@ -3266,10 +3266,14 @@ public class GoogleCastOutput : AudioOutputBase
   /// <c>HandleConnectionLostAsync</c>): it cannot be unmuted.
   /// </summary>
   /// <remarks>
-  /// <para><b>What is guaranteed</b> (pre-merge review H1): an unmute is sent only after the device
-  /// has answered that no receiver application with our <c>ApplicationId</c> is running — stopped
-  /// here, or none was running — so neither the live HttpMp3 stream nor DirectChannel audio the
-  /// receiver had buffered can play out loud after it. If that cannot be established (the stop
+  /// <para><b>What is guaranteed</b> (pre-merge review H1): an unmute is sent only when the
+  /// device's most recent receiver status — the one SharpCaster holds for the channel, or the
+  /// answer to the stop sent here — lists no receiver application with our <c>ApplicationId</c>, so
+  /// neither the live HttpMp3 stream nor DirectChannel audio the receiver had buffered can play out
+  /// loud after it. When that held status already lists none, no stop is sent and the unmute
+  /// follows without a new round-trip; the status is then as current as the device last made it.
+  /// If it cannot be established (the held status has no applications list, which is also how a
+  /// channel that never received a status looks — hostile review F4 — the stop
   /// failed or timed out, the device's answer still lists our application, or a different
   /// application is first in its status, which the library's stop would close instead) the
   /// speaker is deliberately LEFT MUTED and an Information line says so: a muted speaker the owner
@@ -3340,9 +3344,10 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Stops our receiver application (<c>ApplicationId</c>) on the device behind
-  /// <paramref name="client"/>. True when the device has answered that no application of ours is
-  /// running (stopped here, or none was); false when that cannot be established. Throws what
-  /// SharpCaster throws.
+  /// <paramref name="client"/>. True when the channel's most recent receiver status lists no
+  /// application of ours (none was running, or the stop sent here removed it); false when the held
+  /// status has no applications list (never received, or not reported), or that cannot otherwise
+  /// be established. Throws what SharpCaster throws.
   /// </summary>
   private async Task<bool> StopReceiverApplicationAsync(ChromecastClient client)
   {
@@ -3359,14 +3364,27 @@ public class GoogleCastOutput : AudioOutputBase
 
     var applicationId = _options.ApplicationId;
     var status = receiverChannel.ReceiverStatus;
-    var ours = status?.Applications?.FirstOrDefault(a => a.AppId == applicationId);
+    if (status?.Applications == null)
+    {
+      // Hostile review F4. Unknown is not "stopped": the speaker stays muted. A held status with
+      // no applications list is treated as unknown, not as "nothing running", because that is
+      // exactly how SharpCaster 3.0.0 presents a channel that has never received a status — its
+      // ReceiverStatus is a default object, not null (measured in
+      // GoogleCastOutputConsoleVolumeTests.WithNoReceiverStatusEverReceived_…). The cost: a device
+      // whose real status omits the list is left muted at teardown, which is logged and
+      // recoverable. (The stop's own answer below is the device's report, so there a missing
+      // list does mean nothing is running.)
+      return false;
+    }
+
+    var ours = status.Applications.FirstOrDefault(a => a.AppId == applicationId);
     if (ours == null)
     {
       // The device's last status lists no application of ours: nothing of ours can be playing.
       return true;
     }
 
-    if (!ReferenceEquals(status!.Application, ours))
+    if (!ReferenceEquals(status.Application, ours))
     {
       // SharpCaster's StopApplication stops the FIRST application in the status. Closing someone
       // else's is not ours to do, so our stop cannot be made.
