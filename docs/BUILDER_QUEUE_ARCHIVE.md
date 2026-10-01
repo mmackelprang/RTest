@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (89)
+## Shipped rows (90)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3053,3 +3053,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-77.md`](queue/AUD-77.md)**
 
 ✅ **CLOSED BY OWNER VALIDATION 2026-10-02, NO CODE.** Owner: *"#3 - I validated this yesterday - it passes."* Nothing was built for this row; the investigation below is the whole of the work. ⚠ **INFERENCE, not established:** the likely reason it passes now is `AUD-14` ([#726](https://github.com/mmackelprang/RTest/pull/726), squash `b64c8cd`, merged and deployed 2026-09-30). It fixed a stale AVRCP watcher that survived a player re-attach, which can leave the BT source stuck in `Ready` with no `Playing` edge — the mechanism this row's investigation found (the source sat in `Ready` for the whole of "APT."). Supporting, not proving: the 2026-09-29 observation ran on `24b6ce7`, an `AUD-15` branch build that does not have `b64c8cd` in its history. No phone session, `dbus-monitor` capture or Debug-level log read was done to confirm it, so which of the dossier's causes (a)/(b)/(c) it was is still unknown. 🟡 **INVESTIGATED 2026-09-30, NOT BUILT — held for a phone session.** The missing re-identification is **not** in the fingerprint pipeline: the 2026-09-29 file sink shows the BT source sat in **`Ready` from 15:58:10 to 16:00:51** while "APT." played, and the identification loop only samples a `Playing` source. The one sample taken was correctly dropped as pre-track (`AUD-33`). A sibling of `AUD-12`'s stall. _Filed 2026-09-29 as "BT album art is lost when the recognition sample straddles a track change"._ — [detail](queue/AUD-77.md)
+
+### AUD-85 — Picking Cast erased the saved default Cast speaker; the one-tap pick now connects once and a failed connect never clears the default.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#764](https://github.com/mmackelprang/RTest/pull/764) — merged 2026-10-02 on the owner's instruction, *"#2 - retry the push/merge. I'll do the commands if I have to."* `origin/main` with `AUD-37` (#751) was merged into the branch first; the squash SHA, the deploy and the agent box UAT are recorded in the dossier and the next banner |
+| Plan | _plan TBD — make exactly one party connect (the API's auto-connect **or** the UI's explicit connect), and/or have the UI treat "already connecting / connected to the same device" as success rather than clearing the default; the plan decides_ · ⛔ **NOT auto-mergeable** — output-selection path; owner Cast-pick check at the console (pick Cast, then read the default back from the config store) |
+| Spec / handoff | _no spec doc — [`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) § Casting baseline, `AUD-84` re-test. Related punch-list row: **`AUD-54`** (`HANDOFF-GA-PUNCH-LIST.md` §5), whose 2026-09-30 evidence ① is the same race at 16:39:12_ |
+| Depends on | — _(no row dependency. Follow-up to `AUD-84` ([#736](https://github.com/mmackelprang/RTest/pull/736)), archived. Same Cast lifecycle family as `AUD-54`)_ |
+| Branch | `fix/aud-85-cast-pick-clears-default` |
+
+**Detail: [`queue/AUD-85.md`](queue/AUD-85.md)**
+
+✅ **SHIPPED 2026-10-02.** Merged as [#764](https://github.com/mmackelprang/RTest/pull/764) on the owner's instruction: *"#2 - retry the push/merge. I'll do the commands if I have to."* **As built:** the one-tap pick sends only `POST /api/devices/cast/connect`, so one party connects. A failed connect never clears the saved default. The dropdown shows the connected device. A failed pick restores the output the server reports. `cast/connect` answers 200 when it is already streaming to the same device, 409 while the output is mid-transition, and 502 (restoring local) when Cast is not live after the output gate. A failed device switch while casting restores local. It keeps `AUD-37`'s rule that `cast/connect` cancels the reconnect watcher first, made pick-aware in review: `CancelCastReconnectForCastPickAsync` waits up to 15 s for a running reconnect; a pick of the same device keeps the watcher's connection, another device cancels it, and an expired budget answers 409 touching nothing; the watcher's tear-down is atomic with the output gate (`TearDownCastOutputUnlessActiveAsync`). "Stop casting" still clears the default deliberately (existing behaviour, see the dossier). 🟠 **NEW 2026-09-30 (MEASURED — found during the `AUD-84` owner UAT, box on `079d46c`) — picking Cast erases the saved default Cast speaker: the UI's connect races the API's own auto-connect, gets a 500, and clears the default.** At 17:32:55 EDT the output switch to `google-cast` started the API's background auto-connect to "Office speaker"; 5 ms later the UI's own `POST /api/devices/cast/connect` failed `Cannot connect in state Connecting` (500), and the UI, reading any failure as "device not reachable", deleted the default (`Saved default Cast device:  ()`). The API's auto-connect then succeeded at 17:32:59 — so Cast plays, but `AudioPreferences:DefaultCastDeviceId` is now `''` and the console cannot restore Cast after a restart. — [detail](queue/AUD-85.md)
