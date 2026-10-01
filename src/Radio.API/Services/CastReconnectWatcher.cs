@@ -140,8 +140,9 @@ internal interface ICastReconnectHost
   /// <paramref name="ct"/> is cancelled — then leaving a connection of its own standing, for the
   /// caller to keep (<see cref="TryKeepForCastChoiceAsync"/>) or tear down — and, with
   /// <paramref name="ct"/> not cancelled, when its connect was superseded (a newer connect or a
-  /// disconnect claimed the output), in which case nothing published is its own. Every step after
-  /// the connect runs only on the connection that connect published. It does not touch the active
+  /// disconnect claimed the output), in which case nothing published is its own. Before each step
+  /// after the connect it checks that the connection is still the one its connect published (the
+  /// start, which cannot be interrupted, guards itself the same way). It does not touch the active
   /// output — the local speakers keep playing until the switch.
   /// </summary>
   Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct);
@@ -197,8 +198,9 @@ internal interface ICastReconnectHost
 /// output made in that moment is caught by the atomic, conditional switch back to Cast, which
 /// refuses — or, when the choice cancelled the run, by the cancellation path, which keeps (and
 /// starts) the run's own connection when the choice was Cast and removes it otherwise (review M3).
-/// After its connect returns the run acts only on the connection that connect published: a
-/// superseded connect returns normally with nothing of ours published (review M2). The run makes output selections in exactly two places: that switch back to Cast
+/// After its connect returns, the run checks before each step that the connection is still the one
+/// its connect published: a superseded connect returns normally with nothing of ours published
+/// (review M2). The run makes output selections in exactly two places: that switch back to Cast
 /// (conditional on no selection since the drop), and — only when that switch throws —
 /// <see cref="ICastReconnectHost.RestoreLocalOutputAsync"/>, which re-applies the recovery's local
 /// output through the gate when it is still the active output (a selection of its own: on the
@@ -369,7 +371,10 @@ internal sealed class CastReconnectWatcher
           // The device answered TCP but the Cast session would not come up (still booting,
           // receiver app not ready). Retry no more than once per backoff cap from here on.
           _logger.LogDebug(ex, "Cast: reconnect attempt {Attempt} to \"{Name}\" failed; will retry", attempt, name);
-          if (!_failureWarned)
+
+          // Review L2: a run cancelled meanwhile is not retrying — the next wait ends it as
+          // Cancelled — so it must not log the episode's "retrying" Warning (nor use it up).
+          if (!_failureWarned && !ct.IsCancellationRequested)
           {
             // Review M3: the episode's one Warning. The output logged this attempt's failure at
             // Debug, so without this line a speaker that never takes the session would leave
@@ -489,8 +494,10 @@ internal sealed class CastReconnectWatcher
       }
 
       // Not ours to keep (superseded — then whoever superseded it serves the choice — or the
-      // service is stopping) or its start failed.
-      _logger.LogInformation(
+      // service is stopping) or its start failed. Review L4: Warning — when the start failed, Cast
+      // is the active output, local is muted and no connection is left, so the console is silent.
+      // Once per user action, never per retry.
+      _logger.LogWarning(
         "Cast: the output was switched to Cast while reconnecting to \"{Name}\", but the reconnect's connection was not kept for it (no longer ours, or it would not start)",
         name);
     }

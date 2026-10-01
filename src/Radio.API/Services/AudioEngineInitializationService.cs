@@ -279,6 +279,12 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   // replaces the older one and there is never more than one.
   private readonly object _reconnectGate = new();
   private CancellationTokenSource? _reconnectCts;
+
+  // The device the watcher behind _reconnectCts is reconnecting to (for its friendly name), and
+  // the run CancelCastReconnectAsync last logged stopping, so a second user action while the same
+  // run is still finishing adds no second line (review L7). Both guarded by _reconnectGate.
+  private ChromecastDeviceInfo? _reconnectDevice;
+  private CancellationTokenSource? _reconnectCancelLoggedFor;
   private TimeProvider? _reconnectTimeProvider;
 
   // AUD-37 (review H1). The reconnect episode for the device the last watcher served: when its
@@ -397,15 +403,26 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   {
     CancellationTokenSource? cts;
     Task<CastReconnectOutcome> run;
-    string? deviceId;
+    string? deviceName = null;
+    var logStop = false;
     lock (_reconnectGate)
     {
-      deviceId = _reconnectEpisode?.DeviceId;
       // An explicit user action: whatever drops next starts a fresh window, uncapped.
       _reconnectEpisode = null;
       _watcherReconnects.Clear();
       cts = _reconnectCts;
       run = CastReconnectTask;
+
+      // Review L7: once per run — only the call that finds this run not yet cancelled and not
+      // already logged. A second action while the same run is still finishing logs nothing.
+      if (cts != null && !cts.IsCancellationRequested && !ReferenceEquals(_reconnectCancelLoggedFor, cts))
+      {
+        _reconnectCancelLoggedFor = cts;
+        logStop = true;
+        var device = _reconnectDevice;
+        deviceName = device == null ? null
+          : string.IsNullOrWhiteSpace(device.FriendlyName) ? device.Id : device.FriendlyName;
+      }
     }
 
     if (run.IsCompleted)
@@ -419,9 +436,12 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     // would show nothing for "the user moved on" — the watcher's own "no longer trying" line only
     // fires for an output change it observes itself. A Cast pick that lands while the watcher
     // has already connected may still keep that connection (see the watcher's keep branch).
-    _logger.LogInformation(
-      "Cast: no longer trying to reconnect to {DeviceId} — stopped by a user output or Cast action",
-      deviceId ?? "(unknown device)");
+    if (logStop)
+    {
+      _logger.LogInformation(
+        "Cast: no longer trying to reconnect to \"{Name}\" — stopped by a user output or Cast action",
+        deviceName ?? "(unknown device)");
+    }
 
     try
     {
@@ -543,6 +563,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
       previousCts = _reconnectCts;
       _reconnectCts = cts;
+      _reconnectDevice = device;
 
       var watcher = new CastReconnectWatcher(
         CastReconnectHostOverride ?? new ServiceCastReconnectHost(this),
