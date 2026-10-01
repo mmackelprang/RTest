@@ -26,3 +26,55 @@ Owner, 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening b
 ## 🔬 2026-09-30 — reconfirmed on the box (MEASURED)
 
 In the owner's casting baseline run 2026-09-30 (box on `b64c8cd`, Office speaker — a Google Home Mini — in `DirectChannel` mode), after `radio-api` had restarted and restored the Cast output: *"changing the volume on the console didn't affect the office speaker."* The behaviour this row describes is unchanged. The same run found [`AUD-84`](AUD-84.md) (a Cast speaker that drops mid-stream crashes `radio-api`), which touches the same client-lifetime code; see [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) § Casting baseline.
+
+## ✅ As built (batch D, 2026-10-01) — how the four design questions were settled
+
+**Scope: while the active output is `google-cast` and the Cast output is `Streaming`.** Nothing changes for local or HTTP-only outputs.
+
+1. **Mapping — a per-connection curve, not the raw level.** Every master-volume change drives the speaker through `CastConsoleVolumeCurve.Map` (`src/Radio.Infrastructure/Audio/Services/CastConsoleVolumeCurve.cs`). It is a monotonic, piecewise-linear curve through an anchor (console level m0, speaker level s0), taken per connection. So the **first move continues from where the speaker already is and never jumps**. Console 0 is silent. When m0 = s0 the curve is the identity.
+   - Lower segment (m ≤ m0): s = s0·m/m0.
+   - Upper segment (m ≥ m0): s = min(1, s0 + k·(m − m0)), with k = min((1 − s0)/(1 − m0), 3). **The upper slope is capped at 3**, so one encoder detent near the top can never jump the speaker; uncapped, m0 = 0.98 / s0 = 0.2 gives k = 40. **What the cap costs:** when it binds, the console cannot take the speaker to 100 % on that connection. At console 100 % the speaker sits at s0 + 3·(1 − m0). A change made on the speaker itself, or a new connection, re-anchors.
+   - 📝 **Design decision for the owner (recorded, not changed):** the **lower** segment is **not** slope-capped. A curve from (0, 0) to (m0, s0) with every slope ≤ 3 exists only when s0 ≤ 3·m0. Capping it would give up either continuity or "console 0 is silent". It is steep only toward silence, which is the safe direction.
+   - Degenerate anchors (unknown speaker level, or m0 ≤ 0.01) map with the identity.
+2. **`AUD-80`'s per-device memory (`AudioPreferences:CastDeviceVolumes`) — unchanged restore, console moves remembered.** The restore on connect and `AUD-5`'s initial-sync rule are unchanged. Console-driven `SET_VOLUME`s are **coalesced**: one is in flight and the latest wins. **Only a burst's final level is remembered per device**, not every intermediate step.
+3. **The echo filter — a 3 s echo memory plus an explicit re-sync marker.** The speaker's reply to our own `SET_VOLUME`/`SET_MUTE` is recognised as an echo while the send is in flight and for 3 s after it completes (`EchoWindow`, `GoogleCastOutput.cs:314`), and never re-enters master volume. A level counts as our echo when it is within a tolerance of one of our recent pushes, or inside the range our pushes from the last 3 s span, widened by that tolerance. The tolerance is 0.01, or just over half the volume step the speaker reports in its receiver status (`Volume.StepInterval`, e.g. 1/15 on a 15-detent speaker; a speaker that also quantises `SET_VOLUME` to that step would report our 0.50 as 0.5333 — assumed device behaviour, not yet measured on the box's speakers), whichever is larger (`IsRecentVolumePush`). A push still in flight more than 3 s after it started (for example a timed-out one) matches only its own echo and does not widen the range. With no step reported, a speaker that rounds more coarsely than 0.01 still has the echo of a single push read as external. A genuine external change on the speaker (`AUD-5`'s path) re-anchors the curve and drops any queued console target. ⚠ **A status that arrives during a connect's initial sync is never treated as external** (`30a3524c`). This fixes a bug measured on the box during the build: on the first connect after a restart, the initial status read was taken as an external change, and `Synced mute from Cast device: false` **unmuted the console**.
+4. **Local speakers stay muted while casting** (the existing output gate; unchanged).
+
+**Mute.**
+- Console **mute** mutes the speaker while casting, and a console that is already muted mutes the speaker as the stream starts.
+- **Nothing auto-unmutes.** The speaker is unmuted in three cases only:
+  1. A deliberate console unmute while Cast is the active output (`OnMuteStateChanged`, `CastConsoleVolumeFollower.cs:266-293`). This unmutes the speaker whoever muted it.
+  2. The reconcile when the gate makes Cast the active output, and only for a speaker this application muted for the console (`:322`) — on this connection, or on an earlier connection to the same device (next bullet).
+  3. The teardown rule below.
+- A console mute is pushed to any streaming Cast connection, even before the gate has marked Cast active. That is the safe direction.
+- A console-muted speaker is **unmuted on a deliberate teardown**, never on a connection loss. It is unmuted only **after** our receiver application is confirmed stopped, so a muted console can never release audio to the room. If the stop cannot be confirmed within 3 s, the speaker is left muted and an Information line says so (`GoogleCastOutput.cs:3469-3472`).
+- **A console mute survives a lost connection, per device, in memory only** (F11, `RecallConsoleMuteAsync`, `GoogleCastOutput.cs:3374`). The output remembers the id of the device it last muted for the console until it sees that device unmuted (an acknowledged console or teardown unmute, an unmute reported by the speaker, or a reconnect whose initial read shows it unmuted). A new connection to that device whose initial read shows it still muted is marked "muted by console" again, so the reconcile above unmutes it if the console was unmuted meanwhile, it stays muted if not, and a deliberate teardown releases it. A connection to a different device is unaffected, and nothing is sent on the basis of the memory alone. It is lost on a radio-api restart: a speaker left muted that way is then treated like one muted on its own side (never unmuted for the console).
+  - ⚠ **What it cannot tell:** "still muted by us" from "unmuted, then muted again by the owner on the speaker while we were disconnected". Nothing was observed in between, so in that case the mark is re-armed and the reconcile **unmutes the owner's mute**.
+  - It is keyed by `ChromecastDeviceInfo.Id`. The cached and live records of one speaker can carry different ids (`ConnectAsync`'s "matched by IP (ID mismatch)" path, `GoogleCastOutput.cs:888`), so a reconnect through the other id misses the recall and the speaker stays muted. That is the safe direction.
+  - One slot. It is replaced by a console mute on another device, and also by the late acknowledgement of a console mute whose connection has since been superseded.
+- **Mute is never stored** in `AudioPreferences`.
+
+**Surfaces.**
+- New `GET /api/devices/cast/volume`: a live, bounded (3 s) status read. It returns `{ deviceName, level, muted, knownLevel, knownMuted, mutedByConsole }`, or 404 (no Cast output), 409 (not streaming to a connected speaker), 504 (no answer) or 502 (read failed).
+- `GET /api/devices/cast/diagnostics` gains `speakerLevel`, `speakerMuted` and `speakerMutedByConsole`. These are the output's own view, not a live read.
+
+**Log lines** (file sink). The follower's lines are under `Radio.Infrastructure.Audio.Services` and are visible by default. The `GoogleCastOutput` lines are under `…Audio.Outputs`, which `LOG-2` holds at Warning, so raise `Radio.Infrastructure.Audio` (`LOG-5`) to see them:
+- `Cast: console volume {Console:P0} → speaker {Speaker:P0} on {Name}`
+- `Cast: console muted → speaker {Name} muted` / `Cast: console unmuted → speaker {Name} unmuted`
+- `Cast: console is muted → speaker {Name} muted as casting starts`
+- `Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console`
+- `Cast: speaker {Name} left muted — its receiver application could not be confirmed stopped, …`
+- `Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console`
+
+**Not testable offline (box only):** the ordering of the teardown (receiver application stopped before the unmute), and the `StartAsync` → start-of-stream mute call.
+
+**Deferred (LOW, logged by the hostile reviews, not fixed).**
+- **F5:** a metadata-reload relaunch already past its debounce can relaunch our receiver application after the teardown unmute. The window is narrow.
+- **F6:** a console mute that lands during a teardown can leave a stale "muted by console" mark. That is the safe direction (the speaker stays muted).
+- **F7:** the first console move with an unknown speaker level maps with the identity curve, so it can jump.
+- **F10:** `_lastSetMute` and `_lastSetVolume` are read as plain fields. One test comment about the device-switch path was flagged and is unchanged. `ReadSpeakerVolumeAsync` absorbs every status that arrives while a read hangs (up to its 3 s bound).
+- **F11, restart:** the per-device console-mute memory is in process only, so a radio-api restart loses it (see Mute, above).
+- **F11, failed initial read:** a reconnect whose initial status read fails never re-arms the mark. If the console was unmuted meanwhile, the speaker stays muted. That is the safe direction.
+- **Echo, step midpoint (round-3 LOW-2):** for a push within 0.001 of the midpoint between two speaker steps (on a 1/15 speaker: 0.10, 0.30, 0.50, 0.70, 0.90), both neighbouring steps are inside the tolerance. A one-step change made on the speaker's own buttons within 3 s of that push is then absorbed as our echo. Master volume does not follow it, and `AUD-80` keeps the console's level. The next console move corrects it.
+- **Echo, stale step (round-3 LOW-3):** the initial read records the speaker step only while its client is still `_client`, and a live-discovered device reuses the client across connects. So the guard is weaker than "per connection". The publish reset makes the practical risk negligible.
+- **Echo, older baseline compare (round-3 LOW-1, remainder):** the baseline comparison for a status arriving more than 3 s after its send completed still uses 0.01. The remembered-volume restore on connect uses the step tolerance.

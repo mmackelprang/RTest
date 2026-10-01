@@ -400,6 +400,11 @@ public static class AudioServiceExtensions
     // Register Google Cast Output (singleton - optional external output)
     services.AddSingleton<GoogleCastOutput>();
 
+    // AUD-81: the console's volume and mute drive a connected Cast speaker. Needs the master
+    // mixer and engine from AddSoundFlowAudio; constructed at startup by
+    // AudioEngineInitializationService, since nothing else depends on it.
+    services.AddSingleton<CastConsoleVolumeFollower>();
+
     // Register HTTP Stream Output (singleton - provides stream URL for Chromecast)
     services.AddSingleton<HttpStreamOutput>();
 

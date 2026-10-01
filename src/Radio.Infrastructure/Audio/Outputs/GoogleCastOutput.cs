@@ -35,7 +35,7 @@ public class GoogleCastOutput : AudioOutputBase
   // comment said it guarded every read. It never did, and believing it makes the
   // unlocked dereferences described below look safer than they actually are.)
   //
-  // WHAT IT SERIALIZES: eight await-free critical sections, each touching
+  // WHAT IT SERIALIZES: nine await-free critical sections, each touching
   // _connectionGeneration and/or those three fields as one consistent unit:
   //     InitializeAsync         bump, install a fresh client, clear receiver+device
   //     ConnectAsync's claim    bump, snapshot _client
@@ -43,9 +43,13 @@ public class GoogleCastOutput : AudioOutputBase
   //     IsCurrentGeneration     generation check only — mutates nothing
   //     DisconnectAsync         bump, snapshot, clear receiver+device
   //     DisposeAsync            bump, snapshot _client (deliberately NOT clearing it)
-  //     StopAsync               snapshot _client only — touches no generation
+  //     StopAsync               snapshot _client and _publishedGeneration — mutates nothing
   //     HandleConnectionLost    generation+published check, bump, snapshot, clear
   //                             receiver+device (AUD-84; also leaves _client set)
+  //     SnapshotPublished       generation+published check, snapshot client+device —
+  //                             mutates nothing (AUD-81: the console volume/mute
+  //                             commands, the live status read and the target accessor;
+  //                             the only section also entered with a synchronous Wait)
   // _publishedGeneration and the loss-watch pair (_lossWatchedClient/_lossWatchHandler)
   // are written only inside these sections too, alongside the fields they describe.
   // Being await-free is the point: no writer can be preempted mid-swap, so no
@@ -59,11 +63,12 @@ public class GoogleCastOutput : AudioOutputBase
   // connect and does its network work on a snapshot.
   //
   // READS ARE DELIBERATELY UNSYNCHRONIZED. Most reads of these fields — across
-  // the start/stream/volume/teardown paths — take no lock at all. Two of them
-  // null-check a field and then dereference it on a second, separate read:
-  // SetCastVolumeAsync and SetCastMuteAsync, as do the `_client!` dereferences in
-  // the Start/stream helpers. (SyncInitialVolumeAsync was a third until AUD-5; it
-  // now takes its client as a parameter and does not read the field at all.)
+  // the start/stream/teardown paths — take no lock at all. Some null-check a field
+  // and then dereference it on a second, separate read: TestPlayUrlAsync, and the
+  // `_client!` dereferences in the Start/stream helpers. (SyncInitialVolumeAsync was
+  // one until AUD-5 — it now takes its client as a parameter — and SetCastVolumeAsync
+  // and SetCastMuteAsync were two more until AUD-81 replaced them with the console
+  // volume/mute commands, which take their client from the SnapshotPublished section.)
   // Reference assignment is
   // atomic, so such a read always yields a whole reference — but "whole" is not
   // "non-null", and check-then-dereference is sound only because of this:
@@ -83,8 +88,8 @@ public class GoogleCastOutput : AudioOutputBase
   //     precondition alone — each sits behind a caller's null guard (StartAsync
   //     for the Start/stream chain, the reload guard for the metadata path).
   //     What the precondition buys them is that their guard stays valid across
-  //     the awaits that follow it. The two check-then-dereference sites named
-  //     above rely on it directly.
+  //     the awaits that follow it. TestPlayUrlAsync's check-then-dereference
+  //     relies on it directly.
   //
   //     NULL THIS FIELD AND EVERY UNLOCKED DEREFERENCE ABOVE BECOMES AN NRE —
   //     snapshot it under the lock at each of those sites first.
@@ -96,10 +101,14 @@ public class GoogleCastOutput : AudioOutputBase
   // ConnectedDevice only through `?.`. Keep it that way.
   //
   // What the unlocked reads do accept is a bounded race: a command aimed at a
-  // client that has since been superseded or torn down. For SetCastVolumeAsync
-  // and SetCastMuteAsync that is genuinely cheap — SharpCaster throws, the
-  // surrounding try/catch logs it, and the winning connection is untouched. A
-  // wasted network call, not corrupt state.
+  // client that has since been superseded or torn down. The console volume/mute
+  // commands (AUD-81) narrow it — they send only to the connection the
+  // SnapshotPublished section found current, and only for the generation the caller
+  // asked for — but the lock is released before the network call, so a teardown
+  // can still land between the snapshot and the send. That is genuinely cheap —
+  // SharpCaster throws or the stale client ignores it, the surrounding try/catch
+  // logs it, and the winning connection is untouched. A wasted network call, not
+  // corrupt state.
   //
   // SyncInitialVolumeAsync WAS the exception to that reassurance, and AUD-5 addressed
   // it. It is a read rather than a command, and its success path fires
@@ -115,6 +124,11 @@ public class GoogleCastOutput : AudioOutputBase
   //   - AudioStateUpdateService.OnCastVolumeChanged now ignores IsInitialSync events
   //     outright. THAT is what makes an initial read unable to move master volume, and
   //     it has no timing dependence at all.
+  //   - AUD-81 found the side door: the same GET_STATUS response also arrives as a
+  //     ReceiverStatusChanged event, which OnReceiverStatusChanged reported as EXTERNAL
+  //     (IsInitialSync = false) when it beat the baseline priming. Statuses arriving
+  //     while a connect's initial sync is in progress are now baseline-only — see
+  //     _initialSyncPendingGeneration. That mark is an Interlocked int, not lock state.
   // Widening this lock was and remains the wrong fix: the exposure is the event fire,
   // not the field read, and holding it across a SharpCaster call is the hang described
   // above.
@@ -171,7 +185,8 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// <b>Test seam (kind C — substitution).</b> Substitutes the Cast status read inside
-  /// <see cref="SyncInitialVolumeAsync"/>. Set by <c>GoogleCastOutputConcurrencyTests</c>.
+  /// <see cref="SyncInitialVolumeAsync"/> and, since AUD-81, <see cref="ReadSpeakerVolumeAsync"/>.
+  /// Set by <c>GoogleCastOutputConcurrencyTests</c> and <c>GoogleCastOutputConsoleVolumeTests</c>.
   /// <b>Why the real path is unreachable:</b> no fake socket can answer a Cast GET_STATUS,
   /// so offline the read always throws and the method diverts into its catch before the
   /// generation check is ever evaluated. Awaiting inside this delegate is also what lets a
@@ -185,14 +200,48 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// <b>Test seam (kind C — substitution).</b> Substitutes the Cast SET_VOLUME inside
-  /// <see cref="PushVolumeToDeviceAsync"/>. Set by <c>GoogleCastOutputVolumeMemoryTests</c>.
+  /// <see cref="PushVolumeToDeviceAsync"/>. Set by <c>GoogleCastOutputVolumeMemoryTests</c>,
+  /// <c>GoogleCastOutputConsoleVolumeTests</c> and <c>CastConsoleVolumeFollowerTests</c>.
   /// <b>Why the real path is unreachable:</b> the same as
   /// <see cref="CastStatusReadOverrideForTests"/> — no fake socket speaks the Cast protocol.
+  /// Awaiting inside the delegate is also how a test holds a push in flight to drive the
+  /// AUD-81 coalescing deterministically.
   /// <b>NOT covered by this seam:</b> whether the device honours the level. The choice of
-  /// level, and the echo-filter baseline set before sending it, are real.
+  /// level, the coalescing, and the echo-filter baseline and memory recorded before sending
+  /// it are real.
   /// Null (and therefore free) in production.
   /// </summary>
   internal Func<float, Task>? CastSetVolumeOverrideForTests { get; set; }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the Cast SET_MUTE inside
+  /// <see cref="SendMuteToDeviceAsync"/> (AUD-81). Set by <c>GoogleCastOutputConsoleVolumeTests</c>
+  /// and <c>CastConsoleVolumeFollowerTests</c>.
+  /// <b>Why the real path is unreachable:</b> the same as
+  /// <see cref="CastSetVolumeOverrideForTests"/> — no fake socket speaks the Cast protocol, so
+  /// offline the send always throws before the "muted by console" bookkeeping it guards.
+  /// <b>NOT covered by this seam:</b> whether the device honours the mute. Which mute is sent,
+  /// when (console change, start of streaming, teardown), the echo memory and the
+  /// muted-by-console mark around it are real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<bool, Task>? CastSetMuteOverrideForTests { get; set; }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the receiver-application stop inside
+  /// <see cref="StopReceiverApplicationAsync"/> (AUD-81, pre-merge review H1): returns whether no
+  /// application of ours is left running, or throws. Set by <c>CastConsoleTestHarness</c>.
+  /// <b>Why the real path is unreachable:</b> the same as
+  /// <see cref="CastSetMuteOverrideForTests"/> — no fake socket speaks the Cast protocol, so the
+  /// STOP is never answered.
+  /// <b>NOT covered by this seam:</b> how the device's status is read to decide whether our
+  /// application is running (checked against SharpCaster 3.0.0's decompiled
+  /// <c>ReceiverChannel.StopApplication</c>, which stops the FIRST application in the status).
+  /// WHEN the stop is attempted, that the unmute follows it, and that a failed stop leaves the
+  /// speaker muted are real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task<bool>>? CastStopApplicationOverrideForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -215,10 +264,159 @@ public class GoogleCastOutput : AudioOutputBase
   private CancellationTokenSource? _metadataDebouncesCts;
   private readonly object _debounceLock = new();
 
-  // Volume sync: track locally-initiated volume changes to filter out echo events
+  // Volume sync: the echo filter's baseline — the level and mute this application last set or
+  // observed on the device. A status within 0.01 of it is not a change.
+  //
+  // AUD-81 removed the third field that used to live here, _suppressNextVolumeEvent. It
+  // dropped the NEXT status after any set, whatever that status said — so it could swallow a
+  // genuine external change — and it covered exactly one confirmation, so a dragged slider's
+  // confirmations of intermediate levels (0.30, 0.32 while 0.34 was the latest) arrived as
+  // external changes and were written back to master volume. The recent-push memory below
+  // recognises a confirmation by its LEVEL, for every push in the window, and lets anything
+  // else through; it subsumes the flag.
   private float _lastSetVolume = -1f;
   private bool _lastSetMute;
-  private bool _suppressNextVolumeEvent;
+
+  // AUD-81 (connect race): the generation whose connect — including its initial sync — is still
+  // in progress, or -1. Set by ConnectAsync at its claim, before any network work (hostile review
+  // F1: a reused client still carries the handler, so a status can arrive during the transport
+  // connect), and cleared (for that generation only) on every exit from the block that runs from
+  // the claim through SyncInitialVolumeAsync. While it is set,
+  // OnReceiverStatusChanged treats a status as part of the initial sync: it re-baselines the
+  // echo filter and reports nothing. Measured on the box: SharpCaster raises
+  // ReceiverStatusChanged for the GET_STATUS response on its receive thread, racing the
+  // continuation that primes the baseline, so the handler saw the -1f sentinel and reported
+  // the speaker's state as an EXTERNAL change — unmuting a muted console on connect, which is
+  // exactly the write AUD-5's IsInitialSync rule exists to prevent. Accessed through
+  // Volatile/Interlocked only.
+  private int _initialSyncPendingGeneration = -1;
+
+  // AUD-81 (pre-merge review L5): how many diagnostic live reads (ReadSpeakerVolumeAsync) are
+  // in flight. SharpCaster raises their GET_STATUS responses as ReceiverStatusChanged too, so a
+  // status arriving while one is pending is absorbed into the baseline exactly like one during
+  // an initial sync — a diagnostic read must never move master volume. Interlocked only.
+  private int _diagnosticReadsPending;
+
+  // AUD-81: every level and mute this application sent to the device, kept while the send is
+  // in flight and for EchoWindow after it completes, from any path (console follow, AUD-80
+  // restore, after-start sync, start-time mute, teardown). A status matching one of them is the
+  // device confirming our own command, even when it arrives late or out of order. For a level,
+  // "matching" means lying within EchoLevelTolerance of one of them, or within the range the ones
+  // stamped inside EchoWindow span, widened by it (hostile review F3, re-review M2/L1; see
+  // IsRecentVolumePush). Guarded by
+  // _echoLock, which guards nothing else and is never held across an await.
+  //
+  // Pre-merge review L3: the window used to run from the send's START only, and the sends it
+  // covers are bounded at up to 10 s, so the confirmation of a slow send could arrive after its
+  // entry had expired and read as an external change. An entry now stays while its send is in
+  // flight and is re-stamped at completion; EchoInFlightLimit only reclaims an entry whose send
+  // never completed (SharpCaster gives up on a response after 30 s).
+  private static readonly TimeSpan EchoWindow = TimeSpan.FromSeconds(3);
+  private static readonly TimeSpan EchoInFlightLimit = TimeSpan.FromSeconds(35);
+
+  // The least distance from a recent push (or beyond the range recent pushes span) at which a
+  // reported level is still recognised as their echo (see IsRecentVolumePush) — the same 0.01 the
+  // baseline comparison uses. Widened to just over half the speaker's own volume step when it
+  // reports one (EchoLevelTolerance).
+  private const float MinEchoLevelTolerance = 0.01f;
+
+  // Hostile re-review M2: the volume step the connected speaker reports in its receiver status
+  // (SharpCaster 3.0.0 Volume.StepInterval — e.g. 0.05, or 1/15 on a 15-detent speaker), or NaN
+  // while it has reported none. In the Cast protocol it is the speaker's own up/down increment; a
+  // speaker that ALSO quantises SET_VOLUME to it would report our 0.50 on a 1/15 step as 0.5333.
+  // That rounding is assumed device behaviour, not measured on the box's speakers. Taken from every receiver status (the initial read's
+  // included) and from the initial read itself; a status without one leaves it as it was. Values
+  // outside (0, MaxSpeakerStepInterval] are ignored, so a nonsense report cannot widen the echo
+  // tolerance into absorbing every change. Reset per connection (ResetSpeakerStateForNewConnection).
+  // Accessed through Volatile only.
+  private float _speakerStepInterval = float.NaN;
+  private const float MaxSpeakerStepInterval = 0.25f;
+  private readonly TimeProvider _timeProvider;
+  private readonly object _echoLock = new();
+  private readonly List<EchoPush<float>> _recentVolumePushes = new();
+  private readonly List<EchoPush<bool>> _recentMutePushes = new();
+
+  /// <summary>One command recorded in the echo memory. Mutated only under <c>_echoLock</c>.</summary>
+  private sealed class EchoPush<T>(T value, long stamp)
+  {
+    public T Value { get; } = value;
+    public long Stamp { get; set; } = stamp;
+    public bool InFlight { get; set; } = true;
+  }
+
+  // AUD-81: console-driven SET_VOLUME coalescing. At most one drain runs per output; a
+  // request made while it runs overwrites the single pending target (latest wins) and is sent
+  // when the in-flight push completes. These fields, and _externalChangeSerial, are written only
+  // inside _consoleVolumeLock, which is never held across an await; _latestConsoleTarget is also
+  // read unlocked (through Volatile) by KnownSpeakerLevel.
+  private readonly object _consoleVolumeLock = new();
+  private (float Level, int Generation, float ConsoleLevel)? _pendingConsoleVolume;
+  private Task<CastConsoleVolumeResult>? _consoleVolumeDrain;
+  private float _latestConsoleTarget = float.NaN;
+
+  // AUD-81 (pre-merge review L1/L2): bumped, together with the _connectionVolume write, by every
+  // external speaker change OnReceiverStatusChanged reports. The volume drain records a level it
+  // sent as the connection's level only if no external change landed while that send was on the
+  // network (and its connection is still the published one) — otherwise the speaker's own report
+  // is the newer truth and must not be overwritten.
+  private int _externalChangeSerial;
+
+  // AUD-81 (pre-merge review L4): console-driven SET_MUTE coalescing, the same one-slot,
+  // latest-wins drain as the volume's. Guarded by _consoleMuteLock, never held across an await.
+  private readonly object _consoleMuteLock = new();
+  private (bool Muted, int Generation)? _pendingConsoleMute;
+  private Task<bool?>? _consoleMuteDrain;
+
+  // AUD-81 (pre-merge review M1): set on the raising thread for exactly the duration of a
+  // CastVolumeChanged raised for a change made ON THE SPEAKER. AudioStateUpdateService copies
+  // that change into master volume and mute synchronously inside the event, so the follower's
+  // mixer handlers run on this thread while it is set and can tell a speaker re-sync from a
+  // console move without comparing floats. [ThreadStatic], so an owner check keeps one output's
+  // mark from being read by another.
+  [ThreadStatic] private static GoogleCastOutput? t_speakerChangeOwner;
+  [ThreadStatic] private static float t_speakerChangeLevel;
+
+  // AUD-81: the generation of the connection this application muted because the console was
+  // muted (or re-armed for, F11 — see _consoleMutedDeviceId), or -1. A deliberate teardown of that connection stops the receiver application and
+  // then unmutes the speaker, so it is not left muted for its next user (and is left muted when
+  // the stop cannot be confirmed — see ReleaseConsoleMuteAsync). Accessed through
+  // Interlocked/Volatile only.
+  private int _consoleMutedGeneration = -1;
+
+  // AUD-81 (hostile review F11): the ChromecastDeviceInfo.Id of the speaker this application last
+  // muted for the console and has not seen unmuted since, or null. Unlike the generation mark
+  // above it survives a LOST connection — a lost speaker stays muted — so that a later connection
+  // to the same device whose initial read shows it muted re-arms the mark (RecallConsoleMuteAsync)
+  // instead of leaving a speaker nobody will unmute under an unmuted console. Cleared by an
+  // acknowledged console unmute or teardown unmute of that device, by an unmute observed on it,
+  // and by a connection to it whose initial read shows it unmuted. One slot: muting a different
+  // device for the console replaces it — and so does the late acknowledgement of a console mute
+  // whose connection has since been superseded (the drain records the device it sent to). In-process
+  // only, never persisted: after a radio-api restart it is gone, and a speaker left muted by a lost
+  // connection before the restart is treated like one muted on its own side (not unmuted for the
+  // console). Guarded by _consoleMuteLock.
+  //
+  // What it cannot tell (hostile re-review L2/L3): "still muted by us" from "unmuted, then muted
+  // again by the owner on the speaker while we were disconnected" — nothing was observed in
+  // between — so in that case the re-armed mark lets the activation reconcile unmute an owner's
+  // mute. And it is keyed by ChromecastDeviceInfo.Id, which can differ between the cached and the
+  // live record of one speaker (ConnectAsync's "matched by IP (ID mismatch)" path): a reconnect
+  // through the other Id misses the recall, and the speaker stays muted — the safe direction.
+  private string? _consoleMutedDeviceId;
+
+  // AUD-81: set once by CastConsoleVolumeFollower. The console's mute state, read when
+  // streaming starts, and the logger the console lines go to (Radio.Infrastructure.Audio.Outputs
+  // is held at Warning by LOG-2; the follower's namespace is not).
+  private Func<bool>? _isConsoleMuted;
+  private ILogger? _consoleLogger;
+
+  // Bound on a console-driven SET_VOLUME/SET_MUTE; and on the receiver-application stop and the
+  // unmute sent before a teardown. Timed by _timeProvider (hostile review F9), the same clock as
+  // the echo window. A timed-out command is abandoned, not cancelled: its send stays in flight in
+  // SharpCaster, and its echo entry with it.
+  private static readonly TimeSpan ConsoleCommandTimeout = TimeSpan.FromSeconds(5);
+  private static readonly TimeSpan TeardownUnmuteTimeout = TimeSpan.FromSeconds(2);
+  private static readonly TimeSpan TeardownAppStopTimeout = TimeSpan.FromSeconds(3);
 
   // AUD-54 (1). The ReceiverChannel that currently carries OnReceiverStatusChanged, so
   // SubscribeToReceiverStatus can detach it from there before attaching it elsewhere.
@@ -287,12 +485,18 @@ public class GoogleCastOutput : AudioOutputBase
   /// Optional per-device volume memory (AUD-80). Without it every connection adopts the
   /// device's own level and nothing is restored.
   /// </param>
+  /// <param name="timeProvider">
+  /// Clock for the echo memory's window and for the timeouts on console-driven and teardown
+  /// SET_VOLUME / SET_MUTE / application-stop commands (AUD-81). Defaults to
+  /// <see cref="TimeProvider.System"/>.
+  /// </param>
   public GoogleCastOutput(
     ILogger<GoogleCastOutput> logger,
     IOptions<AudioOutputOptions> options,
     CastDeviceCacheRepository? cacheRepository = null,
     IMetricsCollector? metricsCollector = null,
-    ICastDeviceVolumeStore? volumeStore = null)
+    ICastDeviceVolumeStore? volumeStore = null,
+    TimeProvider? timeProvider = null)
     : base("cast-output", "Google Cast Output",
         options?.Value?.GoogleCast?.DefaultVolume ?? 0.7f,
         options?.Value?.GoogleCast?.Enabled ?? false)
@@ -302,20 +506,35 @@ public class GoogleCastOutput : AudioOutputBase
     _cacheRepository = cacheRepository;
     _metricsCollector = metricsCollector;
     _volumeStore = volumeStore;
+    _timeProvider = timeProvider ?? TimeProvider.System;
   }
 
   /// <inheritdoc />
+  /// <remarks>
+  /// Nothing in production assigns this output's <c>Volume</c>; the console reaches the speaker
+  /// through <see cref="SetDeviceVolumeFromConsoleAsync"/> (AUD-81). Routed to the same coalesced,
+  /// echo-recorded path so a future caller cannot bypass the echo memory.
+  /// </remarks>
   protected override void OnVolumeChanged(float volume)
   {
-    // Apply volume to connected device if available
-    SetCastVolumeAsync(volume).SafeFireAndForget(_logger, "SetCastVolume");
+    var target = GetConsoleVolumeTarget();
+    if (target != null)
+    {
+      SetDeviceVolumeFromConsoleAsync(volume, target.Value.Generation)
+        .SafeFireAndForget(_logger, "SetCastVolume");
+    }
   }
 
   /// <inheritdoc />
+  /// <remarks>Routed like <see cref="OnVolumeChanged"/>, to <see cref="SetDeviceMuteFromConsoleAsync"/>.</remarks>
   protected override void OnMuteChanged(bool muted)
   {
-    // Apply mute state to connected device if available
-    SetCastMuteAsync(muted).SafeFireAndForget(_logger, "SetCastMute");
+    var target = GetConsoleVolumeTarget();
+    if (target != null)
+    {
+      SetDeviceMuteFromConsoleAsync(muted, target.Value.Generation)
+        .SafeFireAndForget(_logger, "SetCastMute");
+    }
   }
 
   /// <inheritdoc />
@@ -625,6 +844,17 @@ public class GoogleCastOutput : AudioOutputBase
       // Claim this attempt. Anything that supersedes it (another connect, a
       // disconnect, disposal) bumps the generation, and the commit below then
       // abandons rather than publishing over the winner.
+      //
+      // AUD-81 (connect race; hostile review F1). The initial-sync mark is set HERE, at the
+      // claim, before any network work — not after the publish. On a live-discovered device the
+      // claim reuses _client, whose ReceiverChannel still carries OnReceiverStatusChanged from
+      // the previous connection; a RECEIVER_STATUS arriving during ConnectChromecast, or between
+      // the publish (which resets the echo baseline to its sentinels) and the subscribe, would
+      // otherwise be compared with the previous speaker's baseline or with the sentinels and
+      // reported as an EXTERNAL change — written to master volume, or unmuting a muted console.
+      // While the mark is set such a status only re-baselines. It is cleared in the finally
+      // below for THIS generation only (compare-and-swap), on every exit from the block: a
+      // superseded or failed connect clears its own mark, and never lifts a newer connect's.
       int myGeneration;
       ChromecastClient? client;
       await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -632,111 +862,123 @@ public class GoogleCastOutput : AudioOutputBase
       {
         myGeneration = ++_connectionGeneration;
         client = _client;
+        Volatile.Write(ref _initialSyncPendingGeneration, myGeneration);
       }
       finally
       {
         _lifecycleLock.Release();
       }
 
-      _logger.LogInformation(
-        "Connecting to Chromecast: {Name} at {IP}:{Port}",
-        device.FriendlyName, device.IpAddress, device.Port);
-
-      // Resolve the receiver into a LOCAL, so a concurrent teardown clearing
-      // _connectedReceiver cannot null it out from under the connect below.
-      // Try live discovery first by exact ID, then by IP (IDs can differ due to
-      // URI normalization).
-      ChromecastReceiver? receiver;
-      if (_discoveredReceivers.TryGetValue(device.Id, out receiver))
+      try
       {
-        _logger.LogDebug("Using live ChromecastReceiver from discovery (matched by ID)");
-      }
-      else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out receiver))
-      {
-        _logger.LogInformation("Live ChromecastReceiver matched by IP {IP} (ID mismatch: cached={CachedId}, live={LiveId})",
-          device.IpAddress, device.Id, receiver.DeviceUri);
-      }
-      else
-      {
-        // Device is from persistent cache, not live discovery.
-        // Verify reachability with a TCP connect check before attempting full connection.
-        var connectPort = await FindReachablePortAsync(device, cancellationToken).ConfigureAwait(false);
+        _logger.LogInformation(
+          "Connecting to Chromecast: {Name} at {IP}:{Port}",
+          device.FriendlyName, device.IpAddress, device.Port);
 
-        var deviceUri = new Uri($"https://{device.IpAddress}:{connectPort}");
-        _logger.LogInformation("TCP check passed, creating ChromecastReceiver from cache: {Uri}", deviceUri);
-
-        // Create a fresh ChromecastClient for cached connections to avoid stale
-        // socket state. Built locally and only published at commit time.
-        var stale = client;
-        client = new ChromecastClient();
-        if (stale != null)
+        // Resolve the receiver into a LOCAL, so a concurrent teardown clearing
+        // _connectedReceiver cannot null it out from under the connect below.
+        // Try live discovery first by exact ID, then by IP (IDs can differ due to
+        // URI normalization).
+        ChromecastReceiver? receiver;
+        if (_discoveredReceivers.TryGetValue(device.Id, out receiver))
         {
-          try { await stale.DisconnectAsync().ConfigureAwait(false); }
-          catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client for cached connection"); }
+          _logger.LogDebug("Using live ChromecastReceiver from discovery (matched by ID)");
+        }
+        else if (_discoveredReceiversByIp.TryGetValue(device.IpAddress, out receiver))
+        {
+          _logger.LogInformation("Live ChromecastReceiver matched by IP {IP} (ID mismatch: cached={CachedId}, live={LiveId})",
+            device.IpAddress, device.Id, receiver.DeviceUri);
+        }
+        else
+        {
+          // Device is from persistent cache, not live discovery.
+          // Verify reachability with a TCP connect check before attempting full connection.
+          var connectPort = await FindReachablePortAsync(device, cancellationToken).ConfigureAwait(false);
+
+          var deviceUri = new Uri($"https://{device.IpAddress}:{connectPort}");
+          _logger.LogInformation("TCP check passed, creating ChromecastReceiver from cache: {Uri}", deviceUri);
+
+          // Create a fresh ChromecastClient for cached connections to avoid stale
+          // socket state. Built locally and only published at commit time.
+          var stale = client;
+          client = new ChromecastClient();
+          if (stale != null)
+          {
+            try { await stale.DisconnectAsync().ConfigureAwait(false); }
+            catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client for cached connection"); }
+          }
+
+          receiver = new ChromecastReceiver
+          {
+            DeviceUri = deviceUri,
+            Port = connectPort,
+            Name = device.FriendlyName,
+            Model = device.Model
+          };
         }
 
-        receiver = new ChromecastReceiver
+        if (client == null)
         {
-          DeviceUri = deviceUri,
-          Port = connectPort,
-          Name = device.FriendlyName,
-          Model = device.Model
-        };
-      }
+          throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
+        }
 
-      if (client == null)
+        // AUD-84. Before every transport connect, never once per client: SharpCaster's own
+        // DisconnectAsync swaps the guarded heartbeat channel back for an unguarded one,
+        // and a client is reused across connects. The fault sink is bound to THIS attempt's
+        // generation, so a report from a connection that has since been replaced is stale.
+        var generationForFaults = myGeneration;
+        SharpCasterCallbackGuard.TryHarden(
+          client,
+          fault => ReportConnectionLost(generationForFaults, "a SharpCaster background send failed", fault),
+          _logger);
+
+        if (ConnectRaceHookForTests != null)
+        {
+          await ConnectRaceHookForTests().ConfigureAwait(false);
+        }
+
+        _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", receiver.DeviceUri);
+        if (ConnectTransportOverrideForTests != null)
+        {
+          await ConnectTransportOverrideForTests(receiver).ConfigureAwait(false);
+        }
+        else
+        {
+          await client.ConnectChromecast(receiver).ConfigureAwait(false);
+        }
+
+        // Publish only if nothing superseded us while we were on the network.
+        if (!await TryPublishConnectionAsync(myGeneration, client, receiver, device, cancellationToken).ConfigureAwait(false))
+        {
+          _logger.LogWarning(
+            "Cast connect to {Name} was superseded while connecting — discarding this connection",
+            device.FriendlyName);
+          try { await client.DisconnectAsync().ConfigureAwait(false); }
+          catch (Exception ex) { _logger.LogDebug(ex, "Error discarding superseded Cast connection"); }
+
+          // Hand the state machine back to the winner. Returning while still
+          // Connecting would leave the output permanently unusable — and losing
+          // this race is the NORMAL outcome of a teardown during startup
+          // auto-connect, not an edge case.
+          State = AudioOutputState.Ready;
+          return;
+        }
+
+        // Still under the initial-sync mark set at the claim: the device answers the status
+        // read below with a status that SharpCaster also raises as ReceiverStatusChanged, on
+        // its own thread, possibly before the read's continuation has primed the echo
+        // baseline. Such a status is part of the initial sync, never an external change.
+        // Subscribe to receiver status changes for bidirectional volume sync
+        SubscribeToReceiverStatus(client);
+
+        // Read initial device volume. The generation goes with it: the read is a
+        // network round-trip, and this connection can be superseded inside it.
+        await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
+      }
+      finally
       {
-        throw new InvalidOperationException("Client not initialized. Call InitializeAsync first.");
+        Interlocked.CompareExchange(ref _initialSyncPendingGeneration, -1, myGeneration);
       }
-
-      // AUD-84. Before every transport connect, never once per client: SharpCaster's own
-      // DisconnectAsync swaps the guarded heartbeat channel back for an unguarded one,
-      // and a client is reused across connects. The fault sink is bound to THIS attempt's
-      // generation, so a report from a connection that has since been replaced is stale.
-      var generationForFaults = myGeneration;
-      SharpCasterCallbackGuard.TryHarden(
-        client,
-        fault => ReportConnectionLost(generationForFaults, "a SharpCaster background send failed", fault),
-        _logger);
-
-      if (ConnectRaceHookForTests != null)
-      {
-        await ConnectRaceHookForTests().ConfigureAwait(false);
-      }
-
-      _logger.LogDebug("Calling ConnectChromecast with URI: {Uri}", receiver.DeviceUri);
-      if (ConnectTransportOverrideForTests != null)
-      {
-        await ConnectTransportOverrideForTests(receiver).ConfigureAwait(false);
-      }
-      else
-      {
-        await client.ConnectChromecast(receiver).ConfigureAwait(false);
-      }
-
-      // Publish only if nothing superseded us while we were on the network.
-      if (!await TryPublishConnectionAsync(myGeneration, client, receiver, device, cancellationToken).ConfigureAwait(false))
-      {
-        _logger.LogWarning(
-          "Cast connect to {Name} was superseded while connecting — discarding this connection",
-          device.FriendlyName);
-        try { await client.DisconnectAsync().ConfigureAwait(false); }
-        catch (Exception ex) { _logger.LogDebug(ex, "Error discarding superseded Cast connection"); }
-
-        // Hand the state machine back to the winner. Returning while still
-        // Connecting would leave the output permanently unusable — and losing
-        // this race is the NORMAL outcome of a teardown during startup
-        // auto-connect, not an edge case.
-        State = AudioOutputState.Ready;
-        return;
-      }
-
-      // Subscribe to receiver status changes for bidirectional volume sync
-      SubscribeToReceiverStatus(client);
-
-      // Read initial device volume. The generation goes with it: the read is a
-      // network round-trip, and this connection can be superseded inside it.
-      await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
 
       Connected?.Invoke(this, new ChromecastConnectedEventArgs { Device = device });
 
@@ -786,6 +1028,7 @@ public class GoogleCastOutput : AudioOutputBase
       _connectedReceiver = receiver;
       ConnectedDevice = device;
       _publishedGeneration = generation;
+      ResetSpeakerStateForNewConnection();
       WatchForConnectionLoss_Locked(client, generation);
       Name = $"Cast: {device.FriendlyName}";
       return true;
@@ -793,6 +1036,45 @@ public class GoogleCastOutput : AudioOutputBase
     finally
     {
       _lifecycleLock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Forgets everything this output believed about the PREVIOUS connection's speaker, as a new
+  /// connection is published (AUD-81, pre-merge review M2). Called inside the publish section.
+  /// </summary>
+  /// <remarks>
+  /// The echo baseline used to survive across connections. After a console-muted speaker was
+  /// LOST, <c>_lastSetMute</c> stayed true, so on a reconnect whose initial read failed the
+  /// start-time mute concluded the speaker was already muted and streamed to it unmuted under a
+  /// muted console. Now an unread speaker is "unknown", which the start-time mute treats as
+  /// unmuted (it sends the mute). Takes only the short echo/console locks, never an await, so it
+  /// keeps the publish section await-free. Leaves <c>_consoleMutedDeviceId</c> alone: that is
+  /// about the device, not the connection (see <see cref="RecallConsoleMuteAsync"/>).
+  /// </remarks>
+  private void ResetSpeakerStateForNewConnection()
+  {
+    _lastSetVolume = -1f;
+    _lastSetMute = false;
+    Volatile.Write(ref _speakerStepInterval, float.NaN);
+    Interlocked.Exchange(ref _consoleMutedGeneration, -1);
+
+    lock (_echoLock)
+    {
+      _recentVolumePushes.Clear();
+      _recentMutePushes.Clear();
+    }
+
+    lock (_consoleVolumeLock)
+    {
+      _pendingConsoleVolume = null;
+      Volatile.Write(ref _latestConsoleTarget, float.NaN);
+      Volatile.Write(ref _connectionVolume, float.NaN);
+    }
+
+    lock (_consoleMuteLock)
+    {
+      _pendingConsoleMute = null;
     }
   }
 
@@ -813,9 +1095,11 @@ public class GoogleCastOutput : AudioOutputBase
     ChromecastClient? client;
     ChromecastDeviceInfo? disconnectedDevice;
     bool hadConnection;
+    int closedGeneration;
     await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
     try
     {
+      closedGeneration = _publishedGeneration;
       _connectionGeneration++;
       _publishedGeneration = -1;
       UnwatchConnectionLoss_Locked();
@@ -843,6 +1127,12 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       _logger.LogInformation("Disconnecting from Chromecast: {Name}", disconnectedDevice?.FriendlyName);
+
+      // AUD-81: before closing, so the speaker is not left muted by a muted console. Usually a
+      // no-op — StopAsync has released it — but DisposeAsync reaches here without a StopAsync,
+      // and a release StopAsync could not complete (receiver application not confirmed stopped)
+      // is retried here. Either way the application is stopped before any unmute.
+      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice).ConfigureAwait(false);
 
       UnsubscribeFromReceiverStatus(client);
 
@@ -910,9 +1200,7 @@ public class GoogleCastOutput : AudioOutputBase
       IsEnabledInternal = true;
       State = AudioOutputState.Streaming;
 
-      // A loss reported while this method was still starting was deferred, not dropped:
-      // replay it now that there is a streaming output to rescue.
-      ReplayDeferredConnectionLoss();
+      await OnReachedStreamingAsync().ConfigureAwait(false);
 
       _logger.LogInformation("Google Cast output started streaming to {Name} (mode: {Mode}, setupMs: {SetupMs})",
         ConnectedDevice?.FriendlyName, _options.StreamingMode, startTimer.ElapsedMilliseconds);
@@ -922,6 +1210,34 @@ public class GoogleCastOutput : AudioOutputBase
       _logger.LogError(ex, "Failed to start Google Cast output");
       State = AudioOutputState.Error;
       throw;
+    }
+  }
+
+  /// <summary>
+  /// What <see cref="StartAsync"/> does the moment the output is <c>Streaming</c>. Never throws.
+  /// </summary>
+  /// <remarks>
+  /// <para>Replays a connection loss reported while the start was still running: it was
+  /// deferred, not dropped, and there is now a streaming output to rescue.</para>
+  /// <para>AUD-81 (pre-merge review M3): then re-checks the console's mute. The start-time mute
+  /// ran before <c>Streaming</c>, and until this point the follower ignored console changes
+  /// (nothing is driven before <c>Streaming</c>), so a console mute made in between would
+  /// otherwise be lost and the speaker would play out loud under a muted console. From here on
+  /// the follower sees every change itself. A no-op when the speaker is already muted.</para>
+  /// <para><c>internal</c> so a test can drive it: the <see cref="StartAsync"/> that calls it
+  /// needs a launched receiver application, which no offline test can produce.</para>
+  /// </remarks>
+  internal async Task OnReachedStreamingAsync()
+  {
+    ReplayDeferredConnectionLoss();
+
+    try
+    {
+      await MuteForConsoleAtStartAsync().ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: the console mute re-check after reaching Streaming did not complete");
     }
   }
 
@@ -978,6 +1294,10 @@ public class GoogleCastOutput : AudioOutputBase
       onSendsFailing: fault => ReportConnectionLost(
         streamingGeneration, "DirectChannel audio sends kept failing", fault));
     _directStreaming.SetTransportId(transportId);
+
+    // AUD-81: mute for a muted console BEFORE the first chunk is sent. Repeated (as a no-op,
+    // the speaker then being muted) by SyncVolumeAfterStartAsync below.
+    await MuteForConsoleAtStartAsync().ConfigureAwait(false);
     _directStreaming.Start();
 
     // Sync volume to Cast device
@@ -1005,6 +1325,8 @@ public class GoogleCastOutput : AudioOutputBase
     // Load media if we have a stream URL
     if (!string.IsNullOrEmpty(_streamUrl))
     {
+      // AUD-81: mute for a muted console before the media starts playing.
+      await MuteForConsoleAtStartAsync().ConfigureAwait(false);
       await LoadMediaOnCastAsync(mediaChannel, cancellationToken);
       await SyncVolumeAfterStartAsync();
     }
@@ -1028,6 +1350,9 @@ public class GoogleCastOutput : AudioOutputBase
   /// </remarks>
   internal async Task SyncVolumeAfterStartAsync()
   {
+    // AUD-81: a muted console must not play out loud on the speaker, so the mute goes first.
+    await MuteForConsoleAtStartAsync().ConfigureAwait(false);
+
     var target = Volatile.Read(ref _connectionVolume);
     if (float.IsNaN(target))
     {
@@ -1228,10 +1553,14 @@ public class GoogleCastOutput : AudioOutputBase
       // lock so a concurrent connect swapping _client cannot make us send the
       // media stop down a half-built connection.
       ChromecastClient? stopClient;
+      int stopGeneration;
+      ChromecastDeviceInfo? stopDevice;
       await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
       {
         stopClient = _client;
+        stopGeneration = _publishedGeneration;
+        stopDevice = ConnectedDevice;
       }
       finally
       {
@@ -1299,6 +1628,15 @@ public class GoogleCastOutput : AudioOutputBase
           }
         }
       }
+
+      // AUD-81 (pre-merge review H1). After the media stop, never before it: in HttpMp3 the live
+      // MP3 keeps playing until then. And the media stop alone is not enough — in DirectChannel
+      // stopping the send loop does not stop the receiver, which still holds up to
+      // DirectChannelMaxBufferAhead of our audio, and the gate deactivates the HTTP output only
+      // after this method returns. So a speaker the console muted is unmuted only after its
+      // receiver application has been stopped, and is left muted if that cannot be confirmed.
+      // ReleaseConsoleMuteAsync states exactly what that guarantees.
+      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDevice).ConfigureAwait(false);
 
       IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
@@ -1894,7 +2232,7 @@ public class GoogleCastOutput : AudioOutputBase
       (float Volume, bool Muted)? reading = null;
       try
       {
-        reading = await ReadInitialCastVolumeAsync(client).ConfigureAwait(false);
+        reading = await ReadCastVolumeStatusAsync(client).ConfigureAwait(false);
       }
       catch (Exception ex)
       {
@@ -1906,10 +2244,12 @@ public class GoogleCastOutput : AudioOutputBase
         // Primed BEFORE the currency check, and therefore primed even for a reading
         // that is about to be discarded. That is deliberate. These two fields are the
         // echo filter's baseline, not connection state: _lastSetVolume starts at the
-        // -1f sentinel, and OnReceiverStatusChanged reports any status event arriving
-        // while it is still -1f as an EXTERNAL change. Skipping the priming here would
-        // convert a suppressed initial sync into a spurious user-authored one — the
-        // same write to master volume, through the other door.
+        // -1f sentinel, and OnReceiverStatusChanged reports a status event arriving
+        // AFTER this sync completes while it is still -1f as an EXTERNAL change. (One
+        // arriving DURING the sync only re-baselines — see _initialSyncPendingGeneration.)
+        // Skipping the priming here would convert a suppressed initial sync into a
+        // spurious user-authored one on the next status — the same write to master
+        // volume, through the other door.
         _lastSetVolume = reading.Value.Volume;
         _lastSetMute = reading.Value.Muted;
 
@@ -1946,6 +2286,14 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
+      if (reading != null)
+      {
+        // AUD-81 (F11): before StartAsync's start-time mute and the follower's activation
+        // reconcile, both of which read IsSpeakerMutedByConsole. Changes no device state and
+        // raises nothing, so the initial sync still never reaches the console's mute.
+        await RecallConsoleMuteAsync(generation, device, reading.Value.Muted).ConfigureAwait(false);
+      }
+
       // AUD-80. Which level this connection holds, in order of preference:
       //   1. the level remembered for THIS device — pushed to it if it differs;
       //   2. for a device never seen, the level it reported — adopted and remembered;
@@ -1959,7 +2307,10 @@ public class GoogleCastOutput : AudioOutputBase
       if (remembered is float target)
       {
         Volatile.Write(ref _connectionVolume, target);
-        if (reading == null || Math.Abs(reading.Value.Volume - target) > 0.01f)
+        // EchoLevelTolerance, not a bare 0.01: a speaker that quantises to its step reports a
+        // remembered 0.50 as e.g. 0.5333 on every reconnect, which is the same level, not a
+        // reason to push it again (round-3 review LOW-1). The read noted the step first.
+        if (reading == null || Math.Abs(reading.Value.Volume - target) > EchoLevelTolerance)
         {
           try
           {
@@ -2048,6 +2399,10 @@ public class GoogleCastOutput : AudioOutputBase
     // _lastSetVolume), not an external one. Until AUD-80 the after-start push skipped
     // this, so every connect's confirmation of DefaultVolume (70 %) arrived as an
     // external change and was written — and persisted — as master volume.
+    // AUD-81: also recorded in the recent-push memory, which recognises the confirmation
+    // even when a later push has already moved the baseline on — for as long as the send is in
+    // flight and EchoWindow after it completes (pre-merge review L3).
+    var echo = RecordVolumePush(volume);
     var previous = _lastSetVolume;
     _lastSetVolume = volume;
     try
@@ -2073,14 +2428,19 @@ public class GoogleCastOutput : AudioOutputBase
       _lastSetVolume = previous;
       throw;
     }
+    finally
+    {
+      CompleteEchoPush(echo);
+    }
   }
 
   /// <summary>
-  /// Performs the Cast status read behind <see cref="SyncInitialVolumeAsync"/>, or
+  /// Performs the Cast status read behind <see cref="SyncInitialVolumeAsync"/> and
+  /// <see cref="ReadSpeakerVolumeAsync"/>, or
   /// the test substitute for it. Returns null when the client exposes no receiver
   /// channel or the status carries no volume.
   /// </summary>
-  private async Task<(float Volume, bool Muted)?> ReadInitialCastVolumeAsync(ChromecastClient client)
+  private async Task<(float Volume, bool Muted)?> ReadCastVolumeStatusAsync(ChromecastClient client)
   {
     if (CastStatusReadOverrideForTests != null)
     {
@@ -2097,6 +2457,13 @@ public class GoogleCastOutput : AudioOutputBase
     if (status?.Volume?.Level == null)
     {
       return null;
+    }
+
+    // Only for the client that is still the published one: a read that outlived its connection
+    // must not hand the next speaker this one's step.
+    if (ReferenceEquals(Volatile.Read(ref _client), client))
+    {
+      NoteSpeakerStepInterval(status.Volume.StepInterval);
     }
 
     return ((float)status.Volume.Level.Value, status.Volume.Muted ?? false);
@@ -2139,18 +2506,55 @@ public class GoogleCastOutput : AudioOutputBase
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
 
-    // Filter out echo events from our own SetVolume/SetMute calls
-    if (_suppressNextVolumeEvent)
+    // Hostile re-review M2: before any branch, so the initial sync's own status supplies it too.
+    NoteSpeakerStepInterval(status.Volume.StepInterval);
+
+    // AUD-81 (connect race). A status that arrives while a connection's initial sync is in
+    // progress is the device answering that sync — typically SharpCaster raising the
+    // GET_STATUS response as an event, concurrently with the read's own continuation. It
+    // re-baselines the echo filter and nothing else: no CastVolumeChanged, nothing
+    // remembered, no queued console target dropped. Reporting it was how a connect unmuted a
+    // muted console (it compared against the -1f sentinel, so it looked external).
+    // What this gives up: a genuine change made on the speaker inside that window is absorbed
+    // into the baseline rather than reported. The window runs from the connect's claim (hostile
+    // review F1), so it covers the transport connect too — on a reused client that includes a
+    // change made on the previously connected speaker while the next connect is in progress. When the read itself fails, the device state is
+    // still unknown to subscribers (no initial-sync event), as before — but the baseline now
+    // holds what the device said, so its next identical status is not mistaken for a change.
+    // Pre-merge review L5: the same for a status arriving while a diagnostic live read
+    // (ReadSpeakerVolumeAsync) is in flight — SharpCaster raises its response the same way.
+    if (Volatile.Read(ref _initialSyncPendingGeneration) != -1 || Volatile.Read(ref _diagnosticReadsPending) > 0)
     {
-      _suppressNextVolumeEvent = false;
       _lastSetVolume = deviceVolume;
       _lastSetMute = deviceMuted;
+      _logger.LogDebug(
+        "Cast status during an initial sync or a diagnostic read: {Volume:P0}, Muted: {Muted} — baseline only, not an external change",
+        deviceVolume, deviceMuted);
       return;
     }
 
-    // Check if volume actually changed from what we last set
-    var volumeChanged = Math.Abs(deviceVolume - _lastSetVolume) > 0.01f;
-    var muteChanged = deviceMuted != _lastSetMute;
+    // AUD-81. A level or mute that this application sent within EchoWindow is the device
+    // confirming our own command — even when the confirmation is late, or a later push has
+    // already moved the baseline on — so it is not an external change. For the level that means
+    // near one of our recent pushes, or within the range the freshest of them span, by a tolerance
+    // of 0.01 or just over half the speaker's volume step (F3, M2: a device rounds our level to
+    // its own step; see IsRecentVolumePush for what that does and does not cover).
+    // The baseline follows the device. Anything else is compared with the baseline as before.
+    var volumeEcho = IsRecentVolumePush(deviceVolume);
+    var muteEcho = deviceMuted != _lastSetMute && IsRecentMutePush(deviceMuted);
+
+    var volumeChanged = !volumeEcho && Math.Abs(deviceVolume - _lastSetVolume) > 0.01f;
+    var muteChanged = !muteEcho && deviceMuted != _lastSetMute;
+
+    if (volumeEcho)
+    {
+      _lastSetVolume = deviceVolume;
+    }
+
+    if (muteEcho)
+    {
+      _lastSetMute = deviceMuted;
+    }
 
     if (!volumeChanged && !muteChanged)
     {
@@ -2160,26 +2564,81 @@ public class GoogleCastOutput : AudioOutputBase
     _lastSetVolume = deviceVolume;
     _lastSetMute = deviceMuted;
 
+    // AUD-81 (pre-merge review M1). On EVERY reported change — a mute-only one too — the
+    // speaker's own report becomes the connection's level, and console targets still queued are
+    // dropped. It used to happen only when the level changed, so after a mute-only event the
+    // known level stayed the pending console target, which a quantising device's report (0.46
+    // for 0.4567) need not match. A push already in flight is not recalled; whichever of the two
+    // the device applies last is where it stays, and the drain does not overwrite this level
+    // with its own when it completes (L1/L2, _externalChangeSerial). Done before the event
+    // below, so a subscriber reading KnownSpeakerLevel sees the speaker's level.
+    lock (_consoleVolumeLock)
+    {
+      _pendingConsoleVolume = null;
+      Volatile.Write(ref _latestConsoleTarget, float.NaN);
+      Volatile.Write(ref _connectionVolume, deviceVolume);
+      _externalChangeSerial++;
+    }
+
     if (volumeChanged)
     {
       // AUD-80: a level set on the speaker (buttons, Google Home) is the level to come
       // back to. Keyed by ConnectedDevice, which a handler left attached to a torn-down
       // client can misattribute (C-126 in the AUD-5 plan) — bounded, as that note says.
-      Volatile.Write(ref _connectionVolume, deviceVolume);
       RememberVolume(deviceVolume);
     }
 
-    _logger.LogInformation(
-      "Cast device volume changed externally: {Volume:P0}, Muted: {Muted}",
-      deviceVolume, deviceMuted);
-
-    CastVolumeChanged?.Invoke(this, new CastVolumeChangedEventArgs
+    if (muteChanged && !deviceMuted)
     {
-      Volume = deviceVolume,
-      IsMuted = deviceMuted,
-      IsInitialSync = false
-    });
+      // Unmuted on the speaker itself: nothing of ours is left to release at teardown, and nothing
+      // to re-arm on a later connection to it. Keyed by ConnectedDevice, which a handler left
+      // attached to a torn-down client can misattribute (C-126, as for RememberVolume above).
+      Interlocked.Exchange(ref _consoleMutedGeneration, -1);
+      ForgetConsoleMute(ConnectedDevice?.Id);
+    }
+
+    _logger.LogInformation(
+      "Cast device volume changed externally: {Volume:P0}, Muted: {Muted} (level changed: {VolumeChanged})",
+      deviceVolume, deviceMuted, volumeChanged);
+
+    // AUD-81 (pre-merge review M1): the re-sync this event causes is made explicit rather than
+    // inferred from float equality. While it is raised, SpeakerChangeBeingApplied reports the
+    // speaker's level on this thread, so the follower recognises the master/mute writes
+    // AudioStateUpdateService makes synchronously inside it as the speaker's own and pushes
+    // nothing back. Restored (not cleared) afterwards, in case of nesting.
+    var previousOwner = t_speakerChangeOwner;
+    var previousLevel = t_speakerChangeLevel;
+    t_speakerChangeOwner = this;
+    t_speakerChangeLevel = deviceVolume;
+    try
+    {
+      CastVolumeChanged?.Invoke(this, new CastVolumeChangedEventArgs
+      {
+        Volume = deviceVolume,
+        IsMuted = deviceMuted,
+        IsInitialSync = false,
+        VolumeChanged = volumeChanged
+      });
+    }
+    finally
+    {
+      t_speakerChangeOwner = previousOwner;
+      t_speakerChangeLevel = previousLevel;
+    }
   }
+
+  /// <summary>
+  /// While this output is raising <see cref="CastVolumeChanged"/> for a change made on the
+  /// speaker, and only on the thread raising it: the speaker's reported level. Otherwise null.
+  /// </summary>
+  /// <remarks>
+  /// AUD-81 (pre-merge review M1). <c>AudioStateUpdateService</c> copies an external change into
+  /// master volume and mute synchronously inside the event, so the console follower's mixer
+  /// handlers run inside this window and can tell that re-sync from a console move by asking,
+  /// instead of by comparing floats.
+  /// </remarks>
+  public float? SpeakerChangeBeingApplied =>
+    ReferenceEquals(t_speakerChangeOwner, this) ? t_speakerChangeLevel : null;
 
   /// <summary>Records <paramref name="volume"/> for the connected device, if any (AUD-80).</summary>
   private void RememberVolume(float volume)
@@ -2367,6 +2826,16 @@ public class GoogleCastOutput : AudioOutputBase
       "Cast: lost the connection to {Name} ({Reason}) — Cast output stopped",
       device?.FriendlyName ?? "<unknown device>", reason);
 
+    // AUD-81: a LOST connection cannot be unmuted — there is no socket left to send SET_MUTE
+    // on. If the console had muted this speaker it stays muted until it is unmuted on the
+    // speaker or in Google Home, or by the console while casting to it again (a connect never
+    // unmutes a speaker by itself). Clearing the mark keeps a later teardown from aiming the
+    // unmute at whatever connection comes next. _consoleMutedDeviceId is deliberately KEPT
+    // (F11): a later connection to the same device that finds it still muted re-arms the mark
+    // (RecallConsoleMuteAsync), so the activation reconcile unmutes it if the console has been
+    // unmuted meanwhile.
+    Interlocked.Exchange(ref _consoleMutedGeneration, -1);
+
     IsEnabledInternal = false;
     Name = "Google Cast Output";
     // Error, not Ready: the output did not stop cleanly, and ConnectAsync recovers from Error
@@ -2413,57 +2882,911 @@ public class GoogleCastOutput : AudioOutputBase
     }
   }
 
-  private async Task SetCastVolumeAsync(float volume)
+  // ---------------------------------------------------------------------------------------
+  // AUD-81 — the console drives the connected speaker's volume and mute.
+  // ---------------------------------------------------------------------------------------
+
+  /// <summary>A published connection, snapshotted as one unit under <c>_lifecycleLock</c>.</summary>
+  private sealed record PublishedConnection(int Generation, ChromecastClient Client, ChromecastDeviceInfo Device);
+
+  /// <summary>
+  /// The published connection, or null when none is (nothing published, or the published
+  /// generation has been superseded). Caller holds <c>_lifecycleLock</c>. Mutates nothing.
+  /// </summary>
+  private PublishedConnection? SnapshotPublishedConnection_Locked()
   {
-    if (_client == null || _connectedReceiver == null || State != AudioOutputState.Streaming)
+    if (_publishedGeneration < 0 || _publishedGeneration != _connectionGeneration ||
+        _client == null || ConnectedDevice == null)
+    {
+      return null;
+    }
+
+    return new PublishedConnection(_publishedGeneration, _client, ConnectedDevice);
+  }
+
+  /// <summary>
+  /// The SnapshotPublished critical section, awaited. Null after disposal (the lock is
+  /// disposed) as well as when nothing is published.
+  /// </summary>
+  private async Task<PublishedConnection?> SnapshotPublishedConnectionAsync()
+  {
+    try
+    {
+      await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    }
+    catch (ObjectDisposedException)
+    {
+      return null;
+    }
+
+    try
+    {
+      return SnapshotPublishedConnection_Locked();
+    }
+    finally
+    {
+      try { _lifecycleLock.Release(); }
+      catch (ObjectDisposedException) { /* output disposed */ }
+    }
+  }
+
+  /// <summary>
+  /// The SnapshotPublished critical section, entered with a synchronous <c>Wait</c> for callers
+  /// that cannot await — the master mixer's event handlers. Safe because every holder of the
+  /// lock is await-free inside it, so the wait is bounded by a few field writes.
+  /// </summary>
+  private PublishedConnection? SnapshotPublishedConnection()
+  {
+    try
+    {
+      _lifecycleLock.Wait();
+    }
+    catch (ObjectDisposedException)
+    {
+      return null;
+    }
+
+    try
+    {
+      return SnapshotPublishedConnection_Locked();
+    }
+    finally
+    {
+      try { _lifecycleLock.Release(); }
+      catch (ObjectDisposedException) { /* output disposed */ }
+    }
+  }
+
+  /// <summary>
+  /// The connection the console may drive right now — present only while this output is
+  /// <c>Streaming</c> with a published connection — with the speaker's level as this output
+  /// currently understands it: the latest console target still queued or in flight, else the
+  /// level last set, restored or observed on the device (<c>NaN</c> when unknown).
+  /// </summary>
+  public CastConsoleTarget? GetConsoleVolumeTarget()
+  {
+    if (IsDisposed || State != AudioOutputState.Streaming)
+    {
+      return null;
+    }
+
+    var connection = SnapshotPublishedConnection();
+    if (connection == null)
+    {
+      return null;
+    }
+
+    return new CastConsoleTarget(
+      connection.Generation,
+      connection.Device.Id,
+      connection.Device.FriendlyName,
+      KnownSpeakerLevel,
+      _lastSetMute);
+  }
+
+  /// <summary>
+  /// The speaker level this output last set, restored or observed (or the latest console
+  /// target still queued or in flight), 0.0-1.0; <c>NaN</c> when unknown. Not a live read —
+  /// see <see cref="ReadSpeakerVolumeAsync"/>.
+  /// </summary>
+  public float KnownSpeakerLevel
+  {
+    get
+    {
+      var latest = Volatile.Read(ref _latestConsoleTarget);
+      return float.IsNaN(latest) ? Volatile.Read(ref _connectionVolume) : latest;
+    }
+  }
+
+  /// <summary>The speaker mute this output last set or observed. Not a live read.</summary>
+  public bool KnownSpeakerMuted => _lastSetMute;
+
+  /// <summary>
+  /// True while this application has muted the connected speaker because the console was
+  /// muted — on this connection, or on an earlier one to the same device that the initial read
+  /// found still muted (see <see cref="RecallConsoleMuteAsync"/>); a deliberate teardown stops the
+  /// receiver application and then unmutes it.
+  /// </summary>
+  public bool IsSpeakerMutedByConsole => Volatile.Read(ref _consoleMutedGeneration) >= 0;
+
+  /// <summary>
+  /// Wires the console follower in (AUD-81): <paramref name="isConsoleMuted"/> is read when
+  /// streaming starts, and the console lines are logged to <paramref name="consoleLogger"/>.
+  /// </summary>
+  internal void AttachConsoleFollower(Func<bool> isConsoleMuted, ILogger consoleLogger)
+  {
+    _isConsoleMuted = isConsoleMuted ?? throw new ArgumentNullException(nameof(isConsoleMuted));
+    _consoleLogger = consoleLogger ?? throw new ArgumentNullException(nameof(consoleLogger));
+  }
+
+  private ILogger ConsoleLogger => _consoleLogger ?? _logger;
+
+  /// <summary>
+  /// Sends <paramref name="level"/> to the speaker of connection <paramref name="generation"/>,
+  /// coalesced: at most one SET_VOLUME is in flight per output, and requests made while one is
+  /// in flight replace a single pending target (latest wins), sent when it completes. A target
+  /// whose connection is no longer the published one, or arriving while the output is not
+  /// <c>Streaming</c>, is dropped.
+  /// </summary>
+  /// <param name="level">The speaker level, 0.0-1.0.</param>
+  /// <param name="generation">The connection the caller mapped the level for
+  /// (<see cref="CastConsoleTarget.Generation"/>).</param>
+  /// <param name="consoleLevel">The console level it was mapped from, carried through to the
+  /// result for logging only.</param>
+  /// <returns>
+  /// The burst this request joined: every request made while one drain runs gets the same task,
+  /// which completes when the drain has nothing left to send. On completion the final applied
+  /// level has been written as the connection's level and remembered for the device (once per
+  /// burst, not per request) — unless a change reported by the speaker, or a new connection,
+  /// superseded it while it was on the network, in which case neither happens. A failure is
+  /// logged at Warning once per burst and reported in the result, never thrown.
+  /// </returns>
+  public Task<CastConsoleVolumeResult> SetDeviceVolumeFromConsoleAsync(
+    float level, int generation, float consoleLevel = float.NaN)
+  {
+    var clamped = float.IsNaN(level) ? 0f : Math.Clamp(level, 0f, 1f);
+    lock (_consoleVolumeLock)
+    {
+      _pendingConsoleVolume = (clamped, generation, consoleLevel);
+      Volatile.Write(ref _latestConsoleTarget, clamped);
+      return _consoleVolumeDrain ??= Task.Run(DrainConsoleVolumeAsync);
+    }
+  }
+
+  /// <summary>
+  /// <b>Test seam (kind B — observation).</b> The drain currently running, if any, so a test can
+  /// await it. Read by <c>GoogleCastOutputConsoleVolumeTests</c>; nothing in production reads it.
+  /// </summary>
+  internal Task<CastConsoleVolumeResult>? CurrentConsoleVolumeDrainForTests
+  {
+    get
+    {
+      lock (_consoleVolumeLock)
+      {
+        return _consoleVolumeDrain;
+      }
+    }
+  }
+
+  /// <summary>
+  /// Sends pending console targets one at a time until none is left. Runs on the thread pool,
+  /// never under <c>_lifecycleLock</c> (it takes it only for the SnapshotPublished section
+  /// before each send).
+  /// </summary>
+  private async Task<CastConsoleVolumeResult> DrainConsoleVolumeAsync()
+  {
+    float? applied = null;
+    var appliedConsole = float.NaN;
+    ChromecastDeviceInfo? appliedDevice = null;
+    Exception? failure = null;
+    var sends = 0;
+
+    while (true)
+    {
+      (float Level, int Generation, float ConsoleLevel) next;
+      lock (_consoleVolumeLock)
+      {
+        if (_pendingConsoleVolume is not { } pending)
+        {
+          _consoleVolumeDrain = null;
+          Volatile.Write(ref _latestConsoleTarget, float.NaN);
+          break;
+        }
+
+        next = pending;
+        _pendingConsoleVolume = null;
+      }
+
+      // Re-checked per send, not once per burst: the connection can be superseded or torn
+      // down while an earlier push in the same burst was on the network.
+      var connection = State == AudioOutputState.Streaming
+        ? await SnapshotPublishedConnectionAsync().ConfigureAwait(false)
+        : null;
+      if (connection == null || connection.Generation != next.Generation)
+      {
+        _logger.LogDebug(
+          "Cast: console volume {Volume:P0} dropped — connection generation {Generation} is no longer the streaming one",
+          next.Level, next.Generation);
+        continue;
+      }
+
+      int serialAtSend;
+      lock (_consoleVolumeLock)
+      {
+        serialAtSend = _externalChangeSerial;
+      }
+
+      sends++;
+      try
+      {
+        if (await PushVolumeToDeviceAsync(connection.Client, next.Level)
+              .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
+        {
+          // Pre-merge review L1/L2. Recorded as the connection's level (and, at the end of the
+          // burst, remembered) only if nothing has superseded it since the send went out: the
+          // connection is still the published one, and no external change was reported
+          // meanwhile — that report is the newer truth, and overwriting it would also hand the
+          // follower a known level the speaker never reported. Checked and written under the
+          // lock the external path writes under, so neither write can land between the other's
+          // check and write.
+          bool current;
+          lock (_consoleVolumeLock)
+          {
+            current = _externalChangeSerial == serialAtSend &&
+              Volatile.Read(ref _publishedGeneration) == next.Generation;
+            if (current)
+            {
+              Volatile.Write(ref _connectionVolume, next.Level);
+            }
+          }
+
+          if (current)
+          {
+            applied = next.Level;
+            appliedConsole = next.ConsoleLevel;
+            appliedDevice = connection.Device;
+          }
+          else
+          {
+            applied = null;
+            appliedDevice = null;
+            _logger.LogDebug(
+              "Cast: console volume {Volume:P0} was sent, but a speaker change or a new connection superseded it — not recorded",
+              next.Level);
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        failure ??= ex;
+      }
+    }
+
+    if (applied is float level && appliedDevice != null)
+    {
+      // Once per burst: the store persists the whole map on every change, so remembering
+      // every slider tick would be one config-store write per tick.
+      _volumeStore?.Remember(appliedDevice.Id, level);
+    }
+
+    if (failure != null)
+    {
+      _logger.LogWarning(failure,
+        "Cast: the console volume could not be applied to the speaker ({Sends} send(s) in this burst)",
+        sends);
+    }
+
+    return new CastConsoleVolumeResult(applied, appliedConsole, appliedDevice?.FriendlyName, sends, failure != null);
+  }
+
+  /// <summary>
+  /// Sends the console's mute state to the speaker of connection <paramref name="generation"/>,
+  /// coalesced like the volume (pre-merge review L4): at most one SET_MUTE is in flight per
+  /// output, and a request made meanwhile replaces a single pending state (latest wins), sent
+  /// when it completes. A state is skipped when the speaker already holds it as far as this
+  /// output knows (which is what keeps an external mute, re-synced to the console, from being
+  /// pushed back), when the output is not <c>Streaming</c>, or when its connection is no longer
+  /// the published one. Muting marks the connection "muted by console"; see
+  /// <see cref="IsSpeakerMutedByConsole"/>.
+  /// </summary>
+  /// <returns>
+  /// True when the burst this request joined ended with the speaker acknowledging
+  /// <paramref name="muted"/>; false when nothing was sent, a later request in the same burst
+  /// won, or the send failed. Failures are logged, never thrown.
+  /// </returns>
+  public async Task<bool> SetDeviceMuteFromConsoleAsync(bool muted, int generation)
+  {
+    Task<bool?> drain;
+    lock (_consoleMuteLock)
+    {
+      _pendingConsoleMute = (muted, generation);
+      drain = _consoleMuteDrain ??= Task.Run(DrainConsoleMuteAsync);
+    }
+
+    return await drain.ConfigureAwait(false) == muted;
+  }
+
+  /// <summary>
+  /// Sends pending console mute states one at a time until none is left; returns the last state
+  /// the speaker acknowledged, or null. The sends are sequential, so the "muted by console" mark
+  /// is set and cleared in the order the speaker received them.
+  /// </summary>
+  private async Task<bool?> DrainConsoleMuteAsync()
+  {
+    bool? applied = null;
+
+    while (true)
+    {
+      (bool Muted, int Generation) next;
+      lock (_consoleMuteLock)
+      {
+        if (_pendingConsoleMute is not { } pending)
+        {
+          _consoleMuteDrain = null;
+          break;
+        }
+
+        next = pending;
+        _pendingConsoleMute = null;
+      }
+
+      if (State != AudioOutputState.Streaming || next.Muted == _lastSetMute)
+      {
+        continue;
+      }
+
+      var connection = await SnapshotPublishedConnectionAsync().ConfigureAwait(false);
+      if (connection == null || connection.Generation != next.Generation)
+      {
+        continue;
+      }
+
+      try
+      {
+        if (!await SendMuteToDeviceAsync(connection.Client, next.Muted)
+              .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
+        {
+          continue;
+        }
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "Cast: the console {Action} could not be applied to the speaker",
+          next.Muted ? "mute" : "unmute");
+        continue;
+      }
+
+      if (next.Muted)
+      {
+        Volatile.Write(ref _consoleMutedGeneration, connection.Generation);
+        RememberConsoleMute(connection.Device.Id);
+      }
+      else
+      {
+        Interlocked.CompareExchange(ref _consoleMutedGeneration, -1, connection.Generation);
+        ForgetConsoleMute(connection.Device.Id);
+      }
+
+      applied = next.Muted;
+    }
+
+    return applied;
+  }
+
+  /// <summary>
+  /// Mutes the speaker as streaming starts when the console is muted, so a muted console never
+  /// plays out loud on it. Never UNmutes: a speaker muted on its own side while the console is
+  /// not stays muted. Not gated on the console's active output — this runs only from
+  /// <c>StartAsync</c>, i.e. because Cast is being made the output, and on the common path
+  /// (<c>cast/connect</c>) the output gate records <c>google-cast</c> only after the stream has
+  /// started.
+  /// </summary>
+  /// <remarks>
+  /// Skipped only when this connection has positively seen the speaker muted. A speaker whose
+  /// state is unknown — its initial read failed, so the baseline is still the "not muted" that
+  /// <see cref="ResetSpeakerStateForNewConnection"/> sets — is treated as unmuted, and the mute is
+  /// sent (pre-merge review M2). Sending a mute to an already-muted speaker is harmless; skipping
+  /// one is how a muted console would play out loud.
+  /// </remarks>
+  private async Task MuteForConsoleAtStartAsync()
+  {
+    bool consoleMuted;
+    try
+    {
+      consoleMuted = _isConsoleMuted?.Invoke() ?? false;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: could not read the console's mute state");
+      return;
+    }
+
+    if (!consoleMuted || _lastSetMute)
+    {
+      // Not muted, or this connection has already seen the speaker muted — by us earlier in
+      // this start (then it is already marked), by us on an earlier connection to this device
+      // (then RecallConsoleMuteAsync re-armed the mark when the initial read found it muted), or
+      // on its own side (then a teardown must not unmute it, so it is not marked).
+      return;
+    }
+
+    var connection = await SnapshotPublishedConnectionAsync().ConfigureAwait(false);
+    if (connection == null)
     {
       return;
     }
 
     try
     {
-      var receiverChannel = _client.GetChannel<ReceiverChannel>();
-      if (receiverChannel != null)
+      if (await SendMuteToDeviceAsync(connection.Client, true)
+            .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
       {
-        _suppressNextVolumeEvent = true;
-        _lastSetVolume = volume;
-        await receiverChannel.SetVolume(volume);
-        Volatile.Write(ref _connectionVolume, volume);
-        RememberVolume(volume);
-        _logger.LogDebug("Chromecast volume set to {Volume:P0}", volume);
+        Volatile.Write(ref _consoleMutedGeneration, connection.Generation);
+        RememberConsoleMute(connection.Device.Id);
+        ConsoleLogger.LogInformation(
+          "Cast: console is muted → speaker {Name} muted as casting starts", connection.Device.FriendlyName);
       }
     }
     catch (Exception ex)
     {
-      _suppressNextVolumeEvent = false;
-      _logger.LogWarning(ex, "Failed to set Chromecast volume");
+      _logger.LogWarning(ex, "Cast: could not mute {Name} for the muted console as casting started",
+        connection.Device.FriendlyName);
     }
   }
 
-  private async Task SetCastMuteAsync(bool mute)
+  /// <summary>Records that this application muted <paramref name="deviceId"/> for the console.</summary>
+  private void RememberConsoleMute(string deviceId)
   {
-    if (_client == null || _connectedReceiver == null || State != AudioOutputState.Streaming)
+    lock (_consoleMuteLock)
+    {
+      _consoleMutedDeviceId = deviceId;
+    }
+  }
+
+  /// <summary>
+  /// Forgets the console mute recorded for <paramref name="deviceId"/>, if that is the device
+  /// recorded; a different device's record is left alone.
+  /// </summary>
+  private void ForgetConsoleMute(string? deviceId)
+  {
+    lock (_consoleMuteLock)
+    {
+      if (deviceId != null && string.Equals(_consoleMutedDeviceId, deviceId, StringComparison.Ordinal))
+      {
+        _consoleMutedDeviceId = null;
+      }
+    }
+  }
+
+  /// <summary>
+  /// On a new connection's initial read (hostile review F11): if <paramref name="device"/> is the
+  /// speaker this application last muted for the console and has not seen unmuted since — e.g. the
+  /// connection that muted it was LOST, so nothing could unmute it — re-arm the "muted by console"
+  /// mark for connection <paramref name="generation"/> when the read shows it still muted, and
+  /// forget the record when the read shows it unmuted (someone unmuted it elsewhere).
+  /// </summary>
+  /// <remarks>
+  /// Sends nothing and raises nothing; it only decides what <see cref="IsSpeakerMutedByConsole"/>
+  /// reports. With the mark re-armed, the follower's activation reconcile unmutes the speaker if the
+  /// console is unmuted, nothing is sent while the console is still muted, and a deliberate teardown
+  /// releases it like any console mute (application stop first). A connection to a different
+  /// device leaves the record as it is. The mark is written under <c>_lifecycleLock</c> and only
+  /// while <paramref name="generation"/> is still the published connection, so it cannot land on a
+  /// connection published after this one (whose publish resets it under the same lock). The record
+  /// is in-process only; see <c>_consoleMutedDeviceId</c>.
+  /// </remarks>
+  private async Task RecallConsoleMuteAsync(int generation, ChromecastDeviceInfo device, bool speakerMuted)
+  {
+    var rearmed = false;
+    await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    try
+    {
+      if (_publishedGeneration != generation || _connectionGeneration != generation)
+      {
+        return;
+      }
+
+      lock (_consoleMuteLock)
+      {
+        if (!string.Equals(_consoleMutedDeviceId, device.Id, StringComparison.Ordinal))
+        {
+          return;
+        }
+
+        if (speakerMuted)
+        {
+          Volatile.Write(ref _consoleMutedGeneration, generation);
+          rearmed = true;
+        }
+        else
+        {
+          _consoleMutedDeviceId = null;
+        }
+      }
+    }
+    finally
+    {
+      _lifecycleLock.Release();
+    }
+
+    if (rearmed)
+    {
+      ConsoleLogger.LogInformation(
+        "Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console",
+        device.FriendlyName);
+    }
+  }
+
+  /// <summary>
+  /// Before a deliberate teardown of connection <paramref name="generation"/>: if this
+  /// application muted its speaker for the console, stops the receiver application on the device
+  /// and THEN unmutes the speaker, so it is not left muted for its next user. Bounded by short
+  /// timeouts; never throws. A connection that was LOST is not handled here (see
+  /// <c>HandleConnectionLostAsync</c>): it cannot be unmuted.
+  /// </summary>
+  /// <remarks>
+  /// <para><b>What is guaranteed</b> (pre-merge review H1): an unmute is sent only when the
+  /// device's most recent receiver status — the one SharpCaster holds for the channel, or the
+  /// answer to the stop sent here — lists no receiver application with our <c>ApplicationId</c>, so
+  /// neither the live HttpMp3 stream nor DirectChannel audio the receiver had buffered can play out
+  /// loud after it. When that held status already lists none, no stop is sent and the unmute
+  /// follows without a new round-trip; the status is then as current as the device last made it.
+  /// If it cannot be established (the held status has no applications list, which is also how a
+  /// channel that never received a status looks — hostile review F4 — the stop
+  /// failed or timed out, the device's answer still lists our application, or a different
+  /// application is first in its status, which the library's stop would close instead) the
+  /// speaker is deliberately LEFT MUTED and an Information line says so: a muted speaker the owner
+  /// has to unmute is recoverable; a muted console playing out loud is the one outcome this
+  /// feature must never produce. The mark is kept in that case, so a later teardown of the same
+  /// connection (DisconnectAsync after StopAsync) tries again.</para>
+  /// <para><b>What is not:</b> that the unmute itself lands (a failure is logged; the speaker stays
+  /// muted). Only a connection the console muted is touched: otherwise a teardown leaves the
+  /// receiver application to the media-stop and close paths, as before AUD-81.</para>
+  /// <para>A later <c>StartAsync</c> on the same client still launches the application:
+  /// SharpCaster 3.0.0's <c>ChromecastClient.LaunchApplicationAsync</c> joins an existing session
+  /// only when its last receiver status lists the application, and the stop's response — a
+  /// RECEIVER_STATUS without it — is what that status is replaced with (the receive loop runs
+  /// <c>ReceiverChannel.OnMessageReceived</c> before completing the request).</para>
+  /// </remarks>
+  private async Task ReleaseConsoleMuteAsync(ChromecastClient? client, int generation, ChromecastDeviceInfo? device)
+  {
+    var deviceName = device?.FriendlyName;
+    if (client == null || generation < 0 || Volatile.Read(ref _consoleMutedGeneration) != generation)
+    {
+      return;
+    }
+
+    bool applicationGone;
+    try
+    {
+      applicationGone = await StopReceiverApplicationAsync(client)
+        .WaitAsync(TeardownAppStopTimeout, _timeProvider).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: stopping the receiver application before the teardown unmute failed");
+      applicationGone = false;
+    }
+
+    if (!applicationGone)
+    {
+      ConsoleLogger.LogInformation(
+        "Cast: speaker {Name} left muted — its receiver application could not be confirmed stopped, and " +
+        "unmuting could play our audio under a muted console; unmute it on the speaker or in Google Home",
+        deviceName);
+      return;
+    }
+
+    // Claimed only now, so a failed stop above keeps the mark for a later teardown to retry.
+    if (Interlocked.CompareExchange(ref _consoleMutedGeneration, -1, generation) != generation)
     {
       return;
     }
 
     try
     {
-      var receiverChannel = _client.GetChannel<ReceiverChannel>();
-      if (receiverChannel != null)
+      if (await SendMuteToDeviceAsync(client, false)
+            .WaitAsync(TeardownUnmuteTimeout, _timeProvider).ConfigureAwait(false))
       {
-        _suppressNextVolumeEvent = true;
-        _lastSetMute = mute;
-        await receiverChannel.SetMute(mute);
-        _logger.LogDebug("Chromecast mute set to {Mute}", mute);
+        ConsoleLogger.LogInformation(
+          "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",
+          deviceName);
+        ForgetConsoleMute(device?.Id);
       }
     }
     catch (Exception ex)
     {
-      _suppressNextVolumeEvent = false;
-      _logger.LogWarning(ex, "Failed to set Chromecast mute state");
+      ConsoleLogger.LogInformation(
+        "Cast: could not unmute speaker {Name} before closing ({Error}) — it may stay muted",
+        deviceName, ex.GetType().Name);
+      _logger.LogDebug(ex, "Cast: teardown unmute failed");
     }
   }
+
+  /// <summary>
+  /// Stops our receiver application (<c>ApplicationId</c>) on the device behind
+  /// <paramref name="client"/>. True when the channel's most recent receiver status lists no
+  /// application of ours (none was running, or the stop sent here removed it); false when the held
+  /// status has no applications list (never received, or not reported), or that cannot otherwise
+  /// be established. Throws what SharpCaster throws.
+  /// </summary>
+  private async Task<bool> StopReceiverApplicationAsync(ChromecastClient client)
+  {
+    if (CastStopApplicationOverrideForTests != null)
+    {
+      return await CastStopApplicationOverrideForTests().ConfigureAwait(false);
+    }
+
+    var receiverChannel = client.GetChannel<ReceiverChannel>();
+    if (receiverChannel == null)
+    {
+      return false;
+    }
+
+    var applicationId = _options.ApplicationId;
+    var status = receiverChannel.ReceiverStatus;
+    if (status?.Applications == null)
+    {
+      // Hostile review F4. Unknown is not "stopped": the speaker stays muted. A held status with
+      // no applications list is treated as unknown, not as "nothing running", because that is
+      // exactly how SharpCaster 3.0.0 presents a channel that has never received a status — its
+      // ReceiverStatus is a default object, not null (measured in
+      // GoogleCastOutputConsoleVolumeTests.WithNoReceiverStatusEverReceived_…). The cost: a device
+      // whose real status omits the list is left muted at teardown, which is logged and
+      // recoverable. (The stop's own answer below is the device's report, so there a missing
+      // list does mean nothing is running.)
+      return false;
+    }
+
+    var ours = status.Applications.FirstOrDefault(a => a.AppId == applicationId);
+    if (ours == null)
+    {
+      // The device's last status lists no application of ours: nothing of ours can be playing.
+      return true;
+    }
+
+    if (!ReferenceEquals(status.Application, ours))
+    {
+      // SharpCaster's StopApplication stops the FIRST application in the status. Closing someone
+      // else's is not ours to do, so our stop cannot be made.
+      return false;
+    }
+
+    var after = await receiverChannel.StopApplication().ConfigureAwait(false);
+    return after != null && after.Applications?.Any(a => a.AppId == applicationId) != true;
+  }
+
+  /// <summary>
+  /// Sends <paramref name="muted"/> as a SET_MUTE, recording it in the echo memory and baseline
+  /// first. Returns false when the client exposes no receiver channel (nothing sent). Throws
+  /// what SharpCaster throws, with the baseline restored.
+  /// </summary>
+  private async Task<bool> SendMuteToDeviceAsync(ChromecastClient client, bool muted)
+  {
+    var echo = RecordMutePush(muted);
+    var previous = _lastSetMute;
+    _lastSetMute = muted;
+    try
+    {
+      if (CastSetMuteOverrideForTests != null)
+      {
+        await CastSetMuteOverrideForTests(muted).ConfigureAwait(false);
+        return true;
+      }
+
+      var receiverChannel = client.GetChannel<ReceiverChannel>();
+      if (receiverChannel == null)
+      {
+        _lastSetMute = previous;
+        return false;
+      }
+
+      await receiverChannel.SetMute(muted).ConfigureAwait(false);
+      return true;
+    }
+    catch
+    {
+      _lastSetMute = previous;
+      throw;
+    }
+    finally
+    {
+      CompleteEchoPush(echo);
+    }
+  }
+
+  /// <summary>
+  /// A LIVE read of the connected speaker's level and mute, bounded at 3 s, for diagnostics
+  /// (<c>GET /api/devices/cast/volume</c>). Null when the output is not <c>Streaming</c> with a
+  /// published connection. Read-only: changes nothing here and fires nothing — including through
+  /// SharpCaster's side door, which raises the read's GET_STATUS response as a
+  /// <c>ReceiverStatusChanged</c>: a status arriving while the read is in flight only re-baselines
+  /// the echo filter (pre-merge review L5; see <c>_diagnosticReadsPending</c>). The price: a
+  /// change made on the speaker inside that window is absorbed, not reported.
+  /// </summary>
+  /// <exception cref="TimeoutException">The speaker did not answer within 3 s.</exception>
+  public async Task<CastSpeakerVolumeReading?> ReadSpeakerVolumeAsync(CancellationToken cancellationToken = default)
+  {
+    if (IsDisposed || State != AudioOutputState.Streaming)
+    {
+      return null;
+    }
+
+    var connection = await SnapshotPublishedConnectionAsync().ConfigureAwait(false);
+    if (connection == null)
+    {
+      return null;
+    }
+
+    // Marked BEFORE the request is sent and lifted only when the READ completes — not when the
+    // 3 s wait below gives up — because SharpCaster raises the response's status event before it
+    // completes the read, however late that is.
+    Interlocked.Increment(ref _diagnosticReadsPending);
+    Task<(float Volume, bool Muted)?> read;
+    try
+    {
+      read = ReadCastVolumeStatusAsync(connection.Client);
+    }
+    catch
+    {
+      Interlocked.Decrement(ref _diagnosticReadsPending);
+      throw;
+    }
+
+    _ = read.ContinueWith(
+      _ => Interlocked.Decrement(ref _diagnosticReadsPending),
+      CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    var reading = await read.WaitAsync(TimeSpan.FromSeconds(3), cancellationToken).ConfigureAwait(false);
+
+    var known = KnownSpeakerLevel;
+    return new CastSpeakerVolumeReading(
+      connection.Device.FriendlyName,
+      reading?.Volume,
+      reading?.Muted,
+      float.IsNaN(known) ? null : known,
+      _lastSetMute,
+      IsSpeakerMutedByConsole);
+  }
+
+  /// <summary>Records a level sent to the device, for <see cref="IsRecentVolumePush"/>.</summary>
+  private EchoPush<float> RecordVolumePush(float level)
+  {
+    lock (_echoLock)
+    {
+      PruneEchoMemory_Locked();
+      var push = new EchoPush<float>(level, _timeProvider.GetTimestamp());
+      _recentVolumePushes.Add(push);
+      return push;
+    }
+  }
+
+  /// <summary>Records a mute sent to the device, for <see cref="IsRecentMutePush"/>.</summary>
+  private EchoPush<bool> RecordMutePush(bool muted)
+  {
+    lock (_echoLock)
+    {
+      PruneEchoMemory_Locked();
+      var push = new EchoPush<bool>(muted, _timeProvider.GetTimestamp());
+      _recentMutePushes.Add(push);
+      return push;
+    }
+  }
+
+  /// <summary>
+  /// Marks a recorded send complete (acknowledged, failed or abandoned) and re-stamps it, so its
+  /// confirmation is recognised for <see cref="EchoWindow"/> from completion, not from start.
+  /// </summary>
+  private void CompleteEchoPush<T>(EchoPush<T> push)
+  {
+    lock (_echoLock)
+    {
+      push.Stamp = _timeProvider.GetTimestamp();
+      push.InFlight = false;
+    }
+  }
+
+  /// <summary>
+  /// True when <paramref name="level"/> is the echo of a level this application sent: within
+  /// <see cref="EchoLevelTolerance"/> of any retained push (in flight, or completed within the
+  /// last <see cref="EchoWindow"/>), or within the closed range spanned by the FRESH pushes —
+  /// those stamped within the last <see cref="EchoWindow"/> — widened by that tolerance at each
+  /// end. False when there are none.
+  /// </summary>
+  /// <remarks>
+  /// <para>Hostile review F3. This used to be "within 0.01 of one recent push", so a speaker that
+  /// quantises more coarsely than 0.01 reported our own push as an external change — master volume
+  /// rewritten and AUD-80 remembering it. A level between two of our recent pushes is an echo
+  /// however the device rounded it: during a console drag (0.437 then 0.50) a 1/15-step speaker's
+  /// 0.4667 is recognised.</para>
+  /// <para>Hostile re-review M2. The range alone missed the echo that always arrives — the final
+  /// level of a move is an extreme of the range (or the only push), and a 1/15-step speaker reports
+  /// 0.50 as 0.5333. The tolerance is therefore the larger of 0.01 and just over half the step the
+  /// speaker reports (<see cref="_speakerStepInterval"/>): a speaker rounding to its nearest step is
+  /// never more than half a step from what it was sent. With no step reported it stays 0.01, and
+  /// such a speaker's coarse echo of a single push still reads as external.</para>
+  /// <para>Re-review L1. A push whose send is still in flight more than <see cref="EchoWindow"/>
+  /// after it started (a slow or abandoned send — a timed-out console push stays in flight until
+  /// SharpCaster gives up, up to <see cref="EchoInFlightLimit"/>) still matches its own echo by the
+  /// point tolerance, but no longer stretches the range: one stale entry plus a later push used to
+  /// span a range wide enough to absorb a genuine speaker change for up to 35 s.</para>
+  /// <para>What it gives up: a genuine change made on the speaker within the window that lands
+  /// inside the fresh range, or within the tolerance of a retained push, is absorbed, not
+  /// reported. Anything else is reported as before (AUD-5).</para>
+  /// </remarks>
+  private bool IsRecentVolumePush(float level)
+  {
+    var tolerance = EchoLevelTolerance;
+    lock (_echoLock)
+    {
+      PruneEchoMemory_Locked();
+
+      float lowest = float.MaxValue;
+      float highest = float.MinValue;
+      foreach (EchoPush<float> push in _recentVolumePushes)
+      {
+        if (Math.Abs(level - push.Value) <= tolerance)
+        {
+          return true;
+        }
+
+        if (_timeProvider.GetElapsedTime(push.Stamp) <= EchoWindow)
+        {
+          lowest = Math.Min(lowest, push.Value);
+          highest = Math.Max(highest, push.Value);
+        }
+      }
+
+      return lowest <= highest && level >= lowest - tolerance && level <= highest + tolerance;
+    }
+  }
+
+  /// <summary>
+  /// The echo tolerance for a level: <see cref="MinEchoLevelTolerance"/>, or just over half the
+  /// speaker's reported volume step when that is larger (hostile re-review M2).
+  /// </summary>
+  private float EchoLevelTolerance
+  {
+    get
+    {
+      var step = Volatile.Read(ref _speakerStepInterval);
+      return float.IsNaN(step) ? MinEchoLevelTolerance : Math.Max(MinEchoLevelTolerance, (step / 2f) + 0.001f);
+    }
+  }
+
+  /// <summary>
+  /// Records the volume step a receiver status reports, when it reports a usable one (see
+  /// <see cref="_speakerStepInterval"/>). A missing or out-of-range value changes nothing.
+  /// </summary>
+  private void NoteSpeakerStepInterval(double? stepInterval)
+  {
+    if (stepInterval is double step && step > 0 && step <= MaxSpeakerStepInterval)
+    {
+      Volatile.Write(ref _speakerStepInterval, (float)step);
+    }
+  }
+
+  /// <summary>
+  /// True when <paramref name="muted"/> was sent by a send in flight or completed within the last
+  /// <see cref="EchoWindow"/>.
+  /// </summary>
+  private bool IsRecentMutePush(bool muted)
+  {
+    lock (_echoLock)
+    {
+      PruneEchoMemory_Locked();
+      return _recentMutePushes.Exists(p => p.Value == muted);
+    }
+  }
+
+  private void PruneEchoMemory_Locked()
+  {
+    _recentVolumePushes.RemoveAll(IsExpired);
+    _recentMutePushes.RemoveAll(IsExpired);
+  }
+
+  private bool IsExpired<T>(EchoPush<T> push) =>
+    _timeProvider.GetElapsedTime(push.Stamp) > (push.InFlight ? EchoInFlightLimit : EchoWindow);
 
   /// <inheritdoc />
   public override async ValueTask DisposeAsync()
@@ -2626,7 +3949,49 @@ public class CastVolumeChangedEventArgs : EventArgs
   /// Gets whether this is the initial sync after connecting (not an external change).
   /// </summary>
   public bool IsInitialSync { get; init; }
+
+  /// <summary>
+  /// Whether the speaker's LEVEL changed (AUD-81, pre-merge review M1). False for a change of
+  /// mute only — <see cref="Volume"/> is then just the level the speaker reported alongside it,
+  /// possibly quantised, and a subscriber must not copy it anywhere as if it were news. True by
+  /// default, so a producer that does not distinguish keeps the old meaning.
+  /// </summary>
+  public bool VolumeChanged { get; init; } = true;
 }
+
+/// <summary>
+/// The connection the console may drive, from <see cref="GoogleCastOutput.GetConsoleVolumeTarget"/> (AUD-81).
+/// </summary>
+/// <param name="Generation">The connection's generation; pass it back with each command.</param>
+/// <param name="DeviceId">The speaker's device id (the per-device volume key).</param>
+/// <param name="DeviceName">The speaker's friendly name.</param>
+/// <param name="SpeakerLevel">The speaker's level as this output understands it; NaN when unknown.</param>
+/// <param name="SpeakerMuted">The speaker's mute as this output last set or observed it.</param>
+public readonly record struct CastConsoleTarget(
+  int Generation, string DeviceId, string DeviceName, float SpeakerLevel, bool SpeakerMuted);
+
+/// <summary>
+/// The outcome of one coalesced burst of console volume pushes (AUD-81).
+/// </summary>
+/// <param name="AppliedLevel">The last level the speaker acknowledged, or null when none was.</param>
+/// <param name="AppliedConsoleLevel">The console level that level was mapped from (NaN if not given).</param>
+/// <param name="DeviceName">The speaker the applied level went to.</param>
+/// <param name="Sends">How many SET_VOLUMEs were sent in the burst.</param>
+/// <param name="Failed">True when at least one send failed.</param>
+public sealed record CastConsoleVolumeResult(
+  float? AppliedLevel, float AppliedConsoleLevel, string? DeviceName, int Sends, bool Failed);
+
+/// <summary>
+/// A live read of the connected Cast speaker's volume (AUD-81), with this output's own view beside it.
+/// </summary>
+/// <param name="DeviceName">The speaker's friendly name.</param>
+/// <param name="Level">The level the speaker reported, or null when its status carried none.</param>
+/// <param name="Muted">The mute the speaker reported, or null when its status carried no volume.</param>
+/// <param name="KnownLevel">The level this output last set or observed, or null when unknown.</param>
+/// <param name="KnownMuted">The mute this output last set or observed.</param>
+/// <param name="MutedByConsole">True when this application muted the speaker for the console.</param>
+public sealed record CastSpeakerVolumeReading(
+  string DeviceName, float? Level, bool? Muted, float? KnownLevel, bool KnownMuted, bool MutedByConsole);
 
 /// <summary>
 /// Now-playing metadata to display on Cast devices (Google Home app).

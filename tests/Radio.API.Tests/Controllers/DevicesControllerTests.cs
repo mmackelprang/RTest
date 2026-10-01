@@ -200,4 +200,26 @@ public class DevicesControllerTests : IClassFixture<CustomWebApplicationFactory<
     // Assert
     Assert.Equal(System.Net.HttpStatusCode.BadRequest, response.StatusCode);
   }
+
+  [Fact]
+  public async Task GetCastSpeakerVolume_WhenNotCasting_Returns409()
+  {
+    // AUD-81: the live read is only meaningful while Cast streams to a connected speaker.
+    var response = await _client.GetAsync("/api/devices/cast/volume");
+
+    Assert.Equal(System.Net.HttpStatusCode.Conflict, response.StatusCode);
+  }
+
+  [Fact]
+  public async Task GetCastDiagnostics_ReportsTheSpeakersKnownVolumeAndMute()
+  {
+    var response = await _client.GetAsync("/api/devices/cast/diagnostics");
+
+    Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+    using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+    var cast = json.RootElement.GetProperty("cast");
+    Assert.True(cast.TryGetProperty("speakerLevel", out _));
+    Assert.True(cast.TryGetProperty("speakerMuted", out _));
+    Assert.True(cast.TryGetProperty("speakerMutedByConsole", out _));
+  }
 }

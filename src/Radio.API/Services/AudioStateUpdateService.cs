@@ -981,8 +981,14 @@ public class AudioStateUpdateService : BackgroundService
 
     try
     {
-      // Update master volume and mute to match the Cast device
-      if (Math.Abs(_audioManager.MasterVolume - e.Volume) > 0.01f)
+      // Update master volume and mute to match the Cast device. The level only when the
+      // speaker's LEVEL changed (AUD-81, pre-merge review M1): on a mute-only event e.Volume is
+      // just the level reported alongside the mute — possibly a device-quantised echo of a
+      // console push — and copying it would move the console's volume because the speaker was
+      // muted. Both writes happen synchronously inside the event, which is what lets
+      // CastConsoleVolumeFollower recognise them (GoogleCastOutput.SpeakerChangeBeingApplied)
+      // and push nothing back.
+      if (e.VolumeChanged && Math.Abs(_audioManager.MasterVolume - e.Volume) > 0.01f)
       {
         _audioManager.MasterVolume = e.Volume;
         _logger.LogInformation(

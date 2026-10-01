@@ -320,6 +320,20 @@ Check that:
 - `outputTap.activeReaderCount` is `1` (the DirectChannel reader)
 - `cast.state` is `"Streaming"`
 - `httpStream.state` is `"Created"` (not started — correct for DirectChannel)
+- `cast.speakerLevel`, `cast.speakerMuted` and `cast.speakerMutedByConsole` show this
+  application's own view of the speaker (`AUD-81`). This is not a live read.
+
+For a **live** read of the speaker's volume and mute (a bounded 3 s Cast status read; read-only,
+changes nothing):
+
+```bash
+curl http://<host>:5000/api/devices/cast/volume
+# 200 { deviceName, level, muted, knownLevel, knownMuted, mutedByConsole }
+# 409 when Cast is not streaming to a connected speaker; 504 no answer; 502 read failed
+```
+
+While Cast is the active output, the console's volume and mute drive the speaker (`AUD-81`; design
+in `docs/queue/AUD-81.md` § As built).
 
 ### 6e. Start Playing Audio
 
@@ -428,5 +442,6 @@ Architecture doc:  design/direct-cast-channel.md
 Config file:       src/Radio.API/appsettings.json → AudioOutput.GoogleCast
 Cast Dev Console:  https://cast.google.com/publish/
 Diagnostics API:   GET /api/devices/cast/diagnostics
+Speaker volume:    GET /api/devices/cast/volume
 Cast connect API:  POST /api/devices/cast/connect
 ```
