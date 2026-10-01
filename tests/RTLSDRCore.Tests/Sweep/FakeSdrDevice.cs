@@ -84,7 +84,17 @@ internal sealed class FakeSdrDevice : ISdrDevice
     {
       hz = _frequencyHz;
     }
-    SamplesAvailable?.Invoke(this, new IqSamplesEventArgs(BlockFactory(hz, BlockSize)));
+    RaiseBlockCapturedAt(hz);
+  }
+
+  /// <summary>
+  /// Raises a block as if it had been captured while tuned to
+  /// <paramref name="frequencyHz"/> — models a block read before a retune
+  /// and delivered after it.
+  /// </summary>
+  public void RaiseBlockCapturedAt(long frequencyHz)
+  {
+    SamplesAvailable?.Invoke(this, new IqSamplesEventArgs(BlockFactory(frequencyHz, BlockSize)));
   }
 
   private void Record(string call)

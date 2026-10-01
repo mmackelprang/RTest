@@ -44,6 +44,85 @@ public class RadioReceiverLiveSweepTests
   }
 
   [Fact]
+  public void Sweep_BlocksCapturedBeforeAHop_AreNeverMeasured()
+  {
+    FakeSdrDevice device = new();
+    using RadioReceiver receiver = StartReceiver(device);
+    int hopsSeen = device.SetFrequencyCalls.Count;
+    long previousHz = StartHz;
+    receiver.SweepAwaitingSamples = () =>
+    {
+      IReadOnlyList<long> tunes = device.SetFrequencyCalls;
+      if (tunes.Count != hopsSeen)
+      {
+        // First wait after a hop: two blocks still carrying the previous
+        // channel arrive now — one read before the retune but raised after
+        // the tuner drained its queue, one whose read straddled the retune.
+        hopsSeen = tunes.Count;
+        device.RaiseBlockCapturedAt(previousHz);
+        device.RaiseBlockCapturedAt(previousHz);
+        previousHz = tunes[^1];
+        return;
+      }
+      device.RaiseBlock();
+    };
+
+    IReadOnlyList<ChannelLevel> levels = receiver.SweepChannels(Channels, SweepGain, null, CancellationToken.None);
+
+    Assert.Equal(Channels, levels.Select(l => l.FrequencyHz));
+    float station = levels.Single(l => l.FrequencyHz == FakeSdrDevice.StationHz).LevelDbfs;
+    // Had a stale block been measured, the station's level would show up on
+    // the channel after it (and the station would read as noise).
+    Assert.All(levels.Where(l => l.FrequencyHz != FakeSdrDevice.StationHz),
+      l => Assert.True(l.LevelDbfs < station - 20f, $"{l.FrequencyHz} Hz measured {l.LevelDbfs} dB vs station {station} dB"));
+  }
+
+  [Theory]
+  [InlineData(1024)]
+  [InlineData(3000)]
+  public void Sweep_InvalidSamplesPerMeasurement_ThrowsBeforeTouchingTheDevice(int samplesPerMeasurement)
+  {
+    FakeSdrDevice device = new();
+    using RadioReceiver receiver = StartReceiver(device);
+    int before = device.Calls.Count;
+
+    Assert.Throws<ArgumentOutOfRangeException>(() =>
+      receiver.SweepChannels(Channels, SweepGain, null, CancellationToken.None, samplesPerMeasurement));
+
+    Assert.Equal(before, device.Calls.Count);
+    Assert.False(receiver.IsSweeping);
+  }
+
+  [Fact]
+  public void Sweep_UserGainChangeMidSweep_CancelsAndDeviceEndsOnTheNewGain()
+  {
+    FakeSdrDevice device = new();
+    using RadioReceiver receiver = StartReceiver(device);
+    int waits = 0;
+    receiver.SweepAwaitingSamples = () =>
+    {
+      waits++;
+      if (waits == 3)
+      {
+        // The user changes gain from another thread while the sweep is mid-channel.
+        Task.Run(() =>
+        {
+          receiver.AutoGainEnabled = false;
+          receiver.Gain = 12f;
+        }).GetAwaiter().GetResult();
+      }
+      device.RaiseBlock();
+    };
+
+    Assert.ThrowsAny<OperationCanceledException>(() =>
+      receiver.SweepChannels(Channels, SweepGain, null, CancellationToken.None));
+
+    string[] gainCalls = device.Calls.Where(c => c.StartsWith("SetGain", StringComparison.Ordinal)).ToArray();
+    Assert.Equal(new[] { "SetGainMode:False", "SetGain:12" }, gainCalls[^2..]);
+    Assert.False(receiver.IsSweeping);
+  }
+
+  [Fact]
   public void Sweep_NeverRaisesFrequencyChanged_OrMovesCurrentFrequency_AndReturnsToStation()
   {
     FakeSdrDevice device = new();
@@ -228,7 +307,12 @@ public class RadioReceiverLiveSweepTests
     FakeSdrDevice device = new();
     using RadioReceiver receiver = StartReceiver(device);
     using ManualResetEventSlim cancelRequested = new();
-    receiver.SweepCancelRequested = cancelRequested.Set;
+    ReceiverState? stateAtCancel = null;
+    receiver.SweepCancelRequested = () =>
+    {
+      stateAtCancel = receiver.GetRadioState().State;
+      cancelRequested.Set();
+    };
     Thread? shutdownThread = null;
     int waits = 0;
     receiver.SweepAwaitingSamples = () =>
@@ -253,6 +337,17 @@ public class RadioReceiverLiveSweepTests
     Assert.False(receiver.IsRunning);
     Assert.False(receiver.IsSweeping);
     Assert.Equal("Close", device.Calls.Last(c => c is "Close" or "Open"));
+
+    // Stopping was published before the sweep was cancelled, so no new
+    // sweep could register between the cancel and the close.
+    Assert.Equal(ReceiverState.Stopping, stateAtCancel);
+
+    // The sweep's restore (station, then gain mode) ran before Shutdown closed the device.
+    List<string> calls = device.Calls.ToList();
+    int close = calls.LastIndexOf("Close");
+    Assert.Equal(
+      new[] { $"SetFrequency:{StartHz}", "SetGainMode:True", "StopStreaming", "Close" },
+      calls.Skip(close - 3).Take(4));
   }
 
   [Fact]

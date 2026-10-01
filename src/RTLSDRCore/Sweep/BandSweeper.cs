@@ -25,6 +25,35 @@ public static class BandSweeper
   public const int DefaultSamplesPerMeasurement = 16384;
 
   /// <summary>
+  /// Granularity of <c>samplesPerMeasurement</c>, in IQ samples: 256 samples
+  /// are 512 bytes, the USB bulk-packet size that librtlsdr's own tools
+  /// require read lengths to be a multiple of.
+  /// </summary>
+  public const int SamplesPerMeasurementMultiple = 256;
+
+  /// <summary>
+  /// True when <paramref name="samplesPerMeasurement"/> is at least one FFT
+  /// frame (<see cref="ChannelPowerMeter.FftSize"/>) and a multiple of
+  /// <see cref="SamplesPerMeasurementMultiple"/>.
+  /// </summary>
+  /// <param name="samplesPerMeasurement">The value to check.</param>
+  public static bool IsValidSamplesPerMeasurement(int samplesPerMeasurement) =>
+    samplesPerMeasurement >= ChannelPowerMeter.FftSize
+    && samplesPerMeasurement % SamplesPerMeasurementMultiple == 0;
+
+  /// <summary>Throws when <see cref="IsValidSamplesPerMeasurement"/> is false.</summary>
+  /// <param name="samplesPerMeasurement">The value to check.</param>
+  /// <exception cref="ArgumentOutOfRangeException">The value is not valid.</exception>
+  public static void ThrowIfInvalidSamplesPerMeasurement(int samplesPerMeasurement)
+  {
+    if (!IsValidSamplesPerMeasurement(samplesPerMeasurement))
+    {
+      throw new ArgumentOutOfRangeException(nameof(samplesPerMeasurement), samplesPerMeasurement,
+        $"Must be at least {ChannelPowerMeter.FftSize} samples (one FFT frame) and a multiple of {SamplesPerMeasurementMultiple}.");
+    }
+  }
+
+  /// <summary>
   /// Sweeps <paramref name="channels"/> in order. For each channel: tune, read
   /// one block and discard it (it can hold samples from before the retune),
   /// read one more block and measure it with <see cref="ChannelPowerMeter"/>.
@@ -48,11 +77,7 @@ public static class BandSweeper
   {
     ArgumentNullException.ThrowIfNull(tuner);
     ArgumentNullException.ThrowIfNull(channels);
-    if (samplesPerMeasurement < ChannelPowerMeter.FftSize)
-    {
-      throw new ArgumentOutOfRangeException(nameof(samplesPerMeasurement),
-        $"Must be at least {ChannelPowerMeter.FftSize} samples (one FFT frame).");
-    }
+    ThrowIfInvalidSamplesPerMeasurement(samplesPerMeasurement);
 
     IqSample[] buffer = new IqSample[samplesPerMeasurement];
     List<ChannelLevel> levels = new(channels.Count);
