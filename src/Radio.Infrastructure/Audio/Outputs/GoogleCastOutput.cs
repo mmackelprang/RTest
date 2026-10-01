@@ -217,6 +217,13 @@ public class GoogleCastOutput : AudioOutputBase
   private bool _lastSetMute;
   private bool _suppressNextVolumeEvent;
 
+  // AUD-54 (1). The ReceiverChannel that currently carries OnReceiverStatusChanged, so
+  // SubscribeToReceiverStatus can detach it from there before attaching it elsewhere.
+  // Read and written only inside _receiverStatusSubscriptionLock, which guards nothing else
+  // and is never held across an await.
+  private ReceiverChannel? _receiverStatusSubscribedChannel;
+  private readonly object _receiverStatusSubscriptionLock = new();
+
   // AUD-80: the level the current connection should hold on the device — the volume
   // remembered for it, else the level it reported when first seen, else NaN (unknown).
   // SyncVolumeAfterStartAsync pushes this after the receiver app launches; NaN means
@@ -342,6 +349,7 @@ public class GoogleCastOutput : AudioOutputBase
       // Network work happens on the snapshot, outside the lock.
       if (stale != null)
       {
+        UnsubscribeFromReceiverStatus(stale);
         try { await stale.DisconnectAsync().ConfigureAwait(false); }
         catch (Exception ex) { _logger.LogDebug(ex, "Error disconnecting previous Cast client during reinit"); }
       }
@@ -1635,6 +1643,17 @@ public class GoogleCastOutput : AudioOutputBase
   /// <c>_client</c> so the caller's snapshot is used — a concurrent connect or
   /// teardown may already have swapped the field.
   /// </param>
+  /// <remarks>
+  /// AUD-54 (1). A client is reused when the next device was live-discovered, so a second
+  /// connect used to attach <see cref="OnReceiverStatusChanged"/> a second time to the same
+  /// <see cref="ReceiverChannel"/>, and a disconnect removed only one of the two. This method
+  /// now removes the handler from the channel it was last attached to (which may belong to an
+  /// older client that was replaced without being unsubscribed) and from this channel, then
+  /// attaches it once. Within these two methods, at most one channel carries the handler at a
+  /// time. It does not order this call against a teardown that runs between a connect's publish
+  /// and its subscribe; a handler attached after such a teardown stays until the next subscribe
+  /// or unsubscribe.
+  /// </remarks>
   private void SubscribeToReceiverStatus(ChromecastClient? client)
   {
     if (client == null)
@@ -1643,11 +1662,25 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     var receiverChannel = client.GetChannel<ReceiverChannel>();
-    if (receiverChannel != null)
+    if (receiverChannel == null)
     {
-      receiverChannel.ReceiverStatusChanged += OnReceiverStatusChanged;
-      _logger.LogDebug("Subscribed to Cast receiver status changes for volume sync");
+      return;
     }
+
+    lock (_receiverStatusSubscriptionLock)
+    {
+      if (_receiverStatusSubscribedChannel != null)
+      {
+        _receiverStatusSubscribedChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+      }
+
+      // Removing before adding makes a repeat subscribe on the same channel a no-op.
+      receiverChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+      receiverChannel.ReceiverStatusChanged += OnReceiverStatusChanged;
+      _receiverStatusSubscribedChannel = receiverChannel;
+    }
+
+    _logger.LogDebug("Subscribed to Cast receiver status changes for volume sync");
   }
 
   /// <summary>
@@ -1662,9 +1695,18 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     var receiverChannel = client.GetChannel<ReceiverChannel>();
-    if (receiverChannel != null)
+    if (receiverChannel == null)
+    {
+      return;
+    }
+
+    lock (_receiverStatusSubscriptionLock)
     {
       receiverChannel.ReceiverStatusChanged -= OnReceiverStatusChanged;
+      if (ReferenceEquals(_receiverStatusSubscribedChannel, receiverChannel))
+      {
+        _receiverStatusSubscribedChannel = null;
+      }
     }
   }
 
