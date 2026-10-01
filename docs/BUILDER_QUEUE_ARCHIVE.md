@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (79)
+## Shipped rows (80)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2913,3 +2913,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-36.md`](queue/AUD-36.md)**
 
 ✅ **SHIPPED AND AGENT-VERIFIED 2026-09-30.** The setting was removed from the options class, the Web DTO, the System Config field, appsettings and the design docs. The start-up line now reports sample duration and idle poll. The appliance's stored `fingerprinting:identificationIntervalSeconds` row stays as an orphan, and it is harmless: a mutation-checked test pins the Web load against the box's real section JSON, and the deployed page loads the stored values with no interval field.
+
+### AUD-16 — The deprecated RF320 USB radio and its submodule are removed; the RTL-SDR is the only tuner.
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#743](https://github.com/mmackelprang/RTest/pull/743) (squash `a4bad7c`) — owner instruction 2026-09-30: *"merge and deploy AUD-16"*. Rebased onto `16cf71b`; gates re-run on `929f953` (46 warnings / 0 errors `--no-incremental`; full suite green except the six known `SrcVariableResamplerTests` and the live-network NWS integration test). Deployed `a4bad7c` 2026-09-30 ~21:51 EDT, verified on both services, kiosk live. **Agent-verified on the box, not owner-run**: `/api/radio/devices` lists only `RTLSDRCore`; the RF320 field and dropdown option are gone (Playwright, 1920×720, zero console errors); four sources switched; SDR restored on 92.3 FM. Nothing left for the owner |
+| Plan | _decided by the owner ruling (D-D, remove)_ · _(superseded, kept for the record:)_ _plan TBD — ⚠ **"keep it, documented" is an acceptable close**; the greenfield rule makes removal permitted, not required. Scope first: is the `RaddyRF320BT/` submodule in or out, and what happens to an orphaned SQLite store row?_ |
+| Spec / handoff | _no spec doc — owner input 2026-09-07: "The Radio USB connection has been deprecated so that the SDRRTL radio is really the only one supported"_ · **already live** at `RadioFactory.cs:147` (defaults to `RTLSDRCore`), `:336-339` (blank port ⇒ RF320 never offered), `SystemConfigPage.razor:280` (ships the copy) |
+| Depends on | — _(no row dependency. **Not `AUD-13`** — that row's real defect is the wrong-jack fallback on a NON-empty port and must not be folded in.)_ |
+| Branch | `fix/aud-16-remove-rf320` _(the row had named `chore/aud-16-retire-usb-radio-path`, which was never created)_ |
+
+**Detail: [`queue/AUD-16.md`](queue/AUD-16.md)**
+
+✅ **SHIPPED AND AGENT-VERIFIED 2026-10-01.** Merged as [#743](https://github.com/mmackelprang/RTest/pull/743) (squash `a4bad7c`) and deployed 2026-09-30 ~21:51 EDT (2026-10-01 UTC). On the box, `GET /api/radio/devices` returns one device, `RTLSDRCore`. The System Config Devices tab shows only the Vinyl field, and the Radio tab dropdown lists only RTL-SDR. Vinyl, File Player, Bluetooth and Radio each switched. After the restart the SDR came back on 92.3 FM (signal 100) from the persisted `CurrentSource=Radio`, and the start-up warnings say nothing about Radio config. Not run: `NRestarts`, the USB Audio refusal and a retune away and back; see the dossier. ✅🔬 **BUILT 2026-09-30 (Phase 2i): the RF320 USB radio is removed.** That covers `RadioAudioSource`, the factory branch, `DeviceOptions.Radio` and its DTOs, the System Config field and dropdown option, the `SourceTypeHelper` arms, the `external/RaddyRF320BT` submodule and `.gitmodules`, and CI's `submodules: true`. `AudioSourceType.Radio` is kept, now meaning the RTL-SDR. The box's orphaned `devices:radio` / `devices:Radio` rows and `Devices:Radio:USBPort=AB13X` are left in place. Mutation-checked tests show they are inert. ⛔ **Not deployed or box-verified.** The Builder's deploy was refused by the session's permission classifier. The post-deploy checks are listed in the dossier. Filed `AUD-89` from the review. 📝 **OWNER RULING 2026-09-28 (D-D, [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md) §4): REMOVE ALL RaddyRF320BT SUPPORT — the USB radio source, its protocol/config/docs surface AND the `external/RaddyRF320BT` submodule. The RTL-SDR supersedes it. This is now a removal PR, not a keep-or-delete question; `"keep it, documented"` is no longer an acceptable close.** ⭐ **NEW 2026-09-08 — retire the deprecated USB radio path. ⚠ The deprecation itself is ALREADY implemented, so this is a removal decision, not a fix.** — [detail](queue/AUD-16.md)
