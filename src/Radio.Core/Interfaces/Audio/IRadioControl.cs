@@ -147,7 +147,12 @@ public interface IRadioControl
   /// <returns>A task representing the asynchronous operation.</returns>
   /// <exception cref="ArgumentOutOfRangeException">
   /// <paramref name="frequency"/> is outside <paramref name="band"/>'s range (checked before
-  /// anything is tuned), or the tune failed.
+  /// anything is tuned).
+  /// </exception>
+  /// <exception cref="InvalidOperationException">
+  /// The receiver failed to switch band: switching threw, or streaming could not be restarted
+  /// afterwards. A tuner that refuses the frequency itself is not reported (the RTL-SDR receiver
+  /// logs it and carries on).
   /// </exception>
   Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default);
 

@@ -64,6 +64,19 @@ public class SDRRadioAudioSourceTuneInBandTests
   }
 
   [Fact]
+  public async Task ReceiverFailsToRestartStreaming_ThrowsInvalidOperation_NotArgumentOutOfRange()
+  {
+    _device.Setup(d => d.IsStreaming).Returns(true);
+    _device.Setup(d => d.StartStreaming()).Returns(false);
+
+    InvalidOperationException ex = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+      _source.TuneInBandAsync(RadioBand.VHF, new Frequency(146_520_000)));
+
+    Assert.Contains("VHF", ex.Message);
+    _device.Verify(d => d.StartStreaming(), Times.Once);
+  }
+
+  [Fact]
   public async Task SameBand_KeepsTheUsersStep()
   {
     await _source.SetFrequencyStepAsync(new Frequency(50_000));

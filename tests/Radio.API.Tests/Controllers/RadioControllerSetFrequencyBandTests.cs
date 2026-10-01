@@ -42,6 +42,8 @@ public class RadioControllerSetFrequencyBandTests
   [InlineData("VHF", RadioBand.VHF)]
   [InlineData("wb", RadioBand.WB)]
   [InlineData("Air", RadioBand.AIR)]
+  // Trimmed, as the band map controller's band parameter is.
+  [InlineData(" FM ", RadioBand.FM)]
   public async Task WithBand_TunesInThatBand_Only(string band, RadioBand expected)
   {
     ActionResult<RadioStateDto> result = await _controller.SetFrequency(
@@ -56,13 +58,19 @@ public class RadioControllerSetFrequencyBandTests
   [InlineData("LW")]
   [InlineData("3")]
   [InlineData("")]
+  // Enum.TryParse reads flags syntax: FM (1) | WB (2) is 3, which is VHF.
+  [InlineData("FM,WB")]
+  [InlineData("Weather")]
   public async Task WithInvalidBand_Returns400_WithoutTuning(string band)
   {
     ActionResult<RadioStateDto> result = await _controller.SetFrequency(
       new SetFrequencyRequest { Frequency = 120_000_000, Band = band });
 
     BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
-    Assert.Contains("Invalid band", System.Text.Json.JsonSerializer.Serialize(bad.Value));
+    string body = System.Text.Json.JsonSerializer.Serialize(bad.Value);
+    Assert.Contains("Invalid band", body);
+    // The same list, in the same order, as the band map endpoints.
+    Assert.Contains("Valid values are: AM, FM, SW, AIR, WB, VHF", body);
     _radio.Verify(r => r.TuneInBandAsync(It.IsAny<RadioBand>(), It.IsAny<Frequency>(), It.IsAny<CancellationToken>()), Times.Never);
     _radio.Verify(r => r.SetFrequencyAsync(It.IsAny<Frequency>(), It.IsAny<CancellationToken>()), Times.Never);
   }
@@ -78,5 +86,18 @@ public class RadioControllerSetFrequencyBandTests
 
     BadRequestObjectResult bad = Assert.IsType<BadRequestObjectResult>(result.Result);
     Assert.Contains("outside the WB band", System.Text.Json.JsonSerializer.Serialize(bad.Value));
+  }
+
+  [Fact]
+  public async Task WithBand_ReceiverFailsToSwitch_Returns500_NotA400()
+  {
+    _radio.Setup(r => r.TuneInBandAsync(RadioBand.VHF, It.IsAny<Frequency>(), It.IsAny<CancellationToken>()))
+      .ThrowsAsync(new InvalidOperationException("The receiver failed to switch to the VHF band at 146.52 MHz"));
+
+    ActionResult<RadioStateDto> result = await _controller.SetFrequency(
+      new SetFrequencyRequest { Frequency = 146_520_000, Band = "VHF" });
+
+    ObjectResult error = Assert.IsType<ObjectResult>(result.Result);
+    Assert.Equal(500, error.StatusCode);
   }
 }

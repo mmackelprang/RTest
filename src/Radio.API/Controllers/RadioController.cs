@@ -79,12 +79,17 @@ public class RadioController : ControllerBase
   {
     try
     {
-      // Enum.TryParse alone also accepts numeric strings ("3"); require a defined name.
+      // Exact band codes only, parsed as the band map parses them (case-insensitive, trimmed).
+      // Enum.TryParse would also accept numeric strings ("3") and flags syntax ("FM,WB").
+      // The codes are the RadioBand names, so the code maps straight onto the enum.
       RadioBand band = default;
-      if (request.Band != null
-          && (!Enum.TryParse(request.Band, true, out band) || !Enum.IsDefined(band) || int.TryParse(request.Band, out _)))
+      if (request.Band != null)
       {
-        return BadRequest(new { error = $"Invalid band: {request.Band}. Valid values are: {string.Join(", ", Enum.GetNames<RadioBand>())}" });
+        if (!RTLSDRCore.Sweep.BandSweepPlans.TryParseBandCode(request.Band, out RTLSDRCore.Enums.BandType bandType))
+        {
+          return BadRequest(new { error = $"Invalid band: {request.Band}. Valid values are: {string.Join(", ", RTLSDRCore.Sweep.BandSweepPlans.BandCodes)}" });
+        }
+        band = Enum.Parse<RadioBand>(RTLSDRCore.Sweep.BandSweepPlans.BandCode(bandType));
       }
 
       // Note: Frequency validation is delegated to IRadioControl.SetFrequencyAsync / TuneInBandAsync,

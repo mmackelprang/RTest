@@ -520,6 +520,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// <remarks>
   /// One <c>RadioReceiver.SetBand(type, hz)</c> call. The range check comes first because
   /// <c>SetBand</c> clamps an out-of-range frequency into the band without reporting it.
+  /// <c>SetBand</c> returns false only when switching throws or streaming cannot be restarted
+  /// afterwards; it does not report a tuner that refused the frequency (that is logged as a
+  /// warning by the receiver), so neither does this method.
   /// </remarks>
   public async Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default)
   {
@@ -535,8 +538,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     bool success = await Task.Run(() => _radioReceiver.SetBand(rtlBandType, frequency.Hertz), cancellationToken);
     if (!success)
     {
-      throw new ArgumentOutOfRangeException(nameof(frequency),
-        $"Failed to tune to {frequency.ToDisplayString()} in the {band} band");
+      // A receiver fault, not a bad argument: callers map ArgumentOutOfRangeException to a 400.
+      throw new InvalidOperationException(
+        $"The receiver failed to switch to the {band} band at {frequency.ToDisplayString()}");
     }
 
     if (bandChanged)
