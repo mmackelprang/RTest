@@ -5,8 +5,27 @@ namespace Radio.Web.Services;
 
 /// <summary>A labelled tick on the BAND view's frequency axis.</summary>
 /// <param name="Hz">The tick's frequency, in Hz.</param>
-/// <param name="Label">The label drawn under it: kHz on AM, MHz otherwise, without a unit.</param>
+/// <param name="Label">The tick's value: kHz on AM, MHz otherwise, without a unit.</param>
 public sealed record BandAxisTick(double Hz, string Label);
+
+/// <summary>How an axis label sits against its tick.</summary>
+public enum BandAxisLabelAlign
+{
+  /// <summary>Centred on the tick.</summary>
+  Center,
+
+  /// <summary>Its left edge at the tick, so a tick at the plot's left edge is not clipped.</summary>
+  Start,
+
+  /// <summary>Its right edge at the tick, so a tick at the plot's right edge is not clipped.</summary>
+  End,
+}
+
+/// <summary>A label in the axis strip under the BAND plot.</summary>
+/// <param name="Fraction">Where its tick is, 0 (left edge of the plot) to 1 (right edge).</param>
+/// <param name="Text">What it reads: the tick's value, and on the last label of a non-FM band the unit too.</param>
+/// <param name="Align">How it sits against its tick.</param>
+public sealed record BandAxisLabel(double Fraction, string Text, BandAxisLabelAlign Align);
 
 /// <summary>
 /// The frequency axis and channel grid of one band's map in the visualizer's BAND view (AUD-91): the
@@ -24,6 +43,24 @@ public sealed record BandAxis(
 {
   /// <summary>Most labelled ticks a non-FM axis gets. FM keeps its six fixed labels.</summary>
   public const int MaxTicks = 6;
+
+  /// <summary>
+  /// A label whose tick is at least this far across the plot is end-aligned. FM's 108 (fraction 1) is
+  /// the only FM label past it, and is end-aligned as AUD-76 drew it.
+  /// </summary>
+  public const double LabelEndFraction = 0.97;
+
+  /// <summary>
+  /// A label whose tick is at most this far across the plot is start-aligned. Below FM's first label
+  /// (88 MHz, fraction 0.0244), which AUD-76 centred and which stays centred.
+  /// </summary>
+  public const double LabelStartFraction = 0.02;
+
+  /// <summary>
+  /// A non-FM band's tap snap is at least this share of the plot's span, so that a tap can land on a
+  /// peak on a wide band: AIR's two spacings (±50 kHz) are about ±1.5 px across its 29 MHz.
+  /// </summary>
+  public const double SnapSpanFraction = 0.02;
 
   /// <summary>The FM axis exactly as AUD-76 shipped it: 87.5–108 MHz, channels 87.9–107.9 at 200 kHz.</summary>
   public static readonly BandAxis Fm = new(
@@ -60,10 +97,15 @@ public sealed record BandAxis(
   public bool IsKhz => string.Equals(Band, "AM", StringComparison.OrdinalIgnoreCase);
 
   /// <summary>
-  /// How far either side of a tap a peak may be and still win the tap, in Hz: two channel spacings
-  /// (±0.4 MHz on FM, ±50 kHz on WB and AIR, ±25 kHz on VHF).
+  /// How far either side of a tap a peak may be and still win the tap, in Hz. FM: two channel
+  /// spacings, ±0.4 MHz, exactly as AUD-76. Any other band: two channel spacings or
+  /// <see cref="SnapSpanFraction"/> of the plot's span, whichever is wider — ±580 kHz on AIR's
+  /// 29 MHz, ±40 kHz on VHF's 2 MHz window, and ±50 kHz on WB, whose 175 kHz span makes 2% smaller
+  /// than two spacings.
   /// </summary>
-  public long SnapWindowHz => 2 * ChannelSpacingHz;
+  public long SnapWindowHz => IsFm(Band)
+    ? 2 * ChannelSpacingHz
+    : Math.Max(2 * ChannelSpacingHz, (long)Math.Round(SnapSpanFraction * (DisplayMaxHz - DisplayMinHz)));
 
   /// <summary>The plot's width in channel spacings (102.5 on FM). A drawn bar is half a spacing wide.</summary>
   public double ChannelsAcross => (double)(DisplayMaxHz - DisplayMinHz) / ChannelSpacingHz;
@@ -196,6 +238,30 @@ public sealed record BandAxis(
     }
 
     return [];
+  }
+
+  /// <summary>
+  /// The axis strip's labels, one per tick of <see cref="Ticks"/>. A label near either edge of the plot
+  /// is aligned to stay inside it (<see cref="LabelStartFraction"/>, <see cref="LabelEndFraction"/>);
+  /// the rest are centred. On a band other than FM the last label carries the unit (<c>135 MHz</c>,
+  /// <c>1600 kHz</c>); FM's read <c>88</c> … <c>108</c>, as AUD-76 shipped them.
+  /// </summary>
+  public IReadOnlyList<BandAxisLabel> Labels()
+  {
+    IReadOnlyList<BandAxisTick> ticks = Ticks();
+    string unit = IsKhz ? " kHz" : " MHz";
+    BandAxisLabel[] labels = new BandAxisLabel[ticks.Count];
+    for (int i = 0; i < ticks.Count; i++)
+    {
+      double fraction = HzToFraction(ticks[i].Hz);
+      BandAxisLabelAlign align = fraction >= LabelEndFraction ? BandAxisLabelAlign.End
+        : fraction <= LabelStartFraction ? BandAxisLabelAlign.Start
+        : BandAxisLabelAlign.Center;
+      string text = i == ticks.Count - 1 && !IsFm(Band) ? ticks[i].Label + unit : ticks[i].Label;
+      labels[i] = new BandAxisLabel(fraction, text, align);
+    }
+
+    return labels;
   }
 
   private static decimal PowerOfTen(int k)

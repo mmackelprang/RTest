@@ -67,7 +67,8 @@ public static class BandMapText
   /// <summary>
   /// A frequency as the BAND view names it for <paramref name="band"/>, without a unit (AUD-91): FM in MHz
   /// with one decimal (<c>99.5</c>, as AUD-76), AM in whole kHz (<c>1010</c>), and every other band in MHz
-  /// with three decimals (<c>162.475</c>), enough for a 12.5 kHz grid to the nearest kHz.
+  /// with at least three decimals and as many more as the frequency needs, down to the hertz
+  /// (<c>162.475</c>, <c>118.100</c>, and <c>162.4125</c> for a channel of VHF's 12.5 kHz grid).
   /// </summary>
   public static string FormatFrequency(double hz, string? band)
   {
@@ -78,6 +79,21 @@ public static class BandMapText
 
     return string.Equals(band, "FM", StringComparison.OrdinalIgnoreCase)
       ? FormatMhz(hz)
-      : (hz / 1_000_000.0).ToString("0.000", CultureInfo.InvariantCulture);
+      : (hz / 1_000_000.0).ToString("0.000###", CultureInfo.InvariantCulture);
+  }
+
+  /// <summary>
+  /// A frequency and its band, as the tune messages name a station: <c>99.5 FM</c> on FM, as AUD-76
+  /// shipped it; elsewhere with the unit, <c>162.475 MHz WB</c>, <c>1010 kHz AM</c>.
+  /// </summary>
+  public static string FormatStation(double hz, string band)
+  {
+    if (string.Equals(band, "FM", StringComparison.OrdinalIgnoreCase))
+    {
+      return $"{FormatMhz(hz)} {band}";
+    }
+
+    string unit = string.Equals(band, "AM", StringComparison.OrdinalIgnoreCase) ? "kHz" : "MHz";
+    return $"{FormatFrequency(hz, band)} {unit} {band}";
   }
 }

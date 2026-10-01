@@ -2407,9 +2407,17 @@ body {
   transform: translate(-50%, -50%);
 }
 
-.visualizer-axis.is-band span:last-child {
+/* AUD-91: a label at either edge of the plot is aligned inside it rather than
+   centred and clipped. BandAxis.Labels() decides which: FM's 108 is the only FM
+   label at an edge and is end-aligned exactly as AUD-76's :last-child rule drew it. */
+.visualizer-axis.is-band span.is-edge-end {
   transform: translate(-100%, -50%);
   padding-right: var(--sp-1);
+}
+
+.visualizer-axis.is-band span.is-edge-start {
+  transform: translate(0, -50%);
+  padding-left: var(--sp-1);
 }
 
 /* BAND overlay: status line (age / "Scanning…" / tune feedback) on the left,
