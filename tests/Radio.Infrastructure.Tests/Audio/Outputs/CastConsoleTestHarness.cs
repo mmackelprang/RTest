@@ -258,7 +258,8 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
     float reportedLevel = 0.40f,
     bool reportedMuted = false,
     bool streaming = true,
-    Func<Task<(float Volume, bool Muted)?>>? statusRead = null)
+    Func<Task<(float Volume, bool Muted)?>>? statusRead = null,
+    CastConnectOptions? options = null)
   {
     if (Output.State == AudioOutputState.Created)
     {
@@ -283,7 +284,7 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
       IpAddress = "127.0.0.1",
       Port = _port,
       Model = "test"
-    });
+    }, options ?? CastConnectOptions.Default);
 
     if (streaming)
     {

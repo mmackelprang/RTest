@@ -821,6 +821,154 @@ public class CastConsoleVolumeFollowerTests
     Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // --- AUD-37 × AUD-81: the reconnect watcher's held connect and F11 ---
+
+  /// <summary>The reconnect watcher's connect (AUD-37): held until the receiver is confirmed free, automatic.</summary>
+  private static readonly CastConnectOptions WatcherConnect =
+    new() { HoldUntilReceiverConfirmed = true, AutomaticAttempt = true };
+
+  /// <summary>
+  /// What the reconnect watcher does to the same speaker after a loss, up to the start: a held
+  /// connect (the speaker reports <paramref name="reportedLevel"/> and <paramref name="reportedMuted"/>,
+  /// and repeats it as a status while held), then — the receiver found free — the confirmation.
+  /// Asserts that nothing reaches the speaker or the console while held, and that F11's recall waits
+  /// for the confirmation.
+  /// </summary>
+  private static async Task WatcherReconnectAsync(
+    CastConsoleTestHarness h, SoundFlowMasterMixer mixer, float reportedLevel, bool reportedMuted)
+  {
+    var consoleMuted = mixer.IsMuted;
+    await h.ConnectAsync("cast-a", reportedLevel: reportedLevel, reportedMuted: reportedMuted,
+      streaming: false, options: WatcherConnect);
+
+    Assert.True(h.Output.IsHoldingForReceiverConfirmation);
+    h.RaiseStatus(reportedLevel, muted: reportedMuted); // a status while the receiver is read
+    Assert.Empty(h.Commands);                       // no AUD-80 restore, no mute, no stop, while held
+    Assert.Empty(h.External);                       // nothing reached the console
+    Assert.Equal(consoleMuted, mixer.IsMuted);
+    Assert.False(h.Output.IsSpeakerMutedByConsole); // F11 waits for the confirmation
+
+    h.Output.ConfirmReceiverAvailable();
+    Assert.False(h.Output.IsHoldingForReceiverConfirmation);
+  }
+
+  // The AUD-37 review HIGH, closed by AUD-81's F11. Mutation-checked: with the recall removed from
+  // ConfirmReceiverAvailable, the after-start push re-mutes the speaker as "muted on its own side"
+  // and the last assertions fail, with and without the device model.
+  [Fact]
+  public async Task AConsoleMutedSpeaker_LostThenAutoReconnected_AfterTheConsoleWasUnmuted_IsUnmuted()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f); // AUD-80 remembers 0.40 for cast-a
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower); // no unmute on the loss
+
+    mixer.IsMuted = false; // unmuted while on the local output
+    await follower.LastMutePush;
+    Assert.Empty(h.Commands);
+
+    // The speaker is still muted for the console, and reports a level other than the remembered one.
+    await WatcherReconnectAsync(h, mixer, reportedLevel: 0.30f, reportedMuted: true);
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // re-armed at the confirmation
+
+    await StartCastingAsync(h, follower);
+
+    Assert.Equal(new[] { 0.40f }, h.VolumeSends()); // the remembered level, after the start
+    Assert.False(h.DeviceMuted);                     // UNMUTED: by the level (device model) or the reconcile
+    Assert.DoesNotContain(true, h.MuteSends());      // never muted again
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.False(mixer.IsMuted);                     // the console stays unmuted
+    Assert.Empty(h.External);
+  }
+
+  [Fact]
+  public async Task AConsoleMutedSpeaker_LostThenAutoReconnected_UnderAStillMutedConsole_StaysMuted()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+
+    await WatcherReconnectAsync(h, mixer, reportedLevel: 0.30f, reportedMuted: true);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+
+    await StartCastingAsync(h, follower);
+
+    // No level at all (a level would unmute it on the device model): it is held for the unmute.
+    Assert.Empty(h.Commands);
+    Assert.True(h.DeviceMuted); // no audible window
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.True(mixer.IsMuted);
+    Assert.Empty(h.External);
+
+    // The console's unmute then sends the held level first, then the unmute.
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+    Assert.Equal(0.40f, h.VolumeSends().Single());
+    Assert.False(h.DeviceMuted);
+    Assert.False(mixer.IsMuted);
+  }
+
+  [Fact]
+  public async Task AConsoleMutedSpeaker_UnmutedElsewhereWhileLost_IsMutedAsTheAutoReconnectStarts()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+
+    // Someone unmuted it while it was not connected; the console is still muted.
+    await WatcherReconnectAsync(h, mixer, reportedLevel: 0.30f, reportedMuted: false);
+    Assert.False(h.Output.IsSpeakerMutedByConsole); // the record is forgotten at the confirmation
+
+    await StartCastingAsync(h, follower);
+
+    // The start-time mute comes first, and the level is then held for the console's unmute.
+    Assert.Equal(new[] { "mute" }, h.Kinds());
+    Assert.True(h.DeviceMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    Assert.True(mixer.IsMuted);
+    Assert.Empty(h.External);
+  }
+
+  // Task 5 (AUD-37 × AUD-81): the watcher stands down from a receiver busy with another sender with
+  // a plain DisconnectAsync. AUD-81's teardown release (application stop, unmute, fresh-connection
+  // unmute) must never touch it — it was never ours to mute — and an automatic attempt logs no
+  // Warning or Error. The console-mute record survives, so a later confirmed reconnect still recalls it.
+  [Fact]
+  public async Task AStandDownFromABusyReceiver_SendsNothing_AndKeepsTheConsoleMuteRecord()
+  {
+    await using var h = NewHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    await h.ConnectAsync("cast-a", reportedLevel: 0.30f, reportedMuted: true, streaming: false, options: WatcherConnect);
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    var logBefore = h.OutputLog.Lines().Count;
+
+    await h.Output.DisconnectAsync(automaticAttempt: true, CancellationToken.None);
+
+    Assert.Empty(h.Commands); // no "appstop", "unmute", "fresh" or "fresh-unmute"
+    Assert.DoesNotContain(h.OutputLog.Lines().Skip(logBefore), l => l.Level >= LogLevel.Warning);
+    Assert.Empty(h.External);
+    Assert.False(mixer.IsMuted);
+
+    // The receiver is free next time: the record was kept, and the confirmation re-arms it.
+    await WatcherReconnectAsync(h, mixer, reportedLevel: 0.30f, reportedMuted: true);
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+  }
+
   [Fact]
   public async Task AfterDispose_MasterChangesAreIgnored()
   {
