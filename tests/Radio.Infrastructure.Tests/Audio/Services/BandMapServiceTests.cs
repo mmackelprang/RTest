@@ -338,6 +338,19 @@ public sealed class BandMapServiceTests : IDisposable
     Assert.Single(_devices);
   }
 
+  [Fact]
+  public async Task Dispose_Twice_DoesNotThrow_AndStopAfterDisposeIsHarmless()
+  {
+    // The host's container disposes this singleton once per registration that resolved it
+    // (the concrete type and the IHostedService factory), so a second Dispose is real.
+    BandMapService service = CreateService();
+    await service.StartAsync(CancellationToken.None);
+
+    service.Dispose();
+    service.Dispose();
+    await service.StopAsync(CancellationToken.None);
+  }
+
   private sealed class FakeLiveSweeper : ILiveBandSweeper
   {
     private int _calls;

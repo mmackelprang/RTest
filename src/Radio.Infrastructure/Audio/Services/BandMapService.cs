@@ -90,6 +90,7 @@ public sealed class BandMapService : IHostedService, IDisposable
   private readonly object _lock = new();
   private ITimer? _timer;
   private bool _stopping;
+  private bool _disposed;
   private BandMap? _map;
   private BandSweepOutcome? _last;
   private SweepRun? _running;
@@ -230,6 +231,10 @@ public sealed class BandMapService : IHostedService, IDisposable
     Task running;
     lock (_lock)
     {
+      if (_disposed)
+      {
+        return;
+      }
       _stopping = true;
       _timer?.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
       running = _sweepTask;
@@ -247,10 +252,20 @@ public sealed class BandMapService : IHostedService, IDisposable
   }
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// Idempotent: when both the <see cref="BandMapService"/> registration and the
+  /// <see cref="IHostedService"/> factory registration that returns the same instance have been
+  /// resolved, the container disposes the instance once for each.
+  /// </remarks>
   public void Dispose()
   {
     lock (_lock)
     {
+      if (_disposed)
+      {
+        return;
+      }
+      _disposed = true;
       _stopping = true;
       _timer?.Dispose();
       _timer = null;
