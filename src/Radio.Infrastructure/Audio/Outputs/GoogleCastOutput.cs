@@ -1328,6 +1328,22 @@ public class GoogleCastOutput : AudioOutputBase
       return new { success = false, error = "Not connected to a Cast device" };
     }
 
+    // AUD-54 (3). This relaunches the receiver application on the connected device. On a
+    // live session that hands the device a new transport id while the DirectChannel loop keeps
+    // sending to the old one, so it is refused while an operation of ours owns the session.
+    // A StartAsync still launching the receiver leaves the state at Ready until it reaches
+    // Streaming, so this check does not see that window.
+    var state = State;
+    if (state is AudioOutputState.Streaming or AudioOutputState.Connecting or AudioOutputState.Stopping)
+    {
+      return new
+      {
+        success = false,
+        error = $"Cast output is {state} — stop casting before running a test playback, " +
+                "because the test relaunches the receiver app and would break the live session."
+      };
+    }
+
     try
     {
       // Re-launch the media receiver app to get a clean session
