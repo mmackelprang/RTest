@@ -826,8 +826,9 @@
   /// <summary>
   /// Applies one broadcast. Outside BAND it is ignored. A band other than the one shown re-reads the map
   /// at once — once per band change, not once per broadcast, since telemetry ticks repeat the state up
-  /// to twice a second. On VHF, a frequency outside the window shown re-reads the map once per window,
-  /// so the API's window can follow the radio. Otherwise only a changed frequency does anything: it
+  /// to twice a second. On VHF, a frequency outside the window shown re-reads the map once per window.
+  /// That re-read moves the window only while no VHF map is stored: once one is, the API returns the
+  /// stored map's range, and only a new sweep moves it. Otherwise only a changed frequency does anything: it
   /// moves the station marker, a redraw and no API call; a repeated tick does nothing at all.
   /// </summary>
   private async Task ApplyRadioStateAsync(RadioStateDto dto)
@@ -843,7 +844,9 @@
       if (!SameBand(dto.Band, _bandReadTriggeredFor))
       {
         _bandReadTriggeredFor = dto.Band;
-        await RefreshBandAsync(includePresets: false);
+        // Fetch presets too while none have arrived: this read can supersede the opening read that
+        // carried them, which would otherwise leave the preset ticks empty until the idle refresh.
+        await RefreshBandAsync(includePresets: _presets == null);
         CompleteBandCycle();
       }
 

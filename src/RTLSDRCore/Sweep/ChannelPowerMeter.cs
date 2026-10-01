@@ -5,7 +5,8 @@ namespace RTLSDRCore.Sweep;
 /// <summary>
 /// Measures the in-channel signal level of a block of IQ samples with a
 /// Hann-windowed FFT. Used by the band sweep (<see cref="BandSweeper"/>) to
-/// give each FM channel a single comparable number.
+/// give each channel a single comparable number: one window per tune on FM,
+/// several offset windows from one capture on the narrowband bands.
 /// </summary>
 /// <remarks>
 /// <para>
