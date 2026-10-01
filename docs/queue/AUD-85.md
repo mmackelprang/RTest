@@ -61,6 +61,24 @@ Separate from the race above, and **existing behaviour, not a defect found in a 
 
 Line numbers were read on `main` at `45a220e`. Whether "stop casting" should also mean "forget this speaker" is an owner question. If the answer is no, the fix belongs in this row's plan, since it is the same preference being cleared by a different path.
 
+## As built (2026-10-02, with AUD-37 merged)
+
+**One connecting party per pick.** A Cast pick with a saved default sends only `POST /api/devices/cast/connect` (`CastDefaultPick`). That endpoint promotes Cast through the output gate and re-saves the default on success. A failed pick keeps the saved default and opens the Cast dropdown. The API's fire-and-forget auto-connect still runs for any other caller of `POST /api/devices/output` with `google-cast`.
+
+**The pick and the AUD-37 reconnect watcher.** `cast/connect` validates the request first (503 with no Cast output, 400 without `DeviceId` or `IpAddress`). It then calls `ICastReconnectControl.CancelCastReconnectForCastPickAsync` before it reads the Cast output.
+- That call cancels a running watcher and waits up to 15 s (`CastPickReconnectWaitBound`). The 15 s is a budget, not a guarantee: SharpCaster's connect has no bound of its own. Other output and Cast actions keep the 3 s cancel.
+- **Same device.** If the watcher is reconnecting the picked device, the cancel is marked as a pick of it. A run that has a connection up keeps it, starts it and switches the output to Cast. The switch is conditional on no output selection since the drop. The pick then finds Cast streaming to its device and answers 200 on the already-streaming path. If Cast is not streaming once that switch has gone through, the run switches the output from Cast back to the recovery's local output itself.
+- **Another device.** The watcher is cancelled as usual and removes only a connection it made itself. The pick waits for that run, then connects its own device.
+- **Bound passed.** If the run is still going after 15 s, the pick answers 409 and touches nothing. After that 409 the run may still keep its connection and switch to Cast while the UI shows the request as busy, and the default is not re-saved in that case.
+- **Brief dual output.** When a pick adopts the watcher's connection, the connection is started while the local output is still active, so Cast and local can play together until the switch. The same happens when a short-bound cancel finds a run marked by an earlier pick that answered 409. That run's switch is then refused and it tears the connection down.
+
+**Atomic conditional tear-down.** A cancelled run that does not keep its connection removes it only while Cast is not the active output. On the production engine that check and the tear-down run under one acquisition of the output lock (`SoundFlowAudioEngine.TearDownCastOutputUnlessActiveAsync`). A promotion of Cast either lands first, and the connection is kept for it, or waits until the tear-down has finished.
+
+**Status codes and restoring local** (`DevicesController.ConnectToCastDevice`):
+- **409, busy.** The output was `Connecting` before the attempt, or `GoogleCastOutput.ConnectAsync`'s state guard refused. The refusal carries the refused state (`GoogleCastOutput.TryGetConnectRefusedState`). Local is restored only when Cast was streaming on entry (this call's own stop-before-switch stopped it) and the refused state is neither `Connecting` nor `Streaming`. A `Connecting` or `Streaming` state means another party's connect owns the output, and restoring local would tear that connect down. If that party's connect then fails, local is restored only by its own failure path. This endpoint's 500 and 502 paths do that; the fire-and-forget auto-connect of `POST /api/devices/output` does not.
+- **502.** Cast is not streaming to the requested device after the gate. Local is restored if Cast is still the active output. The default is not saved.
+- **500.** The connect threw. Local is restored if Cast is the active output and not streaming.
+
 ## Verification
 
 ⛔ **NOT auto-mergeable** — output-selection path; needs an owner Cast-pick check.

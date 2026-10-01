@@ -19,6 +19,7 @@ _(Was: 🔬 **BUILT 2026-10-01 (batch D), HELD for the owner: PR #751 is open an
 - Option `GoogleCast.AutoReconnect` turns it off.
 
 **It yields to the user.** `DevicesController` cancels the watcher first in `SetOutputDevice`, `ConnectToCastDevice` and `DisconnectFromCastDevice` (`ICastReconnectControl.CancelCastReconnectAsync`, bounded at 3 s). After that bound the user's action proceeds. The watcher then acts only on a connection it published itself (it checks ownership after connect, before confirm and before start). It removes that connection, **unless** the user's action made Cast the active output, in which case it keeps it. A pick of another output while the speaker is away logs `Cast: no longer trying to reconnect to "<name>" — stopped by a user output or Cast action`.
+Since `AUD-85`, `ConnectToCastDevice` (`cast/connect`) uses its own pick-aware cancel with an explicit same-device keep and a 15 s wait, so the "keeps it only when Cast is already the active output" rule above applies to `SetOutputDevice`. See [`AUD-85`](AUD-85.md) § As built.
 
 **A start overtaken by a teardown abandons itself.** `GoogleCastOutput.StartAsync` re-checks its connection's generation three times (after the launch, before the DirectChannel send loop, and before `Streaming`). If a user's teardown replaced the connection mid-start, it stops what it created instead of streaming into a closed socket.
 
