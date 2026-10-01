@@ -10,7 +10,10 @@ This document catalogs features that have been designed at the interface level b
 
 **Status:** Roadmap only. **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not
 many AM stations nearby."* then *"Spec out what HW I would need to make all the bands work, and add that to
-the roadmap."* No code or hardware change is planned until the owner schedules it. Roadmap entry:
+the roadmap."* No code or hardware change is planned until the owner schedules it. **2026-10-02:** owner chose to
+keep AM/SW selectable as they are in the meantime (*"#4 - keep as it is. Once I have the new hardware,
+we'll execute the roadmap item."*), and asked for the Nooelec NESDR SMArt v5 to be added — it is now
+**option C, recommended for this owner's use**. Roadmap entry:
 [`docs/ROADMAP.md`](../docs/ROADMAP.md) § Queued → *All-band reception*.
 
 ### Why today's radio can't do it (measured, not inferred)
@@ -42,7 +45,32 @@ library has no direct-sampling or upconverter-offset support (`RtlSdrDevice.cs:1
    a different SDR family (SDRplay, Airspy) would mean a new device layer.
 4. Fit the box's USB budget and the cabinet; no new mains supply if avoidable.
 
-### Option A — one HF-capable RTL-SDR dongle (recommended *if* obtainable)
+### Option C — one Nooelec NESDR SMArt v5 with built-in direct sampling (recommended for this owner's use)
+
+Added 2026-10-02 at the owner's request after he asked about the
+[NESDR SMArt v5 bundle](https://www.amazon.com/dp/B01GDN1T4S) (owner: *"Yes - add this to the roadmap."*).
+
+- **What:** an RTL2832U + **R820T2/R860** dongle (same tuner family as today's) whose board brings the
+  RTL2832U's **direct-sampling Q branch** out natively, so it covers **100 kHz – 1.75 GHz with no solder
+  mod**: below ~25 MHz it bypasses the tuner and feeds the antenna straight to the ADC; above that it is the
+  normal R820T2 path, exactly as today. 0.5 PPM TCXO, SMA input, aluminium enclosure; the bundle adds three
+  (VHF/UHF) antennas.
+- **Automatic switching (requirement 2):** ✅ — direct sampling is a software mode switch,
+  `rtlsdr_set_direct_sampling(dev, 2)` ("Q" branch), ON for AM/SW and OFF for FM/AIR/WB/VHF. No physical
+  switch.
+- **Driver (requirement 3):** ✅ — `rtlsdr_set_direct_sampling` is part of the **stock** `librtlsdr`, so
+  unlike option A there is **no driver swap** on the box. (One user report could not tune below 24 MHz until
+  direct-sampling Q mode was enabled — expected; that is exactly the switch the software adds.)
+- **Cost:** ~US$35–45 for the bundle — the cheapest option, one device.
+- **Trade-off:** direct sampling bypasses the tuner's LNA and filtering, so HF **sensitivity and dynamic range
+  are lower** than an upconverter (A or B), and strong out-of-band signals can alias. Fine for local AM and
+  strong shortwave broadcasters with a decent HF antenna (the owner notes few AM stations nearby); weak or
+  distant DX will be marginal. A low-pass filter on the HF antenna feed helps against aliasing.
+- **Why recommended here:** lowest cost and least box change (no driver fork, one dongle, current FM path
+  unchanged in behaviour); its HF quality matches the owner's stated need. Choose A or B instead if serious
+  shortwave listening becomes the goal.
+
+### Option A — one HF-capable RTL-SDR dongle with a built-in upconverter (best HF quality on one dongle, *if* obtainable)
 
 - **What:** an RTL-SDR Blog dongle with a **built-in HF upconverter** that the driver switches in
   automatically below ~28.8 MHz — "simply tune to an HF frequency and it functions normally", no direct
@@ -78,29 +106,32 @@ library has no direct-sampling or upconverter-offset support (`RtlSdrDevice.cs:1
 ### Not recommended
 
 - **Direct sampling on the current dongle:** requires soldering the antenna to the RTL2832U's Q-branch
-  pins plus a software mode switch; poor sensitivity and a hardware mod inside the cabinet.
+  pins plus a software mode switch; poor sensitivity and a hardware mod inside the cabinet. (Option C gets
+  the same direct-sampling path with no mod, because the NESDR SMArt v5 wires the Q branch natively.)
 - **Manual upconverter switching on a single dongle:** violates requirement 2.
 
-### Antennas (needed for A or B — the FM antenna will be weak on MW)
+### Antennas (needed for A, B or C — the FM antenna will be weak on MW)
 
 - **MW + SW:** an **active wideband loop** (e.g. the MLA-30+ class, ~100 kHz–30 MHz, USB-powered) placed
   away from the N100 and switching supplies, or a long wire (several metres; outdoors is far better) with a
   9:1 unun. MW reception indoors in a cabinet will be modest — the owner notes few AM stations nearby.
-- **Sharing one input (option A):** HF and VHF antennas into one SMA need an **HF/VHF diplexer**; option B
-  avoids this (each dongle has its own antenna).
+- **Sharing one input (options A and C):** HF and VHF antennas into one SMA need an **HF/VHF diplexer**;
+  option B avoids this (each dongle has its own antenna). For C, a low-pass filter on the HF leg also
+  reduces direct-sampling aliasing.
 - Expect noise from the PC and LED/switching supplies; ferrite chokes on the antenna feed and USB cable.
 
 ### Software work once hardware exists (estimates)
 
-| Item | A | B |
-|---|---|---|
-| Replace the hard-coded 24 MHz – 1.766 GHz range (`RtlSdrDevice.cs:102-104`) with the device's real range; per-band "receivable" flag (also unblocks `AUD-94`'s UI) | ✓ | ✓ |
-| Band-map sweep plans: AM 118 channels @ 10 kHz; SW the broadcast segments (49/41/31/25/19/16 m) @ 5 kHz | ✓ | ✓ |
-| AM channel-power window (FM's `ChannelPowerMeter` uses 8–80 kHz; AM needs ~±5 kHz) | ✓ | ✓ |
-| Verify AM demod quality (`AmDemodulator`) and AGC on real MW/SW stations | ✓ | ✓ |
-| Driver fork install in `deploy/provision/` + UAT | ✓ | — |
-| Per-band device selection (two dongles), LO offset config, gate ownership per device | — | ✓ |
-| **Estimate** | **~2 days** | **~3–4 days** |
+| Item | C | A | B |
+|---|---|---|---|
+| Replace the hard-coded 24 MHz – 1.766 GHz range (`RtlSdrDevice.cs:102-104`) with the device's real range; per-band "receivable" flag (also unblocks `AUD-94`'s UI) | ✓ | ✓ | ✓ |
+| Band-map sweep plans: AM 118 channels @ 10 kHz; SW the broadcast segments (49/41/31/25/19/16 m) @ 5 kHz | ✓ | ✓ | ✓ |
+| AM channel-power window (FM's `ChannelPowerMeter` uses 8–80 kHz; AM needs ~±5 kHz) | ✓ | ✓ | ✓ |
+| Verify AM demod quality (`AmDemodulator`) and AGC on real MW/SW stations | ✓ | ✓ | ✓ |
+| P/Invoke `rtlsdr_set_direct_sampling` in `RTLSDRCore`; switch Q-mode on for AM/SW and off for the rest, in both the radio and the band-map sweep (`SdrDeviceGate`), with tests | ✓ | — | — |
+| Driver fork install in `deploy/provision/` + UAT | — | ✓ | — |
+| Per-band device selection (two dongles), LO offset config, gate ownership per device | — | — | ✓ |
+| **Estimate** | **~2 days** | **~2 days** | **~3–4 days** |
 
 Everything above the radio — the BAND view, signal-colour bars (`UI-22`), the preset bar (`UI-20`/`UI-21`)
 and the knob — works unchanged once a band can be swept, which is what makes all bands consistent.
@@ -110,6 +141,7 @@ and the knob — works unchanged once a band can be swept, which is what makes a
 - RTL-SDR Blog V4 user guide — HF without direct sampling; updated drivers required: <https://www.rtl-sdr.com/V4/>
 - V4 specs (500 kHz–1.766 GHz, R828D, built-in upconverter, TCXO, bias tee) and launch pricing: <https://www.cnx-software.com/2023/08/17/rtl-sdr-blog-v4-dongle-launched-with-rafeal-r828d-tuner-chip/>
 - V4 end of line: <https://www.hackster.io/news/rtl-sdr-com-announces-the-end-of-the-line-for-its-popular-rtl-sdr-blog-v4-software-defined-radio-76f628f18e0d>
+- NESDR SMArt v5 (100 kHz–1.75 GHz; HF via native direct sampling; R820T2/R860; 0.5 PPM TCXO) — checked 2026-10-02: <https://www.nooelec.com/store/sdr/sdr-receivers/nesdr-smart-sdr.html>, bundle <https://www.amazon.com/dp/B01GDN1T4S>, review <https://osintbench.com/tools/nooelec-nesdr-smart-v5/>, the "can't tune below 24 MHz until Q mode is enabled" report <https://groups.google.com/g/gqrx/c/RBtRRHDVZTs>
 - V4 Lite (R828S): <https://www.sdrstore.eu/rtl-sdr-blog-v4-lite-r828s-driver-update-changes/>, <https://www.sdrstore.eu/rtl-sdr-blog-v4-end-of-life-v4-lite-explained/>
 - Ham It Up Plus v2 (125 MHz, manual pass-through): <https://www.nooelec.com/store/ham-it-up-plus.html>
 - SpyVerter review (noise floor / SNR): <https://www.rtl-sdr.com/review-of-the-spyverter-upconverter/>
