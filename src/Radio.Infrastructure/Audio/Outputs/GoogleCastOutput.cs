@@ -1111,16 +1111,41 @@ public class GoogleCastOutput : AudioOutputBase
   /// device. Throws when no device is connected or the read fails or times out (10 s).
   /// </summary>
   /// <returns>The running applications' ids; empty when nothing is running.</returns>
+  /// <remarks>
+  /// The client is taken from the published connection as one snapshot under <c>_lifecycleLock</c>
+  /// (AUD-81's <see cref="SnapshotPublishedConnectionAsync"/>), never from unlocked reads of
+  /// <c>_client</c> and <c>_connectedReceiver</c>. SharpCaster raises the GET_STATUS response as a
+  /// <c>ReceiverStatusChanged</c> too, so the read is counted in <c>_diagnosticReadsPending</c> from
+  /// before the request until the read itself completes (not when the 10 s bound gives up), as
+  /// <see cref="ReadSpeakerVolumeAsync"/> does: its reply only re-baselines the echo filter and is
+  /// never reported as an external change.
+  /// </remarks>
   public async Task<IReadOnlyList<string>> GetRunningApplicationIdsAsync(CancellationToken cancellationToken = default)
   {
-    var client = Volatile.Read(ref _client);
-    if (client == null || Volatile.Read(ref _connectedReceiver) == null)
+    ThrowIfDisposed();
+
+    var connection = await SnapshotPublishedConnectionAsync().ConfigureAwait(false)
+      ?? throw new InvalidOperationException("No Chromecast device connected");
+
+    Interlocked.Increment(ref _diagnosticReadsPending);
+    Task<ChromecastStatus?> read;
+    try
     {
-      throw new InvalidOperationException("No Chromecast device connected");
+      read = ReceiverApplicationsStatusReadOverrideForTests != null
+        ? ReceiverApplicationsStatusReadOverrideForTests()
+        : connection.Client.ReceiverChannel.GetChromecastStatusAsync();
+    }
+    catch
+    {
+      Interlocked.Decrement(ref _diagnosticReadsPending);
+      throw;
     }
 
-    var status = await client.ReceiverChannel.GetChromecastStatusAsync()
-      .WaitAsync(TimeSpan.FromSeconds(10), cancellationToken).ConfigureAwait(false)
+    _ = read.ContinueWith(
+      _ => Interlocked.Decrement(ref _diagnosticReadsPending),
+      CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+
+    var status = await read.WaitAsync(TimeSpan.FromSeconds(10), _timeProvider, cancellationToken).ConfigureAwait(false)
       ?? throw new InvalidOperationException("The Cast receiver returned no status");
 
     return status.Applications?
@@ -1130,6 +1155,15 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Stands in for the receiver channel's GET_STATUS in
+  /// <see cref="GetRunningApplicationIdsAsync"/>. <b>Why the real path is unreachable:</b> no fake
+  /// socket speaks the Cast protocol. <b>NOT covered by this seam:</b> SharpCaster's request and its
+  /// status parsing. The connection snapshot, the <c>_diagnosticReadsPending</c> bracketing, the bound
+  /// and the result mapping are real. Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task<ChromecastStatus?>>? ReceiverApplicationsStatusReadOverrideForTests { get; set; }
+
+  /// <summary>
   /// AUD-37 (review M5). Ends the hold a <see cref="CastConnectOptions.HoldUntilReceiverConfirmed"/>
   /// connect placed: the caller has established the receiver is free for us. From here receiver
   /// status changes are reported and remembered as for any connection, and the remembered level
@@ -1137,10 +1171,52 @@ public class GoogleCastOutput : AudioOutputBase
   /// <see cref="SyncVolumeAfterStartAsync"/> pushes when <c>StartAsync</c> has launched our receiver
   /// application and started streaming.
   /// Pushes nothing itself. A no-op when no hold is in place.
+  /// <para>AUD-81 (F11): the console-mute recall the held connect deferred runs here, before the
+  /// hold ends and before <c>StartAsync</c>'s start-time mute and the after-start push read the mark.
+  /// It uses the speaker's mute as this connection last observed it (the initial read, or a status
+  /// absorbed during the hold), and only when it observed one: after a failed initial read nothing
+  /// is re-armed, as for an unheld connect.</para>
   /// </summary>
   public void ConfirmReceiverAvailable()
   {
-    _holdingForReceiverConfirmation = false;
+    if (!_holdingForReceiverConfirmation)
+    {
+      return;
+    }
+
+    string? recalledName = null;
+    try
+    {
+      _lifecycleLock.Wait();
+      try
+      {
+        var connection = SnapshotPublishedConnection_Locked();
+        // Round-4 M-1 order: the flag first, then the baseline, so a true flag is never paired with
+        // the per-connection "not muted" reset.
+        if (connection != null && Volatile.Read(ref _speakerMuteObserved) &&
+            RecallConsoleMute_Locked(connection.Generation, connection.Device.Id, _lastSetMute))
+        {
+          recalledName = connection.Device.FriendlyName;
+        }
+      }
+      finally
+      {
+        _lifecycleLock.Release();
+      }
+    }
+    catch (ObjectDisposedException)
+    {
+      // Disposed: nothing to recall.
+    }
+    finally
+    {
+      _holdingForReceiverConfirmation = false;
+    }
+
+    if (recalledName != null)
+    {
+      LogConsoleMuteRecalled(recalledName);
+    }
   }
 
   /// <summary>
@@ -1256,6 +1332,7 @@ public class GoogleCastOutput : AudioOutputBase
     ChromecastDeviceInfo? disconnectedDevice;
     ChromecastReceiver? disconnectedReceiver;
     bool hadConnection;
+    bool wasHeld;
     int closedGeneration;
     await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
     try
@@ -1263,6 +1340,7 @@ public class GoogleCastOutput : AudioOutputBase
       closedGeneration = _publishedGeneration;
       _connectionGeneration++;
       _publishedGeneration = -1;
+      wasHeld = _holdingForReceiverConfirmation;
       _holdingForReceiverConfirmation = false;
       UnwatchConnectionLoss_Locked();
       hadConnection = _connectedReceiver != null;
@@ -1295,7 +1373,14 @@ public class GoogleCastOutput : AudioOutputBase
       // no-op — StopAsync has released it — but DisposeAsync reaches here without a StopAsync,
       // and a release StopAsync could not complete (receiver application not confirmed stopped)
       // is retried here. Either way the application is stopped before any unmute.
-      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice, disconnectedReceiver).ConfigureAwait(false);
+      // AUD-37 (review M5): never for a connection still held for receiver confirmation — the
+      // reconnect watcher's stand-down from a receiver busy with another sender. That connection
+      // was never ours to mute (the F11 recall waits for the confirmation), and the stand-down
+      // must send no Cast message at all: no application stop, no unmute.
+      if (!wasHeld)
+      {
+        await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice, disconnectedReceiver).ConfigureAwait(false);
+      }
 
       UnsubscribeFromReceiverStatus(client);
 
@@ -2505,11 +2590,14 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
-      if (reading != null)
+      if (reading != null && !holdForConfirmation)
       {
         // AUD-81 (F11): before StartAsync's start-time mute and the follower's activation
         // reconcile, both of which read IsSpeakerMutedByConsole. Changes no device state and
         // raises nothing, so the initial sync still never reaches the console's mute.
+        // AUD-37 (review M5): under a hold it waits for ConfirmReceiverAvailable. A receiver that
+        // turns out to be busy with another sender is never marked as muted for the console, so the
+        // stand-down's DisconnectAsync can never try to stop an application or unmute it.
         await RecallConsoleMuteAsync(generation, device, reading.Value.Muted).ConfigureAwait(false);
       }
 
@@ -4116,32 +4204,11 @@ public class GoogleCastOutput : AudioOutputBase
   /// </remarks>
   private async Task RecallConsoleMuteAsync(int generation, ChromecastDeviceInfo device, bool speakerMuted)
   {
-    var rearmed = false;
+    bool rearmed;
     await _lifecycleLock.WaitAsync().ConfigureAwait(false);
     try
     {
-      if (_publishedGeneration != generation || _connectionGeneration != generation)
-      {
-        return;
-      }
-
-      lock (_consoleMuteLock)
-      {
-        if (!string.Equals(_consoleMutedDeviceId, device.Id, StringComparison.Ordinal))
-        {
-          return;
-        }
-
-        if (speakerMuted)
-        {
-          Volatile.Write(ref _consoleMutedGeneration, generation);
-          rearmed = true;
-        }
-        else
-        {
-          _consoleMutedDeviceId = null;
-        }
-      }
+      rearmed = RecallConsoleMute_Locked(generation, device.Id, speakerMuted);
     }
     finally
     {
@@ -4150,11 +4217,43 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (rearmed)
     {
-      ConsoleLogger.LogInformation(
-        "Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console",
-        device.FriendlyName);
+      LogConsoleMuteRecalled(device.FriendlyName);
     }
   }
+
+  /// <summary>
+  /// The decision behind <see cref="RecallConsoleMuteAsync"/>. Caller holds <c>_lifecycleLock</c>.
+  /// Await-free. Returns true when the mark was re-armed.
+  /// </summary>
+  private bool RecallConsoleMute_Locked(int generation, string deviceId, bool speakerMuted)
+  {
+    if (_publishedGeneration != generation || _connectionGeneration != generation)
+    {
+      return false;
+    }
+
+    lock (_consoleMuteLock)
+    {
+      if (!string.Equals(_consoleMutedDeviceId, deviceId, StringComparison.Ordinal))
+      {
+        return false;
+      }
+
+      if (speakerMuted)
+      {
+        Volatile.Write(ref _consoleMutedGeneration, generation);
+        return true;
+      }
+
+      _consoleMutedDeviceId = null;
+      return false;
+    }
+  }
+
+  private void LogConsoleMuteRecalled(string deviceName) =>
+    ConsoleLogger.LogInformation(
+      "Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console",
+      deviceName);
 
   /// <summary>
   /// Before a deliberate teardown of connection <paramref name="generation"/>: if this
