@@ -17,14 +17,14 @@
       mono 12px uppercase 0.10em letter-spacing, active segment tinted with
       --accent-dim + accent underline.
     • Canvas now fills the remaining vertical space — no inset padding.
-    • "Connected" pill collapsed to an 8px dot at top-right.
+    • "Connected" pill collapsed to an 8px dot at top-right. (Removed by UI-30.)
     • The "Updates: NN/sec" overlay moves out of the canvas into
       VisualizerTelemetryService so the dev tray (PR 6) can subscribe.
     • Frequency-band axis labels live in a 16px strip under the canvas
       (mono 10px, low-contrast).
 
-  AUD-76 PR 2: the picker is Wave / Spectrum / BAND / Ring / Phase. BAND (the
-  stored FM band map, touch-to-tune) took Fall's position; Fall (the audio
+  AUD-76 PR 2: the picker was Wave / Spectrum / BAND / Ring / Phase (UI-29 moved
+  BAND last). BAND (the stored FM band map, touch-to-tune) took Fall's position; Fall (the audio
   spectrogram) and VU were removed. BAND reads /api/radio/bandmap on a timer
   and subscribes to no visualization hub stream. The default mode is Spectrum.
 
