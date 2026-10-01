@@ -2872,6 +2872,14 @@ public class GoogleCastOutput : AudioOutputBase
   {
     try
     {
+      // AUD-81 (hostile review L6): noted before anything else, so a teardown unmute waiting on this
+      // connection stops waiting (see ReleaseConsoleMuteAsync).
+      Volatile.Write(ref _lastReportedLossGeneration, generation);
+      if (Volatile.Read(ref _teardownLossWatch) is { } watch && watch.Generation == generation)
+      {
+        watch.Lost.TrySetResult();
+      }
+
       LastConnectionLossHandling = Task.Run(() => HandleConnectionLostAsync(generation, reason, cause));
     }
     catch
@@ -2889,6 +2897,22 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>A loss report that arrived while the output was not yet Streaming.</summary>
   private sealed record DeferredConnectionLoss(int Generation, string Reason, Exception? Cause);
+
+  // AUD-81 (hostile review L6): the connection generation most recently reported lost (by any
+  // reporter, whatever HandleConnectionLostAsync then makes of it), or -1; and the teardown unmute
+  // currently waiting on connection Generation, completed by a loss report for it. Measured on the
+  // box 2026-10-01: stopping our receiver application makes the speaker close our connection, so
+  // the teardown unmute on it can only time out (2 s). A loss already reported — or reported while
+  // that unmute is on the wire — sends the teardown straight to the fresh connection instead.
+  // Volatile only.
+  private int _lastReportedLossGeneration = -1;
+  private TeardownLossWatch? _teardownLossWatch;
+
+  private sealed class TeardownLossWatch(int generation)
+  {
+    public int Generation { get; } = generation;
+    public TaskCompletionSource Lost { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+  }
 
   // Written by HandleConnectionLostAsync, taken (exchange) by ReplayDeferredConnectionLoss.
   private DeferredConnectionLoss? _deferredLoss;
@@ -3962,22 +3986,52 @@ public class GoogleCastOutput : AudioOutputBase
     }
 
     Exception? failure = null;
+    var lossWatch = new TeardownLossWatch(generation);
+    Volatile.Write(ref _teardownLossWatch, lossWatch);
     try
     {
-      if (await SendMuteToDeviceAsync(client, false)
-            .WaitAsync(TeardownUnmuteTimeout, _timeProvider).ConfigureAwait(false))
+      if (Volatile.Read(ref _lastReportedLossGeneration) == generation)
       {
-        ConsoleLogger.LogInformation(
-          "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",
-          deviceName);
-        ForgetConsoleMute(device?.Id);
-        return;
+        // L6: this connection is already reported lost (on the box: the speaker closed it when our
+        // application stopped) — an unmute on it can only time out.
+        failure = new ObjectDisposedException("the Cast connection", "reported lost before the teardown unmute");
+        _logger.LogDebug("Cast: the connection was reported lost — unmuting over a new connection directly");
+      }
+      else
+      {
+        var unmute = SendMuteToDeviceAsync(client, false).WaitAsync(TeardownUnmuteTimeout, _timeProvider);
+        if (await Task.WhenAny(unmute, lossWatch.Lost.Task).ConfigureAwait(false) == unmute)
+        {
+          if (await unmute.ConfigureAwait(false))
+          {
+            ConsoleLogger.LogInformation(
+              "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",
+              deviceName);
+            ForgetConsoleMute(device?.Id);
+            return;
+          }
+        }
+        else
+        {
+          // L6: the connection was reported lost while the unmute was on the wire. It is not waited
+          // for; whatever it ends with is observed here. The fresh connection reads whether it landed.
+          _ = unmute.ContinueWith(
+            t => _logger.LogDebug(t.Exception, "Cast: the teardown unmute on the lost connection failed"),
+            CancellationToken.None, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+          failure = new ObjectDisposedException("the Cast connection", "reported lost during the teardown unmute");
+          _logger.LogDebug("Cast: the connection was reported lost during the teardown unmute — unmuting over a new connection");
+        }
       }
     }
     catch (Exception ex)
     {
       failure = ex;
       _logger.LogDebug(ex, "Cast: teardown unmute on the existing connection failed");
+    }
+    finally
+    {
+      Interlocked.CompareExchange(ref _teardownLossWatch, null, lossWatch);
     }
 
     // D2: the connection is unusable (no receiver channel) or the unmute failed or timed out —

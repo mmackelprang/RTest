@@ -1481,6 +1481,53 @@ public class GoogleCastOutputConsoleVolumeTests
     never.SetResult(null);
   }
 
+  // Hostile review L6 (a). On the box the speaker closes our connection when our application stops,
+  // and the loss is reported while the stop is still tearing down ("loss reported while the output
+  // is Stopping"). An unmute on that connection can only time out — 2 s wasted on every
+  // console-muted Stop — so a teardown whose connection is already reported lost goes straight to
+  // the fresh connection.
+  [Fact]
+  public async Task ATeardownWhoseConnectionIsAlreadyReportedLost_UnmutesOverAFreshConnectionDirectly()
+  {
+    await using var h = NewHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    var generation = h.Target().Generation;
+    h.AppStop = () =>
+    {
+      h.Output.ReportConnectionLost(generation, "the receiver closed the connection", null);
+      return Task.FromResult(true);
+    };
+
+    await h.Output.StopAsync();
+    await h.Output.LastConnectionLossHandling;
+
+    Assert.Equal(new[] { "appstop", "fresh", "fresh-unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("unmuted over a new connection"));
+  }
+
+  // Hostile review L6 (b). The loss is reported while the old connection's unmute is on the wire: the
+  // teardown stops waiting for it and goes to the fresh connection. The fake clock is never advanced,
+  // so the 2 s TeardownUnmuteTimeout cannot be what ended the wait.
+  [Fact]
+  public async Task ALossReportedDuringTheTeardownUnmute_EndsTheWait_AndUnmutesOverAFreshConnection()
+  {
+    await using var h = NewHarness();
+    await CastingUnderAMutedConsoleAsync(h);
+    var generation = h.Target().Generation;
+
+    h.MuteGate = CastConsoleTestHarness.NewTcs(); // the old connection never answers the unmute
+    var stop = h.Output.StopAsync();
+    await h.MuteSendEntered.Task;
+    h.Output.ReportConnectionLost(generation, "the receiver closed the connection", null);
+    await stop.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+    await h.Output.LastConnectionLossHandling;
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh", "fresh-unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    h.MuteGate.SetResult();
+  }
+
   // D2 (d). A connection LOSS never unmutes — not on the old connection, and not over a new one.
   [Fact]
   public async Task ALostConnection_NeverTriesAnUnmuteOverAFreshConnection()
