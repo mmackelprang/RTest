@@ -89,6 +89,42 @@ window.fileDownload = {
   }
 };
 
+/**
+ * UI-26. Save bytes streamed from .NET (a DotNetStreamReference) as a file, WITHOUT navigating.
+ *
+ * The DevTray used to window.open() radio-api URLs. On the kiosk — no tabs, no address bar, no back
+ * button — any response the browser chose to render (a JSON error, an unreachable-host page) left the
+ * panel on a page a finger could not leave. This saves from a same-origin blob: URL via a temporary
+ * <a download>, which starts a download and leaves the current page where it is.
+ *
+ * The blob is typed application/octet-stream whatever the file is. If the download attribute were
+ * ever ignored and the anchor navigated, a renderable type (audio/wav, application/json) would open a
+ * viewer page — the very trap this replaces; octet-stream is handled as a download.
+ *
+ * Returns true once the download has been handed to the browser, false on any failure. Whether the
+ * browser then saves it silently or asks where to save is browser policy, not this code's.
+ */
+window.fileDownload.downloadFromStream = async function (filename, streamRef) {
+  try {
+    const buffer = await streamRef.arrayBuffer();
+    const blob = new Blob([buffer], { type: 'application/octet-stream' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    // Generous delay before revoking, so a multi-megabyte log zip is not revoked mid-save.
+    setTimeout(function () { URL.revokeObjectURL(url); }, 30000);
+    return true;
+  } catch (error) {
+    console.error('Error saving streamed file:', error);
+    return false;
+  }
+};
+
 // Simple wrapper for backwards compatibility
 window.downloadFile = function(filename, base64Data) {
   const mimeType = filename.endsWith('.json') ? 'application/json' : 'application/octet-stream';

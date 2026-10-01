@@ -356,12 +356,18 @@ export const visualizer = {
     ctx.fillText('R', centerX + scale * 0.7, centerY - scale * 0.5);
   },
 
-  // ── BAND (AUD-76): the stored FM band map ─────────────────────────────────
+  // ── BAND (AUD-76; per band since AUD-91): the stored band map ────────────
   //
-  // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync):
-  //   levels:   [{ f, v }]  channel position 0..1 across 87.5–108 MHz, normalised height 0..1
-  //   station:  f | null    the tuned station (FM, radio active), else null
-  //   presets:  [{ f, label }] FM presets, ascending
+  // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync) for the
+  // band shown (87.5–108 MHz on FM):
+  //   levels:   [{ f, v, t }] channel position 0..1 across the band's axis, normalised height 0..1,
+  //             and colour tier t (UI-22) — BandSignalTier in FmBandMath.cs: 0 noise, 1 weak, 2 fair,
+  //             3 strong, by dB above the map's median. A level without a known t gets a cyan bar,
+  //             the colour every bar had before UI-22 (the fill under the bars is grey regardless).
+  //   station:  f | null    the tuned station (shown band, radio active), else null
+  //   presets:  [{ f, label }] the shown band's presets, ascending
+  //   grid:     [f]         gridline positions, the same fractions as the axis strip's labels
+  //   channelsAcross: number the axis span in channel spacings (102.5 on FM); a bar is half a spacing
   //   sweeping: bool
   // x = f * width exactly, with no side padding, so the MHz axis strip under the canvas (positioned
   // by the same fraction) and the tap handler (which reports x / width) line up with what is drawn.
@@ -387,6 +393,8 @@ export const visualizer = {
 
     const { canvas, ctx, width, height } = canvasData;
     const accent = this.token(canvas, '--accent-primary', '#5CD4E8');
+    const signalBlue = this.token(canvas, '--signal-blue', '#60A5FA');
+    const signalGreen = this.token(canvas, '--signal-green', '#4ADE80');
     const station = this.token(canvas, '--source-radio', '#F0A830');
     const textMedium = this.token(canvas, '--text-medium', '#B5BCC9');
     const textLow = this.token(canvas, '--text-low', '#4B5563');
@@ -404,24 +412,26 @@ export const visualizer = {
     const xOf = (f) => f * width;
     const yOf = (v) => plotBottom - v * plotHeight;
 
-    // MHz gridlines, matching the axis strip's 88/92/96/100/104/108.
+    // Gridlines, matching the axis strip's labels (88/92/96/100/104/108 on FM).
     ctx.strokeStyle = separator;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (const mhz of [88, 92, 96, 100, 104, 108]) {
-      const x = Math.round(xOf((mhz - 87.5) / 20.5)) + 0.5;
+    for (const g of (model && model.grid) || []) {
+      const x = Math.round(xOf(g)) + 0.5;
       ctx.moveTo(x, plotTop);
       ctx.lineTo(x, plotBottom);
     }
     ctx.stroke();
 
     // Signal: a filled trace through the channel centres, plus a bar per channel so isolated
-    // stations read as stations rather than as the slope between two points.
+    // stations read as stations rather than as the slope between two points. UI-22: each bar takes
+    // its tier's colour (the cool ramp: grey noise, blue weak, cyan fair, green strong — never amber,
+    // which is the station marker's), and the trace is a neutral grey so it tints none of them.
     const levels = (model && model.levels) || [];
     if (levels.length > 0) {
       const fill = ctx.createLinearGradient(0, plotTop, 0, plotBottom);
-      fill.addColorStop(0, this.withAlpha(accent, 0.45));
-      fill.addColorStop(1, this.withAlpha(accent, 0.04));
+      fill.addColorStop(0, this.withAlpha(textMedium, 0.18));
+      fill.addColorStop(1, this.withAlpha(textMedium, 0.03));
 
       ctx.beginPath();
       ctx.moveTo(xOf(levels[0].f), plotBottom);
@@ -431,11 +441,13 @@ export const visualizer = {
       ctx.fillStyle = fill;
       ctx.fill();
 
-      const barWidth = Math.max(2, (width / 102.5) * 0.5);
-      ctx.fillStyle = accent;
+      const channelsAcross = (model && model.channelsAcross > 0) ? model.channelsAcross : 102.5;
+      const barWidth = Math.max(2, (width / channelsAcross) * 0.5);
+      const tierColours = [textLow, signalBlue, accent, signalGreen];
       for (const p of levels) {
         const h = p.v * plotHeight;
         if (h < 1) continue;
+        ctx.fillStyle = tierColours[p.t] || accent;
         ctx.fillRect(xOf(p.f) - barWidth / 2, plotBottom - h, barWidth, h);
       }
     }

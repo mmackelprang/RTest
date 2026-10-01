@@ -218,6 +218,117 @@ public class SystemApiService
   public static bool IsRuntimeModified(IReadOnlyList<LogLevelStateDto> levels) =>
     levels.Any(l => !string.Equals(l.Level, l.ConfiguredLevel, StringComparison.OrdinalIgnoreCase));
 
+  // ── UI-26: the DevTray's file-shaped diagnostics ───────────────────────────────────────────────
+  // These used to be window.open()ed straight at radio-api, which on the kiosk (no tabs, no address
+  // bar, no back button) left the panel on a page it could not leave. They are now fetched here, on
+  // the server side of the circuit, so the browser is never sent to radio-api: the tray shows the
+  // outcome and, on success, the page saves the bytes as a blob download.
+
+  /// <summary>
+  /// Longest error text returned for display. A tray card's status line is clamped to three lines of
+  /// about 25 monospace characters, and the card prefixes the status code (<c>"501 · "</c>), so 64 fits.
+  /// </summary>
+  internal const int MaxErrorLength = 64;
+
+  /// <summary>Fetches radio-api's zipped log files for <paramref name="period"/> (<c>5m</c>/<c>1h</c>/<c>24h</c>/<c>7d</c>).</summary>
+  public Task<ApiFileResult> DownloadLogsAsync(string period = "1h", CancellationToken cancellationToken = default) =>
+    FetchFileAsync($"/api/system/logs/download?period={Uri.EscapeDataString(period)}", "radio-logs.zip", cancellationToken);
+
+  /// <summary>
+  /// Asks radio-api for an audio-frame dump. As of UI-26 the endpoint is a deliberate
+  /// <c>501 Not Implemented</c> stub (<c>AudioDebugController.DumpAudioFrame</c>), so against today's
+  /// API this returns a failure carrying the API's own explanation.
+  /// </summary>
+  public Task<ApiFileResult> DumpAudioFrameAsync(CancellationToken cancellationToken = default) =>
+    FetchFileAsync("/api/audio/debug/dump-frame", "audio-frame.wav", cancellationToken);
+
+  private async Task<ApiFileResult> FetchFileAsync(string path, string fallbackFileName, CancellationToken cancellationToken)
+  {
+    try
+    {
+      using var response = await _httpClient.GetAsync(path, HttpCompletionOption.ResponseContentRead, cancellationToken);
+      if (!response.IsSuccessStatusCode)
+      {
+        var reason = await ReadErrorAsync(response, cancellationToken);
+        return ApiFileResult.Failed((int)response.StatusCode, reason);
+      }
+
+      var content = await response.Content.ReadAsByteArrayAsync(cancellationToken);
+      var disposition = response.Content.Headers.ContentDisposition;
+      var name = (disposition?.FileNameStar ?? disposition?.FileName)?.Trim('"');
+      return ApiFileResult.Ok((int)response.StatusCode, SafeFileName(name, fallbackFileName), content);
+    }
+    catch (OperationCanceledException)
+    {
+      // Either the caller's token, or HttpClient's own 30 s timeout — which surfaces as a
+      // TaskCanceledException with the caller's token NOT cancelled. Both mean the API was too slow.
+      return ApiFileResult.Failed(null, "timed out waiting for radio-api");
+    }
+    catch (HttpRequestException ex)
+    {
+      _logger.LogWarning(ex, "DevTray file fetch failed");
+      return ApiFileResult.Failed(null, "radio-api unreachable");
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "DevTray file fetch failed");
+      return ApiFileResult.Failed(null, "request to radio-api failed");
+    }
+  }
+
+  /// <summary>
+  /// A short reason for a failed response: the body's <c>error</c> field (this API's convention), else a
+  /// problem-details <c>title</c>, else the status phrase. Only those two named fields are read — other
+  /// body fields (the logs 404 carries a server path) are never shown.
+  /// </summary>
+  private static async Task<string> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+  {
+    string? message = null;
+    try
+    {
+      var body = await response.Content.ReadAsStringAsync(cancellationToken);
+      if (!string.IsNullOrWhiteSpace(body))
+      {
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.ValueKind == JsonValueKind.Object)
+        {
+          foreach (var field in new[] { "error", "title" })
+          {
+            if (doc.RootElement.TryGetProperty(field, out var value) && value.ValueKind == JsonValueKind.String)
+            {
+              message = value.GetString();
+              break;
+            }
+          }
+        }
+      }
+    }
+    catch (Exception)
+    {
+      // Not JSON, or the body could not be read — fall back to the status phrase.
+    }
+
+    if (string.IsNullOrWhiteSpace(message))
+    {
+      message = string.IsNullOrWhiteSpace(response.ReasonPhrase) ? "request failed" : response.ReasonPhrase;
+    }
+    // The tray's own lines carry no full stop; drop the API's so the two read as one voice.
+    message = message.Trim().TrimEnd('.');
+    return message.Length <= MaxErrorLength ? message : message[..(MaxErrorLength - 1)] + "…";
+  }
+
+  // The name arrives in a response header and ends up as an <a download> attribute; keep only a
+  // bare file name.
+  private static string SafeFileName(string? name, string fallback)
+  {
+    if (string.IsNullOrWhiteSpace(name))
+    {
+      return fallback;
+    }
+    var bare = Path.GetFileName(name.Replace('\\', '/'));
+    return string.IsNullOrWhiteSpace(bare) ? fallback : bare;
+  }
+
   private static bool IsRadioSource(string source) =>
     source == "Radio" || source.StartsWith("Radio.", StringComparison.Ordinal);
 

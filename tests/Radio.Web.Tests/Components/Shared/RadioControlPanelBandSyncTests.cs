@@ -61,6 +61,9 @@ public class RadioControlPanelBandSyncTests : TestContext
         NullLogger<AudioStateHubService>.Instance,
         sp.GetRequiredService<IConfiguration>(),
         transport: new OfflineHubTransport()));
+
+    // UI-21 — the preset bar reads the PRESETS knob's highlight off the HUD singleton.
+    Services.AddSingleton<Radio.Web.Services.EncoderHudService>();
   }
 
   [Fact]

@@ -32,6 +32,7 @@ public class DevicesController : ControllerBase
   private readonly IRadioConfigurationManager _configurationManager;
   private readonly IOptionsMonitor<AudioPreferences> _audioPreferences;
   private readonly IOptions<AudioOutputOptions> _audioOutputOptions;
+  private readonly Radio.API.Services.ICastReconnectControl? _castReconnect;
 
   /// <summary>
   /// Initializes a new instance of the DevicesController.
@@ -46,7 +47,8 @@ public class DevicesController : ControllerBase
     SoundFlowAudioEngine? audioEngine = null,
     LocalAudioOutput? localOutput = null,
     GoogleCastOutput? castOutput = null,
-    HttpStreamOutput? httpOutput = null)
+    HttpStreamOutput? httpOutput = null,
+    Radio.API.Services.ICastReconnectControl? castReconnect = null)
   {
     _logger = logger;
     _deviceManager = deviceManager;
@@ -58,7 +60,16 @@ public class DevicesController : ControllerBase
     _localOutput = localOutput;
     _castOutput = castOutput;
     _httpOutput = httpOutput;
+    _castReconnect = castReconnect;
   }
+
+  /// <summary>
+  /// AUD-37 (review M1). Takes the Cast output over from the automatic reconnect before a user's
+  /// own output or Cast action touches it, so the reconnect is never a second connecting party
+  /// (AUD-85). Bounded (3 s) and never throws.
+  /// </summary>
+  private Task CancelCastReconnectAsync() =>
+    _castReconnect?.CancelCastReconnectAsync() ?? Task.CompletedTask;
 
   /// <summary>
   /// Gets all available audio output devices.
@@ -184,6 +195,7 @@ public class DevicesController : ControllerBase
   [ProducesResponseType(StatusCodes.Status404NotFound)]
   public async Task<IActionResult> SetOutputDevice([FromBody] SetOutputDeviceRequest request)
   {
+    await CancelCastReconnectAsync();
     try
     {
       if (string.IsNullOrWhiteSpace(request.DeviceId))
@@ -356,6 +368,10 @@ public class DevicesController : ControllerBase
     var tapDiag = _audioEngine?.GetOutputTapDiagnostics();
     var pipelineDiag = _audioEngine?.GetPipelineDiagnostics();
 
+    // AUD-81 (hostile review F8): read once. KnownSpeakerLevel can change between two reads, and
+    // a NaN reaching System.Text.Json throws, turning this endpoint into a 500.
+    float knownSpeakerLevel = _castOutput?.KnownSpeakerLevel ?? float.NaN;
+
     return Ok(new
     {
       fingerprintTap = new
@@ -381,6 +397,11 @@ public class DevicesController : ControllerBase
       {
         state = _castOutput?.State.ToString(),
         connectedDevice = _castOutput?.ConnectedDevice?.FriendlyName,
+        // AUD-81: this output's own view of the speaker, not a live read — for that, see
+        // GET /api/devices/cast/volume. Null when the level is unknown.
+        speakerLevel = float.IsNaN(knownSpeakerLevel) ? (float?)null : knownSpeakerLevel,
+        speakerMuted = _castOutput?.KnownSpeakerMuted,
+        speakerMutedByConsole = _castOutput?.IsSpeakerMutedByConsole,
         directChannel = _castOutput?.DirectStreaming != null ? new
         {
           isStreaming = _castOutput.DirectStreaming.IsStreaming,
@@ -398,6 +419,66 @@ public class DevicesController : ControllerBase
         playbackDeviceActive = pipelineDiag?.PlaybackDeviceActive ?? false,
         modifierCount = pipelineDiag?.ModifierCount ?? 0,
       }
+    });
+  }
+
+  /// <summary>
+  /// Reads the connected Cast speaker's volume and mute LIVE (a bounded, 3 s Cast status read),
+  /// beside the level this application last set or observed (AUD-81). Read-only: it changes
+  /// nothing and fires no volume event.
+  /// </summary>
+  /// <returns>
+  /// 200 with <c>{ deviceName, level, muted, knownLevel, knownMuted, mutedByConsole }</c>;
+  /// 404 when there is no Cast output; 409 when Cast is not streaming to a connected speaker;
+  /// 504 when the speaker does not answer in time; 502 when the read fails.
+  /// </returns>
+  [HttpGet("cast/volume")]
+  [ProducesResponseType(StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
+  [ProducesResponseType(StatusCodes.Status502BadGateway)]
+  [ProducesResponseType(StatusCodes.Status504GatewayTimeout)]
+  public async Task<IActionResult> GetCastSpeakerVolume(CancellationToken cancellationToken)
+  {
+    if (_castOutput == null)
+    {
+      return NotFound(new { error = "Google Cast output not available" });
+    }
+
+    CastSpeakerVolumeReading? reading;
+    try
+    {
+      reading = await _castOutput.ReadSpeakerVolumeAsync(cancellationToken);
+    }
+    catch (TimeoutException)
+    {
+      return StatusCode(StatusCodes.Status504GatewayTimeout,
+        new { error = "The Cast speaker did not answer the status read within 3 s" });
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast speaker volume read failed");
+      return StatusCode(StatusCodes.Status502BadGateway,
+        new { error = "The Cast speaker status read failed", details = ex.Message });
+    }
+
+    if (reading == null)
+    {
+      return Conflict(new { error = "Cast is not streaming to a connected speaker" });
+    }
+
+    return Ok(new
+    {
+      deviceName = reading.DeviceName,
+      level = reading.Level,
+      muted = reading.Muted,
+      knownLevel = reading.KnownLevel,
+      knownMuted = reading.KnownMuted,
+      mutedByConsole = reading.MutedByConsole,
     });
   }
 
@@ -575,6 +656,7 @@ public class DevicesController : ControllerBase
     [FromBody] ConnectCastDeviceRequest request,
     CancellationToken cancellationToken)
   {
+    await CancelCastReconnectAsync();
     if (_castOutput == null)
     {
       return StatusCode(503, new { error = "Google Cast output not available" });
@@ -876,6 +958,7 @@ public class DevicesController : ControllerBase
   [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
   public async Task<IActionResult> DisconnectFromCastDevice(CancellationToken cancellationToken)
   {
+    await CancelCastReconnectAsync();
     if (_castOutput == null)
     {
       return StatusCode(503, new { error = "Google Cast output not available" });

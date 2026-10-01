@@ -71,6 +71,9 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// <inheritdoc/>
   public event EventHandler<AudioDeviceChangedEventArgs>? DeviceChanged;
 
+  /// <inheritdoc/>
+  public event EventHandler<string>? ActiveOutputChanged;
+
   /// <summary>
   /// Raised after a playback device switch completes, so that services holding
   /// active SoundComponents can re-attach them to the new device's mixer.
@@ -219,6 +222,25 @@ public class SoundFlowAudioEngine : IAudioEngine
   public async Task<bool> SetActiveOutputIfCurrentAsync(
     string expectedCurrent, string outputId, CancellationToken cancellationToken = default)
   {
+    return await SetActiveOutputIfCurrentWithEpochAsync(expectedCurrent, outputId, cancellationToken)
+      .ConfigureAwait(false) != null;
+  }
+
+  /// <summary>
+  /// <see cref="SetActiveOutputIfCurrentAsync"/>, also returning the output-selection epoch
+  /// as it stands immediately after this switch, read under the same lock acquisition.
+  /// </summary>
+  /// <remarks>
+  /// AUD-37. The lost-Cast recovery hands this epoch to its reconnect watcher, which may move
+  /// the output back to Cast only through <see cref="SetActiveOutputIfEpochAsync"/> — so ANY
+  /// output selection made after the recovery, including one that ends on the same local
+  /// device, retires the watcher. Reading the epoch in a separate call afterwards would leave a
+  /// window in which a user's choice is absorbed into the watcher's baseline.
+  /// </remarks>
+  /// <returns>The epoch after the switch, or null when the active output had moved on.</returns>
+  public async Task<int?> SetActiveOutputIfCurrentWithEpochAsync(
+    string expectedCurrent, string outputId, CancellationToken cancellationToken = default)
+  {
     if (string.IsNullOrWhiteSpace(outputId))
     {
       throw new ArgumentException("outputId is required", nameof(outputId));
@@ -229,6 +251,42 @@ public class SoundFlowAudioEngine : IAudioEngine
     {
       var current = _activeOutputId;
       if (current != null && !string.Equals(current, expectedCurrent, StringComparison.OrdinalIgnoreCase))
+      {
+        return null;
+      }
+
+      await ApplyActiveOutputLockedAsync(outputId, cancellationToken).ConfigureAwait(false);
+      return _castConnectEpoch;
+    }
+    finally
+    {
+      _activeOutputLock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Switches to <paramref name="outputId"/> only if no output selection of any kind has been
+  /// made since <paramref name="expectedEpoch"/> was read, checking and switching under ONE
+  /// acquisition of the output lock.
+  /// </summary>
+  /// <remarks>
+  /// AUD-37. Stricter than <see cref="SetActiveOutputIfCurrentAsync"/>: a user who picks another
+  /// output and then the original one again leaves the active output id unchanged but the epoch
+  /// moved, and that user has still made a choice the reconnect watcher must not override.
+  /// </remarks>
+  /// <returns>True when the switch was made; false when any selection happened since.</returns>
+  public async Task<bool> SetActiveOutputIfEpochAsync(
+    int expectedEpoch, string outputId, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(outputId))
+    {
+      throw new ArgumentException("outputId is required", nameof(outputId));
+    }
+
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      if (_castConnectEpoch != expectedEpoch)
       {
         return false;
       }
@@ -241,6 +299,13 @@ public class SoundFlowAudioEngine : IAudioEngine
       _activeOutputLock.Release();
     }
   }
+
+  /// <summary>
+  /// The output-selection epoch: incremented on every output transition through the gate.
+  /// A lock-free read, so only good for an early "has anything changed?" check — a decision
+  /// to switch must go through <see cref="SetActiveOutputIfEpochAsync"/>.
+  /// </summary>
+  public int OutputSelectionEpoch => Volatile.Read(ref _castConnectEpoch);
 
   /// <summary>The body of the output gate. Caller holds <c>_activeOutputLock</c>.</summary>
   private async Task ApplyActiveOutputLockedAsync(string outputId, CancellationToken cancellationToken)
@@ -258,12 +323,12 @@ public class SoundFlowAudioEngine : IAudioEngine
       var isLocal = !isCast && !isHttp;
 
       // Detect a transition AWAY from Cast — Cast needs a full tear-down
-      // (media STOP + CLOSE_APP + disconnect receiver) so the Chromecast
-      // returns to its default state. The bare DeactivateVirtualOutputAsync
-      // only sends media STOP via output.StopAsync; without DisconnectAsync
-      // the receiver app keeps the session and audio keeps playing on Cast
-      // (the user has to manually disconnect via the Cast UI, which was the
-      // bug observed in UAT scenario D).
+      // (StopAsync, then DisconnectAsync closing our connection to the
+      // receiver; see TearDownCastOutputAsync for exactly what each sends).
+      // The bare DeactivateVirtualOutputAsync only calls output.StopAsync and
+      // leaves the connection open, which was the bug observed in UAT
+      // scenario D (audio kept playing on Cast until the user disconnected
+      // via the Cast UI).
       var leavingCast = !isCast && string.Equals(previous, "google-cast", StringComparison.OrdinalIgnoreCase);
 
       // Order: deactivate -> mute-state -> activate. Muting before activation
@@ -317,6 +382,17 @@ public class SoundFlowAudioEngine : IAudioEngine
       }
 
       _activeOutputId = outputId;
+
+      // AUD-81: never let a subscriber fail the switch.
+      try
+      {
+        ActiveOutputChanged?.Invoke(this, outputId);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogWarning(ex, "An ActiveOutputChanged subscriber threw");
+      }
+
       await PersistActiveOutputAsync(outputId, cancellationToken).ConfigureAwait(false);
     }
   }
@@ -352,17 +428,34 @@ public class SoundFlowAudioEngine : IAudioEngine
   }
 
   /// <summary>
-  /// Full graceful tear-down of the Cast output: sends media STOP via
-  /// <c>StopAsync</c> AND <c>CLOSE_APP</c> + receiver-channel disconnect via
-  /// <c>DisconnectAsync</c>. Required when transitioning away from Cast
+  /// Full graceful tear-down of the Cast output: <c>StopAsync</c> (stops
+  /// DirectChannel streaming, and sends a media STOP when this connection
+  /// holds a media session) AND <c>DisconnectAsync</c>, which closes our
+  /// connection to the receiver. Closing itself sends no Cast message:
+  /// SharpCaster 3.0.0's <c>ChromecastClient.DisconnectAsync</c> only cancels
+  /// its receive loop and closes the socket. The one exception (AUD-81): when
+  /// this connection muted the speaker for a muted console, the tear-down
+  /// (<c>StopAsync</c>, or <c>DisconnectAsync</c> if the stop could not
+  /// finish it) releases that mute through <c>ReleaseConsoleMuteAsync</c> —
+  /// it STOPs our receiver application, then sends SET_MUTE false, possibly
+  /// over a fresh short-lived connection that launches nothing. A connection
+  /// still held for receiver confirmation (the reconnect watcher's, AUD-37)
+  /// carries no such mute — the console-mute recall waits for the
+  /// confirmation — and its <c>DisconnectAsync</c> skips the release outright.
+  /// Required when transitioning away from Cast
   /// (output picker switching to soundbar / http-stream) or on engine
-  /// shutdown — without the DisconnectAsync step the Chromecast receiver
-  /// app keeps the session and audio keeps streaming.
+  /// shutdown.
   ///
   /// Best-effort: capped at 5 s, swallows exceptions, never blocks the gate.
   /// Shares the same shutdown sequence used by AudioEngineInitializationService.StopAsync.
   /// </summary>
-  public async Task TearDownCastOutputAsync(CancellationToken cancellationToken)
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <param name="automaticAttempt">
+  /// AUD-37 (review M3): the Cast reconnect watcher's tear-down. The disconnect's and this
+  /// method's own failure lines are logged at Debug instead of Error/Warning. StopAsync's lines
+  /// are unchanged.
+  /// </param>
+  public async Task TearDownCastOutputAsync(CancellationToken cancellationToken, bool automaticAttempt = false)
   {
     if (_castOutput == null)
     {
@@ -384,20 +477,20 @@ public class SoundFlowAudioEngine : IAudioEngine
         await _castOutput.StopAsync(castCts.Token).ConfigureAwait(false);
       }
 
-      // DisconnectAsync sends CLOSE_APP and closes the receiver-channel
-      // connection. Only GoogleCastOutput knows how to do this — the
+      // DisconnectAsync closes our connection to the receiver (no Cast message,
+      // unless it must release a console mute — see the summary). Only GoogleCastOutput knows how to do this — the
       // IAudioOutput interface doesn't expose it. Runtime cast keeps the
       // engine's _castOutput field typed as IAudioOutput? for testability.
       if (_castOutput is Radio.Infrastructure.Audio.Outputs.GoogleCastOutput cast)
       {
-        await cast.DisconnectAsync(castCts.Token).ConfigureAwait(false);
+        await cast.DisconnectAsync(automaticAttempt, castCts.Token).ConfigureAwait(false);
       }
 
       _logger.LogInformation("Cast output stopped + disconnected gracefully");
     }
     catch (Exception ex)
     {
-      _logger.LogWarning(ex, "Graceful Cast tear-down failed; continuing");
+      _logger.Log(automaticAttempt ? LogLevel.Debug : LogLevel.Warning, ex, "Graceful Cast tear-down failed; continuing");
     }
   }
 

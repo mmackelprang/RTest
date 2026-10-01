@@ -1,18 +1,20 @@
 @* PresetCard — the single saved-station renderer (Proposal A). Two visual
-   variants share one field hierarchy + token set so the Home PRESETS rail and
+   variants share one field hierarchy + token set so the Home preset bar and
    the standalone Radio page can't drift (HANDOFF-saved-station-display §8).
 
-   Variant.Rail  → compact 1-row grid (slot · name+band · freq · kebab),
-                   used in RadioControlPanel's 200px PRESETS rail. Active cue +
-                   slot + kebab + long-press gestures live here.
+   Variant.Bar   → 129 × 60 card in RadioControlPanel's preset bar (UI-20, spec
+                   2026-10-01 §4.5): name up to two lines, then a meta line
+                   pinned to the bottom, "06 · FM 92.30". No kebab — a long-press
+                   opens Rename / Delete (owner decision Q3). It replaced the
+                   210 px rail's one-row Rail variant, whose only consumer was
+                   that rail.
    Variant.Card  → 2-column-grid card body (name line, then band + freq + delete
                    row), used in RadioPage's 480px presets panel.
 
    All states from the handoff (§6) are honoured in BOTH variants:
    selected/active (a11y non-color cue), long-name ellipsis + tooltip,
    no-name→freq-as-primary fallback. Empty-slot + empty-list remain the
-   PARENT's responsibility (they're list-level chrome, not per-card) — see
-   the migration tasks. *@
+   PARENT's responsibility (they're list-level chrome, not per-card). *@
 
 @{
   var hasName = !string.IsNullOrWhiteSpace(Name);
@@ -22,46 +24,36 @@
   var rowTitle = $"{fullLabel} — {Band} {freqFull}";
 }
 
-@if (Variant == PresetCardVariant.Rail)
+@if (Variant == PresetCardVariant.Bar)
 {
-  <div class="rcp-preset-item @(IsActive ? "is-active" : "")"
+  var ordinal = SlotNumber > 0 ? SlotNumber.ToString("00") : "";
+  <div class="rcp-bar-card @(IsActive ? "is-active" : "")"
        data-preset-id="@PresetId"
        @onclick="@(() => OnSelect.InvokeAsync(PresetId))"
+       @onkeydown="@(e => e.Key is "Enter" or " " ? OnSelect.InvokeAsync(PresetId) : Task.CompletedTask)"
        @onpointerdown="@(_ => OnPointerDown.InvokeAsync(PresetId))"
        @onpointerup="@(_ => OnPointerUp.InvokeAsync(PresetId))"
        @onpointerleave="@(_ => OnPointerCancel.InvokeAsync())"
        @onpointercancel="@(_ => OnPointerCancel.InvokeAsync())"
        role="button"
        tabindex="0"
-       title="@($"{rowTitle}. Click to tune; long-press or use ⋮ for rename / delete")">
-    @* Non-color active cue (a11y, handoff §7): a 3px amber inset left bar
-       rendered via CSS on .is-active — no extra element needed here. *@
-    <span class="rcp-preset-slot">@(SlotNumber > 0 ? SlotNumber.ToString("00") : "")</span>
+       aria-label="@BarAriaLabel(hasName)"
+       aria-current="@(IsActive ? "true" : null)"
+       aria-describedby="@AriaDescribedBy"
+       title="@($"{rowTitle}. Tap to tune; hold to rename or delete")">
+    @* Non-color active cue (a11y, handoff §7): the 3 px amber inset left bar
+       is painted by CSS on .is-active — no extra element needed here. *@
     @if (hasName)
     {
-      <span class="rcp-preset-text">
-        <span class="rcp-preset-name">@Name</span>
-        <span class="rcp-preset-band">@Band</span>
-      </span>
-      <span class="rcp-preset-freq">@freqValue</span>
+      <span class="rcp-bar-card-name">@Name</span>
     }
     else
     {
-      @* No-name fallback (handoff §6): promote the frequency to the
-         primary line; drop the dim freq tail. Band sub-line stays. The
-         empty freq cell keeps the 4-column grid intact (kebab in col 4). *@
-      <span class="rcp-preset-text">
-        <span class="rcp-preset-name rcp-preset-name-freq">@freqValue</span>
-        <span class="rcp-preset-band">@Band</span>
-      </span>
-      <span class="rcp-preset-freq"></span>
+      @* No-name fallback (handoff §6): the frequency is the primary line, in
+         mono; the meta line then carries only the ordinal and band. *@
+      <span class="rcp-bar-card-name rcp-bar-card-name-freq">@freqValue</span>
     }
-    <button type="button"
-            class="rcp-preset-kebab"
-            aria-label="Rename or delete preset @fullLabel"
-            title="Rename / delete"
-            @onclick="@(_ => OnKebab.InvokeAsync(PresetId))"
-            @onclick:stopPropagation="true">⋮</button>
+    <span class="rcp-bar-card-meta"><span class="rcp-bar-card-ordinal">@ordinal</span>@(ordinal.Length > 0 ? " · " : "")@Band@(hasName ? $" {freqValue}" : "")</span>
   </div>
 }
 else
@@ -113,17 +105,36 @@ else
   [Parameter, EditorRequired] public double Frequency { get; set; }
   /// <summary>Band token ("FM"/"AM"/...). Drives unit selection + the sub-line.</summary>
   [Parameter, EditorRequired] public string Band { get; set; } = string.Empty;
-  /// <summary>One-based per-band slot number. 0 → blank slot cell (Rail only).</summary>
+  /// <summary>One-based per-band slot number. 0 → no ordinal in the Bar meta line.</summary>
   [Parameter] public int SlotNumber { get; set; }
   /// <summary>Active/selected station — amber border + slot + non-color left bar.</summary>
   [Parameter] public bool IsActive { get; set; }
   /// <summary>Which surface this card renders for.</summary>
-  [Parameter] public PresetCardVariant Variant { get; set; } = PresetCardVariant.Rail;
+  [Parameter] public PresetCardVariant Variant { get; set; } = PresetCardVariant.Bar;
+  /// <summary>Bar only: id of the element carrying the "hold for rename or delete" hint (spec §8).</summary>
+  [Parameter] public string? AriaDescribedBy { get; set; }
 
   [Parameter] public EventCallback<string> OnSelect { get; set; }
-  [Parameter] public EventCallback<string> OnKebab { get; set; }
   [Parameter] public EventCallback<string> OnDelete { get; set; }
   [Parameter] public EventCallback<string> OnPointerDown { get; set; }
   [Parameter] public EventCallback<string> OnPointerUp { get; set; }
   [Parameter] public EventCallback OnPointerCancel { get; set; }
+
+  /// <summary>
+  /// Bar card label (spec §8): "Preset 6, Rock 92.3, FM 92.30 megahertz", plus ", now playing" when
+  /// active. The unit is spelled out because a screen reader reads "MHz" letter by letter.
+  /// </summary>
+  private string BarAriaLabel(bool hasName)
+  {
+    var unit = FrequencyFormatter.FrequencyUnit(Band).Trim() switch
+    {
+      "kHz" => "kilohertz",
+      "MHz" => "megahertz",
+      var other => other,
+    };
+    var spoken = $"{Band} {FrequencyFormatter.FrequencyValue(Frequency, Band)} {unit}";
+    var label = SlotNumber > 0 ? $"Preset {SlotNumber}, " : "Preset, ";
+    label += hasName ? $"{Name}, {spoken}" : spoken;
+    return IsActive ? $"{label}, now playing" : label;
+  }
 }

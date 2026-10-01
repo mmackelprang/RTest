@@ -6,12 +6,28 @@ namespace Radio.Core.Models;
 public sealed record BandMapChannel(long FrequencyHz, float LevelDbfs);
 
 /// <summary>
-/// A stored per-channel signal map of one radio band, produced by a band sweep (AUD-76).
+/// A stored per-channel signal map of one radio band, produced by a band sweep (AUD-76; per band
+/// since AUD-91).
 /// </summary>
 public sealed record BandMap
 {
-  /// <summary>Band name, e.g. <c>"FM"</c>.</summary>
+  /// <summary>Band code, e.g. <c>"FM"</c>, <c>"WB"</c>, <c>"AIR"</c>, <c>"VHF"</c>.</summary>
   public string Band { get; init; } = "FM";
+
+  /// <summary>
+  /// Lower edge of the frequency range the sweep covered, as drawn on the band's axis, in Hz.
+  /// 0 when not recorded (a map written before AUD-91).
+  /// </summary>
+  public long RangeMinHz { get; init; }
+
+  /// <summary>
+  /// Upper edge of the frequency range the sweep covered, as drawn on the band's axis, in Hz.
+  /// 0 when not recorded (a map written before AUD-91).
+  /// </summary>
+  public long RangeMaxHz { get; init; }
+
+  /// <summary>Spacing of the swept channel grid, in Hz. 0 when not recorded (a map written before AUD-91).</summary>
+  public long ChannelSpacingHz { get; init; }
 
   /// <summary>When the sweep that produced this map finished, UTC.</summary>
   public DateTimeOffset ScannedAtUtc { get; init; }
@@ -68,6 +84,9 @@ public static class BandSweepResults
 /// <summary>The result of the most recent sweep attempt.</summary>
 public sealed record BandSweepOutcome
 {
+  /// <summary>Band code the attempt was for, or null when not recorded.</summary>
+  public string? Band { get; init; }
+
   /// <summary>What started (or would have started) the sweep.</summary>
   public string Trigger { get; init; } = string.Empty;
 
@@ -95,6 +114,9 @@ public sealed record BandSweepStatus
 {
   /// <summary>True while a sweep is running.</summary>
   public bool IsSweeping { get; init; }
+
+  /// <summary>Band code of the running sweep, or null when idle.</summary>
+  public string? Band { get; init; }
 
   /// <summary>Trigger of the running sweep, or null.</summary>
   public string? Trigger { get; init; }

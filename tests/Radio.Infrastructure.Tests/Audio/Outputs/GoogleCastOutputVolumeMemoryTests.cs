@@ -15,7 +15,7 @@ namespace Radio.Infrastructure.Tests.Audio.Outputs;
 /// volume.
 /// </summary>
 /// <remarks>
-/// Driven through the real <see cref="GoogleCastOutput.ConnectAsync"/> with the transport, the
+/// Driven through the real <see cref="GoogleCastOutput.ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/> with the transport, the
 /// status read and SET_VOLUME substituted — no fake socket speaks the Cast protocol. The
 /// after-start push is invoked directly (<see cref="GoogleCastOutput.SyncVolumeAfterStartAsync"/>)
 /// because the StartAsync chain that calls it needs a launched receiver application. The
@@ -156,14 +156,83 @@ public class GoogleCastOutputVolumeMemoryTests
     Assert.DoesNotContain(published, e => !e.IsInitialSync);
   }
 
+  [Fact]
+  public async Task AHeldConnect_PushesNoVolume_AndReportsNoStatus_UntilTheReceiverIsConfirmedFree()
+  {
+    // AUD-37 review M5. The reconnect watcher connects BEFORE it knows the speaker is free. A
+    // speaker serving another sender must not have its volume jumped to our remembered level,
+    // and that sender's volume/mute changes must not reach the console (the CastVolumeChanged
+    // subscriber writes master volume and mute) or our memory for the device.
+    using var listener = StartLoopbackListener(out var port);
+    var store = new FakeVolumeStore();
+    store.Volumes["cast-a"] = 0.25f;
+    await using var output = BuildOutput(store);
+    await output.InitializeAsync();
+
+    var pushes = new List<float>();
+    var published = new List<CastVolumeChangedEventArgs>();
+    output.CastVolumeChanged += (_, e) => published.Add(e);
+    output.ConnectTransportOverrideForTests = _ => Task.CompletedTask;
+    output.CastStatusReadOverrideForTests = () => Task.FromResult<(float, bool)?>((0.70f, false));
+    output.CastSetVolumeOverrideForTests = v => { pushes.Add(v); return Task.CompletedTask; };
+
+    await output.ConnectAsync(Device("cast-a", port), new CastConnectOptions { HoldUntilReceiverConfirmed = true });
+
+    Assert.True(output.IsHoldingForReceiverConfirmation);
+    Assert.Empty(pushes); // not the remembered 25 %, not anything
+
+    RaiseReceiverStatus(output, 0.40);              // the other sender turns it down…
+    RaiseReceiverStatus(output, 0.40, muted: true); // …and mutes it
+    Assert.DoesNotContain(published, e => !e.IsInitialSync);
+    Assert.Equal(0.25f, store.Volumes["cast-a"], 3); // our memory for the device is untouched
+
+    // Confirmed free: the start's after-launch push applies the remembered level.
+    output.ConfirmReceiverAvailable();
+    await output.SyncVolumeAfterStartAsync();
+    Assert.Equal(new[] { 0.25f }, pushes);
+
+    // And from here statuses are reported again.
+    RaiseReceiverStatus(output, 0.55);
+    Assert.Contains(published, e => !e.IsInitialSync && Math.Abs(e.Volume - 0.55f) < 0.001f);
+  }
+
+  [Fact]
+  public async Task AHold_DoesNotOutliveItsConnect()
+  {
+    using var listener = StartLoopbackListener(out var port);
+    var store = new FakeVolumeStore();
+    store.Volumes["cast-a"] = 0.25f;
+    await using var output = BuildOutput(store);
+    await output.InitializeAsync();
+
+    var pushes = new List<float>();
+    output.ConnectTransportOverrideForTests = _ => Task.CompletedTask;
+    output.CastStatusReadOverrideForTests = () => Task.FromResult<(float, bool)?>((0.70f, false));
+    output.CastSetVolumeOverrideForTests = v => { pushes.Add(v); return Task.CompletedTask; };
+
+    var held = new CastConnectOptions { HoldUntilReceiverConfirmed = true };
+
+    // A user's connect replacing a held one is not held: the remembered level is pushed at once.
+    await output.ConnectAsync(Device("cast-a", port), held);
+    await output.ConnectAsync(Device("cast-a", port));
+    Assert.False(output.IsHoldingForReceiverConfirmation);
+    Assert.Equal(new[] { 0.25f }, pushes);
+
+    // A disconnect ends a hold too.
+    await output.ConnectAsync(Device("cast-a", port), held);
+    Assert.True(output.IsHoldingForReceiverConfirmation);
+    await output.DisconnectAsync();
+    Assert.False(output.IsHoldingForReceiverConfirmation);
+  }
+
   // --- helpers ---
 
-  private static void RaiseReceiverStatus(GoogleCastOutput output, double level)
+  private static void RaiseReceiverStatus(GoogleCastOutput output, double level, bool muted = false)
   {
     var handler = typeof(GoogleCastOutput).GetMethod(
       "OnReceiverStatusChanged", BindingFlags.NonPublic | BindingFlags.Instance);
     Assert.NotNull(handler);
-    var status = new ChromecastStatus { Volume = new() { Level = level, Muted = false } };
+    var status = new ChromecastStatus { Volume = new() { Level = level, Muted = muted } };
     handler!.Invoke(output, new object?[] { null, status });
   }
 

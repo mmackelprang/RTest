@@ -156,6 +156,48 @@ public class GoogleCastOutputOptions
   public int StartupConnectTimeoutSeconds { get; set; } = 40;
 
   /// <summary>
+  /// AUD-37. When a Cast speaker drops mid-stream the console falls back to a local output
+  /// (AUD-84); with this on, it then watches for the speaker to come back and moves the output
+  /// back to Cast — but only if nobody has chosen an output since the drop. Default: true.
+  /// </summary>
+  public bool AutoReconnect { get; set; } = true;
+
+  /// <summary>
+  /// AUD-37. The first wait before probing a dropped Cast speaker; each later wait doubles, up
+  /// to <see cref="AutoReconnectMaxBackoffSeconds"/>. Default: 5 seconds.
+  /// </summary>
+  public int AutoReconnectInitialBackoffSeconds { get; set; } = 5;
+
+  /// <summary>
+  /// AUD-37. The cap on the wait between probes of a dropped Cast speaker. Default: 60 seconds.
+  /// </summary>
+  public int AutoReconnectMaxBackoffSeconds { get; set; } = 60;
+
+  /// <summary>
+  /// AUD-37. How long after the drop the console keeps watching for the speaker before giving
+  /// up; no probe starts after this. Default: 30 minutes.
+  /// </summary>
+  public int AutoReconnectWindowMinutes { get; set; } = 30;
+
+  /// <summary>
+  /// AUD-37. How long a connection the auto-reconnect made must stay up before it counts as
+  /// stable. A speaker that drops again sooner continues the same reconnect window and
+  /// backoff instead of starting a fresh one, so one that accepts the session and then dies
+  /// is given up on when the original window ends. Default: 120 seconds.
+  /// </summary>
+  public int AutoReconnectStabilitySeconds { get; set; } = 120;
+
+  /// <summary>
+  /// AUD-37. The most reconnects the auto-reconnect makes to one speaker in any hour. A speaker
+  /// that stays up past <see cref="AutoReconnectStabilitySeconds"/> and then drops starts a fresh
+  /// window each time; once it has been reconnected this many times within the last hour, the next
+  /// drop is not watched (pick Cast again to reconnect: choosing an output, or connecting or
+  /// disconnecting Cast, through the devices API resets the count). Values below 1 are treated
+  /// as 1. Default: 6.
+  /// </summary>
+  public int AutoReconnectMaxReconnectsPerHour { get; set; } = 6;
+
+  /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
   /// </summary>
   public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";

@@ -172,6 +172,12 @@ public class SetFrequencyRequest
   /// Gets or sets the frequency to tune to in Hertz (Hz).
   /// </summary>
   public long Frequency { get; set; }
+
+  /// <summary>
+  /// Optional band code (AM, FM, SW, AIR, WB, VHF). When set, the radio tunes inside this band and
+  /// the frequency must lie within it; when null, the band is inferred from the frequency (AUD-91).
+  /// </summary>
+  public string? Band { get; set; }
 }
 
 /// <summary>

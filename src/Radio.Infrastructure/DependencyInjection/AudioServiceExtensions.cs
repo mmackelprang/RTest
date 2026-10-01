@@ -120,10 +120,11 @@ public static class AudioServiceExtensions
       sp.GetService<ILogger<SdrDeviceGate>>(),
       sp.GetService<TimeProvider>()));
 
-    // AUD-76: FM band map sweeps. Singleton + AddHostedService(factory) so controllers resolve
-    // the same instance the host starts. The radio source and ISleepService are resolved per
-    // call through delegates: the audio manager is built lazily, and ISleepService is
-    // registered by the API host after this method runs.
+    // AUD-76: band map sweeps (per band since AUD-91). Singleton + AddHostedService(factory) so
+    // controllers resolve the same instance the host starts. The radio source and ISleepService
+    // are resolved per call through delegates: the audio manager is built lazily, and
+    // ISleepService is registered by the API host after this method runs. currentTuning reads
+    // the cached radio source's band and frequency; null (no radio source yet) means FM.
     services.Configure<BandMapOptions>(configuration.GetSection(BandMapOptions.SectionName));
     services.AddSingleton<BandMapService>(sp => new BandMapService(
       sp.GetRequiredService<ILogger<BandMapService>>(),
@@ -135,7 +136,11 @@ public static class AudioServiceExtensions
       () => sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) as ILiveBandSweeper,
       () => sp.GetService<ISleepService>(),
       deviceFactory: null,
-      timeProvider: sp.GetService<TimeProvider>()));
+      timeProvider: sp.GetService<TimeProvider>(),
+      currentTuning: () =>
+        sp.GetRequiredService<IAudioManager>().GetCachedSource(AudioSourceType.Radio) is Radio.Core.Interfaces.Audio.IRadioControl radio
+          ? new BandMapTuning(radio.CurrentBand.ToString(), radio.CurrentFrequency.Hertz)
+          : null));
     services.AddHostedService(sp => sp.GetRequiredService<BandMapService>());
 
     // Register radio factory (singleton for device management). Plain AddSingleton<T>: the
@@ -399,6 +404,11 @@ public static class AudioServiceExtensions
 
     // Register Google Cast Output (singleton - optional external output)
     services.AddSingleton<GoogleCastOutput>();
+
+    // AUD-81: the console's volume and mute drive a connected Cast speaker. Needs the master
+    // mixer and engine from AddSoundFlowAudio; constructed at startup by
+    // AudioEngineInitializationService, since nothing else depends on it.
+    services.AddSingleton<CastConsoleVolumeFollower>();
 
     // Register HTTP Stream Output (singleton - provides stream URL for Chromecast)
     services.AddSingleton<HttpStreamOutput>();

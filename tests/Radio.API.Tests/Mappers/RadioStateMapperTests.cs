@@ -148,6 +148,7 @@ public class RadioStateMapperTests
     public Task StartScanAsync(ScanDirection direction, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task StopScanAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SetBandAsync(RadioBand band, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task TuneInBandAsync(RadioBand band, Frequency frequency, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SetFrequencyStepAsync(Frequency step, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task SetEqualizerModeAsync(RadioEqualizerMode mode, CancellationToken cancellationToken = default) => Task.CompletedTask;
     public Task<bool> GetPowerStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(true);
