@@ -17,8 +17,8 @@ namespace RTLSDRCore.Sweep;
 /// <para>
 /// WB, AIR and VHF are narrowband: several channels are measured from one capture. Consecutive
 /// channels are grouped so that every channel's measurement window lies within
-/// <see cref="NarrowbandMaxOffsetHz"/> of the tuned centre, and the centre sits half a channel
-/// spacing away from every channel in the group, so no channel is measured at DC.
+/// <see cref="NarrowbandMaxOffsetHz"/> of the tuned centre, and the centre sits at least half a
+/// channel spacing from every channel in the group, so no channel is measured at DC.
 /// </para>
 /// <para>
 /// AM, SW and custom bands have no plan. See <see cref="UnavailableReason"/>.

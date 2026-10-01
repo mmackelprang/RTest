@@ -24,7 +24,11 @@ public sealed class BandSweepPlan
   /// <param name="dcExcludeHz">Bins within this distance of the tuned centre are never measured.</param>
   /// <param name="sampleRate">Capture rate the tune grouping was designed for, in samples per second.</param>
   /// <exception cref="ArgumentException">The tunes are empty, a tune has no channels, or the channels are not strictly ascending.</exception>
-  /// <exception cref="ArgumentOutOfRangeException">A numeric argument is not positive, or the display range is inverted.</exception>
+  /// <exception cref="ArgumentOutOfRangeException">
+  /// <paramref name="channelSpacingHz"/>, <paramref name="halfWindowHz"/> or <paramref name="sampleRate"/>
+  /// is not positive, <paramref name="dcExcludeHz"/> is negative (zero is allowed), or the display range
+  /// is inverted.
+  /// </exception>
   public BandSweepPlan(
     string band,
     IReadOnlyList<SweepTune> tunes,

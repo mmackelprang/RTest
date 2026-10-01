@@ -44,8 +44,14 @@ public class RadioReceiverLivePlanSweepTests
     BandSweepPlan plan = BandSweepPlans.For(BandType.Weather, null)!;
     int hopsBefore = device.SetFrequencyCalls.Count;
     int callsBefore = device.Calls.Count;
+    ModulationType modulationBefore = receiver.CurrentModulation;
+    Assert.False(receiver.IsMuted);
 
     IReadOnlyList<ChannelLevel> levels = receiver.SweepPlan(plan, SweepGain, null, CancellationToken.None);
+
+    // Sweeping the WB plan measures WB channels; it does not move the receiver to WB.
+    Assert.Equal(BandType.FM, receiver.CurrentBand.Type);
+    Assert.Equal(modulationBefore, receiver.CurrentModulation);
 
     Assert.Equal(plan.Channels, levels.Select(l => l.FrequencyHz));
     Assert.Equal(WeatherStationHz, levels.MaxBy(l => l.LevelDbfs)!.FrequencyHz);
