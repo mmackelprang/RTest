@@ -2500,23 +2500,34 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// <see cref="PushVolumeToDeviceAsync"/>, then — when this output's baseline had the speaker
-  /// muted before the push — a SET_MUTE true straight after it (AUD-81 follow-up). A SET_VOLUME that
-  /// changes the level unmutes the speaker (measured on a Google Home Mini, box UAT 2026-10-01), and
-  /// a level push of ours must not leave a muted speaker unmuted. Used by the pushes that cannot be
-  /// held for a console unmute: the AUD-80 restore on connect and the after-start push to a speaker
-  /// muted on its own side under an unmuted console. Returns what the level push returned; a re-mute
-  /// that fails or sends nothing is logged at Warning and does not fail the push. Bounded only by the caller (the re-mute by
+  /// muted before the push, unless that mute was the console's and the console is unmuted now
+  /// (hostile review round 3, LOW-1) — a SET_MUTE true straight after it (AUD-81 follow-up). A
+  /// SET_VOLUME that changes the level unmutes the speaker (measured on a Google Home Mini, box UAT
+  /// 2026-10-01). Used only by the two pushes that are not console moves and cannot be held for a
+  /// console unmute: the AUD-80 restore on connect and the after-start push. For those, the speaker's
+  /// mute as found is kept. This is not a rule for every level of ours: a console move under an
+  /// unmuted console goes through the console volume drain, which sends the level alone, so it does
+  /// unmute a speaker muted on its own side (the device does it; the console stays unmuted).
+  /// Returns what the level push returned; a re-mute that fails or sends nothing is logged at
+  /// Warning and does not fail the push. Bounded only by the caller (the re-mute by
   /// <see cref="ConsoleCommandTimeout"/>).
   /// </summary>
   private async Task<bool> PushVolumeKeepingMuteAsync(ChromecastClient client, float volume)
   {
-    var wasMuted = _lastSetMute;
+    // Hostile review (round 3) LOW-1: decided from the state BEFORE the push. A speaker whose mute
+    // was the console's (the mark — e.g. re-armed by F11 after a lost connection) is not muted again
+    // when the console is unmuted now: the console wants it unmuted. Re-muting it would leave it
+    // silent under an unmuted console, and on a device that unmutes on a level change the level's
+    // reply has already released the mark (the level-echo rule), so nothing would unmute it again.
+    // Without the re-mute, either the level unmuted it or it is still muted and still marked, and
+    // the activation reconcile unmutes it.
+    var reMute = _lastSetMute && !(IsSpeakerMutedByConsole && !IsConsoleMutedNow());
     if (!await PushVolumeToDeviceAsync(client, volume).ConfigureAwait(false))
     {
       return false;
     }
 
-    if (wasMuted)
+    if (reMute)
     {
       try
       {

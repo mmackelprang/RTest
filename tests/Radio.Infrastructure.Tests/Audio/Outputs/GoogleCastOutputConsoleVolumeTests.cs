@@ -1261,6 +1261,49 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.True(h.Output.IsSpeakerMutedByConsole);
   }
 
+  // Hostile review (round 3) LOW-1. A speaker still muted from an earlier console mute (lost while
+  // the console was muted; F11 re-arms the mark on reconnect), with the console unmuted meanwhile.
+  // The AUD-80 restore fails, so the after-start push sends the level. That push used to re-mute
+  // the speaker straight after it — on the device model after the level-echo rule had already
+  // released the mark (the console is unmuted), leaving the speaker silent under an unmuted
+  // console with nothing left to unmute it. A mute that was the console's is not re-asserted under
+  // an unmuted console: either the level unmuted the speaker, or it is still muted and still marked,
+  // so the activation reconcile unmutes it.
+  [Fact]
+  public async Task TheAfterStartPush_DoesNotReMuteASpeakerMutedForTheConsole_OnceTheConsoleIsUnmuted()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = true;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.Output.ReportConnectionLost(target.Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+
+    consoleMuted = false;                       // unmuted while nothing could reach the speaker
+    h.Store.Volumes["cast-a"] = 0.60f;          // a remembered level that differs from the speaker's
+    h.FailNextVolume = new TimeoutException("restore failed");
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true);
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // the premise: F11 re-armed the mark
+    h.ClearCommands();
+
+    await h.Output.SyncVolumeAfterStartAsync();
+
+    Assert.Equal(new[] { "vol" }, h.Kinds());
+    Assert.Empty(h.External);
+    if (OnTheDeviceModel)
+    {
+      Assert.False(h.DeviceMuted);              // the level unmuted it, as the console is
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+    }
+    else
+    {
+      Assert.True(h.DeviceMuted);               // still muted, and still the console's to unmute
+      Assert.True(h.Output.IsSpeakerMutedByConsole);
+    }
+  }
+
   // Pre-merge review M3 (a): the start-time mute runs before Streaming, and the follower ignores
   // the console until Streaming, so a mute made in between was lost.
   [Fact]
