@@ -1522,6 +1522,101 @@ body::-webkit-scrollbar,
 }
 
 
+/* ─── §20a  Text-entry dialogs sit at the top (UI-24) ─────────────────────── *
+ *
+ * The kiosk types with the in-app keyboard (js/virtual-keyboard.js — GNOME's own OSK never opens for
+ * Chrome on this box: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md). That keyboard is fixed to
+ * the bottom of the screen and does not resize the page. Measured in Chromium at 1920×720, its top
+ * edge is at y = 348 for the QWERTY layout and y = 360 for the numpad; everything below is covered
+ * while it is up. A centred dialog put its text field and its buttons exactly there.
+ *
+ * So any dialog that holds a text field hangs from the top of the area it overlays instead — always,
+ * not only while the keyboard is up, so it never jumps under the finger that tapped the field.
+ * Hand-built overlays use the overlay + card pair; Radzen DialogService dialogs pass
+ * CssClass = "kiosk-entry-dialog".
+ *
+ * Where they land, measured:
+ *  - The radio panel's overlays are bounded by `.page-transition > *` (§17), whose transform makes
+ *    it the containing block for fixed-position descendants. They cover the content area below the
+ *    120 px top bar, and the card starts at y = 144. Its buttons end at y = 307, 41 px above the
+ *    QWERTY keyboard. If §17 stops transforming that element, these overlays become full-screen and
+ *    the card moves to y = 24, above the bar at z-index 9999. Both placements clear the keyboard.
+ *  - The Radio page's overlays get the same transform on themselves, which does not contain them, so
+ *    they cover the whole screen and their card starts at y = 24.
+ *  - Radzen dialogs render outside `.page-transition`, in a wrapper that Radzen stacks at z-index
+ *    1001, beneath the fixed top bar (1100), so a dialog anchored at y = 24 had its title and ✕ hidden
+ *    by the bar. The wrapper of an anchored dialog is raised to 9999, the hand-built overlays'
+ *    level, which puts the dialog and its mask above the bar (and still below the keyboard, 10001).
+ *    The dialog starts at y = 24. Anchoring it below the bar instead was tried and measured: the
+ *    228 px between the bar and the keyboard is too short for Save Playlist, whose description field
+ *    then sat under the keys. The file browser's action buttons are below y = 348, so they are
+ *    covered while the keyboard is up; Enter or ✕ on the keyboard uncovers them.
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+.kiosk-entry-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: var(--sp-6);
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.kiosk-entry-card {
+  min-width: 320px;
+  max-width: 480px;
+  padding: var(--sp-6);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.kiosk-entry-card h6 {
+  margin: 0 0 var(--sp-3);
+}
+
+.kiosk-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+/* 58 px, as the preset bar's arrows and the kiosk's own dialogs: these are pressed with a finger. */
+.kiosk-entry-actions .rz-button {
+  min-height: 58px;
+  min-width: 96px;
+}
+
+/* Radzen positions .rz-dialog absolutely inside a full-screen flex wrapper and centres it there; a
+   top offset overrides the centring. */
+.rz-dialog.kiosk-entry-dialog {
+  top: var(--sp-6);
+  /* 100% is the full-screen wrapper: a dialog taller than the room below y = 24 (the file browser
+     is 636 px once its list loads) must not run off the bottom of the screen, footer and all. */
+  max-height: calc(100% - 2 * var(--sp-6));
+}
+
+/* Above the fixed top bar (z-index 1100), as the hand-built overlays are. The mask is the wrapper's
+   child, so it rises with it. Selected through :has() so call sites pass one class rather than also
+   setting DialogOptions.WrapperCssClass, which would do the same job. */
+.rz-dialog-wrapper:has(> .rz-dialog.kiosk-entry-dialog) {
+  z-index: 9999;
+}
+
+/* Under the height cap, let the body shrink rather than scroll as a whole, so a dialog with its own
+   scrolling list (the file browser's .file-browser-list) gives up list height and keeps its toolbar
+   and footer on screen. Radzen's overflow: auto on the content stays as the fallback. */
+.rz-dialog.kiosk-entry-dialog .rz-dialog-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+
 /* ─── §21  Queue Drag-and-Drop ────────────────────────────────────────────── */
 
 .queue-drop-container {
@@ -4245,9 +4340,21 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  /* UI-27: the CLIP pill is positioned against this box. */
+  position: relative;
 }
 
+/* UI-27: the pill takes no part in layout. It is 19.5 px tall against the header's 16.5, so while it
+   was inserted in flow the header grew 3 px every time it appeared and everything below the meter
+   moved down with it. It is now out of flow, to the left of the readout and centred on it, and is
+   always rendered — .is-on shows it — so CLIP appearing or clearing changes no element's box. */
 .rcp-clip-pill {
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  transform: translateY(-50%);
+  visibility: hidden;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 9px;
   font-weight: 700;
@@ -4259,6 +4366,10 @@ body {
   background: rgba(248, 113, 113, 0.10);
   color: var(--signal-red);
   box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.rcp-clip-pill.is-on {
+  visibility: visible;
 }
 
 .rcp-meter-dbu {

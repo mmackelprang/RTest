@@ -205,11 +205,10 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Shift dialog content up when keyboard is visible so inputs aren't hidden */
-body.keyboard-active .mud-overlay .mud-paper {
-  transform: translateY(-150px);
-  transition: transform 0.3s ease;
-}
+/* UI-24: dialogs with text fields keep clear of this keyboard by sitting at the top of the screen —
+   design-system.css §20a (.kiosk-entry-overlay, .rz-dialog.kiosk-entry-dialog). The rule that used to
+   be here shifted `.mud-overlay .mud-paper` up 150 px; nothing has rendered those classes since the
+   move from MudBlazor to Radzen, so it matched nothing and every dialog stayed centred under the keys. */
 
 /* Numeric keypad — compact centered layout */
 .virtual-keyboard.numpad {

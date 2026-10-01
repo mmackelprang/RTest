@@ -2,6 +2,7 @@ using System.Net;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
@@ -245,7 +246,7 @@ public class RadioControlPanelTests : TestContext
     var clipState = BuildState(signalStrength: 100, clip: true, rssiDbu: 0.0);
     var cut = RenderPanel(clipState);
 
-    var pills = cut.FindAll(".rcp-clip-pill");
+    var pills = cut.FindAll(".rcp-clip-pill.is-on");
     Assert.Single(pills);
     Assert.Equal("CLIP", pills[0].TextContent.Trim());
   }
@@ -256,7 +257,79 @@ public class RadioControlPanelTests : TestContext
     var state = BuildState(signalStrength: 70, clip: false, rssiDbu: -18.0);
     var cut = RenderPanel(state);
 
-    Assert.Empty(cut.FindAll(".rcp-clip-pill"));
+    // UI-27: the pill stays in the DOM and is hidden by the stylesheet — see
+    // Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn for the half bUnit cannot see.
+    Assert.Single(cut.FindAll(".rcp-clip-pill"));
+    Assert.Empty(cut.FindAll(".rcp-clip-pill.is-on"));
+  }
+
+  [Theory]
+  [InlineData(false, false)]
+  [InlineData(true, false)]
+  [InlineData(false, true)]
+  [InlineData(true, true)]
+  public void MeterHeader_HasTheSameElements_WithAndWithoutClip(bool clip, bool scanning)
+  {
+    // UI-27, owner: "when the CLIP tag appears above the signal strength bar, it causes the whole
+    // screen to shift by a couple of pixels". Inserting the pill made the header 3 px taller
+    // (measured: 16.5 → 19.5 px) and moved everything below the meter. Now CLIP changes one class
+    // and nothing else: the header holds the same elements in the same order either way, so CLIP
+    // cannot add a box to the header's layout or take one away. (One render per bUnit context,
+    // hence one expected shape per scan state rather than a with/without comparison in one test.)
+    var state = BuildState(signalStrength: 100, clip: clip, rssiDbu: -20.0, scanStopThreshold: -10.0) with
+    {
+      IsScanning = scanning,
+      ScanDirection = scanning ? "up" : null,
+    };
+    var cut = RenderPanel(state);
+    var header = cut.Find(".rcp-meter-header");
+    var shape = string.Join("|", header.QuerySelectorAll("*").Select(e =>
+      $"{e.TagName}.{string.Join(".", e.ClassList.Where(c => c != "is-on").OrderBy(c => c, StringComparer.Ordinal))}"));
+
+    var expected = (scanning ? "SPAN.|SPAN.rcp-scanning|" : "SPAN.|")
+      + "SPAN.rcp-meter-readout|SPAN.rcp-clip-pill|SPAN.rcp-meter-dbu";
+    shape.Should().Be(expected);
+    header.QuerySelector(".rcp-clip-pill")!.ClassList.Contains("is-on").Should().Be(clip);
+  }
+
+  [Fact]
+  public void Css_ClipPill_TakesNoRoomAndIsHiddenUntilOn()
+  {
+    // bUnit computes no styles, so the geometry half of UI-27 is pinned in the stylesheet: the pill
+    // is out of flow (absolute, against the readout), hidden by visibility rather than display —
+    // display:none would take its box away and put it back, which is the shift — and shown only by
+    // .is-on. Measured in Chromium at 1920×720: header 16.5 px and every rect below it identical with
+    // CLIP off, CLIP on, scanning and both.
+    var css = File.ReadAllText(LocateDesignSystemCss());
+    var pill = Regex.Match(css, @"\n\.rcp-clip-pill\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    var on = Regex.Match(css, @"\n\.rcp-clip-pill\.is-on\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+    var readout = Regex.Match(css, @"\n\.rcp-meter-readout\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
+
+    pill.Should().Contain("position: absolute");
+    // Where it sits once out of flow: left of the dBu readout and centred on it. Without these it
+    // would land on top of the readout.
+    pill.Should().Contain("right: calc(100% + 6px)");
+    pill.Should().Contain("top: 50%");
+    pill.Should().Contain("transform: translateY(-50%)");
+    pill.Should().Contain("visibility: hidden");
+    pill.Should().NotContain("display: none");
+    on.Should().Contain("visibility: visible");
+    readout.Should().Contain("position: relative", "the pill is placed against the readout, not some outer box");
+  }
+
+  private static string LocateDesignSystemCss()
+  {
+    var dir = AppContext.BaseDirectory;
+    for (var i = 0; i < 10 && dir != null; i++)
+    {
+      var candidate = Path.Combine(dir, "src", "Radio.Web", "wwwroot", "css", "design-system.css");
+      if (File.Exists(candidate))
+      {
+        return candidate;
+      }
+      dir = Path.GetDirectoryName(dir);
+    }
+    throw new FileNotFoundException("design-system.css not found by walking up from test base dir");
   }
 
   [Fact]
@@ -1011,6 +1084,45 @@ public class RadioControlPanelTests : TestContext
     cut.Find(".rcp-bar-save").Click();
 
     cut.FindAll("h6").Select(h => h.TextContent).Should().Contain("Save Preset");
+  }
+
+  [Theory]
+  [InlineData("frequency", "Set Frequency")]
+  [InlineData("save", "Save Preset")]
+  [InlineData("rename", "Rename Preset")]
+  public void TextEntryDialogs_AreTopAnchored_ClearOfTheKeyboard(string dialog, string title)
+  {
+    // UI-24, owner (Rename dialog, UI-20 UAT check 5): "the keyboard occludes the dialog". The
+    // in-app keyboard covers everything below y = 348 of the 720 px panel; these dialogs were centred
+    // overlays with inline align-items:center, which put the field and its buttons under it. They
+    // now use the shared top-anchored overlay (design-system.css §20a — pinned by
+    // TextEntryDialogPlacementTests), so the markup must carry those classes and no inline
+    // placement of its own that could override them.
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var presets = dialog == "rename" ? new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) } : null;
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand(16) });
+
+    switch (dialog)
+    {
+      case "frequency":
+        cut.Find(".rcp-freq-well .display-frequency").Click();
+        break;
+      case "save":
+        cut.Find(".rcp-bar-save").Click();
+        break;
+      default:
+        LongPressCard(cut, "p1");
+        cut.FindAll(".rcp-preset-menu-item")[0].Click();
+        break;
+    }
+
+    var overlay = cut.FindAll(".kiosk-entry-overlay").Should().ContainSingle().Subject;
+    overlay.GetAttribute("style").Should().BeNull("placement comes from the shared class, not an inline override");
+    var card = overlay.QuerySelector(":scope > .kiosk-entry-card");
+    card.Should().NotBeNull();
+    card!.QuerySelector("h6")!.TextContent.Trim().Should().Be(title);
+    card.QuerySelector("input").Should().NotBeNull("the field the keyboard types into is in the anchored card");
+    card.QuerySelectorAll(".kiosk-entry-actions > button").Should().HaveCount(2);
   }
 
   [Fact]
