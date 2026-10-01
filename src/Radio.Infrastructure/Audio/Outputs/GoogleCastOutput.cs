@@ -362,11 +362,24 @@ public class GoogleCastOutput : AudioOutputBase
   [ThreadStatic] private static float t_speakerChangeLevel;
 
   // AUD-81: the generation of the connection this application muted because the console was
-  // muted, or -1. A deliberate teardown of that connection stops the receiver application and
+  // muted (or re-armed for, F11 — see _consoleMutedDeviceId), or -1. A deliberate teardown of that connection stops the receiver application and
   // then unmutes the speaker, so it is not left muted for its next user (and is left muted when
   // the stop cannot be confirmed — see ReleaseConsoleMuteAsync). Accessed through
   // Interlocked/Volatile only.
   private int _consoleMutedGeneration = -1;
+
+  // AUD-81 (hostile review F11): the ChromecastDeviceInfo.Id of the speaker this application last
+  // muted for the console and has not seen unmuted since, or null. Unlike the generation mark
+  // above it survives a LOST connection — a lost speaker stays muted — so that a later connection
+  // to the same device whose initial read shows it muted re-arms the mark (RecallConsoleMuteAsync)
+  // instead of leaving a speaker nobody will unmute under an unmuted console. Cleared by an
+  // acknowledged console unmute or teardown unmute of that device, by an unmute observed on it,
+  // and by a connection to it whose initial read shows it unmuted. One slot: muting a different
+  // device for the console replaces it. In-process only, never persisted: after a radio-api
+  // restart it is gone, and a speaker left muted by a lost connection before the restart is
+  // treated like one muted on its own side (not unmuted for the console). Guarded by
+  // _consoleMuteLock.
+  private string? _consoleMutedDeviceId;
 
   // AUD-81: set once by CastConsoleVolumeFollower. The console's mute state, read when
   // streaming starts, and the logger the console lines go to (Radio.Infrastructure.Audio.Outputs
@@ -1013,7 +1026,8 @@ public class GoogleCastOutput : AudioOutputBase
   /// start-time mute concluded the speaker was already muted and streamed to it unmuted under a
   /// muted console. Now an unread speaker is "unknown", which the start-time mute treats as
   /// unmuted (it sends the mute). Takes only the short echo/console locks, never an await, so it
-  /// keeps the publish section await-free.
+  /// keeps the publish section await-free. Leaves <c>_consoleMutedDeviceId</c> alone: that is
+  /// about the device, not the connection (see <see cref="RecallConsoleMuteAsync"/>).
   /// </remarks>
   private void ResetSpeakerStateForNewConnection()
   {
@@ -1094,7 +1108,7 @@ public class GoogleCastOutput : AudioOutputBase
       // no-op — StopAsync has released it — but DisposeAsync reaches here without a StopAsync,
       // and a release StopAsync could not complete (receiver application not confirmed stopped)
       // is retried here. Either way the application is stopped before any unmute.
-      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice?.FriendlyName).ConfigureAwait(false);
+      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice).ConfigureAwait(false);
 
       UnsubscribeFromReceiverStatus(client);
 
@@ -1516,13 +1530,13 @@ public class GoogleCastOutput : AudioOutputBase
       // media stop down a half-built connection.
       ChromecastClient? stopClient;
       int stopGeneration;
-      string? stopDeviceName;
+      ChromecastDeviceInfo? stopDevice;
       await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
       {
         stopClient = _client;
         stopGeneration = _publishedGeneration;
-        stopDeviceName = ConnectedDevice?.FriendlyName;
+        stopDevice = ConnectedDevice;
       }
       finally
       {
@@ -1598,7 +1612,7 @@ public class GoogleCastOutput : AudioOutputBase
       // after this method returns. So a speaker the console muted is unmuted only after its
       // receiver application has been stopped, and is left muted if that cannot be confirmed.
       // ReleaseConsoleMuteAsync states exactly what that guarantees.
-      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDeviceName).ConfigureAwait(false);
+      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDevice).ConfigureAwait(false);
 
       IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
@@ -2248,6 +2262,14 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
+      if (reading != null)
+      {
+        // AUD-81 (F11): before StartAsync's start-time mute and the follower's activation
+        // reconcile, both of which read IsSpeakerMutedByConsole. Changes no device state and
+        // raises nothing, so the initial sync still never reaches the console's mute.
+        await RecallConsoleMuteAsync(generation, device, reading.Value.Muted).ConfigureAwait(false);
+      }
+
       // AUD-80. Which level this connection holds, in order of preference:
       //   1. the level remembered for THIS device — pushed to it if it differs;
       //   2. for a device never seen, the level it reported — adopted and remembered;
@@ -2530,8 +2552,11 @@ public class GoogleCastOutput : AudioOutputBase
 
     if (muteChanged && !deviceMuted)
     {
-      // Unmuted on the speaker itself: nothing of ours is left to release at teardown.
+      // Unmuted on the speaker itself: nothing of ours is left to release at teardown, and nothing
+      // to re-arm on a later connection to it. Keyed by ConnectedDevice, which a handler left
+      // attached to a torn-down client can misattribute (C-126, as for RememberVolume above).
       Interlocked.Exchange(ref _consoleMutedGeneration, -1);
+      ForgetConsoleMute(ConnectedDevice?.Id);
     }
 
     _logger.LogInformation(
@@ -2765,9 +2790,12 @@ public class GoogleCastOutput : AudioOutputBase
 
     // AUD-81: a LOST connection cannot be unmuted — there is no socket left to send SET_MUTE
     // on. If the console had muted this speaker it stays muted until it is unmuted on the
-    // speaker or in Google Home, or by a console unmute while casting to it again (a connect
-    // never unmutes a speaker by itself). Clearing the mark keeps a later teardown from
-    // aiming the unmute at whatever connection comes next.
+    // speaker or in Google Home, or by the console while casting to it again (a connect never
+    // unmutes a speaker by itself). Clearing the mark keeps a later teardown from aiming the
+    // unmute at whatever connection comes next. _consoleMutedDeviceId is deliberately KEPT
+    // (F11): a later connection to the same device that finds it still muted re-arms the mark
+    // (RecallConsoleMuteAsync), so the activation reconcile unmutes it if the console has been
+    // unmuted meanwhile.
     Interlocked.Exchange(ref _consoleMutedGeneration, -1);
 
     IsEnabledInternal = false;
@@ -2937,7 +2965,9 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// True while this application has muted the connected speaker because the console was
-  /// muted; a deliberate teardown stops the receiver application and then unmutes it.
+  /// muted — on this connection, or on an earlier one to the same device that the initial read
+  /// found still muted (see <see cref="RecallConsoleMuteAsync"/>); a deliberate teardown stops the
+  /// receiver application and then unmutes it.
   /// </summary>
   public bool IsSpeakerMutedByConsole => Volatile.Read(ref _consoleMutedGeneration) >= 0;
 
@@ -3191,10 +3221,12 @@ public class GoogleCastOutput : AudioOutputBase
       if (next.Muted)
       {
         Volatile.Write(ref _consoleMutedGeneration, connection.Generation);
+        RememberConsoleMute(connection.Device.Id);
       }
       else
       {
         Interlocked.CompareExchange(ref _consoleMutedGeneration, -1, connection.Generation);
+        ForgetConsoleMute(connection.Device.Id);
       }
 
       applied = next.Muted;
@@ -3234,8 +3266,9 @@ public class GoogleCastOutput : AudioOutputBase
     if (!consoleMuted || _lastSetMute)
     {
       // Not muted, or this connection has already seen the speaker muted — by us earlier in
-      // this start (then it is already marked), or on its own side (then a teardown must not
-      // unmute it, so it is not marked).
+      // this start (then it is already marked), by us on an earlier connection to this device
+      // (then RecallConsoleMuteAsync re-armed the mark when the initial read found it muted), or
+      // on its own side (then a teardown must not unmute it, so it is not marked).
       return;
     }
 
@@ -3251,6 +3284,7 @@ public class GoogleCastOutput : AudioOutputBase
             .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
       {
         Volatile.Write(ref _consoleMutedGeneration, connection.Generation);
+        RememberConsoleMute(connection.Device.Id);
         ConsoleLogger.LogInformation(
           "Cast: console is muted → speaker {Name} muted as casting starts", connection.Device.FriendlyName);
       }
@@ -3259,6 +3293,89 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogWarning(ex, "Cast: could not mute {Name} for the muted console as casting started",
         connection.Device.FriendlyName);
+    }
+  }
+
+  /// <summary>Records that this application muted <paramref name="deviceId"/> for the console.</summary>
+  private void RememberConsoleMute(string deviceId)
+  {
+    lock (_consoleMuteLock)
+    {
+      _consoleMutedDeviceId = deviceId;
+    }
+  }
+
+  /// <summary>
+  /// Forgets the console mute recorded for <paramref name="deviceId"/>, if that is the device
+  /// recorded; a different device's record is left alone.
+  /// </summary>
+  private void ForgetConsoleMute(string? deviceId)
+  {
+    lock (_consoleMuteLock)
+    {
+      if (deviceId != null && string.Equals(_consoleMutedDeviceId, deviceId, StringComparison.Ordinal))
+      {
+        _consoleMutedDeviceId = null;
+      }
+    }
+  }
+
+  /// <summary>
+  /// On a new connection's initial read (hostile review F11): if <paramref name="device"/> is the
+  /// speaker this application last muted for the console and has not seen unmuted since — e.g. the
+  /// connection that muted it was LOST, so nothing could unmute it — re-arm the "muted by console"
+  /// mark for connection <paramref name="generation"/> when the read shows it still muted, and
+  /// forget the record when the read shows it unmuted (someone unmuted it elsewhere).
+  /// </summary>
+  /// <remarks>
+  /// Sends nothing and raises nothing; it only decides what <see cref="IsSpeakerMutedByConsole"/>
+  /// reports. With the mark re-armed, the follower's activation reconcile unmutes the speaker if the
+  /// console is unmuted, nothing is sent while the console is still muted, and a deliberate teardown
+  /// releases it like any console mute (application stop first). A connection to a different
+  /// device leaves the record as it is. The mark is written under <c>_lifecycleLock</c> and only
+  /// while <paramref name="generation"/> is still the published connection, so it cannot land on a
+  /// connection published after this one (whose publish resets it under the same lock). The record
+  /// is in-process only; see <c>_consoleMutedDeviceId</c>.
+  /// </remarks>
+  private async Task RecallConsoleMuteAsync(int generation, ChromecastDeviceInfo device, bool speakerMuted)
+  {
+    var rearmed = false;
+    await _lifecycleLock.WaitAsync().ConfigureAwait(false);
+    try
+    {
+      if (_publishedGeneration != generation || _connectionGeneration != generation)
+      {
+        return;
+      }
+
+      lock (_consoleMuteLock)
+      {
+        if (!string.Equals(_consoleMutedDeviceId, device.Id, StringComparison.Ordinal))
+        {
+          return;
+        }
+
+        if (speakerMuted)
+        {
+          Volatile.Write(ref _consoleMutedGeneration, generation);
+          rearmed = true;
+        }
+        else
+        {
+          _consoleMutedDeviceId = null;
+        }
+      }
+    }
+    finally
+    {
+      _lifecycleLock.Release();
+    }
+
+    if (rearmed)
+    {
+      ConsoleLogger.LogInformation(
+        "Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console",
+        device.FriendlyName);
     }
   }
 
@@ -3293,8 +3410,9 @@ public class GoogleCastOutput : AudioOutputBase
   /// RECEIVER_STATUS without it — is what that status is replaced with (the receive loop runs
   /// <c>ReceiverChannel.OnMessageReceived</c> before completing the request).</para>
   /// </remarks>
-  private async Task ReleaseConsoleMuteAsync(ChromecastClient? client, int generation, string? deviceName)
+  private async Task ReleaseConsoleMuteAsync(ChromecastClient? client, int generation, ChromecastDeviceInfo? device)
   {
+    var deviceName = device?.FriendlyName;
     if (client == null || generation < 0 || Volatile.Read(ref _consoleMutedGeneration) != generation)
     {
       return;
@@ -3335,6 +3453,7 @@ public class GoogleCastOutput : AudioOutputBase
         ConsoleLogger.LogInformation(
           "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",
           deviceName);
+        ForgetConsoleMute(device?.Id);
       }
     }
     catch (Exception ex)

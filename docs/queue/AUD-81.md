@@ -44,10 +44,11 @@ In the owner's casting baseline run 2026-09-30 (box on `b64c8cd`, Office speaker
 - Console **mute** mutes the speaker while casting, and a console that is already muted mutes the speaker as the stream starts.
 - **Nothing auto-unmutes.** The speaker is unmuted in three cases only:
   1. A deliberate console unmute while Cast is the active output (`CastConsoleVolumeFollower.cs:243-248`). This unmutes the speaker whoever muted it.
-  2. The reconcile when the gate makes Cast the active output, and only for a speaker this application muted for the console (`:284`).
+  2. The reconcile when the gate makes Cast the active output, and only for a speaker this application muted for the console (`:322`) — on this connection, or on an earlier connection to the same device (next bullet).
   3. The teardown rule below.
 - A console mute is pushed to any streaming Cast connection, even before the gate has marked Cast active. That is the safe direction.
-- A console-muted speaker is **unmuted on a deliberate teardown**, never on a connection loss. It is unmuted only **after** our receiver application is confirmed stopped, so a muted console can never release audio to the room. If the stop cannot be confirmed within 3 s, the speaker is left muted and an Information line says so (`GoogleCastOutput.cs:3288`).
+- A console-muted speaker is **unmuted on a deliberate teardown**, never on a connection loss. It is unmuted only **after** our receiver application is confirmed stopped, so a muted console can never release audio to the room. If the stop cannot be confirmed within 3 s, the speaker is left muted and an Information line says so (`GoogleCastOutput.cs:3436`).
+- **A console mute survives a lost connection, per device, in memory only** (F11, `GoogleCastOutput.cs:3340`). The output remembers the id of the device it last muted for the console until it sees that device unmuted (an acknowledged console or teardown unmute, an unmute reported by the speaker, or a reconnect whose initial read shows it unmuted). A new connection to that device whose initial read shows it still muted is marked "muted by console" again, so the reconcile above unmutes it if the console was unmuted meanwhile, it stays muted if not, and a deliberate teardown releases it. A connection to a different device is unaffected, and nothing is sent on the basis of the memory alone. It is lost on a radio-api restart: a speaker left muted that way is then treated like one muted on its own side (never unmuted for the console).
 - **Mute is never stored** in `AudioPreferences`.
 
 **Surfaces.**
@@ -60,5 +61,6 @@ In the owner's casting baseline run 2026-09-30 (box on `b64c8cd`, Office speaker
 - `Cast: console is muted → speaker {Name} muted as casting starts`
 - `Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console`
 - `Cast: speaker {Name} left muted — its receiver application could not be confirmed stopped, …`
+- `Cast: speaker {Name} is still muted from an earlier console mute — treated as muted by the console`
 
 **Not testable offline (box only):** the ordering of the teardown (receiver application stopped before the unmute), and the `StartAsync` → start-of-stream mute call.

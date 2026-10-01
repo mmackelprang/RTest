@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Radio.Core.Interfaces.Audio;
@@ -27,13 +28,41 @@ public class CastConsoleVolumeFollowerTests
   private readonly Mock<IAudioEngine> _engine = new();
 
   private (SoundFlowMasterMixer Mixer, CastConsoleVolumeFollower Follower) Build(
-    CastConsoleTestHarness h, float initialMaster)
+    CastConsoleTestHarness h, float initialMaster, ILogger<CastConsoleVolumeFollower>? logger = null)
   {
     var mixer = new SoundFlowMasterMixer(NullLogger<SoundFlowMasterMixer>.Instance) { MasterVolume = initialMaster };
     _engine.SetupGet(e => e.ActiveOutputId).Returns(() => _activeOutput);
     var follower = new CastConsoleVolumeFollower(
-      NullLogger<CastConsoleVolumeFollower>.Instance, mixer, _engine.Object, h.Output);
+      logger ?? NullLogger<CastConsoleVolumeFollower>.Instance, mixer, _engine.Object, h.Output);
     return (mixer, follower);
+  }
+
+  /// <summary>Records every formatted log line, for asserting what the console log says.</summary>
+  private sealed class ListLogger<T> : ILogger<T>
+  {
+    private readonly object _lock = new();
+    private readonly List<string> _lines = new();
+
+    public List<string> Lines()
+    {
+      lock (_lock)
+      {
+        return _lines.ToList();
+      }
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(
+      LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+      lock (_lock)
+      {
+        _lines.Add(formatter(state, exception));
+      }
+    }
   }
 
   /// <summary>What the output gate does after a switch: record it, then raise the event.</summary>
@@ -543,6 +572,147 @@ public class CastConsoleVolumeFollowerTests
     SwitchActiveOutput("google-cast");
     await follower.LastMutePush;
     Assert.Equal(new[] { true }, h.MuteSends());
+  }
+
+  // --- hostile review F11: a console mute orphaned by a lost connection ---
+
+  /// <summary>
+  /// Casting to cast-a, the console mutes it; then the connection is LOST (the speaker stays
+  /// muted, by design) and the gate falls back to a local output. Returns with the console still
+  /// muted; commands cleared.
+  /// </summary>
+  private async Task MuteThenLoseAsync(CastConsoleTestHarness h, SoundFlowMasterMixer mixer, CastConsoleVolumeFollower follower)
+  {
+    mixer.IsMuted = true;
+    await follower.LastMutePush;
+    Assert.Equal(new[] { true }, h.MuteSends());
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    _activeOutput = "out:Built-in Audio Analog Stereo";
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    h.ClearCommands();
+  }
+
+  /// <summary>
+  /// What StartAsync and the output gate do once a connection is up: the start-time mute, reaching
+  /// Streaming (and its mute re-check), then the gate making Cast the active output.
+  /// </summary>
+  private async Task StartCastingAsync(CastConsoleTestHarness h, CastConsoleVolumeFollower follower)
+  {
+    await h.Output.SyncVolumeAfterStartAsync();
+    h.MarkStreaming();
+    await h.Output.OnReachedStreamingAsync();
+    SwitchActiveOutput("google-cast");
+    await follower.LastMutePush;
+  }
+
+  [Fact]
+  public async Task AConsoleMutedSpeaker_LostThenReconnected_IsUnmutedWhenTheConsoleWasUnmutedMeanwhile()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var log = new ListLogger<CastConsoleVolumeFollower>();
+    var (mixer, follower) = Build(h, 0.50f, log);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+
+    mixer.IsMuted = false; // unmuted on the local output: there is no speaker to send it to
+    await follower.LastMutePush;
+    Assert.Empty(h.MuteSends());
+
+    // The same speaker again, still muted. The device's answer also arrives as a status event
+    // during the read (F1): it must stay a baseline, never a mute synced into the console.
+    await h.ConnectAsync("cast-a", streaming: false, statusRead: () =>
+    {
+      h.RaiseStatus(0.40, muted: true);
+      return Task.FromResult<(float, bool)?>((0.40f, true));
+    });
+    Assert.Empty(h.External);
+    Assert.False(mixer.IsMuted);
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // re-armed for the new connection
+
+    await StartCastingAsync(h, follower);
+
+    Assert.Equal(new[] { false }, h.MuteSends());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.False(mixer.IsMuted);
+    Assert.Contains("Cast: console unmuted → speaker Speaker cast-a unmuted", log.Lines());
+  }
+
+  [Fact]
+  public async Task AConsoleMutedSpeaker_LostThenReconnected_UnderAStillMutedConsole_StaysMuted_AndATeardownReleasesIt()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f, reportedMuted: true, streaming: false);
+    await StartCastingAsync(h, follower);
+
+    Assert.Empty(h.MuteSends());                    // already muted: nothing to send
+    Assert.True(h.Output.IsSpeakerMutedByConsole);  // but known to be the console's mute
+    Assert.True(mixer.IsMuted);
+    h.ClearCommands();
+
+    // A deliberate teardown releases it like any console mute (H1): application stop, then unmute.
+    await h.Output.StopAsync();
+    Assert.Equal(new[] { "appstop", "unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  [Fact]
+  public async Task AReconnectThatFindsTheSpeakerUnmuted_SendsNothing_AndForgetsTheConsoleMute()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    // Someone unmuted it on the speaker while it was not connected.
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f, reportedMuted: false, streaming: false);
+    await StartCastingAsync(h, follower);
+    Assert.Empty(h.MuteSends());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+
+    // Forgotten: lost again, and found muted next time (now by someone else) — not ours to unmute.
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    _activeOutput = "out:Built-in Audio Analog Stereo";
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f, reportedMuted: true, streaming: false);
+    await StartCastingAsync(h, follower);
+
+    Assert.Empty(h.MuteSends());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  [Fact]
+  public async Task AConsoleMuteOrphanedOnOneSpeaker_IsNeverReleasedOnADifferentSpeaker()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
+    var (mixer, follower) = Build(h, 0.50f);
+    using var _ = follower;
+    ResyncLikeAudioStateUpdateService(h.Output, mixer);
+    await MuteThenLoseAsync(h, mixer, follower);
+    mixer.IsMuted = false;
+    await follower.LastMutePush;
+
+    // A different speaker, muted on its own side.
+    await h.ConnectAsync("cast-b", reportedLevel: 0.40f, reportedMuted: true, streaming: false);
+    await StartCastingAsync(h, follower);
+
+    Assert.Empty(h.MuteSends());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
   }
 
   [Fact]
