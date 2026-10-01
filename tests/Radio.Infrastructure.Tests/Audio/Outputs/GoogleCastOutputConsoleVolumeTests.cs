@@ -712,6 +712,12 @@ public class GoogleCastOutputConsoleVolumeTests
 
   // Pre-merge review L3: the echo window ran from a send's START, and the sends it covers are
   // bounded at up to 10 s, so a slow send's confirmation could arrive after its entry expired.
+  //
+  // Hostile re-review M1: the drain's ConsoleCommandTimeout (5 s) runs on this same fake clock
+  // (F9), so the in-flight advance below must stay UNDER it. At 8 s the timeout could fire — or
+  // not, depending on whether the drain had armed it before the Advance — and an abandoned push's
+  // completion could then land after the anti-vacuity advance. 4 s is past EchoWindow (3 s), which
+  // is what the test needs, and short of the timeout, so the timeout can never fire here.
   [Fact]
   public async Task TheConfirmationOfASlowPush_IsAnEcho_ForAsLongAsTheSendIsInFlight_AndTheWindowAfter()
   {
@@ -724,7 +730,7 @@ public class GoogleCastOutputConsoleVolumeTests
     await h.VolumeSendEntered.Task;
 
     h.RaiseStatus(0.55);                      // a speaker change moves the baseline off 0.30
-    h.Time.Advance(TimeSpan.FromSeconds(8));  // the send is still in flight, 8 s after it began
+    h.Time.Advance(TimeSpan.FromSeconds(4));  // in flight 4 s: past EchoWindow, short of the 5 s timeout
     h.RaiseStatus(0.30);                      // the device confirms our push
     Assert.Single(h.External);
 
@@ -767,6 +773,53 @@ public class GoogleCastOutputConsoleVolumeTests
 
     Assert.True(result.Failed);
     Assert.Null(result.AppliedLevel);
+  }
+
+  // Hostile re-review M1 (optional half): the two teardown bounds run on the injected clock too.
+  // Same rendezvous as above — wait for the timer to exist on the fake clock, then advance past
+  // it. On the system clock no such timer is created and the safety-net bound fails the test.
+  [Fact]
+  public async Task ATeardownReceiverApplicationStop_TimesOutOnTheInjectedClock_AndLeavesTheSpeakerMuted()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+
+    var hang = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+    h.AppStop = () => hang.Task; // the device never answers the stop
+    var timeoutArmed = h.Time.WatchForTimer(TimeSpan.FromSeconds(3)); // TeardownAppStopTimeout
+    var stop = h.Output.StopAsync();
+    await timeoutArmed.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+
+    h.Time.Advance(TimeSpan.FromSeconds(4));
+    await stop.WaitAsync(TimeSpan.FromSeconds(30));
+
+    Assert.Equal(new[] { "mute", "appstop" }, h.Kinds());
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // an unconfirmed stop keeps the mark
+    hang.SetResult(true);
+  }
+
+  [Fact]
+  public async Task ATeardownUnmute_TimesOutOnTheInjectedClock()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+
+    h.MuteGate = CastConsoleTestHarness.NewTcs(); // holds the teardown unmute in flight
+    var timeoutArmed = h.Time.WatchForTimer(TimeSpan.FromSeconds(2)); // TeardownUnmuteTimeout
+    var stop = h.Output.StopAsync();
+    await timeoutArmed.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+
+    h.Time.Advance(TimeSpan.FromSeconds(3));
+    await stop.WaitAsync(TimeSpan.FromSeconds(30)); // returns while the unmute is still held
+
+    Assert.Equal(new[] { "mute", "appstop", "unmute" }, h.Kinds());
+    h.MuteGate.SetResult();
   }
 
   // Pre-merge review L4: console mutes were not coalesced, so a burst of toggles queued one
