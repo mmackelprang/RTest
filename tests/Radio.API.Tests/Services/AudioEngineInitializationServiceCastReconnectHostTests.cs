@@ -405,6 +405,122 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     Assert.Null(_castOutput.ConnectedDevice); // …and removed after it
   }
 
+  [Theory]
+  [InlineData(false)] // a disconnect alone
+  [InlineData(true)]  // the user's Stop Casting past the cancel bound: cancel, then disconnect
+  public async Task AConnectSupersededWhileOnTheNetwork_EndsCancelled_AndNeverReadsTheReceiver(bool cancelled)
+  {
+    // Review M2. A superseded ConnectAsync returns normally — State Ready, nothing published. Before
+    // the fix the host went on to read the published connection's apps (none: the read threw and
+    // the episode ended "in use by another app") and could confirm and start whatever was published.
+    using var listener = StartListener();
+    using var cts = new CancellationTokenSource();
+    SetCastSeam("ConnectTransportOverrideForTests", (Func<Sharpcaster.Models.ChromecastReceiver, Task>)(async _ =>
+    {
+      if (cancelled)
+      {
+        await cts.CancelAsync();
+      }
+
+      await _castOutput.DisconnectAsync(); // bumps the generation under our connect
+    }));
+    var service = CreateService();
+    var reads = 0;
+    service.ReceiverApplicationsReadOverride = (_, _) =>
+    {
+      reads++;
+      return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), cts.Token).WaitAsync(HangGuard));
+
+    Assert.Equal(0, reads);
+    Assert.Null(_castOutput.ConnectedDevice);
+    Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);
+  }
+
+  [Fact]
+  public async Task AUsersConnectionPublishedDuringTheReceiverRead_IsNeitherConfirmedNorStarted()
+  {
+    // Review M2: by the time the read returns "free", the published connection is a user's. The
+    // reconnect must not launch on it — the user's own pick does that, with its own state machine.
+    using var listener = StartListener();
+    var service = CreateService();
+    var users = Device(Port(listener)) with { FriendlyName = "Office speaker (user)" };
+    service.ReceiverApplicationsReadOverride = async (cast, ct) =>
+    {
+      await cast.ConnectAsync(users, ct);
+      // Lets a start, if one were made, reach Streaming offline (see AFreeSpeaker_EndsTheHold…).
+      typeof(GoogleCastOutput).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cast, null);
+      return new[] { "E8C28D3C" }; // free
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), CancellationToken.None).WaitAsync(HangGuard));
+
+    Assert.Same(users, _castOutput.ConnectedDevice);
+    Assert.Equal(AudioOutputState.Ready, _castOutput.State); // not started by the reconnect
+  }
+
+  [Fact]
+  public async Task CancelledByACastPickDuringTheReceiverRead_TheConnectionIsKeptAndStarted()
+  {
+    // Review M3: a Cast pick that lost the cancel-bound race. The host leaves its (held, so
+    // untouched) connection standing; the watcher asks it to keep that for the Cast choice.
+    using var listener = StartListener();
+    await _engine.SetActiveOutputAsync("speakers");
+    using var cts = new CancellationTokenSource();
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = async (cast, ct) =>
+    {
+      typeof(GoogleCastOutput).GetField("_client", BindingFlags.NonPublic | BindingFlags.Instance)!.SetValue(cast, null);
+      await cts.CancelAsync();
+      ct.ThrowIfCancellationRequested();
+      return Array.Empty<string>();
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), cts.Token).WaitAsync(HangGuard));
+    Assert.NotNull(_castOutput.ConnectedDevice);              // left standing…
+    Assert.True(_castOutput.IsHoldingForReceiverConfirmation); // …and still untouched
+
+    await _engine.SetActiveOutputAsync("google-cast"); // the user's pick
+    Assert.True(await host.TryKeepForCastChoiceAsync().WaitAsync(HangGuard));
+
+    Assert.Equal(AudioOutputState.Streaming, _castOutput.State);
+    Assert.False(_castOutput.IsHoldingForReceiverConfirmation);
+  }
+
+  [Fact]
+  public async Task CancelledByALocalPickDuringTheReceiverRead_TheConnectionIsNotKept_AndIsTornDown()
+  {
+    // Review M3's control.
+    using var listener = StartListener();
+    await _engine.SetActiveOutputAsync("speakers");
+    _engine.AttachOutputCoordination(_castOutput, null, null); // so the tear-down reaches it
+    using var cts = new CancellationTokenSource();
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = async (_, ct) =>
+    {
+      await cts.CancelAsync();
+      ct.ThrowIfCancellationRequested();
+      return Array.Empty<string>();
+    };
+    var host = service.CreateProductionCastReconnectHost();
+
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), cts.Token).WaitAsync(HangGuard));
+
+    Assert.False(await host.TryKeepForCastChoiceAsync().WaitAsync(HangGuard));
+    Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);
+    await host.TearDownCastAsync().WaitAsync(HangGuard);
+    Assert.Null(_castOutput.ConnectedDevice);
+  }
+
   [Fact]
   public async Task ASwitchToCastThatThrowsAfterMutingLocal_IsUndoneByRestoringTheLocalOutput()
   {
@@ -588,5 +704,6 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     public Task<bool> TrySwitchToCastAsync(CastRecoveryMark mark, CancellationToken ct) => Task.FromResult(false);
     public Task TearDownCastAsync() => Task.CompletedTask;
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
+    public Task<bool> TryKeepForCastChoiceAsync() => Task.FromResult(false);
   }
 }

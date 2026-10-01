@@ -135,10 +135,23 @@ internal interface ICastReconnectHost
   /// Wires the audio source for the configured streaming mode, connects, checks the receiver is
   /// free for us, and starts the Cast output. Throws on failure, having torn down any connection
   /// it made itself; throws <see cref="CastSpeakerInUseException"/> when another application
-  /// holds the receiver. It does not touch the active output — the local speakers keep playing
-  /// until the switch.
+  /// holds the receiver. Throws <see cref="OperationCanceledException"/> when
+  /// <paramref name="ct"/> is cancelled — then leaving a connection of its own standing, for the
+  /// caller to keep (<see cref="TryKeepForCastChoiceAsync"/>) or tear down — and, with
+  /// <paramref name="ct"/> not cancelled, when its connect was superseded (a newer connect or a
+  /// disconnect claimed the output), in which case nothing published is its own. Every step after
+  /// the connect runs only on the connection that connect published. It does not touch the active
+  /// output — the local speakers keep playing until the switch.
   /// </summary>
   Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct);
+
+  /// <summary>
+  /// After a cancelled run: when the published Cast connection is still the one this host's
+  /// connect made, the active output is Cast, and the service is not stopping, confirms the
+  /// receiver, starts that connection if it is not streaming, and keeps it — true. False when any
+  /// of those does not hold (nothing is done) or the start failed. Never throws.
+  /// </summary>
+  Task<bool> TryKeepForCastChoiceAsync();
 
   /// <summary>
   /// Switches the active output to Cast only if no output selection has been made since the
@@ -181,7 +194,10 @@ internal interface ICastReconnectHost
 /// bound) is refused by <c>GoogleCastOutput.ConnectAsync</c> while the watcher's is
 /// <c>Connecting</c>, and that refusal is the user's request failing (AUD-85). A choice of
 /// output made in that moment is caught by the atomic, conditional switch back to Cast, which
-/// refuses. The run makes output selections in exactly two places: that switch back to Cast
+/// refuses — or, when the choice cancelled the run, by the cancellation path, which keeps (and
+/// starts) the run's own connection when the choice was Cast and removes it otherwise (review M3).
+/// After its connect returns the run acts only on the connection that connect published: a
+/// superseded connect returns normally with nothing of ours published (review M2). The run makes output selections in exactly two places: that switch back to Cast
 /// (conditional on no selection since the drop), and — only when that switch throws —
 /// <see cref="ICastReconnectHost.RestoreLocalOutputAsync"/>, which re-applies the recovery's local
 /// output through the gate when it is still the active output (a selection of its own: on the
@@ -330,7 +346,16 @@ internal sealed class CastReconnectWatcher
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-          throw;
+          // The host leaves a connection of its own standing when cancelled, for this to decide.
+          return await EndCancelledAfterConnectAsync(name).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+          // Not our token: our connect was superseded — another connect or a disconnect claimed
+          // the Cast output while ours was on the network (review M2). It is theirs now.
+          _logger.LogInformation(
+            "Cast: no longer trying to reconnect to \"{Name}\" — another connect or a disconnect took over the Cast output", name);
+          return CastReconnectOutcome.CastBusy;
         }
         catch (CastSpeakerInUseException ex)
         {
@@ -363,10 +388,8 @@ internal sealed class CastReconnectWatcher
         if (ct.IsCancellationRequested)
         {
           // Cancelled while the connect was on the network (SharpCaster does not observe the
-          // token): a user action or shutdown owns the outputs now. Remove only what we made.
-          _logger.LogDebug("Cast: reconnect to \"{Name}\" cancelled after connecting — removing that connection", name);
-          await _host.TearDownCastAsync().ConfigureAwait(false);
-          return CastReconnectOutcome.Cancelled;
+          // token): a user action or shutdown owns the outputs now.
+          return await EndCancelledAfterConnectAsync(name).ConfigureAwait(false);
         }
 
         // The owner records the reconnect (and where the backoff got to) before the switch, so a
@@ -437,6 +460,43 @@ internal sealed class CastReconnectWatcher
       _logger.LogError(ex, "Cast: reconnect watcher for \"{Name}\" failed", name);
       return CastReconnectOutcome.SwitchFailed;
     }
+  }
+
+  /// <summary>
+  /// The run was cancelled after its connect was made (or while the host was finishing it). If
+  /// the cancelling action was a pick of Cast — the active output is now <c>google-cast</c> —
+  /// the connection is what serves that choice: the host keeps it (and starts it if it is not
+  /// streaming), as the refused-switch branch does for a Cast pick (review M3). Otherwise the
+  /// action was a local pick, a disconnect or shutdown: only what this run made is removed.
+  /// </summary>
+  /// <remarks>
+  /// Without the keep, a Cast pick that lost the cancel-bound race left the console silent: the
+  /// pick made Cast active and muted local while our connect was <c>Connecting</c> (so its own
+  /// activation was a no-op and its auto-connect was refused), and the run then removed the only
+  /// connection there was.
+  /// </remarks>
+  private async Task<CastReconnectOutcome> EndCancelledAfterConnectAsync(string name)
+  {
+    if (string.Equals(_host.ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+    {
+      if (await _host.TryKeepForCastChoiceAsync().ConfigureAwait(false))
+      {
+        _logger.LogInformation(
+          "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — keeping the connection for that choice",
+          name);
+        return CastReconnectOutcome.OutputChangedByUser;
+      }
+
+      // Not ours to keep (superseded — then whoever superseded it serves the choice — or the
+      // service is stopping) or its start failed.
+      _logger.LogInformation(
+        "Cast: the output was switched to Cast while reconnecting to \"{Name}\", but the reconnect's connection was not kept for it (no longer ours, or it would not start)",
+        name);
+    }
+
+    _logger.LogDebug("Cast: reconnect to \"{Name}\" cancelled — removing any connection it made", name);
+    await _host.TearDownCastAsync().ConfigureAwait(false);
+    return CastReconnectOutcome.Cancelled;
   }
 
   /// <summary>

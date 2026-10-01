@@ -549,5 +549,13 @@ public class AudioEngineInitializationServiceCastReconnectTests
     }
 
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
+
+    public int Keeps;
+
+    public Task<bool> TryKeepForCastChoiceAsync()
+    {
+      Interlocked.Increment(ref Keeps);
+      return Task.FromResult(ConnectedDeviceId != null);
+    }
   }
 }

@@ -275,6 +275,99 @@ public class CastReconnectWatcherTests
   }
 
   [Fact]
+  public async Task CancelledByACastPickWhileTheConnectWasOnTheNetwork_KeepsTheConnectionForThatChoice()
+  {
+    // Review M3: the user re-picked Cast past the cancel bound. The pick made Cast active and muted
+    // local, but could not connect (ours was Connecting); removing ours would leave nothing playing.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.OnConnect = _ =>
+    {
+      _host.Active = "google-cast";
+      cts.Cancel();
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.OutputChangedByUser, outcome);
+    Assert.Equal(new[] { "connect", "keep" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(0, _host.TearDowns);
+    Assert.Equal(0, _host.Switches);
+  }
+
+  [Fact]
+  public async Task CancelledByACastPickWhileTheHostWasStillConnecting_KeepsTheConnectionForThatChoice()
+  {
+    // Review M3, the host's half: cancelled before it finished, it throws and leaves its connection.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ =>
+    {
+      _host.Active = "google-cast";
+      cts.Cancel();
+      return new OperationCanceledException(cts.Token);
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.OutputChangedByUser, outcome);
+    Assert.Equal(new[] { "connect", "keep" }, _host.Calls.Where(c => c != "probe").ToArray());
+  }
+
+  [Fact]
+  public async Task CancelledByACastPick_WhenTheConnectionCannotBeKept_RemovesIt()
+  {
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.KeepResult = false;
+    _host.OnConnect = _ =>
+    {
+      _host.Active = "google-cast";
+      cts.Cancel();
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.Cancelled, outcome);
+    Assert.Equal(new[] { "connect", "keep", "teardown" }, _host.Calls.Where(c => c != "probe").ToArray());
+  }
+
+  [Fact]
+  public async Task CancelledByALocalPickWhileTheHostWasStillConnecting_RemovesItsConnection()
+  {
+    // Review M3's control: the host left its connection standing; a local pick does not want it.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ =>
+    {
+      _host.Active = "hdmi";
+      cts.Cancel();
+      return new OperationCanceledException(cts.Token);
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.Cancelled, outcome);
+    Assert.Equal(new[] { "connect", "teardown" }, _host.Calls.Where(c => c != "probe").ToArray());
+  }
+
+  [Fact]
+  public async Task ASupersededConnect_StandsDownAsCastBusy_WithoutTouchingTheCastOutput()
+  {
+    // Review M2: not our token — a newer connect or a disconnect took the output while ours was on
+    // the network. Not a failed attempt (no Warning, no retry), and not ours to tear down.
+    _host.Reachable = _ => true;
+    _host.ConnectFailure = _ => new OperationCanceledException("superseded");
+    var log = new ListLogger();
+
+    var outcome = await DriveAsync(Start(logger: log));
+
+    Assert.Equal(CastReconnectOutcome.CastBusy, outcome);
+    Assert.Equal(new[] { "connect" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.DoesNotContain(log.Entries, e => e.Level >= LogLevel.Warning);
+  }
+
+  [Fact]
   public async Task ContinuingAnEpisode_StartsAtTheInheritedBackoffAndKeepsTheOriginalWindow()
   {
     // Review H1: the window began four minutes ago and the backoff had reached 40 s.
@@ -572,6 +665,14 @@ public class CastReconnectWatcherTests
       TearDowns++;
       Calls.Add("teardown");
       return Task.CompletedTask;
+    }
+
+    public bool KeepResult = true;
+
+    public Task<bool> TryKeepForCastChoiceAsync()
+    {
+      Calls.Add("keep");
+      return Task.FromResult(KeepResult);
     }
   }
 }

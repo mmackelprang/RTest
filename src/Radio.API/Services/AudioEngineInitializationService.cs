@@ -825,9 +825,17 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         throw;
       }
 
+      // Review M2 (AUD-37 × AUD-85). A superseded connect returns normally — State Ready, nothing
+      // published — so "returned" is not "ours". Every step below acts on the PUBLISHED connection
+      // (the app read, the confirmation, the start), which may by now be a user's: a Disconnect +
+      // Connect made while ours was on the network. Checked here and again before each of those.
+      ThrowUnlessStillOurs(cast, ct);
+
       // Review M5: never take the speaker from someone else. Connecting only opened a channel to
       // the receiver; launching our app (StartAsync) is what would end another sender's session.
       await StandDownIfReceiverInUseAsync(cast, castOptions.ApplicationId, ct).ConfigureAwait(false);
+
+      ThrowUnlessStillOurs(cast, ct);
 
       // Free: end the hold. The remembered level is still the connection's level, and the start
       // below pushes it after launching our receiver app (GoogleCastOutput.SyncVolumeAfterStartAsync,
@@ -836,20 +844,12 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
       try
       {
-        if (!isDirectChannel)
-        {
-          await WireHttpStreamAsync(cast, ours, ct).ConfigureAwait(false);
-        }
-
-        if (cast.State != AudioOutputState.Streaming)
-        {
-          await cast.StartAsync(automaticAttempt: true, ct).ConfigureAwait(false);
-        }
-
-        if (cast.State != AudioOutputState.Streaming)
-        {
-          throw new InvalidOperationException($"Cast output did not reach Streaming (state {cast.State})");
-        }
+        await StartOwnConnectionAsync(cast, ours, isDirectChannel, ct).ConfigureAwait(false);
+      }
+      catch (OperationCanceledException) when (ct.IsCancellationRequested)
+      {
+        // Left standing: the watcher keeps it for a Cast pick, or tears it down (review M3).
+        throw;
       }
       catch
       {
@@ -857,6 +857,79 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         // owned by someone else and retire the watcher on its next check.
         await TearDownCastAsync().ConfigureAwait(false);
         throw;
+      }
+    }
+
+    /// <summary>
+    /// Wires the HTTP stream (HttpMp3) and starts the Cast output on this host's own connection.
+    /// The start itself runs to completion (<see cref="CancellationToken.None"/>): a cancellation
+    /// inside it — its 250 ms post-launch delay — would set <c>Error</c> on a connection whose
+    /// receiver app is already launched. A cancellation is decided after it returns (review M3).
+    /// </summary>
+    private async Task StartOwnConnectionAsync(
+      GoogleCastOutput cast, ChromecastDeviceInfo ours, bool isDirectChannel, CancellationToken ct)
+    {
+      if (!isDirectChannel)
+      {
+        await WireHttpStreamAsync(cast, ours, ct).ConfigureAwait(false);
+      }
+
+      ThrowUnlessStillOurs(cast, ct);
+
+      if (cast.State != AudioOutputState.Streaming)
+      {
+        await cast.StartAsync(automaticAttempt: true, CancellationToken.None).ConfigureAwait(false);
+      }
+
+      if (cast.State != AudioOutputState.Streaming)
+      {
+        throw new InvalidOperationException($"Cast output did not reach Streaming (state {cast.State})");
+      }
+    }
+
+    /// <summary>
+    /// Review M2. Throws <see cref="OperationCanceledException"/> when <paramref name="ct"/> is
+    /// cancelled, or when the Cast output's published connection is no longer the one this host's
+    /// connect made (superseded by a newer connect, or taken down by a disconnect or loss).
+    /// </summary>
+    private void ThrowUnlessStillOurs(GoogleCastOutput cast, CancellationToken ct)
+    {
+      ct.ThrowIfCancellationRequested();
+      if (!OwnsPublishedConnection(cast))
+      {
+        throw new OperationCanceledException(
+          "The reconnect's Cast connection is no longer the published one — another connect or a disconnect took over");
+      }
+    }
+
+    public async Task<bool> TryKeepForCastChoiceAsync()
+    {
+      try
+      {
+        var cast = _svc._castOutput;
+        var ours = _ownDevice;
+        if (cast == null || ours == null || !OwnsPublishedConnection(cast) ||
+            _svc._serviceStoppingCts.IsCancellationRequested ||
+            !string.Equals(ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+        {
+          return false;
+        }
+
+        var isDirectChannel = string.Equals(
+          _svc._audioOutputOptions.Value.GoogleCast.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
+
+        // The user chose Cast; this connection is the only one there is to serve that choice, and
+        // a user's own connect launches without a receiver check, so this does not either. The
+        // confirmation runs AUD-81's deferred console-mute recall; the start applies the
+        // start-time mute as for any start.
+        cast.ConfirmReceiverAvailable();
+        await StartOwnConnectionAsync(cast, ours, isDirectChannel, CancellationToken.None).ConfigureAwait(false);
+        return true;
+      }
+      catch (Exception ex)
+      {
+        _svc._logger.LogDebug(ex, "Cast reconnect: could not keep the connection for a Cast pick");
+        return false;
       }
     }
 
@@ -872,7 +945,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       }
       catch (OperationCanceledException) when (ct.IsCancellationRequested)
       {
-        await DisconnectOwnAsync(cast).ConfigureAwait(false);
+        // Left standing (still held, so nothing has been sent to the speaker): the watcher keeps
+        // it for a Cast pick — the user's choice, which launches as any user connect does — or
+        // removes it (review M3).
         throw;
       }
       catch (Exception ex)
