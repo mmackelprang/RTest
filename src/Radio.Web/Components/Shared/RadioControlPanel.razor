@@ -26,7 +26,6 @@
         // capacity stay in sync without scattering lookups across the markup.
         var activeBand = _availableBands.FirstOrDefault(b => b.Type == _radioState.Band);
         var activeBandCapacity = activeBand?.BandPresetCapacity ?? 0;
-        var presetCount = _presets?.Count ?? 0;
         var bandSavable = !string.IsNullOrEmpty(_radioState.Band);
       }
 
@@ -37,7 +36,9 @@
 
       <!-- Band selector — tall two-line pills (handoff §P1·1 step 2). The
            active pill carries the long-press save-preset gesture (resolved
-           spec ambiguity #4): short click = switch band, long press = save. -->
+           spec ambiguity #4): short click = switch band, long press = save.
+           UI-20: all six on one row, equal widths (spec 2026-10-01 §4.3) — the
+           rail's 210 px went to the tuner column, so the 4 + 2 wrap is gone. -->
       @if (_availableBands.Any())
       {
         <div class="rcp-band-group">
@@ -125,6 +126,10 @@
                RSSI here; the prior SIGNAL label drifted from what the meter
                actually shows. *@
             <span>RSSI</span>
+            @* UI-20 (spec §4.4): the tuner-scan state lives in this header row, where it takes no
+               height. As its own row it added ~36 px against 16 px of slack and pushed the AGC row
+               out of the clipped tuner column; with the preset bar below there is no slack at all. *@
+            @ScanIndicator()
             <span class="rcp-meter-readout">
               @if (_radioState.Clip)
               {
@@ -152,22 +157,11 @@
           </div>
         </div>
       }
-
-      <!-- Scanning indicator -->
-      @if (_radioState.IsScanning)
+      else
       {
-        @if (_radioState.RssiDbu >= _radioState.ScanStopThreshold)
-        {
-          <div class="rcp-scan-signal">
-            SIGNAL @(_radioState.RssiDbu.ToString("0")) dBu
-          </div>
-        }
-        else
-        {
-          <div class="rcp-scanning">
-            SCANNING @_radioState.ScanDirection?.ToUpperInvariant()
-          </div>
-        }
+        @* No signal reading, so no meter header to carry the scan state: give it its own row
+           rather than lose it. The SDR always reports a signal, so this is the rare path. *@
+        @ScanIndicator()
       }
 
       <!-- Tuning + Scan Controls -->
@@ -233,78 +227,29 @@
       }
     </div>
 
-    <!-- Presets bank — handoff §P1·2 (slot · name+band · freq grid),
-         updated by the hot-fix off PR #371 (user feedback) so:
-           1. ALL presets across ALL bands are shown (not just the current
-              band) — the user couldn't find their saved WB station while
-              tuned to FM. The .rcp-preset-band sub-line on each row already
-              communicates the band context, so cross-band visibility is
-              navigable.
-           2. The header counter shows total saved across all bands rather
-              than "N of CAP" (mixing band capacities would be confusing).
-           3. Each row gains a trailing kebab opening a Rename + Delete
-              popover. Long-press on the row also opens the same popover
-              (matches the band-pill long-press-to-save gesture from PR 3).
-           4. The single empty-slot placeholder still scopes to the
-              current band so saving stays in-band. -->
-    <div class="rcp-presets">
-      <div class="rcp-presets-header">
-        <span class="rcp-presets-count">
-          PRESETS · @presetCount saved
-        </span>
-        @if (bandSavable)
-        {
-          <span class="rcp-presets-hint">HOLD <kbd>@_radioState.Band</kbd> TO SAVE</span>
-        }
-      </div>
-
-      <div class="rcp-presets-list">
-        @if (_presets == null || !_presets.Any())
-        {
-          <div class="rcp-presets-empty">
-            <span class="rzi rzi-radio" style="font-size: 40px; opacity: 0.3;"></span>
-            <span>NO PRESETS</span>
-          </div>
-        }
-        else
-        {
-          @foreach (var preset in _presets)
-          {
-            var isActivePreset = IsActivePreset(preset);
-            <PresetCard Variant="PresetCardVariant.Rail"
-                        PresetId="@preset.Id"
-                        Name="@preset.Name"
-                        Frequency="@preset.Frequency"
-                        Band="@preset.Band"
-                        SlotNumber="@preset.SlotNumber"
-                        IsActive="@isActivePreset"
-                        OnSelect="HandlePresetRowClickAsync"
-                        OnKebab="HandleKebabClickAsync"
-                        OnPointerDown="HandlePresetPointerDown"
-                        OnPointerUp="HandlePresetPointerUp"
-                        OnPointerCancel="HandlePresetPointerCancel" />
-          }
-        }
-
-        @* Render exactly ONE dashed-border placeholder for the next empty
-           slot when the CURRENT band has capacity left. Slot numbering is
-           per-band, so this counts the active-band presets only — keeps the
-           "long-press to save" affordance scoped to where a new save will
-           actually land. *@
-        @if (activeBandCapacity > 0 && _presets != null)
-        {
-          var activeBandCount = _presets.Count(p => string.Equals(p.Band, _radioState.Band, StringComparison.OrdinalIgnoreCase));
-          if (activeBandCount < activeBandCapacity)
-          {
-            var nextSlot = activeBandCount + 1;
-            <div class="rcp-preset-item rcp-preset-empty">
-              <span class="rcp-preset-slot">@nextSlot.ToString("00")</span>
-              <span class="rcp-preset-empty-hint">EMPTY · long-press @(_radioState.Band) to save</span>
-            </div>
-          }
-        }
-      </div>
-    </div>
+    <!-- UI-20: the preset bar across the bottom of the panel (spec 2026-10-01 §4.5). It replaced the
+         210 px right-hand rail; everything the rail did that is not layout carries over — all bands
+         shown, never filtered (the hot-fix off PR #371: the owner could not find a WB preset while on
+         FM), the knob's band-then-slot order, the next-slot placeholder scoped to the current band,
+         long-press for Rename / Delete. -->
+    var activePresetId = _presets?.FirstOrDefault(IsActivePreset)?.Id;
+    var activeBandCount = _presets?.Count(p => string.Equals(p.Band, _radioState.Band, StringComparison.OrdinalIgnoreCase)) ?? 0;
+    // Owner decision Q2: one ＋ SAVE card for the next free slot of the CURRENT band — but not when
+    // what is playing is already saved, because then the active card is the confirmation.
+    var showSave = bandSavable && _presets != null && activePresetId == null
+      && activeBandCapacity > 0 && activeBandCount < activeBandCapacity;
+    <PresetBar Presets="@_presets"
+               LoadFailed="@(_presetsLoadFailed && _presets == null)"
+               CurrentBand="@_radioState.Band"
+               ActivePresetId="@activePresetId"
+               ShowSavePlaceholder="@showSave"
+               SavePlaceholderLabel="@($"{_radioState.Band} {FrequencyValue(_radioState.Frequency, _radioState.Band)}")"
+               OnSelect="HandlePresetRowClickAsync"
+               OnPointerDown="HandlePresetPointerDown"
+               OnPointerUp="HandlePresetPointerUp"
+               OnPointerCancel="HandlePresetPointerCancel"
+               OnSave="OpenSavePresetDialog"
+               OnRetry="RetryLoadPresetsAsync" />
 
     @* Preset action menu — anchored by absolute positioning when open. Only
        one menu is open at a time; clicking the overlay or hitting Esc closes
@@ -399,6 +344,9 @@
   .rcp-root {
     height: 100%;
     display: flex;
+    /* UI-20: a column — tuner above, preset bar pinned along the bottom (was a row with the
+       210 px presets rail on the right). */
+    flex-direction: column;
     overflow: hidden;
     background: #080809;
     border: 1px solid var(--surface-separator);
@@ -425,11 +373,15 @@
     flex-direction: column;
     align-items: center;
     justify-content: flex-start;
-    padding: 32px 24px 12px;
-    gap: 10px;
+    /* UI-20 (spec §4.2): top padding 32 → 20 and gap 10 → 8 pay, with the one-row band strip, for
+       the 89 px preset bar. Measured on the box 2026-10-01: ~4.5 px is left over, so any row added
+       here must take height from somewhere else or the AGC row clips. */
+    padding: 20px 24px 12px;
+    gap: 8px;
     position: relative;
     z-index: 1;
     min-width: 0;
+    min-height: 0;
     overflow: hidden;
   }
 
@@ -474,11 +426,12 @@
        header, which UI-17 removed; the tuner's 32 px top padding now
        separates the pills from the centre panel's tab strip. */
     display: flex;
-    flex-wrap: wrap;
+    /* UI-20: one row. At the full 634 px column six equal pills are ~102 px each, above WB's
+       natural 101 px, so nothing truncates (spec §2.2). */
+    flex-wrap: nowrap;
     width: 100%;
     justify-content: center;
     gap: 2px;
-    row-gap: 4px;
     padding: 3px;
     margin-top: 0;
     background: #0a0a0c;
@@ -493,6 +446,11 @@
      removed. The visual treatment (gradient background, beveled border,
      amber-active state) stays here because it's specific to the
      RadioControlPanel chrome aesthetic. */
+  .rcp-band-group .rcp-band-btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
   .rcp-band-btn {
     border-radius: 3px;
     font-family: var(--font-mono);
@@ -549,8 +507,8 @@
       0 1px 0 rgba(255, 255, 255, 0.02);
     position: relative;
     overflow: hidden;
+    /* UI-20: full column width (was max-width 420), edge-aligned with the band row and the bar. */
     width: 100%;
-    max-width: 420px;
   }
 
   /* LCD scan-line texture overlay */
@@ -668,7 +626,6 @@
 
   .rcp-meter {
     width: 100%;
-    max-width: 420px;
   }
 
   .rcp-meter-header {
@@ -730,32 +687,34 @@
       inset 0 1px 0 rgba(255, 255, 255, 0.15);
   }
 
-  /* ── Scanning Indicator ── */
+  /* ── Scanning Indicator ── UI-20: an inline chip in the RSSI header row (spec §4.4), shrunk to
+     the header's 9 px mono. Vertical padding stays 0 so the chip is no taller than the header text
+     and the row keeps its height; the amber blink / green pulse are unchanged. */
+
+  .rcp-scanning,
+  .rcp-scan-signal {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.2em;
+    line-height: 1;
+    padding: 0 8px;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
 
   .rcp-scanning {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 700;
     color: var(--signal-amber);
-    letter-spacing: 0.2em;
-    text-shadow: 0 0 12px rgba(240, 168, 48, 0.5);
-    padding: 4px 16px;
+    text-shadow: 0 0 8px rgba(240, 168, 48, 0.5);
     border: 1px solid rgba(240, 168, 48, 0.2);
-    border-radius: 3px;
     background: rgba(240, 168, 48, 0.04);
     animation: rcp-blink 0.8s infinite;
   }
 
   .rcp-scan-signal {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 700;
     color: var(--signal-green);
-    letter-spacing: 0.2em;
-    text-shadow: 0 0 12px rgba(74, 222, 128, 0.5);
-    padding: 4px 16px;
+    text-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
     border: 1px solid rgba(74, 222, 128, 0.3);
-    border-radius: 3px;
     background: rgba(74, 222, 128, 0.06);
     animation: rcp-pulse 1.5s ease-in-out infinite;
   }
@@ -835,69 +794,16 @@
      rules were removed in PR 1 of the Radio Controller Polish arc when the
      flex strip became a fixed two-cell grid. ──────────────────────────── */
 
-  /* ═══ Presets bank ═══ */
-
-  .rcp-presets {
-    width: 210px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    border-left: 1px solid var(--surface-separator);
-    background: #0b0b0d;
-  }
-
-  .rcp-presets-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 8px 12px;
-    border-bottom: 1px solid var(--surface-separator);
-    font-family: var(--font-mono);
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.18em;
-    color: var(--text-low);
-    flex-shrink: 0;
-    background: linear-gradient(180deg, #0e0e10 0%, #0b0b0d 100%);
-  }
-
-  .rcp-presets-list {
-    flex: 1;
-    overflow-y: auto;
-    padding: 4px;
-    counter-reset: preset;
-  }
-
-  /* Scrollbar reconciled (P1e): the local amber-thumb override was removed so
-     the canonical global thin dark scrollbar in design-system.css §19 applies
-     here too. */
-
-  .rcp-presets-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    height: 100%;
-    color: var(--text-low);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    letter-spacing: 0.15em;
-    opacity: 0.5;
-  }
-
-  /* PR 3 of the Radio Controller Polish arc — preset row rules moved to
-     design-system.css §X. The legacy block (CSS counter-based ::before slot
-     badge, single-column flex layout, preset-name/freq/band rules) has been
-     removed so the grid layout from §X can take over without specificity
-     warfare. Band-pill base rules above (.rcp-band-btn) still apply; the
-     §W stylesheet adds the two-line column override on top. */
+  /* UI-20: the presets rail's rules (.rcp-presets, -header, -list, -empty) went with the rail. The
+     preset bar is styled in design-system.css §X, next to the shared card tokens it reuses. */
 </style>
 
 @code {
   private RadioStateDto? _radioState;
   private List<RadioPresetDto>? _presets;
+  // UI-20 (spec §7): the last preset read failed. Shown as an error card only while there is no
+  // earlier list — a failed refresh after a save keeps the list the user can still see.
+  private bool _presetsLoadFailed;
   private IEnumerable<Radio.Core.Models.RadioBandModel> _availableBands = Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
 
   // HANDOFF-rds-accumulating-scroll — client-side rolling buffer for RDS
@@ -926,8 +832,9 @@
   private bool _suppressNextBandClick;
 
   // ── Hot-fix off PR #371: preset row gestures + action menu ──
-  // Long-press on a preset row opens the same Rename / Delete popover the
-  // kebab opens. Mirrors the band-pill gesture above. _suppressNextPresetClick
+  // Long-press on a preset card opens the Rename / Delete popover (UI-20: the
+  // only way in — owner decision Q3 dropped the 18 px kebab, far under the
+  // 48 px touch minimum). Mirrors the band-pill gesture above. _suppressNextPresetClick
   // makes sure the synthesised click after a long-press doesn't also fire
   // LoadPresetAsync (which would re-tune to the preset the user was about to
   // rename/delete).
@@ -1008,21 +915,33 @@
   {
     try
     {
+      // Hot-fix off PR #371: ALL saved presets, never filtered to the tuned
+      // band — the user couldn't find their WB preset while on FM. UI-20: in the
+      // PRESETS knob's order (band, then per-band slot), so turning the knob
+      // three detents lands on the third card the user can see.
+      // GetPresetsAsync returns null on any failure (it logs it itself).
       var presets = await RadioApi.GetPresetsAsync();
-      // Hot-fix off PR #371: the user couldn't find their saved WB preset
-      // while on FM because the previous filter scoped the list to the
-      // currently-tuned band. Removed the band filter so ALL saved presets
-      // render here; the .rcp-preset-band sub-line on each row already
-      // carries the band context. Sort by Band first (alphabetical) then by
-      // server-assigned per-band SlotNumber — visually groups bands without
-      // breaking the per-band slot numbering the API surfaces.
-      _presets = presets?
-        .OrderBy(p => p.Band, StringComparer.OrdinalIgnoreCase)
-        .ThenBy(p => p.SlotNumber)
-        .ThenBy(p => p.CreatedAt)
-        .ToList();
+      if (presets != null)
+      {
+        _presets = PresetBar.OrderLikeKnob(presets);
+        _presetsLoadFailed = false;
+      }
+      else
+      {
+        _presetsLoadFailed = true;
+      }
     }
-    catch { /* Silently fail */ }
+    catch (Exception ex)
+    {
+      Logger.LogError(ex, "Failed to load presets");
+      _presetsLoadFailed = true;
+    }
+  }
+
+  private async Task RetryLoadPresetsAsync()
+  {
+    await LoadPresetsAsync();
+    await InvokeAsync(StateHasChanged);
   }
 
   /// <summary>
@@ -1428,9 +1347,9 @@
   }
 
   // ─── Preset row gestures + action menu — hot-fix off PR #371 ──────────────
-  // The user asked for a way to rename / delete saved presets. Each row now
-  // carries a trailing kebab and supports a long-press; both open the same
-  // small popover with Rename + Delete actions. The Rename action transitions
+  // The user asked for a way to rename / delete saved presets. A long-press on
+  // a card opens a small popover with Rename + Delete actions (UI-20 removed
+  // the kebab that also opened it). The Rename action transitions
   // into a dedicated text-entry dialog (mirrors the Save dialog pattern).
 
   /// <summary>
@@ -1492,17 +1411,6 @@
   private void HandlePresetPointerCancel()
   {
     _presetPointerDownId = null;
-  }
-
-  /// <summary>
-  /// Kebab click — opens the action menu for the given preset without firing
-  /// the row's load-preset handler (markup stops propagation, this method is
-  /// the menu open).
-  /// </summary>
-  private Task HandleKebabClickAsync(string presetId)
-  {
-    _actionMenuPresetId = presetId;
-    return Task.CompletedTask;
   }
 
   /// <summary>
@@ -1590,7 +1498,7 @@
   }
 
   /// <summary>
-  /// Delete action from the kebab menu. Calls the existing DeletePresetAsync
+  /// Delete action from the preset action menu. Calls the existing DeletePresetAsync
   /// which already toasts on success. No two-step confirm — the action is
   /// reversible (the user can re-save the same band/frequency from the
   /// long-press-band gesture).
@@ -1621,6 +1529,26 @@
     }
     catch (Exception ex) { Logger.LogError(ex, "Error in CycleStepSizeAsync"); }
   }
+
+  /// <summary>
+  /// The tuner-scan state chip: amber "SCANNING UP" while hunting, green "SIGNAL −12 dBu" once the
+  /// RSSI reaches the stop threshold. Nothing when not scanning.
+  /// </summary>
+  private RenderFragment ScanIndicator() => __builder =>
+  {
+    if (_radioState is not { IsScanning: true })
+    {
+      return;
+    }
+    if (_radioState.RssiDbu >= _radioState.ScanStopThreshold)
+    {
+      <span class="rcp-scan-signal">SIGNAL @(_radioState.RssiDbu.ToString("0").Replace("-", "−")) dBu</span>
+    }
+    else
+    {
+      <span class="rcp-scanning">SCANNING @_radioState.ScanDirection?.ToUpperInvariant()</span>
+    }
+  };
 
   // Frequency formatting — delegates to shared FrequencyFormatter
   private static string FormatFrequency(double frequencyHz, string band) => FrequencyFormatter.FormatFrequency(frequencyHz, band);

@@ -10,7 +10,7 @@
 
   Shape rationale:
     NowPlaying — album-art block + title/artist lines + progress bar.
-    Radio      — band-button row + freq-well outline + meter band.
+    Radio      — one-row band strip + freq-well outline + meter band + preset-bar card ghosts.
     ListRow    — single 56px row with leading thumb + two text lines.
     DeviceRow  — list row with trailing action-pill placeholder.
     MetricTile — category + name + value bar + sparkline strip.
@@ -28,14 +28,22 @@
       break;
 
     case SkeletonShape.Radio:
+      @* UI-20: six band pills in one row and the preset bar's four card ghosts, the shape the
+         radio panel takes once its state arrives (spec 2026-10-01 §7). *@
       <div class="skeleton-radio-bands">
-        <div class="skeleton-loading skeleton-band"></div>
-        <div class="skeleton-loading skeleton-band"></div>
-        <div class="skeleton-loading skeleton-band"></div>
-        <div class="skeleton-loading skeleton-band"></div>
+        @for (var i = 0; i < 6; i++)
+        {
+          <div class="skeleton-loading skeleton-band"></div>
+        }
       </div>
       <div class="skeleton-loading skeleton-freq-well"></div>
       <div class="skeleton-loading skeleton-meter"></div>
+      <div class="skeleton-radio-bar">
+        @for (var i = 0; i < 4; i++)
+        {
+          <div class="skeleton-loading skeleton-preset"></div>
+        }
+      </div>
       break;
 
     case SkeletonShape.ListRow:
