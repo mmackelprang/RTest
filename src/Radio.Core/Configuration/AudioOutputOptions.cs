@@ -156,6 +156,30 @@ public class GoogleCastOutputOptions
   public int StartupConnectTimeoutSeconds { get; set; } = 40;
 
   /// <summary>
+  /// AUD-37. When a Cast speaker drops mid-stream the console falls back to a local output
+  /// (AUD-84); with this on, it then watches for the speaker to come back and moves the output
+  /// back to Cast — but only if nobody has chosen an output since the drop. Default: true.
+  /// </summary>
+  public bool AutoReconnect { get; set; } = true;
+
+  /// <summary>
+  /// AUD-37. The first wait before probing a dropped Cast speaker; each later wait doubles, up
+  /// to <see cref="AutoReconnectMaxBackoffSeconds"/>. Default: 5 seconds.
+  /// </summary>
+  public int AutoReconnectInitialBackoffSeconds { get; set; } = 5;
+
+  /// <summary>
+  /// AUD-37. The cap on the wait between probes of a dropped Cast speaker. Default: 60 seconds.
+  /// </summary>
+  public int AutoReconnectMaxBackoffSeconds { get; set; } = 60;
+
+  /// <summary>
+  /// AUD-37. How long after the drop the console keeps watching for the speaker before giving
+  /// up; no probe starts after this. Default: 30 minutes.
+  /// </summary>
+  public int AutoReconnectWindowMinutes { get; set; } = 30;
+
+  /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
   /// </summary>
   public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";

@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using Microsoft.Extensions.Options;
 using Radio.Core.Configuration;
 using Radio.Core.Interfaces.Audio;
+using Radio.Core.Models.Audio;
 using Radio.Infrastructure.Audio.Outputs;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
@@ -127,7 +128,8 @@ public class AudioEngineInitializationService : IHostedService
     {
       // Queued, not awaited: this runs on the Cast output's loss-handling thread, which
       // still has the dead client to close after raising the event.
-      LastCastLossRecovery = Task.Run(() => RestoreLocalOutputAfterCastLossAsync(e.Device?.FriendlyName, e.Reason));
+      var device = e.Device;
+      LastCastLossRecovery = Task.Run(() => RestoreLocalOutputAfterCastLossAsync(device, e.Reason));
     }
     catch (Exception ex)
     {
@@ -146,9 +148,12 @@ public class AudioEngineInitializationService : IHostedService
   /// "still the lost Cast session" from "Cast picked again" — a user who re-selects Cast in the
   /// milliseconds between the loss and this running will have it switched back to local. Any
   /// other <see cref="IAudioEngine"/> gets a check-then-switch with a window between the two.
+  /// When this recovery itself makes the switch, it starts the AUD-37 reconnect watcher for
+  /// <paramref name="device"/> (replacing any earlier one).
   /// </summary>
-  internal async Task RestoreLocalOutputAfterCastLossAsync(string? deviceName, string? reason)
+  internal async Task RestoreLocalOutputAfterCastLossAsync(ChromecastDeviceInfo? device, string? reason)
   {
+    var deviceName = device?.FriendlyName;
     CancellationToken ct;
     try
     {
@@ -187,9 +192,13 @@ public class AudioEngineInitializationService : IHostedService
         "Cast connection to {Device} was lost ({Reason}) — switching to local output \"{DeviceName}\" ({DeviceId})",
         deviceName ?? "<unknown device>", reason, target.Name, target.Id);
 
+      // AUD-37: the epoch after this switch, read under the same lock acquisition, is the
+      // reconnect watcher's baseline — any output selection after it retires the watcher.
+      int? epochAfterSwitch = null;
       if (_audioEngine is SoundFlowAudioEngine gate)
       {
-        if (!await gate.SetActiveOutputIfCurrentAsync("google-cast", target.Id, ct).ConfigureAwait(false))
+        epochAfterSwitch = await gate.SetActiveOutputIfCurrentWithEpochAsync("google-cast", target.Id, ct).ConfigureAwait(false);
+        if (epochAfterSwitch == null)
         {
           _logger.LogInformation(
             "Cast-loss recovery abandoned: the active output moved to {ActiveOutput} while it was queued",
@@ -216,6 +225,8 @@ public class AudioEngineInitializationService : IHostedService
 
       _logger.LogInformation(
         "Local output \"{DeviceName}\" restored and unmuted after the Cast connection was lost", target.Name);
+
+      StartCastReconnectWatcher(device, new CastRecoveryMark(target.Id, epochAfterSwitch));
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
     {
@@ -242,6 +253,385 @@ public class AudioEngineInitializationService : IHostedService
     // list may differ from the startup snapshot.
     var devices = await _deviceManager.GetOutputDevicesAsync(ct).ConfigureAwait(false);
     return devices.FirstOrDefault(d => d.IsDefault) ?? devices.FirstOrDefault();
+  }
+
+  // --- AUD-37: reconnect to a dropped Cast speaker when it returns -----------------------------
+
+  // Guards _reconnectCts and CastReconnectTask, so a newer drop's watcher replaces the older one
+  // and there is never more than one.
+  private readonly object _reconnectGate = new();
+  private CancellationTokenSource? _reconnectCts;
+  private TimeProvider? _reconnectTimeProvider;
+
+  /// <summary>
+  /// The current (or last) reconnect watcher's run, so a test can await its outcome and
+  /// shutdown can drain it. Completed with <see cref="CastReconnectOutcome.Cancelled"/> until
+  /// the first watcher starts.
+  /// </summary>
+  internal Task<CastReconnectOutcome> CastReconnectTask { get; private set; } =
+    Task.FromResult(CastReconnectOutcome.Cancelled);
+
+  /// <summary>
+  /// <b>Test seam.</b> The clock the reconnect watcher waits on. Defaults to a
+  /// <see cref="TimeProvider"/> registered in DI, else <see cref="TimeProvider.System"/>.
+  /// </summary>
+  internal TimeProvider ReconnectTimeProvider
+  {
+    get => _reconnectTimeProvider ??= _serviceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+    set => _reconnectTimeProvider = value;
+  }
+
+  /// <summary>
+  /// <b>Test seam.</b> Replaces the production probe/connect/switch implementation the watcher
+  /// drives. Null in production.
+  /// </summary>
+  internal ICastReconnectHost? CastReconnectHostOverride { get; set; }
+
+  /// <summary>
+  /// Starts the one reconnect watcher for <paramref name="device"/>, replacing (cancelling) any
+  /// earlier one. The new watcher does not begin until the old one has finished, so two can
+  /// never be connecting at once. Does nothing when auto-reconnect is off, the device is
+  /// unknown, or the service is stopping.
+  /// </summary>
+  private void StartCastReconnectWatcher(ChromecastDeviceInfo? device, CastRecoveryMark mark)
+  {
+    var options = _audioOutputOptions.Value.GoogleCast;
+    if (!options.AutoReconnect || device == null || (_castOutput == null && CastReconnectHostOverride == null))
+    {
+      return;
+    }
+
+    CancellationTokenSource? previousCts;
+    lock (_reconnectGate)
+    {
+      CancellationTokenSource cts;
+      try
+      {
+        if (_serviceStoppingCts.IsCancellationRequested)
+        {
+          return;
+        }
+
+        cts = CancellationTokenSource.CreateLinkedTokenSource(_serviceStoppingCts.Token);
+      }
+      catch (ObjectDisposedException)
+      {
+        return; // Service already stopped.
+      }
+
+      previousCts = _reconnectCts;
+      _reconnectCts = cts;
+
+      var previousRun = CastReconnectTask;
+      var watcher = new CastReconnectWatcher(
+        CastReconnectHostOverride ?? new ServiceCastReconnectHost(this),
+        device,
+        mark,
+        CastReconnectSchedule.From(options),
+        ReconnectTimeProvider,
+        _logger);
+
+      CastReconnectTask = Task.Run(() => RunCastReconnectWatcherAsync(watcher, previousRun, device, cts));
+    }
+
+    // Outside the lock: cancelling can run the old watcher's continuations inline.
+    try
+    {
+      previousCts?.Cancel();
+    }
+    catch (ObjectDisposedException)
+    {
+      // The old watcher already finished and disposed its source.
+    }
+  }
+
+  private async Task<CastReconnectOutcome> RunCastReconnectWatcherAsync(
+    CastReconnectWatcher watcher,
+    Task<CastReconnectOutcome> previousRun,
+    ChromecastDeviceInfo device,
+    CancellationTokenSource cts)
+  {
+    try
+    {
+      // Never two: the replaced watcher may be inside a connect that does not observe
+      // cancellation (SharpCaster), so wait for it to come out before this one may act.
+      try
+      {
+        await previousRun.ConfigureAwait(false);
+      }
+      catch
+      {
+        // Its outcome is not this watcher's concern.
+      }
+
+      var outcome = await watcher.RunAsync(cts.Token).ConfigureAwait(false);
+
+      if (outcome == CastReconnectOutcome.LostAgainAfterSwitch && !cts.IsCancellationRequested)
+      {
+        // Re-run the AUD-84 recovery: the loss of the new connection may have been reported
+        // while the output was still local, in which case that recovery declined it and nothing
+        // else would unmute the local speakers. If it does switch, it starts a fresh watcher.
+        await RestoreLocalOutputAfterCastLossAsync(device, "the Cast connection was lost again right after reconnecting")
+          .ConfigureAwait(false);
+      }
+
+      return outcome;
+    }
+    finally
+    {
+      lock (_reconnectGate)
+      {
+        if (ReferenceEquals(_reconnectCts, cts))
+        {
+          _reconnectCts = null;
+        }
+      }
+
+      cts.Dispose();
+    }
+  }
+
+  /// <summary>The production <see cref="ICastReconnectHost"/>: the real engine, Cast and HTTP outputs.</summary>
+  private sealed class ServiceCastReconnectHost : ICastReconnectHost
+  {
+    private const int StandardCastPort = 8009;
+    private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(3);
+
+    private readonly AudioEngineInitializationService _svc;
+    private bool _startedHttpOutput;
+
+    public ServiceCastReconnectHost(AudioEngineInitializationService svc)
+    {
+      _svc = svc;
+    }
+
+    public bool IsStillOnRecoveryOutput(CastRecoveryMark mark)
+    {
+      if (mark.Epoch.HasValue && _svc._audioEngine is SoundFlowAudioEngine engine)
+      {
+        return engine.OutputSelectionEpoch == mark.Epoch.Value;
+      }
+
+      return string.Equals(_svc._audioEngine.ActiveOutputId, mark.LocalOutputId, StringComparison.OrdinalIgnoreCase);
+    }
+
+    public bool IsCastIdle
+    {
+      get
+      {
+        var cast = _svc._castOutput;
+        if (cast == null || cast.ConnectedDevice != null)
+        {
+          return false;
+        }
+
+        return cast.State is AudioOutputState.Created or AudioOutputState.Ready
+          or AudioOutputState.Stopped or AudioOutputState.Error;
+      }
+    }
+
+    public bool IsCastStreaming => _svc._castOutput?.State == AudioOutputState.Streaming;
+
+    public string? ActiveOutputId => _svc._audioEngine.ActiveOutputId;
+
+    public async Task<ChromecastDeviceInfo?> ProbeAsync(ChromecastDeviceInfo device, CancellationToken ct)
+    {
+      // A speaker that rebooted may have come back on a different address; the discovery
+      // cache tracks that, the record captured at the drop does not.
+      var target = device;
+      try
+      {
+        if (_svc._castOutput != null)
+        {
+          var cached = await _svc._castOutput.GetCachedDevicesAsync(ct).ConfigureAwait(false);
+          target = cached.FirstOrDefault(d => d.Id == device.Id) ?? device;
+        }
+      }
+      catch (Exception ex) when (ex is not OperationCanceledException)
+      {
+        _svc._logger.LogDebug(ex, "Cast reconnect: could not read the device cache; probing the last known address");
+      }
+
+      // The same ports GoogleCastOutput.ConnectAsync will try, in the same order.
+      var ports = target.Port == StandardCastPort
+        ? new[] { StandardCastPort }
+        : new[] { StandardCastPort, target.Port };
+
+      foreach (var port in ports)
+      {
+        using var tcp = new TcpClient();
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        probeCts.CancelAfter(ProbeTimeout);
+        try
+        {
+          await tcp.ConnectAsync(target.IpAddress, port, probeCts.Token).ConfigureAwait(false);
+          return target;
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+          // Not answering on this port (refused, unreachable, or timed out).
+        }
+      }
+
+      return null;
+    }
+
+    public async Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct)
+    {
+      var cast = _svc._castOutput ?? throw new InvalidOperationException("No Cast output");
+      var castOptions = _svc._audioOutputOptions.Value.GoogleCast;
+      var isDirectChannel = string.Equals(castOptions.StreamingMode, "DirectChannel", StringComparison.OrdinalIgnoreCase);
+
+      if (cast.State == AudioOutputState.Created)
+      {
+        await cast.InitializeAsync(ct).ConfigureAwait(false);
+      }
+
+      // Source wiring as the startup restore and DevicesController do it.
+      if (isDirectChannel)
+      {
+        cast.SetAudioEngine(_svc._audioEngine);
+      }
+
+      _svc.PushNowPlayingMetadataToCast();
+
+      // A throw here means our connect did not publish a connection (or another party owns the
+      // output) — nothing of ours to tear down.
+      await cast.ConnectAsync(device, ct).ConfigureAwait(false);
+
+      try
+      {
+        if (!isDirectChannel)
+        {
+          await WireHttpStreamAsync(cast, device, ct).ConfigureAwait(false);
+        }
+
+        if (cast.State != AudioOutputState.Streaming)
+        {
+          await cast.StartAsync(ct).ConfigureAwait(false);
+        }
+
+        if (cast.State != AudioOutputState.Streaming)
+        {
+          throw new InvalidOperationException($"Cast output did not reach Streaming (state {cast.State})");
+        }
+      }
+      catch
+      {
+        // The connection is ours; leaving it published would make the Cast output look
+        // owned by someone else and retire the watcher on its next check.
+        await TearDownCastAsync().ConfigureAwait(false);
+        throw;
+      }
+    }
+
+    private async Task WireHttpStreamAsync(GoogleCastOutput cast, ChromecastDeviceInfo device, CancellationToken ct)
+    {
+      var http = _svc._httpOutput;
+      if (http == null)
+      {
+        return;
+      }
+
+      if (http.State is AudioOutputState.Error or AudioOutputState.Created)
+      {
+        await http.InitializeAsync(ct).ConfigureAwait(false);
+      }
+
+      if (http.State is AudioOutputState.Ready or AudioOutputState.Stopped)
+      {
+        await http.StartAsync(ct).ConfigureAwait(false);
+        _startedHttpOutput = true;
+      }
+
+      if (http.State == AudioOutputState.Streaming)
+      {
+        cast.SetStreamUrl(_svc.GetRoutableStreamUrl(http.Mp3StreamUrl, http.Port, device.IpAddress));
+      }
+    }
+
+    public async Task<bool> TrySwitchToCastAsync(CastRecoveryMark mark, CancellationToken ct)
+    {
+      if (_svc._audioEngine is SoundFlowAudioEngine engine)
+      {
+        return mark.Epoch.HasValue
+          ? await engine.SetActiveOutputIfEpochAsync(mark.Epoch.Value, "google-cast", ct).ConfigureAwait(false)
+          : await engine.SetActiveOutputIfCurrentAsync(mark.LocalOutputId, "google-cast", ct).ConfigureAwait(false);
+      }
+
+      // Any other engine: check-then-switch, with a window between the two.
+      if (!IsStillOnRecoveryOutput(mark))
+      {
+        return false;
+      }
+
+      await _svc._audioEngine.SetActiveOutputAsync("google-cast", ct).ConfigureAwait(false);
+      return true;
+    }
+
+    public async Task TearDownCastAsync()
+    {
+      try
+      {
+        if (_svc._audioEngine is SoundFlowAudioEngine engine)
+        {
+          // Stop + CLOSE_APP + disconnect, capped at 5 s, never throws.
+          await engine.TearDownCastOutputAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+        else if (_svc._castOutput is { } cast)
+        {
+          using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+          if (cast.State is AudioOutputState.Streaming or AudioOutputState.Ready)
+          {
+            await cast.StopAsync(cts.Token).ConfigureAwait(false);
+          }
+
+          await cast.DisconnectAsync(cts.Token).ConfigureAwait(false);
+        }
+
+        // HttpMp3 only: stop the HTTP stream this host started, unless an output that uses it
+        // has been selected since.
+        var active = _svc._audioEngine.ActiveOutputId;
+        if (_startedHttpOutput && _svc._httpOutput is { } http &&
+            !string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(active, "http-stream", StringComparison.OrdinalIgnoreCase) &&
+            http.State == AudioOutputState.Streaming)
+        {
+          await http.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        }
+
+        _startedHttpOutput = false;
+      }
+      catch (Exception ex)
+      {
+        _svc._logger.LogDebug(ex, "Cast reconnect: tear-down after an abandoned reconnect failed");
+      }
+    }
+  }
+
+  /// <summary>
+  /// Pushes the active source's now-playing metadata to the Cast output before a connect, as
+  /// DevicesController does, so the receiver's first media load carries it.
+  /// </summary>
+  private void PushNowPlayingMetadataToCast()
+  {
+    if (_castOutput == null || _audioManager?.ActiveSource is not IPrimaryAudioSource primary)
+    {
+      return;
+    }
+
+    var metadata = primary.Metadata;
+    if (metadata == null || metadata.Count == 0)
+    {
+      return;
+    }
+
+    var title = metadata.TryGetValue(StandardMetadataKeys.Title, out var t) ? t as string : null;
+    var artist = metadata.TryGetValue(StandardMetadataKeys.Artist, out var a) ? a as string : null;
+    var album = metadata.TryGetValue(StandardMetadataKeys.Album, out var al) ? al as string : null;
+    var albumArtUrl = metadata.TryGetValue(StandardMetadataKeys.AlbumArtUrl, out var art) ? art as string : null;
+
+    _castOutput.SetNowPlayingMetadata(title, artist, album, albumArtUrl);
   }
 
   /// <summary>
@@ -1119,6 +1509,11 @@ public class AudioEngineInitializationService : IHostedService
         await Task.WhenAny(castTask, Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None));
       }
 
+      // AUD-37: the reconnect watcher is linked to _serviceStoppingCts, so it is already
+      // cancelled; a wait ends at once. A connect in flight may not observe cancellation, so
+      // the drain is bounded the same way.
+      await Task.WhenAny(CastReconnectTask, Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None));
+
       // Graceful Cast shutdown: stop media + CLOSE_APP + disconnect receiver
       // so the Chromecast returns to its default state instead of holding a
       // stale session that the next startup has to fight through. Single
@@ -1148,7 +1543,7 @@ public class AudioEngineInitializationService : IHostedService
       // If it is still running the process is exiting anyway, so leaving them to
       // the process teardown is strictly safer than disposing underneath it.
       var pending = CastAutoConnectTask;
-      if (pending == null || pending.IsCompleted)
+      if ((pending == null || pending.IsCompleted) && CastReconnectTask.IsCompleted)
       {
         _serviceStoppingCts.Dispose();
         _castResolvedCts.Dispose();
@@ -1157,7 +1552,7 @@ public class AudioEngineInitializationService : IHostedService
       else
       {
         _logger.LogDebug(
-          "Cast auto-connect task still running at shutdown — deferring synchronisation-primitive disposal");
+          "Cast auto-connect or reconnect task still running at shutdown — deferring synchronisation-primitive disposal");
       }
     }
   }

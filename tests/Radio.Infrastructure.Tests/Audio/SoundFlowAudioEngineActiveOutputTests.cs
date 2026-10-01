@@ -349,6 +349,61 @@ public class SoundFlowAudioEngineActiveOutputTests
     Assert.False(engine.IsLocalOutputMuted);
   }
 
+  // --- AUD-37: the epoch-guarded switch the Cast reconnect watcher uses -------------------------
+
+  [Fact]
+  public async Task SetActiveOutputIfCurrentWithEpochAsync_ReturnsTheEpochAsItStandsAfterTheSwitch()
+  {
+    var (engine, _, _, _) = BuildEngine(castState: AudioOutputState.Streaming);
+    await engine.SetActiveOutputAsync("google-cast");
+
+    var epoch = await engine.SetActiveOutputIfCurrentWithEpochAsync("google-cast", "playback-1");
+
+    Assert.NotNull(epoch);
+    Assert.Equal(engine.OutputSelectionEpoch, epoch);
+    Assert.Equal("playback-1", engine.ActiveOutputId);
+  }
+
+  [Fact]
+  public async Task SetActiveOutputIfCurrentWithEpochAsync_WhenTheUserAlreadyMovedOn_ReturnsNull()
+  {
+    var (engine, _, _, _) = BuildEngine();
+    await engine.SetActiveOutputAsync("hdmi-1");
+
+    Assert.Null(await engine.SetActiveOutputIfCurrentWithEpochAsync("google-cast", "playback-1"));
+    Assert.Equal("hdmi-1", engine.ActiveOutputId);
+  }
+
+  [Fact]
+  public async Task SetActiveOutputIfEpochAsync_NothingSelectedSince_Switches()
+  {
+    var (engine, _, _, _) = BuildEngine();
+    await engine.SetActiveOutputAsync("playback-1");
+    var epoch = engine.OutputSelectionEpoch;
+
+    Assert.True(await engine.SetActiveOutputIfEpochAsync(epoch, "google-cast"));
+    Assert.Equal("google-cast", engine.ActiveOutputId);
+    Assert.True(engine.IsLocalOutputMuted);
+  }
+
+  [Fact]
+  public async Task SetActiveOutputIfEpochAsync_UserWentElsewhereAndBack_StillRefuses()
+  {
+    // The active id is the same as at the baseline, but the user made two choices since.
+    var (engine, _, _, configMock) = BuildEngine();
+    await engine.SetActiveOutputAsync("playback-1");
+    var epoch = engine.OutputSelectionEpoch;
+    await engine.SetActiveOutputAsync("hdmi-1");
+    await engine.SetActiveOutputAsync("playback-1");
+    configMock.Invocations.Clear();
+
+    Assert.False(await engine.SetActiveOutputIfEpochAsync(epoch, "google-cast"));
+    Assert.Equal("playback-1", engine.ActiveOutputId);
+    Assert.False(engine.IsLocalOutputMuted);
+    configMock.Verify(c => c.SetValueAsync(
+      It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+  }
+
   private static (SoundFlowAudioEngine engine,
                   Mock<IAudioOutput> castMock,
                   Mock<IAudioOutput> httpMock,

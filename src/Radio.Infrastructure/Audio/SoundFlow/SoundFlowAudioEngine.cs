@@ -219,6 +219,25 @@ public class SoundFlowAudioEngine : IAudioEngine
   public async Task<bool> SetActiveOutputIfCurrentAsync(
     string expectedCurrent, string outputId, CancellationToken cancellationToken = default)
   {
+    return await SetActiveOutputIfCurrentWithEpochAsync(expectedCurrent, outputId, cancellationToken)
+      .ConfigureAwait(false) != null;
+  }
+
+  /// <summary>
+  /// <see cref="SetActiveOutputIfCurrentAsync"/>, also returning the output-selection epoch
+  /// as it stands immediately after this switch, read under the same lock acquisition.
+  /// </summary>
+  /// <remarks>
+  /// AUD-37. The lost-Cast recovery hands this epoch to its reconnect watcher, which may move
+  /// the output back to Cast only through <see cref="SetActiveOutputIfEpochAsync"/> — so ANY
+  /// output selection made after the recovery, including one that ends on the same local
+  /// device, retires the watcher. Reading the epoch in a separate call afterwards would leave a
+  /// window in which a user's choice is absorbed into the watcher's baseline.
+  /// </remarks>
+  /// <returns>The epoch after the switch, or null when the active output had moved on.</returns>
+  public async Task<int?> SetActiveOutputIfCurrentWithEpochAsync(
+    string expectedCurrent, string outputId, CancellationToken cancellationToken = default)
+  {
     if (string.IsNullOrWhiteSpace(outputId))
     {
       throw new ArgumentException("outputId is required", nameof(outputId));
@@ -229,6 +248,42 @@ public class SoundFlowAudioEngine : IAudioEngine
     {
       var current = _activeOutputId;
       if (current != null && !string.Equals(current, expectedCurrent, StringComparison.OrdinalIgnoreCase))
+      {
+        return null;
+      }
+
+      await ApplyActiveOutputLockedAsync(outputId, cancellationToken).ConfigureAwait(false);
+      return _castConnectEpoch;
+    }
+    finally
+    {
+      _activeOutputLock.Release();
+    }
+  }
+
+  /// <summary>
+  /// Switches to <paramref name="outputId"/> only if no output selection of any kind has been
+  /// made since <paramref name="expectedEpoch"/> was read, checking and switching under ONE
+  /// acquisition of the output lock.
+  /// </summary>
+  /// <remarks>
+  /// AUD-37. Stricter than <see cref="SetActiveOutputIfCurrentAsync"/>: a user who picks another
+  /// output and then the original one again leaves the active output id unchanged but the epoch
+  /// moved, and that user has still made a choice the reconnect watcher must not override.
+  /// </remarks>
+  /// <returns>True when the switch was made; false when any selection happened since.</returns>
+  public async Task<bool> SetActiveOutputIfEpochAsync(
+    int expectedEpoch, string outputId, CancellationToken cancellationToken = default)
+  {
+    if (string.IsNullOrWhiteSpace(outputId))
+    {
+      throw new ArgumentException("outputId is required", nameof(outputId));
+    }
+
+    await _activeOutputLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+    try
+    {
+      if (_castConnectEpoch != expectedEpoch)
       {
         return false;
       }
@@ -241,6 +296,13 @@ public class SoundFlowAudioEngine : IAudioEngine
       _activeOutputLock.Release();
     }
   }
+
+  /// <summary>
+  /// The output-selection epoch: incremented on every output transition through the gate.
+  /// A lock-free read, so only good for an early "has anything changed?" check — a decision
+  /// to switch must go through <see cref="SetActiveOutputIfEpochAsync"/>.
+  /// </summary>
+  public int OutputSelectionEpoch => Volatile.Read(ref _castConnectEpoch);
 
   /// <summary>The body of the output gate. Caller holds <c>_activeOutputLock</c>.</summary>
   private async Task ApplyActiveOutputLockedAsync(string outputId, CancellationToken cancellationToken)
