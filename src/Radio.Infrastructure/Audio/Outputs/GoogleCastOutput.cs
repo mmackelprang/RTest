@@ -226,6 +226,22 @@ public class GoogleCastOutput : AudioOutputBase
   /// Null (and therefore free) in production.
   /// </summary>
   internal Func<bool, Task>? CastSetMuteOverrideForTests { get; set; }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the receiver-application stop inside
+  /// <see cref="StopReceiverApplicationAsync"/> (AUD-81, pre-merge review H1): returns whether no
+  /// application of ours is left running, or throws. Set by <c>CastConsoleTestHarness</c>.
+  /// <b>Why the real path is unreachable:</b> the same as
+  /// <see cref="CastSetMuteOverrideForTests"/> — no fake socket speaks the Cast protocol, so the
+  /// STOP is never answered.
+  /// <b>NOT covered by this seam:</b> how the device's status is read to decide whether our
+  /// application is running (checked against SharpCaster 3.0.0's decompiled
+  /// <c>ReceiverChannel.StopApplication</c>, which stops the FIRST application in the status).
+  /// WHEN the stop is attempted, that the unmute follows it, and that a failed stop leaves the
+  /// speaker muted are real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal Func<Task<bool>>? CastStopApplicationOverrideForTests { get; set; }
   private string? _streamUrl;
 
   // Direct Channel streaming (experimental)
@@ -295,8 +311,10 @@ public class GoogleCastOutput : AudioOutputBase
   private float _latestConsoleTarget = float.NaN;
 
   // AUD-81: the generation of the connection this application muted because the console was
-  // muted, or -1. A deliberate teardown of that connection unmutes the speaker first, so it is
-  // not left muted for its next user. Accessed through Interlocked/Volatile only.
+  // muted, or -1. A deliberate teardown of that connection stops the receiver application and
+  // then unmutes the speaker, so it is not left muted for its next user (and is left muted when
+  // the stop cannot be confirmed — see ReleaseConsoleMuteAsync). Accessed through
+  // Interlocked/Volatile only.
   private int _consoleMutedGeneration = -1;
 
   // AUD-81: set once by CastConsoleVolumeFollower. The console's mute state, read when
@@ -305,9 +323,11 @@ public class GoogleCastOutput : AudioOutputBase
   private Func<bool>? _isConsoleMuted;
   private ILogger? _consoleLogger;
 
-  // Bound on a console-driven SET_VOLUME/SET_MUTE; and on the unmute sent before a teardown.
+  // Bound on a console-driven SET_VOLUME/SET_MUTE; and on the receiver-application stop and the
+  // unmute sent before a teardown.
   private static readonly TimeSpan ConsoleCommandTimeout = TimeSpan.FromSeconds(5);
   private static readonly TimeSpan TeardownUnmuteTimeout = TimeSpan.FromSeconds(2);
+  private static readonly TimeSpan TeardownAppStopTimeout = TimeSpan.FromSeconds(3);
 
   // AUD-54 (1). The ReceiverChannel that currently carries OnReceiverStatusChanged, so
   // SubscribeToReceiverStatus can detach it from there before attaching it elsewhere.
@@ -968,7 +988,10 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogInformation("Disconnecting from Chromecast: {Name}", disconnectedDevice?.FriendlyName);
 
-      // AUD-81: before closing, so the speaker is not left muted by a muted console.
+      // AUD-81: before closing, so the speaker is not left muted by a muted console. Usually a
+      // no-op — StopAsync has released it — but DisposeAsync reaches here without a StopAsync,
+      // and a release StopAsync could not complete (receiver application not confirmed stopped)
+      // is retried here. Either way the application is stopped before any unmute.
       await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice?.FriendlyName).ConfigureAwait(false);
 
       UnsubscribeFromReceiverStatus(client);
@@ -1378,10 +1401,6 @@ public class GoogleCastOutput : AudioOutputBase
         _lifecycleLock.Release();
       }
 
-      // AUD-81: after the audio has stopped and before the session ends, so the speaker is
-      // neither left muted by a muted console nor unmuted while our audio is still playing.
-      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDeviceName).ConfigureAwait(false);
-
       if (stopClient != null)
       {
         var mediaChannel = stopClient.GetChannel<MediaChannel>();
@@ -1443,6 +1462,15 @@ public class GoogleCastOutput : AudioOutputBase
           }
         }
       }
+
+      // AUD-81 (pre-merge review H1). After the media stop, never before it: in HttpMp3 the live
+      // MP3 keeps playing until then. And the media stop alone is not enough — in DirectChannel
+      // stopping the send loop does not stop the receiver, which still holds up to
+      // DirectChannelMaxBufferAhead of our audio, and the gate deactivates the HTTP output only
+      // after this method returns. So a speaker the console muted is unmuted only after its
+      // receiver application has been stopped, and is left muted if that cannot be confirmed.
+      // ReleaseConsoleMuteAsync states exactly what that guarantees.
+      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDeviceName).ConfigureAwait(false);
 
       IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
@@ -2736,7 +2764,7 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// True while this application has muted the connected speaker because the console was
-  /// muted; a deliberate teardown unmutes it first.
+  /// muted; a deliberate teardown stops the receiver application and then unmutes it.
   /// </summary>
   public bool IsSpeakerMutedByConsole => Volatile.Read(ref _consoleMutedGeneration) >= 0;
 
@@ -2976,14 +3004,61 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// Before a deliberate teardown of connection <paramref name="generation"/>: if this
-  /// application muted its speaker for the console, unmutes it so it is not left muted for its
-  /// next user. Bounded by a short timeout; never throws. A connection that was LOST is not
-  /// handled here (see <c>HandleConnectionLostAsync</c>): it cannot be unmuted.
+  /// application muted its speaker for the console, stops the receiver application on the device
+  /// and THEN unmutes the speaker, so it is not left muted for its next user. Bounded by short
+  /// timeouts; never throws. A connection that was LOST is not handled here (see
+  /// <c>HandleConnectionLostAsync</c>): it cannot be unmuted.
   /// </summary>
+  /// <remarks>
+  /// <para><b>What is guaranteed</b> (pre-merge review H1): an unmute is sent only after the device
+  /// has answered that no receiver application with our <c>ApplicationId</c> is running — stopped
+  /// here, or none was running — so neither the live HttpMp3 stream nor DirectChannel audio the
+  /// receiver had buffered can play out loud after it. If that cannot be established (the stop
+  /// failed or timed out, the device's answer still lists our application, or a different
+  /// application is first in its status, which the library's stop would close instead) the
+  /// speaker is deliberately LEFT MUTED and an Information line says so: a muted speaker the owner
+  /// has to unmute is recoverable; a muted console playing out loud is the one outcome this
+  /// feature must never produce. The mark is kept in that case, so a later teardown of the same
+  /// connection (DisconnectAsync after StopAsync) tries again.</para>
+  /// <para><b>What is not:</b> that the unmute itself lands (a failure is logged; the speaker stays
+  /// muted). Only a connection the console muted is touched: otherwise a teardown leaves the
+  /// receiver application to the media-stop and close paths, as before AUD-81.</para>
+  /// <para>A later <c>StartAsync</c> on the same client still launches the application:
+  /// SharpCaster 3.0.0's <c>ChromecastClient.LaunchApplicationAsync</c> joins an existing session
+  /// only when its last receiver status lists the application, and the stop's response — a
+  /// RECEIVER_STATUS without it — is what that status is replaced with (the receive loop runs
+  /// <c>ReceiverChannel.OnMessageReceived</c> before completing the request).</para>
+  /// </remarks>
   private async Task ReleaseConsoleMuteAsync(ChromecastClient? client, int generation, string? deviceName)
   {
-    if (client == null || generation < 0 ||
-        Interlocked.CompareExchange(ref _consoleMutedGeneration, -1, generation) != generation)
+    if (client == null || generation < 0 || Volatile.Read(ref _consoleMutedGeneration) != generation)
+    {
+      return;
+    }
+
+    bool applicationGone;
+    try
+    {
+      applicationGone = await StopReceiverApplicationAsync(client)
+        .WaitAsync(TeardownAppStopTimeout).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Cast: stopping the receiver application before the teardown unmute failed");
+      applicationGone = false;
+    }
+
+    if (!applicationGone)
+    {
+      ConsoleLogger.LogInformation(
+        "Cast: speaker {Name} left muted — its receiver application could not be confirmed stopped, and " +
+        "unmuting could play our audio under a muted console; unmute it on the speaker or in Google Home",
+        deviceName);
+      return;
+    }
+
+    // Claimed only now, so a failed stop above keeps the mark for a later teardown to retry.
+    if (Interlocked.CompareExchange(ref _consoleMutedGeneration, -1, generation) != generation)
     {
       return;
     }
@@ -2994,7 +3069,8 @@ public class GoogleCastOutput : AudioOutputBase
             .WaitAsync(TeardownUnmuteTimeout).ConfigureAwait(false))
       {
         ConsoleLogger.LogInformation(
-          "Cast: speaker {Name} unmuted before closing — it had been muted for the console", deviceName);
+          "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",
+          deviceName);
       }
     }
     catch (Exception ex)
@@ -3004,6 +3080,45 @@ public class GoogleCastOutput : AudioOutputBase
         deviceName, ex.GetType().Name);
       _logger.LogDebug(ex, "Cast: teardown unmute failed");
     }
+  }
+
+  /// <summary>
+  /// Stops our receiver application (<c>ApplicationId</c>) on the device behind
+  /// <paramref name="client"/>. True when the device has answered that no application of ours is
+  /// running (stopped here, or none was); false when that cannot be established. Throws what
+  /// SharpCaster throws.
+  /// </summary>
+  private async Task<bool> StopReceiverApplicationAsync(ChromecastClient client)
+  {
+    if (CastStopApplicationOverrideForTests != null)
+    {
+      return await CastStopApplicationOverrideForTests().ConfigureAwait(false);
+    }
+
+    var receiverChannel = client.GetChannel<ReceiverChannel>();
+    if (receiverChannel == null)
+    {
+      return false;
+    }
+
+    var applicationId = _options.ApplicationId;
+    var status = receiverChannel.ReceiverStatus;
+    var ours = status?.Applications?.FirstOrDefault(a => a.AppId == applicationId);
+    if (ours == null)
+    {
+      // The device's last status lists no application of ours: nothing of ours can be playing.
+      return true;
+    }
+
+    if (!ReferenceEquals(status!.Application, ours))
+    {
+      // SharpCaster's StopApplication stops the FIRST application in the status. Closing someone
+      // else's is not ours to do, so our stop cannot be made.
+      return false;
+    }
+
+    var after = await receiverChannel.StopApplication().ConfigureAwait(false);
+    return after != null && after.Applications?.Any(a => a.AppId == applicationId) != true;
   }
 
   /// <summary>

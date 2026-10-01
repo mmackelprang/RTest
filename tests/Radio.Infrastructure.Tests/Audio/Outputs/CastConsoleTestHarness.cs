@@ -26,7 +26,10 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   public FakeTimeProvider Time { get; } = new();
   public FakeCastVolumeStore Store { get; } = new();
 
-  /// <summary>Every SET_VOLUME ("vol") and SET_MUTE ("mute") sent, in order.</summary>
+  /// <summary>
+  /// Every SET_VOLUME ("vol"), SET_MUTE ("mute") and receiver-application stop ("appstop") sent,
+  /// in order.
+  /// </summary>
   public List<(string Kind, float Level, bool Muted)> Commands { get; } = new();
   private readonly object _commandsLock = new();
 
@@ -97,6 +100,29 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
       }
       return Task.CompletedTask;
     };
+    Output.CastStopApplicationOverrideForTests = () =>
+    {
+      lock (_commandsLock)
+      {
+        Commands.Add(("appstop", 0f, false));
+      }
+      return AppStop();
+    };
+  }
+
+  /// <summary>
+  /// The receiver-application stop's outcome: true (no application of ours left running) by
+  /// default; a test replaces it with false or a throw.
+  /// </summary>
+  public Func<Task<bool>> AppStop { get; set; } = () => Task.FromResult(true);
+
+  /// <summary>The kinds of every command sent, in order ("vol", "mute", "appstop").</summary>
+  public List<string> Kinds()
+  {
+    lock (_commandsLock)
+    {
+      return Commands.Select(c => c.Kind == "mute" ? (c.Muted ? "mute" : "unmute") : c.Kind).ToList();
+    }
   }
 
   /// <summary>

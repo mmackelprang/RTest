@@ -328,6 +328,67 @@ public class GoogleCastOutputConsoleVolumeTests
     await h.Output.DisconnectAsync();
 
     Assert.Empty(h.MuteSends());
+    Assert.DoesNotContain("appstop", h.Kinds()); // the receiver application is left as before AUD-81
+  }
+
+  // Pre-merge review H1: the release used to run BEFORE the media stop and never stopped the
+  // receiver, so a muted console's audio — the live HttpMp3 stream, or up to 3 s of DirectChannel
+  // audio the receiver had buffered — could play out loud after the unmute.
+  [Fact]
+  public async Task AStop_StopsTheReceiverApplication_BeforeUnmutingASpeakerTheConsoleMuted()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "mute", "appstop", "unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  [Theory]
+  [InlineData(false)] // the device still lists our application, or another one is first
+  [InlineData(true)]  // the stop threw (socket closed, timed out)
+  public async Task WhenTheReceiverApplicationCannotBeConfirmedStopped_TheSpeakerIsLeftMuted(bool throws)
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+    h.AppStop = throws
+      ? () => Task.FromException<bool>(new InvalidOperationException("socket closed"))
+      : () => Task.FromResult(false);
+
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "mute", "appstop" }, h.Kinds());
+    Assert.True(h.Output.IsSpeakerMutedByConsole); // kept, so the disconnect can try again
+
+    // The disconnect retries; once the application is confirmed stopped, the unmute follows it.
+    h.AppStop = () => Task.FromResult(true);
+    await h.Output.DisconnectAsync();
+
+    Assert.Equal(new[] { "mute", "appstop", "appstop", "unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+  }
+
+  [Fact]
+  public async Task ADisconnectWithoutAStop_StopsTheReceiverApplication_BeforeTheUnmute()
+  {
+    // DisposeAsync and the device-switch path can reach DisconnectAsync while still streaming.
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    await h.Output.DisconnectAsync();
+
+    Assert.Equal(new[] { "mute", "appstop", "unmute" }, h.Kinds());
   }
 
   [Fact]
