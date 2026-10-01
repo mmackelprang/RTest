@@ -48,7 +48,57 @@ public class GoogleCastOutputLifecycleTests
     Assert.Equal(0, ReceiverStatusHandlerCount(client, output));
   }
 
+  [Fact]
+  public async Task RegisteringTheDirectChannelRepeatedly_ReplacesIt_SoTheChannelCountStaysConstant()
+  {
+    // Each StartAsync in DirectChannel mode registers a new DirectCastAudioChannel on the
+    // (reused) client. SharpCaster routes inbound messages to the FIRST channel with a
+    // matching namespace, so an appended duplicate is one the live service never hears from.
+    await using var output = await InitializedOutputAsync();
+    var client = new ChromecastClient();
+    var baseline = ChannelsOf(client).Count;
+    const string ns = "urn:x-cast:test.audio";
+
+    var first = new DirectCastAudioChannel(ns, NullLoggerFor());
+    output.RegisterCustomChannel(client, first);
+    var second = new DirectCastAudioChannel(ns, NullLoggerFor());
+    output.RegisterCustomChannel(client, second);
+    var third = new DirectCastAudioChannel(ns, NullLoggerFor());
+    output.RegisterCustomChannel(client, third);
+
+    var channels = ChannelsOf(client);
+    Assert.Equal(baseline + 1, channels.Count);
+    Assert.Same(third, Assert.Single(channels, c => c.Namespace == ns));
+  }
+
+  [Fact]
+  public async Task UnregisteringTheDirectChannel_RemovesOnlyThatChannel()
+  {
+    await using var output = await InitializedOutputAsync();
+    var client = new ChromecastClient();
+    var baseline = ChannelsOf(client).Count;
+    var channel = new DirectCastAudioChannel("urn:x-cast:test.audio", NullLoggerFor()) { Client = client };
+    output.RegisterCustomChannel(client, channel);
+
+    output.UnregisterCustomChannel(channel);
+    output.UnregisterCustomChannel(channel); // idempotent
+
+    var channels = ChannelsOf(client);
+    Assert.Equal(baseline, channels.Count);
+    Assert.DoesNotContain(channels, c => ReferenceEquals(c, channel));
+    Assert.NotNull(client.GetChannel<ReceiverChannel>()); // SharpCaster's own channels untouched
+  }
+
   // --- helpers ---
+
+  private static ILogger NullLoggerFor() => Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
+
+  internal static List<Sharpcaster.Interfaces.IChromecastChannel> ChannelsOf(ChromecastClient client)
+  {
+    var prop = typeof(ChromecastClient).GetProperty("Channels", BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(prop);
+    return ((IEnumerable<Sharpcaster.Interfaces.IChromecastChannel>)prop!.GetValue(client)!).ToList();
+  }
 
   internal static async Task<GoogleCastOutput> InitializedOutputAsync(
     ILogger<GoogleCastOutput>? logger = null,
