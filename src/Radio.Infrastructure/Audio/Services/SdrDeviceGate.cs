@@ -5,12 +5,24 @@ namespace Radio.Infrastructure.Audio.Services;
 
 /// <summary>
 /// Arbitrates the single RTL-SDR dongle between the radio source and idle
-/// band sweeps (AUD-76). The radio's claim always wins: claiming cancels a
-/// live sweep lease and waits (bounded) for the sweep to release the device.
+/// band sweeps (AUD-76). A radio claim is never refused: it cancels a live
+/// sweep lease and waits up to <see cref="LeaseReleaseTimeout"/> for the
+/// sweep to dispose it. If the sweep has not done so by then, the claim
+/// logs an error and returns anyway, and the radio goes on to open a device
+/// the sweep may still have open — that open can then fail.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The gate records who holds the device; it does not open or close it.
 /// Holders are expected to have closed their device handle before releasing.
+/// </para>
+/// <para>
+/// The radio's hold is a single flag, not a count: two radio claims followed
+/// by one <see cref="ReleaseFromRadio"/> leave the gate free. That is correct
+/// only while at most one radio source holds the gate at a time; in practice
+/// there is one radio source. Two sources overlapping their holds is not
+/// handled. Each source releases only a hold it took itself.
+/// </para>
 /// </remarks>
 public sealed class SdrDeviceGate
 {
@@ -59,7 +71,8 @@ public sealed class SdrDeviceGate
   /// <summary>
   /// Marks the radio as the holder. If a sweep lease is live, cancels its
   /// token and waits up to <see cref="LeaseReleaseTimeout"/> for the lease to
-  /// be disposed; on timeout logs a warning and returns anyway. Calling it
+  /// be disposed; on timeout logs an error and returns anyway, with the sweep
+  /// possibly still holding the device open. Calling it
   /// again while the radio already holds the gate is harmless.
   /// </summary>
   /// <param name="cancellationToken">Stops waiting for the lease.</param>
@@ -86,8 +99,8 @@ public sealed class SdrDeviceGate
     }
     catch (TimeoutException)
     {
-      _logger.LogWarning(
-        "Idle band sweep did not release the SDR device within {Timeout}s of cancellation; radio proceeding",
+      _logger.LogError(
+        "Idle band sweep did not release the SDR device within {Timeout}s of cancellation; radio proceeding while the sweep may still hold it open",
         LeaseReleaseTimeout.TotalSeconds);
     }
   }

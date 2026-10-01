@@ -267,7 +267,8 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     }
 
     // Startup also returns false when the receiver is already running; only
-    // release the claim when the receiver is not running.
+    // release the claim when the receiver is not running. A failed Startup
+    // has already closed the device, so the gate is free only once it is.
     if (!started)
     {
       ReleaseDeviceGateIfIdle();
@@ -1162,11 +1163,23 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // Clean up scan resources
     _scanCts?.Dispose();
 
-    // AUD-76: do not leave the gate marked as held by a disposed source.
+    // AUD-76: do not leave the gate marked as held by a disposed source, and
+    // do not release it while the receiver may still have the device open —
+    // shut the receiver down (which closes the device) first. Shutdown is a
+    // no-op on a stopped receiver.
     if (_deviceGate != null && _holdsDeviceGate)
     {
-      _holdsDeviceGate = false;
-      _deviceGate.ReleaseFromRadio();
+      try
+      {
+        await Task.Run(() => _radioReceiver.Shutdown());
+      }
+      catch (Exception ex)
+      {
+        Logger.LogWarning(ex, "Error shutting down the SDR receiver while disposing the radio source");
+      }
+
+      // Released only when the receiver is no longer running.
+      ReleaseDeviceGateIfIdle();
     }
   }
 

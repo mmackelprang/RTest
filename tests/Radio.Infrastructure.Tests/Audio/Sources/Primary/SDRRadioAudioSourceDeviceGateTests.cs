@@ -45,7 +45,14 @@ public class SDRRadioAudioSourceDeviceGateTests
       open = true;
       return true;
     });
-    _device.Setup(d => d.Close()).Callback(() => open = false);
+    _device.Setup(d => d.Close()).Callback(() =>
+    {
+      lock (_events)
+      {
+        _events.Add($"close(gateHeld={_gate.IsHeldByRadio})");
+      }
+      open = false;
+    });
     _device.Setup(d => d.StartStreaming()).Returns(() => _startStreamingResult);
   }
 
@@ -105,8 +112,24 @@ public class SDRRadioAudioSourceDeviceGateTests
 
     Assert.False(await source.StartupAsync());
 
+    // The receiver closed the device while the gate was still held, and only
+    // then was the gate freed for an idle sweep.
+    Assert.Equal(new[] { "open(gateHeld=True)", "close(gateHeld=True)" }, _events);
+    Assert.False(_device.Object.IsOpen);
     Assert.False(_gate.IsHeldByRadio);
     Assert.NotNull(_gate.TryAcquireForSweep());
+  }
+
+  [Fact]
+  public async Task StartupAsync_WhenStartupThrows_ClosesDeviceBeforeReleasingGate()
+  {
+    _device.Setup(d => d.SetSampleRate(It.IsAny<int>())).Throws(new InvalidOperationException("usb gone"));
+    await using SDRRadioAudioSource source = CreateSource();
+
+    Assert.False(await source.StartupAsync());
+
+    Assert.Equal(new[] { "open(gateHeld=True)", "close(gateHeld=True)" }, _events);
+    Assert.False(_gate.IsHeldByRadio);
   }
 
   [Fact]
@@ -130,6 +153,8 @@ public class SDRRadioAudioSourceDeviceGateTests
 
     await source.DisposeAsync();
 
+    // Disposal shut the receiver down (closing the device) before freeing the gate.
+    Assert.Equal(new[] { "open(gateHeld=True)", "close(gateHeld=True)" }, _events);
     Assert.False(_gate.IsHeldByRadio);
   }
 }

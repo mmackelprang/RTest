@@ -220,6 +220,7 @@ namespace RTLSDRCore;
                   if (!_device.StartStreaming())
                   {
                       Logger.Error("Failed to start streaming");
+                      CloseDeviceAfterFailedStartup();
                       SetState(ReceiverState.Error);
                       return false;
                   }
@@ -245,9 +246,48 @@ namespace RTLSDRCore;
               catch (Exception ex)
               {
                   Logger.Error(ex, "Error starting receiver");
+                  CloseDeviceAfterFailedStartup();
                   SetState(ReceiverState.Error);
                   return false;
               }
+          }
+      }
+
+      /// <summary>
+      /// Stops streaming and closes the device after <see cref="Startup"/>
+      /// failed with the device possibly open, so a failed start never
+      /// leaves the dongle held (AUD-76: the device gate is released on
+      /// failure and an idle band sweep may then open the device).
+      /// </summary>
+      private void CloseDeviceAfterFailedStartup()
+      {
+          _device.SamplesAvailable -= OnSamplesAvailable;
+          _processingCts?.Cancel();
+          _processingQueue?.CompleteAdding();
+          _processingThread?.Join(TimeSpan.FromSeconds(2));
+          _processingQueue?.Dispose();
+          _processingQueue = null;
+          _processingThread = null;
+          _processingCts?.Dispose();
+          _processingCts = null;
+
+          try
+          {
+              lock (_tuneLock)
+              {
+                  if (_device.IsStreaming)
+                  {
+                      _device.StopStreaming();
+                  }
+                  if (_device.IsOpen)
+                  {
+                      _device.Close();
+                  }
+              }
+          }
+          catch (Exception ex)
+          {
+              Logger.Error(ex, "Error closing the device after a failed receiver start");
           }
       }
 
