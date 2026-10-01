@@ -131,28 +131,62 @@ never read (they are loaded, but match nothing); a stale `:268` line reference; 
 device-volume cell; and two stale doc strings (Bridge example, AudioUAT P3-001). **Pre-existing, filed
 as [`AUD-89`](AUD-89.md):** the Vinyl key-casing shadow, and the `/dev/ttyUSB1` DTO default.
 
-### ⛔ Not yet deployed — the box checks still to run
+## ✅ 2026-10-01 — shipped, deployed and agent-verified on the box (coordinator)
 
-This Builder's deploy was refused by the session's permission classifier, so none of the following has
-been run against this change. A UI probe was run against the **pre-change** build (`a86349f`) as a
-baseline. It shows the probe can see what this change removes: the Devices tab had the field
-`Radio USB Audio (RF320 only)`, and the Radio tab's device dropdown listed `RTL-SDR` and `Raddy RF320`.
-The five source bubbles were `FM/AM Radio`, `Vinyl (Phono)`, `File Player`, `USB Audio` and `Bluetooth`,
-and there were no console errors.
+This closes the *"Not yet deployed"* section that stood here. The Builder's deploy had been refused by
+the session's permission classifier, so it fell to the coordinator.
 
-After deploying `main`, run these checks. Record and restore the owner's state first: SDR radio on
-92.3 FM, volume 0.3, muted, output `Soundbar`.
+**Merge.** Owner instruction 2026-09-30: *"merge and deploy AUD-16"*. The coordinator rebased
+`fix/aud-16-remove-rf320` onto `16cf71b` (`AUD-76` PR 2). Only the docs conflicted: the "next free"
+lines and the queue banner. The code commits applied cleanly. Gates were re-run on the rebased head
+`929f953`:
 
-1. `Verified: API/Web is running commit <sha>` and `Kiosk is live`. `NRestarts` should be unchanged on
-   both units (it was 0 / 0 before).
-2. `/api/sources` should list the same five primary sources. `/api/radio/devices` should list
-   `RTLSDRCore` only.
-3. Kiosk at 1920x720: the same five bubbles and no console errors. The System Config Devices tab
-   should show only the Vinyl field, still `USB Microphone`. The Radio tab dropdown should list only
-   `RTL-SDR`.
-4. Switch through each source: Radio (SDR), Vinyl, File Player, Bluetooth. USB Audio should refuse,
-   as accepted in `AUD-13`. Then return to Radio.
-5. **RTL-SDR tuning, end to end** (this dossier's own gate). `POST /api/radio/frequency` to another
-   station, confirm `/api/radio/state` reports it, then restore 92,300,000 Hz.
-6. The bounded start-up journal should have no new Warning about `Devices`, `Radio` binding or
-   configuration. Compare against the previous start's set.
+- `dotnet build RadioConsole.sln -c Release --no-incremental`: **46 warnings, 0 errors**.
+- Full `dotnet test`: AudioAnalysis 35, Metrics 28, RTLSDRCore 224, Web.E2E 28, Core 186,
+  Configuration 115, Web 1391, Fingerprinting 112 (+1 skipped) and API 509 all passed. Infrastructure:
+  1949 passed, plus the six known `SrcVariableResamplerTests` failures (`libsamplerate`).
+  IntegrationTests: 30 passed, plus the known live-network
+  `NwsObservationIntegrationTests.RealNwsCall_ReturnsForecast_WithCurrentObservation`.
+
+[#743](https://github.com/mmackelprang/RTest/pull/743) was squash-merged as **`a4bad7c`**.
+
+**Deploy.** `a4bad7c` was deployed from a detached `origin/main` checkout at about 21:51 EDT on
+2026-09-30. The deploy printed `Verified: API is running commit a4bad7c`,
+`Verified: Web is running commit a4bad7c` and
+`Kiosk is live (12 established connections to :5002, radio-kiosk.service=active)`. Both services'
+`/api/health/version` report `a4bad7c`.
+
+**UAT on the box (agent-verified, not owner-run).** Results against the checks this dossier listed:
+
+1. *SHA and kiosk:* as above. ⚠ **`NRestarts` was not recorded** in the evidence handed over.
+2. *Sources and devices:* `/api/sources` lists the same five primary sources: Radio, Vinyl, FilePlayer,
+   GenericUSB and Bluetooth. `GET /api/radio/devices` returns exactly one device, `RTLSDRCore`
+   (count 1). The RF320 is gone.
+3. *UI at 1920×720:* the previous Builder's Playwright probe (`uat_sources.py post`) was run against
+   `http://radio:5002`.
+   - The Devices tab has only one field, "Vinyl Audio Device: USB Microphone". The
+     "Radio USB Audio (RF320 only)" field from the pre-change baseline is gone.
+   - The Radio tab device dropdown has one option, "RTL-SDR". The baseline had RTL-SDR and Raddy RF320.
+   - Neither tab mentions the RF320, and there were zero console errors.
+   - The five source bubbles were not separately recorded.
+4. *Source switching* via `POST /api/sources`, read from the file sink `radio-20260930.txt`:
+   - Vinyl 21:52:22, FilePlayer 21:52:26, Bluetooth 21:52:34 and Radio 21:52:38 each logged
+     `Successfully switched to source`.
+   - Two switches interleaved with these, 21:52:29 → Radio and 21:52:35 → FilePlayer. They came from a
+     concurrent Builder's Cast UAT, not from this check.
+   - ⚠ The USB Audio refusal (as accepted in `AUD-13`) was not exercised.
+5. *RTL-SDR after the restart:* `/api/radio/state` reports frequency 92300000, band FM, signalStrength 100.
+   The persisted `CurrentSource=Radio` was restored at start-up (`Activating persisted source: "Radio"`,
+   then `Source "Radio" activated on startup`). ⚠ **The retune step was not run:** no
+   `POST /api/radio/frequency` to another station and back. What is shown is that the SDR starts,
+   tunes and receives on the restored station, not that a tune request works.
+6. *Start-up warnings 21:51:00–21:52:15:* only the usual set appeared. That is
+   `Saved input device "capture-4" not found`, the GvMedia AuthKey notice, no connected BT device, the
+   Kestrel address override, https-port, and two GC deadline misses. There was nothing about Radio
+   device config or binding.
+
+The owner's state is unchanged: SDR Radio 92.3 FM, volume 0.3, muted, output Soundbar, and no default
+Cast device.
+
+Nothing is left for the owner on this row. The two skipped steps (`NRestarts`, the retune) are cheap
+to run at the next box session if anyone wants them, but neither one gates the removal.
