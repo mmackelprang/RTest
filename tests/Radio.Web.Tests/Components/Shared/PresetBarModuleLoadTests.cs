@@ -29,8 +29,14 @@ public class PresetBarModuleLoadTests : TestContext
   private static RadioPresetDto P(string id, string band, int slot) =>
     new(id, $"Station {id}", 92_300_000 + slot, band, DateTimeOffset.UnixEpoch.AddMinutes(slot), slot);
 
+  /// <summary>
+  /// Long enough that only a missing reveal, never a loaded runner, reaches it. A pass returns as
+  /// soon as the reveal is recorded; only the failing direction pays the whole wait.
+  /// </summary>
+  private static readonly TimeSpan RevealTimeout = TimeSpan.FromSeconds(10);
+
   [Fact]
-  public void RenderDuringTheImport_DoesNotLoseTheFirstPlacement()
+  public async Task RenderDuringTheImport_DoesNotLoseTheFirstPlacement()
   {
     var presets = PresetBar.OrderLikeKnob(new[] { P("a1", "AM", 1), P("f1", "FM", 1), P("w1", "WB", 1), P("w2", "WB", 2) });
 
@@ -41,18 +47,18 @@ public class PresetBarModuleLoadTests : TestContext
 
     // A radio-state tick re-renders the bar — now on WB — before the import has returned.
     cut.SetParametersAndRender(p => p.Add(x => x.CurrentBand, "WB"));
-    _runtime.Module.Calls.Should().BeEmpty();
+    _runtime.Module.Snapshot().Should().BeEmpty();
 
-    cut.InvokeAsync(() => _runtime.CompleteImport());
+    await cut.InvokeAsync(() => _runtime.CompleteImport());
 
-    // Rendezvous on the call itself, not on WaitForAssertion: that re-checks only when the component
-    // renders, and the reveal is made from the import's continuation with no render after it — so a
-    // first check that ran a moment before the continuation failed at the timeout although the call
-    // arrived. Measured: 0/10 failures alone, a failure in a 201-test run (UI-21 build). Same idiom
-    // as DisposedWhileImporting_WiresNothingUp below.
-    SpinWait.SpinUntil(() => _runtime.Module.RevealCount > 0, TimeSpan.FromSeconds(5))
-      .Should().BeTrue("the reveal is made once the module can act");
-    var reveal = _runtime.Module.Snapshot().Single(c => c.Identifier == "reveal");
+    // The import's continuation (init, then reveal) runs on the thread pool and is followed by no
+    // render, so bUnit's WaitForAssertion — which re-checks only on a render — checked once, before
+    // the continuation, and never again under full-suite load. Rendezvous on the reveal itself
+    // (CLAUDE.md § Test Timing). A timeout here means no reveal was made: the failing direction.
+    var revealed = await Task.WhenAny(_runtime.Module.FirstReveal, Task.Delay(RevealTimeout));
+    revealed.Should().BeSameAs(_runtime.Module.FirstReveal, "the first-render continuation reveals once the module can act");
+
+    var reveal = _runtime.Module.Snapshot().Should().ContainSingle(c => c.Identifier == "reveal").Subject;
     reveal.Args[1].Should().Be(2, "WB's first card — a1 f1 w1 w2 — placed once the module can act");
     reveal.Args[2].Should().Be(false, "it is still the first placement, so not animated");
   }
@@ -73,7 +79,7 @@ public class PresetBarModuleLoadTests : TestContext
     // disposed branch, so the empty-calls check below is exact, not a race.
     SpinWait.SpinUntil(() => _runtime.Module.Disposed, TimeSpan.FromSeconds(5))
       .Should().BeTrue("the module that arrived late is released");
-    _runtime.Module.Calls.Should().BeEmpty("a disposed bar must not register listeners that call back into it");
+    _runtime.Module.Snapshot().Should().BeEmpty("a disposed bar must not register listeners that call back into it");
   }
 
   /// <summary>An <see cref="IJSRuntime"/> whose <c>import</c> waits for <see cref="CompleteImport"/>.</summary>
@@ -94,38 +100,39 @@ public class PresetBarModuleLoadTests : TestContext
       InvokeAsync<TValue>(identifier, args);
   }
 
-  /// <summary>An <see cref="IJSObjectReference"/> that completes every call and records it.</summary>
+  /// <summary>
+  /// An <see cref="IJSObjectReference"/> that completes every call and records it. Calls arrive on
+  /// the import continuation's thread, not the test's, so the list is only ever read through
+  /// <see cref="Snapshot"/>, under the same lock that writes it.
+  /// </summary>
   private sealed class RecordingModule : IJSObjectReference
   {
-    public List<(string Identifier, object?[] Args)> Calls { get; } = new();
-    public bool Disposed { get; private set; }
+    private readonly List<(string Identifier, object?[] Args)> _calls = new();
+    private readonly TaskCompletionSource _firstReveal = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private volatile bool _disposed;
 
-    /// <summary>Reveal calls so far, read under the same lock the writes take.</summary>
-    public int RevealCount
-    {
-      get
-      {
-        lock (Calls)
-        {
-          return Calls.Count(c => c.Identifier == "reveal");
-        }
-      }
-    }
+    /// <summary>Completes when the first <c>reveal</c> has been recorded.</summary>
+    public Task FirstReveal => _firstReveal.Task;
 
-    /// <summary>A copy of the calls, taken under the lock.</summary>
+    public bool Disposed => _disposed;
+
     public List<(string Identifier, object?[] Args)> Snapshot()
     {
-      lock (Calls)
+      lock (_calls)
       {
-        return Calls.ToList();
+        return _calls.ToList();
       }
     }
 
     public ValueTask<TValue> InvokeAsync<TValue>(string identifier, object?[]? args)
     {
-      lock (Calls)
+      lock (_calls)
       {
-        Calls.Add((identifier, args ?? Array.Empty<object?>()));
+        _calls.Add((identifier, args ?? Array.Empty<object?>()));
+      }
+      if (identifier == "reveal")
+      {
+        _firstReveal.TrySetResult();
       }
       return ValueTask.FromResult(default(TValue)!);
     }
@@ -135,7 +142,7 @@ public class PresetBarModuleLoadTests : TestContext
 
     public ValueTask DisposeAsync()
     {
-      Disposed = true;
+      _disposed = true;
       return ValueTask.CompletedTask;
     }
   }
