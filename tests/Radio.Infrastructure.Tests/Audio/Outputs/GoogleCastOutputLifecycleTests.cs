@@ -128,7 +128,58 @@ public class GoogleCastOutputLifecycleTests
     Assert.False(output.IsEnabled);
   }
 
+  [Fact]
+  public async Task Stop_CancelsAMetadataReloadStillWaitingOutItsDebounce()
+  {
+    await using var output = await StreamingOutputWithPendingMetadataUpdateAsync();
+    var pending = PendingMetadataDebounce(output);
+    Assert.False(pending.IsCancellationRequested);
+
+    await output.StopAsync();
+
+    // Asserted on the debounce's own source, not on the 3 s reload not happening: no timing.
+    Assert.True(pending.IsCancellationRequested);
+    Assert.Null(PendingMetadataDebounceOrNull(output));
+  }
+
+  [Fact]
+  public async Task Disconnect_CancelsAMetadataReloadStillWaitingOutItsDebounce()
+  {
+    await using var output = await StreamingOutputWithPendingMetadataUpdateAsync();
+    var pending = PendingMetadataDebounce(output);
+
+    await output.DisconnectAsync();
+
+    Assert.True(pending.IsCancellationRequested);
+    Assert.Null(PendingMetadataDebounceOrNull(output));
+  }
+
   // --- helpers ---
+
+  private static async Task<GoogleCastOutput> StreamingOutputWithPendingMetadataUpdateAsync()
+  {
+    var output = await InitializedOutputAsync();
+    SeedLiveReceiver(output, "cast-a", "10.0.0.1");
+    await output.ConnectAsync(Device("cast-a", "10.0.0.1"));
+    output.SetStreamUrl("http://127.0.0.1:1/stream/audio/mp3");
+    MarkStreaming(output);
+    await output.UpdateNowPlayingMetadataAsync("Title", "Artist", "Album", null);
+    return output;
+  }
+
+  private static CancellationTokenSource PendingMetadataDebounce(GoogleCastOutput output)
+  {
+    var cts = PendingMetadataDebounceOrNull(output);
+    Assert.NotNull(cts);
+    return cts!;
+  }
+
+  private static CancellationTokenSource? PendingMetadataDebounceOrNull(GoogleCastOutput output)
+  {
+    var field = typeof(GoogleCastOutput).GetField("_metadataDebouncesCts", BindingFlags.NonPublic | BindingFlags.Instance);
+    Assert.NotNull(field);
+    return (CancellationTokenSource?)field!.GetValue(output);
+  }
 
   private static T ReadProperty<T>(object anonymous, string name)
   {

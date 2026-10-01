@@ -201,9 +201,12 @@ public class GoogleCastOutput : AudioOutputBase
   private DirectCastAudioChannel? _directChannel;
 
   // Cache discovered receivers to use the original objects for connection
-  // Indexed by device ID (DeviceUri.ToString()) and also by IP address for fallback matching
-  private readonly Dictionary<string, ChromecastReceiver> _discoveredReceivers = new();
-  private readonly Dictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
+  // Indexed by device ID (DeviceUri.ToString()) and also by IP address for fallback matching.
+  // AUD-54 (6): concurrent discoveries write these while a connect reads them, so they are
+  // concurrent dictionaries. Each single operation is atomic; the two maps are NOT updated as
+  // one unit, so a reader can see a device in one and not yet (or no longer) in the other.
+  private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ChromecastReceiver> _discoveredReceivers = new();
+  private readonly System.Collections.Concurrent.ConcurrentDictionary<string, ChromecastReceiver> _discoveredReceiversByIp = new();
   private CastNowPlayingMetadata? _nowPlayingMetadata;
 
   // Metadata update debounce: when metadata changes rapidly (source switch
@@ -472,10 +475,10 @@ public class GoogleCastOutput : AudioOutputBase
     {
       if (cachedDevices.TryGetValue(key, out var stale))
       {
-        _discoveredReceiversByIp.Remove(stale.Device.IpAddress);
+        _discoveredReceiversByIp.TryRemove(stale.Device.IpAddress, out _);
       }
       cachedDevices.Remove(key);
-      _discoveredReceivers.Remove(key);
+      _discoveredReceivers.TryRemove(key, out _);
     }
 
     // Save merged cache
@@ -826,6 +829,8 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _lifecycleLock.Release();
     }
+
+    CancelPendingMetadataUpdate();
 
     if (!hadConnection)
     {
@@ -1194,6 +1199,8 @@ public class GoogleCastOutput : AudioOutputBase
       State = AudioOutputState.Stopping;
       _logger.LogInformation("Stopping Google Cast output");
 
+      CancelPendingMetadataUpdate();
+
       // Stop DirectChannel streaming if active. Taken with an exchange so this and
       // HandleConnectionLostAsync, which can run concurrently, never both stop it.
       var directStreaming = Interlocked.Exchange(ref _directStreaming, null);
@@ -1422,16 +1429,18 @@ public class GoogleCastOutput : AudioOutputBase
 
     // Debounce: cancel any pending metadata reload and schedule a new one.
     // This ensures rapid changes coalesce into a single Cast media reload.
+    // AUD-54 (6): the linked source is built INSIDE the lock, from the CTS this call just
+    // installed. Reading the field after the lock (as this used to) could pick up a CTS that a
+    // concurrent update or CancelPendingMetadataUpdate had already disposed.
+    CancellationTokenSource linkedCts;
     lock (_debounceLock)
     {
       _metadataDebouncesCts?.Cancel();
       _metadataDebouncesCts?.Dispose();
-      _metadataDebouncesCts = new CancellationTokenSource();
+      var debounceCts = new CancellationTokenSource();
+      _metadataDebouncesCts = debounceCts;
+      linkedCts = CancellationTokenSource.CreateLinkedTokenSource(debounceCts.Token, cancellationToken);
     }
-
-    var debounceCts = _metadataDebouncesCts;
-    var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-      debounceCts?.Token ?? CancellationToken.None, cancellationToken);
 
     _logger.LogDebug("Cast metadata update debounced: {Title} - {Artist}", title, artist);
 
@@ -1446,7 +1455,10 @@ public class GoogleCastOutput : AudioOutputBase
         // and actual track metadata being available (~2s).
         await Task.Delay(3000, linkedCts.Token);
 
-        await LoadMediaWithRecoveryAsync(cancellationToken);
+        // The linked token, so a stop or disconnect that cancels the pending update also
+        // abandons the wait on a reload already under way. It cannot recall a LOAD that
+        // SharpCaster has already written to the socket.
+        await LoadMediaWithRecoveryAsync(linkedCts.Token);
         _logger.LogInformation(
           "Cast metadata updated: {Title} - {Artist}", title, artist);
       }
@@ -1463,6 +1475,22 @@ public class GoogleCastOutput : AudioOutputBase
         linkedCts.Dispose();
       }
     }, CancellationToken.None);
+  }
+
+  /// <summary>
+  /// Cancels a metadata reload still waiting out its debounce (AUD-54 (6)), so it cannot fire
+  /// a media LOAD after the stream it was meant for has been stopped or disconnected. Called by
+  /// StopAsync, DisconnectAsync, HandleConnectionLostAsync and DisposeAsync. Idempotent. A
+  /// reload already past its debounce is only told to stop waiting; see the call site.
+  /// </summary>
+  private void CancelPendingMetadataUpdate()
+  {
+    lock (_debounceLock)
+    {
+      _metadataDebouncesCts?.Cancel();
+      _metadataDebouncesCts?.Dispose();
+      _metadataDebouncesCts = null;
+    }
   }
 
   /// <summary>
@@ -2308,6 +2336,7 @@ public class GoogleCastOutput : AudioOutputBase
     // Error, not Ready: the output did not stop cleanly, and ConnectAsync recovers from Error
     // by building a fresh ChromecastClient — which is what a dead socket calls for.
     State = AudioOutputState.Error;
+    CancelPendingMetadataUpdate();
 
     // Raised BEFORE the slow cleanup below, so the local speakers come back without waiting
     // on it: stopping the streaming loop can take up to its 5 s cap when a send is stuck on
@@ -2427,12 +2456,7 @@ public class GoogleCastOutput : AudioOutputBase
       UnregisterCustomChannel(Interlocked.Exchange(ref _directChannel, null));
     }
 
-    lock (_debounceLock)
-    {
-      _metadataDebouncesCts?.Cancel();
-      _metadataDebouncesCts?.Dispose();
-      _metadataDebouncesCts = null;
-    }
+    CancelPendingMetadataUpdate();
 
     // Final generation bump so a connect still in flight discards itself rather
     // than publishing onto a disposed output, and take the client as a snapshot.
