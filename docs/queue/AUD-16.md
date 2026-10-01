@@ -198,11 +198,12 @@ Nothing is left for the owner on this row.
 
 ### Follow-up checks — run by the coordinator 2026-09-30 ~22:2x EDT
 
-The three checks recorded above as not run were run by the coordinator on 2026-09-30 at about
-22:2x EDT, on `45a220e` (`AUD-54`, #748), which contains `AUD-16`'s `a4bad7c`:
+The three checks recorded above as not run are now covered. The first is batch D's own measurement.
+The coordinator ran the other two on 2026-09-30 at about 22:2x EDT, on `45a220e` (`AUD-54`, #748), which
+contains `AUD-16`'s `a4bad7c`:
 
-1. **`NRestarts=0`.** Batch D had measured 0 before its own deploy of `45a220e`, so `a4bad7c` ran
-   without a restart.
+1. **`NRestarts=0` on `a4bad7c`.** Batch D measured it before its own deploy of `45a220e`, so `a4bad7c`
+   ran without a restart. A reading taken after `45a220e`'s deploy would say nothing about `a4bad7c`.
 2. **USB Audio refused.** `POST /api/sources {GenericUSB}` returned HTTP 500
    `{"error":"Failed to create source type GenericUSB","details":"Generic USB Audio: no capture device matches USBPort 'AB13X'"}`.
    The active source stayed Radio. That is the refusal accepted under `AUD-13`.

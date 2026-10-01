@@ -25,10 +25,10 @@ Warning is the level `radio-api`'s console sink passes, so the line also reaches
 ## Fix options (for the plan)
 
 1. **Controller:** let the gate do the teardown. Drop the controller's own `StopAsync`/`DisconnectAsync` (`:713-714`) and rely on `SetActiveOutputAsync`'s `TearDownCastOutputAsync`, which already does both. Check the exception path at `:734-746` keeps its "restore local even if disconnect fails" guarantee.
-2. **Gate:** in `TearDownCastOutputAsync`, call `StopAsync` only when the state is `Streaming` (or `Connecting`), not `Ready`.
+2. **Gate:** in `TearDownCastOutputAsync`, call `StopAsync` only when the state is `Streaming`, not `Ready`. A stop on a `Connecting` output would still log the same Warning, because `ValidateCanStop` warns for every state but `Streaming`.
 3. **Base class:** log a stop of an already-`Ready`/`Stopped` output at Debug and keep Warning for genuinely unexpected states. This is broader, because every output shares it.
 
-⚠ `AUD-81` (in flight at filing) changes `GoogleCastOutput.StopAsync` — it stops the receiver application before unmuting a console-muted speaker. Re-read the line numbers on `main` once it merges before planning.
+⚠ The line numbers above are at `45a220e`. `AUD-81` (#749, #750) has since merged and moved them. On `590c40d`: `DevicesController.cs:770` (method), `:782-783` (stop, disconnect), `:797` (gate); `SoundFlowAudioEngine.cs:288` (teardown call), `:394-398` (the second stop); `AudioOutputBase.cs:212-223` unchanged. The mechanism still holds there: `AUD-81`'s re-UAT on `590c40d` logged the same Warning at 05:10:36.805 EDT. `AUD-81` also changed `GoogleCastOutput.StopAsync` (it stops the receiver application before unmuting a console-muted speaker), so re-read it before planning.
 
 ## Verification
 
