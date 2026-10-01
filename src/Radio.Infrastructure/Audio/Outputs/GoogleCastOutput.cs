@@ -2543,7 +2543,7 @@ public class GoogleCastOutput : AudioOutputBase
     //   - The baseline still shows it muted (a device that does not unmute on a level change, or a
     //     reply that has not arrived by the time the send completes): the mark is left, and the
     //     follower's activation reconcile unmutes it — when that reconcile runs, i.e. when the output
-    //     gate makes Cast the active output (OnActiveOutputChanged). A reconnect while Cast is
+    //     gate makes Cast the active output (CastConsoleVolumeFollower.OnActiveOutputChanged). A reconnect while Cast is
     //     already the active output (e.g. the wasStreaming restart) does not run it, and the speaker
     //     then stays muted and marked until the console's mute is next toggled.
     var markedGeneration = Volatile.Read(ref _consoleMutedGeneration);
@@ -2670,8 +2670,10 @@ public class GoogleCastOutput : AudioOutputBase
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
     // LOW-2: every branch below leaves _lastSetMute holding what the device just said, and sets
-    // _speakerMuteObserved only AFTER that baseline write (round-4 L-a), so a reader that sees the
-    // flag never sees the per-connection "not muted" reset in its place.
+    // _speakerMuteObserved only AFTER that baseline write (round-4 L-a). That guarantee holds for a
+    // reader that reads the flag FIRST and the baseline second, which is what its one reader, the
+    // L3 skip in DrainConsoleMuteAsync, does: it then never pairs a true flag with the
+    // per-connection "not muted" reset.
 
     // Hostile re-review M2: before any branch, so the initial sync's own status supplies it too.
     NoteSpeakerStepInterval(status.Volume.StepInterval);
@@ -3702,11 +3704,16 @@ public class GoogleCastOutput : AudioOutputBase
         continue;
       }
 
+      // Round-4 review M-1: read the observed flag BEFORE the baseline. The status handler writes
+      // the baseline first and the flag second, so only this order guarantees that a true flag
+      // means the baseline read below is the device's own report, not the per-connection reset.
+      var speakerMuteObserved = Volatile.Read(ref _speakerMuteObserved);
+
       // An unmute that is about to be skipped as "already unmuted" still sends a held level
       // first, so the speaker ends at the console's level either way.
-      if (next.Muted == _lastSetMute && (next.Muted || !HasHeldConsoleVolume()))
+      if (next.Muted == Volatile.Read(ref _lastSetMute) && (next.Muted || !HasHeldConsoleVolume()))
       {
-        if (!next.Muted && Volatile.Read(ref _speakerMuteObserved))
+        if (!next.Muted && speakerMuteObserved)
         {
           // Hostile review L3: nothing to send, but the speaker is unmuted under an unmuted console,
           // so nothing of ours is left to release either — clear the mark and the device record, as
