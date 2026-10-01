@@ -131,7 +131,7 @@
                out of the clipped tuner column; with the preset bar below there is no slack at all. *@
             @ScanIndicator()
             <span class="rcp-meter-readout">
-              @* UI-27: always in the DOM, shown by .is-on. Inserting it on demand made the header 3 px
+              @* UI-27: rendered whenever the meter is, shown by .is-on. Inserting it on demand made the header 3 px
                  taller while it showed, and everything below the meter moved with each flicker. The
                  pill is also out of flow (design-system.css §S), so it takes no room either way. *@
               <span class="rcp-clip-pill @(_radioState.Clip ? "is-on" : "")">CLIP</span>
@@ -290,7 +290,7 @@
    under it. *@
 @if (_isFrequencyDialogOpen)
 {
-  <div class="overlay kiosk-entry-overlay" @onclick="CloseFrequencyDialog">
+  <div class="kiosk-entry-overlay" @onclick="CloseFrequencyDialog">
     <div class="kiosk-entry-card" @onclick:stopPropagation="true">
       <h6>Set Frequency</h6>
       <RadzenNumeric TValue="double" @bind-Value="_newFrequency"
@@ -308,7 +308,7 @@
 
 @if (_isSavePresetDialogOpen)
 {
-  <div class="overlay kiosk-entry-overlay" @onclick="CloseSavePresetDialog">
+  <div class="kiosk-entry-overlay" @onclick="CloseSavePresetDialog">
     <div class="kiosk-entry-card" @onclick:stopPropagation="true">
       <h6>Save Preset</h6>
       <RadzenTextBox @bind-Value="_presetName"
@@ -324,7 +324,7 @@
 
 @if (_isRenamePresetDialogOpen)
 {
-  <div class="overlay kiosk-entry-overlay" @onclick="CloseRenamePresetDialog">
+  <div class="kiosk-entry-overlay" @onclick="CloseRenamePresetDialog">
     <div class="kiosk-entry-card rcp-preset-rename-card" @onclick:stopPropagation="true">
       <h6>Rename Preset</h6>
       <RadzenTextBox @bind-Value="_renamePresetName"

@@ -25,19 +25,34 @@ namespace Radio.Web.Tests.Components;
 /// </para>
 ///
 /// <para>
-/// bUnit computes no styles, so the placement itself is pinned here as stylesheet rules, the
+/// bUnit computes no styles, so the placement itself is pinned here as stylesheet rules, and the
 /// hand-built overlays are checked for the shared classes (the panel's three in
-/// <c>RadioControlPanelTests</c>, the Radio page's two below), and every <c>DialogService</c> call
-/// site opening a dialog that contains a text field is checked for the shared CSS class — including
-/// dialogs added later. The rendered geometry was measured in Chromium at 1920×720 (see
-/// <c>docs/queue/UI-24.md</c>).
+/// <c>RadioControlPanelTests</c>, the Radio page's two below). The rendered geometry was measured in
+/// Chromium at 1920×720 (see <c>docs/queue/UI-24.md</c>).
+/// </para>
+///
+/// <para>
+/// <see cref="EveryDialogServiceDialogWithATextField_IsOpenedTopAnchored"/> is a source scan, and it
+/// is exactly as wide as this: <c>.razor</c> and <c>.cs</c> files under <c>src/Radio.Web</c>; calls
+/// to <c>Open</c>, <c>OpenAsync</c>, <c>OpenSide</c> and <c>OpenSideAsync</c> with a component type
+/// argument; a dialog counts as holding a text field if its own markup, or a component it renders
+/// (followed by name, transitively), contains one of <see cref="TextEntryTag"/>'s tags. A
+/// non-generic open (a <c>RenderFragment</c> lambda) cannot be followed, so it fails the scan unless
+/// it passes the class. It does not see a text field supplied as a <c>RenderFragment</c> parameter, or
+/// a call through some other wrapper around <c>DialogService</c>.
 /// </para>
 /// </summary>
 public class TextEntryDialogPlacementTests : TestContext
 {
   private static readonly Regex TextEntryTag =
-    new(@"<(RadzenTextBox|RadzenTextArea|RadzenNumeric|RadzenPassword|RadzenMask|textarea|input(?![^>]*type=""(range|checkbox|radio|file|color|hidden|button|submit)""))\b",
+    new(@"<(RadzenTextBox|RadzenTextArea|RadzenNumeric|RadzenPassword|RadzenMask|RadzenAutoComplete|InputText|InputTextArea|InputNumber|textarea|input(?![^>]*type=""(range|checkbox|radio|file|color|hidden|button|submit)""))\b",
       RegexOptions.IgnoreCase);
+
+  private static readonly Regex GenericOpen =
+    new(@"\b(?:Open|OpenAsync|OpenSide|OpenSideAsync)<(?:[\w.]+\.)?(?<name>\w+)>\s*\((?<args>.*?)\);", RegexOptions.Singleline);
+
+  private static readonly Regex NonGenericOpen =
+    new(@"\bDialogService\.(?:Open|OpenAsync|OpenSide|OpenSideAsync)\s*\((?<args>.*?)\);", RegexOptions.Singleline);
 
   [Fact]
   public void Css_TopAnchorsTheOverlayAndTheRadzenDialog_WithKioskSizedButtons()
@@ -46,12 +61,18 @@ public class TextEntryDialogPlacementTests : TestContext
 
     var overlay = Rule(css, @"\.kiosk-entry-overlay");
     overlay.Should().Contain("position: fixed");
+    overlay.Should().Contain("inset: 0");
+    overlay.Should().Contain("z-index: 9999", "the old inline overlays' stacking, above the top bar's 1100");
     overlay.Should().Contain("align-items: flex-start", "the dialog hangs from the top, not the centre");
     overlay.Should().NotContain("align-items: center");
     overlay.Should().Contain("padding-top: var(--sp-6)");
 
-    Rule(css, @"\.rz-dialog\.kiosk-entry-dialog").Should().Contain("top: var(--sp-6)",
-      "Radzen centres .rz-dialog in its wrapper; a top offset is what moves it");
+    var radzen = Rule(css, @"\.rz-dialog\.kiosk-entry-dialog");
+    radzen.Should().Contain("top: var(--sp-6)", "Radzen centres .rz-dialog in its wrapper; a top offset is what moves it");
+    radzen.Should().Contain("max-height: calc(100% - 2 * var(--sp-6))", "a tall dialog must not run off the bottom");
+    // Radzen stacks its wrapper at 1001, under the fixed top bar (1100), which hid the anchored
+    // dialog's title and close button. The wrapper is raised to the hand-built overlays' level.
+    Rule(css, @"\.rz-dialog-wrapper:has\(> \.rz-dialog\.kiosk-entry-dialog\)").Should().Contain("z-index: 9999");
 
     Rule(css, @"\.kiosk-entry-actions \.rz-button").Should().Contain("min-height: 58px");
   }
@@ -69,24 +90,37 @@ public class TextEntryDialogPlacementTests : TestContext
   [Fact]
   public void EveryDialogServiceDialogWithATextField_IsOpenedTopAnchored()
   {
-    var root = RepoRoot();
-    var components = Path.Combine(root, "src", "Radio.Web", "Components");
+    var web = Path.Combine(RepoRoot(), "src", "Radio.Web");
+    var sources = Directory.EnumerateFiles(web, "*.*", SearchOption.AllDirectories)
+      .Where(f => f.EndsWith(".razor", StringComparison.Ordinal) || f.EndsWith(".cs", StringComparison.Ordinal))
+      .Where(f => !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+               && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+      .ToDictionary(f => f, File.ReadAllText);
 
-    // Dialog components that contain a text field, by file name.
-    var textDialogs = Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories)
-      .Where(f => TextEntryTag.IsMatch(File.ReadAllText(f)))
-      .Select(Path.GetFileNameWithoutExtension)
-      .ToHashSet(StringComparer.Ordinal);
+    // Components holding a text field: directly, or by rendering one that does (to a fixed point).
+    var razor = sources.Where(s => s.Key.EndsWith(".razor", StringComparison.Ordinal))
+      .ToDictionary(s => Path.GetFileNameWithoutExtension(s.Key), s => s.Value, StringComparer.Ordinal);
+    var textBearing = razor.Where(r => TextEntryTag.IsMatch(r.Value)).Select(r => r.Key).ToHashSet(StringComparer.Ordinal);
+    for (var grew = true; grew;)
+    {
+      grew = false;
+      foreach (var (name, markup) in razor)
+      {
+        if (!textBearing.Contains(name) && textBearing.Any(t => Regex.IsMatch(markup, $@"<{t}\b")))
+        {
+          grew = textBearing.Add(name);
+        }
+      }
+    }
 
-    var openCall = new Regex(@"OpenAsync<(?:[\w.]+\.)?(?<name>\w+)>\((?<args>.*?)\);", RegexOptions.Singleline);
     var sites = new List<string>();
     var missing = new List<string>();
-    foreach (var file in Directory.EnumerateFiles(components, "*.razor", SearchOption.AllDirectories))
+    foreach (var (file, text) in sources)
     {
-      foreach (Match m in openCall.Matches(File.ReadAllText(file)))
+      foreach (Match m in GenericOpen.Matches(text))
       {
         var name = m.Groups["name"].Value;
-        if (!textDialogs.Contains(name))
+        if (!textBearing.Contains(name))
         {
           continue;
         }
@@ -94,6 +128,13 @@ public class TextEntryDialogPlacementTests : TestContext
         if (!m.Groups["args"].Value.Contains("KioskEntryDialog.CssClass", StringComparison.Ordinal))
         {
           missing.Add($"{Path.GetFileName(file)} → {name}");
+        }
+      }
+      foreach (Match m in NonGenericOpen.Matches(text))
+      {
+        if (!m.Groups["args"].Value.Contains("KioskEntryDialog.CssClass", StringComparison.Ordinal))
+        {
+          missing.Add($"{Path.GetFileName(file)} → non-generic open (its content cannot be followed; pass the class or extend this scan)");
         }
       }
     }

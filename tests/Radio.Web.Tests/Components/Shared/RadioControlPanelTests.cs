@@ -306,6 +306,11 @@ public class RadioControlPanelTests : TestContext
     var readout = Regex.Match(css, @"\n\.rcp-meter-readout\s*\{(?<body>[^}]*)\}").Groups["body"].Value;
 
     pill.Should().Contain("position: absolute");
+    // Where it sits once out of flow: left of the dBu readout and centred on it. Without these it
+    // would land on top of the readout.
+    pill.Should().Contain("right: calc(100% + 6px)");
+    pill.Should().Contain("top: 50%");
+    pill.Should().Contain("transform: translateY(-50%)");
     pill.Should().Contain("visibility: hidden");
     pill.Should().NotContain("display: none");
     on.Should().Contain("visibility: visible");

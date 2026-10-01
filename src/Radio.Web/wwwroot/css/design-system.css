@@ -1533,10 +1533,24 @@ body::-webkit-scrollbar,
  * So any dialog that holds a text field hangs from the top of the area it overlays instead — always,
  * not only while the keyboard is up, so it never jumps under the finger that tapped the field.
  * Hand-built overlays use the overlay + card pair; Radzen DialogService dialogs pass
- * CssClass = "kiosk-entry-dialog". Measured: Radzen dialogs start at y = 24. The radio panel's
- * overlays sit inside an ancestor that contains fixed-position descendants, so they cover the
- * content area below the 120 px top bar and their card starts at y = 144; its buttons end at
- * y = 307, 41 px above the QWERTY keyboard.
+ * CssClass = "kiosk-entry-dialog".
+ *
+ * Where they land, measured:
+ *  - The radio panel's overlays are bounded by `.page-transition > *` (§17), whose transform makes
+ *    it the containing block for fixed-position descendants. They cover the content area below the
+ *    120 px top bar, and the card starts at y = 144. Its buttons end at y = 307, 41 px above the
+ *    QWERTY keyboard. If §17 stops transforming that element, these overlays become full-screen and
+ *    the card moves to y = 24, above the bar at z-index 9999. Both placements clear the keyboard.
+ *  - The Radio page's overlays get the same transform on themselves, which does not contain them, so
+ *    they cover the whole screen and their card starts at y = 24.
+ *  - Radzen dialogs render outside `.page-transition`, in a wrapper that Radzen stacks at z-index
+ *    1001, beneath the fixed top bar (1100), so a dialog anchored at y = 24 had its title and ✕ hidden
+ *    by the bar. The wrapper of an anchored dialog is raised to 9999, the hand-built overlays'
+ *    level, which puts the dialog and its mask above the bar (and still below the keyboard, 10001).
+ *    The dialog starts at y = 24. Anchoring it below the bar instead was tried and measured: the
+ *    228 px between the bar and the keyboard is too short for Save Playlist, whose description field
+ *    then sat under the keys. The file browser's action buttons are below y = 348, so they are
+ *    covered while the keyboard is up; Enter or ✕ on the keyboard uncovers them.
  * ─────────────────────────────────────────────────────────────────────────── */
 
 .kiosk-entry-overlay {
@@ -1581,6 +1595,25 @@ body::-webkit-scrollbar,
    top offset overrides the centring. */
 .rz-dialog.kiosk-entry-dialog {
   top: var(--sp-6);
+  /* 100% is the full-screen wrapper: a dialog taller than the room below y = 24 (the file browser
+     is 636 px once its list loads) must not run off the bottom of the screen, footer and all. */
+  max-height: calc(100% - 2 * var(--sp-6));
+}
+
+/* Above the fixed top bar (z-index 1100), as the hand-built overlays are. The mask is the wrapper's
+   child, so it rises with it. Selected through :has() so call sites pass one class rather than also
+   setting DialogOptions.WrapperCssClass, which would do the same job. */
+.rz-dialog-wrapper:has(> .rz-dialog.kiosk-entry-dialog) {
+  z-index: 9999;
+}
+
+/* Under the height cap, let the body shrink rather than scroll as a whole, so a dialog with its own
+   scrolling list (the file browser's .file-browser-list) gives up list height and keeps its toolbar
+   and footer on screen. Radzen's overflow: auto on the content stays as the fallback. */
+.rz-dialog.kiosk-entry-dialog .rz-dialog-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 
