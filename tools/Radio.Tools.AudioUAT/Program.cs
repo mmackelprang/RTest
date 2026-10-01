@@ -1713,7 +1713,7 @@ static async Task RunPhase13Menu(IServiceProvider services, TestRunner runner, R
     AnsiConsole.Write(rule);
     AnsiConsole.WriteLine();
 
-    AnsiConsole.MarkupLine("[yellow]Note: These tests require the Radio.API to be running and a radio device (RTL-SDR or RF320) connected.[/]");
+    AnsiConsole.MarkupLine("[yellow]Note: These tests require the Radio.API to be running and an RTL-SDR radio device connected.[/]");
     AnsiConsole.WriteLine();
 
     var allTests = tests.GetAllTests();

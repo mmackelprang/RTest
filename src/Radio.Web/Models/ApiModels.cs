@@ -698,15 +698,13 @@ public record ConnectCastDeviceRequest(
 // Note: These DTOs mirror Radio.API.Models.ConfigurationModels but are duplicated
 // here because Radio.Web does not reference Radio.API (architectural separation).
 // The Web layer communicates with the API via HTTP and maintains its own DTOs.
+//
+// A deployed "devices" section can still carry "radio" / "Radio" objects from the removed RF320 USB
+// radio (AUD-16). DeviceOptionsDto has no property for them, and System.Text.Json skips unmapped
+// members by default, so they are ignored on load and left untouched in the store on save.
 public class DeviceOptionsDto
 {
-  public RadioDeviceOptionsDto Radio { get; set; } = new();
   public VinylDeviceOptionsDto Vinyl { get; set; } = new();
-}
-
-public class RadioDeviceOptionsDto
-{
-  public string USBPort { get; set; } = "/dev/ttyUSB0";
 }
 
 public class VinylDeviceOptionsDto

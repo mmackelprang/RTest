@@ -152,8 +152,8 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
   /// Derived classes should provide specific values via properties.
   /// </summary>
   /// <param name="title">The default title for this source.</param>
-  /// <param name="sourceName">The source name (e.g., "Radio", "Vinyl").</param>
-  /// <param name="deviceName">The device name (e.g., "Raddy RF320", "Turntable").</param>
+  /// <param name="sourceName">The source name (e.g., "Vinyl", "Bluetooth").</param>
+  /// <param name="deviceName">The device name (e.g., "Turntable", "USB Device").</param>
   protected void SetDefaultMetadata(string title, string sourceName, string deviceName)
   {
     MetadataInternal[StandardMetadataKeys.Title] = title;
@@ -367,9 +367,9 @@ public abstract class USBAudioSourceBase : PrimaryAudioSourceBase
         // Id itself, not a prefixed derivative. `$"usb-capture-{Id:N}"` CONTAINED the Id but was not
         // EQUAL to it — Id is a string, so the `:N` specifier was silently ignored — and
         // SoundFlowPlaybackService keys on ordinal equality, so AudioManager's gain and ducking
-        // lookups missed. AUD-2. This one line covers the three concrete sources that reach it:
-        // RadioAudioSource, VinylAudioSource and GenericUSBAudioSource. BluetoothAudioSource also
-        // derives from this class but overrides PlayCoreAsync without calling base (:268), so it
+        // lookups missed. AUD-2. This one line covers the two concrete sources that reach it:
+        // VinylAudioSource and GenericUSBAudioSource. BluetoothAudioSource also
+        // derives from this class but overrides PlayCoreAsync without calling base, so it
         // does not reach this line and was fixed separately by 2bbd0eb5.
         _playbackId = Id;
 

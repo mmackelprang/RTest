@@ -785,11 +785,14 @@ When the file sink is configured:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `Radio.USBPort` | `string` | `/dev/ttyUSB0` | USB port path for the radio device (Raddy RF320) |
 | `Vinyl.USBPort` | `string` | `/dev/ttyUSB1` | USB port path for the vinyl turntable device |
 | `Cast.DefaultDevice` | `string` | `""` | Default Chromecast device name |
 | `Spotify.Mode` | `SpotifyMode` | `Integrated` | Spotify integration mode (RemoteControl or Integrated) |
 | `Spotify.LibrespotPath` | `string` | `/usr/bin/librespot` | Path to the librespot executable (used when Mode is Integrated) |
+
+A `Devices:Radio` entry (the RF320 USB radio's port, removed by `AUD-16`) may still exist in a
+deployed `appsettings.Production.json` or config store. It is still loaded into configuration (and
+`GET /api/configuration/devices` still returns it), but it matches no property, so it is ignored.
 
 **Spotify Mode Options:**
 - **RemoteControl**: Uses Spotify Connect API (no audio data flows through app)
@@ -912,7 +915,7 @@ When the file sink is configured:
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DefaultDevice` | `string` | `RTLSDRCore` | Default radio device type (RTLSDRCore or RF320) |
+| `DefaultDevice` | `string` | `RTLSDRCore` | Default radio device type. `RTLSDRCore` is the only supported value |
 | `DefaultFMFrequencyMHz` | `double` | `101.5` | Default FM frequency in MHz |
 | `DefaultAMFrequencyKHz` | `double` | `1000.0` | Default AM frequency in kHz |
 | `DefaultFMStepMHz` | `double` | `0.1` | Default FM frequency step in MHz (typical: 0.1 or 0.2) |

@@ -64,7 +64,7 @@ All scripts are available in both **Bash** (`.sh` for Linux/macOS) and **PowerSh
 - `tests/Radio.API.Tests/`
 - `tests/RTLSDRCore.Tests/`
 
-**⚠️ WARNING:** Some tests may interact with real USB radio devices (RTL-SDR, RF320). Ensure hardware is connected.
+**⚠️ WARNING:** Some tests may interact with real USB radio devices (RTL-SDR). Ensure hardware is connected.
 
 **Duration:** ~30-60 seconds
 
@@ -109,7 +109,7 @@ All scripts are available in both **Bash** (`.sh` for Linux/macOS) and **PowerSh
 **What it runs:** `tools/Radio.Tools.AudioUAT/`  
 **Interface:** Interactive menu-driven console application  
 **⚠️ IMPORTANT:**
-- Requires real radio hardware (RTL-SDR, RF320, etc.)
+- Requires real radio hardware (RTL-SDR)
 - Requires audio output devices to be configured
 - Will produce audible audio output
 - Tests all audio subsystems interactively

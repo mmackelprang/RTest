@@ -14,7 +14,7 @@ public static class SourceTypeHelper
   {
     "Vinyl" => "album",
     "FilePlayer" or "File" => "audio_file",
-    "Radio" or "RTLSDRCore" or "RF320" => "radio",
+    "Radio" or "RTLSDRCore" => "radio",
     "Bluetooth" => "bluetooth",
     "GenericUSB" => "usb",
     "TestTone" => "graphic_eq",
@@ -29,7 +29,7 @@ public static class SourceTypeHelper
   {
     "Vinyl" => "vinyl",
     "FilePlayer" or "File" => "file",
-    "Radio" or "RTLSDRCore" or "RF320" => "radio",
+    "Radio" or "RTLSDRCore" => "radio",
     "Bluetooth" => "bluetooth",
     "GenericUSB" => "usb",
     "TestTone" => "testtone",
@@ -46,7 +46,7 @@ public static class SourceTypeHelper
   {
     "Vinyl" => "--source-vinyl",
     "FilePlayer" or "File" => "--source-file",
-    "Radio" or "RTLSDRCore" or "RF320" => "--source-radio",
+    "Radio" or "RTLSDRCore" => "--source-radio",
     "Bluetooth" => "--source-bluetooth",
     "GenericUSB" or "USB" => "--source-usb",
     _ => "--accent-primary"
@@ -68,7 +68,6 @@ public static class SourceTypeHelper
     {
       "Radio",
       "RTLSDRCore",
-      "RF320",
       "Bluetooth"
     };
 
@@ -90,8 +89,7 @@ public static class SourceTypeHelper
     new(StringComparer.OrdinalIgnoreCase)
     {
       "Radio",
-      "RTLSDRCore",
-      "RF320"
+      "RTLSDRCore"
     };
 
   /// <summary>

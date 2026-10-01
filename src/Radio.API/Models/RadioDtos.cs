@@ -257,7 +257,8 @@ public class SetAutoGainRequest
 public class SelectRadioDeviceRequest
 {
   /// <summary>
-  /// Gets or sets the device type to select (e.g., "RTLSDRCore", "RF320").
+  /// Gets or sets the device type to select. The only supported value is "RTLSDRCore";
+  /// any other value is rejected as not available.
   /// </summary>
   public string DeviceType { get; set; } = string.Empty;
 }

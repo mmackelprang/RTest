@@ -9,7 +9,7 @@ public interface IRadioFactory
   /// <summary>
   /// Creates a radio audio source for the specified device type.
   /// </summary>
-  /// <param name="deviceType">The type of radio device (e.g., "RTLSDRCore", "RF320").</param>
+  /// <param name="deviceType">The type of radio device. The only supported value is "RTLSDRCore".</param>
   /// <returns>A primary audio source implementing IRadioControl.</returns>
   /// <exception cref="ArgumentException">Thrown when the device type is not supported.</exception>
   /// <exception cref="InvalidOperationException">Thrown when the device is not available.</exception>

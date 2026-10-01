@@ -53,7 +53,13 @@ public interface IAudioSource : IAsyncDisposable
 /// </summary>
 public enum AudioSourceType
 {
-  /// <summary>Radio USB input (Raddy RF320).</summary>
+  /// <summary>
+  /// The radio tuner — the RTL-SDR (<c>SDRRadioAudioSource</c>).
+  /// Do not rename or reorder: the name <c>Radio</c> is persisted on deployed boxes as the
+  /// <c>AudioPreferences:CurrentSource</c> config row, parsed back by name at start-up. (PlayHistory's
+  /// <c>Source=Radio</c> is the separate <c>PlaySource.Radio</c>, mapped from this value by
+  /// <c>PlayHistoryTracker</c>.)
+  /// </summary>
   Radio,
 
   /// <summary>Vinyl turntable USB input.</summary>

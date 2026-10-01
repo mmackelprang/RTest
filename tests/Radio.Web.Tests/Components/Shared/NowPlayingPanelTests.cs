@@ -934,7 +934,6 @@ public class NowPlayingPanelTests : TestContext
 
   [Theory]
   [InlineData("SDR Radio (RTL-SDR)", "RTL-SDR")]
-  [InlineData("SDR Radio (RF320)", "RF320")]
   [InlineData("SDR Radio (HackRF One)", "HackRF One")]
   [InlineData("Generic Source", "Generic Source")] // fallback — no wrapper
   [InlineData("", "")]

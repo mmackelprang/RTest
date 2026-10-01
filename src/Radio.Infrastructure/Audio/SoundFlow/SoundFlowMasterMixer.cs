@@ -104,11 +104,11 @@ public class SoundFlowMasterMixer : IMasterMixer
         //
         // ⚠ Be honest about what this trade cost, because the plan understated it. Type is
         // REDUNDANT on this line — AudioSourceBase builds Id as $"{Type}-{Guid:N}", so {SourceType}
-        // is already a prefix of {SourceId}. It is kept for readability, not information. And Name
-        // was NOT redundant here: RadioAudioSource and SDRRadioAudioSource both return
-        // AudioSourceType.Radio while their names differ ("Radio (RF320)" vs
-        // "SDR Radio (RTL-SDR)"), so this line no longer distinguishes the two radio backends.
-        // That discrimination is still available one layer up, from
+        // is already a prefix of {SourceId}. It is kept for readability, not information. Name was
+        // not redundant when this was written, because a second radio backend (the RF320 USB radio)
+        // also returned AudioSourceType.Radio under a different Name. AUD-16 removed that backend,
+        // so SDRRadioAudioSource is now the only production source of type Radio. Should a second
+        // one ever return, the Name that tells them apart is still available one layer up, from
         // AudioManager.SwitchSourceAsync's "Adding new source {SourceName} to mixer", which logs
         // Name on the primary path and is deliberately untouched by TTS-11 (every primary
         // implementation returns a constant Name, so there is nothing to leak there).

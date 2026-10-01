@@ -4,7 +4,7 @@ namespace Radio.Core.Interfaces.Audio;
 
 /// <summary>
 /// Unified interface for controlling radio receiver operations.
-/// Combines functionality from both RTL-SDR and Raddy RF320 radio devices.
+/// Implemented by the RTL-SDR tuner (<c>SDRRadioAudioSource</c>), the only supported radio device.
 /// </summary>
 public interface IRadioControl
 {
@@ -114,8 +114,7 @@ public interface IRadioControl
   /// A <b>default implementation</b> rather than an abstract member, deliberately: adding an
   /// abstract member here breaks every existing implementer and test double, and the honest default
   /// for "a tuner we know nothing else about" is the two broadcast bands every consumer already
-  /// assumes. Implementations that know better override it, and <c>RadioAudioSource</c> (the RF320)
-  /// overrides it downward.
+  /// assumes. Implementations that know better override it, as <c>SDRRadioAudioSource</c> does.
   /// </para>
   ///
   /// <para>
@@ -256,7 +255,7 @@ public interface IRadioControl
   /// Default implementation simply mirrors <see cref="RdsStationName"/>. The
   /// SDR-based <c>SDRRadioAudioSource</c> overrides this with a ring-buffer
   /// tracker that emits the consensus value after 3 consecutive identical
-  /// updates. Other implementations (e.g. the RF320 stub) may leave it
+  /// updates. Other implementations (e.g. test doubles) may leave it
   /// equal to the live name.
   /// </remarks>
   string? RdsStationNameStable => RdsStationName;

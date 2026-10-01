@@ -1173,7 +1173,7 @@ Sets the radio device volume (separate from master volume).
 **Fields:**
 - `volume` (required): Volume level 0-100
 
-**Note:** This adjusts the volume on the RF320 radio device hardware, separate from the master/mixer volume.
+**Note:** This sets the radio source's own device volume, separate from the master/mixer volume.
 
 **Response:** 200 OK - Returns updated `RadioStateDto`
 
@@ -1349,7 +1349,7 @@ Sets the manual gain value in dB. Only works when automatic gain control is disa
 - `500 Internal Server Error` - Failed to set gain
 
 **Notes:**
-- RTLSDRCore only - RF320 does not support gain control
+- RTLSDRCore only
 - Manual gain can only be set when AutoGainEnabled is false
 - Use `/api/radio/gain/auto` to toggle automatic gain control
 
@@ -1394,7 +1394,7 @@ Toggles automatic gain control on or off (RTLSDRCore only).
 - `500 Internal Server Error` - Failed to set automatic gain control
 
 **Notes:**
-- RTLSDRCore only - RF320 does not support gain control
+- RTLSDRCore only
 - When AGC is enabled, manual gain control is disabled
 - Gain value is ignored when AGC is enabled
 
@@ -1418,7 +1418,7 @@ true
 - `500 Internal Server Error` - Failed to get power state
 
 **Notes:**
-- RTLSDRCore only - RF320 uses physical power button
+- RTLSDRCore only
 
 ---
 
@@ -1440,7 +1440,7 @@ false
 - `500 Internal Server Error` - Failed to toggle power state
 
 **Notes:**
-- RTLSDRCore only - RF320 uses physical power button
+- RTLSDRCore only
 - Toggles between on/off states
 - Returns the new power state after toggle
 
@@ -1491,7 +1491,7 @@ Shuts down the radio receiver (RTLSDRCore only).
 
 Base path: `/api/radio/devices`
 
-Enumerate and select radio device types (RTLSDRCore vs RF320).
+Enumerate and select radio device types. `RTLSDRCore` is the only supported type; the RF320 USB radio was removed (`AUD-16`).
 
 ### GET /api/radio/devices
 
@@ -1514,20 +1514,6 @@ Lists all available radio device types with their capabilities.
         "supportsGainControl": true,
         "supportsEqualizer": false,
         "supportsDeviceVolume": false
-      }
-    },
-    {
-      "deviceType": "RF320",
-      "name": "RF320 Bluetooth/USB Radio",
-      "description": "Bluetooth control with USB audio output",
-      "capabilities": {
-        "supportsSoftwareControl": false,
-        "supportsFrequencyControl": false,
-        "supportsBandSwitching": false,
-        "supportsScanning": false,
-        "supportsGainControl": false,
-        "supportsEqualizer": true,
-        "supportsDeviceVolume": true
       }
     }
   ]
@@ -1610,7 +1596,7 @@ Selects a radio device type (framework in place for future AudioManager integrat
 ```
 
 **Fields:**
-- `deviceType` (required): Device type identifier ("RTLSDRCore" or "RF320")
+- `deviceType` (required): Device type identifier. Only "RTLSDRCore" is supported; any other value is not available
 
 **Response:** 200 OK
 
@@ -1632,29 +1618,13 @@ Selects a radio device type (framework in place for future AudioManager integrat
 ```
 
 **Error Responses:**
-- `400 Bad Request` - Empty or invalid device type
+- `400 Bad Request` - Empty, unknown or unavailable device type (including the removed "RF320")
 - `500 Internal Server Error` - Failed to select device
 
 **Notes:**
 - Framework endpoint for future device switching
 - Actual device switching requires AudioManager integration
 - Returns selected device capabilities
-
----
-
-## Radio Device Comparison
-
-| Feature | RTLSDRCore (SDR) | RF320 (Bluetooth/USB) |
-|---------|------------------|----------------------|
-| Software Frequency Control | ✅ Full range | ❌ Hardware only |
-| Band Switching | ✅ Software | ❌ Physical button |
-| Scanning | ✅ Automated | ❌ Physical button |
-| Gain Control (AGC/Manual) | ✅ Yes | ❌ N/A |
-| Power Management | ✅ Software | ❌ Physical button |
-| Lifecycle (Startup/Shutdown) | ✅ Software | ❌ N/A |
-| Equalizer | ❌ No hardware EQ | ✅ Hardware EQ |
-| Device Volume | ❌ Software only | ✅ Hardware volume |
-| Audio Output | ✅ USB via SoundFlow | ✅ USB via SoundFlow |
 
 ---
 

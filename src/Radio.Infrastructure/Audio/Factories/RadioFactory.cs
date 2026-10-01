@@ -8,7 +8,6 @@ using Radio.Infrastructure.Audio.Fingerprinting;
 using Radio.Infrastructure.Audio.Services;
 using Radio.Infrastructure.Audio.SoundFlow;
 using Radio.Infrastructure.Audio.Sources.Primary;
-using Radio.Infrastructure.Configuration;
 using Radio.Metrics;
 using Radio.Fingerprinting.Services;
 using RTLSDRCore;
@@ -19,20 +18,19 @@ namespace Radio.Infrastructure.Audio.Factories;
 
 /// <summary>
 /// Factory for creating radio audio sources based on device type.
-/// Supports RTL-SDR (software-defined radio) and RF320 (Bluetooth radio with USB audio).
+/// The only supported device type is RTL-SDR (<see cref="DeviceTypes.RTLSDRCore"/>); any other
+/// value is unsupported — <see cref="IsDeviceAvailable"/> reports it unavailable and
+/// <see cref="CreateRadioSource"/> throws <see cref="ArgumentException"/>.
 /// </summary>
 public class RadioFactory : IRadioFactory
 {
   private readonly ILogger<RadioFactory> _logger;
   private readonly ILoggerFactory _loggerFactory;
-  private readonly IOptionsMonitor<DeviceOptions> _deviceOptions;
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
-  private readonly IAudioDeviceManager _deviceManager;
   private readonly BackgroundIdentificationService? _identificationService;
   private readonly SoundFlowPlaybackService? _playbackService;
   private readonly IConfiguration _configuration;
   private readonly IMetricsCollector? _metricsCollector;
-  private readonly DeviceOptionsResolver? _deviceOptionsResolver;
   private readonly Radio.Configuration.Abstractions.IConfigurationManager? _configurationManager;
   private readonly Func<IAudioSource?>? _getActiveSource;
   private readonly SdrDeviceGate? _deviceGate;
@@ -50,9 +48,6 @@ public class RadioFactory : IRadioFactory
   {
     /// <summary>RTL-SDR software-defined radio.</summary>
     public const string RTLSDRCore = "RTLSDRCore";
-
-    /// <summary>Raddy RF320 Bluetooth radio with USB audio output.</summary>
-    public const string RF320 = "RF320";
   }
 
   /// <summary>
@@ -60,42 +55,33 @@ public class RadioFactory : IRadioFactory
   /// </summary>
   /// <param name="logger">The logger instance.</param>
   /// <param name="loggerFactory">Logger factory for creating device-specific loggers.</param>
-  /// <param name="deviceOptions">Device configuration options.</param>
   /// <param name="radioOptions">Radio configuration options.</param>
-  /// <param name="deviceManager">Audio device manager.</param>
   /// <param name="configuration">Application configuration.</param>
   /// <param name="identificationService">Optional fingerprinting service.</param>
   /// <param name="playbackService">Optional SoundFlow playback service for audio output.</param>
   /// <param name="metricsCollector">Optional metrics collector.</param>
-  /// <param name="deviceOptionsResolver">Optional resolver for config store device options.</param>
   /// <param name="configurationManager">Optional configuration manager for preference restoration.</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source, handed to every created source.</param>
   /// <param name="deviceGate">Optional SDR device gate handed to every created RTL-SDR source (AUD-76).</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
-    IOptionsMonitor<DeviceOptions> deviceOptions,
     IOptionsMonitor<RadioOptions> radioOptions,
-    IAudioDeviceManager deviceManager,
     IConfiguration configuration,
     BackgroundIdentificationService? identificationService = null,
     SoundFlowPlaybackService? playbackService = null,
     IMetricsCollector? metricsCollector = null,
-    DeviceOptionsResolver? deviceOptionsResolver = null,
     Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null,
     Func<IAudioSource?>? getActiveSource = null,
     SdrDeviceGate? deviceGate = null)
   {
     _logger = logger;
     _loggerFactory = loggerFactory;
-    _deviceOptions = deviceOptions;
     _radioOptions = radioOptions;
-    _deviceManager = deviceManager;
     _configuration = configuration;
     _identificationService = identificationService;
     _playbackService = playbackService;
     _metricsCollector = metricsCollector;
-    _deviceOptionsResolver = deviceOptionsResolver;
     _configurationManager = configurationManager;
     _getActiveSource = getActiveSource;
     _deviceGate = deviceGate;
@@ -128,7 +114,6 @@ public class RadioFactory : IRadioFactory
     return deviceType switch
     {
       DeviceTypes.RTLSDRCore => CreateRTLSDRSource(),
-      DeviceTypes.RF320 => CreateRF320Source(),
       _ => throw new ArgumentException($"Unsupported radio device type: {deviceType}", nameof(deviceType))
     };
   }
@@ -141,11 +126,6 @@ public class RadioFactory : IRadioFactory
     if (IsDeviceAvailable(DeviceTypes.RTLSDRCore))
     {
       availableTypes.Add(DeviceTypes.RTLSDRCore);
-    }
-
-    if (IsDeviceAvailable(DeviceTypes.RF320))
-    {
-      availableTypes.Add(DeviceTypes.RF320);
     }
 
     _logger.LogInformation("Available radio devices: {Devices}", string.Join(", ", availableTypes));
@@ -184,7 +164,6 @@ public class RadioFactory : IRadioFactory
     return deviceType switch
     {
       DeviceTypes.RTLSDRCore => IsRTLSDRAvailable(),
-      DeviceTypes.RF320 => IsRF320Available(),
       _ => false
     };
   }
@@ -223,35 +202,6 @@ public class RadioFactory : IRadioFactory
     {
       _logger.LogError(ex, "Failed to create RTL-SDR radio source");
       throw new InvalidOperationException("Failed to create RTL-SDR radio source", ex);
-    }
-  }
-
-  /// <summary>
-  /// Creates an RF320 radio source.
-  /// </summary>
-  private IPrimaryAudioSource CreateRF320Source()
-  {
-    try
-    {
-      var logger = _loggerFactory.CreateLogger<RadioAudioSource>();
-      var resolvedUSBPort = GetRadioUSBPort();
-      var source = new RadioAudioSource(
-        logger,
-        _deviceOptions,
-        _radioOptions,
-        _deviceManager,
-        _identificationService,
-        resolvedUSBPort,
-        _playbackService,
-        _getActiveSource);
-
-      _logger.LogInformation("Successfully created RF320 radio source with USB port: {USBPort}", resolvedUSBPort);
-      return source;
-    }
-    catch (Exception ex)
-    {
-      _logger.LogError(ex, "Failed to create RF320 radio source");
-      throw new InvalidOperationException("Failed to create RF320 radio source", ex);
     }
   }
 
@@ -334,54 +284,5 @@ public class RadioFactory : IRadioFactory
       _deviceCacheExpiry = DateTime.MinValue;
       _logger.LogDebug("RTL-SDR device cache invalidated");
     }
-  }
-
-  /// <summary>
-  /// Checks if RF320 device is available.
-  /// Reads from the config store first (so UI-saved values are picked up),
-  /// falling back to IOptionsMonitor (appsettings.json).
-  /// </summary>
-  private bool IsRF320Available()
-  {
-    try
-    {
-      var usbPort = GetRadioUSBPort();
-      if (string.IsNullOrWhiteSpace(usbPort))
-      {
-        return false;
-      }
-
-      return !_deviceManager.IsUSBPortInUse(usbPort);
-    }
-    catch
-    {
-      return false;
-    }
-  }
-
-  /// <summary>
-  /// Gets the Radio USB port from the config store (if available) or IOptionsMonitor.
-  /// </summary>
-  internal string GetRadioUSBPort()
-  {
-    // Try config store first (synchronous wait — acceptable here since
-    // this is only called during source creation, not on hot paths)
-    if (_deviceOptionsResolver != null)
-    {
-      try
-      {
-        var port = _deviceOptionsResolver.GetRadioUSBPortAsync().GetAwaiter().GetResult();
-        if (!string.IsNullOrWhiteSpace(port))
-        {
-          return port;
-        }
-      }
-      catch (Exception ex)
-      {
-        _logger.LogWarning(ex, "Failed to read Radio USB port from config store, using appsettings fallback");
-      }
-    }
-
-    return _deviceOptions.CurrentValue.Radio?.USBPort ?? "";
   }
 }

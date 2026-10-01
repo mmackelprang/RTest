@@ -136,12 +136,14 @@ live box the timer is disabled/inactive.
 
    | Key | Live `radio` value | How to find it |
    |-----|-------------------|----------------|
-   | `Devices.Radio.USBPort` | `AB13X` | Devices page → the RTL-SDR/USB radio's port id |
    | `Devices.Vinyl.USBPort` | *(empty)* | Devices page → phono/vinyl capture device |
    | `Devices.Cast.DefaultDevice` | *(empty)* | Cast dropdown → preferred default receiver |
 
    `Deploy-ToLinux.ps1` only writes this template when the box has no
    `appsettings.Production.json` yet, so it never clobbers a filled-in live copy.
+   A live copy may still carry `Devices.Radio.USBPort` (the live `radio` box has
+   `AB13X`) from the RF320 USB radio that `AUD-16` removed. Nothing reads it any
+   more, and it is harmless to leave in place or delete.
    **No secrets live in this file** (the Cast `ApplicationId 567E3DBA` is a public
    receiver id).
 

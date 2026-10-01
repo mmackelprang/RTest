@@ -5,7 +5,7 @@ namespace Radio.Tools.AudioUAT.Phases.Phase13;
 
 /// <summary>
 /// Phase 13: Radio API Integration Tests.
-/// Tests Radio audio source (RTL-SDR/RF320) via the Radio.API REST endpoints.
+/// Tests the Radio audio source (RTL-SDR) via the Radio.API REST endpoints.
 /// </summary>
 public class RadioApiTests
 {
@@ -52,7 +52,7 @@ public class RadioDeviceDetectionTest : IPhaseTest
 
   public string TestId => "RAD-001";
   public string TestName => "Radio Device Detection";
-  public string Description => "Verify RTL-SDR or RF320 device is installed and accessible";
+  public string Description => "Verify the RTL-SDR device is installed and accessible";
   public int Phase => 13;
 
   public RadioDeviceDetectionTest(RadioApiClient apiClient)
