@@ -158,7 +158,8 @@ lines and the queue banner. The code commits applied cleanly. Gates were re-run 
 
 **UAT on the box (agent-verified, not owner-run).** Results against the checks this dossier listed:
 
-1. *SHA and kiosk:* as above. ⚠ **`NRestarts` was not recorded** in the evidence handed over.
+1. *SHA and kiosk:* as above. `NRestarts` was not recorded in the evidence handed over; it was
+   measured afterwards, see § Follow-up checks below.
 2. *Sources and devices:* `/api/sources` lists the same five primary sources: Radio, Vinyl, FilePlayer,
    GenericUSB and Bluetooth. `GET /api/radio/devices` returns exactly one device, `RTLSDRCore`
    (count 1). The RF320 is gone.
@@ -172,14 +173,19 @@ lines and the queue banner. The code commits applied cleanly. Gates were re-run 
 4. *Source switching* via `POST /api/sources`, read from the file sink `radio-20260930.txt`:
    - Vinyl 21:52:22, FilePlayer 21:52:26, Bluetooth 21:52:34 and Radio 21:52:38 each logged
      `Successfully switched to source`.
-   - Two switches interleaved with these, 21:52:29 → Radio and 21:52:35 → FilePlayer. They came from a
-     concurrent Builder's Cast UAT, not from this check.
-   - ⚠ The USB Audio refusal (as accepted in `AUD-13`) was not exercised.
+   - Two switches interleaved with these, 21:52:29 → Radio and 21:52:35 → FilePlayer. They did not
+     come from this check. ⛔ **Corrected 2026-10-01:** this said they came from *"a concurrent
+     Builder's Cast UAT"*. That was wrong. Batch D (the Cast arc) made no box changes before 22:03
+     EDT. Both switches came through `POST /api/sources`, and the log has no client attribution for
+     them. They are **unattributed**. The most likely source is the owner at the panel, who was at the
+     console sending feedback at that time.
+   - The USB Audio refusal (as accepted in `AUD-13`) was not exercised in this pass; it was run
+     afterwards, see § Follow-up checks below.
 5. *RTL-SDR after the restart:* `/api/radio/state` reports frequency 92300000, band FM, signalStrength 100.
    The persisted `CurrentSource=Radio` was restored at start-up (`Activating persisted source: "Radio"`,
-   then `Source "Radio" activated on startup`). ⚠ **The retune step was not run:** no
-   `POST /api/radio/frequency` to another station and back. What is shown is that the SDR starts,
-   tunes and receives on the restored station, not that a tune request works.
+   then `Source "Radio" activated on startup`). The retune step was not run in this pass (no
+   `POST /api/radio/frequency` to another station and back); it was run afterwards, see § Follow-up
+   checks below.
 6. *Start-up warnings 21:51:00–21:52:15:* only the usual set appeared. That is
    `Saved input device "capture-4" not found`, the GvMedia AuthKey notice, no connected BT device, the
    Kestrel address override, https-port, and two GC deadline misses. There was nothing about Radio
@@ -188,5 +194,18 @@ lines and the queue banner. The code commits applied cleanly. Gates were re-run 
 The owner's state is unchanged: SDR Radio 92.3 FM, volume 0.3, muted, output Soundbar, and no default
 Cast device.
 
-Nothing is left for the owner on this row. The two skipped steps (`NRestarts`, the retune) are cheap
-to run at the next box session if anyone wants them, but neither one gates the removal.
+Nothing is left for the owner on this row.
+
+### Follow-up checks — run by the coordinator 2026-09-30 ~22:2x EDT
+
+The three checks recorded above as not run are now covered. The first is batch D's own measurement.
+The coordinator ran the other two on 2026-09-30 at about 22:2x EDT, on `45a220e` (`AUD-54`, #748), which
+contains `AUD-16`'s `a4bad7c`:
+
+1. **`NRestarts=0` on `a4bad7c`.** Batch D measured it before its own deploy of `45a220e`, so `a4bad7c`
+   ran without a restart. A reading taken after `45a220e`'s deploy would say nothing about `a4bad7c`.
+2. **USB Audio refused.** `POST /api/sources {GenericUSB}` returned HTTP 500
+   `{"error":"Failed to create source type GenericUSB","details":"Generic USB Audio: no capture device matches USBPort 'AB13X'"}`.
+   The active source stayed Radio. That is the refusal accepted under `AUD-13`.
+3. **SDR retune.** `POST /api/radio/frequency {"frequency":100100000}` returned 200, and the state
+   read 100100000 with signal 100. Back to 92300000 returned 200, with signal 98.
