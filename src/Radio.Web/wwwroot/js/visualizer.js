@@ -362,7 +362,8 @@ export const visualizer = {
   // band shown (87.5–108 MHz on FM):
   //   levels:   [{ f, v, t }] channel position 0..1 across the band's axis, normalised height 0..1,
   //             and colour tier t (UI-22) — BandSignalTier in FmBandMath.cs: 0 noise, 1 weak, 2 fair,
-  //             3 strong, by dB above the map's median. A level without a t is drawn cyan, as before.
+  //             3 strong, by dB above the map's median. A level without a known t gets a cyan bar,
+  //             the colour every bar had before UI-22 (the fill under the bars is grey regardless).
   //   station:  f | null    the tuned station (shown band, radio active), else null
   //   presets:  [{ f, label }] the shown band's presets, ascending
   //   grid:     [f]         gridline positions, the same fractions as the axis strip's labels

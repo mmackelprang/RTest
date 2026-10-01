@@ -240,10 +240,20 @@ public class FmBandMathTests
   [Fact]
   public void Tiers_AChannelExactlyAtTheProminence_IsAPeakToTheTapAndWeakToTheColour()
   {
-    // "A station" means the same thing on the colour scale as in tap-to-tune (spec §5.1).
+    // Every peak the tap snaps to is coloured weak or above, even one exactly at the prominence (spec
+    // §5.1). Not the reverse: a coloured shadow beside a stronger station is not a peak.
     var map = Map((99.5, Noise + 6f));
     FmBandMath.ResolveTapTarget(Hz(99.2), map).Should().Be(99_500_000);
     TierAt(map, 99.5).Should().Be(BandSignalTier.Weak);
+  }
+
+  [Fact]
+  public void Tiers_NumberedAsVisualizerJsIndexesItsColours()
+  {
+    // drawBandMap's tierColours is [--text-low, --signal-blue, --accent-primary, --signal-green],
+    // indexed by these values; renumbering the enum would recolour every bar without failing anything else.
+    new[] { BandSignalTier.Noise, BandSignalTier.Weak, BandSignalTier.Fair, BandSignalTier.Strong }
+      .Select(t => (int)t).Should().Equal(0, 1, 2, 3);
   }
 
   [Fact]

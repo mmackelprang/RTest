@@ -2488,10 +2488,10 @@ body {
 
 .band-legend-swatch {
   display: inline-block;
-  flex: 0 0 auto;
+  flex-shrink: 0;
   width: 8px;
   height: 8px;
-  border-radius: 1px;
+  border-radius: 2px;
 }
 
 .band-legend-swatch.is-weak   { background: var(--signal-blue); }

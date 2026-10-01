@@ -132,8 +132,10 @@
               <span class="band-status-sep" aria-hidden="true">·</span>
               <span class="band-status-age">scanned @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
             }
-            @* UI-22: the bars' colour key, whenever bars are drawn — so not for an empty map or a band
-               out of range, and it stays through a sweep, which draws the map it has. Page text rather
+            @* UI-22: the bars' colour key, whenever the shown band's map has channels — so not for an
+               empty map or a band out of range, and it stays through a sweep of a band that already has
+               a map, which is drawn meanwhile. (A flat dead map has channels but no bar tall enough to
+               draw; the key still shows.) Page text rather
                than canvas, so it can be read and tested; the swatches are decoration. Grey (noise) is
                not listed: it reads as nothing. *@
             @if (HasBandMap && IsShownBandMappable)

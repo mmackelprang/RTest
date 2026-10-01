@@ -60,14 +60,16 @@ public static class FmBandMath
   /// <summary>
   /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Fair"/>
   /// (cyan) rather than <see cref="BandSignalTier.Weak"/> (blue), in dB (UI-22). Provisional when the
-  /// owner chose the ramp; kept after the four stored maps on the box were measured on 2026-10-01 — the
-  /// split is in <c>docs/queue/UI-22.md</c>.
+  /// owner chose the ramp (spec Q5). Kept unchanged after the tier split of the box's four stored maps was
+  /// counted on 2026-10-01 (recorded in <c>docs/queue/UI-22.md</c>); the owner's look at the panel is
+  /// the check that fixes it.
   /// </summary>
   public const double FairSignalDb = 12.0;
 
   /// <summary>
   /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Strong"/>
-  /// (green), in dB (UI-22). Measured against the box's maps alongside <see cref="FairSignalDb"/>.
+  /// (green), in dB (UI-22). Provisional and counted against the box's maps exactly as
+  /// <see cref="FairSignalDb"/> was.
   /// </summary>
   public const double StrongSignalDb = 20.0;
 
@@ -142,8 +144,10 @@ public static class FmBandMath
   /// stretched per map, so the same bar height is 10 dB on a dead map and 40 dB on a busy one. A tier is
   /// decided per channel by its level alone, not by the peak rule, so a strong station's adjacent-channel
   /// shadow can be coloured too. The comparison is written as the peak rule writes it — level against
-  /// median plus threshold — so a channel at exactly <see cref="PeakProminenceDb"/> is a peak to the tap
-  /// and <see cref="BandSignalTier.Weak"/> to the colour, never one without the other.
+  /// median plus threshold — so every channel the tap treats as a peak is coloured
+  /// <see cref="BandSignalTier.Weak"/> or above, a channel at exactly <see cref="PeakProminenceDb"/>
+  /// included. The reverse does not hold: a peak must also be at least as strong as both neighbours, so
+  /// a coloured shadow next to a stronger station is not one.
   /// </remarks>
   public static BandSignalTier[] SignalTiers(IReadOnlyList<BandMapChannelDto> channels)
   {
