@@ -403,6 +403,13 @@ public class GoogleCastOutput : AudioOutputBase
   // Interlocked/Volatile only.
   private int _consoleMutedGeneration = -1;
 
+  // AUD-81 (hostile review M2): the generation of the connection a console SET_MUTE true is being
+  // sent to right now (the console mute drain, or the start-time mute), or -1. Written BEFORE the
+  // send and cleared after it, so a level-echo unmute status that arrives while the mute's
+  // acknowledgement is still on its way — the mark above is set only after it — is still known to
+  // be under a console mute, and its re-assert is sent to that connection. Interlocked/Volatile only.
+  private int _consoleMuteInFlightGeneration = -1;
+
   // AUD-81 (hostile review F11): the ChromecastDeviceInfo.Id of the speaker this application last
   // muted for the console and has not seen unmuted since, or null. Unlike the generation mark
   // above it survives a LOST connection — a lost speaker stays muted — so that a later connection
@@ -2669,8 +2676,9 @@ public class GoogleCastOutput : AudioOutputBase
     // acknowledgement can still be on its way: hostile review M2). Only the baseline follows the
     // device (_lastSetMute = false): no _externalChangeSerial bump, no queued target dropped, no
     // "changed externally" line. Then:
-    //   - the console is muted: the mute is re-asserted, once for this status, through the console
-    //     mute drain (dropped if the console is unmuted by its turn);
+    //   - the console is muted, or a console mute is being sent (_consoleMuteInFlightGeneration): the
+    //     mute is re-asserted, once for this status, through the console mute drain (dropped if the
+    //     console is unmuted by its turn);
     //   - otherwise the console is unmuted, so the speaker's unmute matches it: whatever this
     //     application had muted for the console is released (mark cleared, device record
     //     forgotten), exactly as an acknowledged console unmute does. This is the path a console
@@ -2690,7 +2698,7 @@ public class GoogleCastOutput : AudioOutputBase
       // The baseline tells the truth (the device is unmuted), so the mute drain does send the
       // mute rather than skipping it as "already muted".
       _lastSetMute = false;
-      if (IsConsoleMutedNow())
+      if (IsConsoleMutedNow() || Volatile.Read(ref _consoleMuteInFlightGeneration) >= 0)
       {
         _logger.LogDebug(
           "Cast: speaker reported unmuted at {Volume:P0}, the echo of our own level push, under a muted console — re-asserting the mute",
@@ -3461,7 +3469,21 @@ public class GoogleCastOutput : AudioOutputBase
   /// </summary>
   private void ReassertConsoleMute()
   {
+    // The connection muted for the console; else the one a console mute is being sent to (hostile
+    // review M2: its acknowledgement, which sets the mark, may not have been processed yet); else the
+    // published one (a speaker muted on its own side under a muted console). The drain sends it only
+    // to the published connection, and only while the console is muted.
     var generation = Volatile.Read(ref _consoleMutedGeneration);
+    if (generation < 0)
+    {
+      generation = Volatile.Read(ref _consoleMuteInFlightGeneration);
+    }
+
+    if (generation < 0)
+    {
+      generation = Volatile.Read(ref _publishedGeneration);
+    }
+
     var deviceName = ConnectedDevice?.FriendlyName;
     LastMuteReassertForTests = ReassertAsync();
 
@@ -3603,18 +3625,33 @@ public class GoogleCastOutput : AudioOutputBase
         }
       }
 
+      if (next.Muted)
+      {
+        // Hostile review M2: before the send, so a level-echo unmute arriving before this mute's
+        // acknowledgement is re-asserted (see _consoleMuteInFlightGeneration).
+        Volatile.Write(ref _consoleMuteInFlightGeneration, connection.Generation);
+      }
+
+      bool sent;
       try
       {
-        if (!await SendMuteToDeviceAsync(connection.Client, next.Muted)
-              .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
-        {
-          continue;
-        }
+        sent = await SendMuteToDeviceAsync(connection.Client, next.Muted)
+          .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false);
       }
       catch (Exception ex)
       {
         _logger.LogWarning(ex, "Cast: the console {Action} could not be applied to the speaker",
           next.Muted ? "mute" : "unmute");
+        sent = false;
+      }
+
+      if (!sent)
+      {
+        if (next.Muted)
+        {
+          Interlocked.CompareExchange(ref _consoleMuteInFlightGeneration, -1, connection.Generation);
+        }
+
         continue;
       }
 
@@ -3622,6 +3659,8 @@ public class GoogleCastOutput : AudioOutputBase
       {
         Volatile.Write(ref _consoleMutedGeneration, connection.Generation);
         RememberConsoleMute(connection.Device.Id);
+        // Lifted only now that the mark is set, so there is no moment with neither.
+        Interlocked.CompareExchange(ref _consoleMuteInFlightGeneration, -1, connection.Generation);
       }
       else
       {
@@ -3687,6 +3726,8 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
+    // Hostile review M2: recorded before the send (see _consoleMuteInFlightGeneration).
+    Volatile.Write(ref _consoleMuteInFlightGeneration, connection.Generation);
     try
     {
       if (await SendMuteToDeviceAsync(connection.Client, true)
@@ -3702,6 +3743,10 @@ public class GoogleCastOutput : AudioOutputBase
     {
       _logger.LogWarning(ex, "Cast: could not mute {Name} for the muted console as casting started",
         connection.Device.FriendlyName);
+    }
+    finally
+    {
+      Interlocked.CompareExchange(ref _consoleMuteInFlightGeneration, -1, connection.Generation);
     }
   }
 
