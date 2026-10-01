@@ -186,7 +186,7 @@ public class PresetCardTests : TestContext
   }
 
   [Fact]
-  public void Bar_Enter_FiresOnSelect_OtherKeysDoNot()
+  public void Bar_EnterAndSpace_FireOnSelect_OtherKeysDoNot()
   {
     var selected = new List<string>();
     var cut = RenderComponent<PresetCard>(p => p
@@ -200,7 +200,8 @@ public class PresetCardTests : TestContext
     cut.Find(".rcp-bar-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "a" });
     selected.Should().BeEmpty();
     cut.Find(".rcp-bar-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Enter" });
-    selected.Should().Equal("kbd");
+    cut.Find(".rcp-bar-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = " " });
+    selected.Should().Equal("kbd", "kbd");
   }
 
   [Fact]

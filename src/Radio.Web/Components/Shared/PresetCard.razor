@@ -30,7 +30,7 @@
   <div class="rcp-bar-card @(IsActive ? "is-active" : "")"
        data-preset-id="@PresetId"
        @onclick="@(() => OnSelect.InvokeAsync(PresetId))"
-       @onkeydown="@(e => e.Key == "Enter" ? OnSelect.InvokeAsync(PresetId) : Task.CompletedTask)"
+       @onkeydown="@(e => e.Key is "Enter" or " " ? OnSelect.InvokeAsync(PresetId) : Task.CompletedTask)"
        @onpointerdown="@(_ => OnPointerDown.InvokeAsync(PresetId))"
        @onpointerup="@(_ => OnPointerUp.InvokeAsync(PresetId))"
        @onpointerleave="@(_ => OnPointerCancel.InvokeAsync())"

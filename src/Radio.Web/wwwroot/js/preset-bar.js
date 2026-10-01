@@ -25,6 +25,8 @@ function extent(viewport, el) {
   return { left, right: left + r.width };
 }
 
+// 'smooth' is the browser's own animation, whose duration Chrome derives from the distance; the
+// spec's "200 ms" is not something scrollTo can be told. Instant under prefers-reduced-motion.
 function behaviour(smooth) {
   const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   return smooth && !reduce ? 'smooth' : 'auto';
@@ -102,8 +104,10 @@ export function init(viewport, bar, dotnet) {
   // A scroll the user drives (finger, wheel) holds off auto-scroll for 10 s; a scroll this module
   // starts (page / reveal) must not. So the module marks its own scrolls rather than trying to
   // recognise the user's: anything that scrolls while no programmatic scroll is in flight is manual.
-  // That also counts the browser re-clamping scrollLeft after a card is deleted, which only means a
-  // harmless 10 s hold right after the user touched the bar anyway.
+  // The browser also scrolls on its own when the cards change — re-clamping after a delete, or
+  // re-snapping when the ＋ SAVE card appears or goes ahead of the view on a tune — so a change to
+  // the card list marks the scroll that follows it as programmatic too (see the MutationObserver
+  // below). The cost: a swipe that starts within that mark's window is not counted as manual.
   s.onScroll = () => {
     scheduleReport(viewport);
     if (!s.programmatic && !s.notified) {
@@ -127,17 +131,23 @@ export function init(viewport, bar, dotnet) {
     if (!s.down || s.moved) return;
     if (Math.hypot(e.clientX - s.down.x, e.clientY - s.down.y) > 10) {
       s.moved = true;
-      // Cancels PresetCard's long-press timer through its existing pointercancel handler.
+      // Through the card's existing pointercancel handler, which clears the press the long-press
+      // test at pointerup needs — so the pointerup that ends this drag opens no menu.
       s.down.target.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true }));
     }
   };
   s.onPointerUp = () => {
     s.down = null;
+    // The click a drag would produce is dispatched in this same task, before the timeout runs. A
+    // drag that produced no click here (it ended outside the viewport, or turned into a native pan)
+    // must not leave the flag set to swallow some later, unrelated click.
+    setTimeout(() => { s.moved = false; }, 0);
   };
   // Capture phase on the viewport runs before Blazor's document-level click delegation, so a click
-  // ending a >10 px drag never reaches a card's recall handler.
+  // ending a >10 px drag never reaches a card's recall handler. detail 0 is keyboard activation,
+  // which no drag produces.
   s.onClickCapture = (e) => {
-    if (s.moved) {
+    if (s.moved && e.detail !== 0) {
       e.stopPropagation();
       e.preventDefault();
       s.moved = false;
@@ -172,7 +182,10 @@ export function init(viewport, bar, dotnet) {
   // visible without a scroll event.
   s.resize = new ResizeObserver(() => scheduleReport(viewport));
   s.resize.observe(viewport);
-  s.mutation = new MutationObserver(() => scheduleReport(viewport));
+  s.mutation = new MutationObserver(() => {
+    beginProgrammatic(s);
+    scheduleReport(viewport);
+  });
   s.mutation.observe(viewport, { childList: true });
 
   report(viewport);

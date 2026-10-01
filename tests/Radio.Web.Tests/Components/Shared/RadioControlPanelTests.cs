@@ -877,7 +877,8 @@ public class RadioControlPanelTests : TestContext
   public void PresetsCaption_ShowsHoldBandHint_WhenEverythingFits()
   {
     var state = BuildState();
-    var cut = RenderPanel(state, bands: new[] { BuildFmBand() });
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var cut = RenderPanel(state, presets: presets, bands: new[] { BuildFmBand() });
 
     var hint = cut.Find(".rcp-bar-caption .rcp-presets-hint");
     Assert.Contains("HOLD", hint.TextContent);
@@ -1046,6 +1047,27 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
+  public void FailedRefresh_AfterAGoodRead_KeepsTheListOnScreen()
+  {
+    // Spec §7's error card is for "no list at all". A refresh that fails after a save must not
+    // replace presets the user can still see with an error.
+    var state = BuildState(band: "FM", frequency: 92_300_000);
+    var presets = new[] { BuildPreset("p1", "KQED", 88_500_000, "FM", 1) };
+    var handler = UseRadioState(state, presets, new[] { BuildFmBand(16) });
+    var cut = RenderComponent<RadioControlPanel>();
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-bar-card").Should().ContainSingle(), TimeSpan.FromSeconds(2));
+
+    handler.FailPresets = true;
+    cut.Find(".rcp-bar-save").Click();
+    cut.FindAll("button").Single(b => b.TextContent.Trim() == "Save").Click();
+
+    cut.WaitForAssertion(() => handler.RecordedCalls.Count(c => c.Method == "GET" && c.Path == "/api/radio/presets").Should().Be(2),
+      TimeSpan.FromSeconds(2));
+    cut.FindAll(".rcp-bar-card").Should().ContainSingle();
+    cut.FindAll(".rcp-bar-msg.is-error").Should().BeEmpty();
+  }
+
+  [Fact]
   public void PresetCard_Tap_RecallsThePreset()
   {
     var state = BuildState();
@@ -1209,6 +1231,20 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
+  public void LoadingSkeleton_IsThePanelShape()
+  {
+    // Until the state arrives the panel shows the RadioPanel skeleton (one-row bands + bar), not
+    // RadioPage's Radio shape.
+
+    var handler = new HttpClient(new NeverRespondsHandler()) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
+    Services.AddSingleton(_ => new RadioApiService(handler, NullLogger<RadioApiService>.Instance));
+
+    var cut = RenderComponent<RadioControlPanel>();
+
+    cut.Find(".skeleton").ClassList.Should().Contain("skeleton-radio-panel");
+  }
+
+  [Fact]
   public void BandPills_SitOnOneRow()
   {
     // UI-20 (spec §2.2, §4.3): six equal pills on one row. Layout cannot be measured in
@@ -1220,7 +1256,7 @@ public class RadioControlPanelTests : TestContext
 
     var css = System.Text.RegularExpressions.Regex.Replace(cut.Markup, @"\s+", " ");
     css.Should().MatchRegex(@"\.rcp-band-group \{[^}]*flex-wrap: nowrap;");
-    css.Should().MatchRegex(@"\.rcp-band-group \.rcp-band-btn \{ flex: 1 1 0; min-width: 0; \}");
+    css.Should().MatchRegex(@"\.rcp-band-group \.rcp-band-btn \{ flex: 1 1 0;[^}]*min-width: var\(--touch-min\); \}");
   }
 
   [Theory]
@@ -1311,6 +1347,13 @@ public class RadioControlPanelTests : TestContext
   {
     var cls = segment.ClassName ?? string.Empty;
     return cls.Contains("seg-green") || cls.Contains("seg-amber") || cls.Contains("seg-red");
+  }
+
+  /// <summary>A handler whose requests never complete — holds the panel in its loading state.</summary>
+  private sealed class NeverRespondsHandler : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+      new TaskCompletionSource<HttpResponseMessage>().Task;
   }
 
   /// <summary>

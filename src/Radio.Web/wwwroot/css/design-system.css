@@ -1273,28 +1273,41 @@ html, body {
   width: 100%;
 }
 
-/* UI-20 (spec §7): the radio skeleton has the panel's real silhouette — six band pills in one
-   56 px row, and the preset bar's four 60 px cards along the bottom — so nothing jumps when the
-   state arrives. */
 .skeleton-radio-bands {
+  display: flex;
+  gap: 8px;
+}
+
+.skeleton-band {
+  flex: 1;
+  height: 36px;
+  border-radius: 18px;
+}
+
+/* UI-20 (spec §7): the Home radio panel's skeleton has the panel's real silhouette — six band
+   pills in one 56 px row, and the preset bar's four 60 px cards along the bottom — so nothing
+   jumps when the state arrives. */
+.skeleton-panel-bands {
   display: flex;
   gap: 2px;
 }
 
-.skeleton-band {
+.skeleton-panel-band {
   flex: 1;
   height: 56px;
   border-radius: 3px;
 }
 
-.skeleton-radio-bar {
+/* Card ghosts start where the real cards do: 74 px in from the panel edge (bar padding 8 + arrow
+   58 + gap 8, as .rcp-bar-track), less the skeleton's own 16 px padding = 58. */
+.skeleton-panel-bar {
   display: flex;
   gap: 6px;
   margin-top: auto;
-  padding: 0 66px;
+  padding: 0 58px;
 }
 
-.skeleton-preset {
+.skeleton-panel-preset {
   flex: 1;
   height: 60px;
   border-radius: 6px;
@@ -4824,6 +4837,13 @@ body {
   height: 12px;
 }
 
+/* Spec §8 leaves the caption's --text-low (≈2.6:1 at 9 px on #0b0b0d) open to raising for AA; the
+   count and the "1–4 of 8" position are now the bar's only orientation, so they get --text-medium,
+   the hold hint's colour. */
+.rcp-bar-caption .rcp-presets-count {
+  color: var(--text-medium);
+}
+
 .rcp-bar-row {
   display: flex;
   align-items: stretch;
@@ -4862,6 +4882,7 @@ body {
 .rcp-bar-arrow:not(.is-disabled):hover {
   border-color: rgba(240, 168, 48, 0.25);
   background: linear-gradient(180deg, #1a1a1d 0%, #131315 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5), 0 0 8px rgba(240, 168, 48, 0.08);
 }
 
 .rcp-bar-arrow:not(.is-disabled):active {
@@ -4933,7 +4954,9 @@ body {
 .rcp-bar-item.is-group-start::before {
   content: '';
   position: absolute;
-  left: -7.5px;
+  /* Whole pixels: at -7.5 the 1 px line straddled a pixel edge and rendered as two half-strength
+     pixels of an already faint colour. -7 puts it in the middle of the 14 px gap. */
+  left: -7px;
   top: 8px;
   bottom: 8px;
   width: 1px;
@@ -4971,9 +4994,15 @@ body {
   background: color-mix(in srgb, var(--signal-amber) 4%, var(--surface-elevated, rgba(255, 255, 255, 0.02)));
 }
 
+.rcp-bar-card:active {
+  transform: translateY(1px);
+}
+
+/* Inset: the viewport clips vertically (overflow-y: hidden) and the cards fill its 60 px, so an
+   outset ring would lose its top and bottom. Same for ＋ SAVE and the retry card below. */
 .rcp-bar-card:focus-visible {
   outline: 1px solid var(--signal-amber);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
 /* Active: the rail's treatment — amber border, 8 % amber fill, and a 3 px inset amber left bar as
@@ -5051,7 +5080,7 @@ body {
 
 .rcp-bar-save:focus-visible {
   outline: 1px solid var(--signal-amber);
-  outline-offset: 1px;
+  outline-offset: -2px;
 }
 
 .rcp-bar-save-label {
@@ -5102,6 +5131,21 @@ body {
 
 .rcp-bar-msg.is-error .rcp-bar-msg-title {
   color: var(--signal-red);
+  /* Sentence case (spec §7 copy); the wide tracking is for the uppercase empty-state title. */
+  letter-spacing: 0.02em;
+}
+
+.rcp-bar-msg.is-error:hover {
+  background: color-mix(in srgb, var(--signal-red) 6%, transparent);
+}
+
+.rcp-bar-msg.is-error:active {
+  transform: translateY(1px);
+}
+
+.rcp-bar-msg.is-error:focus-visible {
+  outline: 1px solid var(--signal-red);
+  outline-offset: -2px;
 }
 
 .rcp-bar-ghost {

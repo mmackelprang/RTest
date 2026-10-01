@@ -24,7 +24,7 @@
       @* Not a live region (spec §8): swiping must not chatter. *@
       <span class="rcp-presets-count rcp-bar-position">@PositionText</span>
     }
-    else if (!string.IsNullOrEmpty(CurrentBand) && !LoadFailed)
+    else if (!string.IsNullOrEmpty(CurrentBand) && Presets is { Count: > 0 })
     {
       <span class="rcp-presets-hint">HOLD <kbd>@CurrentBand</kbd> TO SAVE</span>
     }
@@ -181,12 +181,16 @@
 
   private ITimer? _repeatTimer;
   private int _repeatDirection;
+  private int _pressGeneration;
+  private bool _disposed;
 
   /// <summary>
-  /// The bar's order, and the PRESETS knob's: band, then the per-band slot ordinal
-  /// (<c>PresetSelectorService.cs:364-370</c>, which says the knob's list and the list the user
-  /// can see are "the same list in the same order"). The knob compares band names ordinally, so
-  /// this does too. Never put the current band first — that is done by scrolling (spec §4.7).
+  /// The bar's order, and the PRESETS knob's: band, then the per-band slot ordinal. The knob
+  /// composes its rows this way at <c>PresetSelectorService.cs:364-370</c> and says why at
+  /// <c>:262-263</c> — "the knob's list and the list the user can see are the same list in the same
+  /// order". It compares band names ordinally, so this does too; the slot is the API's
+  /// <c>SlotNumber</c>, derived the same way (per band, by CreatedAt). Never put the current band
+  /// first — that is done by scrolling (spec §4.7).
   /// </summary>
   public static List<RadioPresetDto> OrderLikeKnob(IEnumerable<RadioPresetDto> presets) =>
     presets
@@ -303,7 +307,7 @@
             @onpointerleave="StopRepeat"
             @onpointercancel="StopRepeat"
             @onclick="@(e => ArrowClickAsync(direction, e))">
-      <RadzenIcon Icon="@(direction < 0 ? "chevron_left" : "chevron_right")" aria-hidden="true" />
+      <RadzenIcon Icon="@(direction < 0 ? "keyboard_arrow_left" : "keyboard_arrow_right")" aria-hidden="true" />
       @if (dot)
       {
         <span class="rcp-bar-dot" aria-hidden="true"></span>
@@ -319,6 +323,14 @@
   /// <see cref="RepeatInterval"/> after <see cref="RepeatDelay"/>. Paging on press rather than on
   /// click is what lets one gesture be both "tap" and "hold" without paging twice.
   /// </summary>
+  /// <para>
+  /// The repeat is armed only after the first page's interop call returns, and Blazor Server does
+  /// not hold the next browser event back while a handler awaits — so a quick tap's pointerup can
+  /// arrive, and run <see cref="StopRepeat"/>, before there is a timer to stop. The press
+  /// generation closes that: <see cref="StopRepeat"/> moves it on, and a press whose generation
+  /// moved during the await never arms its timer. Ticks carry their generation too, so one already
+  /// queued for an earlier press does nothing.
+  /// </para>
   internal async Task ArrowPointerDownAsync(int direction, PointerEventArgs e)
   {
     if (e.Button > 0 || IsArrowDisabled(direction))
@@ -326,14 +338,19 @@
       return;
     }
     StopRepeat();
+    var generation = _pressGeneration;
     await PageAsync(direction);
+    if (generation != _pressGeneration || _disposed)
+    {
+      return;
+    }
     _repeatDirection = direction;
-    _repeatTimer = Clock.CreateTimer(_ => _ = InvokeAsync(RepeatTickAsync), null, RepeatDelay, RepeatInterval);
+    _repeatTimer = Clock.CreateTimer(_ => _ = InvokeAsync(() => RepeatTickAsync(generation)), null, RepeatDelay, RepeatInterval);
   }
 
-  private async Task RepeatTickAsync()
+  private async Task RepeatTickAsync(int generation)
   {
-    if (_repeatTimer == null)
+    if (generation != _pressGeneration || _repeatTimer == null)
     {
       return;
     }
@@ -347,6 +364,7 @@
 
   internal void StopRepeat()
   {
+    _pressGeneration++;
     _repeatTimer?.Dispose();
     _repeatTimer = null;
   }
@@ -368,7 +386,13 @@
     _lastManualAt = Clock.GetUtcNow();
     if (_module != null)
     {
-      await _module.InvokeVoidAsync("page", _viewportEl, direction);
+      try
+      {
+        await _module.InvokeVoidAsync("page", _viewportEl, direction);
+      }
+      catch (Exception ex) when (IsInteropFailure(ex))
+      {
+      }
     }
   }
 
@@ -398,31 +422,55 @@
     {
       try
       {
-        _module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/preset-bar.js");
-        _dotnet = DotNetObjectReference.Create(this);
-        if (_module != null)
+        var module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/preset-bar.js");
+        if (_disposed)
         {
-          await _module.InvokeVoidAsync("init", _viewportEl, _barEl, _dotnet);
+          // Disposed while the import was in flight: wire nothing up, and release what arrived.
+          if (module != null)
+          {
+            await module.DisposeAsync();
+          }
+          return;
         }
+        if (module != null)
+        {
+          _dotnet = DotNetObjectReference.Create(this);
+          await module.InvokeVoidAsync("init", _viewportEl, _barEl, _dotnet);
+        }
+        _module = module;
       }
-      catch (JSDisconnectedException)
+      catch (Exception ex) when (IsInteropFailure(ex))
       {
+        // The bar still renders and every control still works; it just cannot measure or scroll.
         return;
       }
     }
 
+    // Renders that land while the import is still in flight (the parent re-renders on every
+    // radio-state tick) must not spend the reveal decision: ChooseReveal records what it decided
+    // about, so a decision taken with no module to act on would be lost — and the first placement
+    // on the current band with it. The first-render continuation above decides once it can act.
+    if (_module == null)
+    {
+      return;
+    }
+
     var (target, smooth) = ChooseReveal();
-    if (target >= 0 && _module != null)
+    if (target >= 0)
     {
       try
       {
         await _module.InvokeVoidAsync("reveal", _viewportEl, target, smooth);
       }
-      catch (JSDisconnectedException)
+      catch (Exception ex) when (IsInteropFailure(ex))
       {
       }
     }
   }
+
+  /// <summary>Interop failures the bar survives: a gone circuit, a JS error, an interop timeout.</summary>
+  private static bool IsInteropFailure(Exception ex) =>
+    ex is JSDisconnectedException or JSException or TaskCanceledException;
 
   /// <summary>
   /// What to scroll into view after this render, if anything (spec §4.5).
@@ -477,6 +525,7 @@
 
   public async ValueTask DisposeAsync()
   {
+    _disposed = true;
     StopRepeat();
     if (_module != null)
     {
@@ -485,7 +534,7 @@
         await _module.InvokeVoidAsync("dispose", _viewportEl);
         await _module.DisposeAsync();
       }
-      catch (JSDisconnectedException)
+      catch (Exception ex) when (IsInteropFailure(ex))
       {
       }
     }

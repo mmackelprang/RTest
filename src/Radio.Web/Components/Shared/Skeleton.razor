@@ -10,7 +10,9 @@
 
   Shape rationale:
     NowPlaying — album-art block + title/artist lines + progress bar.
-    Radio      — one-row band strip + freq-well outline + meter band + preset-bar card ghosts.
+    Radio      — band-button row + freq-well outline + meter band (RadioPage).
+    RadioPanel — one-row band strip + freq-well outline + meter band + preset-bar card ghosts
+                 (the Home radio panel, UI-20).
     ListRow    — single 56px row with leading thumb + two text lines.
     DeviceRow  — list row with trailing action-pill placeholder.
     MetricTile — category + name + value bar + sparkline strip.
@@ -28,20 +30,32 @@
       break;
 
     case SkeletonShape.Radio:
-      @* UI-20: six band pills in one row and the preset bar's four card ghosts, the shape the
-         radio panel takes once its state arrives (spec 2026-10-01 §7). *@
       <div class="skeleton-radio-bands">
+        <div class="skeleton-loading skeleton-band"></div>
+        <div class="skeleton-loading skeleton-band"></div>
+        <div class="skeleton-loading skeleton-band"></div>
+        <div class="skeleton-loading skeleton-band"></div>
+      </div>
+      <div class="skeleton-loading skeleton-freq-well"></div>
+      <div class="skeleton-loading skeleton-meter"></div>
+      break;
+
+    case SkeletonShape.RadioPanel:
+      @* UI-20: the Home radio panel's shape once its state arrives (spec 2026-10-01 §7) — six
+         band pills in one row, and the preset bar's four cards along the bottom. RadioPage keeps
+         Radio: it still has its own round pills and no bar. *@
+      <div class="skeleton-panel-bands">
         @for (var i = 0; i < 6; i++)
         {
-          <div class="skeleton-loading skeleton-band"></div>
+          <div class="skeleton-loading skeleton-panel-band"></div>
         }
       </div>
       <div class="skeleton-loading skeleton-freq-well"></div>
       <div class="skeleton-loading skeleton-meter"></div>
-      <div class="skeleton-radio-bar">
+      <div class="skeleton-panel-bar">
         @for (var i = 0; i < 4; i++)
         {
-          <div class="skeleton-loading skeleton-preset"></div>
+          <div class="skeleton-loading skeleton-panel-preset"></div>
         }
       </div>
       break;
@@ -96,6 +110,7 @@
   {
     NowPlaying,
     Radio,
+    RadioPanel,
     ListRow,
     DeviceRow,
     MetricTile,
@@ -114,6 +129,7 @@
     {
       SkeletonShape.NowPlaying => "now-playing",
       SkeletonShape.Radio => "radio",
+      SkeletonShape.RadioPanel => "radio-panel",
       SkeletonShape.ListRow => "list-row",
       SkeletonShape.DeviceRow => "device-row",
       SkeletonShape.MetricTile => "metric-tile",

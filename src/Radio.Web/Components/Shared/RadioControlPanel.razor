@@ -14,7 +14,7 @@
   {
     @* Initial-load skeleton — shape mirrors the band buttons + freq well +
        meter strip that take its place once _radioState is hydrated. *@
-    <Skeleton Shape="Skeleton.SkeletonShape.Radio" />
+    <Skeleton Shape="Skeleton.SkeletonShape.RadioPanel" />
   }
   else
   {
@@ -448,7 +448,8 @@
      RadioControlPanel chrome aesthetic. */
   .rcp-band-group .rcp-band-btn {
     flex: 1 1 0;
-    min-width: 0;
+    /* Equal shares of the row (~102 px at 1920×720), but never under the touch minimum. */
+    min-width: var(--touch-min);
   }
 
   .rcp-band-btn {
@@ -639,6 +640,11 @@
     letter-spacing: 0.15em;
     color: var(--text-low);
     text-transform: uppercase;
+  }
+
+  /* UI-20: the 0.7 dimming is on the label and readout, not the whole row, so the scan chip that
+     now lives here (spec §4.4) reports a scan at full strength rather than at 0.7 × its blink. */
+  .rcp-meter-header > :not(.rcp-scanning):not(.rcp-scan-signal) {
     opacity: 0.7;
   }
 
@@ -876,9 +882,10 @@
       _ = InvokeAsync(StateHasChanged);
     });
 
-    // Radio state must load BEFORE presets so LoadPresetsAsync can band-filter
-    // the result (PR 3 of the Radio Controller Polish arc). Bands run in
-    // parallel because they don't depend on the state.
+    // State and bands first, then presets. The order is historical — PR 3 of the
+    // Radio Controller Polish arc band-filtered the presets, which the hot-fix off
+    // PR #371 removed — and nothing depends on it now: the active card and the
+    // ＋ SAVE rule are worked out at render time from whatever has loaded.
     await Task.WhenAll(LoadRadioStateAsync(), LoadBandsAsync());
     await LoadPresetsAsync();
 

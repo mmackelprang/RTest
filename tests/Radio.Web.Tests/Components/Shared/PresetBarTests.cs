@@ -148,6 +148,25 @@ public class PresetBarTests : TestContext
   }
 
   [Fact]
+  public async Task Arrow_QuickTap_ReleasedWhileTheFirstPageIsInFlight_ArmsNoRepeat()
+  {
+    // Review M1: the repeat is armed after the first page's interop call returns, and Blazor
+    // Server delivers the pointerup without waiting for that. A pending `page` stands in for the
+    // round trip on a loaded box; the release lands inside it.
+    var cut = RenderBar(EightFm());
+    var pending = _module.SetupVoid("page", _ => true);
+
+    var press = cut.Find(".rcp-bar-next").PointerDownAsync(new PointerEventArgs());
+    await cut.Find(".rcp-bar-next").PointerUpAsync(new PointerEventArgs());
+    pending.SetVoidResult();
+    await press;
+
+    _clock.Advance(PresetBar.RepeatDelay + (PresetBar.RepeatInterval * 3));
+
+    pending.Invocations.Should().ContainSingle("a tap is one page, however long the first page took");
+  }
+
+  [Fact]
   public void Arrow_Repeat_StopsAtTheEnd()
   {
     var cut = RenderBar(EightFm());
@@ -465,6 +484,15 @@ public class PresetBarTests : TestContext
     var cut = RenderBar(presets, band: "WB");
 
     cut.FindAll(".rcp-bar-card").Select(e => e.GetAttribute("data-preset-id")).Should().Equal("a1", "f1", "w1");
+  }
+
+  [Fact]
+  public void NoPresets_CaptionIsJustTheCount()
+  {
+    // Spec §7: "PRESETS · 0 saved" — the empty card and ＋ SAVE already say how to save.
+    var cut = RenderBar(new List<RadioPresetDto>(), showSave: true);
+
+    cut.FindAll(".rcp-bar-caption > *").Select(e => e.TextContent.Trim()).Should().Equal("PRESETS · 0 saved");
   }
 
   [Fact]
