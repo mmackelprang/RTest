@@ -229,6 +229,28 @@ public class AudioEngineInitializationServiceCastReconnectTests
   }
 
   [Fact]
+  public async Task TheFailedAttemptWarning_IsLoggedOncePerEpisode_NotOncePerWatcher()
+  {
+    // Review M3: a speaker that drops right after each reconnect gets a new watcher each time,
+    // within one episode. Each watcher's first connect fails here; only the first logs a Warning.
+    _host.Reachable = true;
+    _host.ConnectFailure = connect => connect % 2 == 1 ? new InvalidOperationException("handshake failed") : null;
+    var log = new CastReconnectWatcherTests.ListLogger<AudioEngineInitializationService>();
+    var service = CreateService(logger: log);
+
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+
+    RaiseLoss(service); // at once: inside the stability period, so the same episode
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+
+    Assert.Equal(4, _host.Connects);
+    Assert.Single(log.Entries, e => e.Level == LogLevel.Warning && e.Message.Contains("would not come up"));
+  }
+
+  [Fact]
   public async Task AReconnectThatStaysUpPastTheStabilityPeriod_LetsTheNextDropStartAFreshWindow()
   {
     _host.Reachable = true;
@@ -315,7 +337,8 @@ public class AudioEngineInitializationServiceCastReconnectTests
 
   // --- helpers ---
 
-  private AudioEngineInitializationService CreateService(bool autoReconnect = true)
+  private AudioEngineInitializationService CreateService(
+    bool autoReconnect = true, ILogger<AudioEngineInitializationService>? logger = null)
   {
     var provider = new Mock<IServiceProvider>();
     provider.Setup(p => p.GetService(typeof(GoogleCastOutput))).Returns(_castOutput);
@@ -327,7 +350,7 @@ public class AudioEngineInitializationServiceCastReconnectTests
     outputOptions.GoogleCast.AutoReconnect = autoReconnect;
 
     var service = new AudioEngineInitializationService(
-      new Mock<ILogger<AudioEngineInitializationService>>().Object,
+      logger ?? new Mock<ILogger<AudioEngineInitializationService>>().Object,
       _engine.Object,
       _deviceManager.Object,
       preferences.Object,
@@ -439,12 +462,21 @@ public class AudioEngineInitializationServiceCastReconnectTests
       return Reachable ? device : null;
     }
 
+    /// <summary>The exception the Nth connect (1-based) throws, or null to succeed.</summary>
+    public Func<int, Exception?> ConnectFailure = _ => null;
+    public int Connects;
+
     public async Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct)
     {
       ConnectEntered.TrySetResult();
       if (ConnectGate is { } gate)
       {
         await gate.Task;
+      }
+
+      if (ConnectFailure(Interlocked.Increment(ref Connects)) is { } failure)
+      {
+        throw failure;
       }
 
       ConnectedDeviceId = device.Id;
