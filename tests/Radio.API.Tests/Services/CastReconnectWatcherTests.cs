@@ -28,6 +28,7 @@ public class CastReconnectWatcherTests
 
   private readonly SignalingTimeProvider _time = new();
   private readonly FakeHost _host = new();
+  private CastReconnectWatcher? _watcher; // the one the last Start() made
 
   [Fact]
   public async Task SpeakerAnswersFromTheThirdProbe_ConfirmsOnceThenConnectsAndSwitchesBackToCast()
@@ -352,6 +353,49 @@ public class CastReconnectWatcherTests
   }
 
   [Fact]
+  public async Task CancelledByACastConnectPickOfThisDevice_KeepsTheConnectionAndSwitchesBackToCast()
+  {
+    // AUD-85 review MEDIUM-1. POST cast/connect for the device being reconnected marks the cancel
+    // as a pick of it and waits for the run. It promotes only afterwards, so the active output is
+    // still local here — before the fix the run tore down the very speaker the user picked.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.OnConnect = _ =>
+    {
+      _watcher!.KeepConnectionForCastPick();
+      cts.Cancel();
+    };
+    var reported = false;
+
+    var outcome = await DriveAsync(Start(ct: cts.Token, onConnected: _ => reported = true));
+
+    Assert.Equal(CastReconnectOutcome.Reconnected, outcome);
+    Assert.Equal(new[] { "connect", "keep-for-pick", "switch" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(Mark, _host.SwitchedWith); // conditional on no selection since the drop, as ever
+    Assert.Equal(0, _host.TearDowns);
+    Assert.False(reported); // the user's pick, not a watcher-made reconnect: not counted
+  }
+
+  [Fact]
+  public async Task CancelledByACastConnectPickOfThisDevice_WhenTheConnectionCannotBeKept_RemovesIt()
+  {
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.KeepResult = false;
+    _host.OnConnect = _ =>
+    {
+      _watcher!.KeepConnectionForCastPick();
+      cts.Cancel();
+    };
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.Cancelled, outcome);
+    Assert.Equal(new[] { "connect", "keep-for-pick", "teardown" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(0, _host.Switches);
+  }
+
+  [Fact]
   public async Task CancelledWhileACastPromotionLandsBetweenTheCheckAndTheTearDown_KeepsTheConnection()
   {
     // AUD-85 review MEDIUM-2. The watcher reads the active output (local), then — before its
@@ -498,7 +542,7 @@ public class CastReconnectWatcherTests
     Action? onFailureWarned = null)
   {
     _host.Clock = _time;
-    var watcher = new CastReconnectWatcher(
+    var watcher = _watcher = new CastReconnectWatcher(
       _host, Device(), Mark, schedule ?? DefaultSchedule, _time, logger ?? NullLogger.Instance, start, onConnected,
       onFailureWarned);
     var started = _time.GetUtcNow();
@@ -709,9 +753,9 @@ public class CastReconnectWatcherTests
 
     public bool KeepResult = true;
 
-    public Task<bool> TryKeepForCastChoiceAsync()
+    public Task<bool> TryKeepForCastChoiceAsync(bool castPickPending)
     {
-      Calls.Add("keep");
+      Calls.Add(castPickPending ? "keep-for-pick" : "keep");
       return Task.FromResult(KeepResult);
     }
   }

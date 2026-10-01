@@ -583,7 +583,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     Assert.True(_castOutput.IsHoldingForReceiverConfirmation); // …and still untouched
 
     await _engine.SetActiveOutputAsync("google-cast"); // the user's pick
-    Assert.True(await host.TryKeepForCastChoiceAsync().WaitAsync(HangGuard));
+    Assert.True(await host.TryKeepForCastChoiceAsync(castPickPending: false).WaitAsync(HangGuard));
 
     Assert.Equal(AudioOutputState.Streaming, _castOutput.State);
     Assert.False(_castOutput.IsHoldingForReceiverConfirmation);
@@ -611,7 +611,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     await Assert.ThrowsAnyAsync<OperationCanceledException>(
       () => host.ConnectAndStartAsync(Device(Port(listener)), cts.Token).WaitAsync(HangGuard));
 
-    Assert.False(await host.TryKeepForCastChoiceAsync().WaitAsync(HangGuard));
+    Assert.False(await host.TryKeepForCastChoiceAsync(castPickPending: false).WaitAsync(HangGuard));
     Assert.NotEqual(AudioOutputState.Streaming, _castOutput.State);
     await host.TearDownCastAsync().WaitAsync(HangGuard);
     Assert.Null(_castOutput.ConnectedDevice);
@@ -923,6 +923,6 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     public Task TearDownCastAsync() => Task.CompletedTask;
     public Task<bool> TearDownCastUnlessCastActiveAsync() => Task.FromResult(true);
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
-    public Task<bool> TryKeepForCastChoiceAsync() => Task.FromResult(false);
+    public Task<bool> TryKeepForCastChoiceAsync(bool castPickPending) => Task.FromResult(false);
   }
 }

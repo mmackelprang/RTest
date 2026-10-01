@@ -72,6 +72,16 @@ public class DevicesController : ControllerBase
     _castReconnect?.CancelCastReconnectAsync() ?? Task.CompletedTask;
 
   /// <summary>
+  /// AUD-85 (review MEDIUM-1). The Cast pick's version of <see cref="CancelCastReconnectAsync"/>:
+  /// a watcher reconnecting the picked device keeps its connection for the pick, and the wait is
+  /// long enough (15 s) to let a reconnect that ignores cancellation finish. True when no watcher
+  /// is still running; false when the bound passed first — the Cast output is then still the
+  /// watcher's, and the caller must not read or touch it. Never throws.
+  /// </summary>
+  private Task<bool> FinishCastReconnectForCastPickAsync(string? deviceId) =>
+    _castReconnect?.CancelCastReconnectForCastPickAsync(deviceId) ?? Task.FromResult(true);
+
+  /// <summary>
   /// Gets all available audio output devices.
   /// </summary>
   /// <returns>List of output devices.</returns>
@@ -628,6 +638,9 @@ public class DevicesController : ControllerBase
   /// Connects to a specific Google Cast device.
   /// </summary>
   /// <remarks>
+  /// First waits (up to 15 s) for a running Cast reconnect watcher (AUD-37) to finish; a watcher
+  /// reconnecting the requested device keeps its connection for this pick, so the request then
+  /// takes the already-streaming path. Returns 409 when the watcher is still running at the bound.
   /// Returns 200 without reconnecting when the output is already streaming to the requested
   /// device (it still re-saves the default, and promotes Cast through the output gate when an
   /// audio engine is available).
@@ -656,7 +669,12 @@ public class DevicesController : ControllerBase
     [FromBody] ConnectCastDeviceRequest request,
     CancellationToken cancellationToken)
   {
-    await CancelCastReconnectAsync();
+    // AUD-85 (review MEDIUM-1). Before anything reads the Cast output: a reconnect watcher still
+    // running owns it, and a read taken while it connects (State Connecting, or a connection about
+    // to be torn down) answers for the watcher, not for the user. A watcher reconnecting this same
+    // device keeps its connection for the pick and switches to it, which the already-streaming
+    // path below then reports as 200.
+    var reconnectFinished = await FinishCastReconnectForCastPickAsync(request.DeviceId);
     if (_castOutput == null)
     {
       return StatusCode(503, new { error = "Google Cast output not available" });
@@ -666,6 +684,15 @@ public class DevicesController : ControllerBase
         string.IsNullOrWhiteSpace(request.IpAddress))
     {
       return BadRequest(new { error = "DeviceId and IpAddress are required" });
+    }
+
+    if (!reconnectFinished)
+    {
+      // The watcher is still inside a step that ignores cancellation. Nothing here has touched
+      // the outputs; if it was reconnecting this device it still keeps its connection and
+      // switches to it when it comes out, otherwise it removes what it made.
+      _logger.LogWarning("Cast connect refused: the automatic Cast reconnect is still finishing");
+      return Conflict(new { error = "Cast output is busy reconnecting; try again shortly" });
     }
 
     // AUD-85: another party (e.g. the fire-and-forget auto-connect started by

@@ -36,11 +36,17 @@ public class DevicesControllerCastReconnectTests : IClassFixture<CustomWebApplic
   }
 
   [Fact]
-  public async Task ConnectToCastDevice_CancelsTheReconnectFirst()
+  public async Task ConnectToCastDevice_CancelsTheReconnectFirst_AsAPickOfItsDevice()
   {
-    await CreateController().ConnectToCastDevice(new ConnectCastDeviceRequest(), CancellationToken.None);
+    // AUD-85 (review MEDIUM-1): the pick-aware cancel, which keeps a same-device reconnect's
+    // connection and waits the longer bound — not the short one. Behaviour:
+    // DevicesControllerCastPickReconnectTests.
+    _reconnect.Setup(r => r.CancelCastReconnectForCastPickAsync(It.IsAny<string?>())).ReturnsAsync(true);
 
-    _reconnect.Verify(r => r.CancelCastReconnectAsync(), Times.Once);
+    await CreateController().ConnectToCastDevice(new ConnectCastDeviceRequest { DeviceId = "cast-a" }, CancellationToken.None);
+
+    _reconnect.Verify(r => r.CancelCastReconnectForCastPickAsync("cast-a"), Times.Once);
+    _reconnect.Verify(r => r.CancelCastReconnectAsync(), Times.Never);
   }
 
   [Fact]

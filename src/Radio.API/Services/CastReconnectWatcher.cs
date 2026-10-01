@@ -149,11 +149,17 @@ internal interface ICastReconnectHost
 
   /// <summary>
   /// After a cancelled run: when the published Cast connection is still the one this host's
-  /// connect made, the active output is Cast, and the service is not stopping, confirms the
-  /// receiver, starts that connection if it is not streaming, and keeps it — true. False when any
-  /// of those does not hold (nothing is done) or the start failed. Never throws.
+  /// connect made, the active output is Cast (not required when <paramref name="castPickPending"/>),
+  /// and the service is not stopping, confirms the receiver, starts that connection if it is not
+  /// streaming, and keeps it — true. False when any of those does not hold (nothing is done) or the
+  /// start failed. Never throws.
   /// </summary>
-  Task<bool> TryKeepForCastChoiceAsync();
+  /// <param name="castPickPending">
+  /// AUD-85 (review MEDIUM-1): the cancel was a Cast pick of this device, which has not promoted Cast
+  /// yet — the watcher switches the output after this returns true. Like the watcher's own reconnect,
+  /// the start then runs while the local output is still active, until that switch.
+  /// </param>
+  Task<bool> TryKeepForCastChoiceAsync(bool castPickPending);
 
   /// <summary>
   /// Switches the active output to Cast only if no output selection has been made since the
@@ -198,16 +204,19 @@ internal interface ICastReconnectHost
 /// a run checks that no output has been chosen since the drop and that nobody else owns the Cast
 /// output (connected, connecting or stopping). Those are checks, not locks. Two things cover the
 /// moment between a check and the connect. First, the user-facing output and Cast actions
-/// (<c>DevicesController</c>) cancel the watcher and wait for it — up to a bound, after which they
-/// proceed regardless — before touching Cast. Second, the watcher only ever tears down a
+/// (<c>DevicesController</c>) cancel the watcher and wait for it before touching Cast: an output
+/// pick or a disconnect waits up to a short bound and then proceeds regardless; a Cast pick
+/// (<c>cast/connect</c>) waits up to a longer one and, if the run is still going at it, answers 409
+/// without touching anything (AUD-85 review MEDIUM-1). Second, the watcher only ever tears down a
 /// connection its own connect published and that no newer connect has claimed since, so a
 /// connection someone else made is never removed by it. Neither makes a collision impossible:
-/// a user connect that starts while the watcher's connect is still on the network (past the
-/// bound) is refused by <c>GoogleCastOutput.ConnectAsync</c> while the watcher's is
-/// <c>Connecting</c>, and that refusal is the user's request failing (AUD-85). A choice of
-/// output made in that moment is caught by the atomic, conditional switch back to Cast, which
-/// refuses — or, when the choice cancelled the run, by the cancellation path, which keeps (and
-/// starts) the run's own connection when the choice was Cast and removes it otherwise (review M3).
+/// an output pick that proceeds past the short bound while the watcher's connect is still on the
+/// network races it, and a Cast connect made then is refused by <c>GoogleCastOutput.ConnectAsync</c>
+/// while the watcher's is <c>Connecting</c>. A choice of output made in that moment is caught by
+/// the atomic, conditional switch back to Cast, which refuses — or, when the choice cancelled the
+/// run, by the cancellation path (<see cref="EndCancelledAfterConnectAsync"/>), which keeps the
+/// run's own connection for a Cast pick of its device or a promotion of Cast, and otherwise removes
+/// it, atomically with the output gate (review M3; AUD-85 review MEDIUM-2).
 /// After its connect returns, the run checks before each step that the connection is still the one
 /// its connect published: a superseded connect returns normally with nothing of ours published
 /// (review M2). The run makes output selections in exactly two places: that switch back to Cast
@@ -287,6 +296,20 @@ internal sealed class CastReconnectWatcher
   /// has reached, doubled (or the cap, after a failed connect).
   /// </summary>
   public TimeSpan NextDelay { get; private set; }
+
+  /// <summary>The device this watcher is reconnecting to.</summary>
+  public string DeviceId => _device.Id;
+
+  // AUD-85 (review MEDIUM-1). Set before the run's token is cancelled, by a Cast pick of this
+  // device; read only on the cancelled-after-connect path.
+  private volatile bool _keepForCastPick;
+
+  /// <summary>
+  /// AUD-85 (review MEDIUM-1). Marks the cancellation that follows as a Cast pick of this watcher's
+  /// own device: if the run has a connection up when it observes the cancellation, it keeps it and
+  /// switches the output back to Cast instead of removing it. Call before cancelling the run.
+  /// </summary>
+  public void KeepConnectionForCastPick() => _keepForCastPick = true;
 
   /// <summary>Runs the watcher to one of the <see cref="CastReconnectOutcome"/>s. Never throws.</summary>
   public async Task<CastReconnectOutcome> RunAsync(CancellationToken ct)
@@ -412,61 +435,7 @@ internal sealed class CastReconnectWatcher
         // drop of this connection is recognised as part of the same episode however soon it comes.
         _onConnected?.Invoke(NextDelay);
 
-        bool switched;
-        try
-        {
-          // CancellationToken.None: once connected, the switch must be decided, not abandoned
-          // half-way — an abandoned connect would leave Cast streaming beside the local speakers.
-          switched = await _host.TrySwitchToCastAsync(_mark, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-          _logger.LogWarning(ex, "Cast: reconnected to \"{Name}\" but could not switch the output back to Cast", name);
-          await _host.TearDownCastAsync().ConfigureAwait(false);
-
-          // The gate mutes local before activating the Cast/HTTP outputs; a throw there leaves
-          // the active output local and muted.
-          await _host.RestoreLocalOutputAsync(_mark).ConfigureAwait(false);
-          return CastReconnectOutcome.SwitchFailed;
-        }
-
-        if (!switched)
-        {
-          var active = _host.ActiveOutputId;
-          if (string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase))
-          {
-            // Someone picked Cast since the drop. Nothing is torn down: if the connection
-            // standing is ours, it is now the one serving that choice; if it is not, it is theirs.
-            _logger.LogInformation(
-              "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — leaving the connection to that choice",
-              name);
-            return CastReconnectOutcome.OutputChangedByUser;
-          }
-
-          _logger.LogInformation(
-            "Cast: \"{Name}\" is back, but the output was changed to {ActiveOutput} since the drop — not switching back; disconnecting Cast",
-            name, active ?? "<none>");
-
-          // Conditional, atomically with the gate (AUD-85 review MEDIUM-2): a Cast pick landing
-          // after the read above makes it decline, and the connection — started — then serves that
-          // pick, as in the branch above.
-          await _host.TearDownCastUnlessCastActiveAsync().ConfigureAwait(false);
-          return CastReconnectOutcome.OutputChangedByUser;
-        }
-
-        if (!_host.IsCastStreaming)
-        {
-          // Lost again between the start and the switch. The loss was reported while the
-          // output was still local, so the AUD-84 recovery may have declined it; the owner
-          // re-runs that recovery so the local speakers are not left muted.
-          _logger.LogInformation(
-            "Cast: \"{Name}\" dropped again right after reconnecting — returning to the local output", name);
-          return CastReconnectOutcome.LostAgainAfterSwitch;
-        }
-
-        _logger.LogInformation(
-          "Cast: \"{Name}\" is back — reconnected and switched the output back to Cast", name);
-        return CastReconnectOutcome.Reconnected;
+        return await SwitchBackToCastAsync(name).ConfigureAwait(false);
       }
     }
     catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -483,20 +452,112 @@ internal sealed class CastReconnectWatcher
   }
 
   /// <summary>
-  /// The run was cancelled after its connect was made (or while the host was finishing it). If
-  /// the cancelling action was a pick of Cast — the active output is now <c>google-cast</c> —
-  /// the connection is what serves that choice: the host keeps it (and starts it if it is not
-  /// streaming), as the refused-switch branch does for a Cast pick (review M3). Otherwise the
-  /// action was a local pick, a disconnect or shutdown: only what this run made is removed.
+  /// The switch back to Cast once this run's connection is up and started: conditional on no output
+  /// selection since the drop (<see cref="ICastReconnectHost.TrySwitchToCastAsync"/>).
+  /// </summary>
+  private async Task<CastReconnectOutcome> SwitchBackToCastAsync(string name)
+  {
+    bool switched;
+    try
+    {
+      // CancellationToken.None: once connected, the switch must be decided, not abandoned
+      // half-way — an abandoned connect would leave Cast streaming beside the local speakers.
+      switched = await _host.TrySwitchToCastAsync(_mark, CancellationToken.None).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Cast: reconnected to \"{Name}\" but could not switch the output back to Cast", name);
+      await _host.TearDownCastAsync().ConfigureAwait(false);
+
+      // The gate mutes local before activating the Cast/HTTP outputs; a throw there leaves
+      // the active output local and muted.
+      await _host.RestoreLocalOutputAsync(_mark).ConfigureAwait(false);
+      return CastReconnectOutcome.SwitchFailed;
+    }
+
+    if (!switched)
+    {
+      var active = _host.ActiveOutputId;
+      if (string.Equals(active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        // Someone picked Cast since the drop. Nothing is torn down: if the connection
+        // standing is ours, it is now the one serving that choice; if it is not, it is theirs.
+        _logger.LogInformation(
+          "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — leaving the connection to that choice",
+          name);
+        return CastReconnectOutcome.OutputChangedByUser;
+      }
+
+      _logger.LogInformation(
+        "Cast: \"{Name}\" is back, but the output was changed to {ActiveOutput} since the drop — not switching back; disconnecting Cast",
+        name, active ?? "<none>");
+
+      // Conditional, atomically with the gate (AUD-85 review MEDIUM-2): a Cast pick landing
+      // after the read above makes it decline, and the connection — started — then serves that
+      // pick, as in the branch above.
+      await _host.TearDownCastUnlessCastActiveAsync().ConfigureAwait(false);
+      return CastReconnectOutcome.OutputChangedByUser;
+    }
+
+    if (!_host.IsCastStreaming)
+    {
+      // Lost again between the start and the switch. The loss was reported while the
+      // output was still local, so the AUD-84 recovery may have declined it; the owner
+      // re-runs that recovery so the local speakers are not left muted.
+      _logger.LogInformation(
+        "Cast: \"{Name}\" dropped again right after reconnecting — returning to the local output", name);
+      return CastReconnectOutcome.LostAgainAfterSwitch;
+    }
+
+    _logger.LogInformation(
+      "Cast: \"{Name}\" is back — reconnected and switched the output back to Cast", name);
+    return CastReconnectOutcome.Reconnected;
+  }
+
+  /// <summary>
+  /// The run was cancelled after its connect was made (or while the host was finishing it). Three
+  /// cases, in this order:
+  /// <list type="number">
+  /// <item>The cancel was a Cast pick of THIS device (<see cref="KeepConnectionForCastPick"/>, set by
+  /// <c>POST /api/devices/cast/connect</c> through <c>ICastReconnectControl.CancelCastReconnectForCastPickAsync</c>,
+  /// which then waits for this run): the host keeps and starts the connection, and the run switches
+  /// the output back to Cast exactly as an uncancelled reconnect would — conditional on no output
+  /// selection since the drop — so the pick finds Cast streaming to its device and answers 200.</item>
+  /// <item>Cast is the active output — a promotion through the gate, e.g. <c>POST /api/devices/output</c>
+  /// with <c>google-cast</c>, which cancels with the short bound and then promotes: the connection is
+  /// what serves that choice, and the host keeps (and starts) it, as the refused-switch branch does
+  /// for a Cast pick (review M3).</item>
+  /// <item>Otherwise (a local pick, a disconnect, shutdown, or a pick of another Cast device): only
+  /// what this run made is removed — conditionally, atomically with the gate, so a promotion of Cast
+  /// landing in the meantime turns this into case 2 instead (AUD-85 review MEDIUM-2).</item>
+  /// </list>
   /// </summary>
   /// <remarks>
-  /// Without the keep, a Cast pick that lost the cancel-bound race left the console silent: the
-  /// pick made Cast active and muted local while our connect was <c>Connecting</c> (so its own
-  /// activation was a no-op and its auto-connect was refused), and the run then removed the only
-  /// connection there was.
+  /// Without case 2, a promotion of Cast that lost the cancel-bound race left the console silent: it
+  /// made Cast active and muted local while our connect was <c>Connecting</c> (so its activation was
+  /// a no-op), and the run then removed the only connection there was. Without case 1, a
+  /// <c>cast/connect</c> pick — which promotes only after the connect, so case 2 never sees Cast
+  /// active — had the run tear down the very speaker the user picked (AUD-85 review MEDIUM-1).
   /// </remarks>
   private async Task<CastReconnectOutcome> EndCancelledAfterConnectAsync(string name)
   {
+    if (_keepForCastPick)
+    {
+      if (await _host.TryKeepForCastChoiceAsync(castPickPending: true).ConfigureAwait(false))
+      {
+        _logger.LogInformation(
+          "Cast: \"{Name}\" was picked while reconnecting to it — keeping the reconnect's connection for that pick", name);
+
+        // Not recorded as a watcher-made reconnect (_onConnected): the pick is the user's own
+        // action, and it has already reset the episode and the hourly count.
+        return await SwitchBackToCastAsync(name).ConfigureAwait(false);
+      }
+
+      _logger.LogDebug(
+        "Cast: \"{Name}\" was picked while reconnecting to it, but the reconnect's connection could not be kept (no longer ours, or it would not start)",
+        name);
+    }
+
     if (!string.Equals(_host.ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
     {
       // Not a Cast pick as far as this read can tell. The tear-down re-checks atomically with the
@@ -511,7 +572,7 @@ internal sealed class CastReconnectWatcher
     }
 
     // Cast is the active output: a Cast pick.
-    if (await _host.TryKeepForCastChoiceAsync().ConfigureAwait(false))
+    if (await _host.TryKeepForCastChoiceAsync(castPickPending: false).ConfigureAwait(false))
     {
       _logger.LogInformation(
         "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — keeping the connection for that choice",

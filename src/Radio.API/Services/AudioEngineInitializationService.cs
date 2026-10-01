@@ -284,6 +284,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   // the run CancelCastReconnectAsync last logged stopping, so a second user action while the same
   // run is still finishing adds no second line (review L7). Both guarded by _reconnectGate.
   private ChromecastDeviceInfo? _reconnectDevice;
+  private CastReconnectWatcher? _reconnectWatcher; // AUD-85: the watcher behind _reconnectCts
   private CancellationTokenSource? _reconnectCancelLoggedFor;
   private TimeProvider? _reconnectTimeProvider;
 
@@ -349,6 +350,23 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   internal TimeSpan CastReconnectCancelBound { get; set; } = TimeSpan.FromSeconds(3);
 
   /// <summary>
+  /// How long <see cref="CancelCastReconnectForCastPickAsync"/> waits for a running watcher to
+  /// finish. Real time: it bounds a user's request. Test-only setter (kind A — a bound a test may
+  /// shorten); production uses 15 s.
+  /// </summary>
+  /// <remarks>
+  /// AUD-85 (review MEDIUM-1). Longer than <see cref="CastReconnectCancelBound"/> because a Cast pick
+  /// must not race the watcher's connect, and the parts of a reconnect that ignore cancellation
+  /// outlast 3 s: SharpCaster's <c>ConnectChromecast</c> has no bound of its own, and the
+  /// uninterruptible start's media load waits up to 10 s (<c>GoogleCastOutput</c>'s
+  /// <c>LoadAsync(...).WaitAsync(10 s)</c>). Capped at 15 s — half of Radio.Web's 30 s timeout for this request
+  /// (<c>Radio.Web/Program.cs</c>, the <c>DevicesApiService</c> client) — so a pick that waited the
+  /// whole bound still has the other half for its own connect and start before the UI gives up.
+  /// Not <c>StartupConnectTimeoutSeconds</c> (40 s): that outlasts the UI's request.
+  /// </remarks>
+  internal TimeSpan CastPickReconnectWaitBound { get; set; } = TimeSpan.FromSeconds(15);
+
+  /// <summary>
   /// Replaces the probe/connect/switch implementation the watcher drives. Null in production,
   /// where the watcher gets <see cref="ServiceCastReconnectHost"/>.
   /// <para>
@@ -399,12 +417,24 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   internal ICastReconnectHost CreateProductionCastReconnectHost() => new ServiceCastReconnectHost(this);
 
   /// <inheritdoc />
-  public async Task CancelCastReconnectAsync()
+  public Task CancelCastReconnectAsync() => CancelCastReconnectCoreAsync(pickedDeviceId: null, CastReconnectCancelBound);
+
+  /// <inheritdoc />
+  public Task<bool> CancelCastReconnectForCastPickAsync(string? deviceId) =>
+    CancelCastReconnectCoreAsync(string.IsNullOrWhiteSpace(deviceId) ? null : deviceId, CastPickReconnectWaitBound);
+
+  /// <summary>
+  /// Ends the current reconnect episode, cancels the running watcher (marking the cancel as a pick
+  /// of the watcher's own device when <paramref name="pickedDeviceId"/> names it), and waits up to
+  /// <paramref name="bound"/> for the run to finish. True when no run is still going on return.
+  /// </summary>
+  private async Task<bool> CancelCastReconnectCoreAsync(string? pickedDeviceId, TimeSpan bound)
   {
     CancellationTokenSource? cts;
     Task<CastReconnectOutcome> run;
     string? deviceName = null;
     var logStop = false;
+    var keepForPick = false;
     lock (_reconnectGate)
     {
       // An explicit user action: whatever drops next starts a fresh window, uncapped.
@@ -412,6 +442,17 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       _watcherReconnects.Clear();
       cts = _reconnectCts;
       run = CastReconnectTask;
+
+      // AUD-85 (review MEDIUM-1): a Cast pick of the very device the watcher is reconnecting must
+      // not have the run tear that connection down; the watcher keeps it and switches back to Cast.
+      // Marked before the cancel below, so the run sees it whenever it observes the cancellation.
+      var watcher = _reconnectWatcher;
+      if (pickedDeviceId != null && watcher != null && cts != null &&
+          string.Equals(watcher.DeviceId, pickedDeviceId, StringComparison.Ordinal))
+      {
+        watcher.KeepConnectionForCastPick();
+        keepForPick = true;
+      }
 
       // Review L7: once per run — only the call that finds this run not yet cancelled and not
       // already logged. A second action while the same run is still finishing logs nothing.
@@ -427,20 +468,30 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
     if (run.IsCompleted)
     {
-      return;
+      return true;
     }
 
     // Logged only when a watcher was still running, so the controller calling this on every
     // output and Cast action adds no line otherwise. A user's pick of another output reaches the
     // watcher through here (DevicesController cancels first), so without this line the file sink
     // would show nothing for "the user moved on" — the watcher's own "no longer trying" line only
-    // fires for an output change it observes itself. A Cast pick that lands while the watcher
-    // has already connected may still keep that connection (see the watcher's keep branch).
+    // fires for an output change it observes itself. A connection the watcher has already made is
+    // still kept when the action is a Cast pick of the same device (keepForPick) or a promotion of
+    // Cast through the gate (see the watcher's EndCancelledAfterConnectAsync).
     if (logStop)
     {
-      _logger.LogInformation(
-        "Cast: no longer trying to reconnect to \"{Name}\" — stopped by a user output or Cast action",
-        deviceName ?? "(unknown device)");
+      if (keepForPick)
+      {
+        _logger.LogInformation(
+          "Cast: \"{Name}\" was picked while reconnecting to it — the pick takes over the reconnect",
+          deviceName ?? "(unknown device)");
+      }
+      else
+      {
+        _logger.LogInformation(
+          "Cast: no longer trying to reconnect to \"{Name}\" — stopped by a user output or Cast action",
+          deviceName ?? "(unknown device)");
+      }
     }
 
     try
@@ -455,8 +506,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     try
     {
       // Bounded: a watcher inside a SharpCaster connect does not observe cancellation. The
-      // caller proceeds regardless; the watcher then removes only a connection it made itself.
-      await Task.WhenAny(run, Task.Delay(CastReconnectCancelBound)).ConfigureAwait(false);
+      // caller decides what to do when it is still running (the short bound proceeds; a Cast
+      // pick answers 409); the watcher then removes only a connection it made itself.
+      await Task.WhenAny(run, Task.Delay(bound)).ConfigureAwait(false);
     }
     catch (Exception ex)
     {
@@ -466,9 +518,12 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     if (!run.IsCompleted)
     {
       _logger.LogDebug(
-        "Cast reconnect: watcher still finishing after {Bound} s — proceeding with the user's action",
-        CastReconnectCancelBound.TotalSeconds);
+        "Cast reconnect: watcher still finishing after {Bound} s — returning to the user's action",
+        bound.TotalSeconds);
+      return false;
     }
+
+    return true;
   }
 
   /// <summary>
@@ -565,7 +620,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       _reconnectCts = cts;
       _reconnectDevice = device;
 
-      var watcher = new CastReconnectWatcher(
+      var watcher = _reconnectWatcher = new CastReconnectWatcher(
         CastReconnectHostOverride ?? new ServiceCastReconnectHost(this),
         device,
         mark,
@@ -647,6 +702,11 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         if (ReferenceEquals(_reconnectCts, cts))
         {
           _reconnectCts = null;
+        }
+
+        if (ReferenceEquals(_reconnectWatcher, watcher))
+        {
+          _reconnectWatcher = null;
         }
       }
 
@@ -951,7 +1011,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       }
     }
 
-    public async Task<bool> TryKeepForCastChoiceAsync()
+    public async Task<bool> TryKeepForCastChoiceAsync(bool castPickPending)
     {
       try
       {
@@ -959,7 +1019,7 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
         var ours = _ownDevice;
         if (cast == null || ours == null || !OwnsPublishedConnection(cast) ||
             _svc._serviceStoppingCts.IsCancellationRequested ||
-            !string.Equals(ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+            (!castPickPending && !string.Equals(ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase)))
         {
           return false;
         }
