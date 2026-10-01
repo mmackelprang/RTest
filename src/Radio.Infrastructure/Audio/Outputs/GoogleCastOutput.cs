@@ -3537,7 +3537,16 @@ public class GoogleCastOutput : AudioOutputBase
     Task<(bool? Applied, float? LevelBeforeUnmute)> drain;
     lock (_consoleMuteLock)
     {
-      _pendingConsoleMute = request;
+      // Hostile review M3: a re-assert fills an empty slot or replaces another re-assert, never a
+      // console request. A console request waiting there is the console's own, newer word: a mute
+      // already does what the re-assert would, and an unmute must not be lost (the re-assert would
+      // then be dropped at its turn, the console being unmuted, and the unmute with its held level
+      // gone with it). The re-assert joins the drain either way.
+      if (!(request.Reassert && _pendingConsoleMute is { Reassert: false }))
+      {
+        _pendingConsoleMute = request;
+      }
+
       drain = _consoleMuteDrain ??= Task.Run(DrainConsoleMuteAsync);
     }
 

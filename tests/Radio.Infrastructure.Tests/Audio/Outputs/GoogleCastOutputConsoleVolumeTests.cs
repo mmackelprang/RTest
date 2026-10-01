@@ -919,6 +919,49 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Empty(h.External);
   }
 
+  // Hostile review M3. The console mute drain has one pending slot, latest wins. A re-assert queued
+  // while a console UNMUTE was waiting there used to replace it; the re-assert is then dropped (the
+  // console is unmuted by its turn), so the console's unmute — and the held level it carries — was
+  // lost. Driven by the mute gate: the re-assert is raised while a console mute holds the drain.
+  [Fact]
+  public async Task AMuteReassert_NeverReplacesAPendingConsoleUnmute()
+  {
+    await using var h = NewHarness();
+    var consoleMuted = false;
+    h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    var target = h.Target();
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation); // a recent level push of ours
+    h.ClearCommands();
+
+    consoleMuted = true;
+    h.MuteGate = CastConsoleTestHarness.NewTcs();
+    var mute = h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation);
+    await h.MuteSendEntered.Task;                                    // the console mute holds the drain
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.50f, target.Generation); // held: the console is muted
+    Assert.Equal(0.50f, h.Output.HeldConsoleVolume(target.Generation)!.Value, 3);
+
+    consoleMuted = false;
+    var unmute = h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation); // pending
+
+    // The speaker reports itself unmuted at our 0.45 while the console mute is still being sent:
+    // the level-echo rule re-asserts the mute (a console mute is in flight).
+    h.RaiseStatus(0.45, muted: false);
+
+    h.MuteGate.SetResult();
+    await mute;
+    var result = await unmute;
+    await h.Output.LastMuteReassertForTests;
+
+    Assert.True(result.Acknowledged);
+    Assert.Equal(0.50f, result.LevelBeforeUnmute!.Value, 3);
+    Assert.Equal(new[] { "mute", "vol", "unmute" }, h.Kinds());
+    Assert.Null(h.Output.HeldConsoleVolume(target.Generation));
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.False(h.DeviceMuted);
+    Assert.Empty(h.External);
+  }
+
   // Hostile review M2. A console mute while a console level is waiting on SharpCaster's send lock:
   // the SET_MUTE reaches the device first (it mutes), then the SET_VOLUME (it unmutes the speaker
   // again), and the level's reply arrives BEFORE the mute's acknowledgement has been processed — so
