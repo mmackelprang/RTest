@@ -169,6 +169,16 @@ internal interface ICastReconnectHost
   Task TearDownCastAsync();
 
   /// <summary>
+  /// <see cref="TearDownCastAsync"/>, but only while Cast is NOT the active output (AUD-85 review
+  /// MEDIUM-2). On the production engine the check and the tear-down run under one acquisition of
+  /// the output lock, so a promotion of Cast cannot land between them: either it lands first and
+  /// this declines, or it waits until the tear-down has finished. False, having done nothing (the
+  /// connection, if ours, stays ours), when Cast is the active output; true otherwise. Best-effort;
+  /// never throws.
+  /// </summary>
+  Task<bool> TearDownCastUnlessCastActiveAsync();
+
+  /// <summary>
   /// After a switch to Cast threw: if the active output is not Cast, re-applies the recovery's
   /// local output through the gate (when it is still the active one), so local is not left
   /// muted by a switch that muted it before failing. Best-effort; never throws.
@@ -436,7 +446,11 @@ internal sealed class CastReconnectWatcher
           _logger.LogInformation(
             "Cast: \"{Name}\" is back, but the output was changed to {ActiveOutput} since the drop — not switching back; disconnecting Cast",
             name, active ?? "<none>");
-          await _host.TearDownCastAsync().ConfigureAwait(false);
+
+          // Conditional, atomically with the gate (AUD-85 review MEDIUM-2): a Cast pick landing
+          // after the read above makes it decline, and the connection — started — then serves that
+          // pick, as in the branch above.
+          await _host.TearDownCastUnlessCastActiveAsync().ConfigureAwait(false);
           return CastReconnectOutcome.OutputChangedByUser;
         }
 
@@ -483,25 +497,38 @@ internal sealed class CastReconnectWatcher
   /// </remarks>
   private async Task<CastReconnectOutcome> EndCancelledAfterConnectAsync(string name)
   {
-    if (string.Equals(_host.ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+    if (!string.Equals(_host.ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
     {
-      if (await _host.TryKeepForCastChoiceAsync().ConfigureAwait(false))
+      // Not a Cast pick as far as this read can tell. The tear-down re-checks atomically with the
+      // output gate (AUD-85 review MEDIUM-2): a promotion of Cast landing after the read above
+      // makes it decline, and the connection is then kept for that choice below rather than
+      // removed from under an output that is now Cast with local muted.
+      if (await _host.TearDownCastUnlessCastActiveAsync().ConfigureAwait(false))
       {
-        _logger.LogInformation(
-          "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — keeping the connection for that choice",
-          name);
-        return CastReconnectOutcome.OutputChangedByUser;
+        _logger.LogDebug("Cast: reconnect to \"{Name}\" cancelled — removed any connection it made", name);
+        return CastReconnectOutcome.Cancelled;
       }
-
-      // Not ours to keep (superseded — then whoever superseded it serves the choice — or the
-      // service is stopping) or its start failed. Review L4: Warning — when the start failed, Cast
-      // is the active output, local is muted and no connection is left, so the console is silent.
-      // Once per user action, never per retry.
-      _logger.LogWarning(
-        "Cast: the output was switched to Cast while reconnecting to \"{Name}\", but the reconnect's connection was not kept for it (no longer ours, or it would not start)",
-        name);
     }
 
+    // Cast is the active output: a Cast pick.
+    if (await _host.TryKeepForCastChoiceAsync().ConfigureAwait(false))
+    {
+      _logger.LogInformation(
+        "Cast: the output was switched to Cast while reconnecting to \"{Name}\" — keeping the connection for that choice",
+        name);
+      return CastReconnectOutcome.OutputChangedByUser;
+    }
+
+    // Not ours to keep (superseded — then whoever superseded it serves the choice — or the
+    // service is stopping) or its start failed. Review L4: Warning — when the start failed, Cast
+    // is the active output, local is muted and no connection is left, so the console is silent.
+    // Once per user action, never per retry.
+    _logger.LogWarning(
+      "Cast: the output was switched to Cast while reconnecting to \"{Name}\", but the reconnect's connection was not kept for it (no longer ours, or it would not start)",
+      name);
+
+    // Reached only when Cast is the active output and the keep failed: unconditional, as before —
+    // a connection that would not start (or is not ours) is not left half-made.
     _logger.LogDebug("Cast: reconnect to \"{Name}\" cancelled — removing any connection it made", name);
     await _host.TearDownCastAsync().ConfigureAwait(false);
     return CastReconnectOutcome.Cancelled;

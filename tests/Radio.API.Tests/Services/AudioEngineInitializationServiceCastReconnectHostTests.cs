@@ -618,6 +618,84 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
   }
 
   [Fact]
+  public async Task TheConditionalTearDown_WaitsForAPromotionOfCastInTheGate_AndThenDeclines()
+  {
+    // AUD-85 review MEDIUM-2. A promotion of Cast is inside the output gate — local already muted,
+    // the HTTP output activating, _activeOutputId not yet assigned — when the cancelled watcher
+    // tears down. A read of ActiveOutputId at that moment says "speakers", and a tear-down acting
+    // on it removes the connection the promotion is about to make active: Cast active, local
+    // muted, nothing connected. The conditional tear-down must instead wait for the gate and then
+    // decline. The promotion is parked at the HTTP activation (a rendezvous, not a race).
+    using var listener = StartListener();
+    await _engine.SetActiveOutputAsync("speakers");
+    var engineCast = new Mock<IAudioOutput>();
+    engineCast.SetupGet(c => c.State).Returns(AudioOutputState.Streaming); // a tear-down would StopAsync it
+    var httpEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var httpGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    var http = new Mock<IAudioOutput>();
+    http.SetupGet(h => h.State).Returns(AudioOutputState.Ready);
+    http.Setup(h => h.StartAsync(It.IsAny<CancellationToken>())).Returns(async () =>
+    {
+      httpEntered.TrySetResult();
+      await httpGate.Task;
+    });
+    _engine.AttachOutputCoordination(engineCast.Object, http.Object, null);
+
+    // Our connection, left standing by a cancelled connect (as in CancelledByACastPick… above).
+    using var cts = new CancellationTokenSource();
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = async (_, ct) =>
+    {
+      await cts.CancelAsync();
+      ct.ThrowIfCancellationRequested();
+      return Array.Empty<string>();
+    };
+    var host = service.CreateProductionCastReconnectHost();
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), cts.Token).WaitAsync(HangGuard));
+    var ours = _castOutput.ConnectedDevice;
+    Assert.NotNull(ours);
+
+    var promotion = _engine.SetActiveOutputAsync("google-cast");
+    await httpEntered.Task.WaitAsync(HangGuard);
+    Assert.Equal("speakers", _engine.ActiveOutputId); // the window: not yet assigned
+
+    var tearDown = host.TearDownCastUnlessCastActiveAsync();
+    httpGate.SetResult();
+    await promotion.WaitAsync(HangGuard);
+
+    Assert.False(await tearDown.WaitAsync(HangGuard)); // declined: Cast is active
+    Assert.Equal("google-cast", _engine.ActiveOutputId);
+    Assert.Same(ours, _castOutput.ConnectedDevice);    // the connection the promotion serves
+    engineCast.Verify(c => c.StopAsync(It.IsAny<CancellationToken>()), Times.Never);
+  }
+
+  [Fact]
+  public async Task TheConditionalTearDown_WithLocalActive_RemovesOurConnection()
+  {
+    // The control for the test above.
+    using var listener = StartListener();
+    await _engine.SetActiveOutputAsync("speakers");
+    _engine.AttachOutputCoordination(_castOutput, null, null);
+    using var cts = new CancellationTokenSource();
+    var service = CreateService();
+    service.ReceiverApplicationsReadOverride = async (_, ct) =>
+    {
+      await cts.CancelAsync();
+      ct.ThrowIfCancellationRequested();
+      return Array.Empty<string>();
+    };
+    var host = service.CreateProductionCastReconnectHost();
+    await Assert.ThrowsAnyAsync<OperationCanceledException>(
+      () => host.ConnectAndStartAsync(Device(Port(listener)), cts.Token).WaitAsync(HangGuard));
+    Assert.NotNull(_castOutput.ConnectedDevice);
+
+    Assert.True(await host.TearDownCastUnlessCastActiveAsync().WaitAsync(HangGuard));
+
+    Assert.Null(_castOutput.ConnectedDevice);
+  }
+
+  [Fact]
   public async Task ReInitialisingTheOutput_EndsAHoldPlacedForTheConnectionItDiscards()
   {
     // LOW: a hold belongs to its connection. Re-initialising discards that connection.
@@ -843,6 +921,7 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
     public Task ConnectAndStartAsync(ChromecastDeviceInfo device, CancellationToken ct) => Task.CompletedTask;
     public Task<bool> TrySwitchToCastAsync(CastRecoveryMark mark, CancellationToken ct) => Task.FromResult(false);
     public Task TearDownCastAsync() => Task.CompletedTask;
+    public Task<bool> TearDownCastUnlessCastActiveAsync() => Task.FromResult(true);
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
     public Task<bool> TryKeepForCastChoiceAsync() => Task.FromResult(false);
   }

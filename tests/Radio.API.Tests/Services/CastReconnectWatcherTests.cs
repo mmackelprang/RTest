@@ -352,6 +352,26 @@ public class CastReconnectWatcherTests
   }
 
   [Fact]
+  public async Task CancelledWhileACastPromotionLandsBetweenTheCheckAndTheTearDown_KeepsTheConnection()
+  {
+    // AUD-85 review MEDIUM-2. The watcher reads the active output (local), then — before its
+    // tear-down — a gate call promotes Cast and mutes local. Tearing down then would leave Cast
+    // active with no connection: a silent console. The tear-down is conditional and atomic with the
+    // gate; it declines, and the connection is kept for that Cast choice.
+    using var cts = new CancellationTokenSource();
+    _host.Reachable = _ => true;
+    _host.OnConnect = _ => cts.Cancel(); // a user action cancelled the run while it was connecting
+    _host.OnConditionalTearDown = () => _host.Active = "google-cast"; // the promotion lands here
+
+    var outcome = await DriveAsync(Start(ct: cts.Token));
+
+    Assert.Equal(CastReconnectOutcome.OutputChangedByUser, outcome);
+    Assert.Equal(new[] { "connect", "teardown-declined", "keep" }, _host.Calls.Where(c => c != "probe").ToArray());
+    Assert.Equal(0, _host.TearDowns);
+    Assert.Equal(0, _host.Switches);
+  }
+
+  [Fact]
   public async Task ASupersededConnect_StandsDownAsCastBusy_WithoutTouchingTheCastOutput()
   {
     // Review M2: not our token — a newer connect or a disconnect took the output while ours was on
@@ -665,6 +685,26 @@ public class CastReconnectWatcherTests
       TearDowns++;
       Calls.Add("teardown");
       return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs at the start of the conditional tear-down, before its active-output check: where a
+    /// test lands a gate promotion "between the watcher's read and its tear-down".
+    /// </summary>
+    public Action? OnConditionalTearDown;
+
+    public Task<bool> TearDownCastUnlessCastActiveAsync()
+    {
+      OnConditionalTearDown?.Invoke();
+      if (string.Equals(Active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        Calls.Add("teardown-declined");
+        return Task.FromResult(false);
+      }
+
+      TearDowns++;
+      Calls.Add("teardown");
+      return Task.FromResult(true);
     }
 
     public bool KeepResult = true;

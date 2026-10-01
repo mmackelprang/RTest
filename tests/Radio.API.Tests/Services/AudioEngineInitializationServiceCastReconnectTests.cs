@@ -558,6 +558,17 @@ public class AudioEngineInitializationServiceCastReconnectTests
       return Task.CompletedTask;
     }
 
+    public Task<bool> TearDownCastUnlessCastActiveAsync()
+    {
+      if (string.Equals(Engine!._active, "google-cast", StringComparison.OrdinalIgnoreCase))
+      {
+        return Task.FromResult(false);
+      }
+
+      Interlocked.Increment(ref TearDowns);
+      return Task.FromResult(true);
+    }
+
     public Task RestoreLocalOutputAsync(CastRecoveryMark mark) => Task.CompletedTask;
 
     public int Keeps;

@@ -1120,8 +1120,21 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       return true;
     }
 
-    public async Task TearDownCastAsync()
+    public Task TearDownCastAsync() => TearDownCastCoreAsync(unlessCastActive: false);
+
+    public Task<bool> TearDownCastUnlessCastActiveAsync() => TearDownCastCoreAsync(unlessCastActive: true);
+
+    /// <summary>
+    /// The tear-down of this host's own published connection. With <paramref name="unlessCastActive"/>,
+    /// declines — returns false, touching nothing and keeping the connection ours — when Cast is the
+    /// active output; on the production engine that check and the tear-down run under one
+    /// acquisition of the output lock (<see cref="SoundFlowAudioEngine.TearDownCastOutputUnlessActiveAsync"/>),
+    /// so a promotion of Cast cannot land between them (AUD-85 review MEDIUM-2). Any other engine
+    /// gets a check-then-act, with a window between the two. True in every other case.
+    /// </summary>
+    private async Task<bool> TearDownCastCoreAsync(bool unlessCastActive)
     {
+      var declined = false;
       try
       {
         var cast = _svc._castOutput;
@@ -1130,16 +1143,45 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
           // Nothing of ours is published: our connect failed before publishing, or someone
           // else's connection (or connect) has replaced it. Theirs is not ours to remove.
           _svc._logger.LogDebug("Cast reconnect: no connection of ours to tear down — leaving the Cast output alone");
-          return;
+          return true;
         }
 
         if (_svc._audioEngine is SoundFlowAudioEngine engine)
         {
-          // Stop + disconnect, capped at 5 s, never throws.
-          await engine.TearDownCastOutputAsync(CancellationToken.None, automaticAttempt: true).ConfigureAwait(false);
+          if (unlessCastActive)
+          {
+            // Ownership re-checked under the lock: a connect may have replaced ours while this
+            // waited for it. Stop + disconnect, capped at 5 s, never throws.
+            var ours = false;
+            if (!await engine.TearDownCastOutputUnlessActiveAsync(
+                  () => ours = OwnsPublishedConnection(cast), CancellationToken.None, automaticAttempt: true)
+                .ConfigureAwait(false))
+            {
+              declined = true;
+              return false;
+            }
+
+            if (!ours)
+            {
+              _svc._logger.LogDebug("Cast reconnect: no connection of ours to tear down — leaving the Cast output alone");
+              return true;
+            }
+          }
+          else
+          {
+            // Stop + disconnect, capped at 5 s, never throws.
+            await engine.TearDownCastOutputAsync(CancellationToken.None, automaticAttempt: true).ConfigureAwait(false);
+          }
         }
         else
         {
+          if (unlessCastActive &&
+              string.Equals(_svc._audioEngine.ActiveOutputId, "google-cast", StringComparison.OrdinalIgnoreCase))
+          {
+            declined = true;
+            return false;
+          }
+
           using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
           if (cast.State is AudioOutputState.Streaming or AudioOutputState.Ready)
           {
@@ -1168,8 +1210,14 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       }
       finally
       {
-        _ownDevice = null;
+        // A declined tear-down leaves the connection ours: the watcher may keep it next.
+        if (!declined)
+        {
+          _ownDevice = null;
+        }
       }
+
+      return true;
     }
 
     public async Task RestoreLocalOutputAsync(CastRecoveryMark mark)
