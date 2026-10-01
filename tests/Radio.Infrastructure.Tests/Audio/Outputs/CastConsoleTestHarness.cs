@@ -26,7 +26,7 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   private readonly int _port;
 
   public GoogleCastOutput Output { get; }
-  public FakeTimeProvider Time { get; } = new();
+  public TimerRendezvousFakeTimeProvider Time { get; } = new();
   public FakeCastVolumeStore Store { get; } = new();
 
   /// <summary>
@@ -314,6 +314,44 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
     });
 
     return listener;
+  }
+}
+
+/// <summary>
+/// A <see cref="FakeTimeProvider"/> that reports when a timer with a given due time is created on
+/// it — the rendezvous a test needs before advancing the clock past a timeout that production code
+/// arms only after the send it bounds has started (<c>WaitAsync(TimeSpan, TimeProvider)</c>).
+/// </summary>
+internal sealed class TimerRendezvousFakeTimeProvider : FakeTimeProvider
+{
+  private readonly object _lock = new();
+  private TimeSpan? _watchedDueTime;
+  private TaskCompletionSource? _created;
+
+  /// <summary>Completes when the next timer with <paramref name="dueTime"/> is created.</summary>
+  public Task WatchForTimer(TimeSpan dueTime)
+  {
+    lock (_lock)
+    {
+      _watchedDueTime = dueTime;
+      _created = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+      return _created.Task;
+    }
+  }
+
+  public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+  {
+    ITimer timer = base.CreateTimer(callback, state, dueTime, period);
+    lock (_lock)
+    {
+      if (_watchedDueTime == dueTime)
+      {
+        _watchedDueTime = null;
+        _created?.TrySetResult();
+      }
+    }
+
+    return timer;
   }
 }
 

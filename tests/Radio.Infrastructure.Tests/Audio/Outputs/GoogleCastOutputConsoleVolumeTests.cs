@@ -743,9 +743,11 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.30f, h.External[^1].Volume, 3);
   }
 
-  // Hostile review F9. The console command timeout runs on the injected clock. Advancing the fake
-  // clock past it while the send is held times the send out, deterministically; on the system
-  // clock (the bug) the gate is released long before 5 real seconds pass and the send succeeds.
+  // Hostile review F9. The console command timeout runs on the injected clock. The timeout is
+  // armed only after the send has started, so the test waits for its timer to exist on the fake
+  // clock (a rendezvous, not a sleep) before advancing past it; the held send then times out
+  // deterministically. On the system clock (the bug) no such timer is ever created on the fake
+  // clock, and the safety-net bound below fails the test.
   [Fact]
   public async Task AConsolePush_TimesOutOnTheInjectedClock()
   {
@@ -753,9 +755,11 @@ public class GoogleCastOutputConsoleVolumeTests
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
+    var timeoutArmed = h.Time.WatchForTimer(TimeSpan.FromSeconds(5)); // ConsoleCommandTimeout
     h.VolumeGate = CastConsoleTestHarness.NewTcs();
     var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
     await h.VolumeSendEntered.Task;
+    await timeoutArmed.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
 
     h.Time.Advance(TimeSpan.FromSeconds(6)); // past the 5 s ConsoleCommandTimeout
     h.VolumeGate.SetResult();
