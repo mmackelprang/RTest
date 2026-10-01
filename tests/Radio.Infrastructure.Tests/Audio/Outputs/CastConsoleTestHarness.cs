@@ -99,15 +99,25 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
     };
   }
 
-  /// <summary>Connects to <paramref name="deviceId"/> with the device reporting the given status.</summary>
-  public async Task ConnectAsync(string deviceId = "cast-a", float reportedLevel = 0.40f, bool reportedMuted = false, bool streaming = true)
+  /// <summary>
+  /// Connects to <paramref name="deviceId"/> with the device reporting the given status, or —
+  /// when <paramref name="statusRead"/> is given — with that delegate standing in for the
+  /// initial status read.
+  /// </summary>
+  public async Task ConnectAsync(
+    string deviceId = "cast-a",
+    float reportedLevel = 0.40f,
+    bool reportedMuted = false,
+    bool streaming = true,
+    Func<Task<(float Volume, bool Muted)?>>? statusRead = null)
   {
     if (Output.State == AudioOutputState.Created)
     {
       await Output.InitializeAsync();
     }
 
-    Output.CastStatusReadOverrideForTests = () => Task.FromResult<(float, bool)?>((reportedLevel, reportedMuted));
+    Output.CastStatusReadOverrideForTests =
+      statusRead ?? (() => Task.FromResult<(float, bool)?>((reportedLevel, reportedMuted)));
     await Output.ConnectAsync(new ChromecastDeviceInfo
     {
       Id = deviceId,

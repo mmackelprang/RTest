@@ -79,6 +79,72 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.32f, external.Volume, 3);
   }
 
+  // AUD-81 connect race, measured on the box: SharpCaster raises the GET_STATUS response as a
+  // ReceiverStatusChanged event on its receive thread, and it beat the continuation that primes
+  // the echo baseline — so the handler compared against the -1f sentinel, fired an EXTERNAL
+  // change, and AudioStateUpdateService unmuted a muted console. Here the status is raised from
+  // inside the status-read seam, i.e. strictly before the read returns: the losing order, every
+  // time, with no clock involved.
+  [Fact]
+  public async Task AStatusRaisedDuringTheInitialRead_IsPartOfTheInitialSync_AndNeverUnmutesTheConsole()
+  {
+    await using var h = new CastConsoleTestHarness();
+
+    // Mirrors AudioStateUpdateService.OnCastVolumeChanged: an initial sync is ignored; any other
+    // event's mute state is written to the console.
+    var consoleMuted = true;
+    var initialSyncs = new List<CastVolumeChangedEventArgs>();
+    h.Output.CastVolumeChanged += (_, e) =>
+    {
+      if (e.IsInitialSync)
+      {
+        initialSyncs.Add(e);
+      }
+      else
+      {
+        consoleMuted = e.IsMuted;
+      }
+    };
+
+    await h.ConnectAsync(statusRead: () =>
+    {
+      h.RaiseStatus(0.30, muted: false);
+      return Task.FromResult<(float, bool)?>((0.30f, false));
+    });
+
+    Assert.Empty(h.External);
+    Assert.True(consoleMuted);
+    Assert.Equal(0.30f, Assert.Single(initialSyncs).Volume, 3);
+
+    // The same status again after the sync is still no change: the baseline holds it.
+    h.RaiseStatus(0.30, muted: false);
+    Assert.Empty(h.External);
+
+    // Anti-vacuity: once the sync is over, a real change on the speaker is still reported.
+    h.RaiseStatus(0.55, muted: false);
+    Assert.Equal(0.55f, Assert.Single(h.External).Volume, 3);
+  }
+
+  [Fact]
+  public async Task AStatusRaisedDuringAFailedInitialRead_IsAbsorbed_NotReportedAsExternal()
+  {
+    await using var h = new CastConsoleTestHarness();
+
+    // The read itself yields nothing (no volume in the response), but the device's status
+    // still arrived as an event while it was in flight.
+    await h.ConnectAsync(statusRead: () =>
+    {
+      h.RaiseStatus(0.30, muted: false);
+      return Task.FromResult<(float, bool)?>(null);
+    });
+
+    Assert.Empty(h.External);
+
+    // The early status became the baseline, so its repeat is not mistaken for a change.
+    h.RaiseStatus(0.30, muted: false);
+    Assert.Empty(h.External);
+  }
+
   [Fact]
   public async Task AnExternalChange_IsReported_UpdatesTheKnownLevelFirst_AndIsRemembered()
   {

@@ -124,6 +124,11 @@ public class GoogleCastOutput : AudioOutputBase
   //   - AudioStateUpdateService.OnCastVolumeChanged now ignores IsInitialSync events
   //     outright. THAT is what makes an initial read unable to move master volume, and
   //     it has no timing dependence at all.
+  //   - AUD-81 found the side door: the same GET_STATUS response also arrives as a
+  //     ReceiverStatusChanged event, which OnReceiverStatusChanged reported as EXTERNAL
+  //     (IsInitialSync = false) when it beat the baseline priming. Statuses arriving
+  //     while a connect's initial sync is in progress are now baseline-only — see
+  //     _initialSyncPendingGeneration. That mark is an Interlocked int, not lock state.
   // Widening this lock was and remains the wrong fix: the exposure is the event fire,
   // not the field read, and holding it across a SharpCaster call is the hang described
   // above.
@@ -255,6 +260,18 @@ public class GoogleCastOutput : AudioOutputBase
   // else through; it subsumes the flag.
   private float _lastSetVolume = -1f;
   private bool _lastSetMute;
+
+  // AUD-81 (connect race): the generation whose initial sync is still in progress, or -1.
+  // Set by ConnectAsync BEFORE it subscribes to receiver status, cleared (for that generation
+  // only) on every exit from its subscribe + SyncInitialVolumeAsync block. While it is set,
+  // OnReceiverStatusChanged treats a status as part of the initial sync: it re-baselines the
+  // echo filter and reports nothing. Measured on the box: SharpCaster raises
+  // ReceiverStatusChanged for the GET_STATUS response on its receive thread, racing the
+  // continuation that primes the baseline, so the handler saw the -1f sentinel and reported
+  // the speaker's state as an EXTERNAL change — unmuting a muted console on connect, which is
+  // exactly the write AUD-5's IsInitialSync rule exists to prevent. Accessed through
+  // Volatile/Interlocked only.
+  private int _initialSyncPendingGeneration = -1;
 
   // AUD-81: every level and mute this application sent to the device in the last
   // EchoWindow, from any path (console follow, AUD-80 restore, after-start sync, teardown).
@@ -822,12 +839,26 @@ public class GoogleCastOutput : AudioOutputBase
         return;
       }
 
-      // Subscribe to receiver status changes for bidirectional volume sync
-      SubscribeToReceiverStatus(client);
+      // AUD-81 (connect race). Marked BEFORE subscribing: the device answers the status
+      // read below with a status that SharpCaster also raises as ReceiverStatusChanged, on
+      // its own thread, possibly before the read's continuation has primed the echo
+      // baseline. Until this block exits, such a status is part of the initial sync, never
+      // an external change. Cleared in the finally for THIS generation only, so a newer
+      // connect's mark is not lifted by an older one finishing.
+      Volatile.Write(ref _initialSyncPendingGeneration, myGeneration);
+      try
+      {
+        // Subscribe to receiver status changes for bidirectional volume sync
+        SubscribeToReceiverStatus(client);
 
-      // Read initial device volume. The generation goes with it: the read is a
-      // network round-trip, and this connection can be superseded inside it.
-      await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
+        // Read initial device volume. The generation goes with it: the read is a
+        // network round-trip, and this connection can be superseded inside it.
+        await SyncInitialVolumeAsync(client, myGeneration, device).ConfigureAwait(false);
+      }
+      finally
+      {
+        Interlocked.CompareExchange(ref _initialSyncPendingGeneration, -1, myGeneration);
+      }
 
       Connected?.Invoke(this, new ChromecastConnectedEventArgs { Device = device });
 
@@ -2019,10 +2050,12 @@ public class GoogleCastOutput : AudioOutputBase
         // Primed BEFORE the currency check, and therefore primed even for a reading
         // that is about to be discarded. That is deliberate. These two fields are the
         // echo filter's baseline, not connection state: _lastSetVolume starts at the
-        // -1f sentinel, and OnReceiverStatusChanged reports any status event arriving
-        // while it is still -1f as an EXTERNAL change. Skipping the priming here would
-        // convert a suppressed initial sync into a spurious user-authored one — the
-        // same write to master volume, through the other door.
+        // -1f sentinel, and OnReceiverStatusChanged reports a status event arriving
+        // AFTER this sync completes while it is still -1f as an EXTERNAL change. (One
+        // arriving DURING the sync only re-baselines — see _initialSyncPendingGeneration.)
+        // Skipping the priming here would convert a suppressed initial sync into a
+        // spurious user-authored one on the next status — the same write to master
+        // volume, through the other door.
         _lastSetVolume = reading.Value.Volume;
         _lastSetMute = reading.Value.Muted;
 
@@ -2255,6 +2288,26 @@ public class GoogleCastOutput : AudioOutputBase
 
     var deviceVolume = (float)(status.Volume.Level ?? 0);
     var deviceMuted = status.Volume.Muted ?? false;
+
+    // AUD-81 (connect race). A status that arrives while a connection's initial sync is in
+    // progress is the device answering that sync — typically SharpCaster raising the
+    // GET_STATUS response as an event, concurrently with the read's own continuation. It
+    // re-baselines the echo filter and nothing else: no CastVolumeChanged, nothing
+    // remembered, no queued console target dropped. Reporting it was how a connect unmuted a
+    // muted console (it compared against the -1f sentinel, so it looked external).
+    // What this gives up: a genuine change made on the speaker inside that window is absorbed
+    // into the baseline rather than reported. When the read itself fails, the device state is
+    // still unknown to subscribers (no initial-sync event), as before — but the baseline now
+    // holds what the device said, so its next identical status is not mistaken for a change.
+    if (Volatile.Read(ref _initialSyncPendingGeneration) != -1)
+    {
+      _lastSetVolume = deviceVolume;
+      _lastSetMute = deviceMuted;
+      _logger.LogDebug(
+        "Cast status during initial sync: {Volume:P0}, Muted: {Muted} — baseline only, not an external change",
+        deviceVolume, deviceMuted);
+      return;
+    }
 
     // AUD-81. A level or mute that this application sent within EchoWindow is the device
     // confirming our own command — even when the confirmation is late, or a later push has
