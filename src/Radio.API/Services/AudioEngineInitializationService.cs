@@ -287,6 +287,9 @@ public class AudioEngineInitializationService : IHostedService
   /// </summary>
   internal ICastReconnectHost? CastReconnectHostOverride { get; set; }
 
+  /// <summary><b>Test seam.</b> The production host, so its engine-facing checks can be tested directly.</summary>
+  internal ICastReconnectHost CreateProductionCastReconnectHost() => new ServiceCastReconnectHost(this);
+
   /// <summary>
   /// Starts the one reconnect watcher for <paramref name="device"/>, replacing (cancelling) any
   /// earlier one. The new watcher does not begin until the old one has finished, so two can
