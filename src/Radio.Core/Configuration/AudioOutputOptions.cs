@@ -188,6 +188,16 @@ public class GoogleCastOutputOptions
   public int AutoReconnectStabilitySeconds { get; set; } = 120;
 
   /// <summary>
+  /// AUD-37. The most reconnects the auto-reconnect makes to one speaker in any hour. A speaker
+  /// that stays up past <see cref="AutoReconnectStabilitySeconds"/> and then drops starts a fresh
+  /// window each time; once it has been reconnected this many times within the last hour, the next
+  /// drop is not watched (pick Cast again to reconnect: choosing an output, or connecting or
+  /// disconnecting Cast, through the devices API resets the count). Values below 1 are treated
+  /// as 1. Default: 6.
+  /// </summary>
+  public int AutoReconnectMaxReconnectsPerHour { get; set; } = 6;
+
+  /// <summary>
   /// Gets or sets the file path for caching discovered Cast devices.
   /// </summary>
   public string CacheFilePath { get; set; } = "./data/config/cast-devices.json";

@@ -271,6 +271,53 @@ public class AudioEngineInitializationServiceCastReconnectTests
   }
 
   [Fact]
+  public async Task ASpeakerThatStaysUpPastStabilityThenDrops_IsReconnectedAtMostSixTimesAnHour()
+  {
+    // Review H1, slow flapping: each reconnect here outlives the 120 s stability period, so each
+    // drop starts a fresh window. The hourly cap is what ends it.
+    _host.Reachable = true;
+    var service = CreateService();
+
+    var outcomes = new List<CastReconnectOutcome>();
+    for (var drop = 0; drop < 7; drop++)
+    {
+      RaiseLoss(service);
+      await service.LastCastLossRecovery.WaitAsync(HangGuard);
+      outcomes.Add(await DriveAsync(service.CastReconnectTask));
+      _time.Advance(TimeSpan.FromSeconds(121));
+    }
+
+    Assert.Equal(Enumerable.Repeat(CastReconnectOutcome.Reconnected, 6).Append(CastReconnectOutcome.GaveUp), outcomes);
+    Assert.Equal(6, _host.Connects);
+
+    // The user picks Cast again (DevicesController cancels the watcher, then switches): the
+    // count resets and the next drop is watched.
+    await service.CancelCastReconnectAsync().WaitAsync(HangGuard);
+    await _engine.Object.SetActiveOutputAsync("google-cast", CancellationToken.None);
+    RaiseLoss(service);
+    await service.LastCastLossRecovery.WaitAsync(HangGuard);
+    Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+  }
+
+  [Fact]
+  public async Task TheHourlyCap_CountsOnlyTheLastHour()
+  {
+    // Seven reconnects eleven minutes apart: by the seventh drop the first has aged out.
+    _host.Reachable = true;
+    var service = CreateService();
+
+    for (var drop = 0; drop < 7; drop++)
+    {
+      RaiseLoss(service);
+      await service.LastCastLossRecovery.WaitAsync(HangGuard);
+      Assert.Equal(CastReconnectOutcome.Reconnected, await DriveAsync(service.CastReconnectTask));
+      _time.Advance(TimeSpan.FromMinutes(11));
+    }
+
+    Assert.Equal(7, _host.Connects);
+  }
+
+  [Fact]
   public async Task AUserActionEndsTheEpisode_TheNextDropStartsAFreshWindow()
   {
     _host.Reachable = true;

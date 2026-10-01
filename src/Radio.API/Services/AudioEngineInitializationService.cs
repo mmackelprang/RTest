@@ -272,6 +272,13 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   // qualifying, so the next drop starts afresh. Guarded by _reconnectGate.
   private CastReconnectEpisode? _reconnectEpisode;
 
+  // AUD-37 (review H1, slow flapping). When the watchers made each reconnect to each device in
+  // the last hour (TimeProvider timestamps, oldest first). A speaker that outlives the stability
+  // period and then drops starts a fresh episode every time; this bounds those to
+  // AutoReconnectMaxReconnectsPerHour. Cleared by an explicit user action
+  // (CancelCastReconnectAsync). Guarded by _reconnectGate.
+  private readonly Dictionary<string, Queue<long>> _watcherReconnects = new(StringComparer.Ordinal);
+
   private sealed class CastReconnectEpisode
   {
     public required string DeviceId { get; init; }
@@ -374,8 +381,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     Task<CastReconnectOutcome> run;
     lock (_reconnectGate)
     {
-      // An explicit user action: whatever drops next starts a fresh window.
+      // An explicit user action: whatever drops next starts a fresh window, uncapped.
       _reconnectEpisode = null;
+      _watcherReconnects.Clear();
       cts = _reconnectCts;
       run = CastReconnectTask;
     }
@@ -418,7 +426,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
   /// earlier one. The new watcher does not begin until the old one has finished, so two can
   /// never be connecting at once. Does nothing when auto-reconnect is off, the device is
   /// unknown, or the service is stopping. A drop soon after a watcher-made reconnect continues
-  /// that episode's window and backoff, and once that window has run out starts no watcher.
+  /// that episode's window and backoff, and once that window has run out starts no watcher. Nor
+  /// does it start one once watchers have reconnected this device
+  /// <c>AutoReconnectMaxReconnectsPerHour</c> times within the last hour.
   /// </summary>
   private void StartCastReconnectWatcher(ChromecastDeviceInfo? device, CastRecoveryMark mark)
   {
@@ -451,6 +461,22 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
 
       var previousRun = CastReconnectTask;
       var now = time.GetTimestamp();
+
+      var perHour = Math.Max(1, options.AutoReconnectMaxReconnectsPerHour);
+      var recent = CountRecentWatcherReconnects_Locked(device.Id, now, time);
+      if (recent >= perHour)
+      {
+        // Review H1 (slow flapping): each of these reconnects outlived the stability period,
+        // so each drop started a fresh window. Stop here rather than cycle all day.
+        _reconnectEpisode = null;
+        cts.Dispose();
+        _logger.LogInformation(
+          "Cast: \"{Name}\" has been reconnected automatically {Count} times in the last hour and has dropped again — giving up on reconnecting; pick Cast again to reconnect",
+          device.FriendlyName, recent);
+        CastReconnectTask = AfterPreviousRunAsync(previousRun, CastReconnectOutcome.GaveUp);
+        return;
+      }
+
       CastReconnectStart start;
       var episode = _reconnectEpisode;
       if (episode != null &&
@@ -589,10 +615,38 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     }
   }
 
+  /// <summary>
+  /// The watcher-made reconnects to <paramref name="deviceId"/> within the hour before
+  /// <paramref name="now"/>, dropping older ones. Caller holds <c>_reconnectGate</c>.
+  /// </summary>
+  private int CountRecentWatcherReconnects_Locked(string deviceId, long now, TimeProvider time)
+  {
+    if (!_watcherReconnects.TryGetValue(deviceId, out var times))
+    {
+      return 0;
+    }
+
+    while (times.Count > 0 && time.GetElapsedTime(times.Peek(), now) > TimeSpan.FromHours(1))
+    {
+      times.Dequeue();
+    }
+
+    return times.Count;
+  }
+
   private void RecordWatcherReconnect(ChromecastDeviceInfo device, TimeSpan nextDelay)
   {
     lock (_reconnectGate)
     {
+      // Recorded whatever the episode's state: the hourly cap counts reconnects, not episodes.
+      if (!_watcherReconnects.TryGetValue(device.Id, out var times))
+      {
+        times = new Queue<long>();
+        _watcherReconnects[device.Id] = times;
+      }
+
+      times.Enqueue(ReconnectTimeProvider.GetTimestamp());
+
       var episode = _reconnectEpisode;
       if (episode == null || !string.Equals(episode.DeviceId, device.Id, StringComparison.Ordinal))
       {
