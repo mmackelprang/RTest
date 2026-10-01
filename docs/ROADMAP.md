@@ -216,16 +216,21 @@ so the BAND view, signal colours, preset bar and knob behave the same on all of 
 
 **Options** (full spec, prices and sources in
 [`design/FUTURE-WORK.md` § All-band reception](../design/FUTURE-WORK.md)):
-- **A (recommended if obtainable):** one RTL-SDR Blog dongle with a built-in, driver-switched HF upconverter
-  (the V4 is discontinued; its successor V4 Lite is expected to keep HF — verify at purchase) + the Blog
-  driver fork on the box. ~US$30–45; ~2 days of software.
+- **C (recommended for this owner's use, added 2026-10-02):** one **Nooelec NESDR SMArt v5**
+  (100 kHz – 1.75 GHz; HF via **native direct sampling**, no solder mod; switched on/off per band in
+  software with the stock `librtlsdr` — no driver swap). ~US$35–45 bundle; ~2 days of software. Trade-off:
+  weaker HF sensitivity than an upconverter — fine for local AM and strong shortwave, marginal for DX.
+- **A (best HF quality on one dongle, if obtainable):** one RTL-SDR Blog dongle with a built-in,
+  driver-switched HF upconverter (the V4 is discontinued; its successor V4 Lite is expected to keep HF —
+  verify at purchase) + the Blog driver fork on the box. ~US$30–45; ~2 days of software.
 - **B:** keep today's dongle for VHF; add a second dongle permanently behind an HF upconverter (Ham It Up
   Plus v2 or SpyVerter R2). ~US$80–130; ~3–4 days of software (per-band device selection, LO offset).
 - **Plus an HF/MW antenna** (active wideband loop or long wire).
 
 **Status**: owner decided 2026-10-01 not to change hardware now (*"There are not many AM stations
-nearby"*). Picks up when the owner buys hardware. Until then, `AUD-94`'s software-only option (show AM/SW as
-unavailable in the panel) remains an open owner decision.
+nearby"*). Picks up when the owner buys hardware. 2026-10-02: owner chose to keep AM/SW selectable as they
+are until then (*"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."*) and
+asked for the NESDR SMArt v5 to be added (*"Yes - add this to the roadmap."*) — now option C.
 
 ### Voice control — Home Assistant Assist integration (queued 2026-08-09)
 
