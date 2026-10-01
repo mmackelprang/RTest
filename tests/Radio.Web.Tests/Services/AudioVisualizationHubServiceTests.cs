@@ -194,4 +194,36 @@ public class AudioVisualizationHubServiceTests : IAsyncLifetime
     // Assert - Service created successfully with default configuration
     Assert.NotNull(service);
   }
+
+  [Fact]
+  public async Task StopAsync_RaisesConnectionStateChanged()
+  {
+    // UI-30. The panel tests fire ConnectionStateChanged themselves; this checks the service raises it.
+    var service = new AudioVisualizationHubService(
+      NullLogger<AudioVisualizationHubService>.Instance,
+      new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+    int raised = 0;
+    service.ConnectionStateChanged += () => { raised++; return Task.CompletedTask; };
+
+    await service.StopAsync();
+
+    Assert.Equal(1, raised);
+    await service.DisposeAsync();
+  }
+
+  [Fact]
+  public async Task ConnectionStateChanged_AThrowingHandler_DoesNotStopTheOthers()
+  {
+    var service = new AudioVisualizationHubService(
+      NullLogger<AudioVisualizationHubService>.Instance,
+      new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build());
+    int reached = 0;
+    service.ConnectionStateChanged += () => throw new InvalidOperationException("boom");
+    service.ConnectionStateChanged += () => { reached++; return Task.CompletedTask; };
+
+    await service.StopAsync();
+
+    Assert.Equal(1, reached);
+    await service.DisposeAsync();
+  }
 }

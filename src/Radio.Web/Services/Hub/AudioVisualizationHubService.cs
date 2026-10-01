@@ -23,6 +23,10 @@ public class AudioVisualizationHubService : IAsyncDisposable
   // Mirrors the pattern in GvBridgeHubService.
   private CancellationTokenSource? _retryCts;
 
+  // Set by StopAsync and DisposeAsync. A Closed this service did not ask for restarts the retry loop
+  // (UI-30: the panel tells the user it is reconnecting, so it must be).
+  private volatile bool _stopRequested;
+
   // Events that components can subscribe to
   public event Func<SpectrumDataDto, Task>? OnSpectrumData;
   public event Func<LevelDataDto, Task>? OnLevelData;
@@ -190,6 +194,14 @@ public class AudioVisualizationHubService : IAsyncDisposable
           _logger.LogWarning(exception, "Visualization hub connection closed");
         }
 
+        // Closed fires after automatic reconnect gives up (RetryPolicy never does) or when the server
+        // closes without allowing a reconnect. Without this, nothing would ever connect again:
+        // StartAsync returns early while _hubConnection is non-null.
+        if (!_stopRequested && !_isDisposed)
+        {
+          StartRetryLoop(hubUrl);
+        }
+
         return RaiseConnectionStateChangedAsync();
       };
 
@@ -286,6 +298,8 @@ public class AudioVisualizationHubService : IAsyncDisposable
 
   public async Task StopAsync()
   {
+    _stopRequested = true;
+
     // Cancel any in-flight initial-connect retry first so it doesn't race with the
     // explicit stop below.
     _retryCts?.Cancel();
@@ -495,6 +509,7 @@ public class AudioVisualizationHubService : IAsyncDisposable
     }
 
     _isDisposed = true;
+    _stopRequested = true;
 
     _retryCts?.Cancel();
     _retryCts?.Dispose();

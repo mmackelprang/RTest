@@ -149,6 +149,24 @@ public class VisualizerPanelConnectionTests : TestContext
     await SetConnectedAsync(cut, connected: true);
 
     cut.WaitForAssertion(() => cut.FindAll(".visualizer-disconnected").Should().BeEmpty());
+    // The canvas was cleared, so until a new frame arrives the panel says it is waiting rather than
+    // showing a blank canvas with no message.
+    cut.FindAll(".visualizer-waiting").Should().HaveCount(1);
+  }
+
+  [Fact]
+  public async Task AfterDataHadArrived_ADropAndReconnect_ShowsWaitingAgain()
+  {
+    _hub.IsConnectedOverride = true;
+    var cut = RenderInitialised();
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(_hub, nameof(AudioVisualizationHubService.OnSpectrumData),
+      new Radio.Web.Models.SpectrumDataDto { Magnitudes = new float[] { 0.5f }, Frequencies = new float[] { 100f } }));
+    cut.WaitForAssertion(() => cut.FindAll(".visualizer-waiting").Should().BeEmpty("a frame has arrived"));
+
+    await SetConnectedAsync(cut, connected: false);
+    await SetConnectedAsync(cut, connected: true);
+
+    cut.WaitForAssertion(() => cut.FindAll(".visualizer-waiting").Should().HaveCount(1));
   }
 
   [Fact]

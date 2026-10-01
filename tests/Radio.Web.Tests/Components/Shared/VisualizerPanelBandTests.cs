@@ -1102,6 +1102,52 @@ public class VisualizerPanelBandTests : TestContext
   }
 
   [Fact]
+  public async Task StartupReadFails_ThenARadioStateBroadcast_EnablesAndShowsBand()
+  {
+    // radio-web up before radio-api, or an API restart while the kiosk reloads: the start-up read fails, so
+    // the panel does not know the radio is active. The server sends RadioStateChanged only while it is.
+    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.InternalServerError, null);
+    var cut = RenderComponent<VisualizerPanel>(p => p.Add(x => x.Clock, _clock));
+    cut.WaitForAssertion(() =>
+    {
+      _module.Invocations["visualizer.init"].Should().NotBeEmpty();
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue("the read failed, so the radio is not known to be active");
+    }, TimeSpan.FromSeconds(5));
+
+    GetJson("/api/radio/state", FmState(101_100_000));
+    await RaiseRadioStateAsync(cut, HubState("FM", 101_100_000));
+
+    cut.WaitForAssertion(() =>
+    {
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeFalse();
+      IsActive(Tab(cut, "BAND")).Should().BeTrue("the saved preference is BAND");
+      cut.FindAll(".band-overlay").Should().HaveCount(1);
+    });
+    PreferenceWrites().Should().BeEmpty();
+  }
+
+  [Fact]
+  public void BandsOwnRefresh_SeesTheRadioGone_AndFallsBack_WithoutASourceChanged()
+  {
+    // A SourceChanged missed while the audio-state hub was reconnecting: BAND's next state read is the
+    // other way the panel learns the radio has gone.
+    var cut = RenderBand();
+    int cycles = cut.Instance.CompletedBandRefreshes;
+    RadioNotActive();
+
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    WaitForRefreshes(cut, cycles + 1);
+
+    cut.WaitForAssertion(() =>
+    {
+      IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
+      cut.FindAll(".band-overlay").Should().BeEmpty();
+    });
+    PreferenceWrites().Should().BeEmpty();
+  }
+
+  [Fact]
   public async Task SourceChanged_ApiUnreachable_KeepsBand()
   {
     // A failed read says nothing about the source; BAND stays rather than flickering away on a blip.

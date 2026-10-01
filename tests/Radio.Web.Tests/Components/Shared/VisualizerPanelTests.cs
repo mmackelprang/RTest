@@ -198,7 +198,10 @@ public class VisualizerPanelTests : TestContext
     var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
     band.HasAttribute("disabled").Should().BeTrue();
     band.GetAttribute("aria-disabled").Should().Be("true");
-    (band.GetAttribute("aria-label") ?? string.Empty).Should().Contain(VisualizerPanel.BandUnavailableHint);
+    band.GetAttribute("aria-label").Should().Be("Radio band map mode", "the name stays fixed; the hint is a description");
+    var hintId = band.GetAttribute("aria-describedby");
+    hintId.Should().NotBeNullOrEmpty();
+    cut.Find($"#{hintId}").TextContent.Should().Be(VisualizerPanel.BandUnavailableHint);
 
     // Drive the handler directly: a disabled button's click never reaches it in a browser, so this
     // is the guard inside SelectMode, not the attribute.
