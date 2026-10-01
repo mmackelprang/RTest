@@ -546,12 +546,20 @@ public class DevicesController : ControllerBase
   /// <summary>
   /// Connects to a specific Google Cast device.
   /// </summary>
+  /// <remarks>
+  /// Returns 200 without reconnecting when the output is already streaming to the requested
+  /// device (it still promotes Cast through the output gate and re-saves the default).
+  /// Returns 409 when the output is busy connecting — either observed before the attempt, or
+  /// reported by <see cref="GoogleCastOutput.ConnectAsync"/> refusing to run in its current
+  /// state. A 409 says another connect is in flight; it is not evidence the device is unreachable.
+  /// </remarks>
   /// <param name="request">The Cast device to connect to.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>Success or error response.</returns>
   [HttpPost("cast/connect")]
   [ProducesResponseType(StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status409Conflict)]
   [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
   public async Task<IActionResult> ConnectToCastDevice(
     [FromBody] ConnectCastDeviceRequest request,
@@ -566,6 +574,41 @@ public class DevicesController : ControllerBase
         string.IsNullOrWhiteSpace(request.IpAddress))
     {
       return BadRequest(new { error = "DeviceId and IpAddress are required" });
+    }
+
+    // AUD-85: another party (e.g. the fire-and-forget auto-connect started by
+    // POST /api/devices/output) is mid-connect. ConnectAsync would refuse with
+    // InvalidOperationException; answer 409 so a caller can tell "busy" from "failed".
+    // This is a check-then-act read — the catch below maps the same refusal when the
+    // state changes between this read and ConnectAsync's own check.
+    if (_castOutput.State == AudioOutputState.Connecting)
+    {
+      _logger.LogWarning("Cast connect refused: output is already connecting");
+      return Conflict(new { error = "Cast output is busy connecting; try again shortly" });
+    }
+
+    // AUD-85: already streaming to the requested device — reconnecting would stop and
+    // restart the stream for nothing. Promote and re-save as a successful connect would.
+    if (_castOutput.State == AudioOutputState.Streaming &&
+        string.Equals(_castOutput.ConnectedDevice?.Id, request.DeviceId, StringComparison.Ordinal))
+    {
+      try
+      {
+        if (_audioEngine != null)
+        {
+          await _audioEngine.SetActiveOutputAsync("google-cast", cancellationToken);
+        }
+
+        await SaveDefaultCastDeviceAsync(request.DeviceId, request.Name ?? "Cast Device");
+
+        _logger.LogInformation("Cast device {Name} is already connected and streaming; no reconnect", request.Name);
+        return Ok(new { message = "Already connected to Cast device", device = request.Name });
+      }
+      catch (Exception ex)
+      {
+        _logger.LogError(ex, "Error promoting already-connected Cast device: {Name}", request.Name);
+        return StatusCode(500, new { error = "Failed to connect to Cast device", details = ex.Message });
+      }
     }
 
     try
@@ -682,6 +725,14 @@ public class DevicesController : ControllerBase
 
       _logger.LogInformation("Connected to Cast device: {Name}, audio streaming started (local output muted)", request.Name);
       return Ok(new { message = "Connected to Cast device", device = request.Name });
+    }
+    catch (InvalidOperationException ex) when (ex.Message.StartsWith("Cannot connect in state", StringComparison.Ordinal))
+    {
+      // AUD-85: GoogleCastOutput.ConnectAsync refused because the output was not in a
+      // connectable state when it checked — for example, another connect that began after
+      // the Connecting check above. That message is thrown only by ConnectAsync's state guard.
+      _logger.LogWarning("Cast connect refused by output state: {Reason}", ex.Message);
+      return Conflict(new { error = "Cast output is busy; try again shortly", details = ex.Message });
     }
     catch (Exception ex)
     {
