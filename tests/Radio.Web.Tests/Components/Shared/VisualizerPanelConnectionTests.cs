@@ -93,7 +93,10 @@ public class VisualizerPanelConnectionTests : TestContext
     state.GetAttribute("role").Should().Be("status");
     state.GetAttribute("aria-live").Should().Be("polite");
     state.TextContent.Should().Contain("Visualizer disconnected").And.Contain("Reconnecting");
-    state.QuerySelector(".visualizer-disconnected-icon").Should().NotBeNull();
+    var icon = state.QuerySelector(".visualizer-disconnected-icon");
+    icon.Should().NotBeNull();
+    // The icon is a font ligature: without aria-hidden its name, "link_off", is announced with the status.
+    icon!.GetAttribute("aria-hidden").Should().Be("true");
   }
 
   [Fact]

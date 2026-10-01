@@ -198,7 +198,8 @@
          otherwise sit there indefinitely while nothing can arrive. Rendered once per disconnection, so the
          status is announced on the change, not on every frame. *@
       <div class="visualizer-disconnected" role="status" aria-live="polite">
-        <RadzenIcon Icon="link_off" class="visualizer-disconnected-icon" />
+        @* aria-hidden: the icon is a font ligature, so its name ("link_off") is text inside the live region. *@
+        <RadzenIcon Icon="link_off" class="visualizer-disconnected-icon" aria-hidden="true" />
         <div class="visualizer-disconnected-title">Visualizer disconnected</div>
         <div class="visualizer-disconnected-sub">Reconnecting…</div>
       </div>
