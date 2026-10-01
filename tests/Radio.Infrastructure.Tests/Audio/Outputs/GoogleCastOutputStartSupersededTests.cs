@@ -75,7 +75,8 @@ public class GoogleCastOutputStartSupersededTests : IDisposable
   public async Task ATeardownDuringTheLaunch_LeavesNothingStreaming()
   {
     // Check 1: after the launch, before anything of the start's own exists.
-    await using var output = await ConnectedDirectChannelOutputAsync();
+    var log = new RecordingLogger<GoogleCastOutput>();
+    await using var output = await ConnectedDirectChannelOutputAsync(log);
     var client = ClientOf(output);
     var channelsBefore = ChannelCount(client);
 
@@ -102,6 +103,13 @@ public class GoogleCastOutputStartSupersededTests : IDisposable
     Assert.Null(output.DirectStreaming);
     Assert.Equal(0, Volatile.Read(ref _readersCreated));
     Assert.Equal(channelsBefore, ChannelCount(client));
+
+    // Nothing of the start's own was built on the dead connection: no DirectChannel set-up began.
+    var lines = log.Inner.Lines();
+    Assert.DoesNotContain(lines, l => l.Line.StartsWith("Cast: Starting DirectChannel streaming"));
+    Assert.DoesNotContain(lines, l => l.Line.StartsWith("Cast: Registered custom channel"));
+    Assert.Contains(lines, l => l.Level == LogLevel.Debug && l.Line.StartsWith("Cast: start on Office speaker abandoned"));
+    Assert.DoesNotContain(lines, l => l.Level >= LogLevel.Warning);
   }
 
   [Fact]
@@ -221,13 +229,14 @@ public class GoogleCastOutputStartSupersededTests : IDisposable
 
   // --- helpers ---
 
-  private async Task<GoogleCastOutput> ConnectedDirectChannelOutputAsync()
+  private async Task<GoogleCastOutput> ConnectedDirectChannelOutputAsync(ILogger<GoogleCastOutput>? logger = null)
   {
     var options = new AudioOutputOptions();
     options.GoogleCast.StreamingMode = "DirectChannel";
     options.GoogleCast.CacheFilePath =
       Path.Combine(Path.GetTempPath(), $"cast-cache-{Guid.NewGuid():N}.json");
-    var output = new GoogleCastOutput(new Mock<ILogger<GoogleCastOutput>>().Object, Options.Create(options));
+    var output = new GoogleCastOutput(
+      logger ?? new Mock<ILogger<GoogleCastOutput>>().Object, Options.Create(options));
 
     await output.InitializeAsync();
     output.SetAudioEngine(_engine.Object);
