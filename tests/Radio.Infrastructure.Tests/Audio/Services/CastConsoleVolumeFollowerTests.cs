@@ -941,6 +941,11 @@ public class CastConsoleVolumeFollowerTests
   // a plain DisconnectAsync. AUD-81's teardown release (application stop, unmute, fresh-connection
   // unmute) must never touch it — it was never ours to mute — and an automatic attempt logs no
   // Warning or Error. The console-mute record survives, so a later confirmed reconnect still recalls it.
+  // Defence in depth for the `wasHeld` guard in GoogleCastOutput.DisconnectAsync, NOT a test of it:
+  // this passes with the guard removed, because a held connection never carries a console-mute mark
+  // (the F11 recall waits for ConfirmReceiverAvailable, and a console mute is sent only while
+  // Streaming), so ReleaseConsoleMuteAsync returns at its first check anyway. It pins the outcome —
+  // nothing sent — whichever of the two keeps it true.
   [Fact]
   public async Task AStandDownFromABusyReceiver_SendsNothing_AndKeepsTheConsoleMuteRecord()
   {

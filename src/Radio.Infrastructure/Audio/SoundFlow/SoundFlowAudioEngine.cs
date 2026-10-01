@@ -431,10 +431,18 @@ public class SoundFlowAudioEngine : IAudioEngine
   /// Full graceful tear-down of the Cast output: <c>StopAsync</c> (stops
   /// DirectChannel streaming, and sends a media STOP when this connection
   /// holds a media session) AND <c>DisconnectAsync</c>, which closes our
-  /// connection to the receiver. <c>DisconnectAsync</c> sends no Cast message
-  /// — no CLOSE_APP/STOP of the receiver application: SharpCaster 3.0.0's
-  /// <c>ChromecastClient.DisconnectAsync</c> only cancels its receive loop
-  /// and closes the socket. Required when transitioning away from Cast
+  /// connection to the receiver. Closing itself sends no Cast message:
+  /// SharpCaster 3.0.0's <c>ChromecastClient.DisconnectAsync</c> only cancels
+  /// its receive loop and closes the socket. The one exception (AUD-81): when
+  /// this connection muted the speaker for a muted console, the tear-down
+  /// (<c>StopAsync</c>, or <c>DisconnectAsync</c> if the stop could not
+  /// finish it) releases that mute through <c>ReleaseConsoleMuteAsync</c> —
+  /// it STOPs our receiver application, then sends SET_MUTE false, possibly
+  /// over a fresh short-lived connection that launches nothing. A connection
+  /// still held for receiver confirmation (the reconnect watcher's, AUD-37)
+  /// carries no such mute — the console-mute recall waits for the
+  /// confirmation — and its <c>DisconnectAsync</c> skips the release outright.
+  /// Required when transitioning away from Cast
   /// (output picker switching to soundbar / http-stream) or on engine
   /// shutdown.
   ///
@@ -469,8 +477,8 @@ public class SoundFlowAudioEngine : IAudioEngine
         await _castOutput.StopAsync(castCts.Token).ConfigureAwait(false);
       }
 
-      // DisconnectAsync closes our connection to the receiver (it sends no
-      // CLOSE_APP — see the summary). Only GoogleCastOutput knows how to do this — the
+      // DisconnectAsync closes our connection to the receiver (no Cast message,
+      // unless it must release a console mute — see the summary). Only GoogleCastOutput knows how to do this — the
       // IAudioOutput interface doesn't expose it. Runtime cast keeps the
       // engine's _castOutput field typed as IAudioOutput? for testability.
       if (_castOutput is Radio.Infrastructure.Audio.Outputs.GoogleCastOutput cast)

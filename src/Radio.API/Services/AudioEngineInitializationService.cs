@@ -891,13 +891,18 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     }
 
     /// <summary>
-    /// Closes our channel to a receiver that is busy with someone else's app — a disconnect only,
-    /// no media STOP and no app launch or close, so their session is untouched. That rests on two
-    /// facts: this calls <c>GoogleCastOutput.DisconnectAsync</c>, never <c>StopAsync</c> or the
-    /// engine's <c>TearDownCastOutputAsync</c>; and <c>DisconnectAsync</c> sends no Cast message —
-    /// it unsubscribes from receiver status and calls SharpCaster 3.0.0's
-    /// <c>ChromecastClient.DisconnectAsync</c>, which only cancels its receive loop and closes
-    /// the socket.
+    /// Closes our channel to a receiver that is busy with someone else's app (or whose status could
+    /// not be read) — a disconnect only, no media STOP and no app launch or close, so their session
+    /// is untouched. That rests on three facts: this calls <c>GoogleCastOutput.DisconnectAsync</c>,
+    /// never <c>StopAsync</c> or the engine's <c>TearDownCastOutputAsync</c>; it runs only before
+    /// <c>ConfirmReceiverAvailable</c>, so our connection is still held for receiver confirmation;
+    /// and <c>DisconnectAsync</c> skips its AUD-81 console-mute release for a held connection (the
+    /// <c>wasHeld</c> check in <c>GoogleCastOutput.DisconnectAsync</c>). That release is the one
+    /// place <c>DisconnectAsync</c> sends Cast messages — a receiver-application STOP, then SET_MUTE
+    /// false, possibly over a fresh connection — and only for a connection that muted the speaker
+    /// for the console. Without it, <c>DisconnectAsync</c> unsubscribes from receiver status and
+    /// calls SharpCaster 3.0.0's <c>ChromecastClient.DisconnectAsync</c>, which only cancels its
+    /// receive loop and closes the socket.
     /// </summary>
     private async Task DisconnectOwnAsync(GoogleCastOutput cast)
     {
@@ -1988,8 +1993,10 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
       await Task.WhenAny(CastReconnectTask, Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None));
 
       // Graceful Cast shutdown: stop our streaming/media and close our
-      // connection to the receiver (no CLOSE_APP is sent — see
-      // TearDownCastOutputAsync). Single
+      // connection to the receiver. No receiver-application stop is sent
+      // unless this connection muted the speaker for a muted console (AUD-81):
+      // then our app is stopped and the speaker unmuted, possibly over a fresh
+      // connection — see TearDownCastOutputAsync. Single
       // source of truth: the same TearDownCastOutputAsync that the
       // SetActiveOutputAsync gate uses when transitioning away from Cast.
       // Best-effort; never blocks engine stop (5s internal cap + try/catch).

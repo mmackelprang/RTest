@@ -228,7 +228,9 @@ public class SoundFlowAudioEngineActiveOutputTests
     // the Chromecast receiver app kept the session, so audio kept playing
     // on Cast until the user manually disconnected. The fix routes the
     // gate through TearDownCastOutputAsync which calls BOTH StopAsync
-    // (media stop) AND DisconnectAsync (CLOSE_APP + receiver disconnect).
+    // (media stop) AND DisconnectAsync (closes the receiver connection; no
+    // Cast message unless it must release an AUD-81 console mute — see
+    // TearDownCastOutputAsync's summary).
     //
     // We can't directly Mock<GoogleCastOutput>.DisconnectAsync (the concrete
     // method isn't virtual, and AudioOutputBase.State isn't virtual either).

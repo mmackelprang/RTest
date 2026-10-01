@@ -180,7 +180,12 @@ public class AudioEngineInitializationServiceCastReconnectHostTests
 
     // Never Streaming at any point, so no media STOP can have been sent: GoogleCastOutput.StopAsync
     // is a no-op unless the output is Streaming (AudioOutputBase.ValidateCanStop), and nothing was
-    // launched to stop. Whether DisconnectAsync itself sends anything is SharpCaster's behaviour
+    // launched to stop. DisconnectAsync sends Cast messages only to release a console mute (AUD-81:
+    // app STOP, then SET_MUTE false, possibly over a fresh connection), which it skips for a
+    // connection still held for receiver confirmation, as this one is (and a held connection
+    // carries no console-mute mark to release; CastConsoleVolumeFollowerTests'
+    // AStandDownFromABusyReceiver_SendsNothing… pins that nothing is sent). Beyond that, whether
+    // closing sends anything is SharpCaster's behaviour
     // (it does not, in 3.0.0), which no offline test can observe.
     Assert.DoesNotContain(AudioOutputState.Streaming, states);
   }
