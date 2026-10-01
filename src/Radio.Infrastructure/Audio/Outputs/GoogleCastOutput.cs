@@ -2511,8 +2511,8 @@ public class GoogleCastOutput : AudioOutputBase
   /// changes the level unmutes the speaker (measured on a Google Home Mini, box UAT 2026-10-01), and
   /// a level push of ours must not leave a muted speaker unmuted. Used by the pushes that cannot be
   /// held for a console unmute: the AUD-80 restore on connect and the after-start push to a speaker
-  /// muted on its own side. Returns what the level push returned; a failed re-mute is logged at
-  /// Warning and does not fail the push. Bounded only by the caller (the re-mute by
+  /// muted on its own side under an unmuted console. Returns what the level push returned; a re-mute
+  /// that fails or sends nothing is logged at Warning and does not fail the push. Bounded only by the caller (the re-mute by
   /// <see cref="ConsoleCommandTimeout"/>).
   /// </summary>
   private async Task<bool> PushVolumeKeepingMuteAsync(ChromecastClient client, float volume)
@@ -3546,7 +3546,10 @@ public class GoogleCastOutput : AudioOutputBase
   /// output knows (which is what keeps an external mute, re-synced to the console, from being
   /// pushed back), when the output is not <c>Streaming</c>, or when its connection is no longer
   /// the published one. Muting marks the connection "muted by console"; see
-  /// <see cref="IsSpeakerMutedByConsole"/>.
+  /// <see cref="IsSpeakerMutedByConsole"/>. An unmute skipped because the speaker is already unmuted
+  /// still clears that mark and the device's console-mute record (hostile review L3). A mute
+  /// re-assert (see <c>OnReceiverStatusChanged</c>) never replaces a console request waiting in the
+  /// slot (hostile review M3).
   /// </summary>
   /// <returns>
   /// True when the burst this request joined ended with the speaker acknowledging
@@ -3935,7 +3938,9 @@ public class GoogleCastOutput : AudioOutputBase
   /// <para><b>When the unmute on this connection fails</b> (AUD-81 follow-up, D2). Measured on the
   /// box 2026-10-01: stopping our receiver application makes the speaker close our connection, so the
   /// unmute sent after the stop timed out. After a confirmed stop, an unmute that times out, throws
-  /// or finds no receiver channel is retried over a fresh, short-lived connection that launches
+  /// or finds no receiver channel — or whose connection is reported lost before it is sent (then it
+  /// is not sent) or while it is on the wire (then it is not waited for; hostile review L6) — is
+  /// retried over a fresh, short-lived connection that launches
   /// nothing (<see cref="UnmuteOverFreshConnectionAsync"/>), which unmutes only when the device's own
   /// fresh status shows our application not running and the speaker muted — the same H1 guarantee.
   /// It is not tried when the console is no longer the reason the speaker is muted (the per-device
