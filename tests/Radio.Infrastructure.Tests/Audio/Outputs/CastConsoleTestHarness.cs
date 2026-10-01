@@ -112,13 +112,37 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
         Commands.Add(("mute", 0f, m));
       }
 
+      var fail = FailNextMute;
+      FailNextMute = null;
       var gate = MuteGate;
       MuteSendEntered.TrySetResult();
       if (gate != null)
       {
         await gate.Task;
       }
+
+      if (fail != null)
+      {
+        throw fail;
+      }
     };
+    Output.CastFreshConnectionOverrideForTests = (
+      _ =>
+      {
+        lock (_commandsLock)
+        {
+          Commands.Add(("fresh", 0f, false));
+        }
+        return FreshConnect();
+      },
+      () =>
+      {
+        lock (_commandsLock)
+        {
+          Commands.Add(("fresh-unmute", 0f, false));
+        }
+        return Task.CompletedTask;
+      });
     Output.CastStopApplicationOverrideForTests = () =>
     {
       lock (_commandsLock)
@@ -135,7 +159,26 @@ internal sealed class CastConsoleTestHarness : IAsyncDisposable
   /// </summary>
   public Func<Task<bool>> AppStop { get; set; } = () => Task.FromResult(true);
 
-  /// <summary>The kinds of every command sent, in order ("vol", "mute", "appstop").</summary>
+  /// <summary>When set, the next SET_MUTE throws it (after recording itself and passing the gate).</summary>
+  public Exception? FailNextMute { get; set; }
+
+  /// <summary>
+  /// The fresh, short-lived teardown connection's status (AUD-81 follow-up, D2): by default the
+  /// speaker is muted and no application is running. A test replaces it with another status, a
+  /// throw, or a task that never completes.
+  /// </summary>
+  public Func<Task<ChromecastStatus?>> FreshConnect { get; set; } = () => Task.FromResult<ChromecastStatus?>(FreshStatus(muted: true));
+
+  /// <summary>A receiver status as a fresh GET_STATUS returns it.</summary>
+  public static ChromecastStatus FreshStatus(bool muted, string? runningAppId = null) => new()
+  {
+    Volume = new() { Level = 0.40, Muted = muted },
+    Applications = runningAppId == null
+      ? null
+      : new System.Collections.ObjectModel.Collection<ChromecastApplication> { new() { AppId = runningAppId } }
+  };
+
+  /// <summary>The kinds of every command sent, in order ("vol", "mute", "unmute", "appstop", "fresh", "fresh-unmute").</summary>
   public List<string> Kinds()
   {
     lock (_commandsLock)
@@ -358,6 +401,34 @@ internal sealed class TimerRendezvousFakeTimeProvider : FakeTimeProvider
     }
 
     return timer;
+  }
+}
+
+/// <summary>Records every formatted log line with its level.</summary>
+internal sealed class RecordingLogger : ILogger
+{
+  private readonly object _lock = new();
+  private readonly List<(LogLevel Level, string Line)> _lines = new();
+
+  public List<(LogLevel Level, string Line)> Lines()
+  {
+    lock (_lock)
+    {
+      return _lines.ToList();
+    }
+  }
+
+  public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+  public bool IsEnabled(LogLevel logLevel) => true;
+
+  public void Log<TState>(
+    LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+  {
+    lock (_lock)
+    {
+      _lines.Add((logLevel, formatter(state, exception)));
+    }
   }
 }
 

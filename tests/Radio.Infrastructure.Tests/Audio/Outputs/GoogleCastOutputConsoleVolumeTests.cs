@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Core.Interfaces.Audio;
 using Radio.Infrastructure.Audio.Outputs;
@@ -1128,8 +1129,129 @@ public class GoogleCastOutputConsoleVolumeTests
     h.Time.Advance(TimeSpan.FromSeconds(3));
     await stop.WaitAsync(TimeSpan.FromSeconds(30)); // returns while the unmute is still held
 
-    Assert.Equal(new[] { "mute", "appstop", "unmute" }, h.Kinds());
+    // Since the AUD-81 follow-up (D2) a timed-out teardown unmute is retried over a fresh
+    // connection (the harness's default: speaker muted, nothing running).
+    Assert.Equal(new[] { "mute", "appstop", "unmute", "fresh", "fresh-unmute" }, h.Kinds());
     h.MuteGate.SetResult();
+  }
+
+  // --- AUD-81 follow-up D2: the teardown unmute when stopping our app closes the connection ---
+
+  /// <summary>
+  /// Casting to cast-a with the console muted (the speaker muted for it), and a console logger
+  /// attached. Returns the logger; commands cleared.
+  /// </summary>
+  private static async Task<RecordingLogger> CastingUnderAMutedConsoleAsync(CastConsoleTestHarness h)
+  {
+    var log = new RecordingLogger();
+    h.Output.AttachConsoleFollower(() => true, log);
+    await h.ConnectAsync(reportedLevel: 0.30f);
+    Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, h.Target().Generation));
+    Assert.True(h.Output.IsSpeakerMutedByConsole);
+    h.ClearCommands();
+    return log;
+  }
+
+  /// <summary>
+  /// Whether the output still records cast-a as muted for the console: a reconnect whose initial
+  /// read shows it muted re-arms the mark only then (F11).
+  /// </summary>
+  private static async Task<bool> StillRecordedAsMutedForTheConsoleAsync(CastConsoleTestHarness h)
+  {
+    await h.ConnectAsync(reportedLevel: 0.30f, reportedMuted: true, streaming: false);
+    return h.Output.IsSpeakerMutedByConsole;
+  }
+
+  // D2 (a). Measured on the box 2026-10-01: stopping our receiver application made the speaker
+  // close our connection, and the unmute sent after it timed out — the speaker could stay muted.
+  [Fact]
+  public async Task WhenTheAppStopClosesTheConnection_TheUnmuteIsSentOverAFreshConnection()
+  {
+    await using var h = new CastConsoleTestHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TaskCanceledException("Client disconnected before receiving response.");
+
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh", "fresh-unmute" }, h.Kinds());
+    Assert.False(h.Output.IsSpeakerMutedByConsole);
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("unmuted over a new connection"));
+    Assert.DoesNotContain(log.Lines(), l => l.Line.Contains("could not unmute"));
+    Assert.False(await StillRecordedAsMutedForTheConsoleAsync(h)); // the record was cleared
+  }
+
+  // D2 (a'): a fresh status that already shows the speaker unmuted sends nothing and clears the record.
+  [Fact]
+  public async Task AFreshConnectionThatFindsTheSpeakerUnmuted_SendsNothing_AndClearsTheRecord()
+  {
+    await using var h = new CastConsoleTestHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TimeoutException("closed");
+    h.FreshConnect = () => Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+      CastConsoleTestHarness.FreshStatus(muted: false));
+
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh" }, h.Kinds());
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("already unmuted after closing"));
+    Assert.False(await StillRecordedAsMutedForTheConsoleAsync(h));
+  }
+
+  // D2 (b). The fresh connection still shows OUR receiver application running: unmuting could
+  // release its audio under a muted console (H1), so the speaker is left muted, and said so.
+  [Fact]
+  public async Task AFreshConnectionThatStillShowsOurApplication_DoesNotUnmute()
+  {
+    await using var h = new CastConsoleTestHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TimeoutException("closed");
+    h.FreshConnect = () => Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+      CastConsoleTestHarness.FreshStatus(muted: true, runningAppId: h.Output.Options.ApplicationId));
+
+    await h.Output.StopAsync();
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh" }, h.Kinds());
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("still shows our receiver application running"));
+    Assert.True(await StillRecordedAsMutedForTheConsoleAsync(h)); // kept: still the console's mute
+  }
+
+  // D2 (c). The speaker cannot be reached at all: bounded at 5 s on the injected clock, logged,
+  // and the speaker left muted (the record kept for a later connection).
+  [Fact]
+  public async Task AnUnreachableSpeaker_IsGivenUpOnTheInjectedClock_AndLeftMuted()
+  {
+    await using var h = new CastConsoleTestHarness();
+    var log = await CastingUnderAMutedConsoleAsync(h);
+    h.FailNextMute = new TimeoutException("closed");
+    var never = new TaskCompletionSource<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
+      TaskCreationOptions.RunContinuationsAsynchronously);
+    h.FreshConnect = () => never.Task;
+
+    var timeoutArmed = h.Time.WatchForTimer(TimeSpan.FromSeconds(5)); // FreshConnectionUnmuteTimeout
+    var stop = h.Output.StopAsync();
+    await timeoutArmed.WaitAsync(TimeSpan.FromSeconds(30)); // safety net only; never the gate
+    h.Time.Advance(TimeSpan.FromSeconds(6));
+    await stop.WaitAsync(TimeSpan.FromSeconds(30));
+
+    Assert.Equal(new[] { "appstop", "unmute", "fresh" }, h.Kinds());
+    Assert.Single(log.Lines(), l => l.Level == LogLevel.Information && l.Line.Contains("could not be reached over a new connection"));
+    Assert.True(await StillRecordedAsMutedForTheConsoleAsync(h));
+    never.SetResult(null);
+  }
+
+  // D2 (d). A connection LOSS never unmutes — not on the old connection, and not over a new one.
+  [Fact]
+  public async Task ALostConnection_NeverTriesAnUnmuteOverAFreshConnection()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await CastingUnderAMutedConsoleAsync(h);
+
+    h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
+    await h.Output.LastConnectionLossHandling;
+    await h.Output.StopAsync();
+    await h.Output.DisconnectAsync();
+
+    Assert.Empty(h.Commands);
   }
 
   // Pre-merge review L4: console mutes were not coalesced, so a burst of toggles queued one

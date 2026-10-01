@@ -1115,6 +1115,7 @@ public class GoogleCastOutput : AudioOutputBase
     // this race into a multi-second hang on the output picker.
     ChromecastClient? client;
     ChromecastDeviceInfo? disconnectedDevice;
+    ChromecastReceiver? disconnectedReceiver;
     bool hadConnection;
     int closedGeneration;
     await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -1125,6 +1126,7 @@ public class GoogleCastOutput : AudioOutputBase
       _publishedGeneration = -1;
       UnwatchConnectionLoss_Locked();
       hadConnection = _connectedReceiver != null;
+      disconnectedReceiver = _connectedReceiver;
       client = _client;
       disconnectedDevice = ConnectedDevice;
       _connectedReceiver = null;
@@ -1153,7 +1155,7 @@ public class GoogleCastOutput : AudioOutputBase
       // no-op — StopAsync has released it — but DisposeAsync reaches here without a StopAsync,
       // and a release StopAsync could not complete (receiver application not confirmed stopped)
       // is retried here. Either way the application is stopped before any unmute.
-      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice).ConfigureAwait(false);
+      await ReleaseConsoleMuteAsync(client, closedGeneration, disconnectedDevice, disconnectedReceiver).ConfigureAwait(false);
 
       UnsubscribeFromReceiverStatus(client);
 
@@ -1607,12 +1609,14 @@ public class GoogleCastOutput : AudioOutputBase
       ChromecastClient? stopClient;
       int stopGeneration;
       ChromecastDeviceInfo? stopDevice;
+      ChromecastReceiver? stopReceiver;
       await _lifecycleLock.WaitAsync(cancellationToken).ConfigureAwait(false);
       try
       {
         stopClient = _client;
         stopGeneration = _publishedGeneration;
         stopDevice = ConnectedDevice;
+        stopReceiver = _connectedReceiver;
       }
       finally
       {
@@ -1688,7 +1692,7 @@ public class GoogleCastOutput : AudioOutputBase
       // after this method returns. So a speaker the console muted is unmuted only after its
       // receiver application has been stopped, and is left muted if that cannot be confirmed.
       // ReleaseConsoleMuteAsync states exactly what that guarantees.
-      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDevice).ConfigureAwait(false);
+      await ReleaseConsoleMuteAsync(stopClient, stopGeneration, stopDevice, stopReceiver).ConfigureAwait(false);
 
       IsEnabledInternal = false;
       State = AudioOutputState.Stopped;
@@ -3772,6 +3776,14 @@ public class GoogleCastOutput : AudioOutputBase
   /// has to unmute is recoverable; a muted console playing out loud is the one outcome this
   /// feature must never produce. The mark is kept in that case, so a later teardown of the same
   /// connection (DisconnectAsync after StopAsync) tries again.</para>
+  /// <para><b>When the unmute on this connection fails</b> (AUD-81 follow-up, D2). Measured on the
+  /// box 2026-10-01: stopping our receiver application makes the speaker close our connection, so the
+  /// unmute sent after the stop timed out. After a confirmed stop, an unmute that times out, throws
+  /// or finds no receiver channel is retried over a fresh, short-lived connection that launches
+  /// nothing (<see cref="UnmuteOverFreshConnectionAsync"/>), which unmutes only when the device's own
+  /// fresh status shows our application not running and the speaker muted — the same H1 guarantee.
+  /// It is not tried when the console is no longer the reason the speaker is muted (the per-device
+  /// console-mute record was cleared — e.g. an unmute was observed on the speaker meanwhile).</para>
   /// <para><b>What is not:</b> that the unmute itself lands (a failure is logged; the speaker stays
   /// muted). Only a connection the console muted is touched: otherwise a teardown leaves the
   /// receiver application to the media-stop and close paths, as before AUD-81.</para>
@@ -3781,7 +3793,8 @@ public class GoogleCastOutput : AudioOutputBase
   /// RECEIVER_STATUS without it — is what that status is replaced with (the receive loop runs
   /// <c>ReceiverChannel.OnMessageReceived</c> before completing the request).</para>
   /// </remarks>
-  private async Task ReleaseConsoleMuteAsync(ChromecastClient? client, int generation, ChromecastDeviceInfo? device)
+  private async Task ReleaseConsoleMuteAsync(
+    ChromecastClient? client, int generation, ChromecastDeviceInfo? device, ChromecastReceiver? receiver)
   {
     var deviceName = device?.FriendlyName;
     if (client == null || generation < 0 || Volatile.Read(ref _consoleMutedGeneration) != generation)
@@ -3816,6 +3829,7 @@ public class GoogleCastOutput : AudioOutputBase
       return;
     }
 
+    Exception? failure = null;
     try
     {
       if (await SendMuteToDeviceAsync(client, false)
@@ -3825,14 +3839,203 @@ public class GoogleCastOutput : AudioOutputBase
           "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",
           deviceName);
         ForgetConsoleMute(device?.Id);
+        return;
       }
     }
     catch (Exception ex)
     {
+      failure = ex;
+      _logger.LogDebug(ex, "Cast: teardown unmute on the existing connection failed");
+    }
+
+    // D2: the connection is unusable (no receiver channel) or the unmute failed or timed out —
+    // on the box, because the speaker closed our connection when its application stopped.
+    if (device == null || receiver == null)
+    {
       ConsoleLogger.LogInformation(
         "Cast: could not unmute speaker {Name} before closing ({Error}) — it may stay muted",
-        deviceName, ex.GetType().Name);
-      _logger.LogDebug(ex, "Cast: teardown unmute failed");
+        deviceName, failure?.GetType().Name ?? "no receiver channel");
+      return;
+    }
+
+    await UnmuteOverFreshConnectionAsync(receiver, device).ConfigureAwait(false);
+  }
+
+  /// <summary>
+  /// <b>Test seam (kind C — substitution).</b> Substitutes the fresh, short-lived connection behind
+  /// <see cref="UnmuteOverFreshConnectionAsync"/> (AUD-81 follow-up, D2): <c>Connect</c> stands in for
+  /// <c>ChromecastClient.ConnectChromecast</c> and returns the device's status (or throws, or never
+  /// completes), <c>Unmute</c> for the SET_MUTE false sent over it. Set by <c>CastConsoleTestHarness</c>.
+  /// <b>Why the real path is unreachable:</b> the same as <see cref="CastSetMuteOverrideForTests"/> —
+  /// no fake socket speaks the Cast protocol (or completes its TLS handshake).
+  /// <b>NOT covered by this seam:</b> that SharpCaster 3.0.0's <c>ConnectChromecast</c> launches no
+  /// application (checked against its decompiled source: TCP, TLS, CONNECT to the platform receiver,
+  /// GET_STATUS — no LAUNCH), and that the client is disconnected afterwards. WHEN the fresh connection
+  /// is tried, the decision taken on its status, the bound and the bookkeeping are real.
+  /// Null (and therefore free) in production.
+  /// </summary>
+  internal (Func<ChromecastReceiver, Task<ChromecastStatus?>> Connect, Func<Task> Unmute)? CastFreshConnectionOverrideForTests { get; set; }
+
+  /// <summary>The whole fresh-connection unmute, connect to disconnect, is bounded by this.</summary>
+  private static readonly TimeSpan FreshConnectionUnmuteTimeout = TimeSpan.FromSeconds(5);
+
+  private enum FreshUnmuteOutcome { Unmuted, AlreadyUnmuted, OurApplicationRunning, StatusUnreadable, NoLongerTheConsoles }
+
+  /// <summary>
+  /// AUD-81 follow-up (D2): after a deliberate teardown whose unmute could not be sent on the closing
+  /// connection, opens a FRESH connection to the same device that launches nothing, reads its receiver
+  /// status, and — only if that status lists no application with our <c>ApplicationId</c> and shows
+  /// the speaker muted — sends SET_MUTE false; then closes it. Bounded as a whole by
+  /// <see cref="FreshConnectionUnmuteTimeout"/> on the injected clock. One Information line with the
+  /// outcome. Never throws.
+  /// </summary>
+  /// <remarks>
+  /// <para>Called only from <see cref="ReleaseConsoleMuteAsync"/>, i.e. only on a deliberate
+  /// teardown after our application was confirmed stopped — never on a connection loss.</para>
+  /// <para>The status here is the device's own answer to a fresh GET_STATUS, so a missing
+  /// applications list means nothing is running (unlike the held status of the old channel, see
+  /// <see cref="StopReceiverApplicationAsync"/>). A status without a volume is "unreadable" and the
+  /// speaker is left muted.</para>
+  /// <para>The console-mute record for the device (<c>_consoleMutedDeviceId</c>) is checked before
+  /// connecting and again just before the SET_MUTE: if it was cleared meanwhile the console is no
+  /// longer the reason, and nothing is sent. On a bound that expires, the connection attempt is
+  /// abandoned (it cannot be cancelled) and told not to send the unmute if it completes later; an
+  /// unmute already on the wire at that moment is not recalled.</para>
+  /// </remarks>
+  private async Task UnmuteOverFreshConnectionAsync(ChromecastReceiver receiver, ChromecastDeviceInfo device)
+  {
+    if (!IsConsoleMuteRecordedFor(device.Id))
+    {
+      _logger.LogDebug(
+        "Cast: {Name} is no longer muted for the console — no unmute over a new connection", device.FriendlyName);
+      return;
+    }
+
+    var abandon = new CancellationTokenSource();
+    FreshUnmuteOutcome outcome;
+    try
+    {
+      outcome = await FreshConnectionUnmuteCoreAsync(receiver, device.Id, abandon.Token)
+        .WaitAsync(FreshConnectionUnmuteTimeout, _timeProvider).ConfigureAwait(false);
+    }
+    catch (Exception ex)
+    {
+      abandon.Cancel();
+      ConsoleLogger.LogInformation(
+        "Cast: speaker {Name} left muted — it could not be reached over a new connection to unmute it ({Error}); " +
+        "unmute it on the speaker or in Google Home",
+        device.FriendlyName, ex.GetType().Name);
+      _logger.LogDebug(ex, "Cast: the unmute over a new connection failed");
+      return;
+    }
+
+    switch (outcome)
+    {
+      case FreshUnmuteOutcome.Unmuted:
+        ForgetConsoleMute(device.Id);
+        ConsoleLogger.LogInformation(
+          "Cast: speaker {Name} unmuted over a new connection after closing — the old connection could not send it; " +
+          "it had been muted for the console",
+          device.FriendlyName);
+        break;
+      case FreshUnmuteOutcome.AlreadyUnmuted:
+        ForgetConsoleMute(device.Id);
+        ConsoleLogger.LogInformation(
+          "Cast: speaker {Name} is already unmuted after closing (read over a new connection)", device.FriendlyName);
+        break;
+      case FreshUnmuteOutcome.OurApplicationRunning:
+        ConsoleLogger.LogInformation(
+          "Cast: speaker {Name} left muted — a new connection still shows our receiver application running, and " +
+          "unmuting could play our audio under a muted console; unmute it on the speaker or in Google Home",
+          device.FriendlyName);
+        break;
+      case FreshUnmuteOutcome.StatusUnreadable:
+        ConsoleLogger.LogInformation(
+          "Cast: speaker {Name} left muted — a new connection could not read its status; unmute it on the speaker or in Google Home",
+          device.FriendlyName);
+        break;
+      default:
+        _logger.LogDebug(
+          "Cast: {Name} stopped being muted for the console during the new connection — no unmute sent", device.FriendlyName);
+        break;
+    }
+  }
+
+  /// <summary>
+  /// The fresh connection itself: connect (no launch), decide on its status, maybe unmute, close.
+  /// Throws what the connect or the unmute throws.
+  /// </summary>
+  private async Task<FreshUnmuteOutcome> FreshConnectionUnmuteCoreAsync(
+    ChromecastReceiver receiver, string deviceId, CancellationToken abandoned)
+  {
+    if (CastFreshConnectionOverrideForTests is { } fake)
+    {
+      return await DecideFreshUnmuteAsync(
+        await fake.Connect(receiver).ConfigureAwait(false), fake.Unmute, deviceId, abandoned).ConfigureAwait(false);
+    }
+
+    var client = new ChromecastClient();
+    // AUD-84: SharpCaster's heartbeat-timeout handler is async void; unguarded, a throw there ends
+    // the process. A fault on this throwaway connection matters to nothing else.
+    SharpCasterCallbackGuard.TryHarden(
+      client, fault => _logger.LogDebug(fault, "Cast: fault on the short-lived unmute connection"), _logger);
+    try
+    {
+      var status = await client.ConnectChromecast(receiver).ConfigureAwait(false);
+      return await DecideFreshUnmuteAsync(status, async () =>
+      {
+        var channel = client.GetChannel<ReceiverChannel>()
+          ?? throw new InvalidOperationException("the new connection exposes no receiver channel");
+        await channel.SetMute(false).ConfigureAwait(false);
+      }, deviceId, abandoned).ConfigureAwait(false);
+    }
+    finally
+    {
+      try
+      {
+        await client.DisconnectAsync().ConfigureAwait(false);
+      }
+      catch (Exception ex)
+      {
+        _logger.LogDebug(ex, "Cast: error closing the short-lived unmute connection");
+      }
+    }
+  }
+
+  private async Task<FreshUnmuteOutcome> DecideFreshUnmuteAsync(
+    ChromecastStatus? status, Func<Task> unmute, string deviceId, CancellationToken abandoned)
+  {
+    if (status?.Volume == null)
+    {
+      return FreshUnmuteOutcome.StatusUnreadable;
+    }
+
+    var applicationId = _options.ApplicationId;
+    if (status.Applications?.Any(a => a.AppId == applicationId) == true)
+    {
+      return FreshUnmuteOutcome.OurApplicationRunning;
+    }
+
+    if (status.Volume.Muted != true)
+    {
+      return FreshUnmuteOutcome.AlreadyUnmuted;
+    }
+
+    if (abandoned.IsCancellationRequested || !IsConsoleMuteRecordedFor(deviceId))
+    {
+      return FreshUnmuteOutcome.NoLongerTheConsoles;
+    }
+
+    await unmute().ConfigureAwait(false);
+    return FreshUnmuteOutcome.Unmuted;
+  }
+
+  /// <summary>True while <paramref name="deviceId"/> is the device recorded as muted for the console.</summary>
+  private bool IsConsoleMuteRecordedFor(string deviceId)
+  {
+    lock (_consoleMuteLock)
+    {
+      return string.Equals(_consoleMutedDeviceId, deviceId, StringComparison.Ordinal);
     }
   }
 
