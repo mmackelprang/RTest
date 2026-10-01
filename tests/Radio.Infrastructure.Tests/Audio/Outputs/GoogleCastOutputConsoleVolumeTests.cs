@@ -104,6 +104,32 @@ public class GoogleCastOutputConsoleVolumeTests
   }
 
   [Fact]
+  public async Task AnExternalChange_DropsAQueuedConsoleTarget_AndBecomesTheKnownLevel()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    h.ClearCommands();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;                                     // 0.30 in flight
+    Assert.Same(burst, h.Output.SetDeviceVolumeFromConsoleAsync(0.36f, target.Generation)); // 0.36 queued
+
+    h.RaiseStatus(0.55); // changed on the speaker meanwhile
+
+    // The re-synced master volume (0.55) must find the speaker already there, or the follower
+    // would push a mapped value back at it.
+    Assert.Equal(0.55f, h.Target().SpeakerLevel, 3);
+
+    h.VolumeGate.SetResult();
+    await burst;
+
+    // The queued 0.36 was never sent. (The in-flight 0.30 was not recallable.)
+    Assert.Equal(new[] { 0.30f }, h.VolumeSends());
+  }
+
+  [Fact]
   public async Task AConsoleTargetForASupersededConnection_IsNeverSent()
   {
     await using var h = new CastConsoleTestHarness();
