@@ -89,7 +89,34 @@ public class GoogleCastOutputLifecycleTests
     Assert.NotNull(client.GetChannel<ReceiverChannel>()); // SharpCaster's own channels untouched
   }
 
+  [Fact]
+  public async Task TestPlayUrl_WhileStreaming_IsRefusedWithoutTouchingTheSession()
+  {
+    // The test playback relaunches the receiver app; on a live DirectChannel session that
+    // invalidates the transport id the streaming loop is sending to.
+    await using var output = await InitializedOutputAsync();
+    SeedLiveReceiver(output, "cast-a", "10.0.0.1");
+    await output.ConnectAsync(Device("cast-a", "10.0.0.1"));
+    MarkStreaming(output);
+
+    // Hang guard only: unrefused, the call waits on a LAUNCH reply no offline client gets.
+    var result = await output.TestPlayUrlAsync("http://example.invalid/a.mp3", "audio/mpeg")
+      .WaitAsync(TimeSpan.FromSeconds(10));
+
+    Assert.False(ReadProperty<bool>(result, "success"));
+    Assert.Contains("stop casting", ReadProperty<string>(result, "error"));
+    Assert.Equal(AudioOutputState.Streaming, output.State);
+    Assert.Equal("cast-a", output.ConnectedDevice?.Id);
+  }
+
   // --- helpers ---
+
+  private static T ReadProperty<T>(object anonymous, string name)
+  {
+    var prop = anonymous.GetType().GetProperty(name);
+    Assert.NotNull(prop);
+    return (T)prop!.GetValue(anonymous)!;
+  }
 
   private static ILogger NullLoggerFor() => Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance;
 
