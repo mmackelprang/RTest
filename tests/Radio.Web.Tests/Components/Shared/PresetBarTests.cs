@@ -161,6 +161,11 @@ public class PresetBarTests : TestContext
     pending.SetVoidResult();
     await press;
 
+    // Nothing left armed — not even a timer whose ticks would be no-ops. Two guards cover the
+    // paging; this pins the first, so neither can quietly go.
+    typeof(PresetBar).GetField("_repeatTimer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+      .GetValue(cut.Instance).Should().BeNull("a released press arms no repeat timer");
+
     _clock.Advance(PresetBar.RepeatDelay + (PresetBar.RepeatInterval * 3));
 
     pending.Invocations.Should().ContainSingle("a tap is one page, however long the first page took");
