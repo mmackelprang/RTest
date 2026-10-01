@@ -1607,8 +1607,10 @@ public class EncoderHudDto
 /// One row of a selector overlay, as it crosses the wire (ENC-5).
 ///
 /// <para>
-/// A flat presentation record with no behaviour. <see cref="Id"/> is opaque to the Web — the API
-/// decides what committing it does — and is used here only as the Blazor <c>@key</c>.
+/// A flat presentation record with no behaviour. The API decides what committing <see cref="Id"/>
+/// does. The overlay uses it only as the Blazor <c>@key</c>; the one place the Web reads into it is
+/// the preset bar (UI-21), which takes the PRESETS knob's <c>preset:{id}</c> rows to find the card the
+/// knob is pointing at — <c>PresetBar.KnobPresetIdOf</c>.
 /// </para>
 /// </summary>
 public class EncoderSelectorRowDto

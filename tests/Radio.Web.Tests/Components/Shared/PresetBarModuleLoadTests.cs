@@ -22,6 +22,8 @@ public class PresetBarModuleLoadTests : TestContext
   public PresetBarModuleLoadTests()
   {
     Services.AddSingleton<IJSRuntime>(_runtime);
+    // UI-21: the bar reads the PRESETS knob's highlight off the HUD singleton.
+    Services.AddSingleton(new Radio.Web.Services.EncoderHudService(timeProvider: new FakeTimeProvider()));
   }
 
   private static RadioPresetDto P(string id, string band, int slot) =>

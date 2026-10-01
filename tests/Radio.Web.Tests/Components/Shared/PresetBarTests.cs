@@ -35,6 +35,9 @@ public class PresetBarTests : TestContext
   public PresetBarTests()
   {
     Services.AddRadzenComponents();
+    // UI-21: the bar reads the PRESETS knob's highlight off the HUD singleton. Nothing publishes to
+    // it here — the mirror's own tests are PresetBarKnobMirrorTests.
+    Services.AddSingleton(new Radio.Web.Services.EncoderHudService(timeProvider: _clock));
     JSInterop.Mode = JSRuntimeMode.Loose;
     _module = JSInterop.SetupModule("./js/preset-bar.js");
     _module.Mode = JSRuntimeMode.Loose;
@@ -470,7 +473,10 @@ public class PresetBarTests : TestContext
   public void OrderLikeKnob_IsBandOrdinalThenSlot_ThenCreatedAt()
   {
     // The PRESETS knob composes band (StringComparer.Ordinal), then the per-band slot
-    // (PresetSelectorService.cs:364-370). Ordinal puts "AIR" before "AM" and "VHF" before "WB".
+    // (PresetSelectorService.InSlotOrder). Ordinal puts "AIR" before "AM" and "VHF" before "WB".
+    // UI-21: the knob half of this pin is PresetSelectorServiceTests
+    // .Rows_OrderBandsByName_NotByEnumValue_AndCarryThePresetIdTheBarMatchesOn — the same six
+    // presets, the same expected sequence. Change one and the other must change with it.
     var presets = new[]
     {
       P("wb1", "WB", 1), P("vhf1", "VHF", 1), P("fm2", "FM", 2), P("am1", "AM", 1),

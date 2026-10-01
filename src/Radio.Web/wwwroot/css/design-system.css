@@ -5049,6 +5049,35 @@ body {
   color: var(--signal-amber);
 }
 
+/* UI-21 (spec §4.8): the card the PRESETS knob is pointing at while its list is open. The overlay's
+   highlight treatment, turned on its side: the --surface-hover fill of .encoder-selector-row
+   .is-highlighted, and the 2 px .encoder-selector-bar along the card's BOTTOM edge instead of its
+   left, in --row-accent = --source-radio.
+   The fill is layered as an image over whatever the card's own background is — --surface-hover is a
+   5 % white wash, so painting it as the background-colour would make a highlighted card DARKER than
+   its --surface-elevated neighbours — and over the amber of .is-active too, so a knob resting on the
+   playing preset keeps both cues: the active card's amber border and inset left bar, and this. */
+.rcp-bar-item.is-knob-highlight {
+  --row-accent: var(--source-radio);
+}
+
+.rcp-bar-item.is-knob-highlight .rcp-bar-card {
+  background-image: linear-gradient(var(--surface-hover), var(--surface-hover));
+}
+
+.rcp-bar-item.is-knob-highlight::after {
+  content: '';
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  /* Inside the card's 1 px border: the viewport clips vertically, so nothing below 60 px shows. */
+  bottom: 1px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--row-accent, var(--accent-primary));
+  pointer-events: none;
+}
+
 /* ＋ SAVE — the next-slot placeholder, tappable by owner decision Q2. Dashed like the rail's
    placeholder, but at full opacity in amber, because it is now a control rather than a hint. */
 .rcp-bar-save {
