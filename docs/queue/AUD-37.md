@@ -2,7 +2,9 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md) · punch-list row: [`HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §4.2
 
-🔬 **BUILT 2026-10-01 (batch D), HELD for the owner: PR [#751](https://github.com/mmackelprang/RTest/pull/751) is open and NOT merged.** The owner script below needs a speaker physically unplugged and replugged. Nothing in this row was run on the box. Firewall changes are ruled out, so there is no agent-side way to drop a speaker.
+✅ **MERGED 2026-10-02 on the owner's validation — PR [#751](https://github.com/mmackelprang/RTest/pull/751).** Owner, 2026-10-02, on the owner script below: *"#1 - I validated this yestarday. This passes."* Which build the owner ran it on is not recorded here. Before the merge, `origin/main` `3f97d19` was merged into the branch and the full gates were re-run (see § Reviews and gates). The HttpMp3 stalled-write gap stays open on the punch-list row.
+
+_(Was: 🔬 **BUILT 2026-10-01 (batch D), HELD for the owner: PR #751 is open and NOT merged.**)_ The owner script below needs a speaker physically unplugged and replugged. Nothing in this row was run on the box. Firewall changes are ruled out, so there is no agent-side way to drop a speaker.
 
 ## Scope
 
@@ -64,6 +66,7 @@ Read the deployed SHA first: `curl -s http://radio:5000/api/health/version` must
   - an unreadable status no longer ends the episode.
 - **Deferred LOWs** (in the PR): the free-check under the default app id `CC1AD845`; a `_diagnosticReadsPending` leak on a never-completing read (shared with `AUD-81`); the blocking `Wait()` in `ConfirmReceiverAvailable`; the hourly cap counting refused switch-backs; "busy" being final for the window; residual per-attempt Warnings (about 30 per 30 min worst case); brief double audio between Streaming and the switch; the gap between the app read and the launch.
 - **Gates on `7e9fb782`:** `dotnet build -c Release --no-incremental` gives 46 warnings / 0 errors on Windows. The full `dotnet test` run is green except the six known `SrcVariableResamplerTests`: Infrastructure 2194, API 593, Web 1391.
+- **Gates after merging `origin/main` `3f97d19` (2026-10-02, clean merge, no conflicts):** `--no-incremental` Release build 46 warnings / 0 errors on Windows. Full `dotnet test`: every project green except Infrastructure's six known `SrcVariableResamplerTests` — Infrastructure 2214 passed / 6 failed, API 619, Web 1595, Web.E2E 28, RTLSDRCore 280, Core 186, Configuration 115, Fingerprinting 112, AudioAnalysis 35, Integration 31, Metrics 28.
 - **Deferred LOWs added by the last two reviews:** an `OperationCanceledException` that did not come from our token is treated as "superseded"; `DevicesController` promotes Cast without re-checking `Streaming` after the start; and a start-time mute that lands after a teardown leaves a mark on a dead generation. That mark self-heals at the next connect to the same speaker (F11).
 
 ## Merging with `AUD-85` (local-only branch, held for the owner)
