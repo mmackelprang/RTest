@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (80)
+## Shipped rows (81)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -2927,3 +2927,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-16.md`](queue/AUD-16.md)**
 
 ✅ **SHIPPED AND AGENT-VERIFIED 2026-10-01.** Merged as [#743](https://github.com/mmackelprang/RTest/pull/743) (squash `a4bad7c`) and deployed 2026-09-30 ~21:51 EDT (2026-10-01 UTC). On the box, `GET /api/radio/devices` returns one device, `RTLSDRCore`. The System Config Devices tab shows only the Vinyl field, and the Radio tab dropdown lists only RTL-SDR. Vinyl, File Player, Bluetooth and Radio each switched. After the restart the SDR came back on 92.3 FM (signal 100) from the persisted `CurrentSource=Radio`, and the start-up warnings say nothing about Radio config. The three checks first recorded as not run are now covered. `NRestarts=0` on `a4bad7c` was measured by batch D before its own deploy of `45a220e`, so `a4bad7c` ran without a restart. The coordinator ran the other two 2026-09-30 ~22:2x EDT on `45a220e` (which contains `a4bad7c`). `POST /api/sources {GenericUSB}` returned HTTP 500 `no capture device matches USBPort 'AB13X'` and the active source stayed Radio, as accepted under `AUD-13`. `POST /api/radio/frequency` to 100100000 returned 200 with signal 100, and back to 92300000 returned 200 with signal 98. ⛔ **Corrected 2026-10-01:** the dossier had attributed two interleaved source switches (21:52:29 → Radio, 21:52:35 → FilePlayer) to a concurrent Builder. Batch D made no box changes before 22:03. The switches came through `POST /api/sources` with no client attribution in the log, so they are unattributed, most likely the owner at the panel. See the dossier. ✅🔬 **BUILT 2026-09-30 (Phase 2i): the RF320 USB radio is removed.** That covers `RadioAudioSource`, the factory branch, `DeviceOptions.Radio` and its DTOs, the System Config field and dropdown option, the `SourceTypeHelper` arms, the `external/RaddyRF320BT` submodule and `.gitmodules`, and CI's `submodules: true`. `AudioSourceType.Radio` is kept, now meaning the RTL-SDR. The box's orphaned `devices:radio` / `devices:Radio` rows and `Devices:Radio:USBPort=AB13X` are left in place. Mutation-checked tests show they are inert. ⛔ **Not deployed or box-verified.** The Builder's deploy was refused by the session's permission classifier. The post-deploy checks are listed in the dossier. Filed `AUD-89` from the review. 📝 **OWNER RULING 2026-09-28 (D-D, [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md) §4): REMOVE ALL RaddyRF320BT SUPPORT — the USB radio source, its protocol/config/docs surface AND the `external/RaddyRF320BT` submodule. The RTL-SDR supersedes it. This is now a removal PR, not a keep-or-delete question; `"keep it, documented"` is no longer an acceptable close.** ⭐ **NEW 2026-09-08 — retire the deprecated USB radio path. ⚠ The deprecation itself is ALREADY implemented, so this is a removal decision, not a fix.** — [detail](queue/AUD-16.md)
+
+### UI-23 — Drag the preset bar with a finger; it already worked, closed with no code.
+
+| Field | Value |
+|---|---|
+| Status | ✅ closed, no code change — 2026-10-01. Owner, re-testing on the box running `f77049b` (the `UI-21` build, no `UI-23` code): *"Drag presets works."* The build was dropped by the coordinator: a scripted drag path would only add gesture-conflict risk. |
+| Plan | _none — closed before a plan_ |
+| Spec / handoff | _owner, `UI-20` UAT check 2: "passes, but I'd like to be able to "drag" the bar in addition to pressing the arrow keys"_ |
+| Depends on | `UI-20` |
+| Branch | — _(investigated on `feat/ui-23-24-preset-bar-drag-osk`, which ships `UI-24` and `UI-27`)_ |
+
+**Detail: [`queue/UI-23.md`](queue/UI-23.md)**
+
+✅ **CLOSED, NO CODE, 2026-10-01.** The strip is a native horizontal scroller (`overflow-x: auto`, mandatory scroll-snap, `touch-action: pan-x`). Driven in Chromium with trusted input, touch drags scroll it and snap; only a mouse-type pointer cannot drag it, and nothing in the tap or long-press paths swallows a touch drag. Why the owner's first attempt seemed not to work is not established; the dossier names the one read-only probe to run if it recurs.
