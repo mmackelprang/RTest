@@ -591,6 +591,21 @@ public class VisualizerPanelBandTests : TestContext
   }
 
   [Fact]
+  public async Task HubBandChange_RepeatedWhileTheMapStillShowsTheOldBand_ReadsOnce()
+  {
+    // The map read answers FM (say the API has not caught up). Telemetry ticks keep saying AIR; each
+    // one must not trigger another read — the idle refresh retries instead.
+    var cut = RenderBand();
+    int readsBefore = MapReads();
+
+    await RaiseRadioStateAsync(cut, HubState("AIR", 118_000_000));
+    await RaiseRadioStateAsync(cut, HubState("AIR", 118_000_000));
+    await RaiseRadioStateAsync(cut, HubState("AIR", 118_025_000));
+
+    MapReads().Should().Be(readsBefore + 1);
+  }
+
+  [Fact]
   public async Task HubFrequencyChange_SameBand_MovesTheStationMarker()
   {
     GetJson("/api/radio/bandmap", AirMap());
