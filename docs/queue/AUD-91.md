@@ -119,6 +119,100 @@ hardware can actually receive".
    matter more. Also watch the `No audio samples captured after 15020ms` warning that a live sweep can
    cause (`AUD-76` PR 2 UAT): a sweep longer than 15 s will trigger it every time.
 
+## Feasibility, measured on the box (Builder, 2026-10-01, deployed `590c40d`)
+
+Measured with the console **muted** (volume 0.3) and the radio playing, by switching band and frequency
+through `/api/radio/band` and `/api/radio/frequency` and reading `/api/radio/state` and the
+`radio-api` journal (bounded). Restored to FM 92.3 (WKRR), step 100 kHz, afterwards.
+
+- **The tuner is a Rafael Micro R820T** in a generic RTL2832U dongle (`0bda:2838`): every receiver open
+  logs `Found Rafael Micro R820T tuner` (journal, 05:09:50 and 05:10:54). The library is Ubuntu's stock
+  osmocom `librtlsdr2 2.0.1`. An R820T tunes from about 24 MHz; HF on such a dongle needs either a
+  hardware direct-sampling mod (antenna on the Q-branch pins) or an upconverter. Neither is present.
+- **AM is not receivable.** At 600, 1000, 1400 and 1710 kHz: `signalStrength 0`, `rssiDbu -60` (the
+  floor), and librtlsdr logs `[R82XX] PLL not locked!` on every tune (7 in one minute). The tune
+  "succeeds" with no usable signal; nothing fails loudly.
+- **SW is not receivable below ~24 MHz.** 5, 10 and 15 MHz: `signalStrength 0`, `PLL not locked!`
+  (4, 2, 1 per tune). 23 and 25 MHz: no PLL warning but still `0`. 27.185 and 29 MHz: `17` / `-49.8`
+  (the noise level of a working tuner). Only the top ~5 MHz of a 1.6-30 MHz band is in range, and
+  nothing was heard there.
+- **AIR, WB and VHF tune normally** (no PLL warning): AIR 108.0 `45`/`-33`, WB 162.400 `39`/`-36.6`,
+  VHF 162.400 `49`/`-30.6`. Stepping the seven NOAA channels gave `50, 59, 82, 94, 89, 86, 87`; that
+  number is a wideband (240 kHz) RMS, so it does not say which channel carries the station. The map
+  does.
+- **Every band runs the receiver at 240 kS/s** (`RadioReceiver.CalculateRates` picks 240 kHz for every
+  channel bandwidth up to 200 kHz), so the live sweep's sample rate is 240 kS/s whatever band the
+  radio is on.
+- Side finding: tuning with `POST /api/radio/frequency` into another band leaves the **previous band's
+  step** in place (`step` read 25000 on FM after a WB to FM tune). `SetBandAsync` updates the step;
+  `SetFrequencyAsync` does not. The BAND view's non-FM tap goes through the new band-explicit tune,
+  which updates it. **Confirmed a real bug by reading the code, filed as [`AUD-95`](AUD-95.md):**
+  `SDRRadioAudioSource.SetFrequencyAsync` calls `RadioReceiver.SetFrequency`, which switches the
+  receiver's band through `FindBandForFrequency` → `SetBand`, but the source's `_frequencyStep` is only
+  reset by `SetBandAsync` and `TuneInBandAsync`. So the step buttons then move by the old band's step.
+
+### The measurements in one table
+
+| Band | Frequencies tried | `signalStrength` / `rssiDbu` | librtlsdr | Verdict |
+|---|---|---|---|---|
+| AM | 600, 1000, 1400, 1710 kHz | 0 / −60 (floor) | `[R82XX] PLL not locked!` every tune | not receivable |
+| SW | 5, 10, 15 MHz | 0 | `PLL not locked!` | not receivable |
+| SW | 23, 25 MHz | 0 | no warning | nothing heard |
+| SW | 27.185, 29 MHz | 17 / −49.8 | no warning | tuner works; noise floor |
+| AIR | 108.000 MHz | 45 / −33 | no warning | tunes |
+| WB | 162.400 MHz | 39 / −36.6 | no warning | tunes |
+| VHF | 162.400 MHz | 49 / −30.6 | no warning | tunes |
+
+Direct sampling was judged **not small**: it needs P/Invoke for `rtlsdr_set_direct_sampling`, a
+different capture rate and DC handling, and, above all, hardware this dongle does not have. It is
+deferred to [`AUD-94`](AUD-94.md) as an owner decision, not built here.
+
+## Design (Builder, 2026-10-01)
+
+| Band | Map? | Channel plan | Tunes | Window per channel | Est. sweep |
+|---|---|---|---|---|---|
+| FM | yes, **unchanged** | 101 channels, 87.9-107.9 MHz at 200 kHz | 101, one per channel | 8-80 kHz either side of the tuned centre (as `AUD-76`) | ~21 s |
+| WB | yes | the 7 NOAA channels, 162.400-162.550 MHz at 25 kHz | **1** (centre 162.4875 MHz) | ±4 kHz around each channel | < 1 s |
+| AIR | yes | 1,161 channels, 108.000-137.000 MHz at 25 kHz (US spacing) | 146, up to 8 channels each | ±4 kHz | ~30 s |
+| VHF | yes, **a 2 MHz window** | 161 channels at 12.5 kHz, ±1 MHz around the radio's VHF frequency | 11, up to 16 channels each | ±4 kHz | ~2-3 s |
+| AM | **no** | — | — | — | — |
+| SW | **no** | — | — | — | — |
+
+- **Grouped tunes.** At 240 kS/s one capture covers about ±100 kHz, so the narrowband bands measure
+  several channels from one FFT instead of hopping per channel. The tuned centre sits midway between
+  two channels, so no channel lands on the DC bin. FM keeps one tune per channel and the same
+  measurement code path as `AUD-76`.
+- **VHF is a window, not the band.** 30-300 MHz at 12.5 kHz is 21,601 channels, about an hour of
+  hopping. The map covers ±1 MHz around the radio's VHF frequency and stores its own range, and the
+  view draws that range.
+- **AM and SW** are drawn with their axis, and the view says plainly that the band is below the tuner's
+  24 MHz lower limit and cannot be scanned. Scan is disabled for them, and `POST .../scan?band=AM` returns
+  409 with the same reason.
+- **Which band.** The map, the Scan and the view follow the radio's band (the band selected in the radio
+  control panel). When the radio is not the active source it is the cached radio source's band, and FM
+  when no radio source exists yet. **The timer sweeps only that band**, and only when it can be mapped. A
+  band's map ages on its own; switching band does not trigger a sweep, and Scan is the way to get a new
+  band's map at once.
+- **Storage.** `bandmap/<band>.json` (`fm.json`, `wb.json`, `air.json`, `vhf.json`). `fm.json` keeps its
+  path and shape, and an `AUD-76` file still loads.
+- **API.** `GET /api/radio/bandmap?band=` and `POST /api/radio/bandmap/scan?band=` (both default to the
+  radio's band) now also report whether the band can be mapped, why not, and its axis. `POST
+  /api/radio/frequency` takes an optional `band`. With it, the radio tunes inside that band in one retune
+  (VHF overlaps FM, AIR and WB, so frequency alone would land in the wrong band). Without it, behaviour is
+  unchanged.
+- **Tap-to-tune** snaps to the strongest peak within a window, else the nearest channel. On FM the
+  window is two channel spacings, **±400 kHz, unchanged from `AUD-76`**. On every other band it is
+  **max(2 channel spacings, 2% of the plotted span)**: AIR ±580 kHz (2% of 29 MHz), VHF ±40 kHz (2% of
+  its 2 MHz window), WB ±50 kHz (two 25 kHz spacings beat 2% of its 175 kHz span). Two spacings alone
+  would be about ±1.5 px on AIR's 29 MHz axis, too narrow to hit with a finger
+  (`src/Radio.Web/Services/BandAxis.cs`, `SnapWindowHz`, `SnapSpanFraction`). FM taps tune exactly as
+  `AUD-76` did; other bands tune with the explicit band.
+- **The live-sweep discipline is unchanged for every band.** That covers the sweep-only mute, no
+  `FrequencyChanged`, the retune to `_currentFrequencyHz`, cancellation on a user action, and the gain
+  restore. ⚠ The AIR live sweep is ~30 s muted, and like FM's 21 s it can log the fingerprint
+  `No audio samples captured` warning. That is log-only (`FingerprintCaptureWatchdog` does not act on
+  it).
+
 ## Verification
 
 Unit tests per band for the channel plan, the measurement window and the tap resolution, using the

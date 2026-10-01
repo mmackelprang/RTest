@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -17,7 +18,7 @@ public enum BandSweepRequestOutcome
   /// <summary>A new sweep was started.</summary>
   Started,
 
-  /// <summary>A sweep was already running; no second one was started.</summary>
+  /// <summary>A sweep of the band asked for was already running; no second one was started.</summary>
   AlreadyRunning,
 
   /// <summary>No sweep could be started; see <see cref="BandSweepRequestResult.Reason"/>.</summary>
@@ -28,22 +29,38 @@ public enum BandSweepRequestOutcome
 /// <param name="Outcome">What happened.</param>
 /// <param name="Reason">
 /// For <see cref="BandSweepRequestOutcome.Unavailable"/>: one of <see cref="BandMapService.ReasonDisabled"/>,
-/// <see cref="BandMapService.ReasonNoSdrDevice"/>, <see cref="BandMapService.ReasonRadioBusy"/> or
-/// <see cref="BandMapService.ReasonDeviceBusy"/>. Null otherwise.
+/// <see cref="BandMapService.ReasonBandNotReceivable"/>, <see cref="BandMapService.ReasonNoSdrDevice"/>,
+/// <see cref="BandMapService.ReasonRadioBusy"/>, <see cref="BandMapService.ReasonDeviceBusy"/> or
+/// <see cref="BandMapService.ReasonOtherBandSweeping"/>. Null otherwise.
 /// </param>
 /// <param name="Status">Sweep status after the request.</param>
 public sealed record BandSweepRequestResult(BandSweepRequestOutcome Outcome, string? Reason, BandSweepStatus Status);
 
+/// <summary>The radio's current tuning, as <see cref="BandMapService"/> reads it.</summary>
+/// <param name="Band">Band code: <c>AM</c>, <c>FM</c>, <c>SW</c>, <c>AIR</c>, <c>WB</c> or <c>VHF</c>.</param>
+/// <param name="FrequencyHz">Tuned frequency, in Hz.</param>
+public sealed record BandMapTuning(string Band, long FrequencyHz);
+
 /// <summary>
-/// Keeps the stored FM band map current (AUD-76). Decides when a sweep may run and on which
-/// device path, runs it on a background thread, and persists the result.
+/// Keeps the stored band maps current (AUD-76; one map per band since AUD-91). Decides when a
+/// sweep may run and on which device path, runs it on a background thread, and persists the result.
 /// </summary>
 /// <remarks>
+/// <para>
+/// The current band is the band of the radio's tuning (the <c>currentTuning</c> constructor
+/// delegate), or FM when that delegate returns null or throws. Each band is swept with its
+/// <see cref="BandSweepPlans.For"/> plan; the VHF plan is centred on the radio's frequency only
+/// while the radio is on VHF. A band with no plan is never swept.
+/// </para>
 /// <para>Rules:</para>
 /// <list type="number">
 /// <item>The timer first evaluates <see cref="BandMapOptions.InitialDelaySeconds"/> after
 /// <see cref="StartAsync"/>, then <see cref="BandMapOptions.RescanIntervalMinutes"/> after each
-/// evaluation or sweep. A sweep is due when there is no map or the map is at least that old.</item>
+/// evaluation or sweep. Each evaluation considers only the current band: when it has no plan the
+/// evaluation records a skip (<see cref="ReasonBandNotReceivable"/>); otherwise a sweep is due
+/// when that band has no map, its map is at least that old, or its map recorded a range that does
+/// not contain the centre of the band's current plan (the radio has moved its VHF window off the
+/// stored one).</item>
 /// <item>Dongle idle (the gate grants a sweep lease): sweep through the idle path — this service
 /// opens its own device. The radio claiming the gate cancels the lease; the sweep stops, closes
 /// the device, releases the lease, and the previous map is kept.</item>
@@ -51,11 +68,12 @@ public sealed record BandSweepRequestResult(BandSweepRequestOutcome Outcome, str
 /// <see cref="ISleepService.IsSleeping"/> is true and the source reports
 /// <see cref="ILiveBandSweeper.CanSweepLive"/>; otherwise it records a skip.
 /// <see cref="ISleepService.IsSleepScreenVisible"/> is not consulted. Such a sleep-triggered
-/// sweep is cancelled after the first channel at which <see cref="ISleepService.IsSleeping"/>
-/// reads false.</item>
+/// sweep is cancelled after the first progress report (each FM channel, each tune of a grouped
+/// plan) at which <see cref="ISleepService.IsSleeping"/> reads false.</item>
 /// <item>A timer evaluation starts no sweep while <see cref="BandMapOptions.Enabled"/> is false.</item>
-/// <item><see cref="RequestSweep"/> starts a sweep through whichever path is available, including
-/// the live path while the radio is playing.</item>
+/// <item><see cref="RequestSweep"/> starts a sweep of the band asked for (the current band when
+/// none is given) through whichever path is available, including the live path while the radio
+/// is playing. A request for VHF while the radio is on another band sweeps 30 to 32 MHz.</item>
 /// <item>At most one sweep runs at a time: the decision to start one and the record of the
 /// running one are both taken under one lock.</item>
 /// </list>
@@ -77,6 +95,18 @@ public sealed class BandMapService : IHostedService, IDisposable
   /// <summary>Skip reason for a timer evaluation while the radio source holds the dongle and the console is awake.</summary>
   public const string ReasonRadioPlaying = "radio-playing";
 
+  /// <summary>
+  /// Unavailable reason for a request, and skip reason for a timer evaluation: the band has no
+  /// sweep plan (<see cref="BandSweepPlans.UnavailableReason"/> says why).
+  /// </summary>
+  public const string ReasonBandNotReceivable = "band-not-receivable";
+
+  /// <summary>
+  /// Unavailable reason for a request: a sweep of a different band is running, so nothing was
+  /// started for the band asked for.
+  /// </summary>
+  public const string ReasonOtherBandSweeping = "other-band-sweeping";
+
   // A zero due time can fire synchronously inside ITimer.Change on some TimeProviders.
   private static readonly TimeSpan MinimumTimerDue = TimeSpan.FromSeconds(1);
 
@@ -87,6 +117,7 @@ public sealed class BandMapService : IHostedService, IDisposable
   private readonly Func<ILiveBandSweeper?> _liveSweeper;
   private readonly Func<ISleepService?> _sleepService;
   private readonly Func<ISdrDevice?> _deviceFactory;
+  private readonly Func<BandMapTuning?> _currentTuning;
   private readonly TimeProvider _time;
   private readonly CancellationTokenSource _stopCts = new();
 
@@ -94,14 +125,15 @@ public sealed class BandMapService : IHostedService, IDisposable
   private ITimer? _timer;
   private bool _stopping;
   private bool _disposed;
-  private BandMap? _map;
+  // Keyed by band code.
+  private readonly Dictionary<string, BandMap> _maps = new(StringComparer.OrdinalIgnoreCase);
   private BandSweepOutcome? _last;
   private SweepRun? _running;
   private Task _sweepTask = Task.CompletedTask;
   // Last invalid SamplesPerMeasurement value warned about; null before any warning.
   private int? _warnedSamplesPerMeasurement;
 
-  /// <summary>Creates the service and loads any stored map.</summary>
+  /// <summary>Creates the service and loads every stored map of a band that has a sweep plan.</summary>
   /// <param name="logger">Logger.</param>
   /// <param name="options">Band map options.</param>
   /// <param name="store">Map file store.</param>
@@ -117,6 +149,10 @@ public sealed class BandMapService : IHostedService, IDisposable
   /// does not fall back to the mock device.
   /// </param>
   /// <param name="timeProvider">Clock; <see cref="TimeProvider.System"/> when omitted.</param>
+  /// <param name="currentTuning">
+  /// Returns the radio's current band and frequency, or null when there is no radio source. When
+  /// omitted, or when it returns null or throws, the current band is FM.
+  /// </param>
   public BandMapService(
     ILogger<BandMapService> logger,
     IOptionsMonitor<BandMapOptions> options,
@@ -125,7 +161,8 @@ public sealed class BandMapService : IHostedService, IDisposable
     Func<ILiveBandSweeper?> liveSweeper,
     Func<ISleepService?>? sleepService = null,
     Func<ISdrDevice?>? deviceFactory = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    Func<BandMapTuning?>? currentTuning = null)
   {
     _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     _options = options ?? throw new ArgumentNullException(nameof(options));
@@ -134,27 +171,50 @@ public sealed class BandMapService : IHostedService, IDisposable
     _liveSweeper = liveSweeper ?? throw new ArgumentNullException(nameof(liveSweeper));
     _sleepService = sleepService ?? (() => null);
     _deviceFactory = deviceFactory ?? CreateFirstRtlSdrOrNull;
+    _currentTuning = currentTuning ?? (() => null);
     _time = timeProvider ?? TimeProvider.System;
 
-    _map = _store.Load();
-    if (_map != null)
+    foreach (string band in MappableBands())
     {
-      _logger.LogInformation("Loaded FM band map from {Path} ({Channels} channels, scanned {ScannedAt:u})",
-        _store.FilePath, _map.Channels.Count, _map.ScannedAtUtc);
+      BandMap? map = _store.Load(band);
+      if (map == null)
+      {
+        continue;
+      }
+
+      // The file name decides the band; a map whose Band field disagrees is filed under its file.
+      _maps[band] = string.Equals(map.Band, band, StringComparison.OrdinalIgnoreCase) ? map : map with { Band = band };
+      _logger.LogInformation("Loaded {Band} band map from {Path} ({Channels} channels, scanned {ScannedAt:u})",
+        band, _store.GetFilePath(band), map.Channels.Count, map.ScannedAtUtc);
     }
   }
 
-  /// <summary>The stored map, or null before the first completed sweep.</summary>
-  public BandMap? CurrentMap
+  /// <summary>
+  /// Band code of the radio's current band, or <c>"FM"</c> when it is not known. See the class remarks.
+  /// </summary>
+  public string CurrentBand => BandSweepPlans.BandCode(ResolveTuning().Band);
+
+  /// <summary>The stored map of <see cref="CurrentBand"/>, or null before its first completed sweep.</summary>
+  public BandMap? CurrentMap => GetMap(CurrentBand);
+
+  /// <summary>The stored map of <paramref name="band"/>, or null before its first completed sweep.</summary>
+  /// <param name="band">A band code accepted by <see cref="BandSweepPlans.TryParseBandCode"/>.</param>
+  /// <exception cref="ArgumentException"><paramref name="band"/> is not a band code.</exception>
+  public BandMap? GetMap(string band)
   {
-    get
+    string code = BandSweepPlans.BandCode(ParseBand(band));
+    lock (_lock)
     {
-      lock (_lock)
-      {
-        return _map;
-      }
+      return _maps.GetValueOrDefault(code);
     }
   }
+
+  /// <summary>
+  /// The plan a sweep of <paramref name="band"/> would use now, or null when the band has none.
+  /// </summary>
+  /// <param name="band">A band code accepted by <see cref="BandSweepPlans.TryParseBandCode"/>.</param>
+  /// <exception cref="ArgumentException"><paramref name="band"/> is not a band code.</exception>
+  public BandSweepPlan? GetPlan(string band) => PlanFor(ParseBand(band));
 
   /// <summary>
   /// Age of <paramref name="map"/> by this service's clock, or null when <paramref name="map"/> is null.
@@ -183,16 +243,38 @@ public sealed class BandMapService : IHostedService, IDisposable
   }
 
   /// <summary>
-  /// Starts a sweep for an explicit request, unless one is already running.
+  /// Starts a sweep of <paramref name="band"/> for an explicit request, unless one is already
+  /// running. A band with no sweep plan is <see cref="BandSweepRequestOutcome.Unavailable"/> with
+  /// <see cref="ReasonBandNotReceivable"/>, whether or not a sweep is running. While a sweep is
+  /// running, a request for the same band is <see cref="BandSweepRequestOutcome.AlreadyRunning"/>
+  /// and a request for another band is <see cref="BandSweepRequestOutcome.Unavailable"/> with
+  /// <see cref="ReasonOtherBandSweeping"/> (the running band is <see cref="BandSweepStatus.Band"/>
+  /// of the result's status). Neither of these refusals is recorded as the last outcome.
   /// </summary>
-  public BandSweepRequestResult RequestSweep()
+  /// <remarks>
+  /// A request for VHF while the radio is not on VHF sweeps the plan <see cref="BandSweepPlans.For"/>
+  /// builds without a frequency: the band's lowest 2 MHz (30 to 32 MHz).
+  /// </remarks>
+  /// <param name="band">A band code; null for <see cref="CurrentBand"/>.</param>
+  /// <exception cref="ArgumentException"><paramref name="band"/> is not null and not a band code.</exception>
+  public BandSweepRequestResult RequestSweep(string? band = null)
   {
+    BandSweepPlan? plan = PlanFor(band == null ? ResolveTuning().Band : ParseBand(band));
     BandMapOptions options = _options.CurrentValue;
     lock (_lock)
     {
+      if (plan == null)
+      {
+        return new BandSweepRequestResult(BandSweepRequestOutcome.Unavailable, ReasonBandNotReceivable, BuildStatusLocked());
+      }
+
       if (_running != null)
       {
-        return new BandSweepRequestResult(BandSweepRequestOutcome.AlreadyRunning, null, BuildStatusLocked());
+        // A running sweep of another band does not satisfy this request; the caller must be
+        // told that nothing was started for the band it asked for.
+        return string.Equals(_running.Plan.Band, plan.Band, StringComparison.OrdinalIgnoreCase)
+          ? new BandSweepRequestResult(BandSweepRequestOutcome.AlreadyRunning, null, BuildStatusLocked())
+          : new BandSweepRequestResult(BandSweepRequestOutcome.Unavailable, ReasonOtherBandSweeping, BuildStatusLocked());
       }
 
       if (!options.Enabled)
@@ -200,11 +282,11 @@ public sealed class BandMapService : IHostedService, IDisposable
         return new BandSweepRequestResult(BandSweepRequestOutcome.Unavailable, ReasonDisabled, BuildStatusLocked());
       }
 
-      string? reason = TryStartLocked(isRequest: true, options);
+      string? reason = TryStartLocked(isRequest: true, options, plan);
       if (reason != null)
       {
-        _last = SkippedOutcome(BandSweepTriggers.Request, reason);
-        _logger.LogInformation("Band sweep requested but not started: {Reason}", reason);
+        _last = SkippedOutcome(BandSweepTriggers.Request, reason, plan.Band);
+        _logger.LogInformation("{Band} band sweep requested but not started: {Reason}", plan.Band, reason);
         return new BandSweepRequestResult(BandSweepRequestOutcome.Unavailable, reason, BuildStatusLocked());
       }
 
@@ -218,7 +300,7 @@ public sealed class BandMapService : IHostedService, IDisposable
     BandMapOptions options = _options.CurrentValue;
     if (!options.Enabled)
     {
-      _logger.LogInformation("FM band map sweeps are disabled (BandMap:Enabled=false)");
+      _logger.LogInformation("Band map sweeps are disabled (BandMap:Enabled=false)");
       return Task.CompletedTask;
     }
 
@@ -284,6 +366,8 @@ public sealed class BandMapService : IHostedService, IDisposable
   {
     BandMapOptions options = _options.CurrentValue;
     TimeSpan interval = RescanInterval(options);
+    BandType band = ResolveTuning().Band;
+    BandSweepPlan? plan = PlanFor(band);
     lock (_lock)
     {
       if (_stopping)
@@ -307,20 +391,36 @@ public sealed class BandMapService : IHostedService, IDisposable
         return;
       }
 
-      DateTimeOffset now = _time.GetUtcNow();
-      if (_map != null && now - _map.ScannedAtUtc < interval)
+      if (plan == null)
       {
-        TimeSpan untilDue = _map.ScannedAtUtc + interval - now;
-        _logger.LogDebug("Band map timer: map is {Age} old, next evaluation in {UntilDue}", now - _map.ScannedAtUtc, untilDue);
+        string code = BandSweepPlans.BandCode(band);
+        _last = SkippedOutcome(BandSweepTriggers.Timer, ReasonBandNotReceivable, code);
+        _logger.LogDebug("Band map timer: the {Band} band has no sweep plan; skipped", code);
+        ArmTimerLocked(interval);
+        return;
+      }
+
+      DateTimeOffset now = _time.GetUtcNow();
+      BandMap? map = _maps.GetValueOrDefault(plan.Band);
+      if (map != null && !CoversPlan(map, plan))
+      {
+        // The radio moved its VHF window away from the stored one: the stored map no longer
+        // shows where the radio is, so it is due whatever its age.
+        _logger.LogDebug("Band map timer: the stored {Band} map does not cover the radio's window; due", plan.Band);
+      }
+      else if (map != null && now - map.ScannedAtUtc < interval)
+      {
+        TimeSpan untilDue = map.ScannedAtUtc + interval - now;
+        _logger.LogDebug("Band map timer: {Band} map is {Age} old, next evaluation in {UntilDue}", plan.Band, now - map.ScannedAtUtc, untilDue);
         ArmTimerLocked(untilDue);
         return;
       }
 
-      string? reason = TryStartLocked(isRequest: false, options);
+      string? reason = TryStartLocked(isRequest: false, options, plan);
       if (reason != null)
       {
-        _last = SkippedOutcome(BandSweepTriggers.Timer, reason);
-        _logger.LogDebug("Band map timer: sweep skipped ({Reason})", reason);
+        _last = SkippedOutcome(BandSweepTriggers.Timer, reason, plan.Band);
+        _logger.LogDebug("Band map timer: {Band} sweep skipped ({Reason})", plan.Band, reason);
         ArmTimerLocked(interval);
       }
     }
@@ -330,7 +430,7 @@ public sealed class BandMapService : IHostedService, IDisposable
   /// Picks a path and starts the sweep. Must be called holding <c>_lock</c> with no sweep running.
   /// </summary>
   /// <returns>Null when a sweep was started; otherwise why not.</returns>
-  private string? TryStartLocked(bool isRequest, BandMapOptions options)
+  private string? TryStartLocked(bool isRequest, BandMapOptions options, BandSweepPlan plan)
   {
     int samplesPerMeasurement = EffectiveSamplesPerMeasurementLocked(options);
     SdrDeviceGate.SweepLease? lease = _gate.TryAcquireForSweep();
@@ -353,7 +453,7 @@ public sealed class BandMapService : IHostedService, IDisposable
         return ReasonNoSdrDevice;
       }
 
-      SweepRun idleRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Timer, BandSweepPaths.Idle);
+      SweepRun idleRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Timer, BandSweepPaths.Idle, plan);
       _sweepTask = Task.Run(() => RunIdle(idleRun, lease, device, options, samplesPerMeasurement));
       return null;
     }
@@ -375,7 +475,7 @@ public sealed class BandMapService : IHostedService, IDisposable
       return ReasonRadioBusy;
     }
 
-    SweepRun liveRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Sleep, BandSweepPaths.Live);
+    SweepRun liveRun = BeginRunLocked(isRequest ? BandSweepTriggers.Request : BandSweepTriggers.Sleep, BandSweepPaths.Live, plan);
     _sweepTask = Task.Run(() => RunLiveAsync(liveRun, live, options, samplesPerMeasurement));
     return null;
   }
@@ -404,11 +504,11 @@ public sealed class BandMapService : IHostedService, IDisposable
     return BandSweeper.DefaultSamplesPerMeasurement;
   }
 
-  private SweepRun BeginRunLocked(string trigger, string path)
+  private SweepRun BeginRunLocked(string trigger, string path, BandSweepPlan plan)
   {
-    SweepRun run = new(trigger, path, _time.GetUtcNow(), _time.GetTimestamp(), FmChannelPlan.Channels.Count);
+    SweepRun run = new(trigger, path, _time.GetUtcNow(), _time.GetTimestamp(), plan);
     _running = run;
-    _logger.LogInformation("Band sweep started (trigger {Trigger}, path {Path})", trigger, path);
+    _logger.LogInformation("Band sweep started (band {Band}, trigger {Trigger}, path {Path})", plan.Band, trigger, path);
     return run;
   }
 
@@ -434,7 +534,7 @@ public sealed class BandMapService : IHostedService, IDisposable
           // A radio claim may already have cancelled the lease: do not open the device then.
           linked.Token.ThrowIfCancellationRequested();
           tuner.Open();
-          levels = BandSweeper.Sweep(tuner, FmChannelPlan.Channels, samplesPerMeasurement, run, linked.Token);
+          levels = BandSweeper.Sweep(tuner, run.Plan, samplesPerMeasurement, run, linked.Token);
           result = BandSweepResults.Completed;
         }
         catch (OperationCanceledException) when (linked.IsCancellationRequested)
@@ -482,7 +582,8 @@ public sealed class BandMapService : IHostedService, IDisposable
         // A sleep-triggered sweep must not outlive the sleep. Waking does not
         // necessarily resume the source (SleepService resumes it only when it
         // was playing before sleep and is paused), so the source's own cancel
-        // on resume is not enough: check IsSleeping after every channel.
+        // on resume is not enough: check IsSleeping after every progress report (every channel
+        // for FM, every tune for a grouped plan).
         run.AfterChannel = () =>
         {
           if (_sleepService()?.IsSleeping == false && !woke)
@@ -497,14 +598,14 @@ public sealed class BandMapService : IHostedService, IDisposable
       try
       {
         levels = await live.SweepLiveAsync(
-          FmChannelPlan.Channels, options.SweepGainDb, samplesPerMeasurement, run, runCts.Token).ConfigureAwait(false);
+          run.Plan, options.SweepGainDb, samplesPerMeasurement, run, runCts.Token).ConfigureAwait(false);
         result = BandSweepResults.Completed;
       }
       catch (OperationCanceledException)
       {
         // The receiver cancels its own sweep on a user tune, band change, gain change, seek
         // scan, source resume or shutdown; this service cancels it on stop and, for a
-        // sleep-triggered sweep, once IsSleeping reads false after a channel.
+        // sleep-triggered sweep, once IsSleeping reads false after a progress report.
         result = BandSweepResults.Cancelled;
         reason = woke ? "woke" : _stopCts.IsCancellationRequested ? "service-stopping" : "interrupted";
       }
@@ -561,7 +662,10 @@ public sealed class BandMapService : IHostedService, IDisposable
       {
         BandMap map = new()
         {
-          Band = "FM",
+          Band = run.Plan.Band,
+          RangeMinHz = run.Plan.DisplayMinHz,
+          RangeMaxHz = run.Plan.DisplayMaxHz,
+          ChannelSpacingHz = run.Plan.ChannelSpacingHz,
           ScannedAtUtc = _time.GetUtcNow(),
           Channels = levels!.Select(l => new BandMapChannel(l.FrequencyHz, l.LevelDbfs)).ToArray(),
           Trigger = run.Trigger,
@@ -574,7 +678,7 @@ public sealed class BandMapService : IHostedService, IDisposable
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-          _logger.LogWarning(ex, "Band map could not be written to {Path}; keeping it in memory only", _store.FilePath);
+          _logger.LogWarning(ex, "Band map could not be written to {Path}; keeping it in memory only", _store.GetFilePath(map.Band));
         }
         newMap = map;
       }
@@ -590,6 +694,7 @@ public sealed class BandMapService : IHostedService, IDisposable
     {
       outcome = new BandSweepOutcome
       {
+        Band = run.Plan.Band,
         Trigger = run.Trigger,
         Path = run.Path,
         StartedAtUtc = run.StartedAtUtc,
@@ -603,7 +708,7 @@ public sealed class BandMapService : IHostedService, IDisposable
       {
         if (newMap != null)
         {
-          _map = newMap;
+          _maps[newMap.Band] = newMap;
         }
         _last = outcome;
         _running = null;
@@ -617,18 +722,20 @@ public sealed class BandMapService : IHostedService, IDisposable
     if (result == BandSweepResults.Failed)
     {
       _logger.LogWarning(failure,
-        "Band sweep finished: {Result} ({Reason}); trigger {Trigger}, path {Path}, {Measured} channels measured in {DurationMs} ms",
-        result, reason, run.Trigger, run.Path, measured, outcome.DurationMs);
+        "Band sweep finished: {Result} ({Reason}); band {Band}, trigger {Trigger}, path {Path}, {Measured} channels measured in {DurationMs} ms",
+        result, reason, run.Plan.Band, run.Trigger, run.Path, measured, outcome.DurationMs);
     }
     else
     {
+      // One decimal is enough on the 200 kHz FM grid; the narrowband grids need four.
+      string format = run.Plan.ChannelSpacingHz >= 100_000 ? "F1" : "F4";
       string strongest = levels == null
         ? "none"
         : string.Join(", ", levels.OrderByDescending(l => l.LevelDbfs).Take(3)
-          .Select(l => $"{l.FrequencyHz / 1_000_000.0:F1} MHz {l.LevelDbfs:F1} dB"));
+          .Select(l => $"{(l.FrequencyHz / 1_000_000.0).ToString(format, CultureInfo.InvariantCulture)} MHz {l.LevelDbfs:F1} dB"));
       _logger.LogInformation(
-        "Band sweep finished: {Result}{Reason}; trigger {Trigger}, path {Path}, {Measured} channels measured in {DurationMs} ms; strongest: {Strongest}",
-        result, reason == null ? string.Empty : $" ({reason})", run.Trigger, run.Path, measured, outcome.DurationMs, strongest);
+        "Band sweep finished: {Result}{Reason}; band {Band}, trigger {Trigger}, path {Path}, {Measured} channels measured in {DurationMs} ms; strongest: {Strongest}",
+        result, reason == null ? string.Empty : $" ({reason})", run.Plan.Band, run.Trigger, run.Path, measured, outcome.DurationMs, strongest);
     }
   }
 
@@ -652,6 +759,7 @@ public sealed class BandMapService : IHostedService, IDisposable
     return new BandSweepStatus
     {
       IsSweeping = true,
+      Band = run.Plan.Band,
       Trigger = run.Trigger,
       Path = run.Path,
       Progress = progress,
@@ -661,8 +769,9 @@ public sealed class BandMapService : IHostedService, IDisposable
     };
   }
 
-  private BandSweepOutcome SkippedOutcome(string trigger, string reason) => new()
+  private BandSweepOutcome SkippedOutcome(string trigger, string reason, string band) => new()
   {
+    Band = band,
     Trigger = trigger,
     StartedAtUtc = _time.GetUtcNow(),
     Result = BandSweepResults.Skipped,
@@ -674,10 +783,71 @@ public sealed class BandMapService : IHostedService, IDisposable
     _timer?.Change(ClampDue(due), Timeout.InfiniteTimeSpan);
   }
 
+  /// <summary>
+  /// False when <paramref name="map"/> recorded its range and that range does not contain the
+  /// centre of <paramref name="plan"/>'s display range. Only the VHF plan moves (its window follows
+  /// the radio), so in practice this is false only for a VHF map of a window the radio has left.
+  /// A map without a recorded range (an AUD-76 file) is treated as covering.
+  /// </summary>
+  private static bool CoversPlan(BandMap map, BandSweepPlan plan)
+  {
+    if (map.RangeMinHz <= 0 || map.RangeMaxHz <= map.RangeMinHz)
+    {
+      return true;
+    }
+
+    long centre = plan.DisplayMinHz + (plan.DisplayMaxHz - plan.DisplayMinHz) / 2;
+    return centre >= map.RangeMinHz && centre <= map.RangeMaxHz;
+  }
+
   private static TimeSpan ClampDue(TimeSpan due) => due < MinimumTimerDue ? MinimumTimerDue : due;
 
   private static TimeSpan RescanInterval(BandMapOptions options) =>
     TimeSpan.FromMinutes(Math.Max(1, options.RescanIntervalMinutes));
+
+  /// <summary>
+  /// The radio's band and frequency from the <c>currentTuning</c> delegate; FM with no frequency
+  /// when it returns null, throws, or names no known band.
+  /// </summary>
+  private (BandType Band, long? FrequencyHz) ResolveTuning()
+  {
+    BandMapTuning? tuning;
+    try
+    {
+      tuning = _currentTuning();
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Band map: reading the radio's tuning failed; using FM");
+      return (BandType.FM, null);
+    }
+
+    return tuning != null && BandSweepPlans.TryParseBandCode(tuning.Band, out BandType band)
+      ? (band, tuning.FrequencyHz)
+      : (BandType.FM, null);
+  }
+
+  /// <summary>
+  /// <paramref name="band"/>'s plan. The radio's frequency is passed only while the radio is on
+  /// that band, so the VHF window follows the radio only on VHF.
+  /// </summary>
+  private BandSweepPlan? PlanFor(BandType band)
+  {
+    (BandType current, long? frequencyHz) = ResolveTuning();
+    return BandSweepPlans.For(band, current == band ? frequencyHz : null);
+  }
+
+  private static BandType ParseBand(string band)
+  {
+    ArgumentNullException.ThrowIfNull(band);
+    return BandSweepPlans.TryParseBandCode(band, out BandType parsed)
+      ? parsed
+      : throw new ArgumentException($"'{band}' is not a band code ({string.Join(", ", BandSweepPlans.BandCodes)}).", nameof(band));
+  }
+
+  private static IEnumerable<string> MappableBands() =>
+    BandSweepPlans.BandCodes.Where(code =>
+      BandSweepPlans.TryParseBandCode(code, out BandType band) && BandSweepPlans.UnavailableReason(band) == null);
 
   private static ISdrDevice? CreateFirstRtlSdrOrNull()
   {
@@ -691,14 +861,17 @@ public sealed class BandMapService : IHostedService, IDisposable
   {
     private int _channelsDone;
 
-    public SweepRun(string trigger, string path, DateTimeOffset startedAtUtc, long startTimestamp, int channelsTotal)
+    public SweepRun(string trigger, string path, DateTimeOffset startedAtUtc, long startTimestamp, BandSweepPlan plan)
     {
       Trigger = trigger;
       Path = path;
       StartedAtUtc = startedAtUtc;
       StartTimestamp = startTimestamp;
-      ChannelsTotal = channelsTotal;
+      Plan = plan;
+      ChannelsTotal = plan.Channels.Count;
     }
+
+    public BandSweepPlan Plan { get; }
 
     public string Trigger { get; }
 
@@ -712,7 +885,7 @@ public sealed class BandMapService : IHostedService, IDisposable
 
     public int ChannelsDone => Volatile.Read(ref _channelsDone);
 
-    /// <summary>Invoked after each channel's progress is recorded, on the reporting thread; null when unused.</summary>
+    /// <summary>Invoked after each progress report is recorded, on the reporting thread; null when unused.</summary>
     public Action? AfterChannel { get; set; }
 
     public void Report(BandSweepProgress value)

@@ -65,12 +65,13 @@ public class RadioController : ControllerBase
   }
 
   /// <summary>
-  /// Sets the radio frequency to a specific value.
+  /// Sets the radio frequency to a specific value. With <c>band</c>, tunes inside that band in one
+  /// retune (AUD-91); without it, the band is inferred from the frequency.
   /// </summary>
-  /// <param name="request">The frequency to set.</param>
+  /// <param name="request">The frequency to set, and optionally the band to tune it in.</param>
   /// <returns>The updated radio state.</returns>
   /// <response code="200">Returns the updated radio state.</response>
-  /// <response code="400">If the radio is not active or the frequency is invalid.</response>
+  /// <response code="400">If the radio is not active, the band is not a band code, or the frequency is invalid (or outside the band).</response>
   [HttpPost("frequency")]
   [ProducesResponseType(typeof(RadioStateDto), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -78,15 +79,35 @@ public class RadioController : ControllerBase
   {
     try
     {
-      // Note: Frequency validation is delegated to IRadioControl.SetFrequencyAsync
-      // which throws ArgumentOutOfRangeException for invalid values
+      // Exact band codes only, parsed as the band map parses them (case-insensitive, trimmed).
+      // Enum.TryParse would also accept numeric strings ("3") and flags syntax ("FM,WB").
+      // The codes are the RadioBand names, so the code maps straight onto the enum.
+      RadioBand band = default;
+      if (request.Band != null)
+      {
+        if (!RTLSDRCore.Sweep.BandSweepPlans.TryParseBandCode(request.Band, out RTLSDRCore.Enums.BandType bandType))
+        {
+          return BadRequest(new { error = $"Invalid band: {request.Band}. Valid values are: {string.Join(", ", RTLSDRCore.Sweep.BandSweepPlans.BandCodes)}" });
+        }
+        band = Enum.Parse<RadioBand>(RTLSDRCore.Sweep.BandSweepPlans.BandCode(bandType));
+      }
+
+      // Note: Frequency validation is delegated to IRadioControl.SetFrequencyAsync / TuneInBandAsync,
+      // which throw ArgumentOutOfRangeException for invalid values
       var radioSource = GetActiveRadioSource();
       if (radioSource == null)
       {
         return BadRequest(new { error = "Radio is not the active source" });
       }
 
-      await radioSource.SetFrequencyAsync(new Frequency(request.Frequency));
+      if (request.Band == null)
+      {
+        await radioSource.SetFrequencyAsync(new Frequency(request.Frequency));
+      }
+      else
+      {
+        await radioSource.TuneInBandAsync(band, new Frequency(request.Frequency));
+      }
       return Ok(radioSource.MapToRadioStateDto());
     }
     catch (ArgumentOutOfRangeException ex)

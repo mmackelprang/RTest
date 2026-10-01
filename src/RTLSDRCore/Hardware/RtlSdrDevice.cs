@@ -12,6 +12,18 @@ namespace RTLSDRCore.Hardware;
   {
       private static readonly ILogger Logger = Log.ForContext<RtlSdrDevice>();
 
+      /// <summary>
+      /// Lowest frequency reported in <see cref="DeviceInfo.MinFrequencyHz"/>, in Hz (24 MHz).
+      /// A fixed value matching an R820T-class tuner; the tuner is not queried for it.
+      /// </summary>
+      public const long TunerMinFrequencyHz = 24_000_000;
+
+      /// <summary>
+      /// Highest frequency reported in <see cref="DeviceInfo.MaxFrequencyHz"/>, in Hz (1.766 GHz).
+      /// A fixed value matching an R820T-class tuner; the tuner is not queried for it.
+      /// </summary>
+      public const long TunerMaxFrequencyHz = 1_766_000_000;
+
       private readonly int _deviceIndex;
       private IntPtr _deviceHandle = IntPtr.Zero;
       private DeviceInfo? _deviceInfo;
@@ -100,8 +112,8 @@ namespace RTLSDRCore.Hardware;
                   Type = DeviceType.RTLSDR,
                   IsAvailable = true,
                   TunerType = "RTL2832U",
-                  MinFrequencyHz = 24_000_000,
-                  MaxFrequencyHz = 1_766_000_000,
+                  MinFrequencyHz = TunerMinFrequencyHz,
+                  MaxFrequencyHz = TunerMaxFrequencyHz,
                   SupportedSampleRates = new[] { 250000, 1024000, 1536000, 1792000, 1920000, 2048000, 2400000, 2560000, 2880000, 3200000 },
                   AvailableGains = new[] { 0f, 0.9f, 1.4f, 2.7f, 3.7f, 7.7f, 8.7f, 12.5f, 14.4f, 15.7f, 16.6f, 19.7f, 20.7f, 22.9f, 25.4f, 28.0f, 29.7f, 32.8f, 33.8f, 36.4f, 37.2f, 38.6f, 40.2f, 42.1f, 43.4f, 43.9f, 44.5f, 48.0f, 49.6f }
               };

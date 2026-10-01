@@ -397,14 +397,40 @@ public record RadioDeviceDto(
 );
 
 /// <summary>
-/// <c>GET /api/radio/bandmap</c> (AUD-76) — the stored FM band map and the sweep status. Mirrors
-/// <c>Radio.API.Models.BandMapResponseDto</c>. Before the first completed sweep,
-/// <see cref="ScannedAtUtc"/> and <see cref="AgeSeconds"/> are null and <see cref="Channels"/> is empty.
+/// <c>GET /api/radio/bandmap</c> (AUD-76; per band since AUD-91) — a band's stored map, its frequency
+/// axis and the sweep status. Mirrors <c>Radio.API.Models.BandMapResponseDto</c>. Before the band's first
+/// completed sweep, <see cref="ScannedAtUtc"/> and <see cref="AgeSeconds"/> are null and
+/// <see cref="Channels"/> is empty.
 /// </summary>
+/// <remarks>
+/// A response from an API older than AUD-91 has no axis fields: it reads as band <c>FM</c>, mappable,
+/// with zero axis values, which <see cref="Radio.Web.Services.BandAxis.FromMap"/> treats as the FM axis.
+/// </remarks>
 public sealed record BandMapResponseDto
 {
-  /// <summary>Band name (<c>FM</c>).</summary>
+  /// <summary>Band code the response describes (<c>FM</c>, <c>AM</c>, <c>SW</c>, <c>AIR</c>, <c>WB</c>, <c>VHF</c>).</summary>
   public string Band { get; init; } = "FM";
+
+  /// <summary>True when the band can be scanned.</summary>
+  public bool Mappable { get; init; } = true;
+
+  /// <summary>Why the band cannot be scanned, as a sentence for the owner; null when <see cref="Mappable"/>.</summary>
+  public string? UnavailableReason { get; init; }
+
+  /// <summary>Lower edge of the band's frequency axis, in Hz; 0 from an API older than AUD-91.</summary>
+  public long DisplayMinHz { get; init; }
+
+  /// <summary>Upper edge of the band's frequency axis, in Hz; 0 from an API older than AUD-91.</summary>
+  public long DisplayMaxHz { get; init; }
+
+  /// <summary>First channel centre of the band's grid, in Hz.</summary>
+  public long FirstChannelHz { get; init; }
+
+  /// <summary>Last channel centre of the band's grid, in Hz.</summary>
+  public long LastChannelHz { get; init; }
+
+  /// <summary>Channel grid spacing, in Hz.</summary>
+  public long ChannelSpacingHz { get; init; }
 
   /// <summary>When the stored map was produced, UTC, or null when there is no map.</summary>
   public DateTimeOffset? ScannedAtUtc { get; init; }
@@ -415,7 +441,7 @@ public sealed record BandMapResponseDto
   /// <summary>Measured channels. The API sends them ascending by frequency.</summary>
   public IReadOnlyList<BandMapChannelDto> Channels { get; init; } = Array.Empty<BandMapChannelDto>();
 
-  /// <summary>Sweep status, including the last outcome.</summary>
+  /// <summary>Sweep status, including the last outcome. Not filtered by band: see <see cref="BandSweepStatusDto.Band"/>.</summary>
   public BandSweepStatusDto Sweep { get; init; } = new();
 }
 
@@ -429,6 +455,9 @@ public sealed record BandSweepStatusDto
 {
   /// <summary>True while a sweep is running.</summary>
   public bool IsSweeping { get; init; }
+
+  /// <summary>Band code of the running sweep, or null (also from an API older than AUD-91).</summary>
+  public string? Band { get; init; }
 
   /// <summary>Trigger of the running sweep (<c>timer</c>, <c>sleep</c>, <c>request</c>), or null.</summary>
   public string? Trigger { get; init; }
@@ -457,8 +486,10 @@ public sealed record BandSweepStatusDto
 /// <param name="Result"><c>completed</c>, <c>cancelled</c>, <c>failed</c> or <c>skipped</c>.</param>
 /// <param name="Reason">Why it did not complete, or null.</param>
 /// <param name="ChannelsMeasured">Channels measured.</param>
+/// <param name="Band">Band code of the attempt, or null when not recorded.</param>
 public sealed record BandSweepOutcomeDto(
-  string Trigger, string? Path, DateTimeOffset StartedAtUtc, long DurationMs, string Result, string? Reason, int ChannelsMeasured);
+  string Trigger, string? Path, DateTimeOffset StartedAtUtc, long DurationMs, string Result, string? Reason, int ChannelsMeasured,
+  string? Band = null);
 
 /// <summary>
 /// The answer to <c>POST /api/radio/bandmap/scan</c>: whether the sweep was accepted (202 — started, or
