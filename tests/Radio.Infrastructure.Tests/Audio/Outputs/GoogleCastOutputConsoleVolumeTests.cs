@@ -1007,9 +1007,13 @@ public class GoogleCastOutputConsoleVolumeTests
     consoleMuted = false;
     var unmute = h.Output.SetDeviceMuteFromConsoleWithLevelAsync(false, target.Generation); // pending
 
-    // The speaker reports itself unmuted at our 0.45 while the console mute is still being sent:
-    // the level-echo rule re-asserts the mute (a console mute is in flight).
+    // The speaker reports itself unmuted at our 0.45 while the console mute is still being sent, at
+    // a moment the console reads muted (it was muted again, and that mute is not queued yet): the
+    // level-echo rule re-asserts the mute while the console's unmute waits in the slot. The console
+    // reads unmuted again from then on.
+    consoleMuted = true;
     h.RaiseStatus(0.45, muted: false);
+    consoleMuted = false;
 
     h.MuteGate.SetResult();
     await mute;
