@@ -868,6 +868,39 @@ public class GoogleCastOutput : AudioOutputBase
   }
 
   /// <summary>
+  /// Prefix of the <see cref="InvalidOperationException"/> message <see cref="ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/> throws
+  /// when its state guard refuses to connect (AUD-85). Callers match on this constant, not on a
+  /// copy of the text, so the throw site and the match cannot drift apart.
+  /// </summary>
+  public const string ConnectRefusedByStatePrefix = "Cannot connect in state";
+
+  /// <summary>
+  /// Key under which that refusal's <see cref="Exception.Data"/> carries the
+  /// <see cref="AudioOutputState"/> the guard refused (AUD-85). Read it with
+  /// <see cref="TryGetConnectRefusedState"/>: the state at the moment of the refusal, which a
+  /// later read of <see cref="AudioOutputBase.State"/> may no longer show.
+  /// </summary>
+  public const string ConnectRefusedStateDataKey = "Radio.GoogleCastOutput.ConnectRefusedState";
+
+  /// <summary>
+  /// The state <see cref="ConnectAsync(ChromecastDeviceInfo, CastConnectOptions, CancellationToken)"/>'s
+  /// state guard refused, when <paramref name="exception"/> is that refusal; false for any other
+  /// exception.
+  /// </summary>
+  public static bool TryGetConnectRefusedState(Exception exception, out AudioOutputState state)
+  {
+    ArgumentNullException.ThrowIfNull(exception);
+    if (exception.Data[ConnectRefusedStateDataKey] is AudioOutputState refused)
+    {
+      state = refused;
+      return true;
+    }
+
+    state = default;
+    return false;
+  }
+
+  /// <summary>
   /// Connects to a specific Chromecast device.
   /// </summary>
   /// <param name="device">The device to connect to.</param>
@@ -905,10 +938,13 @@ public class GoogleCastOutput : AudioOutputBase
       await StopAsync(cancellationToken);
     }
 
-    if (State != AudioOutputState.Ready && State != AudioOutputState.Stopped)
+    var guardState = State;
+    if (guardState != AudioOutputState.Ready && guardState != AudioOutputState.Stopped)
     {
-      throw new InvalidOperationException(
-        $"Cannot connect in state {State}. Output must be in Ready or Stopped state.");
+      var refused = new InvalidOperationException(
+        $"{ConnectRefusedByStatePrefix} {guardState}. Output must be in Ready or Stopped state.");
+      refused.Data[ConnectRefusedStateDataKey] = guardState;
+      throw refused;
     }
 
     State = AudioOutputState.Connecting;

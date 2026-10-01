@@ -2,7 +2,7 @@
 
 **Surface:** Home page → centre panel → **Radio** tab (`RadioControlPanel.razor`), plus the visualizer's **BAND** view (`VisualizerPanel.razor`, `visualizer.js` `drawBandMap`).
 **Author:** Designer · **Date:** 2026-10-01 · **Consumer:** Planner
-**Status:** Owner-reviewed 2026-10-01. Five of the six §9 questions are decided (see **Owner decisions** below); Q4 (AM/SW) stays open as `AUD-94`. ✅ **PRs 1–3 shipped 2026-10-01, each UAT'd by the owner at the panel and archived:** [`UI-20`](../queue/UI-20.md) (PR 1, [#757](https://github.com/mmackelprang/RTest/pull/757), squash `0af90f4`), [`UI-21`](../queue/UI-21.md) (PR 2, [#758](https://github.com/mmackelprang/RTest/pull/758), squash `7d2124e`) and [`UI-22`](../queue/UI-22.md) (PR 3, [#756](https://github.com/mmackelprang/RTest/pull/756), squash `f30ed06`; the 12/20 dB thresholds kept). PR 4 remains parked behind [`AUD-94`](../queue/AUD-94.md).
+**Status:** Owner-reviewed 2026-10-01. Five of the six §9 questions are decided (see **Owner decisions** below); Q4 (AM/SW) stays open as `AUD-94`. ✅ **PRs 1–3 shipped 2026-10-01, each UAT'd by the owner at the panel and archived:** [`UI-20`](../queue/UI-20.md) (PR 1, [#757](https://github.com/mmackelprang/RTest/pull/757), squash `0af90f4`), [`UI-21`](../queue/UI-21.md) (PR 2, [#758](https://github.com/mmackelprang/RTest/pull/758), squash `7d2124e`) and [`UI-22`](../queue/UI-22.md) (PR 3, [#756](https://github.com/mmackelprang/RTest/pull/756), squash `f30ed06`; the 12/20 dB thresholds kept). **PR 4: declined for now by owner 2026-10-02; revisit with the hardware** ([`AUD-94`](../queue/AUD-94.md); owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."*).
 
 ### Owner decisions (2026-10-01)
 
@@ -11,7 +11,7 @@
 | Q1 | **Four wider cards** (≈129 × 60 px), the recommendation. | §4.5 stands as written. |
 | Q2 | **Yes — the empty-slot card becomes a tappable `＋ SAVE`.** Long-press on the active band pill keeps working. | §4.6's "optional extension" is **in scope for PR 1**. ⚠ This **reverses** the radio-controller handoff's save-by-long-press-only choice (`design_handoff_radio_controller/IMPLEMENTATION.md:254-256`, "instead of the icon button") **by owner decision**, not by drift. The "follows by default" row in the table below is superseded. |
 | Q3 | **Drop the `⋮` kebab from bar cards; long-press a card for Rename / Delete.** | §4.5 "No kebab" and §4.6 stand. The `Card` variant on `RadioPage.razor` is out of scope and keeps its kebab. |
-| Q4 | ⛔ **NOT decided.** AM/SW dim / block / explain is the open owner decision [`AUD-94`](../queue/AUD-94.md). | PR 4 stays parked behind it. PR 1 leaves AM and SW behaving exactly as today, in one row. |
+| Q4 | ✅ **Decided 2026-10-02: keep AM/SW as they are** (owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."*). _(Was: ⛔ NOT decided — the open owner decision [`AUD-94`](../queue/AUD-94.md).)_ | PR 4 declined for now; revisit with the all-band hardware. PR 1 leaves AM and SW behaving exactly as today, in one row. |
 | Q5 | **Cool ramp**: grey noise < 6 dB → blue 6–12 → cyan 12–20 → green ≥ 20 dB above the map median. | §5.1 stands. **12 and 20 dB are provisional** until checked against a real map on the box. |
 | Q6 | "Scan area" = **the BAND view's map.** The coordinator and the designer both read it that way; the owner did not object. Recorded as the shared reading, not as an explicit owner answer. | §5 stands. |
 
@@ -345,6 +345,8 @@ viewport: 4 cards × 129 + 3 gaps × 6 = 534
 
 ## 6. AM and SW on this tuner (`AUD-94` undecided)
 
+> ⛔ **2026-10-02: the owner declined this for now — keep AM/SW as they are; revisit with the all-band hardware** (`AUD-94`). The recommendation below is kept for that revisit.
+
 The R820T gets nothing below about 24 MHz. Tuning AM or SW *succeeds* and plays silence (`docs/queue/AUD-94.md:14-23`).
 
 **Recommendation: dim, keep visible, block selection and give the reason.** This is AUD-94 option 1, "shown disabled with the reason".
@@ -439,6 +441,6 @@ Disabled arrows at 0.4 opacity are exempt (WCAG 1.4.3 inactive components).
 | **1. Preset bar + one-row layout** | Remove the rail. `.rcp-root` becomes a column. One-row equal-width bands. Full-width tuner rows. Scan indicator moves into the meter header (fixes the clipping). `PresetCard` `Bar` variant. Arrows, page step, hold-repeat, swipe and snap, position track, active-in-view and off-screen dot, band-change scroll, empty / error / placeholder states, skeleton update. bUnit tests for states and arrow disablement. AT-SPI extents check on the box for the §4.2 budget. | **M–L, about 2 days** | Q1, Q3 (Q2 can fold in if answered "yes") |
 | **2. Knob ↔ bar highlight mirror** | Subscribe the bar to the PRESETS HUD payload; preview highlight + scroll (§4.8). | **S, about 0.5 day** | PR 1. Confirm no API change. |
 | **3. Band-map strength colour** | Tier computation + constants + unit tests in `FmBandMath`; tier per level into `drawBandMap`; neutral trace fill; markup legend. | **S–M, about 0.5–1 day** | Q5. Independent of PR 1; can go first. |
-| **4. AM/SW unavailable** (owner-gated) | Dim / block / toast on pills and on AM/SW preset cards. | **S, about 0.5 day, plus the data-source decision** | Q4 / AUD-94; Architect on where "receivable" comes from. |
+| **4. AM/SW unavailable** (⛔ declined for now by owner 2026-10-02; revisit with the hardware) | Dim / block / toast on pills and on AM/SW preset cards. | **S, about 0.5 day, plus the data-source decision** | Q4 / AUD-94; Architect on where "receivable" comes from. |
 
 **Out of scope:** the standalone `RadioPage.razor` presets panel (`Card` variant). It does not change and shares the field order through `PresetCard`.

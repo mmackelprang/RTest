@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+⛔ **ON HOLD 2026-10-02 BY OWNER RULING.** Owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."* So: **AM and SW stay exactly as they are** — option 1 (dim the pills, `UNAVAILABLE`, a toast instead of switching band; the preset-bar spec's PR 4) is **declined for now** and is not to be built. Options 2–4 become the roadmap's *All-band reception* item ([`docs/ROADMAP.md`](../ROADMAP.md) § Queued; hardware spec in [`design/FUTURE-WORK.md`](../../design/FUTURE-WORK.md) § All-band reception), executed once the owner has the hardware. Revisit the PR 4 UI then, if any band is still unreceivable. The two "still open" notes below were true until this ruling.
+
 🟢 **P3, decision row.** Filed 2026-10-01 by the `AUD-91` Builder, from that row's box feasibility
 measurements. **The reception results below are MEASURED on `radio`; the hardware options are from
 the RTL-SDR's documented behaviour, not tried here.**
