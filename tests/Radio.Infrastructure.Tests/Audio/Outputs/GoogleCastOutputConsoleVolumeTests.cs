@@ -157,6 +157,30 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(rememberedBefore, h.Store.Remembered.Count);
   }
 
+  [Fact]
+  public async Task TheLiveRead_ReportsTheSpeakersStatus_BesideTheKnownLevel_AndChangesNothing()
+  {
+    await using var h = new CastConsoleTestHarness();
+    Assert.Null(await h.Output.ReadSpeakerVolumeAsync()); // nothing connected
+
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+    await h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    h.ClearCommands();
+
+    h.Output.CastStatusReadOverrideForTests = () => Task.FromResult<(float, bool)?>((0.31f, true));
+    var reading = await h.Output.ReadSpeakerVolumeAsync();
+
+    Assert.NotNull(reading);
+    Assert.Equal("Speaker cast-a", reading!.DeviceName);
+    Assert.Equal(0.31f, reading.Level!.Value, 3);
+    Assert.True(reading.Muted);
+    Assert.Equal(0.30f, reading.KnownLevel!.Value, 3);
+    Assert.Empty(h.External);
+    Assert.Empty(h.Commands);
+    Assert.Equal(0.30f, h.Output.KnownSpeakerLevel, 3);
+  }
+
   // --- mute ---
 
   [Fact]
