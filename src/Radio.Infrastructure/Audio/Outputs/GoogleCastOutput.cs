@@ -375,7 +375,9 @@ public class GoogleCastOutput : AudioOutputBase
   private ILogger? _consoleLogger;
 
   // Bound on a console-driven SET_VOLUME/SET_MUTE; and on the receiver-application stop and the
-  // unmute sent before a teardown.
+  // unmute sent before a teardown. Timed by _timeProvider (hostile review F9), the same clock as
+  // the echo window. A timed-out command is abandoned, not cancelled: its send stays in flight in
+  // SharpCaster, and its echo entry with it.
   private static readonly TimeSpan ConsoleCommandTimeout = TimeSpan.FromSeconds(5);
   private static readonly TimeSpan TeardownUnmuteTimeout = TimeSpan.FromSeconds(2);
   private static readonly TimeSpan TeardownAppStopTimeout = TimeSpan.FromSeconds(3);
@@ -448,7 +450,9 @@ public class GoogleCastOutput : AudioOutputBase
   /// device's own level and nothing is restored.
   /// </param>
   /// <param name="timeProvider">
-  /// Clock for the echo memory's window (AUD-81). Defaults to <see cref="TimeProvider.System"/>.
+  /// Clock for the echo memory's window and for the timeouts on console-driven and teardown
+  /// SET_VOLUME / SET_MUTE / application-stop commands (AUD-81). Defaults to
+  /// <see cref="TimeProvider.System"/>.
   /// </param>
   public GoogleCastOutput(
     ILogger<GoogleCastOutput> logger,
@@ -3048,7 +3052,7 @@ public class GoogleCastOutput : AudioOutputBase
       try
       {
         if (await PushVolumeToDeviceAsync(connection.Client, next.Level)
-              .WaitAsync(ConsoleCommandTimeout).ConfigureAwait(false))
+              .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
         {
           // Pre-merge review L1/L2. Recorded as the connection's level (and, at the end of the
           // burst, remembered) only if nothing has superseded it since the send went out: the
@@ -3172,7 +3176,7 @@ public class GoogleCastOutput : AudioOutputBase
       try
       {
         if (!await SendMuteToDeviceAsync(connection.Client, next.Muted)
-              .WaitAsync(ConsoleCommandTimeout).ConfigureAwait(false))
+              .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
         {
           continue;
         }
@@ -3244,7 +3248,7 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       if (await SendMuteToDeviceAsync(connection.Client, true)
-            .WaitAsync(ConsoleCommandTimeout).ConfigureAwait(false))
+            .WaitAsync(ConsoleCommandTimeout, _timeProvider).ConfigureAwait(false))
       {
         Volatile.Write(ref _consoleMutedGeneration, connection.Generation);
         ConsoleLogger.LogInformation(
@@ -3300,7 +3304,7 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       applicationGone = await StopReceiverApplicationAsync(client)
-        .WaitAsync(TeardownAppStopTimeout).ConfigureAwait(false);
+        .WaitAsync(TeardownAppStopTimeout, _timeProvider).ConfigureAwait(false);
     }
     catch (Exception ex)
     {
@@ -3326,7 +3330,7 @@ public class GoogleCastOutput : AudioOutputBase
     try
     {
       if (await SendMuteToDeviceAsync(client, false)
-            .WaitAsync(TeardownUnmuteTimeout).ConfigureAwait(false))
+            .WaitAsync(TeardownUnmuteTimeout, _timeProvider).ConfigureAwait(false))
       {
         ConsoleLogger.LogInformation(
           "Cast: speaker {Name} unmuted before closing, after its receiver application stopped — it had been muted for the console",

@@ -743,6 +743,28 @@ public class GoogleCastOutputConsoleVolumeTests
     Assert.Equal(0.30f, h.External[^1].Volume, 3);
   }
 
+  // Hostile review F9. The console command timeout runs on the injected clock. Advancing the fake
+  // clock past it while the send is held times the send out, deterministically; on the system
+  // clock (the bug) the gate is released long before 5 real seconds pass and the send succeeds.
+  [Fact]
+  public async Task AConsolePush_TimesOutOnTheInjectedClock()
+  {
+    await using var h = new CastConsoleTestHarness();
+    await h.ConnectAsync(reportedLevel: 0.40f);
+    var target = h.Target();
+
+    h.VolumeGate = CastConsoleTestHarness.NewTcs();
+    var burst = h.Output.SetDeviceVolumeFromConsoleAsync(0.30f, target.Generation);
+    await h.VolumeSendEntered.Task;
+
+    h.Time.Advance(TimeSpan.FromSeconds(6)); // past the 5 s ConsoleCommandTimeout
+    h.VolumeGate.SetResult();
+    var result = await burst;
+
+    Assert.True(result.Failed);
+    Assert.Null(result.AppliedLevel);
+  }
+
   // Pre-merge review L4: console mutes were not coalesced, so a burst of toggles queued one
   // SET_MUTE each and the "muted by console" mark followed whichever finished last.
   [Fact]
