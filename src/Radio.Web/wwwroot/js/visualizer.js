@@ -360,7 +360,9 @@ export const visualizer = {
   //
   // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync) for the
   // band shown (87.5–108 MHz on FM):
-  //   levels:   [{ f, v }]  channel position 0..1 across the band's axis, normalised height 0..1
+  //   levels:   [{ f, v, t }] channel position 0..1 across the band's axis, normalised height 0..1,
+  //             and colour tier t (UI-22) — BandSignalTier in FmBandMath.cs: 0 noise, 1 weak, 2 fair,
+  //             3 strong, by dB above the map's median. A level without a t is drawn cyan, as before.
   //   station:  f | null    the tuned station (shown band, radio active), else null
   //   presets:  [{ f, label }] the shown band's presets, ascending
   //   grid:     [f]         gridline positions, the same fractions as the axis strip's labels
@@ -390,6 +392,8 @@ export const visualizer = {
 
     const { canvas, ctx, width, height } = canvasData;
     const accent = this.token(canvas, '--accent-primary', '#5CD4E8');
+    const signalBlue = this.token(canvas, '--signal-blue', '#60A5FA');
+    const signalGreen = this.token(canvas, '--signal-green', '#4ADE80');
     const station = this.token(canvas, '--source-radio', '#F0A830');
     const textMedium = this.token(canvas, '--text-medium', '#B5BCC9');
     const textLow = this.token(canvas, '--text-low', '#4B5563');
@@ -419,12 +423,14 @@ export const visualizer = {
     ctx.stroke();
 
     // Signal: a filled trace through the channel centres, plus a bar per channel so isolated
-    // stations read as stations rather than as the slope between two points.
+    // stations read as stations rather than as the slope between two points. UI-22: each bar takes
+    // its tier's colour (the cool ramp: grey noise, blue weak, cyan fair, green strong — never amber,
+    // which is the station marker's), and the trace is a neutral grey so it tints none of them.
     const levels = (model && model.levels) || [];
     if (levels.length > 0) {
       const fill = ctx.createLinearGradient(0, plotTop, 0, plotBottom);
-      fill.addColorStop(0, this.withAlpha(accent, 0.45));
-      fill.addColorStop(1, this.withAlpha(accent, 0.04));
+      fill.addColorStop(0, this.withAlpha(textMedium, 0.18));
+      fill.addColorStop(1, this.withAlpha(textMedium, 0.03));
 
       ctx.beginPath();
       ctx.moveTo(xOf(levels[0].f), plotBottom);
@@ -436,10 +442,11 @@ export const visualizer = {
 
       const channelsAcross = (model && model.channelsAcross > 0) ? model.channelsAcross : 102.5;
       const barWidth = Math.max(2, (width / channelsAcross) * 0.5);
-      ctx.fillStyle = accent;
+      const tierColours = [textLow, signalBlue, accent, signalGreen];
       for (const p of levels) {
         const h = p.v * plotHeight;
         if (h < 1) continue;
+        ctx.fillStyle = tierColours[p.t] || accent;
         ctx.fillRect(xOf(p.f) - barWidth / 2, plotBottom - h, barWidth, h);
       }
     }

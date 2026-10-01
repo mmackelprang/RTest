@@ -830,6 +830,97 @@ public class VisualizerPanelBandTests : TestContext
       .Should().Equal(new[] { "NOAA" }, "only the shown band's presets are drawn");
   }
 
+  // ── signal colour (UI-22) ────────────────────────────────────────────────
+
+  private string[] LegendWords(IRenderedComponent<VisualizerPanel> cut) =>
+    cut.FindAll(".band-legend-item").Select(i => i.TextContent.Trim()).ToArray();
+
+  [Fact]
+  public void FmMap_ShowsTheColourLegend_AfterTheAge()
+  {
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => LegendWords(cut).Should().Equal("weak", "fair", "strong"));
+    cut.FindAll(".band-legend-swatch").Select(s => s.GetAttribute("class"))
+      .Should().Equal("band-legend-swatch is-weak", "band-legend-swatch is-fair", "band-legend-swatch is-strong");
+    cut.FindAll(".band-legend-swatch").Should().OnlyContain(s => s.GetAttribute("aria-hidden") == "true");
+    cut.Find(".band-status-line").TextContent.Should().MatchRegex(@"scanned 1 min ago\s*·\s*weak\s*fair\s*strong");
+  }
+
+  [Fact]
+  public void EmptyMap_HasNoLegend()
+  {
+    var cut = RenderBand();
+
+    cut.Find(".band-empty-title").TextContent.Should().Be("No scan yet");
+    cut.FindAll(".band-legend").Should().BeEmpty();
+  }
+
+  [Theory]
+  [InlineData("AM", 530_000L, 1_710_000L, 10_000L)]
+  [InlineData("SW", 2_300_000L, 26_100_000L, 5_000L)]
+  public void OutOfRangeBand_HasNoLegend_EvenWithChannelsInTheResponse(string band, long min, long max, long spacing)
+  {
+    // The channels are there so that only the out-of-range guard can be what hides the legend.
+    GetJson("/api/radio/bandmap", BandMap(band, min, max, min, max, spacing,
+      channels: [new { frequencyHz = min, levelDbfs = -30f }, new { frequencyHz = min + spacing, levelDbfs = -60f }],
+      mappable: false, reason: "Out of range."));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-empty-title").TextContent.Should().Be($"{band} is out of this radio's range"));
+    cut.FindAll(".band-legend").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void SweepOfTheShownBand_KeepsTheLegend_WhileItsMapIsDrawn()
+  {
+    object sweep = new { isSweeping = true, band = "FM", trigger = "request", path = "idle", progress = 0.4, estimatedSecondsRemaining = 12.0 };
+    var map = new List<object>();
+    for (long hz = FmBandMath.FirstChannelHz; hz <= FmBandMath.LastChannelHz; hz += FmBandMath.ChannelSpacingHz)
+    {
+      map.Add(new { frequencyHz = hz, levelDbfs = hz == 99_500_000 ? -30f : -60f });
+    }
+
+    GetJson("/api/radio/bandmap", BandMap("FM", 87_500_000, 108_000_000, 87_900_000, 107_900_000, 200_000, map, sweep: sweep));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-status-scanning").TextContent.Should().Be("Scanning… 12 s"));
+    LegendWords(cut).Should().Equal("weak", "fair", "strong");
+  }
+
+  [Fact]
+  public void FmMap_DrawModel_CarriesEachBarsTier()
+  {
+    // 99.5 at 30 dB above the -60 median is strong; every other channel is the noise floor.
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => _module.Invocations["visualizer.drawBandMap"].Should().NotBeEmpty());
+
+    JsonElement[] levels = LastDrawModel().GetProperty("levels").EnumerateArray().ToArray();
+    levels.Should().HaveCount(101);
+    double station = FmBandMath.HzToFraction(99_500_000);
+    levels.Single(l => Math.Abs(l.GetProperty("f").GetDouble() - station) < 1e-12).GetProperty("t").GetInt32()
+      .Should().Be((int)BandSignalTier.Strong);
+    levels.Count(l => l.GetProperty("t").GetInt32() == (int)BandSignalTier.Noise).Should().Be(100);
+  }
+
+  [Fact]
+  public void WbMap_DrawModel_TiersFollowTheWbMapsOwnMedian()
+  {
+    // WB: seven channels, one at -30 over a -60 floor. A band other than FM gets tiers the same way.
+    GetJson("/api/radio/bandmap", WbMap());
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+
+    LastDrawModel().GetProperty("levels").EnumerateArray().Select(l => l.GetProperty("t").GetInt32())
+      .Should().Equal(0, 0, 0, 3, 0, 0, 0);
+    LegendWords(cut).Should().Equal("weak", "fair", "strong");
+  }
+
   [Fact]
   public async Task Dispose_UnsubscribesFromTheHub_AndALaterBroadcastDoesNothing()
   {

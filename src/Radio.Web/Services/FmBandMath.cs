@@ -3,9 +3,30 @@ using Radio.Web.Models;
 namespace Radio.Web.Services;
 
 /// <summary>
+/// A channel's colour on the BAND map (UI-22), by how far it stands above the map's median. The values
+/// are what <c>visualizer.js</c>'s <c>drawBandMap</c> receives as each level's <c>t</c> and indexes its
+/// colours by — <c>--text-low</c>, <c>--signal-blue</c>, <c>--accent-primary</c>, <c>--signal-green</c>
+/// — so they must not be renumbered without changing that list too.
+/// </summary>
+public enum BandSignalTier
+{
+  /// <summary>Below <see cref="FmBandMath.PeakProminenceDb"/> above the median: no station. Grey.</summary>
+  Noise = 0,
+
+  /// <summary>From <see cref="FmBandMath.PeakProminenceDb"/> to <see cref="FmBandMath.FairSignalDb"/>. Blue.</summary>
+  Weak = 1,
+
+  /// <summary>From <see cref="FmBandMath.FairSignalDb"/> to <see cref="FmBandMath.StrongSignalDb"/>. Cyan, the map's colour before UI-22.</summary>
+  Fair = 2,
+
+  /// <summary>At least <see cref="FmBandMath.StrongSignalDb"/> above the median. Green.</summary>
+  Strong = 3,
+}
+
+/// <summary>
 /// Pure arithmetic behind the visualizer's BAND view (AUD-76): the FM plot range, the US FM channel
-/// plan, display normalisation of the band map's relative levels (any band), and the FM tap-to-tune
-/// rule. Since AUD-91 the axis and tap arithmetic is <see cref="BandAxis"/>'s, and the FM members here
+/// plan, display normalisation of the band map's relative levels (any band), the bars' signal-strength
+/// colour tiers (any band, UI-22), and the FM tap-to-tune rule. Since AUD-91 the axis and tap arithmetic is <see cref="BandAxis"/>'s, and the FM members here
 /// delegate to <see cref="BandAxis.Fm"/>. Kept out of the component so every rule is unit-tested
 /// without a renderer.
 /// </summary>
@@ -35,6 +56,20 @@ public static class FmBandMath
   /// mean anything; 6 dB is a factor of four in power, well clear of channel-to-channel noise.
   /// </summary>
   public const double PeakProminenceDb = 6.0;
+
+  /// <summary>
+  /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Fair"/>
+  /// (cyan) rather than <see cref="BandSignalTier.Weak"/> (blue), in dB (UI-22). Provisional when the
+  /// owner chose the ramp; kept after the four stored maps on the box were measured on 2026-10-01 — the
+  /// split is in <c>docs/queue/UI-22.md</c>.
+  /// </summary>
+  public const double FairSignalDb = 12.0;
+
+  /// <summary>
+  /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Strong"/>
+  /// (green), in dB (UI-22). Measured against the box's maps alongside <see cref="FairSignalDb"/>.
+  /// </summary>
+  public const double StrongSignalDb = 20.0;
 
   /// <summary>
   /// Smallest level span the display stretches to full height, in dB. Without it a map of nothing
@@ -93,6 +128,39 @@ public static class FmBandMath
     double span = Math.Max(levels.Max() - floor, MinDisplaySpanDb);
     return levels.Select(l => Math.Clamp((l - floor) / span, 0.0, 1.0)).ToArray();
   }
+
+  /// <summary>
+  /// Each channel's colour tier on the BAND map (UI-22), in the order given: how far its level stands
+  /// above the map's median — the same noise estimate the peak rule measures
+  /// <see cref="PeakProminenceDb"/> from. Below that it is <see cref="BandSignalTier.Noise"/>; from it,
+  /// <see cref="BandSignalTier.Weak"/>; from <see cref="FairSignalDb"/>, <see cref="BandSignalTier.Fair"/>;
+  /// from <see cref="StrongSignalDb"/>, <see cref="BandSignalTier.Strong"/>. Each threshold belongs to the
+  /// tier above it.
+  /// </summary>
+  /// <remarks>
+  /// Keyed to the median, not to the display height from <see cref="NormalizeLevels"/>: that height is
+  /// stretched per map, so the same bar height is 10 dB on a dead map and 40 dB on a busy one. A tier is
+  /// decided per channel by its level alone, not by the peak rule, so a strong station's adjacent-channel
+  /// shadow can be coloured too. The comparison is written as the peak rule writes it — level against
+  /// median plus threshold — so a channel at exactly <see cref="PeakProminenceDb"/> is a peak to the tap
+  /// and <see cref="BandSignalTier.Weak"/> to the colour, never one without the other.
+  /// </remarks>
+  public static BandSignalTier[] SignalTiers(IReadOnlyList<BandMapChannelDto> channels)
+  {
+    if (channels.Count == 0)
+    {
+      return [];
+    }
+
+    double median = Median(channels.Select(c => (double)c.LevelDbfs));
+    return channels.Select(c => TierOf(c.LevelDbfs, median)).ToArray();
+  }
+
+  private static BandSignalTier TierOf(double level, double median) =>
+    level >= median + StrongSignalDb ? BandSignalTier.Strong
+    : level >= median + FairSignalDb ? BandSignalTier.Fair
+    : level >= median + PeakProminenceDb ? BandSignalTier.Weak
+    : BandSignalTier.Noise;
 
   /// <summary>Median of <paramref name="values"/> (mean of the middle two for an even count); 0 when empty.</summary>
   public static double Median(IEnumerable<double> values)

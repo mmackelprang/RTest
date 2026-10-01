@@ -132,6 +132,19 @@
               <span class="band-status-sep" aria-hidden="true">·</span>
               <span class="band-status-age">scanned @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
             }
+            @* UI-22: the bars' colour key, whenever bars are drawn — so not for an empty map or a band
+               out of range, and it stays through a sweep, which draws the map it has. Page text rather
+               than canvas, so it can be read and tested; the swatches are decoration. Grey (noise) is
+               not listed: it reads as nothing. *@
+            @if (HasBandMap && IsShownBandMappable)
+            {
+              <span class="band-status-sep" aria-hidden="true">·</span>
+              <span class="band-legend">
+                <span class="band-legend-item"><span class="band-legend-swatch is-weak" aria-hidden="true"></span>weak</span>
+                <span class="band-legend-item"><span class="band-legend-swatch is-fair" aria-hidden="true"></span>fair</span>
+                <span class="band-legend-item"><span class="band-legend-swatch is-strong" aria-hidden="true"></span>strong</span>
+              </span>
+            }
           </div>
           @if (_bandMessage != null)
           {
@@ -737,8 +750,8 @@
   /// <summary>
   /// Hands the canvas a drawing model in plot coordinates (0–1 across the shown band's axis; 87.5–108 MHz
   /// on FM), so the JS stays arithmetic-free: normalised channel heights, the gridline positions, the
-  /// axis span in channel spacings (for the bar width), the station marker (shown band, radio active),
-  /// and the shown band's presets as labelled ticks.
+  /// axis span in channel spacings (for the bar width), each bar's colour tier (UI-22), the station
+  /// marker (shown band, radio active), and the shown band's presets as labelled ticks.
   /// </summary>
   private async Task DrawBandAsync()
   {
@@ -752,8 +765,10 @@
       ? _bandMap?.Channels ?? Array.Empty<BandMapChannelDto>()
       : Array.Empty<BandMapChannelDto>();
     double[] heights = FmBandMath.NormalizeLevels(channels);
+    // UI-22: t is the bar's colour tier, the BandSignalTier value visualizer.js indexes its colours by.
+    BandSignalTier[] tiers = FmBandMath.SignalTiers(channels);
     object[] levels = channels
-      .Select((c, i) => (object)new { f = axis.HzToFraction(c.FrequencyHz), v = heights[i] })
+      .Select((c, i) => (object)new { f = axis.HzToFraction(c.FrequencyHz), v = heights[i], t = (int)tiers[i] })
       .ToArray();
 
     // The marker and the presets are the shown band's, and only when the axis drawn is that band's: a
