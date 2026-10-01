@@ -17,10 +17,19 @@ namespace Radio.Infrastructure.Tests.Audio.Outputs;
 /// </remarks>
 public class GoogleCastOutputConsoleVolumeTests
 {
+  /// <summary>
+  /// Whether the harness models the measured device (a level change unmutes a muted speaker, the
+  /// reply status raised inside the send — <see cref="CastConsoleTestHarness.LevelCommandUnmutes"/>).
+  /// Off here; <see cref="GoogleCastOutputConsoleVolumeTests_OnTheDeviceModel"/> runs every test with it on.
+  /// </summary>
+  protected virtual bool OnTheDeviceModel => false;
+
+  private CastConsoleTestHarness NewHarness() => new(OnTheDeviceModel);
+
   [Fact]
   public async Task ABurstOfConsoleChanges_IsCoalesced_LatestWins_AndRememberedOnce()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -54,7 +63,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task LateAndOutOfOrderConfirmations_OfConsolePushes_AreEchoes_NotExternalChanges()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -91,7 +100,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ACoarselyQuantisedEcho_BetweenRecentPushes_IsAbsorbed_NotWrittenBack()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep); // 0.40: no change; the step is known
     var target = h.Target();
@@ -117,7 +126,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ALevelBetweenTwoRecentPushes_FarFromBoth_IsAbsorbedByTheRangeRuleAlone()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -141,7 +150,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ASingleDetentPush_OnAOneFifteenthStepSpeaker_HasItsQuantisedEchoAbsorbed()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
     var target = h.Target();
@@ -162,7 +171,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task OnAOneFifteenthStepSpeaker_AChangeMoreThanAStepOutsideTheRange_IsStillReported()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
     var target = h.Target();
@@ -186,7 +195,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [InlineData(0.5)] // above MaxSpeakerStepInterval: ignored
   public async Task WithNoUsableStepReported_TheEchoToleranceFallsBackTo001(double? stepInterval)
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     h.RaiseStatus(0.40, stepInterval: stepInterval);
     var target = h.Target();
@@ -203,7 +212,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheSpeakerStep_IsForgotten_OnANewConnection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     h.RaiseStatus(6 * FifteenStep, stepInterval: FifteenStep);
 
@@ -223,7 +232,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStaleInFlightPush_DoesNotWidenTheEchoRange_ButStillMatchesItsOwnEcho()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -254,7 +263,7 @@ public class GoogleCastOutputConsoleVolumeTests
   {
     // Guard, not a mutation target: within 0.01 of the one push, so recognised by both the old
     // single-push rule and the range rule.
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -268,7 +277,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AGenuineExternalChange_OutsideTheRangeOfRecentPushes_IsStillReported_WithinTheWindow()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -294,7 +303,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusRaisedDuringTheInitialRead_IsPartOfTheInitialSync_AndNeverUnmutesTheConsole()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
 
     // Mirrors AudioStateUpdateService.OnCastVolumeChanged: an initial sync is ignored; any other
     // event's mute state is written to the console.
@@ -340,7 +349,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusRaisedDuringAReusedClientsTransportConnect_IsPartOfTheInitialSync_NeverExternal()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.RegisterLiveReceiver("cast-a");
     h.RegisterLiveReceiver("cast-b");
 
@@ -384,7 +393,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusRaisedDuringAFailedInitialRead_IsAbsorbed_NotReportedAsExternal()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
 
     // The read itself yields nothing (no volume in the response), but the device's status
     // still arrived as an event while it was in flight.
@@ -404,7 +413,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalChange_IsReported_UpdatesTheKnownLevelFirst_AndIsRemembered()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
 
     float? knownWhenFired = null;
@@ -428,7 +437,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalChange_DropsAQueuedConsoleTarget_AndBecomesTheKnownLevel()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -454,7 +463,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsoleTargetForASupersededConnection_IsNeverSent()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var oldTarget = h.Target();
 
@@ -476,7 +485,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task NothingIsSent_WhenTheOutputIsNotStreaming()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
     Assert.Null(h.Output.GetConsoleVolumeTarget());
     h.ClearCommands();
@@ -491,7 +500,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AFailedPush_IsReportedOnce_AndTheKnownLevelIsUnchanged()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     var rememberedBefore = h.Store.Remembered.Count;
@@ -508,7 +517,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheLiveRead_ReportsTheSpeakersStatus_BesideTheKnownLevel_AndChangesNothing()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     Assert.Null(await h.Output.ReadSpeakerVolumeAsync()); // nothing connected
 
     await h.ConnectAsync(reportedLevel: 0.40f);
@@ -534,7 +543,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsoleMuteWhileCasting_MutesTheSpeaker_AndADeliberateStopUnmutesIt()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -548,9 +557,19 @@ public class GoogleCastOutputConsoleVolumeTests
     // (With a muted console it is held instead — see UnderAMutedConsole_… and the follower tests.)
     await h.Output.SetDeviceVolumeFromConsoleAsync(0.25f, target.Generation);
 
+    if (OnTheDeviceModel)
+    {
+      // That level unmuted the speaker (its reply arrived inside the send), and the console — as
+      // far as this output can tell — is not muted: the unmute matches it, so nothing is left to
+      // release at the stop. It is not reported as a change made on the speaker either.
+      Assert.False(h.Output.IsSpeakerMutedByConsole);
+      Assert.False(h.Output.KnownSpeakerMuted);
+      Assert.Empty(h.External);
+    }
+
     await h.Output.StopAsync();
 
-    Assert.Equal(new[] { true, false }, h.MuteSends());
+    Assert.Equal(OnTheDeviceModel ? new[] { true } : new[] { true, false }, h.MuteSends());
     Assert.Equal(new[] { 0.25f }, h.VolumeSends());
     Assert.False(h.Output.IsSpeakerMutedByConsole);
 
@@ -562,7 +581,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ADeliberateDisconnect_UnmutesASpeakerTheConsoleMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -577,7 +596,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ATeardownSendsNoUnmute_WhenTheConsoleNeverMutedTheSpeaker()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true); // muted on the speaker itself
     h.ClearCommands();
 
@@ -594,7 +613,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStop_StopsTheReceiverApplication_BeforeUnmutingASpeakerTheConsoleMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -611,7 +630,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [InlineData(true)]  // the stop threw (socket closed, timed out)
   public async Task WhenTheReceiverApplicationCannotBeConfirmedStopped_TheSpeakerIsLeftMuted(bool throws)
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -642,7 +661,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task WithNoReceiverStatusEverReceived_ATeardownLeavesTheConsoleMutedSpeakerMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -664,7 +683,7 @@ public class GoogleCastOutputConsoleVolumeTests
   public async Task ADisconnectWithoutAStop_StopsTheReceiverApplication_BeforeTheUnmute()
   {
     // DisposeAsync and the device-switch path can reach DisconnectAsync while still streaming.
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -681,7 +700,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AMutedConsole_MutesTheSpeakerAtStart_AndSendsNoLevelItAlreadyHolds()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Output.AttachConsoleFollower(() => true, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GoogleCastOutputConsoleVolumeTests>());
     await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: false);
     h.ClearCommands();
@@ -698,7 +717,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AfterStart_ASpeakerMutedOnItsOwnSide_AtTheSameLevel_GetsNoCommandAtAll()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Output.AttachConsoleFollower(() => false, NullLogger.Instance);
     await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
     h.ClearCommands();
@@ -715,7 +734,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AfterStart_ALevelPushToASpeakerMutedOnItsOwnSide_IsFollowedByAMuteReassert()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Output.AttachConsoleFollower(() => false, NullLogger.Instance);
     h.Store.Volumes["cast-a"] = 0.60f;
     h.FailNextVolume = new TimeoutException("restore lost");
@@ -736,7 +755,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task UnderAMutedConsole_TheAfterStartLevelIsHeld_NotSent_AndGoesOutBeforeTheUnmute()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var consoleMuted = true;
     h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
     h.Store.Volumes["cast-a"] = 0.60f;
@@ -765,7 +784,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheRestoreOnConnect_ToAMutedSpeaker_IsFollowedByAMuteReassert()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Store.Volumes["cast-a"] = 0.60f;
 
     await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
@@ -787,7 +806,13 @@ public class GoogleCastOutputConsoleVolumeTests
     await h.ConnectAsync(reportedLevel: 0.30f);
     var target = h.Target();
     Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    // The device model is off for this push: these tests raise the device's reply to it
+    // themselves, at the moment they choose (on the model it would arrive inside the send, while
+    // the console still reads unmuted).
+    var model = h.LevelCommandUnmutes;
+    h.LevelCommandUnmutes = false;
     await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
+    h.LevelCommandUnmutes = model;
     consoleMuted = true;
     Assert.True(h.Output.IsSpeakerMutedByConsole);
     Assert.Equal(new[] { "mute", "vol" }, h.Kinds());
@@ -800,7 +825,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnUnmuteEchoingOurOwnLevelPush_UnderAMutedConsole_IsReassertedAsMuted_NotReported()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await ConsoleMutedAfterALevelPushAsync(h);
 
     h.Time.Advance(TimeSpan.FromSeconds(1)); // inside EchoWindow of the 0.45 push
@@ -820,13 +845,14 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AMuteReassert_IsNotSent_WhenTheConsoleWasUnmutedBeforeItsTurn()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var armed = false;
     var reads = 0;
     h.Output.AttachConsoleFollower(() => armed && Interlocked.Increment(ref reads) == 1, NullLogger.Instance);
     await h.ConnectAsync(reportedLevel: 0.30f);
     var target = h.Target();
     Assert.True(await h.Output.SetDeviceMuteFromConsoleAsync(true, target.Generation));
+    h.LevelCommandUnmutes = false; // the device's reply is raised by hand below (see ConsoleMutedAfterALevelPushAsync)
     await h.Output.SetDeviceVolumeFromConsoleAsync(0.45f, target.Generation);
     h.ClearCommands();
     armed = true;
@@ -844,7 +870,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnOwnerUnmuteOutsideTheEchoWindow_IsStillAnExternalChange()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await ConsoleMutedAfterALevelPushAsync(h);
 
     h.Time.Advance(TimeSpan.FromSeconds(5)); // past EchoWindow of the 0.45 push
@@ -861,7 +887,7 @@ public class GoogleCastOutputConsoleVolumeTests
   public async Task StreamingStart_NeverUnmutesASpeaker_AndDoesNotClaimOneMutedOnItsOwnSide()
   {
     // Console not muted, speaker muted on its own side: left alone.
-    await using (var h = new CastConsoleTestHarness())
+    await using (var h = NewHarness())
     {
       h.Output.AttachConsoleFollower(() => false, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GoogleCastOutputConsoleVolumeTests>());
       await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
@@ -874,7 +900,7 @@ public class GoogleCastOutputConsoleVolumeTests
     }
 
     // Console muted, speaker already muted: nothing sent, and not marked as ours to release.
-    await using (var h = new CastConsoleTestHarness())
+    await using (var h = NewHarness())
     {
       h.Output.AttachConsoleFollower(() => true, new Microsoft.Extensions.Logging.Abstractions.NullLogger<GoogleCastOutputConsoleVolumeTests>());
       await h.ConnectAsync(reportedLevel: 0.40f, reportedMuted: true);
@@ -891,7 +917,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalMute_IsNotPushedBack_AndItsConfirmationOfOurMuteIsAnEcho()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -918,7 +944,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ALostConnection_ClearsTheConsoleMuteMark_WithoutSendingAnUnmute()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -938,7 +964,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AReconnectWhoseInitialReadFails_StillMutesTheSpeakerForAMutedConsole()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     h.Output.AttachConsoleFollower(() => true, NullLogger.Instance);
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
@@ -963,7 +989,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsoleMuteMadeWhileTheStreamWasStarting_IsAppliedOnReachingStreaming()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var consoleMuted = false;
     h.Output.AttachConsoleFollower(() => consoleMuted, NullLogger.Instance);
     await h.ConnectAsync(reportedLevel: 0.40f, streaming: false);
@@ -984,7 +1010,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnExternalChangeWhileAPushIsInFlight_IsNotOverwrittenWhenThePushCompletes()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -1004,7 +1030,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task APushThatCompletesAfterANewConnection_IsNotRecordedForEitherConnection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync("cast-a", reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -1032,7 +1058,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task TheConfirmationOfASlowPush_IsAnEcho_ForAsLongAsTheSendIsInFlight_AndTheWindowAfter()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -1068,7 +1094,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AConsolePush_TimesOutOnTheInjectedClock()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
 
@@ -1092,7 +1118,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ATeardownReceiverApplicationStop_TimesOutOnTheInjectedClock_AndLeavesTheSpeakerMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -1115,7 +1141,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ATeardownUnmute_TimesOutOnTheInjectedClock()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -1167,7 +1193,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task WhenTheAppStopClosesTheConnection_TheUnmuteIsSentOverAFreshConnection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var log = await CastingUnderAMutedConsoleAsync(h);
     h.FailNextMute = new TaskCanceledException("Client disconnected before receiving response.");
 
@@ -1184,7 +1210,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AFreshConnectionThatFindsTheSpeakerUnmuted_SendsNothing_AndClearsTheRecord()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var log = await CastingUnderAMutedConsoleAsync(h);
     h.FailNextMute = new TimeoutException("closed");
     h.FreshConnect = () => Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
@@ -1202,7 +1228,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AFreshConnectionThatStillShowsOurApplication_DoesNotUnmute()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var log = await CastingUnderAMutedConsoleAsync(h);
     h.FailNextMute = new TimeoutException("closed");
     h.FreshConnect = () => Task.FromResult<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
@@ -1220,7 +1246,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AnUnreachableSpeaker_IsGivenUpOnTheInjectedClock_AndLeftMuted()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     var log = await CastingUnderAMutedConsoleAsync(h);
     h.FailNextMute = new TimeoutException("closed");
     var never = new TaskCompletionSource<Sharpcaster.Models.ChromecastStatus.ChromecastStatus?>(
@@ -1243,7 +1269,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ALostConnection_NeverTriesAnUnmuteOverAFreshConnection()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await CastingUnderAMutedConsoleAsync(h);
 
     h.Output.ReportConnectionLost(h.Target().Generation, "test", null);
@@ -1259,7 +1285,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task ConsoleMutes_AreCoalesced_LatestWins_AndTheMarkFollowsTheLastSent()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -1287,7 +1313,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AStatusArrivingDuringTheLiveRead_IsBaselineOnly_NeverAnExternalChange()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
 
     h.Output.CastStatusReadOverrideForTests = () =>
@@ -1312,7 +1338,7 @@ public class GoogleCastOutputConsoleVolumeTests
   [Fact]
   public async Task AMuteOnlyExternalChange_DropsTheQueuedTarget_AndIsMarkedAsNotALevelChange()
   {
-    await using var h = new CastConsoleTestHarness();
+    await using var h = NewHarness();
     await h.ConnectAsync(reportedLevel: 0.40f);
     var target = h.Target();
     h.ClearCommands();
@@ -1334,4 +1360,14 @@ public class GoogleCastOutputConsoleVolumeTests
     await burst;
     Assert.Equal(new[] { 0.30f }, h.VolumeSends()); // the queued 0.36 was dropped
   }
+}
+
+/// <summary>
+/// Every <see cref="GoogleCastOutputConsoleVolumeTests"/> test again, on the device model measured on
+/// the box (AUD-81 follow-up): a SET_VOLUME that changes the level unmutes a muted speaker, and the
+/// reply status reaches the output before the send completes.
+/// </summary>
+public class GoogleCastOutputConsoleVolumeTests_OnTheDeviceModel : GoogleCastOutputConsoleVolumeTests
+{
+  protected override bool OnTheDeviceModel => true;
 }
