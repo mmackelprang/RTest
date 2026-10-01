@@ -39,15 +39,18 @@ public class SkeletonTests : TestContext
   }
 
   [Fact]
-  public void Skeleton_Radio_RendersBands_FreqWell_Meter()
+  public void Skeleton_Radio_RendersOneRowOfSixBands_FreqWell_Meter_AndPresetBar()
   {
+    // UI-20 (spec 2026-10-01 §7): the skeleton takes the panel's real shape — six band
+    // pills in one row and the preset bar's four cards — so nothing jumps on load.
     var cut = RenderComponent<Skeleton>(p => p
       .Add(x => x.Shape, Skeleton.SkeletonShape.Radio));
 
     cut.Find(".skeleton").GetAttribute("class").Should().Contain("skeleton-radio");
-    cut.FindAll(".skeleton-band").Count.Should().Be(4);
+    cut.FindAll(".skeleton-radio-bands > .skeleton-band").Count.Should().Be(6);
     cut.FindAll(".skeleton-freq-well").Count.Should().Be(1);
     cut.FindAll(".skeleton-meter").Count.Should().Be(1);
+    cut.FindAll(".skeleton-radio-bar > .skeleton-preset").Count.Should().Be(4);
   }
 
   [Fact]
