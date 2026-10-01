@@ -57,6 +57,9 @@ namespace Radio.Infrastructure.Platform.Input;
 /// </summary>
 public sealed class PresetSelectorService : IDisposable
 {
+  // A wire contract, not only an internal tag: the Web's preset bar (UI-21) strips this prefix off
+  // the highlighted row to find the card the knob is pointing at (PresetBar.KnobPresetRowPrefix). The
+  // remainder must stay the preset's own Id — the same Id GET /api/radio/presets returns.
   private const string PresetIdPrefix = "preset:";
 
   /// <summary>
