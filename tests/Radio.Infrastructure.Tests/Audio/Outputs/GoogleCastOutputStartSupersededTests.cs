@@ -209,6 +209,43 @@ public class GoogleCastOutputStartSupersededTests : IDisposable
   }
 
   [Fact]
+  public async Task AnAbandonedStart_StopsItsOwnSendLoop_EvenWhenTheStreamingFieldNoLongerHoldsIt()
+  {
+    // Start-guard review M1: a newer start can overwrite the published _directStreaming before this
+    // start is abandoned. The abandon's exchange then fails, and it must STILL stop and dispose its
+    // own service — otherwise its send loop runs forever with its reader held. The overwrite is
+    // simulated by clearing the field (any value other than this start's service takes the branch).
+    await using var output = await ConnectedDirectChannelOutputAsync();
+    output.CastLaunchApplicationOverrideForTests = () => Task.FromResult<ChromecastStatus?>(LaunchStatus());
+
+    var volumeEntered = NewTcs();
+    var volumeGate = NewTcs();
+    DirectCastStreamingService? streamingDuringPush = null;
+    output.CastSetVolumeOverrideForTests = async _ =>
+    {
+      streamingDuringPush = output.DirectStreaming;
+      volumeEntered.TrySetResult();
+      await volumeGate.Task;
+    };
+
+    var start = output.StartAsync(automaticAttempt: true, CancellationToken.None);
+    await volumeEntered.Task.WaitAsync(HangGuard);
+    Assert.NotNull(streamingDuringPush);
+    Assert.True(streamingDuringPush!.IsStreaming);
+
+    await output.DisconnectAsync().WaitAsync(HangGuard);
+    typeof(GoogleCastOutput)
+      .GetField("_directStreaming", BindingFlags.NonPublic | BindingFlags.Instance)!
+      .SetValue(output, null);
+
+    volumeGate.SetResult();
+    await start.WaitAsync(HangGuard);
+
+    Assert.NotEqual(AudioOutputState.Streaming, output.State);
+    Assert.False(streamingDuringPush.IsStreaming); // stopped although the field no longer held it
+  }
+
+  [Fact]
   public async Task AStartNobodyTearsDown_StillStreams()
   {
     // The guard's other direction: an undisturbed start reaches Streaming with its loop running.

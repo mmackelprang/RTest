@@ -904,8 +904,9 @@ public class AudioEngineInitializationService : IHostedService, ICastReconnectCo
     /// cannot interrupt the start, so a launch that outlasts <c>CancelCastReconnectAsync</c>'s
     /// bound is still running when the user's teardown runs. That is covered by
     /// <c>GoogleCastOutput.StartAsync</c>'s own generation guard (AUD-37, final review M-1): a start
-    /// whose connection was torn down or replaced meanwhile abandons itself before it starts the
-    /// DirectChannel send loop or sets <c>Streaming</c>, removes what it created, and returns with
+    /// whose connection was torn down or replaced meanwhile abandons itself — before the
+    /// DirectChannel send loop starts if the change is seen by then, otherwise by stopping that
+    /// loop before it sets <c>Streaming</c> — removes what it created, and returns with
     /// <c>State</c> as the teardown left it — up to the narrow window that guard documents
     /// (<c>StartIsStillCurrentAsync</c>). The ownership check after the start turns that into the
     /// superseded outcome here.

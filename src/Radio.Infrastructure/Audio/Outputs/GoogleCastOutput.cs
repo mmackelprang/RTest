@@ -1696,10 +1696,15 @@ public class GoogleCastOutput : AudioOutputBase
 
   /// <summary>
   /// AUD-37 (final review M-1). Removes what a superseded start created, as
-  /// <see cref="StopAsync"/> does: stops and disposes its streaming service if it is still the
-  /// published one (an exchange, so this and a concurrent StopAsync or loss handling never both
-  /// stop it), and unregisters its channel by reference — a no-op if a newer start's channel has
-  /// replaced it. Leaves anything another start created alone. Never throws.
+  /// <see cref="StopAsync"/> does: clears the published streaming field only if it still holds
+  /// this start's service (an exchange — a newer start's service is left in place), then ALWAYS
+  /// stops and disposes this start's own service, and unregisters its channel by reference — a
+  /// no-op if a newer start's channel has replaced it. Stopping unconditionally matters when a
+  /// newer start has already overwritten the field: the exchange then fails, and skipping the
+  /// stop would leave this start's send loop running with its reader held (start-guard review
+  /// M1). Both calls are idempotent (StopAsync releases its reader and CTS by exchange;
+  /// DisposeAsync is guarded by its disposed flag), so a concurrent StopAsync or loss handling
+  /// that already took the service makes this a no-op. Never throws.
   /// </summary>
   private async Task AbandonSupersededStartAsync(DirectChannelStart? created)
   {
@@ -1710,16 +1715,14 @@ public class GoogleCastOutput : AudioOutputBase
 
     try
     {
-      if (ReferenceEquals(Interlocked.CompareExchange(ref _directStreaming, null, created.Streaming), created.Streaming))
+      Interlocked.CompareExchange(ref _directStreaming, null, created.Streaming);
+      try
       {
-        try
-        {
-          await created.Streaming.StopAsync().ConfigureAwait(false);
-        }
-        finally
-        {
-          await created.Streaming.DisposeAsync().ConfigureAwait(false);
-        }
+        await created.Streaming.StopAsync().ConfigureAwait(false);
+      }
+      finally
+      {
+        await created.Streaming.DisposeAsync().ConfigureAwait(false);
       }
     }
     catch (Exception ex)
