@@ -28,7 +28,14 @@ public class PhoneIntegrationOptions
   public int RingPriority { get; set; } = 9;
 
   /// <summary>Audio ducking priority for caller name TTS announcement (1-10).</summary>
-  public int AnnouncementPriority { get; set; } = 8;
+  /// <remarks>
+  /// 9, one above the 8 that <c>NotificationsController.Announce</c> uses when a notification names no
+  /// priority (owner ruling on <c>AUD-87</c>, 2026-10-02). <c>AnnouncementService</c> lets the later of
+  /// two equal-priority announcements replace the earlier, so at 8 a routine doorbell posted after an
+  /// incoming call cut off the caller's name; at 9 the doorbell plays alongside it instead.
+  /// ⚠ A value in the SQLite config store outranks this default and <c>appsettings.json</c>.
+  /// </remarks>
+  public int AnnouncementPriority { get; set; } = 9;
 
   /// <summary>Base delay for reconnection backoff in milliseconds.</summary>
   public int ReconnectBaseDelayMs { get; set; } = 2000;
