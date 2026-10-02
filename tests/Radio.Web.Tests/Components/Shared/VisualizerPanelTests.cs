@@ -115,12 +115,12 @@ public class VisualizerPanelTests : TestContext
   [Fact]
   public void ModePicker_RendersAllFiveLabelsInOrder()
   {
-    // UI-29: BAND is last (AUD-76 had put it where Fall was). VU is gone.
+    // UI-29: BAND is last (AUD-76 had put it where Fall was). VU is gone. UI-31: it reads RADIO.
     var cut = RenderComponent<VisualizerPanel>();
     var labels = cut.FindAll(".visualizer-mode")
       .Select(e => e.TextContent.Trim())
       .ToList();
-    labels.Should().Equal("Wave", "Spectrum", "Ring", "Phase", "BAND");
+    labels.Should().Equal("Wave", "Spectrum", "Ring", "Phase", "RADIO");
   }
 
   [Fact]
@@ -163,11 +163,12 @@ public class VisualizerPanelTests : TestContext
   }
 
   [Fact]
-  public void ModePicker_BandButton_HasBandMapAriaLabel()
+  public void ModePicker_RadioButton_HasSignalMapAriaLabel()
   {
+    // UI-31: the band map's tab reads RADIO; VisualizationMode.Band behind it is unchanged.
     var cut = RenderComponent<VisualizerPanel>();
-    var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
-    (band.GetAttribute("aria-label") ?? string.Empty).Should().ContainAll("band", "mode");
+    var radio = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "RADIO");
+    radio.GetAttribute("aria-label").Should().Be("Radio signal map mode");
   }
 
   [Fact]
@@ -195,10 +196,11 @@ public class VisualizerPanelTests : TestContext
     // rendered disabled (out of the tab order, taps ignored by the browser) and SelectMode refuses it
     // as well, for a tap that lands before the re-render. Enabling it is VisualizerPanelBandTests'.
     var cut = RenderComponent<VisualizerPanel>();
-    var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
+    var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "RADIO");
     band.HasAttribute("disabled").Should().BeTrue();
     band.GetAttribute("aria-disabled").Should().Be("true");
-    band.GetAttribute("aria-label").Should().Be("Radio band map mode", "the name stays fixed; the hint is a description");
+    band.GetAttribute("aria-label").Should().Be("Radio signal map mode", "the name stays fixed; the hint is a description");
+    band.HasAttribute("title").Should().BeFalse("UI-31: the owner wants no tooltip on the greyed tab");
     var hintId = band.GetAttribute("aria-describedby");
     hintId.Should().NotBeNullOrEmpty();
     cut.Find($"#{hintId}").TextContent.Should().Be(VisualizerPanel.BandUnavailableHint);
@@ -207,7 +209,7 @@ public class VisualizerPanelTests : TestContext
     // is the guard inside SelectMode, not the attribute.
     await cut.InvokeAsync(() => band.Click());
 
-    var bandAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
+    var bandAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "RADIO");
     (bandAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
     var spectrumAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Spectrum");
     (spectrumAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");

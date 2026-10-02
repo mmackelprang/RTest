@@ -3,8 +3,8 @@ using System.Globalization;
 namespace Radio.Web.Formatting;
 
 /// <summary>
-/// Text shown over the visualizer's BAND view (AUD-76; per band since AUD-91): the map's age, the sweep
-/// progress, and frequencies. Invariant culture throughout, matching <see cref="Timestamps"/>.
+/// Text shown with the visualizer's RADIO (formerly BAND) view (AUD-76; per band since AUD-91; UI-31): the
+/// map's age, the sweep progress, plotted ranges, and frequencies. Invariant culture throughout, matching <see cref="Timestamps"/>.
 /// </summary>
 public static class BandMapText
 {
@@ -39,25 +39,42 @@ public static class BandMapText
   }
 
   /// <summary>
-  /// The sweep overlay: <c>Scanning… 12 s</c> from the API's estimate (rounded up), else
-  /// <c>Scanning… 40%</c> from the progress fraction, else <c>Scanning…</c> before either is known.
+  /// The sweep status (UI-31: "Discover", not "Scan", so it is not mistaken for the radio panel's seek
+  /// SCAN buttons): <c>Discovering… 12 s</c> from the API's estimate (rounded up), else
+  /// <c>Discovering… 40%</c> from the progress fraction, else <c>Discovering…</c> before either is known.
   /// When <paramref name="otherBand"/> is given — a sweep of a band other than the one shown (AUD-91) —
-  /// it is named: <c>Scanning AIR… 12 s</c>.
+  /// it is named: <c>Discovering AIR… 12 s</c>.
   /// </summary>
-  public static string FormatScanning(double? estimatedSecondsRemaining, double progress, string? otherBand = null)
+  public static string FormatDiscovering(double? estimatedSecondsRemaining, double progress, string? otherBand = null)
   {
-    string scanning = string.IsNullOrEmpty(otherBand) ? "Scanning…" : $"Scanning {otherBand}…";
+    string discovering = string.IsNullOrEmpty(otherBand) ? "Discovering…" : $"Discovering {otherBand}…";
     if (estimatedSecondsRemaining is double r && !double.IsNaN(r))
     {
-      return string.Create(CultureInfo.InvariantCulture, $"{scanning} {(long)Math.Ceiling(Math.Max(0, r))} s");
+      return string.Create(CultureInfo.InvariantCulture, $"{discovering} {(long)Math.Ceiling(Math.Max(0, r))} s");
     }
 
     if (progress > 0)
     {
-      return string.Create(CultureInfo.InvariantCulture, $"{scanning} {Math.Round(Math.Clamp(progress, 0, 1) * 100):0}%");
+      return string.Create(CultureInfo.InvariantCulture, $"{discovering} {Math.Round(Math.Clamp(progress, 0, 1) * 100):0}%");
     }
 
-    return scanning;
+    return discovering;
+  }
+
+  /// <summary>
+  /// A plotted range as the strip under the map names it (UI-31), with an en dash and the unit: AM in
+  /// whole kHz (<c>530–1710 kHz</c>), every other band in MHz with at most two decimals
+  /// (<c>87.5–108 MHz</c>, <c>145.52–147.52 MHz</c>). Used for VHF's window, and for any band whose
+  /// nominal range (the control panel's band list) could not be read.
+  /// </summary>
+  public static string FormatRange(long minHz, long maxHz, string? band)
+  {
+    if (string.Equals(band, "AM", StringComparison.OrdinalIgnoreCase))
+    {
+      return string.Create(CultureInfo.InvariantCulture, $"{minHz / 1_000.0:0}–{maxHz / 1_000.0:0} kHz");
+    }
+
+    return string.Create(CultureInfo.InvariantCulture, $"{minHz / 1_000_000.0:0.##}–{maxHz / 1_000_000.0:0.##} MHz");
   }
 
   /// <summary>An FM frequency in MHz with one decimal, e.g. <c>99.5</c>.</summary>

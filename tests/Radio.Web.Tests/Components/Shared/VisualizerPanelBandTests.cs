@@ -18,8 +18,9 @@ using Radio.Web.Tests.TestHelpers;
 namespace Radio.Web.Tests.Components.Shared;
 
 /// <summary>
-/// The visualizer's BAND view (AUD-76 PR 2): the empty, aged and sweeping states, the Scan button,
-/// the refresh cadence and tap-to-tune.
+/// The visualizer's band map view (AUD-76 PR 2; the RADIO tab since UI-31, BAND before): the empty, aged
+/// and sweeping states, the Discover button (Scan before UI-31), the strip under the map, the refresh
+/// cadence and tap-to-tune.
 ///
 /// <para>
 /// Every API call goes to a <see cref="RoutedApiHandler"/>, so the "server" is a table the test
@@ -130,7 +131,7 @@ public class VisualizerPanelBandTests : TestContext
     var cut = RenderComponent<VisualizerPanel>(p => p.Add(x => x.Clock, _clock));
     cut.WaitForAssertion(() =>
     {
-      cut.FindAll(".band-overlay").Should().HaveCount(1, "the canvas initialised and BAND is the saved mode");
+      cut.FindAll(".band-strip").Should().HaveCount(1, "the canvas initialised and BAND is the saved mode");
       cut.Instance.CompletedBandRefreshes.Should().BeGreaterThanOrEqualTo(1);
     }, TimeSpan.FromSeconds(5));
     return cut;
@@ -149,11 +150,11 @@ public class VisualizerPanelBandTests : TestContext
   // ── states ───────────────────────────────────────────────────────────────
 
   [Fact]
-  public void EmptyMap_ShowsNoScanYet_AndNotTheAudioWaitingOverlay()
+  public void EmptyMap_ShowsNoStationsDiscoveredYet_AndNotTheAudioWaitingOverlay()
   {
     var cut = RenderBand();
 
-    cut.Find(".band-empty-title").TextContent.Should().Be("No scan yet");
+    cut.Find(".band-empty-title").TextContent.Should().Be("No stations discovered yet");
     cut.FindAll(".visualizer-waiting").Should().BeEmpty("BAND has no audio stream to wait for");
     cut.FindAll(".band-status-age").Should().BeEmpty();
   }
@@ -165,20 +166,20 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => cut.Find(".band-status-age").TextContent.Should().Be("scanned 3 h ago"));
+    cut.WaitForAssertion(() => cut.Find(".band-status-age").TextContent.Should().Be("discovered 3 h ago"));
     cut.FindAll(".band-empty").Should().BeEmpty();
     cut.FindAll(".visualizer-waiting").Should().BeEmpty();
   }
 
   [Fact]
-  public void Sweeping_ShowsTheCountdown_AndDisablesScan()
+  public void Sweeping_ShowsTheCountdown_AndDisablesDiscover()
   {
     GetJson("/api/radio/bandmap", EmptyMap(isSweeping: true, remaining: 12));
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => cut.Find(".band-status-scanning").TextContent.Should().Be("Scanning… 12 s"));
-    cut.Find(".band-scan-btn").HasAttribute("disabled").Should().BeTrue();
+    cut.WaitForAssertion(() => cut.Find(".band-status-discovering").TextContent.Should().Be("Discovering… 12 s"));
+    cut.Find(".band-discover-btn").HasAttribute("disabled").Should().BeTrue();
   }
 
   [Fact]
@@ -186,31 +187,31 @@ public class VisualizerPanelBandTests : TestContext
   {
     var cut = RenderBand();
 
-    cut.FindAll(".visualizer-axis.is-band span").Select(s => s.TextContent)
+    cut.FindAll(".band-axis-labels span").Select(s => s.TextContent)
       .Should().Equal("88", "92", "96", "100", "104", "108");
   }
 
-  // ── Scan button ──────────────────────────────────────────────────────────
+  // ── Discover button (UI-31; was Scan) ──────────────────────────────────────────────────────────
 
   [Fact]
-  public void ScanButton_PostsTheScan()
+  public void DiscoverButton_PostsTheScan()
   {
     _api.Route(HttpMethod.Post, "/api/radio/bandmap/scan", HttpStatusCode.Accepted, "{}");
     var cut = RenderBand();
 
-    cut.Find(".band-scan-btn").Click();
+    cut.Find(".band-discover-btn").Click();
 
     cut.WaitForAssertion(() => IndexOf(HttpMethod.Post, "/api/radio/bandmap/scan").Should().BeGreaterThanOrEqualTo(0));
   }
 
   [Fact]
-  public void ScanButton_Unavailable_ShowsTheApiReason()
+  public void DiscoverButton_Unavailable_ShowsTheApiReason()
   {
     _api.Route(HttpMethod.Post, "/api/radio/bandmap/scan", HttpStatusCode.ServiceUnavailable,
       "{\"error\":\"No SDR device is available\"}");
     var cut = RenderBand();
 
-    cut.Find(".band-scan-btn").Click();
+    cut.Find(".band-discover-btn").Click();
 
     cut.WaitForAssertion(() =>
     {
@@ -282,7 +283,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     var cut = RenderBand();
     cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Spectrum").Click();
-    cut.WaitForAssertion(() => cut.FindAll(".band-overlay").Should().BeEmpty());
+    cut.WaitForAssertion(() => cut.FindAll(".band-strip").Should().BeEmpty());
     int requestsAfterLeaving = _api.Requests.Count(r => r.Path == "/api/radio/bandmap");
 
     _clock.Advance(VisualizerPanel.BandIdleRefresh * 4);
@@ -486,7 +487,7 @@ public class VisualizerPanelBandTests : TestContext
     _module.Invocations["visualizer.drawBandMap"].Count;
 
   private string[] AxisLabels(IRenderedComponent<VisualizerPanel> cut) =>
-    cut.FindAll(".visualizer-axis.is-band span").Select(s => s.TextContent).ToArray();
+    cut.FindAll(".band-axis-labels span").Select(s => s.TextContent).ToArray();
 
   /// <summary>The model of the last <c>visualizer.drawBandMap</c> call, as the JSON the browser receives.</summary>
   private JsonElement LastDrawModel()
@@ -507,8 +508,8 @@ public class VisualizerPanelBandTests : TestContext
     model.GetProperty("grid").EnumerateArray().Select(g => g.GetDouble()).Should().Equal(
       new[] { 88.0, 92, 96, 100, 104, 108 }.Select(mhz => (mhz - 87.5) / 20.5),
       (a, b) => Math.Abs(a - b) < 1e-12);
-    cut.Find(".band-status-band").TextContent.Should().Be("FM");
-    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the FM band");
+    cut.Find(".band-strip-name").TextContent.Should().Be("FM");
+    cut.Find(".band-discover-btn").GetAttribute("aria-label").Should().Be("Discover stations in the FM band");
   }
 
   [Fact]
@@ -518,25 +519,25 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("162.40", "162.45", "162.50", "162.55 MHz"));
-    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the WB band");
-    cut.Find(".visualizer-canvas").GetAttribute("aria-label").Should().Be("WB band map. Tap a station to tune.");
-    cut.Find(".band-status-band").TextContent.Should().Be("WB");
-    cut.Find(".band-status-age").TextContent.Should().Be("scanned 3 min ago");
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("162.40", "162.45", "162.50", "162.55"));
+    cut.Find(".band-discover-btn").GetAttribute("aria-label").Should().Be("Discover stations in the WB band");
+    cut.Find(".visualizer-canvas").GetAttribute("aria-label").Should().Be("WB signal map. Touch a signal to tune.");
+    cut.Find(".band-strip-name").TextContent.Should().Be("WB");
+    cut.Find(".band-status-age").TextContent.Should().Be("discovered 3 min ago");
     LastDrawModel().GetProperty("grid").GetArrayLength().Should().Be(4);
   }
 
   [Fact]
-  public async Task AmMap_DisablesScan_ShowsTheReason_AndATapTunesNothing()
+  public async Task AmMap_DisablesDiscover_ShowsTheReason_AndATapTunesNothing()
   {
     GetJson("/api/radio/bandmap", AmMap());
     var cut = RenderBand();
 
     cut.WaitForAssertion(() => cut.Find(".band-empty-title").TextContent.Should().Be("AM is out of this radio's range"));
     cut.Find(".band-empty-sub").TextContent.Should().Be(AmReason);
-    cut.Markup.Should().NotContain("No scan yet");
-    cut.Find(".band-scan-btn").HasAttribute("disabled").Should().BeTrue();
-    AxisLabels(cut).Should().Equal("600", "800", "1000", "1200", "1400", "1600 kHz");
+    cut.Markup.Should().NotContain("No stations discovered yet");
+    cut.Find(".band-discover-btn").HasAttribute("disabled").Should().BeTrue();
+    AxisLabels(cut).Should().BeEmpty("UI-31: no axis on a band this radio cannot receive");
 
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(0.5));
 
@@ -550,7 +551,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/radio/bandmap", AirMap());
     GetJson("/api/radio/state", FmState(118_000_000, band: "AIR"));
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("AIR"));
 
     // 40 kHz below the station: inside AIR's snap, so the tap lands on it.
     BandAxis air = new("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000);
@@ -572,7 +573,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/radio/bandmap", AirMap());
     GetJson("/api/radio/state", FmState(118_000_000, band: "AIR"));
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("AIR"));
 
     BandAxis air = new("AIR", 108_000_000, 137_000_000, 108_000_000, 137_000_000, 25_000);
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(air.HzToFraction(118_350_000)));
@@ -589,7 +590,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/radio/bandmap", WbMap());
     GetJson("/api/radio/state", FmState(162_400_000, band: "WB"));
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("WB"));
 
     BandAxis wb = new("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000);
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(wb.HzToFraction(162_475_000)));
@@ -612,14 +613,14 @@ public class VisualizerPanelBandTests : TestContext
   }
 
   [Fact]
-  public void Scan_PostsTheShownBand()
+  public void Discover_PostsTheShownBand()
   {
     GetJson("/api/radio/bandmap", WbMap());
     _api.Route(HttpMethod.Post, "/api/radio/bandmap/scan", HttpStatusCode.Accepted, "{}");
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("WB"));
 
-    cut.Find(".band-scan-btn").Click();
+    cut.Find(".band-discover-btn").Click();
 
     cut.WaitForAssertion(() => IndexOf(HttpMethod.Post, "/api/radio/bandmap/scan").Should().BeGreaterThanOrEqualTo(0));
     _api.Requests[IndexOf(HttpMethod.Post, "/api/radio/bandmap/scan")].Query.Should().Be("?band=WB");
@@ -636,7 +637,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/radio/bandmap", AirMap());
     await RaiseRadioStateAsync(cut, HubState("AIR", 118_000_000));
 
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135 MHz"));
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135"));
     MapReads().Should().Be(readsBefore + 1, "the band change re-reads the map without waiting for the timer");
 
     // Telemetry ticks repeat the state; a new frequency in the same band moves only the marker.
@@ -665,7 +666,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     GetJson("/api/radio/bandmap", AirMap());
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("AIR"));
     int readsBefore = MapReads();
 
     await RaiseRadioStateAsync(cut, HubState("AIR", 122_500_000));
@@ -682,8 +683,8 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => cut.Find(".band-status-scanning").TextContent.Should().Be("Scanning AIR… 12 s"));
-    cut.Find(".band-empty-title").TextContent.Should().Be("No scan yet", "the sweep running is not of the band shown");
+    cut.WaitForAssertion(() => cut.Find(".band-status-discovering").TextContent.Should().Be("Discovering AIR… 12 s"));
+    cut.Find(".band-empty-title").TextContent.Should().Be("No stations discovered yet", "the sweep running is not of the band shown");
   }
 
   // ── review fixes (AUD-91) ────────────────────────────────────────────────
@@ -706,12 +707,12 @@ public class VisualizerPanelBandTests : TestContext
     raise.IsCompleted.Should().BeTrue("the handler must not hold the hub while its map read is pending");
 
     release.SetResult();
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135 MHz"),
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("110", "115", "120", "125", "130", "135"),
       TimeSpan.FromSeconds(5));
   }
 
   private string[] AxisLabelClasses(IRenderedComponent<VisualizerPanel> cut) =>
-    cut.FindAll(".visualizer-axis.is-band span").Select(s => s.GetAttribute("class") ?? "").ToArray();
+    cut.FindAll(".band-axis-labels span").Select(s => s.GetAttribute("class") ?? "").ToArray();
 
   [Fact]
   public void Axis_LabelClasses_FmOnlyItsLastIsEndAligned()
@@ -728,7 +729,7 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("161.5", "162.0", "162.5", "163.0", "163.5 MHz"));
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("161.5", "162.0", "162.5", "163.0", "163.5"));
     AxisLabelClasses(cut).Should().Equal("is-edge-start", "", "", "", "is-edge-end");
   }
 
@@ -748,7 +749,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     GetJson("/api/radio/bandmap", AirMap());
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("AIR"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("AIR"));
     await RaiseRadioStateAsync(cut, HubState("AIR", 122_500_000));
     int draws = DrawCalls();
 
@@ -763,7 +764,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     GetJson("/api/radio/bandmap", BandMap("VHF", 161_400_000, 163_400_000, 161_400_000, 163_400_000, 12_500));
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("VHF"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("VHF"));
     int readsBefore = MapReads();
 
     // Inside the window: a marker move, no read.
@@ -781,7 +782,7 @@ public class VisualizerPanelBandTests : TestContext
     await RaiseRadioStateAsync(cut, HubState("VHF", 172_500_000));
     MapReads().Should().Be(readsBefore + 1, "the window shown has not changed, so its read is not repeated");
     _clock.Advance(VisualizerPanel.BandIdleRefresh);
-    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("169.0", "169.5", "170.0", "170.5", "171.0 MHz"),
+    cut.WaitForAssertion(() => AxisLabels(cut).Should().Equal("169.0", "169.5", "170.0", "170.5", "171.0"),
       TimeSpan.FromSeconds(5));
 
     await RaiseRadioStateAsync(cut, HubState("VHF", 172_500_000));
@@ -795,15 +796,15 @@ public class VisualizerPanelBandTests : TestContext
     var cut = RenderComponent<VisualizerPanel>(p => p.Add(x => x.Clock, _clock));
     cut.WaitForAssertion(() =>
     {
-      cut.FindAll(".band-overlay").Should().HaveCount(1);
+      cut.FindAll(".band-strip").Should().HaveCount(1);
       MapReads().Should().BeGreaterThanOrEqualTo(1, "the first map read is in flight");
     }, TimeSpan.FromSeconds(5));
 
-    cut.FindAll(".band-status-band").Should().BeEmpty("the band is not known until a map has been read");
-    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the band");
+    cut.FindAll(".band-strip-name").Should().BeEmpty("the band is not known until a map has been read");
+    cut.Find(".band-discover-btn").GetAttribute("aria-label").Should().Be("Discover stations in this band");
 
     release.SetResult();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("FM"), TimeSpan.FromSeconds(5));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("FM"), TimeSpan.FromSeconds(5));
   }
 
   [Fact]
@@ -814,8 +815,8 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
-    cut.Find(".band-scan-btn").GetAttribute("aria-label").Should().Be("Scan the WB band");
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("WB"));
+    cut.Find(".band-discover-btn").GetAttribute("aria-label").Should().Be("Discover stations in the WB band");
   }
 
   [Fact]
@@ -832,12 +833,13 @@ public class VisualizerPanelBandTests : TestContext
     });
 
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("WB"));
 
     JsonElement model = LastDrawModel();
     model.GetProperty("station").ValueKind.Should().Be(JsonValueKind.Null, "the radio is on FM, not WB");
-    model.GetProperty("presets").EnumerateArray().Select(p => p.GetProperty("label").GetString())
-      .Should().Equal(new[] { "NOAA" }, "only the shown band's presets are drawn");
+    BandAxis wb = new("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000);
+    model.GetProperty("presets").EnumerateArray().Select(p => p.GetProperty("f").GetDouble())
+      .Should().Equal(new[] { wb.HzToFraction(162_475_000) }, "only the shown band's presets are drawn");
   }
 
   // ── signal colour (UI-22) ────────────────────────────────────────────────
@@ -856,7 +858,7 @@ public class VisualizerPanelBandTests : TestContext
     cut.FindAll(".band-legend-swatch").Select(s => s.GetAttribute("class"))
       .Should().Equal("band-legend-swatch is-weak", "band-legend-swatch is-fair", "band-legend-swatch is-strong");
     cut.FindAll(".band-legend-swatch").Should().OnlyContain(s => s.GetAttribute("aria-hidden") == "true");
-    cut.Find(".band-status-line").TextContent.Should().MatchRegex(@"scanned 1 min ago\s*·\s*weak\s*fair\s*strong");
+    cut.Find(".band-status-line").TextContent.Should().MatchRegex(@"discovered 1 min ago\s*weak\s*fair\s*strong");
   }
 
   [Fact]
@@ -864,7 +866,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     var cut = RenderBand();
 
-    cut.Find(".band-empty-title").TextContent.Should().Be("No scan yet");
+    cut.Find(".band-empty-title").TextContent.Should().Be("No stations discovered yet");
     cut.FindAll(".band-legend").Should().BeEmpty();
   }
 
@@ -898,7 +900,7 @@ public class VisualizerPanelBandTests : TestContext
 
     var cut = RenderBand();
 
-    cut.WaitForAssertion(() => cut.Find(".band-status-scanning").TextContent.Should().Be("Scanning… 12 s"));
+    cut.WaitForAssertion(() => cut.Find(".band-status-discovering").TextContent.Should().Be("Discovering… 12 s"));
     LegendWords(cut).Should().Equal("weak", "fair", "strong");
   }
 
@@ -924,7 +926,7 @@ public class VisualizerPanelBandTests : TestContext
     // WB: seven channels, one at -30 over a -60 floor. A band other than FM gets tiers the same way.
     GetJson("/api/radio/bandmap", WbMap());
     var cut = RenderBand();
-    cut.WaitForAssertion(() => cut.Find(".band-status-band").TextContent.Should().Be("WB"));
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("WB"));
 
     LastDrawModel().GetProperty("levels").EnumerateArray().Select(l => l.GetProperty("t").GetInt32())
       .Should().Equal(0, 0, 0, 3, 0, 0, 0);
@@ -992,14 +994,14 @@ public class VisualizerPanelBandTests : TestContext
   public void BandTab_IsLast()
   {
     var cut = RenderBand();
-    TabLabels(cut).Should().Equal("Wave", "Spectrum", "Ring", "Phase", "BAND");
+    TabLabels(cut).Should().Equal("Wave", "Spectrum", "Ring", "Phase", "RADIO");
   }
 
   [Fact]
   public void RadioActive_BandTabIsEnabled()
   {
     var cut = RenderBand();
-    var band = Tab(cut, "BAND");
+    var band = Tab(cut, "RADIO");
     band.HasAttribute("disabled").Should().BeFalse();
     band.GetAttribute("aria-disabled").Should().Be("false");
     IsActive(band).Should().BeTrue();
@@ -1010,12 +1012,12 @@ public class VisualizerPanelBandTests : TestContext
   {
     var cut = RenderWithRadioNotActive();
 
-    var band = Tab(cut, "BAND");
+    var band = Tab(cut, "RADIO");
     band.HasAttribute("disabled").Should().BeTrue("BAND is not selectable while the radio is not active");
     band.GetAttribute("aria-disabled").Should().Be("true");
-    band.GetAttribute("title").Should().Be(VisualizerPanel.BandUnavailableHint);
+    band.HasAttribute("title").Should().BeFalse("UI-31: no tooltip on the greyed tab");
     IsActive(band).Should().BeFalse();
-    cut.FindAll(".band-overlay").Should().BeEmpty();
+    cut.FindAll(".band-strip").Should().BeEmpty();
     _api.Requests.Should().NotContain(r => r.Path == "/api/radio/bandmap", "BAND is not running");
     PreferenceWrites().Should().BeEmpty("the fallback is display-only; the saved BAND preference stays");
   }
@@ -1031,8 +1033,8 @@ public class VisualizerPanelBandTests : TestContext
     cut.WaitForAssertion(() =>
     {
       IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
-      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
-      cut.FindAll(".band-overlay").Should().BeEmpty();
+      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue();
+      cut.FindAll(".band-strip").Should().BeEmpty();
     });
 
     // BAND's polling stopped with it.
@@ -1045,8 +1047,8 @@ public class VisualizerPanelBandTests : TestContext
 
     cut.WaitForAssertion(() =>
     {
-      IsActive(Tab(cut, "BAND")).Should().BeTrue("the saved preference is still BAND");
-      cut.FindAll(".band-overlay").Should().HaveCount(1);
+      IsActive(Tab(cut, "RADIO")).Should().BeTrue("the saved preference is still BAND");
+      cut.FindAll(".band-strip").Should().HaveCount(1);
     });
     PreferenceWrites().Should().BeEmpty("neither the fallback nor the return is a pick");
   }
@@ -1063,7 +1065,7 @@ public class VisualizerPanelBandTests : TestContext
     await RaiseSourceChangedAsync(cut);
 
     IsActive(Tab(cut, "Wave")).Should().BeTrue("the pick replaced the BAND preference");
-    cut.FindAll(".band-overlay").Should().BeEmpty();
+    cut.FindAll(".band-strip").Should().BeEmpty();
   }
 
   [Fact]
@@ -1085,18 +1087,18 @@ public class VisualizerPanelBandTests : TestContext
   {
     GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
     var cut = RenderWithRadioNotActive();
-    Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
+    Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue();
 
     GetJson("/api/radio/state", FmState(101_100_000));
     await RaiseSourceChangedAsync(cut);
-    cut.WaitForAssertion(() => Tab(cut, "BAND").HasAttribute("disabled").Should().BeFalse());
+    cut.WaitForAssertion(() => Tab(cut, "RADIO").HasAttribute("disabled").Should().BeFalse());
     IsActive(Tab(cut, "Spectrum")).Should().BeTrue("the preference is Spectrum; the radio arriving changes nothing else");
 
-    Tab(cut, "BAND").Click();
+    Tab(cut, "RADIO").Click();
     cut.WaitForAssertion(() =>
     {
-      IsActive(Tab(cut, "BAND")).Should().BeTrue();
-      cut.FindAll(".band-overlay").Should().HaveCount(1);
+      IsActive(Tab(cut, "RADIO")).Should().BeTrue();
+      cut.FindAll(".band-strip").Should().HaveCount(1);
       PreferenceWrites().Should().ContainSingle().Which.Should().Contain("Band");
     });
   }
@@ -1111,7 +1113,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
     var cut = RenderWithRadioNotActive();
 
-    await cut.InvokeAsync(() => Tab(cut, "BAND").Click());
+    await cut.InvokeAsync(() => Tab(cut, "RADIO").Click());
 
     PreferenceWrites().Should().BeEmpty();
     IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
@@ -1127,7 +1129,7 @@ public class VisualizerPanelBandTests : TestContext
     cut.WaitForAssertion(() =>
     {
       _module.Invocations["visualizer.init"].Should().NotBeEmpty();
-      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue("the read failed, so the radio is not known to be active");
+      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue("the read failed, so the radio is not known to be active");
     }, TimeSpan.FromSeconds(5));
 
     GetJson("/api/radio/state", FmState(101_100_000));
@@ -1135,9 +1137,9 @@ public class VisualizerPanelBandTests : TestContext
 
     cut.WaitForAssertion(() =>
     {
-      Tab(cut, "BAND").HasAttribute("disabled").Should().BeFalse();
-      IsActive(Tab(cut, "BAND")).Should().BeTrue("the saved preference is BAND");
-      cut.FindAll(".band-overlay").Should().HaveCount(1);
+      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeFalse();
+      IsActive(Tab(cut, "RADIO")).Should().BeTrue("the saved preference is BAND");
+      cut.FindAll(".band-strip").Should().HaveCount(1);
     });
     PreferenceWrites().Should().BeEmpty();
   }
@@ -1157,8 +1159,8 @@ public class VisualizerPanelBandTests : TestContext
     cut.WaitForAssertion(() =>
     {
       IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
-      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
-      cut.FindAll(".band-overlay").Should().BeEmpty();
+      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue();
+      cut.FindAll(".band-strip").Should().BeEmpty();
     });
     PreferenceWrites().Should().BeEmpty();
   }
@@ -1172,8 +1174,8 @@ public class VisualizerPanelBandTests : TestContext
 
     await RaiseSourceChangedAsync(cut);
 
-    IsActive(Tab(cut, "BAND")).Should().BeTrue();
-    cut.FindAll(".band-overlay").Should().HaveCount(1);
+    IsActive(Tab(cut, "RADIO")).Should().BeTrue();
+    cut.FindAll(".band-strip").Should().HaveCount(1);
   }
 
   [Theory]
@@ -1201,5 +1203,205 @@ public class VisualizerPanelBandTests : TestContext
 
     cut.FindAll(".visualizer-disconnected").Should().BeEmpty();
     cut.FindAll(".band-empty").Should().HaveCount(1);
+  }
+
+  // ── UI-31: the strip under the map, Discover, and the RADIO tab ──────────
+
+  private void BandList(params (string Type, string Range)[] bands) =>
+    GetJson("/api/RadioBands", bands.Select(b => (object)new { type = b.Type, name = b.Type, range = b.Range }).ToArray());
+
+  private static string StripText(IRenderedComponent<VisualizerPanel> cut) =>
+    cut.Find(".band-strip").TextContent;
+
+  [Fact]
+  public void Strip_NamesTheBand_AndItsRangeAsTheBandPillDoes()
+  {
+    BandList(("FM", "87.5–108 MHz"), ("WB", "162.4–162.55 MHz"));
+    GetJson("/api/radio/bandmap", WbMap());
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-range").TextContent.Should().Be("162.4–162.55 MHz"));
+    cut.Find(".band-strip-name").TextContent.Should().Be("WB");
+    cut.FindAll(".band-strip-window").Should().BeEmpty("only VHF's map is a window");
+  }
+
+  [Fact]
+  public void Strip_WithoutTheBandList_FallsBackToThePlottedRange()
+  {
+    // No /api/RadioBands route: the read fails, and the range is the map's own plotted range (WB's is
+    // padded half a channel either side, so it differs from the pill's).
+    GetJson("/api/radio/bandmap", WbMap());
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("WB"));
+    cut.Find(".band-strip-range").TextContent.Should().Be("162.39–162.56 MHz");
+  }
+
+  [Fact]
+  public void Strip_Vhf_ShowsItsWindow_NotTheBand()
+  {
+    BandList(("VHF", "30–300 MHz"));
+    GetJson("/api/radio/bandmap", BandMap("VHF", 161_500_000, 163_500_000, 161_500_000, 163_500_000, 12_500));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("VHF"));
+    cut.Find(".band-strip-window").TextContent.Should().Be("Window");
+    cut.Find(".band-strip-range").TextContent.Should().Be("161.5–163.5 MHz");
+  }
+
+  [Fact]
+  public void Strip_ShowsTheHelpText_WhileNoMessageIsUp()
+  {
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+
+    var cut = RenderBand();
+
+    cut.Find(".band-strip-help").TextContent.Should().Contain(VisualizerPanel.BandHelpTouch)
+      .And.Contain(VisualizerPanel.BandHelpFineTune);
+    VisualizerPanel.BandHelpTouch.Should().Be("Touch a signal to snap to it. ▲ marks a preset.");
+    VisualizerPanel.BandHelpFineTune.Should().Be("Fine-tune with ‹ › on the radio panel or the knob.");
+  }
+
+  [Fact]
+  public async Task Strip_ATuneMessage_ReplacesTheHelp_InThePersistentPoliteRegion()
+  {
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+    var cut = RenderBand();
+
+    // The region is in the page before any message, so the message is announced when it lands.
+    var region = cut.Find(".band-message-live");
+    region.GetAttribute("role").Should().Be("status");
+    region.GetAttribute("aria-live").Should().Be("polite");
+    region.GetAttribute("aria-atomic").Should().Be("true");
+    region.TextContent.Trim().Should().BeEmpty();
+
+    await cut.InvokeAsync(() => cut.Instance.OnBandTap(FmBandMath.HzToFraction(99_200_000)));
+
+    cut.WaitForAssertion(() =>
+      cut.Find(".band-message-live .band-status-message").TextContent.Should().Be("Tuning 99.5 FM"));
+    cut.FindAll(".band-strip-help").Should().BeEmpty("the message takes the help text's place");
+    cut.FindAll("[role=alert]").Should().BeEmpty();
+
+    _clock.Advance(VisualizerPanel.BandMessageLifetime);
+    cut.WaitForAssertion(() => cut.FindAll(".band-strip-help").Should().HaveCount(1), TimeSpan.FromSeconds(5));
+    cut.Find(".band-message-live").TextContent.Trim().Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Strip_AnError_IsAnAlert_OutsideThePoliteRegion()
+  {
+    _api.Route(HttpMethod.Post, "/api/radio/bandmap/scan", HttpStatusCode.Conflict, "{}");
+    var cut = RenderBand();
+
+    cut.Find(".band-discover-btn").Click();
+
+    cut.WaitForAssertion(() =>
+    {
+      var alert = cut.Find(".band-status-message.is-error");
+      alert.GetAttribute("role").Should().Be("alert");
+      alert.TextContent.Should().Be("Discover unavailable", "the API gave no reason");
+    });
+    cut.Find(".band-message-live").TextContent.Trim().Should().BeEmpty();
+    cut.FindAll(".band-strip-help").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void Strip_OutOfRange_SaysSo_HidesTheHelp_AndKeepsDiscoverInPlaceDisabled()
+  {
+    BandList(("AM", "530–1710 kHz"));
+    GetJson("/api/radio/bandmap", AmMap());
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-name").TextContent.Should().Be("AM"));
+    cut.Find(".band-strip-range").TextContent.Should().Be("530–1710 kHz");
+    cut.Find(".band-status-unavailable").TextContent.Should().Be("Out of range");
+    cut.FindAll(".band-strip-help").Should().BeEmpty("touching does nothing on a band the radio cannot receive");
+    cut.FindAll(".band-axis-labels").Should().BeEmpty("there is no plot to read an axis against");
+    cut.Find(".band-discover-btn").HasAttribute("disabled").Should().BeTrue();
+    LastDrawModel().GetProperty("mappable").GetBoolean().Should().BeFalse();
+  }
+
+  [Fact]
+  public void FmMap_DrawModel_IsMappable_AndPresetsCarryNoLabel()
+  {
+    GetJson("/api/radio/presets", new object[] { new { id = "1", name = "KUER", band = "FM", frequency = 90_100_000.0 } });
+    GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => LastDrawModel().GetProperty("presets").GetArrayLength().Should().Be(1));
+
+    JsonElement model = LastDrawModel();
+    model.GetProperty("mappable").GetBoolean().Should().BeTrue();
+    JsonElement preset = model.GetProperty("presets")[0];
+    preset.GetProperty("f").GetDouble().Should().BeApproximately(FmBandMath.HzToFraction(90_100_000), 1e-12);
+    preset.TryGetProperty("label", out _).Should().BeFalse("presets are carets on the axis (UI-31)");
+  }
+
+  [Fact]
+  public void Discover_IsTheOnlyButtonInTheStrip_AndIsTheKioskHeight()
+  {
+    var cut = RenderBand();
+
+    var button = cut.Find(".band-strip .band-discover-btn");
+    button.TextContent.Should().Be("Discover");
+    cut.FindAll(".band-strip button").Should().HaveCount(1);
+    cut.FindAll(".visualizer-canvas-wrap button").Should().BeEmpty("nothing over the plot takes a tap from it");
+  }
+
+  [Theory]
+  [InlineData("map")]
+  [InlineData("empty")]
+  [InlineData("sweeping")]
+  [InlineData("otherBandSweeping")]
+  [InlineData("am")]
+  public void TheWordScan_AppearsNowhereInTheView(string state)
+  {
+    // The owner: "The 'SCAN' button is confusing since it overlaps meaning with the 'SCAN' buttons on
+    // the central panel." Rendered text and accessible names both count.
+    object sweepOther = new { isSweeping = true, band = "AIR", trigger = "request", path = "idle", progress = 0.4, estimatedSecondsRemaining = 12.0 };
+    GetJson("/api/radio/bandmap", state switch
+    {
+      "map" => MapWithStation(ageSeconds: 60),
+      "sweeping" => MapWithStation(ageSeconds: 60, isSweeping: true, remaining: 12),
+      "otherBandSweeping" => BandMap("WB", 162_387_500, 162_562_500, 162_400_000, 162_550_000, 25_000, sweep: sweepOther),
+      "am" => AmMap(),
+      _ => EmptyMap(),
+    });
+
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.FindAll(".band-strip-name").Should().HaveCount(1));
+
+    // The API's own sentences are shown verbatim and are out of this row's scope (the API is unchanged):
+    // AM's reason ends "... and cannot be scanned." They are taken out before the check.
+    var panel = cut.Find(".viz-panel");
+    string text = panel.TextContent;
+    foreach (var apiText in cut.FindAll(".band-empty-sub"))
+    {
+      text = text.Replace(apiText.TextContent, string.Empty);
+    }
+
+    text.Should().NotContainEquivalentOf("scan");
+    panel.QuerySelectorAll("[aria-label]").Select(e => e.GetAttribute("aria-label"))
+      .Should().NotContain(label => label!.Contains("scan", StringComparison.OrdinalIgnoreCase));
+  }
+
+  [Fact]
+  public void SavedBandPreference_OpensTheRadioTab_AndPickingItSavesBandUnchanged()
+  {
+    // UI-31 renamed the tab, not the stored value. The owner's box holds ui.visualizer/defaultMode=Band;
+    // renaming the value would orphan it (the AUD-1 lesson about renamed config keys).
+    var cut = RenderBand();
+    IsActive(Tab(cut, "RADIO")).Should().BeTrue("defaultMode=Band is the saved preference");
+
+    Tab(cut, "Spectrum").Click();
+    Tab(cut, "RADIO").Click();
+
+    cut.WaitForAssertion(() => PreferenceWrites().Should().HaveCount(2));
+    JsonDocument.Parse(PreferenceWrites()[^1]).RootElement.GetProperty("defaultMode").GetString()
+      .Should().Be("Band");
+    VisualizerPanel.ParseSavedMode("Band").Should().Be(VisualizerPanel.VisualizationMode.Band);
   }
 }

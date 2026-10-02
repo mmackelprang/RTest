@@ -2533,57 +2533,119 @@ body {
   letter-spacing: 0.05em;
 }
 
-/* BAND (AUD-76): the MHz labels sit at their frequency's position, the same
-   fraction of the width the canvas plots them at, rather than spaced evenly. */
-.visualizer-axis.is-band {
-  position: relative;
-  display: block;
-  padding: 0;
+/* ── RADIO (band map) view — UI-31 (was BAND; AUD-76 / AUD-91 / UI-22) ──────────
+   Spec: docs/design-handoffs/2026-10-02-band-view-strip.md. The plot fills the
+   canvas down to a 32 px axis zone that visualizer.js draws in (axis line, tick
+   marks, preset and station carets; bandAxisZone there). The tick labels are
+   markup laid over that zone, and the band's name, status, colour key, help text
+   and Discover sit in an 89 px strip under the canvas, so nothing overlays the
+   plot and a tap anywhere on the canvas tunes. */
+
+/* Axis labels: over the bottom of the canvas, each at its tick's fraction of the
+   width — the fraction the canvas draws the tick at. 13 px --text-medium (was a
+   10 px --text-low strip under the canvas), no unit (the strip's range line has it). */
+.band-axis-labels {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 2px;
+  height: 18px;
+  pointer-events: none;
+  color: var(--text-medium);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
 }
 
-.visualizer-axis.is-band span {
+.band-axis-labels span {
   position: absolute;
   top: 50%;
   transform: translate(-50%, -50%);
+  white-space: nowrap;
 }
 
 /* AUD-91: a label at either edge of the plot is aligned inside it rather than
    centred and clipped. BandAxis.Labels() decides which: FM's 108 is the only FM
-   label at an edge and is end-aligned exactly as AUD-76's :last-child rule drew it. */
-.visualizer-axis.is-band span.is-edge-end {
+   label at an edge. */
+.band-axis-labels span.is-edge-end {
   transform: translate(-100%, -50%);
   padding-right: var(--sp-1);
 }
 
-.visualizer-axis.is-band span.is-edge-start {
+.band-axis-labels span.is-edge-start {
   transform: translate(0, -50%);
   padding-left: var(--sp-1);
 }
 
-/* BAND overlay: status line (age / "Scanning…" / tune feedback) on the left,
-   the Scan button on the right. The bar passes pointer events through so a
-   tap anywhere on the plot reaches the canvas; only the button takes them.
-   Its 64px height is the space visualizer.js reserves above the plot
-   (bandTopReserve). */
-.band-overlay {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
+/* The strip: 89 px (1 + 10 + 68 + 10), the preset bar's height, so the two top
+   edges line up across the panel gap. Band block | text block | Discover. */
+.band-strip {
+  flex: 0 0 89px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: var(--sp-3);
-  padding: 0 var(--sp-3) 0 var(--sp-4);
-  pointer-events: none;
+  padding: 10px var(--sp-3) 10px var(--sp-4);
+  border-top: 1px solid var(--surface-separator);
+  background: var(--surface-base);
+  min-width: 0;
 }
 
-.band-status {
+.band-strip-band {
+  flex: 0 0 128px;
+  min-width: 0;
+}
+
+.band-strip-title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+/* The band's name. --text-high, deliberately not amber: amber means "tuned here". */
+.band-strip-name {
+  font-family: var(--font-mono);
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 34px;
+  letter-spacing: 0.04em;
+  color: var(--text-high);
+}
+
+/* VHF's map is a window around the radio's frequency, not the band. */
+.band-strip-window {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+}
+
+.band-strip-range {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-medium);
+  white-space: nowrap;
+}
+
+.band-strip-text {
+  flex: 1 1 auto;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
-  min-width: 0;
+}
+
+/* Line 1: the discovery status on the left, the colour key on the right. */
+.band-status-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  min-height: 16px;
+  white-space: nowrap;
   font-family: var(--font-mono);
   font-size: 12px;
   letter-spacing: 0.10em;
@@ -2591,28 +2653,17 @@ body {
   color: var(--text-medium);
 }
 
-/* AUD-91: "WB · scanned 3 min ago" — the shown band, then the age or the sweep countdown. */
-.band-status-line {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2);
-  white-space: nowrap;
-}
-
-.band-status-band {
-  color: var(--text-high);
-}
-
-.band-status-scanning {
+.band-status-discovering {
   /* Full opacity, deliberately not ambientPulse: this countdown is the one status the owner
      needs to read while a sweep runs, and the pulse's 30–60% opacity drops it below 4:1. */
   color: var(--accent-primary);
 }
 
-/* UI-22: the colour key for the bars, after the age — "· ▮ weak ▮ fair ▮ strong". 11px against the
-   line's 12px, so it reads as a key rather than as status. Swatch colours are the tokens
-   visualizer.js's drawBandMap paints the bars with; grey (noise) is deliberately not keyed. */
+/* UI-22: the colour key for the bars — "▮ weak ▮ fair ▮ strong". 11px against the line's 12px, so it
+   reads as a key rather than as status. Swatch colours are the tokens visualizer.js's drawBandMap
+   paints the bars with; grey (noise) is deliberately not keyed. */
 .band-legend {
+  margin-left: auto;
   display: inline-flex;
   align-items: baseline;
   gap: var(--sp-2);
@@ -2638,7 +2689,39 @@ body {
 .band-legend-swatch.is-fair   { background: var(--accent-primary); }
 .band-legend-swatch.is-strong { background: var(--signal-green); }
 
+/* Lines 2–3: the help text, or a tune/discover message in its place. */
+.band-strip-lower {
+  min-height: 36px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.band-strip-help {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-medium);
+}
+
+.band-strip-help span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.band-message-live:empty {
+  display: none;
+}
+
 .band-status-message {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 18px;
   color: var(--text-high);
   white-space: nowrap;
   overflow: hidden;
@@ -2649,14 +2732,13 @@ body {
   color: var(--signal-red);
 }
 
-/* Matches the existing Scan button (.bt-scan-button, §BT) — outlined in the accent, accent-dim on
-   hover, faded when disabled — except that it is 48px tall (--touch-min), not 44px. */
-.band-scan-btn {
-  pointer-events: auto;
-  flex: 0 0 auto;
-  min-width: 96px;
-  min-height: var(--touch-min);
-  padding: 0 var(--sp-5);
+/* Discover (was Scan, top-right over the plot): the house outlined-action language (.bt-scan-button)
+   — accent outline, accent-dim when pressed, faded when disabled. 58 px tall, not --touch-min: a
+   primary action at arm's length, level with the preset bar's 58 px arrows across the gap. */
+.band-discover-btn {
+  flex: 0 0 112px;
+  height: 58px;
+  padding: 0 var(--sp-4);
   background: transparent;
   border: 1px solid var(--accent-primary);
   border-radius: 6px;
@@ -2670,17 +2752,17 @@ body {
   transition: background var(--anim-duration-fast) var(--anim-ease-standard);
 }
 
-.band-scan-btn:hover:not(:disabled),
-.band-scan-btn:active:not(:disabled) {
+.band-discover-btn:hover:not(:disabled),
+.band-discover-btn:active:not(:disabled) {
   background: var(--accent-dim);
 }
 
-.band-scan-btn:focus-visible {
+.band-discover-btn:focus-visible {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
 
-.band-scan-btn:disabled {
+.band-discover-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
 }
@@ -2693,16 +2775,21 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* "No scan yet": centred like .visualizer-waiting, and likewise transparent
-   to taps so the plot stays touchable underneath. */
+/* "No stations discovered yet": centred on the plot (half the 32 px axis zone
+   above the canvas's centre), and transparent to taps so the plot stays
+   touchable underneath. Out of range there is no axis, so it centres on the canvas. */
 .band-empty {
   position: absolute;
-  top: 50%;
+  top: calc(50% - 16px);
   left: 50%;
   transform: translate(-50%, -50%);
   max-width: 80%;
   text-align: center;
   pointer-events: none;
+}
+
+.band-empty.is-unavailable {
+  top: 50%;
 }
 
 .band-empty-title,
@@ -4223,7 +4310,7 @@ body {
   font: inherit;
 }
 
-/* Actions: the house outlined-action language (.band-scan-btn) — full accent border at rest. */
+/* Actions: the house outlined-action language (.band-discover-btn) — full accent border at rest. */
 .dev-card--action {
   background: var(--surface-elevated);
   border: 1px solid var(--accent-primary);
