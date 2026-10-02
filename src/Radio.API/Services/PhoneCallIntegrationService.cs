@@ -23,6 +23,10 @@ public class PhoneCallIntegrationService : BackgroundService
   private readonly IHubContext<AudioStateHub> _hubContext;
   private readonly IOptions<PhoneIntegrationOptions> _options;
 
+  // AUD-87: the token source for the announcement of the call that is ringing now, or null. Swapped only
+  // with Interlocked; see HandleCallStateChangedAsync for who cancels and who disposes it.
+  private CancellationTokenSource? _callAnnouncementCts;
+
   public PhoneCallIntegrationService(
     ILogger<PhoneCallIntegrationService> logger,
     IPhoneIntegrationService phoneClient,
@@ -90,20 +94,7 @@ public class PhoneCallIntegrationService : BackgroundService
   {
     try
     {
-      // Broadcast state to Web UI
-      await BroadcastPhoneStateAsync(e);
-
-      switch (e.State)
-      {
-        case PhoneCallState.Ringing:
-          await HandleIncomingCallAsync(e);
-          break;
-
-        case PhoneCallState.Ended:
-        case PhoneCallState.Idle:
-          await _announcementService.StopAsync();
-          break;
-      }
+      await HandleCallStateChangedAsync(e);
     }
     catch (Exception ex)
     {
@@ -112,12 +103,101 @@ public class PhoneCallIntegrationService : BackgroundService
   }
 
   /// <summary>
+  /// Broadcasts the new call state and, on <c>Ringing</c>, announces the caller; on <c>Ended</c> or
+  /// <c>Idle</c>, stops that announcement. <c>internal</c> so <c>PhoneCallIntegrationAnnouncementTests</c>
+  /// can drive the handler itself; <see cref="OnCallStateChanged"/> is its only production caller.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// AUD-87 (owner ruling 2026-10-02): a hang-up stops <b>only the phone's own announcement</b>. It used
+  /// to call <see cref="IAnnouncementService.StopAsync"/>, which stops every announcement, so a doorbell
+  /// playing alongside the caller's name was silenced by the hang-up too. Each ringing call now owns a
+  /// <see cref="CancellationTokenSource"/> whose token is passed to the announcement as its caller
+  /// token; the hang-up cancels that token, and <c>AnnouncementService</c> treats a cancelled caller
+  /// token as an interruption of that one call — still synthesising, ducking or playing.
+  /// </para>
+  /// <para>
+  /// The CTS is swapped in or out BEFORE this method's first await. The client raises each state as a
+  /// separate event and this method returns to it at the first await, so the swap is what fixes the
+  /// order: a hang-up that arrives while the ringing event is still broadcasting still reaches the
+  /// announcement that ringing event is about to start. Whoever takes the CTS out of the field disposes
+  /// it, and cancels it first if it is a hang-up, a newer ring or the service's <see cref="Dispose"/>;
+  /// the ringing event that created it, once its announcement has returned, only disposes it.
+  /// </para>
+  /// </remarks>
+  internal async Task HandleCallStateChangedAsync(PhoneCallStateChangedEventArgs e)
+  {
+    CancellationTokenSource? ringingCts = null;
+    var callToken = CancellationToken.None;
+    switch (e.State)
+    {
+      case PhoneCallState.Ringing:
+        ringingCts = new CancellationTokenSource();
+        // Read now: a hang-up may dispose the CTS before the await below returns.
+        callToken = ringingCts.Token;
+        // Every Ringing is treated as a new call, so it stops the previous ring's announcement. If the
+        // server ever re-sent Ringing for the same call, the name would be cut off and restarted — much as
+        // AUD-73's equal-priority rule already did before AUD-87.
+        CancelAndDispose(Interlocked.Exchange(ref _callAnnouncementCts, ringingCts));
+        break;
+
+      case PhoneCallState.Ended:
+      case PhoneCallState.Idle:
+        CancelAndDispose(Interlocked.Exchange(ref _callAnnouncementCts, null));
+        break;
+    }
+
+    // Broadcast state to Web UI
+    await BroadcastPhoneStateAsync(e);
+
+    if (ringingCts != null)
+    {
+      try
+      {
+        await HandleIncomingCallAsync(e, callToken);
+      }
+      finally
+      {
+        // Still ours (no hang-up and no newer call took it): retire it. Otherwise its taker disposed it.
+        if (ReferenceEquals(Interlocked.CompareExchange(ref _callAnnouncementCts, null, ringingCts), ringingCts))
+        {
+          ringingCts.Dispose();
+        }
+      }
+    }
+  }
+
+  /// <summary>
+  /// Cancels and disposes a call's token source. A throwing cancellation callback is logged, not
+  /// propagated: it must not stop the caller from broadcasting the new call state or announcing a new call.
+  /// </summary>
+  private void CancelAndDispose(CancellationTokenSource? cts)
+  {
+    if (cts == null)
+    {
+      return;
+    }
+    try
+    {
+      cts.Cancel();
+    }
+    catch (AggregateException ex)
+    {
+      _logger.LogWarning(ex, "Error cancelling a phone call's announcement");
+    }
+    finally
+    {
+      cts.Dispose();
+    }
+  }
+
+  /// <summary>
   /// Resolves the caller name, logs the masked ringing line, and speaks the announcement.
   /// <c>internal</c> rather than <c>private</c> so <c>PhoneCallIntegrationLogSafetyTests</c> can
   /// drive this method itself instead of a copy of it — <c>Radio.API.csproj</c> already has
-  /// <c>InternalsVisibleTo</c> for <c>Radio.API.Tests</c>. It is still called only from
-  /// <see cref="OnCallStateChanged"/>'s <c>Ringing</c> arm, so the live path and the pinned path
-  /// are one method.
+  /// <c>InternalsVisibleTo</c> for <c>Radio.API.Tests</c>. Its only production caller is
+  /// <see cref="HandleCallStateChangedAsync"/>'s <c>Ringing</c> arm, so the live path and the pinned
+  /// path are one method.
   /// </summary>
   /// <remarks>
   /// ⚠ The log-safety pin on this method is doing work no lint can do. <c>LogSafetyLintTests</c>
@@ -126,7 +206,8 @@ public class PhoneCallIntegrationService : BackgroundService
   /// contact name travelling under the name <c>announcement</c>, which is far too generic to write
   /// a rule for. If this method stops being reachable from a test, that coverage is gone.
   /// </remarks>
-  internal async Task HandleIncomingCallAsync(PhoneCallStateChangedEventArgs e)
+  internal async Task HandleIncomingCallAsync(
+    PhoneCallStateChangedEventArgs e, CancellationToken announcementToken = default)
   {
     var opts = _options.Value;
 
@@ -152,24 +233,33 @@ public class PhoneCallIntegrationService : BackgroundService
     _logger.LogInformation("Phone ringing: announcing to {Number}, announcement {Announcement}",
       LogSafeText.ForPhone(e.PhoneNumber), LogSafeText.For(announcement));
 
+    // announcementToken is cancelled by this call's hang-up (AUD-87), a newer ring, or service shutdown.
+    // Passed as the caller token, it
+    // interrupts this announcement and no other.
     try
     {
-      if (opts.PlayRingSound)
+      if (announcementToken.IsCancellationRequested)
+      {
+        // Hung up, or superseded by a newer ring, before the announcement began (while broadcasting or
+        // resolving the name): nothing to announce.
+        _logger.LogDebug("Call ended or superseded before its announcement started; not announcing");
+      }
+      else if (opts.PlayRingSound)
       {
         if (File.Exists(opts.RingSoundPath))
         {
           await _announcementService.PlaySoundWithAnnouncementAsync(
-            opts.RingSoundPath, announcement, opts.RingPriority);
+            opts.RingSoundPath, announcement, opts.RingPriority, announcementToken);
         }
         else
         {
           _logger.LogWarning("Ring sound enabled but file not found: {Path}. Playing TTS only.", opts.RingSoundPath);
-          await _announcementService.AnnounceAsync(announcement, opts.AnnouncementPriority);
+          await _announcementService.AnnounceAsync(announcement, opts.AnnouncementPriority, announcementToken);
         }
       }
       else
       {
-        await _announcementService.AnnounceAsync(announcement, opts.AnnouncementPriority);
+        await _announcementService.AnnounceAsync(announcement, opts.AnnouncementPriority, announcementToken);
       }
     }
     catch (Exception ex)
@@ -210,6 +300,7 @@ public class PhoneCallIntegrationService : BackgroundService
 
   public override void Dispose()
   {
+    CancelAndDispose(Interlocked.Exchange(ref _callAnnouncementCts, null));
     base.Dispose();
   }
 }

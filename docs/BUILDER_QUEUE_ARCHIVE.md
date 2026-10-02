@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (105)
+## Shipped rows (107)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3277,3 +3277,31 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/ENC-25.md`](queue/ENC-25.md)**
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"All of these items pass."* on `7583e06` — after a first round that ran on `1daecde` (without this fix) and failed exactly as reported, a pre-fix baseline. Owner also noted: *"pressing sleep currently always mutes.  I'm ok with that behavior."*
+
+### AUD-87 — owner ruling on overlapping announcements: keep the mixing; the phone announces at 9; a hang-up stops only the phone's announcement
+
+| Field | Value |
+|---|---|
+| Status | ✅ owner ruling 2026-10-02 built; merged by the PR that archived this row (PR number and squash SHA in the next banner) |
+| Plan | _no plan — decision row; built directly from the ruling_ |
+| Spec / handoff | _owner ruling 2026-10-02:_ *"#1 - a:keep, b:move to priority 9, c:hangup should only affect the phone announcement."* |
+| Depends on | `AUD-73` ([#739](https://github.com/mmackelprang/RTest/pull/739)) |
+| Branch | `fix/aud-87-phone-priority-scoped-stop` |
+
+**Detail: [`queue/AUD-87.md`](queue/AUD-87.md)**
+
+✅ **RULED AND BUILT 2026-10-02.** (a) a lower-priority announcement keeps mixing — no change. (b) `PhoneIntegration:AnnouncementPriority` defaults to **9**, above the notification default 8, so a doorbell no longer cuts off the caller's name. (c) each ringing call's announcement runs under its own token; a hang-up cancels that token instead of calling the stop-all `StopAsync`, so a doorbell playing alongside keeps playing. ⚠ **`radio`'s SQLite config store holds `phoneintegration:announcementPriority = 8` and `phoneintegration:enabled = true`** (read-only, 2026-10-02): the box keeps 8 until the owner changes that row, and phone integration is connected to the RotaryPhone hub there. ⚠ The box may never announce a call at all: its logs show only `Idle` call states, consistent with a suspected `CallStateChanged(phoneId, state)` vs `(state, phoneNumber)` contract mismatch — see the dossier; unfiled, predates this row. Not deployed.
+
+### GV-10 — Confirm-or-close: do conversation bubbles render the list snippet instead of the full body? Closed by owner ruling with no code (falsified as a Radio Console defect).
+
+| Field | Value |
+|---|---|
+| Status | ✅ closed, no code change — owner ruling 2026-10-02: *"#2 - close."* |
+| Plan | _no plan — the "investigate first" instruction was discharged 2026-09-06_ |
+| Spec / handoff | [F-5 diagnosis 2026-09-06 — FALSIFIED as a Radio Console defect](uat/2026-07-31-gv-live-data/F-5-DIAGNOSIS.md) · [UAT F-5](uat/2026-07-31-gv-live-data/REPORT.md) |
+| Depends on | `GV-3` |
+| Branch | — _(closed on `fix/aud-87-phone-priority-scoped-stop`, docs only)_ |
+
+**Detail: [`queue/GV-10.md`](queue/GV-10.md)**
+
+✅ **CLOSED BY OWNER RULING 2026-10-02, NO CODE.** Owner: *"#2 - close."* Bubbles bind `SmsMessageDto.Text` verbatim, with no data or CSS truncation; the bubble and the list preview matched because both come from the same wire slot, not because the bubble renders a snippet. **Cross-repo:** whether Google's `SmsTextIdx` carries a full body or a snippet is a RotaryPhone question; nothing was filed there by this closure.
