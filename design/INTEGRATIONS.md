@@ -61,9 +61,20 @@ The knobs are a vertical column to the **left of the LCD**, so index 0 is the **
 | 2 | **PRESETS** | Opens the PRESETS overlay and moves the highlight one entry per detent. **Nothing plays** — preview only | Recalls the highlighted station: switches source and band if needed, tunes, and plays. With the overlay closed it opens instead | **Save what is playing** |
 | 3 | **TUNING** | Frequency step up/down when Radio is active (accelerated ×2/×4/×8, host-clamped to 8 steps per event); publishes a "no track control on this source" card otherwise | Start/stop frequency scan | *none* |
 
-**There are exactly two long-presses on the whole panel, and there is deliberately no third:**
+**There are exactly two long-presses on the knobs, and there is deliberately no third:**
 VOLUME → standby and PRESETS → save. SOURCE and TUNING have no long action at all, and they publish no
 progress ring either — a ring that fills and then does nothing is a promise the code does not keep.
+(The touchscreen's own holds — the Sleep pill, the band pill, a preset card — are separate.)
+
+**Turning a knob while its button is held cancels the hold (`ENC-24`, 2026-10-02).** A press-and-turn is
+neither a click nor a hold: the turn acts as a turn, the ring collapses, and the release that follows does
+nothing — no Standby at 600 ms, no mute toggle on release (`EncoderLongPressGesture.OnTurn`). A turn after
+the long action has already fired changes nothing. ⚠ A detent produced by pushing the knob slightly
+off-axis would cancel a hold the same way; if VOLUME → Standby ever feels unreliable at the cabinet, look
+here first.
+
+**These gestures are fixed, not configurable.** The `ENC-8` mapping surface is a read-only view of the
+router's table; no press or hold action can be reassigned, so `ENC-23`/`ENC-24` add no settings.
 
 **The engraving mismatch is closed.** `ENC-5` remapped indices 1 and 3 onto SOURCE and TUNING and parked the
 visualiser on 2 as a seat-warmer; `ENC-7` replaced it with PRESETS. Leaving the *old source cycler* on index 2
@@ -384,7 +395,7 @@ The console has **three** states, derived from two facts rather than stored as a
 |---|---|---|---|---|
 | **Awake** | false | no | playing | any wake |
 | **Ambient** | false | yes | **playing** | 30 min idle (`idle-dimmer.js`), or navigating to `/sleep` |
-| **Standby** | **true** | yes | **paused + muted** | the topbar Sleep pill · a VOLUME long-press · `POST /api/system/sleep` |
+| **Standby** | **true** | yes | **paused + muted** | the topbar Sleep pill (a tap; a hold also powers the panel off — `ENC-23`) · a VOLUME long-press · `POST /api/system/sleep` |
 
 **Designer Rev 5 §8 describes five states. The two dark ones are not states of this model.** `ENC-15`
 withdrew them with the blanking half; **`ENC-22` (2026-09-28) brings back a dark panel for the knob-only
@@ -393,7 +404,9 @@ whichever of the three states it was in; the router asks the panel layer first.
 
 **What each input does on a lit panel** (handoff §8.3, minus the two dark columns). On a **dark** panel
 (`ENC-22`, off by default) every turn and every press is consumed and does one thing only — lights the
-panel — and so does anything within `Sleep:WakeGraceMilliseconds` (2 s) after that:
+panel — and so does anything within `Sleep:WakeGraceMilliseconds` (2 s) after that. **One exception
+(`ENC-23`):** on a panel darkened by *deep sleep* (the Sleep pill's hold), a **VOLUME press** lights it
+**and** wakes the console to the full UI in the same press — still consumed, so mute is not toggled:
 
 | Input | Awake | Ambient | Standby |
 |---|---|---|---|
@@ -509,6 +522,26 @@ which never reached DPMS-off.
 5. The sleep screen closing by any route (REST wake, incoming call, navigation) lights the panel.
 
 Check state: `cat /sys/class/drm/card1-DP-1/dpms` (`On`/`Off`). Recovery is the Mutter command above.
+
+#### Deep sleep — hold the Sleep pill (`ENC-23`)
+
+**Holding the topbar Sleep pill for 600 ms** (a fill sweeps behind the label from 300 ms, the encoder
+ring's schedule; it fires on lift) enters Standby **and** powers the panel off at once —
+`POST /api/system/sleep` with `{ "sleep": true, "panelOff": true }` → `EnterSleepAsync`, then
+`PanelPowerService.PowerOffNow`. It does **not** depend on `PanelOffAfterMinutes`: it works with the
+timer off, which is the shipped default. A tap on the pill is unchanged (Standby, panel on).
+
+- **Wake:** a **VOLUME press** lights the panel and leaves sleep in the same press (audio and the
+  pre-sleep mute state are restored by the ordinary wake). The press is consumed — mute is not toggled
+  and its release does nothing. Any **other** input (a turn, or another knob's press) only lights the panel
+  onto the Standby sleep screen, as on a timer-darkened panel; a press from there wakes as usual.
+- **Same safety rule 1, refused rather than deferred:** no encoder, or an encoder connected for less than
+  `EncoderStableSeconds`, and the panel stays on — sleep is still entered. The response says why:
+  `panelOffResult` is `PoweredOff`, `AlreadyOff`, `RefusedEncoderNotConnected`,
+  `RefusedEncoderNotStable` or `Unavailable` (no panel service — any non-Linux host). The Web does not
+  surface a refusal on screen; it is in the API's Information log.
+- Every path that lights the panel (rules 2–5 above, a knob) ends the deep sleep; a later timer
+  power-off is an ordinary `ENC-22` dark panel again, where a VOLUME press only lights it.
 
 ⚠ **Known limitation — a stale sleep-screen flag can dark a panel someone is using by touch.** The
 server learns the sleep screen is gone from `Sleep.razor`'s dispose report (best-effort, 2 s) and
