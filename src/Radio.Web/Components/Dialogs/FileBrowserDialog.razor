@@ -11,7 +11,7 @@
 
 <div style="display: flex; flex-direction: column; max-height: 480px; min-height: 320px;">
   <!-- Breadcrumbs + Location/Path bar + Search/Filter toolbar -->
-  <div class="file-browser-toolbar">
+  <div class="file-browser-toolbar @(SelectFolder ? "is-folder-mode" : "")">
     <!-- Location button (drive/mount picker) -->
     <div style="position: relative; flex-shrink: 0;">
       <RadzenButton Icon="folder_open" Size="ButtonSize.Small"

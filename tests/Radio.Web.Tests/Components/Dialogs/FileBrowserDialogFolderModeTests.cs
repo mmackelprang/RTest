@@ -281,6 +281,9 @@ public class FileBrowserDialogFolderModeTests : TestContext
 
     cut.WaitForAssertion(() => cut.FindAll(".file-item").Count.Should().Be(1), TimeSpan.FromSeconds(10));
     cut.FindAll(".file-browser-chip-row").Should().BeEmpty("no files are listed and Add queues every type");
+    // Without the chips the tools fit beside the breadcrumbs and squeeze them (measured); this class gives the
+    // tools their own row (design-system.css § UI-32).
+    cut.Find(".file-browser-toolbar").ClassList.Should().Contain("is-folder-mode");
   }
 
   [Fact]

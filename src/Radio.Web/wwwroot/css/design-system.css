@@ -7752,6 +7752,13 @@ body {
   min-height: 30px;
 }
 
+/* Folder mode has no type-filter chips, so the tools fit beside the breadcrumbs and squeezed them to their
+   220 px minimum — the folder being shown scrolled out of sight (measured at 1920x720). The tools take a row of
+   their own instead, as they do in file mode once the chips wrap them down. */
+.file-browser-toolbar.is-folder-mode .file-browser-toolbar-tools {
+  flex-basis: 100%;
+}
+
 /* Folder-mode footer: switch (or progress) left, Cancel and Add right, all finger-sized. */
 .folder-pick-footer {
   display: flex;
