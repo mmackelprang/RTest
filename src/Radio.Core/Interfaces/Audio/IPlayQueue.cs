@@ -33,20 +33,25 @@ public interface IPlayQueue
   long QueueVersion { get; }
 
   /// <summary>
-  /// Waits, at most <paramref name="timeout"/>, for the queued items' metadata (title, artist, album,
-  /// duration, art) to be read (AUD-96). Queue reads never wait for it — an item not read yet comes back
+  /// Waits, at most <paramref name="timeout"/>, for the metadata (title, artist, album, duration, art) of
+  /// every item <see cref="GetFullPlaylistAsync"/> returns — played, current and upcoming — to be read
+  /// (AUD-96; AUD-98 made Save as playlist store all of them). Queue reads never wait for it — an item not read yet comes back
   /// with placeholder metadata — so a caller that STORES that metadata, such as saving the queue as a
   /// playlist, calls this first.
   /// </summary>
   /// <param name="timeout">The longest to wait.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns><c>true</c> when every queued item's metadata came from a successful read; <c>false</c> if the
+  /// <returns><c>true</c> when every item's metadata came from a successful read; <c>false</c> if the
   /// timeout elapsed first, or if any item's read failed (it then carries its placeholder or an older
   /// value).</returns>
   Task<bool> WaitForQueueMetadataAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Retrieves the current playback queue (upcoming items only).
+  /// Retrieves the current track (when there is one) followed by the upcoming tracks. Tracks already played
+  /// are NOT included —
+  /// use <see cref="GetFullPlaylistAsync"/> for the whole list. The indexes this returns are the ones
+  /// <see cref="RemoveFromQueueAsync"/>, <see cref="MoveQueueItemAsync"/>, <see cref="JumpToIndexAsync"/>
+  /// and <see cref="AddToQueueAsync"/>'s position take.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>
   /// <returns>A task representing the async operation that returns the queue items.</returns>
