@@ -245,12 +245,12 @@ public class BandAxisTests
   }
 
   [Fact]
-  public void WbLabels_LastCarriesTheUnit_AndIsCentred()
+  public void WbLabels_LastIsCentred()
   {
     // 162.55 MHz is 93% across WB's plot: not at its edge.
     Strip(Wb).Should().Equal(
       ("162.40", BandAxisLabelAlign.Center), ("162.45", BandAxisLabelAlign.Center),
-      ("162.50", BandAxisLabelAlign.Center), ("162.55 MHz", BandAxisLabelAlign.Center));
+      ("162.50", BandAxisLabelAlign.Center), ("162.55", BandAxisLabelAlign.Center));
   }
 
   [Fact]
@@ -258,15 +258,19 @@ public class BandAxisTests
   {
     Strip(VhfOnTheHalf).Should().Equal(
       ("161.5", BandAxisLabelAlign.Start), ("162.0", BandAxisLabelAlign.Center), ("162.5", BandAxisLabelAlign.Center),
-      ("163.0", BandAxisLabelAlign.Center), ("163.5 MHz", BandAxisLabelAlign.End));
+      ("163.0", BandAxisLabelAlign.Center), ("163.5", BandAxisLabelAlign.End));
   }
 
   [Fact]
-  public void LastLabel_CarriesTheBandsUnit()
+  public void NoLabel_CarriesAUnit()
   {
-    Air.Labels()[^1].Text.Should().Be("135 MHz");
-    Am.Labels()[^1].Text.Should().Be("1600 kHz");
+    // UI-31: the unit is in the strip's range line under the map; on the axis it was clipped at the
+    // right edge on WB and VHF.
+    Air.Labels()[^1].Text.Should().Be("135");
+    Am.Labels()[^1].Text.Should().Be("1600");
     Am.Labels()[0].Text.Should().Be("600");
-    Sw.Labels()[^1].Should().Be(new BandAxisLabel(1.0, "30 MHz", BandAxisLabelAlign.End));
+    Sw.Labels()[^1].Should().Be(new BandAxisLabel(1.0, "30", BandAxisLabelAlign.End));
+    new[] { BandAxis.Fm, Air, Am, Sw, Wb, VhfOnTheHalf }.SelectMany(a => a.Labels())
+      .Should().OnlyContain(l => !l.Text.Contains("Hz"));
   }
 }
