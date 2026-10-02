@@ -212,6 +212,22 @@ public class VisualizerPanelStreamTests : TestContext
   }
 
   [Fact]
+  public async Task AnotherModesFrames_DoNotHideAStallOfThisPanelsStream()
+  {
+    // The hub connection is shared by every circuit: a LAN browser on Waveform keeps Waveform frames
+    // flowing while this Spectrum panel's group may be gone (pre-merge review M1).
+    WithPreferencesReadFailingAtOnce();
+    var cut = RenderInitialised();
+
+    for (int tick = 1; tick <= 2; tick++)
+    {
+      await cut.InvokeAsync(() => HubEventFire.FireAsync(_hub, nameof(AudioVisualizationHubService.OnWaveformData),
+        new WaveformDataDto { LeftSamples = new[] { 0.1f }, RightSamples = new[] { 0.1f } }));
+      await TickAsync(cut, expectedRecoveries: tick == 2 ? 1 : 0);
+    }
+  }
+
+  [Fact]
   public async Task WhileDisconnected_NothingReSubscribes()
   {
     // UI-30 owns the disconnected state, and the hub's own reconnect replays subscriptions.

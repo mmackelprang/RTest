@@ -399,9 +399,12 @@
   internal static readonly TimeSpan TelemetryInterval = TimeSpan.FromSeconds(1);
 
   /// <summary>
-  /// UI-36: how many consecutive silent ticks count as a stalled stream. The server broadcasts at 20 fps
-  /// whenever any client is connected — silence included, as flat frames — so two whole seconds with no
-  /// frame at all is a stream that has stopped, not a quiet song.
+  /// UI-36: how many consecutive silent ticks count as a stalled stream. <c>VisualizationBroadcastService</c>
+  /// broadcasts at 20 fps while a client is connected, broadcasting is enabled, and the visualizer has
+  /// processed any audio since radio-api started (<c>IsActive</c>) — silence included, as flat frames — so
+  /// two whole seconds with no frame is a stream that has stopped, not a quiet song. ⚠ One known false
+  /// positive: straight after a radio-api restart, before any audio has reached the tap, no frames are sent
+  /// by design; the panel then logs one stall Warning and re-asks on its backoff (every 30 s at most).
   /// </summary>
   internal const int StallTicks = 2;
 
@@ -1054,7 +1057,14 @@
   private Task HandleWaveformData(WaveformDataDto data)
   {
     if (_isDisposed) return Task.CompletedTask;
-    Interlocked.Increment(ref _hubFramesSinceLastTick);
+    // Counted for the stall check only when it is this panel's stream: the hub connection is shared by
+    // every circuit, so another browser's Waveform frames must not hide a lost Spectrum subscription
+    // here (pre-merge review M1).
+    if (_currentMode is VisualizationMode.Waveform or VisualizationMode.PhaseScope)
+    {
+      Interlocked.Increment(ref _hubFramesSinceLastTick);
+    }
+
     OfferFrame(data);
     return Task.CompletedTask;
   }
@@ -1063,7 +1073,11 @@
   private Task HandleSpectrumData(SpectrumDataDto data)
   {
     if (_isDisposed) return Task.CompletedTask;
-    Interlocked.Increment(ref _hubFramesSinceLastTick);
+    if (_currentMode is VisualizationMode.Spectrum or VisualizationMode.Circular)
+    {
+      Interlocked.Increment(ref _hubFramesSinceLastTick);
+    }
+
     OfferFrame(data);
     return Task.CompletedTask;
   }
@@ -1089,7 +1103,9 @@
   /// </summary>
   private async Task DrainFramesAsync()
   {
-    // Off the caller's thread, so the hub's receive loop is never the one that runs a draw.
+    // Never inline in the caller, so the hub's receive loop is never the one that runs a draw. A loop
+    // started from the hub thread continues on the thread pool; one started from the renderer (the
+    // RequestInitialData frame) continues on the renderer's dispatcher, which is harmless.
     await Task.Yield();
 
     while (true)
@@ -1141,8 +1157,17 @@
     long started = Clock.GetTimestamp();
     try
     {
-      await module.InvokeVoidAsync(method, args);
-      NoteDrawDuration(Clock.GetElapsedTime(started));
+      try
+      {
+        await module.InvokeVoidAsync(method, args);
+      }
+      finally
+      {
+        // In a finally, so a draw that ends in the interop timeout — the slowest browser of all — is
+        // logged too rather than swallowed by the cancellation catches below (pre-merge review M2).
+        NoteDrawDuration(Clock.GetElapsedTime(started));
+      }
+
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (TaskCanceledException) { }

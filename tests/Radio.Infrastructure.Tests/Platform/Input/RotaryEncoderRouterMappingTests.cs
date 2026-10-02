@@ -1254,6 +1254,27 @@ public class RotaryEncoderRouterMappingTests
   }
 
   [Fact]
+  public async Task Standby_DetentsArrivingWhileTheWakeIsInFlight_AllApply_AndTheConsoleWakesOnce()
+  {
+    // The realistic fast spin (pre-merge review L2): detents 2 and 3 arrive while detent 1's wake is still
+    // resuming the source. They act at once (the claim reads Awake); detent 1 applies when the wake ends.
+    using var h = Standby();
+    h.Sleep.WakeGate = new TaskCompletionSource();
+
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+    Assert.Equal(0.52f, h.Audio.MasterVolume, 3);
+
+    h.Sleep.WakeGate.SetResult();
+    await h.Router.WakeTurnIdle;
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+    Assert.Equal(0.53f, h.Audio.MasterVolume, 3);
+    Assert.False(h.Audio.IsMuted);
+  }
+
+  [Fact]
   public void Standby_AVolumeTurnWhileVolumeIsStillHeld_DoesNotWake()
   {
     // The hold that enters Standby fires at the threshold with the finger still down. A turn then is

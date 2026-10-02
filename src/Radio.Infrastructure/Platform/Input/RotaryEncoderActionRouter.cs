@@ -52,6 +52,7 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly PresetSelectorService _presetSelector;
   private readonly EncoderLongPressGesture _gesture;
   private readonly TimeProvider _time;
+  private readonly object _volumeTurnLock = new();
   private bool _disposed;
 
   // ENC-25: when the VOLUME button last changed state (either edge), read by the Standby turn-wake rule
@@ -590,7 +591,8 @@ public class RotaryEncoderActionRouter : IDisposable
     try
     {
       await _sleepService!.WakeAsync("encoder-volume-turn").ConfigureAwait(false);
-      _logger.LogInformation("Woke from Standby via a VOLUME turn; applying the turn");
+      // "Requested", not "woke": WakeAsync returns without waking if another wake landed first.
+      _logger.LogInformation("VOLUME turn in Standby: wake requested; applying the turn");
       _turnHandlers[index](index, delta);
     }
     catch (Exception ex)
@@ -752,8 +754,16 @@ public class RotaryEncoderActionRouter : IDisposable
       _logger.LogInformation("Unmuted by a volume knob turn");
     }
 
-    var newVolume = Math.Clamp(mgr.MasterVolume + clamped * step, 0f, 1f);
-    mgr.MasterVolume = newVolume;
+    // Under a lock since ENC-25: the turn that woke the console from Standby is applied on a thread-pool
+    // continuation after the wake, possibly while the later detents of the same spin run here on the
+    // encoder thread, and an unguarded read-modify-write would lose one of them (pre-merge review L1).
+    float newVolume;
+    lock (_volumeTurnLock)
+    {
+      newVolume = Math.Clamp(mgr.MasterVolume + clamped * step, 0f, 1f);
+      mgr.MasterVolume = newVolume;
+    }
+
     _logger.LogDebug("Volume: {Volume:P0}", newVolume);
 
     PublishHud(index, "VOLUME", b =>
