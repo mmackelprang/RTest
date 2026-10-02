@@ -95,8 +95,14 @@ public class AudioStateUpdateService : BackgroundService
   // Cached state to detect changes
   private PlaybackStateDto? _lastPlaybackState;
   private NowPlayingDto? _lastNowPlaying;
-  // Lightweight queue snapshot for cheap change detection (avoids building full DTOs every 500ms)
-  private List<(string Id, int Index, bool IsCurrent, string State)>? _lastQueueSnapshot;
+  // Lightweight queue snapshot for cheap change detection (avoids building full DTOs every 500ms).
+  // AUD-96: it carries each row's metadata too, because rows now arrive as placeholders and are filled
+  // in by a background read — a fill changes no id, index or state, and must still be broadcast.
+  private List<QueueRowSnapshot>? _lastQueueSnapshot;
+
+  // AUD-96: IPlayQueue.QueueVersion as of the last pass that compared (or broadcast) the queue. Null
+  // until the first such pass. Same advance-after-send ordering as the snapshot (UI-13).
+  private long? _lastQueueVersion;
   private RadioStateDto? _lastRadioState;
   private VolumeDto? _lastVolume;
   private string? _lastActiveSourceType;
@@ -534,17 +540,33 @@ public class AudioStateUpdateService : BackgroundService
       return;
     }
 
+    // ⚠ AUD-96: this runs every 500 ms for as long as File Player is the active source, in one
+    // sequential loop with CheckSourceChangedAsync — so whatever it costs delays the next pass, and with
+    // it the next SourceChanged broadcast. Measured on the appliance 2026-10-02, the full-playlist
+    // read it used to do on every pass cost 1.4–4.7 s and ~140 CIFS opens. QueueVersion is in-memory;
+    // when it has not moved, nothing GetFullPlaylistAsync would return can have changed, so skip it.
+    long version = playQueue.QueueVersion;
+    if (_lastQueueVersion == version)
+    {
+      return;
+    }
+
     // Use full playlist so UI always gets played + current + upcoming with state
     var fullPlaylist = await playQueue.GetFullPlaylistAsync(cancellationToken);
 
     // Build lightweight snapshot first for cheap change detection.
     // Only construct full DTOs when something actually changed.
     var snapshot = fullPlaylist
-      .Select(item => (item.Id, item.Index, item.IsCurrent, State: item.State.ToString()))
+      .Select(item => new QueueRowSnapshot(
+        item.Id, item.Index, item.IsCurrent, item.State.ToString(),
+        item.Title, item.Artist, item.Album, item.Duration, item.AlbumArtUrl))
       .ToList();
 
     if (!HasQueueSnapshotChanged(_lastQueueSnapshot, snapshot))
     {
+      // The version moved but nothing a client sees did (e.g. a re-validation of a row that is not in
+      // this queue). Nothing to send, so nothing can be lost by remembering the version.
+      _lastQueueVersion = version;
       return;
     }
 
@@ -554,7 +576,11 @@ public class AudioStateUpdateService : BackgroundService
 
     await _hubContext.Clients.Group("Queue")
       .SendAsync("QueueChanged", currentQueue, cancellationToken);
+
+    // ⚠ AFTER the send (UI-13), both of them. Advancing the version before a send that faults would
+    // make the next pass skip the read entirely, and the delta would never be retried.
     _lastQueueSnapshot = snapshot;
+    _lastQueueVersion = version;
     _logger.LogDebug("Broadcast QueueChanged with {Count} items", currentQueue.Count);
   }
 
@@ -658,32 +684,32 @@ public class AudioStateUpdateService : BackgroundService
   }
 
   private static bool HasQueueSnapshotChanged(
-    List<(string Id, int Index, bool IsCurrent, string State)>? previous,
-    List<(string Id, int Index, bool IsCurrent, string State)>? current)
+    List<QueueRowSnapshot>? previous,
+    List<QueueRowSnapshot>? current)
   {
     if (previous == null || current == null)
     {
       return true;
     }
 
-    if (previous.Count != current.Count)
-    {
-      return true;
-    }
-
-    for (int i = 0; i < previous.Count; i++)
-    {
-      if (previous[i].Id != current[i].Id ||
-          previous[i].Index != current[i].Index ||
-          previous[i].IsCurrent != current[i].IsCurrent ||
-          previous[i].State != current[i].State)
-      {
-        return true;
-      }
-    }
-
-    return false;
+    // Record-struct equality: id, position, state and every displayed metadata field.
+    return !previous.SequenceEqual(current);
   }
+
+  /// <summary>
+  /// What a client sees of one queue row — its identity, position and state, and (AUD-96) the metadata
+  /// it displays, which can change on its own when a background read replaces a placeholder.
+  /// </summary>
+  private readonly record struct QueueRowSnapshot(
+    string Id,
+    int Index,
+    bool IsCurrent,
+    string State,
+    string Title,
+    string Artist,
+    string Album,
+    TimeSpan? Duration,
+    string? AlbumArtUrl);
 
   private static bool HasRadioStateChanged(RadioStateDto? previous, RadioStateDto? current)
   {

@@ -25,6 +25,28 @@ public interface IPlayQueue
   int Count { get; }
 
   /// <summary>
+  /// A cheap change signal for <see cref="GetFullPlaylistAsync"/> (AUD-96). When two reads return the
+  /// same value, a full-playlist read in between would have returned the same items; a different value
+  /// means it MAY have changed, not that it did. Reading it must never touch a file or the network —
+  /// the API's 500 ms state poller reads it on every pass so that it can skip the full read.
+  /// </summary>
+  long QueueVersion { get; }
+
+  /// <summary>
+  /// Waits, at most <paramref name="timeout"/>, for the metadata (title, artist, album, duration, art) of
+  /// every item <see cref="GetFullPlaylistAsync"/> returns — played, current and upcoming — to be read
+  /// (AUD-96; AUD-98 made Save as playlist store all of them). Queue reads never wait for it — an item not read yet comes back
+  /// with placeholder metadata — so a caller that STORES that metadata, such as saving the queue as a
+  /// playlist, calls this first.
+  /// </summary>
+  /// <param name="timeout">The longest to wait.</param>
+  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <returns><c>true</c> when every item's metadata came from a successful read; <c>false</c> if the
+  /// timeout elapsed first, or if any item's read failed (it then carries its placeholder or an older
+  /// value).</returns>
+  Task<bool> WaitForQueueMetadataAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Retrieves the current track (when there is one) followed by the upcoming tracks. Tracks already played
   /// are NOT included —
   /// use <see cref="GetFullPlaylistAsync"/> for the whole list. The indexes this returns are the ones
