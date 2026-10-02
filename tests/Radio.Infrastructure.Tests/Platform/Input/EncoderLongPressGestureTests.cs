@@ -350,5 +350,28 @@ public class EncoderLongPressGestureTests
     Assert.Equal(new[] { 0 }, rec.LongPress);
   }
 
+  [Fact]
+  public void ATurnCancelledHoldsTimer_CannotFireIntoTheNextPress()
+  {
+    // The cancelled press's timer must be disposed, not merely outrun. Left armed, it fires at the
+    // FIRST press's deadline, finds the SECOND press down, and raises the long action 400 ms into a
+    // press that has not reached the threshold.
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(100));
+    gesture.OnTurn(0);
+    gesture.OnButtonEdge(0, false);
+    time.Advance(TimeSpan.FromMilliseconds(100));
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(ThresholdMs - 200));
+    Assert.Empty(rec.LongPress);
+
+    time.Advance(TimeSpan.FromMilliseconds(200));
+    Assert.Equal(new[] { 0 }, rec.LongPress);
+  }
+
   private const int ThresholdMs = Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs;
 }
