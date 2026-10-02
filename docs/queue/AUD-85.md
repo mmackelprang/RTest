@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+✅ **SHIPPED AND OWNER-VERIFIED 2026-10-02** — [#764](https://github.com/mmackelprang/RTest/pull/764), squash `8df918b`, deployed and SHA-verified; owner: *"AUD-85 passed."* The agent box UAT was not run. See [§ Deploy and owner check](#deploy-and-owner-check-2026-10-02). Archived.
+
 🟠 **User-visible, cheap.** Filed 2026-09-30 during the `AUD-84` owner UAT. **The symptom is MEASURED on the box; the mechanism is read from code** (line numbers below re-read on `main` at `646be99`).
 
 ## Provenance
@@ -94,6 +96,17 @@ Three hostile reviews were run after `AUD-37` was merged in. The first found two
 1. **Unit:** a test that drives the UI's pick with a saved default and an API that reports the device already connecting (or 409/500 for a busy state) asserts the default is **not** cleared. It must fail on `646be99`.
 2. **On the box, with the owner:** with a saved default and a local output active, pick Cast several times (switch back to local between picks). Each time: Cast plays, no `POST /api/devices/cast/connect responded 500`, and `AudioPreferences:DefaultCastDeviceId` still holds the speaker's id afterwards.
 3. Restart `radio-api` with Cast selected; it comes back on Cast.
+
+## Deploy and owner check (2026-10-02)
+
+✅ **Merged, deployed and owner-verified.** [#764](https://github.com/mmackelprang/RTest/pull/764), squash `8df918b`.
+
+- **Deploy.** `main` `8df918b` was deployed to `radio` on 2026-10-02. The deploy printed `Verified: API is running commit 8df918b`, `Verified: Web is running commit 8df918b` and `Kiosk is live (14 established connections…)`. `/api/health/version` reports `8df918b` on both `:5000` and `:5002`.
+- ⚠ **The agent box UAT was NOT run.** The merge step was interrupted by a permission refusal, and the owner resolved the `ROADMAP` conflict himself. No agent read the config store or the file sink after a pick, so Verification step 2's log and config-store checks (no `cast/connect responded 500`, `AudioPreferences:DefaultCastDeviceId` still set) were **not measured** on the box.
+- **Owner check at the console.** Picking Cast connects without opening the dropdown, and the saved default survives. Owner, verbatim: *"AUD-85 passed."* This is the validation of record.
+- **Not reported either way:** Verification step 3 (restart `radio-api` with Cast selected and confirm it comes back on Cast).
+
+The archive entry previously said these were "recorded in the dossier and the next banner"; they were not until this section and the 2026-10-02 banner entry.
 
 ## Related
 
