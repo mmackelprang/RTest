@@ -612,9 +612,9 @@ html, body {
    `forwards` only, so this base opacity (not the `from` frame) applies during
    the delay, and an ordinary tap shows nothing.
 
-   40% of the accent alone reads at about 2:1 against the topbar, too faint to
-   carry the progress; the solid accent bottom edge, which grows with the
-   scale, is what makes the fill's leading edge legible. */
+   A translucent tint alone was judged too faint to carry the progress (the
+   polish pass put the earlier 30% mix near 2:1); the solid accent bottom
+   edge, which grows with the scale, is what makes the fill legible. */
 .nav-pill-sleep-fill {
   position: absolute;
   inset: 0;
