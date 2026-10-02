@@ -39,13 +39,17 @@ the same day.
   `stat` on the reader, a re-read only if the stamp changed — when it is **enqueued** (load file / directory /
   playlist, add to queue, restore at startup) and when it **becomes the current track**. Nothing re-validates
   on a timer: a file re-tagged in place while it sits in the queue keeps its old row until it is enqueued again
-  or played. Two kinds of row are re-read even with an unchanged stamp: **a failed read** (an existing file
-  that read as nothing — on the appliance, a CIFS hiccup — is stored unverified and read again at its next
-  revalidation, rather than pinned for the life of the process), and **a row older than a day**, re-read the
-  next time it is asked for. ⚠ That second one is load-bearing: `AlbumArtCacheService` deletes art it has not
-  been asked to save for 7 days, and the old per-request read re-saved every queued track's art continuously —
-  an unstated side effect the cache would otherwise have removed. A missing file is cached as its placeholder
-  and is not re-read per request. The cache drops rows for paths no longer queued once it exceeds 2,048 entries.
+  or played. Two kinds of row are re-read even with an unchanged stamp, the next time they are asked for: **an
+  unverified row** once it is 2 minutes old, and **any row** once it is a day old. ⚠ The second is load-bearing:
+  `AlbumArtCacheService` deletes art it has not been asked to save for 7 days, and the old per-request read
+  re-saved every queued track's art continuously — an unstated side effect the cache would otherwise have
+  removed.
+- **A failure never downgrades a good row.** A row is unverified when its last read or stat failed. On the
+  appliance the share sits behind WiFi and `FileInfo.Exists` answers `false` on any I/O error, so neither "read
+  as nothing" nor "missing" can be told from a hiccup: the last good metadata is kept (unverified, so it is
+  retried), and only a path that never read successfully shows its placeholder. A file that genuinely cannot be
+  read costs one attempt per 2 minutes, and only while its queue is being looked at. The cache drops rows for
+  paths no longer queued once it exceeds 2,048 entries.
 - **The read itself is unchanged** — it is the old per-row code moved onto the reader
   (`FilePlayerAudioSource.ReadQueueItemMetadata`): `AudioTagReader.Read` (so `AUD-32`'s SoundFlow → TagLib
   fallback stands) and `TryGetEmbeddedAlbumArtUrl` (embedded art, content-addressed cache). `AUD-1`'s per-field
@@ -60,12 +64,15 @@ the same day.
   still be broadcast. Version and snapshot both advance **after** the send (`UI-13` ordering).
 - **Saving the queue as a playlist waits for unread rows** (new `IPlayQueue.WaitForQueueMetadataAsync`, bounded
   at 15 s in `PlaylistsController.Create`). The playlist stores title / artist / album / duration for good, so a
-  save made right after loading a large folder would otherwise store file names. If the wait times out it saves
-  what it has and logs a Warning.
+  save made right after loading a large folder would otherwise store file names. The wait reports unsettled
+  while any queued row's read has failed, too, not only while the reader is busy; either way the save goes ahead
+  with what it has and logs a Warning. A save the client abandons during the wait returns 499 rather than
+  logging an Error.
 - **`QueueVersion` copies the lists with `ToArray`.** Several pre-existing writers change them without
-  `_playlistLock`; enumeration would throw on that, a copy does not, and if even the copy fails a fresh value is
-  returned so the poller re-reads rather than skips. It is seeded per instance, so a re-created File Player never
-  repeats an old instance's value.
+  `_playlistLock`. Enumeration would throw on that; a copy does not, but can pick up a slot a concurrent `Clear`
+  or `Dequeue` has just nulled, so a null entry is hashed as a marker. If anything still throws, a fallback value
+  practically certain to be new is returned, so the poller re-reads rather than skips. It is seeded per instance
+  with a random 64-bit value, so a re-created File Player is practically certain not to repeat an old one's.
 - **`radio-web`'s "Queue state saved" line is now Debug.** It ran on every `QueueChanged` in every open panel,
   and `radio-web`'s console sink reaches journald (see `CLAUDE.md`).
 - **Restore (`InitializeAsync`) warms the cache** in the background. ⚠ **The `File.Exists` filter at restore was
@@ -75,21 +82,24 @@ the same day.
 
 ## Tests
 
-- `QueueItemMetadataCacheTests` (15): a miss returns the placeholder at once and is read once however often it is
-  asked for; requests while a read is queued are served by that one queued pass (the reader parked on a gate); an
-  unchanged file is stat'ed but not re-read and the version stays; a changed stamp re-reads and advances the
-  version (and does not when the tags came back identical); a missing file is cached without a read; a throwing
-  reader is not retried per request; a failed read is read again at the next revalidation; a row past `MaxAge` is
-  re-read when next asked for, and not before (`FakeTimeProvider`); the version is published per batch of 16 and
-  when idle; the trim bound; dispose abandons the backlog after the read in progress; nothing scheduled after
-  dispose.
-- `FilePlayerQueueMetadataTests` (8, counting reader and stat seams): each queued path read once across 50 queue
+- `QueueItemMetadataCacheTests` (17, `FakeTimeProvider` where time matters): a miss returns the placeholder at
+  once and is read once however often it is asked for; requests while a read is queued are served by that one
+  queued pass (the reader parked on a gate); an unchanged file is stat'ed but not re-read and the version stays;
+  a changed stamp re-reads and advances the version (and does not when the tags came back identical); a missing
+  file shows its placeholder without a read and is stat'ed again only after the retry interval; a throwing
+  reader is retried only after the retry interval; a failed read is read again at the next revalidation, and when
+  asked for after the retry interval but not before; a failed refresh read and a failed stat both keep the last
+  good row; a row past `MaxAge` is re-read when next asked for, and not before; the version is published per
+  batch of 16 (reader parked until every path is queued) and when idle; the trim bound; dispose abandons the
+  backlog after the read in progress; nothing scheduled after dispose.
+- `FilePlayerQueueMetadataTests` (10, counting reader and stat seams): each queued path read once across 50 queue
   reads; rows carry the cached fields; **100 reads of `QueueVersion` with an unchanged queue make zero reads and
   zero stats**; the version moves on a fill (and `WaitForQueueMetadataAsync` reports unsettled before it, settled
-  after), add, move and remove; a re-added changed file is re-read, an unchanged one is not; two instances with the
-  same queue report different versions; a restored queue is warmed.
-- `PlaylistsControllerCreateMetadataTests` (2): saving a playlist waits for the queue metadata before reading the
-  queue, and still saves when the wait times out.
+  after), add, move and remove; the wait stays unsettled while a row's read has failed; `QueueVersion` hashes a
+  null slot rather than throwing; a re-added changed file is re-read, an unchanged one is not; two instances with
+  the same queue report different versions; a restored queue is warmed.
+- `PlaylistsControllerCreateMetadataTests` (3): saving a playlist waits for the queue metadata before reading the
+  queue; still saves when the wait times out; returns 499 and saves nothing when the client cancels.
 - `AudioStateUpdateServiceQueueVersionTests` (5): an unchanged version skips the full read on every later pass; a
   moved version with identical rows reads once and sends nothing; a filled-in title / album art is broadcast; a
   cancelled send does not advance the version.
@@ -114,6 +124,14 @@ With the share emulated (the reader seam sleeping 30 ms per row, about three CIF
 in 0.4 ms first / 0.005 ms steady, and the background warm-up takes 1.83 s. The old code would pay that warm-up on
 **every** call — 47 × 30 ms ≈ 1.4 s, the low end of what the box measured. ⚠ Local disk understates the box by
 orders of magnitude; the deploy measurement below is the one that counts.
+
+## Known limits (accepted)
+
+- A row that nothing asks for is not refreshed. After more than about 6 days with nobody reading the queue, a
+  queued track's art file can expire; the next read returns the old URL (and schedules the re-read that re-saves
+  the same content-addressed file), so one render can show a broken tile. Narrow, and self-healing.
+- Two `SourceChanged` events for one switch can each start a background queue read in the panel ([`UI-35`](UI-35.md)).
+  Not a regression — the old code awaited two — and the read is now cheap.
 
 ## Owner checks (after deploy)
 
