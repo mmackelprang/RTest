@@ -3,7 +3,11 @@
 @inject NotificationService NotificationService
 @inject ILogger<SavePlaylistDialog> Logger
 
-<div style="min-width: 400px;">
+@* UI-34: no min-width here. The dialog is opened 400 px wide and its content box is narrower by Radzen's
+   padding, so the old "min-width: 400px" made this block — and both 100%-wide fields in it — overflow the
+   dialog's right edge (measured: fields 400 px wide in a 352 px content box). .save-playlist-form fills the
+   content box instead; design-system.css §UI-32/34. *@
+<div class="save-playlist-form">
   <div style="margin-bottom: 16px;">
     <label style="display: block; margin-bottom: 4px;">Playlist Name</label>
     <RadzenTextBox @bind-Value="_name"

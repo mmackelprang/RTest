@@ -128,11 +128,79 @@ public class FileApiService
 
       return (false, 0, $"No files could be added ({result.FailedCount} failed)");
     }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      // The caller cancelled (UI-32: Add folder's dialog closed mid-run). Not a failure to report or log.
+      throw;
+    }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to add files to queue");
       return (false, 0, ex.Message);
     }
+  }
+
+  /// <summary>
+  /// UI-32: lists a folder's playable files in queue order. Queues nothing.
+  /// </summary>
+  /// <param name="path">Absolute path, path relative to the media root, or null for the media root.</param>
+  /// <param name="includeSubfolders">Walk subfolders too.</param>
+  /// <param name="checkReadable">
+  /// Have the API open each file and leave out unreadable ones — one NAS round trip a file. False for a count.
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token; cancelling throws rather than returning an error.</param>
+  /// <returns>The listing, or null and a message fit to show the owner.</returns>
+  public async Task<(FolderTracksDto? Folder, string? Error)> GetFolderTracksAsync(
+    string? path, bool includeSubfolders, bool checkReadable, CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var url = $"/api/files/folder-tracks?includeSubfolders={(includeSubfolders ? "true" : "false")}"
+        + $"&checkReadable={(checkReadable ? "true" : "false")}";
+      if (!string.IsNullOrEmpty(path))
+      {
+        url += $"&path={Uri.EscapeDataString(path)}";
+      }
+
+      using var response = await _httpClient.GetAsync(url, cancellationToken);
+      if (response.IsSuccessStatusCode)
+      {
+        var folder = await response.Content.ReadFromJsonAsync<FolderTracksDto>(cancellationToken: cancellationToken);
+        return folder == null ? (null, "Empty response from server") : (folder, null);
+      }
+
+      return (null, await ReadErrorAsync(response, cancellationToken));
+    }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      throw;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogWarning(ex, "Failed to list folder tracks for {Path}", path);
+      return (null, "Couldn't reach the radio to read the folder");
+    }
+  }
+
+  /// <summary>The API's <c>{ "error": "…" }</c> body, or the status code when there is none.</summary>
+  private static async Task<string> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+  {
+    try
+    {
+      var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>(cancellationToken: cancellationToken);
+      if (body.ValueKind == System.Text.Json.JsonValueKind.Object
+          && body.TryGetProperty("error", out var error)
+          && error.ValueKind == System.Text.Json.JsonValueKind.String)
+      {
+        return error.GetString()!;
+      }
+    }
+    catch (Exception)
+    {
+      // Not JSON, or no body: fall through to the status code.
+    }
+
+    return $"Server returned {(int)response.StatusCode}";
   }
 
   public async Task<List<DriveInfoDto>?> GetDrivesAsync(CancellationToken cancellationToken = default)
