@@ -412,10 +412,25 @@ panel — and so does anything within `Sleep:WakeGraceMilliseconds` (2 s) after 
 
 | Input | Awake | Ambient | Standby |
 |---|---|---|---|
-| VOLUME turn / press / hold | acts | **acts in place** — the readout renders on the sleep screen's own HUD host | consumed; the press **resumes** |
+| VOLUME turn | acts | **acts in place** — the readout renders on the sleep screen's own HUD host | **resumes, then acts** (`ENC-25`) — see below |
+| VOLUME press / hold | acts | **acts in place** | consumed; the press **resumes** |
 | SOURCE / PRESETS / TUNING turn | acts | consumed, and **wakes** to the full UI | consumed; **does not resume audio** (D22) |
 | SOURCE / PRESETS / TUNING press | acts | consumed, and **wakes** | **resumes** |
 | Screen tap | acts | wakes | **resumes** |
+
+**A VOLUME turn wakes the console from Standby (`ENC-25`, 2026-10-02).** Owner: *"In normal sleep, I expect
+a volume change to wake the console, but it only shows the new volume without waking."* In Standby a VOLUME
+turn now wakes the console **and then applies its volume change** — after the wake, because the wake restores
+the pre-sleep mute state and the turn's first detent clears mute (`ENC-4b`); the other order would leave a
+console that was muted before it slept still muted. The detents of a fast spin after the first act directly
+(one wake). **The other three knobs keep D22:** their turns in Standby are still consumed and only show their
+current value. Two guards keep the VOLUME hold that *enters* Standby from being undone by the same hand: a
+VOLUME turn does **not** wake while the VOLUME button is still held (the hold fires at 600 ms with the finger
+down), nor within **500 ms** of the button's last press or release (a stray detent on letting go). Such a
+turn is consumed and shows the volume, as before. Ambient is unchanged (VOLUME acts in place without waking).
+On a dark panel nothing changes: the turn that lights it is spent lighting it, as is anything inside the
+2 s wake grace; a VOLUME turn **after** that, on the lit Standby screen, wakes like any other. The Standby
+hint line (`tap anywhere, or press any knob, to turn on`) does not mention the turn and was left as designed.
 
 **Two things that are easy to get wrong here, both of which shipped as bugs:**
 
@@ -544,7 +559,16 @@ unchanged (Standby, panel on).
 - **Wake:** a **VOLUME press** lights the panel and leaves sleep in the same press (audio and the
   pre-sleep mute state are restored by the ordinary wake). The press is consumed — mute is not toggled
   and its release does nothing. Any **other** input (a turn, or another knob's press) only lights the panel
-  onto the Standby sleep screen, as on a timer-darkened panel; a press from there wakes as usual.
+  onto the Standby sleep screen, as on a timer-darkened panel; a press from there wakes as usual, and since
+  `ENC-25` so does a VOLUME turn made after the 2 s wake grace.
+- **While the panel is dark, the kiosk's Chrome renders no frame at all, but its scripts keep running**
+  (measured `UI-36`, 2026-10-02, through the kiosk's own Long Animation Frame timeline on `:9223`): in the
+  two deep sleeps measured, the rendering step of one animation frame did not start until 6.8 s and 6.6 s
+  after the frame began — the whole dark period — ending within ~0.2 s of the panel coming back, while that
+  frame's tasks (Blazor's websocket messages) ran with no blocking time. `document.visibilityState` stayed
+  `visible` throughout, so the page is never told it is hidden and nothing visibility-based (hidden-page
+  timer throttling, `visibilitychange`) is involved. Anything that waits for a *rendered frame*
+  (`requestAnimationFrame`, observer callbacks) waits for the panel; JS interop does not.
 - **Same safety rule 1, refused rather than deferred:** no encoder, or an encoder connected for less than
   `EncoderStableSeconds`, and the panel stays on — sleep is still entered. The response says why:
   `panelOffResult` is `PoweredOff`, `AlreadyOff`, `RefusedEncoderNotConnected`,

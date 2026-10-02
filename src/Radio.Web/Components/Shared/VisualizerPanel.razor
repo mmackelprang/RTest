@@ -364,10 +364,75 @@
   private bool _hasReceivedData;
   private IJSObjectReference? _jsModule;
 
-  // Updates/sec telemetry — counted in HandleWaveformData/HandleSpectrumData
-  // and sampled every second by _telemetryTimer.
+  // Updates/sec telemetry — frames drawn, counted in DrawFrameAsync and sampled every second by
+  // _telemetryTimer.
   private int _frameCountSinceLastSample;
-  private System.Threading.Timer? _telemetryTimer;
+  private ITimer? _telemetryTimer;
+
+  // ── live-stream stall watch (UI-36) ──
+  // Frames that arrived from the hub since the last tick. Separate from _frameCountSinceLastSample
+  // because RequestInitialData draws a frame it fetched on demand, and that frame says nothing about
+  // whether the live stream is flowing.
+  private int _hubFramesSinceLastTick;
+
+  // Consecutive whole ticks with no hub frame while the stream should be flowing; 0 while healthy.
+  private int _silentTicks;
+
+  // When the current stall began (the start of its first silent tick), for the recovery log line.
+  private DateTimeOffset _stallStartedAt;
+
+  // The tick count at which the next re-subscribe may be sent, so a stream that stays down is re-asked
+  // with backoff rather than every second.
+  private int _nextRecoveryAtSilentTicks = StallTicks;
+
+  // Latest-wins draw (UI-36): the newest frame not yet drawn, and whether a drain loop is running.
+  // The hub's receive loop hands frames over here and returns at once; it never waits on the browser.
+  private object? _pendingFrame;
+  private int _drawLoopRunning;
+  private Task _drawLoop = Task.CompletedTask;
+
+  // One slow-draw warning per stall, re-armed by the next fast draw, so a browser that stays slow
+  // produces one log line rather than twenty a second.
+  private bool _slowDrawLogged;
+
+  /// <summary>The telemetry tick, which is also the stall check's clock.</summary>
+  internal static readonly TimeSpan TelemetryInterval = TimeSpan.FromSeconds(1);
+
+  /// <summary>
+  /// UI-36: how many consecutive silent ticks count as a stalled stream. <c>VisualizationBroadcastService</c>
+  /// broadcasts at 20 fps while a client is connected, broadcasting is enabled, and the visualizer has
+  /// processed any audio since radio-api started (<c>IsActive</c>) — silence included, as flat frames — so
+  /// two whole seconds with no frame is a stream that has stopped, not a quiet song. ⚠ One known false
+  /// positive: straight after a radio-api restart, before any audio has reached the tap, no frames are sent
+  /// by design; the panel then logs one stall Warning and re-asks on its backoff (every 30 s at most).
+  /// </summary>
+  internal const int StallTicks = 2;
+
+  /// <summary>
+  /// UI-36: a single browser round trip for one frame longer than this is logged, once per episode. It
+  /// is the measurement the row could not take: it says whether a future pause was the browser not
+  /// accepting frames (this line) or the hub not delivering them (the stall line).
+  /// </summary>
+  internal static readonly TimeSpan SlowDrawThreshold = TimeSpan.FromSeconds(1);
+
+  /// <summary>
+  /// Stall recoveries (UI-36) that have finished running, whether or not they re-subscribed — one that
+  /// finds the panel disposed or in BAND does nothing and still counts. For tests, which rendezvous on it.
+  /// </summary>
+  internal int StreamStallRecoveries => Volatile.Read(ref _streamStallRecoveries);
+
+  private int _streamStallRecoveries;
+
+  /// <summary>
+  /// Stall recoveries started (UI-36) — counted on the tick itself, before the recovery is queued, so a
+  /// test driving the tick from a fake clock can assert it exactly, with nothing still in flight.
+  /// </summary>
+  internal int StreamStallRecoveriesStarted => Volatile.Read(ref _streamStallRecoveriesStarted);
+
+  private int _streamStallRecoveriesStarted;
+
+  /// <summary>Completes when no frame is waiting to be drawn. For tests, which need a rendezvous, not a sleep.</summary>
+  internal Task DrawIdle => Volatile.Read(ref _drawLoop);
 
   // ── BAND state ──
   private BandMapResponseDto? _bandMap;
@@ -575,6 +640,19 @@
       // UI-29: subscribed before the radio-state read, so a source change during start-up is not missed.
       AudioStateHub.SourceChanged += HandleSourceChangedAsync;
 
+      // UI-36: the live frame handlers are attached FIRST, before the two HTTP reads below. They used
+      // to be attached after them, and the first render does not wait for this method: OnAfterRenderAsync
+      // initialises the canvas, subscribes, and draws ONE frame from RequestInitialData while these reads
+      // are still in flight. Until they returned, no live frame reached the canvas, so a Home page built
+      // straight after a wake — when radio-api is busy resuming the source and reloading its output
+      // settings — showed a single frozen frame for as long as the slower read took. Frames that arrive
+      // before the canvas is initialised are dropped by OfferFrame's guard. Until the saved mode is known
+      // the panel shows the default mode, exactly as RequestInitialData's first frame always has, and the
+      // move to the saved mode below moves the subscription as before.
+      VisualizationHub.OnWaveformData += HandleWaveformData;
+      VisualizationHub.OnSpectrumData += HandleSpectrumData;
+      VisualizationHub.ConnectionStateChanged += HandleHubConnectionChangedAsync;
+
       await LoadPreferencesAsync();
       await RefreshRadioActiveAsync();
       _currentMode = DisplayModeFor(_preferredMode, _radioActive);
@@ -584,9 +662,6 @@
         await VisualizationHub.StartAsync();
       }
 
-      VisualizationHub.OnWaveformData += HandleWaveformData;
-      VisualizationHub.OnSpectrumData += HandleSpectrumData;
-      VisualizationHub.ConnectionStateChanged += HandleHubConnectionChangedAsync;
       _wasHubConnected = VisualizationHub.IsConnected;
 
       // AUD-91: BAND follows the radio's band. A band picked in the radio control panel arrives here
@@ -618,14 +693,10 @@
       // SHOWN also follows the active source (SourceChanged, subscribed above): that can swap BAND for
       // Spectrum and back, but it never changes the preference.
 
-      // Publish an "updates/sec" sample once per second by snapshotting
-      // the frame counter and resetting it. The dev tray (PR 6) reads
-      // the value via VisualizerTelemetryService.
-      _telemetryTimer = new System.Threading.Timer(_ =>
-      {
-        var n = System.Threading.Interlocked.Exchange(ref _frameCountSinceLastSample, 0);
-        Telemetry.SetUpdatesPerSecond(n);
-      }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+      // Once a second: publish an "updates/sec" sample (the dev tray reads it via
+      // VisualizerTelemetryService) and, since UI-36, check the live stream for a stall. On Clock so a
+      // test can drive it; the cadence and the work are what they were, plus two integer reads.
+      _telemetryTimer = Clock.CreateTimer(_ => OnTelemetryTick(), null, TelemetryInterval, TelemetryInterval);
     }
     catch (Exception ex)
     {
@@ -954,60 +1025,290 @@
         case VisualizationMode.Waveform:
         case VisualizationMode.PhaseScope:
           var waveform = await VisualizationHub.GetWaveformAsync();
-          if (waveform != null) await HandleWaveformData(waveform);
+          if (waveform != null) OfferFrame(waveform);
           break;
         case VisualizationMode.Spectrum:
         case VisualizationMode.Circular:
           var spectrum = await VisualizationHub.GetSpectrumAsync();
-          if (spectrum != null) await HandleSpectrumData(spectrum);
+          if (spectrum != null) OfferFrame(spectrum);
           break;
       }
     }
     catch (Exception ex) { Logger.LogError(ex, "Error requesting initial visualization data"); }
   }
 
-  private async Task HandleWaveformData(WaveformDataDto data)
+  // ── live frames (UI-36: latest wins, and the hub never waits on the browser) ──────────────
+
+  /// <summary>
+  /// A waveform frame from the hub. Returns at once: the frame is handed to the draw loop, which draws
+  /// the newest frame it has whenever the browser is ready for one.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>Why this no longer awaits the draw.</b> <c>AudioVisualizationHubService</c> is one connection
+  /// shared by every circuit; its <c>InvokeEventHandlersAsync</c> awaits each subscriber in turn, and the
+  /// SignalR client finishes one message's handler before it dispatches the next. A handler that awaited
+  /// its browser round trip therefore held the whole stream for as long as that browser took to answer,
+  /// and a browser that stopped answering for a while came back to a queue of stale frames drawn one
+  /// round trip at a time. Now the hub hands over and moves on, frames that arrive while one is being
+  /// drawn replace each other, and the canvas always receives the newest frame next.
+  /// ⚠ <b>A guard, not a measured cure.</b> UI-36 found that while the panel is dark the kiosk's Chrome
+  /// renders nothing but keeps running scripts, and it observed no slow round trip; see the row's dossier.
+  /// </remarks>
+  private Task HandleWaveformData(WaveformDataDto data)
   {
-    if (_isDisposed || !_isInitialized || _jsModule == null) return;
-    if (_currentMode != VisualizationMode.Waveform && _currentMode != VisualizationMode.PhaseScope) return;
-    System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
-    var wasFirst = !_hasReceivedData;
-    _hasReceivedData = true;
-    try
+    if (_isDisposed) return Task.CompletedTask;
+    // Counted for the stall check only when it is this panel's stream: the hub connection is shared by
+    // every circuit, so another browser's Waveform frames must not hide a lost Spectrum subscription
+    // here (pre-merge review M1).
+    if (_currentMode is VisualizationMode.Waveform or VisualizationMode.PhaseScope)
     {
-      if (_currentMode == VisualizationMode.PhaseScope)
-        await _jsModule.InvokeVoidAsync("visualizer.drawPhaseScope",
-          WebConstants.ElementIds.VisualizerCanvas, data.LeftSamples, data.RightSamples);
-      else
-        await _jsModule.InvokeVoidAsync("visualizer.drawWaveform",
-          WebConstants.ElementIds.VisualizerCanvas, data.LeftSamples, data.RightSamples);
-      if (wasFirst) await InvokeAsync(StateHasChanged);
+      Interlocked.Increment(ref _hubFramesSinceLastTick);
     }
-    catch (TaskCanceledException) { }
-    catch (OperationCanceledException) { }
-    catch (Exception ex) { Logger.LogError(ex, "Error drawing waveform/{Mode}", _currentMode); }
+
+    OfferFrame(data);
+    return Task.CompletedTask;
   }
 
-  private async Task HandleSpectrumData(SpectrumDataDto data)
+  /// <summary>A spectrum frame from the hub. See <see cref="HandleWaveformData"/>.</summary>
+  private Task HandleSpectrumData(SpectrumDataDto data)
   {
-    if (_isDisposed || !_isInitialized || _jsModule == null) return;
-    if (_currentMode != VisualizationMode.Spectrum &&
-        _currentMode != VisualizationMode.Circular) return;
-    System.Threading.Interlocked.Increment(ref _frameCountSinceLastSample);
+    if (_isDisposed) return Task.CompletedTask;
+    if (_currentMode is VisualizationMode.Spectrum or VisualizationMode.Circular)
+    {
+      Interlocked.Increment(ref _hubFramesSinceLastTick);
+    }
+
+    OfferFrame(data);
+    return Task.CompletedTask;
+  }
+
+  /// <summary>Makes <paramref name="frame"/> the next frame to draw, and starts the draw loop if it is idle.</summary>
+  private void OfferFrame(object frame)
+  {
+    if (_isDisposed || !_isInitialized || _jsModule == null)
+    {
+      return;
+    }
+
+    Interlocked.Exchange(ref _pendingFrame, frame);
+    if (Interlocked.CompareExchange(ref _drawLoopRunning, 1, 0) == 0)
+    {
+      Volatile.Write(ref _drawLoop, DrainFramesAsync());
+    }
+  }
+
+  /// <summary>
+  /// Draws the newest pending frame until none is left. One loop at a time (<c>_drawLoopRunning</c>), so
+  /// at most one draw per panel is ever in flight.
+  /// </summary>
+  private async Task DrainFramesAsync()
+  {
+    // Never inline in the caller, so the hub's receive loop is never the one that runs a draw. A loop
+    // started from the hub thread continues on the thread pool; one started from the renderer (the
+    // RequestInitialData frame) continues on the renderer's dispatcher, which is harmless.
+    await Task.Yield();
+
+    while (true)
+    {
+      object? frame = Interlocked.Exchange(ref _pendingFrame, null);
+      if (frame == null)
+      {
+        Volatile.Write(ref _drawLoopRunning, 0);
+
+        // A frame offered between the exchange above and the flag write found the loop "running" and
+        // did not start one; pick it up here rather than leave it waiting for the next frame.
+        if (Volatile.Read(ref _pendingFrame) == null || Interlocked.CompareExchange(ref _drawLoopRunning, 1, 0) != 0)
+        {
+          return;
+        }
+
+        continue;
+      }
+
+      await DrawFrameAsync(frame);
+    }
+  }
+
+  /// <summary>Draws one frame for the mode on screen; a frame for another mode is dropped.</summary>
+  private async Task DrawFrameAsync(object frame)
+  {
+    IJSObjectReference? module = _jsModule;
+    if (_isDisposed || !_isInitialized || module == null) return;
+
+    string method;
+    object?[] args;
+    switch (frame)
+    {
+      case SpectrumDataDto spectrum when _currentMode is VisualizationMode.Spectrum or VisualizationMode.Circular:
+        method = _currentMode == VisualizationMode.Circular ? "visualizer.drawCircularSpectrum" : "visualizer.drawSpectrum";
+        args = [WebConstants.ElementIds.VisualizerCanvas, spectrum.Magnitudes, spectrum.Frequencies];
+        break;
+      case WaveformDataDto waveform when _currentMode is VisualizationMode.Waveform or VisualizationMode.PhaseScope:
+        method = _currentMode == VisualizationMode.PhaseScope ? "visualizer.drawPhaseScope" : "visualizer.drawWaveform";
+        args = [WebConstants.ElementIds.VisualizerCanvas, waveform.LeftSamples, waveform.RightSamples];
+        break;
+      default:
+        return;
+    }
+
+    Interlocked.Increment(ref _frameCountSinceLastSample);
     var wasFirst = !_hasReceivedData;
     _hasReceivedData = true;
+    long started = Clock.GetTimestamp();
     try
     {
-      var method = _currentMode == VisualizationMode.Circular
-        ? "visualizer.drawCircularSpectrum"
-        : "visualizer.drawSpectrum";
-      await _jsModule.InvokeVoidAsync(method,
-        WebConstants.ElementIds.VisualizerCanvas, data.Magnitudes, data.Frequencies);
+      try
+      {
+        await module.InvokeVoidAsync(method, args);
+      }
+      finally
+      {
+        // In a finally, so a draw that ends in the interop timeout — the slowest browser of all — is
+        // logged too rather than swallowed by the cancellation catches below (pre-merge review M2).
+        NoteDrawDuration(Clock.GetElapsedTime(started));
+      }
+
       if (wasFirst) await InvokeAsync(StateHasChanged);
     }
     catch (TaskCanceledException) { }
     catch (OperationCanceledException) { }
-    catch (Exception ex) { Logger.LogError(ex, "Error drawing spectrum/{Mode}", _currentMode); }
+    catch (JSDisconnectedException) { /* the circuit is going away; its dispose follows */ }
+    catch (Exception ex) { Logger.LogError(ex, "Error drawing {Method}", method); }
+  }
+
+  /// <summary>
+  /// UI-36's browser-side instrument: one warning when a single frame takes longer than
+  /// <see cref="SlowDrawThreshold"/> to be accepted, re-armed by the next fast one.
+  /// </summary>
+  private void NoteDrawDuration(TimeSpan elapsed)
+  {
+    if (elapsed >= SlowDrawThreshold)
+    {
+      if (!_slowDrawLogged)
+      {
+        _slowDrawLogged = true;
+        Logger.LogWarning(
+          "Visualizer: the browser took {Milliseconds} ms to accept one frame; frames were coalesced meanwhile (UI-36)",
+          (long)elapsed.TotalMilliseconds);
+      }
+    }
+    else
+    {
+      _slowDrawLogged = false;
+    }
+  }
+
+  /// <summary>
+  /// The once-a-second tick: publishes the updates/sec sample and runs the stall check (UI-36).
+  /// </summary>
+  private void OnTelemetryTick()
+  {
+    var drawn = Interlocked.Exchange(ref _frameCountSinceLastSample, 0);
+    try { Telemetry.SetUpdatesPerSecond(drawn); } catch (Exception ex) { Logger.LogDebug(ex, "Telemetry publish failed"); }
+
+    int arrived = Interlocked.Exchange(ref _hubFramesSinceLastTick, 0);
+    CheckForStall(arrived);
+  }
+
+  /// <summary>
+  /// UI-36: a hub-fed panel that is initialised and connected but has received no frame for
+  /// <see cref="StallTicks"/> ticks re-asserts its subscription and asks for a frame — once at the
+  /// threshold, then with backoff while the stream stays down — and logs the stall's start and end.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// ⚠ <b>What this does and does not guard.</b> It recovers a stream whose group membership was lost
+  /// while the connection stayed up — <c>UI-33</c>'s shared subscription set is one known way, since
+  /// another panel's dispose can leave the group on the one shared connection — within about two
+  /// seconds instead of never. It cannot make a browser present frames it is not presenting; for that
+  /// case the slow-draw line in <see cref="NoteDrawDuration"/> is the evidence, and the two lines
+  /// together say which side a future pause was on.
+  /// </para>
+  /// <para>
+  /// Re-subscribing is safe to repeat: the API's <c>SubscribeTo*</c> is a SignalR group add, which is
+  /// idempotent, and <c>AudioVisualizationHubService</c> records the group in a set.
+  /// </para>
+  /// </remarks>
+  private void CheckForStall(int framesArrived)
+  {
+    bool watching = !_isDisposed && _isInitialized && !IsBandMode && VisualizationHub.IsConnected;
+    if (!watching || framesArrived > 0)
+    {
+      if (_silentTicks >= StallTicks && framesArrived > 0)
+      {
+        Logger.LogInformation(
+          "Visualizer: live frames resumed after {Seconds:0.0} s (UI-36)",
+          (Clock.GetUtcNow() - _stallStartedAt).TotalSeconds);
+      }
+
+      _silentTicks = 0;
+      _nextRecoveryAtSilentTicks = StallTicks;
+      return;
+    }
+
+    if (_silentTicks == 0)
+    {
+      _stallStartedAt = Clock.GetUtcNow() - TelemetryInterval;
+    }
+
+    _silentTicks++;
+    if (_silentTicks < _nextRecoveryAtSilentTicks)
+    {
+      return;
+    }
+
+    if (_silentTicks == StallTicks)
+    {
+      Logger.LogWarning(
+        "Visualizer: no live frame for {Seconds} s while connected; re-subscribing to {Mode} (UI-36)",
+        StallTicks * (int)TelemetryInterval.TotalSeconds, _currentMode);
+    }
+
+    // Backoff: 2, 5, 10, 30 silent ticks, then every 30 — a stream that stays down is re-asked, not hammered.
+    _nextRecoveryAtSilentTicks = _silentTicks switch
+    {
+      < 5 => 5,
+      < 10 => 10,
+      _ => _silentTicks + 30,
+    };
+
+    Interlocked.Increment(ref _streamStallRecoveriesStarted);
+    _ = RecoverStreamAsync();
+  }
+
+  private async Task RecoverStreamAsync()
+  {
+    try
+    {
+      await InvokeAsync(async () =>
+      {
+        // Under the mode gate, so a mode change cannot interleave with the re-subscribe and leave the
+        // panel subscribed to a mode it is not showing.
+        await _modeGate.WaitAsync();
+        try
+        {
+          if (_isDisposed || IsBandMode)
+          {
+            return;
+          }
+
+          await SubscribeToCurrentMode();
+          await RequestInitialData();
+        }
+        finally
+        {
+          _modeGate.Release();
+        }
+      });
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Visualizer stream recovery did not complete");
+    }
+    finally
+    {
+      Interlocked.Increment(ref _streamStallRecoveries);
+    }
   }
 
   // ── BAND ────────────────────────────────────────────────────────────────

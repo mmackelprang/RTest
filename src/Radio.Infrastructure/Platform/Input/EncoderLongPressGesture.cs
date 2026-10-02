@@ -85,6 +85,25 @@ public sealed class EncoderLongPressGesture : IDisposable
     }
   }
 
+  /// <summary>
+  /// Whether this gesture currently has the button of <paramref name="index"/> down — from its press
+  /// edge until its release, including after the long action fired, and false once a turn has cancelled
+  /// the press (<see cref="OnTurn"/>). A press the router consumed before it reached the gesture (a
+  /// sleep wake) was never recorded, so it reads false.
+  /// </summary>
+  public bool IsHeld(int index)
+  {
+    if (index < 0 || index >= _state.Length)
+    {
+      return false;
+    }
+
+    lock (_gate)
+    {
+      return _state[index].IsDown;
+    }
+  }
+
   /// <summary>Feeds one button edge in. <paramref name="isPressed"/> false is a release.</summary>
   public void OnButtonEdge(int index, bool isPressed)
   {

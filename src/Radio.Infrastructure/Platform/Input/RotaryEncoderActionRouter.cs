@@ -51,7 +51,29 @@ public class RotaryEncoderActionRouter : IDisposable
   private readonly SourceSelectorService _sourceSelector;
   private readonly PresetSelectorService _presetSelector;
   private readonly EncoderLongPressGesture _gesture;
+  private readonly TimeProvider _time;
+  private readonly object _volumeTurnLock = new();
   private bool _disposed;
+
+  // ENC-25: when the VOLUME button last changed state (either edge), read by the Standby turn-wake rule
+  // so a jostle as the finger leaves the knob that just entered Standby cannot wake it straight back.
+  // Ticks of _time's UTC clock, accessed with Volatile: which thread raises the encoder events is the
+  // encoder service's business, so this class does not rely on both edges and turns sharing one.
+  private long _lastVolumeButtonEdgeTicks = DateTimeOffset.MinValue.UtcTicks;
+
+  // ENC-25: the most recent wake-then-turn, for tests (WakeTurnIdle).
+  private Task _wakeTurn = Task.CompletedTask;
+
+  /// <summary>
+  /// ENC-25: how long after the VOLUME button's last edge a VOLUME turn in Standby is still treated as
+  /// part of that press rather than as a request to wake. The HID parse raises a report's button edges
+  /// before its turn, so the release that ends the hold which entered Standby can arrive in the same
+  /// report as a stray detent; without this window that detent would wake the console it just parked.
+  /// </summary>
+  internal static readonly TimeSpan VolumeTurnWakeSettle = TimeSpan.FromMilliseconds(500);
+
+  /// <summary>Completes when the most recent ENC-25 wake-then-turn has finished. For tests.</summary>
+  internal Task WakeTurnIdle => Volatile.Read(ref _wakeTurn);
 
   private readonly RotaryEncoderMapping[] _mapping;
   // (index, delta) rather than ENC-8's (delta): ENC-5 threads the encoder index the event actually
@@ -101,6 +123,7 @@ public class RotaryEncoderActionRouter : IDisposable
     _presetSelector = presetSelector;
     _sleepService = sleepService;
     _panelPower = panelPower;
+    _time = timeProvider ?? TimeProvider.System;
 
     // Index-ordered and index-addressed: entry n dispatches encoder n. Kept as three parallel arrays
     // rather than delegates on the record so the record stays a plain data type the API can project.
@@ -180,7 +203,9 @@ public class RotaryEncoderActionRouter : IDisposable
       // screen that comes back is the one that went dark (the browser is untouched by a power cycle).
       // That holds for a deep-sleep dark panel too (ENC-23): only a VOLUME PRESS wakes from that, so a
       // turn just lights the sleep screen the pill's hold left behind (Standby), where a later press
-      // wakes through the sleep gate below.
+      // wakes through the sleep gate below — and, since ENC-25, so does a later VOLUME turn, once the
+      // panel's wake grace window (PanelPowerOptions.WakeGraceMilliseconds) has passed. The turn that
+      // lit the panel is still spent on lighting it, and so is every input inside that window.
       PanelInputOutcome panel = _panelPower?.OnEncoderInput("encoder-turn") ?? PanelInputOutcome.Pass;
       if (panel != PanelInputOutcome.Pass)
       {
@@ -188,6 +213,15 @@ public class RotaryEncoderActionRouter : IDisposable
       }
 
       SleepGateOutcome gate = GateInput(e.EncoderIndex, isTurn: true);
+      if (gate == SleepGateOutcome.WakeThenDispatch)
+      {
+        // ENC-25: a VOLUME turn in Standby. Not awaited — the encoder read loop must not wait on a
+        // wake that resumes audio — and the turn is applied only after the wake has finished; see
+        // WakeThenTurnAsync for why that order.
+        Volatile.Write(ref _wakeTurn, WakeThenTurnAsync(e.EncoderIndex, e.Delta));
+        return;
+      }
+
       if (gate != SleepGateOutcome.Dispatch)
       {
         PublishCurrentValue(e.EncoderIndex);
@@ -229,6 +263,13 @@ public class RotaryEncoderActionRouter : IDisposable
       // letting the release through would fire a short action into a UI that has just changed
       // underneath the user. The release that follows a consumed press reaches the gesture and is
       // dropped by its orphan-release guard, which exists for exactly this path.
+      // ENC-25: every VOLUME edge is timed, before any gate can consume it, because the turn-wake
+      // rule's settle window is about the finger, not about what the edge went on to do.
+      if (e.EncoderIndex == RotaryEncoderConfigDefaults.VolumeEncoderIndex)
+      {
+        Volatile.Write(ref _lastVolumeButtonEdgeTicks, _time.GetUtcNow().UtcTicks);
+      }
+
       if (e.IsPressed)
       {
         // ENC-22, as in OnEncoderTurned. The press edge only, for the same reason the sleep gate is
@@ -433,6 +474,12 @@ public class RotaryEncoderActionRouter : IDisposable
 
     /// <summary>Spend this input: publish this knob's current value, run no handler, and do not wake.</summary>
     Consume,
+
+    /// <summary>
+    /// ENC-25: start the wake, and run the handler once the wake has finished. Only a VOLUME turn in
+    /// Standby gets this.
+    /// </summary>
+    WakeThenDispatch,
   }
 
   /// <summary>
@@ -441,7 +488,13 @@ public class RotaryEncoderActionRouter : IDisposable
   /// <para>
   /// Rule 2 on a lit panel: VOLUME acts in place and everything else is spent waking. Standby adds
   /// D22 on top of it — a <b>turn</b> never resumes audio, only a press or a screen tap does — so a
-  /// turn there is consumed without a wake. <b>Rule 1 (the dark panel) is not applied here</b>: since
+  /// turn there is consumed without a wake, with one exception since <c>ENC-25</c>: a <b>VOLUME</b>
+  /// turn wakes the console and then applies itself (<see cref="SleepGateOutcome.WakeThenDispatch"/>).
+  /// The owner, 2026-10-02: <i>"In normal sleep, I expect a volume change to wake the console, but it
+  /// only shows the new volume without waking."</i> The other three knobs keep D22: a turn of SOURCE,
+  /// PRESETS or TUNING in Standby is still consumed and shows that knob's current value. Two guards keep
+  /// the exception from undoing the hold that entered Standby (<see cref="VolumeTurnMayWake"/>).
+  /// <b>Rule 1 (the dark panel) is not applied here</b>: since
   /// <c>ENC-22</c> it is <see cref="IPanelPowerService.OnEncoderInput"/>, which the two handlers call
   /// before this method and which consumes any input that lights a dark panel (or arrives inside the
   /// wake grace window). By the time an input reaches this gate the panel is lit, so only the lit
@@ -470,6 +523,17 @@ public class RotaryEncoderActionRouter : IDisposable
         // which is why this needs no code of its own.
         return SleepGateOutcome.Dispatch;
 
+      case ConsoleWakeState.Standby when isTurn
+                                          && index == RotaryEncoderConfigDefaults.VolumeEncoderIndex
+                                          && VolumeTurnMayWake():
+        // ENC-25. Once one detent has claimed the wake, WakeState reads Awake, so the later detents of
+        // a fast spin dispatch straight to the handler and the console is woken once. A claim lost here
+        // means another input won the race between the WakeState read and the claim, and dispatching
+        // is right for the same reason it is in the Ambient case below.
+        return _sleepService.TryClaimWake()
+          ? SleepGateOutcome.WakeThenDispatch
+          : SleepGateOutcome.Dispatch;
+
       case ConsoleWakeState.Standby when isTurn:
         return SleepGateOutcome.Consume;
 
@@ -484,6 +548,56 @@ public class RotaryEncoderActionRouter : IDisposable
 
       default:
         return SleepGateOutcome.Dispatch;
+    }
+  }
+
+  /// <summary>
+  /// ENC-25's two guards on a VOLUME turn waking the console from Standby. Both are about the hold on
+  /// this same knob that enters Standby (ENC-24 kept a hold that a turn cancels from entering it at all;
+  /// these keep a hold that did enter it from being undone by the hand that made it).
+  /// <list type="number">
+  ///   <item>The VOLUME button is not held. A hold fires its long action at the threshold with the
+  ///   finger still down, so the console is in Standby while the knob is still in the hand, and a turn
+  ///   then is that hand, not a request to wake.</item>
+  ///   <item>At least <see cref="VolumeTurnWakeSettle"/> has passed since the VOLUME button's last edge,
+  ///   which covers a stray detent arriving with, or just after, the release.</item>
+  /// </list>
+  /// A turn that fails either guard is consumed as before, showing the current volume.
+  /// </summary>
+  private bool VolumeTurnMayWake()
+  {
+    int volume = RotaryEncoderConfigDefaults.VolumeEncoderIndex;
+    if (_gesture.IsHeld(volume))
+    {
+      return false;
+    }
+
+    long sinceEdgeTicks = _time.GetUtcNow().UtcTicks - Volatile.Read(ref _lastVolumeButtonEdgeTicks);
+    return sinceEdgeTicks >= VolumeTurnWakeSettle.Ticks;
+  }
+
+  /// <summary>
+  /// ENC-25: wakes the console, then applies the VOLUME turn that woke it.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>The order is the point.</b> <c>SleepService.WakeAsync</c> restores the mute state from before
+  /// sleep, and the volume handler clears mute on its first detent (ENC-4b). Applied before the wake,
+  /// the turn's unmute would be overwritten by that restore whenever the console was muted before it
+  /// slept, leaving a knob that moved a volume nobody can hear. Applied after, the turn behaves exactly
+  /// as it does on an awake console: it unmutes and moves the volume. A wake that throws applies nothing.
+  /// </remarks>
+  private async Task WakeThenTurnAsync(int index, int delta)
+  {
+    try
+    {
+      await _sleepService!.WakeAsync("encoder-volume-turn").ConfigureAwait(false);
+      // "Requested", not "woke": WakeAsync returns without waking if another wake landed first.
+      _logger.LogInformation("VOLUME turn in Standby: wake requested; applying the turn");
+      _turnHandlers[index](index, delta);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Error waking from Standby via a VOLUME turn");
     }
   }
 
@@ -640,8 +754,16 @@ public class RotaryEncoderActionRouter : IDisposable
       _logger.LogInformation("Unmuted by a volume knob turn");
     }
 
-    var newVolume = Math.Clamp(mgr.MasterVolume + clamped * step, 0f, 1f);
-    mgr.MasterVolume = newVolume;
+    // Under a lock since ENC-25: the turn that woke the console from Standby is applied on a thread-pool
+    // continuation after the wake, possibly while the later detents of the same spin run here on the
+    // encoder thread, and an unguarded read-modify-write would lose one of them (pre-merge review L1).
+    float newVolume;
+    lock (_volumeTurnLock)
+    {
+      newVolume = Math.Clamp(mgr.MasterVolume + clamped * step, 0f, 1f);
+      mgr.MasterVolume = newVolume;
+    }
+
     _logger.LogDebug("Volume: {Volume:P0}", newVolume);
 
     PublishHud(index, "VOLUME", b =>
