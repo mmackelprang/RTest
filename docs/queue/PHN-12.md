@@ -45,9 +45,11 @@ page consume.
   is none), and raising both would announce "Unknown caller" and then cut it off milliseconds later (`AUD-87`'s
   `PhoneCallIntegrationService` treats every `Ringing` as a new call). A caller-ID update (the real number
   replacing `"Unknown"`) raises again, which restarts the announcement with the better name — intended.
-- Every `CallStateChanged(…, "Ringing")` resets the ring, and a hub reconnect forgets it, so one missed `Idle`
-  cannot silence the same caller's next call (pre-merge review M3). The same number arriving twice with no
-  `Ringing` between is a duplicate and is not raised.
+- Every `CallStateChanged(…, "Ringing")` resets the ring — RotaryPhone sends one before every `IncomingCall` — so
+  one missed `Idle` cannot silence the same caller's next call (pre-merge review M3). The same number arriving
+  twice with no `CallStateChanged` between is a duplicate delivery and is not raised. (A reconnect-time reset was
+  tried and removed on re-review: redundant with the per-`Ringing` reset, and it set the reported state to `Idle`
+  silently mid-ring.)
 - **RotaryPhone's `"Unknown"` is raised as no number** (review M4): passed through, the API would have said
   *"Incoming call from Unknown"*, looked it up as a contact and reported it back to RotaryPhone as a resolved
   name. As null, the announcement says *"Unknown caller"* and does neither.
@@ -74,8 +76,10 @@ page consume.
 - `PhoneCallIntegrationLogSafetyTests.PHN12_ACallWithNoCallerId_…` — a ring with no number is announced as
   "Unknown caller", with no lookup and no report back.
 
-Mutation checks: see [`PHN-11`](PHN-11.md) § Mutation checks (M1–M4, N1–N2). **Not covered by a test:** the
-reconnect handler forgetting the ring.
+Mutation checks: see [`PHN-11`](PHN-11.md) § Mutation checks (M1–M4, N1–N2).
+
+`SystemConfigPage`'s phone status row shows **Unknown caller** for a ring with no number (it showed a blank once
+`"Unknown"` stopped arriving as a number; found on re-review).
 
 ## Owner check
 

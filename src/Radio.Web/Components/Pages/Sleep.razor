@@ -67,8 +67,10 @@
     @* ENC-4 / handoff §8.6 — while a knob readout is up it replaces the alternating
        clock/weather composition for its lifetime, and the composition is restored afterward.
        Rendering it alongside the clock would put two large emissive elements inside the same
-       anti-burn-in wrapper. *@
-    @if (EncoderHud.HasRenderableCard)
+       anti-burn-in wrapper.
+       PHN-11: not while the call banner covers the screen — the fixed-position readout below the banner is
+       the one that can be seen then, and two would be two live regions announcing every detent. *@
+    @if (EncoderHud.HasRenderableCard && !_bannerCovering)
     {
       <EncoderHud Variant="EncoderHudVariant.Sleep" />
     }

@@ -127,9 +127,15 @@ number, the per-phone read, overlapping reads, `CallId` splitting, emptied live 
 staying quiet, the in-flight aria-label, keys on the covered sleep screen, the HUD over the banner. M1–M4, M10,
 M14, M18 and M19 were re-run against the refactored code: all killed.
 
-**Not covered by a test:** the dispose report waiting on the report gate; `Start` re-checking `Dispose`;
-`PhoneCallClient` forgetting the ring on reconnect; that a live region is empty at its first render (bUnit cannot
-observe the first render separately).
+**Not covered by a test:** the dispose report waiting on the report gate; `Start` re-checking `Dispose`; that a
+live region is empty at its first render (bUnit cannot observe the first render separately —
+`ACallAlreadyUpWhenTheBannerMounts_…` pins the announcement, not the empty first paint).
+
+**Known, left as is (re-review LOWs):** a `CallId` split can misfire if the hub is *late* rather than lost (a
+status read sees the new call before a delayed `Idle`): a CALL ENDED flash and a second announcement — only with a
+hub lagging by seconds without disconnecting. On a host that took a call over mid-ring, later caller-ID upgrades
+swap without the 200 ms fade. An unknown phone id in the status read logs at Error on each 3 s read until the 90 s
+stale close (ids come from RotaryPhone's own hub, so only a phone set changed mid-call reaches it).
 
 ## Owner checks (needs a real call)
 

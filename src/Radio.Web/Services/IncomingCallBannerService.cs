@@ -504,21 +504,22 @@ public sealed class IncomingCallBannerService : IDisposable
 
   private async Task PollAsync()
   {
-    List<TrackedCall> calls;
+    List<(TrackedCall Call, string? PhoneId)> calls;
     lock (_gate)
     {
       if (_ringing.Count == 0 || _disposed)
       {
         return;
       }
-      calls = [.. _ringing];
+      // The phone ids are read here, under the lock, like every other field of a tracked call.
+      calls = _ringing.Select(c => (c, c.PhoneId)).ToList();
     }
 
     // Each tracked call's own phone (null = the default phone, for a call first seen by the start-up read).
     var reads = new List<(TrackedCall Call, PhoneCallStateDto? State)>(calls.Count);
-    foreach (var call in calls)
+    foreach (var (call, phoneId) in calls)
     {
-      reads.Add((call, await ReadStatusAsync(call.PhoneId)));
+      reads.Add((call, await ReadStatusAsync(phoneId)));
     }
 
     bool changed = false;
@@ -549,6 +550,10 @@ public sealed class IncomingCallBannerService : IDisposable
           // Ringing, but a DIFFERENT call: the Idle that ended the tracked one was lost, and the next ring
           // merged into it (a touch-closed one would have kept the new call off the screen). Split it off as
           // the new call it is — fresh, not touched away, no exit beat for the old one.
+          // ⚠ This assumes the Idle was LOST. If it is merely LATE (a hub lagging by seconds without
+          // disconnecting), it arrives after the split and ends the new call, and the late Ringing then starts
+          // it again: a CALL ENDED flash and a second announcement. Accepted; RotaryPhone replays nothing on a
+          // real drop, which is the case this exists for.
           _ringing.Remove(call);
           call.DeclineTimer?.Dispose();
           call.DeclineTimer = null;

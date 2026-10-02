@@ -43,9 +43,11 @@ public class PhoneCallClient : IPhoneIntegrationService
   private string? _callerNumber;
   private string? _callerName;
 
-  // The number this ring was last raised for, so a re-sent IncomingCall with the same number does not
-  // restart the announcement (PhoneCallIntegrationService treats every Ringing as a new call). Cleared on
-  // any other state.
+  // The raw number this ring was last raised for, so an IncomingCall repeated with NO CallStateChanged
+  // between them is not raised twice (PhoneCallIntegrationService treats every Ringing as a new call and
+  // would restart the announcement). Cleared by every CallStateChanged — Ringing included, because
+  // RotaryPhone sends one before every IncomingCall — so in practice it only ever stops a duplicate
+  // delivery, never a real ring.
   private string? _ringRaisedFor;
 
   public PhoneCallClient(
@@ -111,10 +113,6 @@ public class PhoneCallClient : IPhoneIntegrationService
     };
     _hubConnection.Reconnected += _ =>
     {
-      // Whatever was missed while disconnected — an Idle, most likely — is unknowable, and RotaryPhone does
-      // not replay state on reconnect. Forget the ring, so the next IncomingCall raises even if it is the
-      // same number as the ring the dropped Idle should have ended.
-      ForgetRing();
       _logger.LogInformation("RotaryPhone hub reconnected");
       return Task.CompletedTask;
     };
@@ -236,17 +234,6 @@ public class PhoneCallClient : IPhoneIntegrationService
       State = PhoneCallState.Ringing,
       PhoneNumber = number,
     });
-  }
-
-  private void ForgetRing()
-  {
-    lock (_gate)
-    {
-      _currentState = PhoneCallState.Idle;
-      _callerNumber = null;
-      _callerName = null;
-      _ringRaisedFor = null;
-    }
   }
 
   private static PhoneCallState ParseCallState(string state)

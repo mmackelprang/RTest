@@ -134,6 +134,8 @@ public class SleepIncomingCallBannerTests : TestContext
     });
 
     cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".encoder-hud:not(.encoder-hud--sleep)")));
+    // ...and only that one: the trapped Sleep variant would be a second live region for every detent.
+    Assert.Empty(cut.FindAll(".encoder-hud--sleep"));
   }
 
   [Fact]
