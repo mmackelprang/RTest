@@ -593,6 +593,57 @@ public class RotaryEncoderRouterMappingTests
     Assert.Equal(0, h.Audio.MuteWrites);
   }
 
+  // --- ENC-24: a turn while VOLUME is held cancels the hold ---------------------------------
+
+  [Fact]
+  public void VolumePressAndTurn_PastTheThreshold_NeitherStandbyNorMute_AndTheTurnStillApplies()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseTurn(0, 1);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+    Assert.Equal(0, h.Audio.MuteWrites);
+    Assert.False(h.Audio.IsMuted);
+    // The turn is still a turn: the volume moved.
+    Assert.True(h.Audio.MasterVolume > 0.5f);
+  }
+
+  [Fact]
+  public void VolumePressAndTurn_PublishesTheHoldCancelBeforeTheTurnsOwnCard()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseTurn(0, 1);
+
+    // HoldStart (press-down), HoldCancel (the turn ended the hold), then the turn's own Value card,
+    // so the ring collapses and the card left on screen is the new volume.
+    Assert.Equal(
+      new[] { EncoderHudPhase.HoldStart, EncoderHudPhase.HoldCancel, EncoderHudPhase.Value },
+      h.Hud.Published.Select(c => c.Phase).ToArray());
+  }
+
+  [Fact]
+  public void VolumeShortPress_TogglesMuteOnRelease_NotOnPressDown()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    Assert.Equal(0, h.Audio.MuteWrites);
+
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(1, h.Audio.MuteWrites);
+    Assert.True(h.Audio.IsMuted);
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+  }
+
   /// <summary>
   /// Pins SOURCE (index 1): the selector knob that still has no long action, so it commits nothing
   /// and promises nothing. Kept under its original name because it moved knobs rather than

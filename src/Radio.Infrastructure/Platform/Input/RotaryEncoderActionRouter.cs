@@ -167,6 +167,12 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
+      // ENC-24, first of all: a turn of a knob whose button is held cancels that hold, so the press
+      // fires neither its long action at the threshold nor its short action on release. It runs
+      // before the panel gate so that a consumed turn still cancels the hold, and before the turn's
+      // own handler so that the HoldCancel card is published ahead of the turn's own card.
+      _gesture.OnTurn(e.EncoderIndex);
+
       // ENC-22, ahead of every other gate: a turn on a dark panel is spent lighting it. Nothing else
       // happens — no HUD card, no sleep wake — because nothing on the panel is visible yet, and the
       // screen that comes back is the one that went dark (the browser is untouched by a power cycle).

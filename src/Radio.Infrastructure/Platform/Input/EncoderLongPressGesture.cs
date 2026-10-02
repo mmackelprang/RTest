@@ -46,7 +46,10 @@ public sealed class EncoderLongPressGesture : IDisposable
   /// <summary>Fired on press-down, so the HUD can start the progress ring.</summary>
   public event Action<int>? HoldStarted;
 
-  /// <summary>Fired on an early release, so the HUD can collapse the ring.</summary>
+  /// <summary>
+  /// Fired on an early release, or on a turn of the held knob (<see cref="OnTurn"/>), so the HUD can
+  /// collapse the ring.
+  /// </summary>
   public event Action<int>? HoldCancelled;
 
   public EncoderLongPressGesture(int encoderCount, ILogger logger, TimeProvider? timeProvider = null)
@@ -104,7 +107,8 @@ public sealed class EncoderLongPressGesture : IDisposable
         // A release edge with no press recorded for it. The case this guard exists for is the
         // sleep-wake path in RotaryEncoderActionRouter: that consumes the PRESS edge to wake, so
         // this gesture never saw the press and there is no hold to end. Synthesising a short action
-        // out of the release would fire it into a UI that just changed underneath the user.
+        // out of the release would fire it into a UI that just changed underneath the user. The
+        // second path is OnTurn: a turn of the held knob ends the press, and its release lands here.
         if (!s.IsDown)
         {
           return;
@@ -138,6 +142,53 @@ public sealed class EncoderLongPressGesture : IDisposable
     // asserted the opposite of the truth for the card's full lifetime. This order also makes
     // EncoderHudPhase.HoldCancel's "the short action fired" true of the event it names.
     if (raiseShort) { Raise(ShortPress, index, nameof(ShortPress)); }
+    if (raiseHoldCancelled) { Raise(HoldCancelled, index, nameof(HoldCancelled)); }
+  }
+
+  /// <summary>
+  /// Feeds one detent in. A turn on a knob whose button is held, and whose long action has not yet
+  /// fired, cancels that hold (ENC-24).
+  ///
+  /// <para>
+  /// A press-and-turn is neither a click nor a hold. Without this, holding VOLUME while adjusting it
+  /// would drop the console into Standby at the threshold, and releasing a sub-threshold
+  /// press-and-turn would toggle mute.
+  /// </para>
+  ///
+  /// <para>
+  /// The cancel ends the press: the timer is disposed and the button is recorded as up, so the
+  /// release that follows is dropped by the orphan-release guard in <see cref="OnButtonEdge"/> and
+  /// neither <see cref="ShortPress"/> nor <see cref="LongPress"/> fires for this press.
+  /// <see cref="HoldCancelled"/> is raised once, so the HUD can collapse the ring. A turn after the
+  /// long action fired, a turn with the button up, and a turn on a different index do nothing here.
+  /// </para>
+  /// </summary>
+  public void OnTurn(int index)
+  {
+    if (index < 0 || index >= _state.Length)
+    {
+      return;
+    }
+
+    bool raiseHoldCancelled = false;
+
+    lock (_gate)
+    {
+      if (_disposed)
+      {
+        return;
+      }
+
+      PressState s = _state[index];
+      if (s.IsDown && !s.LongFired)
+      {
+        s.Timer?.Dispose();
+        s.Timer = null;
+        s.IsDown = false;
+        raiseHoldCancelled = true;
+      }
+    }
+
     if (raiseHoldCancelled) { Raise(HoldCancelled, index, nameof(HoldCancelled)); }
   }
 

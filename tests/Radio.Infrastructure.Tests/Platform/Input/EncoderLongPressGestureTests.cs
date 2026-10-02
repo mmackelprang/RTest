@@ -214,4 +214,141 @@ public class EncoderLongPressGestureTests
     Assert.Empty(rec.HoldCancelled);
     Assert.Empty(rec.HoldStarted);
   }
+
+  // --- ENC-24: a turn while held cancels the hold ------------------------------------------
+
+  [Fact]
+  public void TurnDuringHold_CancelsIt_NeitherLongNorShortFires()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(200));
+    gesture.OnTurn(0);
+    time.Advance(TimeSpan.FromMilliseconds(ThresholdMs + 400));
+
+    // Holding VOLUME while adjusting it must not drop the console into Standby.
+    Assert.Empty(rec.LongPress);
+
+    gesture.OnButtonEdge(0, false);
+
+    // ...and releasing a press-and-turn must not toggle mute.
+    Assert.Empty(rec.ShortPress);
+    Assert.Equal(new[] { 0 }, rec.HoldCancelled);
+  }
+
+  [Fact]
+  public void SeveralTurnsDuringHold_RaiseHoldCancelledOnce()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    gesture.OnTurn(0);
+    gesture.OnTurn(0);
+    gesture.OnTurn(0);
+    gesture.OnButtonEdge(0, false);
+
+    Assert.Equal(new[] { 0 }, rec.HoldCancelled);
+    Assert.Empty(rec.ShortPress);
+  }
+
+  [Fact]
+  public void TurnOnAnotherIndex_DoesNotCancelTheHold()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    gesture.OnTurn(1);
+    time.Advance(TimeSpan.FromMilliseconds(ThresholdMs));
+
+    Assert.Equal(new[] { 0 }, rec.LongPress);
+    Assert.Empty(rec.HoldCancelled);
+  }
+
+  [Fact]
+  public void TurnOnAnotherIndex_DoesNotCancelAShortPress()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    gesture.OnTurn(3);
+    gesture.OnButtonEdge(0, false);
+
+    Assert.Equal(new[] { 0 }, rec.ShortPress);
+  }
+
+  [Fact]
+  public void TurnAfterLongPressFired_ChangesNothing()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(ThresholdMs));
+    gesture.OnTurn(0);
+    gesture.OnButtonEdge(0, false);
+
+    Assert.Equal(new[] { 0 }, rec.LongPress);
+    Assert.Empty(rec.ShortPress);
+    // The release is still the inert post-long release, and the turn raised no cancel of its own.
+    Assert.Empty(rec.HoldCancelled);
+  }
+
+  [Fact]
+  public void TurnWithNoPress_IsANoOp()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnTurn(0);
+    gesture.OnTurn(-1);
+    gesture.OnTurn(99);
+    time.Advance(TimeSpan.FromMilliseconds(1000));
+
+    Assert.Empty(rec.HoldCancelled);
+    Assert.Empty(rec.ShortPress);
+    Assert.Empty(rec.LongPress);
+  }
+
+  [Fact]
+  public void AfterATurnCancel_AFreshPressAndReleaseIsANormalShortPress()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    gesture.OnTurn(0);
+    gesture.OnButtonEdge(0, false);
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(200));
+    gesture.OnButtonEdge(0, false);
+
+    Assert.Equal(new[] { 0 }, rec.ShortPress);
+    Assert.Equal(2, rec.HoldStarted.Count);
+    Assert.Equal(2, rec.HoldCancelled.Count);
+    Assert.Empty(rec.LongPress);
+  }
+
+  [Fact]
+  public void AfterATurnCancel_AFreshHoldStillFiresTheLongAction()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out var rec);
+
+    gesture.OnButtonEdge(0, true);
+    gesture.OnTurn(0);
+    gesture.OnButtonEdge(0, false);
+
+    gesture.OnButtonEdge(0, true);
+    time.Advance(TimeSpan.FromMilliseconds(ThresholdMs));
+
+    Assert.Equal(new[] { 0 }, rec.LongPress);
+  }
+
+  private const int ThresholdMs = Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs;
 }
