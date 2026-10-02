@@ -334,9 +334,10 @@ public class SleepService : ISleepService
       await _hubContext.Clients.All
         .SendAsync("SleepStateChanged", true);
 
-      // No display power here. The panel is powered off, if at all, by PanelPowerService (ENC-22)
-      // after a period on the sleep screen — which this route reaches via MainLayout navigating to
-      // /sleep on the SleepStateChanged push above.
+      // No display power here. The panel is powered off, if at all, by PanelPowerService: by its ENC-22
+      // timer after a period on the sleep screen — which this route reaches via MainLayout navigating
+      // to /sleep on the SleepStateChanged push above — or at once, when SystemController's deep-sleep
+      // path (ENC-23, panelOff: true) calls PowerOffNow after this method returns.
 
       _logger.LogInformation("Sleep mode entered");
     }

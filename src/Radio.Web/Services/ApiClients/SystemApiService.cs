@@ -81,6 +81,27 @@ public class SystemApiService
   }
 
   /// <summary>
+  /// Deep sleep (<c>ENC-23</c>, the Sleep pill's hold): enters sleep and asks the API to power the
+  /// panel off now. Returns whether the request succeeded — <b>not</b> whether the panel went dark:
+  /// the API still enters sleep when it refuses the power-off (no encoder connected and stable, or no
+  /// panel power service on its host), and reports that only in its response body.
+  /// </summary>
+  public async Task<bool> EnterDeepSleepAsync(CancellationToken cancellationToken = default)
+  {
+    try
+    {
+      var response = await _httpClient.PostAsJsonAsync(
+        "/api/system/sleep", new { sleep = true, panelOff = true }, cancellationToken);
+      return response.IsSuccessStatusCode;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to enter deep sleep");
+      return false;
+    }
+  }
+
+  /// <summary>
   /// Reports whether the <c>/sleep</c> route is on screen, and returns the resulting state.
   /// </summary>
   /// <remarks>

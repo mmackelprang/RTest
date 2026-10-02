@@ -302,6 +302,28 @@ public class SystemControllerTests : IClassFixture<CustomWebApplicationFactory<P
   }
 
   [Fact]
+  public async Task SetSleep_WithPanelOff_SleepsAndReportsThePanelOutcome()
+  {
+    // ENC-23, through the real DI container: the controller resolves with or without a panel power
+    // service (Program.cs registers one on Linux only), sleeps either way, and reports the outcome.
+    // The value is not asserted: Unavailable on Windows, a refusal on a Linux host with no encoder.
+    await ResetSleepStateAsync();
+    try
+    {
+      var response = await _client.PostAsJsonAsync("/api/system/sleep", new { sleep = true, panelOff = true });
+
+      Assert.True(response.IsSuccessStatusCode, $"Expected success, got {response.StatusCode}");
+      var body = await response.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+      Assert.True(body.GetProperty("isSleeping").GetBoolean());
+      Assert.False(string.IsNullOrEmpty(body.GetProperty("panelOffResult").GetString()));
+    }
+    finally
+    {
+      await ResetSleepStateAsync();
+    }
+  }
+
+  [Fact]
   public async Task SetSleepScreenVisible_True_WhileSleeping_ReportsStandby()
   {
     await ResetSleepStateAsync();

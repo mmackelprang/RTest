@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
 using Radio.API.Models;
+using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 
 namespace Radio.API.Controllers;
@@ -20,6 +21,7 @@ public class SystemController : ControllerBase
   private readonly IAudioEngine _audioEngine;
   private readonly IHostApplicationLifetime _applicationLifetime;
   private readonly Services.SleepService? _sleepService;
+  private readonly IPanelPowerService? _panelPower;
   private static readonly DateTime _startTime = DateTime.UtcNow;
   
   // Cache CPU usage to avoid delays on every request
@@ -38,12 +40,16 @@ public class SystemController : ControllerBase
     ILogger<SystemController> logger,
     IAudioEngine audioEngine,
     IHostApplicationLifetime applicationLifetime,
-    Services.SleepService? sleepService = null)
+    Services.SleepService? sleepService = null,
+    IPanelPowerService? panelPower = null)
   {
     _logger = logger;
     _audioEngine = audioEngine;
     _applicationLifetime = applicationLifetime;
     _sleepService = sleepService;
+    // Null off Linux, where Program.cs registers no panel power service; a deep-sleep request then
+    // answers Unavailable rather than failing.
+    _panelPower = panelPower;
   }
 
   /// <summary>
@@ -507,6 +513,22 @@ public class SystemController : ControllerBase
   /// <summary>
   /// Sets the sleep/standby state. When sleeping, audio is muted and the UI shows a black overlay.
   /// </summary>
+  /// <remarks>
+  /// <para>
+  /// With <see cref="SetSleepRequest.PanelOff"/> and <see cref="SetSleepRequest.Sleep"/> both true
+  /// (<c>ENC-23</c>'s deep sleep, the Sleep pill's hold), sleep is entered first and the panel is then
+  /// asked to power off now through <see cref="IPanelPowerService.PowerOffNow"/>. The response then
+  /// carries two more fields: <c>panelOff</c> (true when power-off was requested or the panel was
+  /// already off — requested, not confirmed by the compositor)
+  /// and <c>panelOffResult</c> (the <see cref="PanelPowerOffResult"/> name, including the refusal
+  /// reason). A host with no panel power service — anything but Linux — answers
+  /// <c>Unavailable</c>. Sleep is entered either way; a refused power-off does not undo it.
+  /// </para>
+  /// <para>
+  /// Without <c>PanelOff</c>, or with it on a wake (where it is ignored), the response is the
+  /// original <c>{ isSleeping }</c> shape, unchanged.
+  /// </para>
+  /// </remarks>
   [HttpPost("sleep")]
   [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
   public async Task<IActionResult> SetSleepState([FromBody] SetSleepRequest request)
@@ -519,6 +541,21 @@ public class SystemController : ControllerBase
     if (request.Sleep)
     {
       await _sleepService.EnterSleepAsync();
+
+      if (request.PanelOff)
+      {
+        // After EnterSleepAsync has completed rather than before it, so the panel goes dark on a console
+        // that has already been parked, and a VOLUME press on it finds Standby to wake from.
+        // "api-panel-off", not the pill: the Sleep pill's hold is the documented caller, but any API
+        // client can send this flag, and the log line must not claim a hold that never happened.
+        PanelPowerOffResult result = _panelPower?.PowerOffNow("api-panel-off") ?? PanelPowerOffResult.Unavailable;
+        return Ok(new
+        {
+          isSleeping = _sleepService.IsSleeping,
+          panelOff = result is PanelPowerOffResult.PoweredOff or PanelPowerOffResult.AlreadyOff,
+          panelOffResult = result.ToString(),
+        });
+      }
     }
     else
     {

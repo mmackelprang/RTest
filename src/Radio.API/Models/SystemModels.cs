@@ -135,6 +135,15 @@ public class SetSleepRequest
   /// Gets or sets whether to enter sleep mode (true) or wake (false).
   /// </summary>
   public bool Sleep { get; set; }
+
+  /// <summary>
+  /// Deep sleep (<c>ENC-23</c>, the Sleep pill's hold): after entering sleep, also power the panel off
+  /// now, regardless of <c>Sleep:PanelOffAfterMinutes</c>. Only meaningful with <see cref="Sleep"/>
+  /// true; ignored on a wake. The power-off can still be refused (no panel power service on this host,
+  /// or the encoder — the dark panel's only wake source — is not connected and stable); the response's
+  /// <c>panelOffResult</c> says which. Defaults to false.
+  /// </summary>
+  public bool PanelOff { get; set; }
 }
 
 /// <summary>

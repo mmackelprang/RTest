@@ -75,18 +75,31 @@ public class RotaryEncoderRouterMappingTests
   private sealed class FakePanelPower : IPanelPowerService
   {
     public bool Dark { get; set; }
+
+    /// <summary>
+    /// With <see cref="Dark"/>, makes the dark panel a deep sleep (ENC-23), so the first input answers
+    /// <see cref="PanelInputOutcome.LitPanelFromDeepSleep"/> rather than <see cref="PanelInputOutcome.LitPanel"/>.
+    /// </summary>
+    public bool Deep { get; set; }
+
     public List<string> Inputs { get; } = [];
 
     public bool IsPanelOff => Dark;
 
-    public bool OnEncoderInput(string source)
+    public PanelInputOutcome OnEncoderInput(string source)
     {
       Inputs.Add(source);
-      bool consume = Dark;
-      // A real knob wake lights the panel; the next input finds it on.
+      PanelInputOutcome outcome = !Dark
+        ? PanelInputOutcome.Pass
+        : Deep ? PanelInputOutcome.LitPanelFromDeepSleep : PanelInputOutcome.LitPanel;
+      // A real knob wake lights the panel and ends a deep sleep; the next input finds it on.
       Dark = false;
-      return consume;
+      Deep = false;
+      return outcome;
     }
+
+    public PanelPowerOffResult PowerOffNow(string source) =>
+      throw new NotSupportedException("The router never powers the panel off.");
   }
 
   private sealed class FakeSleepService : ISleepService
@@ -132,9 +145,12 @@ public class RotaryEncoderRouterMappingTests
       return Task.CompletedTask;
     }
 
+    public List<string> WakeSources { get; } = [];
+
     public Task WakeAsync(string wakeSource = "unknown")
     {
       WakeCalls++;
+      WakeSources.Add(wakeSource);
       return Task.CompletedTask;
     }
 
@@ -593,6 +609,76 @@ public class RotaryEncoderRouterMappingTests
     Assert.Equal(0, h.Audio.MuteWrites);
   }
 
+  // --- ENC-24: a turn while VOLUME is held cancels the hold ---------------------------------
+
+  [Fact]
+  public void VolumePressAndTurn_PastTheThreshold_NeitherStandbyNorMute_AndTheTurnStillApplies()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    // Two detents: the cancel tolerance (EncoderLongPressGesture.TurnCancelDetents). One is ignored.
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+    Assert.Equal(0, h.Audio.MuteWrites);
+    Assert.False(h.Audio.IsMuted);
+    // The turn is still a turn: the volume moved.
+    Assert.True(h.Audio.MasterVolume > 0.5f);
+  }
+
+  [Fact]
+  public void VolumePressAndTurn_PublishesTheHoldCancelBeforeTheTurnsOwnCard()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseTurn(0, 2);
+
+    // HoldStart (press-down), HoldCancel (the turn ended the hold), then the turn's own Value card,
+    // so the ring collapses and the card left on screen is the new volume.
+    Assert.Equal(
+      new[] { EncoderHudPhase.HoldStart, EncoderHudPhase.HoldCancel, EncoderHudPhase.Value },
+      h.Hud.Published.Select(c => c.Phase).ToArray());
+  }
+
+  [Fact]
+  public void VolumePressWithOneStrayDetent_StillTogglesMuteOnRelease()
+  {
+    // The router passes the turn's delta through; one detent is below the cancel tolerance, so a push
+    // that jostles the knob is still a click. The detent itself still moves the volume.
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(1, h.Audio.MuteWrites);
+    Assert.True(h.Audio.IsMuted);
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+  }
+
+  [Fact]
+  public void VolumeShortPress_TogglesMuteOnRelease_NotOnPressDown()
+  {
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    Assert.Equal(0, h.Audio.MuteWrites);
+
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(1, h.Audio.MuteWrites);
+    Assert.True(h.Audio.IsMuted);
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+  }
+
   /// <summary>
   /// Pins SOURCE (index 1): the selector knob that still has no long action, so it commits nothing
   /// and promises nothing. Kept under its original name because it moved knobs rather than
@@ -895,6 +981,124 @@ public class RotaryEncoderRouterMappingTests
 
     Assert.Equal(["encoder-turn"], h.Panel.Inputs);
     Assert.True(h.Audio.MasterVolume > 0.5f);
+  }
+
+  // --- The deep-sleep dark panel (ENC-23) -----------------------------------------------------
+
+  /// <summary>The state the Sleep pill's hold leaves: Standby, the sleep screen up, the panel deep-dark.</summary>
+  private static Harness DeepDark()
+  {
+    var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.ReportSleepScreen(true);
+    h.Panel.Dark = true;
+    h.Panel.Deep = true;
+    return h;
+  }
+
+  [Fact]
+  public void DeepDark_AVolumePress_LightsAndWakesInOnePress_AndTheReleaseDoesNotToggleMute()
+  {
+    using var h = DeepDark();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(["encoder-deep-sleep"], h.Sleep.WakeSources);
+    Assert.Equal(0, h.Audio.MuteWrites);
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+  }
+
+  [Fact]
+  public void DeepDark_AVolumePressHeldPastTheThreshold_DoesNotReEnterStandby()
+  {
+    using var h = DeepDark();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs * 2));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+    Assert.Equal(1, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  [Fact]
+  public void DeepDark_AVolumeTurn_OnlyLights_NoWakeAndNoVolumeChange()
+  {
+    using var h = DeepDark();
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
+    Assert.Equal(0.5f, h.Audio.MasterVolume);
+  }
+
+  [Theory]
+  [InlineData(1)]
+  [InlineData(2)]
+  [InlineData(3)]
+  public void DeepDark_AnotherKnobsPress_OnlyLights(int index)
+  {
+    using var h = DeepDark();
+
+    h.Encoders.RaiseButton(index, isPressed: true);
+    h.Encoders.RaiseButton(index, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
+    Assert.Empty(h.Audio.GetOrCreateCalls);
+  }
+
+  [Fact]
+  public void TimerDark_AVolumePress_StillOnlyLights()
+  {
+    // ENC-22 unchanged: the timer's dark panel is not a deep sleep, so VOLUME there lights and nothing more.
+    using var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.ReportSleepScreen(true);
+    h.Panel.Dark = true;
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  [Fact]
+  public void DeepDark_AVolumePressOnAnAwakeConsole_LightsWithoutAWake()
+  {
+    // The claim decides: if nothing is asleep to wake (a REST wake landed while the panel was dark),
+    // the press only lights the panel and the console is not woken twice.
+    using var h = new Harness();
+    h.Panel.Dark = true;
+    h.Panel.Deep = true;
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  [Fact]
+  public void DeepDark_ATurnThenAVolumePress_WakesThroughTheStandbyGate()
+  {
+    // The turn lit the panel (and ended the deep sleep); the press then lands on a lit Standby screen,
+    // where the ENC-6 gate spends it waking, exactly as before.
+    //
+    // ⚠ FakePanelPower has no wake grace window: its next input after a lighting one passes straight
+    // through. The real PanelPowerService consumes inputs for WakeGraceMilliseconds after it lights the
+    // panel, so on the box this press must come after that window, or it is spent on the grace too.
+    using var h = DeepDark();
+
+    h.Encoders.RaiseTurn(2, 1);
+    h.Encoders.RaiseButton(0, isPressed: true);
+
+    Assert.Equal(["encoder-button"], h.Sleep.WakeSources);
   }
 
   // --- The sleep gate (ENC-6, handoff 8.3) --------------------------------------------------

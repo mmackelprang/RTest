@@ -30,11 +30,33 @@ public sealed class EncoderLongPressGesture : IDisposable
   private readonly PressState[] _state;
   private bool _disposed;
 
+  /// <summary>
+  /// How far a held knob must turn, net, before the turn cancels the hold (ENC-24).
+  ///
+  /// <para>
+  /// Two detents, not one, because one is not evidence of intent. The HID parse raises a report's
+  /// button edges before its turn, so a push that jostles the knob by a single detent reaches
+  /// <see cref="OnTurn"/> as a turn of a held knob; cancelling on that would eat the press. The count
+  /// is <b>signed and net</b>, so a back-and-forth wobble of one detent each way sums to zero and
+  /// cancels nothing.
+  /// </para>
+  /// </summary>
+  internal const int TurnCancelDetents = 2;
+
   private sealed class PressState
   {
     public bool IsDown;
     public bool LongFired;
     public ITimer? Timer;
+
+    /// <summary>Signed detents turned since this press went down. Reset on press-down.</summary>
+    public int NetTurn;
+
+    /// <summary>
+    /// Incremented on every press-down. The threshold timer captures the value it was created
+    /// under, so a callback belonging to an earlier press is recognised and ignored.
+    /// </summary>
+    public long Generation;
   }
 
   /// <summary>Fired on release, when the hold did not reach the threshold.</summary>
@@ -46,7 +68,10 @@ public sealed class EncoderLongPressGesture : IDisposable
   /// <summary>Fired on press-down, so the HUD can start the progress ring.</summary>
   public event Action<int>? HoldStarted;
 
-  /// <summary>Fired on an early release, so the HUD can collapse the ring.</summary>
+  /// <summary>
+  /// Fired on an early release, or on a turn of the held knob (<see cref="OnTurn"/>), so the HUD can
+  /// collapse the ring.
+  /// </summary>
   public event Action<int>? HoldCancelled;
 
   public EncoderLongPressGesture(int encoderCount, ILogger logger, TimeProvider? timeProvider = null)
@@ -92,8 +117,10 @@ public sealed class EncoderLongPressGesture : IDisposable
 
         s.IsDown = true;
         s.LongFired = false;
+        s.NetTurn = 0;
+        long generation = ++s.Generation;
         s.Timer = _timeProvider.CreateTimer(
-          _ => OnThreshold(index),
+          _ => OnThreshold(index, generation),
           null,
           TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs),
           Timeout.InfiniteTimeSpan);
@@ -104,7 +131,8 @@ public sealed class EncoderLongPressGesture : IDisposable
         // A release edge with no press recorded for it. The case this guard exists for is the
         // sleep-wake path in RotaryEncoderActionRouter: that consumes the PRESS edge to wake, so
         // this gesture never saw the press and there is no hold to end. Synthesising a short action
-        // out of the release would fire it into a UI that just changed underneath the user.
+        // out of the release would fire it into a UI that just changed underneath the user. The
+        // second path is OnTurn: a turn of the held knob ends the press, and its release lands here.
         if (!s.IsDown)
         {
           return;
@@ -141,13 +169,79 @@ public sealed class EncoderLongPressGesture : IDisposable
     if (raiseHoldCancelled) { Raise(HoldCancelled, index, nameof(HoldCancelled)); }
   }
 
-  private void OnThreshold(int index)
+  /// <summary>
+  /// Feeds one turn report in, with its signed <paramref name="delta"/> in detents. A held knob that
+  /// has turned <see cref="TurnCancelDetents"/> or more detents net since its press went down, before
+  /// its long action fired, has its hold cancelled (ENC-24).
+  ///
+  /// <para>
+  /// A press-and-turn is neither a click nor a hold. Without this, holding VOLUME while adjusting it
+  /// would drop the console into Standby at the threshold, and releasing a sub-threshold
+  /// press-and-turn would toggle mute. Below the tolerance the press is untouched: a single stray
+  /// detent, or a wobble that nets to zero, still ends in the short action on release or the long
+  /// action at the threshold.
+  /// </para>
+  ///
+  /// <para>
+  /// The cancel ends the press: the timer is disposed and the button is recorded as up, so the
+  /// release that follows is dropped by the orphan-release guard in <see cref="OnButtonEdge"/> and
+  /// neither <see cref="ShortPress"/> nor <see cref="LongPress"/> fires for this press.
+  /// <see cref="HoldCancelled"/> is raised once, so the HUD can collapse the ring. A turn after the
+  /// long action fired, a turn with the button up, and a turn on a different index do nothing here.
+  /// </para>
+  /// </summary>
+  public void OnTurn(int index, int delta)
+  {
+    if (index < 0 || index >= _state.Length)
+    {
+      return;
+    }
+
+    bool raiseHoldCancelled = false;
+
+    lock (_gate)
+    {
+      if (_disposed)
+      {
+        return;
+      }
+
+      PressState s = _state[index];
+      if (!s.IsDown || s.LongFired)
+      {
+        return;
+      }
+
+      s.NetTurn += delta;
+      if (Math.Abs(s.NetTurn) >= TurnCancelDetents)
+      {
+        s.Timer?.Dispose();
+        s.Timer = null;
+        s.IsDown = false;
+        raiseHoldCancelled = true;
+      }
+    }
+
+    if (raiseHoldCancelled) { Raise(HoldCancelled, index, nameof(HoldCancelled)); }
+  }
+
+  private void OnThreshold(int index, long generation)
   {
     bool fire = false;
 
     lock (_gate)
     {
       PressState s = _state[index];
+
+      // A callback from an earlier press. Disposing a timer does not recall a callback the timer
+      // queue had already dispatched, so a release or a turn-cancel can race one in; without this it
+      // would find the NEXT press down and fire the long action into it early. Return before
+      // touching s.Timer, which now belongs to that next press.
+      if (s.Generation != generation)
+      {
+        return;
+      }
+
       s.Timer?.Dispose();
       s.Timer = null;
 
