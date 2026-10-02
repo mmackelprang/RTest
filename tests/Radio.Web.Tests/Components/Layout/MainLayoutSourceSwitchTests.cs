@@ -121,6 +121,14 @@ public class MainLayoutSourceSwitchTests : TestContext
     var vinyl = cut.WaitForElement(VinylPill, TimeSpan.FromSeconds(30));
     Assert.False(IsActive(vinyl));
 
+    // Stop the layout's 1 s clock: each tick re-renders the whole layout, and would light the pill on its
+    // own — measured: with the fix removed, this test passed on a tick.
+    var clock = (System.Timers.Timer?)typeof(Radio.Web.Components.Layout.MainLayout)
+      .GetField("_timer", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+      .GetValue(cut.Instance);
+    Assert.NotNull(clock);
+    clock!.Stop();
+
     // Hold the switch POST so it completes asynchronously, as it does against the real API. Without the
     // hold the stub answers synchronously, the handler reaches the held subscriber before its first yield,
     // and the event dispatch's own post-yield render lights the pill whether or not the layout asks for it.
@@ -133,8 +141,9 @@ public class MainLayoutSourceSwitchTests : TestContext
     post.SetResult();
     await subscriberEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
-    // The subscriber is still held: the pill must already be lit.
-    cut.WaitForAssertion(() => Assert.True(IsActive(cut.Find(VinylPill))), TimeSpan.FromSeconds(10));
+    // The subscriber is still held: the pill must already be lit. Asserted at once, not with
+    // WaitForAssertion — any later render would light it, which is exactly what this must not credit.
+    Assert.True(IsActive(cut.Find(VinylPill)));
     Assert.False(tap.IsCompleted, "the layout's handler is still awaiting the held subscriber");
 
     subscriberGate.SetResult();
