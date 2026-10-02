@@ -1,4 +1,5 @@
 using Bunit;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Time.Testing;
 using Radzen;
 using Radio.Core.Configuration;
@@ -193,8 +194,63 @@ public class SleepPillTests : TestContext
     var cut = Render();
 
     Assert.Equal("Sleep", cut.Find(".nav-pill-label").TextContent);
-    Assert.Equal("Enter sleep mode. Hold to also turn the screen off", cut.Find("button").GetAttribute("aria-label"));
+    // The name is the pill's original one; the hold is a description, not part of the name.
+    Assert.Equal("Enter sleep mode", cut.Find("button").GetAttribute("aria-label"));
     Assert.Equal("Sleep (hold to turn the screen off)", cut.Find("button").GetAttribute("title"));
     Assert.Equal("true", cut.Find(".nav-pill-sleep-fill").GetAttribute("aria-hidden"));
+  }
+
+  [Fact]
+  public void TheHoldHint_IsAVisuallyHiddenDescription()
+  {
+    var cut = Render();
+
+    string? describedBy = cut.Find("button").GetAttribute("aria-describedby");
+    Assert.False(string.IsNullOrEmpty(describedBy));
+
+    var hint = cut.Find($"#{describedBy}");
+    Assert.Contains("visually-hidden", hint.ClassList);
+    Assert.Equal("Hold to also turn the screen off", hint.TextContent);
+  }
+
+  [Fact]
+  public void TheHoldHintId_IsUniquePerInstance()
+  {
+    var first = Render();
+    var second = Render();
+
+    Assert.NotEqual(
+      first.Find("button").GetAttribute("aria-describedby"),
+      second.Find("button").GetAttribute("aria-describedby"));
+  }
+
+  [Fact]
+  public void TheArmedLabel_IsHiddenFromAssistiveTech_AndIsNotANavPillLabel()
+  {
+    // MainLayoutNavTests reads every .nav-pill-label as a pill's visible name, so the armed text must
+    // not carry that class or the Sleep pill would read as "Sleep Screen off".
+    var cut = Render();
+
+    var armed = cut.Find(".nav-pill-sleep-armed");
+    Assert.Equal("Screen off", armed.TextContent);
+    Assert.Equal("true", armed.GetAttribute("aria-hidden"));
+    Assert.DoesNotContain("nav-pill-label", armed.ClassList);
+    Assert.Single(cut.FindAll(".nav-pill-label"));
+  }
+
+  [Theory]
+  [InlineData(1)] // middle
+  [InlineData(2)] // right
+  public void ANonPrimaryButtonPress_DoesNotArmTheHold(long button)
+  {
+    var cut = Render();
+
+    cut.Find("button").PointerDown(new PointerEventArgs { Button = button });
+    Assert.DoesNotContain("is-holding", cut.Find("button").ClassList);
+
+    _clock.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs * 2));
+    cut.Find("button").PointerUp(new PointerEventArgs { Button = button });
+
+    Assert.Equal(0, _deepSleeps);
   }
 }

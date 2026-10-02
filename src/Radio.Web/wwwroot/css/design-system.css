@@ -565,7 +565,8 @@ html, body {
   flex-shrink: 0;
 }
 
-.nav-pill-label {
+.nav-pill-label,
+.nav-pill-sleep-armed {
   font-family: var(--font-body);
   font-size: 12px;
   font-weight: 500;
@@ -594,24 +595,26 @@ html, body {
 }
 
 /* ENC-23: the Sleep pill (SleepPill.razor). A tap enters Standby; a hold also
-   turns the screen off. The fill behind the label is the hold's only feedback.
+   turns the screen off. The fill behind the label is the hold's feedback, and
+   the "Screen off" label that replaces "Sleep" at the threshold says to let go
+   (the pill commits on lift).
 
    isolation: isolate makes the pill its own stacking context, so the fill's
    z-index -1 puts it above the pill's own (hover) background and below the
-   icon and label. The text-selection and callout suppression stop a long touch
-   press from selecting the label instead of arming the hold. */
+   icon and label. Text-selection and callout suppression come from body (§25)
+   and position: relative from .nav-pill, so neither is repeated here. */
 .nav-pill-sleep {
-  position: relative;
   overflow: hidden;
   isolation: isolate;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
 }
 
 /* Hidden until the animation's 300ms delay elapses — the fill-mode is
    `forwards` only, so this base opacity (not the `from` frame) applies during
-   the delay, and an ordinary tap shows nothing. */
+   the delay, and an ordinary tap shows nothing.
+
+   40% of the accent alone reads at about 2:1 against the topbar, too faint to
+   carry the progress; the solid accent bottom edge, which grows with the
+   scale, is what makes the fill's leading edge legible. */
 .nav-pill-sleep-fill {
   position: absolute;
   inset: 0;
@@ -620,14 +623,17 @@ html, body {
   transform: scaleX(0);
   opacity: 0;
   pointer-events: none;
-  background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+  background: color-mix(in srgb, var(--accent-primary) 40%, transparent);
+  box-shadow: inset 0 -3px 0 var(--accent-primary);
 }
 
 /* 300ms -> 600ms: the same schedule as the encoder HUD ring, mirroring
    EncoderInteractionTimings.LongPressRingStartMs (the delay) and
    LongPressThresholdMs (where the fill completes). The first 300ms of a press
    is indistinguishable from a tap, so the fill is delayed rather than started
-   at zero. */
+   at zero. Its reduced-motion handling sits with the HUD ring's, in the
+   encoder HUD's reduced-motion block, so both hold indicators follow one
+   policy. */
 @keyframes navPillSleepFill {
   from { transform: scaleX(0); opacity: 1; }
   to   { transform: scaleX(1); opacity: 1; }
@@ -637,16 +643,40 @@ html, body {
   animation: navPillSleepFill 300ms linear 300ms 1 forwards;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  /* Deliberately left animating, for the reason the encoder HUD ring gives: it
-     is the only on-screen evidence that the hold is arming, and without it the
-     pill would act on a hold with no visible warning. The duration is restored
-     with !important because §26's global reduced-motion rule otherwise cuts
-     every animation to 0.01ms, which would make the fill jump straight to full
-     at 300ms instead of filling. */
-  .nav-pill-sleep.is-holding .nav-pill-sleep-fill {
-    animation-duration: 300ms !important;
-  }
+/* The armed state. "Sleep" and "Screen off" share one grid cell, so the pill
+   is always as wide as the longer of the two and never changes width at the
+   threshold. At 600ms of hold — the moment the fill completes — "Sleep" goes
+   and "Screen off" appears: a step change, not a fade, so it reads the same
+   with reduced motion (§26 cuts the 1ms duration but not the delay). Lifting
+   drops .is-holding and the pill reverts. */
+.nav-pill-sleep-text {
+  display: inline-grid;
+}
+
+.nav-pill-sleep-text > * {
+  grid-area: 1 / 1;
+  justify-self: center;
+}
+
+.nav-pill-sleep-armed {
+  color: var(--accent-primary);
+  opacity: 0;
+}
+
+@keyframes navPillSleepArmedShow {
+  from, to { opacity: 1; }
+}
+
+@keyframes navPillSleepArmedHide {
+  from, to { opacity: 0; }
+}
+
+.nav-pill-sleep.is-holding .nav-pill-sleep-armed {
+  animation: navPillSleepArmedShow 1ms linear 600ms 1 forwards;
+}
+
+.nav-pill-sleep.is-holding .nav-pill-label {
+  animation: navPillSleepArmedHide 1ms linear 600ms 1 forwards;
 }
 
 /* Queue count badge — amber pill next to the Queue label */
@@ -7475,14 +7505,24 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   /* The slide-in (and the slide-out, for whichever variant adopts it) becomes
-     instant. The ring is deliberately left animating: it is the only on-screen
-     indication that a 600 ms hold is arming standby, and freezing it would put
-     the machine back in the state this row exists to fix — an input that acts
-     with no visible evidence. */
+     instant. */
   .encoder-hud.snackbar-enter,
   .encoder-hud.snackbar-exit,
   .encoder-hud.encoder-hud-enter,
   .encoder-hud.encoder-hud-exit { animation: none; }
+
+  /* The two hold indicators — this ring (both variants) and the topbar Sleep
+     pill's fill (ENC-23) — keep animating, under one policy: each is the only
+     on-screen indication that a 600 ms hold is arming, and freezing it would
+     leave an input that acts with no visible evidence. §26's global rule cuts every animation to 0.01ms
+     with !important, which would make both jump straight to full at 300 ms, so
+     the duration is restored here with !important; among !important
+     declarations a class selector outranks §26's `*`. §26 does not touch the
+     300 ms delay. */
+  .encoder-hud-ring,
+  .nav-pill-sleep.is-holding .nav-pill-sleep-fill {
+    animation-duration: 300ms !important;
+  }
 }
 
 /* ─── ENC-5  Encoder selector overlay ──────────────────────────────────────────

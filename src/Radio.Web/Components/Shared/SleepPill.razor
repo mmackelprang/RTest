@@ -3,19 +3,30 @@
   EncoderInteractionTimings.LongPressThresholdMs also turns the screen off (deep sleep).
 
   The gesture mirrors RadioControlPanel's band-pill long-press: the press time is recorded on
-  pointerdown and resolved on pointerup, and a hold suppresses the click that trails it. Deep sleep
-  therefore fires on LIFT, not while the finger is still on the glass — a hold that slides off the
-  pill (pointerleave) or is interrupted (pointercancel) does nothing at all.
+  pointerdown (primary button only) and resolved on pointerup, and a hold suppresses the click that
+  trails it. Deep sleep therefore fires on LIFT, not while the finger is still on the glass.
 
-  The fill behind the label is the only feedback that the hold is arming. It runs on CSS alone (see
-  .nav-pill-sleep-fill in design-system.css), keyed by the is-holding class this component toggles,
-  on the same 300 -> 600 ms schedule as the encoder HUD ring.
+  What abandons a hold depends on the pointer, and the two differ:
+  - Touch (the kiosk): Chrome implicitly captures a touch pointer to the element it went down on, so
+    sliding the finger off the pill does NOT fire pointerleave before the lift — pointerup still
+    lands here, and a hold of the threshold commits wherever the finger is lifted. The one thing that
+    abandons a touch hold is pointercancel, which the browser fires when it takes the gesture over
+    (a pan).
+  - Mouse: no implicit capture. Sliding off fires pointerleave, which abandons the hold. Sliding back
+    on and releasing then delivers a pointerup with no press recorded (ignored) and a click, so that
+    release is a plain Standby, not a deep sleep.
+
+  The feedback runs on CSS alone, keyed by the is-holding class this component toggles (see
+  .nav-pill-sleep-fill in design-system.css): the fill grows on the same 300 -> 600 ms schedule as
+  the encoder HUD ring, and at 600 ms "Sleep" is replaced by "Screen off" — the hold is armed, and
+  lifting now turns the screen off.
 *@
 
 <button type="button"
         class="nav-pill nav-pill-sleep @(_holding ? "is-holding" : "")"
         title="Sleep (hold to turn the screen off)"
-        aria-label="Enter sleep mode. Hold to also turn the screen off"
+        aria-label="Enter sleep mode"
+        aria-describedby="@_holdHintId"
         @onpointerdown="HandlePointerDown"
         @onpointerup="HandlePointerUpAsync"
         @onpointercancel="HandlePointerAbandoned"
@@ -24,7 +35,12 @@
         @onclick="HandleClickAsync">
   <span class="nav-pill-sleep-fill" aria-hidden="true"></span>
   <RadzenIcon Icon="power_settings_new" />
-  <span class="nav-pill-label">Sleep</span>
+  <span class="nav-pill-sleep-text">
+    <span class="nav-pill-label">Sleep</span>
+    @* Not a .nav-pill-label: MainLayoutNavTests reads every .nav-pill-label as a pill's visible name. *@
+    <span class="nav-pill-sleep-armed" aria-hidden="true">Screen off</span>
+  </span>
+  <span id="@_holdHintId" class="visually-hidden">Hold to also turn the screen off</span>
 </button>
 
 @code {
@@ -45,6 +61,9 @@
   /// </summary>
   [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
 
+  // Unique per instance, as PresetBar's hold hint is: aria-describedby resolves ids document-wide.
+  private readonly string _holdHintId = $"nav-pill-sleep-hold-{Guid.NewGuid():N}";
+
   private bool _pressed;
   private bool _holding;
   private bool _suppressNextClick;
@@ -52,6 +71,13 @@
 
   private void HandlePointerDown(PointerEventArgs e)
   {
+    // Primary button only (left mouse, touch contact, pen tip). A right or middle press is not a hold
+    // and never produces the click a tap relies on, so arming for it would only show a fill for nothing.
+    if (e.Button != 0)
+    {
+      return;
+    }
+
     _pressedAt = Clock.GetUtcNow();
     _pressed = true;
     _holding = true;
