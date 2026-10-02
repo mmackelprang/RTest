@@ -202,14 +202,14 @@ public class QueueHistoryPanelTests : TestContext
   }
 
   [Fact]
-  public void Kebab_ShowsOnlyOnTheQueueView()
+  public void QueueActions_ShowOnlyOnTheQueueView()
   {
-    // UI-17 point 3: the kebab (Add Files / Load Playlist / Clear All) goes with the Queue view.
+    // UI-17 point 3, as moved by UI-32: the queue actions go with the Queue view.
     var cut = RenderOn("FilePlayer");
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(0, "File Player with an empty queue opens on History");
+    cut.FindAll(".queue-actions").Count.Should().Be(0, "File Player with an empty queue opens on History");
 
     ClickTab(cut, "Queue");
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(1);
+    cut.FindAll(".queue-actions").Count.Should().Be(1);
   }
 
   [Fact]
@@ -220,7 +220,7 @@ public class QueueHistoryPanelTests : TestContext
     ClickTab(cut, "Queue");
     cut.FindAll(".queue-total-tile").Count.Should().Be(1);
     cut.FindAll(".up-next-tile").Count.Should().Be(0);
-    var savePlaylist = cut.FindAll(".save-playlist-tile");
+    var savePlaylist = cut.FindAll(".queue-action[aria-label='Save current queue as playlist']");
     savePlaylist.Count.Should().Be(1);
     savePlaylist[0].HasAttribute("disabled").Should().BeTrue(
       "the Save-as-playlist CTA is disabled when the queue is empty");
@@ -322,16 +322,6 @@ public class QueueHistoryPanelTests : TestContext
   }
 
 
-  [Fact]
-  public void QueueHistoryPanel_OpeningKebab_ShowsAddFilesAndClearAllItems()
-  {
-    var cut = RenderOn("FilePlayer");
-    ClickTab(cut, "Queue");
-    cut.Find(".queue-split-kebab").Click();
-    cut.Markup.Should().Contain("Add Files");
-    cut.Markup.Should().Contain("Load Playlist");
-    cut.Markup.Should().Contain("Clear All");
-  }
 
   [Fact]
   public void SwitchingFromQueueToHistory_SwapsRightColumnContent()
@@ -345,7 +335,7 @@ public class QueueHistoryPanelTests : TestContext
 
     ClickTab(cut, "History");
     cut.FindAll(".queue-total-tile").Count.Should().Be(0);
-    cut.FindAll(".save-playlist-tile").Count.Should().Be(0);
+    cut.FindAll(".queue-actions").Count.Should().Be(0);
     cut.FindAll(".history-stats-tile").Count.Should().Be(0);
 
     cut.Find(".centre-stats-chip").Click();
@@ -572,6 +562,126 @@ public class QueueHistoryPanelTests : TestContext
   private static List<string> TabLabels(IRenderedComponent<QueueHistoryPanel> cut) =>
     cut.FindAll(".queue-split-tab").Select(t => t.TextContent.Trim()).ToList();
 
+  /// <summary>The visible labels of the queue action buttons, top to bottom (UI-32).</summary>
+  private static List<string> ActionLabels(IRenderedComponent<QueueHistoryPanel> cut) =>
+    cut.FindAll(".queue-action span").Select(s => s.TextContent.Trim()).ToList();
+
+  private static AngleSharp.Dom.IElement Action(IRenderedComponent<QueueHistoryPanel> cut, string label) =>
+    cut.FindAll(".queue-action").Single(b => b.TextContent.Contains(label, StringComparison.Ordinal));
+
+  // ── UI-32: the queue actions on screen, not behind a ⋮ menu ──────────────────────────────────────
+
+  [Fact]
+  public void FilePlayerQueueView_ShowsEveryActionOnScreen_InOrder_AndNoMenu()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+
+    ActionLabels(cut).Should().Equal("Add files", "Add folder", "Load playlist", "Save as playlist", "Clear queue");
+    cut.FindAll(".queue-action").Should().OnlyContain(b => !b.HasAttribute("disabled"),
+      "with tracks queued every action is available");
+    Action(cut, "Clear queue").ClassList.Should().Contain("is-danger");
+    Action(cut, "Save as playlist").ClassList.Should().Contain("is-secondary");
+    cut.FindAll(".queue-split-kebab").Count.Should().Be(0, "the ⋮ menu is gone");
+    cut.Markup.Should().NotContain("⋮");
+  }
+
+  [Fact]
+  public void EmptyQueue_AddActionsStayEnabled_SaveAndClearAreDisabled_AndTheEmptyStatePointsAtThem()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 0);
+    ClickTab(cut, "Queue");
+
+    Action(cut, "Add files").HasAttribute("disabled").Should().BeFalse();
+    Action(cut, "Add folder").HasAttribute("disabled").Should().BeFalse();
+    Action(cut, "Load playlist").HasAttribute("disabled").Should().BeFalse();
+    Action(cut, "Save as playlist").HasAttribute("disabled").Should().BeTrue();
+    Action(cut, "Clear queue").HasAttribute("disabled").Should().BeTrue();
+    cut.Markup.Should().Contain("Queue is empty");
+    cut.Find(".queue-empty-hint").TextContent.Should().Be("Add files, a folder, or a playlist to start.");
+  }
+
+  [Fact]
+  public void ClearQueue_AsksFirst_AndCancelLeavesTheQueueAlone()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+
+    Action(cut, "Clear queue").Click();
+
+    cut.Find(".queue-confirm-card h6").TextContent.Should().Be("Clear the queue?");
+    cut.Find(".queue-confirm-card p").TextContent.Should().Be("Removes all 2 tracks and stops playback.");
+    cut.Find("button.queue-confirm-cancel").Click();
+
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0);
+    _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Delete && r.Path == "/api/queue");
+  }
+
+  [Fact]
+  public void ClearQueue_TappingOutsideTheCard_Cancels()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+
+    Action(cut, "Clear queue").Click();
+    cut.Find(".queue-confirm-overlay").Click();
+
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0);
+    _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Delete && r.Path == "/api/queue");
+  }
+
+  [Fact]
+  public void ClearQueue_Confirmed_ClearsTheQueue()
+  {
+    _api.Route(HttpMethod.Delete, "/api/queue", HttpStatusCode.OK, "{}");
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+
+    Action(cut, "Clear queue").Click();
+    cut.Find("button.queue-confirm-clear").Click();
+
+    cut.WaitForAssertion(() => _api.Requests.Should().Contain(r => r.Method == HttpMethod.Delete && r.Path == "/api/queue"),
+      TimeSpan.FromSeconds(10));
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0);
+  }
+
+  [Fact]
+  public void ClearQueue_Esc_Cancels_AndCancelTakesFocusWhenTheCardOpens()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+
+    Action(cut, "Clear queue").Click();
+
+    cut.WaitForAssertion(() => JSInterop.Invocations.Should().Contain(i => i.Identifier.EndsWith("focus", StringComparison.Ordinal)),
+      TimeSpan.FromSeconds(10));
+    cut.Find(".queue-confirm-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
+
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0);
+    _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Delete && r.Path == "/api/queue");
+  }
+
+  [Fact]
+  public void ClearQueue_Confirmation_DoesNotOutliveTheQueueView()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+    Action(cut, "Clear queue").Click();
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(1);
+
+    ClickTab(cut, "History");
+
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0, "the History view has no Clear button to confirm");
+  }
+
+  [Theory]
+  [InlineData(1, "Removes the 1 track in the queue and stops playback.")]
+  [InlineData(47, "Removes all 47 tracks and stops playback.")]
+  public void ClearQueueConfirmText_CountsTheTracks(int count, string expected)
+  {
+    QueueHistoryPanel.ClearQueueConfirmText(count).Should().Be(expected);
+  }
+
   private static string? ActiveTabLabel(IRenderedComponent<QueueHistoryPanel> cut) =>
     cut.FindAll(".queue-split-tab.is-active").Select(t => t.TextContent.Trim()).SingleOrDefault();
 
@@ -632,13 +742,13 @@ public class QueueHistoryPanelTests : TestContext
   [InlineData("RTLSDRCore", false)]
   [InlineData("Bluetooth", false)]
   [InlineData("Bluetooth", true)]
-  public void NonFilePlayerSources_HaveNoQueueTab_AndNoKebab(string source, bool btConnected)
+  public void NonFilePlayerSources_HaveNoQueueTab_AndNoQueueActions(string source, bool btConnected)
   {
     // A queue exists (3 tracks) so a Queue tab would have something to show — and still must not.
     var cut = RenderOn(source, queueCount: 3, bluetoothConnected: btConnected);
 
     TabLabels(cut).Should().NotContain(label => label.StartsWith("Queue"));
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
+    cut.FindAll(".queue-action").Count.Should().Be(0);
   }
 
   // --- override rule ---
@@ -738,7 +848,7 @@ public class QueueHistoryPanelTests : TestContext
   // --- Queue nav pill / radio chevron (CentrePanelViewService) ---
 
   [Fact]
-  public async Task QueuePill_OnANonFilePlayerSource_ShowsTheQueueView_WithoutSwitchingSource_AndHidesTheKebab()
+  public async Task QueuePill_OnANonFilePlayerSource_ShowsTheQueueView_WithoutSwitchingSource_AndHidesTheAddActions()
   {
     var cut = RenderOn("RTLSDRCore", queueCount: 2);
     AssertView(cut, "Radio");
@@ -748,10 +858,9 @@ public class QueueHistoryPanelTests : TestContext
 
     AssertView(cut, "Queue");
     TabLabels(cut).Should().Equal("Radio", "History", "Queue · 2");
-    // Add Files / Load Playlist make the API switch the source to File Player, so the kebab is
-    // File Player only; Save as playlist does not switch source and stays.
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
-    cut.FindAll(".save-playlist-tile").Count.Should().Be(1);
+    // Add files / Add folder / Load playlist make the API switch the source to File Player, so they (and
+    // Clear queue) are File Player only; Save as playlist does not switch source and stays.
+    ActionLabels(cut).Should().Equal("Save as playlist");
     views.PendingView.Should().BeNull("the mounted panel consumed the request");
     _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Post && r.Path == "/api/sources",
       "viewing the queue must not switch source");
@@ -773,7 +882,7 @@ public class QueueHistoryPanelTests : TestContext
 
     AssertView(cut, "Queue");
     TabLabels(cut).Should().Equal("History", "Queue · 1");
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(0);
+    ActionLabels(cut).Should().Equal("Save as playlist");
     views.PendingView.Should().BeNull();
   }
 
@@ -1020,8 +1129,7 @@ public class QueueHistoryPanelTests : TestContext
 
     var tablist = cut.Find("[role=tablist]");
     tablist.Children.Should().OnlyContain(e => e.GetAttribute("role") == "tab");
-    tablist.QuerySelectorAll(".queue-split-kebab, .centre-stats-chip").Length.Should().Be(0);
-    cut.FindAll(".queue-split-kebab").Count.Should().Be(1, "File Player's queue view keeps its kebab, beside the tablist");
+    tablist.QuerySelectorAll(".queue-action, .centre-stats-chip").Length.Should().Be(0);
 
     var panel = cut.Find("[role=tabpanel]");
     var active = cut.Find(".queue-split-tab.is-active");

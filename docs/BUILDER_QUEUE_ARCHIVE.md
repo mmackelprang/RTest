@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (93)
+## Shipped rows (98)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3109,3 +3109,73 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-97.md`](queue/AUD-97.md)**
 
 ✅🔬 **SHIPPED 2026-10-02, owner check outstanding.** Page load took the current output from `/api/devices/output/default`, which answers the hardware default sink whatever is playing; it now reads the output list's `IsActive` entry.
+
+### UI-28 — Shuffle / Repeat switch themselves off while a file plays (server-side: the values lived only in a reloadable options cache)
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#765](https://github.com/mmackelprang/RTest/pull/765) — owner panel UAT passed (*"PR#765 passes."*), merged as `e955f63` |
+| Plan | _no plan — owner-reported defect; root cause in the dossier_ |
+| Spec / handoff | _owner report, 2026-10-02_ |
+| Depends on | — |
+| Branch | `fix/ui-28-29-shuffle-band-tab` |
+
+**Detail: [`queue/UI-28.md`](queue/UI-28.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"PR#765 passes."* Shuffle and Repeat no longer reset when the progress bar updates (the toggles survive config reloads; the store holds one key per case variant).
+
+### UI-29 — the BAND visualizer tab moves to the end of the picker and is selectable only while the Radio is the active source
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#765](https://github.com/mmackelprang/RTest/pull/765) — owner panel UAT passed (*"PR#765 passes."*), merged as `e955f63` |
+| Plan | _no plan — owner request; the fallback rule is in the dossier_ |
+| Spec / handoff | _owner report, 2026-10-02_ |
+| Depends on | — _(touches `AUD-76` / `AUD-91` / `UI-22` BAND behaviour)_ |
+| Branch | `fix/ui-28-29-shuffle-band-tab` |
+
+**Detail: [`queue/UI-29.md`](queue/UI-29.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"PR#765 passes."* The BAND (now RADIO) visualizer tab is last in the picker and selectable only while Radio is the active source.
+
+### UI-30 — a disconnected visualizer shows a disconnected icon and label in the visualization area; the header dot is removed
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#765](https://github.com/mmackelprang/RTest/pull/765) — owner panel UAT passed (*"PR#765 passes."*), merged as `e955f63` |
+| Plan | _no plan — owner ruling; behaviour in the dossier_ |
+| Spec / handoff | _owner ruling, 2026-10-02_ |
+| Depends on | — |
+| Branch | `fix/ui-28-29-shuffle-band-tab` |
+
+**Detail: [`queue/UI-30.md`](queue/UI-30.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"PR#765 passes."* A disconnected visualizer shows a disconnected icon in the plot area instead of a small green dot on the tab.
+
+### UI-32 — the file player's queue actions are on screen (no ⋮ menu), and Add folder queues a folder's tracks with an Include subfolders option
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#769](https://github.com/mmackelprang/RTest/pull/769) — owner panel UAT passed (*"UI-32 + UI-34 both pass."*), merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner request; behaviour and the designer consult in the dossier_ |
+| Spec / handoff | _owner request, 2026-10-02_ |
+| Depends on | — _(related: `UI-17`, which put the ⋮ there; `AUD-75`, the allowed-directory set)_ |
+| Branch | `feat/ui-32-file-player-actions` |
+
+**Detail: [`queue/UI-32.md`](queue/UI-32.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UI-32 + UI-34 both pass."* The file player's queue actions are on-screen buttons (no ⋮ menu), Clear queue asks first, and Add folder adds a folder with an Include subfolders switch through the new `GET /api/files/folder-tracks` (real-path guards, 500-track cap, 20 s timeout).
+
+### UI-34 — Save Playlist's Playlist Name and Description fields no longer run past the dialog's right edge
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#769](https://github.com/mmackelprang/RTest/pull/769) — owner panel UAT passed (*"UI-32 + UI-34 both pass."*), merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner-reported defect; measurements in the dossier_ |
+| Spec / handoff | _owner report, 2026-10-02_ |
+| Depends on | — _(related: `UI-24`, which top-anchored the dialog)_ |
+| Branch | `feat/ui-32-file-player-actions` |
+
+**Detail: [`queue/UI-34.md`](queue/UI-34.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UI-32 + UI-34 both pass."* Save Playlist's fields stay inside the dialog (a 400 px form `min-width` in a 400 px dialog removed; a scan test forbids inline pixel `min-width` in dialogs).
