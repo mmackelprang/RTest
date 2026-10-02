@@ -60,6 +60,17 @@
     </div>
   </div>
 
+  @* OPS-14: where the API docs are. Plain text on purpose — never an <a>: a page outside the app would
+     strand the kiosk (UI-26), so this tells the owner what to type on another device. *@
+  @if (!string.IsNullOrEmpty(ApiDocsUrl))
+  {
+    <div class="dev-tray-note">
+      <span class="dev-readout-label">API docs</span>
+      <span class="dev-readout-value dev-tray-note-url">@ApiDocsUrl</span>
+      <span class="dev-tray-note-hint">open on another device</span>
+    </div>
+  }
+
   <div class="dev-tray-grid">
     <button type="button"
             class="dev-card dev-card--action"
@@ -141,6 +152,29 @@
   /// auto-lock timer elapses. Parent should set its own state to closed.
   /// </summary>
   [Parameter] public EventCallback OnClose { get; set; }
+
+  /// <summary>
+  /// Where the API's interactive docs live (OPS-14), shown as a plain-text note — never a link: the
+  /// kiosk has no way back from a page outside the app (UI-26), so the owner opens it on another
+  /// device. Null hides the note. The parent builds it with <see cref="BuildApiDocsUrl"/>.
+  /// </summary>
+  [Parameter] public string? ApiDocsUrl { get; set; }
+
+  /// <summary>
+  /// The Scalar docs URL as another device on the LAN would reach it: this machine's name plus the
+  /// port of the configured API base URL. The configured host itself is useless for that — on the box
+  /// radio-web talks to the API at <c>http://localhost:5000</c>. Null when the base URL won't parse.
+  /// </summary>
+  internal static string? BuildApiDocsUrl(string? apiBaseUrl, string machineName)
+  {
+    if (string.IsNullOrWhiteSpace(apiBaseUrl) || string.IsNullOrWhiteSpace(machineName)
+        || !Uri.TryCreate(apiBaseUrl, UriKind.Absolute, out var api))
+    {
+      return null;
+    }
+
+    return $"{api.Scheme}://{machineName.ToLowerInvariant()}:{api.Port}/scalar/v1";
+  }
 
   private const int AutoLockSeconds = 30;
 

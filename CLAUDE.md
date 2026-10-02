@@ -36,7 +36,8 @@ dotnet test --configuration Release --verbosity normal
 # Run single test
 dotnet test --filter "FullyQualifiedName~TestClassName.TestMethodName"
 
-# Run API server (Swagger at http://localhost:5000/swagger)
+# Run API server (API docs: Scalar UI at http://localhost:5000/scalar/v1, OpenAPI JSON at
+# /openapi/v1.json — also served on the box: http://radio:5000/scalar/v1, since OPS-14)
 dotnet run --project src/Radio.API
 
 # Run Web UI (http://localhost:5002)
