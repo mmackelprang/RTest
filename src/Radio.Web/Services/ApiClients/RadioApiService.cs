@@ -18,7 +18,18 @@ public class RadioApiService
     _logger = logger;
   }
 
-  public async Task<IEnumerable<Radio.Core.Models.RadioBandModel>> GetBandsAsync(CancellationToken cancellationToken = default)
+  public Task<IEnumerable<Radio.Core.Models.RadioBandModel>> GetBandsAsync(CancellationToken cancellationToken = default) =>
+    GetBandsCoreAsync(LogLevel.Error, cancellationToken);
+
+  /// <summary>
+  /// <see cref="GetBandsAsync"/> for a poll: a failure logs at Debug, because the visualizer's band map view
+  /// (UI-31) retries it on its 30 s refresh until one read succeeds, and <c>radio-web</c>'s Information and
+  /// above reach journald — the same reasoning as <see cref="GetPresetsForPollAsync"/>.
+  /// </summary>
+  public Task<IEnumerable<Radio.Core.Models.RadioBandModel>> GetBandsForPollAsync(CancellationToken cancellationToken = default) =>
+    GetBandsCoreAsync(LogLevel.Debug, cancellationToken);
+
+  private async Task<IEnumerable<Radio.Core.Models.RadioBandModel>> GetBandsCoreAsync(LogLevel failureLevel, CancellationToken cancellationToken)
   {
     try
     {
@@ -26,7 +37,7 @@ public class RadioApiService
     }
     catch (Exception ex)
     {
-      _logger.LogError(ex, "Failed to get radio bands");
+      _logger.Log(failureLevel, ex, "Failed to get radio bands");
       return Enumerable.Empty<Radio.Core.Models.RadioBandModel>();
     }
   }
