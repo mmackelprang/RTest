@@ -20,7 +20,7 @@ Within a session the normal Next / Repeat All path drops nothing. `NextAsync` mo
 
 **Persistence was the problem.** `SaveQueueStateToPreferences` saved `GetAllTracksInOrder()`, which is the current track plus the upcoming ones. `InitializeAsync` then restored **both** `_playlist` **and** `_originalOrder` from that list. So every restart (every deploy) deleted the played tracks for good, and from then on Repeat All repeated only what had been left. With Shuffle on, the unshuffled order was lost as well.
 
-Found on the way. Items 1, 2 and 5 lost or duplicated a track within a session; items 3 and 4 are persistence defects:
+Found on the way. Items 1, 2, 5 and 6 lost, duplicated or mis-targeted a track within a session; items 3 and 4 are persistence defects:
 
 1. **`PreviousAsync` with Repeat All, at the first track**, set the current track to `_originalOrder[^1]` and changed nothing else. The track that had been current vanished, and the last track was then listed twice.
 2. **`NextAsync` past the end with Repeat Off** left the last track in `_playedHistory` while it stayed the current track. The full list showed it twice, and Previous then put a copy of it in front of itself.
