@@ -45,6 +45,14 @@
   UI-30: the header's connection dot is gone. While the visualization hub is not
   connected, the hub-fed modes show a "disconnected" state in the canvas area
   instead. BAND does not: it reads the REST API, not the hub.
+
+  UI-31: the BAND tab reads RADIO (owner: "band isn't descriptive of what it does"); only user-facing text
+  changed — the enum member, the saved preference value ("Band") and the API routes keep their names, so a
+  saved preference still opens this view. The view's text moved from a bar over the top of the plot to a
+  strip under it: the band's name and range, the discovery status and colour key, help text, and the
+  sweep button, renamed Discover so it is not mistaken for the radio panel's seek SCAN buttons. The axis
+  labels sit inside the canvas over the drawn axis, and presets are carets on it. Spec:
+  docs/design-handoffs/2026-10-02-band-view-strip.md.
 *@
 
 <div class="viz-panel">
@@ -77,17 +85,18 @@
               aria-label="Phase scope mode">Phase</button>
       @* UI-29: last, and only while the radio is the active source. `disabled` takes it out of the tab
          order and ignores taps (the brief: not focusable, not tappable); aria-disabled and the described-by
-         hint say why it is there at all, for anyone reading the page rather than tabbing through it. *@
+         hint say why it is there at all, for anyone reading the page rather than tabbing through it.
+         UI-31: labelled RADIO (the mode is still VisualizationMode.Band, and is saved as "Band"), and no
+         `title` tooltip — the owner: "No tooltip needed for the gray 'Band' selection". *@
       <button class="visualizer-mode @(_currentMode == VisualizationMode.Band ? "is-active" : "")"
               type="button"
               disabled="@(!IsBandSelectable)"
               aria-disabled="@(IsBandSelectable ? "false" : "true")"
               aria-describedby="@(IsBandSelectable ? null : BandHintId)"
-              title="@(IsBandSelectable ? null : BandUnavailableHint)"
               @onclick="@(() => SelectMode(VisualizationMode.Band))"
               role="tab"
               aria-selected="@(_currentMode == VisualizationMode.Band ? "true" : "false")"
-              aria-label="Radio band map mode">BAND</button>
+              aria-label="Radio signal map mode">@RadioTabLabel</button>
     </div>
     @if (!IsBandSelectable)
     {
@@ -119,6 +128,7 @@
       flips and the skeleton unmounts.
     *@
     <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas @(IsBandMode ? "is-band" : "")"
+            role="@(IsBandMode ? "img" : null)"
             aria-label="@(IsBandMode ? BandCanvasLabel : null)"></canvas>
 
     @if (!_isInitialized)
@@ -127,62 +137,24 @@
     }
     else if (IsBandMode)
     {
-      @* BAND's text lives in markup over the canvas, not on it: it is what the owner reads and what
-         the tests assert. The bar and the empty state ignore pointer events except on the button, so
-         a tap on the plot below the bar reaches the canvas's tap handler; visualizer.js ignores taps
-         that land inside the bar itself. Only the tune/scan message is a live region — the countdown
-         re-renders every second while a sweep runs and would be announced on each tick. *@
-      <div class="band-overlay">
-        <div class="band-status">
-          @* AUD-91: the shown band leads the line, so a map of another band is never mistaken for FM.
-             Before the first map read it is not known, and no band is named. *@
-          <div class="band-status-line">
-            @if (_bandMap != null)
-            {
-              <span class="band-status-band">@ShownBand</span>
-            }
-            @if (_bandMap?.Sweep.IsSweeping == true)
-            {
-              <span class="band-status-sep" aria-hidden="true">·</span>
-              <span class="band-status-scanning">@BandMapText.FormatScanning(_bandMap.Sweep.EstimatedSecondsRemaining, _bandMap.Sweep.Progress, IsSweepingOtherBand ? _bandMap.Sweep.Band : null)</span>
-            }
-            else if (HasBandMap)
-            {
-              <span class="band-status-sep" aria-hidden="true">·</span>
-              <span class="band-status-age">scanned @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
-            }
-            @* UI-22: the bars' colour key, whenever the shown band's map has channels — so not for an
-               empty map or a band out of range, and it stays through a sweep of a band that already has
-               a map, which is drawn meanwhile. (A flat dead map has channels but no bar tall enough to
-               draw; the key still shows.) Page text rather
-               than canvas, so it can be read and tested; the swatches are decoration. Grey (noise) is
-               not listed: it reads as nothing. *@
-            @if (HasBandMap && IsShownBandMappable)
-            {
-              <span class="band-status-sep" aria-hidden="true">·</span>
-              <span class="band-legend">
-                <span class="band-legend-item"><span class="band-legend-swatch is-weak" aria-hidden="true"></span>weak</span>
-                <span class="band-legend-item"><span class="band-legend-swatch is-fair" aria-hidden="true"></span>fair</span>
-                <span class="band-legend-item"><span class="band-legend-swatch is-strong" aria-hidden="true"></span>strong</span>
-              </span>
-            }
-          </div>
-          @if (_bandMessage != null)
+      @* UI-31: the axis labels, over the axis visualizer.js draws in the canvas's bottom 32 px. Markup, not
+         canvas text, so they can be read and tested; each sits at its tick's fraction of the width, the
+         fraction the canvas draws the tick at. Nothing over the canvas takes pointer events, so a tap
+         anywhere on it reaches the tap handler. No axis on a band this radio cannot receive: there is no
+         plot to read it against. *@
+      @if (IsShownBandMappable)
+      {
+        <div class="band-axis-labels" aria-hidden="true">
+          @foreach (BandAxisLabel label in _bandAxis.Labels())
           {
-            <span class="band-status-message @(_bandMessageIsError ? "is-error" : "")"
-                  role="@(_bandMessageIsError ? "alert" : "status")">@_bandMessage</span>
+            <span class="@AxisLabelClass(label.Align)" style="left: @AxisLeftPercent(label.Fraction)%">@label.Text</span>
           }
         </div>
-        <button type="button"
-                class="band-scan-btn"
-                disabled="@(_bandMap?.Sweep.IsSweeping == true || _scanRequestInFlight || !IsShownBandMappable)"
-                aria-label="@(_bandMap == null ? "Scan the band" : $"Scan the {ShownBand} band")"
-                @onclick="RequestScanAsync">Scan</button>
-      </div>
+      }
 
       @if (!IsShownBandMappable)
       {
-        <div class="band-empty">
+        <div class="band-empty is-unavailable">
           <div class="band-empty-title">@ShownBand is out of this radio's range</div>
           @if (!string.IsNullOrWhiteSpace(_bandMap?.UnavailableReason))
           {
@@ -193,8 +165,8 @@
       else if (!HasBandMap && !IsSweepingShownBand)
       {
         <div class="band-empty">
-          <div class="band-empty-title">No scan yet</div>
-          <div class="band-empty-sub">The band is swept automatically a few minutes after start-up, or tap Scan.</div>
+          <div class="band-empty-title">No stations discovered yet</div>
+          <div class="band-empty-sub">The band is swept automatically a few minutes after start-up, or tap Discover.</div>
         </div>
       }
     }
@@ -219,14 +191,90 @@
     }
   </div>
 
-  <!-- Axis strip: audio frequency bands for the spectrum modes; for BAND, the shown band's MHz (kHz on AM) -->
   @if (IsBandMode)
   {
-    <div class="visualizer-axis is-band" aria-hidden="true">
-      @foreach (BandAxisLabel label in _bandAxis.Labels())
-      {
-        <span class="@AxisLabelClass(label.Align)" style="left: @AxisLeftPercent(label.Fraction)%">@label.Text</span>
-      }
+    @* UI-31: the strip under the map. Left, the band's name and range (before the first map read the band
+       is not known, and nothing is named — AUD-91). Middle, the discovery status and the colour key, then
+       either the help text or a tune/discover message. Right, Discover. The status line is not a live
+       region: the countdown re-renders every second while a sweep runs and would be announced each tick.
+       Tune confirmations go to one persistent polite region (a region inserted together with its text is
+       announced unreliably); errors render on demand as an alert. *@
+    <div class="band-strip">
+      <div class="band-strip-band">
+        @if (_bandMap != null)
+        {
+          <div class="band-strip-title">
+            <span class="band-strip-name">@ShownBand</span>
+            @if (IsVhfWindow)
+            {
+              <span class="band-strip-window">Window</span>
+            }
+          </div>
+          @if (ShownRange != null)
+          {
+            <div class="band-strip-range">@ShownRange</div>
+          }
+        }
+      </div>
+
+      <div class="band-strip-text">
+        <div class="band-status-line">
+          @if (_bandMap?.Sweep.IsSweeping == true)
+          {
+            <span class="band-status-discovering">@BandMapText.FormatDiscovering(_bandMap.Sweep.EstimatedSecondsRemaining, _bandMap.Sweep.Progress, IsSweepingOtherBand ? _bandMap.Sweep.Band : null)</span>
+          }
+          else if (!IsShownBandMappable)
+          {
+            <span class="band-status-unavailable">Out of range</span>
+          }
+          else if (HasBandMap)
+          {
+            <span class="band-status-age">discovered @BandMapText.FormatAge(_bandMap!.AgeSeconds)</span>
+          }
+          @* UI-22: the bars' colour key, whenever the shown band's map has channels — so not for an empty
+             map or a band out of range, and it stays through a sweep of a band that already has a map, which
+             is drawn meanwhile. (A flat dead map has channels but no bar tall enough to draw; the key still
+             shows.) Grey (noise) is not listed: it reads as nothing. The swatches are decoration. *@
+          @if (HasBandMap && IsShownBandMappable)
+          {
+            <span class="band-legend">
+              <span class="band-legend-item"><span class="band-legend-swatch is-weak" aria-hidden="true"></span>weak</span>
+              <span class="band-legend-item"><span class="band-legend-swatch is-fair" aria-hidden="true"></span>fair</span>
+              <span class="band-legend-item"><span class="band-legend-swatch is-strong" aria-hidden="true"></span>strong</span>
+            </span>
+          }
+        </div>
+
+        <div class="band-strip-lower">
+          <div class="band-message-live" role="status" aria-live="polite" aria-atomic="true">
+            @if (_bandMessage != null && !_bandMessageIsError)
+            {
+              <span class="band-status-message">@_bandMessage</span>
+            }
+          </div>
+          @if (_bandMessage != null && _bandMessageIsError)
+          {
+            <div class="band-status-message is-error" role="alert">@_bandMessage</div>
+          }
+          else if (_bandMessage == null && IsShownBandMappable)
+          {
+            @* The glyphs are pictures of what to look for (the preset caret drawn on the axis; the tuner's step
+               buttons), hidden from screen readers, which would read them as "black up-pointing triangle" and
+               "single angle quotation marks"; words stand in for them. "The tuner", not "the radio panel":
+               this view's own tab reads Radio. *@
+            <div class="band-strip-help">
+              <span>Touch a signal to snap to it. <span aria-hidden="true">▲</span><span class="visually-hidden">A triangle</span> marks a preset.</span>
+              <span>Fine-tune with the tuner's <span aria-hidden="true">‹ ›</span><span class="visually-hidden">step</span> buttons or the knob.</span>
+            </div>
+          }
+        </div>
+      </div>
+
+      <button type="button"
+              class="band-discover-btn"
+              disabled="@(_bandMap?.Sweep.IsSweeping == true || _scanRequestInFlight || !IsShownBandMappable)"
+              aria-label="@(_bandMap == null ? "Discover stations in this band" : $"Discover stations in the {ShownBand} band")"
+              @onclick="RequestDiscoverAsync">Discover</button>
     </div>
   }
   else if (IsSpectrumMode)
@@ -255,7 +303,7 @@
   }
 
   /// <summary>
-  /// How often BAND re-reads the map while a sweep runs, so the "Scanning… N s" countdown moves.
+  /// How often BAND re-reads the map while a sweep runs, so the "Discovering… N s" countdown moves.
   /// <c>internal</c> so tests advance the fake clock by the production value.
   /// </summary>
   internal static readonly TimeSpan BandSweepingRefresh = TimeSpan.FromSeconds(1);
@@ -279,8 +327,16 @@
   /// </summary>
   [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
 
-  /// <summary>The tooltip and accessible hint on a disabled BAND tab (UI-29).</summary>
+  /// <summary>The accessible hint on a disabled RADIO (band map) tab (UI-29; no tooltip since UI-31).</summary>
   internal const string BandUnavailableHint = "Available when the radio is the active source";
+
+  /// <summary>
+  /// The band map tab's label (UI-31; was "BAND"), title case like its siblings — the picker's CSS
+  /// upper-cases them all. The mode behind it is still
+  /// <see cref="VisualizationMode.Band"/>, saved as <c>Band</c>.
+  /// </summary>
+  internal const string RadioTabLabel = "Radio";
+
 
   // The described-by target for the hint. One panel per page, so a fixed id is unique.
   private const string BandHintId = "visualizer-band-hint";
@@ -331,6 +387,10 @@
   private BandAxis? _windowReadTriggeredFor;
   private RadioStateDto? _radioState;
   private List<RadioPresetDto>? _presets;
+
+  // UI-31: the band list the radio control panel's band pills render (GET /api/RadioBands), for the
+  // strip's range line ("87.5–108 MHz"). Read with the presets until a read returns any; null until then.
+  private List<Radio.Core.Models.RadioBandModel>? _bandList;
   private ITimer? _bandTimer;
   private bool _bandActive;
   private bool _bandTapRegistered;
@@ -346,9 +406,9 @@
   // cadence until a read succeeds.
   private bool _bandMapReadFailed;
 
-  // Refreshes can overlap — a timer refresh in flight when a tap or Scan starts its own. Each takes a
+  // Refreshes can overlap — a timer refresh in flight when a tap or Discover starts its own. Each takes a
   // number, and only the newest applies its results, so an older read cannot land last and overwrite
-  // a newer one (e.g. hide a sweep that a Scan has just started).
+  // a newer one (e.g. hide a sweep that a Discover has just started).
   private int _bandRefreshSeq;
 
   /// <summary>
@@ -412,8 +472,36 @@
     _bandMap?.Sweep.IsSweeping == true && _bandMap.Sweep.Band != null && !SameBand(_bandMap.Sweep.Band, ShownBand);
 
   private string BandCanvasLabel => IsShownBandMappable
-    ? $"{ShownBand} band map. Tap a station to tune."
-    : $"{ShownBand} band map.";
+    ? $"{ShownBand} signal map. Touch a signal to tune."
+    : $"{ShownBand} signal map.";
+
+  /// <summary>VHF's map is a window around the radio's frequency, not the whole band (AUD-91).</summary>
+  private bool IsVhfWindow => SameBand(ShownBand, "VHF");
+
+  /// <summary>
+  /// The strip's range line (UI-31): VHF's plotted window; otherwise the band's range as the control panel's
+  /// band pill names it, falling back to the plotted range when the band list has not been read. Null when
+  /// neither is known (a map without a usable axis, before the band list arrives).
+  /// </summary>
+  private string? ShownRange
+  {
+    get
+    {
+      bool axisIsShownBand = SameBand(_bandAxis.Band, ShownBand);
+      if (IsVhfWindow)
+      {
+        return axisIsShownBand ? BandMapText.FormatRange(_bandAxis.DisplayMinHz, _bandAxis.DisplayMaxHz, ShownBand) : null;
+      }
+
+      string? nominal = _bandList?.FirstOrDefault(b => SameBand(b.Type, ShownBand))?.Range;
+      if (!string.IsNullOrWhiteSpace(nominal))
+      {
+        return nominal;
+      }
+
+      return axisIsShownBand ? BandMapText.FormatRange(_bandAxis.DisplayMinHz, _bandAxis.DisplayMaxHz, ShownBand) : null;
+    }
+  }
 
   private static bool SameBand(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
 
@@ -956,7 +1044,7 @@
   /// Re-arms the one-shot refresh timer: <see cref="BandSweepingRefresh"/> while the last successful
   /// map read showed a sweep, else <see cref="BandIdleRefresh"/> — and no later than the expiry of a
   /// message that is showing. The timer is one-shot and every arm disposes the previous one, so at
-  /// most one timer exists and timer refreshes cannot stack up behind a slow API. (A tap or Scan
+  /// most one timer exists and timer refreshes cannot stack up behind a slow API. (A tap or Discover
   /// refresh can still overlap a timer refresh; <see cref="_bandRefreshSeq"/> handles that.)
   /// </summary>
   private void ArmBandTimer()
@@ -1015,7 +1103,13 @@
       Task<List<RadioPresetDto>?> presetsTask = includePresets
         ? RadioApi.GetPresetsForPollAsync()
         : Task.FromResult<List<RadioPresetDto>?>(null);
-      await Task.WhenAll(mapTask, stateTask, presetsTask);
+      // UI-31: the band list changes only with configuration; read until one read returns any bands.
+      // GetBandsForPollAsync answers an empty list on failure (logged at Debug), so an empty answer is
+      // retried next time.
+      Task<IEnumerable<Radio.Core.Models.RadioBandModel>> bandsTask = includePresets && _bandList == null
+        ? RadioApi.GetBandsForPollAsync()
+        : Task.FromResult(Enumerable.Empty<Radio.Core.Models.RadioBandModel>());
+      await Task.WhenAll(mapTask, stateTask, presetsTask, bandsTask);
 
       if (seq != _bandRefreshSeq)
       {
@@ -1047,6 +1141,11 @@
       }
 
       _presets = await presetsTask ?? _presets;
+      List<Radio.Core.Models.RadioBandModel> bands = (await bandsTask).ToList();
+      if (bands.Count > 0)
+      {
+        _bandList = bands;
+      }
 
       if (!_isDisposed && _bandActive)
       {
@@ -1062,9 +1161,10 @@
 
   /// <summary>
   /// Hands the canvas a drawing model in plot coordinates (0–1 across the shown band's axis; 87.5–108 MHz
-  /// on FM), so the JS stays arithmetic-free: normalised channel heights, the gridline positions, the
-  /// axis span in channel spacings (for the bar width), each bar's colour tier (UI-22), the station
-  /// marker (shown band, radio active), and the shown band's presets as labelled ticks.
+  /// on FM), so the JS stays arithmetic-free: normalised channel heights, the gridline and tick positions,
+  /// the axis span in channel spacings (for the bar width), each bar's colour tier (UI-22), the station
+  /// marker (shown band, radio active), the shown band's presets as carets on the axis (UI-31), and
+  /// whether the band can be received at all (no axis is drawn when it cannot).
   /// </summary>
   private async Task DrawBandAsync()
   {
@@ -1096,7 +1196,7 @@
     object[] presets = shownPresets
       .Where(p => SameBand(p.Band, band) && axis.Contains(p.Frequency))
       .OrderBy(p => p.Frequency)
-      .Select(p => (object)new { f = axis.HzToFraction(p.Frequency), label = PresetLabel(p, band) })
+      .Select(p => (object)new { f = axis.HzToFraction(p.Frequency) })
       .ToArray();
 
     double[] grid = axis.Ticks().Select(t => axis.HzToFraction(t.Hz)).ToArray();
@@ -1104,18 +1204,15 @@
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawBandMap", WebConstants.ElementIds.VisualizerCanvas,
-        new { levels, station, presets, grid, channelsAcross = axis.ChannelsAcross, sweeping = _bandMap?.Sweep.IsSweeping == true });
+        new
+        {
+          levels, station, presets, grid, channelsAcross = axis.ChannelsAcross,
+          sweeping = _bandMap?.Sweep.IsSweeping == true, mappable = IsShownBandMappable,
+        });
     }
     catch (TaskCanceledException) { }
     catch (OperationCanceledException) { }
     catch (Exception ex) { Logger.LogWarning(ex, "Error drawing the band map"); }
-  }
-
-  /// <summary>A preset's tick label: its name when short, else its frequency as the band names it.</summary>
-  private static string PresetLabel(RadioPresetDto preset, string band)
-  {
-    string name = preset.Name?.Trim() ?? string.Empty;
-    return name.Length is > 0 and <= 8 ? name : BandMapText.FormatFrequency(preset.Frequency, band);
   }
 
   /// <summary>
@@ -1347,13 +1444,13 @@
   }
 
   /// <summary>
-  /// The Scan button: <c>POST /api/radio/bandmap/scan?band=</c> with the band shown (AUD-91), so a band
+  /// The Discover button (UI-31; was Scan): <c>POST /api/radio/bandmap/scan?band=</c> with the band shown (AUD-91), so a band
   /// change between the render and the tap cannot scan a band the owner was not looking at; before any
   /// map has been read, no band, and the API takes the radio's. On 202 the map is re-read at once, which
-  /// shows the sweep overlay and switches the timer to the one-second cadence; on 409/503 the API's
+  /// shows "Discovering…" in the strip and switches the timer to the one-second cadence; on 409/503 the API's
   /// reason is shown.
   /// </summary>
-  private async Task RequestScanAsync()
+  private async Task RequestDiscoverAsync()
   {
     if (_scanRequestInFlight)
     {
@@ -1366,7 +1463,7 @@
       BandScanRequestResult result = await RadioApi.RequestBandScanAsync(_bandMap == null ? null : ShownBand);
       if (!result.Accepted)
       {
-        ShowBandMessage(result.Error ?? (result.StatusCode == 0 ? "The radio API is not reachable" : "Scan unavailable"),
+        ShowBandMessage(result.Error ?? (result.StatusCode == 0 ? "The radio API is not reachable" : "Discover unavailable"),
           isError: true);
       }
 

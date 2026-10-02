@@ -21,9 +21,9 @@ public enum BandAxisLabelAlign
   End,
 }
 
-/// <summary>A label in the axis strip under the BAND plot.</summary>
+/// <summary>A label on the band map's axis, laid over the canvas's axis zone (UI-31).</summary>
 /// <param name="Fraction">Where its tick is, 0 (left edge of the plot) to 1 (right edge).</param>
-/// <param name="Text">What it reads: the tick's value, and on the last label of a non-FM band the unit too.</param>
+/// <param name="Text">What it reads: the tick's value, without a unit (UI-31: the unit is in the strip's range line).</param>
 /// <param name="Align">How it sits against its tick.</param>
 public sealed record BandAxisLabel(double Fraction, string Text, BandAxisLabelAlign Align);
 
@@ -241,15 +241,14 @@ public sealed record BandAxis(
   }
 
   /// <summary>
-  /// The axis strip's labels, one per tick of <see cref="Ticks"/>. A label near either edge of the plot
+  /// The axis labels, one per tick of <see cref="Ticks"/>. A label near either edge of the plot
   /// is aligned to stay inside it (<see cref="LabelStartFraction"/>, <see cref="LabelEndFraction"/>);
-  /// the rest are centred. On a band other than FM the last label carries the unit (<c>135 MHz</c>,
-  /// <c>1600 kHz</c>); FM's read <c>88</c> … <c>108</c>, as AUD-76 shipped them.
+  /// the rest are centred. No label carries a unit (UI-31): the strip under the map names the band's
+  /// range with its unit, and a unit on the last label was clipped at the right edge on WB and VHF.
   /// </summary>
   public IReadOnlyList<BandAxisLabel> Labels()
   {
     IReadOnlyList<BandAxisTick> ticks = Ticks();
-    string unit = IsKhz ? " kHz" : " MHz";
     BandAxisLabel[] labels = new BandAxisLabel[ticks.Count];
     for (int i = 0; i < ticks.Count; i++)
     {
@@ -257,8 +256,7 @@ public sealed record BandAxis(
       BandAxisLabelAlign align = fraction >= LabelEndFraction ? BandAxisLabelAlign.End
         : fraction <= LabelStartFraction ? BandAxisLabelAlign.Start
         : BandAxisLabelAlign.Center;
-      string text = i == ticks.Count - 1 && !IsFm(Band) ? ticks[i].Label + unit : ticks[i].Label;
-      labels[i] = new BandAxisLabel(fraction, text, align);
+      labels[i] = new BandAxisLabel(fraction, ticks[i].Label, align);
     }
 
     return labels;
