@@ -15,6 +15,10 @@
     <InternalsVisibleTo Include="Radio.Infrastructure.Tests" />
     <InternalsVisibleTo Include="Radio.IntegrationTests" />
     <InternalsVisibleTo Include="Radio.Fingerprinting.Tests" />
+    <!-- PHN-12: PhoneCallClientContractTests drives PhoneCallClient over a real SignalR connection to an
+         in-process TestServer, which only Radio.API.Tests can host; it needs the client's internal
+         connection seam. -->
+    <InternalsVisibleTo Include="Radio.API.Tests" />
   </ItemGroup>
   <!-- Conditional compilation: exclude platform-specific Bluetooth files -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
