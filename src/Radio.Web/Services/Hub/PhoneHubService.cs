@@ -72,11 +72,7 @@ public class PhoneHubService : IAsyncDisposable
           TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(30) })
         .Build();
 
-      _hubConnection.On<string, string>("CallStateChanged", (phoneId, state) =>
-      {
-        _logger.LogDebug("Phone call state changed: {PhoneId} → {State}", phoneId, state);
-        CallStateChanged?.Invoke(phoneId, state);
-      });
+      _hubConnection.On<string, string>("CallStateChanged", RaiseCallStateChangedForTest);
 
       // PHN-5 (P8): the masking lives in RaiseIncomingCallForTest so the live handler + the unit
       // test share one source of truth, the same arrangement as ReadStateChanged below.
@@ -143,6 +139,17 @@ public class PhoneHubService : IAsyncDisposable
     {
       _connectionLock.Release();
     }
+  }
+
+  /// <summary>
+  /// Logs and raises <see cref="CallStateChanged"/>. The live /hub
+  /// <c>.On&lt;string, string&gt;("CallStateChanged", …)</c> handler is wired directly to this method, so a
+  /// test that drives it drives production (PHN-11, the same seam as <see cref="RaiseIncomingCallForTest"/>).
+  /// </summary>
+  internal void RaiseCallStateChangedForTest(string phoneId, string state)
+  {
+    _logger.LogDebug("Phone call state changed: {PhoneId} → {State}", phoneId, state);
+    CallStateChanged?.Invoke(phoneId, state);
   }
 
   /// <summary>

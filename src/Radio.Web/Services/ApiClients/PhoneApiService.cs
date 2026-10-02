@@ -70,6 +70,47 @@ public class PhoneApiService
     }
   }
 
+  /// <summary>
+  /// PHN-11: asks RotaryPhone to decline the RINGING call — the banner's Ignore button. True only when the
+  /// service answers 2xx with a JSON body carrying <c>"declined": true</c>.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>The route does not exist in RotaryPhone yet.</b> It was requested on 2026-10-02
+  /// (<c>RotaryPhone/docs/prompts/2026-10-02-radioconsole-decline-ringing-call-request.md</c>), and the
+  /// banner calls this only when <c>RotaryPhone:DeclineSupported</c> is true. The body check is not
+  /// decoration: RotaryPhone's front end answers unknown <c>/api/*</c> paths with <c>200</c> and its
+  /// <c>index.html</c> (see <c>CLAUDE.md</c>, <c>UI-11</c>), so a status code alone would report a decline
+  /// that never happened if the flag were flipped before the route shipped.
+  /// <c>simulate/hook?offHook=false</c> would reach the same hang-up today and is deliberately not used:
+  /// it is unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+  /// </remarks>
+  public async Task<bool> DeclineCallAsync(string? phoneId, CancellationToken ct = default)
+  {
+    try
+    {
+      string url = string.IsNullOrEmpty(phoneId)
+        ? "/api/phone/decline"
+        : $"/api/phone/decline?phoneId={Uri.EscapeDataString(phoneId)}";
+      using var response = await _httpClient.PostAsync(url, null, ct);
+      if (!response.IsSuccessStatusCode
+          || response.Content.Headers.ContentType?.MediaType?.Contains("json", StringComparison.OrdinalIgnoreCase) != true)
+      {
+        _logger.LogWarning("The phone service did not accept the decline ({StatusCode})", (int)response.StatusCode);
+        return false;
+      }
+
+      using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+      return body.RootElement.ValueKind == JsonValueKind.Object
+        && body.RootElement.TryGetProperty("declined", out var declined)
+        && declined.ValueKind == JsonValueKind.True;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to decline the incoming call");
+      return false;
+    }
+  }
+
   // Simulate controls (developer tools)
 
   public async Task<bool> SimulateHookAsync(bool offHook, CancellationToken ct = default)

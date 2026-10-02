@@ -480,6 +480,11 @@ builder.Services.AddScoped<Radio.Web.Services.CentrePanelViewService>();
 // is shared by PhonePage and its child panels for the session.
 builder.Services.AddScoped<Radio.Web.Services.ContactResolutionService>();
 
+// PHN-11 — the incoming-call banner's state. Scoped, not singleton: a touch on one screen closes that
+// screen's banner and no other. Both banner hosts (MainLayout and the /sleep page, which is on a
+// different layout) inject it, so it outlives the route change between them within a circuit.
+builder.Services.AddScoped<Radio.Web.Services.IncomingCallBannerService>();
+
 // Task #15 PR E item #47 — gain-popover backdrop portal. Scoped so the
 // circuit's NowPlayingPanel + MainLayout share a single instance per user
 // session; mounted in MainLayout (OUTSIDE .page-transition) so the backdrop
