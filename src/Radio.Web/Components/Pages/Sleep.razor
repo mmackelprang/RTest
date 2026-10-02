@@ -15,6 +15,7 @@
 @inject IOptionsMonitor<DisplayOptions> DisplayOptionsMonitor
 @inject IOptionsMonitor<WeatherDisplayOptions> WeatherOptionsMonitor
 @inject Radio.Web.Services.EncoderHudService EncoderHud
+@inject Radio.Web.Services.IncomingCallBannerService Banner
 @inject ILogger<Sleep> Logger
 @implements IAsyncDisposable
 
@@ -279,6 +280,11 @@
     }
 
     _reportedVisible = true;
+    // Read the banner's state directly rather than wait for its callback: measured in bUnit, this page's
+    // first after-render runs BEFORE the banner's, so a call already up when the page mounts would
+    // otherwise be reported as a visible sleep screen and then corrected — a needless off/on edge for
+    // ENC-22's timer and a dark panel that stays dark for one round trip.
+    _bannerCovering |= Banner.Current.IsVisible;
     await SyncSleepScreenVisibilityAsync();
   }
 
@@ -289,9 +295,8 @@
   /// screen is reported visible again, and ENC-22's off-timer restarts from its full period.
   /// </summary>
   /// <remarks>
-  /// A child's first after-render runs before its parent's, so with a call already up when this page
-  /// mounts this arrives BEFORE the page's own first report. It only records the fact then; the page's
-  /// first report reads it.
+  /// Before the page's own first report this only records the fact; the first report reads it (and the
+  /// banner service's state, since the order of the two after-renders is not something to lean on).
   /// </remarks>
   private async Task OnBannerCoveringChangedAsync(bool covering)
   {
