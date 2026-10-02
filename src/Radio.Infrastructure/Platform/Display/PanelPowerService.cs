@@ -12,6 +12,16 @@ namespace Radio.Infrastructure.Platform.Display;
 /// continuous sleep screen, and back on when a knob is turned or pressed (<c>ENC-22</c>).
 ///
 /// <para>
+/// <b>Deep sleep (<c>ENC-23</c>)</b>: <see cref="PowerOffNow"/> powers the panel off at once, on the
+/// Sleep pill's hold, whatever <see cref="PanelPowerOptions.PanelOffAfterMinutes"/> says — but under the
+/// same safety rule 1 as the timer, refused rather than deferred. The only other difference from a
+/// timer power-off is what the first knob input on the dark panel reports
+/// (<see cref="PanelInputOutcome.LitPanelFromDeepSleep"/> instead of <see cref="PanelInputOutcome.LitPanel"/>),
+/// which the router uses to let a VOLUME press wake the console in the same press. Every path that
+/// lights the panel ends the deep sleep.
+/// </para>
+///
+/// <para>
 /// <b>Keyed on <see cref="ISleepService.IsSleepScreenVisible"/>, not <see cref="ISleepService.IsSleeping"/>.</b>
 /// The 30-minute idle path reaches <c>/sleep</c> without ever setting <c>IsSleeping</c>
 /// (<c>HANDOFF-NEXT-SESSION.md</c> gotcha #9), so a timer on <c>IsSleeping</c> would never run for the
@@ -24,7 +34,7 @@ namespace Radio.Infrastructure.Platform.Display;
 /// with a lost encoder is a screen nobody can turn on inside a sealed cabinet:
 /// <list type="number">
 ///   <item>The panel is never powered off unless the encoder is connected, and has been for
-///   <see cref="PanelPowerOptions.EncoderStableSeconds"/>.</item>
+///   <see cref="PanelPowerOptions.EncoderStableSeconds"/> — by the timer or by <see cref="PowerOffNow"/>.</item>
 ///   <item>If the encoder disconnects while the panel is off, the panel is powered on at once —
 ///   on the <c>ConnectionChanged</c> event, not on a poll.</item>
 ///   <item>The panel is powered on unconditionally at start-up (a crash while dark must not survive
@@ -62,8 +72,14 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
 
   private readonly object _gate = new();
 
-  // What the panel should be. Written only under _gate.
+  // What the panel should be. Written only under _gate. Set true only through RequestOnLocked, which
+  // also ends a deep sleep, so no path that lights the panel can leave _deepSleep behind.
   private bool _desiredOn = true;
+
+  // ENC-23: the panel is dark because PowerOffNow asked for it (the Sleep pill's hold), not because the
+  // ENC-22 timer fired. Written only under _gate. Read once by OnEncoderInput to tell the router which
+  // kind of dark panel an input lit, and cleared by RequestOnLocked.
+  private bool _deepSleep;
 
   // What the compositor last confirmed. Null until the first command lands: at start-up the panel's
   // state is unknown, and "unknown" must not be treated as "on" by anything that decides to skip a
@@ -138,6 +154,15 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
   // and dispatch into a panel that is still black.
   private bool IsDarkLocked() => !_desiredOn || _appliedOn == false;
 
+  // The one way to want the panel on. Every path that lights it also ends a deep sleep: once the panel
+  // is wanted on, the dark panel PowerOffNow made is gone, and a later dark panel is a deep sleep only
+  // if PowerOffNow asks again — an ENC-22 timer power-off's first knob input must only light it.
+  private void RequestOnLocked()
+  {
+    _desiredOn = true;
+    _deepSleep = false;
+  }
+
   /// <inheritdoc />
   public Task StartAsync(CancellationToken cancellationToken)
   {
@@ -188,7 +213,7 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
       _started = false;
       DisarmOffTimerLocked();
       needsOn = IsDarkLocked() || _appliedOn != true;
-      _desiredOn = true;
+      RequestOnLocked();
     }
 
     if (needsOn)
@@ -210,10 +235,10 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
   }
 
   /// <inheritdoc />
-  public bool OnEncoderInput(string source)
+  public PanelInputOutcome OnEncoderInput(string source)
   {
     bool powerOn = false;
-    bool consume;
+    PanelInputOutcome outcome;
 
     lock (_gate)
     {
@@ -221,17 +246,19 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
 
       if (IsDarkLocked())
       {
-        _desiredOn = true;
+        // Read before RequestOnLocked clears it: this input is the one that ends the deep sleep, so it
+        // is the only one that can report it.
+        outcome = _deepSleep ? PanelInputOutcome.LitPanelFromDeepSleep : PanelInputOutcome.LitPanel;
+        RequestOnLocked();
         _wakeGraceUntil = now + TimeSpan.FromMilliseconds(Math.Max(0, _options.CurrentValue.WakeGraceMilliseconds));
         powerOn = true;
-        consume = true;
       }
       else
       {
         // Inside the grace window the panel is showing its own power-up splash, so nothing a knob does
         // here would be visible. Consumed rather than acted on, so a fast spin that woke the panel
         // cannot go on to move the volume unseen.
-        consume = now < _wakeGraceUntil;
+        outcome = now < _wakeGraceUntil ? PanelInputOutcome.ConsumedInGrace : PanelInputOutcome.Pass;
       }
 
       // Any knob input on the sleep screen is someone at the console: the countdown starts again.
@@ -243,11 +270,92 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
 
     if (powerOn)
     {
-      _logger.LogInformation("Panel power: {Source} on a dark panel; requested power-on, input consumed", source);
+      _logger.LogInformation(
+        "Panel power: {Source} on a dark panel{Deep}; requested power-on, input consumed",
+        source,
+        outcome == PanelInputOutcome.LitPanelFromDeepSleep ? " (deep sleep)" : "");
       KickPump();
     }
 
-    return consume;
+    return outcome;
+  }
+
+  /// <inheritdoc />
+  public PanelPowerOffResult PowerOffNow(string source)
+  {
+    PanelPowerOffResult result;
+
+    lock (_gate)
+    {
+      if (!_started || _disposed)
+      {
+        result = PanelPowerOffResult.Unavailable;
+      }
+      else if (!_desiredOn)
+      {
+        // Dark already (the ENC-22 timer, or an earlier deep sleep). Nothing to send; from here on the
+        // dark panel is a deep sleep, so a VOLUME press both lights it and wakes the console.
+        _deepSleep = true;
+        DisarmOffTimerLocked();
+        result = PanelPowerOffResult.AlreadyOff;
+      }
+      // ⛔ Safety rule 1, applied exactly as the ENC-22 timer applies it — but refused rather than
+      // deferred: the owner is standing at the pill, and a panel that went dark minutes later on its own
+      // would be a surprise rather than an answer.
+      else if (_encoder is null || !_encoder.IsConnected || _encoderConnectedSince is null)
+      {
+        result = PanelPowerOffResult.RefusedEncoderNotConnected;
+      }
+      else if (_time.GetUtcNow() - _encoderConnectedSince.Value < StablePeriod())
+      {
+        result = PanelPowerOffResult.RefusedEncoderNotStable;
+      }
+      else
+      {
+        _desiredOn = false;
+        _deepSleep = true;
+        // The ENC-22 countdown has nothing left to do while the panel is dark; a later knob input re-arms
+        // it if the sleep screen is still up.
+        DisarmOffTimerLocked();
+        result = PanelPowerOffResult.PoweredOff;
+      }
+    }
+
+    switch (result)
+    {
+      case PanelPowerOffResult.PoweredOff:
+        _logger.LogInformation(
+          "Panel power: deep sleep requested by {Source}; powering the panel off now; a VOLUME press wakes it",
+          source);
+        KickPump();
+        break;
+
+      case PanelPowerOffResult.AlreadyOff:
+        _logger.LogInformation(
+          "Panel power: deep sleep requested by {Source}; the panel is already off; a VOLUME press wakes it",
+          source);
+        break;
+
+      case PanelPowerOffResult.RefusedEncoderNotConnected:
+        _logger.LogInformation(
+          "Panel power: deep sleep requested by {Source} refused — the encoder is not connected, and the knobs are the panel's only wake source",
+          source);
+        break;
+
+      case PanelPowerOffResult.RefusedEncoderNotStable:
+        _logger.LogInformation(
+          "Panel power: deep sleep requested by {Source} refused — the encoder has been connected for less than {Seconds} s",
+          source, StablePeriod().TotalSeconds);
+        break;
+
+      default:
+        _logger.LogInformation(
+          "Panel power: deep sleep requested by {Source} refused — the panel power service is not running",
+          source);
+        break;
+    }
+
+    return result;
   }
 
   private void OnSleepScreenVisibilityChanged(object? sender, bool visible)
@@ -278,7 +386,7 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
         // Leaving /sleep by any route — a REST wake, an incoming call, a navigation — lights the panel.
         if (IsDarkLocked())
         {
-          _desiredOn = true;
+          RequestOnLocked();
           powerOn = true;
         }
       }
@@ -321,7 +429,7 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
         // ⛔ Safety rule 2. The only wake source has just gone; the panel comes on now.
         if (IsDarkLocked())
         {
-          _desiredOn = true;
+          RequestOnLocked();
           powerOn = true;
         }
       }
@@ -504,7 +612,7 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
           // Settling here instead — "presumably still lit" — left a possibly-dark panel with every
           // knob dispatching and nothing ever sending "on" (pre-merge review, H1).
           _appliedOn = false;
-          _desiredOn = true;
+          RequestOnLocked();
           continue;
         }
 

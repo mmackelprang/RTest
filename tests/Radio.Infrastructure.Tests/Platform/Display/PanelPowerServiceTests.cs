@@ -294,10 +294,10 @@ public class PanelPowerServiceTests
     await h.StartAsync();
     await h.GoDarkAsync();
 
-    bool consumed = h.Service.OnEncoderInput("encoder-turn");
+    PanelInputOutcome outcome = h.Service.OnEncoderInput("encoder-turn");
     await h.Service.PumpIdle;
 
-    Assert.True(consumed);
+    Assert.Equal(PanelInputOutcome.LitPanel, outcome);
     Assert.True(h.Control.Last);
     Assert.False(h.Service.IsPanelOff);
   }
@@ -311,11 +311,11 @@ public class PanelPowerServiceTests
     await h.StartAsync();
     await h.GoDarkAsync();
 
-    Assert.True(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-turn"));
     await h.AdvanceAsync(TimeSpan.FromMilliseconds(1999));
-    Assert.True(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.ConsumedInGrace, h.Service.OnEncoderInput("encoder-turn"));
     await h.AdvanceAsync(TimeSpan.FromMilliseconds(1));
-    Assert.False(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.Pass, h.Service.OnEncoderInput("encoder-turn"));
   }
 
   [Fact]
@@ -325,7 +325,7 @@ public class PanelPowerServiceTests
     await h.StartAsync();
     h.Sleep.Show(true);
 
-    Assert.False(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.Pass, h.Service.OnEncoderInput("encoder-turn"));
     Assert.Equal([true], h.Control.Commands);
   }
 
@@ -479,11 +479,11 @@ public class PanelPowerServiceTests
     await h.GoDarkAsync();
 
     h.Control.Results.Enqueue(false);
-    Assert.True(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-turn"));
     await h.Service.PumpIdle;
     await h.AdvanceAsync(TimeSpan.FromMilliseconds(2000));
 
-    Assert.True(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-turn"));
     await h.Service.PumpIdle;
 
     Assert.True(h.Control.Last);
@@ -505,7 +505,7 @@ public class PanelPowerServiceTests
 
     Assert.Equal([true, false, true], h.Control.Commands);
     Assert.False(h.Service.IsPanelOff);
-    Assert.False(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.Pass, h.Service.OnEncoderInput("encoder-turn"));
   }
 
   [Fact]
@@ -522,10 +522,233 @@ public class PanelPowerServiceTests
     await h.AdvanceAsync(TimeSpan.FromMinutes(10));
     Assert.True(h.Service.IsPanelOff);
 
-    Assert.True(h.Service.OnEncoderInput("encoder-turn"));
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-turn"));
     await h.Service.PumpIdle;
 
     Assert.Equal([true, false, true, true], h.Control.Commands);
     Assert.False(h.Service.IsPanelOff);
+  }
+
+  // --- Deep sleep (ENC-23): PowerOffNow ------------------------------------------------------
+
+  /// <summary>Starts the service and runs out the encoder's stability period, so PowerOffNow may act.</summary>
+  private static async Task<Harness> StartedAndStableAsync(double minutes = 0, double stableSeconds = 30, double graceMs = 2000)
+  {
+    var h = new Harness(minutes: minutes, stableSeconds: stableSeconds, graceMs: graceMs);
+    await h.StartAsync();
+    await h.AdvanceAsync(TimeSpan.FromSeconds(stableSeconds));
+    return h;
+  }
+
+  [Fact]
+  public async Task PowerOffNow_WithTheTimerFeatureOff_PowersThePanelOff()
+  {
+    // The box runs PanelOffAfterMinutes = 0. The pill's hold must work there regardless.
+    using var h = await StartedAndStableAsync(minutes: 0);
+
+    PanelPowerOffResult result = h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    Assert.Equal(PanelPowerOffResult.PoweredOff, result);
+    Assert.Equal([true, false], h.Control.Commands);
+    Assert.True(h.Service.IsPanelOff);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_EncoderDisconnected_IsRefusedAndSendsNothing()
+  {
+    // Safety rule 1. The knobs are the only wake source.
+    using var h = await StartedAndStableAsync();
+    h.Encoder.SetConnected(false);
+
+    PanelPowerOffResult result = h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    Assert.Equal(PanelPowerOffResult.RefusedEncoderNotConnected, result);
+    Assert.Equal([true], h.Control.Commands);
+    Assert.False(h.Service.IsPanelOff);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_NoEncoderRegistered_IsRefused()
+  {
+    using var h = new Harness(minutes: 0, withEncoder: false);
+    await h.StartAsync();
+    await h.AdvanceAsync(TimeSpan.FromMinutes(5));
+
+    Assert.Equal(PanelPowerOffResult.RefusedEncoderNotConnected, h.Service.PowerOffNow("test"));
+    await h.Service.PumpIdle;
+    Assert.Equal([true], h.Control.Commands);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_InsideTheStabilityPeriod_IsRefusedNotDeferred()
+  {
+    using var h = new Harness(minutes: 0, stableSeconds: 30);
+    await h.StartAsync();
+    await h.AdvanceAsync(TimeSpan.FromSeconds(29));
+
+    Assert.Equal(PanelPowerOffResult.RefusedEncoderNotStable, h.Service.PowerOffNow("test"));
+
+    // Refused, not deferred: running the clock out does not power the panel off later on its own.
+    await h.AdvanceAsync(TimeSpan.FromMinutes(10));
+    Assert.Equal([true], h.Control.Commands);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_AfterAReconnect_IsRefusedUntilTheEncoderHasStayed()
+  {
+    using var h = await StartedAndStableAsync(stableSeconds: 30);
+    h.Encoder.SetConnected(false);
+    h.Encoder.SetConnected(true);
+    await h.AdvanceAsync(TimeSpan.FromSeconds(29));
+
+    Assert.Equal(PanelPowerOffResult.RefusedEncoderNotStable, h.Service.PowerOffNow("test"));
+
+    await h.AdvanceAsync(Tick);
+    Assert.Equal(PanelPowerOffResult.PoweredOff, h.Service.PowerOffNow("test"));
+  }
+
+  [Fact]
+  public void PowerOffNow_BeforeStart_IsUnavailable()
+  {
+    using var h = new Harness(minutes: 0);
+
+    Assert.Equal(PanelPowerOffResult.Unavailable, h.Service.PowerOffNow("test"));
+    Assert.Empty(h.Control.Commands);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_AfterStop_IsUnavailable()
+  {
+    using var h = await StartedAndStableAsync();
+    await h.Service.StopAsync(CancellationToken.None);
+
+    Assert.Equal(PanelPowerOffResult.Unavailable, h.Service.PowerOffNow("test"));
+    await h.Service.PumpIdle;
+    Assert.Equal([true], h.Control.Commands);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_Twice_SecondIsAlreadyOff_AndSendsNothingMore()
+  {
+    using var h = await StartedAndStableAsync();
+
+    Assert.Equal(PanelPowerOffResult.PoweredOff, h.Service.PowerOffNow("test"));
+    await h.Service.PumpIdle;
+    Assert.Equal(PanelPowerOffResult.AlreadyOff, h.Service.PowerOffNow("test"));
+    await h.Service.PumpIdle;
+
+    Assert.Equal([true, false], h.Control.Commands);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_OnATimerDarkPanel_IsAlreadyOff_AndMakesItADeepSleep()
+  {
+    using var h = new Harness(minutes: 10);
+    await h.StartAsync();
+    await h.GoDarkAsync();
+
+    Assert.Equal(PanelPowerOffResult.AlreadyOff, h.Service.PowerOffNow("test"));
+    Assert.Equal(PanelInputOutcome.LitPanelFromDeepSleep, h.Service.OnEncoderInput("encoder-button"));
+  }
+
+  [Fact]
+  public async Task FirstKnobAfterADeepSleep_ReportsIt_AndATimerDarkCycleAfterwardsDoesNot()
+  {
+    using var h = await StartedAndStableAsync(minutes: 10);
+
+    h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    Assert.Equal(PanelInputOutcome.LitPanelFromDeepSleep, h.Service.OnEncoderInput("encoder-button"));
+    await h.Service.PumpIdle;
+    Assert.False(h.Service.IsPanelOff);
+
+    // The flag was cleared by that input. A later dark panel from the ENC-22 timer is an ordinary one,
+    // whose first knob only lights it.
+    await h.GoDarkAsync();
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-button"));
+  }
+
+  [Fact]
+  public async Task EncoderLostWhileDeepDark_PowersOn_AndEndsTheDeepSleep()
+  {
+    using var h = await StartedAndStableAsync(minutes: 10);
+    h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    h.Encoder.SetConnected(false);
+    await h.Service.PumpIdle;
+
+    Assert.True(h.Control.Last);
+    Assert.False(h.Service.IsPanelOff);
+
+    // Back, stable, and dark again by the timer: that dark panel is not a deep sleep.
+    h.Encoder.SetConnected(true);
+    await h.AdvanceAsync(TimeSpan.FromSeconds(30));
+    await h.GoDarkAsync();
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-button"));
+  }
+
+  [Fact]
+  public async Task SleepScreenHiddenWhileDeepDark_PowersOn_AndEndsTheDeepSleep()
+  {
+    using var h = await StartedAndStableAsync(minutes: 10);
+    h.Sleep.Show(true);
+    h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    h.Sleep.Show(false);
+    await h.Service.PumpIdle;
+
+    Assert.True(h.Control.Last);
+    Assert.False(h.Service.IsPanelOff);
+
+    await h.GoDarkAsync();
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-button"));
+  }
+
+  [Fact]
+  public async Task AnUnconfirmedDeepPowerOff_IsFollowedByAPowerOn_AndEndsTheDeepSleep()
+  {
+    using var h = await StartedAndStableAsync(minutes: 10);
+
+    h.Control.Results.Enqueue(false);
+    h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    Assert.Equal([true, false, true], h.Control.Commands);
+    Assert.False(h.Service.IsPanelOff);
+
+    await h.GoDarkAsync();
+    Assert.Equal(PanelInputOutcome.LitPanel, h.Service.OnEncoderInput("encoder-button"));
+  }
+
+  [Fact]
+  public async Task TheWakeGrace_StillConsumesAfterADeepWake()
+  {
+    using var h = await StartedAndStableAsync(graceMs: 2000);
+    h.Service.PowerOffNow("test");
+    await h.Service.PumpIdle;
+
+    Assert.Equal(PanelInputOutcome.LitPanelFromDeepSleep, h.Service.OnEncoderInput("encoder-button"));
+    await h.AdvanceAsync(TimeSpan.FromMilliseconds(1999));
+    Assert.Equal(PanelInputOutcome.ConsumedInGrace, h.Service.OnEncoderInput("encoder-turn"));
+    await h.AdvanceAsync(TimeSpan.FromMilliseconds(1));
+    Assert.Equal(PanelInputOutcome.Pass, h.Service.OnEncoderInput("encoder-turn"));
+  }
+
+  [Fact]
+  public async Task PowerOffNow_DisarmsTheTimer_SoNothingFiresWhileDeepDark()
+  {
+    using var h = await StartedAndStableAsync(minutes: 10);
+    h.Sleep.Show(true);
+
+    h.Service.PowerOffNow("test");
+    await h.AdvanceAsync(TimeSpan.FromHours(1));
+
+    Assert.Equal([true, false], h.Control.Commands);
+    Assert.True(h.Service.IsPanelOff);
   }
 }

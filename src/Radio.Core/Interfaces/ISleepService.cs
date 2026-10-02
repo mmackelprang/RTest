@@ -12,6 +12,13 @@ namespace Radio.Core.Interfaces;
 /// dark panel, and leaves the console in whichever of these three states it was already in. See
 /// <c>docs/queue/ENC-22.md</c> and <c>design/INTEGRATIONS.md</c> §1.
 /// </para>
+///
+/// <para>
+/// <c>ENC-23</c> adds one exception to "leaves the console in whichever state": a <b>VOLUME press</b>
+/// that lights a panel darkened by a deep sleep (<see cref="IPanelPowerService.PowerOffNow"/>) is also
+/// spent waking it, so the owner's "click the Volume knob to wake" is one press, not two. The decision
+/// is the router's; this enum is unchanged.
+/// </para>
 /// </summary>
 public enum ConsoleWakeState
 {
@@ -26,7 +33,8 @@ public enum ConsoleWakeState
   Ambient,
 
   /// <summary>
-  /// Audio is paused and muted. Reached by the topbar Sleep pill, a VOLUME long-press, or the API.
+  /// Audio is paused and muted. Reached by the topbar Sleep pill (a tap, or a hold, which also powers
+  /// the panel off — <c>ENC-23</c>'s deep sleep), a VOLUME long-press, or the API.
   /// A <b>turn</b> here never resumes audio — only a press or a screen tap does (D22).
   /// </summary>
   Standby,
