@@ -994,14 +994,14 @@ public class VisualizerPanelBandTests : TestContext
   public void BandTab_IsLast()
   {
     var cut = RenderBand();
-    TabLabels(cut).Should().Equal("Wave", "Spectrum", "Ring", "Phase", "RADIO");
+    TabLabels(cut).Should().Equal("Wave", "Spectrum", "Ring", "Phase", "Radio");
   }
 
   [Fact]
   public void RadioActive_BandTabIsEnabled()
   {
     var cut = RenderBand();
-    var band = Tab(cut, "RADIO");
+    var band = Tab(cut, "Radio");
     band.HasAttribute("disabled").Should().BeFalse();
     band.GetAttribute("aria-disabled").Should().Be("false");
     IsActive(band).Should().BeTrue();
@@ -1012,7 +1012,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     var cut = RenderWithRadioNotActive();
 
-    var band = Tab(cut, "RADIO");
+    var band = Tab(cut, "Radio");
     band.HasAttribute("disabled").Should().BeTrue("BAND is not selectable while the radio is not active");
     band.GetAttribute("aria-disabled").Should().Be("true");
     band.HasAttribute("title").Should().BeFalse("UI-31: no tooltip on the greyed tab");
@@ -1033,7 +1033,7 @@ public class VisualizerPanelBandTests : TestContext
     cut.WaitForAssertion(() =>
     {
       IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
-      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue();
+      Tab(cut, "Radio").HasAttribute("disabled").Should().BeTrue();
       cut.FindAll(".band-strip").Should().BeEmpty();
     });
 
@@ -1047,7 +1047,7 @@ public class VisualizerPanelBandTests : TestContext
 
     cut.WaitForAssertion(() =>
     {
-      IsActive(Tab(cut, "RADIO")).Should().BeTrue("the saved preference is still BAND");
+      IsActive(Tab(cut, "Radio")).Should().BeTrue("the saved preference is still BAND");
       cut.FindAll(".band-strip").Should().HaveCount(1);
     });
     PreferenceWrites().Should().BeEmpty("neither the fallback nor the return is a pick");
@@ -1087,17 +1087,17 @@ public class VisualizerPanelBandTests : TestContext
   {
     GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
     var cut = RenderWithRadioNotActive();
-    Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue();
+    Tab(cut, "Radio").HasAttribute("disabled").Should().BeTrue();
 
     GetJson("/api/radio/state", FmState(101_100_000));
     await RaiseSourceChangedAsync(cut);
-    cut.WaitForAssertion(() => Tab(cut, "RADIO").HasAttribute("disabled").Should().BeFalse());
+    cut.WaitForAssertion(() => Tab(cut, "Radio").HasAttribute("disabled").Should().BeFalse());
     IsActive(Tab(cut, "Spectrum")).Should().BeTrue("the preference is Spectrum; the radio arriving changes nothing else");
 
-    Tab(cut, "RADIO").Click();
+    Tab(cut, "Radio").Click();
     cut.WaitForAssertion(() =>
     {
-      IsActive(Tab(cut, "RADIO")).Should().BeTrue();
+      IsActive(Tab(cut, "Radio")).Should().BeTrue();
       cut.FindAll(".band-strip").Should().HaveCount(1);
       PreferenceWrites().Should().ContainSingle().Which.Should().Contain("Band");
     });
@@ -1113,7 +1113,7 @@ public class VisualizerPanelBandTests : TestContext
     GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
     var cut = RenderWithRadioNotActive();
 
-    await cut.InvokeAsync(() => Tab(cut, "RADIO").Click());
+    await cut.InvokeAsync(() => Tab(cut, "Radio").Click());
 
     PreferenceWrites().Should().BeEmpty();
     IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
@@ -1129,7 +1129,7 @@ public class VisualizerPanelBandTests : TestContext
     cut.WaitForAssertion(() =>
     {
       _module.Invocations["visualizer.init"].Should().NotBeEmpty();
-      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue("the read failed, so the radio is not known to be active");
+      Tab(cut, "Radio").HasAttribute("disabled").Should().BeTrue("the read failed, so the radio is not known to be active");
     }, TimeSpan.FromSeconds(5));
 
     GetJson("/api/radio/state", FmState(101_100_000));
@@ -1137,8 +1137,8 @@ public class VisualizerPanelBandTests : TestContext
 
     cut.WaitForAssertion(() =>
     {
-      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeFalse();
-      IsActive(Tab(cut, "RADIO")).Should().BeTrue("the saved preference is BAND");
+      Tab(cut, "Radio").HasAttribute("disabled").Should().BeFalse();
+      IsActive(Tab(cut, "Radio")).Should().BeTrue("the saved preference is BAND");
       cut.FindAll(".band-strip").Should().HaveCount(1);
     });
     PreferenceWrites().Should().BeEmpty();
@@ -1159,7 +1159,7 @@ public class VisualizerPanelBandTests : TestContext
     cut.WaitForAssertion(() =>
     {
       IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
-      Tab(cut, "RADIO").HasAttribute("disabled").Should().BeTrue();
+      Tab(cut, "Radio").HasAttribute("disabled").Should().BeTrue();
       cut.FindAll(".band-strip").Should().BeEmpty();
     });
     PreferenceWrites().Should().BeEmpty();
@@ -1174,7 +1174,7 @@ public class VisualizerPanelBandTests : TestContext
 
     await RaiseSourceChangedAsync(cut);
 
-    IsActive(Tab(cut, "RADIO")).Should().BeTrue();
+    IsActive(Tab(cut, "Radio")).Should().BeTrue();
     cut.FindAll(".band-strip").Should().HaveCount(1);
   }
 
@@ -1239,6 +1239,40 @@ public class VisualizerPanelBandTests : TestContext
     cut.Find(".band-strip-range").TextContent.Should().Be("162.39–162.56 MHz");
   }
 
+  private int BandListReads() => _api.Requests.Count(r => r.Method == HttpMethod.Get && r.Path == "/api/RadioBands");
+
+  [Fact]
+  public void Strip_TheBandList_IsReadOnce_ThenKept()
+  {
+    BandList(("FM", "87.5–108 MHz"));
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-strip-range").TextContent.Should().Be("87.5–108 MHz"));
+    int refreshes = cut.Instance.CompletedBandRefreshes;
+
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    WaitForRefreshes(cut, refreshes + 1);
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    WaitForRefreshes(cut, refreshes + 2);
+
+    BandListReads().Should().Be(1, "the band list changes only with configuration");
+  }
+
+  [Fact]
+  public void Strip_ABandListThatFailedAtFirst_IsRetried_AndThenReplacesTheFallback()
+  {
+    GetJson("/api/radio/bandmap", WbMap());
+    var cut = RenderBand();
+    cut.WaitForAssertion(() => cut.Find(".band-strip-range").TextContent.Should().Be("162.39–162.56 MHz"));
+    int refreshes = cut.Instance.CompletedBandRefreshes;
+
+    BandList(("WB", "162.4–162.55 MHz"));
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    WaitForRefreshes(cut, refreshes + 1);
+
+    cut.WaitForAssertion(() => cut.Find(".band-strip-range").TextContent.Should().Be("162.4–162.55 MHz"));
+    BandListReads().Should().Be(2);
+  }
+
   [Fact]
   public void Strip_Vhf_ShowsItsWindow_NotTheBand()
   {
@@ -1252,17 +1286,38 @@ public class VisualizerPanelBandTests : TestContext
     cut.Find(".band-strip-range").TextContent.Should().Be("161.5–163.5 MHz");
   }
 
+  /// <summary>
+  /// The help lines as seen (visually-hidden words removed) and as read (aria-hidden glyphs removed), with
+  /// whitespace collapsed.
+  /// </summary>
+  private static (string[] Seen, string[] Read) HelpLines(IRenderedComponent<VisualizerPanel> cut)
+  {
+    static string Collapse(string text) => System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ").Trim();
+    static string Without(AngleSharp.Dom.IElement line, string selector)
+    {
+      string text = line.TextContent;
+      foreach (var part in line.QuerySelectorAll(selector))
+      {
+        text = text.Replace(part.TextContent, " ");
+      }
+
+      return Collapse(text);
+    }
+
+    var lines = cut.FindAll(".band-strip-help > span").ToArray();
+    return (lines.Select(l => Without(l, ".visually-hidden")).ToArray(), lines.Select(l => Without(l, "[aria-hidden=true]")).ToArray());
+  }
+
   [Fact]
-  public void Strip_ShowsTheHelpText_WhileNoMessageIsUp()
+  public void Strip_ShowsTheHelpText_WhileNoMessageIsUp_AndScreenReadersGetWordsForTheGlyphs()
   {
     GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
 
     var cut = RenderBand();
 
-    cut.Find(".band-strip-help").TextContent.Should().Contain(VisualizerPanel.BandHelpTouch)
-      .And.Contain(VisualizerPanel.BandHelpFineTune);
-    VisualizerPanel.BandHelpTouch.Should().Be("Touch a signal to snap to it. ▲ marks a preset.");
-    VisualizerPanel.BandHelpFineTune.Should().Be("Fine-tune with ‹ › on the radio panel or the knob.");
+    var (seen, read) = HelpLines(cut);
+    seen.Should().Equal("Touch a signal to snap to it. ▲ marks a preset.", "Fine-tune with the tuner's ‹ › buttons or the knob.");
+    read.Should().Equal("Touch a signal to snap to it. A triangle marks a preset.", "Fine-tune with the tuner's step buttons or the knob.");
   }
 
   [Fact]
@@ -1341,10 +1396,11 @@ public class VisualizerPanelBandTests : TestContext
   }
 
   [Fact]
-  public void Discover_IsTheOnlyButtonInTheStrip_AndIsTheKioskHeight()
+  public void Discover_IsTheOnlyButtonInTheStrip_AndNothingOverlaysThePlot()
   {
     var cut = RenderBand();
 
+    cut.Find(".visualizer-canvas").GetAttribute("role").Should().Be("img", "an aria-label on a role-less canvas may be ignored");
     var button = cut.Find(".band-strip .band-discover-btn");
     button.TextContent.Should().Be("Discover");
     cut.FindAll(".band-strip button").Should().HaveCount(1);
@@ -1394,10 +1450,10 @@ public class VisualizerPanelBandTests : TestContext
     // UI-31 renamed the tab, not the stored value. The owner's box holds ui.visualizer/defaultMode=Band;
     // renaming the value would orphan it (the AUD-1 lesson about renamed config keys).
     var cut = RenderBand();
-    IsActive(Tab(cut, "RADIO")).Should().BeTrue("defaultMode=Band is the saved preference");
+    IsActive(Tab(cut, "Radio")).Should().BeTrue("defaultMode=Band is the saved preference");
 
     Tab(cut, "Spectrum").Click();
-    Tab(cut, "RADIO").Click();
+    Tab(cut, "Radio").Click();
 
     cut.WaitForAssertion(() => PreferenceWrites().Should().HaveCount(2));
     JsonDocument.Parse(PreferenceWrites()[^1]).RootElement.GetProperty("defaultMode").GetString()

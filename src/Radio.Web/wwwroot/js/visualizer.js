@@ -55,8 +55,8 @@ export const visualizer = {
   },
 
   // Keeps the canvas's pixel buffer the size it is laid out at. The buffer is sized once by init, but the
-  // element's height changes with the mode: the band map's strip (UI-31) takes 89 px, the spectrum axis
-  // 17, the other modes nothing, so a buffer left at init's size is drawn stretched or squashed. A resize
+  // element's height changes with the mode: the band map's strip (UI-31) takes 91 px, the spectrum axis
+  // 16, the other modes nothing, so a buffer left at init's size is drawn stretched or squashed. A resize
   // clears the canvas, which every draw repaints in full anyway; the phase scope's decay buffer is sized
   // to the canvas and is dropped with it. Falls back to the parent's size, then to the panel's known
   // size, while the element has no layout yet.

@@ -161,6 +161,13 @@ The centred empty states (`.band-empty`) centre on the **plot** (offset up by ha
 - **The band range in the strip** comes from `GET /api/RadioBands` — the same `Range` string the control panel's band pills show — so there is no second hard-coded copy and no API change. If that read fails, the strip falls back to the map's own plotted range.
 - **The disabled tab's tooltip (`title`) is removed**, per the owner's first sentence ("No tooltip needed for the gray 'Band' selection"). The visually-hidden description stays for screen readers.
 - **§8 is built as recommended (carets only)**; it is listed as an owner check on the PR.
+- **Deviations from §1/§4 found by the pre-merge polish pass (measured at 1920×720), built that way:**
+  - **The strip is 91 px, not 89.** The preset bar is 89 px but ends 2 px above the screen's bottom edge; 91 px puts both top edges at y = 629.
+  - **Discover is 112 × 60 px and bottom-aligned** (strip padding-bottom 8 px), matching the preset bar's arrows, which are 58 px wide × **60 px tall** at y 652–712. §4's "58 px arrows" was their width.
+  - **Help line 3 reads "Fine-tune with the tuner's ‹ › buttons or the knob."** — "the radio panel" became ambiguous once this view's own tab read Radio.
+  - **The glyphs are `aria-hidden`**, with visually-hidden words ("A triangle", "step") read in their place.
+  - **The empty states centre 12 px above the canvas centre**, the plot's true centre (8 px top pad, 32 px axis zone), not 16.
+  - **WB's last label renders centred** (162.55 is not at the plot's edge); §5's "end-aligned" was wrong.
 
 ## 8. Open question for the owner
 

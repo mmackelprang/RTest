@@ -128,6 +128,7 @@
       flips and the skeleton unmounts.
     *@
     <canvas id="@WebConstants.ElementIds.VisualizerCanvas" class="visualizer-canvas @(IsBandMode ? "is-band" : "")"
+            role="@(IsBandMode ? "img" : null)"
             aria-label="@(IsBandMode ? BandCanvasLabel : null)"></canvas>
 
     @if (!_isInitialized)
@@ -257,9 +258,13 @@
           }
           else if (_bandMessage == null && IsShownBandMappable)
           {
+            @* The glyphs are pictures of what to look for (the preset caret drawn on the axis; the tuner's step
+               buttons), hidden from screen readers, which would read them as "black up-pointing triangle" and
+               "single angle quotation marks"; words stand in for them. "The tuner", not "the radio panel":
+               this view's own tab reads Radio. *@
             <div class="band-strip-help">
-              <span>@BandHelpTouch</span>
-              <span>@BandHelpFineTune</span>
+              <span>Touch a signal to snap to it. <span aria-hidden="true">▲</span><span class="visually-hidden">A triangle</span> marks a preset.</span>
+              <span>Fine-tune with the tuner's <span aria-hidden="true">‹ ›</span><span class="visually-hidden">step</span> buttons or the knob.</span>
             </div>
           }
         </div>
@@ -326,16 +331,12 @@
   internal const string BandUnavailableHint = "Available when the radio is the active source";
 
   /// <summary>
-  /// The band map tab's label (UI-31; was "BAND"). The mode behind it is still
+  /// The band map tab's label (UI-31; was "BAND"), title case like its siblings — the picker's CSS
+  /// upper-cases them all. The mode behind it is still
   /// <see cref="VisualizationMode.Band"/>, saved as <c>Band</c>.
   /// </summary>
-  internal const string RadioTabLabel = "RADIO";
+  internal const string RadioTabLabel = "Radio";
 
-  /// <summary>The strip's first help line (UI-31). ▲ is the preset caret drawn on the axis.</summary>
-  internal const string BandHelpTouch = "Touch a signal to snap to it. ▲ marks a preset.";
-
-  /// <summary>The strip's second help line (UI-31).</summary>
-  internal const string BandHelpFineTune = "Fine-tune with ‹ › on the radio panel or the knob.";
 
   // The described-by target for the hint. One panel per page, so a fixed id is unique.
   private const string BandHintId = "visualizer-band-hint";
@@ -1103,9 +1104,10 @@
         ? RadioApi.GetPresetsForPollAsync()
         : Task.FromResult<List<RadioPresetDto>?>(null);
       // UI-31: the band list changes only with configuration; read until one read returns any bands.
-      // GetBandsAsync answers an empty list on failure, so an empty answer is retried next time.
+      // GetBandsForPollAsync answers an empty list on failure (logged at Debug), so an empty answer is
+      // retried next time.
       Task<IEnumerable<Radio.Core.Models.RadioBandModel>> bandsTask = includePresets && _bandList == null
-        ? RadioApi.GetBandsAsync()
+        ? RadioApi.GetBandsForPollAsync()
         : Task.FromResult(Enumerable.Empty<Radio.Core.Models.RadioBandModel>());
       await Task.WhenAll(mapTask, stateTask, presetsTask, bandsTask);
 
@@ -1445,7 +1447,7 @@
   /// The Discover button (UI-31; was Scan): <c>POST /api/radio/bandmap/scan?band=</c> with the band shown (AUD-91), so a band
   /// change between the render and the tap cannot scan a band the owner was not looking at; before any
   /// map has been read, no band, and the API takes the radio's. On 202 the map is re-read at once, which
-  /// shows the sweep overlay and switches the timer to the one-second cadence; on 409/503 the API's
+  /// shows "Discovering…" in the strip and switches the timer to the one-second cadence; on 409/503 the API's
   /// reason is shown.
   /// </summary>
   private async Task RequestDiscoverAsync()

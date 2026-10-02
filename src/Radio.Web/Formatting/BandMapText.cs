@@ -65,7 +65,8 @@ public static class BandMapText
   /// A plotted range as the strip under the map names it (UI-31), with an en dash and the unit: AM in
   /// whole kHz (<c>530–1710 kHz</c>), every other band in MHz with at most two decimals
   /// (<c>87.5–108 MHz</c>, <c>145.52–147.52 MHz</c>). Used for VHF's window, and for any band whose
-  /// nominal range (the control panel's band list) could not be read.
+  /// nominal range (the control panel's band list) could not be read. The same shape as the API's
+  /// <c>RadioBandService.FormatRange</c>, which composes that list's <c>Range</c>; keep the two alike.
   /// </summary>
   public static string FormatRange(long minHz, long maxHz, string? band)
   {

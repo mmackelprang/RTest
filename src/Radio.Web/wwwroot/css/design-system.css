@@ -2538,7 +2538,7 @@ body {
    canvas down to a 32 px axis zone that visualizer.js draws in (axis line, tick
    marks, preset and station carets; bandAxisZone there). The tick labels are
    markup laid over that zone, and the band's name, status, colour key, help text
-   and Discover sit in an 89 px strip under the canvas, so nothing overlays the
+   and Discover sit in a 91 px strip under the canvas, so nothing overlays the
    plot and a tap anywhere on the canvas tunes. */
 
 /* Axis labels: over the bottom of the canvas, each at its tick's fraction of the
@@ -2578,14 +2578,16 @@ body {
   padding-left: var(--sp-1);
 }
 
-/* The strip: 89 px (1 + 10 + 68 + 10), the preset bar's height, so the two top
-   edges line up across the panel gap. Band block | text block | Discover. */
+/* The strip: 91 px (1 + 10 + 72 + 8). The centre panel's preset bar is 89 px but
+   ends 2 px above the screen's bottom edge, so its top edge is at 629 px and this
+   strip's, which reaches the bottom, is too (measured at 1920x720). Band block |
+   text block | Discover. */
 .band-strip {
-  flex: 0 0 89px;
+  flex: 0 0 91px;
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  padding: 10px var(--sp-3) 10px var(--sp-4);
+  padding: 10px var(--sp-3) 8px var(--sp-4);
   border-top: 1px solid var(--surface-separator);
   background: var(--surface-base);
   min-width: 0;
@@ -2629,6 +2631,8 @@ body {
   text-transform: uppercase;
   color: var(--text-medium);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .band-strip-text {
@@ -2713,10 +2717,6 @@ body {
   text-overflow: ellipsis;
 }
 
-.band-message-live:empty {
-  display: none;
-}
-
 .band-status-message {
   display: block;
   font-family: var(--font-body);
@@ -2733,11 +2733,13 @@ body {
 }
 
 /* Discover (was Scan, top-right over the plot): the house outlined-action language (.bt-scan-button)
-   — accent outline, accent-dim when pressed, faded when disabled. 58 px tall, not --touch-min: a
-   primary action at arm's length, level with the preset bar's 58 px arrows across the gap. */
+   — accent outline, accent-dim when pressed, faded when disabled. 60 px tall and bottom-aligned, not
+   --touch-min: a primary action at arm's length, the height of the preset bar's arrows (58 x 60 px),
+   whose 652–712 px it matches across the gap (the strip's 8 px bottom padding puts its bottom at 712). */
 .band-discover-btn {
   flex: 0 0 112px;
-  height: 58px;
+  align-self: flex-end;
+  height: 60px;
   padding: 0 var(--sp-4);
   background: transparent;
   border: 1px solid var(--accent-primary);
@@ -2775,12 +2777,14 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* "No stations discovered yet": centred on the plot (half the 32 px axis zone
-   above the canvas's centre), and transparent to taps so the plot stays
-   touchable underneath. Out of range there is no axis, so it centres on the canvas. */
+/* "No stations discovered yet": centred on the plot, which runs from 8 px below
+   the canvas top to 32 px above its bottom (bandTopPad / bandAxisZone in
+   visualizer.js), so its centre is 12 px above the canvas's; and transparent to
+   taps so the plot stays touchable underneath. Out of range there is no axis, so
+   it centres on the canvas. */
 .band-empty {
   position: absolute;
-  top: calc(50% - 16px);
+  top: calc(50% - 12px);
   left: 50%;
   transform: translate(-50%, -50%);
   max-width: 80%;
