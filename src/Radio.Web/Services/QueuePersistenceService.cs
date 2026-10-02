@@ -50,7 +50,10 @@ public class QueuePersistenceService
       var success = await _configApi.UpdateConfigurationAsync(QueueStateSection, queueData, cancellationToken);
       if (success)
       {
-        _logger.LogInformation("Queue state saved: {Count} items", queue.Count);
+        // Debug, not Information: this runs on every QueueChanged in every open panel, and radio-web's console
+        // sink is unrestricted, so an Information line here is a journald line per queue change on a box where
+        // log volume correlates with audible distortion (AUD-96 made metadata fills QueueChanged events too).
+        _logger.LogDebug("Queue state saved: {Count} items", queue.Count);
       }
       else
       {

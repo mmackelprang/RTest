@@ -177,15 +177,26 @@ public sealed class FilePlayerQueueMetadataTests : IDisposable
       return real(path);
     };
 
-    await source.LoadDirectoryAsync("");
-    // Before the read: the row is the placeholder, served without waiting for the file.
-    IReadOnlyList<QueueItem> before = await source.GetFullPlaylistAsync();
-    Assert.Equal("a", Assert.Single(before).Title);
-    Assert.Equal("--", before[0].Artist);
-    long versionBefore = source.QueueVersion;
+    long versionBefore;
+    try
+    {
+      await source.LoadDirectoryAsync("");
+      // Before the read: the row is the placeholder, served without waiting for the file.
+      IReadOnlyList<QueueItem> before = await source.GetFullPlaylistAsync();
+      Assert.Equal("a", Assert.Single(before).Title);
+      Assert.Equal("--", before[0].Artist);
+      versionBefore = source.QueueVersion;
 
-    gate.Set();
-    await source.WhenQueueMetadataIdleAsync();
+      // Saving a playlist now would store the placeholder: the bounded wait reports it has not settled.
+      Assert.False(await source.WaitForQueueMetadataAsync(TimeSpan.Zero));
+    }
+    finally
+    {
+      // Always released, so a failed assertion above surfaces as itself rather than as Dispose's timeout.
+      gate.Set();
+    }
+
+    Assert.True(await source.WaitForQueueMetadataAsync(TimeSpan.FromSeconds(30)));
 
     Assert.NotEqual(versionBefore, source.QueueVersion);
     Assert.Equal("Tagged a", Assert.Single(await source.GetFullPlaylistAsync()).Title);
@@ -227,6 +238,21 @@ public sealed class FilePlayerQueueMetadataTests : IDisposable
     await source.AddToQueueAsync("a.mp3");
     await source.WhenQueueMetadataIdleAsync();
     Assert.Equal(2, _reads[FullPath("a.mp3")]);
+  }
+
+  /// <summary>Review L1: a re-created File Player must not repeat an earlier instance's value.</summary>
+  [Fact]
+  public async Task TwoInstancesWithTheSameQueue_ReportDifferentVersions()
+  {
+    CreateFiles("a.mp3", "b.mp3");
+    var first = CreateSource();
+    var second = CreateSource();
+    await first.LoadPlaylistAsync(["a.mp3", "b.mp3"]);
+    await second.LoadPlaylistAsync(["a.mp3", "b.mp3"]);
+    await first.WhenQueueMetadataIdleAsync();
+    await second.WhenQueueMetadataIdleAsync();
+
+    Assert.NotEqual(first.QueueVersion, second.QueueVersion);
   }
 
   [Fact]

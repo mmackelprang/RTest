@@ -121,7 +121,16 @@ public class MainLayoutSourceSwitchTests : TestContext
     var vinyl = cut.WaitForElement(VinylPill, TimeSpan.FromSeconds(30));
     Assert.False(IsActive(vinyl));
 
+    // Hold the switch POST so it completes asynchronously, as it does against the real API. Without the
+    // hold the stub answers synchronously, the handler reaches the held subscriber before its first yield,
+    // and the event dispatch's own post-yield render lights the pill whether or not the layout asks for it.
+    TaskCompletionSource post = sources.Hold(HttpMethod.Post, "/api/sources");
     Task tap = cut.Find(VinylPill).ClickAsync(new MouseEventArgs());
+    cut.WaitForAssertion(
+      () => Assert.Contains(sources.Requests, r => r.Method == HttpMethod.Post && r.Path == "/api/sources"),
+      TimeSpan.FromSeconds(10));
+    Assert.False(IsActive(cut.Find(VinylPill)), "not lit before the switch has succeeded");
+    post.SetResult();
     await subscriberEntered.Task.WaitAsync(TimeSpan.FromSeconds(30));
 
     // The subscriber is still held: the pill must already be lit.

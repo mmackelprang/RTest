@@ -43,9 +43,11 @@ public sealed record AudioFileTags(
 /// file player showed placeholders and AUD-1's per-field rule let fingerprinting fill the tagged fields.
 /// </para>
 /// <para>
-/// Everything here logs at Debug only: queue rendering re-reads every queued file on each render, and on
-/// the appliance log volume correlates with audible distortion. A caller that reads a file once — track
-/// load — decides whether a <c>null</c> deserves a Warning.
+/// Everything here logs at Debug only: the queue's metadata reader calls this once per queued file, and
+/// again only when the file's size or last-write time changes (AUD-96; before that every queue request
+/// re-read every queued file), and on the appliance log volume
+/// correlates with audible distortion. A caller that reads a file once — track load — decides whether a
+/// <c>null</c> deserves a Warning.
 /// </para>
 /// </remarks>
 public static class AudioTagReader

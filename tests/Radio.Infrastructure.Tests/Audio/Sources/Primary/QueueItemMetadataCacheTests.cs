@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Radio.Infrastructure.Audio.Sources.Primary;
 
 namespace Radio.Infrastructure.Tests.Audio.Sources.Primary;
@@ -24,7 +25,7 @@ public class QueueItemMetadataCacheTests
     public ConcurrentDictionary<string, string> Titles { get; } = new();
     public Func<string, QueueItemMetadata>? ReadOverride { get; set; }
 
-    public QueueItemMetadataCache NewCache() => new(Read, Stat, NullLogger.Instance);
+    public QueueItemMetadataCache NewCache(TimeProvider? time = null) => new(Read, Stat, NullLogger.Instance, time);
 
     public void Add(string path, string title, long length = 100)
     {
@@ -106,6 +107,8 @@ public class QueueItemMetadataCacheTests
     await cache.WhenIdleAsync();
 
     Assert.Equal(1, files.ReadsOf("/m/b.mp3"));
+    // One queued pass, not ten: without the de-duplication every request would queue its own stat.
+    Assert.Equal(1, files.Stats["/m/b.mp3"]);
     Assert.Equal("Song B", cache.GetOrSchedule("/m/b.mp3").Title);
   }
 
@@ -202,19 +205,93 @@ public class QueueItemMetadataCacheTests
     Assert.Equal(1, files.ReadsOf("/m/bad.mp3"));
   }
 
+  /// <summary>
+  /// Review M1: a read that failed on a share hiccup must not pin the placeholder for the life of the
+  /// process just because the file's stamp has not changed. The next revalidation reads it again.
+  /// </summary>
   [Fact]
-  public async Task TheVersion_AdvancesOncePerFill()
+  public async Task AFailedRead_IsReadAgainOnTheNextRevalidation_ThoughTheStampIsUnchanged()
   {
     var files = new FakeFiles();
-    files.Add("/m/a.mp3", "A");
-    files.Add("/m/b.mp3", "B");
+    files.Add("/m/a.mp3", "Song A");
+    bool shareDown = true;
+    files.ReadOverride = path => shareDown
+      ? QueueItemMetadata.Placeholder(path)
+      : new QueueItemMetadata(files.Titles[path], "Artist", "Album", null, null);
+    using var cache = files.NewCache();
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+    Assert.Equal("a", cache.GetOrSchedule("/m/a.mp3").Title);
+
+    shareDown = false;
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+
+    Assert.Equal(2, files.ReadsOf("/m/a.mp3"));
+    Assert.Equal("Song A", cache.GetOrSchedule("/m/a.mp3").Title);
+  }
+
+  /// <summary>
+  /// Review M2: the album-art cache deletes art not saved for 7 days, and the per-request read used to
+  /// re-save every queued track's art continuously. A row past MaxAge is re-read when next asked for.
+  /// </summary>
+  [Fact]
+  public async Task ARowPastMaxAge_IsReReadWhenNextAskedFor_AndNotBefore()
+  {
+    var files = new FakeFiles();
+    files.Add("/m/a.mp3", "Song A");
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+    using var cache = files.NewCache(time);
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+
+    time.Advance(QueueItemMetadataCache.MaxAge - TimeSpan.FromMinutes(1));
+    cache.GetOrSchedule("/m/a.mp3");
+    await cache.WhenIdleAsync();
+    Assert.Equal(1, files.ReadsOf("/m/a.mp3"));
+
+    time.Advance(TimeSpan.FromMinutes(2));
+    Assert.Equal("Song A", cache.GetOrSchedule("/m/a.mp3").Title);
+    await cache.WhenIdleAsync();
+    Assert.Equal(2, files.ReadsOf("/m/a.mp3"));
+  }
+
+  /// <summary>
+  /// Review M3: every step of the version is a QueueChanged broadcast and a queue re-read per open panel,
+  /// so fills are published in batches — every PublishEvery changed rows, and once more when idle.
+  /// </summary>
+  [Fact]
+  public async Task TheVersion_IsPublishedPerBatchOfFills_NotPerFill()
+  {
+    var files = new FakeFiles();
+    int fills = QueueItemMetadataCache.PublishEvery + 4;
+    List<string> paths = Enumerable.Range(0, fills).Select(i => $"/m/{i}.mp3").ToList();
+    foreach (string p in paths)
+    {
+      files.Add(p, p);
+    }
     using var cache = files.NewCache();
     long start = cache.Version;
 
-    cache.Revalidate(["/m/a.mp3", "/m/b.mp3"]);
+    cache.Revalidate(paths);
     await cache.WhenIdleAsync();
 
+    // One at PublishEvery, one for the remaining four when the reader went idle.
     Assert.Equal(start + 2, cache.Version);
+  }
+
+  [Fact]
+  public async Task TheVersion_IsPublishedWhenTheReaderGoesIdle()
+  {
+    var files = new FakeFiles();
+    files.Add("/m/a.mp3", "A");
+    using var cache = files.NewCache();
+    long start = cache.Version;
+
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+
+    Assert.Equal(start + 1, cache.Version);
   }
 
   [Fact]
@@ -239,6 +316,40 @@ public class QueueItemMetadataCacheTests
 
     Assert.Equal(2, cache.Count);
     Assert.Equal("/m/0.mp3", cache.GetOrSchedule("/m/0.mp3").Title);
+  }
+
+  /// <summary>Review M5: Dispose abandons the backlog; only the read already in progress finishes.</summary>
+  [Fact]
+  public async Task Dispose_AbandonsTheBacklog_AfterTheReadInProgress()
+  {
+    var files = new FakeFiles();
+    List<string> paths = Enumerable.Range(0, 6).Select(i => $"/m/{i}.mp3").ToList();
+    foreach (string p in paths)
+    {
+      files.Add(p, p);
+    }
+    using var gate = new ManualResetEventSlim(false);
+    using var parked = new ManualResetEventSlim(false);
+    files.ReadOverride = path =>
+    {
+      parked.Set();
+      gate.Wait();
+      return new QueueItemMetadata(path, "A", "B", null, null);
+    };
+    var cache = files.NewCache();
+    try
+    {
+      cache.Revalidate(paths);
+      Assert.True(parked.Wait(TimeSpan.FromSeconds(30)), "the reader never started");
+      cache.Dispose();
+    }
+    finally
+    {
+      gate.Set();
+    }
+
+    await cache.WhenIdleAsync();
+    Assert.Equal(1, files.Reads.Values.Sum());
   }
 
   [Fact]

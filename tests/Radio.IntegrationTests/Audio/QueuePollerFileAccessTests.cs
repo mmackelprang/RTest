@@ -166,12 +166,19 @@ public sealed class QueuePollerFileAccessTests : IDisposable
       gate.Wait();
       return real(path);
     };
-    await source.AddToQueueAsync("b.mp3");
-    await PollQueueAsync(poller, source);
-    Assert.Equal(2, proxy.Sends);
-    Assert.Equal("b", (await source.GetFullPlaylistAsync())[1].Title);
+    try
+    {
+      await source.AddToQueueAsync("b.mp3");
+      await PollQueueAsync(poller, source);
+      Assert.Equal(2, proxy.Sends);
+      Assert.Equal("b", (await source.GetFullPlaylistAsync())[1].Title);
+    }
+    finally
+    {
+      // Always released, so a failed assertion surfaces as itself rather than as a parked reader.
+      gate.Set();
+    }
 
-    gate.Set();
     await source.WhenQueueMetadataIdleAsync();
     await PollQueueAsync(poller, source);
     await PollQueueAsync(poller, source);

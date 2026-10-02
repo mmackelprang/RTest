@@ -96,7 +96,7 @@ public class QueueHistoryPanelSourceSwitchTests : TestContext
     cut.WaitForAssertion(
       () => _api.Requests.Should().Contain(r => r.Path == "/api/playhistory/statistics"),
       TimeSpan.FromSeconds(10));
-    // The mount's queue read is in the background too now; wait for it before counting requests.
+    // The mount reads the queue once (awaited, before its tab). Rendezvous on it before counting requests.
     cut.WaitForAssertion(() => QueueReads().Should().Be(1), TimeSpan.FromSeconds(10));
     return cut;
   }
@@ -148,7 +148,9 @@ public class QueueHistoryPanelSourceSwitchTests : TestContext
 
     cut.WaitForAssertion(() => QueueReads().Should().Be(2), TimeSpan.FromSeconds(10));
     AssertView(cut, "Radio");
-    fired.IsCompleted.Should().BeTrue("the SourceChanged subscriber must not wait for the queue read");
+    // The read is still held, so this completes only if the subscriber does not wait for it. Bounded so
+    // the old ordering fails here rather than hanging.
+    await fired.WaitAsync(TimeSpan.FromSeconds(10));
 
     release.SetResult();
     await fired;
@@ -187,6 +189,29 @@ public class QueueHistoryPanelSourceSwitchTests : TestContext
     AssertView(cut, "Queue");
   }
 
+  /// <summary>
+  /// Review: a queue change made while the source could not be read may have been missed, so the read
+  /// that recovers re-reads the queue — once — even though the source type did not change.
+  /// </summary>
+  [Fact]
+  public async Task RecoveringFromAFailedSourceRead_ReReadsTheQueueOnce()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+
+    _api.Route(HttpMethod.Get, "/api/sources/primary", HttpStatusCode.InternalServerError, null);
+    await FireSourceChangedAsync(cut);
+    QueueReads().Should().Be(1, "a failed source read reads nothing else");
+
+    StubQueue(3);
+    StubSource("FilePlayer");
+    await cut.InvokeAsync(() => cut.Instance.PollTickAsync());
+    cut.WaitForAssertion(() => QueueReads().Should().Be(2), TimeSpan.FromSeconds(10));
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("Queue · 3"), TimeSpan.FromSeconds(10));
+
+    await FireSourceChangedAsync(cut);
+    QueueReads().Should().Be(2, "once recovered, a repeated SourceChanged reads only the source");
+  }
+
   [Fact]
   public async Task ASwitchBetweenTwoSourcesWithNoQueueView_DoesNotReadTheQueue()
   {
@@ -216,9 +241,12 @@ public class QueueHistoryPanelSourceSwitchTests : TestContext
     StubSource("FilePlayer");
     Task fired = FireSourceChangedAsync(cut);
     AssertView(cut, "History"); // the held count is 0
+    // The dispatch has returned with the read still held: the Queue tab below can only come from the
+    // background read's re-apply, not from a SyncSourceAsync that waited for the read.
+    await fired.WaitAsync(TimeSpan.FromSeconds(10));
+    AssertView(cut, "History");
 
     release.SetResult();
-    await fired;
     AssertView(cut, "Queue");
   }
 

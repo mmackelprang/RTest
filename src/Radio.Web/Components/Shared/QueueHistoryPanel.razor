@@ -673,13 +673,15 @@
   /// on every SourceChanged — twice per switch, and for Radio, Bluetooth and Vinyl too — and that read
   /// measured 1.4–4.7 s on the appliance. Now, on a switch, the tab is decided from the source read alone
   /// and the caller renders it at once; the queue is re-read in the background, and only for a change to
-  /// or from File Player. A repeated SourceChanged for the same type does nothing beyond the source read.
+  /// or from File Player, or when the read recovers from a failed one. A repeated SourceChanged for the
+  /// same type does nothing beyond the source read.
   /// The first successful read (the panel mounting) still reads the queue first.</para>
   /// </summary>
   private async Task SyncSourceAsync()
   {
     bool hadPrevious = _sourceEverRead;
     string? previous = _sourceType;
+    bool recovering = _sourceStale;
 
     SourcesApiService.PrimarySourceRead read = await SourcesApi.ReadPrimarySourceAsync();
     if (!read.Succeeded)
@@ -696,6 +698,12 @@
       || !string.Equals(previous, _sourceType, StringComparison.OrdinalIgnoreCase);
     if (!changed)
     {
+      // The API is back after a failed read: a queue change during the outage may have been missed, so
+      // re-read it (in the background, as on a switch). Otherwise a repeated SourceChanged reads nothing more.
+      if (recovering)
+      {
+        _ = RefreshQueueForSourceAsync();
+      }
       return;
     }
 
@@ -726,7 +734,7 @@
       _activeTab = DefaultTabFor(_sourceType, _queueItems.Count, _btConnected);
     }
 
-    if (hadPrevious && (IsFilePlayer(previous) || IsFilePlayer(_sourceType)))
+    if (hadPrevious && (recovering || IsFilePlayer(previous) || IsFilePlayer(_sourceType)))
     {
       _ = RefreshQueueForSourceAsync();
     }

@@ -46,15 +46,19 @@ internal readonly record struct QueueFileStamp(long Length, DateTime LastWriteUt
 /// </para>
 /// <para>
 /// <see cref="GetOrSchedule"/> never touches a file. A miss returns <see cref="QueueItemMetadata.Placeholder"/>
-/// and queues the path for the reader; when the reader stores a result that differs from what was there,
-/// <see cref="Version"/> advances, which is how a reader of the queue learns to fetch it again.
+/// and queues the path for the reader. <see cref="Version"/> tells a reader of the queue that rows changed;
+/// it is published in batches (see <see cref="PublishEvery"/>), not per row, because every step of it is
+/// a <c>QueueChanged</c> broadcast and a queue re-read by every open panel.
 /// </para>
 /// <para>
 /// Staleness: an entry is keyed by path and stamped with the file's size and last-write time. It is
 /// re-validated — one <c>stat</c>, and a re-read only when the stamp differs — when its path is
 /// <see cref="Revalidate">revalidated</see>, which the file player does when a path is enqueued and when
-/// it becomes the current track. Nothing re-validates on a timer: a file re-tagged in place while it sits
-/// in the queue keeps its old row until it is enqueued again or played.
+/// it becomes the current track. A file re-tagged in place while it sits in the queue keeps its old row
+/// until then. Two exceptions are re-read even with an unchanged stamp: a row whose read failed (a share
+/// hiccup must not pin a placeholder for the life of the process), and a row older than
+/// <see cref="MaxAge"/> — the album-art cache deletes art it has not been asked to save for 7 days, and
+/// re-reading is what renews it.
 /// </para>
 /// <para>
 /// One reader, sequential, deliberately: the point is to take load off the share, and a burst of parallel
@@ -63,14 +67,29 @@ internal readonly record struct QueueFileStamp(long Length, DateTime LastWriteUt
 /// </remarks>
 internal sealed class QueueItemMetadataCache : IDisposable
 {
-  /// <summary>Entries kept beyond the live queue before <see cref="TrimTo"/> drops the rest.</summary>
+  /// <summary>
+  /// Once the cache holds more than this many paths, <see cref="TrimTo"/> drops every path not still
+  /// queued. A total-count threshold, not a size the cache is held to.
+  /// </summary>
   internal const int MaxEntries = 2048;
 
-  private sealed record Entry(QueueItemMetadata Metadata, QueueFileStamp? Stamp);
+  /// <summary>Rows changed before <see cref="Version"/> is published while the reader is still busy.</summary>
+  internal const int PublishEvery = 16;
+
+  /// <summary>
+  /// A row older than this is re-read the next time it is asked for, even if its file is unchanged. Well
+  /// inside <c>AlbumArtCacheService</c>'s 7-day expiry, whose clock a re-read (a <c>Save</c>) resets.
+  /// </summary>
+  internal static readonly TimeSpan MaxAge = TimeSpan.FromDays(1);
+
+  // Verified: the row is the file's as of Stamp. False when the read failed for a file that exists, so the
+  // next revalidation reads it again instead of trusting the stamp.
+  private sealed record Entry(QueueItemMetadata Metadata, QueueFileStamp? Stamp, bool Verified, DateTimeOffset ReadAt);
 
   private readonly Func<string, QueueItemMetadata> _read;
   private readonly Func<string, QueueFileStamp?> _stat;
   private readonly ILogger _logger;
+  private readonly TimeProvider _time;
   private readonly ConcurrentDictionary<string, Entry> _entries = new(StringComparer.Ordinal);
   private readonly ConcurrentDictionary<string, bool> _pending = new(StringComparer.Ordinal);
   private readonly Channel<string> _work =
@@ -80,44 +99,57 @@ internal sealed class QueueItemMetadataCache : IDisposable
   private int _outstanding;
   private TaskCompletionSource _idle = NewCompletedIdle();
   private long _version;
+  private int _unpublished; // reader thread only
   private Task? _worker;
   private bool _disposed;
 
   /// <summary>
   /// Creates the cache. Nothing is read until a path is scheduled.
   /// </summary>
-  /// <param name="read">Reads one file's row. Called only on the background reader. Must not throw for an
-  /// unreadable file — return <see cref="QueueItemMetadata.Placeholder"/> instead (an exception is caught,
-  /// logged at Debug, and stored as a placeholder so the path is not re-read on every request).</param>
+  /// <param name="read">Reads one file's row. Called only on the background reader. Returns
+  /// <see cref="QueueItemMetadata.Placeholder"/> for a file it cannot read; an exception is treated the
+  /// same way.</param>
   /// <param name="stat">The file's stamp, or <c>null</c> when it does not exist. Called only on the reader.</param>
   /// <param name="logger">Logger. Debug only: on the appliance, log volume correlates with audible distortion.</param>
+  /// <param name="timeProvider">Clock for <see cref="MaxAge"/>; <see cref="TimeProvider.System"/> by default.</param>
   public QueueItemMetadataCache(
     Func<string, QueueItemMetadata> read,
     Func<string, QueueFileStamp?> stat,
-    ILogger logger)
+    ILogger logger,
+    TimeProvider? timeProvider = null)
   {
     _read = read;
     _stat = stat;
     _logger = logger;
+    _time = timeProvider ?? TimeProvider.System;
   }
 
   /// <summary>
-  /// Advances whenever a stored row changes (a first read, or a re-read that found different tags).
-  /// Never advances for a re-validation that found the file unchanged.
+  /// Advances when stored rows have changed (a first read, or a re-read that found different tags) — once
+  /// per <see cref="PublishEvery"/> changed rows while the reader is busy, and once when it goes idle with
+  /// changes not yet published. Never advances for a re-validation that found the file unchanged.
   /// </summary>
   public long Version => Interlocked.Read(ref _version);
 
   /// <summary>Number of cached paths.</summary>
   public int Count => _entries.Count;
 
+  /// <summary>Whether <see cref="TrimTo"/> would drop anything — so a caller can skip building its list.</summary>
+  public bool NeedsTrim => _entries.Count > MaxEntries;
+
   /// <summary>
   /// The cached row for <paramref name="filePath"/>, or — on a miss — its placeholder, with the path
-  /// queued for the reader. Never touches the file.
+  /// queued for the reader. A row past <see cref="MaxAge"/> is returned as it is and queued for a re-read.
+  /// Never touches the file.
   /// </summary>
   public QueueItemMetadata GetOrSchedule(string filePath)
   {
     if (_entries.TryGetValue(filePath, out Entry? entry))
     {
+      if (IsAged(entry))
+      {
+        Enqueue(filePath);
+      }
       return entry.Metadata;
     }
 
@@ -126,8 +158,9 @@ internal sealed class QueueItemMetadataCache : IDisposable
   }
 
   /// <summary>
-  /// Queues each path for the reader: a path never seen is read; a cached path is re-read only if its
-  /// size or last-write time changed. Returns at once — the work happens on the background reader.
+  /// Queues each path for the reader: a path never seen is read; a cached path is re-read if its size or
+  /// last-write time changed, its last read failed, or it is past <see cref="MaxAge"/>. Returns at once —
+  /// the work happens on the background reader.
   /// </summary>
   public void Revalidate(IEnumerable<string> filePaths)
   {
@@ -143,7 +176,7 @@ internal sealed class QueueItemMetadataCache : IDisposable
   /// </summary>
   public void TrimTo(IReadOnlyCollection<string> keep)
   {
-    if (_entries.Count <= MaxEntries)
+    if (!NeedsTrim)
     {
       return;
     }
@@ -159,8 +192,8 @@ internal sealed class QueueItemMetadataCache : IDisposable
   }
 
   /// <summary>
-  /// Completes when every path queued so far has been processed. A test rendezvous — production code
-  /// never waits on the reader.
+  /// Completes when every path queued so far has been processed, or the cache is disposed. Used by tests
+  /// as a rendezvous, and by a playlist save to wait (bounded) for rows it is about to store.
   /// </summary>
   internal Task WhenIdleAsync()
   {
@@ -169,6 +202,8 @@ internal sealed class QueueItemMetadataCache : IDisposable
       return _idle.Task;
     }
   }
+
+  private bool IsAged(Entry entry) => _time.GetUtcNow() - entry.ReadAt > MaxAge;
 
   private void Enqueue(string filePath)
   {
@@ -207,6 +242,13 @@ internal sealed class QueueItemMetadataCache : IDisposable
     {
       await foreach (string path in _work.Reader.ReadAllAsync(_cts.Token))
       {
+        // ReadAllAsync checks the token only while waiting for more work, not between items it already
+        // holds — so without this a disposed cache would go on reading the whole backlog.
+        if (_cts.IsCancellationRequested)
+        {
+          break;
+        }
+
         // Removed BEFORE processing, so a revalidation requested while this read runs queues a second
         // pass rather than being swallowed by one that may already have stat'ed the old file.
         _pending.TryRemove(path, out _);
@@ -226,12 +268,12 @@ internal sealed class QueueItemMetadataCache : IDisposable
     }
     catch (OperationCanceledException) when (_cts.IsCancellationRequested)
     {
-      // Disposed.
+      // Disposed while waiting for work.
     }
     finally
     {
-      // The reader is gone (disposed): nothing still queued will be processed, and no file is open any
-      // more. Release anyone waiting — which is only ever a test.
+      // Only reached once disposed. Paths still queued are abandoned unread; the read that was in progress
+      // (if any) has finished, so no file is open. Release anyone waiting.
       lock (_idleLock)
       {
         _outstanding = 0;
@@ -244,16 +286,23 @@ internal sealed class QueueItemMetadataCache : IDisposable
   {
     QueueFileStamp? stamp = _stat(path);
 
-    if (_entries.TryGetValue(path, out Entry? existing) && existing.Stamp == stamp)
+    if (_entries.TryGetValue(path, out Entry? existing)
+        && existing.Verified
+        && existing.Stamp == stamp
+        && !IsAged(existing))
     {
-      // Same size and last-write time (or still missing): the cached row is the file's. No read.
+      // Same size and last-write time (or still missing), read successfully, and recently: the cached
+      // row is the file's. No read.
       return;
     }
 
     QueueItemMetadata metadata;
+    bool verified;
     if (stamp == null)
     {
+      // Missing: the placeholder IS the verified answer until the file appears (a stamp then differs).
       metadata = QueueItemMetadata.Placeholder(path);
+      verified = true;
     }
     else
     {
@@ -266,13 +315,27 @@ internal sealed class QueueItemMetadataCache : IDisposable
         _logger.LogDebug(ex, "Could not read queue metadata from {File}; showing its file name", path);
         metadata = QueueItemMetadata.Placeholder(path);
       }
+
+      // A file that exists but read as nothing at all is most likely a failed read (on the appliance, a
+      // CIFS hiccup), so it is not trusted: the next revalidation reads it again. A genuinely untagged
+      // file normally still yields a duration and so does not land here.
+      verified = metadata != QueueItemMetadata.Placeholder(path);
     }
 
-    _entries[path] = new Entry(metadata, stamp);
+    _entries[path] = new Entry(metadata, stamp, verified, _time.GetUtcNow());
     if (existing == null || existing.Metadata != metadata)
     {
-      Interlocked.Increment(ref _version);
+      if (++_unpublished >= PublishEvery)
+      {
+        Publish();
+      }
     }
+  }
+
+  private void Publish()
+  {
+    _unpublished = 0;
+    Interlocked.Increment(ref _version);
   }
 
   private void MarkDone()
@@ -281,6 +344,12 @@ internal sealed class QueueItemMetadataCache : IDisposable
     {
       if (_outstanding > 0 && --_outstanding == 0)
       {
+        // Idle: publish what the batch changed before anyone waiting is released, so a waiter that
+        // then reads Version sees it.
+        if (_unpublished > 0)
+        {
+          Publish();
+        }
         _idle.TrySetResult();
       }
     }
@@ -309,8 +378,8 @@ internal sealed class QueueItemMetadataCache : IDisposable
 
     _cts.Cancel();
 
-    // _cts is deliberately not disposed: a reader that is still finishing reads its token, and a
-    // CancellationTokenSource with no timer holds nothing that needs releasing. A read already in
-    // progress runs to completion; WhenIdleAsync completes once it has.
+    // _cts is deliberately not disposed: the reader may still be finishing a read and then checks it, and
+    // a CancellationTokenSource with no timer holds nothing that needs releasing. The read in progress (if
+    // any) runs to completion; nothing queued after it is read; WhenIdleAsync completes once it has.
   }
 }

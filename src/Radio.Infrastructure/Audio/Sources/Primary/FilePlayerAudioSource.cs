@@ -202,35 +202,63 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// AUD-96: a 64-bit FNV-1a hash of exactly what <see cref="GetFullPlaylistAsync"/> derives an item's
   /// identity and state from — the played, current and upcoming paths in order, and which of them are
   /// in error — mixed with the metadata cache's <see cref="QueueItemMetadataCache.Version"/>, which
-  /// advances when a row's title, artist, album, duration or art changes. Hashing the lists rather than
+  /// advances when rows' title, artist, album, duration or art change. Hashing the lists rather than
   /// counting mutations is deliberate: this class changes its queue from more than a dozen places, and a
-  /// counter would be correct only while every one of them remembered to bump it. Touches no file.
+  /// counter would be correct only while every one of them remembered to bump it. Seeded per instance,
+  /// so a re-created File Player never repeats an old instance's value. Touches no file.
+  /// <para>
+  /// ⚠ Several of those places mutate the lists without <c>_playlistLock</c> (a pre-existing pattern this
+  /// row did not change). The lists are therefore copied with <c>ToArray</c> — which, unlike enumeration,
+  /// does not throw on a concurrent change — and if the copy still fails, a value no earlier read returned
+  /// is reported, so the caller re-reads the playlist rather than skipping it.
+  /// </para>
   /// </remarks>
   public long QueueVersion
   {
     get
     {
-      ulong hash = FnvOffset;
-      lock (_playlistLock)
+      string[] played;
+      string? current;
+      string[] upcoming;
+      string[] errors;
+      try
       {
-        foreach (string path in _playedHistory)
+        lock (_playlistLock)
         {
-          hash = MixEntry(hash, 'P', path);
+          played = _playedHistory.ToArray();
+          current = _currentFile;
+          upcoming = _playlist.ToArray();
+          errors = _errorFiles.ToArray();
         }
-        if (_currentFile != null)
-        {
-          hash = MixEntry(hash, 'C', _currentFile);
-        }
-        foreach (string path in _playlist)
-        {
-          hash = MixEntry(hash, 'U', path);
-        }
+      }
+      catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or IndexOutOfRangeException)
+      {
+        return unchecked((long)_versionSeed ^ Interlocked.Increment(ref _versionFallback) ^ long.MinValue);
+      }
+
+      HashSet<string> errorSet = new(errors, StringComparer.Ordinal);
+      ulong hash = FnvOffset ^ _versionSeed;
+      foreach (string path in played)
+      {
+        hash = MixEntry(hash, 'P', path, errorSet);
+      }
+      if (current != null)
+      {
+        hash = MixEntry(hash, 'C', current, errorSet);
+      }
+      foreach (string path in upcoming)
+      {
+        hash = MixEntry(hash, 'U', path, errorSet);
       }
 
       hash = Mix(hash, (ulong)_queueMetadata.Version);
       return unchecked((long)hash);
     }
   }
+
+  // Per-instance seed for QueueVersion, and the counter its fallback draws from.
+  private readonly ulong _versionSeed = (ulong)Random.Shared.NextInt64();
+  private long _versionFallback;
 
   private const ulong FnvOffset = 14695981039346656037UL;
   private const ulong FnvPrime = 1099511628211UL;
@@ -247,10 +275,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   // One entry: its segment (played / current / upcoming), its error flag, its path, and a terminator so
   // that adjacent paths cannot run together into the same byte stream.
-  private ulong MixEntry(ulong hash, char segment, string path)
+  private static ulong MixEntry(ulong hash, char segment, string path, HashSet<string> errors)
   {
     hash = Mix(hash, segment);
-    hash = Mix(hash, _errorFiles.Contains(path) ? 1UL : 0UL);
+    hash = Mix(hash, errors.Contains(path) ? 1UL : 0UL);
     foreach (char c in path)
     {
       hash = Mix(hash, c);
@@ -1908,12 +1936,30 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// </summary>
   private void PrimeQueueMetadata(IReadOnlyCollection<string> paths)
   {
-    _queueMetadata.TrimTo(GetFullPlaylistInOrder().Concat(paths).ToList());
+    if (_queueMetadata.NeedsTrim)
+    {
+      _queueMetadata.TrimTo(GetFullPlaylistInOrder().Concat(paths).ToList());
+    }
     _queueMetadata.Revalidate(paths);
   }
 
-  /// <summary>Completes when the queue metadata reader has caught up. Test rendezvous only.</summary>
+  /// <summary>Completes when the queue metadata reader has caught up. A test rendezvous.</summary>
   internal Task WhenQueueMetadataIdleAsync() => _queueMetadata.WhenIdleAsync();
+
+  /// <inheritdoc/>
+  public async Task<bool> WaitForQueueMetadataAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+  {
+    ThrowIfDisposed();
+    try
+    {
+      await _queueMetadata.WhenIdleAsync().WaitAsync(timeout, cancellationToken);
+      return true;
+    }
+    catch (TimeoutException)
+    {
+      return false;
+    }
+  }
 
   /// <summary>
   /// Reads one queue row from the file: the read every queue request used to do per item (AUD-96 moved
