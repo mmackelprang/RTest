@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (92)
+## Shipped rows (93)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3095,3 +3095,17 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/OPS-14.md`](queue/OPS-14.md)**
 
 ✅ **SHIPPED 2026-10-02.** `/openapi/v1.json` and the Scalar UI at `/scalar/v1` were mapped only in Development, so the box answered 404 for both; they are now mapped in every environment. The DevTray shows the address as plain text, never a link (owner: *"don't actually open them on the console though"*).
+
+### AUD-97 — after a restart the panel showed the Soundbar as the output while the saved Cast device played
+
+| Field | Value |
+|---|---|
+| Status | ✅🔬 shipped 2026-10-02 by the coordinator; owner check on the panel outstanding (PR and SHA in the next banner) |
+| Plan | — |
+| Spec / handoff | — |
+| Depends on | — |
+| Branch | `fix/aud-97-output-display-after-restart` |
+
+**Detail: [`queue/AUD-97.md`](queue/AUD-97.md)**
+
+✅🔬 **SHIPPED 2026-10-02, owner check outstanding.** Page load took the current output from `/api/devices/output/default`, which answers the hardware default sink whatever is playing; it now reads the output list's `IsActive` entry.
