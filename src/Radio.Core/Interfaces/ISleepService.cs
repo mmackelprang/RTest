@@ -37,7 +37,10 @@ public enum ConsoleWakeState
   /// for the panel to be powered off — <c>ENC-23</c>'s deep sleep; that request is refused when the
   /// encoder is not connected and stable, and the console is in Standby either way), a VOLUME
   /// long-press, or the API.
-  /// A <b>turn</b> here never resumes audio — only a press or a screen tap does (D22).
+  /// A <b>turn</b> here does not resume audio — only a press or a screen tap does (D22) — with one
+  /// exception since <c>ENC-25</c>: a VOLUME turn wakes the console and then applies its volume change,
+  /// unless the VOLUME button is held or changed state less than 500 ms earlier
+  /// (<c>RotaryEncoderActionRouter.VolumeTurnMayWake</c>).
   /// </summary>
   Standby,
 }
