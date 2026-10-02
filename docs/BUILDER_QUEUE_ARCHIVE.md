@@ -3282,7 +3282,7 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 
 | Field | Value |
 |---|---|
-| Status | ✅ owner ruling 2026-10-02 built; merged 2026-10-02 (PR and squash SHA in the next banner) |
+| Status | ✅ owner ruling 2026-10-02 built; merged by the PR that archived this row (PR number and squash SHA in the next banner) |
 | Plan | _no plan — decision row; built directly from the ruling_ |
 | Spec / handoff | _owner ruling 2026-10-02:_ *"#1 - a:keep, b:move to priority 9, c:hangup should only affect the phone announcement."* |
 | Depends on | `AUD-73` ([#739](https://github.com/mmackelprang/RTest/pull/739)) |
@@ -3290,7 +3290,7 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 
 **Detail: [`queue/AUD-87.md`](queue/AUD-87.md)**
 
-✅ **RULED AND BUILT 2026-10-02.** (a) a lower-priority announcement keeps mixing — no change. (b) `PhoneIntegration:AnnouncementPriority` defaults to **9**, above the notification default 8, so a doorbell no longer cuts off the caller's name. (c) each ringing call's announcement runs under its own token; a hang-up cancels that token instead of calling the stop-all `StopAsync`, so a doorbell playing alongside keeps playing. ⚠ **`radio`'s SQLite config store holds `phoneintegration:announcementPriority = 8` and `phoneintegration:enabled = true`** (read-only, 2026-10-02): the box keeps 8 until the owner changes that row, and phone integration is running there. Not deployed.
+✅ **RULED AND BUILT 2026-10-02.** (a) a lower-priority announcement keeps mixing — no change. (b) `PhoneIntegration:AnnouncementPriority` defaults to **9**, above the notification default 8, so a doorbell no longer cuts off the caller's name. (c) each ringing call's announcement runs under its own token; a hang-up cancels that token instead of calling the stop-all `StopAsync`, so a doorbell playing alongside keeps playing. ⚠ **`radio`'s SQLite config store holds `phoneintegration:announcementPriority = 8` and `phoneintegration:enabled = true`** (read-only, 2026-10-02): the box keeps 8 until the owner changes that row, and phone integration is connected to the RotaryPhone hub there. ⚠ The box may never announce a call at all: its logs show only `Idle` call states, consistent with a suspected `CallStateChanged(phoneId, state)` vs `(state, phoneNumber)` contract mismatch — see the dossier; unfiled, predates this row. Not deployed.
 
 ### GV-10 — Confirm-or-close: do conversation bubbles render the list snippet instead of the full body? Closed by owner ruling with no code (falsified as a Radio Console defect).
 

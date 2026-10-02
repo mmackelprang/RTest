@@ -24,9 +24,19 @@ Read-only on `radio`, 2026-10-02: the SQLite config store (`/opt/radio-console/d
 `Config_sqlite`) holds **`phoneintegration:announcementPriority = 8`** (written 2026-03-12), which outranks
 both JSON layers. Until the owner changes that row, the box keeps 8. **The same store holds
 `phoneintegration:enabled = true`**, and the file sink shows `PhoneCallIntegrationService` connecting to
-the RotaryPhone hub — so the "`PhoneIntegration` is not enabled on the box" premise below is **wrong**:
-the collision in point 2 below was reachable on the box (no `playRingSound` row, so the default `false`
-sends the phone through `AnnounceAsync` at 8). Neither row was written.
+the RotaryPhone hub — so the "`PhoneIntegration` is not enabled on the box" premise below is **wrong**.
+Neither row was written.
+
+⚠ **But whether the box ever announces a call is unproven, and probably it does not.** The pre-merge
+reviewer found that the RotaryPhone server sends `CallStateChanged(phoneId, state)`
+(`D:/prj/RotaryPhone/src/RotaryPhoneController.Server/Services/SignalRNotifierService.cs:260`), while
+`PhoneCallClient` binds the two-argument form as `(state, phoneNumber)` (`PhoneCallClient.cs:65`, `:117`),
+so the parser would see a phone id where it expects a state and map it to `Idle`. The box's seven
+retained file-sink logs (read 2026-10-02) contain three `Phone call state:` lines, all `"Idle"`, and no
+`Ringing` at all. So the point-2 collision is reachable in code but has not been seen on the box.
+**Not fixed here** — it predates `AUD-87`, is a separate contract defect, and needs its own row (not
+minted by this Builder: a concurrent Builder holds `PHN-11`, and the coordinator should take the next
+number).
 
 ---
 

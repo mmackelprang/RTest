@@ -120,8 +120,9 @@ public class PhoneCallIntegrationService : BackgroundService
   /// The CTS is swapped in or out BEFORE this method's first await. The client raises each state as a
   /// separate event and this method returns to it at the first await, so the swap is what fixes the
   /// order: a hang-up that arrives while the ringing event is still broadcasting still reaches the
-  /// announcement that ringing event is about to start. Whoever takes the CTS out of the field cancels
-  /// (if it is a hang-up or a newer call) and disposes it.
+  /// announcement that ringing event is about to start. Whoever takes the CTS out of the field disposes
+  /// it, and cancels it first if it is a hang-up, a newer ring or the service's <see cref="Dispose"/>;
+  /// the ringing event that created it, once its announcement has returned, only disposes it.
   /// </para>
   /// </remarks>
   internal async Task HandleCallStateChangedAsync(PhoneCallStateChangedEventArgs e)
@@ -134,7 +135,9 @@ public class PhoneCallIntegrationService : BackgroundService
         ringingCts = new CancellationTokenSource();
         // Read now: a hang-up may dispose the CTS before the await below returns.
         callToken = ringingCts.Token;
-        // A newer call's ring makes the previous call's announcement stale.
+        // Every Ringing is treated as a new call, so it stops the previous ring's announcement. If the
+        // server ever re-sent Ringing for the same call, the name would be cut off and restarted — much as
+        // AUD-73's equal-priority rule already did before AUD-87.
         CancelAndDispose(Interlocked.Exchange(ref _callAnnouncementCts, ringingCts));
         break;
 
@@ -164,14 +167,28 @@ public class PhoneCallIntegrationService : BackgroundService
     }
   }
 
-  private static void CancelAndDispose(CancellationTokenSource? cts)
+  /// <summary>
+  /// Cancels and disposes a call's token source. A throwing cancellation callback is logged, not
+  /// propagated: it must not stop the caller from broadcasting the new call state or announcing a new call.
+  /// </summary>
+  private void CancelAndDispose(CancellationTokenSource? cts)
   {
     if (cts == null)
     {
       return;
     }
-    cts.Cancel();
-    cts.Dispose();
+    try
+    {
+      cts.Cancel();
+    }
+    catch (AggregateException ex)
+    {
+      _logger.LogWarning(ex, "Error cancelling a phone call's announcement");
+    }
+    finally
+    {
+      cts.Dispose();
+    }
   }
 
   /// <summary>
@@ -216,14 +233,16 @@ public class PhoneCallIntegrationService : BackgroundService
     _logger.LogInformation("Phone ringing: announcing to {Number}, announcement {Announcement}",
       LogSafeText.ForPhone(e.PhoneNumber), LogSafeText.For(announcement));
 
-    // announcementToken is cancelled by this call's hang-up (AUD-87). Passed as the caller token, it
+    // announcementToken is cancelled by this call's hang-up (AUD-87), a newer ring, or service shutdown.
+    // Passed as the caller token, it
     // interrupts this announcement and no other.
     try
     {
       if (announcementToken.IsCancellationRequested)
       {
-        // Hung up while the caller's name was being resolved: nothing to announce.
-        _logger.LogDebug("Call ended before its announcement started; not announcing");
+        // Hung up, or superseded by a newer ring, before the announcement began (while broadcasting or
+        // resolving the name): nothing to announce.
+        _logger.LogDebug("Call ended or superseded before its announcement started; not announcing");
       }
       else if (opts.PlayRingSound)
       {
