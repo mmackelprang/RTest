@@ -83,12 +83,12 @@ Found on the way. Items 1, 2, 5 and 6 lost, duplicated or mis-targeted a track w
 
 ## Tests
 
-- `FilePlayerQueueRestoreTests` (22): restart round trip with states, Repeat All after a restart (Shuffle off and on), a Shuffle restart keeping both the play order and the unshuffled order, Shuffle off after a restart and within a session, old shape at index 0 and at a non-zero index, Previous and jump-into-played after a restart, the Repeat Off end, the Repeat All Previous wrap, an emptied list, and `BuildRestoredQueue` edge cases.
+- `FilePlayerQueueRestoreTests` (24): restart round trip with states, Repeat All after a restart (Shuffle off and on), a Shuffle restart keeping both the play order and the unshuffled order, Shuffle off after a restart and within a session, old shape at index 0 and at a non-zero index, Previous and jump-into-played after a restart, the Repeat Off end, the Repeat All Previous wrap, an emptied list, the restore priming `AUD-96`'s metadata cache with every row (played included) and moving `QueueVersion`, and `BuildRestoredQueue` edge cases.
 - `FilePlayerQueueRestoreSqliteTests` (4), on the real store and bridge: a round trip, a stale lowercase row holding a longer list, the box's old-shape rows, and `CurrentValue` before any reload.
 - `QueueWholeListConsumerTests` (2): Save as playlist, and `contains`.
 - `QueueHistoryPanelRemoveIndexTests` (4): the panel's Remove index with and without played tracks, with an Error row, and with no current row.
 
-**Mutation checks.** Each mutant was applied to committed code, run against these tests, then reverted. All 14 were killed:
+**Mutation checks.** Each mutant was applied to committed code, run against these tests, then reverted. All 15 were killed; after `AUD-96`/`UI-35` (#771) and #772 were merged in, the restore, Repeat All, Shuffle-off, case-variant, `CurrentValue`, Save-as-playlist and panel-index mutants were re-run on the merged code and were killed again:
 
 | Mutant | Killed by |
 |---|---|
@@ -106,6 +106,7 @@ Found on the way. Items 1, 2, 5 and 6 lost, duplicated or mis-targeted a track w
 | **the original defect** (no played tracks saved AND no `OriginalOrder`) | both Repeat All after-restart tests (Shuffle off and on) |
 | Shuffle off back to `_originalOrder.Skip(current)` | both Shuffle-off tests |
 | panel passes the full-list index | 3 of the 4 Remove-index tests (the no-played case is the same index either way) |
+| restore primes `AUD-96`'s cache without the played rows | the priming test |
 
 Saving without played tracks alone does **not** fail the Repeat All tests. That is because the persisted `OriginalOrder` still holds every track, so Repeat All still wraps to the whole list; the round-trip tests catch that mutant instead.
 
@@ -117,3 +118,14 @@ Saving without played tracks alone does **not** fail the Repeat All tests. That 
 4. **Mid-list, Save as playlist.** The saved playlist's track count equals the whole list, played tracks included. Load it to confirm.
 5. *(Shuffle)* With Shuffle on, repeat 1–2. The order after the restart is the same shuffled order. Turning Shuffle off keeps the played tracks dimmed where they are; the upcoming tracks are every unplayed track, in folder order, with none repeated.
 6. **After the restart, with played tracks showing, tap ✕ on an upcoming track.** That track is the one removed, not one further down.
+
+## Merged with `AUD-96` / `UI-35`
+
+On the coordinator's instruction, `perf/aud-96-ui-35-snappy-switch` and then `origin/main` (#771 squash `46df8b5`, #772 `ebb1bd5`) were merged into this branch. Resolutions:
+
+- The restore primes #771's metadata cache with every restored row (played, current and upcoming), after the lists are set. `_originalOrder` is not primed: rows built from it are read on demand.
+- Save as playlist keeps #771's `WaitForQueueMetadataAsync`, then reads `GetFullPlaylistAsync`. The wait already checked `GetFullPlaylistInOrder()`, which includes the played tracks. Its interface doc said "queued items" and now says every full-playlist row.
+- #771's `PlaylistsControllerCreateMetadataTests` now mocks `GetFullPlaylistAsync`.
+
+#771's `QueueVersion` mixes in each played path under its own marker (`'P'`), so restoring played tracks moves it and the 500 ms poller broadcasts them. The test shows that the restore moves the version; that the played segment is part of the hash is read from the code, not isolated by a test.
+
