@@ -17,14 +17,14 @@
       mono 12px uppercase 0.10em letter-spacing, active segment tinted with
       --accent-dim + accent underline.
     • Canvas now fills the remaining vertical space — no inset padding.
-    • "Connected" pill collapsed to an 8px dot at top-right.
+    • "Connected" pill collapsed to an 8px dot at top-right. (Removed by UI-30.)
     • The "Updates: NN/sec" overlay moves out of the canvas into
       VisualizerTelemetryService so the dev tray (PR 6) can subscribe.
     • Frequency-band axis labels live in a 16px strip under the canvas
       (mono 10px, low-contrast).
 
-  AUD-76 PR 2: the picker is Wave / Spectrum / BAND / Ring / Phase. BAND (the
-  stored FM band map, touch-to-tune) took Fall's position; Fall (the audio
+  AUD-76 PR 2: the picker was Wave / Spectrum / BAND / Ring / Phase (UI-29 moved
+  BAND last). BAND (the stored FM band map, touch-to-tune) took Fall's position; Fall (the audio
   spectrogram) and VU were removed. BAND reads /api/radio/bandmap on a timer
   and subscribes to no visualization hub stream. The default mode is Spectrum.
 
@@ -34,6 +34,17 @@
   be scanned and say so. It follows a band change at once through
   AudioStateHub.RadioStateChanged (the audio-state hub, not the visualization
   hub), not only on its timer.
+
+  UI-29: the picker is Wave / Spectrum / Ring / Phase / BAND, and BAND can be
+  picked only while the radio is the active source (disabled otherwise). The
+  saved preference (_preferredMode) and the mode on screen (_currentMode) are
+  separate: a saved BAND shows Spectrum while the radio is not active, without
+  overwriting the preference, and BAND returns when the radio does. Picking any
+  enabled tab replaces the preference. See DisplayModeFor.
+
+  UI-30: the header's connection dot is gone. While the visualization hub is not
+  connected, the hub-fed modes show a "disconnected" state in the canvas area
+  instead. BAND does not: it reads the REST API, not the hub.
 *@
 
 <div class="viz-panel">
@@ -52,12 +63,6 @@
               role="tab"
               aria-selected="@(_currentMode == VisualizationMode.Spectrum ? "true" : "false")"
               aria-label="Spectrum mode">Spectrum</button>
-      <button class="visualizer-mode @(_currentMode == VisualizationMode.Band ? "is-active" : "")"
-              type="button"
-              @onclick="@(() => SelectMode(VisualizationMode.Band))"
-              role="tab"
-              aria-selected="@(_currentMode == VisualizationMode.Band ? "true" : "false")"
-              aria-label="Radio band map mode">BAND</button>
       <button class="visualizer-mode @(_currentMode == VisualizationMode.Circular ? "is-active" : "")"
               type="button"
               @onclick="@(() => SelectMode(VisualizationMode.Circular))"
@@ -70,10 +75,24 @@
               role="tab"
               aria-selected="@(_currentMode == VisualizationMode.PhaseScope ? "true" : "false")"
               aria-label="Phase scope mode">Phase</button>
+      @* UI-29: last, and only while the radio is the active source. `disabled` takes it out of the tab
+         order and ignores taps (the brief: not focusable, not tappable); aria-disabled and the described-by
+         hint say why it is there at all, for anyone reading the page rather than tabbing through it. *@
+      <button class="visualizer-mode @(_currentMode == VisualizationMode.Band ? "is-active" : "")"
+              type="button"
+              disabled="@(!IsBandSelectable)"
+              aria-disabled="@(IsBandSelectable ? "false" : "true")"
+              aria-describedby="@(IsBandSelectable ? null : BandHintId)"
+              title="@(IsBandSelectable ? null : BandUnavailableHint)"
+              @onclick="@(() => SelectMode(VisualizationMode.Band))"
+              role="tab"
+              aria-selected="@(_currentMode == VisualizationMode.Band ? "true" : "false")"
+              aria-label="Radio band map mode">BAND</button>
     </div>
-    <span class="visualizer-conn-dot @(VisualizationHub.IsConnected ? "is-connected" : "")"
-          aria-label="@(VisualizationHub.IsConnected ? "Connected" : "Disconnected")"
-          title="@(VisualizationHub.IsConnected ? "Connected" : "Disconnected")"></span>
+    @if (!IsBandSelectable)
+    {
+      <span id="@BandHintId" class="visually-hidden">@BandUnavailableHint</span>
+    }
   </div>
 
   <!-- Full-bleed canvas -->
@@ -179,6 +198,18 @@
         </div>
       }
     }
+    else if (!VisualizationHub.IsConnected)
+    {
+      @* UI-30: replaces the header's 8 px dot. Takes precedence over "Waiting for audio data", which would
+         otherwise sit there indefinitely while nothing can arrive. Rendered once per disconnection, so the
+         status is announced on the change, not on every frame. *@
+      <div class="visualizer-disconnected" role="status" aria-live="polite">
+        @* aria-hidden: the icon is a font ligature, so its name ("link_off") is text inside the live region. *@
+        <RadzenIcon Icon="link_off" class="visualizer-disconnected-icon" aria-hidden="true" />
+        <div class="visualizer-disconnected-title">Visualizer disconnected</div>
+        <div class="visualizer-disconnected-sub">Reconnecting...</div>
+      </div>
+    }
     else if (!_hasReceivedData)
     {
       <div class="visualizer-waiting" aria-live="polite">
@@ -248,7 +279,30 @@
   /// </summary>
   [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
 
+  /// <summary>The tooltip and accessible hint on a disabled BAND tab (UI-29).</summary>
+  internal const string BandUnavailableHint = "Available when the radio is the active source";
+
+  // The described-by target for the hint. One panel per page, so a fixed id is unique.
+  private const string BandHintId = "visualizer-band-hint";
+
+  // UI-29: one mode change at a time. Mode changes await hub RPCs and JS calls, and since UI-29 they come
+  // from a tap, from SourceChanged (often twice per switch — the server's broadcast and MainLayout's local
+  // nudge), from RadioStateChanged and from BAND's own state reads. Unserialised, a change that started
+  // first could finish last and leave the screen contradicting the rule; see ReconcileModeAsync.
+  private readonly SemaphoreSlim _modeGate = new(1, 1);
+
+  // The mode on screen. UI-29: may differ from _preferredMode — see DisplayModeFor.
   private VisualizationMode _currentMode = VisualizationMode.Spectrum;
+
+  // The mode the user picked last (the saved ui.visualizer/defaultMode).
+  private VisualizationMode _preferredMode = VisualizationMode.Spectrum;
+
+  // UI-29: whether the radio is the active source, from /api/radio/state at start-up and on every
+  // SourceChanged. False until a read says otherwise; a read that fails keeps the previous value.
+  private bool _radioActive;
+
+  // UI-30: the hub's state as of the last ConnectionStateChanged this panel handled.
+  private bool _wasHubConnected;
   private bool _isInitialized;
   private bool _isDisposed;
   private bool _hasReceivedData;
@@ -313,6 +367,22 @@
 
   private int _completedRadioStateUpdates;
 
+  /// <summary>
+  /// <c>SourceChanged</c> broadcasts whose handling — the radio-state read and any mode change — has
+  /// finished (UI-29). Tests rendezvous on this count, as on <see cref="CompletedRadioStateUpdates"/>.
+  /// </summary>
+  internal int CompletedSourceChecks => Volatile.Read(ref _completedSourceChecks);
+
+  private int _completedSourceChecks;
+
+  /// <summary><c>ConnectionStateChanged</c> notifications this panel has finished handling (UI-30).</summary>
+  internal int CompletedConnectionUpdates => Volatile.Read(ref _completedConnectionUpdates);
+
+  private int _completedConnectionUpdates;
+
+  /// <summary>UI-29: BAND can be picked only while the radio is the active source.</summary>
+  private bool IsBandSelectable => _radioActive;
+
   // Spectrum-family modes share the freq-band axis strip beneath the canvas.
   // Picker buttons compare _currentMode directly — no per-button helper needed.
   private bool IsSpectrumMode =>
@@ -358,6 +428,14 @@
   };
 
   /// <summary>
+  /// UI-29: the mode to show for a preference. A saved BAND shows Spectrum (the default) while the radio is
+  /// not the active source, and BAND again once it is; every other mode shows as itself. The preference is
+  /// not changed by this — only a pick in the picker changes it.
+  /// </summary>
+  internal static VisualizationMode DisplayModeFor(VisualizationMode preferred, bool radioActive) =>
+    preferred == VisualizationMode.Band && !radioActive ? VisualizationMode.Spectrum : preferred;
+
+  /// <summary>
   /// Maps a saved <c>ui.visualizer/defaultMode</c> value to a mode. AUD-76 removed two modes, and a
   /// preference naming either must still land somewhere sensible: <c>Spectrogram</c> ("Fall") becomes
   /// <see cref="VisualizationMode.Band"/>, which took its place in the picker; <c>VUMeter</c>, anything
@@ -385,16 +463,43 @@
 
   protected override async Task OnInitializedAsync()
   {
+    // UI-29: the start-up mode is applied under the mode gate, so a SourceChanged that arrives meanwhile
+    // waits and is reconciled at the end rather than being overwritten by the start-up code.
+    await _modeGate.WaitAsync();
+    try
+    {
+      await InitializeUnderModeGateAsync();
+    }
+    finally
+    {
+      _modeGate.Release();
+    }
+
+    await ReconcileModeAsync();
+  }
+
+  private async Task InitializeUnderModeGateAsync()
+  {
     try
     {
       VisualizationMode modeBeforePreferences = _currentMode;
+
+      // UI-29: subscribed before the radio-state read, so a source change during start-up is not missed.
+      AudioStateHub.SourceChanged += HandleSourceChangedAsync;
+
       await LoadPreferencesAsync();
+      await RefreshRadioActiveAsync();
+      _currentMode = DisplayModeFor(_preferredMode, _radioActive);
 
       if (!VisualizationHub.IsConnected)
+      {
         await VisualizationHub.StartAsync();
+      }
 
       VisualizationHub.OnWaveformData += HandleWaveformData;
       VisualizationHub.OnSpectrumData += HandleSpectrumData;
+      VisualizationHub.ConnectionStateChanged += HandleHubConnectionChangedAsync;
+      _wasHubConnected = VisualizationHub.IsConnected;
 
       // AUD-91: BAND follows the radio's band. A band picked in the radio control panel arrives here
       // at once, rather than on BAND's next 30-second refresh. Ignored outside BAND.
@@ -420,8 +525,10 @@
       // ⚠ There is deliberately no remote mode subscription here. ENC-9a added one against the
       // server's VisualizationModeChanged broadcast; ENC-7 then removed the only thing that could
       // ever send it, and ENC-9 deleted the broadcast, the service behind it and this subscription
-      // together. Mode is local to this circuit by decision: _currentMode plus the saved preference
-      // below are the whole mechanism, and nothing outside this component changes it.
+      // together. Mode is local to this circuit by decision: _preferredMode, _currentMode and the saved
+      // preference below are the whole mechanism, and no remote party picks a mode. Since UI-29 the mode
+      // SHOWN also follows the active source (SourceChanged, subscribed above): that can swap BAND for
+      // Spectrum and back, but it never changes the preference.
 
       // Publish an "updates/sec" sample once per second by snapshotting
       // the frame counter and resetting it. The dev tray (PR 6) reads
@@ -479,9 +586,72 @@
     }
   }
 
+  /// <summary>A tap on a picker tab: replaces the preference, saves it, and shows the mode.</summary>
   private async Task SelectMode(VisualizationMode mode)
   {
-    if (_currentMode == mode) return;
+    // UI-29: the BAND tab is disabled while the radio is not active; this covers a tap that lands in the
+    // moment between the radio going away and the re-render.
+    if (mode == VisualizationMode.Band && !IsBandSelectable)
+    {
+      return;
+    }
+
+    bool preferenceChanged = _preferredMode != mode;
+    _preferredMode = mode;
+    await ReconcileModeAsync();
+
+    if (preferenceChanged)
+    {
+      await SavePreferenceAsync("defaultMode", mode.ToString());
+    }
+
+    StateHasChanged();
+  }
+
+  /// <summary>
+  /// UI-29: shows the mode the preference and the radio state call for — <see cref="DisplayModeFor"/> of
+  /// <c>_preferredMode</c> and <c>_radioActive</c> as they are when the change runs, not when it was asked
+  /// for. Serialised by <c>_modeGate</c>, and repeated until the screen matches, because either input can
+  /// change while a change is awaiting. Saves nothing: <see cref="SelectMode"/> saves a pick, and the
+  /// fallback deliberately does not.
+  /// </summary>
+  private async Task ReconcileModeAsync()
+  {
+    await _modeGate.WaitAsync();
+    try
+    {
+      while (!_isDisposed)
+      {
+        VisualizationMode wanted = DisplayModeFor(_preferredMode, _radioActive);
+        if (wanted == _currentMode)
+        {
+          break;
+        }
+
+        await ShowModeCoreAsync(wanted);
+      }
+    }
+    finally
+    {
+      _modeGate.Release();
+    }
+
+    if (!_isDisposed)
+    {
+      StateHasChanged();
+    }
+  }
+
+  /// <summary>
+  /// Puts <paramref name="mode"/> on screen: stops BAND or moves the hub subscription, clears the canvas,
+  /// and starts the new mode. Call only while holding <c>_modeGate</c> (<see cref="ReconcileModeAsync"/>).
+  /// </summary>
+  private async Task ShowModeCoreAsync(VisualizationMode mode)
+  {
+    if (_currentMode == mode)
+    {
+      return;
+    }
 
     if (IsBandMode)
     {
@@ -490,6 +660,12 @@
 
     await UnsubscribeFromCurrentMode();
     _currentMode = mode;
+    if (_isDisposed)
+    {
+      // Disposal already unsubscribed; subscribing now would leave the singleton hub streaming to nobody.
+      return;
+    }
+
     await SubscribeToCurrentMode();
 
     if (_isInitialized && _jsModule != null)
@@ -512,9 +688,134 @@
     {
       await RequestInitialData();
     }
+  }
 
-    await SavePreferenceAsync("defaultMode", _currentMode.ToString());
-    StateHasChanged();
+  // ── active source (UI-29) ──────────────────────────────────────────────
+
+  /// <summary>
+  /// Reads whether the radio is the active source. <c>/api/radio/state</c> answers 400 when it is not; a
+  /// read that fails for any other reason says nothing about the source, so it keeps the last answer.
+  /// </summary>
+  private async Task RefreshRadioActiveAsync()
+  {
+    try
+    {
+      RadioStateRead read = await RadioApi.ReadStateAsync();
+      if (read.Status == RadioStateReadStatus.Active)
+      {
+        _radioActive = true;
+      }
+      else if (read.Status == RadioStateReadStatus.NotActive)
+      {
+        _radioActive = false;
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogDebug(ex, "Could not read whether the radio is active");
+    }
+  }
+
+  /// <summary>
+  /// A <c>SourceChanged</c> broadcast, or MainLayout's local nudge after its own switch. Returns to the hub
+  /// at once, as <see cref="HandleRadioStateChangedAsync"/> does, and re-reads the radio state afterwards.
+  /// </summary>
+  private Task HandleSourceChangedAsync()
+  {
+    if (!_isDisposed)
+    {
+      _ = ApplySourceChangeInBackgroundAsync();
+    }
+
+    return Task.CompletedTask;
+  }
+
+  private async Task ApplySourceChangeInBackgroundAsync()
+  {
+    try
+    {
+      await InvokeAsync(async () =>
+      {
+        await RefreshRadioActiveAsync();
+
+        // Falls back from BAND to Spectrum, or back to BAND, without touching the saved preference.
+        await ReconcileModeAsync();
+      });
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Applying a source change to the visualizer failed");
+    }
+    finally
+    {
+      Interlocked.Increment(ref _completedSourceChecks);
+    }
+  }
+
+  /// <summary>Queues <see cref="ReconcileModeAsync"/> on the dispatcher without waiting for it.</summary>
+  private async Task ReconcileInBackgroundAsync()
+  {
+    try
+    {
+      await InvokeAsync(ReconcileModeAsync);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Applying the visualizer mode in the background failed");
+    }
+  }
+
+  // ── hub connection (UI-30) ─────────────────────────────────────────────
+
+  private Task HandleHubConnectionChangedAsync()
+  {
+    if (!_isDisposed)
+    {
+      _ = ApplyHubConnectionInBackgroundAsync();
+    }
+
+    return Task.CompletedTask;
+  }
+
+  private async Task ApplyHubConnectionInBackgroundAsync()
+  {
+    try
+    {
+      await InvokeAsync(async () =>
+      {
+        bool connected = VisualizationHub.IsConnected;
+        bool dropped = _wasHubConnected && !connected;
+        _wasHubConnected = connected;
+
+        // After the reconnect, "Waiting for audio data" shows until the first new frame, rather than a
+        // blank canvas with no message.
+        if (dropped)
+        {
+          _hasReceivedData = false;
+        }
+
+        // The last frame drawn before the drop would otherwise stay on the canvas under the
+        // disconnected state, looking live. BAND draws from the REST API and keeps its map.
+        if (dropped && !IsBandMode && _isInitialized && _jsModule != null && !_isDisposed)
+        {
+          try { await _jsModule.InvokeVoidAsync("visualizer.clear", WebConstants.ElementIds.VisualizerCanvas); }
+          catch (Exception ex) { Logger.LogDebug(ex, "Could not clear the canvas after a hub drop"); }
+        }
+
+        if (!_isDisposed)
+        {
+          StateHasChanged();
+        }
+      });
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Applying a visualization hub state change failed");
+    }
+    finally
+    {
+      Interlocked.Increment(ref _completedConnectionUpdates);
+    }
   }
 
   private async Task SubscribeToCurrentMode()
@@ -735,6 +1036,16 @@
         RadioStateReadStatus.NotActive => null,
         _ => _radioState,
       };
+
+      // UI-29: BAND's own read also answers "is the radio active", which catches a SourceChanged this
+      // circuit missed. The fallback cannot run inline: this refresh may itself be running inside a mode
+      // change (StartBandAsync) that holds the mode gate, so it is queued instead.
+      if (state.Status == RadioStateReadStatus.NotActive && _radioActive)
+      {
+        _radioActive = false;
+        _ = ReconcileInBackgroundAsync();
+      }
+
       _presets = await presetsTask ?? _presets;
 
       if (!_isDisposed && _bandActive)
@@ -841,7 +1152,11 @@
   }
 
   /// <summary>
-  /// Applies one broadcast. Outside BAND it is ignored. A band other than the one shown re-reads the map
+  /// Applies one broadcast. UI-29 first: the server sends <c>RadioStateChanged</c> only while the radio is
+  /// the active source (<c>AudioStateUpdateService.CheckRadioStateAsync</c> returns for any other source),
+  /// so a broadcast while <c>_radioActive</c> is false means a start-up read failed or a SourceChanged was
+  /// missed — it enables BAND and, for a saved BAND, shows it. Otherwise, outside BAND the broadcast is
+  /// ignored. A band other than the one shown re-reads the map
   /// at once — once per band change, not once per broadcast, since telemetry ticks repeat the state up
   /// to twice a second. On VHF, a frequency outside the window shown re-reads the map once per window.
   /// That re-read moves the window only while no VHF map is stored: once one is, the API returns the
@@ -850,7 +1165,19 @@
   /// </summary>
   private async Task ApplyRadioStateAsync(RadioStateDto dto)
   {
-    if (_isDisposed || !_bandActive)
+    if (_isDisposed)
+    {
+      return;
+    }
+
+    if (!_radioActive)
+    {
+      _radioActive = true;
+      await ReconcileModeAsync();
+      return;
+    }
+
+    if (!_bandActive)
     {
       return;
     }
@@ -1071,7 +1398,7 @@
       var prefs = await ConfigApi.GetConfigurationAsync<Dictionary<string, object>>("ui.visualizer");
       if (prefs != null && prefs.TryGetValue("defaultMode", out var modeObj) && modeObj != null)
       {
-        _currentMode = ParseSavedMode(modeObj.ToString());
+        _preferredMode = ParseSavedMode(modeObj.ToString());
       }
     }
     catch (Exception ex) { Logger.LogWarning(ex, "Failed to load visualizer preferences"); }
@@ -1097,7 +1424,9 @@
 
     VisualizationHub.OnWaveformData -= HandleWaveformData;
     VisualizationHub.OnSpectrumData -= HandleSpectrumData;
+    VisualizationHub.ConnectionStateChanged -= HandleHubConnectionChangedAsync;
     AudioStateHub.RadioStateChanged -= HandleRadioStateChangedAsync;
+    AudioStateHub.SourceChanged -= HandleSourceChangedAsync;
 
     await UnsubscribeFromCurrentMode();
 

@@ -2445,9 +2445,16 @@ body {
   border-right: none;
 }
 
-.visualizer-mode:hover:not(.is-active) {
+.visualizer-mode:hover:not(.is-active):not(:disabled) {
   color: var(--text-high);
   background: var(--surface-hover);
+}
+
+/* UI-29: BAND while the radio is not the active source. Same dimming as the
+   transport and phone buttons' disabled state. */
+.visualizer-mode:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .visualizer-mode:focus-visible {
@@ -2459,23 +2466,6 @@ body {
   background: var(--accent-dim);
   color: var(--accent-primary);
   box-shadow: inset 0 -2px 0 var(--accent-primary);
-}
-
-/* 8×8 connection dot, top-right of the header. No text label. */
-.visualizer-conn-dot {
-  position: absolute;
-  top: 18px;
-  right: 12px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--signal-red);
-  box-shadow: 0 0 0 2px var(--surface-base);
-  pointer-events: none;
-}
-
-.visualizer-conn-dot.is-connected {
-  background: var(--signal-green);
 }
 
 .visualizer-canvas-wrap {
@@ -2500,6 +2490,32 @@ body {
   animation: ambientPulse 3s ease-in-out infinite;
   pointer-events: none;
 }
+
+/* UI-30: the hub is not connected. Centred like .visualizer-waiting, with the
+   type of BAND's "No scan yet" (the -title / -sub rules are grouped with
+   .band-empty-title / -sub). Amber, not red: the
+   hub reconnects by itself, so this is a wait, not a fault to act on. */
+.visualizer-disconnected {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.visualizer-disconnected-icon {
+  font-size: 48px;
+  color: var(--signal-amber);
+  margin-bottom: var(--sp-2);
+}
+
+/* .visualizer-disconnected-title / -sub share .band-empty-title / -sub's rules
+   (grouped with them further down this section). */
 
 /* Frequency-band axis strip — 16px tall, mono 10px, low contrast.
    Spectrum-family modes only. */
@@ -2689,7 +2705,8 @@ body {
   pointer-events: none;
 }
 
-.band-empty-title {
+.band-empty-title,
+.visualizer-disconnected-title {
   font-family: var(--font-mono);
   font-size: 16px;
   letter-spacing: 0.10em;
@@ -2697,7 +2714,8 @@ body {
   color: var(--text-medium);
 }
 
-.band-empty-sub {
+.band-empty-sub,
+.visualizer-disconnected-sub {
   margin-top: var(--sp-2);
   font-size: 13px;
   color: var(--text-medium);

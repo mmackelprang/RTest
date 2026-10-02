@@ -23,7 +23,8 @@ namespace Radio.Web.Tests.Components.Shared;
 ///
 /// <para>
 /// Every API call goes to a <see cref="RoutedApiHandler"/>, so the "server" is a table the test
-/// controls. The saved preference is BAND, so the panel opens on it. The refresh timer is armed
+/// controls. The saved preference is BAND and the radio is the active source, so the panel opens on
+/// BAND (UI-29: BAND is shown only while the radio is active). The refresh timer is armed
 /// against a <see cref="FakeTimeProvider"/>, and refreshes are counted through
 /// <c>CompletedBandRefreshes</c> rather than timed (CLAUDE.md § Test Timing).
 /// </para>
@@ -62,9 +63,10 @@ public class VisualizerPanelBandTests : TestContext
       transport: new OfflineHubTransport()));
     Services.AddSingleton<VisualizerTelemetryService>();
 
-    // Defaults: BAND is the saved mode, the radio is not the active source, no presets, no map.
+    // Defaults: BAND is the saved mode, the radio is the active source (UI-29: otherwise BAND is not
+    // shown at all), no presets, no map. Tests about the radio NOT being active reroute the state.
     GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Band" });
-    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.BadRequest, "{\"error\":\"Radio is not the active source\"}");
+    GetJson("/api/radio/state", FmState(101_100_000));
     GetJson("/api/radio/presets", Array.Empty<object>());
     GetJson("/api/radio/bandmap", EmptyMap());
     _api.Post("/api/sources");
@@ -140,6 +142,9 @@ public class VisualizerPanelBandTests : TestContext
 
   private int IndexOf(HttpMethod method, string path) =>
     _api.Requests.ToList().FindIndex(r => r.Method == method && r.Path == path);
+
+  private void RadioNotActive() =>
+    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.BadRequest, "{\"error\":\"Radio is not the active source\"}");
 
   // ── states ───────────────────────────────────────────────────────────────
 
@@ -293,8 +298,12 @@ public class VisualizerPanelBandTests : TestContext
   [Fact]
   public async Task Tap_RadioNotActive_SwitchesToRadioBeforeTuning()
   {
+    // UI-29 shows BAND only while the radio is active, so this is the race: the radio went away between
+    // the render and the tap. The switch it sends then makes the radio active again.
     GetJson("/api/radio/bandmap", MapWithStation(ageSeconds: 60));
     var cut = RenderBand();
+    RadioNotActive();
+    _api.OnRequest(HttpMethod.Post, "/api/sources", () => GetJson("/api/radio/state", FmState(101_100_000)));
 
     // A tap 0.3 MHz below the station snaps to it.
     double fraction = FmBandMath.HzToFraction(99_200_000);
@@ -351,8 +360,8 @@ public class VisualizerPanelBandTests : TestContext
   {
     // A 500 is not "the radio is not active": switching on it would re-select a radio that may be
     // playing. The tap does nothing and says why.
-    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.InternalServerError, null);
     var cut = RenderBand();
+    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.InternalServerError, null);
 
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(0.5));
 
@@ -403,6 +412,7 @@ public class VisualizerPanelBandTests : TestContext
   {
     _api.Post("/api/sources", HttpStatusCode.InternalServerError);
     var cut = RenderBand();
+    RadioNotActive();
 
     await cut.InvokeAsync(() => cut.Instance.OnBandTap(0.5));
 
@@ -936,5 +946,260 @@ public class VisualizerPanelBandTests : TestContext
       .Should().NotContain(d => d.Target is VisualizerPanel);
     await HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged), HubState("AIR", 118_000_000));
     MapReads().Should().Be(readsBefore);
+  }
+
+  // ── UI-29: BAND only while the radio is the active source ───────────────
+
+  private static string[] TabLabels(IRenderedComponent<VisualizerPanel> cut) =>
+    cut.FindAll(".visualizer-mode").Select(b => b.TextContent.Trim()).ToArray();
+
+  private static AngleSharp.Dom.IElement Tab(IRenderedComponent<VisualizerPanel> cut, string label) =>
+    cut.FindAll(".visualizer-mode").Single(b => b.TextContent.Trim() == label);
+
+  private static bool IsActive(AngleSharp.Dom.IElement tab) =>
+    (tab.GetAttribute("class") ?? string.Empty).Split(' ').Contains("is-active");
+
+  /// <summary>Every visualizer preference write, as the bodies POSTed to the configuration API.</summary>
+  private string[] PreferenceWrites() => _api.Requests
+    .Where(r => r.Method == HttpMethod.Post && r.Path == "/api/configuration/ui.visualizer")
+    .Select(r => r.Body ?? string.Empty)
+    .ToArray();
+
+  private async Task RaiseSourceChangedAsync(IRenderedComponent<VisualizerPanel> cut)
+  {
+    int handled = cut.Instance.CompletedSourceChecks;
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(
+      Services.GetRequiredService<AudioStateHubService>(), nameof(AudioStateHubService.SourceChanged)));
+    cut.WaitForAssertion(() => cut.Instance.CompletedSourceChecks.Should().BeGreaterThan(handled),
+      TimeSpan.FromSeconds(5));
+  }
+
+  /// <summary>Renders with the radio NOT active and waits for the canvas and the radio-state read.</summary>
+  private IRenderedComponent<VisualizerPanel> RenderWithRadioNotActive()
+  {
+    RadioNotActive();
+    var cut = RenderComponent<VisualizerPanel>(p => p.Add(x => x.Clock, _clock));
+    cut.WaitForAssertion(() =>
+    {
+      _api.Requests.Should().Contain(r => r.Path == "/api/radio/state");
+      _module.Invocations["visualizer.init"].Should().NotBeEmpty();
+      IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
+    }, TimeSpan.FromSeconds(5));
+    return cut;
+  }
+
+  [Fact]
+  public void BandTab_IsLast()
+  {
+    var cut = RenderBand();
+    TabLabels(cut).Should().Equal("Wave", "Spectrum", "Ring", "Phase", "BAND");
+  }
+
+  [Fact]
+  public void RadioActive_BandTabIsEnabled()
+  {
+    var cut = RenderBand();
+    var band = Tab(cut, "BAND");
+    band.HasAttribute("disabled").Should().BeFalse();
+    band.GetAttribute("aria-disabled").Should().Be("false");
+    IsActive(band).Should().BeTrue();
+  }
+
+  [Fact]
+  public void SavedBand_RadioNotActive_ShowsSpectrum_DisablesBand_AndKeepsThePreference()
+  {
+    var cut = RenderWithRadioNotActive();
+
+    var band = Tab(cut, "BAND");
+    band.HasAttribute("disabled").Should().BeTrue("BAND is not selectable while the radio is not active");
+    band.GetAttribute("aria-disabled").Should().Be("true");
+    band.GetAttribute("title").Should().Be(VisualizerPanel.BandUnavailableHint);
+    IsActive(band).Should().BeFalse();
+    cut.FindAll(".band-overlay").Should().BeEmpty();
+    _api.Requests.Should().NotContain(r => r.Path == "/api/radio/bandmap", "BAND is not running");
+    PreferenceWrites().Should().BeEmpty("the fallback is display-only; the saved BAND preference stays");
+  }
+
+  [Fact]
+  public async Task RadioGoesAway_WhileOnBand_FallsBackToSpectrum_ThenReturnsToBand()
+  {
+    var cut = RenderBand();
+
+    RadioNotActive();
+    await RaiseSourceChangedAsync(cut);
+
+    cut.WaitForAssertion(() =>
+    {
+      IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
+      cut.FindAll(".band-overlay").Should().BeEmpty();
+    });
+
+    // BAND's polling stopped with it.
+    int mapReads = MapReads();
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    MapReads().Should().Be(mapReads);
+
+    GetJson("/api/radio/state", FmState(101_100_000));
+    await RaiseSourceChangedAsync(cut);
+
+    cut.WaitForAssertion(() =>
+    {
+      IsActive(Tab(cut, "BAND")).Should().BeTrue("the saved preference is still BAND");
+      cut.FindAll(".band-overlay").Should().HaveCount(1);
+    });
+    PreferenceWrites().Should().BeEmpty("neither the fallback nor the return is a pick");
+  }
+
+  [Fact]
+  public async Task PickingAnotherTab_WhileFallenBack_ReplacesThePreference()
+  {
+    var cut = RenderWithRadioNotActive();
+
+    Tab(cut, "Wave").Click();
+    cut.WaitForAssertion(() => PreferenceWrites().Should().ContainSingle().Which.Should().Contain("Waveform"));
+
+    GetJson("/api/radio/state", FmState(101_100_000));
+    await RaiseSourceChangedAsync(cut);
+
+    IsActive(Tab(cut, "Wave")).Should().BeTrue("the pick replaced the BAND preference");
+    cut.FindAll(".band-overlay").Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task PickingSpectrum_WhileFallenBack_ReplacesThePreference_EvenThoughItIsAlreadyShown()
+  {
+    var cut = RenderWithRadioNotActive();
+
+    Tab(cut, "Spectrum").Click();
+    cut.WaitForAssertion(() => PreferenceWrites().Should().ContainSingle().Which.Should().Contain("Spectrum"));
+
+    GetJson("/api/radio/state", FmState(101_100_000));
+    await RaiseSourceChangedAsync(cut);
+
+    IsActive(Tab(cut, "Spectrum")).Should().BeTrue("Spectrum was picked; BAND is no longer the preference");
+  }
+
+  [Fact]
+  public async Task RadioBecomesActive_BandTabEnables_AndPickingItSavesBand()
+  {
+    GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
+    var cut = RenderWithRadioNotActive();
+    Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
+
+    GetJson("/api/radio/state", FmState(101_100_000));
+    await RaiseSourceChangedAsync(cut);
+    cut.WaitForAssertion(() => Tab(cut, "BAND").HasAttribute("disabled").Should().BeFalse());
+    IsActive(Tab(cut, "Spectrum")).Should().BeTrue("the preference is Spectrum; the radio arriving changes nothing else");
+
+    Tab(cut, "BAND").Click();
+    cut.WaitForAssertion(() =>
+    {
+      IsActive(Tab(cut, "BAND")).Should().BeTrue();
+      cut.FindAll(".band-overlay").Should().HaveCount(1);
+      PreferenceWrites().Should().ContainSingle().Which.Should().Contain("Band");
+    });
+  }
+
+  [Fact]
+  public async Task ATapOnTheDisabledBandTab_SavesNothing()
+  {
+    // A browser does not deliver a click to a disabled button, but a tap can land in the moment between the
+    // radio going away and the re-render. The screen would stay right anyway (the reconcile shows Spectrum);
+    // what the guard in SelectMode prevents is BAND being saved as the preference by a tab the user could
+    // not see was off.
+    GetJson("/api/configuration/ui.visualizer", new Dictionary<string, object> { ["defaultMode"] = "Spectrum" });
+    var cut = RenderWithRadioNotActive();
+
+    await cut.InvokeAsync(() => Tab(cut, "BAND").Click());
+
+    PreferenceWrites().Should().BeEmpty();
+    IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
+  }
+
+  [Fact]
+  public async Task StartupReadFails_ThenARadioStateBroadcast_EnablesAndShowsBand()
+  {
+    // radio-web up before radio-api, or an API restart while the kiosk reloads: the start-up read fails, so
+    // the panel does not know the radio is active. The server sends RadioStateChanged only while it is.
+    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.InternalServerError, null);
+    var cut = RenderComponent<VisualizerPanel>(p => p.Add(x => x.Clock, _clock));
+    cut.WaitForAssertion(() =>
+    {
+      _module.Invocations["visualizer.init"].Should().NotBeEmpty();
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue("the read failed, so the radio is not known to be active");
+    }, TimeSpan.FromSeconds(5));
+
+    GetJson("/api/radio/state", FmState(101_100_000));
+    await RaiseRadioStateAsync(cut, HubState("FM", 101_100_000));
+
+    cut.WaitForAssertion(() =>
+    {
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeFalse();
+      IsActive(Tab(cut, "BAND")).Should().BeTrue("the saved preference is BAND");
+      cut.FindAll(".band-overlay").Should().HaveCount(1);
+    });
+    PreferenceWrites().Should().BeEmpty();
+  }
+
+  [Fact]
+  public void BandsOwnRefresh_SeesTheRadioGone_AndFallsBack_WithoutASourceChanged()
+  {
+    // A SourceChanged missed while the audio-state hub was reconnecting: BAND's next state read is the
+    // other way the panel learns the radio has gone.
+    var cut = RenderBand();
+    int cycles = cut.Instance.CompletedBandRefreshes;
+    RadioNotActive();
+
+    _clock.Advance(VisualizerPanel.BandIdleRefresh);
+    WaitForRefreshes(cut, cycles + 1);
+
+    cut.WaitForAssertion(() =>
+    {
+      IsActive(Tab(cut, "Spectrum")).Should().BeTrue();
+      Tab(cut, "BAND").HasAttribute("disabled").Should().BeTrue();
+      cut.FindAll(".band-overlay").Should().BeEmpty();
+    });
+    PreferenceWrites().Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task SourceChanged_ApiUnreachable_KeepsBand()
+  {
+    // A failed read says nothing about the source; BAND stays rather than flickering away on a blip.
+    var cut = RenderBand();
+    _api.Route(HttpMethod.Get, "/api/radio/state", HttpStatusCode.InternalServerError, null);
+
+    await RaiseSourceChangedAsync(cut);
+
+    IsActive(Tab(cut, "BAND")).Should().BeTrue();
+    cut.FindAll(".band-overlay").Should().HaveCount(1);
+  }
+
+  [Theory]
+  [InlineData("Band", true, "Band")]
+  [InlineData("Band", false, "Spectrum")]
+  [InlineData("Waveform", false, "Waveform")]
+  [InlineData("PhaseScope", false, "PhaseScope")]
+  [InlineData("Circular", true, "Circular")]
+  [InlineData("Spectrum", false, "Spectrum")]
+  public void DisplayModeFor_FallsBackOnlyForBandWithoutTheRadio(string preferred, bool radioActive, string shown)
+  {
+    var mode = VisualizerPanel.ParseSavedMode(preferred);
+    VisualizerPanel.DisplayModeFor(mode, radioActive).ToString().Should().Be(shown);
+  }
+
+  // ── UI-30: BAND does not show the hub's disconnected state ───────────────
+
+  [Fact]
+  public void Band_HubDisconnected_ShowsNoDisconnectedState()
+  {
+    // BAND reads the REST API, not the visualization hub, so a hub drop does not stop it. The fixture's
+    // hub is offline throughout.
+    Services.GetRequiredService<AudioVisualizationHubService>().IsConnected.Should().BeFalse();
+    var cut = RenderBand();
+
+    cut.FindAll(".visualizer-disconnected").Should().BeEmpty();
+    cut.FindAll(".band-empty").Should().HaveCount(1);
   }
 }

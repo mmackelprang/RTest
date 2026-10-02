@@ -77,6 +77,23 @@ public sealed class RoutedApiHandler : HttpMessageHandler
 
   private readonly Dictionary<(HttpMethod Method, string Path), Task> _holds = new();
 
+  /// <summary>
+  /// Runs <paramref name="action"/> each time <c><paramref name="method"/> <paramref name="path"/></c>
+  /// arrives, after the request is recorded and its own answer chosen. It is how a test makes one
+  /// request change the "server" for the ones after it — e.g. a source switch that makes the radio
+  /// active. The action may call <see cref="Route"/>.
+  /// </summary>
+  public RoutedApiHandler OnRequest(HttpMethod method, string path, Action action)
+  {
+    lock (_sync)
+    {
+      _onRequest[(method, path)] = action;
+    }
+    return this;
+  }
+
+  private readonly Dictionary<(HttpMethod Method, string Path), Action> _onRequest = new();
+
   protected override async Task<HttpResponseMessage> SendAsync(
     HttpRequestMessage request, CancellationToken cancellationToken)
   {
@@ -87,15 +104,20 @@ public sealed class RoutedApiHandler : HttpMessageHandler
 
     (HttpStatusCode Status, string? Body) answer;
     Task? hold;
+    Action? onRequest;
     lock (_sync)
     {
       _requests.Add(new RecordedRequest(request.Method, path, body) { Query = request.RequestUri?.Query ?? string.Empty });
       _holds.TryGetValue((request.Method, path), out hold);
+      _onRequest.TryGetValue((request.Method, path), out onRequest);
       if (!_routes.TryGetValue((request.Method, path), out answer))
       {
         answer = (HttpStatusCode.NotFound, null);
       }
     }
+
+    // Outside the lock: the action may replace routes.
+    onRequest?.Invoke();
 
     if (hold != null)
     {

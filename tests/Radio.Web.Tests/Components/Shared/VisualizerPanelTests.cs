@@ -22,19 +22,23 @@ namespace Radio.Web.Tests.Components.Shared;
 /// picker from a floating chip group into a full-width header with six
 /// segments. AUD-76 then replaced Fall (the audio spectrogram) with BAND
 /// (the stored FM band map) in the same position and removed VU, leaving
-/// five:
+/// five. UI-29 moved BAND to the end and made it selectable only while the
+/// radio is the active source:
 ///
 /// <list type="bullet">
 ///   <item>Wave (Waveform)</item>
 ///   <item>Spectrum (Spectrum) — the default</item>
-///   <item>BAND (Band)</item>
 ///   <item>Ring (Circular)</item>
 ///   <item>Phase (PhaseScope)</item>
+///   <item>BAND (Band) — disabled unless the radio is active</item>
 /// </list>
 ///
 /// These tests lock the contract that exactly those five segments render
-/// in the header and that clicking each segment activates that segment.
-/// BAND's own behaviour is in <see cref="VisualizerPanelBandTests"/>.
+/// in the header and that clicking each enabled segment activates it. This
+/// fixture's API is unreachable, so the radio is never active here and BAND
+/// is always disabled. BAND's own behaviour, including UI-29's fallback, is in
+/// <see cref="VisualizerPanelBandTests"/>; the hub's disconnected state
+/// (UI-30) is in <see cref="VisualizerPanelConnectionTests"/>.
 /// </summary>
 public class VisualizerPanelTests : TestContext
 {
@@ -111,12 +115,12 @@ public class VisualizerPanelTests : TestContext
   [Fact]
   public void ModePicker_RendersAllFiveLabelsInOrder()
   {
-    // BAND sits where Fall was; VU is gone.
+    // UI-29: BAND is last (AUD-76 had put it where Fall was). VU is gone.
     var cut = RenderComponent<VisualizerPanel>();
     var labels = cut.FindAll(".visualizer-mode")
       .Select(e => e.TextContent.Trim())
       .ToList();
-    labels.Should().Equal("Wave", "Spectrum", "BAND", "Ring", "Phase");
+    labels.Should().Equal("Wave", "Spectrum", "Ring", "Phase", "BAND");
   }
 
   [Fact]
@@ -185,28 +189,28 @@ public class VisualizerPanelTests : TestContext
   }
 
   [Fact]
-  public void ModePicker_ClickingBand_ActivatesBandSegment()
+  public async Task ModePicker_Band_IsDisabledAndInert_WhenTheRadioIsNotActive()
   {
-    // Clicking BAND flips _currentMode to Band. The is-active class
-    // and aria-selected attribute should move from Spectrum to BAND.
+    // UI-29. This fixture's API is unreachable, so the radio is not known to be active. The tab is
+    // rendered disabled (out of the tab order, taps ignored by the browser) and SelectMode refuses it
+    // as well, for a tap that lands before the re-render. Enabling it is VisualizerPanelBandTests'.
     var cut = RenderComponent<VisualizerPanel>();
     var band = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
-    band.Click();
+    band.HasAttribute("disabled").Should().BeTrue();
+    band.GetAttribute("aria-disabled").Should().Be("true");
+    band.GetAttribute("aria-label").Should().Be("Radio band map mode", "the name stays fixed; the hint is a description");
+    var hintId = band.GetAttribute("aria-describedby");
+    hintId.Should().NotBeNullOrEmpty();
+    cut.Find($"#{hintId}").TextContent.Should().Be(VisualizerPanel.BandUnavailableHint);
 
-    // SelectMode assigns _currentMode only after `await UnsubscribeFromCurrentMode()`,
-    // so the re-render is not guaranteed to have happened when Click() returns. See
-    // the class remarks for why that await's timing varies. Same assertions, waited
-    // for rather than raced.
-    cut.WaitForAssertion(() =>
-    {
-      var bandAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
-      (bandAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
-      bandAfter.GetAttribute("aria-selected").Should().Be("true");
+    // Drive the handler directly: a disabled button's click never reaches it in a browser, so this
+    // is the guard inside SelectMode, not the attribute.
+    await cut.InvokeAsync(() => band.Click());
 
-      var spectrumAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Spectrum");
-      (spectrumAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
-      spectrumAfter.GetAttribute("aria-selected").Should().Be("false");
-    }, timeout: TimeSpan.FromSeconds(2));
+    var bandAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "BAND");
+    (bandAfter.GetAttribute("class") ?? string.Empty).Should().NotContain("is-active");
+    var spectrumAfter = cut.FindAll(".visualizer-mode").First(b => b.TextContent.Trim() == "Spectrum");
+    (spectrumAfter.GetAttribute("class") ?? string.Empty).Should().Contain("is-active");
   }
 
   [Fact]
