@@ -33,14 +33,16 @@ public interface IPlayQueue
   long QueueVersion { get; }
 
   /// <summary>
-  /// Waits, at most <paramref name="timeout"/>, until every queued item's metadata (title, artist, album,
-  /// duration, art) has been read (AUD-96). Queue reads never wait for it — an item not read yet comes
-  /// back with placeholder metadata — so a caller that STORES that metadata, such as saving the queue as a
-  /// playlist, calls this first. Returns <c>false</c> if the timeout elapsed first.
+  /// Waits, at most <paramref name="timeout"/>, for the queued items' metadata (title, artist, album,
+  /// duration, art) to be read (AUD-96). Queue reads never wait for it — an item not read yet comes back
+  /// with placeholder metadata — so a caller that STORES that metadata, such as saving the queue as a
+  /// playlist, calls this first.
   /// </summary>
   /// <param name="timeout">The longest to wait.</param>
   /// <param name="cancellationToken">Cancellation token.</param>
-  /// <returns><c>true</c> when every queued item's metadata has been read.</returns>
+  /// <returns><c>true</c> when every queued item's metadata came from a successful read; <c>false</c> if the
+  /// timeout elapsed first, or if any item's read failed (it then carries its placeholder or an older
+  /// value).</returns>
   Task<bool> WaitForQueueMetadataAsync(TimeSpan timeout, CancellationToken cancellationToken = default);
 
   /// <summary>

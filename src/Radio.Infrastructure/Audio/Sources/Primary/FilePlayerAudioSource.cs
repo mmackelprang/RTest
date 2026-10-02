@@ -204,25 +204,28 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// in error — mixed with the metadata cache's <see cref="QueueItemMetadataCache.Version"/>, which
   /// advances when rows' title, artist, album, duration or art change. Hashing the lists rather than
   /// counting mutations is deliberate: this class changes its queue from more than a dozen places, and a
-  /// counter would be correct only while every one of them remembered to bump it. Seeded per instance,
-  /// so a re-created File Player never repeats an old instance's value. Touches no file.
+  /// counter would be correct only while every one of them remembered to bump it. Seeded per instance
+  /// with a random 64-bit value, so a re-created File Player is practically certain not to repeat an old
+  /// instance's value. Touches no file.
   /// <para>
   /// ⚠ Several of those places mutate the lists without <c>_playlistLock</c> (a pre-existing pattern this
-  /// row did not change). The lists are therefore copied with <c>ToArray</c> — which, unlike enumeration,
-  /// does not throw on a concurrent change — and if the copy still fails, a value no earlier read returned
-  /// is reported, so the caller re-reads the playlist rather than skipping it.
+  /// row did not change). The lists are therefore copied with <c>ToArray</c>, which does not throw on a
+  /// concurrent change the way enumeration does — but can copy a slot a concurrent <c>Clear</c> or
+  /// <c>Dequeue</c> has just nulled, so null entries are hashed as a marker rather than dereferenced. If
+  /// anything still throws, a fresh fallback value is returned (one practically certain to differ from
+  /// every earlier read), so the caller re-reads the playlist rather than skipping it.
   /// </para>
   /// </remarks>
   public long QueueVersion
   {
     get
     {
-      string[] played;
-      string? current;
-      string[] upcoming;
-      string[] errors;
       try
       {
+        string?[] played;
+        string? current;
+        string?[] upcoming;
+        string?[] errors;
         lock (_playlistLock)
         {
           played = _playedHistory.ToArray();
@@ -230,29 +233,31 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           upcoming = _playlist.ToArray();
           errors = _errorFiles.ToArray();
         }
-      }
-      catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or IndexOutOfRangeException)
-      {
-        return unchecked((long)_versionSeed ^ Interlocked.Increment(ref _versionFallback) ^ long.MinValue);
-      }
 
-      HashSet<string> errorSet = new(errors, StringComparer.Ordinal);
-      ulong hash = FnvOffset ^ _versionSeed;
-      foreach (string path in played)
-      {
-        hash = MixEntry(hash, 'P', path, errorSet);
-      }
-      if (current != null)
-      {
-        hash = MixEntry(hash, 'C', current, errorSet);
-      }
-      foreach (string path in upcoming)
-      {
-        hash = MixEntry(hash, 'U', path, errorSet);
-      }
+        HashSet<string> errorSet = new(errors.OfType<string>(), StringComparer.Ordinal);
+        ulong hash = FnvOffset ^ _versionSeed;
+        foreach (string? path in played)
+        {
+          hash = MixEntry(hash, 'P', path, errorSet);
+        }
+        if (current != null)
+        {
+          hash = MixEntry(hash, 'C', current, errorSet);
+        }
+        foreach (string? path in upcoming)
+        {
+          hash = MixEntry(hash, 'U', path, errorSet);
+        }
 
-      hash = Mix(hash, (ulong)_queueMetadata.Version);
-      return unchecked((long)hash);
+        hash = Mix(hash, (ulong)_queueMetadata.Version);
+        return unchecked((long)hash);
+      }
+      catch (Exception)
+      {
+        // A torn read of lists being changed under it. Report a value no earlier read is practically
+        // likely to have returned, so the poller fetches the playlist on its next pass instead of skipping.
+        return unchecked((long)(_versionSeed ^ FnvPrime * (ulong)Interlocked.Increment(ref _versionFallback)));
+      }
     }
   }
 
@@ -275,9 +280,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   // One entry: its segment (played / current / upcoming), its error flag, its path, and a terminator so
   // that adjacent paths cannot run together into the same byte stream.
-  private static ulong MixEntry(ulong hash, char segment, string path, HashSet<string> errors)
+  private static ulong MixEntry(ulong hash, char segment, string? path, HashSet<string> errors)
   {
     hash = Mix(hash, segment);
+    if (path == null)
+    {
+      // A slot nulled by a concurrent Clear/Dequeue (see QueueVersion). The next read will not see it.
+      return Mix(hash, 0xDEAD_BEEFUL);
+    }
     hash = Mix(hash, errors.Contains(path) ? 1UL : 0UL);
     foreach (char c in path)
     {
@@ -1953,12 +1963,15 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     try
     {
       await _queueMetadata.WhenIdleAsync().WaitAsync(timeout, cancellationToken);
-      return true;
     }
     catch (TimeoutException)
     {
       return false;
     }
+
+    // Idle is not the same as read: a row whose read failed is idle too, and still shows its placeholder
+    // (or its last good value).
+    return _queueMetadata.AllVerified(GetFullPlaylistInOrder());
   }
 
   /// <summary>
@@ -1989,7 +2002,11 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     return new QueueItemMetadata(title, artist, album, duration, albumArtUrl);
   }
 
-  /// <summary>The file's size and last-write time, or <c>null</c> when it is missing or unreadable.</summary>
+  /// <summary>
+  /// The file's size and last-write time, or <c>null</c> when it is missing — or when the share could not be
+  /// asked (<c>FileInfo.Exists</c> answers <c>false</c> on any I/O error, which is why the cache treats
+  /// <c>null</c> as unverified rather than as a fact).
+  /// </summary>
   private static QueueFileStamp? StatQueueFile(string filePath)
   {
     try

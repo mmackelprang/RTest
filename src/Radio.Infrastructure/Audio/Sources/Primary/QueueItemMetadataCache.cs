@@ -55,10 +55,17 @@ internal readonly record struct QueueFileStamp(long Length, DateTime LastWriteUt
 /// re-validated — one <c>stat</c>, and a re-read only when the stamp differs — when its path is
 /// <see cref="Revalidate">revalidated</see>, which the file player does when a path is enqueued and when
 /// it becomes the current track. A file re-tagged in place while it sits in the queue keeps its old row
-/// until then. Two exceptions are re-read even with an unchanged stamp: a row whose read failed (a share
-/// hiccup must not pin a placeholder for the life of the process), and a row older than
-/// <see cref="MaxAge"/> — the album-art cache deletes art it has not been asked to save for 7 days, and
+/// until then. Two kinds of row are re-read even with an unchanged stamp, the next time they are asked for:
+/// an <i>unverified</i> row once it is <see cref="RetryInterval"/> old, and any row once it is
+/// <see cref="MaxAge"/> old — the album-art cache deletes art it has not been asked to save for 7 days, and
 /// re-reading is what renews it.
+/// </para>
+/// <para>
+/// A row is unverified when its last read or stat failed. On the appliance the share sits behind WiFi, and
+/// <c>FileInfo.Exists</c> answers <c>false</c> on any I/O error, so neither "read as nothing" nor "does not
+/// exist" can be told apart from a hiccup. A failure therefore never downgrades a good row: the last good
+/// metadata is kept (marked unverified, to be retried), and only a path with no good row shows its
+/// placeholder.
 /// </para>
 /// <para>
 /// One reader, sequential, deliberately: the point is to take load off the share, and a burst of parallel
@@ -82,8 +89,15 @@ internal sealed class QueueItemMetadataCache : IDisposable
   /// </summary>
   internal static readonly TimeSpan MaxAge = TimeSpan.FromDays(1);
 
-  // Verified: the row is the file's as of Stamp. False when the read failed for a file that exists, so the
-  // next revalidation reads it again instead of trusting the stamp.
+  /// <summary>
+  /// An unverified row (its last read or stat failed) is retried the next time it is asked for once it is
+  /// this old — soon enough that a share hiccup during a warm-up heals within minutes, rare enough that a
+  /// file that genuinely cannot be read costs one attempt per interval while its queue is being looked at.
+  /// </summary>
+  internal static readonly TimeSpan RetryInterval = TimeSpan.FromMinutes(2);
+
+  // Verified: Metadata and Stamp are what the last read of the file returned. False when the last read or
+  // stat failed — Metadata is then the last good value (or the placeholder if there never was one).
   private sealed record Entry(QueueItemMetadata Metadata, QueueFileStamp? Stamp, bool Verified, DateTimeOffset ReadAt);
 
   private readonly Func<string, QueueItemMetadata> _read;
@@ -139,14 +153,14 @@ internal sealed class QueueItemMetadataCache : IDisposable
 
   /// <summary>
   /// The cached row for <paramref name="filePath"/>, or — on a miss — its placeholder, with the path
-  /// queued for the reader. A row past <see cref="MaxAge"/> is returned as it is and queued for a re-read.
-  /// Never touches the file.
+  /// queued for the reader. A row due a retry (unverified and <see cref="RetryInterval"/> old) or a refresh
+  /// (<see cref="MaxAge"/> old) is returned as it is and queued for a re-read. Never touches the file.
   /// </summary>
   public QueueItemMetadata GetOrSchedule(string filePath)
   {
     if (_entries.TryGetValue(filePath, out Entry? entry))
     {
-      if (IsAged(entry))
+      if (IsDue(entry))
       {
         Enqueue(filePath);
       }
@@ -169,6 +183,13 @@ internal sealed class QueueItemMetadataCache : IDisposable
       Enqueue(path);
     }
   }
+
+  /// <summary>
+  /// Whether every one of <paramref name="filePaths"/> has a row from a successful read. Never touches a
+  /// file. A path not read yet, or whose last read failed, is not.
+  /// </summary>
+  public bool AllVerified(IEnumerable<string> filePaths) =>
+    filePaths.All(path => _entries.TryGetValue(path, out Entry? entry) && entry.Verified);
 
   /// <summary>
   /// Drops every entry whose path is not in <paramref name="keep"/>, once the cache holds more than
@@ -204,6 +225,9 @@ internal sealed class QueueItemMetadataCache : IDisposable
   }
 
   private bool IsAged(Entry entry) => _time.GetUtcNow() - entry.ReadAt > MaxAge;
+
+  private bool IsDue(Entry entry) =>
+    IsAged(entry) || (!entry.Verified && _time.GetUtcNow() - entry.ReadAt > RetryInterval);
 
   private void Enqueue(string filePath)
   {
@@ -291,39 +315,45 @@ internal sealed class QueueItemMetadataCache : IDisposable
         && existing.Stamp == stamp
         && !IsAged(existing))
     {
-      // Same size and last-write time (or still missing), read successfully, and recently: the cached
-      // row is the file's. No read.
+      // Same size and last-write time, read successfully, and recently: the cached row is the file's.
       return;
     }
 
-    QueueItemMetadata metadata;
-    bool verified;
-    if (stamp == null)
-    {
-      // Missing: the placeholder IS the verified answer until the file appears (a stamp then differs).
-      metadata = QueueItemMetadata.Placeholder(path);
-      verified = true;
-    }
-    else
+    QueueItemMetadata? read = null;
+    if (stamp != null)
     {
       try
       {
-        metadata = _read(path);
+        read = _read(path);
       }
       catch (Exception ex)
       {
-        _logger.LogDebug(ex, "Could not read queue metadata from {File}; showing its file name", path);
-        metadata = QueueItemMetadata.Placeholder(path);
+        _logger.LogDebug(ex, "Could not read queue metadata from {File}", path);
       }
-
-      // A file that exists but read as nothing at all is most likely a failed read (on the appliance, a
-      // CIFS hiccup), so it is not trusted: the next revalidation reads it again. A genuinely untagged
-      // file normally still yields a duration and so does not land here.
-      verified = metadata != QueueItemMetadata.Placeholder(path);
     }
 
-    _entries[path] = new Entry(metadata, stamp, verified, _time.GetUtcNow());
-    if (existing == null || existing.Metadata != metadata)
+    // A file that is reported missing, or exists but read as nothing at all, is most likely a failed read
+    // (see the class remarks) — so it is not trusted, and it never replaces a good row. A genuinely untagged
+    // file still yields a duration, so it does not land here.
+    bool failed = read == null || read == QueueItemMetadata.Placeholder(path);
+    Entry next;
+    if (!failed)
+    {
+      next = new Entry(read!, stamp, Verified: true, _time.GetUtcNow());
+    }
+    else if (existing != null && existing.Metadata != QueueItemMetadata.Placeholder(path))
+    {
+      // Keep the last good row; keep its stamp too, so a later successful stat of the unchanged file does
+      // not look like a change. Unverified, so it is retried.
+      next = existing with { Verified = false, ReadAt = _time.GetUtcNow() };
+    }
+    else
+    {
+      next = new Entry(QueueItemMetadata.Placeholder(path), stamp, Verified: false, _time.GetUtcNow());
+    }
+
+    _entries[path] = next;
+    if (existing == null || existing.Metadata != next.Metadata)
     {
       if (++_unpublished >= PublishEvery)
       {

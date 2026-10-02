@@ -169,10 +169,11 @@ public class QueueItemMetadataCacheTests
   }
 
   [Fact]
-  public async Task AMissingFile_IsCachedAsItsPlaceholder_WithoutARead_AndIsNotAskedForAgain()
+  public async Task AMissingFile_ShowsItsPlaceholder_WithoutARead_AndIsRetriedOnlyAfterTheRetryInterval()
   {
     var files = new FakeFiles();
-    using var cache = files.NewCache();
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+    using var cache = files.NewCache(time);
 
     cache.GetOrSchedule("/m/gone.mp3");
     await cache.WhenIdleAsync();
@@ -181,9 +182,18 @@ public class QueueItemMetadataCacheTests
       Assert.Equal("gone", cache.GetOrSchedule("/m/gone.mp3").Title);
     }
     await cache.WhenIdleAsync();
-
     Assert.Equal(0, files.ReadsOf("/m/gone.mp3"));
     Assert.Equal(1, files.Stats["/m/gone.mp3"]);
+
+    // "Missing" may have been a share hiccup (FileInfo.Exists is false on any I/O error): asked for again
+    // after the retry interval, it is stat'ed again — and here the file has appeared.
+    files.Add("/m/gone.mp3", "Found");
+    time.Advance(QueueItemMetadataCache.RetryInterval + TimeSpan.FromSeconds(1));
+    cache.GetOrSchedule("/m/gone.mp3");
+    await cache.WhenIdleAsync();
+
+    Assert.Equal(2, files.Stats["/m/gone.mp3"]);
+    Assert.Equal("Found", cache.GetOrSchedule("/m/gone.mp3").Title);
   }
 
   [Fact]
@@ -192,7 +202,8 @@ public class QueueItemMetadataCacheTests
     var files = new FakeFiles();
     files.Add("/m/bad.mp3", "never");
     files.ReadOverride = _ => throw new IOException("corrupt");
-    using var cache = files.NewCache();
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+    using var cache = files.NewCache(time);
 
     cache.GetOrSchedule("/m/bad.mp3");
     await cache.WhenIdleAsync();
@@ -201,8 +212,88 @@ public class QueueItemMetadataCacheTests
       Assert.Equal("bad", cache.GetOrSchedule("/m/bad.mp3").Title);
     }
     await cache.WhenIdleAsync();
-
     Assert.Equal(1, files.ReadsOf("/m/bad.mp3"));
+
+    time.Advance(QueueItemMetadataCache.RetryInterval + TimeSpan.FromSeconds(1));
+    cache.GetOrSchedule("/m/bad.mp3");
+    await cache.WhenIdleAsync();
+    Assert.Equal(2, files.ReadsOf("/m/bad.mp3"));
+  }
+
+  /// <summary>
+  /// Re-review M-B: a share hiccup during a warm-up must heal on its own, not wait until each failed track
+  /// is played. An unverified row is retried when asked for once it is RetryInterval old.
+  /// </summary>
+  [Fact]
+  public async Task AFailedRead_IsRetriedWhenAskedForAfterTheRetryInterval_AndNotBefore()
+  {
+    var files = new FakeFiles();
+    files.Add("/m/a.mp3", "Song A");
+    bool shareDown = true;
+    files.ReadOverride = path => shareDown
+      ? QueueItemMetadata.Placeholder(path)
+      : new QueueItemMetadata(files.Titles[path], "Artist", "Album", null, null);
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+    using var cache = files.NewCache(time);
+    cache.GetOrSchedule("/m/a.mp3");
+    await cache.WhenIdleAsync();
+    shareDown = false;
+
+    time.Advance(QueueItemMetadataCache.RetryInterval - TimeSpan.FromSeconds(1));
+    Assert.Equal("a", cache.GetOrSchedule("/m/a.mp3").Title);
+    await cache.WhenIdleAsync();
+    Assert.Equal(1, files.ReadsOf("/m/a.mp3"));
+
+    time.Advance(TimeSpan.FromSeconds(2));
+    cache.GetOrSchedule("/m/a.mp3");
+    await cache.WhenIdleAsync();
+    Assert.Equal(2, files.ReadsOf("/m/a.mp3"));
+    Assert.Equal("Song A", cache.GetOrSchedule("/m/a.mp3").Title);
+  }
+
+  /// <summary>
+  /// Re-review M-A: the daily refresh must not turn a good row into a file name when the refresh read
+  /// fails. The last good row is kept (unverified, so it is retried), and nothing is broadcast.
+  /// </summary>
+  [Fact]
+  public async Task AFailedRefreshRead_KeepsTheLastGoodRow()
+  {
+    var files = new FakeFiles();
+    files.Add("/m/a.mp3", "Song A");
+    var time = new FakeTimeProvider(new DateTimeOffset(2026, 10, 2, 0, 0, 0, TimeSpan.Zero));
+    using var cache = files.NewCache(time);
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+    long version = cache.Version;
+
+    files.ReadOverride = _ => throw new IOException("share hiccup");
+    time.Advance(QueueItemMetadataCache.MaxAge + TimeSpan.FromMinutes(1));
+    cache.GetOrSchedule("/m/a.mp3");
+    await cache.WhenIdleAsync();
+
+    Assert.Equal(2, files.ReadsOf("/m/a.mp3"));
+    Assert.Equal("Song A", cache.GetOrSchedule("/m/a.mp3").Title);
+    Assert.Equal(version, cache.Version);
+  }
+
+  /// <summary>
+  /// Re-review M-A, the stat half: FileInfo.Exists answers false on an I/O error, so a good row whose stat
+  /// fails is kept rather than replaced by the "missing file" placeholder.
+  /// </summary>
+  [Fact]
+  public async Task AFailedStat_KeepsTheLastGoodRow()
+  {
+    var files = new FakeFiles();
+    files.Add("/m/a.mp3", "Song A");
+    using var cache = files.NewCache();
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+
+    files.Stamps["/m/a.mp3"] = null;
+    cache.Revalidate(["/m/a.mp3"]);
+    await cache.WhenIdleAsync();
+
+    Assert.Equal("Song A", cache.GetOrSchedule("/m/a.mp3").Title);
   }
 
   /// <summary>
@@ -270,10 +361,25 @@ public class QueueItemMetadataCacheTests
     {
       files.Add(p, p);
     }
+    // Park the reader in its first read until every path is queued: otherwise it could drain a partial
+    // queue, go idle and publish early, and the count below would depend on thread scheduling.
+    using var gate = new ManualResetEventSlim(false);
+    files.ReadOverride = path =>
+    {
+      gate.Wait();
+      return new QueueItemMetadata(path, "Artist", "Album", null, null);
+    };
     using var cache = files.NewCache();
     long start = cache.Version;
 
-    cache.Revalidate(paths);
+    try
+    {
+      cache.Revalidate(paths);
+    }
+    finally
+    {
+      gate.Set();
+    }
     await cache.WhenIdleAsync();
 
     // One at PublishEvery, one for the remaining four when the reader went idle.

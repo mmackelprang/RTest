@@ -176,6 +176,12 @@ public class PlaylistsController : ControllerBase
 
       return CreatedAtAction(nameof(GetById), new { id = playlist.Id }, dto);
     }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      // The client went away — most likely during the metadata wait above. Not a server fault, so not an
+      // Error line in journald. 499 is nginx's "client closed request"; nobody is left to read it.
+      return StatusCode(499);
+    }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to create playlist");

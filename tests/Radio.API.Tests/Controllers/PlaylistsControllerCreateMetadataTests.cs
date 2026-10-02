@@ -64,6 +64,27 @@ public class PlaylistsControllerCreateMetadataTests
     _queue.Verify(q => q.WaitForQueueMetadataAsync(PlaylistsController.PlaylistMetadataWait, It.IsAny<CancellationToken>()), Times.Once);
   }
 
+  /// <summary>Re-review L-3: a client that goes away during the wait is not a server Error.</summary>
+  [Fact]
+  public async Task Create_ClientCancelledDuringTheWait_Returns499_AndSavesNothing()
+  {
+    using var cts = new CancellationTokenSource();
+    _queue.Setup(q => q.WaitForQueueMetadataAsync(It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+      .Returns(async (TimeSpan _, CancellationToken token) =>
+      {
+        cts.Cancel();
+        token.ThrowIfCancellationRequested();
+        await Task.CompletedTask;
+        return true;
+      });
+
+    var result = await _controller.Create(new CreatePlaylistRequest { Name = "Mix" }, cts.Token);
+
+    var status = Assert.IsType<Microsoft.AspNetCore.Mvc.StatusCodeResult>(result.Result);
+    Assert.Equal(499, status.StatusCode);
+    Assert.Null(_stored);
+  }
+
   [Fact]
   public async Task Create_StillSaves_WhenTheWaitTimesOut()
   {

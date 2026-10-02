@@ -255,6 +255,44 @@ public sealed class FilePlayerQueueMetadataTests : IDisposable
     Assert.NotEqual(first.QueueVersion, second.QueueVersion);
   }
 
+  /// <summary>Re-review M-B: idle is not "read" — a row whose read failed keeps the wait unsettled.</summary>
+  [Fact]
+  public async Task WaitForQueueMetadata_IsUnsettled_WhileARowsReadHasFailed()
+  {
+    CreateFiles("a.mp3", "b.mp3");
+    var source = CreateSource();
+    Func<string, QueueItemMetadata> real = source.QueueMetadataReader;
+    source.QueueMetadataReader = path =>
+      path.EndsWith("b.mp3", StringComparison.Ordinal) ? QueueItemMetadata.Placeholder(path) : real(path);
+
+    await source.LoadPlaylistAsync(["a.mp3", "b.mp3"]);
+
+    Assert.False(await source.WaitForQueueMetadataAsync(TimeSpan.FromSeconds(30)));
+  }
+
+  /// <summary>
+  /// Re-review M-C: ToArray can copy a slot a concurrent Clear/Dequeue has just nulled. A null path must be
+  /// hashed, not dereferenced — the getter runs on every 500 ms poller pass.
+  /// </summary>
+  [Fact]
+  public async Task QueueVersion_ToleratesANullSlot()
+  {
+    CreateFiles("a.mp3", "b.mp3");
+    var source = CreateSource();
+    await source.LoadPlaylistAsync(["a.mp3", "b.mp3"]);
+    long before = source.QueueVersion;
+
+    var playlist = (Queue<string>)typeof(FilePlayerAudioSource)
+      .GetField("_playlist", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
+      .GetValue(source)!;
+    playlist.Enqueue(null!);
+
+    long after = source.QueueVersion;
+    Assert.NotEqual(before, after);
+    // Hashed, not thrown into the fallback: the fallback differs on every read, a hash does not.
+    Assert.Equal(after, source.QueueVersion);
+  }
+
   [Fact]
   public async Task RestoringAQueue_WarmsEveryRestoredRow()
   {
