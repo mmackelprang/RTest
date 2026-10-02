@@ -2,7 +2,35 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🟢 **Decision row. Nothing to build until ruled.** Filed 2026-09-30 by the `AUD-73` Builder, on the second pre-merge reviewer's recommendation.
+✅ **RULED AND BUILT 2026-10-02.** Filed 2026-09-30 by the `AUD-73` Builder, on the second pre-merge reviewer's recommendation, as a decision row.
+
+## Owner ruling, 2026-10-02
+
+> *"#1 - a:keep, b:move to priority 9, c:hangup should only affect the phone announcement."*
+
+| Question | Ruling | What was done |
+|---|---|---|
+| (a) Lower-priority overlap | **Keep** — mix | Nothing to change. Pinned by `AHangUpStopsThePhonesAnnouncementAndLeavesAConcurrentDoorbellPlaying` (a doorbell at 8 plays alongside the caller's name at 9) beside `AUD-73`'s `ALowerPriorityAnnouncementDoesNotCutOffAHigherOne`. |
+| (b) Phone priority | **9** | `PhoneIntegrationOptions.AnnouncementPriority` and `src/Radio.API/appsettings.json` default to 9. No `deploy/*/appsettings.Production.json` seed carries the key. `RingPriority` was already 9. |
+| (c) Hang-up scope | **Only the phone's announcement** | `PhoneCallIntegrationService` gives each ringing call its own `CancellationTokenSource` and passes the token to `AnnounceAsync` / `PlaySoundWithAnnouncementAsync`. `Ended` / `Idle` cancel that token instead of calling `IAnnouncementService.StopAsync`. The swap happens before the handler's first await, so a hang-up that arrives while the ring is still being broadcast still reaches the announcement. `AnnouncementService` now also refuses a caller-cancelled announcement before it ducks (and before phase 2 of sound + announcement), which keeps the stop path `StopAsync`'s stop-generation used to give a hang-up during synthesis. |
+
+**Other callers of the stop-all path:** none. `PhoneCallIntegrationService` was the only production
+caller of `IAnnouncementService.StopAsync`; it keeps its stop-everything behaviour and its tests, and
+now has no production caller.
+
+### ⚠ The box does not get (b) from this change
+
+Read-only on `radio`, 2026-10-02: the SQLite config store (`/opt/radio-console/data/config/configuration.db`,
+`Config_sqlite`) holds **`phoneintegration:announcementPriority = 8`** (written 2026-03-12), which outranks
+both JSON layers. Until the owner changes that row, the box keeps 8. **The same store holds
+`phoneintegration:enabled = true`**, and the file sink shows `PhoneCallIntegrationService` connecting to
+the RotaryPhone hub — so the "`PhoneIntegration` is not enabled on the box" premise below is **wrong**:
+the collision in point 2 below was reachable on the box (no `playRingSound` row, so the default `false`
+sends the phone through `AnnounceAsync` at 8). Neither row was written.
+
+---
+
+_The decision row as filed follows._
 
 ## What `AUD-73` shipped ([#739](https://github.com/mmackelprang/RTest/pull/739))
 
