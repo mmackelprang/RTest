@@ -64,8 +64,27 @@ public class StandardMetadataTests : IDisposable
     Directory.CreateDirectory(_testDir);
   }
 
+  // AUD-96: file players built here, so Dispose can wait for their background queue metadata readers
+  // to release the test files before the directory is deleted (Windows refuses the delete otherwise).
+  private readonly List<FilePlayerAudioSource> _fileSources = new();
+
+  private FilePlayerAudioSource Track(FilePlayerAudioSource source)
+  {
+    _fileSources.Add(source);
+    return source;
+  }
+
   public void Dispose()
   {
+    foreach (FilePlayerAudioSource source in _fileSources)
+    {
+      // Cleanup only, never an assertion: a bound so a wedged reader fails loudly, not as a hang.
+      if (!source.WhenQueueMetadataIdleAsync().Wait(TimeSpan.FromSeconds(30)))
+      {
+        throw new TimeoutException("The queue metadata reader did not go idle");
+      }
+    }
+
     if (Directory.Exists(_testDir))
     {
       Directory.Delete(_testDir, recursive: true);
@@ -100,11 +119,11 @@ public class StandardMetadataTests : IDisposable
   public void FilePlayerAudioSource_Metadata_IsObjectType()
   {
     // Arrange
-    var source = new FilePlayerAudioSource(
+    var source = Track(new FilePlayerAudioSource(
       _filePlayerLoggerMock.Object,
       _filePlayerOptionsMock.Object,
       _filePlayerPreferencesMock.Object,
-      _testDir);
+      _testDir));
 
     // Assert - Verify metadata is IReadOnlyDictionary<string, object>
     Assert.IsAssignableFrom<IReadOnlyDictionary<string, object>>(source.Metadata);
@@ -114,11 +133,11 @@ public class StandardMetadataTests : IDisposable
   public async Task FilePlayerAudioSource_WithFile_UsesStandardMetadataKeys()
   {
     // Arrange
-    var source = new FilePlayerAudioSource(
+    var source = Track(new FilePlayerAudioSource(
       _filePlayerLoggerMock.Object,
       _filePlayerOptionsMock.Object,
       _filePlayerPreferencesMock.Object,
-      _testDir);
+      _testDir));
 
     var testFile = Path.Combine(_testDir, "test.mp3");
     File.WriteAllText(testFile, "test content");
@@ -138,11 +157,11 @@ public class StandardMetadataTests : IDisposable
   public async Task FilePlayerAudioSource_WithFile_ProvidesDefaultValues()
   {
     // Arrange
-    var source = new FilePlayerAudioSource(
+    var source = Track(new FilePlayerAudioSource(
       _filePlayerLoggerMock.Object,
       _filePlayerOptionsMock.Object,
       _filePlayerPreferencesMock.Object,
-      _testDir);
+      _testDir));
 
     var testFile = Path.Combine(_testDir, "test.mp3");
     File.WriteAllText(testFile, "test content");
@@ -160,11 +179,11 @@ public class StandardMetadataTests : IDisposable
   public async Task FilePlayerAudioSource_Duration_IsTimeSpanType()
   {
     // Arrange
-    var source = new FilePlayerAudioSource(
+    var source = Track(new FilePlayerAudioSource(
       _filePlayerLoggerMock.Object,
       _filePlayerOptionsMock.Object,
       _filePlayerPreferencesMock.Object,
-      _testDir);
+      _testDir));
 
     var testFile = Path.Combine(_testDir, "test.mp3");
     File.WriteAllText(testFile, "test content");

@@ -409,6 +409,9 @@
   // Set when the latest read failed; the poll re-reads the source while it is set.
   private bool _sourceStale;
 
+  // UI-35: set by DisposeAsync, so a background queue re-read that lands afterwards does not render.
+  private bool _disposed;
+
   private List<QueueItemDto> _queueItems = new();
   private List<PlayHistoryEntryDto> _historyItems = new();
   private PlayHistoryStatsDto? _historyStats;
@@ -665,7 +668,7 @@
   }
 
   /// <summary>
-  /// Reads the primary source and the queue, and applies a source change if there was one.
+  /// Reads the primary source and applies a source change if there was one.
   ///
   /// <para>A failed read changes nothing — not <c>_sourceType</c>, not the tab, not the override —
   /// and sets <c>_sourceStale</c> so the poll re-reads it. An API blip is not a source change.</para>
@@ -674,14 +677,23 @@
   /// when it is the first successful read. A real change clears the override; the first read does
   /// not (there was no earlier source for a tapped view to belong to). Either way the source's
   /// default tab is applied unless the override is set.</para>
+  ///
+  /// <para>⚠ UI-35 (owner, 2026-10-02: <i>"switching between audio sources takes quite a while to
+  /// update the UI"</i>). This used to await <c>GET /api/queue/full</c> before it looked at the source,
+  /// on every SourceChanged — twice per switch, and for Radio, Bluetooth and Vinyl too — and that read
+  /// measured 1.4–4.7 s on the appliance. Now, on a switch, the tab is decided from the source read alone
+  /// and the caller renders it at once; the queue is re-read in the background, and only for a change to
+  /// or from File Player, or when the read recovers from a failed one. A repeated SourceChanged for the
+  /// same type does nothing beyond the source read.
+  /// The first successful read (the panel mounting) still reads the queue first.</para>
   /// </summary>
   private async Task SyncSourceAsync()
   {
     bool hadPrevious = _sourceEverRead;
     string? previous = _sourceType;
+    bool recovering = _sourceStale;
 
     SourcesApiService.PrimarySourceRead read = await SourcesApi.ReadPrimarySourceAsync();
-    await RefreshQueueAsync();
     if (!read.Succeeded)
     {
       _sourceStale = true;
@@ -696,6 +708,12 @@
       || !string.Equals(previous, _sourceType, StringComparison.OrdinalIgnoreCase);
     if (!changed)
     {
+      // The API is back after a failed read: a queue change during the outage may have been missed, so
+      // re-read it (in the background, as on a switch). Otherwise a repeated SourceChanged reads nothing more.
+      if (recovering)
+      {
+        _ = RefreshQueueForSourceAsync();
+      }
       return;
     }
 
@@ -711,9 +729,57 @@
       ApplyBluetoothStatus(await BluetoothApi.GetStatusAsync(), allowAutoSwitch: false);
     }
 
+    // The first read is the panel mounting, not a switch: nothing is waiting on it and nothing is held
+    // yet, so it reads the queue before choosing the tab, as it always did.
+    if (!hadPrevious)
+    {
+      await RefreshQueueAsync();
+    }
+
     if (!_userOverrodeTab)
     {
+      // On a switch, File Player's default depends on the queue's length and the queue read is not
+      // awaited: this uses the count already held (the queue survives source switches on the server),
+      // and RefreshQueueForSourceAsync re-applies the default once the fresh count arrives.
       _activeTab = DefaultTabFor(_sourceType, _queueItems.Count, _btConnected);
+    }
+
+    if (hadPrevious && (recovering || IsFilePlayer(previous) || IsFilePlayer(_sourceType)))
+    {
+      _ = RefreshQueueForSourceAsync();
+    }
+  }
+
+  /// <summary>
+  /// UI-35: the queue re-read a source change starts and does not wait for. When it lands it re-renders
+  /// the panel and — if File Player is the source by then and the owner has not picked a view
+  /// meanwhile — re-applies File Player's default tab with the fresh count. (Any other source's default
+  /// does not depend on the queue, so a read landing after a switch away leaves the tab alone.)
+  /// </summary>
+  private async Task RefreshQueueForSourceAsync()
+  {
+    try
+    {
+      await RefreshQueueAsync();
+      await InvokeAsync(() =>
+      {
+        if (_disposed)
+        {
+          return;
+        }
+
+        if (!_userOverrodeTab && IsFilePlayer(_sourceType))
+        {
+          _activeTab = DefaultTabFor(_sourceType, _queueItems.Count, _btConnected);
+        }
+
+        StateHasChanged();
+      });
+    }
+    catch (Exception ex)
+    {
+      // RefreshQueueAsync logs its own failures; this is only a render after disposal.
+      Logger.LogDebug(ex, "Queue refresh after a source change could not be applied");
     }
   }
 
@@ -1150,6 +1216,7 @@
 
   public async ValueTask DisposeAsync()
   {
+    _disposed = true;
     HubService.QueueChanged -= OnQueueChanged;
     HubService.SourceChanged -= OnSourceChanged;
     CentrePanelViews.ViewRequested -= OnViewRequested;

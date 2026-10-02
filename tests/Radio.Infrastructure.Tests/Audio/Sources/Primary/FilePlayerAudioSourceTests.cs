@@ -25,6 +25,17 @@ public class FilePlayerAudioSourceTests : IDisposable
   private readonly FilePlayerOptions _options;
   private readonly FilePlayerPreferences _preferences;
 
+  // AUD-96: every source this fixture builds, so Dispose can wait for each one's background queue
+  // metadata reader to let go of the test files before the directory is deleted. Without it, Windows
+  // refuses the delete ("being used by another process") whenever a read is still in flight.
+  private readonly List<FilePlayerAudioSource> _sources = new();
+
+  private FilePlayerAudioSource Track(FilePlayerAudioSource source)
+  {
+    _sources.Add(source);
+    return source;
+  }
+
   public FilePlayerAudioSourceTests()
   {
     _loggerMock = new Mock<ILogger<FilePlayerAudioSource>>();
@@ -57,6 +68,15 @@ public class FilePlayerAudioSourceTests : IDisposable
 
   public void Dispose()
   {
+    foreach (FilePlayerAudioSource source in _sources)
+    {
+      // Cleanup only, never an assertion: a bound so a wedged reader fails loudly here, not as a hang.
+      if (!source.WhenQueueMetadataIdleAsync().Wait(TimeSpan.FromSeconds(30)))
+      {
+        throw new TimeoutException("The queue metadata reader did not go idle");
+      }
+    }
+
     if (Directory.Exists(_testDir))
     {
       Directory.Delete(_testDir, recursive: true);
@@ -65,11 +85,11 @@ public class FilePlayerAudioSourceTests : IDisposable
 
   private FilePlayerAudioSource CreateSource()
   {
-    return new FilePlayerAudioSource(
+    return Track(new FilePlayerAudioSource(
       _loggerMock.Object,
       _optionsMock.Object,
       _preferencesMock.Object,
-      _testDir);
+      _testDir));
   }
 
   /// <summary>
@@ -81,12 +101,12 @@ public class FilePlayerAudioSourceTests : IDisposable
   /// </remarks>
   private FilePlayerAudioSource CreateSource(SoundFlowPlaybackService playbackService)
   {
-    return new FilePlayerAudioSource(
+    return Track(new FilePlayerAudioSource(
       _loggerMock.Object,
       _optionsMock.Object,
       _preferencesMock.Object,
       _testDir,
-      playbackService: playbackService);
+      playbackService: playbackService));
   }
 
   private void CreateTestFile(string relativePath, string content = "test")
@@ -922,6 +942,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     CreateTestFile("song2.mp3");
     CreateTestFile("song3.mp3");
     await source.LoadDirectoryAsync("");
+    // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+    await source.WhenQueueMetadataIdleAsync();
 
     // Act
     var queue = await source.GetQueueAsync();
@@ -945,6 +967,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     CreateTestFile("song1.mp3");
     CreateTestFile("song2.mp3");
     await source.LoadDirectoryAsync("");
+    // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+    await source.WhenQueueMetadataIdleAsync();
 
     // Act
     var queue = await source.GetQueueAsync();
@@ -974,6 +998,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     var source = CreateSource();
     CreateTestFile("song1.mp3");
     await source.LoadDirectoryAsync("");
+    // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+    await source.WhenQueueMetadataIdleAsync();
 
     // Act
     var queue = await source.GetQueueAsync();
@@ -992,6 +1018,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     var source = CreateSourceWithAlbumArtCache(cache);
     CreateTestFile("song1.mp3");
     await source.LoadDirectoryAsync("");
+    // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+    await source.WhenQueueMetadataIdleAsync();
 
     // Act
     var queue = await source.GetQueueAsync();
@@ -1012,6 +1040,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     try
     {
       await source.LoadDirectoryAsync("");
+      // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+      await source.WhenQueueMetadataIdleAsync();
 
       // Act
       var queue = await source.GetQueueAsync();
@@ -1038,6 +1068,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     try
     {
       await source.LoadDirectoryAsync("");
+      // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+      await source.WhenQueueMetadataIdleAsync();
 
       // Act
       var queue = await source.GetQueueAsync();
@@ -1064,6 +1096,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     try
     {
       await source.LoadFileAsync(Path.GetFileName(mp3WithArt));
+      // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+      await source.WhenQueueMetadataIdleAsync();
 
       // Act
       var fullPlaylist = await source.GetFullPlaylistAsync();
@@ -1093,12 +1127,12 @@ public class FilePlayerAudioSourceTests : IDisposable
 
   private FilePlayerAudioSource CreateSourceWithAlbumArtCache(AlbumArtCacheService cache)
   {
-    return new FilePlayerAudioSource(
+    return Track(new FilePlayerAudioSource(
       _loggerMock.Object,
       _optionsMock.Object,
       _preferencesMock.Object,
       _testDir,
-      albumArtCache: cache);
+      albumArtCache: cache));
   }
 
   // Path to a real MP3 already in the repo. Used as the "base" of fixture files
@@ -1724,12 +1758,12 @@ public class FilePlayerAudioSourceTests : IDisposable
     });
 
     // Act
-    var source = new FilePlayerAudioSource(
+    var source = Track(new FilePlayerAudioSource(
       _loggerMock.Object,
       _optionsMock.Object,
       _preferencesMock.Object,
       _testDir,
-      fingerprintingOptions: fpMonitor.Object);
+      fingerprintingOptions: fpMonitor.Object));
 
     // Assert
     Assert.Equal("File Player", source.Name);
@@ -1985,6 +2019,8 @@ public class FilePlayerAudioSourceTests : IDisposable
     await using var source = CreateSource();
     CopyId3v22Fixture("meditating.mp3");
     await source.LoadFileAsync("meditating.mp3");
+    // AUD-96: rows are filled by a background reader; rendezvous on it rather than racing it.
+    await source.WhenQueueMetadataIdleAsync();
 
     var queue = await source.GetQueueAsync();
 
@@ -2146,13 +2182,13 @@ public class FilePlayerAudioSourceTests : IDisposable
       UseShazamForAllSources = true
     });
 
-    return new FilePlayerAudioSource(
+    return Track(new FilePlayerAudioSource(
       _loggerMock.Object,
       _optionsMock.Object,
       _preferencesMock.Object,
       _testDir,
       fingerprintingOptions: fpMonitor.Object,
-      getActiveSource: getActiveSource);
+      getActiveSource: getActiveSource));
   }
 
   private static TrackMetadata CreateTrackMetadata(
