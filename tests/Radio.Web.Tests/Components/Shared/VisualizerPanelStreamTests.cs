@@ -145,17 +145,15 @@ public class VisualizerPanelStreamTests : TestContext
     var draw = _module.SetupVoid("visualizer.drawSpectrum", _ => true); // pending until released
     var cut = RenderInitialised();
 
-    await FireFrameAsync(cut, 0.1f);
-    cut.WaitForAssertion(() => Draws.Should().HaveCount(1), TimeSpan.FromSeconds(5));
-
-    // The browser has not answered frame 1. Each further frame must come straight back to the hub.
-    foreach (float level in new[] { 0.2f, 0.3f, 0.4f })
+    // Every fire is bounded only so a regression fails rather than hangs: with the handler awaiting the
+    // draw, a fire cannot complete until the test releases the draw below, however long it waits. (The
+    // first draft awaited this first fire directly, and its mutation check hung instead of failing.)
+    foreach (float level in new[] { 0.1f, 0.2f, 0.3f, 0.4f })
     {
-      // Bounded only so a regression fails rather than hangs: with the handler awaiting the draw, this
-      // task cannot complete until the test releases the draw below, however long it waits.
       Task fire = FireFrameAsync(cut, level);
       (await Task.WhenAny(fire, Task.Delay(TimeSpan.FromSeconds(5)))).Should().BeSameAs(fire,
         "the hub's handler must not wait on a browser round trip");
+      cut.WaitForAssertion(() => Draws.Should().HaveCount(1), TimeSpan.FromSeconds(5));
     }
 
     Draws.Should().HaveCount(1, "one draw in flight per panel");
