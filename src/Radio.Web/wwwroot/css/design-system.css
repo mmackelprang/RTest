@@ -7809,6 +7809,9 @@ body {
 
 .queue-confirm-card h6 {
   margin: 0 0 var(--sp-3);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-high);
 }
 
 .queue-confirm-card p {
