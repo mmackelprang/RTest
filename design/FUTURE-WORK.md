@@ -6,6 +6,40 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
+## The incoming-call banner's **Ignore** button — built, disabled until RotaryPhone can decline a call (`PHN-11`)
+
+**What exists.** The banner (`Radio.Web/Components/Shared/IncomingCallBanner.razor`) shows an Ignore button;
+`IncomingCallBannerService.DeclineAsync` and `PhoneApiService.DeclineCallAsync` post
+`POST /api/phone/decline?phoneId=…` to RotaryPhone and treat only a 2xx JSON `{"declined": true}` as success;
+the in-flight (**ENDING CALL**), failure (*"Couldn't end the call. Try again."*) and 5 s no-`Idle` deadline
+states are built and tested. Ignore is enabled only when Radio.Web's `RotaryPhone:DeclineSupported` is
+`true`; it ships `false`, so the button renders disabled with *"Not available yet. Answer and hang up on the
+phone, or let it ring."*
+
+**What's needed.** RotaryPhone has no decline route (read-only check 2026-10-02: not on `PhoneController`, not
+a `RotaryHub` method, not on `GVBridgeController`). The request, with the contract — `200 {"declined": true}`
+from `Ringing` only, decided atomically against a handset lift; `409 {"declined": false, "state": …}` from any
+other state; `404` for an unknown phone — is at
+`D:\prj\RotaryPhone\docs\prompts\2026-10-02-radioconsole-decline-ringing-call-request.md`. When it ships:
+set `"RotaryPhone": { "DeclineSupported": true }` in Radio.Web's `appsettings.Production.json` (or the config
+store), and run the owner check in `docs/queue/PHN-11.md`. In the same change, rename the Phone page hero's
+disabled **Reject** button to **Ignore** and wire it to the same decline. Owner, 2026-10-02: *"d - yes - ignore
+is the label I want."*
+
+**Gotchas.**
+- ⛔ Do not "unblock" this with `POST /api/phone/simulate/hook?offHook=false`. It reaches the same
+  `CallManager.HangUp()` and would work today, but it is unconditional: a tap a moment after the handset is
+  lifted would hang up the answered call. It also logs a hook change that never happened.
+- A current RotaryPhone answers a route it lacks with a JSON `404` (its `Program.cs` API fallback); an older
+  build's SPA fallback answered `200` with `index.html`. The client requires the JSON body
+  `{"declined": true}`, so neither reads as a decline. Do not relax that to a status-code test.
+- What the caller experiences differs by path (Bluetooth/HFP: rejected, normally to voicemail; Google Voice:
+  the leg was already answered, so the call drops). RotaryPhone was asked to confirm both.
+
+**Priority.** P2 — owner-requested, but the console works without it (answer and hang up, or let it ring).
+
+---
+
 ## All-band reception — the hardware needed to make AM (MW) and shortwave work (`AUD-94`)
 
 **Status:** Roadmap only. **Owner, 2026-10-01:** *"We're not going to change hardware now. There are not

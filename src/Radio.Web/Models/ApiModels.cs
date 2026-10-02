@@ -1162,9 +1162,11 @@ public class PhoneCallStateDto
   public string CallState { get; set; } = "Idle";
   public string? DialedNumber { get; set; }
   public string? IncomingNumber { get; set; }
+  // PHN-11: RotaryPhone's per-call id (PhoneController.GetStatus returns it; null when idle). The
+  // incoming-call banner uses it to tell a new call from the old one when the Idle between them was lost.
+  public string? CallId { get; set; }
   // CallerName and Duration intentionally absent — the RotaryPhone /api/phone/status
-  // controller has never populated them (anonymous response with only the three fields
-  // above). Re-add only if the server starts emitting them.
+  // controller has never populated them. Re-add only if the server starts emitting them.
 }
 
 public record ContactDto

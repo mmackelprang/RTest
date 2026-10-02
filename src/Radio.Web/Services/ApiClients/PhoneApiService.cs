@@ -56,17 +56,69 @@ public class PhoneApiService
     }
   }
 
-  public async Task<PhoneCallStateDto?> GetCallStateAsync(CancellationToken ct = default)
+  /// <summary>Reads one phone's call state from RotaryPhone's <c>GET /api/phone/status</c>; null on failure.</summary>
+  /// <param name="phoneId">The phone to ask about; null asks about RotaryPhone's default (first) phone.</param>
+  /// <param name="ct">Cancels the request.</param>
+  public async Task<PhoneCallStateDto?> GetCallStateAsync(string? phoneId = null, CancellationToken ct = default)
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<PhoneCallStateDto>(
-        "/api/phone/status", JsonOptions, ct);
+      string url = string.IsNullOrEmpty(phoneId)
+        ? "/api/phone/status"
+        : $"/api/phone/status?phoneId={Uri.EscapeDataString(phoneId)}";
+      return await _httpClient.GetFromJsonAsync<PhoneCallStateDto>(url, JsonOptions, ct);
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to get phone call state");
       return null;
+    }
+  }
+
+  /// <summary>
+  /// PHN-11: asks RotaryPhone to decline the RINGING call — the banner's Ignore button. True only when the
+  /// service answers 2xx with a JSON body carrying <c>"declined": true</c>.
+  /// </summary>
+  /// <remarks>
+  /// ⚠ <b>The route does not exist in RotaryPhone yet.</b> It was requested on 2026-10-02
+  /// (<c>RotaryPhone/docs/prompts/2026-10-02-radioconsole-decline-ringing-call-request.md</c>), and the
+  /// banner calls this only when <c>RotaryPhone:DeclineSupported</c> is true. A current RotaryPhone answers
+  /// an unknown <c>/api/*</c> route with a JSON <c>404</c> (its <c>Program.cs</c> API fallback, added after
+  /// <c>UI-11</c>), which fails the status check. The body check is what still holds against an older
+  /// RotaryPhone build, whose SPA fallback answered such a route <c>200</c> with <c>index.html</c>: that
+  /// body is not JSON, so it counts as a failure rather than a decline that never happened.
+  /// <c>simulate/hook?offHook=false</c> would reach the same hang-up today and is deliberately not used:
+  /// it is unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+  /// </remarks>
+  public async Task<bool> DeclineCallAsync(string? phoneId, CancellationToken ct = default)
+  {
+    try
+    {
+      string url = string.IsNullOrEmpty(phoneId)
+        ? "/api/phone/decline"
+        : $"/api/phone/decline?phoneId={Uri.EscapeDataString(phoneId)}";
+      using var response = await _httpClient.PostAsync(url, null, ct);
+      if (!response.IsSuccessStatusCode)
+      {
+        _logger.LogWarning("The phone service did not accept the decline ({StatusCode})", (int)response.StatusCode);
+        return false;
+      }
+
+      using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+      return body.RootElement.ValueKind == JsonValueKind.Object
+        && body.RootElement.TryGetProperty("declined", out var declined)
+        && declined.ValueKind == JsonValueKind.True;
+    }
+    catch (JsonException)
+    {
+      // A 2xx that is not JSON: an older RotaryPhone's SPA fallback answering a route it does not have.
+      _logger.LogWarning("The phone service answered the decline with something other than JSON; is the route deployed?");
+      return false;
+    }
+    catch (Exception ex)
+    {
+      _logger.LogError(ex, "Failed to decline the incoming call");
+      return false;
     }
   }
 

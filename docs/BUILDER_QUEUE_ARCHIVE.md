@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (107)
+## Shipped rows (109)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3305,3 +3305,31 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/GV-10.md`](queue/GV-10.md)**
 
 ✅ **CLOSED BY OWNER RULING 2026-10-02, NO CODE.** Owner: *"#2 - close."* Bubbles bind `SmsMessageDto.Text` verbatim, with no data or CSS truncation; the bubble and the list preview matched because both come from the same wire slot, not because the bubble renders a snippet. **Cross-repo:** whether Google's `SmsTextIdx` carries a full body or a snippet is a RotaryPhone question; nothing was filed there by this closure.
+
+### PHN-11 — an incoming call shows a large banner overlay with the caller; it closes on a touch, an answer or the call ending, and Ignore waits on RotaryPhone
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#777](https://github.com/mmackelprang/RTest/pull/777) — owner panel UAT passed 2026-10-02; merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner request built directly; design spec at right_ · ⛔ **NOT auto-mergeable — HELD for owner panel UAT** (a real call to the rotary phone) |
+| Spec / handoff | [`design-handoffs/2026-10-02-incoming-call-banner.md`](design-handoffs/2026-10-02-incoming-call-banner.md) |
+| Depends on | — _(Ignore needs a RotaryPhone decline endpoint; see the dossier)_ |
+| Branch | `feat/phn-11-incoming-call-banner` |
+
+**Detail: [`queue/PHN-11.md`](queue/PHN-11.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* on `6efb4df` (a real call to the rotary phone, checks 1–7). Owner rulings recorded in the dossier: Ambient knobs while the banner is up and the lit panel after a deep-sleep call accepted; **no console Answer control, ever**; the Phone page's Reject becomes **Ignore** when RotaryPhone ships the decline route (`design/FUTURE-WORK.md`). Ignore is built and disabled behind `RotaryPhone:DeclineSupported` until then; the request is in RotaryPhone's lane with a boundary-doc Change Log row.
+
+### PHN-12 — the API's phone client misread RotaryPhone's hub contract, so no call was ever announced on the box
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#777](https://github.com/mmackelprang/RTest/pull/777) — owner panel UAT passed 2026-10-02; merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — contract fix, built in `PHN-11`'s PR_ · ⛔ **NOT auto-mergeable — HELD for owner panel UAT with `PHN-11`** (a real call is announced) |
+| Spec / handoff | _the RotaryPhone source (`SignalRNotifierService.OnStateChanged`), cited in the dossier_ |
+| Depends on | — _(ships with `PHN-11`; merged `AUD-87` first)_ |
+| Branch | `feat/phn-11-incoming-call-banner` |
+
+**Detail: [`queue/PHN-12.md`](queue/PHN-12.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* — the same call now produced the console's first-ever call announcement. `PhoneCallClient` binds `CallStateChanged(phoneId, state)` and `IncomingCall(phoneId, number)` in RotaryPhone's order, pinned by a contract test over real SignalR.

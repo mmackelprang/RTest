@@ -174,7 +174,7 @@ public class PhoneCallIntegrationLogSafetyTests
     // radio says the caller's name out loud, and the phone's UI shows it — so this test exists to
     // make a future over-eager "mask everything" edit fail loudly. PHN-5 masks what is written to a
     // sink that persists, not what is spoken or handed to a collaborator. The sibling guards are
-    // P6_TheRawNumberAndNameStillReachSubscribers and
+    // P6_TheRawNumberStillReachesSubscribers and
     // P8_IncomingCall_LogsNoRawNumberButStillRaisesItToSubscribers.
     var capture = new CapturingLoggerProvider();
     var service = Build(capture, out var spokenTo, out var phoneClient);
@@ -185,5 +185,27 @@ public class PhoneCallIntegrationLogSafetyTests
     phoneClient.Verify(
       p => p.ReportCallerResolvedAsync(Sentinel, ContactName, It.IsAny<CancellationToken>()),
       Times.Once);
+  }
+
+  [Fact]
+  public async Task PHN12_ACallWithNoCallerId_IsAnnouncedAsUnknownCaller_WithNoLookupAndNoReport()
+  {
+    // Since PHN-12, PhoneCallClient raises RotaryPhone's "Unknown" as NO number. This pins what that buys
+    // on this side: "Incoming call from Unknown caller" — not "...from Unknown" — and no contact lookup
+    // (OfflineClient would throw and log it) and nothing reported back to RotaryPhone.
+    var capture = new CapturingLoggerProvider();
+    var service = Build(capture, out var spokenTo, out var phoneClient);
+
+    await service.HandleIncomingCallAsync(new PhoneCallStateChangedEventArgs
+    {
+      State = PhoneCallState.Ringing,
+      PhoneNumber = null,
+    });
+
+    Assert.Equal(["Incoming call from Unknown caller"], spokenTo);
+    phoneClient.Verify(
+      p => p.ReportCallerResolvedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+      Times.Never);
+    Assert.DoesNotContain(capture.Messages, m => m.Contains("lookup failed", StringComparison.OrdinalIgnoreCase));
   }
 }

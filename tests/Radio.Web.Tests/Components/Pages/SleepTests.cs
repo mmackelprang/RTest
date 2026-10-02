@@ -52,6 +52,7 @@ public class SleepTests : TestContext
     // negotiate without touching the network, so this fixture's result never
     // depends on whether radio-api happens to be running locally.
     Services.AddHermeticTestRig();
+    Services.AddOfflineIncomingCallBanner();
 
     _loggerFactory = new NullLoggerFactory();
     JSInterop.Mode = JSRuntimeMode.Loose;

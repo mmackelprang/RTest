@@ -1,0 +1,383 @@
+@using Radio.Web.Services
+@inject IncomingCallBannerService Banner
+@inject IJSRuntime JS
+@inject ILogger<IncomingCallBanner> Logger
+@implements IDisposable
+
+@*
+  PHN-11 — the incoming-call banner. Spec: docs/design-handoffs/2026-10-02-incoming-call-banner.md.
+
+  Two hosts, like <EncoderHud>: MainLayout (every normal route) and the /sleep page, which is on
+  EmptyLayout and therefore not in MainLayout's tree. The state lives in the circuit-scoped
+  IncomingCallBannerService, so the banner survives the route change between the two hosts; this
+  component only draws it.
+
+  The two live regions are rendered whether or not a call is up, because a live region inserted
+  together with its text is announced unreliably (spec §11).
+*@
+
+<div class="visually-hidden" role="alert" aria-atomic="true">@if (_alertText.Length > 0)
+  {<span @key="_alertKey">@_alertText</span>}</div>
+<div class="visually-hidden" role="status" aria-atomic="true">@if (_statusText.Length > 0)
+  {<span @key="_statusKey">@_statusText</span>}</div>
+
+@if (_snap.IsVisible)
+{
+  @* Keyed by the call, so a fresh ring during the previous call's exit beat remounts and plays its own
+     entry (spec §7). A touch anywhere on the scrim or the card closes the banner — except in the Ignore
+     column, which stops the click (spec §6). *@
+  <div @key="_snap.CallId"
+       class="@ScrimClass"
+       role="dialog"
+       aria-modal="true"
+       aria-labelledby="icb-header"
+       aria-describedby="icb-hint"
+       tabindex="-1"
+       @onclick="HandleTouch"
+       @onkeydown="HandleKeyDown">
+    <div class="icb-card">
+      <div class="icb-disc-col" aria-hidden="true">
+        <div class="icb-halo"></div>
+        <div class="icb-disc" @key="DiscKey">
+          @if (_snap.Monogram is not null)
+          {
+            <span class="icb-monogram">@_snap.Monogram</span>
+          }
+          else
+          {
+            <RadzenIcon Icon="@DiscIcon" class="icb-glyph" />
+          }
+        </div>
+      </div>
+
+      <div class="icb-text">
+        <div id="icb-header" class="icb-header">@HeaderText</div>
+        @if (!_snap.IsAwaitingCallerId)
+        {
+          @* Keyed by the text, so each upgrade (unknown → number → name) is a 200 ms crossfade. *@
+          <div class="icb-caller" @key="_snap.PrimaryText">
+            <div class="@PrimaryClass">@_snap.PrimaryText</div>
+            @if (_snap.SecondaryText is not null)
+            {
+              <div class="@SecondaryClass">@_snap.SecondaryText</div>
+            }
+          </div>
+        }
+      </div>
+
+      @* The whole column is inert to touch-to-close: a near-miss on Ignore must not close the banner and
+         read as "it worked" while the phone keeps ringing (spec §6). The no-op handler gives the column an
+         owner for the click; stopPropagation is what keeps it from reaching the scrim. *@
+      <div class="icb-ignore-zone" @onclick="IgnoreZoneTouched" @onclick:stopPropagation="true">
+        <button type="button"
+                class="icb-ignore"
+                disabled="@(!IgnoreEnabled)"
+                aria-label="@IgnoreAriaLabel"
+                @onclick="HandleIgnoreAsync">
+          @if (_snap.DeclineState == IncomingCallDeclineState.Declining)
+          {
+            <span class="spinner icb-spinner" aria-hidden="true"></span>
+            <span>ENDING CALL</span>
+          }
+          else
+          {
+            <RadzenIcon Icon="call_end" class="icb-ignore-icon" />
+            <span>IGNORE</span>
+          }
+        </button>
+        @if (_snap.DeclineState == IncomingCallDeclineState.Failed)
+        {
+          <div class="icb-ignore-sub icb-ignore-error" role="alert">Couldn't end the call. Try again.</div>
+        }
+        else if (_snap.DeclineState != IncomingCallDeclineState.Declining)
+        {
+          <div class="icb-ignore-sub">
+            @(_snap.CanDecline ? "Ends the call" : "Not available yet. Answer and hang up on the phone, or let it ring.")
+          </div>
+        }
+      </div>
+
+      <div id="icb-hint" class="icb-hint">Touch anywhere to close. The call keeps ringing.</div>
+    </div>
+  </div>
+}
+
+@code {
+  /// <summary>
+  /// The /sleep host's hook: raised with <c>true</c> when the banner starts covering the screen and
+  /// <c>false</c> when it stops, so the page can report the sleep screen hidden while it is covered —
+  /// which is what lights a dark panel (ENC-22) without waking the console.
+  /// </summary>
+  [Parameter] public EventCallback<bool> OnCoveringChanged { get; set; }
+
+  /// <summary>MainLayout's: lift the 5-minute idle dim when a call arrives (spec §9).</summary>
+  [Parameter] public bool UndimOnShow { get; set; }
+
+  private IncomingCallBannerSnapshot _snap = IncomingCallBannerSnapshot.Hidden;
+  private bool _covering;
+  private bool _disposed;
+  private string _alertText = "";
+  private string _statusText = "";
+
+  // Live-region bookkeeping (UpdateLiveRegions). Nothing is written before the first render.
+  private bool _regionsLive;
+  private long _alertKey;
+  private long _statusKey;
+  private long _regionCall;
+  private string? _regionCaller;
+  private IncomingCallPhase _regionPhase;
+
+  // Whether THIS instance plays the entry for the call on screen. Decided once per call, when the
+  // instance first sees it: a re-render (a caller-ID upgrade inside the first 300 ms) must not flip it.
+  private long _entryDecidedFor;
+  private bool _playEntry;
+
+  protected override void OnInitialized()
+  {
+    Banner.Changed += OnBannerChanged;
+    Banner.Start();
+    ApplySnapshot(Banner.Current);
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (firstRender)
+    {
+      // The regions now exist, empty, in the DOM; only from here may text go into them (spec §11: a live
+      // region inserted together with its text is announced unreliably).
+      _regionsLive = true;
+      if (UpdateLiveRegions())
+      {
+        StateHasChanged();
+      }
+    }
+
+    // Covering means mounted: through the exit beat and the fade, not just while ringing, so a lit panel
+    // stays lit until the banner is actually gone.
+    bool covering = _snap.IsVisible;
+    if (covering == _covering)
+    {
+      return;
+    }
+
+    _covering = covering;
+    if (OnCoveringChanged.HasDelegate)
+    {
+      await OnCoveringChanged.InvokeAsync(covering);
+    }
+    if (covering && UndimOnShow)
+    {
+      await UndimAsync();
+    }
+  }
+
+  private void OnBannerChanged()
+  {
+    if (_disposed)
+    {
+      return;
+    }
+    _ = InvokeAsync(() =>
+    {
+      if (_disposed)
+      {
+        return;
+      }
+      ApplySnapshot(Banner.Current);
+      StateHasChanged();
+    });
+  }
+
+  private void ApplySnapshot(IncomingCallBannerSnapshot snap)
+  {
+    _snap = snap;
+    if (snap.IsVisible && snap.CallId != _entryDecidedFor)
+    {
+      _entryDecidedFor = snap.CallId;
+      // False when the other host already showed this call (a /sleep ↔ layout navigation, spec §6).
+      _playEntry = Banner.TryMarkEntered(snap.CallId);
+    }
+    UpdateLiveRegions();
+  }
+
+  /// <summary>
+  /// The assertive region gets "Incoming call from …" once per call, the first time any host shows it —
+  /// not again when the banner moves between /sleep and the layout. Caller-ID upgrades this instance sees
+  /// and the exit go to the polite region; an instance that takes over a call mid-ring writes nothing for
+  /// it until something changes (spec §11). Both regions empty when the banner goes. Each message is a new
+  /// keyed node, so the same words for the next call (the same caller calling back) are still a change.
+  /// Returns whether either region's text changed.
+  /// </summary>
+  private bool UpdateLiveRegions()
+  {
+    if (!_regionsLive)
+    {
+      return false;
+    }
+
+    string alert = _alertText;
+    string status = _statusText;
+
+    if (!_snap.IsVisible)
+    {
+      _alertText = "";
+      _statusText = "";
+      _regionCall = 0;
+      return alert != _alertText || status != _statusText;
+    }
+
+    if (_snap.CallId != _regionCall)
+    {
+      // First sight of this call by THIS instance.
+      _regionCall = _snap.CallId;
+      _regionCaller = null;
+      _regionPhase = _snap.Phase;
+      _statusText = "";
+    }
+
+    if (_snap.Phase == IncomingCallPhase.Ringing && !_snap.IsAwaitingCallerId)
+    {
+      string caller = _snap.CallerKind == IncomingCallCallerKind.Unknown ? "unknown caller" : _snap.PrimaryText;
+      if (Banner.TryMarkAnnounced(_snap.CallId))
+      {
+        _alertText = $"Incoming call from {caller}";
+        _alertKey = _snap.CallId;
+        _regionCaller = caller;
+      }
+      else if (_regionCaller is null)
+      {
+        // Announced by the other host before this one took over: the baseline, said by nobody here.
+        _regionCaller = caller;
+      }
+      else if (_regionCaller != caller)
+      {
+        _regionCaller = caller;
+        SetStatus($"Incoming call from {caller}");
+      }
+    }
+
+    if (_snap.Phase != _regionPhase)
+    {
+      _regionPhase = _snap.Phase;
+      if (_snap.Phase == IncomingCallPhase.Answered)
+      {
+        SetStatus("Call answered");
+      }
+      else if (_snap.Phase == IncomingCallPhase.Ended)
+      {
+        SetStatus("Call ended");
+      }
+    }
+
+    return alert != _alertText || status != _statusText;
+  }
+
+  private void SetStatus(string text)
+  {
+    _statusText = text;
+    _statusKey++;
+  }
+
+  private void HandleTouch() => Banner.Dismiss();
+
+  private static void IgnoreZoneTouched()
+  {
+    // Deliberately nothing: see the markup comment on .icb-ignore-zone.
+  }
+
+  private void HandleKeyDown(KeyboardEventArgs e)
+  {
+    if (e.Key == "Escape")
+    {
+      Banner.Dismiss();
+    }
+  }
+
+  private Task HandleIgnoreAsync() => Banner.DeclineAsync();
+
+  private async Task UndimAsync()
+  {
+    try
+    {
+      await JS.InvokeVoidAsync("radioSleepManager.wake", "call");
+    }
+    catch (JSDisconnectedException)
+    {
+      // The circuit is gone; an undim is cosmetic.
+    }
+    catch (InvalidOperationException ex)
+    {
+      // Prerender, or no JS runtime (bUnit without the interop set up): nothing to undim.
+      Logger.LogDebug(ex, "Could not undim the panel for an incoming call");
+    }
+    catch (JSException ex)
+    {
+      Logger.LogDebug(ex, "Could not undim the panel for an incoming call");
+    }
+    catch (TaskCanceledException)
+    {
+    }
+  }
+
+  private bool IgnoreEnabled =>
+    _snap.CanDecline && _snap.Phase == IncomingCallPhase.Ringing
+    && _snap.DeclineState != IncomingCallDeclineState.Declining;
+
+  // While declining, the spoken name matches the visible "ENDING CALL" (label-in-name); the spec's §10 has no
+  // in-flight label, so this one is the Builder's, flagged for the Designer.
+  private string IgnoreAriaLabel =>
+    !_snap.CanDecline ? "Ignore call, not available yet"
+    : _snap.DeclineState == IncomingCallDeclineState.Declining ? "Ending call"
+    : $"Ignore call from {(_snap.CallerKind == IncomingCallCallerKind.Unknown ? "unknown caller" : _snap.PrimaryText)}";
+
+  private string HeaderText => _snap.Phase switch
+  {
+    IncomingCallPhase.Answered => "ANSWERED",
+    IncomingCallPhase.Ended => "CALL ENDED",
+    _ => "INCOMING CALL",
+  };
+
+  private string DiscIcon =>
+    _snap.CallerKind == IncomingCallCallerKind.Unknown && !_snap.IsAwaitingCallerId ? "no_accounts" : "person";
+
+  private string DiscKey => _snap.Monogram ?? DiscIcon;
+
+  private string PrimaryClass =>
+    _snap.CallerKind == IncomingCallCallerKind.Number ? "icb-primary icb-primary--number" : "icb-primary";
+
+  private string SecondaryClass =>
+    _snap.CallerKind == IncomingCallCallerKind.Contact ? "icb-secondary icb-secondary--number" : "icb-secondary";
+
+  private string ScrimClass
+  {
+    get
+    {
+      var classes = new List<string> { "icb-scrim" };
+      classes.Add(_snap.Phase switch
+      {
+        IncomingCallPhase.Answered => "icb--answered",
+        IncomingCallPhase.Ended => "icb--ended",
+        _ => "icb--ringing",
+      });
+      if (_snap.DeclineState == IncomingCallDeclineState.Declining)
+      {
+        classes.Add("icb--declining");
+      }
+      if (_snap.IsLeaving)
+      {
+        classes.Add("icb--leaving");
+      }
+      if (!_playEntry)
+      {
+        classes.Add("icb--no-entry");
+      }
+      return string.Join(' ', classes);
+    }
+  }
+
+  public void Dispose()
+  {
+    _disposed = true;
+    Banner.Changed -= OnBannerChanged;
+  }
+}

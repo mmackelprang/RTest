@@ -1790,7 +1790,9 @@
                   @if (_phoneStatus.Enabled && _phoneStatus.CurrentState != "Idle")
                   {
                     <RadzenColumn Size="12" SizeMD="4">
-                      <span><strong>Caller:</strong> @(string.IsNullOrEmpty(_phoneStatus.CallerName) ? _phoneStatus.CallerNumber : $"{_phoneStatus.CallerName} ({_phoneStatus.CallerNumber})")</span>
+                      @* PHN-12: the API raises a withheld number (RotaryPhone's "Unknown") as no number, so an
+                         empty one means "no caller ID", not "nothing to show". *@
+                      <span><strong>Caller:</strong> @(string.IsNullOrEmpty(_phoneStatus.CallerNumber) && string.IsNullOrEmpty(_phoneStatus.CallerName) ? "Unknown caller" : string.IsNullOrEmpty(_phoneStatus.CallerName) ? _phoneStatus.CallerNumber : $"{_phoneStatus.CallerName} ({_phoneStatus.CallerNumber})")</span>
                     </RadzenColumn>
                   }
                   @if (_phoneStatus.Enabled && !string.IsNullOrEmpty(_phoneStatus.HubUrl))
