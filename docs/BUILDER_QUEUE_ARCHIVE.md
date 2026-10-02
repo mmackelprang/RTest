@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (102)
+## Shipped rows (105)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3235,3 +3235,45 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/ENC-24.md`](queue/ENC-24.md)**
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"UAT - these all pass"* — follow-ups filed from the same UAT: `UI-36` (visualizations pause ~15 s after a deep sleep) and `ENC-25` (a VOLUME turn in normal sleep should wake the console).
+
+### AUD-98 — a File Player list lost the tracks it had played at every restart, so Repeat All repeated only the remainder
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#773](https://github.com/mmackelprang/RTest/pull/773) — owner panel UAT passed 2026-10-02; merged as `24fcf62` |
+| Plan | _no plan — owner-reported, measured on the box; design in the dossier_ |
+| Spec / handoff | _owner question, 2026-10-02_ |
+| Depends on | — |
+| Branch | `fix/aud-98-queue-keeps-played` |
+
+**Detail: [`queue/AUD-98.md`](queue/AUD-98.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"Remaining items all pass."* (wrap, Save as playlist, ✕) and *"All of these items pass."* on `7583e06`. Restart measured on the box: 25 tracks before and after, same order and states, the 4 played tracks restored as played (Shuffle on, Repeat All).
+
+### UI-36 — visualizations sometimes paused for ~15 s after waking from deep sleep
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#774](https://github.com/mmackelprang/RTest/pull/774) — owner panel UAT passed 2026-10-02; merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner report; built directly_ |
+| Spec / handoff | _owner report 2026-10-02_ |
+| Depends on | — _(related: `UI-33`, `ENC-23`)_ |
+| Branch | `fix/ui-36-enc-25-wake` |
+
+**Detail: [`queue/UI-36.md`](queue/UI-36.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"All of these items pass."* on `7583e06`. ⚠ **The cause was not proven** — the fix guards three plausible mechanisms (live handlers attached before start-up reads, a latest-wins draw loop, a 2 s stall re-subscribe) and adds `UI-36` log lines that say which side stalled if it recurs; the pause was intermittent, so one passing session is weak evidence. Re-open on any recurrence with those log lines.
+
+### ENC-25 — turning VOLUME in normal sleep (Standby) wakes the console and changes the volume
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#774](https://github.com/mmackelprang/RTest/pull/774) — owner panel UAT passed 2026-10-02; merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner report; built directly_ |
+| Spec / handoff | _owner report 2026-10-02_ |
+| Depends on | — _(related: `ENC-6` D22, `ENC-23`, `ENC-24`)_ |
+| Branch | `fix/ui-36-enc-25-wake` |
+
+**Detail: [`queue/ENC-25.md`](queue/ENC-25.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"All of these items pass."* on `7583e06` — after a first round that ran on `1daecde` (without this fix) and failed exactly as reported, a pre-fix baseline. Owner also noted: *"pressing sleep currently always mutes.  I'm ok with that behavior."*

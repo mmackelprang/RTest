@@ -32,7 +32,8 @@ public class PlaylistsControllerCreateMetadataTests
 
     // The queue answers with real tags only once the wait has let the reader finish — the shape of the
     // race on the appliance, made deterministic.
-    _queue.Setup(q => q.GetQueueAsync(It.IsAny<CancellationToken>()))
+    // AUD-98: Save as playlist reads the whole list (played + current + upcoming).
+    _queue.Setup(q => q.GetFullPlaylistAsync(It.IsAny<CancellationToken>()))
       .ReturnsAsync(() => (IReadOnlyList<QueueItem>)
       [
         new QueueItem

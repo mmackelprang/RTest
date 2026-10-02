@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+✅ **SHIPPED 2026-10-02.** Owner: *"All of these items pass."* on `7583e06` — after a first round that ran on `1daecde` (without this fix) and failed exactly as reported, a pre-fix baseline. Owner also noted: *"pressing sleep currently always mutes.  I'm ok with that behavior."* Merged via [#774](https://github.com/mmackelprang/RTest/pull/774). The status lines below were true until then.
+
 🚧 **BUILT 2026-10-02, HELD for owner panel UAT with the knob** — branch `fix/ui-36-enc-25-wake`, one PR
 with [`UI-36`](UI-36.md). **Not deployed, not merged.**
 

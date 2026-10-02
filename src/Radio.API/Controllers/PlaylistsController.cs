@@ -101,7 +101,7 @@ public class PlaylistsController : ControllerBase
   }
 
   /// <summary>
-  /// Creates a new playlist from the current queue.
+  /// Creates a new playlist from the whole File Player list: played, current and upcoming tracks.
   /// </summary>
   [HttpPost]
   [ProducesResponseType(typeof(PlaylistSummaryDto), StatusCodes.Status201Created)]
@@ -135,7 +135,8 @@ public class PlaylistsController : ControllerBase
 
       // AUD-96: queue rows are filled by a background reader, and a row not read yet carries placeholder
       // metadata (file name, "--"). This stores the metadata for good, so give the reader a bounded chance
-      // to catch up — normally it already has; right after loading a large folder it may not have.
+      // to catch up — normally it already has; right after loading a large folder it may not have. The wait
+      // covers every row GetFullPlaylistAsync returns, played tracks included.
       if (!await playQueue.WaitForQueueMetadataAsync(PlaylistMetadataWait, ct))
       {
         _logger.LogWarning(
@@ -143,7 +144,10 @@ public class PlaylistsController : ControllerBase
           request.Name);
       }
 
-      var queueItems = await playQueue.GetQueueAsync(ct);
+      // AUD-98: the whole list as the queue panel shows it — played, current, upcoming, in that order.
+      // GetQueueAsync returns only the current and upcoming tracks, so a playlist saved mid-play used to
+      // leave out every track already played.
+      var queueItems = await playQueue.GetFullPlaylistAsync(ct);
       if (queueItems == null || queueItems.Count == 0)
       {
         return BadRequest(new { error = "Queue is empty" });
