@@ -167,11 +167,13 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
-      // ENC-24, first of all: a turn of a knob whose button is held cancels that hold, so the press
-      // fires neither its long action at the threshold nor its short action on release. It runs
-      // before the panel gate so that a consumed turn still cancels the hold, and before the turn's
-      // own handler so that the HoldCancel card is published ahead of the turn's own card.
-      _gesture.OnTurn(e.EncoderIndex);
+      // ENC-24, first of all: a turn of a knob whose button is held cancels that hold once it nets
+      // EncoderLongPressGesture.TurnCancelDetents (2) detents, so the press fires neither its long
+      // action at the threshold nor its short action on release. A single stray detent - a push that
+      // jostles the knob - does not cancel. The signed delta is passed so a wobble nets to zero. It
+      // runs before the panel gate so that a consumed turn still counts toward the cancel, and before
+      // the turn's own handler so that a HoldCancel card is published ahead of the turn's own card.
+      _gesture.OnTurn(e.EncoderIndex, e.Delta);
 
       // ENC-22, ahead of every other gate: a turn on a dark panel is spent lighting it. Nothing else
       // happens — no HUD card, no sleep wake — because nothing on the panel is visible yet, and the

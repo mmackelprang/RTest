@@ -618,6 +618,8 @@ public class RotaryEncoderRouterMappingTests
 
     h.Encoders.RaiseButton(0, isPressed: true);
     h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    // Two detents: the cancel tolerance (EncoderLongPressGesture.TurnCancelDetents). One is ignored.
+    h.Encoders.RaiseTurn(0, 1);
     h.Encoders.RaiseTurn(0, 1);
     h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
     h.Encoders.RaiseButton(0, isPressed: false);
@@ -635,13 +637,30 @@ public class RotaryEncoderRouterMappingTests
     using var h = new Harness();
 
     h.Encoders.RaiseButton(0, isPressed: true);
-    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 2);
 
     // HoldStart (press-down), HoldCancel (the turn ended the hold), then the turn's own Value card,
     // so the ring collapses and the card left on screen is the new volume.
     Assert.Equal(
       new[] { EncoderHudPhase.HoldStart, EncoderHudPhase.HoldCancel, EncoderHudPhase.Value },
       h.Hud.Published.Select(c => c.Phase).ToArray());
+  }
+
+  [Fact]
+  public void VolumePressWithOneStrayDetent_StillTogglesMuteOnRelease()
+  {
+    // The router passes the turn's delta through; one detent is below the cancel tolerance, so a push
+    // that jostles the knob is still a click. The detent itself still moves the volume.
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Time.Advance(TimeSpan.FromMilliseconds(200));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(1, h.Audio.MuteWrites);
+    Assert.True(h.Audio.IsMuted);
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
   }
 
   [Fact]
@@ -1070,6 +1089,10 @@ public class RotaryEncoderRouterMappingTests
   {
     // The turn lit the panel (and ended the deep sleep); the press then lands on a lit Standby screen,
     // where the ENC-6 gate spends it waking, exactly as before.
+    //
+    // ⚠ FakePanelPower has no wake grace window: its next input after a lighting one passes straight
+    // through. The real PanelPowerService consumes inputs for WakeGraceMilliseconds after it lights the
+    // panel, so on the box this press must come after that window, or it is spent on the grace too.
     using var h = DeepDark();
 
     h.Encoders.RaiseTurn(2, 1);
