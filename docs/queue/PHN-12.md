@@ -40,11 +40,17 @@ page consume.
 
 - `CallStateChanged` bound as `(phoneId, state)`; `IncomingCall` bound as `(phoneId, phoneNumber)`; the
   three-argument registration removed.
-- **Ringing is raised from `IncomingCall`**, with the number, once per number per ring. The bare
-  `CallStateChanged(…, "Ringing")` raises nothing: it carries no number, every inbound path in RotaryPhone sets
-  the number first, and raising both would announce "Unknown caller" and then cut it off milliseconds later
-  (`AUD-87`'s `PhoneCallIntegrationService` treats every `Ringing` as a new call). A caller-ID update (the real
-  number replacing `"Unknown"`) raises again, which restarts the announcement with the better name — intended.
+- **Ringing is raised from `IncomingCall`**, with the number. The bare `CallStateChanged(…, "Ringing")` raises
+  nothing: it carries no number, every inbound path in RotaryPhone sets the number first (`"Unknown"` when there
+  is none), and raising both would announce "Unknown caller" and then cut it off milliseconds later (`AUD-87`'s
+  `PhoneCallIntegrationService` treats every `Ringing` as a new call). A caller-ID update (the real number
+  replacing `"Unknown"`) raises again, which restarts the announcement with the better name — intended.
+- Every `CallStateChanged(…, "Ringing")` resets the ring, and a hub reconnect forgets it, so one missed `Idle`
+  cannot silence the same caller's next call (pre-merge review M3). The same number arriving twice with no
+  `Ringing` between is a duplicate and is not raised.
+- **RotaryPhone's `"Unknown"` is raised as no number** (review M4): passed through, the API would have said
+  *"Incoming call from Unknown"*, looked it up as a contact and reported it back to RotaryPhone as a resolved
+  name. As null, the announcement says *"Unknown caller"* and does neither.
 - Every other state is raised as it arrives and clears the caller. `"Dialing"` still maps to `Idle`, as before.
 - Logging: the ringing line keeps the masked number (`LogSafeText.ForPhone`); the other lines carry none.
 - An internal constructor takes a connection-options callback (the test seam), and `Radio.Infrastructure`
@@ -65,12 +71,17 @@ page consume.
   phone id.
 - `PhoneCallClientLogSafetyTests` (`PHN-5`) rewritten for the new handlers; the name arms went with the
   three-argument overload that carried a name.
+- `PhoneCallIntegrationLogSafetyTests.PHN12_ACallWithNoCallerId_…` — a ring with no number is announced as
+  "Unknown caller", with no lookup and no report back.
 
-Mutation checks: see [`PHN-11`](PHN-11.md) § Mutation checks (M1–M4).
+Mutation checks: see [`PHN-11`](PHN-11.md) § Mutation checks (M1–M4, N1–N2). **Not covered by a test:** the
+reconnect handler forgetting the ring.
 
 ## Owner check
 
 1. Call the rotary phone. **The console announces the caller** ("Incoming call from …") — this has never worked
-   on the box before.
-2. Hang up from the calling phone while it rings. **The announcement stops.**
+   on the box before. A withheld number is announced as "Unknown caller".
+2. Hang up from the calling phone while it rings. **The announcement stops.** ⚠ On the Google Voice path the
+   caller's hang-up may never reach the box (RotaryPhone prompt `2026-09-11-radioconsole-inbound-hangup-never-arrives.md`);
+   then it stops when the handset is lifted.
 3. Call again and pick up. The announcement stops at the pick-up.

@@ -765,10 +765,11 @@ IncomingCall(string phoneId, string phoneNumber)   // sent right after Ringing, 
 A caller-ID update mid-ring (the real number replacing `"Unknown"`) re-sends both. No call id, contact name
 or photo travels on the hub. Both clients bind exactly these:
 
-- **Radio.API** (`PhoneCallClient`) raises **Ringing** from `IncomingCall`, with the number — once per number
-  per ring, so a re-send with the same number does not restart the announcement, and a caller-ID update
-  restarts it with the better name. The bare `CallStateChanged(…, "Ringing")` raises nothing of its own.
-  Every other state is raised as it arrives and clears the caller.
+- **Radio.API** (`PhoneCallClient`) raises **Ringing** from `IncomingCall`, with the number; a caller-ID update
+  raises again and restarts the announcement with the better name. The bare `CallStateChanged(…, "Ringing")`
+  raises nothing of its own, but resets the ring, so a missed `Idle` cannot silence the same caller's next
+  call. `"Unknown"` is raised as **no number**, so the announcement says "Unknown caller" and nothing is
+  looked up or reported back. Every other state is raised as it arrives and clears the caller.
 - **Radio.Web** (`PhoneHubService`) feeds both events to the Phone page and the incoming-call banner.
 
 ⛔ **Until `PHN-12` Radio.API bound `CallStateChanged` as `(state, phoneNumber)`**, plus a three-argument
@@ -876,8 +877,8 @@ silence it. Design: [`docs/design-handoffs/2026-10-02-incoming-call-banner.md`](
 | **Where the state lives** | `Radio.Web/Services/IncomingCallBannerService.cs`, one per browser circuit, fed by `PhoneHubService`'s `CallStateChanged` and `IncomingCall`. Hosts: `MainLayout` and `/sleep` (`Components/Shared/IncomingCallBanner.razor`). |
 | **Caller line** | Contact name (from the API's PBAP lookup, then RotaryPhone's `/api/contacts`) with the number under it; the formatted number alone; or **Unknown caller / No caller ID**. A monogram for a contact, a glyph otherwise — no photo exists in any contract. A caller-ID update upgrades the line in place. |
 | **Closes on** | A touch anywhere outside the Ignore column (the call keeps ringing; the announcement is untouched). The call being **answered** (`InCall`: a 600 ms **ANSWERED** beat, then a fade). The call **ending** (`Idle`: the caller hung up, the ring timed out, or Ignore worked — **CALL ENDED**, same beat). |
-| **Safety net** | While a call is tracked, `GET /api/phone/status` is re-read every 3 s: a hang-up lost to a hub reconnect still closes the banner. If nothing confirms the ring for 90 s (RotaryPhone unreachable), the banner closes on its own. |
-| **Sleep** | On `/sleep` the banner covers the sleep screen and the page reports the screen hidden, which **lights a dark panel** (`ENC-22` off-timer or `ENC-23` deep sleep) **without waking the console** — parked music stays parked. When it closes the screen is reported visible again, and `ENC-22`'s timer restarts from its full period. ⚠ With `PanelOffAfterMinutes = 0` (the box), a call during deep sleep therefore leaves the panel lit on the sleep clock until someone sleeps it again; the Web cannot restore deep-dark without an API change (design Q3). A touch on the banner never wakes the console. On normal pages the 5-minute idle dim is lifted. |
+| **Safety net** | While a call is tracked, each ringing phone's `GET /api/phone/status?phoneId=` is re-read every 3 s, one read at a time: a hang-up lost to a hub reconnect still closes the banner, and RotaryPhone's `CallId` in that answer splits a new call off an old one whose `Idle` was lost. If nothing confirms the ring for 90 s (RotaryPhone unreachable), the banner closes on its own. |
+| **Sleep** | On `/sleep` the banner covers the sleep screen and the page reports the screen hidden, which **lights a dark panel** (`ENC-22` off-timer or `ENC-23` deep sleep) **without waking the console** — parked music stays parked. When it closes the screen is reported visible again, and `ENC-22`'s timer restarts from its full period. ⚠ With `PanelOffAfterMinutes = 0` (the box), a call during deep sleep therefore leaves the panel lit on the sleep clock until someone sleeps it again; the Web cannot restore deep-dark without an API change (design Q3). A touch on the banner never wakes the console, and neither does a key on the covered sleep screen (Escape closes the banner). ⚠ In **Ambient** (the 30-minute idle clock, music playing) the server counts the console as Awake while the banner covers the screen, so a knob acts as on the awake console instead of waking it; Standby is unaffected. While covered, `/sleep` also hosts the fixed-position knob readout, above the banner. On normal pages a ring lifts the 5-minute idle dim and restarts the 30-minute idle-to-sleep timer. |
 | **More than one call** | RotaryPhone refuses a second inbound call on a ringing phone, so a second `IncomingCall` is the same call with a better number. A ring on another phone id shows the newest; when it ends the banner falls back to the other. A touch-closed banner stays closed for that call; the next call shows again. |
 | **Logging** | Nothing at Information (`Radio.Web`'s console sink is unrestricted — `PHN-5`). Numbers only through `LogSafeText.ForPhone`; names never. |
 
