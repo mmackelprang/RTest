@@ -25,6 +25,14 @@ public interface IPlayQueue
   int Count { get; }
 
   /// <summary>
+  /// A cheap change signal for <see cref="GetFullPlaylistAsync"/> (AUD-96). When two reads return the
+  /// same value, a full-playlist read in between would have returned the same items; a different value
+  /// means it MAY have changed, not that it did. Reading it must never touch a file or the network —
+  /// the API's 500 ms state poller reads it on every pass so that it can skip the full read.
+  /// </summary>
+  long QueueVersion { get; }
+
+  /// <summary>
   /// Retrieves the current playback queue (upcoming items only).
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>

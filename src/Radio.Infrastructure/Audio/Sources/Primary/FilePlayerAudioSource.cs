@@ -59,6 +59,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private bool _trackEndedNaturally;
   private long _pendingSeekMs;
 
+  // AUD-96: queue rows come from here, never from the file on the request path. See the class remarks.
+  private readonly QueueItemMetadataCache _queueMetadata;
+
+  /// <summary>
+  /// Reads one file's queue row (tags + embedded art). A test seam: production uses
+  /// <see cref="ReadQueueItemMetadata"/>. Called only on the metadata cache's background reader.
+  /// </summary>
+  internal Func<string, QueueItemMetadata> QueueMetadataReader { get; set; }
+
+  /// <summary>
+  /// A file's size and last-write time, or <c>null</c> when it is missing. A test seam: production uses
+  /// <see cref="StatQueueFile"/>. Called only on the metadata cache's background reader.
+  /// </summary>
+  internal Func<string, QueueFileStamp?> QueueFileStat { get; set; } = StatQueueFile;
+
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
     _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
@@ -101,6 +116,14 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _configurationManager = configurationManager;
     _albumArtCache = albumArtCache;
     _fingerprintingOptionsMonitor = fingerprintingOptions;
+
+    // AUD-96. The lambdas read the properties at call time, so a test can swap either seam after
+    // construction.
+    QueueMetadataReader = ReadQueueItemMetadata;
+    _queueMetadata = new QueueItemMetadataCache(
+      path => QueueMetadataReader(path),
+      path => QueueFileStat(path),
+      Logger);
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -175,6 +198,67 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   public int Count => _playlist.Count + (_currentFile != null ? 1 : 0);
 
   /// <inheritdoc/>
+  /// <remarks>
+  /// AUD-96: a 64-bit FNV-1a hash of exactly what <see cref="GetFullPlaylistAsync"/> derives an item's
+  /// identity and state from — the played, current and upcoming paths in order, and which of them are
+  /// in error — mixed with the metadata cache's <see cref="QueueItemMetadataCache.Version"/>, which
+  /// advances when a row's title, artist, album, duration or art changes. Hashing the lists rather than
+  /// counting mutations is deliberate: this class changes its queue from more than a dozen places, and a
+  /// counter would be correct only while every one of them remembered to bump it. Touches no file.
+  /// </remarks>
+  public long QueueVersion
+  {
+    get
+    {
+      ulong hash = FnvOffset;
+      lock (_playlistLock)
+      {
+        foreach (string path in _playedHistory)
+        {
+          hash = MixEntry(hash, 'P', path);
+        }
+        if (_currentFile != null)
+        {
+          hash = MixEntry(hash, 'C', _currentFile);
+        }
+        foreach (string path in _playlist)
+        {
+          hash = MixEntry(hash, 'U', path);
+        }
+      }
+
+      hash = Mix(hash, (ulong)_queueMetadata.Version);
+      return unchecked((long)hash);
+    }
+  }
+
+  private const ulong FnvOffset = 14695981039346656037UL;
+  private const ulong FnvPrime = 1099511628211UL;
+
+  private static ulong Mix(ulong hash, ulong value)
+  {
+    for (int i = 0; i < 8; i++)
+    {
+      hash ^= (value >> (i * 8)) & 0xFF;
+      hash *= FnvPrime;
+    }
+    return hash;
+  }
+
+  // One entry: its segment (played / current / upcoming), its error flag, its path, and a terminator so
+  // that adjacent paths cannot run together into the same byte stream.
+  private ulong MixEntry(ulong hash, char segment, string path)
+  {
+    hash = Mix(hash, segment);
+    hash = Mix(hash, _errorFiles.Contains(path) ? 1UL : 0UL);
+    foreach (char c in path)
+    {
+      hash = Mix(hash, c);
+    }
+    return Mix(hash, 0xFFFF_FFFF_FFFF_FFFFUL);
+  }
+
+  /// <inheritdoc/>
   public event EventHandler<QueueChangedEventArgs>? QueueChanged;
 
   /// <inheritdoc/>
@@ -217,6 +301,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _errorFiles.Clear();
     _consecutiveSkipCount = 0;
     _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
+    PrimeQueueMetadata(_originalOrder);
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded audio file: {FilePath}", fullPath);
@@ -267,6 +352,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _errorFiles.Clear();
     _consecutiveSkipCount = 0;
     _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
+    PrimeQueueMetadata(audioFiles);
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded {Count} audio files from directory: {DirectoryPath}", audioFiles.Count, fullPath);
@@ -310,6 +396,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _errorFiles.Clear();
     _consecutiveSkipCount = 0;
     _currentIndex = -1; // Will be set when LoadCurrentFileAsync is called
+    PrimeQueueMetadata(validFiles);
     await LoadCurrentFileAsync(cancellationToken);
 
     Logger.LogInformation("Loaded playlist with {Count} files", validFiles.Count);
@@ -724,6 +811,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       
       if (validFiles.Count > 0)
       {
+        // AUD-96: warm the queue rows in the background, so the first queue read after a restart does
+        // not pay for every file on the share.
+        PrimeQueueMetadata(validFiles);
+
         _originalOrder = new List<string>(validFiles);
         _playlist = new Queue<string>(validFiles);
         _currentIndex = Math.Max(0, Math.Min(prefs.CurrentQueueIndex, validFiles.Count - 1));
@@ -1183,6 +1274,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     _playlist.Clear();
     _originalOrder.Clear();
     _playedHistory.Clear();
+    _queueMetadata.Dispose();
 
     await base.DisposeAsyncCore();
   }
@@ -1326,6 +1418,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     // Rebuild queue from all tracks, keeping current position
     var newCurrentIndex = _currentFile != null ? allTracks.IndexOf(_currentFile) : -1;
     RebuildQueueFromList(allTracks, newCurrentIndex);
+    PrimeQueueMetadata([fullPath]);
 
     var actualIndex = position ?? allTracks.Count - 1;
     Logger.LogInformation("Added track to queue: {Track} at position {Position}", Path.GetFileName(fullPath), actualIndex);
@@ -1764,39 +1857,21 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Creates a QueueItem from a file path.
+  /// Creates a QueueItem from a file path. AUD-96: the row's metadata comes from the cache and never from
+  /// the file — a path not read yet shows its placeholder (file name, "--", no art) until the background
+  /// reader fills it, after which <see cref="QueueVersion"/> moves and the queue is broadcast again.
   /// </summary>
   private QueueItem CreateQueueItem(string filePath, int index, bool isCurrent)
   {
-    // Read metadata from file using SoundFlow
-    var title = Path.GetFileNameWithoutExtension(filePath);
-    var artist = "--";
-    var album = "--";
-    TimeSpan? duration = null;
-
-    // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
-    var tags = AudioTagReader.Read(filePath, Logger);
-    if (tags != null)
-    {
-      duration = tags.Duration;
-      title = tags.Title ?? title;
-      artist = tags.Artist ?? artist;
-      album = tags.Album ?? album;
-    }
-
-    // Populate album art from embedded picture tags so Up Next tiles render real art
-    // instead of falling back to the music_note placeholder. Content-addressed cache
-    // makes repeated reads idempotent.
-    var albumArtUrl = TryGetEmbeddedAlbumArtUrl(filePath);
-
+    var metadata = _queueMetadata.GetOrSchedule(filePath);
     return new QueueItem
     {
       Id = filePath,
-      Title = title,
-      Artist = artist,
-      Album = album,
-      Duration = duration,
-      AlbumArtUrl = albumArtUrl,
+      Title = metadata.Title,
+      Artist = metadata.Artist,
+      Album = metadata.Album,
+      Duration = metadata.Duration,
+      AlbumArtUrl = metadata.AlbumArtUrl,
       Index = index,
       IsCurrent = isCurrent,
       State = isCurrent ? QueueItemState.Current : QueueItemState.Upcoming,
@@ -1805,16 +1880,53 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Creates a QueueItem with an explicit state and full playlist index.
+  /// Creates a QueueItem with an explicit state and full playlist index. Metadata from the cache, as
+  /// <see cref="CreateQueueItem"/>.
   /// </summary>
   private QueueItem CreateQueueItemWithState(string filePath, int fullPlaylistIndex, QueueItemState state)
+  {
+    var metadata = _queueMetadata.GetOrSchedule(filePath);
+    return new QueueItem
+    {
+      Id = filePath,
+      Title = metadata.Title,
+      Artist = metadata.Artist,
+      Album = metadata.Album,
+      Duration = metadata.Duration,
+      AlbumArtUrl = metadata.AlbumArtUrl,
+      Index = fullPlaylistIndex, // For operational compatibility
+      IsCurrent = state == QueueItemState.Current,
+      State = state,
+      FullPlaylistIndex = fullPlaylistIndex
+    };
+  }
+
+  /// <summary>
+  /// AUD-96: queues <paramref name="paths"/> for the metadata reader (read if new, re-read if the file
+  /// changed) and, once the cache has grown past its bound, drops rows for paths no longer queued.
+  /// Returns at once; touches no file.
+  /// </summary>
+  private void PrimeQueueMetadata(IReadOnlyCollection<string> paths)
+  {
+    _queueMetadata.TrimTo(GetFullPlaylistInOrder().Concat(paths).ToList());
+    _queueMetadata.Revalidate(paths);
+  }
+
+  /// <summary>Completes when the queue metadata reader has caught up. Test rendezvous only.</summary>
+  internal Task WhenQueueMetadataIdleAsync() => _queueMetadata.WhenIdleAsync();
+
+  /// <summary>
+  /// Reads one queue row from the file: the read every queue request used to do per item (AUD-96 moved
+  /// it here, onto the cache's background reader). AUD-32: SoundFlow first, TagLib when SoundFlow rejects
+  /// the tag; blank tags come back null and keep the defaults. Never throws.
+  /// </summary>
+  private QueueItemMetadata ReadQueueItemMetadata(string filePath)
   {
     var title = Path.GetFileNameWithoutExtension(filePath);
     var artist = "--";
     var album = "--";
     TimeSpan? duration = null;
 
-    // AUD-32: SoundFlow first, TagLib when SoundFlow rejects the tag. Blank tags come back null.
     var tags = AudioTagReader.Read(filePath, Logger);
     if (tags != null)
     {
@@ -1824,24 +1936,25 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       album = tags.Album ?? album;
     }
 
-    // Populate album art from embedded picture tags so Up Next / Recent tiles render real
-    // art instead of falling back to the music_note placeholder. Content-addressed cache
-    // makes repeated reads idempotent.
+    // Embedded art so Up Next / Recent tiles render real art instead of the music_note placeholder.
+    // The album-art cache is content-addressed, so the URL is stable for the same picture.
     var albumArtUrl = TryGetEmbeddedAlbumArtUrl(filePath);
 
-    return new QueueItem
+    return new QueueItemMetadata(title, artist, album, duration, albumArtUrl);
+  }
+
+  /// <summary>The file's size and last-write time, or <c>null</c> when it is missing or unreadable.</summary>
+  private static QueueFileStamp? StatQueueFile(string filePath)
+  {
+    try
     {
-      Id = filePath,
-      Title = title,
-      Artist = artist,
-      Album = album,
-      Duration = duration,
-      AlbumArtUrl = albumArtUrl,
-      Index = fullPlaylistIndex, // For operational compatibility
-      IsCurrent = state == QueueItemState.Current,
-      State = state,
-      FullPlaylistIndex = fullPlaylistIndex
-    };
+      var info = new FileInfo(filePath);
+      return info.Exists ? new QueueFileStamp(info.Length, info.LastWriteTimeUtc) : null;
+    }
+    catch (Exception)
+    {
+      return null;
+    }
   }
 
   /// <summary>
@@ -2043,6 +2156,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       _trackStartedFile = filePath;
       Volatile.Write(ref _trackStartedAtTicks, DateTime.UtcNow.Ticks);
     }
+
+    // AUD-96: the track being loaded is the row most likely to be looked at, so re-check its cached row
+    // against the file (one stat on the background reader; a re-read only if the file changed).
+    _queueMetadata.Revalidate([filePath]);
 
     _metadata.Clear();
     
