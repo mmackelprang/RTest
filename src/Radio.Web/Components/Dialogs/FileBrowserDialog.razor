@@ -1,11 +1,13 @@
 @using Radzen
 @using Radzen.Blazor
 @using System.Text.Json
+@using Radio.Web.Services
 @using Radio.Web.Services.ApiClients
 @inject FileApiService FileApi
 @inject ConfigurationApiService ConfigApi
 @inject DialogService DialogService
 @inject ILogger<FileBrowserDialog> Logger
+@implements IDisposable
 
 <div style="display: flex; flex-direction: column; max-height: 480px; min-height: 320px;">
   <!-- Breadcrumbs + Location/Path bar + Search/Filter toolbar -->
@@ -224,6 +226,12 @@
     </div>
   </div>
 
+  @if (SelectFolder)
+  {
+    @* UI-32 folder mode: what adding this folder would queue, so an empty-looking folder is not a surprise. *@
+    <div class="folder-pick-summary" aria-live="polite">@FolderSummaryText</div>
+  }
+
   <!-- File list -->
   @if (_isLoading)
   {
@@ -247,12 +255,14 @@
       }
     </div>
   }
-  else if (!FilteredDirectories.Any() && !FilteredFiles.Any())
+  else if (!FilteredDirectories.Any() && (SelectFolder || !FilteredFiles.Any()))
   {
     <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 32px;">
       <RadzenIcon Icon="folder_off" Style="font-size: 64px; opacity: 0.4;" />
       <span style="margin-top: 12px; color: var(--text-low);">
-        @(string.IsNullOrEmpty(_searchText) ? "No audio files or folders found" : "No matching files")
+        @(SelectFolder
+          ? (string.IsNullOrEmpty(_searchText) ? "No folders inside this one" : "No matching folders")
+          : (string.IsNullOrEmpty(_searchText) ? "No audio files or folders found" : "No matching files"))
       </span>
     </div>
   }
@@ -271,8 +281,8 @@
         </div>
       }
 
-      @* Files *@
-      @foreach (var file in FilteredFiles)
+      @* Files — not in folder mode, where a file row would look tappable and do nothing (UI-32). *@
+      @foreach (var file in SelectFolder ? Enumerable.Empty<FileItemDto>() : FilteredFiles)
       {
         var isSelected = AllowMultiSelect ? _selectedPaths.Contains(file.Path) : _selectedPath == file.Path;
         <div class="file-item list-item-touch @(isSelected ? "file-item-selected" : "")"
@@ -330,6 +340,34 @@
   }
 </div>
 
+@if (SelectFolder)
+{
+  @* UI-32 folder-mode footer: the subfolder switch on the left, Cancel and Add on the right. While an add runs the
+     progress replaces the switch and every control is disabled. *@
+  <div class="folder-pick-footer">
+    @if (_isAddingFolder)
+    {
+      <div class="folder-pick-progress" role="status" aria-live="polite">
+        <RadzenProgressBar Value="@_addDone" Max="@(Math.Max(1, _addTotal))" ShowValue="false" Style="height: 6px;" />
+        <span>@($"Adding {_addDone} of {_addTotal}…")</span>
+      </div>
+    }
+    else
+    {
+      <label class="folder-pick-switch">
+        <RadzenSwitch @bind-Value="_includeSubfolders" Name="folder-pick-include-subfolders" />
+        <span>Include subfolders</span>
+      </label>
+    }
+    <RadzenButton Click="@Cancel" Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light" Text="Cancel"
+                  Disabled="@_isAddingFolder" class="folder-pick-button" />
+    <RadzenButton Click="@AddFolderAsync" Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary"
+                  Text="@AddFolderButtonText" Disabled="@(!CanAddFolder)" IsBusy="@_isAddingFolder"
+                  class="folder-pick-button folder-pick-add" />
+  </div>
+}
+else
+{
 <!-- Dialog action buttons -->
 <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px;">
   @if (AllowMultiSelect)
@@ -358,6 +396,7 @@
                   Text="@(AllowMultiSelect && _selectedPaths.Count > 1 ? $"Select ({_selectedPaths.Count})" : "Select")" />
   }
 </div>
+}
 
 @code {
   [Parameter] public string? InitialSelection { get; set; }
@@ -372,6 +411,26 @@
   /// E.g., "music" opens the NAS music bookmark, "sounds" opens the local audio folder.
   /// </summary>
   [Parameter] public string? PreferredBookmarkTag { get; set; }
+
+  /// <summary>
+  /// UI-32 "Add folder": the dialog picks a folder instead of files. Only folders are listed; the footer holds an
+  /// "Include subfolders" switch (on by default — measured on the box, artist folders hold no tracks at the top
+  /// level, only album subfolders do) and an Add button for the folder being shown. The dialog lists the folder's
+  /// tracks through <c>GET /api/files/folder-tracks</c>, queues them in batches (<see cref="FolderQueueAdder"/>)
+  /// while showing progress, and closes with a <see cref="FolderAddResult"/>.
+  /// </summary>
+  [Parameter] public bool SelectFolder { get; set; }
+
+  // ── UI-32 folder mode state ──
+  private bool _includeSubfolders = true;
+  private FolderTracksDto? _folderInfo;     // the shown folder's listing, always fetched WITH subfolders
+  private string? _folderInfoError;
+  private bool _folderInfoLoading;
+  private CancellationTokenSource? _folderInfoCts;
+  private readonly CancellationTokenSource _lifetimeCts = new();
+  private bool _isAddingFolder;
+  private int _addDone;
+  private int _addTotal;
 
   private List<FileItemDto> _directories = new();
   private List<FileItemDto> _files = new();
@@ -666,6 +725,193 @@
       _isLoading = false;
       StateHasChanged();
     }
+
+    if (SelectFolder)
+    {
+      await LoadFolderInfoAsync();
+    }
+  }
+
+  // --- UI-32 folder mode ---
+
+  /// <summary>The shown folder as the API takes it: absolute, relative to the media root, or null for the root.</summary>
+  private string? CurrentFolderPath => _isAbsoluteMode
+    ? _absolutePath
+    : (string.IsNullOrEmpty(_currentPath) || _currentPath == "/" ? null : _currentPath);
+
+  /// <summary>
+  /// Whether the shown folder is a library root — the media root or a bookmark — where its own name says little,
+  /// so the button reads "Add this folder".
+  /// </summary>
+  private bool IsAtLibraryRoot
+  {
+    get
+    {
+      var folder = CurrentFolderPath;
+      if (folder == null)
+      {
+        return true;
+      }
+      var trimmed = folder.TrimEnd('/', '\\');
+      return _bookmarks.Any(b => string.Equals(b.Path.TrimEnd('/', '\\'), trimmed, StringComparison.OrdinalIgnoreCase));
+    }
+  }
+
+  /// <summary>What Add would queue with the switch as it is: every listed track, or only the top-level ones.</summary>
+  internal IReadOnlyList<string> PathsToAdd => _folderInfo == null
+    ? Array.Empty<string>()
+    : _includeSubfolders ? _folderInfo.Paths : _folderInfo.Paths.Take(_folderInfo.TopLevelCount).ToList();
+
+  private bool CanAddFolder => !_isAddingFolder && !_folderInfoLoading && !_isLoading && _errorMessage == null
+    && PathsToAdd.Count > 0;
+
+  private string FolderName => _folderInfo?.FolderName ?? "this folder";
+
+  internal string AddFolderButtonText
+  {
+    get
+    {
+      if (_isAddingFolder)
+      {
+        return "Adding…";
+      }
+      if (_folderInfo != null && _includeSubfolders && _folderInfo.Truncated)
+      {
+        return $"Add first {_folderInfo.MaxTracks}";
+      }
+
+      var label = IsAtLibraryRoot ? "Add this folder" : $"Add \"{Ellipsize(FolderName, 18)}\"";
+      var count = PathsToAdd.Count;
+      return count > 0 ? $"{label} ({count})" : label;
+    }
+  }
+
+  internal string FolderSummaryText
+  {
+    get
+    {
+      if (_isLoading || _folderInfoLoading)
+      {
+        return "Counting tracks…";
+      }
+      if (_folderInfoError != null)
+      {
+        return _folderInfoError;
+      }
+      if (_folderInfo == null)
+      {
+        return "";
+      }
+
+      var top = _folderInfo.TopLevelCount;
+      var all = _folderInfo.Paths.Count;
+      var allText = _folderInfo.Truncated ? $"{_folderInfo.MaxTracks}+" : all.ToString();
+      if (all == 0)
+      {
+        return $"No playable tracks in {FolderName}";
+      }
+      if (!_includeSubfolders && top == 0)
+      {
+        return $"No tracks directly in {FolderName}. Turn on Include subfolders to add {allText}.";
+      }
+      if (_includeSubfolders && _folderInfo.Truncated)
+      {
+        return $"More than {_folderInfo.MaxTracks} tracks here. Only the first {_folderInfo.MaxTracks} will be added.";
+      }
+
+      var here = $"{top} {(top == 1 ? "track" : "tracks")} here";
+      return _folderInfo.SubfolderCount > 0 ? $"{here} · {allText} including subfolders" : here;
+    }
+  }
+
+  private static string Ellipsize(string text, int max) =>
+    text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";
+
+  /// <summary>
+  /// Lists the shown folder's tracks, subfolders included, for the summary line and the Add button. One listing
+  /// serves both switch positions: the top-level tracks are its first <c>TopLevelCount</c> entries. A newer
+  /// navigation cancels an older listing still in flight.
+  /// </summary>
+  private async Task LoadFolderInfoAsync()
+  {
+    _folderInfoCts?.Cancel();
+    _folderInfoCts?.Dispose();
+    _folderInfo = null;
+    _folderInfoError = null;
+    if (_errorMessage != null)
+    {
+      return;
+    }
+
+    var cts = CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCts.Token);
+    _folderInfoCts = cts;
+    _folderInfoLoading = true;
+    StateHasChanged();
+    try
+    {
+      var (folder, error) = await FileApi.GetFolderTracksAsync(CurrentFolderPath, includeSubfolders: true, cts.Token);
+      if (cts.IsCancellationRequested)
+      {
+        return;
+      }
+      _folderInfo = folder;
+      _folderInfoError = error;
+    }
+    catch (OperationCanceledException)
+    {
+      return;
+    }
+    finally
+    {
+      if (ReferenceEquals(_folderInfoCts, cts))
+      {
+        _folderInfoLoading = false;
+      }
+    }
+
+    StateHasChanged();
+  }
+
+  private async Task AddFolderAsync()
+  {
+    if (!CanAddFolder || _folderInfo == null)
+    {
+      return;
+    }
+
+    var info = _folderInfo;
+    var paths = PathsToAdd.ToList();
+    _isAddingFolder = true;
+    _addDone = 0;
+    _addTotal = paths.Count;
+    StateHasChanged();
+
+    var outcome = await FolderQueueAdder.AddInBatchesAsync(
+      paths,
+      FolderQueueAdder.BatchSize,
+      (batch, ct) => FileApi.AddFilesToQueueAsync(batch, ct),
+      sent =>
+      {
+        _addDone = sent;
+        return InvokeAsync(StateHasChanged);
+      },
+      _lifetimeCts.Token);
+
+    // Closed (✕) mid-run: the dialog is gone, so there is nothing to close — closing now would close whatever
+    // dialog is on top instead. The batches already sent stay queued.
+    if (_lifetimeCts.IsCancellationRequested)
+    {
+      return;
+    }
+
+    DialogService.Close(new FolderAddResult(
+      info.FolderName, outcome.Added, paths.Count, outcome.Failed + info.SkippedUnreadable, outcome.Error));
+  }
+
+  public void Dispose()
+  {
+    // Cancelled, not disposed: an add or listing still awaiting may read the token after this runs.
+    _lifetimeCts.Cancel();
   }
 
   // --- Navigation: Relative mode ---

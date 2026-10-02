@@ -283,6 +283,25 @@ public record QueueFilesResponseDto(
   List<string>? FailedPaths
 );
 
+/// <summary>
+/// UI-32: a folder's playable files in queue order, from <c>GET /api/files/folder-tracks</c>. Mirrors the API's
+/// <c>FolderTracksDto</c>; see there for each field.
+/// </summary>
+public record FolderTracksDto
+{
+  public string FolderPath { get; init; } = "";
+  public string FolderName { get; init; } = "";
+  public bool IncludeSubfolders { get; init; }
+  public List<string> Paths { get; init; } = new();
+  public int TopLevelCount { get; init; }
+  public int SubfolderCount { get; init; }
+  public bool Truncated { get; init; }
+  public int MaxTracks { get; init; }
+  public int SkippedUnreadable { get; init; }
+  public int SkippedLinks { get; init; }
+  public int UnreadableFolders { get; init; }
+}
+
 // Play History API DTOs
 public record PlayHistoryListDto(
   int TotalCount,
