@@ -19,9 +19,10 @@ namespace Radio.API.Tests.Controllers;
 /// outcome.
 ///
 /// <para>
-/// A direct construction rather than <c>WebApplicationFactory</c>: on Windows (and in CI's container)
-/// <c>Program.cs</c> registers no <see cref="IPanelPowerService"/>, so the only way to put one behind
-/// the controller is to hand it one.
+/// A direct construction rather than <c>WebApplicationFactory</c>: <c>Program.cs</c> registers the
+/// real <see cref="IPanelPowerService"/> only on Linux (CI's self-hosted runner included), where it
+/// drives Mutter over D-Bus, and none at all on Windows. Neither is a panel a test can observe, so the
+/// controller is handed a fake directly.
 /// </para>
 /// </summary>
 public class SystemControllerDeepSleepTests
@@ -83,7 +84,7 @@ public class SystemControllerDeepSleepTests
     JsonElement body = Body(await controller.SetSleepState(new SetSleepRequest { Sleep = true, PanelOff = true }));
 
     Assert.True(sleep.IsSleeping);
-    Assert.Equal(["sleep-pill-hold"], panel.PowerOffSources);
+    Assert.Equal(["api-panel-off"], panel.PowerOffSources);
     Assert.Equal([true], panel.SleepingAtPowerOff);
     Assert.True(body.GetProperty("isSleeping").GetBoolean());
     Assert.True(body.GetProperty("panelOff").GetBoolean());

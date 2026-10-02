@@ -740,8 +740,10 @@ public class PanelPowerServiceTests
   }
 
   [Fact]
-  public async Task PowerOffNow_DisarmsTheTimer_SoNothingFiresWhileDeepDark()
+  public async Task PowerOffNow_WithTheSleepScreenUp_StaysDarkThroughTheTimersDeadline()
   {
+    // Passes with or without PowerOffNow's disarm: a timer firing on a dark panel is a no-op anyway
+    // (OnOffTimer returns on IsDarkLocked). It pins the outcome, not the disarm - the next test does.
     using var h = await StartedAndStableAsync(minutes: 10);
     h.Sleep.Show(true);
 
@@ -750,5 +752,49 @@ public class PanelPowerServiceTests
 
     Assert.Equal([true, false], h.Control.Commands);
     Assert.True(h.Service.IsPanelOff);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_DisarmsTheTimer_SoAnUnconfirmedDeepOffIsNotRetakenAtTheOldDeadline()
+  {
+    // The case that tells the disarm apart. The deep power-off is not confirmed, so the pump lights the
+    // panel again - by a path that does not touch the timer (unlike a knob input, which re-arms it with
+    // a full period and would hide a missing disarm). Had the countdown armed by Show(true) survived
+    // PowerOffNow, it would fire at its old deadline and power the lit panel off a minute later, on a
+    // decision the owner never made. With the disarm, the countdown starts again only on the next knob
+    // input or sleep-screen report.
+    using var h = await StartedAndStableAsync(minutes: 10);
+    h.Sleep.Show(true);
+    await h.AdvanceAsync(TimeSpan.FromMinutes(9));
+
+    h.Control.Results.Enqueue(false);
+    Assert.Equal(PanelPowerOffResult.PoweredOff, h.Service.PowerOffNow("test"));
+    await h.Service.PumpIdle;
+    Assert.Equal([true, false, true], h.Control.Commands);
+
+    await h.AdvanceAsync(TimeSpan.FromMinutes(2));
+
+    Assert.Equal([true, false, true], h.Control.Commands);
+    Assert.False(h.Service.IsPanelOff);
+  }
+
+  [Fact]
+  public async Task PowerOffNow_BeforeTheSleepScreenReports_StaysDark_AndTheFirstKnobStillReportsTheDeepSleep()
+  {
+    // The production order. SystemController calls PowerOffNow as soon as EnterSleepAsync returns; the
+    // sleep page reports itself visible only after MainLayout has navigated to /sleep, so the report
+    // lands on an already-dark panel. It must neither light the panel nor end the deep sleep.
+    using var h = await StartedAndStableAsync(minutes: 10);
+    Assert.False(h.Sleep.IsSleepScreenVisible);
+
+    Assert.Equal(PanelPowerOffResult.PoweredOff, h.Service.PowerOffNow("test"));
+    await h.Service.PumpIdle;
+
+    h.Sleep.Show(true);
+    await h.AdvanceAsync(TimeSpan.FromHours(1));
+
+    Assert.Equal([true, false], h.Control.Commands);
+    Assert.True(h.Service.IsPanelOff);
+    Assert.Equal(PanelInputOutcome.LitPanelFromDeepSleep, h.Service.OnEncoderInput("encoder-button"));
   }
 }

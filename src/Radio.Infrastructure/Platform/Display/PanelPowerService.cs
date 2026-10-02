@@ -14,9 +14,11 @@ namespace Radio.Infrastructure.Platform.Display;
 /// <para>
 /// <b>Deep sleep (<c>ENC-23</c>)</b>: <see cref="PowerOffNow"/> powers the panel off at once, on the
 /// Sleep pill's hold, whatever <see cref="PanelPowerOptions.PanelOffAfterMinutes"/> says — but under the
-/// same safety rule 1 as the timer, refused rather than deferred. The only other difference from a
-/// timer power-off is what the first knob input on the dark panel reports
-/// (<see cref="PanelInputOutcome.LitPanelFromDeepSleep"/> instead of <see cref="PanelInputOutcome.LitPanel"/>),
+/// same safety rule 1 as the timer, refused rather than deferred. It differs from a timer power-off in
+/// three ways: it does not require the sleep screen to be visible (the controller calls it right after
+/// entering sleep, before the page has reported itself); it disarms the timer, which has nothing left
+/// to do while the panel is dark; and the first knob input on the dark panel reports
+/// <see cref="PanelInputOutcome.LitPanelFromDeepSleep"/> instead of <see cref="PanelInputOutcome.LitPanel"/>,
 /// which the router uses to let a VOLUME press wake the console in the same press. Every path that
 /// lights the panel ends the deep sleep.
 /// </para>
@@ -534,7 +536,8 @@ public sealed class PanelPowerService : IPanelPowerService, IHostedService, IDis
   {
     if (FullPeriod() <= TimeSpan.Zero)
     {
-      // Feature off. Nothing arms, so nothing can power the panel off.
+      // Timer off. Nothing arms, so the sleep screen never powers the panel off on its own. A deep
+      // sleep (PowerOffNow) does not go through this timer and still can.
       DisarmOffTimerLocked();
       return;
     }

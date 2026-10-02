@@ -33,8 +33,10 @@ public enum ConsoleWakeState
   Ambient,
 
   /// <summary>
-  /// Audio is paused and muted. Reached by the topbar Sleep pill (a tap, or a hold, which also powers
-  /// the panel off — <c>ENC-23</c>'s deep sleep), a VOLUME long-press, or the API.
+  /// Audio is paused and muted. Reached by the topbar Sleep pill (a tap, or a hold, which also asks
+  /// for the panel to be powered off — <c>ENC-23</c>'s deep sleep; that request is refused when the
+  /// encoder is not connected and stable, and the console is in Standby either way), a VOLUME
+  /// long-press, or the API.
   /// A <b>turn</b> here never resumes audio — only a press or a screen tap does (D22).
   /// </summary>
   Standby,

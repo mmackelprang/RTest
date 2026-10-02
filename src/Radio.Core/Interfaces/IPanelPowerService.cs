@@ -32,7 +32,11 @@ public enum PanelInputOutcome
 /// <summary>The outcome of <see cref="IPanelPowerService.PowerOffNow"/>.</summary>
 public enum PanelPowerOffResult
 {
-  /// <summary>The panel was wanted on; it is now wanted off and the command has been dispatched (not awaited).</summary>
+  /// <summary>
+  /// The panel was wanted on; power-off has been requested. Not awaited, and not necessarily a command
+  /// sent: if the last power-on was never confirmed (a retry is pending), the service already counts the
+  /// panel as off, so the request matches the applied state and nothing is sent.
+  /// </summary>
   PoweredOff,
 
   /// <summary>The panel was already wanted off. Nothing was sent; the dark panel is now treated as a deep sleep.</summary>
@@ -44,7 +48,10 @@ public enum PanelPowerOffResult
   /// <summary>Refused under safety rule 1: the encoder is connected but has not been for <c>EncoderStableSeconds</c>.</summary>
   RefusedEncoderNotStable,
 
-  /// <summary>The service is not started, or is disposed. Nothing was sent.</summary>
+  /// <summary>
+  /// The service is not started or is disposed — or, as <c>SystemController</c> uses it, no panel power
+  /// service is registered on this host at all. Nothing was sent.
+  /// </summary>
   Unavailable,
 }
 
@@ -105,10 +112,10 @@ public interface IPanelPowerService
   /// </para>
   ///
   /// <para>
-  /// The decision is synchronous; the power-off command is dispatched, not awaited, so
+  /// The decision is synchronous; the power-off is requested of the pump, not awaited, so
   /// <see cref="PanelPowerOffResult.PoweredOff"/> means "requested", not "confirmed by the compositor".
   /// </para>
   /// </summary>
-  /// <param name="source">What asked, for the log line (e.g. <c>sleep-pill-hold</c>).</param>
+  /// <param name="source">What asked, for the log line (e.g. <c>api-panel-off</c>).</param>
   PanelPowerOffResult PowerOffNow(string source);
 }

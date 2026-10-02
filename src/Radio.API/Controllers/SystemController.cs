@@ -518,7 +518,8 @@ public class SystemController : ControllerBase
   /// With <see cref="SetSleepRequest.PanelOff"/> and <see cref="SetSleepRequest.Sleep"/> both true
   /// (<c>ENC-23</c>'s deep sleep, the Sleep pill's hold), sleep is entered first and the panel is then
   /// asked to power off now through <see cref="IPanelPowerService.PowerOffNow"/>. The response then
-  /// carries two more fields: <c>panelOff</c> (true when the panel was powered off or was already off)
+  /// carries two more fields: <c>panelOff</c> (true when power-off was requested or the panel was
+  /// already off — requested, not confirmed by the compositor)
   /// and <c>panelOffResult</c> (the <see cref="PanelPowerOffResult"/> name, including the refusal
   /// reason). A host with no panel power service — anything but Linux — answers
   /// <c>Unavailable</c>. Sleep is entered either way; a refused power-off does not undo it.
@@ -545,7 +546,9 @@ public class SystemController : ControllerBase
       {
         // After EnterSleepAsync has completed rather than before it, so the panel goes dark on a console
         // that has already been parked, and a VOLUME press on it finds Standby to wake from.
-        PanelPowerOffResult result = _panelPower?.PowerOffNow("sleep-pill-hold") ?? PanelPowerOffResult.Unavailable;
+        // "api-panel-off", not the pill: the Sleep pill's hold is the documented caller, but any API
+        // client can send this flag, and the log line must not claim a hold that never happened.
+        PanelPowerOffResult result = _panelPower?.PowerOffNow("api-panel-off") ?? PanelPowerOffResult.Unavailable;
         return Ok(new
         {
           isSleeping = _sleepService.IsSleeping,
