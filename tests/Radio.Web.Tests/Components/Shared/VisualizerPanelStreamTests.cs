@@ -47,6 +47,7 @@ public class VisualizerPanelStreamTests : TestContext
 
   public VisualizerPanelStreamTests()
   {
+    _prefsHandler = new GatedHandler(_prefsGate.Task);
     Services.AddHermeticTestRig();
     JSInterop.Mode = JSRuntimeMode.Loose;
     _module = JSInterop.SetupModule("./js/visualizer.js");
@@ -80,14 +81,28 @@ public class VisualizerPanelStreamTests : TestContext
   /// The preferences read does not answer until <see cref="_prefsGate"/> is completed: radio-api busy
   /// at a wake, resuming the source and reloading its output settings.
   /// </summary>
+  /// <remarks>
+  /// ⚠ The base address is load-bearing. Without one, the client's relative GET throws before it reaches
+  /// any handler, the service swallows that and answers at once, and the "held" read is not held — which
+  /// is how this test's first draft passed against the very ordering it exists to catch (caught by its
+  /// mutation check).
+  /// </remarks>
   private void WithPreferencesReadHeld() =>
-    Services.AddHttpClient<ConfigurationApiService>()
-      .ConfigurePrimaryHttpMessageHandler(() => new GatedHandler(_prefsGate.Task));
+    Services.AddHttpClient<ConfigurationApiService>(c => c.BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl))
+      .ConfigurePrimaryHttpMessageHandler(() => _prefsHandler);
+
+  private readonly GatedHandler _prefsHandler;
 
   private sealed class GatedHandler(Task gate) : HttpMessageHandler
   {
+    private int _requests;
+
+    /// <summary>Requests that have reached this handler and are waiting on the gate (or did).</summary>
+    public int Requests => Volatile.Read(ref _requests);
+
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
+      Interlocked.Increment(ref _requests);
       await gate.WaitAsync(cancellationToken);
       throw new HttpRequestException("released by the test");
     }
@@ -160,10 +175,12 @@ public class VisualizerPanelStreamTests : TestContext
   {
     WithPreferencesReadHeld();
     var cut = RenderInitialised();
+    cut.WaitForAssertion(() => _prefsHandler.Requests.Should().Be(1), TimeSpan.FromSeconds(5));
 
     await FireFrameAsync(cut, 0.5f);
 
     cut.WaitForAssertion(() => Draws.Should().HaveCount(1), TimeSpan.FromSeconds(5));
+    _prefsGate.Task.IsCompleted.Should().BeFalse("the frame was drawn while the read was still held");
     _prefsGate.SetResult();
   }
 

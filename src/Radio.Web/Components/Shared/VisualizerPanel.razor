@@ -1042,14 +1042,14 @@
   /// </summary>
   /// <remarks>
   /// ⚠ <b>Why this no longer awaits the draw.</b> <c>AudioVisualizationHubService</c> is one connection
-  /// shared by every circuit, and it awaits each subscriber in turn before it reads the next message. A
-  /// handler that awaited its browser round trip therefore held the whole stream for as long as that
-  /// browser took to answer, and a browser that stopped answering for a while came back to a queue of
-  /// stale frames drawn one round trip at a time. Measured on the kiosk (UI-36): while the panel is
-  /// powered off, Chrome completes no animation frame for the whole dark period (6.8 s and 6.6 s in the
-  /// two deep sleeps measured), so a browser that is slow to answer is a real state here, not a
-  /// hypothetical. Now the hub hands over and moves on, frames that arrive while one is being drawn
-  /// replace each other, and the canvas always receives the newest frame next.
+  /// shared by every circuit; its <c>InvokeEventHandlersAsync</c> awaits each subscriber in turn, and the
+  /// SignalR client finishes one message's handler before it dispatches the next. A handler that awaited
+  /// its browser round trip therefore held the whole stream for as long as that browser took to answer,
+  /// and a browser that stopped answering for a while came back to a queue of stale frames drawn one
+  /// round trip at a time. Now the hub hands over and moves on, frames that arrive while one is being
+  /// drawn replace each other, and the canvas always receives the newest frame next.
+  /// ⚠ <b>A guard, not a measured cure.</b> UI-36 found that while the panel is dark the kiosk's Chrome
+  /// renders nothing but keeps running scripts, and it observed no slow round trip; see the row's dossier.
   /// </remarks>
   private Task HandleWaveformData(WaveformDataDto data)
   {
