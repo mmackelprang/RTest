@@ -354,6 +354,91 @@ public sealed class FileBrowserFolderTracksTests : IDisposable
     Assert.Single(listing.Paths);
   }
 
+  // ── Review fixes ──
+
+  [Fact]
+  public async Task AWalkBlockedInsideOneCall_DoesNotHoldTheCaller_OnceCancelled()
+  {
+    // A stale CIFS mount or a FIFO named *.mp3 blocks inside open() and never reaches a cancellation check. The
+    // caller (the request) must still be released when its token is cancelled. Synchronised on the probe being
+    // entered, not on elapsed time; the 10 s bound only fails if the release never happens.
+    Touch("Album/1.mp3");
+    using var entered = new ManualResetEventSlim();
+    using var release = new ManualResetEventSlim();
+    var browser = Browser();
+    browser.ReadProbe = _ =>
+    {
+      entered.Set();
+      release.Wait();
+      return true;
+    };
+    using var cts = new CancellationTokenSource();
+
+    try
+    {
+      var listing = browser.ListFolderTracksAsync("Album", false, 500, checkReadable: true, cts.Token);
+      Assert.True(entered.Wait(TimeSpan.FromSeconds(10)), "the walk never reached the probe");
+      cts.Cancel();
+
+      await Assert.ThrowsAnyAsync<OperationCanceledException>(() => listing.WaitAsync(TimeSpan.FromSeconds(10)));
+    }
+    finally
+    {
+      release.Set();
+    }
+  }
+
+  [Fact]
+  public async Task CheckReadableFalse_SkipsTheProbe()
+  {
+    Touch("Album/1.mp3");
+    Touch("Album/2.mp3");
+    var browser = Browser();
+    var probed = 0;
+    browser.ReadProbe = _ =>
+    {
+      Interlocked.Increment(ref probed);
+      return false;
+    };
+
+    var counted = await browser.ListFolderTracksAsync("Album", false, 500, checkReadable: false);
+    var checkedListing = await browser.ListFolderTracksAsync("Album", false, 500, checkReadable: true);
+
+    Assert.Equal(2, counted.Paths.Count);
+    Assert.Equal(0, counted.SkippedUnreadable);
+    Assert.Empty(checkedListing.Paths);
+    Assert.Equal(2, checkedListing.SkippedUnreadable);
+    Assert.Equal(2, probed);
+  }
+
+  [SkippableFact]
+  public void ResolveRealPath_DotDotAfterALink_ClimbsOutOfTheLinksTarget()
+  {
+    // media/l -> "x/..", and media/x -> <root>/outside/a/b. The kernel resolves media/l to outside/a/b/.. =
+    // outside/a. A lexical normalisation of the target ("x/.." -> "") would wrongly answer "media".
+    var deep = Path.Combine(_root, "outside", "a", "b");
+    Directory.CreateDirectory(deep);
+    Skip.IfNot(TryCreateDirectoryLink(Path.Combine(_media, "x"), deep), "this machine cannot create directory symlinks");
+    Skip.IfNot(TryCreateDirectoryLink(Path.Combine(_media, "l"), "x" + Path.DirectorySeparatorChar + ".."),
+      "this machine cannot create directory symlinks");
+
+    var real = FileBrowser.ResolveRealPath(Path.Combine(_media, "l"));
+
+    Assert.Equal(Path.Combine(_root, "outside", "a"), real, ignoreCase: OperatingSystem.IsWindows());
+  }
+
+  [SkippableFact]
+  public async Task OnLinux_TheRealPathCheck_IsCaseSensitive()
+  {
+    // "media" is the root; "MEDIA" is a different folder on Linux. The older lexical check ignores case and admits
+    // it; the real-path check must not.
+    Skip.If(OperatingSystem.IsWindows(), "Windows paths are case-insensitive");
+    var other = Path.Combine(_root, "MEDIA");
+    TouchAbsolute(Path.Combine(other, "secret.mp3"));
+
+    await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Browser().ListFolderTracksAsync(other, false, 500));
+  }
+
   // ── Helpers ──
 
   private FileBrowser Browser(FilePlayerOptions? options = null)

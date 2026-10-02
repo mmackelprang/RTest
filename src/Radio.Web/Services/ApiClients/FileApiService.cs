@@ -128,6 +128,11 @@ public class FileApiService
 
       return (false, 0, $"No files could be added ({result.FailedCount} failed)");
     }
+    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+    {
+      // The caller cancelled (UI-32: Add folder's dialog closed mid-run). Not a failure to report or log.
+      throw;
+    }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to add files to queue");
@@ -140,14 +145,18 @@ public class FileApiService
   /// </summary>
   /// <param name="path">Absolute path, path relative to the media root, or null for the media root.</param>
   /// <param name="includeSubfolders">Walk subfolders too.</param>
-  /// <param name="cancellationToken">Cancellation token.</param>
+  /// <param name="checkReadable">
+  /// Have the API open each file and leave out unreadable ones — one NAS round trip a file. False for a count.
+  /// </param>
+  /// <param name="cancellationToken">Cancellation token; cancelling throws rather than returning an error.</param>
   /// <returns>The listing, or null and a message fit to show the owner.</returns>
   public async Task<(FolderTracksDto? Folder, string? Error)> GetFolderTracksAsync(
-    string? path, bool includeSubfolders, CancellationToken cancellationToken = default)
+    string? path, bool includeSubfolders, bool checkReadable, CancellationToken cancellationToken = default)
   {
     try
     {
-      var url = $"/api/files/folder-tracks?includeSubfolders={(includeSubfolders ? "true" : "false")}";
+      var url = $"/api/files/folder-tracks?includeSubfolders={(includeSubfolders ? "true" : "false")}"
+        + $"&checkReadable={(checkReadable ? "true" : "false")}";
       if (!string.IsNullOrEmpty(path))
       {
         url += $"&path={Uri.EscapeDataString(path)}";

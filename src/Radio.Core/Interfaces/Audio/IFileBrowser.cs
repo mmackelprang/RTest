@@ -69,6 +69,10 @@ public interface IFileBrowser
   /// </param>
   /// <param name="includeSubfolders">Whether to walk subfolders.</param>
   /// <param name="maxTracks">The most files to return; the walk stops at the first file past it.</param>
+  /// <param name="checkReadable">
+  /// Open each file to check it can be read, and leave out those that cannot. Costs one open per file — on the box a
+  /// NAS round trip — so a caller that only wants a count passes false and checks when it is about to queue.
+  /// </param>
   /// <param name="cancellationToken">Cancels the walk.</param>
   /// <exception cref="UnauthorizedAccessException">The folder is outside every allowed directory.</exception>
   /// <exception cref="DirectoryNotFoundException">The folder does not exist.</exception>
@@ -76,6 +80,7 @@ public interface IFileBrowser
     string? path,
     bool includeSubfolders,
     int maxTracks,
+    bool checkReadable = true,
     CancellationToken cancellationToken = default);
 
   /// <summary>

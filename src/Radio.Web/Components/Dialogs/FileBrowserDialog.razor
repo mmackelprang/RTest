@@ -178,7 +178,11 @@
       </div>
       @* Extension chips. Each chip is a token in _filterExtensions; clicking the ×
          removes it and re-filters immediately (no Apply button). Adding goes through
-         the dashed "+ add type" affordance which pops a curated extension list. *@
+         the dashed "+ add type" affordance which pops a curated extension list.
+         Not in folder mode (UI-32): no files are listed there, and Add folder queues every supported type, so a
+         filter would change nothing it shows or adds. *@
+      @if (!SelectFolder)
+      {
       <div class="file-browser-chip-row" role="list" aria-label="File type filter">
         @foreach (var ext in _filterExtensions)
         {
@@ -223,6 +227,7 @@
           }
         </div>
       </div>
+      }
     </div>
   </div>
 
@@ -349,7 +354,7 @@
     {
       <div class="folder-pick-progress" role="status" aria-live="polite">
         <RadzenProgressBar Value="@_addDone" Max="@(Math.Max(1, _addTotal))" ShowValue="false" Style="height: 6px;" />
-        <span>@($"Adding {_addDone} of {_addTotal}…")</span>
+        <span>@(_addTotal == 0 ? "Checking tracks…" : $"Adding {_addDone} of {_addTotal}…")</span>
       </div>
     }
     else
@@ -363,7 +368,7 @@
         <span @onclick="ToggleIncludeSubfolders">Include subfolders</span>
       </div>
     }
-    <RadzenButton Click="@Cancel" Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light" Text="Cancel"
+    <RadzenButton Click="@Cancel" Variant="Variant.Text" Text="Cancel"
                   Disabled="@_isAddingFolder" class="folder-pick-button" />
     <RadzenButton Click="@AddFolderAsync" Variant="Variant.Filled" ButtonStyle="ButtonStyle.Primary"
                   Text="@AddFolderButtonText" Disabled="@(!CanAddFolder)" IsBusy="@_isAddingFolder"
@@ -761,10 +766,21 @@ else
     }
   }
 
-  /// <summary>What Add would queue with the switch as it is: every listed track, or only the top-level ones.</summary>
+  /// <summary>
+  /// What Add would queue with the switch as it is, from the count listing: every listed track, or only the top-level
+  /// ones. Add itself lists again (see <see cref="AddFolderAsync"/>), so this is the count shown, not the paths sent.
+  /// </summary>
   internal IReadOnlyList<string> PathsToAdd => _folderInfo == null
     ? Array.Empty<string>()
     : _includeSubfolders ? _folderInfo.Paths : _folderInfo.Paths.Take(_folderInfo.TopLevelCount).ToList();
+
+  /// <summary>
+  /// Whether the cap cuts what Add would queue with the switch as it is. With subfolders on, whenever the listing was
+  /// truncated; with them off, only when the top level alone reached the cap (the top-level tracks come first, so a
+  /// truncation further down leaves them whole).
+  /// </summary>
+  private bool TruncatedForSwitch => _folderInfo != null && _folderInfo.Truncated
+    && (_includeSubfolders || _folderInfo.TopLevelCount >= _folderInfo.MaxTracks);
 
   private bool CanAddFolder => !_isAddingFolder && !_folderInfoLoading && !_isLoading && _errorMessage == null
     && PathsToAdd.Count > 0;
@@ -779,7 +795,7 @@ else
       {
         return "Adding…";
       }
-      if (_folderInfo != null && _includeSubfolders && _folderInfo.Truncated)
+      if (_folderInfo != null && TruncatedForSwitch)
       {
         return $"Add first {_folderInfo.MaxTracks}";
       }
@@ -818,12 +834,13 @@ else
       {
         return $"No tracks directly in {FolderName}. Turn on Include subfolders to add {allText}.";
       }
-      if (_includeSubfolders && _folderInfo.Truncated)
+      if (TruncatedForSwitch)
       {
         return $"More than {_folderInfo.MaxTracks} tracks here. Only the first {_folderInfo.MaxTracks} will be added.";
       }
 
-      var here = $"{top} {(top == 1 ? "track" : "tracks")} here";
+      var topText = top >= _folderInfo.MaxTracks ? $"{top}+" : top.ToString();
+      var here = $"{topText} {(top == 1 ? "track" : "tracks")} here";
       return _folderInfo.SubfolderCount > 0 ? $"{here} · {allText} including subfolders" : here;
     }
   }
@@ -834,16 +851,23 @@ else
     text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";
 
   /// <summary>
-  /// Lists the shown folder's tracks, subfolders included, for the summary line and the Add button. One listing
-  /// serves both switch positions: the top-level tracks are its first <c>TopLevelCount</c> entries. A newer
+  /// Counts the shown folder's tracks, subfolders included, for the summary line and the Add button. One listing
+  /// serves both switch positions: the top-level tracks are its first <c>TopLevelCount</c> entries. It skips the
+  /// per-file readability check (one NAS open a file) because it runs on every navigation; Add checks. A newer
   /// navigation cancels an older listing still in flight.
   /// </summary>
   private async Task LoadFolderInfoAsync()
   {
-    _folderInfoCts?.Cancel();
-    _folderInfoCts?.Dispose();
+    // Detach before cancelling, so no path out of this method — the early return below included — leaves the field
+    // pointing at a disposed source for the next navigation to Cancel() (which throws, and on Blazor Server an
+    // exception from an event handler ends the circuit).
+    var previous = _folderInfoCts;
+    _folderInfoCts = null;
+    previous?.Cancel();
+    previous?.Dispose();
     _folderInfo = null;
     _folderInfoError = null;
+    _folderInfoLoading = false;
     if (_errorMessage != null)
     {
       return;
@@ -855,7 +879,8 @@ else
     StateHasChanged();
     try
     {
-      var (folder, error) = await FileApi.GetFolderTracksAsync(CurrentFolderPath, includeSubfolders: true, cts.Token);
+      var (folder, error) = await FileApi.GetFolderTracksAsync(
+        CurrentFolderPath, includeSubfolders: true, checkReadable: false, cts.Token);
       if (cts.IsCancellationRequested)
       {
         return;
@@ -878,17 +903,51 @@ else
     StateHasChanged();
   }
 
+  /// <summary>
+  /// Lists the folder again — with the switch's subfolder setting, and with the readability check the count listing
+  /// skipped — then queues the result in batches while showing progress, and closes with a
+  /// <see cref="FolderAddResult"/>.
+  /// </summary>
   private async Task AddFolderAsync()
   {
-    if (!CanAddFolder || _folderInfo == null)
+    if (!CanAddFolder)
     {
       return;
     }
 
-    var info = _folderInfo;
-    var paths = PathsToAdd.ToList();
+    var name = FolderName;
+    var expected = PathsToAdd.Count;
     _isAddingFolder = true;
     _addDone = 0;
+    _addTotal = 0; // 0 while checking: the footer reads "Checking tracks…"
+    StateHasChanged();
+
+    FolderTracksDto? listing;
+    string? error;
+    try
+    {
+      (listing, error) = await FileApi.GetFolderTracksAsync(
+        CurrentFolderPath, _includeSubfolders, checkReadable: true, _lifetimeCts.Token);
+    }
+    catch (OperationCanceledException)
+    {
+      return;
+    }
+
+    // Closed (✕) mid-run: the dialog is gone, so there is nothing to close — closing now would close whatever
+    // dialog is on top instead. Batches already sent stay queued.
+    if (_lifetimeCts.IsCancellationRequested)
+    {
+      return;
+    }
+
+    if (listing == null)
+    {
+      DialogService.Close(new FolderAddResult(name, 0, expected, 0, error ?? "The folder could not be read"));
+      return;
+    }
+
+    var paths = listing.Paths;
     _addTotal = paths.Count;
     StateHasChanged();
 
@@ -903,15 +962,13 @@ else
       },
       _lifetimeCts.Token);
 
-    // Closed (✕) mid-run: the dialog is gone, so there is nothing to close — closing now would close whatever
-    // dialog is on top instead. The batches already sent stay queued.
     if (_lifetimeCts.IsCancellationRequested)
     {
       return;
     }
 
     DialogService.Close(new FolderAddResult(
-      info.FolderName, outcome.Added, paths.Count, outcome.Failed + info.SkippedUnreadable, outcome.Error));
+      listing.FolderName, outcome.Added, paths.Count, outcome.Failed + listing.SkippedUnreadable, outcome.Error));
   }
 
   public void Dispose()

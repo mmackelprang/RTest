@@ -16,10 +16,11 @@ public sealed record FolderAddResult(string FolderName, int Added, int Requested
 /// Adds a folder's tracks to the queue in batches through <c>POST /api/files/queue</c> (UI-32).
 /// </summary>
 /// <remarks>
-/// <para>Why batches: the API reads each track's tags as it queues it, ~180 ms a file cold on the box's NAS (68 files
-/// measured at 12.5 s), and the Web's HttpClient gives up after 30 s — so a 500-track folder in one request would
-/// time out partway with no way to tell how far it got. Twenty per request keeps each call to a few seconds and lets
-/// the dialog show "Adding 40 of 68…".</para>
+/// <para>Why batches: the API reads each track's tags (and embedded art) as it queues it, and on the box's NAS cold
+/// I/O is slow — reading the first 256 KB of each of one artist's 68 files took 12.5 s (~184 ms a file, measured
+/// 2026-10-02; that is raw reads, the nearest measurement to a tag read). The Web's HttpClient gives up after 30 s,
+/// so a 500-track folder in one request would time out partway with no way to tell how far it got. Twenty per
+/// request keeps each call to a few seconds at that rate and lets the dialog show "Adding 40 of 68…".</para>
 /// <para>Order is preserved: batches are sent one after another, each awaited, in the listing's order.</para>
 /// </remarks>
 public static class FolderQueueAdder

@@ -3280,7 +3280,7 @@ body {
   font-family: var(--font-mono);
   font-size: 13px;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   cursor: pointer;
   transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
   min-height: var(--touch-preferred);
@@ -3308,8 +3308,10 @@ body {
   outline-offset: 2px;
 }
 
+/* --text-low, not --surface-separator, for the outline: on a 56 px block the separator (#1F1F22) all but vanished
+   and the button read as a label. */
 .queue-action.is-secondary {
-  border-color: var(--surface-separator);
+  border-color: var(--text-low);
   color: var(--text-medium);
 }
 
@@ -7737,7 +7739,7 @@ body {
 .queue-empty-hint {
   margin-top: 6px;
   font-size: 13px;
-  color: var(--text-low);
+  color: var(--text-medium); /* not --text-low: ~2.2:1 at this size (see the note at the NowPlaying meta line) */
 }
 
 /* File browser in folder mode: what adding the shown folder would queue ("12 tracks here · 60 including
@@ -7833,7 +7835,9 @@ body {
 
 /* UI-34: Save Playlist's form fills the dialog's content box and no more. Its fields carry width: 100%; the
    border-box keeps their padding and border inside that width, so neither field can run past the dialog's
-   right edge (it did, by 26 px at 1920x720, while the form carried a fixed min-width of 400 px). */
+   right edge. Measured at 1920x720 while the form carried a fixed min-width of 400 px: the 400 px dialog's
+   content box is 352 px inside its padding, the fields were 400 px wide, and they ended 26 px past that box's
+   inner right edge (the overflowing content had also scrolled sideways, which is why the overrun is not 48). */
 .save-playlist-form {
   width: 100%;
   min-width: 0;

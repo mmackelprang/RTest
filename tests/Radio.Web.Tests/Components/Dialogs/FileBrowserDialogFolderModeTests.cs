@@ -190,9 +190,13 @@ public class FileBrowserDialogFolderModeTests : TestContext
 
     cut.Find(".folder-pick-switch .rz-switch").Click();
     AddButtonText(cut).Should().Be("Add \"ABBA\" (3)");
+    // Add lists again with the switch's setting; the server answers that listing with the top level only.
+    _api.Get("/api/files/folder-tracks", Listing(Abba, "ABBA", topLevel: 3, total: 3, subfolders: 2));
     cut.Find("button.folder-pick-add").Click();
 
     ((object?)await closed.WaitAsync(TimeSpan.FromSeconds(10))).Should().BeOfType<FolderAddResult>();
+    var addListing = Uri.UnescapeDataString(_api.Requests.Last(r => r.Path == "/api/files/folder-tracks").Query);
+    addListing.Should().Contain("includeSubfolders=false").And.Contain("checkReadable=true");
     var posted = QueuedBatches();
     posted.Should().HaveCount(1);
     posted[0].Should().Equal($"{Abba}/01.mp3", $"{Abba}/02.mp3", $"{Abba}/03.mp3");
@@ -212,12 +216,71 @@ public class FileBrowserDialogFolderModeTests : TestContext
     cut.Find("button.folder-pick-add").Click();
 
     object? result = await closed.WaitAsync(TimeSpan.FromSeconds(10));
+    var listings = _api.Requests.Where(r => r.Path == "/api/files/folder-tracks")
+      .Select(r => Uri.UnescapeDataString(r.Query)).ToList();
+    listings.Should().Contain(q => q.Contains($"path={Abba}") && q.Contains("checkReadable=false"),
+      "navigating counts without opening every file");
+    listings.Last().Should().Contain("includeSubfolders=true").And.Contain("checkReadable=true",
+      "Add lists again with the readability check before queueing");
     var batches = QueuedBatches();
     batches.Select(b => b.Count).Should().Equal(20, 20, 5);
     batches.SelectMany(b => b).Should().Equal(listing.Paths, "the queue gets the listing's order");
     // The canned API reports 20 added per batch, so the 5-path batch over-reports; the result counts what the
     // API said it added. Skipped carries the 2 the listing could not read.
     result.Should().BeOfType<FolderAddResult>().Which.Should().Be(new FolderAddResult("ABBA", 60, 45, 2, null));
+  }
+
+  [Fact]
+  public void TopLevelAloneOverTheCap_SubfoldersOff_StillSaysTheCapApplies()
+  {
+    StubBrowsing();
+    _api.Get("/api/files/folder-tracks", Listing(Abba, "ABBA", topLevel: 500, total: 500, truncated: true));
+    var cut = RenderFolderMode();
+    OpenAbba(cut);
+    cut.WaitForAssertion(() => AddButtonText(cut).Should().Be("Add first 500"), TimeSpan.FromSeconds(10));
+
+    cut.Find(".folder-pick-switch > span").Click();
+
+    AddButtonText(cut).Should().Be("Add first 500", "the top level alone reached the cap");
+    cut.Find(".folder-pick-summary").TextContent.Should()
+      .Be("More than 500 tracks here. Only the first 500 will be added.");
+  }
+
+  [Fact]
+  public void AFolderThatCannotBeListed_ThenAnotherNavigation_DoesNotThrow()
+  {
+    // Review HIGH: an unlistable folder left the listing's token source disposed but still referenced, and the next
+    // navigation's Cancel() threw ObjectDisposedException — on Blazor Server, the end of the circuit.
+    _api.Get("/api/files", new FileListDto(Library, new List<FileItemDto>
+    {
+      new("ABBA", Abba, true, null, null, null, null),
+    }));
+    _api.OnRequest(HttpMethod.Get, "/api/files",
+      () => _api.Route(HttpMethod.Get, "/api/files", HttpStatusCode.NotFound, null));
+    _api.Get("/api/files/folder-tracks", Listing(Library, "Music", topLevel: 0, total: 10));
+    var cut = RenderFolderMode();
+    cut.WaitForAssertion(() => AddButtonText(cut).Should().Be("Add this folder (10)"), TimeSpan.FromSeconds(10));
+
+    cut.FindAll(".file-item").Single(e => e.TextContent.Contains("ABBA")).Click();
+    cut.WaitForAssertion(() => cut.Markup.Should().Contain("Could not access"), TimeSpan.FromSeconds(10));
+    var listingsBefore = _api.Requests.Count(r => r.Path == "/api/files/folder-tracks");
+
+    cut.FindAll("button").Single(b => b.TextContent.Contains("Return to Media Library")).Click();
+
+    cut.WaitForAssertion(() => _api.Requests.Count(r => r.Path == "/api/files/folder-tracks").Should()
+      .BeGreaterThan(listingsBefore, "the media library was counted, so navigation survived"), TimeSpan.FromSeconds(10));
+  }
+
+  [Fact]
+  public void FolderMode_HidesTheFileTypeFilter()
+  {
+    StubBrowsing();
+    _api.Get("/api/files/folder-tracks", Listing(Library, "Music", topLevel: 0, total: 10));
+
+    var cut = RenderFolderMode();
+
+    cut.WaitForAssertion(() => cut.FindAll(".file-item").Count.Should().Be(1), TimeSpan.FromSeconds(10));
+    cut.FindAll(".file-browser-chip-row").Should().BeEmpty("no files are listed and Add queues every type");
   }
 
   [Fact]
@@ -271,6 +334,7 @@ public class FileBrowserDialogFolderModeTests : TestContext
       .Add(d => d.PreferredBookmarkTag, "music"));
 
     cut.WaitForAssertion(() => cut.Markup.Should().Contain("loose.mp3"), TimeSpan.FromSeconds(10));
+    cut.FindAll(".file-browser-chip-row").Should().HaveCount(1);
     cut.FindAll(".folder-pick-footer").Count.Should().Be(0);
     cut.FindAll(".folder-pick-summary").Count.Should().Be(0);
     _api.Requests.Should().NotContain(r => r.Path == "/api/files/folder-tracks");

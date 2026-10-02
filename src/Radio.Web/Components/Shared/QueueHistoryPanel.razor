@@ -344,17 +344,20 @@
     }
   </div>
 
-  @if (_confirmClear)
+  @if (_confirmClear && _activeTab == TabQueue && IsFilePlayer(_sourceType))
   {
     @* UI-32: Clear queue is a 56 px button now, easy to hit by accident, so it asks first. Same shape as Play
-       History's Clear All confirmation; Cancel comes first and tapping outside cancels. *@
+       History's Clear All confirmation; Cancel comes first, takes focus when the card opens, and Esc or a tap
+       outside cancels. Shown only while the File Player queue view that raised it is still showing — a source
+       change or tab change hides it rather than leaving it over a view with no Clear button. *@
     <div class="queue-confirm-overlay" @onclick="CancelClearQueue">
       <div class="queue-confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="queue-confirm-title"
+           tabindex="-1" @onkeydown="OnClearConfirmKeyDown"
            @onclick:stopPropagation="true">
         <h6 id="queue-confirm-title">Clear the queue?</h6>
         <p>@ClearQueueConfirmText(_queueItems.Count)</p>
         <div class="queue-confirm-actions">
-          <RadzenButton Text="Cancel" Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light"
+          <RadzenButton @ref="_clearCancelButton" Text="Cancel" Variant="Variant.Text"
                         Click="CancelClearQueue" class="queue-confirm-cancel" />
           <RadzenButton Text="Clear queue" Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger"
                         Click="ConfirmClearQueueAsync" class="queue-confirm-clear" />
@@ -424,8 +427,10 @@
   private BluetoothStatusDto? _btStatus;
   private bool _btConnected;
 
-  // UI-32: the Clear queue confirmation is showing.
+  // UI-32: the Clear queue confirmation is showing; its Cancel button, focused once when the card opens.
   private bool _confirmClear;
+  private RadzenButton? _clearCancelButton;
+  private bool _focusClearCancel;
 
   // Cached display strings for the history-stats tile so the right column can
   // render synchronously without re-querying TopTracks/TopArtists each render.
@@ -1083,9 +1088,38 @@
     }
   }
 
-  private void AskClearQueue() => _confirmClear = true;
+  private void AskClearQueue()
+  {
+    _confirmClear = true;
+    _focusClearCancel = true;
+  }
 
   private void CancelClearQueue() => _confirmClear = false;
+
+  private void OnClearConfirmKeyDown(KeyboardEventArgs e)
+  {
+    if (e.Key == "Escape")
+    {
+      CancelClearQueue();
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (_focusClearCancel && _clearCancelButton != null)
+    {
+      _focusClearCancel = false;
+      try
+      {
+        await _clearCancelButton.Element.FocusAsync();
+      }
+      catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+      {
+        // Focus is a courtesy; a circuit going away or an element already gone must not break the panel.
+        Logger.LogDebug(ex, "Could not focus the Clear queue confirmation");
+      }
+    }
+  }
 
   private async Task ConfirmClearQueueAsync()
   {

@@ -168,8 +168,8 @@ public sealed class FilesControllerFolderTracksTests : IDisposable
   {
     // A browser that only finishes when cancelled: the controller's timeout is what cancels it.
     var slow = new Mock<IFileBrowser>();
-    slow.Setup(b => b.ListFolderTracksAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-      .Returns(async (string? _, bool _, int _, CancellationToken ct) =>
+    slow.Setup(b => b.ListFolderTracksAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+      .Returns(async (string? _, bool _, int _, bool _, CancellationToken ct) =>
       {
         await Task.Delay(Timeout.Infinite, ct);
         return new FolderTrackListing { FolderPath = "never" };
@@ -187,8 +187,8 @@ public sealed class FilesControllerFolderTracksTests : IDisposable
   public async Task ClientDisconnect_IsNotReportedAsATimeout()
   {
     var slow = new Mock<IFileBrowser>();
-    slow.Setup(b => b.ListFolderTracksAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<CancellationToken>()))
-      .Returns(async (string? _, bool _, int _, CancellationToken ct) =>
+    slow.Setup(b => b.ListFolderTracksAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+      .Returns(async (string? _, bool _, int _, bool _, CancellationToken ct) =>
       {
         await Task.Delay(Timeout.Infinite, ct);
         return new FolderTrackListing { FolderPath = "never" };
@@ -197,7 +197,27 @@ public sealed class FilesControllerFolderTracksTests : IDisposable
     aborted.Cancel();
 
     await Assert.ThrowsAnyAsync<OperationCanceledException>(
-      () => Controller(slow.Object).ListFolderTracks("Album", true, aborted.Token));
+      () => Controller(slow.Object).ListFolderTracks("Album", true, cancellationToken: aborted.Token));
+  }
+
+  [Fact]
+  public async Task PathWithANulCharacter_Is400_NotAServerError()
+  {
+    var result = await Controller().ListFolderTracks("Album\0evil", includeSubfolders: true);
+
+    Assert.Equal(StatusCodes.Status400BadRequest, StatusOf(result));
+  }
+
+  [Fact]
+  public async Task CheckReadableFalse_IsPassedThrough()
+  {
+    var browser = new Mock<IFileBrowser>();
+    browser.Setup(b => b.ListFolderTracksAsync(It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<int>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(new FolderTrackListing { FolderPath = "/m/x" });
+
+    await Controller(browser.Object).ListFolderTracks("x", includeSubfolders: true, checkReadable: false);
+
+    browser.Verify(b => b.ListFolderTracksAsync("x", true, It.IsAny<int>(), false, It.IsAny<CancellationToken>()), Times.Once);
   }
 
   [Theory]

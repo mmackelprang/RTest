@@ -476,14 +476,18 @@ public class FilesController : ControllerBase
   /// to each path the client later sends — and then, like a relative path, by
   /// <see cref="IFileBrowser.ListFolderTracksAsync"/>, which also resolves symbolic links before deciding.</para>
   /// <para>At most <c>FilePlayer:MaxFolderTracks</c> paths come back; past that <c>truncated</c> is set and the
-  /// walk stops reading. The walk runs off the request thread and is abandoned after
-  /// <c>FilePlayer:FolderScanTimeoutSeconds</c> (504) or when the client disconnects.</para>
+  /// walk opens no further file and lists no further folder. The walk runs on the thread pool; the request stops
+  /// waiting for it after <c>FilePlayer:FolderScanTimeoutSeconds</c> (504) or when the client disconnects, even if
+  /// the walk is stuck in a blocking filesystem call (it then stops at its own next cancellation check).</para>
+  /// <para><paramref name="checkReadable"/> = false skips the per-file open — one NAS round trip a file — for a
+  /// caller that only wants the count; "Add folder" lists with it on when it is about to queue.</para>
   /// </remarks>
   /// <param name="path">The folder: absolute, relative to the media root, or empty for the media root.</param>
   /// <param name="includeSubfolders">Walk subfolders too.</param>
+  /// <param name="checkReadable">Open each file and leave out those that cannot be read (default true).</param>
   /// <param name="cancellationToken">Cancelled when the client disconnects.</param>
   /// <response code="200">The folder's tracks, possibly none.</response>
-  /// <response code="400">The folder is outside every allowed directory.</response>
+  /// <response code="400">The folder is outside every allowed directory, or the path is malformed.</response>
   /// <response code="404">The folder does not exist.</response>
   /// <response code="504">The walk took longer than the configured timeout.</response>
   /// <response code="500">The folder exists but could not be read.</response>
@@ -496,6 +500,7 @@ public class FilesController : ControllerBase
   public async Task<IActionResult> ListFolderTracks(
     [FromQuery] string? path = null,
     [FromQuery] bool includeSubfolders = false,
+    [FromQuery] bool checkReadable = true,
     CancellationToken cancellationToken = default)
   {
     if (!string.IsNullOrEmpty(path) && Path.IsPathRooted(path) && !IsPathAllowed(path))
@@ -513,7 +518,7 @@ public class FilesController : ControllerBase
 
     try
     {
-      var listing = await _fileBrowser.ListFolderTracksAsync(path, includeSubfolders, maxTracks, linked.Token);
+      var listing = await _fileBrowser.ListFolderTracksAsync(path, includeSubfolders, maxTracks, checkReadable, linked.Token);
       return Ok(new FolderTracksDto
       {
         FolderPath = listing.FolderPath,
@@ -537,6 +542,11 @@ public class FilesController : ControllerBase
     catch (DirectoryNotFoundException)
     {
       return NotFound(new { error = "Folder not found" });
+    }
+    catch (ArgumentException)
+    {
+      // Path.GetFullPath rejects a path with an embedded NUL (and similar). A bad request, not a server fault.
+      return BadRequest(new { error = "Invalid folder path" });
     }
     catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
     {

@@ -645,6 +645,35 @@ public class QueueHistoryPanelTests : TestContext
     cut.FindAll(".queue-confirm-card").Count.Should().Be(0);
   }
 
+  [Fact]
+  public void ClearQueue_Esc_Cancels_AndCancelTakesFocusWhenTheCardOpens()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+
+    Action(cut, "Clear queue").Click();
+
+    cut.WaitForAssertion(() => JSInterop.Invocations.Should().Contain(i => i.Identifier.EndsWith("focus", StringComparison.Ordinal)),
+      TimeSpan.FromSeconds(10));
+    cut.Find(".queue-confirm-card").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = "Escape" });
+
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0);
+    _api.Requests.Should().NotContain(r => r.Method == HttpMethod.Delete && r.Path == "/api/queue");
+  }
+
+  [Fact]
+  public void ClearQueue_Confirmation_DoesNotOutliveTheQueueView()
+  {
+    var cut = RenderOn("FilePlayer", queueCount: 2);
+    AssertView(cut, "Queue");
+    Action(cut, "Clear queue").Click();
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(1);
+
+    ClickTab(cut, "History");
+
+    cut.FindAll(".queue-confirm-card").Count.Should().Be(0, "the History view has no Clear button to confirm");
+  }
+
   [Theory]
   [InlineData(1, "Removes the 1 track in the queue and stops playback.")]
   [InlineData(47, "Removes all 47 tracks and stops playback.")]
