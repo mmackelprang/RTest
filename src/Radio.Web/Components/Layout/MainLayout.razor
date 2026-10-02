@@ -297,7 +297,8 @@
   {
     <div class="dev-tray-backdrop" @onclick="CloseDevTrayAsync" aria-hidden="true"></div>
   }
-  <DevTray IsOpen="@_isDevTrayOpen" Placement="@_devTrayPlacement" OnClose="@CloseDevTrayAsync" />
+  <DevTray IsOpen="@_isDevTrayOpen" Placement="@_devTrayPlacement" OnClose="@CloseDevTrayAsync"
+           ApiDocsUrl="@_apiDocsUrl" />
 
   @* Task #15 PR E item #47 — gain-popover click-away backdrop.
        Mounted at the layout root (outside .page-transition) so the
@@ -377,6 +378,9 @@
   private bool _isDevTrayOpen;
   private DevTrayPlacement? _devTrayPlacement;
 
+  // OPS-14: the API docs address shown (as text) in the DevTray — this machine's name and the API's port.
+  private string? _apiDocsUrl;
+
   private AudioSourceDto? ActiveSource =>
     _availableSources.FirstOrDefault(s => s.Id == _selectedSourceId);
   private AudioDeviceDto? ActiveOutput =>
@@ -395,6 +399,9 @@
     try
     {
       Logger.LogDebug("MainLayout.OnInitializedAsync - Starting initialization");
+
+      _apiDocsUrl = DevTray.BuildApiDocsUrl(
+        Configuration["ApiBaseUrl"] ?? WebConstants.DefaultApiBaseUrl, Environment.MachineName);
 
       // Load available sources and outputs concurrently
       await Task.WhenAll(LoadSourcesAsync(), LoadOutputDevicesAsync());
@@ -776,7 +783,19 @@
         _availableOutputs = outputs;
         UpdateCastOutputDisplayName();
 
-        // Try to get current output device
+        // AUD-97: the output in use is the one the list marks active. /output/default answers the
+        // box's hardware default sink (the Soundbar) whatever is playing, so after a restart with Cast
+        // restored the panel showed the Soundbar while Cast played. This reads the visible list, so an
+        // active device the owner has hidden falls through to the old lookup below, as before.
+        var active = outputs.FirstOrDefault(o => o.IsActive);
+        if (active != null)
+        {
+          _selectedOutputId = active.Id;
+          SyncConnectedCastDeviceToOutput();
+          return;
+        }
+
+        // No output reports itself active (e.g. the API is still starting): fall back to the default.
         try
         {
           var current = await DevicesApi.GetCurrentOutputDeviceAsync();
@@ -824,9 +843,9 @@
   /// off Cast, nothing is connected; on Cast, the device already recorded as connected stands,
   /// or else the saved default (the device the API connects to when it restores Cast).
   /// Called after <see cref="_selectedOutputId"/> changes: from an OutputChanged broadcast and from
-  /// this layout's own output switches (which can set it), from page load (which can only clear it,
-  /// since the device it reads there is never google-cast), and after a failed pick — never before a
-  /// pick's connect returns.
+  /// this layout's own output switches, from page load (which, since AUD-97, reads the active output
+  /// and so can set it when Cast was restored before the page loaded), and after a failed pick — never
+  /// before a pick's connect returns.
   /// </summary>
   private void SyncConnectedCastDeviceToOutput()
   {

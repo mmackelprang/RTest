@@ -35,7 +35,7 @@ export const visualizer = {
       height: height,
       // Phase scope decay buffer
       phaseScopeBuffer: null,
-      // BAND (AUD-76): the canvas tap handler while BAND is shown, so it can be removed
+      // RADIO view (AUD-76's BAND): the canvas tap handler while it is shown, so it can be removed
       bandTapHandler: null
     };
 
@@ -50,18 +50,32 @@ export const visualizer = {
 
     const { ctx, width, height } = canvasData;
     ctx.clearRect(0, 0, width, height);
+    // A mode change clears the canvas; the band map's last model must not be repainted over the next mode.
+    canvasData.bandModel = null;
   },
 
-  // Lazy-resize: fix canvas if it was initialized before parent had layout
+  // Keeps the canvas's pixel buffer the size it is laid out at. The buffer is sized once by init, but the
+  // element's height changes with the mode: the band map's strip (UI-31) takes 91 px, the spectrum axis
+  // 16, the other modes nothing, so a buffer left at init's size is drawn stretched or squashed. A resize
+  // clears the canvas, which every draw repaints in full anyway; the phase scope's decay buffer is sized
+  // to the canvas and is dropped with it. Falls back to the parent's size, then to the panel's known
+  // size, while the element has no layout yet.
   ensureCanvasSize: function (canvasData) {
-    if (canvasData.width > 0 && canvasData.height > 0) return;
-    const parent = canvasData.canvas.parentElement;
-    const w = parent && parent.clientWidth > 0 ? parent.clientWidth : 710;
-    const h = parent && parent.clientHeight > 0 ? parent.clientHeight : 640;
-    canvasData.canvas.width = w;
-    canvasData.canvas.height = h;
+    const canvas = canvasData.canvas;
+    let w = canvas.clientWidth;
+    let h = canvas.clientHeight;
+    if (!(w > 0 && h > 0)) {
+      if (canvasData.width > 0 && canvasData.height > 0) return;
+      const parent = canvas.parentElement;
+      w = parent && parent.clientWidth > 0 ? parent.clientWidth : 710;
+      h = parent && parent.clientHeight > 0 ? parent.clientHeight : 640;
+    }
+    if (w === canvasData.width && h === canvasData.height) return;
+    canvas.width = w;
+    canvas.height = h;
     canvasData.width = w;
     canvasData.height = h;
+    canvasData.phaseScopeBuffer = null;
   },
 
   // Draw waveform
@@ -356,7 +370,7 @@ export const visualizer = {
     ctx.fillText('R', centerX + scale * 0.7, centerY - scale * 0.5);
   },
 
-  // ── BAND (AUD-76; per band since AUD-91): the stored band map ────────────
+  // ── RADIO view (was BAND; AUD-76, per band since AUD-91, re-laid out by UI-31): the stored band map ──
   //
   // The model arrives in plot coordinates, computed in C# (VisualizerPanel.DrawBandAsync) for the
   // band shown (87.5–108 MHz on FM):
@@ -365,20 +379,21 @@ export const visualizer = {
   //             3 strong, by dB above the map's median. A level without a known t gets a cyan bar,
   //             the colour every bar had before UI-22 (the fill under the bars is grey regardless).
   //   station:  f | null    the tuned station (shown band, radio active), else null
-  //   presets:  [{ f, label }] the shown band's presets, ascending
-  //   grid:     [f]         gridline positions, the same fractions as the axis strip's labels
+  //   presets:  [{ f }]     the shown band's presets, ascending
+  //   grid:     [f]         gridline and tick positions, the same fractions as the axis labels
   //   channelsAcross: number the axis span in channel spacings (102.5 on FM); a bar is half a spacing
   //   sweeping: bool
-  // x = f * width exactly, with no side padding, so the MHz axis strip under the canvas (positioned
-  // by the same fraction) and the tap handler (which reports x / width) line up with what is drawn.
-  // Text the owner reads ("No scan yet", the age, "Scanning…") is Blazor markup, not drawn here.
+  //   mappable: bool        false on a band this radio cannot receive (AM, SW): no axis is drawn
+  // x = f * width exactly, with no side padding, so the axis labels (markup laid over the axis zone at the
+  // same fractions) and the tap handler (which reports x / width) line up with what is drawn.
+  // Text the owner reads (the band, "Discovering…", the axis labels) is Blazor markup, not drawn here.
 
-  // Space reserved above the plot: the markup status bar + Scan button (64px, the height of
-  // .band-overlay in design-system.css), then two preset-label lanes, then room for the station caret
-  // (9px tall) so it does not overprint a label in the second lane.
-  bandTopReserve: 64,
-  bandLabelLane: 18,
-  bandCaretGap: 12,
+  // UI-31: nothing overlays the plot any more (the status, key and Discover moved to a strip under the
+  // canvas), so the plot starts just below the canvas top and ends at the axis zone: the bottom 32 px,
+  // where the axis line, tick marks and carets are drawn and the markup axis labels sit
+  // (.band-axis-labels in design-system.css).
+  bandTopPad: 8,
+  bandAxisZone: 32,
 
   // Reads a design token from the canvas's computed style, with a fallback for a missing token.
   token: function (canvas, name, fallback) {
@@ -386,37 +401,57 @@ export const visualizer = {
     return value || fallback;
   },
 
+  // An upward-pointing filled caret with its apex on the axis line at x, kept whole inside the canvas: a
+  // preset at the plot's edge would otherwise be drawn half off it.
+  drawCaret: function (ctx, x, apexY, width, height, colour) {
+    x = Math.min(Math.max(x, width / 2), ctx.canvas.width - width / 2);
+    ctx.fillStyle = colour;
+    ctx.beginPath();
+    ctx.moveTo(x, apexY);
+    ctx.lineTo(x + width / 2, apexY + height);
+    ctx.lineTo(x - width / 2, apexY + height);
+    ctx.closePath();
+    ctx.fill();
+  },
+
   drawBandMap: function (canvasId, model) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
     this.ensureCanvasSize(canvasData);
+
+    // Kept so a resize can repaint it (registerBandTap's observer).
+    canvasData.bandModel = model;
 
     const { canvas, ctx, width, height } = canvasData;
     const accent = this.token(canvas, '--accent-primary', '#5CD4E8');
     const signalBlue = this.token(canvas, '--signal-blue', '#60A5FA');
     const signalGreen = this.token(canvas, '--signal-green', '#4ADE80');
     const station = this.token(canvas, '--source-radio', '#F0A830');
+    const textHigh = this.token(canvas, '--text-high', '#F0EFF4');
     const textMedium = this.token(canvas, '--text-medium', '#B5BCC9');
     const textLow = this.token(canvas, '--text-low', '#4B5563');
     const separator = this.token(canvas, '--surface-separator', '#1F1F22');
     const background = this.token(canvas, '--surface-inset', '#0A0A0C');
-    const monoFont = this.token(canvas, '--font-mono', 'monospace');
 
     ctx.fillStyle = background;
     ctx.fillRect(0, 0, width, height);
 
-    const labelTop = this.bandTopReserve;
-    const plotTop = labelTop + this.bandLabelLane * 2 + this.bandCaretGap;
-    const plotBottom = height - 2;
+    // A band this radio cannot receive has no plot: nothing is drawn, and the markup says why.
+    if (model && model.mappable === false) return;
+
+    const plotTop = this.bandTopPad;
+    const plotBottom = Math.max(plotTop + 1, height - this.bandAxisZone);
     const plotHeight = Math.max(1, plotBottom - plotTop);
+    const axisY = Math.round(plotBottom) + 0.5;
     const xOf = (f) => f * width;
     const yOf = (v) => plotBottom - v * plotHeight;
+    const grid = (model && model.grid) || [];
 
-    // Gridlines, matching the axis strip's labels (88/92/96/100/104/108 on FM).
+    // Gridlines, at the axis labels' ticks (88/92/96/100/104/108 on FM).
     ctx.strokeStyle = separator;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    for (const g of (model && model.grid) || []) {
+    for (const g of grid) {
       const x = Math.round(xOf(g)) + 0.5;
       ctx.moveTo(x, plotTop);
       ctx.lineTo(x, plotBottom);
@@ -452,37 +487,32 @@ export const visualizer = {
       }
     }
 
-    // Presets: a dashed tick down the plot and a short label in one of two lanes. A label that
-    // would overlap the previous one in both lanes is skipped; its tick is still drawn.
-    const presets = (model && model.presets) || [];
-    ctx.font = `11px ${monoFont}`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    const laneRight = [-Infinity, -Infinity];
-    for (const p of presets) {
-      const x = xOf(p.f);
-      ctx.strokeStyle = textLow;
-      ctx.setLineDash([3, 4]);
-      ctx.beginPath();
-      ctx.moveTo(Math.round(x) + 0.5, plotTop);
-      ctx.lineTo(Math.round(x) + 0.5, plotBottom);
-      ctx.stroke();
-      ctx.setLineDash([]);
+    // UI-31: the axis — a line across the bottom of the plot, and a 6 px tick under it at each labelled
+    // frequency. The labels themselves are markup under the ticks.
+    ctx.strokeStyle = textLow;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, axisY);
+    ctx.lineTo(width, axisY);
+    ctx.stroke();
+    ctx.strokeStyle = textMedium;
+    ctx.beginPath();
+    for (const g of grid) {
+      const x = Math.round(xOf(g)) + 0.5;
+      ctx.moveTo(x, axisY + 0.5);
+      ctx.lineTo(x, axisY + 6.5);
+    }
+    ctx.stroke();
 
-      const label = p.label || '';
-      const w = ctx.measureText(label).width;
-      const left = Math.min(Math.max(x - w / 2, 2), width - w - 2);
-      for (let lane = 0; lane < 2; lane++) {
-        if (left >= laneRight[lane] + 6) {
-          ctx.fillStyle = textMedium;
-          ctx.fillText(label, left + w / 2, labelTop + this.bandLabelLane * lane + this.bandLabelLane / 2);
-          laneRight[lane] = left + w;
-          break;
-        }
-      }
+    // UI-31: presets are carets pointing up at the axis, 10 x 8 px. No label: the preset bar names them,
+    // and two lanes of labels cost plot height and crowded each other on FM.
+    for (const p of (model && model.presets) || []) {
+      this.drawCaret(ctx, xOf(p.f), plotBottom + 1, 10, 8, textHigh);
     }
 
-    // Current station: a solid line in the radio source colour with a downward caret on top.
+    // The tuned station: a solid amber line through the plot and a larger amber caret (16 x 12 px) on the
+    // axis, drawn last so it covers a preset caret at the same frequency. Size as well as colour tells
+    // it from a preset.
     if (model && typeof model.station === 'number') {
       const x = Math.round(xOf(model.station)) + 0.5;
       ctx.strokeStyle = station;
@@ -491,14 +521,8 @@ export const visualizer = {
       ctx.moveTo(x, plotTop);
       ctx.lineTo(x, plotBottom);
       ctx.stroke();
-      ctx.fillStyle = station;
-      ctx.beginPath();
-      ctx.moveTo(x - 7, plotTop - 9);
-      ctx.lineTo(x + 7, plotTop - 9);
-      ctx.lineTo(x, plotTop);
-      ctx.closePath();
-      ctx.fill();
       ctx.lineWidth = 1;
+      this.drawCaret(ctx, x, plotBottom + 1, 16, 12, station);
     }
   },
 
@@ -512,8 +536,8 @@ export const visualizer = {
 
   // Reports a tap on the plot to .NET as a fraction of the canvas width (0 = 87.5, 1 = 108 MHz).
   // pointerup covers touch and mouse alike; one handler per canvas, replaced on re-registration.
-  // A tap inside the top bar (status text + Scan button) is ignored: the bar passes pointer events
-  // through to the canvas, so without this a near-miss on Scan would retune the radio.
+  // UI-31: a tap anywhere on the canvas counts, the axis zone included. Nothing overlays the canvas
+  // any more (Discover is in the strip under it), so there is no button to miss onto the plot.
   registerBandTap: function (canvasId, dotNetRef) {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
@@ -523,18 +547,35 @@ export const visualizer = {
     const handler = (e) => {
       const rect = canvas.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-      const yCanvas = (e.clientY - rect.top) * (canvas.height / rect.height);
-      if (yCanvas < this.bandTopReserve) return;
       const fraction = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
       dotNetRef.invokeMethodAsync('OnBandTap', fraction).catch(() => { /* circuit gone */ });
     };
     canvas.addEventListener('pointerup', handler);
     canvasData.bandTapHandler = handler;
+
+    // UI-31: the map is drawn when its data arrives, not every frame, and entering this mode changes the
+    // canvas's height (the strip appears under it) after the first draw may already have run. Repaint the
+    // last model whenever the laid-out size stops matching the buffer. An observer delivers one
+    // observation when it starts, which covers a resize that happened before it was registered.
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        if (!canvasData.bandModel) return;
+        if (canvas.clientWidth === canvasData.width && canvas.clientHeight === canvasData.height) return;
+        this.drawBandMap(canvasId, canvasData.bandModel);
+      });
+      observer.observe(canvas);
+      canvasData.bandResizeObserver = observer;
+    }
   },
 
   unregisterBandTap: function (canvasId) {
     const canvasData = this.canvases[canvasId];
-    if (!canvasData || !canvasData.bandTapHandler) return;
+    if (!canvasData) return;
+    if (canvasData.bandResizeObserver) {
+      canvasData.bandResizeObserver.disconnect();
+      canvasData.bandResizeObserver = null;
+    }
+    if (!canvasData.bandTapHandler) return;
     canvasData.canvas.removeEventListener('pointerup', canvasData.bandTapHandler);
     canvasData.bandTapHandler = null;
   },
