@@ -286,6 +286,43 @@ public sealed class FilePlayerQueueRestoreTests : IDisposable
   }
 
   [Fact]
+  public async Task Restore_PrimesTheMetadataCache_WithEveryRestoredRow_PlayedIncluded()
+  {
+    // AUD-96's cache must be warmed for the played rows too: the panel shows them, and Save as playlist
+    // waits for every full-playlist row before storing the metadata.
+    List<string> tracks = CreateTracks(5);
+    _preferences.QueueItems = new List<string>(tracks);
+    _preferences.CurrentQueueIndex = 2;
+    FilePlayerAudioSource source = CreateSource();
+    var read = new System.Collections.Concurrent.ConcurrentBag<string>();
+    Func<string, QueueItemMetadata> real = source.QueueMetadataReader;
+    source.QueueMetadataReader = path => { read.Add(path); return real(path); };
+
+    await source.InitializeAsync();
+    await source.WhenQueueMetadataIdleAsync();
+
+    Assert.Equal(tracks.Order(), read.Distinct().Order());
+  }
+
+  [Fact]
+  public async Task Restore_MovesQueueVersion_SoThePollerBroadcastsThePlayedRows()
+  {
+    // AUD-96's poller skips the full-playlist read while QueueVersion is unchanged. A restore that brings
+    // back played tracks must move it. This shows only that the restore moves it; that the PLAYED segment is
+    // part of the hash is read from QueueVersion (each played path is mixed in under its own marker), not
+    // isolated here — the current and upcoming segments change in the same restore.
+    List<string> tracks = CreateTracks(4);
+    _preferences.QueueItems = new List<string>(tracks);
+    _preferences.CurrentQueueIndex = 2;
+    FilePlayerAudioSource source = CreateSource();
+    long before = source.QueueVersion;
+
+    await source.InitializeAsync();
+
+    Assert.NotEqual(before, source.QueueVersion);
+  }
+
+  [Fact]
   public async Task ClearedList_PersistsEmpty_WithIndexMinusOne()
   {
     List<string> tracks = CreateTracks(2);
