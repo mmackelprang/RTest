@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (90)
+## Shipped rows (93)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3067,3 +3067,45 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/AUD-85.md`](queue/AUD-85.md)**
 
 ✅ **SHIPPED AND OWNER-VERIFIED 2026-10-02.** Merged as [#764](https://github.com/mmackelprang/RTest/pull/764) (squash `8df918b`) on the owner's instruction: *"#2 - retry the push/merge. I'll do the commands if I have to."* Deployed to `radio` the same day and SHA-verified on both services. Owner, at the console: *"AUD-85 passed."* The agent box UAT was not run. **As built:** the one-tap pick sends only `POST /api/devices/cast/connect`, so one party connects. A failed connect never clears the saved default. The dropdown shows the connected device. A failed pick restores the output the server reports. `cast/connect` answers 200 when it is already streaming to the same device, 409 while the output is mid-transition, and 502 (restoring local) when Cast is not live after the output gate. A failed device switch while casting restores local. It keeps `AUD-37`'s rule that `cast/connect` cancels the reconnect watcher first, made pick-aware in review: `CancelCastReconnectForCastPickAsync` waits up to 15 s for a running reconnect; a pick of the same device keeps the watcher's connection, another device cancels it, and an expired budget answers 409 touching nothing; the watcher's tear-down is atomic with the output gate (`TearDownCastOutputUnlessActiveAsync`). "Stop casting" still clears the default deliberately (existing behaviour, see the dossier). 🟠 **NEW 2026-09-30 (MEASURED — found during the `AUD-84` owner UAT, box on `079d46c`) — picking Cast erases the saved default Cast speaker: the UI's connect races the API's own auto-connect, gets a 500, and clears the default.** At 17:32:55 EDT the output switch to `google-cast` started the API's background auto-connect to "Office speaker"; 5 ms later the UI's own `POST /api/devices/cast/connect` failed `Cannot connect in state Connecting` (500), and the UI, reading any failure as "device not reachable", deleted the default (`Saved default Cast device:  ()`). The API's auto-connect then succeeded at 17:32:59 — so Cast plays, but `AudioPreferences:DefaultCastDeviceId` is now `''` and the console cannot restore Cast after a restart. — [detail](queue/AUD-85.md)
+
+### UI-31 — the band map view gets a strip under the plot, preset carets, a Discover button, and a RADIO tab
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#767](https://github.com/mmackelprang/RTest/pull/767) — owner panel UAT passed 2026-10-02 (*"UI-31 passes."*), merged as `b3aeda7`; the box ran the identical tree (`c52ec3d`) for the UAT, so no redeploy |
+| Plan | [`2026-10-02-band-view-strip.md`](design-handoffs/2026-10-02-band-view-strip.md) |
+| Spec / handoff | _owner report, 2026-10-02_ |
+| Depends on | `UI-29` ✅ ([#765](https://github.com/mmackelprang/RTest/pull/765)) _(touches `AUD-76` / `AUD-91` / `UI-22` BAND behaviour)_ |
+| Branch | `feat/ui-31-band-strip-discover` |
+
+**Detail: [`queue/UI-31.md`](queue/UI-31.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UI-31 passes."* The RADIO tab (stored value still `Band`), the 91 px strip (band name and range, discovery status and colour key, help text, Discover), the in-canvas axis with preset carets, and the canvas-sizing fix. Follow-ups noted in the PR: API/RTLSDRCore sentences still say "scan", and the SW reason quotes 2.3–26.1 MHz against the pill's 1.6–30.
+
+### OPS-14 — the API docs (OpenAPI + Scalar) are served on the box, and the DevTray says where
+
+| Field | Value |
+|---|---|
+| Status | ✅ shipped 2026-10-02 on the owner's choice of option 1 (see the dossier); PR and squash SHA recorded in the next banner |
+| Plan | — |
+| Spec / handoff | — |
+| Depends on | — |
+| Branch | `ops/ops-14-api-docs-on-box` |
+
+**Detail: [`queue/OPS-14.md`](queue/OPS-14.md)**
+
+✅ **SHIPPED 2026-10-02.** `/openapi/v1.json` and the Scalar UI at `/scalar/v1` were mapped only in Development, so the box answered 404 for both; they are now mapped in every environment. The DevTray shows the address as plain text, never a link (owner: *"don't actually open them on the console though"*).
+
+### AUD-97 — after a restart the panel showed the Soundbar as the output while the saved Cast device played
+
+| Field | Value |
+|---|---|
+| Status | ✅🔬 shipped 2026-10-02 by the coordinator; owner check on the panel outstanding (PR and SHA in the next banner) |
+| Plan | — |
+| Spec / handoff | — |
+| Depends on | — |
+| Branch | `fix/aud-97-output-display-after-restart` |
+
+**Detail: [`queue/AUD-97.md`](queue/AUD-97.md)**
+
+✅🔬 **SHIPPED 2026-10-02, owner check outstanding.** Page load took the current output from `/api/devices/output/default`, which answers the hardware default sink whatever is playing; it now reads the output list's `IsActive` entry.

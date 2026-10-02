@@ -108,6 +108,45 @@ public class MainLayoutCastPickTests : TestContext
     await cut.Find(CastPill).ClickAsync(new MouseEventArgs());
   }
 
+  // AUD-97 (owner, 2026-10-02): after a restart with Cast restored, the panel showed the Soundbar.
+  // /output/default answers the hardware default sink whatever is playing; the list's IsActive flag
+  // is the truth, so page load must read that.
+  [Fact]
+  public void PageLoad_WithCastActive_ShowsCast_NotTheDefaultSink()
+  {
+    var soundbar = new AudioDeviceDto { Id = "out:Built-in", Name = "Soundbar", Type = "Output", IsDefault = true };
+    var cast = new AudioDeviceDto { Id = "google-cast", Name = "Cast", Type = "Output", IsActive = true };
+    var devices = new RoutedApiHandler()
+      .Get(OutputPath, new List<AudioDeviceDto> { soundbar, cast })
+      .Get("/api/devices/output/default", soundbar)
+      .Get(DefaultCastPath, SavedDefault);
+
+    var cut = RenderLayout(devices);
+
+    cut.WaitForAssertion(() =>
+      Assert.Equal("google-cast", cut.FindComponent<OutputPickerDropdown>().Instance.CurrentOutputId),
+      TimeSpan.FromSeconds(30));
+    Assert.Equal(SavedDefault, cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+  }
+
+  [Fact]
+  public void PageLoad_WithNoOutputActive_FallsBackToTheDefaultLookup()
+  {
+    var soundbar = new AudioDeviceDto { Id = "out:Built-in", Name = "Soundbar", Type = "Output", IsDefault = true };
+    var cast = new AudioDeviceDto { Id = "google-cast", Name = "Cast", Type = "Output" };
+    var devices = new RoutedApiHandler()
+      .Get(OutputPath, new List<AudioDeviceDto> { soundbar, cast })
+      .Get("/api/devices/output/default", soundbar)
+      .Get(DefaultCastPath, SavedDefault);
+
+    var cut = RenderLayout(devices);
+
+    cut.WaitForAssertion(() =>
+      Assert.Equal("out:Built-in", cut.FindComponent<OutputPickerDropdown>().Instance.CurrentOutputId),
+      TimeSpan.FromSeconds(30));
+    Assert.Null(cut.FindComponent<CastDeviceDropdown>().Instance.ConnectedDevice);
+  }
+
   [Theory]
   [InlineData(HttpStatusCode.InternalServerError)]
   [InlineData(HttpStatusCode.Conflict)]

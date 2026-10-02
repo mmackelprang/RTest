@@ -42,6 +42,33 @@ public class ApiTests : IClassFixture<CustomWebApplicationFactory<Program>>
     Assert.Equal(System.Net.HttpStatusCode.NotFound, response.StatusCode);
   }
 
+  // OPS-14: the API docs are served outside Development too. This factory runs the host in the
+  // "Testing" environment, so these fail if the mapping is put back behind IsDevelopment().
+  [Fact]
+  public async Task OpenApiDocument_IsServedOutsideDevelopment()
+  {
+    var client = _factory.CreateClient();
+
+    var response = await client.GetAsync("/openapi/v1.json");
+
+    Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+    Assert.Equal("application/json", response.Content.Headers.ContentType?.MediaType);
+    var body = await response.Content.ReadAsStringAsync();
+    Assert.Contains("\"openapi\"", body);
+    Assert.Contains("/api/audio", body);
+  }
+
+  [Fact]
+  public async Task ScalarReference_IsServedOutsideDevelopment()
+  {
+    var client = _factory.CreateClient();
+
+    var response = await client.GetAsync("/scalar/v1");
+
+    Assert.Equal(System.Net.HttpStatusCode.OK, response.StatusCode);
+    Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+  }
+
   [Fact]
   public void PlaceholderTest_ApiProjectConfigured()
   {
