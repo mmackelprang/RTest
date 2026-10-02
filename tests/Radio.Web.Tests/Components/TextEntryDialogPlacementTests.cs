@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Radio.Web.Components.Dialogs;
+using Radzen;
 using Radio.Web.Components.Pages;
 using Radio.Web.Services.ApiClients;
 using Radio.Web.Services.Hub;
@@ -172,6 +173,59 @@ public class TextEntryDialogPlacementTests : TestContext
     card.QuerySelector("h6")!.TextContent.Trim().Should().Be(title);
     card.QuerySelector("input").Should().NotBeNull();
     card.QuerySelectorAll(".kiosk-entry-actions > button").Should().HaveCount(2);
+  }
+
+  // ── UI-34: text fields stay inside the dialog ──
+  //
+  // Save Playlist's form carried "min-width: 400px" inside a dialog opened 400 px wide, whose content box is
+  // narrower by Radzen's padding, so both 100%-wide fields ran 26 px past the dialog's right edge (measured in
+  // Chromium at 1920x720, keyboard up and down). bUnit computes no layout, so what is pinned is the cause: no
+  // fixed pixel min-width on a dialog component's content, and the form's fill rule.
+
+  [Fact]
+  public void SavePlaylistDialog_FormFillsTheContentBox_AndItsFieldsAreFullWidth()
+  {
+    Services.AddHermeticTestRig();
+    Services.AddSingleton<IConfiguration>(new ConfigurationBuilder()
+      .AddInMemoryCollection(new Dictionary<string, string?> { { "ApiBaseUrl", HermeticTestRig.ApiBaseUrl } })
+      .Build());
+    Services.AddHttpClient<PlaylistApiService>();
+    Services.AddRadzenComponents();
+    JSInterop.Mode = JSRuntimeMode.Loose;
+
+    var cut = RenderComponent<SavePlaylistDialog>();
+
+    var form = cut.Find(".save-playlist-form");
+    form.GetAttribute("style").Should().BeNull("the form's width comes from .save-playlist-form, not a fixed inline size");
+    form.QuerySelector("input")!.GetAttribute("style").Should().Contain("width: 100%");
+    form.QuerySelector("textarea")!.GetAttribute("style").Should().Contain("width: 100%");
+  }
+
+  [Fact]
+  public void Css_SavePlaylistForm_FillsItsDialog_WithBorderBoxFields()
+  {
+    var css = File.ReadAllText(Path.Combine(RepoRoot(), "src", "Radio.Web", "wwwroot", "css", "design-system.css"));
+
+    var form = Rule(css, @"\.save-playlist-form");
+    form.Should().Contain("width: 100%");
+    form.Should().Contain("min-width: 0");
+    var fields = Rule(css, @"\.save-playlist-form \.rz-textbox,\s*\.save-playlist-form \.rz-textarea");
+    fields.Should().Contain("box-sizing: border-box", "padding and border must stay inside the 100% width");
+    fields.Should().Contain("max-width: 100%");
+  }
+
+  [Fact]
+  public void NoDialogComponent_PinsItsContentToAFixedPixelMinWidth()
+  {
+    // A fixed min-width cannot know the width the caller opens the dialog at, minus Radzen's padding. That is
+    // exactly how UI-34 happened. "min-width: 0" (a flex-shrink idiom) is fine.
+    var dialogs = Path.Combine(RepoRoot(), "src", "Radio.Web", "Components", "Dialogs");
+    var offenders = Directory.EnumerateFiles(dialogs, "*.razor")
+      .SelectMany(f => Regex.Matches(File.ReadAllText(f), @"style=""[^""]*min-width:\s*[1-9]\d*px")
+        .Select(m => $"{Path.GetFileName(f)}: {m.Value}"))
+      .ToList();
+
+    offenders.Should().BeEmpty();
   }
 
   /// <summary>The body of the first rule whose selector is exactly <paramref name="selector"/> at the start of a line.</summary>

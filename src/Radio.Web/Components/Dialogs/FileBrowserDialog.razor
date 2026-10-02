@@ -354,10 +354,14 @@
     }
     else
     {
-      <label class="folder-pick-switch">
-        <RadzenSwitch @bind-Value="_includeSubfolders" Name="folder-pick-include-subfolders" />
-        <span>Include subfolders</span>
-      </label>
+      @* A div, not a <label>: RadzenSwitch holds a hidden checkbox, and a label around it forwards the tap to that
+         checkbox as a second click, so every tap toggled twice and the switch never moved (measured in Chromium).
+         The text toggles through its own handler instead. *@
+      <div class="folder-pick-switch">
+        <RadzenSwitch @bind-Value="_includeSubfolders" Name="folder-pick-include-subfolders"
+                      InputAttributes="@(new Dictionary<string, object> { { "aria-label", "Include subfolders" } })" />
+        <span @onclick="ToggleIncludeSubfolders">Include subfolders</span>
+      </div>
     }
     <RadzenButton Click="@Cancel" Variant="Variant.Outlined" ButtonStyle="ButtonStyle.Light" Text="Cancel"
                   Disabled="@_isAddingFolder" class="folder-pick-button" />
@@ -823,6 +827,8 @@ else
       return _folderInfo.SubfolderCount > 0 ? $"{here} · {allText} including subfolders" : here;
     }
   }
+
+  private void ToggleIncludeSubfolders() => _includeSubfolders = !_includeSubfolders;
 
   private static string Ellipsize(string text, int max) =>
     text.Length <= max ? text : text[..(max - 1)].TrimEnd() + "…";

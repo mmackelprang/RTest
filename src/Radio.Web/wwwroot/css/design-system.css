@@ -7728,7 +7728,7 @@ body {
 .encoder-config-table td:first-child { white-space: nowrap; }
 .encoder-config-table td:last-child { font-family: var(--font-mono); font-size: 11px; }
 
-/* ─── §UI-32  Add folder dialog + Clear queue confirmation ─────────────────── *
+/* ─── §UI-32  Add folder dialog + Clear queue confirmation (+ UI-34 Save Playlist fit) ─ *
  * Kept in its own section so it merges cleanly with other work on this file. The queue-action buttons
  * themselves live with the Queue view's other tiles (.queue-actions, near .queue-total-tile).
  * ─────────────────────────────────────────────────────────────────────────── */
@@ -7826,4 +7826,20 @@ body {
 .queue-confirm-actions .rz-button {
   min-height: var(--touch-preferred);
   min-width: 120px;
+}
+
+/* UI-34: Save Playlist's form fills the dialog's content box and no more. Its fields carry width: 100%; the
+   border-box keeps their padding and border inside that width, so neither field can run past the dialog's
+   right edge (it did, by 26 px at 1920x720, while the form carried a fixed min-width of 400 px). */
+.save-playlist-form {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.save-playlist-form .rz-textbox,
+.save-playlist-form .rz-textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }

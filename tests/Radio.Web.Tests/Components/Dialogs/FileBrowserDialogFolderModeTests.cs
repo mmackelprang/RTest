@@ -161,6 +161,24 @@ public class FileBrowserDialogFolderModeTests : TestContext
   }
 
   [Fact]
+  public void TheSwitchIsNotInsideALabel_AndItsTextTogglesIt()
+  {
+    // Measured in Chromium: a <label> around RadzenSwitch forwards each tap to the switch's hidden checkbox as a
+    // second click, so the switch toggled twice and never moved. bUnit does not emulate that forwarding, so the
+    // structure is pinned instead.
+    StubBrowsing();
+    _api.Get("/api/files/folder-tracks", Listing(Abba, "ABBA", topLevel: 0, total: 60));
+    var cut = RenderFolderMode();
+    OpenAbba(cut);
+    cut.WaitForAssertion(() => AddButtonText(cut).Should().Be("Add \"ABBA\" (60)"), TimeSpan.FromSeconds(10));
+
+    cut.FindAll("label .rz-switch").Should().BeEmpty();
+    cut.Find(".folder-pick-switch > span").Click();
+
+    AddDisabled(cut).Should().BeTrue("the text turned subfolders off, and ABBA has nothing at the top level");
+  }
+
+  [Fact]
   public async Task SubfoldersOff_AddsOnlyTheTopLevelTracks()
   {
     StubBrowsing();
