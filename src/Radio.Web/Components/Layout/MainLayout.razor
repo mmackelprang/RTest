@@ -239,12 +239,8 @@
         @* The distortion-marker pill was DEBUG-gated in PR 2 and is now hosted
            inside the DevTray (PR 6 / §P2·2). Topbar stays clean — production
            and dev chrome are identical until the 3-tap gesture activates. *@
-        <button type="button" class="nav-pill" @onclick="HandleSleepButtonAsync"
-                title="Sleep"
-                aria-label="Enter sleep mode">
-          <RadzenIcon Icon="power_settings_new" />
-          <span class="nav-pill-label">Sleep</span>
-        </button>
+        @* ENC-23: a tap is today's Standby; a hold (600 ms, lift to commit) also powers the panel off. *@
+        <SleepPill OnSleep="HandleSleepButtonAsync" OnDeepSleep="HandleDeepSleepButtonAsync" />
       </div>
     </div>
 
@@ -1309,6 +1305,26 @@
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "Error setting sleep state on button press");
+    }
+    NavigationManager.NavigateTo("/sleep");
+  }
+
+  private async Task HandleDeepSleepButtonAsync()
+  {
+    // ENC-23: the Sleep pill's hold. Same shape as HandleSleepButtonAsync — sleep server-side, then
+    // navigate — but the request also asks the API to power the panel off now. The navigation happens
+    // whatever the answer: a refused power-off (the encoder is the dark panel's only wake source, so
+    // the API refuses without one) still leaves the console asleep, on a lit sleep screen.
+    try
+    {
+      if (!await SystemApi.EnterDeepSleepAsync())
+      {
+        Logger.LogWarning("Deep sleep request from the Sleep pill's hold did not succeed");
+      }
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Error entering deep sleep on a Sleep pill hold");
     }
     NavigationManager.NavigateTo("/sleep");
   }

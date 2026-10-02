@@ -593,6 +593,62 @@ html, body {
   color: var(--accent-primary);
 }
 
+/* ENC-23: the Sleep pill (SleepPill.razor). A tap enters Standby; a hold also
+   turns the screen off. The fill behind the label is the hold's only feedback.
+
+   isolation: isolate makes the pill its own stacking context, so the fill's
+   z-index -1 puts it above the pill's own (hover) background and below the
+   icon and label. The text-selection and callout suppression stop a long touch
+   press from selecting the label instead of arming the hold. */
+.nav-pill-sleep {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Hidden until the animation's 300ms delay elapses — the fill-mode is
+   `forwards` only, so this base opacity (not the `from` frame) applies during
+   the delay, and an ordinary tap shows nothing. */
+.nav-pill-sleep-fill {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  transform-origin: left;
+  transform: scaleX(0);
+  opacity: 0;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+
+/* 300ms -> 600ms: the same schedule as the encoder HUD ring, mirroring
+   EncoderInteractionTimings.LongPressRingStartMs (the delay) and
+   LongPressThresholdMs (where the fill completes). The first 300ms of a press
+   is indistinguishable from a tap, so the fill is delayed rather than started
+   at zero. */
+@keyframes navPillSleepFill {
+  from { transform: scaleX(0); opacity: 1; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+.nav-pill-sleep.is-holding .nav-pill-sleep-fill {
+  animation: navPillSleepFill 300ms linear 300ms 1 forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Deliberately left animating, for the reason the encoder HUD ring gives: it
+     is the only on-screen evidence that the hold is arming, and without it the
+     pill would act on a hold with no visible warning. The duration is restored
+     with !important because §26's global reduced-motion rule otherwise cuts
+     every animation to 0.01ms, which would make the fill jump straight to full
+     at 300ms instead of filling. */
+  .nav-pill-sleep.is-holding .nav-pill-sleep-fill {
+    animation-duration: 300ms !important;
+  }
+}
+
 /* Queue count badge — amber pill next to the Queue label */
 .nav-badge {
   display: inline-flex;

@@ -1,0 +1,103 @@
+@*
+  ENC-23: the topbar Sleep pill. A tap enters Standby, exactly as the pill always did; a hold of
+  EncoderInteractionTimings.LongPressThresholdMs also turns the screen off (deep sleep).
+
+  The gesture mirrors RadioControlPanel's band-pill long-press: the press time is recorded on
+  pointerdown and resolved on pointerup, and a hold suppresses the click that trails it. Deep sleep
+  therefore fires on LIFT, not while the finger is still on the glass — a hold that slides off the
+  pill (pointerleave) or is interrupted (pointercancel) does nothing at all.
+
+  The fill behind the label is the only feedback that the hold is arming. It runs on CSS alone (see
+  .nav-pill-sleep-fill in design-system.css), keyed by the is-holding class this component toggles,
+  on the same 300 -> 600 ms schedule as the encoder HUD ring.
+*@
+
+<button type="button"
+        class="nav-pill nav-pill-sleep @(_holding ? "is-holding" : "")"
+        title="Sleep (hold to turn the screen off)"
+        aria-label="Enter sleep mode. Hold to also turn the screen off"
+        @onpointerdown="HandlePointerDown"
+        @onpointerup="HandlePointerUpAsync"
+        @onpointercancel="HandlePointerAbandoned"
+        @onpointerleave="HandlePointerAbandoned"
+        @oncontextmenu:preventDefault="true"
+        @onclick="HandleClickAsync">
+  <span class="nav-pill-sleep-fill" aria-hidden="true"></span>
+  <RadzenIcon Icon="power_settings_new" />
+  <span class="nav-pill-label">Sleep</span>
+</button>
+
+@code {
+  /// <summary>The hold length that turns a tap into deep sleep — the console's shared long-press threshold.</summary>
+  internal static readonly TimeSpan HoldThreshold =
+    TimeSpan.FromMilliseconds(Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs);
+
+  /// <summary>A tap, or a keyboard activation: today's Standby.</summary>
+  [Parameter] public EventCallback OnSleep { get; set; }
+
+  /// <summary>A hold of at least <see cref="HoldThreshold"/>, resolved on lift: Standby and the screen off.</summary>
+  [Parameter] public EventCallback OnDeepSleep { get; set; }
+
+  /// <summary>
+  /// The clock the hold is measured on. A parameter rather than <c>@inject</c> because neither host
+  /// registers a <see cref="TimeProvider"/> — the same seam <c>PresetBar.Clock</c> uses. Production
+  /// never sets it.
+  /// </summary>
+  [Parameter] public TimeProvider Clock { get; set; } = TimeProvider.System;
+
+  private bool _pressed;
+  private bool _holding;
+  private bool _suppressNextClick;
+  private DateTimeOffset _pressedAt;
+
+  private void HandlePointerDown(PointerEventArgs e)
+  {
+    _pressedAt = Clock.GetUtcNow();
+    _pressed = true;
+    _holding = true;
+
+    // A hold whose trailing click never arrived (a browser is not obliged to deliver one after a long
+    // touch press) would otherwise swallow this press's click, and a tap would do nothing.
+    _suppressNextClick = false;
+  }
+
+  private async Task HandlePointerUpAsync(PointerEventArgs e)
+  {
+    if (!_pressed)
+    {
+      return;
+    }
+
+    _pressed = false;
+    _holding = false;
+
+    TimeSpan held = Clock.GetUtcNow() - _pressedAt;
+    if (held >= HoldThreshold)
+    {
+      // The browser still delivers a click after this lift; it must not also enter plain Standby
+      // (and navigate a second time) on top of the deep sleep.
+      _suppressNextClick = true;
+      await OnDeepSleep.InvokeAsync();
+    }
+  }
+
+  private void HandlePointerAbandoned(PointerEventArgs e)
+  {
+    // No action: a hold that slid off the pill or was interrupted is not a commit. The suppression
+    // flag is left alone — after a resolved hold, touch delivers pointerleave between the lift and
+    // the click it must still swallow.
+    _pressed = false;
+    _holding = false;
+  }
+
+  private async Task HandleClickAsync()
+  {
+    if (_suppressNextClick)
+    {
+      _suppressNextClick = false;
+      return;
+    }
+
+    await OnSleep.InvokeAsync();
+  }
+}
