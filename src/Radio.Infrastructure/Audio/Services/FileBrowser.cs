@@ -4,6 +4,7 @@ using Radio.Core.Configuration;
 using Radio.Core.Interfaces;
 using Radio.Core.Interfaces.Audio;
 using Radio.Core.Models.Audio;
+using Radio.Core.Utilities;
 using Radio.Metrics;
 using System.Diagnostics;
 
@@ -198,6 +199,381 @@ public class FileBrowser : IFileBrowser
       return Array.Empty<string>();
     }
   }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// <para>Two checks gate the folder. First the same lexical check every other entry point here uses
+  /// (<see cref="GetFullPath"/>: <c>..</c> segments are normalised away and the result must sit inside the allowed
+  /// set). <see cref="Path.GetFullPath(string)"/> does not resolve symbolic links, so second, the folder's real path
+  /// — every link along it resolved — must also sit inside the real path of an allowed directory. Without that a link
+  /// inside an allowed tree pointing at, say, <c>/etc</c> would pass the first check and be walked.</para>
+  /// <para>The walk itself never follows a symbolic link or other reparse point (see <see cref="WalkFolder"/>), so
+  /// no link below the checked folder can lead out of it, and a link cycle cannot loop it. (A Linux bind mount is not
+  /// a reparse point; one placed inside an allowed tree would be walked like any folder.)</para>
+  /// <para>The walk is synchronous filesystem I/O — on the box a NAS mount, where the whole music tree takes ~15 s
+  /// to walk — so it runs on the thread pool. This method returns as soon as <paramref name="cancellationToken"/> is
+  /// cancelled, even if the walk is stuck inside one blocking call (a stale CIFS mount, a FIFO named <c>*.mp3</c>);
+  /// the walk itself checks the token between entries and stops at its next check, and until then it holds its
+  /// thread-pool thread.</para>
+  /// </remarks>
+  public async Task<FolderTrackListing> ListFolderTracksAsync(
+    string? path,
+    bool includeSubfolders,
+    int maxTracks,
+    bool checkReadable = true,
+    CancellationToken cancellationToken = default)
+  {
+    if (maxTracks < 1)
+    {
+      throw new ArgumentOutOfRangeException(nameof(maxTracks), maxTracks, "The cap must be at least 1.");
+    }
+
+    // Throws UnauthorizedAccessException for a path outside the allowed set. Null/empty means the media root.
+    var folder = Path.TrimEndingDirectorySeparator(
+      Path.GetFullPath(GetFullPath(string.IsNullOrEmpty(path) ? null : path)));
+
+    var canRead = checkReadable ? ReadProbe : static _ => true;
+    var walk = Task.Run(() =>
+    {
+      if (!Directory.Exists(folder))
+      {
+        throw new DirectoryNotFoundException($"Folder not found: {folder}");
+      }
+
+      if (!IsRealPathAllowed(folder))
+      {
+        _logger.LogWarning("Folder rejected: {Folder} resolves through a link to outside the allowed directories", folder);
+        throw new UnauthorizedAccessException($"Folder '{folder}' resolves to outside the allowed media directories");
+      }
+
+      return WalkFolder(folder, includeSubfolders, maxTracks, IsSupportedAudioFile, canRead, cancellationToken);
+    }, cancellationToken);
+
+    // WaitAsync, not just the token passed to Task.Run: that only stops a walk that has not started. A walk blocked
+    // in one filesystem call cannot observe the token, and the request must not wait for it.
+    var listing = await walk.WaitAsync(cancellationToken);
+
+    _logger.LogInformation(
+      "Folder listing for {Folder}: {Count} tracks ({TopLevel} top level), subfolders {IncludeSubfolders}, truncated {Truncated}, skipped {Unreadable} unreadable / {Links} links, {UnreadableFolders} unreadable folders",
+      listing.FolderPath, listing.Paths.Count, listing.TopLevelCount, listing.IncludeSubfolders, listing.Truncated,
+      listing.SkippedUnreadable, listing.SkippedLinks, listing.UnreadableFolders);
+
+    return listing;
+  }
+
+  /// <summary>
+  /// Walks <paramref name="folder"/> and returns its supported files in queue order (see
+  /// <see cref="FolderTrackListing"/>). Pure apart from the filesystem reads, so tests drive it directly.
+  /// </summary>
+  /// <remarks>
+  /// <list type="bullet">
+  /// <item>Hidden and system entries are ignored outright (on Linux, names starting with a dot — which covers the
+  /// <c>._Song.mp3</c> AppleDouble files a Mac leaves on a NAS, and that are not audio).</item>
+  /// <item>Symbolic links and other reparse points are never entered or queued, and are counted in
+  /// <see cref="FolderTrackListing.SkippedLinks"/> when they are a folder or carry a supported extension.</item>
+  /// <item>A supported file that <paramref name="canRead"/> rejects is counted in
+  /// <see cref="FolderTrackListing.SkippedUnreadable"/> and left out.</item>
+  /// <item>A subfolder that cannot be listed is counted in <see cref="FolderTrackListing.UnreadableFolders"/> and
+  /// skipped; the chosen folder itself failing to list is an error and propagates.</item>
+  /// <item>The walk stops at the first supported file past <paramref name="maxTracks"/> and sets
+  /// <see cref="FolderTrackListing.Truncated"/>. The folder it is in has already been listed; past that point no
+  /// further file is opened and no further folder is listed.</item>
+  /// </list>
+  /// </remarks>
+  internal static FolderTrackListing WalkFolder(
+    string folder,
+    bool includeSubfolders,
+    int maxTracks,
+    Func<string, bool> isSupported,
+    Func<string, bool> canRead,
+    CancellationToken cancellationToken)
+  {
+    // Attributes are filtered below rather than through AttributesToSkip so links can be counted, not just dropped.
+    var options = new EnumerationOptions
+    {
+      RecurseSubdirectories = false,
+      IgnoreInaccessible = false,
+      AttributesToSkip = 0,
+      ReturnSpecialDirectories = false
+    };
+
+    var paths = new List<string>();
+    var topLevel = 0;
+    var subfolderCount = 0;
+    var skippedUnreadable = 0;
+    var skippedLinks = 0;
+    var unreadableFolders = 0;
+    var truncated = false;
+
+    // Depth-first, pre-order: a folder's files, then its subfolders in natural order. Children are pushed in
+    // reverse so the first in natural order is popped first.
+    var pending = new Stack<string>();
+    pending.Push(folder);
+    var isRoot = true;
+
+    while (pending.Count > 0 && !truncated)
+    {
+      cancellationToken.ThrowIfCancellationRequested();
+      var dir = pending.Pop();
+
+      List<FileSystemInfo> entries;
+      try
+      {
+        entries = new DirectoryInfo(dir).EnumerateFileSystemInfos("*", options).ToList();
+      }
+      catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+      {
+        if (isRoot)
+        {
+          // Not an UnauthorizedAccessException to the caller: that means "outside the allowed directories" there,
+          // and this folder passed that check — it just cannot be listed.
+          throw new IOException($"Cannot list folder '{folder}'", ex);
+        }
+
+        // DirectoryNotFoundException is an IOException: a subfolder removed mid-walk lands here too.
+        unreadableFolders++;
+        continue;
+      }
+
+      var files = new List<FileSystemInfo>();
+      var dirs = new List<FileSystemInfo>();
+      foreach (var entry in entries)
+      {
+        cancellationToken.ThrowIfCancellationRequested();
+        var attributes = entry.Attributes;
+        if ((attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0)
+        {
+          continue;
+        }
+
+        var isDirectory = entry is DirectoryInfo;
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+        {
+          if (isDirectory || isSupported(entry.Name))
+          {
+            skippedLinks++;
+          }
+          continue;
+        }
+
+        if (isDirectory)
+        {
+          dirs.Add(entry);
+        }
+        else if (isSupported(entry.Name))
+        {
+          files.Add(entry);
+        }
+      }
+
+      files.Sort((a, b) => NaturalStringComparer.Instance.Compare(a.Name, b.Name));
+      foreach (var file in files)
+      {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (paths.Count == maxTracks)
+        {
+          truncated = true;
+          break;
+        }
+
+        if (!canRead(file.FullName))
+        {
+          skippedUnreadable++;
+          continue;
+        }
+
+        paths.Add(file.FullName);
+        if (isRoot)
+        {
+          topLevel++;
+        }
+      }
+
+      if (isRoot)
+      {
+        subfolderCount = dirs.Count;
+      }
+
+      if (includeSubfolders && !truncated)
+      {
+        dirs.Sort((a, b) => NaturalStringComparer.Instance.Compare(b.Name, a.Name));
+        foreach (var sub in dirs)
+        {
+          pending.Push(sub.FullName);
+        }
+      }
+
+      isRoot = false;
+    }
+
+    return new FolderTrackListing
+    {
+      FolderPath = folder,
+      Paths = paths,
+      TopLevelCount = topLevel,
+      IncludeSubfolders = includeSubfolders,
+      Truncated = truncated,
+      MaxTracks = maxTracks,
+      SubfolderCount = subfolderCount,
+      SkippedUnreadable = skippedUnreadable,
+      SkippedLinks = skippedLinks,
+      UnreadableFolders = unreadableFolders
+    };
+  }
+
+  /// <summary>
+  /// The readability probe <see cref="ListFolderTracksAsync"/> uses when asked to check. Defaults to
+  /// <see cref="CanOpenForRead"/>; tests replace it to make a probe that blocks.
+  /// </summary>
+  internal Func<string, bool> ReadProbe { get; set; } = CanOpenForRead;
+
+  /// <summary>
+  /// Whether a file can be opened for reading. Opening is the check — permission bits alone do not say whether an
+  /// SMB mount will hand the file over. The handle is closed at once; nothing is read.
+  /// </summary>
+  private static bool CanOpenForRead(string path)
+  {
+    try
+    {
+      using var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+      return true;
+    }
+    catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
+    {
+      return false;
+    }
+  }
+
+  /// <summary>
+  /// Whether <paramref name="fullPath"/>'s real path (see <see cref="ResolveRealPath"/>) is inside the real path of
+  /// the media root, an allowed browse directory or a bookmark. A path that cannot be resolved is not allowed.
+  /// </summary>
+  private bool IsRealPathAllowed(string fullPath)
+  {
+    string real;
+    try
+    {
+      real = ResolveRealPath(fullPath);
+    }
+    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+    {
+      _logger.LogWarning(ex, "Could not resolve links in {Path}", fullPath);
+      return false;
+    }
+
+    var options = _options.CurrentValue;
+    var allowed = new[] { GetFullPath(null) }
+      .Concat(options.AllowedBrowseDirectories)
+      .Concat(options.BookmarkedPaths.Select(b => b.Path));
+
+    foreach (var dir in allowed)
+    {
+      if (string.IsNullOrWhiteSpace(dir))
+      {
+        continue;
+      }
+
+      string allowedReal;
+      try
+      {
+        allowedReal = ResolveRealPath(Path.GetFullPath(dir));
+      }
+      catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+      {
+        continue;
+      }
+
+      if (IsSameOrInside(real, allowedReal))
+      {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// <summary>
+  /// Whether <paramref name="fullPath"/> is <paramref name="dir"/> or inside it. Case-sensitive except on Windows:
+  /// on Linux <c>/mnt/NAS_MEDIA</c> is a different folder from <c>/mnt/nas_media</c>. (The older lexical checks,
+  /// <see cref="IsWithinAllowedDirectory"/> and <c>FilesController.IsPathAllowed</c>, ignore case everywhere; this
+  /// check runs after them, so "Add folder" gets the stricter answer.)
+  /// </summary>
+  private static bool IsSameOrInside(string fullPath, string dir)
+  {
+    var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    var trimmed = Path.TrimEndingDirectorySeparator(dir);
+    var path = Path.TrimEndingDirectorySeparator(fullPath);
+    return path.Equals(trimmed, comparison)
+      || path.StartsWith(trimmed + Path.DirectorySeparatorChar, comparison);
+  }
+
+  /// <summary>
+  /// Resolves every symbolic link along <paramref name="fullPath"/>, component by component, and returns the
+  /// resulting absolute path (the equivalent of <c>realpath</c>; .NET has no single call for it —
+  /// <see cref="FileSystemInfo.ResolveLinkTarget(bool)"/> only resolves the last component). Components that do not
+  /// exist are kept as they are.
+  /// </summary>
+  /// <remarks>
+  /// A link's target is spliced into the components still to resolve, and <c>.</c> / <c>..</c> are applied as they
+  /// are reached, against the path resolved so far — so a <c>..</c> after a link climbs out of the link's TARGET, as
+  /// the kernel does, not out of the folder the link sits in.
+  /// </remarks>
+  /// <exception cref="IOException">More than 40 links were followed (a cycle, or an absurd chain).</exception>
+  internal static string ResolveRealPath(string fullPath)
+  {
+    var root = Path.GetPathRoot(fullPath) ?? string.Empty;
+    var current = root;
+    var remaining = new LinkedList<string>(SplitComponents(fullPath[root.Length..]));
+
+    var hops = 0;
+    while (remaining.First is { } first)
+    {
+      remaining.RemoveFirst();
+      var part = first.Value;
+      if (part == ".")
+      {
+        continue;
+      }
+      if (part == "..")
+      {
+        current = Path.GetDirectoryName(current) ?? current;
+        continue;
+      }
+
+      var next = Path.Combine(current, part);
+      FileSystemInfo info = Directory.Exists(next) ? new DirectoryInfo(next) : new FileInfo(next);
+      if (info.LinkTarget is { } target)
+      {
+        if (++hops > 40)
+        {
+          throw new IOException($"Too many levels of symbolic links resolving '{fullPath}'");
+        }
+
+        // An absolute target restarts from its root; a relative one continues from the link's own folder, which is
+        // `current`. Either way its components go on the front of the queue and are resolved in turn.
+        if (Path.IsPathRooted(target))
+        {
+          var targetRoot = Path.GetPathRoot(target) ?? string.Empty;
+          current = targetRoot;
+          target = target[targetRoot.Length..];
+        }
+
+        var parts = SplitComponents(target);
+        for (var i = parts.Length - 1; i >= 0; i--)
+        {
+          remaining.AddFirst(parts[i]);
+        }
+        continue;
+      }
+
+      current = next;
+    }
+
+    return current;
+  }
+
+  private static string[] SplitComponents(string path) =>
+    path.Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
 
   /// <inheritdoc/>
   public async Task<int> GetFileCountAsync(CancellationToken cancellationToken = default)

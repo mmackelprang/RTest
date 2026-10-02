@@ -34,13 +34,14 @@
 
   Layout map:
     .centre-panel
-      .queue-split-tabstrip   ← tabs, then the Stats chip (History view) or the kebab (Queue view)
+      .queue-split-tabstrip   ← tabs, then the Stats chip (History view)
       .centre-panel-body
         Radio      → RadioControlPanel
         Bluetooth  → BluetoothConnectPanel
         otherwise  → .queue-split
                        .queue-split-list-col     queue rows OR history rows
-                       .queue-split-context-col  Queue view: Queue Total + Save as playlist
+                       .queue-split-context-col  Queue view: Queue Total + the queue actions (UI-32 — they
+                                                 replaced the tab strip's ⋮ menu)
                                                  History view: stats tile, only with the chip on
 *@
 
@@ -80,54 +81,6 @@
         Stats
       </button>
     }
-    @if (_activeTab == TabQueue && IsFilePlayer(_sourceType))
-    {
-      @* UI-17 points 3 and 4: the kebab belongs to File Player's queue view only. On the queue view
-         reached from another source by the Queue pill it is hidden, because Add Files and Load
-         Playlist make the API switch the source to File Player — viewing the queue must not
-         interrupt what is playing. *@
-      <div style="position: relative;">
-        <button type="button"
-                class="queue-split-kebab"
-                @onclick="ToggleKebab"
-                aria-label="Queue actions">⋮</button>
-        @if (_isKebabOpen)
-        {
-          <div @onclick="CloseKebab" @onclick:stopPropagation="true"
-               style="position: fixed; inset: 0; z-index: 99;"></div>
-          <div @onclick:stopPropagation="true"
-               style="position: absolute; top: 100%; right: 0; z-index: 100; min-width: 180px;
-                      background: rgba(30,30,30,0.95); backdrop-filter: blur(12px);
-                      border: 1px solid rgba(255,255,255,0.15); border-radius: 6px;
-                      box-shadow: 0 8px 24px rgba(0,0,0,0.5); overflow: hidden;
-                      margin-top: 4px;">
-            <button type="button" class="queue-split-kebab-item"
-                    @onclick="@(async () => { CloseKebab(); await OpenFileSelectionDialogAsync(); })"
-                    style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px;
-                           background: transparent; border: none; color: var(--text-high);
-                           font-size: 13px; cursor: pointer; text-align: left;">
-              <RadzenIcon Icon="add" /> Add Files
-            </button>
-            <button type="button" class="queue-split-kebab-item"
-                    @onclick="@(async () => { CloseKebab(); await OpenLoadPlaylistDialogAsync(); })"
-                    style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px;
-                           background: transparent; border: none; color: var(--text-high);
-                           font-size: 13px; cursor: pointer; text-align: left;">
-              <RadzenIcon Icon="playlist_play" /> Load Playlist
-            </button>
-            <button type="button" class="queue-split-kebab-item"
-                    disabled="@(!_queueItems.Any())"
-                    @onclick="@(async () => { CloseKebab(); await HandleClearQueueAsync(); })"
-                    style="display: flex; align-items: center; gap: 8px; width: 100%; padding: 10px 14px;
-                           background: transparent; border: none;
-                           color: @(_queueItems.Any() ? "var(--rz-danger)" : "var(--text-low)");
-                           font-size: 13px; cursor: @(_queueItems.Any() ? "pointer" : "not-allowed"); text-align: left;">
-              <RadzenIcon Icon="delete_sweep" /> Clear All
-            </button>
-          </div>
-        }
-      </div>
-    }
   </div>
 
   <div class="centre-panel-body"
@@ -157,7 +110,12 @@
             {
               <div style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-low);">
                 <RadzenIcon Icon="queue_music" Style="font-size: 80px; opacity: 0.4; margin-bottom: 12px;" />
-                <span style="font-size: 16px;">No tracks in queue</span>
+                <span style="font-size: 16px;">Queue is empty</span>
+                @if (IsFilePlayer(_sourceType))
+                {
+                  @* Points at the action buttons beside the list (UI-32). *@
+                  <span class="queue-empty-hint">Add files, a folder, or a playlist to start.</span>
+                }
               </div>
             }
             else
@@ -322,15 +280,43 @@
               </div>
             </div>
 
-            <!-- Save-as-playlist CTA. Disabled when the queue is empty — saving nothing
-                 would create an empty playlist (no current dialog flow handles that). -->
-            <button type="button"
-                    class="save-playlist-tile"
-                    disabled="@(!_queueItems.Any())"
-                    @onclick="OpenSavePlaylistDialogAsync"
-                    aria-label="Save current queue as playlist">
-              ＋ Save as playlist
-            </button>
+            <!-- UI-32: the queue actions, on screen rather than behind a ⋮ menu, as 56 px buttons. Add files,
+                 Add folder, Load playlist and Clear queue belong to File Player's queue view only (UI-17 points 3
+                 and 4): on the queue view reached from another source by the Queue pill they are hidden,
+                 because adding makes the API switch the source to File Player — viewing the queue must not
+                 interrupt what is playing. Save as playlist switches nothing and shows on both. Save and Clear
+                 are disabled with the queue empty (saving nothing would create an empty playlist); Clear asks
+                 first. -->
+            <div class="queue-actions" role="group" aria-label="Queue actions">
+              @if (IsFilePlayer(_sourceType))
+              {
+                <button type="button" class="queue-action" @onclick="OpenFileSelectionDialogAsync">
+                  <RadzenIcon Icon="add" /><span>Add files</span>
+                </button>
+                <button type="button" class="queue-action" @onclick="OpenAddFolderDialogAsync">
+                  <RadzenIcon Icon="create_new_folder" /><span>Add folder</span>
+                </button>
+                <button type="button" class="queue-action" @onclick="OpenLoadPlaylistDialogAsync">
+                  <RadzenIcon Icon="playlist_play" /><span>Load playlist</span>
+                </button>
+              }
+              <button type="button"
+                      class="queue-action is-secondary"
+                      disabled="@(!_queueItems.Any())"
+                      @onclick="OpenSavePlaylistDialogAsync"
+                      aria-label="Save current queue as playlist">
+                <RadzenIcon Icon="playlist_add" /><span>Save as playlist</span>
+              </button>
+              @if (IsFilePlayer(_sourceType))
+              {
+                <button type="button"
+                        class="queue-action is-danger"
+                        disabled="@(!_queueItems.Any())"
+                        @onclick="AskClearQueue">
+                  <RadzenIcon Icon="delete_sweep" /><span>Clear queue</span>
+                </button>
+              }
+            </div>
           </div>
         }
         else if (_showStats)
@@ -357,6 +343,28 @@
       </div>
     }
   </div>
+
+  @if (_confirmClear && _activeTab == TabQueue && IsFilePlayer(_sourceType))
+  {
+    @* UI-32: Clear queue is a 56 px button now, easy to hit by accident, so it asks first. Same shape as Play
+       History's Clear All confirmation; Cancel comes first, takes focus when the card opens, and Esc or a tap
+       outside cancels. Shown only while the File Player queue view that raised it is still showing — a source
+       change or tab change hides it rather than leaving it over a view with no Clear button. *@
+    <div class="queue-confirm-overlay" @onclick="CancelClearQueue">
+      <div class="queue-confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="queue-confirm-title"
+           tabindex="-1" @onkeydown="OnClearConfirmKeyDown"
+           @onclick:stopPropagation="true">
+        <h6 id="queue-confirm-title">Clear the queue?</h6>
+        <p>@ClearQueueConfirmText(_queueItems.Count)</p>
+        <div class="queue-confirm-actions">
+          <RadzenButton @ref="_clearCancelButton" Text="Cancel" Variant="Variant.Text"
+                        Click="CancelClearQueue" class="queue-confirm-cancel" />
+          <RadzenButton Text="Clear queue" Variant="Variant.Filled" ButtonStyle="ButtonStyle.Danger"
+                        Click="ConfirmClearQueueAsync" class="queue-confirm-clear" />
+        </div>
+      </div>
+    </div>
+  }
 </div>
 
 @code {
@@ -419,8 +427,10 @@
   private BluetoothStatusDto? _btStatus;
   private bool _btConnected;
 
-  // Kebab menu open state (Add Files / Load Playlist / Clear All actions).
-  private bool _isKebabOpen;
+  // UI-32: the Clear queue confirmation is showing; its Cancel button, focused once when the card opens.
+  private bool _confirmClear;
+  private RadzenButton? _clearCancelButton;
+  private bool _focusClearCancel;
 
   // Cached display strings for the history-stats tile so the right column can
   // render synchronously without re-querying TopTracks/TopArtists each render.
@@ -989,6 +999,33 @@
     }
   }
 
+  /// <summary>
+  /// UI-32 Add folder: the file browser in folder mode lists, queues and reports progress itself, then closes with
+  /// a <see cref="Radio.Web.Services.FolderAddResult"/> that becomes the toast. Tapping outside does not close it,
+  /// so a stray tap cannot abandon an add half-way; ✕ still does (the batches already sent stay queued).
+  /// </summary>
+  private async Task OpenAddFolderDialogAsync()
+  {
+    var result = await DialogService.OpenAsync<Radio.Web.Components.Dialogs.FileBrowserDialog>("Add folder",
+      new Dictionary<string, object>
+      {
+        { "SelectFolder", true },
+        { "PreferredBookmarkTag", "music" }
+      },
+      // UI-24: path and search fields — top-anchored, clear of the in-app keyboard.
+      new DialogOptions { ShowClose = true, Width = "600px", CloseDialogOnOverlayClick = false, CssClass = Radio.Web.Components.Dialogs.KioskEntryDialog.CssClass });
+
+    if (result is Radio.Web.Services.FolderAddResult added)
+    {
+      var (severity, summary, detail) = Radio.Web.Services.FolderQueueAdder.Describe(added);
+      NotificationService.Notify(severity, summary, detail);
+      if (added.Added > 0)
+      {
+        await RefreshQueueAsync();
+      }
+    }
+  }
+
   private async Task HandleAddFilesToQueueAsync(List<string> filePaths)
   {
     if (filePaths == null || !filePaths.Any()) return;
@@ -1051,8 +1088,50 @@
     }
   }
 
-  private void ToggleKebab() => _isKebabOpen = !_isKebabOpen;
-  private void CloseKebab() => _isKebabOpen = false;
+  private void AskClearQueue()
+  {
+    _confirmClear = true;
+    _focusClearCancel = true;
+  }
+
+  private void CancelClearQueue() => _confirmClear = false;
+
+  private void OnClearConfirmKeyDown(KeyboardEventArgs e)
+  {
+    if (e.Key == "Escape")
+    {
+      CancelClearQueue();
+    }
+  }
+
+  protected override async Task OnAfterRenderAsync(bool firstRender)
+  {
+    if (_focusClearCancel && _clearCancelButton != null)
+    {
+      _focusClearCancel = false;
+      try
+      {
+        await _clearCancelButton.Element.FocusAsync();
+      }
+      catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+      {
+        // Focus is a courtesy; a circuit going away or an element already gone must not break the panel.
+        Logger.LogDebug(ex, "Could not focus the Clear queue confirmation");
+      }
+    }
+  }
+
+  private async Task ConfirmClearQueueAsync()
+  {
+    _confirmClear = false;
+    await HandleClearQueueAsync();
+  }
+
+  /// <summary>The Clear queue confirmation's body. Clearing also stops playback (FilePlayerAudioSource.ClearQueueAsync).</summary>
+  internal static string ClearQueueConfirmText(int trackCount) =>
+    trackCount == 1
+      ? "Removes the 1 track in the queue and stops playback."
+      : $"Removes all {trackCount} tracks and stops playback.";
 
   /// <summary>
   /// SourceChanged fires more than once per switch (MainLayout notifies locally, then the hub pushes)

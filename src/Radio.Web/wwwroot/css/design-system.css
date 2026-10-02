@@ -3384,8 +3384,9 @@ body {
   border-color: rgba(92, 212, 232, 0.35);
 }
 
-/* UI-17: the tabs' own group inside the strip, so the Stats chip and kebab can sit outside the
- * tablist element without changing the strip's layout. */
+/* UI-17: the tabs' own group inside the strip, so the Stats chip can sit outside the tablist element
+ * without changing the strip's layout. (The Queue view's ⋮ menu also sat there until UI-32 moved its
+ * actions into the right column — .queue-actions.) */
 .centre-tablist {
   display: flex;
   align-items: center;
@@ -3394,25 +3395,6 @@ body {
 
 .queue-split-tab-spacer {
   flex: 1;
-}
-
-.queue-split-kebab {
-  background: transparent;
-  border: none;
-  color: var(--text-medium);
-  font-size: 18px;
-  width: 32px;
-  height: 32px;
-  border-radius: 4px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.queue-split-kebab:hover {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--text-high);
 }
 
 .queue-split-list-body {
@@ -3452,33 +3434,98 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ── Save-as-playlist CTA tile ── */
-.save-playlist-tile {
+/* ── Queue actions (UI-32) ──
+ * The ⋮ menu's actions, on screen in the Queue view's right column: Add files, Add folder, Load playlist
+ * (accent outline — the primary actions), Save as playlist (neutral outline, accent on hover), and Clear queue
+ * (red outline) pushed to the bottom of the column behind a rule. This is the old Save-as-playlist tile's
+ * treatment — mono uppercase, outline, no fill — made a full-width 56 px (--touch-preferred) list with the icon
+ * leading. Measured at 1920x720 the column is ~537 px tall; tile + five buttons need ~420. */
+.queue-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-height: 0;
+}
+
+.queue-action {
   background: transparent;
   border: 1px solid var(--accent-primary);
   color: var(--accent-primary);
   border-radius: 8px;
-  padding: 14px;
+  padding: 0 14px;
   font-family: var(--font-mono);
   font-size: 13px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
-  text-align: center;
-  min-height: 48px;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  min-height: var(--touch-preferred);
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 6px;
+  justify-content: flex-start;
+  gap: 10px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.queue-action .rzi {
+  font-size: 18px;
   flex-shrink: 0;
 }
 
-.save-playlist-tile:hover:not(:disabled) {
+.queue-action:hover:not(:disabled),
+.queue-action:active:not(:disabled) {
   background: var(--accent-dim);
 }
 
-.save-playlist-tile:disabled {
+.queue-action:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+
+/* --text-low, not --surface-separator, for the outline: on a 56 px block the separator (#1F1F22) all but vanished
+   and the button read as a label. */
+.queue-action.is-secondary {
+  border-color: var(--text-low);
+  color: var(--text-medium);
+}
+
+.queue-action.is-secondary:hover:not(:disabled),
+.queue-action.is-secondary:active:not(:disabled) {
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* Destructive: red outline and text, no fill, at the bottom of the column behind a rule. margin-top: auto pushes
+   it down; the border-top rule is drawn by the ::before so the button keeps its own full outline. */
+.queue-action.is-danger {
+  border-color: var(--signal-red);
+  color: var(--signal-red);
+  margin-top: auto;
+  position: relative;
+}
+
+.queue-action.is-danger::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -9px;
+  border-top: 1px solid var(--surface-separator);
+}
+
+.queue-action.is-danger:hover:not(:disabled),
+.queue-action.is-danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--signal-red) 12%, transparent);
+}
+
+.queue-action.is-danger:focus-visible {
+  outline-color: var(--signal-red);
+}
+
+.queue-action:disabled {
   opacity: 0.4;
   cursor: not-allowed;
   border-color: var(--surface-separator);
@@ -7888,3 +7935,131 @@ body {
    agreement column carries a sentence and must be allowed to. */
 .encoder-config-table td:first-child { white-space: nowrap; }
 .encoder-config-table td:last-child { font-family: var(--font-mono); font-size: 11px; }
+
+/* ─── §UI-32  Add folder dialog + Clear queue confirmation (+ UI-34 Save Playlist fit) ─ *
+ * Kept in its own section so it merges cleanly with other work on this file. The queue-action buttons
+ * themselves live with the Queue view's other tiles (.queue-actions, near .queue-total-tile).
+ * ─────────────────────────────────────────────────────────────────────────── */
+
+/* Empty queue: the sub-line that points at the action buttons. */
+.queue-empty-hint {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--text-medium); /* not --text-low: ~2.2:1 at this size (see the note at the NowPlaying meta line) */
+}
+
+/* File browser in folder mode: what adding the shown folder would queue ("12 tracks here · 60 including
+   subfolders"). One line, muted, above the folder list. */
+.folder-pick-summary {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-medium);
+  padding: 6px 2px 8px;
+  min-height: 30px;
+}
+
+/* Folder mode has no type-filter chips, so the tools fit beside the breadcrumbs and squeezed them to their
+   220 px minimum — the folder being shown scrolled out of sight (measured at 1920x720). The tools take a row of
+   their own instead, as they do in file mode once the chips wrap them down. */
+.file-browser-toolbar.is-folder-mode .file-browser-toolbar-tools {
+  flex-basis: 100%;
+}
+
+/* Folder-mode footer: switch (or progress) left, Cancel and Add right, all finger-sized. */
+.folder-pick-footer {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-top: 12px;
+  flex-shrink: 0;
+}
+
+.folder-pick-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--touch-preferred);
+  margin-right: auto;
+  cursor: pointer;
+  color: var(--text-high);
+  font-size: 14px;
+}
+
+.folder-pick-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  margin-right: var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-medium);
+}
+
+.folder-pick-footer .folder-pick-button {
+  min-height: var(--touch-preferred);
+  min-width: 96px;
+}
+
+/* Clear queue confirmation: a centred card over the content area, the Play History Clear All shape. */
+.queue-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.queue-confirm-card {
+  width: min(440px, 90%);
+  padding: var(--sp-6);
+  border-radius: 8px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--surface-separator);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.queue-confirm-card h6 {
+  margin: 0 0 var(--sp-3);
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-high);
+}
+
+.queue-confirm-card p {
+  margin: 0;
+  color: var(--text-medium);
+}
+
+.queue-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-top: var(--sp-6);
+}
+
+.queue-confirm-actions .rz-button {
+  min-height: var(--touch-preferred);
+  min-width: 120px;
+}
+
+/* UI-34: Save Playlist's form fills the dialog's content box and no more. Its fields carry width: 100%; the
+   border-box keeps their padding and border inside that width, so neither field can run past the dialog's
+   right edge. Measured at 1920x720 while the form carried a fixed min-width of 400 px: the 400 px dialog's
+   content box is 352 px inside its padding, the fields were 400 px wide, and they ended 26 px past that box's
+   inner right edge (the overflowing content had also scrolled sideways, which is why the overrun is not 48). */
+.save-playlist-form {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.save-playlist-form .rz-textbox,
+.save-playlist-form .rz-textarea {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}

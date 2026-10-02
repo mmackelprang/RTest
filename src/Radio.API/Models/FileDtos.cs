@@ -228,6 +228,47 @@ public class QueueFilesResponseDto
 }
 
 /// <summary>
+/// The playable files in a folder, in queue order, for "Add folder" (UI-32). Returned by
+/// <c>GET /api/files/folder-tracks</c>. Listing queues nothing: the client adds <see cref="Paths"/> through
+/// <c>POST /api/files/queue</c>, in batches, so it can show progress and no single request outlives its timeout.
+/// </summary>
+public class FolderTracksDto
+{
+  /// <summary>The folder's full path.</summary>
+  public required string FolderPath { get; set; }
+
+  /// <summary>The folder's own name, for display ("Added 60 tracks from ABBA").</summary>
+  public required string FolderName { get; set; }
+
+  /// <summary>Whether subfolders were walked.</summary>
+  public bool IncludeSubfolders { get; set; }
+
+  /// <summary>Full paths to queue, in order: the folder's files by natural name order, then each subfolder in turn.</summary>
+  public List<string> Paths { get; set; } = new();
+
+  /// <summary>How many of <see cref="Paths"/> are directly in the folder; they are its first entries.</summary>
+  public int TopLevelCount { get; set; }
+
+  /// <summary>Immediate subfolders the walk would enter.</summary>
+  public int SubfolderCount { get; set; }
+
+  /// <summary>True when the folder holds more than <see cref="MaxTracks"/>; <see cref="Paths"/> is the first <see cref="MaxTracks"/>.</summary>
+  public bool Truncated { get; set; }
+
+  /// <summary>The cap (<c>FilePlayer:MaxFolderTracks</c>).</summary>
+  public int MaxTracks { get; set; }
+
+  /// <summary>Supported files left out because they could not be opened.</summary>
+  public int SkippedUnreadable { get; set; }
+
+  /// <summary>Linked files and folders left out (links are never followed).</summary>
+  public int SkippedLinks { get; set; }
+
+  /// <summary>Subfolders that could not be listed.</summary>
+  public int UnreadableFolders { get; set; }
+}
+
+/// <summary>
 /// DTO representing drive information.
 /// </summary>
 public class DriveInfoDto
