@@ -431,6 +431,13 @@
 
   private int _streamStallRecoveriesStarted;
 
+  /// <summary>
+  /// The most recently started stall recovery (UI-36), completed when no recovery has run. For tests:
+  /// a finished recovery does not re-render the panel, so a render-driven wait (bUnit's
+  /// <c>WaitForAssertion</c>) can miss it under load — tests await this instead.
+  /// </summary>
+  internal Task LastStreamRecovery { get; private set; } = Task.CompletedTask;
+
   /// <summary>Completes when no frame is waiting to be drawn. For tests, which need a rendezvous, not a sleep.</summary>
   internal Task DrawIdle => Volatile.Read(ref _drawLoop);
 
@@ -1273,7 +1280,7 @@
     };
 
     Interlocked.Increment(ref _streamStallRecoveriesStarted);
-    _ = RecoverStreamAsync();
+    LastStreamRecovery = RecoverStreamAsync();
   }
 
   private async Task RecoverStreamAsync()

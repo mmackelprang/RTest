@@ -125,15 +125,23 @@ public class VisualizerPanelStreamTests : TestContext
 
   /// <summary>
   /// One tick. <see cref="FakeTimeProvider.Advance"/> runs the timer callback inline, so the count of
-  /// recoveries STARTED is exact the moment it returns; the wait then lets every started recovery finish,
-  /// so none is still in flight when the next tick or assertion runs.
+  /// recoveries STARTED is exact the moment it returns; a tick starts at most one recovery, and awaiting
+  /// <c>LastStreamRecovery</c> lets it finish — so, with every tick going through here, none is still in
+  /// flight when the next tick or assertion runs.
   /// </summary>
+  /// <remarks>
+  /// ⚠ This used to be <c>cut.WaitForAssertion(...)</c> on the finished count. bUnit re-checks that only
+  /// when the component renders, and a finished recovery does not render — so whenever the recovery
+  /// completed after the first check (any loaded run of the whole project) it was never re-checked and the
+  /// test failed after 5 s, "Check count: 1". The await is the rendezvous; the timeout only turns a
+  /// regression that never completes into a failure instead of a hang.
+  /// </remarks>
   private async Task TickAsync(IRenderedComponent<VisualizerPanel> cut, int expectedRecoveries)
   {
     _clock.Advance(VisualizerPanel.TelemetryInterval);
     cut.Instance.StreamStallRecoveriesStarted.Should().Be(expectedRecoveries);
-    cut.WaitForAssertion(() => cut.Instance.StreamStallRecoveries.Should().Be(expectedRecoveries), TimeSpan.FromSeconds(5));
-    await Task.CompletedTask;
+    await cut.Instance.LastStreamRecovery.WaitAsync(TimeSpan.FromSeconds(30));
+    cut.Instance.StreamStallRecoveries.Should().Be(expectedRecoveries);
   }
 
   // --- 1. The hub never waits on the browser, and the newest frame wins --------------------------
