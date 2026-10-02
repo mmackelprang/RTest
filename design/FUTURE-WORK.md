@@ -22,7 +22,9 @@ from `Ringing` only, decided atomically against a handset lift; `409 {"declined"
 other state; `404` for an unknown phone — is at
 `D:\prj\RotaryPhone\docs\prompts\2026-10-02-radioconsole-decline-ringing-call-request.md`. When it ships:
 set `"RotaryPhone": { "DeclineSupported": true }` in Radio.Web's `appsettings.Production.json` (or the config
-store), and run the owner check in `docs/queue/PHN-11.md`.
+store), and run the owner check in `docs/queue/PHN-11.md`. In the same change, rename the Phone page hero's
+disabled **Reject** button to **Ignore** and wire it to the same decline. Owner, 2026-10-02: *"d - yes - ignore
+is the label I want."*
 
 **Gotchas.**
 - ⛔ Do not "unblock" this with `POST /api/phone/simulate/hook?offHook=false`. It reaches the same

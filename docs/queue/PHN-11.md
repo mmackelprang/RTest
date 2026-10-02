@@ -159,9 +159,11 @@ stale close (ids come from RotaryPhone's own hub, so only a phone set changed mi
    ringing stops, and note what the caller hears** (voicemail on the Bluetooth path, a dropped call on Google
    Voice, per the code).
 
-## Open questions for the owner
+## Owner rulings (2026-10-02) on the open questions
 
-1. Ambient knobs while the banner is up (see Deviations) — acceptable, or file the API seam?
-2. Deep sleep after a call leaves the panel lit — acceptable, or file an API row (spec Q3)?
-3. Answer from the banner? (Spec Q1 — recommended: not in this row.)
-4. When the decline route lands, rename the Phone page hero's disabled **Reject** to **Ignore**? (Spec Q2.)
+Owner, verbatim: *"Answers - a - yes, b - yes, c - no - answering on the console doesn't make any sense.  The only way to answer is on the phone. d - yes - ignore is the label I want."*
+
+1. Ambient knobs act directly while the banner is up (see Deviations): **accepted.** No API seam is filed.
+2. After a call in deep sleep the panel stays lit on the sleep clock: **accepted.** No API row is filed.
+3. Answer from the banner: **no, permanently.** The only way to answer is the rotary phone, so no console "Answer" control should be proposed again.
+4. When RotaryPhone ships the decline route, the Phone page hero's disabled **Reject** is renamed **Ignore**, the owner's chosen label. It is done together with turning on `RotaryPhone:DeclineSupported`.
