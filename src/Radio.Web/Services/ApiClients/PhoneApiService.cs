@@ -77,10 +77,11 @@ public class PhoneApiService
   /// <remarks>
   /// ⚠ <b>The route does not exist in RotaryPhone yet.</b> It was requested on 2026-10-02
   /// (<c>RotaryPhone/docs/prompts/2026-10-02-radioconsole-decline-ringing-call-request.md</c>), and the
-  /// banner calls this only when <c>RotaryPhone:DeclineSupported</c> is true. The body check is not
-  /// decoration: RotaryPhone's front end answers unknown <c>/api/*</c> paths with <c>200</c> and its
-  /// <c>index.html</c> (see <c>CLAUDE.md</c>, <c>UI-11</c>), so a status code alone would report a decline
-  /// that never happened if the flag were flipped before the route shipped.
+  /// banner calls this only when <c>RotaryPhone:DeclineSupported</c> is true. A current RotaryPhone answers
+  /// an unknown <c>/api/*</c> route with a JSON <c>404</c> (its <c>Program.cs</c> API fallback, added after
+  /// <c>UI-11</c>), which fails the status check. The body check is what still holds against an older
+  /// RotaryPhone build, whose SPA fallback answered such a route <c>200</c> with <c>index.html</c>: that
+  /// body is not JSON, so it counts as a failure rather than a decline that never happened.
   /// <c>simulate/hook?offHook=false</c> would reach the same hang-up today and is deliberately not used:
   /// it is unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
   /// </remarks>
@@ -92,8 +93,7 @@ public class PhoneApiService
         ? "/api/phone/decline"
         : $"/api/phone/decline?phoneId={Uri.EscapeDataString(phoneId)}";
       using var response = await _httpClient.PostAsync(url, null, ct);
-      if (!response.IsSuccessStatusCode
-          || response.Content.Headers.ContentType?.MediaType?.Contains("json", StringComparison.OrdinalIgnoreCase) != true)
+      if (!response.IsSuccessStatusCode)
       {
         _logger.LogWarning("The phone service did not accept the decline ({StatusCode})", (int)response.StatusCode);
         return false;
@@ -103,6 +103,12 @@ public class PhoneApiService
       return body.RootElement.ValueKind == JsonValueKind.Object
         && body.RootElement.TryGetProperty("declined", out var declined)
         && declined.ValueKind == JsonValueKind.True;
+    }
+    catch (JsonException)
+    {
+      // A 2xx that is not JSON: an older RotaryPhone's SPA fallback answering a route it does not have.
+      _logger.LogWarning("The phone service answered the decline with something other than JSON; is the route deployed?");
+      return false;
     }
     catch (Exception ex)
     {

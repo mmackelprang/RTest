@@ -753,21 +753,39 @@ This is safe — the client retries with exponential backoff and will connect au
 
 ### SignalR Hub Protocol
 
-The Radio Console expects the RotaryPhone hub to invoke the following client method:
+**The contract, read from RotaryPhone's source (`SignalRNotifierService.OnStateChanged`), not assumed** —
+corrected by `PHN-12` (2026-10-02):
 
 ```
-CallStateChanged(string state, string phoneNumber)
-CallStateChanged(string state, string phoneNumber, string callerName)
+CallStateChanged(string phoneId, string state)    // state: Idle | Dialing | Ringing | InCall
+IncomingCall(string phoneId, string phoneNumber)   // sent right after Ringing, only when the number is known;
+                                                    // the number may be the literal "Unknown"
 ```
 
-Both overloads are registered. The `state` parameter is parsed leniently:
+A caller-ID update mid-ring (the real number replacing `"Unknown"`) re-sends both. No call id, contact name
+or photo travels on the hub. Both clients bind exactly these:
+
+- **Radio.API** (`PhoneCallClient`) raises **Ringing** from `IncomingCall`, with the number — once per number
+  per ring, so a re-send with the same number does not restart the announcement, and a caller-ID update
+  restarts it with the better name. The bare `CallStateChanged(…, "Ringing")` raises nothing of its own.
+  Every other state is raised as it arrives and clears the caller.
+- **Radio.Web** (`PhoneHubService`) feeds both events to the Phone page and the incoming-call banner.
+
+⛔ **Until `PHN-12` Radio.API bound `CallStateChanged` as `(state, phoneNumber)`**, plus a three-argument
+overload nobody sends, and never subscribed to `IncomingCall`. The phone id was parsed as the state, which
+matches no arm below, so every event read as `Idle`: **the incoming-call announcement never ran on the box**
+(its retained logs show `Phone call state:` lines, all `Idle`, never `Ringing`). `PhoneCallClientContractTests`
+(Radio.API.Tests) now drives the real client over a real SignalR connection to a hub that sends exactly the
+two calls above. Radio.Web's `PhoneHubService` always bound them correctly.
+
+The API maps the `state` string leniently:
 
 | State Values | Maps To |
 |-------------|---------|
-| `"ringing"`, `"ring"`, `"incoming"` | Ringing |
+| `"ringing"`, `"ring"`, `"incoming"` | Ringing (raised from `IncomingCall`, see above) |
 | `"incall"`, `"in_call"`, `"active"`, `"answered"` | InCall |
 | `"ended"`, `"hangup"`, `"idle"` | Ended |
-| Anything else | Idle |
+| Anything else (including `"Dialing"`) | Idle |
 
 **Ringing** starts the caller-name announcement (ring sound first, if `PlayRingSound`). **Ended** and
 **Idle** stop it — **only it** (`AUD-87`, 2026-10-02). Each ringing call's announcement runs under its own
@@ -846,6 +864,43 @@ When an incoming call is detected (`Ringing` state):
 5. The resolved caller name is reported back to RotaryPhone via SignalR (`ReportCallerResolved`)
 6. When the call ends (`Ended` or `Idle`), the announcement stops and audio returns to normal
 7. Call state changes are broadcast to the Web UI in real-time via SignalR
+
+### The incoming-call banner (`PHN-11`)
+
+A ringing call puts a large banner over the console: **"INCOMING CALL"**, the caller, and an **Ignore**
+button. It shows on every page and on the sleep screen, alongside the announcement — it does not replace or
+silence it. Design: [`docs/design-handoffs/2026-10-02-incoming-call-banner.md`](../docs/design-handoffs/2026-10-02-incoming-call-banner.md).
+
+| | |
+|---|---|
+| **Where the state lives** | `Radio.Web/Services/IncomingCallBannerService.cs`, one per browser circuit, fed by `PhoneHubService`'s `CallStateChanged` and `IncomingCall`. Hosts: `MainLayout` and `/sleep` (`Components/Shared/IncomingCallBanner.razor`). |
+| **Caller line** | Contact name (from the API's PBAP lookup, then RotaryPhone's `/api/contacts`) with the number under it; the formatted number alone; or **Unknown caller / No caller ID**. A monogram for a contact, a glyph otherwise — no photo exists in any contract. A caller-ID update upgrades the line in place. |
+| **Closes on** | A touch anywhere outside the Ignore column (the call keeps ringing; the announcement is untouched). The call being **answered** (`InCall`: a 600 ms **ANSWERED** beat, then a fade). The call **ending** (`Idle`: the caller hung up, the ring timed out, or Ignore worked — **CALL ENDED**, same beat). |
+| **Safety net** | While a call is tracked, `GET /api/phone/status` is re-read every 3 s: a hang-up lost to a hub reconnect still closes the banner. If nothing confirms the ring for 90 s (RotaryPhone unreachable), the banner closes on its own. |
+| **Sleep** | On `/sleep` the banner covers the sleep screen and the page reports the screen hidden, which **lights a dark panel** (`ENC-22` off-timer or `ENC-23` deep sleep) **without waking the console** — parked music stays parked. When it closes the screen is reported visible again, and `ENC-22`'s timer restarts from its full period. ⚠ With `PanelOffAfterMinutes = 0` (the box), a call during deep sleep therefore leaves the panel lit on the sleep clock until someone sleeps it again; the Web cannot restore deep-dark without an API change (design Q3). A touch on the banner never wakes the console. On normal pages the 5-minute idle dim is lifted. |
+| **More than one call** | RotaryPhone refuses a second inbound call on a ringing phone, so a second `IncomingCall` is the same call with a better number. A ring on another phone id shows the newest; when it ends the banner falls back to the other. A touch-closed banner stays closed for that call; the next call shows again. |
+| **Logging** | Nothing at Information (`Radio.Web`'s console sink is unrestricted — `PHN-5`). Numbers only through `LogSafeText.ForPhone`; names never. |
+
+**Ignore** asks RotaryPhone to decline the ringing call: `POST /api/phone/decline?phoneId=…`, counted as
+success only on 2xx with a JSON `{"declined": true}` (a current RotaryPhone answers a route it lacks with a JSON
+`404`; an older build's SPA fallback answered `200` with `index.html`, which the body check rejects). The banner
+then shows **ENDING CALL** and
+closes on the `Idle` that follows; if the request fails, or the call is still ringing 5 s later, it shows
+*"Couldn't end the call. Try again."* and stays up.
+
+⛔ **That route does not exist in RotaryPhone yet** (verified read-only 2026-10-02: `PhoneController` has
+status, bell-failure ack, three `simulate/*` routes, system-status and HT801 validate; the hub and the GV
+bridge have nothing either). It was requested in
+`D:\prj\RotaryPhone\docs\prompts\2026-10-02-radioconsole-decline-ringing-call-request.md`. Until it ships,
+**Ignore is shown disabled** with *"Not available yet. Answer and hang up on the phone, or let it ring."* —
+enable it with `"RotaryPhone": { "DeclineSupported": true }` in Radio.Web's configuration once it does.
+`simulate/hook?offHook=false` would reach the same `CallManager.HangUp()` today and is deliberately not used:
+it is unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+
+What the caller hears when a call is declined depends on the path (from reading RotaryPhone, not yet
+observed): on the **Bluetooth/HFP** path the cell rejects the call and the carrier normally sends the caller
+to voicemail; on the **Google Voice** path the GV leg was already answered before the rotary rang, so the
+caller hears the call drop. The RotaryPhone request asks them to confirm both.
 
 ### Troubleshooting
 
@@ -1437,7 +1492,9 @@ Status indicators update in real-time via SignalR — no page refresh needed.
 | Core | `Configuration/PhoneIntegrationOptions.cs` | Phone config options |
 | Infrastructure | `Platform/Input/HidRotaryEncoderService.cs` | USB HID reader + event firing |
 | Infrastructure | `Platform/Input/RotaryEncoderActionRouter.cs` | Maps encoder events → audio actions |
-| Infrastructure | `External/PhoneCallClient.cs` | SignalR client for RotaryPhone hub |
+| Infrastructure | `External/PhoneCallClient.cs` | SignalR client for RotaryPhone hub (contract corrected by `PHN-12`) |
+| Web | `Services/IncomingCallBannerService.cs` | Incoming-call banner state, per circuit (`PHN-11`) |
+| Web | `Components/Shared/IncomingCallBanner.razor` | The banner; hosted by `MainLayout` and `/sleep` |
 | Infrastructure | `External/PhoneContactLookupService.cs` | PBAP + REST contact lookup |
 | Infrastructure | `Bluetooth/PbapSyncService.cs` | PBAP sync service (D-Bus OBEX) |
 | Infrastructure | `Bluetooth/PbapContactRepository.cs` | SQLite contact storage |

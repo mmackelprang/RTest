@@ -542,7 +542,8 @@ public class IncomingCallBannerServiceTests
   [Theory]
   [InlineData(HttpStatusCode.InternalServerError, "{\"declined\":false}", "application/json")]
   [InlineData(HttpStatusCode.Conflict, "{\"declined\":false,\"state\":\"InCall\"}", "application/json")]
-  [InlineData(HttpStatusCode.OK, "<!doctype html><html></html>", "text/html")]   // RotaryPhone's SPA fallback
+  [InlineData(HttpStatusCode.OK, "<!doctype html><html></html>", "text/html")]   // an older RotaryPhone's SPA fallback
+  [InlineData(HttpStatusCode.NotFound, "{\"error\":\"No API route matches POST /api/phone/decline\"}", "application/json")]   // today's
   [InlineData(HttpStatusCode.OK, "{\"declined\":false}", "application/json")]
   public async Task AFailedDecline_ShowsTheError_LeavesTheBannerUp_AndIgnoreWorksAgain(
     HttpStatusCode status, string body, string contentType)
