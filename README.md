@@ -18,7 +18,7 @@ This project restores the original function (Radio/Vinyl) while adding modern ca
 | 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
 | 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
 | 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
-| 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, Swagger |
+| 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, OpenAPI + Scalar docs |
 | 9 - UI | ✅ Completed | 12-page Blazor Server UI, Radzen.Blazor, shared components |
 | 10 - Testing | ✅ Substantially Complete | ~1,416 tests across 10 projects (unit, integration, E2E) |
 | 11 - Documentation | 🔄 In Progress | Design docs, decision log, work log (user manual pending) |
@@ -515,7 +515,7 @@ The API layer provides REST endpoints and real-time communication for external c
 - **REST Controllers**: Complete CRUD operations for audio, sources, devices, and configuration
 - **SignalR Hub**: Real-time visualization data broadcasting at 30fps
 - **Audio Streaming**: HTTP PCM audio stream for Chromecast and web clients
-- **Swagger Documentation**: Interactive API documentation at `/swagger`
+- **API Documentation**: interactive Scalar UI at `/scalar/v1` and the OpenAPI document at `/openapi/v1.json` (generated from the live controllers; served in every environment, including on the box)
 
 ### REST API Endpoints
 

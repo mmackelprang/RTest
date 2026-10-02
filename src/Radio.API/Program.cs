@@ -188,11 +188,12 @@ builder.Services.PostConfigure<Microsoft.Extensions.Hosting.HostOptions>(_ => { 
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
-{
-  app.MapOpenApi();
-  app.MapScalarApiReference();
-}
+// API docs are served in every environment, including on the box (OPS-14, owner request 2026-10-02):
+// the OpenAPI document at /openapi/v1.json and the Scalar UI at /scalar/v1. This exposes nothing new —
+// every endpoint it describes is already reachable, unauthenticated, on the LAN — and Scalar.AspNetCore
+// serves its UI script from the package itself, so the page works without internet access.
+app.MapOpenApi();
+app.MapScalarApiReference();
 
 // Add CORS middleware (must be early in pipeline)
 if (app.Environment.IsDevelopment())

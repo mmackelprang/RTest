@@ -4336,6 +4336,25 @@ body {
   color: var(--text-high);
 }
 
+/* OPS-14: where the API docs are — a reading, not an action (plain text, no link, no button look). */
+.dev-tray-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--surface-separator);
+}
+
+.dev-tray-note-url {
+  word-break: break-all;
+}
+
+.dev-tray-note-hint {
+  font-size: 12px;
+  color: var(--text-medium);
+}
+
 .dev-tray-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);

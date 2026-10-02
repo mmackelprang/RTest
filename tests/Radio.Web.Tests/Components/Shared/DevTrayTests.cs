@@ -91,6 +91,41 @@ public class DevTrayTests : TestContext
     base.Dispose(disposing);
   }
 
+  // OPS-14: the API docs note. It must name the address another device uses (the box's name, not the
+  // localhost radio-web talks to) and must never be a link — a page outside the app strands the kiosk.
+  [Theory]
+  [InlineData("http://localhost:5000", "RADIO", "http://radio:5000/scalar/v1")]
+  [InlineData("http://localhost:5100/", "dev-pc", "http://dev-pc:5100/scalar/v1")]
+  [InlineData("not a url", "radio", null)]
+  [InlineData("", "radio", null)]
+  [InlineData("http://localhost:5000", "", null)]
+  public void BuildApiDocsUrl_UsesTheMachineNameAndTheApiPort(string apiBaseUrl, string machine, string? expected)
+  {
+    DevTray.BuildApiDocsUrl(apiBaseUrl, machine).Should().Be(expected);
+  }
+
+  [Fact]
+  public void ApiDocsNote_IsPlainText_NeverALink()
+  {
+    var cut = RenderComponent<DevTray>(p => p
+      .Add(x => x.IsOpen, true)
+      .Add(x => x.ApiDocsUrl, "http://radio:5000/scalar/v1"));
+
+    var note = cut.Find(".dev-tray-note");
+    note.TextContent.Should().Contain("http://radio:5000/scalar/v1");
+    note.TextContent.Should().Contain("open on another device");
+    cut.FindAll(".dev-tray a").Should().BeEmpty();
+    note.QuerySelectorAll("button").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void ApiDocsNote_IsHidden_WithoutAnAddress()
+  {
+    var cut = RenderComponent<DevTray>(p => p.Add(x => x.IsOpen, true));
+
+    cut.FindAll(".dev-tray-note").Should().BeEmpty();
+  }
+
   [Fact]
   public void DevTray_Closed_StillMounts()
   {
