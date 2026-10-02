@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (98)
+## Shipped rows (102)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3179,3 +3179,59 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/UI-34.md`](queue/UI-34.md)**
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"UI-32 + UI-34 both pass."* Save Playlist's fields stay inside the dialog (a 400 px form `min-width` in a 400 px dialog removed; a scan test forbids inline pixel `min-width` in dialogs).
+
+### AUD-96 — queue rows were re-read from the NAS on every request, and the 500 ms poller did it continuously
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#771](https://github.com/mmackelprang/RTest/pull/771) — owner panel UAT passed 2026-10-02 (*"UAT - these all pass"*) on the combined test build `552396d`; merged as `46df8b5` |
+| Plan | _no plan — owner-reported, measured on the box; design in the dossier_ |
+| Spec / handoff | _owner report, 2026-10-02_ |
+| Depends on | — |
+| Branch | `perf/aud-96-ui-35-snappy-switch` |
+
+**Detail: [`queue/AUD-96.md`](queue/AUD-96.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UAT - these all pass"* Measured on the box (File Player playing, 10 s windows): WiFi rx 120 MB → 0.05 MB, CIFS reads 1,010 → 0, `GET /api/queue/full` 2.36 s → 0.012–0.027 s.
+
+### UI-35 — a source switch waited on the queue before the centre panel and the source pill changed
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#771](https://github.com/mmackelprang/RTest/pull/771) — owner panel UAT passed 2026-10-02 (*"UAT - these all pass"*) on the combined test build `552396d`; merged as `46df8b5` |
+| Plan | _no plan — owner-reported; root cause in the dossier_ |
+| Spec / handoff | _owner report, 2026-10-02_ |
+| Depends on | — |
+| Branch | `perf/aud-96-ui-35-snappy-switch` |
+
+**Detail: [`queue/UI-35.md`](queue/UI-35.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UAT - these all pass"* Measured on the box (File Player playing, 10 s windows): WiFi rx 120 MB → 0.05 MB, CIFS reads 1,010 → 0, `GET /api/queue/full` 2.36 s → 0.012–0.027 s.
+
+### ENC-23 — hold the SLEEP pill 600 ms for deep sleep: Standby AND the panel powered off at once, through `ENC-22`'s `PanelPowerService.PowerOffNow` (works with the timer off; refused, panel left on, without a connected stable encoder); a VOLUME press lights it and wakes to the full UI, consumed (no mute toggle). Fill from 300 ms, SCREEN OFF at 600 ms, fires on lift
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#772](https://github.com/mmackelprang/RTest/pull/772) — owner panel UAT passed 2026-10-02 (*"UAT - these all pass"*) on the combined test build `552396d`; merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner request; behaviour and decisions in the dossier_ · ⛔ **NOT auto-mergeable** — owner panel UAT with the knob (dossier § Owner checks) |
+| Spec / handoff | _owner request, 2026-10-02_ · [`ENC-22`](queue/ENC-22.md) |
+| Depends on | `ENC-22` ✅ |
+| Branch | `feat/enc-23-24-sleep-gestures` |
+
+**Detail: [`queue/ENC-23.md`](queue/ENC-23.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UAT - these all pass"* — follow-ups filed from the same UAT: `UI-36` (visualizations pause ~15 s after a deep sleep) and `ENC-25` (a VOLUME turn in normal sleep should wake the console).
+
+### ENC-24 — VOLUME long-press → Standby and short-press-on-release (mute) ALREADY EXISTED (unchanged feel); new: a turn while held cancels the hold once it nets ≥ 2 detents (one stray detent does not), and a late threshold callback cannot fire into a newer press
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#772](https://github.com/mmackelprang/RTest/pull/772) — owner panel UAT passed 2026-10-02 (*"UAT - these all pass"*) on the combined test build `552396d`; merged 2026-10-02 (squash SHA in the next banner) |
+| Plan | _no plan — owner request; behaviour in the dossier_ · ⛔ **NOT auto-mergeable** — owner panel UAT with the knob |
+| Spec / handoff | _owner request, 2026-10-02_ · [encoder handoff §4](design-handoffs/HANDOFF-rotary-encoder-mapping.md) |
+| Depends on | — |
+| Branch | `feat/enc-23-24-sleep-gestures` |
+
+**Detail: [`queue/ENC-24.md`](queue/ENC-24.md)**
+
+✅ **SHIPPED 2026-10-02.** Owner: *"UAT - these all pass"* — follow-ups filed from the same UAT: `UI-36` (visualizations pause ~15 s after a deep sleep) and `ENC-25` (a VOLUME turn in normal sleep should wake the console).

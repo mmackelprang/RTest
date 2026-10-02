@@ -13,8 +13,14 @@ public class PanelPowerOptions
 
   /// <summary>
   /// Minutes of continuous sleep screen before the panel is powered off. <b>0 (the default) switches
-  /// the feature off</b>: the panel is never powered off, while the safety behaviour (power the panel
-  /// on at start-up, and whenever the encoder is lost) still runs.
+  /// the timer off</b>: the sleep screen never powers the panel off on its own, while the safety
+  /// behaviour (power the panel on at start-up, and whenever the encoder is lost) still runs.
+  ///
+  /// <para>
+  /// 0 disables only this timer, not panel power-off. A deep sleep (<c>ENC-23</c>: a hold of the
+  /// topbar Sleep pill, or <c>POST /api/system/sleep</c> with <c>panelOff: true</c>) still powers the
+  /// panel off at once whatever this says, under the same encoder safety rule.
+  /// </para>
   ///
   /// <para>
   /// ⚠ Shipped disabled on purpose. The one check that cannot be made from a shell — a real knob,

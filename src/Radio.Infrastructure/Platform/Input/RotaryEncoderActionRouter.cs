@@ -167,10 +167,22 @@ public class RotaryEncoderActionRouter : IDisposable
   {
     try
     {
+      // ENC-24, first of all: a turn of a knob whose button is held cancels that hold once it nets
+      // EncoderLongPressGesture.TurnCancelDetents (2) detents, so the press fires neither its long
+      // action at the threshold nor its short action on release. A single stray detent - a push that
+      // jostles the knob - does not cancel. The signed delta is passed so a wobble nets to zero. It
+      // runs before the panel gate so that a consumed turn still counts toward the cancel, and before
+      // the turn's own handler so that a HoldCancel card is published ahead of the turn's own card.
+      _gesture.OnTurn(e.EncoderIndex, e.Delta);
+
       // ENC-22, ahead of every other gate: a turn on a dark panel is spent lighting it. Nothing else
       // happens — no HUD card, no sleep wake — because nothing on the panel is visible yet, and the
       // screen that comes back is the one that went dark (the browser is untouched by a power cycle).
-      if (_panelPower?.OnEncoderInput("encoder-turn") == true)
+      // That holds for a deep-sleep dark panel too (ENC-23): only a VOLUME PRESS wakes from that, so a
+      // turn just lights the sleep screen the pill's hold left behind (Standby), where a later press
+      // wakes through the sleep gate below.
+      PanelInputOutcome panel = _panelPower?.OnEncoderInput("encoder-turn") ?? PanelInputOutcome.Pass;
+      if (panel != PanelInputOutcome.Pass)
       {
         return;
       }
@@ -222,8 +234,24 @@ public class RotaryEncoderActionRouter : IDisposable
         // ENC-22, as in OnEncoderTurned. The press edge only, for the same reason the sleep gate is
         // press-only: the release that follows reaches the gesture and is dropped by its orphan-release
         // guard, so a press that lit the panel cannot fire a short action on release.
-        if (_panelPower?.OnEncoderInput("encoder-button") == true)
+        PanelInputOutcome panel = _panelPower?.OnEncoderInput("encoder-button") ?? PanelInputOutcome.Pass;
+        if (panel != PanelInputOutcome.Pass)
         {
+          // ENC-23: the owner's "click the Volume knob to wake it back up". A VOLUME press that lights
+          // a panel darkened by a deep sleep (the Sleep pill's hold) is ALSO spent waking the console,
+          // so one press brings the screen and the audio back. Every other input on a dark panel —
+          // another knob's press, any turn, and any input on a panel the ENC-22 timer darkened — only
+          // lights it, exactly as before. The input is consumed either way, so the release that
+          // follows is dropped by the gesture's orphan-release guard and mute is not toggled.
+          if (panel == PanelInputOutcome.LitPanelFromDeepSleep
+              && e.EncoderIndex == RotaryEncoderConfigDefaults.VolumeEncoderIndex
+              && _sleepService is not null
+              && _sleepService.TryClaimWake())
+          {
+            _ = _sleepService.WakeAsync("encoder-deep-sleep");
+            _logger.LogInformation("Woke from deep sleep via a VOLUME press");
+          }
+
           return;
         }
 
@@ -415,8 +443,10 @@ public class RotaryEncoderActionRouter : IDisposable
   /// D22 on top of it — a <b>turn</b> never resumes audio, only a press or a screen tap does — so a
   /// turn there is consumed without a wake. <b>Rule 1 (the dark panel) is not applied here</b>: since
   /// <c>ENC-22</c> it is <see cref="IPanelPowerService.OnEncoderInput"/>, which the two handlers call
-  /// before this method and which consumes any input that lights a dark panel. By the time an input
-  /// reaches this gate the panel is lit, so only the lit columns below apply.
+  /// before this method and which consumes any input that lights a dark panel (or arrives inside the
+  /// wake grace window). By the time an input reaches this gate the panel is lit, so only the lit
+  /// columns below apply. The one dark-panel wake — a VOLUME press on a deep-sleep panel
+  /// (<c>ENC-23</c>) — is decided in <c>OnButtonPressed</c> beside that call, not here.
   /// </para>
   ///
   /// <para>
