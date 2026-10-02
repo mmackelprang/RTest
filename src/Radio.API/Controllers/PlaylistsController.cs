@@ -17,6 +17,9 @@ public class PlaylistsController : ControllerBase
   private readonly IAudioManager? _audioManager;
   private readonly ILogger<PlaylistsController> _logger;
 
+  /// <summary>How long saving a playlist waits for unread queue metadata (AUD-96).</summary>
+  internal static readonly TimeSpan PlaylistMetadataWait = TimeSpan.FromSeconds(15);
+
   public PlaylistsController(
     IPlaylistRepository playlistRepository,
     IAudioEngine audioEngine,
@@ -130,6 +133,16 @@ public class PlaylistsController : ControllerBase
         playQueue = fileQueue;
       }
 
+      // AUD-96: queue rows are filled by a background reader, and a row not read yet carries placeholder
+      // metadata (file name, "--"). This stores the metadata for good, so give the reader a bounded chance
+      // to catch up — normally it already has; right after loading a large folder it may not have.
+      if (!await playQueue.WaitForQueueMetadataAsync(PlaylistMetadataWait, ct))
+      {
+        _logger.LogWarning(
+          "Saving playlist '{Name}' before every track's tags were read; unread tracks are stored by file name",
+          request.Name);
+      }
+
       var queueItems = await playQueue.GetQueueAsync(ct);
       if (queueItems == null || queueItems.Count == 0)
       {
@@ -162,6 +175,12 @@ public class PlaylistsController : ControllerBase
       };
 
       return CreatedAtAction(nameof(GetById), new { id = playlist.Id }, dto);
+    }
+    catch (OperationCanceledException) when (ct.IsCancellationRequested)
+    {
+      // The client went away — most likely during the metadata wait above. Not a server fault, so not an
+      // Error line in journald. 499 is nginx's "client closed request"; nobody is left to read it.
+      return StatusCode(499);
     }
     catch (Exception ex)
     {

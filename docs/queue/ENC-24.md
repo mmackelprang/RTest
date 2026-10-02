@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+✅ **SHIPPED 2026-10-02.** Owner panel UAT passed (*"UAT - these all pass"*) on the combined test build `552396d`; merged via [#772](https://github.com/mmackelprang/RTest/pull/772). The status lines below were true until then.
+
 🚧 **BUILT 2026-10-02, HELD for owner panel UAT with the knob** — branch `feat/enc-23-24-sleep-gestures`,
 [#772](https://github.com/mmackelprang/RTest/pull/772), one PR with [`ENC-23`](ENC-23.md). **Not deployed, not merged.**
 
