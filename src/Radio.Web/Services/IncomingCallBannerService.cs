@@ -119,9 +119,11 @@ public sealed record IncomingCallBannerSnapshot
 /// <c>CallStateChanged(phoneId, state)</c> (<c>Idle</c>, <c>Dialing</c>, <c>Ringing</c>, <c>InCall</c>) and
 /// <c>IncomingCall(phoneId, number)</c>, which RotaryPhone sends right after <c>Ringing</c> only when it has
 /// a number, and again for the same call when a caller-ID update arrives. Nothing on the hub carries a
-/// call id, a contact name or a photo, so "the same call" means the same phone id with no other state in
-/// between. While a call is tracked, <c>GET /api/phone/status</c> is re-read every
-/// <see cref="PollInterval"/>, so a hub event lost to a reconnect cannot leave the banner up for good.
+/// call id, a contact name or a photo, so on the hub "the same call" means the same phone id with no other
+/// state in between. While a call is tracked, each tracked phone's <c>GET /api/phone/status?phoneId=</c> is
+/// re-read every <see cref="PollInterval"/>, so a hub event lost to a reconnect cannot leave the banner up
+/// for good; that read also carries RotaryPhone's <c>CallId</c>, and a changed id splits a new call off an
+/// old one whose <c>Idle</c> was lost.
 /// </para>
 /// <para>
 /// <b>More than one call.</b> RotaryPhone refuses a second inbound call on a phone that is ringing, so a
@@ -136,8 +138,11 @@ public sealed record IncomingCallBannerSnapshot
 /// </para>
 /// <para>
 /// <b>Threads.</b> Hub events arrive on SignalR threads, timers on the thread pool, and Dismiss/Ignore on
-/// the circuit. Every read and write of the mutable fields is under <see cref="_gate"/>;
-/// <see cref="Changed"/> is raised outside it, and subscribers marshal onto their own circuit.
+/// the circuit. Every read and write of the call state is under <see cref="_gate"/>;
+/// <see cref="Changed"/> is raised outside it, and subscribers marshal onto their own circuit. The three
+/// test rendezvous properties (<c>LastPoll</c>, <c>LastNameLookup</c>, <c>Seeded</c>) are plain task
+/// references written outside it; production never reads them except <c>LastPoll</c>'s completion, as the
+/// poll-overlap guard, where a stale read only skips or allows one tick.
 /// </para>
 /// </remarks>
 public sealed class IncomingCallBannerService : IDisposable
@@ -248,6 +253,20 @@ public sealed class IncomingCallBannerService : IDisposable
 
     _hub.IncomingCall += OnIncomingCall;
     _hub.CallStateChanged += OnCallStateChanged;
+
+    // A Dispose that ran between the claim above and the subscribe would have unsubscribed nothing; the
+    // hub service is a singleton, so undo it here rather than leave a handler on it for good.
+    bool disposed;
+    lock (_gate)
+    {
+      disposed = _disposed;
+    }
+    if (disposed)
+    {
+      _hub.IncomingCall -= OnIncomingCall;
+      _hub.CallStateChanged -= OnCallStateChanged;
+      return;
+    }
     Seeded = SeedAsync();
   }
 
@@ -394,7 +413,7 @@ public sealed class IncomingCallBannerService : IDisposable
     }
   }
 
-  private void OnRinging(string? phoneId, string? number)
+  private void OnRinging(string? phoneId, string? number, string? callId = null)
   {
     TrackedCall call;
     string? lookupNumber = null;
@@ -412,6 +431,7 @@ public sealed class IncomingCallBannerService : IDisposable
         // only ever gains information — a later "Unknown" never replaces a known number.
         call = existing;
         call.PhoneId ??= phoneId;
+        call.CallId ??= callId;
         call.LastConfirmed = _time.GetUtcNow();
         call.NumberSettled |= number is not null;
         if (IsUsableNumber(number) && !SameNumber(call.Number, number))
@@ -424,22 +444,8 @@ public sealed class IncomingCallBannerService : IDisposable
       }
       else
       {
-        call = new TrackedCall
-        {
-          Id = ++_nextCallId,
-          PhoneId = phoneId,
-          Number = IsUsableNumber(number) ? number : null,
-          NumberSettled = number is not null,
-          LastConfirmed = _time.GetUtcNow(),
-        };
-        call.ResolvingName = call.Number is not null;
+        call = NewCallLocked(phoneId, number, callId);
         lookupNumber = call.Number;
-        _ringing.Add(call);
-        _lastCloseReason = null;
-        // A fresh ring cancels any exit beat still on screen (spec §7).
-        CancelExitLocked();
-        EnsurePollTimerLocked();
-        _logger.LogDebug("Incoming-call banner shown for phone {PhoneId}", phoneId ?? "(default)");
       }
     }
 
@@ -450,39 +456,73 @@ public sealed class IncomingCallBannerService : IDisposable
     RaiseChanged();
   }
 
+  /// <summary>Starts tracking a new ringing call, newest last, and takes the banner for it.</summary>
+  private TrackedCall NewCallLocked(string? phoneId, string? number, string? callId)
+  {
+    var call = new TrackedCall
+    {
+      Id = ++_nextCallId,
+      PhoneId = phoneId,
+      CallId = callId,
+      Number = IsUsableNumber(number) ? number : null,
+      NumberSettled = number is not null,
+      LastConfirmed = _time.GetUtcNow(),
+    };
+    call.ResolvingName = call.Number is not null;
+    _ringing.Add(call);
+    _lastCloseReason = null;
+    // A fresh ring cancels any exit beat still on screen (spec §7).
+    CancelExitLocked();
+    EnsurePollTimerLocked();
+    _logger.LogDebug("Incoming-call banner shown for phone {PhoneId}", phoneId ?? "(default)");
+    return call;
+  }
+
   // ── status read ───────────────────────────────────────────────────
 
   private async Task SeedAsync()
   {
-    PhoneCallStateDto? state = await ReadStatusAsync();
+    PhoneCallStateDto? state = await ReadStatusAsync(phoneId: null);
     if (state is not null && string.Equals(state.CallState, "Ringing", StringComparison.OrdinalIgnoreCase))
     {
-      // The status route answers for the default phone and does not name it, hence the null id, which
-      // matches whichever phone the hub names next.
-      OnRinging(null, state.IncomingNumber ?? "");
+      // Asked without a phone id, the status route answers for RotaryPhone's default (first) phone and does
+      // not name it — hence the null id, which matches whichever phone the hub names next.
+      OnRinging(null, state.IncomingNumber ?? "", state.CallId);
     }
   }
 
   private void OnPollTimer(object? _)
   {
+    // One read at a time. With RotaryPhone hung, the client's 10 s timeout would otherwise stack about
+    // four reads per circuit during a ring, on a box where load correlates with audio distortion.
+    if (!LastPoll.IsCompleted)
+    {
+      return;
+    }
     LastPoll = PollAsync();
   }
 
   private async Task PollAsync()
   {
+    List<TrackedCall> calls;
     lock (_gate)
     {
       if (_ringing.Count == 0 || _disposed)
       {
         return;
       }
+      calls = [.. _ringing];
     }
 
-    PhoneCallStateDto? state = await ReadStatusAsync();
+    // Each tracked call's own phone (null = the default phone, for a call first seen by the start-up read).
+    var reads = new List<(TrackedCall Call, PhoneCallStateDto? State)>(calls.Count);
+    foreach (var call in calls)
+    {
+      reads.Add((call, await ReadStatusAsync(call.PhoneId)));
+    }
 
     bool changed = false;
-    TrackedCall? lookupCall = null;
-    string? lookupNumber = null;
+    var lookups = new List<(TrackedCall Call, string Number)>();
     lock (_gate)
     {
       if (_disposed)
@@ -490,33 +530,51 @@ public sealed class IncomingCallBannerService : IDisposable
         return;
       }
 
-      // The status route reports the DEFAULT phone, without naming it. With one phone ringing — every
-      // installation there is — it is that phone. With two, it cannot say which, so only the hub and the
-      // stale window decide for them.
-      if (state is not null && _ringing.Count == 1)
+      foreach (var (call, state) in reads)
       {
-        var call = _ringing[0];
-        if (string.Equals(state.CallState, "Ringing", StringComparison.OrdinalIgnoreCase))
+        if (state is null || !_ringing.Contains(call))
         {
-          call.LastConfirmed = _time.GetUtcNow();
-          if (!call.NumberSettled)
-          {
-            call.NumberSettled = true;
-            changed = true;
-          }
-          if (IsUsableNumber(state.IncomingNumber) && !SameNumber(call.Number, state.IncomingNumber))
-          {
-            call.Number = state.IncomingNumber;
-            call.ContactName = null;
-            call.ResolvingName = true;
-            lookupCall = call;
-            lookupNumber = state.IncomingNumber;
-            changed = true;
-          }
+          continue;
         }
-        else
+
+        if (!string.Equals(state.CallState, "Ringing", StringComparison.OrdinalIgnoreCase))
         {
-          changed = EndCallsLocked(c => ReferenceEquals(c, call), ReasonFor(state.CallState));
+          changed = EndCallsLocked(c => ReferenceEquals(c, call), ReasonFor(state.CallState)) || changed;
+          continue;
+        }
+
+        if (call.CallId is not null && state.CallId is not null
+            && !string.Equals(call.CallId, state.CallId, StringComparison.Ordinal))
+        {
+          // Ringing, but a DIFFERENT call: the Idle that ended the tracked one was lost, and the next ring
+          // merged into it (a touch-closed one would have kept the new call off the screen). Split it off as
+          // the new call it is — fresh, not touched away, no exit beat for the old one.
+          _ringing.Remove(call);
+          call.DeclineTimer?.Dispose();
+          call.DeclineTimer = null;
+          var fresh = NewCallLocked(call.PhoneId, state.IncomingNumber ?? "", state.CallId);
+          if (fresh.Number is not null)
+          {
+            lookups.Add((fresh, fresh.Number));
+          }
+          changed = true;
+          continue;
+        }
+
+        call.CallId ??= state.CallId;
+        call.LastConfirmed = _time.GetUtcNow();
+        if (!call.NumberSettled)
+        {
+          call.NumberSettled = true;
+          changed = true;
+        }
+        if (IsUsableNumber(state.IncomingNumber) && !SameNumber(call.Number, state.IncomingNumber))
+        {
+          call.Number = state.IncomingNumber;
+          call.ContactName = null;
+          call.ResolvingName = true;
+          lookups.Add((call, state.IncomingNumber!));
+          changed = true;
         }
       }
 
@@ -524,9 +582,9 @@ public sealed class IncomingCallBannerService : IDisposable
       changed = EndCallsLocked(c => now - c.LastConfirmed >= StaleAfter, IncomingCallCloseReason.Stale) || changed;
     }
 
-    if (lookupCall is not null)
+    foreach (var (call, number) in lookups)
     {
-      LastNameLookup = ResolveNameAsync(lookupCall, lookupNumber!);
+      LastNameLookup = ResolveNameAsync(call, number);
     }
     if (changed)
     {
@@ -534,11 +592,11 @@ public sealed class IncomingCallBannerService : IDisposable
     }
   }
 
-  private async Task<PhoneCallStateDto?> ReadStatusAsync()
+  private async Task<PhoneCallStateDto?> ReadStatusAsync(string? phoneId)
   {
     try
     {
-      return await _phoneApi.GetCallStateAsync();
+      return await _phoneApi.GetCallStateAsync(phoneId);
     }
     catch (Exception ex)
     {
@@ -882,6 +940,9 @@ public sealed class IncomingCallBannerService : IDisposable
   {
     public long Id { get; init; }
     public string? PhoneId { get; set; }
+
+    // RotaryPhone's call id, from the first status read that sees this call ringing (the hub never sends it).
+    public string? CallId { get; set; }
     public string? Number { get; set; }
     public string? ContactName { get; set; }
     public bool ResolvingName { get; set; }

@@ -289,5 +289,58 @@ public class IncomingCallBannerTests : TestContext
 
     Assert.Contains("icb--no-entry", second.Find(".icb-scrim").ClassName);
     Assert.Equal("", second.Find("[role=alert]").TextContent);
+    // Not politely either: the host that took over says nothing until something changes.
+    Assert.Equal("", second.Find("[role=status]").TextContent);
+  }
+
+  [Fact]
+  public void TheSameCallerCallingBack_IsAnnouncedAgain()
+  {
+    var cut = Render();
+    _h.Hub.RaiseIncomingCallForTest("default", Number);
+    cut.WaitForAssertion(() => Assert.Equal($"Incoming call from {Formatted}", cut.Find("[role=alert]").TextContent));
+
+    _h.Hub.RaiseCallStateChangedForTest("default", "Idle");
+    _h.Time.Advance(IncomingCallBannerService.ExitHold);
+    _h.Time.Advance(IncomingCallBannerService.ExitFade);
+    cut.WaitForAssertion(() => Assert.Empty(cut.FindAll(".icb-scrim")));
+    var between = cut.Find("[role=alert]").TextContent;
+
+    _h.Hub.RaiseCallStateChangedForTest("default", "Ringing");
+    _h.Hub.RaiseIncomingCallForTest("default", Number);
+
+    // Emptied in between, so the same words are a change a screen reader announces.
+    Assert.Equal("", between);
+    cut.WaitForAssertion(() => Assert.Equal($"Incoming call from {Formatted}", cut.Find("[role=alert]").TextContent));
+  }
+
+  [Fact]
+  public async Task ACallAlreadyUpWhenTheBannerMounts_IsAnnouncedAfterTheFirstRender()
+  {
+    // A reload mid-ring. The region must exist empty first (spec §11), then get the text.
+    _h = new IncomingCallBannerHarness();
+    _h.Phone.StatusJson = $"{{\"callState\":\"Ringing\",\"incomingNumber\":\"{Number}\"}}";
+    _h.Start();
+    await _h.Service.Seeded;
+    Services.AddRadzenComponents();
+    Services.AddSingleton(_h.Service);
+    JSInterop.Mode = JSRuntimeMode.Loose;
+
+    var cut = RenderComponent<IncomingCallBanner>();
+
+    cut.WaitForAssertion(() => Assert.Equal($"Incoming call from {Formatted}", cut.Find("[role=alert]").TextContent));
+    Assert.Single(cut.FindAll(".icb-scrim"));
+  }
+
+  [Fact]
+  public async Task WhileDeclining_IgnoresSpokenNameMatchesWhatItShows()
+  {
+    var cut = Render(declineSupported: true);
+    _h.Hub.RaiseIncomingCallForTest("default", Number);
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".icb-scrim")));
+
+    await cut.Find(".icb-ignore").ClickAsync(new MouseEventArgs());
+
+    cut.WaitForAssertion(() => Assert.Equal("Ending call", cut.Find(".icb-ignore").GetAttribute("aria-label")));
   }
 }

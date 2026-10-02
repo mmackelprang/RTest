@@ -100,6 +100,55 @@ public class SleepIncomingCallBannerTests : TestContext
     Assert.Single(cut.FindAll(".sleep-screen"));
   }
 
+  [Theory]
+  [InlineData("Escape", true)]
+  [InlineData("Enter", false)]
+  [InlineData("a", false)]
+  public void AKeyOnTheSleepScreenWhileTheBannerCoversIt_NeverWakesTheConsole(string key, bool closesTheBanner)
+  {
+    // Focus left on the sleep screen (it is tabindex=0 and "any key wakes" there) or tabbed out of the
+    // banner: the key must not wake the console behind the banner. Escape closes the banner instead.
+    var cut = RenderComponent<Sleep>();
+    _h.Hub.RaiseIncomingCallForTest("default", Number);
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".icb-scrim")));
+
+    cut.Find(".sleep-screen").KeyDown(new Microsoft.AspNetCore.Components.Web.KeyboardEventArgs { Key = key });
+
+    Assert.Equal(0, WakeRequests());
+    Assert.Empty(_nav.History);
+    Assert.Equal(closesTheBanner, _h.Service.Current.IsLeaving);
+  }
+
+  [Fact]
+  public void AKnobReadoutDuringARing_IsDrawnAboveTheBanner()
+  {
+    // Spec §1/§2: the HUD wins. The page's own Sleep-variant HUD is trapped under the banner (it lives in
+    // .sleep-screen's stacking context), so while covered the page also hosts the fixed-position variant.
+    var cut = RenderComponent<Sleep>();
+    _h.Hub.RaiseIncomingCallForTest("default", Number);
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".icb-scrim")));
+
+    Services.GetRequiredService<EncoderHudService>().Publish(new EncoderHudDto
+    {
+      EncoderIndex = 0, Label = "VOLUME", Phase = "Value", VolumePercent = 62,
+    });
+
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".encoder-hud:not(.encoder-hud--sleep)")));
+  }
+
+  [Fact]
+  public void WithNoCall_TheSleepScreenHostsNoExtraReadout()
+  {
+    var cut = RenderComponent<Sleep>();
+    Services.GetRequiredService<EncoderHudService>().Publish(new EncoderHudDto
+    {
+      EncoderIndex = 0, Label = "VOLUME", Phase = "Value", VolumePercent = 62,
+    });
+
+    cut.WaitForAssertion(() => Assert.Single(cut.FindAll(".encoder-hud--sleep")));
+    Assert.Empty(cut.FindAll(".encoder-hud:not(.encoder-hud--sleep)"));
+  }
+
   [Fact]
   public async Task ACallAlreadyRingingWhenThePageMounts_IsReportedHidden_AndNeverVisibleFirst()
   {

@@ -63,6 +63,9 @@ public sealed class ScriptedPhoneHandler : HttpMessageHandler
 
   public string StatusJson { get; set; } = "{\"callState\":\"Idle\"}";
   public bool StatusFails { get; set; }
+
+  /// <summary>Holds every status read open until completed, so a test can see what overlaps.</summary>
+  public Task? StatusGate { get; set; }
   public string ContactsJson { get; set; } = "[]";
   public string? PbapName { get; set; }
   public Task? PbapGate { get; set; }
@@ -91,7 +94,14 @@ public sealed class ScriptedPhoneHandler : HttpMessageHandler
 
     if (path.StartsWith("/api/phone/status", StringComparison.Ordinal))
     {
-      return StatusFails ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) : Json(StatusJson);
+      string status = StatusJson;
+      bool fails = StatusFails;
+      var gate = StatusGate;
+      if (gate is not null)
+      {
+        await gate;
+      }
+      return fails ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) : Json(status);
     }
     if (path.StartsWith("/api/contacts", StringComparison.Ordinal))
     {

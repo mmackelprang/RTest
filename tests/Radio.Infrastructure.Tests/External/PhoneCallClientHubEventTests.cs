@@ -44,30 +44,47 @@ public class PhoneCallClientHubEventTests
   }
 
   [Fact]
-  public void TheSameNumberResent_DuringOneRing_IsNotRaisedAgain()
+  public void ADuplicateIncomingCall_WithNoRingingBetween_IsNotRaisedAgain()
   {
     var (client, raised) = Build();
 
     client.OnHubCallStateChanged("default", "Ringing");
     client.OnHubIncomingCall("default", Number);
-    client.OnHubCallStateChanged("default", "Ringing");
     client.OnHubIncomingCall("default", Number);
 
     Assert.Single(raised);
   }
 
   [Fact]
-  public void ACallerIdUpdate_IsRaisedAgain_WithTheRealNumber()
+  public void AfterAMissedIdle_TheSameCallersNextCall_IsStillRaised()
   {
-    // RotaryPhone's CallManager re-broadcasts when +CLIP replaces "Unknown" mid-ring.
+    // A hub drop swallowed the Idle that ended the first call, so the client still thinks it is ringing.
+    // RotaryPhone sends Ringing before every IncomingCall, and that is what lets the second call through.
+    var (client, raised) = Build();
+    client.OnHubCallStateChanged("default", "Ringing");
+    client.OnHubIncomingCall("default", Number);
+
+    client.OnHubCallStateChanged("default", "Ringing");
+    client.OnHubIncomingCall("default", Number);
+
+    Assert.Equal(2, raised.Count(e => e.State == PhoneCallState.Ringing));
+  }
+
+  [Fact]
+  public void NoCallerId_IsRaisedAsNoNumber_AndTheRealNumberAfterIt_IsRaisedAgain()
+  {
+    // RotaryPhone's CallManager re-broadcasts when +CLIP replaces "Unknown" mid-ring. "Unknown" itself must
+    // not reach the announcement as if it were a number ("Incoming call from Unknown").
     var (client, raised) = Build();
 
     client.OnHubCallStateChanged("default", "Ringing");
     client.OnHubIncomingCall("default", "Unknown");
+    var withheld = client.CallerNumber;
     client.OnHubCallStateChanged("default", "Ringing");
     client.OnHubIncomingCall("default", Number);
 
-    Assert.Equal(new[] { "Unknown", Number }, raised.Select(e => e.PhoneNumber));
+    Assert.Equal(new string?[] { null, Number }, raised.Select(e => e.PhoneNumber));
+    Assert.Null(withheld);
   }
 
   [Theory]

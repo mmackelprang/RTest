@@ -111,6 +111,10 @@ public class PhoneCallClient : IPhoneIntegrationService
     };
     _hubConnection.Reconnected += _ =>
     {
+      // Whatever was missed while disconnected — an Idle, most likely — is unknowable, and RotaryPhone does
+      // not replay state on reconnect. Forget the ring, so the next IncomingCall raises even if it is the
+      // same number as the ring the dropped Idle should have ended.
+      ForgetRing();
       _logger.LogInformation("RotaryPhone hub reconnected");
       return Task.CompletedTask;
     };
@@ -158,10 +162,11 @@ public class PhoneCallClient : IPhoneIntegrationService
   /// </summary>
   /// <remarks>
   /// <c>Ringing</c> is NOT raised from here: it carries no number, and RotaryPhone sends the number in the
-  /// <c>IncomingCall</c> that follows immediately — every inbound path it has sets the number before it
-  /// sets <c>Ringing</c> (<c>CallManager.SimulateIncomingCall</c> uses <c>"Unknown"</c>). Raising here as
-  /// well would announce "Unknown caller" and then cut it off with the real name a few milliseconds later,
-  /// since <c>PhoneCallIntegrationService</c> treats every <c>Ringing</c> as a new call.
+  /// <c>IncomingCall</c> that follows immediately. Every inbound path it has sets the number before it sets
+  /// <c>Ringing</c> — <c>"Unknown"</c> when there is none (<c>CallManager.SimulateIncomingCall</c>, and the
+  /// BlueZ path for a call without caller ID). Raising here as well would announce "Unknown caller" and then
+  /// cut it off with the real name a few milliseconds later, since <c>PhoneCallIntegrationService</c> treats
+  /// every <c>Ringing</c> as a new call.
   /// </remarks>
   internal void OnHubCallStateChanged(string phoneId, string state)
   {
@@ -170,11 +175,10 @@ public class PhoneCallClient : IPhoneIntegrationService
     {
       lock (_gate)
       {
-        if (_currentState != PhoneCallState.Ringing)
-        {
-          // A new ring: whatever number the last one was raised for no longer counts.
-          _ringRaisedFor = null;
-        }
+        // RotaryPhone sends this before EVERY IncomingCall it pairs with — a new ring and a caller-ID
+        // update alike — so the IncomingCall that follows always raises. Resetting only when the state was
+        // not already Ringing would let one missed Idle silence the same caller's next call.
+        _ringRaisedFor = null;
         _currentState = PhoneCallState.Ringing;
       }
       _logger.LogDebug("Phone {PhoneId} ringing; the number follows in IncomingCall", phoneId);
@@ -195,11 +199,22 @@ public class PhoneCallClient : IPhoneIntegrationService
 
   /// <summary>
   /// The hub's <c>IncomingCall(phoneId, number)</c>: raises <see cref="PhoneCallState.Ringing"/> with the
-  /// number, once per number per ring. A caller-ID update (RotaryPhone re-sends it when the real number
-  /// replaces <c>"Unknown"</c>) raises again, which restarts the announcement with the better name.
+  /// number. A caller-ID update (RotaryPhone re-sends <c>Ringing</c> and this when the real number replaces
+  /// <c>"Unknown"</c>) raises again, which restarts the announcement with the better name. The same number
+  /// arriving twice with no <c>Ringing</c> in between is a duplicate and is not raised again.
   /// </summary>
+  /// <remarks>
+  /// RotaryPhone's <c>"Unknown"</c> (no caller ID) is raised as NO number. Passed through, it would be
+  /// announced as "Incoming call from Unknown", looked up as a contact, and reported back to RotaryPhone as a
+  /// resolved name; as null, <c>PhoneCallIntegrationService</c> says "Unknown caller" and does neither.
+  /// </remarks>
   internal void OnHubIncomingCall(string phoneId, string phoneNumber)
   {
+    string? number = string.IsNullOrWhiteSpace(phoneNumber)
+      || string.Equals(phoneNumber.Trim(), "Unknown", StringComparison.OrdinalIgnoreCase)
+        ? null
+        : phoneNumber;
+
     lock (_gate)
     {
       if (_currentState == PhoneCallState.Ringing && string.Equals(_ringRaisedFor, phoneNumber, StringComparison.Ordinal))
@@ -207,24 +222,37 @@ public class PhoneCallClient : IPhoneIntegrationService
         return;
       }
       _currentState = PhoneCallState.Ringing;
-      _callerNumber = phoneNumber;
+      _callerNumber = number;
       _callerName = null;
+      // Keyed on the RAW value, so "Unknown" followed by the real number is two different raises.
       _ringRaisedFor = phoneNumber;
     }
 
     _logger.LogInformation("Phone call state: {State}, Number: {Number}",
-      PhoneCallState.Ringing, LogSafeText.ForPhone(phoneNumber));
+      PhoneCallState.Ringing, number is null ? "(none)" : LogSafeText.ForPhone(number));
 
     CallStateChanged?.Invoke(this, new PhoneCallStateChangedEventArgs
     {
       State = PhoneCallState.Ringing,
-      PhoneNumber = phoneNumber,
+      PhoneNumber = number,
     });
+  }
+
+  private void ForgetRing()
+  {
+    lock (_gate)
+    {
+      _currentState = PhoneCallState.Idle;
+      _callerNumber = null;
+      _callerName = null;
+      _ringRaisedFor = null;
+    }
   }
 
   private static PhoneCallState ParseCallState(string state)
   {
-    // Be lenient with the state string — the RotaryPhone server format is unverified
+    // RotaryPhone sends CallState.ToString(): Idle | Dialing | Ringing | InCall (see the class remarks). The
+    // extra spellings are older leniency, kept because they cost nothing.
     return state.ToLowerInvariant() switch
     {
       "ringing" or "ring" or "incoming" => PhoneCallState.Ringing,

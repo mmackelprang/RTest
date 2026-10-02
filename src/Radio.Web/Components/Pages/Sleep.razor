@@ -123,6 +123,15 @@
    While it covers this screen the page reports the sleep screen hidden, which lights a dark panel. *@
 <IncomingCallBanner OnCoveringChanged="OnBannerCoveringChangedAsync" />
 
+@* PHN-11 spec §1/§2: a knob turned during a ring must be seen, and the HUD wins over the banner. This
+   page's own HUD is the Sleep variant, drawn INSIDE .sleep-screen's 9999 stacking context, so no z-index can
+   lift it over the banner. While the banner covers the screen, the layout's fixed-position variant is hosted
+   here as well, after the banner, where design-system.css's §PHN-11 lift puts it on top. *@
+@if (_bannerCovering)
+{
+  <EncoderHud />
+}
+
 @code {
   private string _clockText = string.Empty;
   private string? _title;
@@ -295,8 +304,19 @@
   /// screen is reported visible again, and ENC-22's off-timer restarts from its full period.
   /// </summary>
   /// <remarks>
+  /// <para>
   /// Before the page's own first report this only records the fact; the first report reads it (and the
   /// banner service's state, since the order of the two after-renders is not something to lean on).
+  /// </para>
+  /// <para>
+  /// ⚠ <b>A side effect on the knobs, in Ambient only.</b> <c>SleepService.WakeState</c> reads Ambient only
+  /// while the sleep screen is reported visible, so for as long as the banner covers it the console counts
+  /// as Awake: a knob acts as it would on the awake console (a TUNING turn retunes) instead of being spent
+  /// waking it. Standby is unaffected — it is decided by parked audio, checked first. This deviates from the
+  /// design spec's §6 ("knobs behave exactly as they do without it"); avoiding it needs an API seam that
+  /// lights the panel without changing the wake state, and is recorded for the owner in
+  /// <c>docs/queue/PHN-11.md</c>.
+  /// </para>
   /// </remarks>
   private async Task OnBannerCoveringChangedAsync(bool covering)
   {
@@ -571,6 +591,18 @@
 
   private Task HandleWakeKeyDownAsync(KeyboardEventArgs e)
   {
+    // PHN-11: while the call banner covers this screen, a key that reaches it (focus left on the screen, or
+    // tabbed out of the banner) must not wake the console behind the banner (spec §9). Escape closes the
+    // banner, as it does on the banner itself; any other key does nothing.
+    if (_bannerCovering)
+    {
+      if (e.Key == "Escape")
+      {
+        Banner.Dismiss();
+      }
+      return Task.CompletedTask;
+    }
+
     // Kiosk a11y: any key wakes. We don't differentiate Enter/Space — the
     // intent is "any input is wake input" on this screen.
     return HandleWakeAsync();
@@ -591,14 +623,28 @@
       // user has just tapped to leave, on a box whose API shares a WiFi link with everything else.
       // Without a bound, an API that is slow rather than down would hold the dispose - and the
       // navigation the user is waiting on - for the HttpClient's full default timeout.
+      //
+      // PHN-11: behind the same gate as every other report, inside the same 2 s bound, so a "visible" sent
+      // when the call banner closed cannot land after this "hidden" and leave the server believing the sleep
+      // screen is up while the browser is on Home.
+      bool gated = false;
       try
       {
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+        await _reportGate.WaitAsync(cts.Token);
+        gated = true;
         await SystemApi.SetSleepScreenVisibleAsync(false, cts.Token);
       }
       catch (Exception ex)
       {
         Logger.LogDebug(ex, "Could not report the sleep screen hidden during dispose");
+      }
+      finally
+      {
+        if (gated)
+        {
+          _reportGate.Release();
+        }
       }
     }
 

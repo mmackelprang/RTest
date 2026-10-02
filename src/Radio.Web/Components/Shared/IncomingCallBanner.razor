@@ -16,8 +16,10 @@
   together with its text is announced unreliably (spec §11).
 *@
 
-<div class="visually-hidden" role="alert" aria-atomic="true">@_alertText</div>
-<div class="visually-hidden" role="status" aria-atomic="true">@_statusText</div>
+<div class="visually-hidden" role="alert" aria-atomic="true">@if (_alertText.Length > 0)
+  {<span @key="_alertKey">@_alertText</span>}</div>
+<div class="visually-hidden" role="status" aria-atomic="true">@if (_statusText.Length > 0)
+  {<span @key="_statusKey">@_statusText</span>}</div>
 
 @if (_snap.IsVisible)
 {
@@ -117,6 +119,14 @@
   private string _alertText = "";
   private string _statusText = "";
 
+  // Live-region bookkeeping (UpdateLiveRegions). Nothing is written before the first render.
+  private bool _regionsLive;
+  private long _alertKey;
+  private long _statusKey;
+  private long _regionCall;
+  private string? _regionCaller;
+  private IncomingCallPhase _regionPhase;
+
   // Whether THIS instance plays the entry for the call on screen. Decided once per call, when the
   // instance first sees it: a re-render (a caller-ID upgrade inside the first 300 ms) must not flip it.
   private long _entryDecidedFor;
@@ -131,6 +141,17 @@
 
   protected override async Task OnAfterRenderAsync(bool firstRender)
   {
+    if (firstRender)
+    {
+      // The regions now exist, empty, in the DOM; only from here may text go into them (spec §11: a live
+      // region inserted together with its text is announced unreliably).
+      _regionsLive = true;
+      if (UpdateLiveRegions())
+      {
+        StateHasChanged();
+      }
+    }
+
     // Covering means mounted: through the exit beat and the fade, not just while ringing, so a lit panel
     // stays lit until the banner is actually gone.
     bool covering = _snap.IsVisible;
@@ -181,33 +202,80 @@
 
   /// <summary>
   /// The assertive region gets "Incoming call from …" once per call, the first time any host shows it —
-  /// not again when the banner moves between /sleep and the layout. Caller-ID upgrades and the exit go to
-  /// the polite region (spec §11).
+  /// not again when the banner moves between /sleep and the layout. Caller-ID upgrades this instance sees
+  /// and the exit go to the polite region; an instance that takes over a call mid-ring writes nothing for
+  /// it until something changes (spec §11). Both regions empty when the banner goes. Each message is a new
+  /// keyed node, so the same words for the next call (the same caller calling back) are still a change.
+  /// Returns whether either region's text changed.
   /// </summary>
-  private void UpdateLiveRegions()
+  private bool UpdateLiveRegions()
   {
+    if (!_regionsLive)
+    {
+      return false;
+    }
+
+    string alert = _alertText;
+    string status = _statusText;
+
     if (!_snap.IsVisible)
     {
-      return;
+      _alertText = "";
+      _statusText = "";
+      _regionCall = 0;
+      return alert != _alertText || status != _statusText;
     }
 
-    string caller = _snap.IsAwaitingCallerId || _snap.CallerKind == IncomingCallCallerKind.Unknown
-      ? "unknown caller"
-      : _snap.PrimaryText;
-
-    if (_snap.Phase == IncomingCallPhase.Ringing && !_snap.IsAwaitingCallerId && Banner.TryMarkAnnounced(_snap.CallId))
+    if (_snap.CallId != _regionCall)
     {
-      _alertText = $"Incoming call from {caller}";
-      return;
+      // First sight of this call by THIS instance.
+      _regionCall = _snap.CallId;
+      _regionCaller = null;
+      _regionPhase = _snap.Phase;
+      _statusText = "";
     }
 
-    _statusText = _snap.Phase switch
+    if (_snap.Phase == IncomingCallPhase.Ringing && !_snap.IsAwaitingCallerId)
     {
-      IncomingCallPhase.Answered => "Call answered",
-      IncomingCallPhase.Ended => "Call ended",
-      _ when !_snap.IsAwaitingCallerId => $"Incoming call from {caller}",
-      _ => _statusText,
-    };
+      string caller = _snap.CallerKind == IncomingCallCallerKind.Unknown ? "unknown caller" : _snap.PrimaryText;
+      if (Banner.TryMarkAnnounced(_snap.CallId))
+      {
+        _alertText = $"Incoming call from {caller}";
+        _alertKey = _snap.CallId;
+        _regionCaller = caller;
+      }
+      else if (_regionCaller is null)
+      {
+        // Announced by the other host before this one took over: the baseline, said by nobody here.
+        _regionCaller = caller;
+      }
+      else if (_regionCaller != caller)
+      {
+        _regionCaller = caller;
+        SetStatus($"Incoming call from {caller}");
+      }
+    }
+
+    if (_snap.Phase != _regionPhase)
+    {
+      _regionPhase = _snap.Phase;
+      if (_snap.Phase == IncomingCallPhase.Answered)
+      {
+        SetStatus("Call answered");
+      }
+      else if (_snap.Phase == IncomingCallPhase.Ended)
+      {
+        SetStatus("Call ended");
+      }
+    }
+
+    return alert != _alertText || status != _statusText;
+  }
+
+  private void SetStatus(string text)
+  {
+    _statusText = text;
+    _statusKey++;
   }
 
   private void HandleTouch() => Banner.Dismiss();
@@ -255,10 +323,12 @@
     _snap.CanDecline && _snap.Phase == IncomingCallPhase.Ringing
     && _snap.DeclineState != IncomingCallDeclineState.Declining;
 
+  // While declining, the spoken name matches the visible "ENDING CALL" (label-in-name); the spec's §10 has no
+  // in-flight label, so this one is the Builder's, flagged for the Designer.
   private string IgnoreAriaLabel =>
-    !_snap.CanDecline
-      ? "Ignore call, not available yet"
-      : $"Ignore call from {(_snap.CallerKind == IncomingCallCallerKind.Unknown ? "unknown caller" : _snap.PrimaryText)}";
+    !_snap.CanDecline ? "Ignore call, not available yet"
+    : _snap.DeclineState == IncomingCallDeclineState.Declining ? "Ending call"
+    : $"Ignore call from {(_snap.CallerKind == IncomingCallCallerKind.Unknown ? "unknown caller" : _snap.PrimaryText)}";
 
   private string HeaderText => _snap.Phase switch
   {

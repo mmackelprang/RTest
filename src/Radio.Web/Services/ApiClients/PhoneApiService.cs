@@ -56,12 +56,17 @@ public class PhoneApiService
     }
   }
 
-  public async Task<PhoneCallStateDto?> GetCallStateAsync(CancellationToken ct = default)
+  /// <summary>Reads one phone's call state from RotaryPhone's <c>GET /api/phone/status</c>; null on failure.</summary>
+  /// <param name="phoneId">The phone to ask about; null asks about RotaryPhone's default (first) phone.</param>
+  /// <param name="ct">Cancels the request.</param>
+  public async Task<PhoneCallStateDto?> GetCallStateAsync(string? phoneId = null, CancellationToken ct = default)
   {
     try
     {
-      return await _httpClient.GetFromJsonAsync<PhoneCallStateDto>(
-        "/api/phone/status", JsonOptions, ct);
+      string url = string.IsNullOrEmpty(phoneId)
+        ? "/api/phone/status"
+        : $"/api/phone/status?phoneId={Uri.EscapeDataString(phoneId)}";
+      return await _httpClient.GetFromJsonAsync<PhoneCallStateDto>(url, JsonOptions, ct);
     }
     catch (Exception ex)
     {

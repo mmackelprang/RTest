@@ -8069,8 +8069,10 @@ body {
    docs/design-handoffs/2026-10-02-incoming-call-banner.md. A full-panel overlay on every route and on
    /sleep: a 1760×600 card inset 80/60 px, three columns (caller disc 240, text, Ignore zone 400).
    z 10002: above the 9999 tier (the sleep screen, kiosk dialogs), the 10000 tier (gain popover anchor,
-   encoder HUD) and the virtual keyboard (10001) — except the encoder HUD and its selector, which are
-   lifted over the banner while it is up (spec §2: a knob turned during a ring must be seen). No backdrop
+   encoder HUD) and the virtual keyboard (10001) — except the fixed-position encoder HUD and its selector,
+   which are lifted over the banner while it is up (spec §2: a knob turned during a ring must be seen). On
+   /sleep the page's own HUD is the static Sleep variant inside .sleep-screen's 9999 stacking context, which
+   no z-index can lift, so Sleep.razor also hosts the fixed variant while the banner covers it. No backdrop
    blur: a blur over a live visualizer costs GPU on a box where load correlates with audio distortion,
    at the moment the announcement is playing (spec §1). */
 
@@ -8083,6 +8085,7 @@ body {
   justify-content: center;
   background: rgba(5, 5, 7, 0.88);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   user-select: none;
   -webkit-user-select: none;
   outline: none;
@@ -8112,14 +8115,14 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   border-radius: 24px;
   box-shadow: 0 0 64px var(--signal-amber-glow), 0 16px 48px rgba(0, 0, 0, 0.6);
   animation: icbCardIn var(--anim-duration-slow) var(--anim-ease-emphasized);
-  transition: transform var(--anim-duration-normal) var(--anim-ease-accelerate),
-              border-color var(--anim-duration-normal) ease,
-              box-shadow var(--anim-duration-normal) ease;
+  transition: transform var(--anim-duration-normal) var(--anim-ease-accelerate);
 }
 
 /* The banner moved between hosts (/sleep ↔ the layout) mid-ring: it is already on screen. */
 .icb-scrim.icb--no-entry,
-.icb-scrim.icb--no-entry .icb-card { animation: none; }
+.icb-scrim.icb--no-entry .icb-card,
+.icb-scrim.icb--no-entry .icb-disc,
+.icb-scrim.icb--no-entry .icb-caller { animation: none; }
 
 .icb-scrim.icb--leaving { opacity: 0; }
 .icb-scrim.icb--leaving .icb-card { transform: scale(0.98); }
@@ -8249,8 +8252,7 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 .icb-ignore-zone {
   grid-column: 3;
   grid-row: 1 / span 2;
-  margin: -56px -56px -56px 0;
-  padding: 56px 40px;
+  padding: 0 40px;
   border-left: 1px solid var(--surface-separator);
   display: flex;
   flex-direction: column;
@@ -8258,7 +8260,7 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   justify-content: center;
   gap: 20px;
   cursor: default;
-  transition: opacity 150ms ease;
+  transition: opacity 150ms var(--anim-ease-standard);   /* 150 ms is the spec's (§7); no token holds it */
 }
 
 .icb-ignore {
@@ -8278,6 +8280,7 @@ body:has(.icb-scrim) .encoder-selector-overlay {
   justify-content: center;
   gap: 16px;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   /* No glow and no shadow on the red call button: the owner's UI-8 ruling. */
   box-shadow: none;
   transition: transform var(--anim-duration-fast) ease;
@@ -8295,7 +8298,7 @@ body:has(.icb-scrim) .encoder-selector-overlay {
 .icb-ignore .icb-spinner {
   width: 32px;
   height: 32px;
-  border-color: rgba(0, 0, 0, 0.25);
+  border-color: color-mix(in srgb, var(--text-inverse) 25%, transparent);
   border-top-color: var(--text-inverse);
 }
 

@@ -363,6 +363,86 @@ public class IncomingCallBannerServiceTests
     Assert.Equal(IncomingCallPhase.Ringing, rig.Service.Current.Phase);
   }
 
+  [Fact]
+  public async Task TheStatusRead_AsksAboutTheRingingPhone()
+  {
+    var rig = new Rig();
+    rig.Start();
+    await rig.Service.Seeded;
+    rig.Hub.RaiseIncomingCallForTest("hall", Number);
+    rig.Phone.StatusJson = $"{{\"callState\":\"Ringing\",\"incomingNumber\":\"{Number}\"}}";
+
+    await rig.Tick();
+
+    Assert.Contains(rig.Phone.Requests, r => r.StartsWith("GET /api/phone/status?phoneId=hall", StringComparison.Ordinal));
+  }
+
+  [Fact]
+  public async Task AHungStatusRead_IsNotStackedOn_TheNextTickSkips()
+  {
+    var rig = new Rig();
+    rig.Start();
+    await rig.Service.Seeded;
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    var gate = new TaskCompletionSource();
+    rig.Phone.StatusGate = gate.Task;
+    int before = rig.Phone.Count("/api/phone/status");
+
+    rig.Time.Advance(IncomingCallBannerService.PollInterval);   // starts a read that hangs
+    var hung = rig.Service.LastPoll;
+    rig.Time.Advance(IncomingCallBannerService.PollInterval);   // must not start another
+    rig.Time.Advance(IncomingCallBannerService.PollInterval);
+    int during = rig.Phone.Count("/api/phone/status") - before;
+    gate.SetResult();
+    await hung;
+
+    Assert.Equal(1, during);
+  }
+
+  [Fact]
+  public async Task ANewCallIdWhileRinging_SplitsOffTheNewCall_EvenWhenTheOldOneWasTouchClosed()
+  {
+    // The Idle between two calls on one phone was lost: the hub's next ring merged into the old,
+    // touch-closed call, which would keep the new call off the screen. RotaryPhone's CallId says otherwise.
+    var rig = new Rig();
+    rig.Start();
+    await rig.Service.Seeded;
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    rig.Phone.StatusJson = $"{{\"callState\":\"Ringing\",\"incomingNumber\":\"{Number}\",\"callId\":\"call-A\"}}";
+    await rig.Tick();
+    var first = rig.Service.Current.CallId;
+    rig.Service.Dismiss();
+    rig.Time.Advance(IncomingCallBannerService.ExitFade);
+
+    rig.Hub.RaiseIncomingCallForTest("default", "5550100000");   // merges into the hidden call
+    var merged = rig.Service.Current.IsVisible;
+    rig.Phone.StatusJson = "{\"callState\":\"Ringing\",\"incomingNumber\":\"5550100000\",\"callId\":\"call-B\"}";
+    await rig.Tick();
+
+    Assert.False(merged);
+    var s = rig.Service.Current;
+    Assert.True(s.IsVisible);
+    Assert.NotEqual(first, s.CallId);
+    Assert.Equal("(555) 010-0000", s.PrimaryText);
+    Assert.Equal(IncomingCallPhase.Ringing, s.Phase);
+  }
+
+  [Fact]
+  public async Task TheSameCallId_IsTheSameCall()
+  {
+    var rig = new Rig();
+    rig.Start();
+    await rig.Service.Seeded;
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    rig.Phone.StatusJson = $"{{\"callState\":\"Ringing\",\"incomingNumber\":\"{Number}\",\"callId\":\"call-A\"}}";
+    await rig.Tick();
+    var first = rig.Service.Current.CallId;
+
+    await rig.Tick();
+
+    Assert.Equal(first, rig.Service.Current.CallId);
+  }
+
   // ── second call ───────────────────────────────────────────────────
 
   [Fact]
@@ -592,13 +672,16 @@ public class IncomingCallBannerServiceTests
   {
     var sink = new CapturingSink();
     var rig = new Rig(declineSupported: true, sink: sink);
-    rig.Phone.PbapName = "Grandma Anderson";
     rig.Phone.LookupThrowsOnce = true;   // reaches the lookup's failure line, which mentions the number
+    // ...and the name then resolves from RotaryPhone's own contacts, so it genuinely exists during the run:
+    // without it the "Grandma" sweep below could not fail.
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"Grandma Anderson\",\"phoneNumber\":\"{Number}\"}}]";
     rig.Start();
 
     rig.Hub.RaiseCallStateChangedForTest("default", "Ringing");
     rig.Hub.RaiseIncomingCallForTest("default", Number);
     await rig.Service.LastNameLookup;
+    Assert.Equal("Grandma Anderson", rig.Service.Current.PrimaryText);
     rig.Phone.DeclineResponse = (HttpStatusCode.InternalServerError, "{}", "application/json");
     await rig.Service.DeclineAsync();
     rig.Phone.StatusFails = true;
