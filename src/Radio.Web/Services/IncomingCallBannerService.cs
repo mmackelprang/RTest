@@ -188,6 +188,8 @@ public sealed class IncomingCallBannerService : IDisposable
   private ITimer? _exitTimer;
 
   private IncomingCallCloseReason? _lastCloseReason;
+  private long _announcedCallId;
+  private long _enteredCallId;
 
   /// <summary>Raised after every change to <see cref="Current"/>, from whichever thread made it.</summary>
   public event Action? Changed;
@@ -247,6 +249,29 @@ public sealed class IncomingCallBannerService : IDisposable
     _hub.IncomingCall += OnIncomingCall;
     _hub.CallStateChanged += OnCallStateChanged;
     Seeded = SeedAsync();
+  }
+
+  /// <summary>
+  /// True the first time it is asked about a call, false after. The banner's hosts use it so a call is
+  /// announced once and plays its entry once, even when the banner moves between the /sleep page and the
+  /// layout mid-ring (two component instances, one circuit).
+  /// </summary>
+  public bool TryMarkAnnounced(long callId) => TryMark(ref _announcedCallId, callId);
+
+  /// <inheritdoc cref="TryMarkAnnounced"/>
+  public bool TryMarkEntered(long callId) => TryMark(ref _enteredCallId, callId);
+
+  private bool TryMark(ref long field, long callId)
+  {
+    lock (_gate)
+    {
+      if (callId <= 0 || field == callId)
+      {
+        return false;
+      }
+      field = callId;
+      return true;
+    }
   }
 
   /// <summary>

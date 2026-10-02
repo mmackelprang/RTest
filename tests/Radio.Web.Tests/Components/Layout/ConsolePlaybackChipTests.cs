@@ -45,6 +45,7 @@ public class ConsolePlaybackChipTests : TestContext
     JSInterop.Mode = JSRuntimeMode.Loose;
     Services.AddRadzenComponents();
     Services.AddHermeticTestRig();
+    Services.AddOfflineIncomingCallBanner();
     Services.AddLogging(b => b.AddProvider(NullLoggerProvider.Instance));
     Services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
     Services.AddSingleton<IOptionsMonitor<DevicesOptions>>(

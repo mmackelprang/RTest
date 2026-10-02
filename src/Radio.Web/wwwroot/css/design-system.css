@@ -8063,3 +8063,300 @@ body {
   max-width: 100%;
   box-sizing: border-box;
 }
+
+
+/* ─── §PHN-11  Incoming-call banner ───────────────────────────────────────── *
+   docs/design-handoffs/2026-10-02-incoming-call-banner.md. A full-panel overlay on every route and on
+   /sleep: a 1760×600 card inset 80/60 px, three columns (caller disc 240, text, Ignore zone 400).
+   z 10002: above the 9999 tier (the sleep screen, kiosk dialogs), the 10000 tier (gain popover anchor,
+   encoder HUD) and the virtual keyboard (10001) — except the encoder HUD and its selector, which are
+   lifted over the banner while it is up (spec §2: a knob turned during a ring must be seen). No backdrop
+   blur: a blur over a live visualizer costs GPU on a box where load correlates with audio distortion,
+   at the moment the announcement is playing (spec §1). */
+
+.icb-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(5, 5, 7, 0.88);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  outline: none;
+  animation: icbScrimIn var(--anim-duration-normal) var(--anim-ease-decelerate);
+  transition: opacity var(--anim-duration-normal) var(--anim-ease-accelerate);
+}
+
+body:has(.icb-scrim) .encoder-hud,
+body:has(.icb-scrim) .encoder-selector-overlay {
+  z-index: 10003;
+}
+
+.icb-card {
+  position: relative;
+  box-sizing: border-box;
+  width: 1760px;
+  height: 600px;
+  padding: 56px;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr) 400px;
+  grid-template-rows: minmax(0, 1fr) 28px;
+  column-gap: 56px;
+  background:
+    radial-gradient(circle at 220px 260px, rgba(240, 168, 48, 0.15), transparent 480px),
+    var(--surface-raised);
+  border: 1px solid rgba(240, 168, 48, 0.30);
+  border-radius: 24px;
+  box-shadow: 0 0 64px var(--signal-amber-glow), 0 16px 48px rgba(0, 0, 0, 0.6);
+  animation: icbCardIn var(--anim-duration-slow) var(--anim-ease-emphasized);
+  transition: transform var(--anim-duration-normal) var(--anim-ease-accelerate),
+              border-color var(--anim-duration-normal) ease,
+              box-shadow var(--anim-duration-normal) ease;
+}
+
+/* The banner moved between hosts (/sleep ↔ the layout) mid-ring: it is already on screen. */
+.icb-scrim.icb--no-entry,
+.icb-scrim.icb--no-entry .icb-card { animation: none; }
+
+.icb-scrim.icb--leaving { opacity: 0; }
+.icb-scrim.icb--leaving .icb-card { transform: scale(0.98); }
+
+@keyframes icbScrimIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes icbCardIn  { from { opacity: 0; transform: scale(0.96); } to { opacity: 1; transform: scale(1); } }
+@keyframes icbFadeIn  { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Caller disc ── */
+.icb-disc-col {
+  grid-column: 1;
+  grid-row: 1;
+  position: relative;
+  width: 240px;
+  height: 240px;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* The one pulsing element (spec §8): the existing ringPulse, on a halo behind the disc. */
+.icb-halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(240, 168, 48, 0.35), transparent 70%);
+  animation: ringPulse 1.2s ease-in-out infinite;
+}
+
+.icb-disc {
+  position: relative;
+  box-sizing: border-box;
+  width: 176px;
+  height: 176px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(240, 168, 48, 0.12);
+  border: 2px solid var(--signal-amber);
+  color: var(--signal-amber);
+  animation: icbFadeIn var(--anim-duration-normal) var(--anim-ease-standard);
+}
+
+.icb-monogram {
+  font-family: var(--font-display);
+  font-size: 64px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  line-height: 1;
+}
+
+.icb-disc .icb-glyph { font-size: 88px; width: 88px; height: 88px; line-height: 1; }
+
+/* ── Text column ── */
+.icb-text {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.icb-header {
+  font-family: var(--font-display);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 40px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--signal-amber);
+  text-shadow: 0 0 20px rgba(240, 168, 48, 0.50);
+}
+
+.icb-caller {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  animation: icbFadeIn var(--anim-duration-normal) var(--anim-ease-standard);
+}
+
+/* A name wraps to two lines at word boundaries, then ellipsis; an unbroken token breaks anywhere. */
+.icb-primary {
+  font-family: var(--font-body);
+  font-size: 72px;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--text-high);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* A number never wraps. */
+.icb-primary--number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 1px;
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.icb-secondary {
+  font-family: var(--font-body);
+  font-size: 32px;
+  font-weight: 500;
+  line-height: 40px;
+  color: var(--text-medium);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icb-secondary--number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Ignore zone: the whole column is inert to touch-to-close (spec §6) ── */
+.icb-ignore-zone {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  margin: -56px -56px -56px 0;
+  padding: 56px 40px;
+  border-left: 1px solid var(--surface-separator);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  cursor: default;
+  transition: opacity 150ms ease;
+}
+
+.icb-ignore {
+  width: 320px;
+  height: 128px;
+  border: none;
+  border-radius: 64px;
+  background: var(--signal-red);
+  color: var(--text-inverse);
+  font-family: var(--font-body);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  cursor: pointer;
+  /* No glow and no shadow on the red call button: the owner's UI-8 ruling. */
+  box-shadow: none;
+  transition: transform var(--anim-duration-fast) ease;
+}
+
+.icb-ignore:active:not(:disabled) { transform: scale(0.96); }
+
+.icb-ignore:disabled { opacity: 0.35; cursor: not-allowed; }
+
+/* In flight: full opacity, not pressable (spec §7). */
+.icb--declining .icb-ignore:disabled { opacity: 1; cursor: progress; }
+
+.icb-ignore .icb-ignore-icon { font-size: 40px; width: 40px; height: 40px; line-height: 1; }
+
+.icb-ignore .icb-spinner {
+  width: 32px;
+  height: 32px;
+  border-color: rgba(0, 0, 0, 0.25);
+  border-top-color: var(--text-inverse);
+}
+
+.icb-ignore-sub {
+  width: 320px;
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--text-medium);
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.icb-ignore-error { color: var(--signal-red); }
+
+/* ── Hint line ── */
+.icb-hint {
+  grid-column: 1 / span 2;
+  grid-row: 2;
+  padding-left: 296px;   /* aligned with the text column: 240 disc + 56 gap */
+  font-family: var(--font-body);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 28px;
+  color: var(--text-medium);
+}
+
+.icb--declining .icb-hint { visibility: hidden; }
+
+/* ── Exit beats: ANSWERED (green) / CALL ENDED (grey) — colour changes are instant (spec §8) ── */
+.icb--answered .icb-header,
+.icb--ended .icb-header { text-shadow: none; }
+.icb--answered .icb-header { color: var(--signal-green); }
+.icb--ended .icb-header { color: var(--text-medium); }
+
+.icb--answered .icb-halo,
+.icb--ended .icb-halo { animation: none; opacity: 0; }
+
+.icb--answered .icb-disc { border-color: var(--signal-green); color: var(--signal-green); background: rgba(74, 222, 128, 0.12); }
+.icb--ended .icb-disc { border-color: var(--text-medium); color: var(--text-medium); background: transparent; }
+
+.icb--answered .icb-card { border-color: rgba(74, 222, 128, 0.30); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); }
+.icb--ended .icb-card { border-color: var(--surface-separator); box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); }
+
+.icb--answered .icb-ignore-zone,
+.icb--ended .icb-ignore-zone { opacity: 0; pointer-events: none; }
+
+.icb--answered .icb-hint,
+.icb--ended .icb-hint { visibility: hidden; }
+
+/* Reduced motion (spec §8). The global §26 rule shortens every animation to one 0.01 ms iteration, which
+   would leave ringPulse frozen on its LAST frame — opacity 0.45, a dim halo. The halo is therefore made
+   static explicitly, at full strength. Entry, crossfades and the exit fade become instant through §26. */
+@media (prefers-reduced-motion: reduce) {
+  .icb-halo {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}

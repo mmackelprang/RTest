@@ -117,6 +117,11 @@
   <div class="sleep-screen-hint">@HintText</div>
 </div>
 
+@* PHN-11 — the incoming-call banner. A SIBLING of .sleep-screen, not a child: a touch on the banner closes
+   the banner and must never reach HandleWakeAsync above (spec §6, §9 — a call does not wake the console).
+   While it covers this screen the page reports the sleep screen hidden, which lights a dark panel. *@
+<IncomingCallBanner OnCoveringChanged="OnBannerCoveringChangedAsync" />
+
 @code {
   private string _clockText = string.Empty;
   private string? _title;
@@ -171,6 +176,12 @@
   // pass, which renders and disposes without ever reaching OnAfterRenderAsync: that instance never
   // sets this, so it cannot clear a flag it never reported.
   private bool _reportedVisible;
+
+  // PHN-11. Whether the incoming-call banner is covering this screen, the last visibility actually
+  // reported (null before the first), and the gate that keeps reports in order.
+  private bool _bannerCovering;
+  private bool? _lastReportedVisible;
+  private readonly SemaphoreSlim _reportGate = new(1, 1);
 
   /// <summary>
   /// ENC-6 deviation D-1: the Standby line names the tap, which handoff §8.6's copy omits. §8.3's
@@ -268,14 +279,58 @@
     }
 
     _reportedVisible = true;
-    var state = await SystemApi.SetSleepScreenVisibleAsync(true);
-    if (state is null || _disposed)
-    {
-      return;
-    }
+    await SyncSleepScreenVisibilityAsync();
+  }
 
-    _wakeState = state.WakeState;
-    await InvokeAsync(StateHasChanged);
+  /// <summary>
+  /// PHN-11. The banner started or stopped covering this screen. While it covers it, the sleep screen is
+  /// not what is on the panel, so the page says so: that is what lights a panel ENC-22 or a deep sleep
+  /// turned off, without waking the console (the audio stays as it was). When the banner closes the
+  /// screen is reported visible again, and ENC-22's off-timer restarts from its full period.
+  /// </summary>
+  /// <remarks>
+  /// A child's first after-render runs before its parent's, so with a call already up when this page
+  /// mounts this arrives BEFORE the page's own first report. It only records the fact then; the page's
+  /// first report reads it.
+  /// </remarks>
+  private async Task OnBannerCoveringChangedAsync(bool covering)
+  {
+    _bannerCovering = covering;
+    if (_reportedVisible)
+    {
+      await SyncSleepScreenVisibilityAsync();
+    }
+  }
+
+  /// <summary>
+  /// Reports what is on the panel — the sleep screen, unless the call banner covers it — one report at a
+  /// time, so two reports in flight cannot reach the API in the wrong order. Reports only a change.
+  /// </summary>
+  private async Task SyncSleepScreenVisibilityAsync()
+  {
+    await _reportGate.WaitAsync();
+    try
+    {
+      bool visible = !_bannerCovering;
+      if (_disposed || _lastReportedVisible == visible)
+      {
+        return;
+      }
+      _lastReportedVisible = visible;
+
+      var state = await SystemApi.SetSleepScreenVisibleAsync(visible);
+      if (state is null || _disposed)
+      {
+        return;
+      }
+
+      _wakeState = state.WakeState;
+      await InvokeAsync(StateHasChanged);
+    }
+    finally
+    {
+      _reportGate.Release();
+    }
   }
 
   // The clock text is rebuilt every 1 s. We read DisplayOptionsMonitor.CurrentValue

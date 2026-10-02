@@ -324,6 +324,10 @@
        backdrop (10000 vs 9999).
        The /sleep route is on EmptyLayout and is not in this tree, so it hosts its own copy. *@
   <EncoderHud />
+
+  @* PHN-11 — the incoming-call banner, at the layout root for the same stacking-context reason as the
+       HUD above. /sleep hosts its own copy, as it does the HUD. UndimOnShow lifts the 5-minute idle dim. *@
+  <IncomingCallBanner UndimOnShow="true" />
 </div>
 
 @code {
