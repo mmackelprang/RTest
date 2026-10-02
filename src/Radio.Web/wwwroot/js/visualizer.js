@@ -50,18 +50,32 @@ export const visualizer = {
 
     const { ctx, width, height } = canvasData;
     ctx.clearRect(0, 0, width, height);
+    // A mode change clears the canvas; the band map's last model must not be repainted over the next mode.
+    canvasData.bandModel = null;
   },
 
-  // Lazy-resize: fix canvas if it was initialized before parent had layout
+  // Keeps the canvas's pixel buffer the size it is laid out at. The buffer is sized once by init, but the
+  // element's height changes with the mode: the band map's strip (UI-31) takes 89 px, the spectrum axis
+  // 17, the other modes nothing, so a buffer left at init's size is drawn stretched or squashed. A resize
+  // clears the canvas, which every draw repaints in full anyway; the phase scope's decay buffer is sized
+  // to the canvas and is dropped with it. Falls back to the parent's size, then to the panel's known
+  // size, while the element has no layout yet.
   ensureCanvasSize: function (canvasData) {
-    if (canvasData.width > 0 && canvasData.height > 0) return;
-    const parent = canvasData.canvas.parentElement;
-    const w = parent && parent.clientWidth > 0 ? parent.clientWidth : 710;
-    const h = parent && parent.clientHeight > 0 ? parent.clientHeight : 640;
-    canvasData.canvas.width = w;
-    canvasData.canvas.height = h;
+    const canvas = canvasData.canvas;
+    let w = canvas.clientWidth;
+    let h = canvas.clientHeight;
+    if (!(w > 0 && h > 0)) {
+      if (canvasData.width > 0 && canvasData.height > 0) return;
+      const parent = canvas.parentElement;
+      w = parent && parent.clientWidth > 0 ? parent.clientWidth : 710;
+      h = parent && parent.clientHeight > 0 ? parent.clientHeight : 640;
+    }
+    if (w === canvasData.width && h === canvasData.height) return;
+    canvas.width = w;
+    canvas.height = h;
     canvasData.width = w;
     canvasData.height = h;
+    canvasData.phaseScopeBuffer = null;
   },
 
   // Draw waveform
@@ -387,8 +401,10 @@ export const visualizer = {
     return value || fallback;
   },
 
-  // An upward-pointing filled caret with its apex on the axis line at x.
+  // An upward-pointing filled caret with its apex on the axis line at x, kept whole inside the canvas: a
+  // preset at the plot's edge would otherwise be drawn half off it.
   drawCaret: function (ctx, x, apexY, width, height, colour) {
+    x = Math.min(Math.max(x, width / 2), ctx.canvas.width - width / 2);
     ctx.fillStyle = colour;
     ctx.beginPath();
     ctx.moveTo(x, apexY);
@@ -402,6 +418,9 @@ export const visualizer = {
     const canvasData = this.canvases[canvasId];
     if (!canvasData) return;
     this.ensureCanvasSize(canvasData);
+
+    // Kept so a resize can repaint it (registerBandTap's observer).
+    canvasData.bandModel = model;
 
     const { canvas, ctx, width, height } = canvasData;
     const accent = this.token(canvas, '--accent-primary', '#5CD4E8');
@@ -533,11 +552,30 @@ export const visualizer = {
     };
     canvas.addEventListener('pointerup', handler);
     canvasData.bandTapHandler = handler;
+
+    // UI-31: the map is drawn when its data arrives, not every frame, and entering this mode changes the
+    // canvas's height (the strip appears under it) after the first draw may already have run. Repaint the
+    // last model whenever the laid-out size stops matching the buffer. An observer delivers one
+    // observation when it starts, which covers a resize that happened before it was registered.
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        if (!canvasData.bandModel) return;
+        if (canvas.clientWidth === canvasData.width && canvas.clientHeight === canvasData.height) return;
+        this.drawBandMap(canvasId, canvasData.bandModel);
+      });
+      observer.observe(canvas);
+      canvasData.bandResizeObserver = observer;
+    }
   },
 
   unregisterBandTap: function (canvasId) {
     const canvasData = this.canvases[canvasId];
-    if (!canvasData || !canvasData.bandTapHandler) return;
+    if (!canvasData) return;
+    if (canvasData.bandResizeObserver) {
+      canvasData.bandResizeObserver.disconnect();
+      canvasData.bandResizeObserver = null;
+    }
+    if (!canvasData.bandTapHandler) return;
     canvasData.canvas.removeEventListener('pointerup', canvasData.bandTapHandler);
     canvasData.bandTapHandler = null;
   },
