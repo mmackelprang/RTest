@@ -239,8 +239,8 @@ public class AnnouncementService : IAnnouncementService
       // one registers, so the music starts to come back up between the ring and the name. That
       // predates AUD-73 and is not fixed here.
       ttsSource = await _ttsFactory.CreateAsync(message, cancellationToken: token);
-      // Stopped while the name was being synthesised: return before ducking, as phase 1 does. The
-      // finally still cleans the source up.
+      // Stopped while the name was being synthesised: leave before ducking, as phase 1 does (here by
+      // throwing, caught below as a cancellation). The finally still cleans the source up.
       token.ThrowIfCancellationRequested();
       _duckingService.SetPriority(ttsSource, priority);
 
