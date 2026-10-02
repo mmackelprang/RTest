@@ -25,7 +25,8 @@ public interface IPlayQueue
   int Count { get; }
 
   /// <summary>
-  /// Retrieves the current track followed by the upcoming tracks. Tracks already played are NOT included —
+  /// Retrieves the current track (when there is one) followed by the upcoming tracks. Tracks already played
+  /// are NOT included —
   /// use <see cref="GetFullPlaylistAsync"/> for the whole list. The indexes this returns are the ones
   /// <see cref="RemoveFromQueueAsync"/>, <see cref="MoveQueueItemAsync"/>, <see cref="JumpToIndexAsync"/>
   /// and <see cref="AddToQueueAsync"/>'s position take.

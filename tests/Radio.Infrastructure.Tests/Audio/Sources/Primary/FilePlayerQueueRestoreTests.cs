@@ -126,11 +126,36 @@ public sealed class FilePlayerQueueRestoreTests : IDisposable
     Assert.Equal(beforeRestart, await FullPathsAsync(restored));
     Assert.Equal(tracks.Order(), beforeRestart.Order());
 
-    // Turning shuffle off rebuilds the upcoming tracks from the unshuffled order. That order is only right
-    // if it was persisted: rebuilt from the shuffled list, it would come back shuffled.
+    // Turning shuffle off puts the tracks not yet played back in the unshuffled order. That order is only
+    // right if it was persisted: rebuilt from the shuffled list, it would come back shuffled.
+    List<string> played = beforeRestart.Take(3).ToList();
+    string current = restored.CurrentFile!;
     await restored.SetShuffleAsync(false);
-    int at = tracks.IndexOf(restored.CurrentFile!);
-    Assert.Equal(tracks.Skip(at + 1), restored.Playlist);
+
+    Assert.Equal(current, restored.CurrentFile);
+    Assert.Equal(tracks.Except(played).Where(t => t != current), restored.Playlist);
+    // Every track exactly once: no played track comes back as upcoming, no unplayed one leaves.
+    Assert.Equal(tracks.Order(), (await FullPathsAsync(restored)).Order());
+  }
+
+  [Fact]
+  public async Task ShuffleOff_InSession_KeepsEveryUnplayedTrack_AndRepeatsNoPlayedOne()
+  {
+    // Pins the pre-existing in-session half of the same defect, deterministically: original order
+    // 1..5, played 3 then 1 (as a shuffle could), current 4, upcoming 5, 2.
+    List<string> tracks = CreateTracks(5);
+    _preferences.Shuffle = true;
+    _preferences.QueueItems = new List<string> { tracks[2], tracks[0], tracks[3], tracks[4], tracks[1] };
+    _preferences.CurrentQueueIndex = 2;
+    _preferences.OriginalOrder = new List<string>(tracks);
+    FilePlayerAudioSource source = CreateSource();
+    await source.InitializeAsync();
+
+    await source.SetShuffleAsync(false);
+
+    Assert.Equal(tracks[3], source.CurrentFile);
+    Assert.Equal(new[] { tracks[1], tracks[4] }, source.Playlist);
+    Assert.Equal(new[] { tracks[2], tracks[0], tracks[3], tracks[1], tracks[4] }, await FullPathsAsync(source));
   }
 
   [Fact]

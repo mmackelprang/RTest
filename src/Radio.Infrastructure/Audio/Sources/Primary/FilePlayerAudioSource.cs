@@ -64,6 +64,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private readonly SemaphoreSlim _queueSaveGate = new(1, 1);
   private long _queueSaveGeneration;
   private Task _lastQueueSave = Task.CompletedTask;
+  // Every key in the store matching each queue key case-insensitively, read on the first write and only
+  // ever touched inside _queueSaveGate.
+  private Dictionary<string, string[]>? _queueKeyVariants;
 
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
@@ -625,22 +628,39 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
       else
       {
-        // Disable shuffle - restore original order for remaining tracks
+        // Disable shuffle - put the tracks not yet played back in their original order.
+        //
+        // AUD-98: this used to take _originalOrder from the current track onward, which ignored the
+        // played history — tracks already played in shuffled order came back as upcoming, and tracks
+        // before the current one in the original order that had NOT been played left the list. Now
+        // the set reordered is exactly the current + upcoming tracks (counted, so a track queued twice
+        // stays twice), ordered by _originalOrder; any of them _originalOrder lacks keep their
+        // relative order after it. The current track stays first.
         if (_originalOrder.Count > 0)
         {
-          // Find current position in original order
-          var currentIndex = _currentFile != null ? _originalOrder.IndexOf(_currentFile) : -1;
+          var notYetPlaced = new Dictionary<string, int>(StringComparer.Ordinal);
+          foreach (string track in remainingTracks)
+          {
+            notYetPlaced[track] = notYetPlaced.GetValueOrDefault(track) + 1;
+          }
 
-          if (currentIndex >= 0)
+          var ordered = new List<string>(remainingTracks.Count);
+          foreach (string track in _originalOrder.Concat(remainingTracks))
           {
-            // Rebuild playlist with remaining tracks in original order
-            remainingTracks = _originalOrder.Skip(currentIndex).ToList();
+            if (notYetPlaced.TryGetValue(track, out int left) && left > 0)
+            {
+              ordered.Add(track);
+              notYetPlaced[track] = left - 1;
+            }
           }
-          else
+
+          if (_currentFile != null)
           {
-            // Couldn't find current in original order - just sort what we have
-            remainingTracks.Sort();
+            ordered.Remove(_currentFile);
+            ordered.Insert(0, _currentFile);
           }
+
+          remainingTracks = ordered;
         }
       }
 
@@ -1898,9 +1918,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
   /// <summary>
   /// Saves the whole playlist — played, current and upcoming, and the unshuffled order — so that a restart
-  /// brings it back (AUD-98). With a configuration manager the write goes to the configuration store,
-  /// asynchronously and without blocking the caller; without one, only <c>_preferences.CurrentValue</c> is
-  /// updated.
+  /// brings it back (AUD-98). The snapshot is taken on the caller's thread. With a configuration manager,
+  /// the store write is queued to the thread pool and not awaited; without one, only
+  /// <c>_preferences.CurrentValue</c> is updated, synchronously.
   /// </summary>
   private void SaveQueueStateToPreferences()
   {
@@ -1910,8 +1930,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
       if (_configurationManager != null)
       {
-        // Fire-and-forget: callers include the playback monitor's auto-advance.
-        _lastQueueSave = SaveQueueStateAsync(snapshot);
+        // Task.Run, not a direct call: SemaphoreSlim.WaitAsync completes synchronously when the gate is
+        // free and Microsoft.Data.Sqlite's async methods run synchronously, so a direct call would do the
+        // whole store write on the caller — the playback monitor's auto-advance, or an HTTP request.
+        _lastQueueSave = Task.Run(() => SaveQueueStateAsync(snapshot));
       }
       else
       {
@@ -1945,8 +1967,9 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       }
       items.AddRange(_playlist);
 
-      // ToArray: several paths assign or mutate _originalOrder without this lock (pre-existing), and
-      // ToArray copies rather than enumerating, so a concurrent change cannot make it throw mid-copy.
+      // ToArray rather than enumerating: several paths assign or mutate _originalOrder without this lock
+      // (pre-existing). A concurrent Add can still, rarely, make ToArray throw; SaveQueueStateToPreferences
+      // catches it, that save is skipped, and the next queue change saves again.
       var originalOrder = _originalOrder.ToArray().ToList();
 
       return new PersistedQueue(
@@ -1980,16 +2003,22 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <see cref="PersistPlaybackModeAsync"/> gives. It matters more here: the bridge flattens a JSON array
   /// into <c>QueueItems:0</c>, <c>QueueItems:1</c>, … and its keys ignore case, so a stale variant row
   /// holding a LONGER list would leave its extra entries in the bound list behind a shorter new one — tracks
-  /// from an old playlist appearing in this one.
+  /// from an old playlist appearing in this one. Which variants exist is read from the store once, on the
+  /// first write, and reused for the life of this source. A variant row created after that first write
+  /// would not be updated until the next restart. The case variants measured on the box come from the
+  /// System Config page, and neither File Player preferences DTO carries these three keys.
   /// </para>
   /// <para>
   /// <b><c>CurrentValue</c> is updated after the store write</b>, because
   /// <c>PreferencesPersistenceService</c> writes <c>CurrentValue</c> back to the store every 30 seconds.
   /// Before AUD-98 this method left <c>CurrentValue</c> alone, so whenever no configuration reload happened
-  /// in between, that periodic save wrote the queue from the last reload over this one. A periodic save
-  /// that serialises <c>CurrentValue</c> between this method's store write and its <c>CurrentValue</c>
-  /// update can still write the previous queue back; the next periodic save, 30 seconds later, then writes
-  /// this one.
+  /// in between, that periodic save wrote the queue from the last reload over this one. Races remain,
+  /// each needing a periodic save or a reload to overlap this write. A periodic save that serialised
+  /// <c>CurrentValue</c> before the update below can land the previous queue after this write. A reload
+  /// already in flight can rebuild <c>CurrentValue</c> from the store as it was before this write. And the
+  /// three assignments are not atomic, so a periodic save can pair the new list with the old index, which
+  /// moves the played/current boundary but drops no track. Each is repaired by the next queue change,
+  /// which writes again; until then a restart restores the earlier list.
   /// </para>
   /// </remarks>
   private async Task SaveQueueStateAsync(PersistedQueue snapshot)
@@ -2031,15 +2060,23 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
           System.Text.Json.JsonSerializer.Serialize(snapshot.OriginalOrder),
       };
 
-      IReadOnlyList<ConfigurationEntry> existing = await store.GetAllEntriesAsync(ConfigurationReadMode.Raw);
+      if (_queueKeyVariants == null)
+      {
+        IReadOnlyList<ConfigurationEntry> existing = await store.GetAllEntriesAsync(ConfigurationReadMode.Raw);
+        _queueKeyVariants = values.Keys.ToDictionary(
+          key => key,
+          key => existing
+            .Select(e => e.Key)
+            .Where(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase))
+            .Append(key)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray());
+      }
+
       var entries = new List<ConfigurationEntry>();
       foreach (KeyValuePair<string, string> value in values)
       {
-        entries.AddRange(existing
-          .Select(e => e.Key)
-          .Where(k => string.Equals(k, value.Key, StringComparison.OrdinalIgnoreCase))
-          .Append(value.Key)
-          .Distinct(StringComparer.Ordinal)
+        entries.AddRange(_queueKeyVariants[value.Key]
           .Select(k => new ConfigurationEntry { Key = k, Value = value.Value }));
       }
 
@@ -2060,7 +2097,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
   }
 
-  /// <summary>Completes when the most recently started queue-state write has finished. A test rendezvous.</summary>
+  /// <summary>
+  /// The most recently started queue-state write. A test rendezvous, and only for a single caller: with
+  /// concurrent callers it can be an older snapshot's write, which the generation check skips.
+  /// </summary>
   internal Task WhenQueueStateSavedAsync() => _lastQueueSave;
 
   /// <summary>AUD-98. A playlist as persisted: see <see cref="CapturePersistedQueue"/>.</summary>

@@ -177,7 +177,7 @@
                                       Icon="close"
                                       Size="ButtonSize.Small"
                                       ButtonStyle="ButtonStyle.Light"
-                                      Click="@(() => HandleRemoveAsync(item.Index))"
+                                      Click="@(() => HandleRemoveAsync(ToQueueIndex(_queueItems, item)))"
                                       title="Remove" />
                       </div>
                     }
@@ -934,6 +934,22 @@
     {
       Logger.LogWarning(ex, "Failed to jump to playlist position");
     }
+  }
+
+  /// <summary>
+  /// AUD-98. Converts a row of the full playlist (played + current + upcoming, from <c>/api/queue/full</c>)
+  /// to the index <c>DELETE /api/queue/{index}</c> takes, which counts from the current track
+  /// (<c>IPlayQueue.GetQueueAsync</c>'s list). The row's own <c>Index</c> is its full-list position, so
+  /// passing it removed the track as many rows further down as there were played tracks — and with played
+  /// tracks now surviving a restart, that was true from the first tap. The offset is the Current row's
+  /// full-list position; with no Current row it is the number of Played rows, which is exact unless a
+  /// played track failed to decode (an Error row the panel cannot place).
+  /// </summary>
+  internal static int ToQueueIndex(IReadOnlyList<QueueItemDto> items, QueueItemDto item)
+  {
+    QueueItemDto? current = items.FirstOrDefault(i => i.State == "Current");
+    int offset = current?.FullPlaylistIndex ?? items.Count(i => i.State == "Played");
+    return item.FullPlaylistIndex - offset;
   }
 
   private async Task HandleRemoveAsync(int index)
