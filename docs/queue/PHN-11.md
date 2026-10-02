@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* on `6efb4df` (a real call to the rotary phone, checks 1–7). Owner rulings recorded in the dossier: Ambient knobs while the banner is up and the lit panel after a deep-sleep call accepted; **no console Answer control, ever**; the Phone page's Reject becomes **Ignore** when RotaryPhone ships the decline route (`design/FUTURE-WORK.md`). Ignore is built and disabled behind `RotaryPhone:DeclineSupported` until then; the request is in RotaryPhone's lane with a boundary-doc Change Log row. Merged via [#777](https://github.com/mmackelprang/RTest/pull/777). The status lines below were true until then.
+
 🚧 **BUILT 2026-10-02, HELD for owner panel UAT** — branch `feat/phn-11-incoming-call-banner`, one PR with
 [`PHN-12`](PHN-12.md). **Not deployed, not merged.** `origin/main` `4ab61b2` (`AUD-87`) merged in first.
 

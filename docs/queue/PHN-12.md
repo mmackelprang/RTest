@@ -2,6 +2,8 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
+✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* — the same call now produced the console's first-ever call announcement. `PhoneCallClient` binds `CallStateChanged(phoneId, state)` and `IncomingCall(phoneId, number)` in RotaryPhone's order, pinned by a contract test over real SignalR. Merged via [#777](https://github.com/mmackelprang/RTest/pull/777). The status lines below were true until then.
+
 🚧 **BUILT 2026-10-02, in the same PR as [`PHN-11`](PHN-11.md)** — branch `feat/phn-11-incoming-call-banner`.
 **HELD for owner panel UAT** with `PHN-11`: not deployed, not merged.
 
