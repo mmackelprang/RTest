@@ -59,6 +59,26 @@ public interface IFileBrowser
   IReadOnlyList<string> ListDirectories(string? path = null);
 
   /// <summary>
+  /// Lists the playable audio files in a folder, in queue order, for "Add folder" (UI-32). See
+  /// <see cref="FolderTrackListing"/> for the order and the counts reported.
+  /// </summary>
+  /// <param name="path">
+  /// The folder: relative to the media root, absolute, or null/empty for the media root itself. It must be the media
+  /// root or inside it, or inside an allowed browse directory or bookmark — after any symbolic links in the path are
+  /// resolved.
+  /// </param>
+  /// <param name="includeSubfolders">Whether to walk subfolders.</param>
+  /// <param name="maxTracks">The most files to return; the walk stops at the first file past it.</param>
+  /// <param name="cancellationToken">Cancels the walk.</param>
+  /// <exception cref="UnauthorizedAccessException">The folder is outside every allowed directory.</exception>
+  /// <exception cref="DirectoryNotFoundException">The folder does not exist.</exception>
+  Task<FolderTrackListing> ListFolderTracksAsync(
+    string? path,
+    bool includeSubfolders,
+    int maxTracks,
+    CancellationToken cancellationToken = default);
+
+  /// <summary>
   /// Gets the count of tracked audio files from the database.
   /// </summary>
   /// <param name="cancellationToken">Cancellation token.</param>

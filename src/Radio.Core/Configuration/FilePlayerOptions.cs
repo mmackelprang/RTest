@@ -33,6 +33,20 @@ public class FilePlayerOptions
   /// the file browser. These paths are also implicitly allowed for browsing.
   /// </summary>
   public BookmarkedPath[] BookmarkedPaths { get; set; } = [];
+
+  /// <summary>
+  /// Gets or sets the most tracks one "Add folder" queues (UI-32). The folder walk stops at the first track past
+  /// it and the first <c>MaxFolderTracks</c>, in queue order, are offered. Default 500: measured 2026-10-02 on the
+  /// box, an artist folder on the NAS holds 12–68 tracks and the whole music library 12,649, so the cap admits
+  /// any artist or album and stops a tap on the library root from queueing the lot.
+  /// </summary>
+  public int MaxFolderTracks { get; set; } = 500;
+
+  /// <summary>
+  /// Gets or sets how long, in seconds, the "Add folder" walk may take before the request gives up (UI-32).
+  /// Default 20. A cold walk of the whole NAS library measured ~15 s, and the cap normally ends a walk far sooner.
+  /// </summary>
+  public int FolderScanTimeoutSeconds { get; set; } = 20;
 }
 
 /// <summary>

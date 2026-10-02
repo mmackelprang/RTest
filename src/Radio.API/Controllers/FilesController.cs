@@ -468,6 +468,97 @@ public class FilesController : ControllerBase
   }
 
   /// <summary>
+  /// Lists the playable files in a folder, in the order "Add folder" queues them (UI-32). Queues nothing.
+  /// </summary>
+  /// <remarks>
+  /// <para>The folder must be the media root or inside it, or inside an allowed browse directory or bookmark. An
+  /// absolute path is checked by <see cref="IsPathAllowed"/> — the same check <c>POST /api/files/queue</c> applies
+  /// to each path the client later sends — and then, like a relative path, by
+  /// <see cref="IFileBrowser.ListFolderTracksAsync"/>, which also resolves symbolic links before deciding.</para>
+  /// <para>At most <c>FilePlayer:MaxFolderTracks</c> paths come back; past that <c>truncated</c> is set and the
+  /// walk stops reading. The walk runs off the request thread and is abandoned after
+  /// <c>FilePlayer:FolderScanTimeoutSeconds</c> (504) or when the client disconnects.</para>
+  /// </remarks>
+  /// <param name="path">The folder: absolute, relative to the media root, or empty for the media root.</param>
+  /// <param name="includeSubfolders">Walk subfolders too.</param>
+  /// <param name="cancellationToken">Cancelled when the client disconnects.</param>
+  /// <response code="200">The folder's tracks, possibly none.</response>
+  /// <response code="400">The folder is outside every allowed directory.</response>
+  /// <response code="404">The folder does not exist.</response>
+  /// <response code="504">The walk took longer than the configured timeout.</response>
+  /// <response code="500">The folder exists but could not be read.</response>
+  [HttpGet("folder-tracks")]
+  [ProducesResponseType(typeof(FolderTracksDto), StatusCodes.Status200OK)]
+  [ProducesResponseType(StatusCodes.Status400BadRequest)]
+  [ProducesResponseType(StatusCodes.Status404NotFound)]
+  [ProducesResponseType(StatusCodes.Status500InternalServerError)]
+  [ProducesResponseType(StatusCodes.Status504GatewayTimeout)]
+  public async Task<IActionResult> ListFolderTracks(
+    [FromQuery] string? path = null,
+    [FromQuery] bool includeSubfolders = false,
+    CancellationToken cancellationToken = default)
+  {
+    if (!string.IsNullOrEmpty(path) && Path.IsPathRooted(path) && !IsPathAllowed(path))
+    {
+      _logger.LogWarning("Rejected folder listing outside the allowed directories: {Path}", path);
+      return BadRequest(new { error = "Folder is not within an allowed directory" });
+    }
+
+    var options = _filePlayerOptions.CurrentValue;
+    var maxTracks = Math.Max(1, options.MaxFolderTracks);
+    var timeout = TimeSpan.FromSeconds(Math.Max(1, options.FolderScanTimeoutSeconds));
+
+    using var timeoutCts = new CancellationTokenSource(timeout);
+    using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+    try
+    {
+      var listing = await _fileBrowser.ListFolderTracksAsync(path, includeSubfolders, maxTracks, linked.Token);
+      return Ok(new FolderTracksDto
+      {
+        FolderPath = listing.FolderPath,
+        FolderName = FolderDisplayName(listing.FolderPath),
+        IncludeSubfolders = listing.IncludeSubfolders,
+        Paths = listing.Paths.ToList(),
+        TopLevelCount = listing.TopLevelCount,
+        SubfolderCount = listing.SubfolderCount,
+        Truncated = listing.Truncated,
+        MaxTracks = listing.MaxTracks,
+        SkippedUnreadable = listing.SkippedUnreadable,
+        SkippedLinks = listing.SkippedLinks,
+        UnreadableFolders = listing.UnreadableFolders
+      });
+    }
+    catch (UnauthorizedAccessException)
+    {
+      _logger.LogWarning("Rejected folder listing outside the allowed directories: {Path}", path);
+      return BadRequest(new { error = "Folder is not within an allowed directory" });
+    }
+    catch (DirectoryNotFoundException)
+    {
+      return NotFound(new { error = "Folder not found" });
+    }
+    catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+    {
+      _logger.LogWarning("Folder listing for {Path} gave up after {Seconds} s", path, timeout.TotalSeconds);
+      return StatusCode(StatusCodes.Status504GatewayTimeout,
+        new { error = $"Reading the folder took longer than {timeout.TotalSeconds:0} seconds. Try a smaller folder." });
+    }
+    catch (IOException ex)
+    {
+      _logger.LogWarning(ex, "Folder listing failed for {Path}", path);
+      return StatusCode(StatusCodes.Status500InternalServerError, new { error = "The folder could not be read" });
+    }
+  }
+
+  /// <summary>The last segment of a folder path, or the path itself for a root such as <c>/</c>.</summary>
+  internal static string FolderDisplayName(string folderPath)
+  {
+    var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(folderPath));
+    return string.IsNullOrEmpty(name) ? folderPath : name;
+  }
+
+  /// <summary>
   /// Gets the configured bookmarked directories with accessibility status.
   /// </summary>
   /// <returns>A list of bookmarked directories.</returns>
@@ -799,13 +890,17 @@ public class FilesController : ControllerBase
 
   /// <summary>
   /// Validates that a path falls within an allowed directory (media root or configured browse directories).
-  /// Prevents path traversal attacks via ".." segments or symlinks.
+  /// Prevents path traversal via ".." segments. The check is lexical: it does NOT resolve symbolic links, so a link
+  /// inside an allowed directory that points elsewhere passes it. "Add folder" (<see cref="ListFolderTracks"/>)
+  /// adds a link-resolving check in <see cref="IFileBrowser.ListFolderTracksAsync"/>; the other endpoints rely on
+  /// this one alone.
   /// </summary>
   private bool IsPathAllowed(string path)
   {
     try
     {
-      // Resolve to absolute path, eliminating ".." segments and symlinks
+      // Resolve to an absolute path, normalising away ".." segments. Path.GetFullPath does not touch the
+      // filesystem, so symbolic links are left as they are.
       var resolvedPath = Path.GetFullPath(path);
 
       // Check against configured media root
