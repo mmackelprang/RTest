@@ -2,7 +2,7 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🚧 **BUILT 2026-10-02, HELD for owner panel UAT** — PR on branch `perf/aud-96-ui-35-snappy-switch`, one PR
+🚧 **BUILT 2026-10-02, HELD for owner panel UAT** — [#771](https://github.com/mmackelprang/RTest/pull/771), branch `perf/aud-96-ui-35-snappy-switch`, one PR
 with [`UI-35`](UI-35.md). Not deployed, not merged.
 
 🟠 **P1.** Filed 2026-10-02 by the Builder from the owner's report and a read-only investigation on the box
