@@ -29,7 +29,9 @@ public interface IAnnouncementService
   Task PlaySoundWithAnnouncementAsync(string soundPath, string message, int priority = 5, CancellationToken cancellationToken = default);
 
   /// <summary>
-  /// Stop any currently playing announcement.
+  /// Stop every announcement, including any still being prepared. To stop only one announcement,
+  /// cancel the <c>cancellationToken</c> passed to its <see cref="AnnounceAsync"/> or
+  /// <see cref="PlaySoundWithAnnouncementAsync"/> call instead (AUD-87).
   /// </summary>
   Task StopAsync(CancellationToken cancellationToken = default);
 }

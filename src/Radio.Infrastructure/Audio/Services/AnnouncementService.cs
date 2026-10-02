@@ -73,7 +73,10 @@ public class AnnouncementService : IAnnouncementService
 
       // Checked before ducking as well as in BecomeActive: an announcement that will not play must not
       // raise DuckingStateChanged(Started), which EventPlaybackService reads as a preemption signal.
-      if (IsSuperseded(registration))
+      // The token is checked here too (AUD-87): a phone hang-up now stops its announcement by cancelling
+      // the caller's token rather than through StopAsync, and synthesis that ignores the token must not
+      // lead to a duck either.
+      if (token.IsCancellationRequested || IsSuperseded(registration))
       {
         _logger.LogInformation("Announcement not played: superseded by a newer one of the same priority, or stopped");
         return AnnouncementOutcome.Interrupted;
@@ -200,7 +203,7 @@ public class AnnouncementService : IAnnouncementService
     {
       // Phase 1: Play the sound file with ducking
       soundSource = await _audioFileFactory.CreateFromFileAsync(soundPath, token);
-      if (IsSuperseded(registration))
+      if (token.IsCancellationRequested || IsSuperseded(registration))
       {
         _logger.LogInformation("Sound + announcement not played: superseded by a newer one of the same priority, or stopped");
         return;
@@ -236,6 +239,9 @@ public class AnnouncementService : IAnnouncementService
       // one registers, so the music starts to come back up between the ring and the name. That
       // predates AUD-73 and is not fixed here.
       ttsSource = await _ttsFactory.CreateAsync(message, cancellationToken: token);
+      // Stopped while the name was being synthesised: leave before ducking, as phase 1 does (here by
+      // throwing, caught below as a cancellation). The finally still cleans the source up.
+      token.ThrowIfCancellationRequested();
       _duckingService.SetPriority(ttsSource, priority);
 
       await _duckingService.StartDuckingAsync(ttsSource, cancellationToken);
@@ -288,8 +294,9 @@ public class AnnouncementService : IAnnouncementService
   /// ducking: those are refused when they try to become active (<c>_stopGeneration</c>). Every
   /// announcement currently playing is cancelled and removed; its source is stopped here unless its
   /// own call has already begun that cleanup, in which case that call finishes it. Every
-  /// announcement is stopped, not only the one a caller started: a phone hang-up also silences a
-  /// doorbell playing alongside.
+  /// announcement is stopped, not only the one a caller started. To stop just one, cancel the token
+  /// passed to its call — which is what the phone hang-up does since AUD-87, so that a doorbell
+  /// playing alongside the caller's name keeps playing.
   /// </remarks>
   public async Task StopAsync(CancellationToken cancellationToken = default)
   {
