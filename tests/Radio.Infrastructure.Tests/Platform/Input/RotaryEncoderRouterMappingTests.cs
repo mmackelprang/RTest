@@ -147,11 +147,29 @@ public class RotaryEncoderRouterMappingTests
 
     public List<string> WakeSources { get; } = [];
 
-    public Task WakeAsync(string wakeSource = "unknown")
+    /// <summary>
+    /// ENC-25: when set, <see cref="WakeAsync"/> does not complete until the test completes this, so a
+    /// test can observe the router between starting a wake and the wake finishing.
+    /// </summary>
+    public TaskCompletionSource? WakeGate { get; set; }
+
+    /// <summary>
+    /// ENC-25: what the wake does to the console when it finishes — the real <c>SleepService</c>
+    /// restores the pre-sleep mute state there — so a test can check the order of the wake and the turn.
+    /// </summary>
+    public Action? OnWakeCompleted { get; set; }
+
+    public async Task WakeAsync(string wakeSource = "unknown")
     {
       WakeCalls++;
       WakeSources.Add(wakeSource);
-      return Task.CompletedTask;
+      if (WakeGate is not null)
+      {
+        await WakeGate.Task;
+      }
+
+      IsSleeping = false;
+      OnWakeCompleted?.Invoke();
     }
 
     public Task SetSleepScreenVisibleAsync(bool visible)
@@ -1149,21 +1167,161 @@ public class RotaryEncoderRouterMappingTests
   }
 
   [Fact]
-  public void Standby_ATurn_DoesNotResumeAudio()
+  public void Standby_ATurnOfAnyOtherKnob_DoesNotResumeAudio()
   {
-    // D22, verbatim: "a turn is what a passing sleeve does; a press is what a person does."
+    // D22, verbatim: "a turn is what a passing sleeve does; a press is what a person does." Since ENC-25
+    // it holds for SOURCE, PRESETS and TUNING only; VOLUME is pinned below.
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
     h.Sleep.ReportSleepScreen(true);
 
-    h.Encoders.RaiseTurn(0, 1);
     h.Encoders.RaiseTurn(1, 1);
     h.Encoders.RaiseTurn(2, 1);
     h.Encoders.RaiseTurn(3, 1);
 
     Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Sleep.ClaimAttempts);
     Assert.Equal(0.5f, h.Audio.MasterVolume);
     Assert.Equal(0, h.Audio.MuteWrites);
+  }
+
+  // --- A VOLUME turn wakes from Standby (ENC-25) ----------------------------------------------
+
+  /// <summary>Standby as the Sleep pill's tap leaves it: audio parked and muted, the sleep screen lit.</summary>
+  private static Harness Standby()
+  {
+    var h = new Harness();
+    h.Sleep.IsSleeping = true;
+    h.Sleep.ReportSleepScreen(true);
+    h.Audio.IsMuted = true;
+    return h;
+  }
+
+  [Fact]
+  public async Task Standby_AVolumeTurn_WakesTheConsole_AndAppliesTheTurn()
+  {
+    // The owner, 2026-10-02: "In normal sleep, I expect a volume change to wake the console, but it only
+    // shows the new volume without waking."
+    using var h = Standby();
+    h.Sleep.OnWakeCompleted = () => h.Audio.IsMuted = false; // the pre-sleep state was unmuted
+
+    h.Encoders.RaiseTurn(0, 1);
+    await h.Router.WakeTurnIdle;
+
+    Assert.Equal(["encoder-volume-turn"], h.Sleep.WakeSources);
+    Assert.True(h.Audio.MasterVolume > 0.5f, "the turn that woke the console also moves the volume");
+    Assert.False(h.Audio.IsMuted);
+    EncoderHudEventArgs card = Assert.Single(h.Hud.Published);
+    Assert.Equal("VOLUME", card.Label);
+    Assert.Equal((int)Math.Round(h.Audio.MasterVolume * 100f), card.VolumePercent);
+  }
+
+  [Fact]
+  public async Task Standby_AVolumeTurn_IsAppliedOnlyAfterTheWakeHasRestoredMute()
+  {
+    // The console was muted before it slept, so the wake restores mute. Applied before that restore,
+    // the turn's unmute (ENC-4b) would be overwritten and the knob would move a volume nobody can hear.
+    using var h = Standby();
+    h.Sleep.WakeGate = new TaskCompletionSource();
+    h.Sleep.OnWakeCompleted = () => h.Audio.IsMuted = true;
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+    Assert.Equal(0.5f, h.Audio.MasterVolume); // nothing applied while the wake is in flight
+    Assert.Empty(h.Hud.Published);
+
+    h.Sleep.WakeGate.SetResult();
+    await h.Router.WakeTurnIdle;
+
+    Assert.False(h.Audio.IsMuted, "the turn unmutes after the wake's restore, as it does on an awake console");
+    Assert.True(h.Audio.MasterVolume > 0.5f);
+  }
+
+  [Fact]
+  public async Task Standby_AFastVolumeSpin_WakesOnce_AndEveryDetentMovesTheVolume()
+  {
+    using var h = Standby();
+    h.Sleep.OnWakeCompleted = () => h.Audio.IsMuted = false;
+
+    h.Encoders.RaiseTurn(0, 1);
+    await h.Router.WakeTurnIdle;
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(1, h.Sleep.WakeCalls);
+    Assert.Equal(0.53f, h.Audio.MasterVolume, 3);
+  }
+
+  [Fact]
+  public void Standby_AVolumeTurnWhileVolumeIsStillHeld_DoesNotWake()
+  {
+    // The hold that enters Standby fires at the threshold with the finger still down. A turn then is
+    // that hand, so it must not undo the Standby it just made; it shows the volume, as before ENC-25.
+    using var h = new Harness();
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+    Assert.Equal(1, h.Sleep.EnterSleepCalls);
+    h.Sleep.IsSleeping = true; // what the real EnterSleepAsync leaves
+    h.Time.Advance(RotaryEncoderActionRouter.VolumeTurnWakeSettle * 4); // long after the press edge
+
+    h.Encoders.RaiseTurn(0, 1);
+
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0.5f, h.Audio.MasterVolume);
+  }
+
+  [Fact]
+  public void Standby_AVolumeTurnInsideTheSettleWindowAfterTheRelease_DoesNotWake_ButOneAfterItDoes()
+  {
+    using var h = new Harness();
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+    h.Sleep.IsSleeping = true;
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    // A stray detent with, or just after, the release that ended the hold.
+    h.Time.Advance(RotaryEncoderActionRouter.VolumeTurnWakeSettle - TimeSpan.FromMilliseconds(1));
+    h.Encoders.RaiseTurn(0, 1);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+
+    h.Time.Advance(TimeSpan.FromMilliseconds(1));
+    h.Encoders.RaiseTurn(0, 1);
+    Assert.Equal(1, h.Sleep.WakeCalls);
+  }
+
+  [Fact]
+  public void Awake_AHoldCancelledByTurningVolume_StillDoesNotEnterStandby_OrWake()
+  {
+    // ENC-24's rule, unchanged by ENC-25: a press-and-turn is neither a click nor a hold.
+    using var h = new Harness();
+
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(0, 1);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs * 2));
+    h.Encoders.RaiseButton(0, isPressed: false);
+
+    Assert.Equal(0, h.Sleep.EnterSleepCalls);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0, h.Audio.MuteWrites);
+    Assert.True(h.Audio.MasterVolume > 0.5f, "the turn still adjusts the volume");
+  }
+
+  [Fact]
+  public void DeepDark_AVolumeTurn_StillOnlyLights_ThenAVolumeTurnOnTheLitStandbyScreenWakes()
+  {
+    // ENC-23 unchanged: the turn that lights a deep-dark panel is spent lighting it. On the lit Standby
+    // screen that follows (after the real panel's wake grace), a further VOLUME turn wakes — ENC-25.
+    using var h = DeepDark();
+    h.Time.Advance(RotaryEncoderActionRouter.VolumeTurnWakeSettle);
+
+    h.Encoders.RaiseTurn(0, 1);
+    Assert.Equal(0, h.Sleep.WakeCalls);
+    Assert.Equal(0.5f, h.Audio.MasterVolume);
+
+    h.Encoders.RaiseTurn(0, 1);
+    Assert.Equal(["encoder-volume-turn"], h.Sleep.WakeSources);
   }
 
   [Fact]
@@ -1224,15 +1382,36 @@ public class RotaryEncoderRouterMappingTests
   [Fact]
   public void Standby_AConsumedTurn_PublishesThatKnobsCurrentValueWithoutChangingIt()
   {
+    // SOURCE, not VOLUME: since ENC-25 a VOLUME turn in Standby wakes and acts rather than being
+    // consumed. The consumed VOLUME readout is still reached by a turn while VOLUME is held — pinned in
+    // Standby_AConsumedVolumeTurn_StillShowsTheCurrentVolume below.
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
     h.Sleep.ReportSleepScreen(true);
-    h.Audio.MasterVolume = 0.62f;
+    var radio = h.WithActiveRadio();
 
-    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(1, 1);
 
     var card = Assert.Single(h.Hud.Published);
-    Assert.Equal(0, card.EncoderIndex);
+    Assert.Equal(1, card.EncoderIndex);
+    Assert.Equal("SOURCE", card.Label);
+    Assert.Equal(radio.Name.ToUpperInvariant(), card.PrimaryText);
+    Assert.False(h.Selector.IsOpen, "a consumed turn previews nothing");
+  }
+
+  [Fact]
+  public void Standby_AConsumedVolumeTurn_StillShowsTheCurrentVolume()
+  {
+    using var h = new Harness();
+    h.Audio.MasterVolume = 0.62f;
+    h.Encoders.RaiseButton(0, isPressed: true);
+    h.Time.Advance(TimeSpan.FromMilliseconds(EncoderInteractionTimings.LongPressThresholdMs));
+    h.Sleep.IsSleeping = true;
+    int before = h.Hud.Published.Count;
+
+    h.Encoders.RaiseTurn(0, 1); // VOLUME still held: consumed, not a wake
+
+    var card = Assert.Single(h.Hud.Published.Skip(before));
     Assert.Equal("VOLUME", card.Label);
     Assert.Equal(62, card.VolumePercent);
     Assert.Equal(0.62f, h.Audio.MasterVolume);
@@ -1258,13 +1437,14 @@ public class RotaryEncoderRouterMappingTests
   {
     // D22 makes a turn in Standby permanently consumed, so "spend one and stop rendering" would
     // leave three knobs looking broken for the whole standby.
+    // TUNING rather than VOLUME since ENC-25, which made a VOLUME turn in Standby wake.
     using var h = new Harness();
     h.Sleep.IsSleeping = true;
     h.Sleep.ReportSleepScreen(true);
 
-    h.Encoders.RaiseTurn(0, 1);
-    h.Encoders.RaiseTurn(0, 1);
-    h.Encoders.RaiseTurn(0, 1);
+    h.Encoders.RaiseTurn(3, 1);
+    h.Encoders.RaiseTurn(3, 1);
+    h.Encoders.RaiseTurn(3, 1);
 
     Assert.Equal(3, h.Hud.Published.Count);
     Assert.Equal(0, h.Sleep.WakeCalls);
@@ -1297,7 +1477,9 @@ public class RotaryEncoderRouterMappingTests
     h.Sleep.IsSleeping = true;
     h.Sleep.ReportSleepScreen(true);
 
-    h.Encoders.RaiseTurn(index, 1);
+    // A PRESS, which every knob spends waking from Standby and so reaches the current-value publisher
+    // for all four. (A turn did until ENC-25, which made VOLUME's turn wake and act instead.)
+    h.Encoders.RaiseButton(index, isPressed: true);
 
     var card = Assert.Single(h.Hud.Published);
     Assert.Equal(index, card.EncoderIndex);

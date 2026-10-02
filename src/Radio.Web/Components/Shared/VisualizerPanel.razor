@@ -383,7 +383,7 @@
 
   // The tick count at which the next re-subscribe may be sent, so a stream that stays down is re-asked
   // with backoff rather than every second.
-  private int _nextRecoveryAtSilentTicks;
+  private int _nextRecoveryAtSilentTicks = StallTicks;
 
   // Latest-wins draw (UI-36): the newest frame not yet drawn, and whether a drain loop is running.
   // The hub's receive loop hands frames over here and returns at once; it never waits on the browser.
@@ -419,6 +419,14 @@
   internal int StreamStallRecoveries => Volatile.Read(ref _streamStallRecoveries);
 
   private int _streamStallRecoveries;
+
+  /// <summary>
+  /// Stall recoveries started (UI-36) — counted on the tick itself, before the recovery is queued, so a
+  /// test driving the tick from a fake clock can assert it exactly, with nothing still in flight.
+  /// </summary>
+  internal int StreamStallRecoveriesStarted => Volatile.Read(ref _streamStallRecoveriesStarted);
+
+  private int _streamStallRecoveriesStarted;
 
   /// <summary>Completes when no frame is waiting to be drawn. For tests, which need a rendezvous, not a sleep.</summary>
   internal Task DrawIdle => Volatile.Read(ref _drawLoop);
@@ -1239,6 +1247,7 @@
       _ => _silentTicks + 30,
     };
 
+    Interlocked.Increment(ref _streamStallRecoveriesStarted);
     _ = RecoverStreamAsync();
   }
 

@@ -41,6 +41,39 @@ public class EncoderLongPressGestureTests
   }
 
   [Fact]
+  public void IsHeld_FollowsThePress_ThroughTheLongAction_UntilTheRelease()
+  {
+    // ENC-25 reads this: a VOLUME turn must not wake Standby while the hold that entered it is still down.
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out _);
+
+    Assert.False(gesture.IsHeld(0));
+    gesture.OnButtonEdge(0, true);
+    Assert.True(gesture.IsHeld(0));
+    Assert.False(gesture.IsHeld(1));
+
+    time.Advance(TimeSpan.FromMilliseconds(Radio.Core.Configuration.EncoderInteractionTimings.LongPressThresholdMs));
+    Assert.True(gesture.IsHeld(0), "the long action fires with the button still down");
+
+    gesture.OnButtonEdge(0, false);
+    Assert.False(gesture.IsHeld(0));
+    Assert.False(gesture.IsHeld(-1));
+    Assert.False(gesture.IsHeld(4));
+  }
+
+  [Fact]
+  public void IsHeld_IsFalseOnceATurnHasCancelledThePress()
+  {
+    var time = new FakeTimeProvider();
+    using var gesture = Create(time, out _);
+
+    gesture.OnButtonEdge(0, true);
+    gesture.OnTurn(0, EncoderLongPressGesture.TurnCancelDetents);
+
+    Assert.False(gesture.IsHeld(0));
+  }
+
+  [Fact]
   public void ShortPress_IsRaisedBeforeHoldCancelled()
   {
     // Regression guard for a shipped defect, and the ordering is behaviour rather than style. The
