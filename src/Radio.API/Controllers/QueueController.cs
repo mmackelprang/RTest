@@ -309,10 +309,11 @@ public class QueueController : ControllerBase
   }
 
   /// <summary>
-  /// Checks if a track identifier already exists in the queue.
+  /// Checks if a track identifier is anywhere in the playlist — played, current or upcoming (AUD-98: a
+  /// played track is still in the list, and Repeat All plays it again).
   /// </summary>
   /// <param name="identifier">The track identifier to check.</param>
-  /// <returns>True if the track is in the queue, false otherwise.</returns>
+  /// <returns>True if the track is in the playlist, false otherwise.</returns>
   [HttpGet("contains/{identifier}")]
   [ProducesResponseType(typeof(bool), StatusCodes.Status200OK)]
   [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -327,7 +328,7 @@ public class QueueController : ControllerBase
         return result;
       }
 
-      var queue = await queueSource!.GetQueueAsync();
+      var queue = await queueSource!.GetFullPlaylistAsync();
       var contains = queue.Any(item => item.Id == identifier);
 
       return Ok(contains);

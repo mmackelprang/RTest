@@ -102,16 +102,28 @@ public class FilePlayerPreferences
   public RepeatMode Repeat { get; set; } = RepeatMode.Off;
 
   /// <summary>
-  /// Gets or sets the persisted queue items (file paths in order).
-  /// Used to restore the queue on application restart.
+  /// Gets or sets the persisted File Player playlist (file paths in play order), used to restore it on
+  /// application restart. AUD-98: this is the WHOLE list — tracks already played, then the current track,
+  /// then the upcoming ones — and <see cref="CurrentQueueIndex"/> says where the played tracks end.
+  /// Before AUD-98 it held only the current and upcoming tracks; a list written in that shape (with an
+  /// index of 0) reads as one with no played tracks, so it restores as it did.
   /// </summary>
   public List<string> QueueItems { get; set; } = new();
 
   /// <summary>
-  /// Gets or sets the current index in the queue.
-  /// Used to restore playback position in the queue.
+  /// Gets or sets the index in <see cref="QueueItems"/> of the current track, which is also the number of
+  /// played tracks before it; written as <c>-1</c> when the list is empty. On restore a negative value is
+  /// read as 0, and a value past the last track that still exists makes that last track current.
   /// </summary>
   public int CurrentQueueIndex { get; set; } = -1;
+
+  /// <summary>
+  /// AUD-98. Gets or sets the playlist's unshuffled order — what Repeat All rebuilds the list from and what
+  /// turning Shuffle off restores. It differs from <see cref="QueueItems"/> when Shuffle is on. Empty means
+  /// "not saved" (a list persisted before AUD-98), and the restore then uses <see cref="QueueItems"/>'
+  /// order, which is what it did before.
+  /// </summary>
+  public List<string> OriginalOrder { get; set; } = new();
 }
 
 /// <summary>

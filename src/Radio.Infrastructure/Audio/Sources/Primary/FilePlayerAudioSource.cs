@@ -59,6 +59,12 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   private bool _trackEndedNaturally;
   private long _pendingSeekMs;
 
+  // AUD-98: queue-state writes go through this gate one at a time; a snapshot whose generation is no
+  // longer the newest is skipped (see SaveQueueStateAsync). _lastQueueSave is the most recent write.
+  private readonly SemaphoreSlim _queueSaveGate = new(1, 1);
+  private long _queueSaveGeneration;
+  private Task _lastQueueSave = Task.CompletedTask;
+
   /// <summary>Current fingerprinting options (live from IOptionsMonitor).</summary>
   private FingerprintingOptions FpOptions =>
     _fingerprintingOptionsMonitor?.CurrentValue ?? new FingerprintingOptions();
@@ -339,11 +345,13 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     }
 
     // Add current file to history before moving to next
+    bool addedToHistory = false;
     lock (_playlistLock)
     {
       if (_currentFile != null && !_playedHistory.Contains(_currentFile))
       {
         _playedHistory.Add(_currentFile);
+        addedToHistory = true;
       }
     }
 
@@ -403,7 +411,23 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
       return;
     }
 
-    // No repeat or reached end - stop playback
+    // No repeat or reached end - stop playback.
+    //
+    // AUD-98: the last track stays the current one (StopCoreAsync leaves _currentFile set), so take back
+    // the history entry added above — otherwise the full playlist lists it twice, once played and once
+    // current, a restart persists both, and Previous pops it onto the front of the queue as a copy of
+    // itself. Only an entry THIS call added is removed.
+    if (addedToHistory)
+    {
+      lock (_playlistLock)
+      {
+        if (_playedHistory.Count > 0 && _playedHistory[^1] == _currentFile)
+        {
+          _playedHistory.RemoveAt(_playedHistory.Count - 1);
+        }
+      }
+    }
+
     Logger.LogDebug("Reached end of playlist with no repeat");
     await StopAsync(cancellationToken);
   }
@@ -453,6 +477,10 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
 
     if (previousFile != null)
     {
+      // AUD-98: the history just changed, and this path raises no QueueChanged — so persist it here, or a
+      // restart before the next queue change would bring back the list as it was before this Previous.
+      SaveQueueStateToPreferences();
+
       _position = TimeSpan.Zero;
       CleanupDataProvider();
 
@@ -488,12 +516,36 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     {
       Logger.LogDebug("At start of playlist with Repeat All - going to last track");
 
-      // Go to last track in original order
-      var lastFile = _originalOrder[^1];
+      // AUD-98: go to the last track of the list as it stands, and mark every track before it played, so
+      // the list keeps every track and its order. This used to set the current track to the last entry of
+      // _originalOrder and change nothing else, which dropped the track that had been current and left the
+      // last one listed twice (as current, and still at the end of the upcoming queue). With Shuffle off
+      // and no queue edits the last track of the list IS the last entry of _originalOrder; with Shuffle on
+      // it is the last track in shuffled order. _originalOrder is only the fallback for an empty list.
+      string lastFile;
       lock (_playlistLock)
       {
+        var wholeList = new List<string>();
+        if (_currentFile != null)
+        {
+          wholeList.Add(_currentFile);
+        }
+        wholeList.AddRange(_playlist);
+
+        if (wholeList.Count > 0)
+        {
+          lastFile = wholeList[^1];
+          _playedHistory = wholeList.Take(wholeList.Count - 1).ToList();
+          _playlist = new Queue<string>();
+        }
+        else
+        {
+          lastFile = _originalOrder[^1];
+        }
+
         _currentFile = lastFile;
       }
+      SaveQueueStateToPreferences();
       _position = TimeSpan.Zero;
       CleanupDataProvider();
 
@@ -718,59 +770,50 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
     if (prefs.QueueItems != null && prefs.QueueItems.Count > 0)
     {
       Logger.LogInformation("Restoring queue with {Count} items from preferences", prefs.QueueItems.Count);
-      
-      // Filter to only existing files
-      var validFiles = prefs.QueueItems.Where(File.Exists).ToList();
-      
-      if (validFiles.Count > 0)
+
+      // AUD-98: played tracks, the current track, upcoming tracks and the unshuffled order all come back.
+      // Before this, only the current and upcoming tracks were saved, so every restart dropped the played
+      // tracks for good and Repeat All went on to repeat only what was left.
+      RestoredQueue? restored = BuildRestoredQueue(
+        prefs.QueueItems, prefs.CurrentQueueIndex, prefs.OriginalOrder, File.Exists);
+
+      if (restored != null)
       {
-        _originalOrder = new List<string>(validFiles);
-        _playlist = new Queue<string>(validFiles);
-        _currentIndex = Math.Max(0, Math.Min(prefs.CurrentQueueIndex, validFiles.Count - 1));
-        
-        // If there's a valid current index, set that as the current file
-        if (_currentIndex >= 0 && _currentIndex < validFiles.Count)
+        lock (_playlistLock)
         {
-          _currentFile = validFiles[_currentIndex];
-          
-          // Remove all items before current from playlist
-          for (int i = 0; i <= _currentIndex; i++)
-          {
-            if (_playlist.Count > 0 && _playlist.Peek() == validFiles[i])
-            {
-              _playlist.Dequeue();
-            }
-          }
-          
-          _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
-
-          // ⛔ AUD-24 — OWNER RULING, 2026-09-10. `_pendingSeekMs = prefs.SongPositionMs;` used to
-          // sit here, and PlayCoreAsync still consumes it. It is deliberately not assigned.
-          //
-          // Repairing SeekCoreAsync would otherwise have made resume-where-you-left-off start
-          // working on every restart — a startup behaviour change nobody asked for, riding along on
-          // a bug fix. The owner declined it for this PR; re-enabling it is exactly this one line.
-          //
-          // ⭐ Not assigning it also makes the two restore arms AGREE. The fallback arm below
-          // ("restore just the last played file") sets _position and never set _pendingSeekMs, so
-          // un-guarding this arm alone would have left a restored QUEUE resuming audibly while a
-          // restored LAST-PLAYED FILE did not. Neither resumes, which is what this appliance has
-          // always done.
-          UpdateMetadataFromFile(_currentFile);
-
-          // ⚠ This line used to end "(seek to {Ms}ms)". No seek ever happened — SeekCoreAsync did
-          // not call the engine — so the message had claimed one on every startup for the life of
-          // the file, which is the CLAUDE.md § Pre-Merge Review failure class. With the resume
-          // deliberately guarded above, it would now be claiming one that definitely cannot happen.
-          Logger.LogInformation(
-            "Restored queue position at index {Index}: {File} — reported position set to {Ms}ms; playback will start from the beginning of the track",
-            _currentIndex, Path.GetFileName(_currentFile), prefs.SongPositionMs);
+          _playedHistory = restored.Played;
+          _currentFile = restored.Current;
+          _playlist = new Queue<string>(restored.Upcoming);
+          _originalOrder = restored.OriginalOrder;
         }
-        else if (_playlist.Count > 0)
-        {
-          // No valid current index, load first file from queue
-          await LoadCurrentFileAsync(cancellationToken);
-        }
+
+        // The operational index within current + upcoming, where the current track always sits first.
+        _currentIndex = 0;
+
+        _position = TimeSpan.FromMilliseconds(prefs.SongPositionMs);
+
+        // ⛔ AUD-24 — OWNER RULING, 2026-09-10. `_pendingSeekMs = prefs.SongPositionMs;` used to
+        // sit here, and PlayCoreAsync still consumes it. It is deliberately not assigned.
+        //
+        // Repairing SeekCoreAsync would otherwise have made resume-where-you-left-off start
+        // working on every restart — a startup behaviour change nobody asked for, riding along on
+        // a bug fix. The owner declined it for this PR; re-enabling it is exactly this one line.
+        //
+        // ⭐ Not assigning it also makes the two restore arms AGREE. The fallback arm below
+        // ("restore just the last played file") sets _position and never set _pendingSeekMs, so
+        // un-guarding this arm alone would have left a restored QUEUE resuming audibly while a
+        // restored LAST-PLAYED FILE did not. Neither resumes, which is what this appliance has
+        // always done.
+        UpdateMetadataFromFile(restored.Current);
+
+        // ⚠ This line used to end "(seek to {Ms}ms)". No seek ever happened — SeekCoreAsync did
+        // not call the engine — so the message had claimed one on every startup for the life of
+        // the file, which is the CLAUDE.md § Pre-Merge Review failure class. With the resume
+        // deliberately guarded above, it would now be claiming one that definitely cannot happen.
+        Logger.LogInformation(
+          "Restored queue: {Played} played, {Upcoming} upcoming, current {File} — reported position set to {Ms}ms; playback will start from the beginning of the track",
+          restored.Played.Count, restored.Upcoming.Count,
+          Path.GetFileName(restored.Current), prefs.SongPositionMs);
       }
       else
       {
@@ -1854,30 +1897,29 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Saves the current queue state to preferences for persistence.
+  /// Saves the whole playlist — played, current and upcoming, and the unshuffled order — so that a restart
+  /// brings it back (AUD-98). With a configuration manager the write goes to the configuration store,
+  /// asynchronously and without blocking the caller; without one, only <c>_preferences.CurrentValue</c> is
+  /// updated.
   /// </summary>
   private void SaveQueueStateToPreferences()
   {
     try
     {
-      // Get all tracks in order (current + queue)
-      var allTracks = GetAllTracksInOrder();
+      PersistedQueue snapshot = CapturePersistedQueue();
 
-      // Save queue state using IConfigurationManager if available
-      // This ensures proper persistence rather than relying on mutating IOptionsMonitor snapshots
       if (_configurationManager != null)
       {
-        // Fire-and-forget async save to avoid blocking
-        _ = SaveQueueStateAsync(allTracks, _currentIndex);
+        // Fire-and-forget: callers include the playback monitor's auto-advance.
+        _lastQueueSave = SaveQueueStateAsync(snapshot);
       }
       else
       {
-        // Fallback: Try to mutate preferences snapshot (may not persist reliably)
-        _preferences.CurrentValue.QueueItems = allTracks;
-        _preferences.CurrentValue.CurrentQueueIndex = _currentIndex;
+        ApplyToPreferences(snapshot);
       }
 
-      Logger.LogDebug("Saved queue state: {Count} items, current index: {Index}", allTracks.Count, _currentIndex);
+      Logger.LogDebug("Saved queue state: {Count} items, current index: {Index}",
+        snapshot.Items.Count, snapshot.CurrentIndex);
     }
     catch (Exception ex)
     {
@@ -1886,17 +1928,86 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   }
 
   /// <summary>
-  /// Asynchronously saves queue state to configuration store.
+  /// AUD-98. The persisted form of the playlist, taken under <c>_playlistLock</c>: played + current +
+  /// upcoming in play order, the index of the current track in that list (the number of played tracks;
+  /// <c>-1</c> for an empty list), and a copy of <c>_originalOrder</c>. Each capture takes the next
+  /// generation number, so the store write can tell an older snapshot from a newer one.
   /// </summary>
-  private async Task SaveQueueStateAsync(List<string> queueItems, int currentIndex)
+  private PersistedQueue CapturePersistedQueue()
+  {
+    lock (_playlistLock)
+    {
+      var items = new List<string>(_playedHistory);
+      int currentIndex = items.Count;
+      if (_currentFile != null)
+      {
+        items.Add(_currentFile);
+      }
+      items.AddRange(_playlist);
+
+      // ToArray: several paths assign or mutate _originalOrder without this lock (pre-existing), and
+      // ToArray copies rather than enumerating, so a concurrent change cannot make it throw mid-copy.
+      var originalOrder = _originalOrder.ToArray().ToList();
+
+      return new PersistedQueue(
+        items,
+        items.Count == 0 ? -1 : currentIndex,
+        originalOrder,
+        ++_queueSaveGeneration);
+    }
+  }
+
+  /// <summary>Copies a snapshot into <c>_preferences.CurrentValue</c>, as new lists.</summary>
+  private void ApplyToPreferences(PersistedQueue snapshot)
+  {
+    FilePlayerPreferences prefs = _preferences.CurrentValue;
+    prefs.QueueItems = new List<string>(snapshot.Items);
+    prefs.CurrentQueueIndex = snapshot.CurrentIndex;
+    prefs.OriginalOrder = new List<string>(snapshot.OriginalOrder);
+  }
+
+  /// <summary>
+  /// Writes a snapshot to the configuration store, then to <c>_preferences.CurrentValue</c>.
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// <b>Writes are serialised, and a snapshot older than the newest one is skipped</b> rather than written,
+  /// so two quick queue changes cannot land in the store in the wrong order. The newest snapshot is always
+  /// written: when it reaches the gate no newer one exists.
+  /// </para>
+  /// <para>
+  /// <b>Every case variant of each key is written</b>, for the reason
+  /// <see cref="PersistPlaybackModeAsync"/> gives. It matters more here: the bridge flattens a JSON array
+  /// into <c>QueueItems:0</c>, <c>QueueItems:1</c>, … and its keys ignore case, so a stale variant row
+  /// holding a LONGER list would leave its extra entries in the bound list behind a shorter new one — tracks
+  /// from an old playlist appearing in this one.
+  /// </para>
+  /// <para>
+  /// <b><c>CurrentValue</c> is updated after the store write</b>, because
+  /// <c>PreferencesPersistenceService</c> writes <c>CurrentValue</c> back to the store every 30 seconds.
+  /// Before AUD-98 this method left <c>CurrentValue</c> alone, so whenever no configuration reload happened
+  /// in between, that periodic save wrote the queue from the last reload over this one. A periodic save
+  /// that serialises <c>CurrentValue</c> between this method's store write and its <c>CurrentValue</c>
+  /// update can still write the previous queue back; the next periodic save, 30 seconds later, then writes
+  /// this one.
+  /// </para>
+  /// </remarks>
+  private async Task SaveQueueStateAsync(PersistedQueue snapshot)
   {
     if (_configurationManager == null)
     {
       return;
     }
 
+    await _queueSaveGate.WaitAsync();
     try
     {
+      if (snapshot.Generation != Volatile.Read(ref _queueSaveGeneration))
+      {
+        // A newer snapshot has been captured; its own write will follow this one through the gate.
+        return;
+      }
+
       var mainStoreId = _configurationManager.CurrentStoreType ==
         Radio.Configuration.Models.ConfigurationStoreType.Sqlite ? "sqlite" : "config";
 
@@ -1910,24 +2021,151 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
         store = await _configurationManager.CreateStoreAsync(mainStoreId);
       }
 
-      // Serialize queue items as JSON array
-      var queueJson = System.Text.Json.JsonSerializer.Serialize(queueItems);
-
-      var entries = new List<ConfigurationEntry>
+      var values = new Dictionary<string, string>
       {
-        new() { Key = $"{FilePlayerPreferences.SectionName}:QueueItems", Value = queueJson },
-        new() { Key = $"{FilePlayerPreferences.SectionName}:CurrentQueueIndex", Value = currentIndex.ToString() }
+        [$"{FilePlayerPreferences.SectionName}:{nameof(FilePlayerPreferences.QueueItems)}"] =
+          System.Text.Json.JsonSerializer.Serialize(snapshot.Items),
+        [$"{FilePlayerPreferences.SectionName}:{nameof(FilePlayerPreferences.CurrentQueueIndex)}"] =
+          snapshot.CurrentIndex.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        [$"{FilePlayerPreferences.SectionName}:{nameof(FilePlayerPreferences.OriginalOrder)}"] =
+          System.Text.Json.JsonSerializer.Serialize(snapshot.OriginalOrder),
       };
+
+      IReadOnlyList<ConfigurationEntry> existing = await store.GetAllEntriesAsync(ConfigurationReadMode.Raw);
+      var entries = new List<ConfigurationEntry>();
+      foreach (KeyValuePair<string, string> value in values)
+      {
+        entries.AddRange(existing
+          .Select(e => e.Key)
+          .Where(k => string.Equals(k, value.Key, StringComparison.OrdinalIgnoreCase))
+          .Append(value.Key)
+          .Distinct(StringComparer.Ordinal)
+          .Select(k => new ConfigurationEntry { Key = k, Value = value.Value }));
+      }
 
       await store.SetEntriesAsync(entries);
       await store.SaveAsync();
 
-      Logger.LogTrace("Queue state persisted to configuration store: {Count} items", queueItems.Count);
+      ApplyToPreferences(snapshot);
+
+      Logger.LogTrace("Queue state persisted to configuration store: {Count} items", snapshot.Items.Count);
     }
     catch (Exception ex)
     {
       Logger.LogWarning(ex, "Failed to save queue state to configuration store");
     }
+    finally
+    {
+      _queueSaveGate.Release();
+    }
+  }
+
+  /// <summary>Completes when the most recently started queue-state write has finished. A test rendezvous.</summary>
+  internal Task WhenQueueStateSavedAsync() => _lastQueueSave;
+
+  /// <summary>AUD-98. A playlist as persisted: see <see cref="CapturePersistedQueue"/>.</summary>
+  private sealed record PersistedQueue(
+    List<string> Items, int CurrentIndex, List<string> OriginalOrder, long Generation);
+
+  /// <summary>AUD-98. A playlist as restored: see <see cref="BuildRestoredQueue"/>.</summary>
+  internal sealed record RestoredQueue(
+    List<string> Played, string Current, List<string> Upcoming, List<string> OriginalOrder);
+
+  /// <summary>
+  /// AUD-98. Rebuilds a playlist from its persisted form, keeping only files <paramref name="exists"/>
+  /// accepts. Returns <c>null</c> when none of <paramref name="savedItems"/> exists.
+  /// </summary>
+  /// <remarks>
+  /// <list type="bullet">
+  ///   <item>Entries of <paramref name="savedItems"/> before <paramref name="savedCurrentIndex"/> are the
+  ///     played tracks; the first existing entry at or after it is the current track; the rest are
+  ///     upcoming. A negative index is read as 0. A list saved before AUD-98 held only the current and
+  ///     upcoming tracks, with an index of 0 on every box measured, so it restores as it did then: nothing
+  ///     played, the first track current.</item>
+  ///   <item>Missing files are skipped without moving the boundary: an entry is played or not by its
+  ///     position in the SAVED list. If no existing entry sits at or after the index, the last existing
+  ///     played track becomes the current one rather than leaving no current track.</item>
+  ///   <item>The unshuffled order is <paramref name="savedOriginalOrder"/>'s existing files, followed by
+  ///     any restored track it does not contain (so Repeat All cannot leave one out). When it is null or
+  ///     has no existing file — every list saved before AUD-98 — it is the restored list in play order,
+  ///     which is what the restore used before.</item>
+  ///   <item>Each distinct path is checked with <paramref name="exists"/> once.</item>
+  /// </list>
+  /// </remarks>
+  internal static RestoredQueue? BuildRestoredQueue(
+    IReadOnlyList<string> savedItems,
+    int savedCurrentIndex,
+    IReadOnlyList<string>? savedOriginalOrder,
+    Func<string, bool> exists)
+  {
+    var existsCache = new Dictionary<string, bool>(StringComparer.Ordinal);
+    bool Exists(string? path)
+    {
+      if (string.IsNullOrEmpty(path))
+      {
+        return false;
+      }
+      if (!existsCache.TryGetValue(path, out bool found))
+      {
+        found = exists(path);
+        existsCache[path] = found;
+      }
+      return found;
+    }
+
+    int boundary = Math.Max(0, savedCurrentIndex);
+    var played = new List<string>();
+    string? current = null;
+    var upcoming = new List<string>();
+
+    for (int i = 0; i < savedItems.Count; i++)
+    {
+      string path = savedItems[i];
+      if (!Exists(path))
+      {
+        continue;
+      }
+
+      if (i < boundary)
+      {
+        played.Add(path);
+      }
+      else if (current == null)
+      {
+        current = path;
+      }
+      else
+      {
+        upcoming.Add(path);
+      }
+    }
+
+    if (current == null)
+    {
+      if (played.Count == 0)
+      {
+        return null;
+      }
+
+      current = played[^1];
+      played.RemoveAt(played.Count - 1);
+    }
+
+    var restoredList = new List<string>(played) { current };
+    restoredList.AddRange(upcoming);
+
+    List<string> originalOrder = (savedOriginalOrder ?? Array.Empty<string>()).Where(p => Exists(p)).ToList();
+    if (originalOrder.Count == 0)
+    {
+      originalOrder = new List<string>(restoredList);
+    }
+    else
+    {
+      var inOrder = new HashSet<string>(originalOrder, StringComparer.Ordinal);
+      originalOrder.AddRange(restoredList.Where(inOrder.Add));
+    }
+
+    return new RestoredQueue(played, current, upcoming, originalOrder);
   }
 
   private string GetFullPath(string path)

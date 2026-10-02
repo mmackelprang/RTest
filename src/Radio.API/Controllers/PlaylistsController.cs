@@ -98,7 +98,7 @@ public class PlaylistsController : ControllerBase
   }
 
   /// <summary>
-  /// Creates a new playlist from the current queue.
+  /// Creates a new playlist from the whole File Player list: played, current and upcoming tracks.
   /// </summary>
   [HttpPost]
   [ProducesResponseType(typeof(PlaylistSummaryDto), StatusCodes.Status201Created)]
@@ -130,7 +130,10 @@ public class PlaylistsController : ControllerBase
         playQueue = fileQueue;
       }
 
-      var queueItems = await playQueue.GetQueueAsync(ct);
+      // AUD-98: the whole list as the queue panel shows it — played, current, upcoming, in that order.
+      // GetQueueAsync returns only the current and upcoming tracks, so a playlist saved mid-play used to
+      // leave out every track already played.
+      var queueItems = await playQueue.GetFullPlaylistAsync(ct);
       if (queueItems == null || queueItems.Count == 0)
       {
         return BadRequest(new { error = "Queue is empty" });
