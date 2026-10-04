@@ -2,8 +2,10 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🚧 **BUILT 2026-10-03, HELD for the owner's real-call UAT** — branch `feat/phn-13-14-ignore-and-lookup`, one PR with
-[`PHN-14`](PHN-14.md). **Not deployed, not merged. `RotaryPhone:DeclineSupported` stays `false`.**
+✅🔬 **SHIPPED** in [#779](https://github.com/mmackelprang/RTest/pull/779) (squash `57bc371`, with [`PHN-14`](PHN-14.md)) and [#780](https://github.com/mmackelprang/RTest/pull/780) (squash `22363aa`,
+`RotaryPhone:DeclineSupported` on by default). **Deployed and verified at `22363aa` on 2026-10-04.** The owner's real-call
+test stopped the rotary ringer, **but the cell kept ringing**. That is open in RotaryPhone; see § Owner real-call test,
+2026-10-04. *(Was: built 2026-10-03, held for the owner's real-call UAT.)*
 
 🟡 **P2, owner request.** Filed 2026-10-03 by the coordinator.
 
@@ -95,3 +97,18 @@ hero's 409 / failure / deadline / reset / double-tap / enable, the page and pane
 the two new mutants (local index consulted; `skipLocalIndex` ignored) and the Web round re-run against the
 refactored code (M24 re-formed: its anchor moved with the tap-armed timer). Not covered by a test: the
 `Dispose` attempt bump in the hero, and the enum order.
+
+## Owner real-call test, 2026-10-04 — the console half passes; the cell keeps ringing (OPEN, RotaryPhone)
+
+This ran on `22363aa`, deployed and verified on both services, with `DeclineSupported` on by #780. A real incoming
+call reached the paired cell, and the owner tapped **Ignore** on the console:
+
+- ✅ the rotary phone stopped ringing (the HT801/handset side);
+- ⛔ **the cell kept ringing.** Decline does not reject the call on the cell. This is a **RotaryPhone-side gap**,
+  reported in `D:\prj\RotaryPhone\docs\prompts\2026-10-04-radioconsole-decline-does-not-reject-on-cell.md`
+  (it asks for the HFP reject on `hci1`). **Not fixed.** It is tracked in
+  [`CROSS-REPO-HANDOFFS.md`](CROSS-REPO-HANDOFFS.md) and in the punch list's 2026-10-04 status.
+
+**Not yet recorded:** owner checks 2 (lift the handset, then tap Ignore) and 3 (the Phone page's Ignore), and M3
+(the lookup precedence question, an owner call). The row stays ✅🔬 in the queue until they are recorded and
+RotaryPhone replies.

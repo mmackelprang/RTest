@@ -249,3 +249,9 @@ Measured by the batch B session that merged and deployed [#742](https://github.c
 
 **Owner check still open (the row stays ✅🔬):** play a Bluetooth track from the phone. Album art should
 still appear about 15 s in, through song recognition.
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: `AUD-17` (Bluetooth album art) passes owner UAT. This closes the "Owner check left" line above.
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).

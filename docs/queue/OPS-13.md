@@ -126,3 +126,10 @@ Both halves of the recommended shape, plus the instrument on its own:
 ⚠ The full path — a real deploy exercising the `Verified` verdict and the relaunch — is the
 supervised deploy at merge time, per the row's own instruction. The `Unreachable` and `Mismatch`
 branches were not driven live; they are read-verified and the row should say so until one occurs.
+
+## ✅ Merged — [#682](https://github.com/mmackelprang/RTest/pull/682), squash `4adfbe9` (with `OPS-12`)
+
+Merged to `main` as `4adfbe95`. Deploys since verify from the box, and `-VerifyOnly` is the documented pre-UAT
+gate (`CLAUDE.md` § Deployment). The `Verified` verdict has since occurred, e.g. on the 2026-10-02 deploy of
+`8df918b`. The `Unreachable` and `Mismatch` branches are still read-verified only, as stated above.
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md). The live row had still read 🚧 BUILT.

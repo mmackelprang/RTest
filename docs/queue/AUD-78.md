@@ -43,3 +43,9 @@ A deploy leaves no `Failed to finalize play history entry` line, and the in-flig
 - Tests: `PlayHistoryShutdownFinalizerTests` (host stop finalizes once and container disposal logs
   no Warning; disposal without stop does not reach the repository; no in-flight entry is a no-op;
   a repository failure is logged and swallowed).
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: `AUD-78` passes owner UAT. 
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).

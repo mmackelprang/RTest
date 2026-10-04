@@ -2,6 +2,20 @@
 
 ---
 
+## 📤 OUTBOUND — 2026-10-04 · OPEN: Ignore stops the rotary ringer but does not reject the call on the cell
+
+**Filed:** `D:\prj\RotaryPhone\docs\prompts\2026-10-04-radioconsole-decline-does-not-reject-on-cell.md`.
+**Our side is shipped:** `PHN-13` ([#779](https://github.com/mmackelprang/RTest/pull/779),
+[#780](https://github.com/mmackelprang/RTest/pull/780)), with `RotaryPhone:DeclineSupported` on. The box was deployed
+and verified at `22363aa` on 2026-10-04.
+
+On the owner's real call that day, tapping **Ignore** stopped the rotary phone ringing, **but the cell kept
+ringing**. The request asks RotaryPhone to send the HFP reject (on `hci1`) for a ringing call on decline. It also
+asks them to say what `declined: true` means once that is done. **Open until they reply. The cell behaviour is
+not fixed.** The tracking row is [`PHN-13`](PHN-13.md), which stays ✅🔬 in the queue.
+
+---
+
 ## 📤 OUTBOUND — 2026-09-09 · ⛔ WE DID NOT HAVE THE SPA-FALLBACK HOLE. The attribution was ours, and it was wrong.
 
 **Send immediately** under exception 1 of the batching rule: it corrects a defect we asked them to

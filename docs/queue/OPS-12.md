@@ -174,3 +174,9 @@ probe file and `-tmp` staging dirs gone from the box afterwards.** ⭐ That is t
 branch has been driven against a real target from a script run, which `OPS-9` recorded as never
 having happened (`design/FUTURE-WORK.md` §27). Its masked `mv` exit codes are unchanged by this row. ⚠ The Windows half of `auto` (scp) is by construction from this row's own
 measurements, not re-measured on a Windows host today.
+
+## ✅ Merged — [#682](https://github.com/mmackelprang/RTest/pull/682), squash `4adfbe9` (with `OPS-13`)
+
+Merged to `main` as `4adfbe95`. Deploys since have used the step-1.5 pre-flight. For example, the 2026-10-02 deploy
+of `8df918b` reported `Verified` on both services and a live kiosk (queue banner, 2026-10-02).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md). The live row had still read 🚧 BUILT.

@@ -183,3 +183,9 @@ Times are EDT.
 **Restored afterwards:** SDR Radio 92.3 FM playing, volume 0.3, muted, output Soundbar, no default Cast device (the connect had saved one, and `DELETE /api/devices/cast/default` cleared it), and log levels reset.
 
 **Owner check outstanding (by ear, with audio playing):** while casting, turning the console's volume knob changes the speaker; console mute silences the speaker; and turning the knob while muted keeps it silent.
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: the owner confirms the console's volume knob changes the Cast speaker's volume. Owner UAT passed. This closes the "Owner check outstanding" line above.
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).

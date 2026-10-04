@@ -2,8 +2,9 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🚧 **BUILT 2026-10-03, HELD for the owner's real-call UAT** — branch `feat/phn-13-14-ignore-and-lookup`, one PR with
-[`PHN-13`](PHN-13.md). **Not deployed, not merged.**
+✅🔬 **SHIPPED** in [#779](https://github.com/mmackelprang/RTest/pull/779) (squash `57bc371`, with [`PHN-13`](PHN-13.md)). **Deployed** (box verified at `22363aa`,
+2026-10-04). Not yet recorded: the owner's check that a caller's name resolves from the synced phone book with no
+phone connected. *(Was: built 2026-10-03, held for the owner's real-call UAT, not merged.)*
 
 🟡 **Owner request, 2026-10-03.**
 

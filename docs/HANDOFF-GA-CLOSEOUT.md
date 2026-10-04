@@ -6,6 +6,33 @@ appliance at `f409bb9` (both services, SHA-verified by IP). Supersedes the "Star
 ([`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md)) remains the authority on *what each row
 is*, and [`BUILDER_QUEUE.md`](BUILDER_QUEUE.md) on *what is claimable*. This file is the order.
 
+> ⛔ **2026-10-04: most of the work sequenced below is DONE. What is left is in
+> [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) § *Status 2026-10-04*.** Each item below was checked against
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md), the punch list's struck rows, or `git log origin/main`.
+> **Shipped or closed:**
+> - **2b:** `AUD-26`, `TTS-6`, `TTS-5`, `TTS-2` and `TEST-8`.
+> - **2c:** `AUD-84`, `AUD-85`, `AUD-5`, `AUD-38` (superseded), `AUD-81`, `AUD-54` and `AUD-37`'s auto-reconnect half
+>   (#751).
+> - **2d:** `LOG-5`, `LOG-2`, `LOG-6`, `LOG-7` and `LOG-8`.
+> - **2e:** `OPS-13` and `OPS-12` (#682, `4adfbe9`).
+> - **2f:** `AUD-15`, `AUD-13`, `AUD-27`, `AUD-28`, `AUD-29`, `AUD-17`, `AUD-14`, `AUD-34`, `UI-10` and `UI-15`.
+> - **2g:** `ENC-22` and `ENC-19`.
+> - **2h:** `UI-2` and `UI-4` (#728).
+> - **2i:** `AUD-21`, `GV-10`, `TEST-2`, `AUD-36` and `AUD-16`.
+> - **2k:** `XR-2` to `XR-6`, all closed upstream.
+> - **Phase 0:** `TEST-11` part 1 (#681).
+> - **Verification debt:** `PHN-2` §3 U5, passed by the owner 2026-10-04.
+>
+> **Still open from this file:**
+> - `OPS-3`, `OPS-10`, `AUD-18` (root cause), `AUD-25` and `TEST-10`.
+> - `UX-2` (a decision).
+> - `AUD-37` part (b), `TTS-8`, `AUD-19` and `AUD-20`.
+> - D-A's eight, which are P2 for the install.
+> - The other verification debts, which this pass did not re-check: the RDS acceptance (1.1) and the encoder harness
+>   re-verification (1.9).
+>
+> D-A (§4 below) is now applied to the punch list's §9 counts.
+
 ## 0. Where we actually are
 
 | | |

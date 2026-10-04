@@ -232,3 +232,9 @@ The `FINAL` block above claims all nine checks have been run. ⛔ **That claim i
 **8 pass · 1 fail · 0 deferred — but with one check UNRUN AS SPECIFIED**, whose surface is believed correct and has never been confirmed. `AUD-24`'s plan runs **both** surfaces and records them **separately**, rather than closing one by implication. ⛔ **Do not mark U5 discharged until the voicemail-tap path has itself been exercised.**
 
 ⚠ **And the row's other citation was wrong too:** `AUD-24` and its queue row both attributed the *"a caller that posts … gets `200` … has been misled"* reasoning to `CLAUDE.md`. **The word *seek* does not appear in `CLAUDE.md`.** The quote is `DECISION-LOG`'s, about `MaxSpeechChars` **truncation**, citing seek only as precedent. That citation was written by this coordinator and propagated into three documents without the source ever being opened.
+
+## ✅ 2026-10-04 — `PHN-2` passes; U5 as specified (voicemail, tap the bar) is now recorded
+
+Reported by the coordinator on 2026-10-04: **`PHN-2` passes owner UAT, and that covers §3 U5 as written** (start a
+voicemail, tap the bar), which was never run before. The correction above stands as history. The one unrun check
+now has a result: **9 of 9 run on the surface specified.**

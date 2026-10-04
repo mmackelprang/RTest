@@ -119,3 +119,9 @@ Pass if:
 - the music does not swell up between them.
 
 Also rule on [`AUD-87`](AUD-87.md).
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: `AUD-73` passes owner UAT. 
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).

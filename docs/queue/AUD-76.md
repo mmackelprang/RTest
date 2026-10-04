@@ -130,3 +130,9 @@ Recorded, not changed: the 64 px reserve duplicated in CSS and JS; long API erro
 - **`AUD-90` reproduced:** after the live sweep the radio panel's AGC readout shows **28.0 dB** with AUTO on. It went back to 0 after a source switch.
 
 **Owner checks left:** touch feel on the panel (a finger, not a mouse: snap, the dead band at the top, accidental taps), and by ear: a requested live scan is silent and the station returns cleanly.
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: `AUD-76` passes owner UAT. This closes the "Owner checks left" line above.
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
