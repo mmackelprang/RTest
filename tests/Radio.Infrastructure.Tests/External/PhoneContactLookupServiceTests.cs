@@ -36,7 +36,7 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
 
   public void Dispose() => _connection.Dispose();
 
-  private PhoneContactLookupService Build(string rotaryContactsJson, string? connectedAddress = null)
+  private PhoneContactLookupService Build(string? rotaryContactsJson, string? connectedAddress = null)
   {
     var options = new Mock<IOptionsMonitor<PhoneIntegrationOptions>>();
     options.SetupGet(o => o.CurrentValue).Returns(new PhoneIntegrationOptions
@@ -143,6 +143,15 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   }
 
   [Fact]
+  public async Task ASyncedLocalEntry_StandsWhenRotaryPhoneIsUnreachable()
+  {
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
+    var service = Build(rotaryContactsJson: null);
+
+    Assert.Equal("Synced local entry", await service.FindCallerNameAsync(Number));
+  }
+
+  [Fact]
   public async Task AStrangerWhoSharesTheLastSeven_IsNotNamedFromEitherSource()
   {
     await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced owner", PhoneNumbers = [Number] }]);
@@ -167,11 +176,16 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
     Assert.Equal("Named", await service.FindCallerNameAsync(Number));
   }
 
-  private sealed class Handler(List<string> requests, string contactsJson) : HttpMessageHandler
+  // A null contactsJson plays RotaryPhone unreachable (503 on the list).
+  private sealed class Handler(List<string> requests, string? contactsJson) : HttpMessageHandler
   {
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
       requests.Add($"{request.Method} {request.RequestUri}");
+      if (contactsJson is null)
+      {
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
+      }
       return Task.FromResult(request.RequestUri!.AbsolutePath == "/api/contacts"
         ? new HttpResponseMessage(HttpStatusCode.OK)
         {

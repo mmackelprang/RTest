@@ -33,9 +33,9 @@ no phone connected.
 | | |
 |---|---|
 | **Sources, in order** | 1. The stored synced phone books (PBAP), on **every** phone ever synced. 2. RotaryPhone's contacts list, `GET /api/contacts`, matched locally. |
-| **Precedence when both match** | The synced phone book wins (as before, and as recommended). |
+| **Precedence when both match** | **Match quality first, then source** (owner ruling below): synced-exact, RotaryPhone-exact, synced local entry, RotaryPhone local entry. |
 | **Which phone books, in which order** | The **connected** phone first (it is the phone in hand, and it was the only one searched before), then the **most recently synced**, then the rest by address. Chosen because the newest sync is the most likely to be current — a contact renamed on the new phone should beat the old phone's spelling — while older phones still fill gaps (the box's three books overlap but are not identical). |
-| **Matching** | One rule everywhere (`PhoneNumberNormalizer.FindMatch`; the same tiers in the repository's SQL): an exact match on the digits, with the North American `1` dropped from an 11-digit number — so `+19193718044`, `19193718044` and `9193718044` are one number — then the last seven digits. **An exact match on any phone beats a last-seven match on any phone**, so an old phone's exact entry wins over a connected phone's lookalike. |
+| **Matching** | One rule everywhere (`PhoneNumberNormalizer.TryFindMatch`; the same tiers in both repository queries): an exact match on the digits, with the North American `1` dropped from an 11-digit number — so `+19193718044`, `19193718044` and `9193718044` are one number — then the **local-entry** tier: a stored 7-digit number (no area code) equal to the caller's last seven. A stored full number never matches on its last seven (owner ruling below). An exact match on any phone beats a local entry on any phone. `pbap/lookup` returns `isExactMatch`. |
 | **Consumers** | The banner (Web: `pbap/lookup`, then the list) and the spoken announcement (API: the repository, then the list). Both now use both sources, in the same order, with the same rule. |
 | **Logging** | No number or name at Information. The PBAP hit line moved from Information to Debug (it carried only the masked token) and now names the device and match kind. |
 
@@ -43,13 +43,31 @@ Also on the Web side: the Messages feed's local index now prefers a synced conta
 the same number (it was alphabetical), and the banner no longer trusts a circuit-cached "no such contact" — the
 kiosk circuit lives for days, and before this row every lookup with no phone connected was cached as a miss.
 
-## Owner question (not changed)
+## Owner rulings, 2026-10-03
 
-The last-seven-digit tier also matches two different numbers that share their last seven digits (different area
-codes). It is the repository's long-standing, tested behaviour (`FindByPhoneNumber_Last7Fallback_ShouldMatch`),
-carried to every source unchanged rather than tightened unilaterally. With three phone books (~2,400 numbers) now
-searched, a stranger could occasionally be announced as a contact. Options: keep it; or match last-seven only when
-one side is a 7-digit local number.
+Owner, verbatim, on the PR's two questions: *"You're suggestions are fine for both"*. The coordinator's
+suggestions, now built (`4dfee9b` and the commit after it):
+
+1. **Precedence (reviewer M3): match quality first, then source** — synced-exact, then RotaryPhone-exact, then
+   synced local entry, then RotaryPhone local entry. An exact match on either source beats a partial match on
+   either. Built in `PhoneContactLookupService` (API) and `IncomingCallBannerService` (Web, using the lookup's new
+   `isExactMatch`).
+2. **The last-seven fallback applies only when the stored number itself has seven digits** (a local entry with no
+   area code). A stored 10/11-digit number matches only on the full number, with the leading `1` dropped, and never
+   on its last seven. Built in `PhoneNumberNormalizer.TryFindMatch` and both repository queries
+   (`FindByPhoneNumberAsync`, `FindByPhoneNumberAnyDeviceAsync`). `FindByPhoneNumber_Last7Fallback_ShouldMatch`,
+   which pinned the old behaviour (a different area code matching), now asserts the opposite.
+
+Box context from the coordinator: the branch at `e0e78fc` was deployed, and the lookup returned the owner's name
+for `9193718044` and `+19193718044` with no phone connected. RotaryPhone's decline route is not deployed on the box
+yet (`GET /api/phone/decline` → 404), so `DeclineSupported` stays off.
+
+Mutation checks for the rulings: 11 mutants, 11 killed (R1–R11: the old suffix rule in `FindMatch` and in each
+repository query; a synced local entry returned before RotaryPhone could match exactly, or losing to RotaryPhone's
+local entry, or dropped when RotaryPhone is unreachable; the banner's two orderings; the tier ignored by the Web
+client, not reported by the controller, misreported by `TryFindMatch`). R6 first **survived** — no test had
+RotaryPhone unreachable with only a synced local entry — and was killed after `ASyncedLocalEntry_StandsWhenRotaryPhoneIsUnreachable`
+was added.
 
 ## Tests
 
@@ -63,12 +81,11 @@ phone connected), `PhoneContactLookupServiceTests` (both sources, precedence, co
 
 No HIGH. **M1** (the banner consulted the circuit's local contact index first — one phone book's first numbers plus
 every RotaryPhone contact — so it could show a RotaryPhone name where the announcement spoke the synced one): fixed,
-the banner asks the API's lookup directly (`ResolveAsync(skipLocalIndex: true)`), pinned by
+the banner asks the API's lookup directly (now `ContactResolutionService.LookupForCallAsync`), pinned by
 `ThePhonePagesLocalIndex_DoesNotOutrankTheApisSyncedPhoneBookAnswer`. **M2** (the hero's 5 s deadline started at
 the `200`, the banner's at the tap): fixed, armed at the tap; pinned. **M3** (precedence is source first, then
-match tier, so a last-seven synced match beats an exact RotaryPhone match): **not changed — owner question**; it
-meets the stated "synced phone contacts first", and the alternative (synced-exact → RotaryPhone-exact →
-synced-last-7 → RotaryPhone-last-7) changes that rule. LOWs fixed: `DeclineCallResult.Failed` is 0 (a default
+match tier, so a last-seven synced match beats an exact RotaryPhone match): left for the owner, who ruled for
+quality first (see *Owner rulings*); built. LOWs fixed: `DeclineCallResult.Failed` is 0 (a default
 outcome fails closed); no timer after the hero is disposed; the `409` close drops an attempt check that guarded
 nothing; the stale `Program.cs` cross-process reload comment and the hero's phone-id comment corrected; a remark
 narrowed ("does not parse"); a PhonePage test now waits for the `200` to be handled. Left: the Debug line naming the

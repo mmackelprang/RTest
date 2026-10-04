@@ -807,12 +807,20 @@ directly, not the Phone page's local contact index, so it names the caller as th
 2. **RotaryPhone's contacts** — `GET {ContactsApiBaseUrl}/api/contacts` (a list,
    `[{ "id", "name", "phoneNumber", … }]`), matched locally.
 
-When both have the number, **the synced phone book wins**. Matching is one rule everywhere
-(`PhoneNumberNormalizer.FindMatch`, and the same tiers in the PBAP repository's SQL): an exact match on the
-digits — with the North American country code dropped, so `+19193718044`, `19193718044` and `9193718044` are one
-number — then a match on the last seven digits. Across phone books, an exact match on any phone beats a
-last-seven match on any phone. If neither source has the number, the announcement uses the raw number and the
-banner shows it formatted.
+Matching is one rule everywhere (`PhoneNumberNormalizer.TryFindMatch`, and the same tiers in the PBAP
+repository's SQL), in two tiers:
+
+- **Exact** — the digits, with the North American country code dropped, so `+19193718044`, `19193718044` and
+  `9193718044` are one number.
+- **Local entry** — a stored number of exactly **seven** digits (no area code) equal to the caller's last seven.
+  A stored 10- or 11-digit number matches **only** on the full number, never on its last seven, so a stranger in
+  another area code who shares a contact's last seven digits is not named.
+
+Ranking is **match quality first, then source**: synced-exact, then RotaryPhone-exact, then synced local entry,
+then RotaryPhone local entry. Within the synced tiers, the connected phone first, then the most recently synced.
+`pbap/lookup` reports `isExactMatch` so the banner can rank the same way. If nothing matches, the announcement
+uses the raw number and the banner shows it formatted. (Owner rulings, 2026-10-03: *"You're suggestions are fine
+for both"*.)
 
 ⚠ **Before `PHN-14` (2026-10-03) neither fallback worked as documented.** `pbap/lookup` answered
 `404 "No device currently connected"` whenever no phone was connected — measured on the box for a number that was
@@ -820,9 +828,8 @@ in the stored phone books — and the API asked RotaryPhone for `/api/contacts/l
 never had (`GET /api/contacts/{id}` read `lookup` as an id, so every request 404'd). The Web banner's RotaryPhone
 fallback did work: it has always read the list.
 
-⚠ The last-seven tier will also match two different numbers that share their last seven digits (different area
-codes). It is the PBAP repository's long-standing, tested behaviour, carried to every source unchanged; with
-three phone books (~2,400 numbers) on the box, whether to keep it is an owner question.
+Until those rulings the last-seven tier matched any stored number ending in the same seven digits, and the
+synced phone book won on any match, so a lookalike in one phone book could outrank an exact RotaryPhone contact.
 
 ### PBAP Contact Sync
 
@@ -832,7 +839,7 @@ Radio.API can download contacts from the connected phone's phonebook via Bluetoo
 1. A Python helper script (`pbap_download.py`) manages the D-Bus session bus connection to BlueZ's obexd
 2. It creates an OBEX PBAP session, selects the internal phonebook, and downloads all contacts as a VCF file
 3. The VCF is parsed (vCard 2.1/3.0 with quoted-printable decoding) and stored in SQLite
-4. Phone number lookup uses exact match first, then last-7-digit suffix matching for fuzzy resolution — across every stored phone book, not only the connected phone's (`PHN-14`; see *Caller names* above)
+4. Phone number lookup uses an exact match first, then a stored 7-digit local entry against the caller's last seven digits — across every stored phone book, not only the connected phone's (`PHN-14`; see *Caller names* above)
 5. After sync, the BT connection is automatically restored (OBEX teardown causes a temporary disconnect)
 
 **Prerequisites:**
@@ -933,7 +940,7 @@ no-answer timeout.
 
 - **"Disconnected" but server is running:** Check firewall rules, verify the hub URL is reachable from the Radio Console host with `curl http://<phone-server>:5555/hubs/phone/negotiate`
 - **No announcement on ring:** Check TTS engine availability in **System Config → Event Sources**. Ensure a TTS engine (Google or Azure) is configured, with its API key present. Both engines are cloud services and there is no offline fallback, so announcements also go silent whenever the network is down - see the `TTS-9` note in [SYSTEMCONFIGURATION.md](SYSTEMCONFIGURATION.md#text-to-speech-tts-setup)
-- **Wrong caller name:** See *Caller names* above — the synced phone books win over RotaryPhone's contacts, and the last-seven-digit tier can match a different number with the same last seven digits. `GET /api/bluetooth/pbap/lookup?phoneNumber=…` shows what the phone books answer
+- **Wrong caller name:** See *Caller names* above — an exact match beats a local-entry match, and the synced phone books beat RotaryPhone's contacts within a tier; a 7-digit local entry still matches any area code. `GET /api/bluetooth/pbap/lookup?phoneNumber=…` shows what the phone books answer (and `isExactMatch`)
 - **Ring sound doesn't play:** Verify the file exists at the configured path and is a valid WAV or MP3
 
 ### Google Voice (gvbridge) Messages
