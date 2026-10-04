@@ -18,7 +18,7 @@
 
 ---
 
-## Shipped rows (109)
+## Shipped rows (125)
 
 ### GV-1 — GV Messages PR1 — Foundation + IA shell.
 
@@ -3333,3 +3333,227 @@ The plan claimed the **Stop button, doorbell preemption, `MaxPlaybackSeconds` (A
 **Detail: [`queue/PHN-12.md`](queue/PHN-12.md)**
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* — the same call now produced the console's first-ever call announcement. `PhoneCallClient` binds `CallStateChanged(phoneId, state)` and `IncomingCall(phoneId, number)` in RotaryPhone's order, pinned by a contract test over real SignalR.
+
+### AUD-1 — Split `UseShazamForAllSources`: source metadata wins per field; fingerprinting only fills what is missing
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#667](https://github.com/mmackelprang/RTest/pull/667) (squash `e726f80`), deployed and SHA-verified — owner box UAT passed 4/4, 2026-09-26 (dossier § UAT). Archived 2026-10-04: the row had been ✅ in the live table since 2026-09-26. |
+| Plan | ✅ **MERGED 2026-09-26 as `e726f80` ([PR #667](https://github.com/mmackelprang/RTest/pull/667)), deployed (SHA verified on both services), owner box UAT PASSED 4/4** — see the dossier § UAT. Follow-ups found during UAT: `AUD-32` (silent tag-read failure), `AUD-33` (stale identification applied across a track change). _History as built:_ **BUILT 2026-09-25 on `fix/split-shazam-fingerprint-vs-overwrite`.** Per-field precedence via `Radio.Core.Models.Audio.SourceMetadataPrecedence`, BT + FilePlayer; flag NOT renamed. ⚠ The plan missed `USBAudioSourceBase`'s own `TrackIdentified` overwrite (runs while Playing/Paused) — BT now overrides it. See the dossier's BUILT section · [`AUD-1-split-the-fingerprint-gate-from-the-overwrite.md`](../design/plans/AUD-1-split-the-fingerprint-gate-from-the-overwrite.md) · **0.75 d** (F1) / **0.5 d** (F2) · ⛔ **NOT auto-mergeable** — live audio path, user-visible metadata, UAT needs a phone · ✅ **UNBLOCKED BY OWNER DECISION 2026-09-08 — and the rule is simpler than the F1/F2 split.** *"When metadata is available from the audio source, use the source metadata (song name, album name, album art). When one or more is missing, use fingerprinting to augment the missing data."* **Precedence is per FIELD, not per track**, and the same rule applies to **both** sources — so FilePlayer follows BT (F1), but by making one rule true everywhere rather than by imitation. Keep the always-fingerprint gate at `:837`; ⛔ **CORRECTED 2026-09-08** — replace the overwrite at `:867-891` with per-field fill-if-missing. ⚠ **NOT "the behaviour already on the preserve branch at `:893-905`"**, as this cell previously said: that branch fills **cover art only** and never touches Title/Artist/Album, so an empty AVRCP title would end up with no title at all. The preserve path must GAIN per-field text fill — new behaviour, not behaviour made reachable. ⚠ Treat an empty string from the source as **missing**, not as an authoritative blank. ⚠ **`AUD-17` makes this self-correcting on Bluetooth** — AVRCP never supplies art there, so art is always "missing" and fingerprinting always fills it, which is exactly today's working ~99% · _Planner's prior recommendation, now superseded but its evidence still stands:_ `PlayHistory` shows **44 of 52 file plays had their tags overwritten**, two fabricated titles, a **U+2010 non-breaking hyphen** corrupting `blink‐182`, and nine competing cover-art hashes for a track whose embedded art has one. 79% of files carry embedded art and `:2126-2128` replaces it unconditionally · ⚠ **THE FLAG MUST NOT BE RENAMED.** The SQLite store outranks both JSON layers and already holds `fingerprinting:useShazamForAllSources\|true`; a rename orphans that row, the new key falls through to `appsettings.json`'s `false`, and **BT album art dies** — the one outcome this row forbids. Not theoretical: `fingerprinting:fpcalcPath` is already orphaned there from the AcoustID→SongRec rename · ⚠ Anchor drift: `appsettings.json:91` → **`:93`**_ |
+| Spec / handoff | _no spec doc — the diagnosis is in this row_ · provenance: 2026-08-10 debugging session; PR #469 is the adjacent merged fix |
+| Depends on | — _(no row dependency. **Touches the same file and method region as PR #469** (`BluetoothAudioSource.OnTrackIdentified`), which is merged — rebase, don't re-derive. **Also touches `FilePlayerAudioSource.cs`, which #468 changed on 2026-08-11** — the anchors above are already re-sited, but rebase rather than trusting any earlier copy.)_ |
+| Branch | `fix/split-shazam-fingerprint-vs-overwrite` |
+
+**Detail: [`queue/AUD-1.md`](queue/AUD-1.md)**
+
+**Split `UseShazamForAllSources` into the two independent decisions it currently conflates.** — [detail](queue/AUD-1.md)
+
+### AUD-17 — AVRCP album art never worked; the dead AVRCP cover-art read is removed and BT art comes from song recognition
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#742](https://github.com/mmackelprang/RTest/pull/742) (squash `a86349f`) — owner UAT passed 2026-10-04 (BT album art), reported by the coordinator. |
+| Plan | ✅ **RULED 2026-09-30 — option A, a removal PR (≤ ½ d, Phase 2i):** delete the never-firing `ArtUrl`/`mpris:artUrl` read and `CacheAvrcpArtAsync`'s unreachable branch; fix the "MPRIS" comment and the `:339`/`:358` log strings; leave the SongRec art path alone. Scope and verification in the dossier's last section · _(superseded by the ruling, kept for the reasoning:)_ _plan TBD — ⚠ **the first question is whether to fix it at all.** `ImgHandle` is an OBEX BIP handle and **BlueZ 5.72 ships no BIP client**, so the options are implement BIP, **delete the dead path** (probably right — SongRec already supplies art on ~99% of rows), or upgrade BlueZ. Whatever is chosen, **fix the comment and the `:339`/`:358` log strings**, which claim MPRIS about a BlueZ interface_ · ⛔ **NOT auto-mergeable** if the path is changed rather than deleted — needs the owner's phone |
+| Spec / handoff | _no spec doc — measured read-only on `radio` 2026-09-08: **`file://` is ZERO across all 45,210 `TrackMetadata` rows, every source**, and `PlayHistoryTracker.cs:733-737` writes any BT-supplied URL raw at row creation, so one would have appeared. Of 66 `Avrcp` rows with art, **26 share a content-addressed filename with a `Shazam` row** (`AlbumArtCacheService.cs:46`/`:80` hash the image bytes, so a shared name means byte-identical), 1 with `Manual`_ · ⛔ **Do NOT "correct" `queue/AUD-1.md:26` or `ROADMAP.md:133`** — their conclusion is right, only their mechanism is incomplete |
+| Depends on | — _(no row dependency. ⚠ **`Source` records the TITLE's provenance, not the art's** — `UpdateRecentPlayHistoryCoverArtAsync` (`:1070-1112`) writes `CoverArtUrl` without touching `Source`, and its only live caller is the SongRec path. Any future row reasoning from `Source='Avrcp'` about **art** is reasoning from the wrong column.)_ |
+| Branch | `fix/aud-17-remove-dead-avrcp-art` |
+
+**Detail: [`queue/AUD-17.md`](queue/AUD-17.md)**
+
+⛔ **RETRACTED AND REWRITTEN 2026-09-08, the same night it was filed — AVRCP album art has NEVER worked, and this was never a regression.** `LinuxBluetoothService.cs:2761-2765` reads the MPRIS names `ArtUrl`/`mpris:artUrl` off a proxy on `org.bluez.MediaPlayer1`, which publishes **`ImgHandle`** — so `CacheAvrcpArtAsync` has never executed. 📝 **2026-09-30: owner reports *"Bluetooth album art passes."*** — the art arrives via song recognition (SongRec), not AVRCP, so it does not close this row. ✅ **OWNER RULING 2026-09-30: *"AUD-17 recommendation is fine."* — option A: close the dead AVRCP cover-art code path; art continues to come from song recognition. Buildable now as a small removal row, sequenced with Phase 2i (confirm-or-close).** ✅🔬 **SHIPPED 2026-09-30 (Phase 2i): the Linux `ArtUrl`/`mpris:artUrl` read is removed and the two "No MPRIS media player" warnings name `org.bluez.MediaPlayer1`. ⚠ `CacheAvrcpArtAsync` was NOT unreachable — the Windows media-session watcher and the mock service feed it, and `AUD-1`'s source-art tests run through it — so it is kept, renamed `CacheSourceSuppliedArtAsync`, and documented as never running on the appliance. Filed `AUD-88` for the Windows art it silently drops. Owner check left: BT album art still appears on a played track.** — [detail](queue/AUD-17.md)
+
+### AUD-26 — switching source during an active duck left the new source at full volume; a source registered during a duck now inherits it
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#694](https://github.com/mmackelprang/RTest/pull/694) (squash `0917ef2`) — owner by-ear UAT passed 2026-09-28. Archived 2026-10-04: the row had been ✅ in the live table since then. |
+| Plan | ✅ **Owner by-ear UAT PASSED 2026-09-28** (switch during a duck, switch back, Next during a duck, normal notification). _plan TBD — ⚠ **the removal in `StopAsync` may be correct in isolation**; the defect may be the **ORDERING** against registration, not the removal · ⚠ **establish which switch paths are affected** — source switch is the observed one; check reconnect and error-recovery for the same read-after-remove ordering **before scoping the fix to one call site** · ⚠ **What SHOULD the new source's level be mid-duck is a DESIGN question, not a bug question** — inherit the current duck, or start un-ducked and be ducked on the next event. **Say which and why**_ · ⛔ **NOT auto-mergeable** — live audio path |
+| Spec / handoff | _no spec doc — ⭐ **PRE-EXISTING, but `AUD-2` made it OBSERVABLE for the first time**: before `AUD-2` shipped, ducking did not work **at all**, so this defect was invisible behind a larger one. ⚠ **Expect this class after ANY fix that restores a broken mechanism — masked defects become reachable. Do NOT read "new symptom after `AUD-2`" as "`AUD-2` caused it"** · ⭐ **Assert the PRESENCE of attenuation on the newly-registered source** by reading back the registered component's `Volume`, as `AUD-2`'s tests do — ⛔ **an indexer write to a wrong key throws nothing and returns nothing**, so "did not throw" passes on a broken tree · ⚠ **Beware a vacuous test**: if the fixture ducks to `1.0` the assertion passes on the defect_ |
+| Depends on | — _(no row dependency. **`AUD-2`** is the shipped parent — read its PR for the key-registration map, four `AudioSourceType`s across five concrete classes. ⚠ **`BluetoothAudioSource` derives from `USBAudioSourceBase` but overrides three methods without calling base** and shadows `_playbackId`, so "all USB sources behave alike" is false.)_ |
+| Branch | `fix/aud-26-duck-lost-on-source-switch` |
+
+**Detail: [`queue/AUD-26.md`](queue/AUD-26.md)**
+
+🟠 **NEW 2026-09-09 — switching source during an active duck leaves the new source at FULL VOLUME.** `AudioManager`'s source-switch path: `StopAsync` removes the entry from `_duckingMultipliers` **before registration reads it back**, so the incoming source registers with no multiplier. Found by `AUD-2`'s Builder while fixing the key mismatch. — [detail](queue/AUD-26.md)
+
+### AUD-32 — some MP3s' ID3 tags failed to load silently; tag reads fall back to TagLib
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#669](https://github.com/mmackelprang/RTest/pull/669) (squash `89a58c5`), deployed `f409bb9` — owner UAT passed at the cabinet 2026-09-28 (Phase 1 check 1.8). Archived 2026-10-04: the row said "ready to archive" since then. |
+| Plan | ✅ **MERGED 2026-09-26 as [#669](https://github.com/mmackelprang/RTest/pull/669), deployed to `radio` 2026-09-28 (`f409bb9`) — ✅ **owner UAT PASSED at the cabinet 2026-09-28 (Phase 1 check 1.8) — ready to archive.** Built on `fix/aud-32-tag-read-fallback`.** Cause: SoundFlow 1.4.1 rejects ID3v2.2 tags wholesale (`CorruptFrameError`); TagLib reads them. New `AudioTagReader` (SoundFlow → TagLib fallback) behind all four tag-reading sites. See the dossier § BUILT |
+| Spec / handoff | _no spec doc — measured on `radio` 2026-09-26_ |
+| Depends on | — _(touches `FilePlayerAudioSource.UpdateMetadataFromFile`; AUD-1 merged)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-32.md`](queue/AUD-32.md)**
+
+🟠 **NEW 2026-09-26 — some MP3s' ID3 tags silently fail to load, so AUD-1 treats tagged fields as missing and fingerprinting fills them.** Seen in `AUD-1`'s UAT: `Hear What They Say.mp3` (tag `artist=Kevin MacLeod`) was shown as artist `Dsp Records North`; `Meditating Beat.mp3` (title/artist/album all tagged) was filled on all four fields. Both logged `Duration: 00:00:00`; `08-I'm Not In Love.mp3` loaded fine. — [detail](queue/AUD-32.md)
+
+### AUD-33 — a fingerprint result that arrived after a track change was applied to the new track
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#670](https://github.com/mmackelprang/RTest/pull/670) (squash `3cf14db`), deployed `f409bb9` — owner UAT passed at the cabinet 2026-09-28 (Phase 1 check 1.8). Archived 2026-10-04: the row said "ready to archive" since then. |
+| Plan | ✅ **MERGED 2026-09-26 as [#670](https://github.com/mmackelprang/RTest/pull/670), deployed to `radio` 2026-09-28 (`f409bb9`) — ✅ **owner UAT PASSED at the cabinet 2026-09-28 (Phase 1 check 1.8) — ready to archive.** Built on `fix/aud-33-drop-stale-identifications`.** `TrackIdentifiedEventArgs.CaptureStartedAt`; FilePlayer and BT drop a result sampled before their current track started, and forget it from duplicate suppression so the new track is still identified. See the dossier § BUILT |
+| Spec / handoff | _no spec doc — measured on `radio` 2026-09-26_ |
+| Depends on | — _(pre-dates AUD-1; the old overwrite had it too. Same handler as `AUD-32`)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-33.md`](queue/AUD-33.md)**
+
+🟡 **NEW 2026-09-26 — a fingerprint result that arrives after a track change is applied to the NEW track.** 08:38:01 skip to `Meditating Beat.mp3`; 08:38:10 `Fingerprint result for file 'Here's to the Night' by 'Eve 6'` filled all four fields on it. The sample was captured from the previous track. — [detail](queue/AUD-33.md)
+
+### AUD-34 — a stale identification that crossed a source switch or BT reconnect was still applied
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#723](https://github.com/mmackelprang/RTest/pull/723) (squash `866e333`, with `AUD-74` and `AUD-78`) — owner UAT passed 2026-10-04, reported by the coordinator. |
+| Plan | _plan TBD — stamp on source activation too_ |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — _(follows `AUD-33`)_ |
+| Branch | — |
+
+**Detail: [`queue/AUD-34.md`](queue/AUD-34.md)**
+
+✅🔬 **SHIPPED 2026-09-29: `AudioManager.SwitchSourceAsync` stamps source activation; BT and File drop identifications sampled before the later of their track start and that activation.** 🟡 **NEW 2026-09-26 — a stale identification that crosses a SOURCE SWITCH or BT reconnect is still applied.** `AUD-33`'s track-start stamp only moves on a track-key / file-path change; neither is reset on deactivation. From `AUD-33`'s review (M2). — [detail](queue/AUD-34.md)
+
+### AUD-35 — the identification loop busy-spun a CPU core whenever there was nothing to identify
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#671](https://github.com/mmackelprang/RTest/pull/671) (squash `e46fa68`), deployed `f409bb9` — owner UAT passed at the cabinet 2026-09-28 (Phase 1 check 1.8). Archived 2026-10-04: the row said "ready to archive" since then. |
+| Plan | ✅ **MERGED 2026-09-26 as [#671](https://github.com/mmackelprang/RTest/pull/671), deployed to `radio` 2026-09-28 (`f409bb9`) — ✅ **owner UAT PASSED at the cabinet 2026-09-28 (Phase 1 check 1.8) — ready to archive.** Built on `fix/aud-35-identification-loop-idle-wait`.** A cycle that captured nothing now waits `IdlePollIntervalMs` (1 s) on the token `RequestImmediateIdentification` cancels. Red test: 629,167 polls in 2 s. See the dossier § BUILT |
+| Spec / handoff | _no spec doc — measured on `radio` 2026-09-26_ |
+| Depends on | — |
+| Branch | — |
+
+**Detail: [`queue/AUD-35.md`](queue/AUD-35.md)**
+
+🔴 **NEW 2026-09-26 — the identification loop busy-spins a CPU core whenever there is nothing to identify.** Measured on `radio`: `Radio.API` 72 CPU-min in 75 wall-min, one thread-pool thread at 99.9 %, nothing playing. `ExecuteAsync` skips the idle wait when there are no failures, but an early-returning cycle never awaits. — [detail](queue/AUD-35.md)
+
+### AUD-73 — overlapping announcements are arbitrated instead of mixing
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#739](https://github.com/mmackelprang/RTest/pull/739) (squash `41311b5`) — agent UAT on the box (dossier); owner UAT passed 2026-10-04, reported by the coordinator. |
+| Plan | ✅ **[#739](https://github.com/mmackelprang/RTest/pull/739)** — agent UAT on the box in the dossier; **owner by-ear check outstanding** (two announcements via the API: the first stops when the second starts, no swell between) |
+| Spec / handoff | _no spec doc — found 2026-09-28 during Phase 2b_ |
+| Depends on | — |
+| Branch | `fix/aud-73-announcement-preempt` |
+
+**Detail: [`queue/AUD-73.md`](queue/AUD-73.md)**
+
+✅🔬 **SHIPPED 2026-09-30 — overlapping announcements are arbitrated: higher priority replaces lower, the newer of two equal priorities replaces the older, a lower priority plays alongside (never cuts off).** Measured before the fix on the box: two announcements 1.5 s apart both returned `completed`, two events ducked at once; the owner's by-ear pass could not see it because **Send Test** stays disabled until its request returns. 🟡 _Filed 2026-09-28 (code read, 2b Builder) as "a second announcement does not stop the first; both play at once"._ — [detail](queue/AUD-73.md)
+
+### AUD-76 — a touchable FM band map ("BAND") replaces the "Fall" visualizer; "VU" is removed
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#745](https://github.com/mmackelprang/RTest/pull/745) (squash `6c33ec3`, PR 1) + [#746](https://github.com/mmackelprang/RTest/pull/746) (squash `16cf71b`, PR 2) — owner UAT passed 2026-10-04, reported by the coordinator. |
+| Plan | _two PRs: sweep service + stored map + API ([#745](https://github.com/mmackelprang/RTest/pull/745)); then BAND view + touch-to-tune + Fall/VU removal (PR 2)_ |
+| Spec / handoff | _owner conversation 2026-09-29_ |
+| Depends on | — |
+| Branch | `feat/aud-76-band-view` |
+
+**Detail: [`queue/AUD-76.md`](queue/AUD-76.md)**
+
+✅🔬 **SHIPPED 2026-09-30 in two PRs; owner UAT outstanding — a touchable FM band map ("BAND") replaces the "Fall" visualizer; "VU" is removed.** PR 1 ([#745](https://github.com/mmackelprang/RTest/pull/745)): the channel sweep, stored map and `GET/POST /api/radio/bandmap`, silent on a timer while the dongle is idle, on request or while asleep when the radio plays. PR 2 (`feat/aud-76-band-view`): the BAND view, tap-to-tune (strongest peak within ±0.4 MHz, else nearest channel; switches to the radio first) and the Fall/VU removal. Owner checks: touch feel on the panel; by ear, a requested live scan is silent and the station returns cleanly. — [detail](queue/AUD-76.md)
+
+### AUD-78 — play history's in-flight entry is finalised at shutdown while the container is alive
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#723](https://github.com/mmackelprang/RTest/pull/723) (squash `866e333`, with `AUD-34` and `AUD-74`) — owner UAT passed 2026-10-04, reported by the coordinator. |
+| Plan | _plan TBD — finalise from `IHostApplicationLifetime.ApplicationStopping` (or a hosted service's `StopAsync`) while the container is alive_ |
+| Spec / handoff | _no spec doc — found 2026-09-29 in the file sink_ |
+| Depends on | — |
+| Branch | `fix/aud-78-history-finalize-on-stop` |
+
+**Detail: [`queue/AUD-78.md`](queue/AUD-78.md)**
+
+✅🔬 **SHIPPED 2026-09-29: `PlayHistoryShutdownFinalizer` (hosted service) finalises the in-flight entry in `StopAsync` while the container is alive; `Dispose` only unsubscribes. Box check: the next deploy logs `Finalized in-flight play history entry … during shutdown` and no `Failed to finalize`.** 🟢 **NEW 2026-09-29 — `PlayHistoryTracker.Dispose()` cannot finalise the in-flight entry at shutdown: the service container is already disposed.** `ObjectDisposedException` from `CreateScope` (`PlayHistoryTracker.cs:880-895`), a Warning with stack trace on every `radio-api` stop (every deploy). Startup orphan cleanup is the documented backup, so no data should be lost. — [detail](queue/AUD-78.md)
+
+### AUD-81 — while casting, the console's volume and mute drive the Cast speaker
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#749](https://github.com/mmackelprang/RTest/pull/749) (squash `82f5840`) + [#750](https://github.com/mmackelprang/RTest/pull/750) (squash `590c40d`) — owner UAT passed 2026-10-04: the volume knob changes the Cast volume. |
+| Plan | ✅ **[#749](https://github.com/mmackelprang/RTest/pull/749) + [#750](https://github.com/mmackelprang/RTest/pull/750)** — design as built and both box UATs in the dossier |
+| Spec / handoff | _no spec doc — owner ruling 2026-09-30 ([`RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) evening batch §D)_ |
+| Depends on | `AUD-80` ✅ ([#725](https://github.com/mmackelprang/RTest/pull/725)) |
+| Branch | `feat/aud-81-console-drives-cast-volume` |
+
+**Detail: [`queue/AUD-81.md`](queue/AUD-81.md)**
+
+✅🔬 **SHIPPED 2026-10-01 ([#749](https://github.com/mmackelprang/RTest/pull/749) + follow-up [#750](https://github.com/mmackelprang/RTest/pull/750), box on `590c40d`) — while casting, the console's volume and mute drive the Cast speaker.** ⚠ #749's box UAT found that a level change unmutes the Google Home Mini, so knob moves under a muted console unmuted it. #750 holds the level until the console unmutes. A silent re-UAT on `590c40d` passed: speaker muted through three moves, the held level applied on unmute, follow, mute, and the teardown unmute confirmed over a new connection. A per-connection curve, anchored at (console, speaker), means the first move never jumps; upward moves are capped at 3× the step. `SET_VOLUME` is coalesced, with a 3 s echo memory whose tolerance comes from the speaker's own step. Only a burst's final level is remembered (`AUD-80`). Console mute mutes the speaker, and nothing auto-unmutes; a console-muted speaker is unmuted only on a deliberate teardown, after our app has stopped. Also new: `GET /api/devices/cast/volume`. **Owner check outstanding:** while casting, turning the console's volume knob changes the speaker, and console mute silences the speaker. 🟡 **NEW 2026-09-29 (found by the `AUD-80` builder) — the console cannot change a Cast speaker's volume.** Cast audio is tapped before master volume, and nothing sets `GoogleCastOutput.Volume` after construction; only the speaker or Google Home can change it. ✅ **OWNER RULING 2026-09-30: *"I'd like the console volume to be able to change the cast volume."* Buildable; belongs with the casting work (Cast arc, 2c).** 🔬 **Reconfirmed on the box 2026-09-30 (MEASURED, owner's casting baseline on `b64c8cd`): *"changing the volume on the console didn't affect the office speaker."*** — [detail](queue/AUD-81.md)
+
+### AUD-82 — the uncalled `/api/metrics/snapshots` and `/aggregate` endpoints are deleted (the double count did not exist)
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#738](https://github.com/mmackelprang/RTest/pull/738) (squash `af9bc2b`) — a deletion with no caller left; no owner check applies. Archived 2026-10-04: the row had been ✅ in the live table since 2026-09-30. |
+| Plan | ✅ **[#738](https://github.com/mmackelprang/RTest/pull/738)** — no caller remained; deleted rather than fixed. Follow-up **`AUD-86`** (a Diagnostics range that crosses a rollup tier undercounts) |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — |
+| Branch | `fix/aud-82-metrics-snapshot-rollup` |
+
+**Detail: [`queue/AUD-82.md`](queue/AUD-82.md)**
+
+✅ **SHIPPED 2026-09-30 — the uncalled `/api/metrics/snapshots` and `/api/metrics/aggregate` are deleted (and `IMetricsReader`'s two all-time reads; `Radio.Metrics` 2.0.0).** ⛔ **The double count this row was filed for does not exist** — the rollup moves rows, measured on the box; see the dossier § Correction. 🟢 _Filed 2026-09-29 (found by the `UI-2` builder) as "`/api/metrics/snapshots` counts rolled-up data more than once"._ — [detail](queue/AUD-82.md)
+
+### AUD-91 — the band sweep and the BAND view follow the radio's band, not just FM
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#753](https://github.com/mmackelprang/RTest/pull/753) (squash `27ddec4`) — silent agent UAT on all six bands (dossier); owner UAT passed 2026-10-04, reported by the coordinator. |
+| Plan | _one PR: per-band sweep plans, a multi-channel meter, per-band storage, API `?band=` and 409, a band-explicit tune; the BAND view follows the radio's band_ |
+| Spec / handoff | _no spec doc — owner request 2026-09-30; design in the dossier_ |
+| Depends on | `AUD-76` ✅🔬 (both PRs merged) |
+| Branch | `feat/aud-91-band-aware-sweep` |
+
+**Detail: [`queue/AUD-91.md`](queue/AUD-91.md)**
+
+✅🔬 **SHIPPED 2026-10-01 ([#753](https://github.com/mmackelprang/RTest/pull/753)) — the band sweep and the BAND view follow the radio's band, not just FM.** Owner: *"note that the scan function for the radio seems to only scan the FM band. It should scan and adjust the display based on the selected band in the radio control panel."* **Feasibility was measured on the box first:** the dongle is an R820T, and AM and SW below ~24 MHz are not receivable (signal 0, `PLL not locked!`), so they are deferred to `AUD-94` as an owner decision. **What each band does now:** FM is unchanged from `AUD-76` (101 channels, one tune each, `bandmap/fm.json`, tap snap ±400 kHz). WB maps its 7 NOAA channels in 1 tune. AIR maps 1,161 channels at 25 kHz in 146 tunes. VHF maps a ±1 MHz window around the radio's VHF frequency, 161 channels in 11 tunes. AM and SW show their axis and say they are out of this radio's range; Scan is disabled and `POST .../scan?band=` returns 409. One map file per band (`bandmap/<band>.json`); `GET`/`POST /api/radio/bandmap?band=`; `POST /api/radio/frequency` takes an optional `band`. The timer sweeps only the radio's current band. A sweep leaves the radio's band, frequency and step as they were. Squash `27ddec4`, deployed and SHA-verified on both services; a silent agent UAT on the box passed on all six bands (Scan in the UI, map counts 7/1,161/161/101, the radio unchanged after each sweep, taps tune band and frequency, AM/SW 409 and the out-of-range state; see the dossier). **Owner checks outstanding:** per band, the look and touch of the BAND view at the panel; whether the AIR and VHF maps are useful. — [detail](queue/AUD-91.md)
+
+### AUD-100 — Scan Up/Down and the band map share one station list
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#782](https://github.com/mmackelprang/RTest/pull/782) (squash `aef7169`), deployed and SHA-verified — owner UAT passed 2026-10-04. The box's duplicate `radio:ScanStopThreshold = 100` row was deleted the same day; `radio:scanStopThreshold = 50` is the single live value (dossier). |
+| Plan | _one PR; see the dossier_ |
+| Spec / handoff | _owner request 2026-10-04 (dossier)_ |
+| Depends on | `AUD-76`, `AUD-91` |
+| Branch | `feat/aud-100-scan-band-map` |
+
+**Detail: [`queue/AUD-100.md`](queue/AUD-100.md)**
+
+✅🔬 **SHIPPED 2026-10-04 ([#782](https://github.com/mmackelprang/RTest/pull/782)), deployed and SHA-verified; owner by-ear and BAND-view checks outstanding.** On the box, Scan hopped between the fresh FM map's stations, and fell back to live seek on a stale map. ⚠ The seek-observed upsert was not exercised on the box: the box's `ScanStopThreshold` is 100, so the live seek made no stop (dossier § Box UAT). **Owner request, 2026-10-04: Scan Up/Down and the band map share one station list.** Scan jumps to the next mapped station when the band map is fresh (live seek otherwise), and each station a live seek finds is added to the map as seek-observed, never overriding a sweep. Details: [`docs/queue/AUD-100.md`](queue/AUD-100.md).
+
+### OPS-12 — the deploy proves its transport before stopping anything, and the rsync/scp choice is explicit per host (D-C)
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#682](https://github.com/mmackelprang/RTest/pull/682) (squash `4adfbe9`, with `OPS-13`). Deploys since have used it; e.g. the 2026-10-02 deploy of `8df918b` reported `Verified` on both services and a live kiosk. Archived 2026-10-04: the row still read 🚧 BUILT. |
+| Plan | 🚧 **BUILT 2026-09-28 on `fix/ops-13-ops-12-deploy-safety` (with `OPS-13`, one PR — D-C: keep rsync, make the choice explicit).** New step 1.5 decides the transport (`-Transport rsync\|scp\|auto`; auto = scp on Windows, rsync elsewhere when on PATH), prints the reason, and PROVES it before step 2 stops anything: ssh reachability, box prerequisites (`rsync`, `curl`, `sudo -n`), then an `rsync -n` dry run of the real API sync or a one-byte `scp` probe. Any failure exits 1 with *"Nothing was stopped"*. `Get-Command rsync` no longer chooses anything on its own. Measured on the Linux dev box with `-NoRestart` (build + pre-flight + sync, services untouched): rsync path OK; scp path in the dossier. ⛔ NOT auto-mergeable — owner reviews. _plan TBD — ⛔ **THREE STACKED DEFECTS, MEASURED BY DRY RUN, NOT INFERRED — and EACH FIX REVEALS THE NEXT.** (1) `'D:\...\api/'` → **`The source and destination cannot both be remote`**: MSYS2 rsync parses `D:` as a **hostname**, and **the script does NO path conversion** — `:220`/`:250` pass `${ApiPublishDir}/` raw. (2) `'/d/.../api/'` → **`dup() in/out/err failed`**: MSYS2 rsync **cannot drive native Windows OpenSSH**. (3) `+ -e /usr/bin/ssh` → **`Host key verification failed`**: MSYS2 ssh has its **own** `known_hosts`/`config`/identity. ⛔ **A Builder who fixes only the path will re-run the deploy, stop the services, and fail at `dup()` — a SECOND outage caused by the fix** · ⭐ **STRONGLY CONSIDER DELETING THE BRANCH rather than fixing it** — scp is the only transport that has ever worked here and rsync has **zero** successful executions; deleting removes a trap instead of arming it better_ · ⛔ **NOT auto-mergeable** — production deploy path |
+| Spec / handoff | _no spec doc — ⛔ **DO NOT VALIDATE THIS ROW BY RUNNING THE DEPLOY.** Step 2 stops services before step 3 is reached, so **every failed attempt is an outage**. Use `rsync -n` against a scratch remote path, as the three measurements above did · ⭐ **The INDEPENDENT defect, and arguably the bigger one: the transport is never proven reachable BEFORE the step that stops things.** That ordering converts any sync error into an outage and would bite the tar/scp paths identically — **fix it even if rsync is deleted** · ⭐ **General lesson: installing a tool ARMED an untested code path.** A capability probe that silently switches transports is a landmine wherever the alternative has never been exercised. ⭐ **`Get-Command rsync` ran, passed, and answered a DIFFERENT QUESTION than the one being asked** — it proved rsync EXISTS; it was read as "rsync WORKS here" · ⚠ **Mitigation in place is NOT a fix**: `C:\Users\mark\bin\rsync.cmd` renamed to `rsync.cmd.disabled-broken-transport` — **workstation-local, invisible to the repo, and re-armed by anyone who installs rsync by any route**_ |
+| Depends on | — _(no row dependency. ⚠ **Related to `OPS-9`** — that row's per-call `$LASTEXITCODE` capture is why this failure REPORTED HONESTLY (`API sync failed!`) instead of claiming success. ⭐ **`OPS-9` worked exactly as designed; it is the reason this was diagnosable at all.**)_ |
+| Branch | `fix/ops-12-deploy-transport-preflight` |
+
+**Detail: [`queue/OPS-12.md`](queue/OPS-12.md)**
+
+🔴 **NEW 2026-09-09 — the rsync branch of `Deploy-ToLinux.ps1` has NEVER executed, and the first attempt TOOK THE APPLIANCE DOWN.** `Get-Command rsync` (`:178-185`) picks the transport; rsync had never been on PATH, so **every successful deploy in project history took the scp fallback**. ⛔ **NOT an unrelated shim — an OWNER DECISION for RotaryPhone deploy safety** (corrected; the `rsync.cmd` shim + persistent PATH change were installed so deploys would use rsync instead of the tar-pipe fallback). It silently selected a never-run branch. It failed at **[3/4]** — but **[2/4] had already stopped `radio-api` and `radio-web`**, so the console went dark until the units were restarted by hand. — [detail](queue/OPS-12.md) ⭐ **UPDATE 2026-09-28 — the rsync branch EXECUTED SUCCESSFULLY from a Linux host** (dry run first, then PR #677's deploy, `f409bb9` on both services): all three defects above are Windows/MSYS2 artifacts, so "delete the branch" should be re-weighed as "make the per-host choice explicit". The ordering defect stands, now joined by `OPS-13`. See the row file's update section.
+
+### OPS-13 — the deploy verifies the SHA from the box, and a failed check no longer leaves the panel dark
+
+| Field | Value |
+|---|---|
+| Status | ✅ [#682](https://github.com/mmackelprang/RTest/pull/682) (squash `4adfbe9`, with `OPS-12`). Deploys since have used it; e.g. the 2026-10-02 deploy of `8df918b` reported `Verified` on both services and a live kiosk. Archived 2026-10-04: the row still read 🚧 BUILT. |
+| Plan | 🚧 **BUILT 2026-09-28 on `fix/ops-13-ops-12-deploy-safety` (with `OPS-12`, one PR).** Both halves: (1) step 4 reads `/api/health/version` ON THE BOX over ssh (`Get-DeployedSha`), never via the dev host's resolver; (2) the kiosk is relaunched on every path that stopped it — verified, endpoint unreachable, service not active — except a SHA that was REACHED and MISMATCHED, which leaves it down on purpose. Plus `-VerifyOnly`: the step-4 instrument alone, no build/stop/sync; measured against `radio` — reports MISMATCH with exit 1 when `main` is ahead of the box, kiosk liveness printed. ⛔ NOT auto-mergeable — owner reviews. _plan TBD — two independent halves: (1) verify from the box over ssh (`curl localhost:5000/api/health/version`), exactly as the negotiate poll at `:461` already does, so the check has the same answer on every dev host; (2) relaunch the kiosk on every path that stopped it unless the SHA was REACHED and MISMATCHED. ⚠ Do not fix by pinning an IP in the docs; the per-host cure is `/etc/hosts`_ · ⛔ **NOT auto-mergeable** — production deploy path; validate with `-NoRestart` first |
+| Spec / handoff | _no spec doc_ |
+| Depends on | — _(sibling of **`OPS-12`**: both are sequencing outages, not broken binaries; fix together or one dark-panel path remains)_ |
+| Branch | `fix/ops-13-deploy-verify-from-box` |
+
+**Detail: [`queue/OPS-13.md`](queue/OPS-13.md)**
+
+🟠 **NEW 2026-09-28 — a failed SHA verification exits the deploy BEFORE the kiosk relaunch, so a dev-host DNS miss turned a SUCCESSFUL deploy into a dark panel.** First deploy from a Linux host (PR #677 → `f409bb9`): steps 1–4 landed, both services on the right SHA by IP — but `Deploy-ToLinux.ps1:472/:508` build `http://${TargetHost}:5000/...` for `Invoke-RestMethod`, and the bare name `radio` does not resolve on that host outside `~/.ssh/config`. Ten misses, `exit 1` at `:492`, and the relaunch at `:561` never ran; `radio-kiosk.service` inactive, 0 connections, until `radio-kiosk-launch` by hand. ⭐ **A false-NEGATIVE gate: the deploy claimed failure and had succeeded.** — [detail](queue/OPS-13.md)

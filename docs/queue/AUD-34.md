@@ -49,3 +49,9 @@ result dropped.
   not); BT `Aud34_*` (same song after switch-back dropped; before first AVRCP, activation is the
   boundary; post-activation sample applies); FilePlayer `Aud34_*` (same file after reactivation
   dropped; post-activation sample applies).
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: `AUD-34` (a stale identification across a source switch) passes owner UAT. 
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).

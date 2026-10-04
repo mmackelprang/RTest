@@ -1,5 +1,12 @@
 # ROADMAP — what is actually left before GA
 
+> ⛔ **2026-10-04: THIS IS A 2026-09-09 SNAPSHOT. For what is left, read
+> [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) § *Status 2026-10-04*.** Most rows in §A.3 below have
+> shipped and been archived since. This file was not re-derived, with one exception: **`AUD-1` and `AUD-19` are
+> re-tiered from P2 to pre-GA in §A.3 and §A.4**, per the owner ruling of 2026-09-10 recorded in the punch list
+> (§5's head note). That ruling outranks the P2 this file gave them. `AUD-1` has since shipped (#667); `AUD-19` is
+> open.
+
 **Written:** 2026-09-09 (Planner) · **Read-only pass.** Nothing was claimed, reordered, or edited; this
 file is the only thing it added.
 
@@ -123,10 +130,10 @@ Tier source is marked: **[PL]** = punch list, **[D]** = the row's own dossier.
 | `PHN-7` | 🟠 P1 [D] | `BellHealthService` polls the REST transport, which returns `UtcNow` as "last checked" | no | not stated |
 | `OPS-3` | 🟠 P1 [PL] | `BindsTo=` on web **+ `Upholds=` on api** — make joint failure actually joint | yes | ⛔ no, by standing exemption |
 | `UX-1` | 🟠 P1 [PL] | Skeleton shimmer invisible; value decided, one new token | yes | ⛔ no (rationale now spent) |
-| `AUD-1` | 🟡 P2 [PL] | Per-field metadata precedence: source wins where present, fingerprinting fills gaps | **yes** | ⛔ no |
+| `AUD-1` | ⛔ **pre-GA** (owner ruling 2026-09-10; was 🟡 P2 [PL]) · ✅ shipped #667 | Per-field metadata precedence: source wins where present, fingerprinting fills gaps | **yes** | ⛔ no |
 | `AUD-4` | 🟡 P2 [PL] | Unify the three source-removal layers; rename `SoundFlowMasterMixer` — it is not a mixer | yes | ⛔ no |
 | `AUD-17` | 🟡 P2 [D] | AVRCP album art has **never** worked; the code reads MPRIS names off a BlueZ interface | no | conditional |
-| `AUD-19` | 🟡 P2 [D] | After `AUD-1`, History will not follow the per-field rule that now-playing does | no | likely yes |
+| `AUD-19` | ⛔ **pre-GA** (owner ruling 2026-09-10; was 🟡 P2 [D]) | After `AUD-1`, History will not follow the per-field rule that now-playing does | no | likely yes |
 | `UI-8` | 🟡 P2 [D] | Two glow tokens consumed, never declared — **delete three dead references** | no (fully specified) | ✅ **yes** |
 | `UI-15` | 🟡 P2 [D] | `isFirstRun` conflates "never observed" with "no source" | **yes** | ✅ **yes** |
 | `PHN-8` | 🟡 P2 [D] | Speak a thread's unread messages from the phone **dashboard**, not just inside a thread | no | not stated |
@@ -151,7 +158,9 @@ reason *"The visible symptom is a slightly wrong track title. Real, annoying, **
 The queue has since filed `AUD-19` explicitly as *"after `AUD-1` ships"* and the owner issued a
 behavioural rule for it on 2026-09-08. **This is a real tension the punch list has not been asked
 about**: is per-field metadata precedence post-GA work, or is it the thing two other rows are now
-waiting behind? That is your call, not a bookkeeping error.
+waiting behind? That is your call, not a bookkeeping error. ✅ **Answered 2026-09-10: the owner ruled `AUD-1`
+and `AUD-19` pre-GA** (punch list §5 head note), so both are pre-GA work, with `AUD-1` first. `AUD-1` shipped as
+#667.
 
 **3. ⛔ `AUD-1`'s punch-list cell contains a claim its own dossier has since falsified.** §5 says
 *"The wanted behaviour already exists at `BluetoothAudioSource.cs:893-905`, on the branch the flag
@@ -462,7 +471,8 @@ cause sitting in another repo's config file.
    use of a phone-plus-box hour on the board.
 7. **Decide `AUD-1`'s tier.** The punch list says post-GA; the queue is scheduling `AUD-19` behind it and
    you already issued its behavioural rule. Both positions are defensible — but they cannot both be
-   acted on, and right now nobody has asked you.
+   acted on, and right now nobody has asked you. ✅ **Decided 2026-09-10: pre-GA, for both `AUD-1` and
+   `AUD-19`.**
 8. **Ask for a Planner pass on the punch list.** Eleven shipped items are still listed as open across
    three tiers, and thirty P1 items have no queue row. **Neither is a correctness bug; both make the
    document unusable as a picture of what is left**, which is the job it exists to do. Half a day of

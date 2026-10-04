@@ -299,3 +299,9 @@ interleaved switching. None appeared in the quiet re-run.
 **Owner checks outstanding:**
 - Per band, the look and touch of the BAND view at the panel.
 - Whether the AIR and VHF maps are useful.
+
+## ✅ Owner UAT — passed 2026-10-04
+
+Reported by the coordinator on 2026-10-04: `AUD-91` passes owner UAT. This closes the "Owner checks outstanding" list above. AM and SW stay with `AUD-94`, on hold for the all-band hardware.
+
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).

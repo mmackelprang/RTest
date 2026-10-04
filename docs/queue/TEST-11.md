@@ -95,3 +95,8 @@ rather than skip there.
 ## Depends on
 
 Nothing. Test-only for part 1. Part 2 is an owner decision.
+
+## ✅ Part 1 merged — [#681](https://github.com/mmackelprang/RTest/pull/681), squash `89b5b12`
+
+Merged to `main` as `89b5b12a`: the guard now probes what the P/Invoke probes. **Part 2 is still an owner
+decision.** The row stays live as 📋, with "owner decision first" in its Item cell (2026-10-04).
