@@ -46,6 +46,7 @@ public class StationListScanTests
   [Theory]
   [InlineData(92_300_000, 88_100_000, 92_300_000, true, true)]     // reaches the start
   [InlineData(92_290_000, 88_100_000, 92_300_000, true, true)]     // reaches the station the scan started on
+  [InlineData(92_290_000, 100_100_000, 92_300_000, false, true)]   // down, from above: 92.3 is not past 92.29, but is its station
   [InlineData(95_000_000, 88_100_000, 100_100_000, true, true)]    // passes the start after wrapping
   [InlineData(95_000_000, 95_000_000, 100_100_000, true, false)]   // first hop
   [InlineData(95_000_000, 100_100_000, 88_100_000, true, false)]   // the wrap itself
@@ -78,6 +79,20 @@ public class StationListScanTests
     Assert.Equal(new[] { ReceiverState.Scanning, ReceiverState.Running }, states);
     // Only a live seek's stops are observations; the list's stations are already known.
     Assert.Equal(0, seekEvents);
+    receiver.Shutdown();
+  }
+
+  [Fact]
+  public void ScanStations_StartedJustOffAStation_DoesNotReturnToIt()
+  {
+    // 10 kHz below 92.3 is listening to 92.3: going down and round must stop before 92.3, not land on it.
+    using RadioReceiver receiver = StartedReceiver(92_290_000);
+    List<long> tunes = new();
+    receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
+
+    receiver.ScanStations(Stations, ascending: false, Gap);
+
+    Assert.Equal(new long[] { 88_100_000, 100_100_000 }, tunes);
     receiver.Shutdown();
   }
 
