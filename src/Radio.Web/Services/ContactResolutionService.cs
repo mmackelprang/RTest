@@ -52,15 +52,26 @@ public class ContactResolutionService
     var index = new Dictionary<string, string>(StringComparer.Ordinal);
     if (contacts != null)
     {
-      foreach (var c in contacts)
+      // PHN-14: the synced phone book (PBAP) wins over a RotaryPhone ("Manual") contact for the same number —
+      // the precedence the API's announcement and the incoming-call banner use. Two passes, PBAP first; within
+      // a source the first contact wins (contacts arrive name-sorted).
+      var list = contacts as IReadOnlyList<MergedContact> ?? contacts.ToList();
+      foreach (bool pbapPass in new[] { true, false })
       {
-        var key = PhoneNumberNormalizer.Normalize(c.Phone);
-        if (key.Length == 0 || string.IsNullOrWhiteSpace(c.Name))
+        foreach (var c in list)
         {
-          continue;
+          bool isPbap = string.Equals(c.Source, "PBAP", StringComparison.OrdinalIgnoreCase);
+          if (isPbap != pbapPass)
+          {
+            continue;
+          }
+          var key = PhoneNumberNormalizer.Normalize(c.Phone);
+          if (key.Length == 0 || string.IsNullOrWhiteSpace(c.Name))
+          {
+            continue;
+          }
+          index.TryAdd(key, c.Name);
         }
-        // First contact wins for a given number (contacts arrive name-sorted).
-        index.TryAdd(key, c.Name);
       }
     }
     _index = index;
@@ -111,7 +122,14 @@ public class ContactResolutionService
   /// single lookup shared by all concurrent callers for the same number. Never
   /// throws; returns the resolved name or null.
   /// </summary>
-  public Task<string?> ResolveAsync(string? number, CancellationToken ct = default)
+  /// <param name="number">The number to resolve.</param>
+  /// <param name="retryCachedMiss">
+  /// PHN-14: when true, a cached "no such contact" is asked again instead of returned. The incoming-call
+  /// banner sets it: a call is rare, and the kiosk circuit can hold a miss for days — through a later phone
+  /// sync, or from before PHN-14, when the API answered 404 for every number while no phone was connected.
+  /// </param>
+  /// <param name="ct">Cancels the lookup.</param>
+  public Task<string?> ResolveAsync(string? number, bool retryCachedMiss = false, CancellationToken ct = default)
   {
     var key = PhoneNumberNormalizer.Normalize(number ?? "");
     if (key.Length == 0)
@@ -122,7 +140,7 @@ public class ContactResolutionService
     {
       return Task.FromResult<string?>(local);
     }
-    if (_cache.TryGetValue(key, out var cached))
+    if (_cache.TryGetValue(key, out var cached) && (cached is not null || !retryCachedMiss))
     {
       return Task.FromResult(cached);
     }

@@ -10,17 +10,22 @@ public class PbapContactRepository : IPbapContactRepository
 {
   private readonly string _connectionString;
   private readonly SqliteConnection? _sharedConnection; // for testing with in-memory DB
+  private readonly TimeProvider _time;
 
   public PbapContactRepository(string connectionString)
   {
     _connectionString = connectionString;
+    _time = TimeProvider.System;
   }
 
   /// <summary>Test-only constructor for in-memory SQLite.</summary>
-  internal PbapContactRepository(SqliteConnection sharedConnection)
+  /// <param name="sharedConnection">The open in-memory connection every call reuses.</param>
+  /// <param name="timeProvider">Stamps <c>LastSynced</c> on upsert; lets a test order syncs deterministically.</param>
+  internal PbapContactRepository(SqliteConnection sharedConnection, TimeProvider? timeProvider = null)
   {
     _sharedConnection = sharedConnection;
     _connectionString = sharedConnection.ConnectionString;
+    _time = timeProvider ?? TimeProvider.System;
   }
 
   private SqliteConnection GetConnection()
@@ -82,7 +87,7 @@ public class PbapContactRepository : IPbapContactRepository
         }
 
         // Insert new contacts (one row per phone number)
-        var now = DateTime.UtcNow;
+        var now = _time.GetUtcNow().UtcDateTime;
         foreach (var contact in contacts)
         {
           foreach (var number in contact.PhoneNumbers)
@@ -155,6 +160,68 @@ public class PbapContactRepository : IPbapContactRepository
       }
 
       return null;
+    }
+    finally
+    {
+      ReturnConnection(conn);
+    }
+  }
+
+  /// <inheritdoc />
+  /// <remarks>
+  /// One query reads every candidate on every device (an exact match, or a stored number ending in the same
+  /// seven digits) with its device's sync time; the ranking is done here rather than in SQL so the order is
+  /// written once, in one place. <c>LastSynced</c> per device is <c>MAX(LastSynced)</c>: an upsert replaces a
+  /// device's whole phone book with one timestamp, so every row of a device carries its last sync.
+  /// </remarks>
+  public async Task<PbapContactMatch?> FindByPhoneNumberAnyDeviceAsync(
+    string normalizedNumber, string? preferredDeviceAddress = null, CancellationToken ct = default)
+  {
+    if (string.IsNullOrEmpty(normalizedNumber))
+    {
+      return null;
+    }
+
+    var last7 = PhoneNumberNormalizer.GetLast7(normalizedNumber);
+    bool useSuffix = last7.Length == 7;
+
+    var conn = GetConnection();
+    try
+    {
+      using var cmd = conn.CreateCommand();
+      cmd.CommandText = """
+          SELECT c.Id, c.DeviceAddress, c.DisplayName, c.PhoneNumber, d.LastSynced
+          FROM PbapContacts c
+          JOIN (SELECT DeviceAddress, MAX(LastSynced) AS LastSynced FROM PbapContacts GROUP BY DeviceAddress) d
+            ON d.DeviceAddress = c.DeviceAddress
+          WHERE c.PhoneNumber = @phone OR (@useSuffix = 1 AND c.PhoneNumber LIKE @suffix)
+          """;
+      cmd.Parameters.AddWithValue("@phone", normalizedNumber);
+      cmd.Parameters.AddWithValue("@useSuffix", useSuffix ? 1 : 0);
+      cmd.Parameters.AddWithValue("@suffix", "%" + last7);
+
+      var candidates = new List<(long Id, PbapContactMatch Match, DateTime? Synced)>();
+      using var reader = await cmd.ExecuteReaderAsync(ct);
+      while (await reader.ReadAsync(ct))
+      {
+        var phone = reader.GetString(3);
+        DateTime? synced = reader.IsDBNull(4)
+          ? null
+          : DateTime.Parse(reader.GetString(4), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+        candidates.Add((reader.GetInt64(0),
+          new PbapContactMatch(reader.GetString(1), reader.GetString(2), phone, phone == normalizedNumber),
+          synced));
+      }
+
+      return candidates
+        .OrderByDescending(c => c.Match.IsExactMatch)
+        .ThenByDescending(c => preferredDeviceAddress is not null
+          && string.Equals(c.Match.DeviceAddress, preferredDeviceAddress, StringComparison.OrdinalIgnoreCase))
+        .ThenByDescending(c => c.Synced ?? DateTime.MinValue)
+        .ThenBy(c => c.Match.DeviceAddress, StringComparer.Ordinal)
+        .ThenBy(c => c.Id)
+        .Select(c => c.Match)
+        .FirstOrDefault();
     }
     finally
     {

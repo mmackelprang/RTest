@@ -9,7 +9,9 @@
                    BellHealth="Bell"
                    OnCheckBell="OnCheckBell"
                    OnAnswer="@(() => OnSimulateHook.InvokeAsync(true))"
-                   OnHangup="@(() => OnSimulateHook.InvokeAsync(false))" />
+                   OnHangup="@(() => OnSimulateHook.InvokeAsync(false))"
+                   CanIgnore="CanIgnore"
+                   OnIgnore="OnIgnore" />
 
   @* Right column, spans both rows: existing System Status + Call Path *@
   <div style="display: flex; flex-direction: column; gap: 12px; grid-column: 2;
@@ -158,6 +160,12 @@
   [Parameter] public EventCallback OnSimulateIncoming { get; set; }
   [Parameter] public EventCallback OnSimulateDial { get; set; }
   [Parameter] public List<MergedContact>? Contacts { get; set; }
+
+  /// <summary>PHN-13: forwarded to the hero's Ignore — whether declining is enabled.</summary>
+  [Parameter] public bool CanIgnore { get; set; }
+
+  /// <summary>PHN-13: forwarded to the hero's Ignore — declines the ringing call.</summary>
+  [Parameter] public Func<Task<Radio.Web.Services.ApiClients.DeclineCallOutcome>>? OnIgnore { get; set; }
 
   /// <summary>
   /// Re-checks whether the bell can ring (State C's "Check again"). Forwarded to the

@@ -11,6 +11,7 @@
 @inject GvBridgeStatusService GvBridgeStatus
 @inject PhoneUnreadState PhoneUnread
 @inject BellHealthService BellHealth
+@inject IConfiguration Configuration
 @implements IDisposable
 
 <PageTitle>Phone - Radio Console</PageTitle>
@@ -104,6 +105,8 @@
                            OnSimulateIncoming="SimulateIncomingCallAsync"
                            OnSimulateDial="SimulateDialStringAsync"
                            OnCheckBell="CheckBellAsync"
+                           CanIgnore="@Configuration.GetValue(IncomingCallBannerService.DeclineSupportedKey, false)"
+                           OnIgnore="DeclineRingingCallAsync"
                            Contacts="MergedContacts" />
     }
     else if (_activeTab == "contacts")
@@ -1087,6 +1090,9 @@
   }
 
   // Developer controls
+
+  // PHN-13: the hero's Ignore — the same decline as the banner's, for the default phone (the one this page shows).
+  private Task<DeclineCallOutcome> DeclineRingingCallAsync() => PhoneApi.DeclineCallAsync(phoneId: null);
 
   private async Task SimulateHookAsync(bool offHook)
   {
