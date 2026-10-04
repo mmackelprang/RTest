@@ -12,7 +12,7 @@ public sealed record BandMapChannel(long FrequencyHz, float LevelDbfs);
 /// <param name="FrequencyHz">Where the seek stopped, in Hz.</param>
 /// <param name="SeekStrength">
 /// The seek's own signal reading when it stopped: the RMS magnitude of the receiver's wideband
-/// capture, 0 to about 1.2. Not a dB level and not comparable with <see cref="BandMapChannel.LevelDbfs"/>.
+/// capture, 0 to about 1.4. Not a dB level and not comparable with <see cref="BandMapChannel.LevelDbfs"/>.
 /// </param>
 /// <param name="ObservedAtUtc">When the seek stopped there, UTC.</param>
 public sealed record BandMapSeekStation(long FrequencyHz, float SeekStrength, DateTimeOffset ObservedAtUtc);

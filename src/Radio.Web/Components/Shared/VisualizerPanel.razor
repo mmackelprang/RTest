@@ -1606,8 +1606,11 @@
   /// at once — once per band change, not once per broadcast, since telemetry ticks repeat the state up
   /// to twice a second. On VHF, a frequency outside the window shown re-reads the map once per window.
   /// That re-read moves the window only while no VHF map is stored: once one is, the API returns the
-  /// stored map's range, and only a new sweep moves it. Otherwise only a changed frequency does anything: it
-  /// moves the station marker, a redraw and no API call; a repeated tick does nothing at all.
+  /// stored map's range, and only a new sweep moves it. AUD-100: the tick on which <c>IsScanning</c> goes
+  /// from true to false re-reads the map, so a live seek's stops appear at once (a refresh in flight
+  /// during the scan can bring back a scanning state and cause one more such read, never one per tick).
+  /// Otherwise only a changed frequency does anything: it moves the station marker, a redraw and no API
+  /// call; a repeated tick does nothing at all.
   /// </summary>
   private async Task ApplyRadioStateAsync(RadioStateDto dto)
   {
@@ -1648,7 +1651,7 @@
       || _radioState.Frequency != dto.Frequency
       || !SameBand(_radioState.Band, dto.Band);
     // AUD-100: a scan that has just ended may have added seek-observed stations; read them now rather
-    // than at the next idle refresh, up to 30 s later. Once per scan: only the tick that ends it.
+    // than at the next idle refresh, up to 30 s later. Only the tick that ends a scan does this.
     bool scanEnded = _radioState?.IsScanning == true && !dto.IsScanning;
     _radioState = dto;
 

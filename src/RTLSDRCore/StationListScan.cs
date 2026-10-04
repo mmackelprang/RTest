@@ -64,8 +64,27 @@ public static class StationListScan
   /// <paramref name="minGapHz"/> to it (the station the scan started on): it has gone all the way
   /// round and stops, as the live seek stops when it returns to its start.
   /// </summary>
-  public static bool CompletesCircle(long startHz, long currentHz, long nextHz, bool ascending, long minGapHz) =>
-    Math.Abs(nextHz - startHz) < Math.Max(1, minGapHz)
-    || (ascending && currentHz < startHz && nextHz >= startHz)
-    || (!ascending && currentHz > startHz && nextHz <= startHz);
+  /// <remarks>
+  /// A hop covers the arc from <paramref name="currentHz"/> (exclusive) to <paramref name="nextHz"/>
+  /// (inclusive) in the scan's direction. A wrapping hop's arc runs through the band edge, so it
+  /// covers a start above the top station or below the bottom one.
+  /// </remarks>
+  public static bool CompletesCircle(long startHz, long currentHz, long nextHz, bool ascending, long minGapHz)
+  {
+    if (Math.Abs(nextHz - startHz) < Math.Max(1, minGapHz))
+    {
+      return true;
+    }
+
+    if (ascending)
+    {
+      return nextHz > currentHz
+        ? startHz > currentHz && startHz <= nextHz
+        : startHz > currentHz || startHz <= nextHz;   // wrapped through the top edge
+    }
+
+    return nextHz < currentHz
+      ? startHz < currentHz && startHz >= nextHz
+      : startHz < currentHz || startHz >= nextHz;     // wrapped through the bottom edge
+  }
 }

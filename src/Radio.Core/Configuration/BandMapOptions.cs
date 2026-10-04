@@ -38,8 +38,9 @@ public sealed class BandMapOptions
   /// </summary>
   /// <remarks>
   /// A day, because the timer re-sweeps the radio's band every <see cref="RescanIntervalMinutes"/>
-  /// whenever the dongle is idle or the console is asleep, so on a box in normal use the map is
-  /// rarely more than a few hours old, and broadcast transmitters do not move within a day. What a
+  /// whenever the dongle is idle or the console is asleep — but not while the radio plays with the
+  /// console awake, so after a day's listening the map can be many hours old — and broadcast
+  /// transmitters do not move within a day. What a
   /// stale map costs is a station that came on air since the sweep being hopped over, and a
   /// station gone off air costing one scan pause. A map older than a day means the sweeps have
   /// stopped happening, and live seek is the safer answer.

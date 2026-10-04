@@ -70,7 +70,7 @@ public class StationListScanTests
     receiver.SeekStationFound += (_, _) => seekEvents++;
     receiver.StateChanged += (_, e) => states.Add(e.NewState);
 
-    receiver.ScanStations(Stations, ascending, Gap);
+    Bounded(receiver, () => receiver.ScanStations(Stations, ascending, Gap));
 
     // Straight from station to station: no frequency in between is ever tuned.
     Assert.Equal(expectedTunes, tunes);
@@ -90,7 +90,7 @@ public class StationListScanTests
     List<long> tunes = new();
     receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
 
-    receiver.ScanStations(Stations, ascending: false, Gap);
+    Bounded(receiver, () => receiver.ScanStations(Stations, ascending: false, Gap));
 
     Assert.Equal(new long[] { 88_100_000, 100_100_000 }, tunes);
     receiver.Shutdown();
@@ -103,7 +103,7 @@ public class StationListScanTests
     List<long> tunes = new();
     receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
 
-    receiver.ScanStations(new long[] { 162_400_000, 100_100_000, 92_300_000 }, ascending: true, Gap);
+    Bounded(receiver, () => receiver.ScanStations(new long[] { 162_400_000, 100_100_000, 92_300_000 }, ascending: true, Gap));
 
     Assert.Equal(new long[] { 100_100_000 }, tunes);
     receiver.Shutdown();
@@ -128,7 +128,7 @@ public class StationListScanTests
 
     // Threshold 0: every step is a stop, so the events are determined by the steps, not by what the
     // mock device's samples happen to measure. 5 MHz steps keep the round trip to a few dwells.
-    receiver.ScanFrequencyUp(stepHz: 5_000_000, signalThreshold: 0f, dwellTimeMs: 0);
+    Bounded(receiver, () => receiver.ScanFrequencyUp(stepHz: 5_000_000, signalThreshold: 0f, dwellTimeMs: 0));
 
     Assert.NotEmpty(found);
     Assert.Equal(tunes, found.Select(e => e.FrequencyHz));
@@ -147,12 +147,78 @@ public class StationListScanTests
       throw new IOException("disk full");
     };
 
-    receiver.ScanFrequencyUp(stepHz: 5_000_000, signalThreshold: 0f, dwellTimeMs: 0);
+    Bounded(receiver, () => receiver.ScanFrequencyUp(stepHz: 5_000_000, signalThreshold: 0f, dwellTimeMs: 0));
 
     // More than one stop: the first throw did not end the scan.
     Assert.True(calls > 1, $"expected several stops, got {calls}");
     Assert.False(receiver.IsScanning);
     receiver.Shutdown();
+  }
+
+  [Theory]
+  // Started above the top station or below the bottom one: the wrap hop passes the start through the
+  // band edge, and the scan must stop there rather than cycle until Stop (the reviewer's H1).
+  [InlineData(107_900_000, true, new long[] { 88_100_000, 92_300_000, 100_100_000 })]
+  [InlineData(107_900_000, false, new long[] { 100_100_000, 92_300_000, 88_100_000 })]
+  [InlineData(87_900_000, true, new long[] { 88_100_000, 92_300_000, 100_100_000 })]
+  [InlineData(87_900_000, false, new long[] { 100_100_000, 92_300_000, 88_100_000 })]
+  public void ScanStations_StartedOutsideTheStationsSpan_VisitsEachOnce_AndEnds(long startHz, bool ascending, long[] expected)
+  {
+    using RadioReceiver receiver = StartedReceiver(startHz);
+    List<long> tunes = new();
+    receiver.FrequencyChanged += (_, e) => tunes.Add(e.NewFrequency);
+
+    Bounded(receiver, () => receiver.ScanStations(Stations, ascending, Gap));
+
+    Assert.Equal(expected, tunes);
+    receiver.Shutdown();
+  }
+
+  [Theory]
+  [InlineData(107_900_000, 100_100_000, 88_100_000, true, true)]   // up, start above the top: the wrap passes it
+  [InlineData(87_900_000, 88_100_000, 100_100_000, false, true)]   // down, start below the bottom: the wrap passes it
+  [InlineData(87_900_000, 100_100_000, 88_100_000, true, true)]    // up, start below the bottom: the wrap passes it
+  [InlineData(107_900_000, 88_100_000, 100_100_000, false, true)]  // down, start above the top: the wrap passes it
+  [InlineData(107_900_000, 88_100_000, 92_300_000, true, false)]
+  public void CompletesCircle_AWrapHop_PassesAStartBeyondTheEndStations(long startHz, long currentHz, long nextHz, bool ascending, bool expected)
+  {
+    Assert.Equal(expected, StationListScan.CompletesCircle(startHz, currentHz, nextHz, ascending, Gap));
+  }
+
+  [Fact]
+  public void ScanStations_EndsWhenTheBandChanges_WithoutTuningTheOldBandsStations()
+  {
+    using RadioReceiver receiver = StartedReceiver(92_300_000);
+    List<long> tunes = new();
+    receiver.FrequencyChanged += (_, e) =>
+    {
+      tunes.Add(e.NewFrequency);
+      // The first hop lands, then the band changes under the scan (SetBand does not cancel it).
+      if (e.NewFrequency == 100_100_000)
+      {
+        receiver.SetBand(BandType.Aircraft, 118_000_000);
+      }
+    };
+
+    Bounded(receiver, () => receiver.ScanStations(Stations, ascending: true, Gap));
+
+    Assert.Equal(new long[] { 100_100_000, 118_000_000 }, tunes);
+    Assert.Equal(118_000_000, receiver.CurrentFrequency);
+    receiver.Shutdown();
+  }
+
+  /// <summary>
+  /// Runs a blocking scan with a fail-safe, so a scan that never ends fails the test instead of hanging
+  /// the run. The bound is not part of any assertion: every scan here ends by going round.
+  /// </summary>
+  private static void Bounded(RadioReceiver receiver, Action scan)
+  {
+    Task task = Task.Run(scan);
+    if (!task.Wait(TimeSpan.FromSeconds(30)))
+    {
+      receiver.CancelScan();
+      Assert.Fail("The scan did not end within the fail-safe.");
+    }
   }
 
   private static RadioReceiver StartedReceiver(long frequencyHz)

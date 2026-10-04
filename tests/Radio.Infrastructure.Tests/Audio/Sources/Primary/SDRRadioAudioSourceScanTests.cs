@@ -112,7 +112,7 @@ public sealed class SDRRadioAudioSourceScanTests : IAsyncDisposable
   }
 
   [Fact]
-  public async Task NoBandMaps_ScanSeeksLive_AndRecordsNothing()
+  public async Task NoBandMaps_ScanSeeksLive()
   {
     _radioOptions.ScanStopThreshold = 0;
     SDRRadioAudioSource source = CreateSource(null);

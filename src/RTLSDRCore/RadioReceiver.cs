@@ -593,12 +593,13 @@ namespace RTLSDRCore;
       /// <summary>
       /// Hops between <paramref name="stationsHz"/> in one direction, pausing
       /// <see cref="ScanPauseMs"/> on each so the listener can hear it, until
-      /// <see cref="CancelScan"/> or until the next hop would reach the
-      /// frequency the scan started on (AUD-100). The station-list twin of
+      /// <see cref="CancelScan"/>, until the next hop would reach or pass the
+      /// frequency the scan started on, or until the band changes (AUD-100);
+      /// never more hops than there are stations. The station-list twin of
       /// <see cref="ScanFrequencyUp"/> / <see cref="ScanFrequencyDown"/>: it
       /// tunes straight from station to station, with no stepping through
-      /// the frequencies between, and it measures nothing — every listed
-      /// station gets its pause. <see cref="SeekStationFound"/> is not raised.
+      /// the frequencies between, and it measures nothing — every station it
+      /// lands on gets its pause, whatever its signal is now. <see cref="SeekStationFound"/> is not raised.
       /// Blocks the calling thread.
       /// </summary>
       /// <param name="stationsHz">
@@ -637,8 +638,26 @@ namespace RTLSDRCore;
           try
           {
               long startFrequency = _currentFrequencyHz;
+              // Backstop: a scan round visits each station at most once, so more hops than
+              // stations means the circle check has missed and the scan would never end.
+              int hops = 0;
               while (!_scanCts.Token.IsCancellationRequested)
               {
+                  // The list was filtered against the band the scan started on. A band change
+                  // mid-scan (SetBand does not cancel a scan) ends it rather than tuning the
+                  // old band's stations inside the new band.
+                  if (!ReferenceEquals(_currentBand, band))
+                  {
+                      Logger.Information("Station scan ended: the band changed to {Band}", _currentBand.Name);
+                      break;
+                  }
+
+                  if (hops >= stations.Length)
+                  {
+                      Logger.Warning("Station scan ended after {Hops} hops without going round; stopping", hops);
+                      break;
+                  }
+
                   long? next = StationListScan.Next(stations, _currentFrequencyHz, ascending, minGapHz);
                   if (next == null)
                   {
@@ -653,6 +672,7 @@ namespace RTLSDRCore;
                       break;
                   }
 
+                  hops++;
                   SetFrequencyInternal(next.Value);
                   Logger.Information("Station scan stopped at {Frequency}, pausing {PauseMs}ms",
                       RadioBand.FormatFrequency(next.Value), ScanPauseMs);

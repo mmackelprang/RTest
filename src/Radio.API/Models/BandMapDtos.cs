@@ -77,7 +77,7 @@ public sealed record BandMapChannelDto(long FrequencyHz, float LevelDbfs);
 
 /// <summary>A station a live seek stopped on (AUD-100).</summary>
 /// <param name="FrequencyHz">Where the seek stopped, in Hz.</param>
-/// <param name="SeekStrength">The seek's own wideband signal reading, 0 to about 1.2; not comparable with <see cref="BandMapChannelDto.LevelDbfs"/>.</param>
+/// <param name="SeekStrength">The seek's own wideband signal reading, 0 to about 1.4; not comparable with <see cref="BandMapChannelDto.LevelDbfs"/>.</param>
 /// <param name="ObservedAtUtc">When, UTC.</param>
 public sealed record BandMapSeekStationDto(long FrequencyHz, float SeekStrength, DateTimeOffset ObservedAtUtc);
 

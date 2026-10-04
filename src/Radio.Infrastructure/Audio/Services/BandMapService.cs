@@ -81,7 +81,7 @@ public sealed record BandMapTuning(string Band, long FrequencyHz);
 /// Seek-observed stations (AUD-100) are kept per band beside the maps, never inside them: recording
 /// one changes no swept channel, no <see cref="BandMap.ScannedAtUtc"/> and no age, and a band with
 /// only seek-observed stations still has no map. A completed sweep drops the band's seek-observed
-/// stations inside the range it swept.
+/// stations inside the range it swept that were observed no later than the sweep finished.
 /// </para>
 /// </remarks>
 public sealed class BandMapService : IHostedService, IDisposable, IScanStationMap
@@ -362,10 +362,10 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
 
   /// <summary>
   /// Drops <paramref name="band"/>'s seek-observed stations from <paramref name="minHz"/> to
-  /// <paramref name="maxHz"/> inclusive, after a completed sweep of that range; returns how many.
-  /// Must be called holding <c>_lock</c>.
+  /// <paramref name="maxHz"/> inclusive that were observed no later than <paramref name="sweptAtUtc"/>,
+  /// after a completed sweep of that range; returns how many. Must be called holding <c>_lock</c>.
   /// </summary>
-  private int DropSeekStationsLocked(string band, long minHz, long maxHz)
+  private int DropSeekStationsLocked(string band, long minHz, long maxHz, DateTimeOffset sweptAtUtc)
   {
     IReadOnlyList<BandMapSeekStation>? current = _seekStations.GetValueOrDefault(band);
     if (current == null || current.Count == 0)
@@ -373,7 +373,9 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
       return 0;
     }
 
-    BandMapSeekStation[] kept = current.Where(s => s.FrequencyHz < minHz || s.FrequencyHz > maxHz).ToArray();
+    BandMapSeekStation[] kept = current
+      .Where(s => s.FrequencyHz < minHz || s.FrequencyHz > maxHz || s.ObservedAtUtc > sweptAtUtc)
+      .ToArray();
     _seekStations[band] = kept;
     return current.Count - kept.Length;
   }
@@ -923,9 +925,10 @@ public sealed class BandMapService : IHostedService, IDisposable, IScanStationMa
         if (newMap != null)
         {
           _maps[newMap.Band] = newMap;
-          // AUD-100: the sweep measured every channel of its range, so it is the authority there;
-          // seek-observed stations outside it (another VHF window) are kept.
-          seekDropped = DropSeekStationsLocked(newMap.Band, newMap.RangeMinHz, newMap.RangeMaxHz);
+          // AUD-100: the sweep measured every channel of its range, so it is the authority there
+          // over what was seen before it finished; seek-observed stations outside it (another VHF
+          // window), and any recorded after it finished, are kept.
+          seekDropped = DropSeekStationsLocked(newMap.Band, newMap.RangeMinHz, newMap.RangeMaxHz, newMap.ScannedAtUtc);
         }
         _last = outcome;
         _running = null;
