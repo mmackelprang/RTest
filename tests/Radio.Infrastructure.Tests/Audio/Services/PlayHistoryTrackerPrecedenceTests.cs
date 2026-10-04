@@ -281,6 +281,42 @@ public class PlayHistoryTrackerPrecedenceTests
     Assert.Equal(MetadataSource.Avrcp, entry.MetadataSource);
   }
 
+  [Fact]
+  public void Bluetooth_AnIdentificationWithNoArtOrAlbum_DoesNotEraseTheRowsArtOrAlbum()
+  {
+    using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.Bluetooth);
+    RaiseAvrcp("Basket Case", "Green Day", album: "");
+    RaiseSongChanged(Identified("Basket Case", "Green Day", "Dookie", ArtUrl));
+    Assert.Equal(ArtUrl, Assert.Single(_entries).Track!.CoverArtUrl);
+
+    RaiseSongChanged(Identified("Spirit In The Sky", "Norman Greenbaum"));
+
+    PlayHistoryEntry entry = Assert.Single(_entries);
+    Assert.Equal("Dookie", entry.Track!.Album);
+    Assert.Equal(ArtUrl, entry.Track.CoverArtUrl);
+  }
+
+  [Fact]
+  public void Bluetooth_AvrcpTitleWithoutArtist_AMisidentificationDoesNotSplitTheRow()
+  {
+    // A phone that sends a title but no artist. BluetoothAudioSource fills the artist from the
+    // first identification (which raises no SongChanged) and keeps it under AVRCP's title.
+    using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.Bluetooth);
+    RaiseAvrcp("Basket Case", "", album: "");
+    Assert.Empty(_entries); // the AVRCP handler needs an artist
+    RaiseIdentified(Identified("Basket Case", "Green Day", "Dookie", ArtUrl));
+    _sourceMetadata[StandardMetadataKeys.Artist] = "Green Day";
+
+    RaiseSongChanged(Identified("Spirit In The Sky", "Norman Greenbaum", "Spirit In The Sky", ArtUrl));
+    RaiseSongChanged(Identified("Basket Case", "Green Day", "Dookie", ArtUrl));
+
+    PlayHistoryEntry entry = Assert.Single(_entries);
+    Assert.Empty(_finalized);
+    Assert.Equal("Basket Case", entry.Track!.Title);
+    Assert.Equal("Green Day", entry.Track.Artist);
+    Assert.Equal(MetadataSource.Avrcp, entry.MetadataSource);
+  }
+
   // --- File player -----------------------------------------------------------------------------
 
   [Fact]
