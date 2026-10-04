@@ -147,6 +147,24 @@ public class PhoneStatusHeroIgnoreTests : TestContext
   }
 
   [Fact]
+  public void ADeclineStillUnansweredAtTheDeadline_ShowsTheError_MeasuredFromTheTap()
+  {
+    // Pre-merge review M2: the deadline is armed at the tap, as the banner's is — a hung RotaryPhone must not leave
+    // "Ending call…" up for the client's 10 s timeout. A 200 that arrives later changes nothing.
+    var pending = new TaskCompletionSource<DeclineCallOutcome>();
+    var cut = Render(() => pending.Task);
+    Ignore(cut).Click();
+
+    _time.Advance(PhoneStatusHero.IgnoreDeadline);
+
+    cut.WaitForAssertion(() =>
+      cut.Find(".phone-hero-ignore-error").TextContent.Should().Be("Couldn't end the call. Try again."));
+    cut.InvokeAsync(() => pending.SetResult(DeclineCallOutcome.Declined));
+    cut.Find(".phone-hero-ignore-error").Should().NotBeNull();
+    Ignore(cut).HasAttribute("disabled").Should().BeFalse();
+  }
+
+  [Fact]
   public void TheCallStoppingRinging_BeforeTheDeadline_CancelsIt()
   {
     var cut = Render(() => Task.FromResult(DeclineCallOutcome.Declined));

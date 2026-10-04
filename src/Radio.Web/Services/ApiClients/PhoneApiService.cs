@@ -8,14 +8,17 @@ namespace Radio.Web.Services.ApiClients;
 /// <summary>How RotaryPhone answered a decline (PHN-13). See <see cref="PhoneApiService.DeclineCallAsync"/>.</summary>
 public enum DeclineCallResult
 {
+  /// <summary>
+  /// Transport failure, 5xx, 404, or a 2xx without <c>"declined": true</c>. The only error case. Value 0, so a
+  /// <c>default</c> outcome fails closed rather than reading as a decline.
+  /// </summary>
+  Failed = 0,
+
   /// <summary><c>200 {"declined": true}</c>: the ringing call is being torn down.</summary>
   Declined,
 
   /// <summary><c>409</c>: the call was not ringing any more (answered, or the caller gave up). Benign.</summary>
   NotRinging,
-
-  /// <summary>Transport failure, 5xx, 404, or a 2xx without <c>"declined": true</c>. The only error case.</summary>
-  Failed,
 }
 
 /// <summary>The result of a decline, with the phone's state when RotaryPhone reported one on a <c>409</c>.</summary>
@@ -126,7 +129,7 @@ public class PhoneApiService
   /// <para>
   /// <b>Every <c>409</c> is benign, whatever its body says.</b> RotaryPhone returns <c>409</c> from this route
   /// only when the phone is not ringing, so the call on screen is over or answered either way; the state is
-  /// read for the banner's exit beat and for the debug line, and a <c>409</c> whose body cannot be read is still
+  /// read for the banner's exit beat and for the debug line, and a <c>409</c> whose body does not parse is still
   /// <see cref="DeclineCallResult.NotRinging"/> (state <c>null</c>).
   /// </para>
   /// <para>

@@ -105,6 +105,23 @@ public class IncomingCallBannerServiceTests
     Assert.Equal(0, rig.Phone.Count("/api/contacts"));   // the second source is not even asked
   }
 
+  [Fact]
+  public async Task ThePhonePagesLocalIndex_DoesNotOutrankTheApisSyncedPhoneBookAnswer()
+  {
+    // Pre-merge review M1: the circuit's index (primed by the Phone page) holds only one phone book's first numbers
+    // plus every RotaryPhone contact. A RotaryPhone name there must not beat the synced name the API returns —
+    // the name the spoken announcement uses.
+    var rig = new Rig();
+    rig.Contacts.PrimeFromContacts([new Radio.Web.Models.MergedContact("1", "RotaryPhone name", Number, null, "Manual")]);
+    rig.Phone.PbapName = "Synced name";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("Synced name", rig.Service.Current.PrimaryText);
+  }
+
   [Theory]
   [InlineData("+15550137424", "5550137424")]
   [InlineData("15550137424", "+1 (555) 013-7424")]

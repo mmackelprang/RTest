@@ -1091,7 +1091,9 @@
 
   // Developer controls
 
-  // PHN-13: the hero's Ignore — the same decline as the banner's, for the default phone (the one this page shows).
+  // PHN-13: the hero's Ignore — the same decline as the banner's, sent without a phone id, so RotaryPhone declines
+  // its "default" phone. The page does not track phone ids (its hub handlers overwrite _callState for any phone);
+  // today RotaryPhone has one phone, "default". With a second phone ringing this would get a quiet 409.
   private Task<DeclineCallOutcome> DeclineRingingCallAsync() => PhoneApi.DeclineCallAsync(phoneId: null);
 
   private async Task SimulateHookAsync(bool offHook)

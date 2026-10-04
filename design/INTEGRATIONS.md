@@ -798,7 +798,8 @@ Before `AUD-87` the hang-up called `IAnnouncementService.StopAsync`, which stops
 
 Every caller-name consumer — the API's spoken announcement (`PhoneContactLookupService`, called by
 `PhoneCallIntegrationService` when the event carries no name) and the Web's incoming-call banner
-(`IncomingCallBannerService`) — asks the same two sources in the same order:
+(`IncomingCallBannerService`) — asks the same two sources in the same order (the banner asks the API's lookup
+directly, not the Phone page's local contact index, so it names the caller as the announcement does):
 
 1. **The stored synced phone books (PBAP)** — every phone ever synced, **whether or not one is connected**:
    the connected phone first, then the most recently synced, then the rest. The Web asks through
@@ -900,7 +901,7 @@ asks RotaryPhone to decline the ringing call: `POST /api/phone/decline?phoneId=�
 
 | RotaryPhone answers | Meaning | Banner / hero |
 |---|---|---|
-| `200 {"declined": true}` | Declined; the `Idle` broadcast follows synchronously | **ENDING CALL** / *Ending call…* until the call leaves Ringing; still ringing 5 s later → the error |
+| `200 {"declined": true}` | Declined; the `Idle` broadcast follows synchronously | **ENDING CALL** / *Ending call…* until the call leaves Ringing; still ringing (or unanswered) 5 s after the tap → the error |
 | `409 {"declined": false, "state": "InCall"}` | The handset was lifted first; the call goes on (the route never hangs up an answered call) | Closes quietly with the **ANSWERED** beat / resets. **No error** |
 | `409 {"declined": false, "state": "Idle"}` (or any other `409`) | The caller gave up, or the ring timed out | Closes quietly with **CALL ENDED** / resets. **No error** |
 | `404`, 5xx, transport failure, a 2xx without `"declined": true` | Failed | *"Couldn't end the call. Try again."*; Ignore works again |

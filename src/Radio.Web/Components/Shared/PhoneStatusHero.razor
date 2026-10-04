@@ -186,7 +186,10 @@
   /// <summary>The clock behind Ignore's deadline; a test substitutes a fake one.</summary>
   [Parameter] public TimeProvider Time { get; set; } = TimeProvider.System;
 
-  /// <summary>How long a call may keep ringing after an accepted decline before Ignore reports a failure (as the banner).</summary>
+  /// <summary>
+  /// How long after the tap a call may keep ringing (or the request stay unanswered) before Ignore reports a
+  /// failure. Measured from the tap, like the banner's <c>DeclineDeadline</c>.
+  /// </summary>
   public static readonly TimeSpan IgnoreDeadline = TimeSpan.FromSeconds(5);
 
   private enum IgnoreState { None, Declining, Failed }
@@ -219,6 +222,10 @@
     int attempt = ++_ignoreAttempt;
     _ignore = IgnoreState.Declining;
     DisposeIgnoreTimer();
+    // Armed at the tap, not at the 200: a hung RotaryPhone (the client's 10 s timeout) must not leave
+    // "Ending call…" up longer than the banner's 5 s.
+    _ignoreTimer = Time.CreateTimer(_ => InvokeAsync(() => OnIgnoreDeadline(attempt)), null,
+      IgnoreDeadline, Timeout.InfiniteTimeSpan);
 
     DeclineCallOutcome outcome;
     try
@@ -232,19 +239,21 @@
 
     if (attempt != _ignoreAttempt || _ignore != IgnoreState.Declining)
     {
-      return;   // the call already left Ringing, which reset Ignore
+      // The call left Ringing (which reset Ignore), the deadline already reported a failure, or the component
+      // was disposed (Dispose bumps the attempt).
+      return;
     }
     switch (outcome.Result)
     {
       case DeclineCallResult.Declined:
-        _ignoreTimer = Time.CreateTimer(_ => InvokeAsync(() => OnIgnoreDeadline(attempt)), null,
-          IgnoreDeadline, Timeout.InfiniteTimeSpan);
-        break;
+        break;   // keep "Ending call…"; the deadline armed at the tap still stands
       case DeclineCallResult.NotRinging:
         _ignore = IgnoreState.None;
+        DisposeIgnoreTimer();
         break;
       default:
         _ignore = IgnoreState.Failed;
+        DisposeIgnoreTimer();
         break;
     }
   }
@@ -419,6 +428,7 @@
   public void Dispose()
   {
     _durationTimer?.Dispose();
+    _ignoreAttempt++;   // an Ignore still in flight finds a stale attempt and creates nothing
     DisposeIgnoreTimer();
   }
 }

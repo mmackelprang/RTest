@@ -227,7 +227,8 @@ public sealed class IncomingCallBannerService : IDisposable
   /// <summary>
   /// <c>RotaryPhone:DeclineSupported</c>, read on every use rather than once per circuit (PHN-13), so turning it
   /// on through the config store (<c>POST /api/configuration/RotaryPhone</c>, which radio-web reloads on the
-  /// API's <c>ConfigChanged</c> push) reaches a kiosk circuit that is already open, from its next call.
+  /// API's <c>ConfigChanged</c> push) reaches a kiosk circuit that is already open — the next snapshot reads it,
+  /// so even a banner already up gains a working Ignore.
   /// </summary>
   private bool CanDecline => _configuration.GetValue(DeclineSupportedKey, false);
 
@@ -393,8 +394,8 @@ public sealed class IncomingCallBannerService : IDisposable
       // already closed it, the call is no longer tracked and this changes nothing.
       lock (_gate)
       {
-        changed = call.DeclineAttempt == attempt
-          && EndCallsLocked(c => ReferenceEquals(c, call),
+        // No attempt check: a 409 is a fact about the phone (not ringing), true whichever press it answers.
+        changed = EndCallsLocked(c => ReferenceEquals(c, call),
             outcome.WasAnswered ? IncomingCallCloseReason.Answered : IncomingCallCloseReason.Ended);
       }
       if (changed)
@@ -684,9 +685,12 @@ public sealed class IncomingCallBannerService : IDisposable
     {
       if (_contacts is not null)
       {
-        // A circuit-cached "no such contact" is not trusted for a call: the kiosk circuit lives for days, and a
-        // phone synced since the miss (or a pre-PHN-14 404 for "no phone connected") must not hide the name.
-        name = _contacts.TryResolve(number) ?? await _contacts.ResolveAsync(number, retryCachedMiss: true);
+        // The API's lookup decides, not the circuit's local index: that index (primed by the Phone page) holds
+        // one phone book's first numbers plus every RotaryPhone contact, so it could put a RotaryPhone name ahead
+        // of a synced one the announcement would speak (pre-merge review M1). And a circuit-cached "no such
+        // contact" is not trusted for a call: the kiosk circuit lives for days, and a phone synced since the miss
+        // (or a pre-PHN-14 404 for "no phone connected") must not hide the name.
+        name = await _contacts.ResolveAsync(number, retryCachedMiss: true, skipLocalIndex: true);
       }
 
       if (string.IsNullOrWhiteSpace(name))

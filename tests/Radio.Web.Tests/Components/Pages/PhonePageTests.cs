@@ -303,6 +303,8 @@ public class PhonePageTests : TestContext
     ignore.Click();
 
     cut.WaitForAssertion(() => Assert.Equal(["POST /api/phone/decline"], _declines));
+    // The 200 has been handled once the button says "Ending call…" (it stays there until the call leaves Ringing).
+    cut.WaitForAssertion(() => Assert.Contains("Ending call", cut.Find(".phone-hero-ignore").TextContent));
     Assert.Empty(cut.FindAll(".phone-hero-ignore-error"));
   }
 

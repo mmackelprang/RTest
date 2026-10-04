@@ -128,15 +128,21 @@ public class ContactResolutionService
   /// banner sets it: a call is rare, and the kiosk circuit can hold a miss for days — through a later phone
   /// sync, or from before PHN-14, when the API answered 404 for every number while no phone was connected.
   /// </param>
+  /// <param name="skipLocalIndex">
+  /// PHN-14: when true, the local index from <see cref="PrimeFromContacts"/> is not consulted, so the API's lookup
+  /// (every stored phone book, every number, exact before last-seven) decides. The incoming-call banner sets it so
+  /// it names the caller as the API's announcement does.
+  /// </param>
   /// <param name="ct">Cancels the lookup.</param>
-  public Task<string?> ResolveAsync(string? number, bool retryCachedMiss = false, CancellationToken ct = default)
+  public Task<string?> ResolveAsync(string? number, bool retryCachedMiss = false, bool skipLocalIndex = false,
+    CancellationToken ct = default)
   {
     var key = PhoneNumberNormalizer.Normalize(number ?? "");
     if (key.Length == 0)
     {
       return Task.FromResult<string?>(null);
     }
-    if (_index.TryGetValue(key, out var local))
+    if (!skipLocalIndex && _index.TryGetValue(key, out var local))
     {
       return Task.FromResult<string?>(local);
     }

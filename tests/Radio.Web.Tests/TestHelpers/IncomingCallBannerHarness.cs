@@ -28,6 +28,9 @@ public sealed class IncomingCallBannerHarness
   /// <summary>The configuration the service reads; a test may change it mid-run (PHN-13's live flag).</summary>
   public IConfigurationRoot Config { get; }
 
+  /// <summary>The circuit's contact resolver, shared with the Phone page in production (its local index).</summary>
+  public ContactResolutionService Contacts { get; }
+
   public IncomingCallBannerHarness(bool declineSupported = false, ILoggerFactory? sink = null)
   {
     ILoggerFactory logs = sink ?? NullLoggerFactory.Instance;
@@ -43,6 +46,7 @@ public sealed class IncomingCallBannerHarness
     var phoneApi = new PhoneApiService(Client, logs.CreateLogger<PhoneApiService>());
     var pbap = new PbapApiService(Client, logs.CreateLogger<PbapApiService>());
     var contacts = new ContactResolutionService(pbap, logs.CreateLogger<ContactResolutionService>());
+    Contacts = contacts;
     Service = new IncomingCallBannerService(
       Hub, phoneApi, config, logs.CreateLogger<IncomingCallBannerService>(), contacts, Time);
   }
