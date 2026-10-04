@@ -25,6 +25,9 @@ public sealed class IncomingCallBannerHarness
   /// <summary>An HttpClient over <see cref="Phone"/>, for other clients a test wants scripted too.</summary>
   public HttpClient Client { get; }
 
+  /// <summary>The configuration the service reads; a test may change it mid-run (PHN-13's live flag).</summary>
+  public IConfigurationRoot Config { get; }
+
   public IncomingCallBannerHarness(bool declineSupported = false, ILoggerFactory? sink = null)
   {
     ILoggerFactory logs = sink ?? NullLoggerFactory.Instance;
@@ -34,6 +37,7 @@ public sealed class IncomingCallBannerHarness
         [IncomingCallBannerService.DeclineSupportedKey] = declineSupported ? "true" : "false",
       })
       .Build();
+    Config = config;
     Hub = new PhoneHubService(logs.CreateLogger<PhoneHubService>(), config);
     Client = new HttpClient(Phone) { BaseAddress = new Uri("http://phone.test.invalid") };
     var phoneApi = new PhoneApiService(Client, logs.CreateLogger<PhoneApiService>());

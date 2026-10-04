@@ -117,6 +117,63 @@ public class ContactResolutionServiceTests
     Assert.Equal("Jane", await svc.ResolveAsync("9193718044"));
   }
 
+  // ── PHN-14 ────────────────────────────────────────────────────────
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void PrimeFromContacts_TheSyncedPhoneBookWinsOverARotaryPhoneContact_WhicheverSortsFirst(bool manualFirst)
+  {
+    var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
+    var manual = new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-371-8044", null, "Manual");
+    var pbap = new MergedContact(null, "Zelda (synced)", "9193718044", null, "PBAP");
+
+    svc.PrimeFromContacts(manualFirst ? new[] { manual, pbap } : new[] { pbap, manual });
+
+    Assert.Equal("Zelda (synced)", svc.TryResolve("19193718044"));
+  }
+
+  [Fact]
+  public void PrimeFromContacts_ARotaryPhoneContactStillAnswers_WhenNoSyncedOneHasTheNumber()
+  {
+    var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
+    svc.PrimeFromContacts(new[]
+    {
+      new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-371-8044", null, "Manual"),
+      new MergedContact(null, "Someone else", "5550001111", null, "PBAP"),
+    });
+
+    Assert.Equal("Aaron (RotaryPhone)", svc.TryResolve("9193718044"));
+  }
+
+  [Fact]
+  public async Task ResolveAsync_RetryCachedMiss_AsksAgain_AndPicksUpALaterSync()
+  {
+    var handler = new ScriptedPhoneHandler();   // PbapName null → 404, a definitive miss
+    var svc = Create(handler);
+
+    Assert.Null(await svc.ResolveAsync("9193718044"));
+    handler.PbapName = "Synced since";
+    var withoutRetry = await svc.ResolveAsync("9193718044");
+    var withRetry = await svc.ResolveAsync("9193718044", retryCachedMiss: true);
+
+    Assert.Null(withoutRetry);                       // the default still trusts the cached miss
+    Assert.Equal("Synced since", withRetry);
+    Assert.Equal(2, handler.Count("/api/bluetooth/pbap/lookup"));
+    Assert.Equal("Synced since", svc.TryResolve("9193718044"));   // and the cache now holds the name
+  }
+
+  [Fact]
+  public async Task ResolveAsync_RetryCachedMiss_DoesNotRetryACachedName()
+  {
+    var handler = new ScriptedPhoneHandler { PbapName = "Bob" };
+    var svc = Create(handler);
+
+    await svc.ResolveAsync("9193718044");
+    Assert.Equal("Bob", await svc.ResolveAsync("9193718044", retryCachedMiss: true));
+    Assert.Equal(1, handler.Count("/api/bluetooth/pbap/lookup"));
+  }
+
   [Fact]
   public async Task ResolveAsync_ConcurrentSameNumber_IssuesSingleRequest()
   {

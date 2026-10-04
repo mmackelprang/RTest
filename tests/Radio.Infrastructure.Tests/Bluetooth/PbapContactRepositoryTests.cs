@@ -136,4 +136,121 @@ public class PbapContactRepositoryTests : IDisposable
     var summary = await _repo.GetSyncSummaryAsync();
     Assert.Empty(summary);
   }
+
+  // ── PHN-14: every stored phone book, connected or not ─────────────
+
+  // ⚠ Address order is the REVERSE of sync order (the oldest phone sorts first, and is inserted first), so
+  // neither the address tie-break nor row order can pass a test that recency is supposed to decide.
+  private const string Pixel = "CC:CC:CC:CC:CC:03";
+  private const string OldPhone = "BB:BB:BB:BB:BB:02";
+  private const string OlderPhone = "AA:AA:AA:AA:AA:01";
+
+  /// <summary>
+  /// A repository whose sync stamps come from a fake clock, and three phone books synced in a known order:
+  /// <see cref="OlderPhone"/> first, then <see cref="OldPhone"/>, then <see cref="Pixel"/> (the newest).
+  /// </summary>
+  private async Task<PbapContactRepository> ThreePhonesAsync(
+    string pixelName = "Pixel's name", string oldName = "Old phone's name", string olderName = "Older phone's name",
+    string number = "9193718044")
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var repo = new PbapContactRepository(_connection, time);
+    await repo.UpsertContactsAsync(OlderPhone, [new() { DisplayName = olderName, PhoneNumbers = [number] }]);
+    time.Advance(TimeSpan.FromDays(30));
+    await repo.UpsertContactsAsync(OldPhone, [new() { DisplayName = oldName, PhoneNumbers = [number] }]);
+    time.Advance(TimeSpan.FromDays(30));
+    await repo.UpsertContactsAsync(Pixel, [new() { DisplayName = pixelName, PhoneNumbers = [number] }]);
+    return repo;
+  }
+
+  [Fact]
+  public async Task AnyDevice_WithNoPhoneConnected_FindsTheContactInAStoredPhoneBook()
+  {
+    // The coordinator's measurement: no phone connected, the number in the stored contacts. Was a 404.
+    await _repo.UpsertContactsAsync(OldPhone, [new() { DisplayName = "Owner", PhoneNumbers = ["9193718044"] }]);
+
+    var match = await _repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: null);
+
+    Assert.NotNull(match);
+    Assert.Equal("Owner", match!.DisplayName);
+    Assert.Equal(OldPhone, match.DeviceAddress);
+    Assert.True(match.IsExactMatch);
+  }
+
+  [Fact]
+  public async Task AnyDevice_WithNoPhoneConnected_TheMostRecentlySyncedPhoneWins()
+  {
+    var repo = await ThreePhonesAsync();
+
+    var match = await repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: null);
+
+    Assert.Equal("Pixel's name", match!.DisplayName);
+  }
+
+  [Fact]
+  public async Task AnyDevice_TheConnectedPhoneWins_OverAMoreRecentSync()
+  {
+    var repo = await ThreePhonesAsync();
+
+    var match = await repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: OlderPhone);
+
+    Assert.Equal("Older phone's name", match!.DisplayName);
+  }
+
+  [Fact]
+  public async Task AnyDevice_TheConnectedPhoneMatchesCaseInsensitively()
+  {
+    var repo = await ThreePhonesAsync();
+
+    var match = await repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: OldPhone.ToLowerInvariant());
+
+    Assert.Equal("Old phone's name", match!.DisplayName);
+  }
+
+  [Fact]
+  public async Task AnyDevice_AConnectedPhoneWithoutTheNumber_FallsBackToTheOthers()
+  {
+    var repo = await ThreePhonesAsync();
+    await repo.UpsertContactsAsync("DD:DD:DD:DD:DD:04", [new() { DisplayName = "Someone else", PhoneNumbers = ["5550001111"] }]);
+
+    var match = await repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: "DD:DD:DD:DD:DD:04");
+
+    Assert.Equal("Pixel's name", match!.DisplayName);
+  }
+
+  [Fact]
+  public async Task AnyDevice_AnExactMatchOnAnOlderPhone_BeatsALast7MatchOnTheConnectedPhone()
+  {
+    var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    var repo = new PbapContactRepository(_connection, time);
+    await repo.UpsertContactsAsync(OlderPhone, [new() { DisplayName = "Exact, old phone", PhoneNumbers = ["9193718044"] }]);
+    time.Advance(TimeSpan.FromDays(30));
+    await repo.UpsertContactsAsync(Pixel, [new() { DisplayName = "Last seven, connected", PhoneNumbers = ["5553718044"] }]);
+
+    var match = await repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: Pixel);
+
+    Assert.Equal("Exact, old phone", match!.DisplayName);
+    Assert.True(match.IsExactMatch);
+  }
+
+  [Fact]
+  public async Task AnyDevice_FallsBackToTheLastSevenDigits()
+  {
+    await _repo.UpsertContactsAsync(OldPhone, [new() { DisplayName = "Local", PhoneNumbers = ["3718044"] }]);
+
+    var match = await _repo.FindByPhoneNumberAnyDeviceAsync("9193718044");
+
+    Assert.Equal("Local", match!.DisplayName);
+    Assert.False(match.IsExactMatch);
+  }
+
+  [Theory]
+  [InlineData("")]
+  [InlineData("5550001111")]
+  public async Task AnyDevice_NoMatchOrNoNumber_ReturnsNull(string number)
+  {
+    await ThreePhonesAsync();
+
+    Assert.Null(await _repo.FindByPhoneNumberAnyDeviceAsync(number));
+  }
 }
