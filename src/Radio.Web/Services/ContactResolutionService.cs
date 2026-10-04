@@ -122,31 +122,18 @@ public class ContactResolutionService
   /// single lookup shared by all concurrent callers for the same number. Never
   /// throws; returns the resolved name or null.
   /// </summary>
-  /// <param name="number">The number to resolve.</param>
-  /// <param name="retryCachedMiss">
-  /// PHN-14: when true, a cached "no such contact" is asked again instead of returned. The incoming-call
-  /// banner sets it: a call is rare, and the kiosk circuit can hold a miss for days — through a later phone
-  /// sync, or from before PHN-14, when the API answered 404 for every number while no phone was connected.
-  /// </param>
-  /// <param name="skipLocalIndex">
-  /// PHN-14: when true, the local index from <see cref="PrimeFromContacts"/> is not consulted, so the API's lookup
-  /// (every stored phone book, every number, exact before last-seven) decides. The incoming-call banner sets it so
-  /// it names the caller as the API's announcement does.
-  /// </param>
-  /// <param name="ct">Cancels the lookup.</param>
-  public Task<string?> ResolveAsync(string? number, bool retryCachedMiss = false, bool skipLocalIndex = false,
-    CancellationToken ct = default)
+  public Task<string?> ResolveAsync(string? number, CancellationToken ct = default)
   {
     var key = PhoneNumberNormalizer.Normalize(number ?? "");
     if (key.Length == 0)
     {
       return Task.FromResult<string?>(null);
     }
-    if (!skipLocalIndex && _index.TryGetValue(key, out var local))
+    if (_index.TryGetValue(key, out var local))
     {
       return Task.FromResult<string?>(local);
     }
-    if (_cache.TryGetValue(key, out var cached) && (cached is not null || !retryCachedMiss))
+    if (_cache.TryGetValue(key, out var cached))
     {
       return Task.FromResult(cached);
     }
@@ -163,6 +150,27 @@ public class ContactResolutionService
     }
     _ = RunLookupAsync(key, number!, tcs, ct);
     return tcs.Task;
+  }
+
+  /// <summary>
+  /// PHN-14: a fresh lookup for an incoming call — no local index, no cache, no dedupe — with the match tier. The
+  /// banner uses it: the local index (primed by the Phone page) holds one phone book's first numbers plus every
+  /// RotaryPhone contact, and the circuit's cache can hold a "no such contact" for days (through a later phone
+  /// sync, or from before PHN-14, when every lookup with no phone connected was a 404). Never throws.
+  /// </summary>
+  /// <returns>The synced contact's name and whether it matched exactly; <c>(null, false)</c> when none did.</returns>
+  public async Task<(string? Name, bool IsExact)> LookupForCallAsync(string number, CancellationToken ct = default)
+  {
+    try
+    {
+      var (outcome, name, isExact) = await _pbap.LookupNumberWithTierAsync(number, ct);
+      return outcome == ContactLookupOutcome.Found ? (name, isExact) : (null, false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Contact lookup for a call failed for {Number}", LogSafeText.ForPhone(number));
+      return (null, false);
+    }
   }
 
   private async Task RunLookupAsync(string key, string number,

@@ -113,6 +113,44 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
     Assert.Equal("Newer sync's name", await Build("[]", connectedAddress: null).FindCallerNameAsync(Number));
   }
 
+  // ── Owner ruling 2026-10-03: match quality first, then source ──
+
+  [Fact]
+  public async Task ARotaryPhoneExactMatch_BeatsASyncedLocalEntry()
+  {
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
+    var service = Build(Rotary("RotaryPhone exact", "+1 919 371 8044"));
+
+    Assert.Equal("RotaryPhone exact", await service.FindCallerNameAsync(Number));
+  }
+
+  [Fact]
+  public async Task ASyncedLocalEntry_BeatsARotaryPhoneLocalEntry()
+  {
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
+    var service = Build(Rotary("RotaryPhone local entry", "371-8044"));
+
+    Assert.Equal("Synced local entry", await service.FindCallerNameAsync(Number));
+  }
+
+  [Fact]
+  public async Task ASyncedLocalEntry_StandsWhenRotaryPhoneHasNothing()
+  {
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
+    var service = Build(Rotary("Someone else", "5550001111"));
+
+    Assert.Equal("Synced local entry", await service.FindCallerNameAsync(Number));
+  }
+
+  [Fact]
+  public async Task AStrangerWhoSharesTheLastSeven_IsNotNamedFromEitherSource()
+  {
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced owner", PhoneNumbers = [Number] }]);
+    var service = Build(Rotary("RotaryPhone owner", "+1 919 371 8044"));
+
+    Assert.Equal("5553718044", await service.FindCallerNameAsync("5553718044"));
+  }
+
   [Fact]
   public async Task NeitherSource_ReturnsTheRawNumber()
   {

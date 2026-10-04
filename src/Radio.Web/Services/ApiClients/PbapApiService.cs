@@ -79,9 +79,20 @@ public class PbapApiService
   public async Task<(ContactLookupOutcome Outcome, string? Name)> LookupNumberAsync(
     string phoneNumber, CancellationToken ct = default)
   {
+    var (outcome, name, _) = await LookupNumberWithTierAsync(phoneNumber, ct);
+    return (outcome, name);
+  }
+
+  /// <summary>
+  /// <see cref="LookupNumberAsync"/>, also reporting whether the match was exact (false: a stored 7-digit local
+  /// entry). The incoming-call banner uses it to rank across sources (owner ruling 2026-10-03, PHN-14).
+  /// </summary>
+  public async Task<(ContactLookupOutcome Outcome, string? Name, bool IsExact)> LookupNumberWithTierAsync(
+    string phoneNumber, CancellationToken ct = default)
+  {
     if (string.IsNullOrWhiteSpace(phoneNumber))
     {
-      return (ContactLookupOutcome.NotFound, null);   // nothing to look up
+      return (ContactLookupOutcome.NotFound, null, false);   // nothing to look up
     }
     try
     {
@@ -89,21 +100,21 @@ public class PbapApiService
         $"/api/bluetooth/pbap/lookup?phoneNumber={Uri.EscapeDataString(phoneNumber)}", ct);
       if (response.StatusCode == HttpStatusCode.NotFound)
       {
-        return (ContactLookupOutcome.NotFound, null);   // definitive: no such contact
+        return (ContactLookupOutcome.NotFound, null, false);   // definitive: no such contact
       }
       if (!response.IsSuccessStatusCode)
       {
-        return (ContactLookupOutcome.Unavailable, null);   // transient: retry later
+        return (ContactLookupOutcome.Unavailable, null, false);   // transient: retry later
       }
       var dto = await response.Content.ReadFromJsonAsync<PbapLookupDto>(JsonOptions, ct);
       return string.IsNullOrWhiteSpace(dto?.DisplayName)
-        ? (ContactLookupOutcome.NotFound, null)
-        : (ContactLookupOutcome.Found, dto.DisplayName);
+        ? (ContactLookupOutcome.NotFound, null, false)
+        : (ContactLookupOutcome.Found, dto.DisplayName, dto.IsExactMatch ?? true);
     }
     catch (Exception ex)
     {
       _logger.LogDebug(ex, "PBAP number lookup failed for {Number}", LogSafeText.ForPhone(phoneNumber));
-      return (ContactLookupOutcome.Unavailable, null);   // transient: retry later
+      return (ContactLookupOutcome.Unavailable, null, false);   // transient: retry later
     }
   }
 

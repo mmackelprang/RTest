@@ -9,7 +9,8 @@ public interface IPbapContactRepository
 
   /// <summary>
   /// PHN-14: finds a caller in EVERY stored phone book, so a name resolves with no phone connected.
-  /// An exact digits match on any device beats a last-seven-digits match on any device. Within a tier the
+  /// An exact digits match on any device beats a local-entry match (a stored 7-digit number equal to the
+  /// caller's last seven; owner ruling 2026-10-03) on any device. Within a tier the
   /// devices are searched <paramref name="preferredDeviceAddress"/> first (the connected phone, when there is
   /// one), then the most recently synced, then the rest by address.
   /// </summary>

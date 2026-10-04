@@ -50,8 +50,9 @@ public class PbapController : ControllerBase
   /// connected"</c> whenever no phone was connected, though the box held three synced phone books.
   /// </summary>
   /// <remarks>
-  /// Order: an exact digits match on any phone beats a last-seven-digits match on any phone; within each,
-  /// the connected phone first, then the most recently synced. A <c>404</c> means no stored contact has the
+  /// Order: an exact digits match on any phone beats a local-entry match (a stored 7-digit number equal to the
+  /// caller's last seven) on any phone; within each, the connected phone first, then the most recently synced.
+  /// <c>IsExactMatch</c> says which, so the Web can rank across sources (owner ruling, 2026-10-03). A <c>404</c> means no stored contact has the
   /// number, and nothing else: the Web caches it as a definitive miss. The <c>404</c> body does not echo the
   /// number (PHN-5).
   /// </remarks>
@@ -68,7 +69,7 @@ public class PbapController : ControllerBase
     if (match == null)
       return NotFound("No contact found");
 
-    return Ok(new { match.DisplayName, PhoneNumber = phoneNumber });
+    return Ok(new { match.DisplayName, PhoneNumber = phoneNumber, match.IsExactMatch });
   }
 
   [HttpGet("status")]

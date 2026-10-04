@@ -147,31 +147,28 @@ public class ContactResolutionServiceTests
   }
 
   [Fact]
-  public async Task ResolveAsync_RetryCachedMiss_AsksAgain_AndPicksUpALaterSync()
+  public async Task LookupForCallAsync_IgnoresTheIndexAndTheCache_AndReportsTheTier()
   {
-    var handler = new ScriptedPhoneHandler();   // PbapName null → 404, a definitive miss
+    var handler = new ScriptedPhoneHandler();   // PbapName null → 404, which ResolveAsync caches as a miss
     var svc = Create(handler);
+    svc.PrimeFromContacts(new[] { new MergedContact("1", "Index name", "9193718044", null, "Manual") });
+    await svc.ResolveAsync("5550001111");
 
-    Assert.Null(await svc.ResolveAsync("9193718044"));
-    handler.PbapName = "Synced since";
-    var withoutRetry = await svc.ResolveAsync("9193718044");
-    var withRetry = await svc.ResolveAsync("9193718044", retryCachedMiss: true);
+    handler.PbapName = "Synced local entry";
+    handler.PbapExact = false;
+    var forIndexed = await svc.LookupForCallAsync("9193718044");
+    var forCachedMiss = await svc.LookupForCallAsync("5550001111");
 
-    Assert.Null(withoutRetry);                       // the default still trusts the cached miss
-    Assert.Equal("Synced since", withRetry);
-    Assert.Equal(2, handler.Count("/api/bluetooth/pbap/lookup"));
-    Assert.Equal("Synced since", svc.TryResolve("9193718044"));   // and the cache now holds the name
+    Assert.Equal(("Synced local entry", false), forIndexed);
+    Assert.Equal(("Synced local entry", false), forCachedMiss);
   }
 
   [Fact]
-  public async Task ResolveAsync_RetryCachedMiss_DoesNotRetryACachedName()
+  public async Task LookupForCallAsync_NoMatch_IsNull()
   {
-    var handler = new ScriptedPhoneHandler { PbapName = "Bob" };
-    var svc = Create(handler);
+    var svc = Create(new ScriptedPhoneHandler());
 
-    await svc.ResolveAsync("9193718044");
-    Assert.Equal("Bob", await svc.ResolveAsync("9193718044", retryCachedMiss: true));
-    Assert.Equal(1, handler.Count("/api/bluetooth/pbap/lookup"));
+    Assert.Equal(((string?)null, false), await svc.LookupForCallAsync("9193718044"));
   }
 
   [Fact]

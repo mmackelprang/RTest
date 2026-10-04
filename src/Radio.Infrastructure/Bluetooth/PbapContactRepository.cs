@@ -136,18 +136,19 @@ public class PbapContactRepository : IPbapContactRepository
           return new PbapContact { DisplayName = name, PhoneNumbers = new() { normalizedNumber } };
       }
 
-      // Try last-7 suffix match
+      // Local-entry tier (owner ruling 2026-10-03, PHN-14): only a stored 7-digit number (no area code) may
+      // match the caller's last seven. A stored full number never matches on its last seven.
       var last7 = PhoneNumberNormalizer.GetLast7(normalizedNumber);
-      if (last7.Length == 7)
+      if (normalizedNumber.Length > 7)
       {
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT DisplayName, PhoneNumber FROM PbapContacts
-            WHERE DeviceAddress = @addr AND PhoneNumber LIKE @suffix
+            WHERE DeviceAddress = @addr AND PhoneNumber = @last7
             LIMIT 1
             """;
         cmd.Parameters.AddWithValue("@addr", deviceAddress);
-        cmd.Parameters.AddWithValue("@suffix", "%" + last7);
+        cmd.Parameters.AddWithValue("@last7", last7);
         using var reader = await cmd.ExecuteReaderAsync(ct);
         if (await reader.ReadAsync(ct))
         {
@@ -169,8 +170,8 @@ public class PbapContactRepository : IPbapContactRepository
 
   /// <inheritdoc />
   /// <remarks>
-  /// One query reads every candidate on every device (an exact match, or a stored number ending in the same
-  /// seven digits) with its device's sync time; the ranking is done here rather than in SQL so the order is
+  /// One query reads every candidate on every device (an exact match, or a stored 7-digit local entry equal to
+  /// the caller's last seven — owner ruling 2026-10-03) with its device's sync time; the ranking is done here rather than in SQL so the order is
   /// written once, in one place. <c>LastSynced</c> per device is <c>MAX(LastSynced)</c>: an upsert replaces a
   /// device's whole phone book with one timestamp, so every row of a device carries its last sync.
   /// </remarks>
@@ -183,7 +184,7 @@ public class PbapContactRepository : IPbapContactRepository
     }
 
     var last7 = PhoneNumberNormalizer.GetLast7(normalizedNumber);
-    bool useSuffix = last7.Length == 7;
+    bool useLocalEntry = normalizedNumber.Length > 7;
 
     var conn = GetConnection();
     try
@@ -194,11 +195,11 @@ public class PbapContactRepository : IPbapContactRepository
           FROM PbapContacts c
           JOIN (SELECT DeviceAddress, MAX(LastSynced) AS LastSynced FROM PbapContacts GROUP BY DeviceAddress) d
             ON d.DeviceAddress = c.DeviceAddress
-          WHERE c.PhoneNumber = @phone OR (@useSuffix = 1 AND c.PhoneNumber LIKE @suffix)
+          WHERE c.PhoneNumber = @phone OR (@useLocalEntry = 1 AND c.PhoneNumber = @last7)
           """;
       cmd.Parameters.AddWithValue("@phone", normalizedNumber);
-      cmd.Parameters.AddWithValue("@useSuffix", useSuffix ? 1 : 0);
-      cmd.Parameters.AddWithValue("@suffix", "%" + last7);
+      cmd.Parameters.AddWithValue("@useLocalEntry", useLocalEntry ? 1 : 0);
+      cmd.Parameters.AddWithValue("@last7", last7);
 
       var candidates = new List<(long Id, PbapContactMatch Match, DateTime? Synced)>();
       using var reader = await cmd.ExecuteReaderAsync(ct);

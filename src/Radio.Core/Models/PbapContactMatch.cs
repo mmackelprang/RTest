@@ -6,5 +6,5 @@ namespace Radio.Core.Models;
 /// <param name="DeviceAddress">The phone whose synced phone book holds the contact.</param>
 /// <param name="DisplayName">The contact's name.</param>
 /// <param name="PhoneNumber">The stored (normalized) number that matched.</param>
-/// <param name="IsExactMatch">True for an exact digits match; false for the last-seven-digits fallback.</param>
+/// <param name="IsExactMatch">True for an exact digits match; false for a stored 7-digit local entry matching the caller's last seven.</param>
 public sealed record PbapContactMatch(string DeviceAddress, string DisplayName, string PhoneNumber, bool IsExactMatch);

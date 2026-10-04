@@ -674,28 +674,27 @@ public sealed class IncomingCallBannerService : IDisposable
 
   /// <summary>
   /// Resolves a contact name the way the API's announcement does (<c>PhoneContactLookupService</c>), PHN-14:
-  /// the stored synced phone books first — the API's <c>/api/bluetooth/pbap/lookup</c>, which searches every
-  /// phone ever synced, connected or not — then RotaryPhone's own contacts list. When both have the number,
-  /// the synced phone book wins.
+  /// the stored synced phone books — the API's <c>/api/bluetooth/pbap/lookup</c>, which searches every phone ever
+  /// synced, connected or not — and RotaryPhone's own contacts list, ranked <b>match quality first, then source</b>
+  /// (owner ruling, 2026-10-03): synced-exact, RotaryPhone-exact, synced local-entry, RotaryPhone local-entry.
   /// </summary>
   private async Task ResolveNameAsync(TrackedCall call, string number)
   {
     string? name = null;
     try
     {
-      if (_contacts is not null)
+      // A fresh lookup, not the circuit's local index or cache (see LookupForCallAsync), so the banner names the
+      // caller as the API's announcement does (pre-merge review M1).
+      var (synced, syncedExact) = _contacts is null ? (null, false) : await _contacts.LookupForCallAsync(number);
+      if (synced is not null && syncedExact)
       {
-        // The API's lookup decides, not the circuit's local index: that index (primed by the Phone page) holds
-        // one phone book's first numbers plus every RotaryPhone contact, so it could put a RotaryPhone name ahead
-        // of a synced one the announcement would speak (pre-merge review M1). And a circuit-cached "no such
-        // contact" is not trusted for a call: the kiosk circuit lives for days, and a phone synced since the miss
-        // (or a pre-PHN-14 404 for "no phone connected") must not hide the name.
-        name = await _contacts.ResolveAsync(number, retryCachedMiss: true, skipLocalIndex: true);
+        name = synced;   // the top tier: RotaryPhone is not asked
       }
-
-      if (string.IsNullOrWhiteSpace(name))
+      else
       {
-        name = FindInContacts(await _phoneApi.GetContactsAsync(), number);
+        var rotary = FindInContactsWithTier(await _phoneApi.GetContactsAsync(), number);
+        name = rotary.Name is not null && rotary.IsExact ? rotary.Name   // RotaryPhone-exact beats a synced local entry
+          : synced ?? rotary.Name;                                        // then synced, then RotaryPhone, local entries
       }
     }
     catch (Exception ex)
@@ -719,8 +718,14 @@ public sealed class IncomingCallBannerService : IDisposable
 
   // The same matching rule as the API's PBAP lookup and its announcement (PhoneNumberNormalizer.FindMatch).
   internal static string? FindInContacts(IEnumerable<ContactDto>? contacts, string number) =>
-    PhoneNumberNormalizer.FindMatch(
-      contacts?.Where(c => !string.IsNullOrWhiteSpace(c.Name)), c => c.PhoneNumber, number)?.Name;
+    FindInContactsWithTier(contacts, number).Name;
+
+  private static (string? Name, bool IsExact) FindInContactsWithTier(IEnumerable<ContactDto>? contacts, string number) =>
+    PhoneNumberNormalizer.TryFindMatch(
+      contacts?.Where(c => !string.IsNullOrWhiteSpace(c.Name)), c => c.PhoneNumber, number,
+      out var contact, out bool isExact)
+      ? (contact!.Name, isExact)
+      : (null, false);
 
   // ── ending and the exit beat ──────────────────────────────────────
 

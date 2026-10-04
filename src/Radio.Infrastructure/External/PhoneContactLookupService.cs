@@ -16,7 +16,9 @@ namespace Radio.Infrastructure.External;
 ///   then the most recently synced. A name resolves with no phone connected.</item>
 ///   <item>RotaryPhone's own contacts list, <c>GET {ContactsApiBaseUrl}/api/contacts</c>, matched here.</item>
 /// </list>
-/// When both have the number, the synced phone book wins. Returns the raw number when neither does.
+/// Ranking (owner ruling, 2026-10-03): <b>match quality first, then source</b> — synced-exact, then
+/// RotaryPhone-exact, then synced local-entry, then RotaryPhone local-entry. An exact match on either source beats
+/// a local-entry match on either. Returns the raw number when nothing matches.
 /// The Web's incoming-call banner (<c>IncomingCallBannerService</c>) uses the same two sources, the same order
 /// and the same matching rule (<see cref="PhoneNumberNormalizer.FindMatch{T}"/>).
 /// </summary>
@@ -59,7 +61,9 @@ public class PhoneContactLookupService
       return "Unknown caller";
     }
 
-    // 1. The stored synced phone books — every phone, not only a connected one (PHN-14).
+    // 1. The stored synced phone books — every phone, not only a connected one (PHN-14). An exact hit returns at
+    // once; a local-entry hit waits until RotaryPhone has had the chance to match exactly.
+    string? pbapLocalEntry = null;
     if (_pbapRepo != null)
     {
       try
@@ -74,8 +78,12 @@ public class PhoneContactLookupService
           // Debug, not Information: the file sink is the only place this would land, and the device it came
           // from is the useful part. The number is masked and the name never logged (PHN-5).
           _logger.LogDebug("PBAP contact resolved for {Number} from {Device} ({Kind} match)",
-            LogSafeText.ForPhone(phoneNumber), match.DeviceAddress, match.IsExactMatch ? "exact" : "last-7");
-          return match.DisplayName;
+            LogSafeText.ForPhone(phoneNumber), match.DeviceAddress, match.IsExactMatch ? "exact" : "local-entry");
+          if (match.IsExactMatch)
+          {
+            return match.DisplayName;
+          }
+          pbapLocalEntry = match.DisplayName;
         }
       }
       catch (Exception ex)
@@ -97,9 +105,15 @@ public class PhoneContactLookupService
       if (response.IsSuccessStatusCode)
       {
         var contacts = await response.Content.ReadFromJsonAsync<List<ContactListEntry>>(cancellationToken: cancellationToken);
-        var contact = PhoneNumberNormalizer.FindMatch(
-          contacts?.Where(c => !string.IsNullOrWhiteSpace(c.Name)), c => c.PhoneNumber, phoneNumber);
-        if (contact is not null)
+        bool found = PhoneNumberNormalizer.TryFindMatch(
+          contacts?.Where(c => !string.IsNullOrWhiteSpace(c.Name)), c => c.PhoneNumber, phoneNumber,
+          out var contact, out bool rotaryExact);
+        if (pbapLocalEntry is not null && !(found && rotaryExact))
+        {
+          // 3. A synced local entry beats RotaryPhone's local entry, but not RotaryPhone's exact match.
+          return pbapLocalEntry;
+        }
+        if (found && contact is not null)
         {
           // ⚠ The inline "***{last4}" mask that used to be computed here is GONE, and its removal
           // is the point of PHN-5 rather than a side effect. It was the file's own local idiom,
@@ -123,8 +137,8 @@ public class PhoneContactLookupService
         LogSafeText.ForPhone(phoneNumber));
     }
 
-    // Fall back to the raw phone number
-    return phoneNumber;
+    // A synced local entry still stands when RotaryPhone could not be read.
+    return pbapLocalEntry ?? phoneNumber;
   }
 
   /// <summary>One entry of RotaryPhone's <c>GET /api/contacts</c> (its <c>Contact</c>; other fields ignored).</summary>

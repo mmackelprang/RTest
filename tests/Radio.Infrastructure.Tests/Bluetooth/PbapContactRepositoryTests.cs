@@ -35,19 +35,21 @@ public class PbapContactRepositoryTests : IDisposable
   }
 
   [Fact]
-  public async Task FindByPhoneNumber_Last7Fallback_ShouldMatch()
+  public async Task FindByPhoneNumber_AStrangerWhoSharesTheLastSeven_DoesNotMatchAFullStoredNumber()
   {
-    var contacts = new List<PbapContact>
-    {
-      new() { DisplayName = "Jane", PhoneNumbers = new() { "5551234567" } }
-    };
+    // Owner ruling 2026-10-03 (PHN-14). Until then this test asserted the opposite: a different area code with
+    // the same last seven digits matched.
+    await _repo.UpsertContactsAsync("AA:BB:CC:DD:EE:FF", [new() { DisplayName = "Jane", PhoneNumbers = ["5551234567"] }]);
 
-    await _repo.UpsertContactsAsync("AA:BB:CC:DD:EE:FF", contacts);
-    // Query with different area code prefix, same last 7
-    var result = await _repo.FindByPhoneNumberAsync("AA:BB:CC:DD:EE:FF", "9991234567");
+    Assert.Null(await _repo.FindByPhoneNumberAsync("AA:BB:CC:DD:EE:FF", "9991234567"));
+  }
 
-    Assert.NotNull(result);
-    Assert.Equal("Jane", result!.DisplayName);
+  [Fact]
+  public async Task FindByPhoneNumber_ASevenDigitLocalEntry_MatchesOnTheLastSeven()
+  {
+    await _repo.UpsertContactsAsync("AA:BB:CC:DD:EE:FF", [new() { DisplayName = "Jane", PhoneNumbers = ["1234567"] }]);
+
+    Assert.Equal("Jane", (await _repo.FindByPhoneNumberAsync("AA:BB:CC:DD:EE:FF", "9991234567"))!.DisplayName);
   }
 
   [Fact]
@@ -225,7 +227,7 @@ public class PbapContactRepositoryTests : IDisposable
     var repo = new PbapContactRepository(_connection, time);
     await repo.UpsertContactsAsync(OlderPhone, [new() { DisplayName = "Exact, old phone", PhoneNumbers = ["9193718044"] }]);
     time.Advance(TimeSpan.FromDays(30));
-    await repo.UpsertContactsAsync(Pixel, [new() { DisplayName = "Last seven, connected", PhoneNumbers = ["5553718044"] }]);
+    await repo.UpsertContactsAsync(Pixel, [new() { DisplayName = "Last seven, connected", PhoneNumbers = ["3718044"] }]);
 
     var match = await repo.FindByPhoneNumberAnyDeviceAsync("9193718044", preferredDeviceAddress: Pixel);
 
@@ -242,6 +244,14 @@ public class PbapContactRepositoryTests : IDisposable
 
     Assert.Equal("Local", match!.DisplayName);
     Assert.False(match.IsExactMatch);
+  }
+
+  [Fact]
+  public async Task AnyDevice_AStrangerWhoSharesTheLastSeven_MatchesNoFullStoredNumberOnAnyPhone()
+  {
+    await ThreePhonesAsync();   // every phone stores 9193718044
+
+    Assert.Null(await _repo.FindByPhoneNumberAnyDeviceAsync("5553718044", preferredDeviceAddress: Pixel));
   }
 
   [Theory]

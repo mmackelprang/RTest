@@ -50,7 +50,7 @@ public class PhoneNumberNormalizerTests
   public void FindMatch_AnExactMatchBeatsAnEarlierLast7Match()
   {
     // The last-7 candidate comes FIRST in the list, so only the tiering can pick the exact one.
-    var entries = new[] { new Entry("Same last seven", "5553718044"), new Entry("Exact", "9193718044") };
+    var entries = new[] { new Entry("Local entry", "371-8044"), new Entry("Exact", "9193718044") };
 
     Assert.Equal("Exact", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "+1 919 371 8044")!.Name);
   }
@@ -61,6 +61,41 @@ public class PhoneNumberNormalizerTests
     var entries = new[] { new Entry("Local", "371-8044") };
 
     Assert.Equal("Local", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "9193718044")!.Name);
+  }
+
+  [Theory]
+  [InlineData("5553718044")]      // another area code, same last seven
+  [InlineData("+1 555 371 8044")]
+  [InlineData("15553718044")]
+  public void FindMatch_AStrangerWhoSharesTheLastSeven_DoesNotMatchAFullStoredNumber(string stranger)
+  {
+    // Owner ruling 2026-10-03: a stored 10/11-digit number matches only on the full number, never its last seven.
+    var entries = new[] { new Entry("Owner", "+1 (919) 371-8044") };
+
+    Assert.Null(PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, stranger));
+  }
+
+  [Theory]
+  [InlineData("9193718044")]
+  [InlineData("+19193718044")]
+  [InlineData("3718044")]
+  public void FindMatch_ASevenDigitLocalEntry_StillMatches(string incoming)
+  {
+    var entries = new[] { new Entry("Local", "371-8044") };
+
+    Assert.Equal("Local", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, incoming)!.Name);
+  }
+
+  [Theory]
+  [InlineData("9193718044", "9193718044", true)]
+  [InlineData("371-8044", "9193718044", false)]
+  [InlineData("3718044", "3718044", true)]
+  public void TryFindMatch_ReportsTheTier(string stored, string incoming, bool exact)
+  {
+    Assert.True(PhoneNumberNormalizer.TryFindMatch(new[] { new Entry("X", stored) }, e => e.Phone, incoming,
+      out var match, out bool isExact));
+    Assert.Equal("X", match!.Name);
+    Assert.Equal(exact, isExact);
   }
 
   [Fact]

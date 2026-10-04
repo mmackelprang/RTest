@@ -52,6 +52,7 @@ public sealed class PbapControllerLookupTests : IDisposable
 
     var ok = Assert.IsType<OkObjectResult>(result);
     Assert.Equal("Owner", DisplayNameOf(ok));
+    Assert.Equal(true, ok.Value!.GetType().GetProperty("IsExactMatch")!.GetValue(ok.Value));
   }
 
   [Fact]
@@ -71,8 +72,20 @@ public sealed class PbapControllerLookupTests : IDisposable
     Assert.Equal("Connected phone's name", DisplayNameOf(ok));
   }
 
+  [Fact]
+  public async Task ALocalEntryMatch_ReportsIsExactMatchFalse()
+  {
+    await _repo.UpsertContactsAsync("78:20:51:F5:FB:A7", [new PbapContact { DisplayName = "Local", PhoneNumbers = ["3718044"] }]);
+
+    var ok = Assert.IsType<OkObjectResult>(await Controller().LookupNumber("9193718044", CancellationToken.None));
+
+    Assert.Equal("Local", DisplayNameOf(ok));
+    Assert.Equal(false, ok.Value!.GetType().GetProperty("IsExactMatch")!.GetValue(ok.Value));
+  }
+
   [Theory]
   [InlineData("5550001111")]
+  [InlineData("5553718044")]   // a stranger sharing the stored number's last seven (owner ruling 2026-10-03)
   [InlineData("")]
   public async Task NoStoredContact_Is404_WithoutEchoingTheNumber(string phoneNumber)
   {

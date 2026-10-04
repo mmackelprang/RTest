@@ -122,6 +122,50 @@ public class IncomingCallBannerServiceTests
     Assert.Equal("Synced name", rig.Service.Current.PrimaryText);
   }
 
+  [Fact]
+  public async Task ARotaryPhoneExactMatch_BeatsASyncedLocalEntry()
+  {
+    // Owner ruling 2026-10-03: match quality first, then source.
+    var rig = new Rig();
+    rig.Phone.PbapName = "Synced local entry";
+    rig.Phone.PbapExact = false;
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"RotaryPhone exact\",\"phoneNumber\":\"{Number}\"}}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("RotaryPhone exact", rig.Service.Current.PrimaryText);
+  }
+
+  [Fact]
+  public async Task ASyncedLocalEntry_BeatsARotaryPhoneLocalEntry()
+  {
+    var rig = new Rig();
+    rig.Phone.PbapName = "Synced local entry";
+    rig.Phone.PbapExact = false;
+    rig.Phone.ContactsJson = "[{\"id\":\"1\",\"name\":\"RotaryPhone local entry\",\"phoneNumber\":\"013-7424\"}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("Synced local entry", rig.Service.Current.PrimaryText);
+  }
+
+  [Fact]
+  public async Task AStrangerWhoSharesTheLastSeven_IsNotNamedFromRotaryPhonesFullNumber()
+  {
+    var rig = new Rig();
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"Uncle Bob\",\"phoneNumber\":\"{Number}\"}}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", "9190137424");
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal(IncomingCallCallerKind.Number, rig.Service.Current.CallerKind);
+  }
+
   [Theory]
   [InlineData("+15550137424", "5550137424")]
   [InlineData("15550137424", "+1 (555) 013-7424")]
