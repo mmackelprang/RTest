@@ -68,7 +68,15 @@ public class PlayHistoryTrackerPrecedenceTests
       .ReturnsAsync(false);
     _history.Setup(r => r.FinalizeEntryAsync(It.IsAny<string>(), It.IsAny<DateTime>(),
         It.IsAny<CancellationToken>()))
-      .Callback<string, DateTime, CancellationToken>((id, _, _) => _finalized.Add(id))
+      .Callback<string, DateTime, CancellationToken>((id, endedAt, _) =>
+      {
+        _finalized.Add(id);
+        int index = _entries.FindIndex(x => x.Id == id);
+        if (index >= 0)
+        {
+          _entries[index] = _entries[index] with { EndedAt = endedAt };
+        }
+      })
       .ReturnsAsync(true);
 
     _trackRows.Setup(r => r.StoreAsync(It.IsAny<TrackMetadata>(), It.IsAny<CancellationToken>()))
@@ -121,6 +129,7 @@ public class PlayHistoryTrackerPrecedenceTests
 
   private void RaiseAvrcp(string title, string artist, string album)
   {
+    // Pass "" to model a phone that publishes no track names: the event still arrives.
     // The Bluetooth source writes AVRCP into its own metadata; History reads it from there.
     _sourceMetadata[StandardMetadataKeys.Title] = title;
     _sourceMetadata[StandardMetadataKeys.Artist] = artist;
@@ -220,27 +229,56 @@ public class PlayHistoryTrackerPrecedenceTests
     // A phone that publishes no track names: Bluetooth fills its title from the identification
     // and keeps it until AVRCP writes the field again. That filled title is not the source naming
     // the song, so it must not hold History on the first song forever.
+    //
+    // The real sequence: the phone's AVRCP events carry no title (no History row — the handler
+    // needs a title and artist); the FIRST identification raises no SongChanged, only
+    // TrackIdentified, which reaches no row (none is unidentified) while BluetoothAudioSource
+    // fills its title from it and keeps that title; every later identification raises SongChanged.
     using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.Bluetooth);
-    _sourceMetadata[StandardMetadataKeys.Title] = "";
-    _sourceMetadata[StandardMetadataKeys.Artist] = "";
-    _sourceMetadata["Device"] = "Pixel 10 Pro XL";
+    RaiseAvrcp("", "", album: "");
+    Assert.Empty(_entries);
 
     TrackMetadata first = Identified("Africa", "Toto", "Toto IV", ArtUrl);
-    RaiseSongChanged(first);
-    PlayHistoryEntry firstEntry = Assert.Single(_entries);
-    Assert.Equal(first.Id, firstEntry.TrackMetadataId); // nothing from the source: taken whole
-    Assert.Equal(MetadataSource.Fingerprinting, firstEntry.MetadataSource);
-
-    // What BluetoothAudioSource.OnTrackIdentified does with that identification.
+    RaiseIdentified(first);
+    Assert.Empty(_entries);
+    // What BluetoothAudioSource.OnTrackIdentified does with it — and keeps doing, because AUD-1
+    // never overwrites a field it has filled.
     _sourceMetadata[StandardMetadataKeys.Title] = "Africa";
     _sourceMetadata[StandardMetadataKeys.Artist] = "Toto";
+    _sourceMetadata[StandardMetadataKeys.Album] = "Toto IV";
 
     RaiseSongChanged(Identified("Rosanna", "Toto", "Toto IV", ArtUrl));
+    PlayHistoryEntry rosanna = Assert.Single(_entries);
+    Assert.Equal("Rosanna", rosanna.Track!.Title);
+    Assert.Equal(MetadataSource.Fingerprinting, rosanna.MetadataSource);
 
-    Assert.Equal([firstEntry.Id], _finalized);
+    RaiseSongChanged(Identified("Hold the Line", "Toto", "Toto", ArtUrl));
+
+    Assert.Equal([rosanna.Id], _finalized);
     Assert.Equal(2, _entries.Count);
-    Assert.Equal("Rosanna", _entries[1].Track!.Title);
+    Assert.Equal("Hold the Line", _entries[1].Track!.Title);
+    Assert.Equal("Toto", _entries[1].Track!.Album);
     Assert.Equal(MetadataSource.Fingerprinting, _entries[1].MetadataSource);
+  }
+
+  [Fact]
+  public void Bluetooth_ArtAndAlbumFilledByAMisidentification_AreCorrectedByTheNextIdentification()
+  {
+    // The owner's 2026-09-26 AUD-1 ruling accepted a misidentification's art under the phone's
+    // title because the next identification corrects it. It must in History too.
+    using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.Bluetooth);
+    RaiseAvrcp("Basket Case", "Green Day", album: "");
+    RaiseSongChanged(Identified("Spirit In The Sky", "Norman Greenbaum", "Spirit In The Sky", "/api/albumart/wrong.jpg"));
+    Assert.Equal("/api/albumart/wrong.jpg", Assert.Single(_entries).Track!.CoverArtUrl);
+
+    RaiseSongChanged(Identified("Basket Case", "Green Day", "Dookie", ArtUrl));
+
+    PlayHistoryEntry entry = Assert.Single(_entries);
+    Assert.Empty(_finalized);
+    Assert.Equal("Basket Case", entry.Track!.Title);
+    Assert.Equal("Dookie", entry.Track.Album);
+    Assert.Equal(ArtUrl, entry.Track.CoverArtUrl);
+    Assert.Equal(MetadataSource.Avrcp, entry.MetadataSource);
   }
 
   // --- File player -----------------------------------------------------------------------------
@@ -285,6 +323,24 @@ public class PlayHistoryTrackerPrecedenceTests
     Assert.Equal("Album C", entry.Track.Album);
     Assert.Equal(MetadataSource.FileTag, entry.MetadataSource);
     Assert.True(entry.WasIdentified);
+  }
+
+  [Fact]
+  public void File_TrackIdentified_DoesNotRewriteAFinishedRow()
+  {
+    // An identification is of what is playing now. A finished unidentified row (an earlier file
+    // SongRec never matched) must not be merged with a later file's identification.
+    using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.FilePlayer);
+    SetFileTags("Song C", StandardMetadataKeys.DefaultArtist, StandardMetadataKeys.DefaultAlbum);
+    RaisePlaying();
+    _entries[0] = _entries[0] with { EndedAt = DateTime.UtcNow };
+
+    RaiseIdentified(Identified("Song D", "Band D", "Album D", ArtUrl));
+
+    PlayHistoryEntry entry = Assert.Single(_entries);
+    Assert.Equal("Song C", entry.Track!.Title);
+    Assert.Equal("File Player", entry.Track.Artist);
+    Assert.False(entry.WasIdentified);
   }
 
   // --- Sources AUD-1 did not put under the rule: unchanged ------------------------------------

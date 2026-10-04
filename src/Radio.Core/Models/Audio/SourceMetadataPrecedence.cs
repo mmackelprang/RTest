@@ -7,11 +7,15 @@ namespace Radio.Core.Models.Audio;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Since <c>AUD-19</c>, <c>PlayHistoryTracker</c> uses this type too, for the same two sources:
-/// its placeholder test calls <see cref="IsMissing"/>, and it records an identification through
-/// <see cref="FillMissingFrom"/> and <see cref="ShouldFillAlbumArt"/>. Its extra placeholders are
-/// the fallbacks History itself writes when a source supplied nothing ("Bluetooth Audio", an
-/// artist of "File Player", and so on), passed in the same way Bluetooth passes its device name.
+/// Since <c>AUD-19</c>, <c>PlayHistoryTracker</c> uses this type too. Its row-level placeholder
+/// test calls <see cref="IsMissing"/> for every source, and for Bluetooth and the file player it
+/// records an identification through <see cref="FillMissingFrom"/> and
+/// <see cref="ShouldFillAlbumArt"/>. It passes the fallback titles History itself writes when a
+/// source supplied nothing ("Bluetooth Audio", "File Player", …) as extra title placeholders, the
+/// way Bluetooth passes its device name; its fallback artist is left out of the merge so that it
+/// reads as missing. ⚠ Not the only definition in that class: <c>GetSourceMetadata</c> still
+/// strips the <see cref="StandardMetadataKeys"/> defaults by exact, case-sensitive match before
+/// any of this runs.
 /// </para>
 /// <para>
 /// <b>The rule (AUD-1, owner decision 2026-09-08):</b> when metadata is available from the
