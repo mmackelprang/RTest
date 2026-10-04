@@ -140,7 +140,8 @@ public sealed record BandAxis(
   /// ±<see cref="SnapWindowHz"/>, else the nearest channel. With no map at all it is the nearest channel.
   /// </summary>
   /// <remarks>
-  /// A channel is a peak when its level is at least that of both neighbours in the map (a missing
+  /// A channel is a peak by <see cref="Radio.Core.Models.BandMapStations.Peaks"/> (since AUD-100; the
+  /// same rule as before): its level is at least that of both neighbours in the map (a missing
   /// neighbour at the band edge counts as lower) <b>and</b> at least <see cref="FmBandMath.PeakProminenceDb"/>
   /// above the map's median level. Two peaks in the window: the stronger wins; equal levels: the one
   /// nearer the tap.
@@ -153,22 +154,17 @@ public sealed record BandAxis(
       return fallback;
     }
 
-    BandMapChannelDto[] sorted = channels.OrderBy(c => c.FrequencyHz).ToArray();
-    double threshold = FmBandMath.Median(sorted.Select(c => (double)c.LevelDbfs)) + FmBandMath.PeakProminenceDb;
+    // AUD-100: the peak rule is BandMapStations.Peaks, the one Scan Up/Down hops between, so a tap
+    // and a scan always agree on what is a station.
+    HashSet<long> peaks = Radio.Core.Models.BandMapStations
+      .Peaks(channels.Select(c => new Radio.Core.Models.BandMapChannel(c.FrequencyHz, c.LevelDbfs)).ToArray())
+      .ToHashSet();
 
     BandMapChannelDto? best = null;
-    for (int i = 0; i < sorted.Length; i++)
+    // Ascending, so two equally strong peaks equally far from the tap resolve to the lower one, as before.
+    foreach (BandMapChannelDto c in channels.OrderBy(c => c.FrequencyHz))
     {
-      BandMapChannelDto c = sorted[i];
-      if (Math.Abs(c.FrequencyHz - tappedHz) > SnapWindowHz + 0.5)
-      {
-        continue;
-      }
-
-      double left = i > 0 ? sorted[i - 1].LevelDbfs : double.NegativeInfinity;
-      double right = i < sorted.Length - 1 ? sorted[i + 1].LevelDbfs : double.NegativeInfinity;
-      bool isPeak = c.LevelDbfs >= left && c.LevelDbfs >= right && c.LevelDbfs >= threshold;
-      if (!isPeak)
+      if (Math.Abs(c.FrequencyHz - tappedHz) > SnapWindowHz + 0.5 || !peaks.Contains(c.FrequencyHz))
       {
         continue;
       }

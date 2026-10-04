@@ -460,6 +460,13 @@ public sealed record BandMapResponseDto
   /// <summary>Measured channels. The API sends them ascending by frequency.</summary>
   public IReadOnlyList<BandMapChannelDto> Channels { get; init; } = Array.Empty<BandMapChannelDto>();
 
+  /// <summary>
+  /// Where a live Scan Up/Down stopped since the band's last sweep of that frequency (AUD-100). Not
+  /// channels: they carry no comparable level and do not make an unswept band swept. Empty from an
+  /// API older than AUD-100.
+  /// </summary>
+  public IReadOnlyList<BandMapSeekStationDto> SeekStations { get; init; } = Array.Empty<BandMapSeekStationDto>();
+
   /// <summary>Sweep status, including the last outcome. Not filtered by band: see <see cref="BandSweepStatusDto.Band"/>.</summary>
   public BandSweepStatusDto Sweep { get; init; } = new();
 }
@@ -468,6 +475,12 @@ public sealed record BandMapResponseDto
 /// <param name="FrequencyHz">Channel centre, in Hz.</param>
 /// <param name="LevelDbfs">Relative level in dB — not calibrated, only comparable within one map.</param>
 public sealed record BandMapChannelDto(long FrequencyHz, float LevelDbfs);
+
+/// <summary>A station a live seek stopped on (AUD-100).</summary>
+/// <param name="FrequencyHz">Where the seek stopped, in Hz.</param>
+/// <param name="SeekStrength">The seek's wideband reading; not comparable with <see cref="BandMapChannelDto.LevelDbfs"/>.</param>
+/// <param name="ObservedAtUtc">When, UTC.</param>
+public sealed record BandMapSeekStationDto(long FrequencyHz, float SeekStrength, DateTimeOffset ObservedAtUtc);
 
 /// <summary>Band sweep status (AUD-76).</summary>
 public sealed record BandSweepStatusDto

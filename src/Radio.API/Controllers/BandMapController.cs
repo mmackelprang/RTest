@@ -33,6 +33,8 @@ public class BandMapController : ControllerBase
   /// <returns>
   /// The map; before the band's first sweep, an empty channel list with null scan time and age.
   /// A band that cannot be scanned has <c>mappable: false</c>, the reason, and its preset range as the axis.
+  /// <c>seekStations</c> lists where a live Scan Up/Down stopped since the last sweep (AUD-100); they
+  /// are not channels and do not change the scan time or age.
   /// </returns>
   /// <response code="200">Returns the map and sweep status.</response>
   /// <response code="400">The band is not a band code.</response>
@@ -48,7 +50,7 @@ public class BandMapController : ControllerBase
 
     string code = BandSweepPlans.BandCode(bandType);
     BandMap? map = _bandMap.GetMap(code);
-    BandMapResponseDto dto = BandMapResponseDto.From(map, _bandMap.GetAge(map), _bandMap.GetStatus());
+    BandMapResponseDto dto = BandMapResponseDto.From(map, _bandMap.GetAge(map), _bandMap.GetStatus(), _bandMap.GetSeekStations(code));
     return Ok(WithAxis(dto with { Band = code }, bandType, map));
   }
 

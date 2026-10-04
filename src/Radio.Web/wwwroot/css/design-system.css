@@ -2778,6 +2778,8 @@ body {
 .band-legend-swatch.is-weak   { background: var(--signal-blue); }
 .band-legend-swatch.is-fair   { background: var(--accent-primary); }
 .band-legend-swatch.is-strong { background: var(--signal-green); }
+/* AUD-100: a seek-observed station is drawn as a hollow ring over a dashed line, so its key is hollow too. */
+.band-legend-swatch.is-seek   { background: transparent; border: 1.5px solid var(--text-high); border-radius: 50%; }
 
 /* Lines 2–3: the help text, or a tune/discover message in its place. */
 .band-strip-lower {

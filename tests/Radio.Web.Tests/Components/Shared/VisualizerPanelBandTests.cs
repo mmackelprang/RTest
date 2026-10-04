@@ -870,6 +870,103 @@ public class VisualizerPanelBandTests : TestContext
     cut.FindAll(".band-legend").Should().BeEmpty();
   }
 
+  // ── seek-observed stations (AUD-100) ─────────────────────────────────────
+
+  /// <summary><paramref name="map"/> with a <c>seekStations</c> list at <paramref name="hz"/>.</summary>
+  private static System.Text.Json.Nodes.JsonObject WithSeekStations(object map, params long[] hz)
+  {
+    System.Text.Json.Nodes.JsonObject json = JsonSerializer.SerializeToNode(map, JsonSerializerOptions.Web)!.AsObject();
+    json["seekStations"] = new System.Text.Json.Nodes.JsonArray(hz
+      .Select(f => (System.Text.Json.Nodes.JsonNode)new System.Text.Json.Nodes.JsonObject
+      {
+        ["frequencyHz"] = f,
+        ["seekStrength"] = 0.9,
+        ["observedAtUtc"] = "2026-10-04T12:00:00Z",
+      })
+      .ToArray());
+    return json;
+  }
+
+  private static double[] SeekFractions(JsonElement model) =>
+    model.GetProperty("seek").EnumerateArray().Select(s => s.GetProperty("f").GetDouble()).ToArray();
+
+  private int BandMapReads() =>
+    _api.Requests.Count(r => r.Method == HttpMethod.Get && r.Path == "/api/radio/bandmap");
+
+  [Fact]
+  public void UnsweptBand_WithSeekStations_DrawsTheirMarkers_AndStillReadsAsUndiscovered()
+  {
+    GetJson("/api/radio/bandmap", WithSeekStations(EmptyMap(), 95_500_000, 101_100_000));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => SeekFractions(LastDrawModel()).Should().Equal(
+      BandAxis.Fm.HzToFraction(95_500_000), BandAxis.Fm.HzToFraction(101_100_000)));
+    LastDrawModel().GetProperty("levels").GetArrayLength().Should().Be(0, "a seek stop is not a swept channel");
+    cut.Find(".band-empty-title").TextContent.Should().Be("No stations discovered yet");
+    cut.Find(".band-empty-sub").TextContent.Should().Be("The rings mark where Scan stopped. Tap Discover to sweep the whole band.");
+    cut.FindAll(".band-status-age").Should().BeEmpty("a seek never makes a band look swept");
+    LegendWords(cut).Should().Equal("found by scan");
+    cut.Find(".band-legend-swatch").GetAttribute("class").Should().Be("band-legend-swatch is-seek");
+  }
+
+  [Fact]
+  public void SweptBand_WithSeekStations_KeepsItsBarsAndTiers_AndAddsTheMarkersAndTheirKey()
+  {
+    GetJson("/api/radio/bandmap", WithSeekStations(MapWithStation(ageSeconds: 60), 95_500_000));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => LegendWords(cut).Should().Equal("weak", "fair", "strong", "found by scan"));
+    JsonElement model = LastDrawModel();
+    model.GetProperty("levels").GetArrayLength().Should().Be(101);
+    SeekFractions(model).Should().Equal(BandAxis.Fm.HzToFraction(95_500_000));
+    cut.Find(".band-status-age").TextContent.Should().Be("discovered 1 min ago");
+  }
+
+  [Fact]
+  public void SeekStations_OffTheAxis_AreNotDrawn_AndNeedNoKey()
+  {
+    GetJson("/api/radio/bandmap", WithSeekStations(EmptyMap(), 120_000_000));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => _module.Invocations["visualizer.drawBandMap"].Should().NotBeEmpty());
+    SeekFractions(LastDrawModel()).Should().BeEmpty();
+    cut.FindAll(".band-legend").Should().BeEmpty();
+    cut.Find(".band-empty-sub").TextContent.Should().StartWith("The band is swept automatically");
+  }
+
+  [Fact]
+  public void OutOfRangeBand_DrawsNoSeekMarkers()
+  {
+    GetJson("/api/radio/bandmap", WithSeekStations(AmMap(), 1_000_000));
+
+    var cut = RenderBand();
+
+    cut.WaitForAssertion(() => _module.Invocations["visualizer.drawBandMap"].Should().NotBeEmpty());
+    SeekFractions(LastDrawModel()).Should().BeEmpty();
+    cut.FindAll(".band-legend").Should().BeEmpty();
+  }
+
+  [Fact]
+  public async Task AScanEnding_RereadsTheMapOnce_SoItsStopsAppearAtOnce()
+  {
+    var cut = RenderBand();
+    await RaiseRadioStateAsync(cut, HubState("FM", 101_100_000) with { IsScanning = true });
+    int readsBefore = BandMapReads();
+    GetJson("/api/radio/bandmap", WithSeekStations(EmptyMap(), 95_500_000));
+
+    await RaiseRadioStateAsync(cut, HubState("FM", 95_500_000) with { IsScanning = false });
+
+    cut.WaitForAssertion(() => SeekFractions(LastDrawModel()).Should().Equal(BandAxis.Fm.HzToFraction(95_500_000)));
+    BandMapReads().Should().Be(readsBefore + 1);
+
+    // A repeated not-scanning tick does not read again.
+    await RaiseRadioStateAsync(cut, HubState("FM", 95_500_000));
+    BandMapReads().Should().Be(readsBefore + 1);
+  }
+
   [Theory]
   [InlineData("AM", 530_000L, 1_710_000L, 10_000L)]
   [InlineData("SW", 2_300_000L, 26_100_000L, 5_000L)]

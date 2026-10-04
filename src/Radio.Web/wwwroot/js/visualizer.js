@@ -380,6 +380,7 @@ export const visualizer = {
   //             the colour every bar had before UI-22 (the fill under the bars is grey regardless).
   //   station:  f | null    the tuned station (shown band, radio active), else null
   //   presets:  [{ f }]     the shown band's presets, ascending
+  //   seek:     [{ f }]     where a live Scan stopped since the last sweep (AUD-100), ascending; no height
   //   grid:     [f]         gridline and tick positions, the same fractions as the axis labels
   //   channelsAcross: number the axis span in channel spacings (102.5 on FM); a bar is half a spacing
   //   sweeping: bool
@@ -503,6 +504,35 @@ export const visualizer = {
       ctx.lineTo(x, axisY + 6.5);
     }
     ctx.stroke();
+
+    // AUD-100: where a live Scan stopped since the last sweep — a hollow ring at the top of the plot over a
+    // dashed line to the axis, so it reads apart from the swept bars (solid, from the bottom, tier-coloured),
+    // the tuned station (solid amber) and the presets (filled carets on the axis). It has no height: a seek's
+    // reading is not on the map's dB scale.
+    const seek = (model && model.seek) || [];
+    if (seek.length > 0) {
+      const ringRadius = 5;
+      const ringY = plotTop + ringRadius + 2;
+      ctx.strokeStyle = textHigh;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      for (const s of seek) {
+        const x = Math.round(xOf(s.f)) + 0.5;
+        ctx.moveTo(x, ringY + ringRadius);
+        ctx.lineTo(x, plotBottom);
+      }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.lineWidth = 1.5;
+      for (const s of seek) {
+        const x = Math.min(Math.max(xOf(s.f), ringRadius + 1), width - ringRadius - 1);
+        ctx.beginPath();
+        ctx.arc(x, ringY, ringRadius, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.lineWidth = 1;
+    }
 
     // UI-31: presets are carets pointing up at the axis, 10 x 8 px. No label: the preset bar names them,
     // and two lanes of labels cost plot height and crowded each other on FM.

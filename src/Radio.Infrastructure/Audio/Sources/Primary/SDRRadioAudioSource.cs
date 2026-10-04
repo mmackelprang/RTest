@@ -25,6 +25,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
 {
   private readonly RadioReceiver _radioReceiver;
   private readonly SdrDeviceGate? _deviceGate;
+  private readonly IScanStationMap? _scanStationMap;
   // True between this source's gate claim in StartupAsync and its release.
   private bool _holdsDeviceGate;
   private readonly IOptionsMonitor<RadioOptions> _radioOptions;
@@ -72,6 +73,11 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   /// Optional SDR device gate (AUD-76). When supplied, <see cref="StartupAsync"/> claims it
   /// before starting the receiver and <see cref="ShutdownAsync"/> releases it afterwards.
   /// </param>
+  /// <param name="scanStationMap">
+  /// Optional band maps for Scan Up/Down (AUD-100). When supplied, a scan hops between the
+  /// stations of the band's fresh map instead of seeking live, and every station a live seek
+  /// stops on is recorded there. When null, every scan seeks live and nothing is recorded.
+  /// </param>
   public SDRRadioAudioSource(
     ILogger<SDRRadioAudioSource> logger,
     RadioReceiver radioReceiver,
@@ -81,11 +87,13 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     SoundFlowPlaybackService? playbackService = null,
     IConfigurationManager? configurationManager = null,
     Func<IAudioSource?>? getActiveSource = null,
-    SdrDeviceGate? deviceGate = null)
+    SdrDeviceGate? deviceGate = null,
+    IScanStationMap? scanStationMap = null)
     : base(logger, metricsCollector, getActiveSource)
   {
     _radioReceiver = radioReceiver ?? throw new ArgumentNullException(nameof(radioReceiver));
     _deviceGate = deviceGate;
+    _scanStationMap = scanStationMap;
     _radioOptions = radioOptions ?? throw new ArgumentNullException(nameof(radioOptions));
     _identificationService = identificationService;
     _playbackService = playbackService;
@@ -107,6 +115,9 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     // Subscribed in the constructor so a PI decoded during a startup/scan
     // reaches us even before the first RdsStationNameStable read.
     _radioReceiver.ProgramIdChanged += OnRadioReceiverProgramIdChanged;
+
+    // AUD-100: a live seek's stops go onto the band map as seek-observed stations.
+    _radioReceiver.SeekStationFound += OnSeekStationFound;
 
     // Subscribe to track identification events if service is available
     if (_identificationService != null)
@@ -429,9 +440,26 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     {
       try
       {
+        bool ascending = direction == Radio.Core.Models.Audio.ScanDirection.Up;
+
+        // AUD-100: a fresh band map turns the scan into hops between its stations, with no
+        // stepping through the empty frequencies between. Anything else seeks live.
+        ScanStationList? stations = TryGetScanStations(out string band, out string? whyNot);
+        if (stations != null)
+        {
+          Logger.LogInformation(
+            "Scan {Direction} from {Frequency} Hz hops between the {Count} stations of the {Band} band map (swept {ScannedAt:u})",
+            ascending ? "up" : "down", _radioReceiver.CurrentFrequency, stations.StationsHz.Count, band, stations.ScannedAtUtc);
+          _radioReceiver.ScanStations(stations.StationsHz, ascending, stations.MinGapHz);
+          return;
+        }
+
+        Logger.LogInformation("Scan {Direction} from {Frequency} Hz seeks live on band {Band} ({Reason})",
+          ascending ? "up" : "down", _radioReceiver.CurrentFrequency, band, whyNot);
+
         // Convert ScanStopThreshold (0-100 UI scale) to 0.0-1.0 for RadioReceiver
         var threshold = _radioOptions.CurrentValue.ScanStopThreshold / 100.0f;
-        if (direction == Radio.Core.Models.Audio.ScanDirection.Up)
+        if (ascending)
         {
           _radioReceiver.ScanFrequencyUp(_frequencyStep.Hertz, threshold);
         }
@@ -750,6 +778,63 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
   private void OnRadioReceiverProgramIdChanged(object? sender, ushort piCode)
   {
     _decodedCallSign = RbdsCallSignDecoder.DecodeCallSign(piCode);
+  }
+
+  /// <summary>
+  /// The receiver's band as a band-map code (<c>FM</c>, <c>WB</c>, …), or null for a custom band,
+  /// which has no code (AUD-100).
+  /// </summary>
+  private string? ReceiverBandCode()
+  {
+    BandType type = _radioReceiver.CurrentBand.Type;
+    return type == BandType.Custom || !Enum.IsDefined(type) ? null : RTLSDRCore.Sweep.BandSweepPlans.BandCode(type);
+  }
+
+  /// <summary>
+  /// The stations a scan from the receiver's frequency may hop between, or null when it must seek
+  /// live (AUD-100). Never throws: any failure reading the map means a live seek.
+  /// </summary>
+  private ScanStationList? TryGetScanStations(out string band, out string? whyNot)
+  {
+    string? code = ReceiverBandCode();
+    band = code ?? _radioReceiver.CurrentBand.Name;
+    if (_scanStationMap == null)
+    {
+      whyNot = "no-band-maps";
+      return null;
+    }
+
+    if (code == null)
+    {
+      whyNot = "custom-band";
+      return null;
+    }
+
+    try
+    {
+      return _scanStationMap.GetScanStations(code, _radioReceiver.CurrentFrequency, out whyNot);
+    }
+    catch (Exception ex)
+    {
+      Logger.LogWarning(ex, "Reading the {Band} band map for a scan failed; seeking live", code);
+      whyNot = "map-read-failed";
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// A live seek stopped on a signal: record it on the band map as seek-observed (AUD-100). Runs on
+  /// the scan's thread; the receiver logs and swallows anything thrown here.
+  /// </summary>
+  private void OnSeekStationFound(object? sender, SeekStationFoundEventArgs e)
+  {
+    string? code = ReceiverBandCode();
+    if (_scanStationMap == null || code == null)
+    {
+      return;
+    }
+
+    _scanStationMap.RecordSeekStation(code, e.FrequencyHz, e.Strength);
   }
 
   /// <summary>
@@ -1195,6 +1280,7 @@ public class SDRRadioAudioSource : PrimaryAudioSourceBase, Radio.Core.Interfaces
     _radioReceiver.StateChanged -= OnRTLSDRStateChanged;
     _radioReceiver.AudioDataAvailable -= OnAudioDataAvailable;
     _radioReceiver.ProgramIdChanged -= OnRadioReceiverProgramIdChanged;
+    _radioReceiver.SeekStationFound -= OnSeekStationFound;
 
     // Unsubscribe from fingerprinting events
     if (_identificationService != null)

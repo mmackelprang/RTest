@@ -69,6 +69,54 @@ public sealed class BandMapControllerBandTests : IDisposable
   }
 
   [Fact]
+  public void Get_AnUnsweptBandWithSeekStations_ListsThem_AndStillHasNoScanTimeAgeOrChannels()
+  {
+    // AUD-100: a seek's stops never make an unswept band look swept.
+    BandMapController controller = CreateController();
+    _service!.RecordSeekStation("FM", 95_500_000, 0.9f);
+
+    BandMapResponseDto dto = Body(controller.Get("FM"));
+
+    Assert.Null(dto.ScannedAtUtc);
+    Assert.Null(dto.AgeSeconds);
+    Assert.Empty(dto.Channels);
+    BandMapSeekStationDto seek = Assert.Single(dto.SeekStations);
+    Assert.Equal(95_500_000, seek.FrequencyHz);
+    Assert.Equal(0.9f, seek.SeekStrength);
+    Assert.Equal(_time.GetUtcNow(), seek.ObservedAtUtc);
+  }
+
+  [Fact]
+  public void Get_ASweptBandWithSeekStations_KeepsItsChannelsScanTimeAndAge()
+  {
+    DateTimeOffset scannedAt = _time.GetUtcNow() - TimeSpan.FromMinutes(30);
+    Store(new BandMap
+    {
+      Band = "FM",
+      ScannedAtUtc = scannedAt,
+      Channels = new[] { new BandMapChannel(88_100_000, -40f), new BandMapChannel(88_300_000, -60f) },
+    });
+    BandMapController controller = CreateController();
+    _service!.RecordSeekStation("FM", 88_300_000, 1.1f);
+
+    BandMapResponseDto dto = Body(controller.Get("FM"));
+
+    Assert.Equal(scannedAt, dto.ScannedAtUtc);
+    Assert.Equal(1800, dto.AgeSeconds);
+    Assert.Equal(new[] { -40f, -60f }, dto.Channels.Select(c => c.LevelDbfs));
+    Assert.Equal(88_300_000, Assert.Single(dto.SeekStations).FrequencyHz);
+  }
+
+  [Fact]
+  public void Get_AnUnmappableBand_HasNoSeekStations()
+  {
+    BandMapController controller = CreateController();
+    _service!.RecordSeekStation("AM", 1_000_000, 0.9f);
+
+    Assert.Empty(Body(controller.Get("AM")).SeekStations);
+  }
+
+  [Fact]
   public void Get_Fm_ReportsTheAud76Axis()
   {
     BandMapController controller = CreateController();

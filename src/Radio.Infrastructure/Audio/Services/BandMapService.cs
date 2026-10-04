@@ -77,9 +77,33 @@ public sealed record BandMapTuning(string Band, long FrequencyHz);
 /// <item>At most one sweep runs at a time: the decision to start one and the record of the
 /// running one are both taken under one lock.</item>
 /// </list>
+/// <para>
+/// Seek-observed stations (AUD-100) are kept per band beside the maps, never inside them: recording
+/// one changes no swept channel, no <see cref="BandMap.ScannedAtUtc"/> and no age, and a band with
+/// only seek-observed stations still has no map. A completed sweep drops the band's seek-observed
+/// stations inside the range it swept that were observed no later than the sweep finished.
+/// </para>
 /// </remarks>
-public sealed class BandMapService : IHostedService, IDisposable
+public sealed class BandMapService : IHostedService, IDisposable, IScanStationMap
 {
+  /// <summary>Why Scan seeks live (<see cref="GetScanStations"/>): <see cref="BandMapOptions.ScanMapMaxAgeMinutes"/> is 0 or less.</summary>
+  public const string ScanReasonDisabled = "scan-from-map-disabled";
+
+  /// <summary>Why Scan seeks live: the band has no sweep plan, or is not a band code.</summary>
+  public const string ScanReasonNotMappable = "band-not-mappable";
+
+  /// <summary>Why Scan seeks live: the band has never been swept.</summary>
+  public const string ScanReasonNoMap = "no-map";
+
+  /// <summary>Why Scan seeks live: the band's map is older than <see cref="BandMapOptions.ScanMapMaxAgeMinutes"/>.</summary>
+  public const string ScanReasonStale = "map-stale";
+
+  /// <summary>Why Scan seeks live: the radio's frequency is outside the range the map swept.</summary>
+  public const string ScanReasonOutsideMap = "outside-map";
+
+  /// <summary>Why Scan seeks live: the map lists no station other than the one the radio is on.</summary>
+  public const string ScanReasonNoOtherStation = "no-other-station";
+
   /// <summary>Unavailable reason: <see cref="BandMapOptions.Enabled"/> is false.</summary>
   public const string ReasonDisabled = "disabled";
 
@@ -127,6 +151,11 @@ public sealed class BandMapService : IHostedService, IDisposable
   private bool _disposed;
   // Keyed by band code.
   private readonly Dictionary<string, BandMap> _maps = new(StringComparer.OrdinalIgnoreCase);
+  // Seek-observed stations (AUD-100), keyed by band code; each list ascending by frequency.
+  private readonly Dictionary<string, IReadOnlyList<BandMapSeekStation>> _seekStations = new(StringComparer.OrdinalIgnoreCase);
+  // Serializes seek-station file writes so the last write is of the latest list (taken under _lock
+  // inside it); never taken while holding _lock.
+  private readonly object _seekSaveLock = new();
   private BandSweepOutcome? _last;
   private SweepRun? _running;
   private Task _sweepTask = Task.CompletedTask;
@@ -186,6 +215,192 @@ public sealed class BandMapService : IHostedService, IDisposable
       _maps[band] = string.Equals(map.Band, band, StringComparison.OrdinalIgnoreCase) ? map : map with { Band = band };
       _logger.LogInformation("Loaded {Band} band map from {Path} ({Channels} channels, scanned {ScannedAt:u})",
         band, _store.GetFilePath(band), map.Channels.Count, map.ScannedAtUtc);
+    }
+
+    foreach (string band in MappableBands())
+    {
+      BandMapSeekStations? seek = _store.LoadSeekStations(band);
+      if (seek == null || seek.Stations.Count == 0)
+      {
+        continue;
+      }
+
+      // One entry per frequency, ascending, whatever the file holds; the latest observation wins.
+      _seekStations[band] = seek.Stations
+        .GroupBy(s => s.FrequencyHz)
+        .Select(g => g.OrderByDescending(s => s.ObservedAtUtc).First())
+        .OrderBy(s => s.FrequencyHz)
+        .ToArray();
+      _logger.LogInformation("Loaded {Count} seek-observed {Band} stations from {Path}",
+        _seekStations[band].Count, band, _store.GetSeekFilePath(band));
+    }
+  }
+
+  /// <summary>
+  /// The seek-observed stations of <paramref name="band"/> (AUD-100), ascending by frequency; empty
+  /// when there are none.
+  /// </summary>
+  /// <param name="band">A band code accepted by <see cref="BandSweepPlans.TryParseBandCode"/>.</param>
+  /// <exception cref="ArgumentException"><paramref name="band"/> is not a band code.</exception>
+  public IReadOnlyList<BandMapSeekStation> GetSeekStations(string band)
+  {
+    string code = BandSweepPlans.BandCode(ParseBand(band));
+    lock (_lock)
+    {
+      return _seekStations.GetValueOrDefault(code) ?? Array.Empty<BandMapSeekStation>();
+    }
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// The list is the swept map's peaks (<see cref="BandMapStations.Peaks"/>, the BAND view's tap rule)
+  /// plus the band's seek-observed stations inside the map's range that are at least one channel
+  /// spacing from every peak and from each other (the stronger seek reading kept). A peak always
+  /// wins over a seek-observed station near it. The map's range is the one it recorded, or for a map
+  /// that recorded none (an AUD-76 file) the band's current plan.
+  /// </remarks>
+  public ScanStationList? GetScanStations(string band, long frequencyHz, out string? whyNot)
+  {
+    int maxAgeMinutes = _options.CurrentValue.ScanMapMaxAgeMinutes;
+    if (maxAgeMinutes <= 0)
+    {
+      whyNot = ScanReasonDisabled;
+      return null;
+    }
+
+    if (!BandSweepPlans.TryParseBandCode(band, out BandType bandType) || BandSweepPlans.UnavailableReason(bandType) != null)
+    {
+      whyNot = ScanReasonNotMappable;
+      return null;
+    }
+
+    string code = BandSweepPlans.BandCode(bandType);
+    BandMap? map;
+    IReadOnlyList<BandMapSeekStation> seek;
+    lock (_lock)
+    {
+      map = _maps.GetValueOrDefault(code);
+      seek = _seekStations.GetValueOrDefault(code) ?? Array.Empty<BandMapSeekStation>();
+    }
+
+    if (map == null || map.Channels.Count == 0)
+    {
+      whyNot = ScanReasonNoMap;
+      return null;
+    }
+
+    // A map from the future (the clock went back) counts as fresh.
+    if (_time.GetUtcNow() - map.ScannedAtUtc > TimeSpan.FromMinutes(maxAgeMinutes))
+    {
+      whyNot = ScanReasonStale;
+      return null;
+    }
+
+    BandSweepPlan? plan = BandSweepPlans.For(bandType, frequencyHz);
+    bool storedRange = map.RangeMinHz > 0 && map.RangeMaxHz > map.RangeMinHz;
+    long rangeMin = storedRange ? map.RangeMinHz : plan?.DisplayMinHz ?? 0;
+    long rangeMax = storedRange ? map.RangeMaxHz : plan?.DisplayMaxHz ?? 0;
+    if (frequencyHz < rangeMin || frequencyHz > rangeMax)
+    {
+      whyNot = ScanReasonOutsideMap;
+      return null;
+    }
+
+    long spacing = map.ChannelSpacingHz > 0 ? map.ChannelSpacingHz : plan?.ChannelSpacingHz ?? 0;
+    List<long> stations = new(BandMapStations.Peaks(map.Channels));
+    foreach (BandMapSeekStation s in seek.OrderByDescending(s => s.SeekStrength))
+    {
+      bool inRange = s.FrequencyHz >= rangeMin && s.FrequencyHz <= rangeMax;
+      if (inRange && stations.All(hz => Math.Abs(hz - s.FrequencyHz) >= Math.Max(1, spacing)))
+      {
+        stations.Add(s.FrequencyHz);
+      }
+    }
+
+    stations.Sort();
+    long minGap = spacing / 2;
+    if (RTLSDRCore.StationListScan.Next(stations, frequencyHz, ascending: true, minGap) == null)
+    {
+      whyNot = ScanReasonNoOtherStation;
+      return null;
+    }
+
+    whyNot = null;
+    return new ScanStationList(stations, minGap, map.ScannedAtUtc);
+  }
+
+  /// <inheritdoc/>
+  /// <remarks>
+  /// Upserts by exact frequency: a second stop on the same frequency replaces the first entry's
+  /// reading and time. The band's stations are written to <see cref="BandMapStore.GetSeekFilePath"/>;
+  /// a failed write is logged and the station kept in memory.
+  /// </remarks>
+  public void RecordSeekStation(string band, long frequencyHz, float seekStrength)
+  {
+    if (!BandSweepPlans.TryParseBandCode(band, out BandType bandType) || BandSweepPlans.UnavailableReason(bandType) != null)
+    {
+      _logger.LogDebug("Seek stop at {FrequencyHz} Hz on band {Band} not recorded: the band is not mappable", frequencyHz, band);
+      return;
+    }
+
+    string code = BandSweepPlans.BandCode(bandType);
+    BandMapSeekStation station = new(frequencyHz, seekStrength, _time.GetUtcNow());
+    lock (_lock)
+    {
+      IReadOnlyList<BandMapSeekStation> current = _seekStations.GetValueOrDefault(code) ?? Array.Empty<BandMapSeekStation>();
+      _seekStations[code] = current
+        .Where(s => s.FrequencyHz != frequencyHz)
+        .Append(station)
+        .OrderBy(s => s.FrequencyHz)
+        .ToArray();
+    }
+
+    _logger.LogInformation("Seek-observed {Band} station recorded at {Frequency} MHz (seek strength {Strength:F3})",
+      code, (frequencyHz / 1_000_000.0).ToString("F4", CultureInfo.InvariantCulture), seekStrength);
+    SaveSeekStations(code);
+  }
+
+  /// <summary>
+  /// Drops <paramref name="band"/>'s seek-observed stations from <paramref name="minHz"/> to
+  /// <paramref name="maxHz"/> inclusive that were observed no later than <paramref name="sweptAtUtc"/>,
+  /// after a completed sweep of that range; returns how many. Must be called holding <c>_lock</c>.
+  /// </summary>
+  private int DropSeekStationsLocked(string band, long minHz, long maxHz, DateTimeOffset sweptAtUtc)
+  {
+    IReadOnlyList<BandMapSeekStation>? current = _seekStations.GetValueOrDefault(band);
+    if (current == null || current.Count == 0)
+    {
+      return 0;
+    }
+
+    BandMapSeekStation[] kept = current
+      .Where(s => s.FrequencyHz < minHz || s.FrequencyHz > maxHz || s.ObservedAtUtc > sweptAtUtc)
+      .ToArray();
+    _seekStations[band] = kept;
+    return current.Count - kept.Length;
+  }
+
+  /// <summary>Writes <paramref name="band"/>'s current seek-observed stations; logs and keeps going on failure.</summary>
+  private void SaveSeekStations(string band)
+  {
+    lock (_seekSaveLock)
+    {
+      IReadOnlyList<BandMapSeekStation> snapshot;
+      lock (_lock)
+      {
+        snapshot = _seekStations.GetValueOrDefault(band) ?? Array.Empty<BandMapSeekStation>();
+      }
+
+      try
+      {
+        _store.SaveSeekStations(new BandMapSeekStations { Band = band, Stations = snapshot });
+      }
+      catch (Exception ex)
+      {
+        // Any failure, not only IO: this runs on the scan thread and at the end of Finish, and
+        // neither may be ended by a file that could not be written.
+        _logger.LogWarning(ex, "Seek stations could not be written to {Path}; keeping them in memory only", _store.GetSeekFilePath(band));
+      }
     }
   }
 
@@ -646,6 +861,7 @@ public sealed class BandMapService : IHostedService, IDisposable
   {
     TimeSpan duration = TimeSpan.Zero;
     int measured = 0;
+    int seekDropped = 0;
     BandMap? newMap = null;
     BandSweepOutcome outcome;
     try
@@ -709,6 +925,10 @@ public sealed class BandMapService : IHostedService, IDisposable
         if (newMap != null)
         {
           _maps[newMap.Band] = newMap;
+          // AUD-100: the sweep measured every channel of its range, so it is the authority there
+          // over what was seen before it finished; seek-observed stations outside it (another VHF
+          // window), and any recorded after it finished, are kept.
+          seekDropped = DropSeekStationsLocked(newMap.Band, newMap.RangeMinHz, newMap.RangeMaxHz, newMap.ScannedAtUtc);
         }
         _last = outcome;
         _running = null;
@@ -717,6 +937,12 @@ public sealed class BandMapService : IHostedService, IDisposable
           ArmTimerLocked(RescanInterval(options));
         }
       }
+    }
+
+    if (seekDropped > 0)
+    {
+      _logger.LogInformation("{Band} sweep replaced {Count} seek-observed stations", run.Plan.Band, seekDropped);
+      SaveSeekStations(run.Plan.Band);
     }
 
     if (result == BandSweepResults.Failed)

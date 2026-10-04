@@ -166,7 +166,16 @@
       {
         <div class="band-empty">
           <div class="band-empty-title">No stations discovered yet</div>
-          <div class="band-empty-sub">The band is swept automatically a few minutes after start-up, or tap Discover.</div>
+          @if (ShownSeekStations().Count > 0)
+          {
+            @* AUD-100: a seek proves a station is there, not that the rest of the band is empty — so the band
+               still reads as undiscovered, and the rings are named as Scan's. *@
+            <div class="band-empty-sub">The rings mark where Scan stopped. Tap Discover to sweep the whole band.</div>
+          }
+          else
+          {
+            <div class="band-empty-sub">The band is swept automatically a few minutes after start-up, or tap Discover.</div>
+          }
         </div>
       }
     }
@@ -235,12 +244,21 @@
              map or a band out of range, and it stays through a sweep of a band that already has a map, which
              is drawn meanwhile. (A flat dead map has channels but no bar tall enough to draw; the key still
              shows.) Grey (noise) is not listed: it reads as nothing. The swatches are decoration. *@
-          @if (HasBandMap && IsShownBandMappable)
+          @* AUD-100: the seek-observed key shows whenever such a marker is drawn, with or without a map — on
+             a never-swept band it is the only key, and the status line still says nothing was discovered. *@
+          @if ((HasBandMap && IsShownBandMappable) || ShownSeekStations().Count > 0)
           {
             <span class="band-legend">
-              <span class="band-legend-item"><span class="band-legend-swatch is-weak" aria-hidden="true"></span>weak</span>
-              <span class="band-legend-item"><span class="band-legend-swatch is-fair" aria-hidden="true"></span>fair</span>
-              <span class="band-legend-item"><span class="band-legend-swatch is-strong" aria-hidden="true"></span>strong</span>
+              @if (HasBandMap && IsShownBandMappable)
+              {
+                <span class="band-legend-item"><span class="band-legend-swatch is-weak" aria-hidden="true"></span>weak</span>
+                <span class="band-legend-item"><span class="band-legend-swatch is-fair" aria-hidden="true"></span>fair</span>
+                <span class="band-legend-item"><span class="band-legend-swatch is-strong" aria-hidden="true"></span>strong</span>
+              }
+              @if (ShownSeekStations().Count > 0)
+              {
+                <span class="band-legend-item"><span class="band-legend-swatch is-seek" aria-hidden="true"></span>found by scan</span>
+              }
             </span>
           }
         </div>
@@ -1468,11 +1486,31 @@
   }
 
   /// <summary>
+  /// The frequencies of the shown band's seek-observed stations that are on the drawn axis (AUD-100),
+  /// ascending; none on a band that cannot be received, or when the axis drawn is not the shown band's.
+  /// </summary>
+  private IReadOnlyList<long> ShownSeekStations()
+  {
+    BandAxis axis = _bandAxis;
+    if (!IsShownBandMappable || _bandMap == null || !SameBand(axis.Band, ShownBand))
+    {
+      return Array.Empty<long>();
+    }
+
+    return (_bandMap.SeekStations ?? Array.Empty<BandMapSeekStationDto>())
+      .Where(s => axis.Contains(s.FrequencyHz))
+      .Select(s => s.FrequencyHz)
+      .OrderBy(hz => hz)
+      .ToArray();
+  }
+
+  /// <summary>
   /// Hands the canvas a drawing model in plot coordinates (0–1 across the shown band's axis; 87.5–108 MHz
   /// on FM), so the JS stays arithmetic-free: normalised channel heights, the gridline and tick positions,
   /// the axis span in channel spacings (for the bar width), each bar's colour tier (UI-22), the station
-  /// marker (shown band, radio active), the shown band's presets as carets on the axis (UI-31), and
-  /// whether the band can be received at all (no axis is drawn when it cannot).
+  /// marker (shown band, radio active), the shown band's presets as carets on the axis (UI-31), the
+  /// seek-observed stations (AUD-100), and whether the band can be received at all (no axis is drawn
+  /// when it cannot).
   /// </summary>
   private async Task DrawBandAsync()
   {
@@ -1509,12 +1547,15 @@
 
     double[] grid = axis.Ticks().Select(t => axis.HzToFraction(t.Hz)).ToArray();
 
+    // AUD-100: where a live Scan stopped since the last sweep, drawn as markers apart from the bars.
+    object[] seek = ShownSeekStations().Select(hz => (object)new { f = axis.HzToFraction(hz) }).ToArray();
+
     try
     {
       await _jsModule.InvokeVoidAsync("visualizer.drawBandMap", WebConstants.ElementIds.VisualizerCanvas,
         new
         {
-          levels, station, presets, grid, channelsAcross = axis.ChannelsAcross,
+          levels, station, presets, seek, grid, channelsAcross = axis.ChannelsAcross,
           sweeping = _bandMap?.Sweep.IsSweeping == true, mappable = IsShownBandMappable,
         });
     }
@@ -1565,8 +1606,11 @@
   /// at once — once per band change, not once per broadcast, since telemetry ticks repeat the state up
   /// to twice a second. On VHF, a frequency outside the window shown re-reads the map once per window.
   /// That re-read moves the window only while no VHF map is stored: once one is, the API returns the
-  /// stored map's range, and only a new sweep moves it. Otherwise only a changed frequency does anything: it
-  /// moves the station marker, a redraw and no API call; a repeated tick does nothing at all.
+  /// stored map's range, and only a new sweep moves it. AUD-100: the tick on which <c>IsScanning</c> goes
+  /// from true to false re-reads the map, so a live seek's stops appear at once (a refresh in flight
+  /// during the scan can bring back a scanning state and cause one more such read, never one per tick).
+  /// Otherwise only a changed frequency does anything: it moves the station marker, a redraw and no API
+  /// call; a repeated tick does nothing at all.
   /// </summary>
   private async Task ApplyRadioStateAsync(RadioStateDto dto)
   {
@@ -1606,7 +1650,17 @@
     bool markerMoved = _radioState == null
       || _radioState.Frequency != dto.Frequency
       || !SameBand(_radioState.Band, dto.Band);
+    // AUD-100: a scan that has just ended may have added seek-observed stations; read them now rather
+    // than at the next idle refresh, up to 30 s later. Only the tick that ends a scan does this.
+    bool scanEnded = _radioState?.IsScanning == true && !dto.IsScanning;
     _radioState = dto;
+
+    if (scanEnded)
+    {
+      await RefreshBandAsync(includePresets: false);
+      CompleteBandCycle();
+      return;
+    }
 
     if (SameBand(dto.Band, "VHF") && SameBand(_bandAxis.Band, "VHF") && !_bandAxis.Contains(dto.Frequency)
       && _bandAxis != _windowReadTriggeredFor)
