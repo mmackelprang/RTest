@@ -25,9 +25,12 @@ public class PlayHistoryTracker : IDisposable
   private readonly IBluetoothService _bluetoothService;
   private readonly IMetricsCollector? _metricsCollector;
 
-  // Pre-allocated fallback title arrays for placeholder detection —
-  // avoids allocating new string[] on every IsPlaceholderMetadata call.
-  private static readonly string[] BluetoothFallbackTitles = ["Bluetooth Audio", "Bluetooth"];
+  // Title values that mean "no title" for each source: History's own fallbacks
+  // (GetSourceMetadata) plus the defaults the sources themselves write when they have no
+  // track metadata. Passed to SourceMetadataPrecedence.IsMissing as extra placeholders,
+  // the same way BluetoothAudioSource passes its device name (AUD-19).
+  private static readonly string[] BluetoothFallbackTitles = ["Bluetooth Audio", "Bluetooth", "Bluetooth Device"];
+  private static readonly string[] FileFallbackTitles = ["File Player"];
   private static readonly string[] VinylFallbackTitles = ["Vinyl"];
   private static readonly string[] UsbFallbackTitles = ["USB Audio", "Generic USB Audio"];
   private static readonly string[] RadioFallbackTitles = ["SDR Radio", "Radio"];
@@ -293,52 +296,214 @@ public class PlayHistoryTracker : IDisposable
   /// Determines if the given title+artist represent placeholder/fallback metadata
   /// rather than real track information (e.g., BT device name, source type name).
   /// </summary>
+  /// <remarks>
+  /// Row-level, not per-field: true when the title is missing OR the artist is History's
+  /// fallback artist. "Missing" is <see cref="SourceMetadataPrecedence.IsMissing"/> — the
+  /// predicate AUD-1 gave now-playing — with History's own fallbacks as placeholders (AUD-19).
+  /// ⚠ A file player title equal to the filename is NOT a placeholder here (no filename is
+  /// passed), so a file with an artist tag but no title tag still records as identified. The
+  /// per-field merge (<see cref="ApplyIdentification"/>) does treat it as a missing title.
+  /// </remarks>
   private static bool IsPlaceholderMetadata(
     string? title, string? artist, PlaySource source, string? btDeviceName = null)
   {
-    if (string.IsNullOrWhiteSpace(title))
-    {
-      return true;
-    }
-
-    // BT device name (e.g., "Pixel 8 Pro") used as title before AVRCP arrives
-    if (source == PlaySource.Bluetooth && btDeviceName != null &&
-        string.Equals(title, btDeviceName, StringComparison.OrdinalIgnoreCase))
+    // BT device name (e.g., "Pixel 8 Pro") is used as the title before AVRCP arrives
+    if (SourceMetadataPrecedence.IsMissing(title, TitlePlaceholders(source, btDeviceName, fileTitle: null)))
     {
       return true;
     }
 
     // Source-type fallback artists indicate no real metadata was available
-    var fallbackArtist = source switch
-    {
-      PlaySource.Radio => "Radio",
-      PlaySource.File => "File Player",
-      PlaySource.Vinyl => "Vinyl",
-      PlaySource.GenericUSB => "USB Input",
-      PlaySource.Bluetooth => "Bluetooth",
-      _ => null
-    };
-    if (fallbackArtist != null && string.Equals(artist, fallbackArtist, StringComparison.OrdinalIgnoreCase))
-    {
-      return true;
-    }
+    var fallbackArtist = FallbackArtist(source);
+    return fallbackArtist != null && SourceMetadataPrecedence.IsMissing(artist, fallbackArtist);
+  }
 
-    // Source-type fallback titles (static readonly arrays to avoid per-call allocations)
-    var fallbackTitles = source switch
+  /// <summary>
+  /// The artist <see cref="GetSourceMetadata"/> writes when the source supplied none.
+  /// </summary>
+  private static string? FallbackArtist(PlaySource source) => source switch
+  {
+    PlaySource.Radio => "Radio",
+    PlaySource.File => "File Player",
+    PlaySource.Vinyl => "Vinyl",
+    PlaySource.GenericUSB => "USB Input",
+    PlaySource.Bluetooth => "Bluetooth",
+    _ => null
+  };
+
+  /// <summary>
+  /// Title values that mean "no title" for <paramref name="source"/>, on top of
+  /// <see cref="StandardMetadataKeys.DefaultTitle"/>.
+  /// </summary>
+  /// <param name="source">The play source.</param>
+  /// <param name="btDeviceName">The connected phone's name, which Bluetooth writes as the title
+  /// when it has no track metadata.</param>
+  /// <param name="fileTitle">The current file's name without extension, which the file player
+  /// seeds as the title and replaces only when the file has a Title tag.</param>
+  private static string[] TitlePlaceholders(PlaySource source, string? btDeviceName, string? fileTitle)
+  {
+    var fallbacks = source switch
     {
       PlaySource.Bluetooth => BluetoothFallbackTitles,
+      PlaySource.File => FileFallbackTitles,
       PlaySource.Vinyl => VinylFallbackTitles,
       PlaySource.GenericUSB => UsbFallbackTitles,
       PlaySource.Radio => RadioFallbackTitles,
       _ => Array.Empty<string>()
     };
-    if (fallbackTitles.Any(f => string.Equals(title, f, StringComparison.OrdinalIgnoreCase)))
+
+    var extra = source switch
     {
-      return true;
+      PlaySource.Bluetooth => btDeviceName,
+      PlaySource.File => fileTitle,
+      _ => null
+    };
+
+    return string.IsNullOrWhiteSpace(extra)
+      ? [StandardMetadataKeys.DefaultTitle, .. fallbacks]
+      : [StandardMetadataKeys.DefaultTitle, .. fallbacks, extra];
+  }
+
+  /// <summary>
+  /// True for the sources whose now-playing metadata follows AUD-1's per-field rule:
+  /// Bluetooth (AVRCP) and the file player (tags). The SDR radio, vinyl and USB sources still
+  /// take an identification whole on now-playing (USBAudioSourceBase.UpdateMetadataFromFingerprint),
+  /// so History does the same for them.
+  /// </summary>
+  private static bool FollowsSourcePrecedence(PlaySource source) =>
+    source is PlaySource.Bluetooth or PlaySource.File;
+
+  /// <summary>
+  /// The provenance of a title the source supplied itself.
+  /// </summary>
+  private static MetadataSource SourceProvenance(PlaySource source) => source switch
+  {
+    PlaySource.Bluetooth => MetadataSource.Avrcp,
+    PlaySource.File => MetadataSource.FileTag,
+    _ => MetadataSource.Manual
+  };
+
+  /// <summary>
+  /// What History records when an identification lands on <paramref name="recorded"/>: the
+  /// owner's AUD-1 rule, per field (AUD-19). Where the source supplied a title, artist, album or
+  /// cover art it is kept; the identification fills only what is missing. Fields the sources
+  /// never supply to History (genre, year, track number, album artist, MusicBrainz ids) are
+  /// taken from the identification where the recorded row has none.
+  /// </summary>
+  /// <param name="recorded">The source's metadata as History recorded it, or null when there is
+  /// none — then the identification is taken whole.</param>
+  /// <param name="identified">The fingerprint result.</param>
+  /// <param name="playSource">The active play source. For sources outside the rule
+  /// (<see cref="FollowsSourcePrecedence"/>) the identification is taken whole, as before.</param>
+  /// <param name="source">The active source, read for its placeholders (device name, filename).</param>
+  /// <returns>
+  /// The track to record, and whether its TITLE came from the identification. When nothing the
+  /// source supplied survived, the identification itself is returned (its id included);
+  /// otherwise a new row with a fresh id — never the identification's id, so the merged row
+  /// cannot be confused with the fingerprint's own.
+  /// </returns>
+  private static (TrackMetadata Track, bool TitleFromIdentification) ApplyIdentification(
+    TrackMetadata? recorded, TrackMetadata identified, PlaySource playSource, IAudioSource source)
+  {
+    if (recorded == null || !FollowsSourcePrecedence(playSource))
+    {
+      return (identified, true);
     }
 
-    return false;
+    var titlePlaceholders = TitlePlaceholders(playSource, DeviceName(source), FileTitle(source));
+    var fallbackArtist = FallbackArtist(playSource);
+
+    // The recorded row as a metadata dictionary, so the shared helper decides each field. History
+    // wrote its fallback artist itself when the source supplied none; that is not source data, so
+    // it is left out and reads as missing. (FillMissingFrom only takes extra TITLE placeholders.)
+    Dictionary<string, object> fields = new()
+    {
+      [StandardMetadataKeys.Title] = recorded.Title
+    };
+    if (fallbackArtist == null || !SourceMetadataPrecedence.IsMissing(recorded.Artist, fallbackArtist))
+    {
+      fields[StandardMetadataKeys.Artist] = recorded.Artist;
+    }
+    if (recorded.Album != null)
+    {
+      fields[StandardMetadataKeys.Album] = recorded.Album;
+    }
+    if (recorded.CoverArtUrl != null)
+    {
+      fields[StandardMetadataKeys.AlbumArtUrl] = recorded.CoverArtUrl;
+    }
+
+    var filled = SourceMetadataPrecedence.FillMissingFrom(fields, identified, titlePlaceholders);
+
+    // Cover art by the same rule. Like BluetoothAudioSource since the owner's 2026-09-26 decision
+    // on AUD-1, there is no artist-match guard: art fills whenever the source had none.
+    string? coverArt;
+    if (SourceMetadataPrecedence.ShouldFillAlbumArt(fields) && !string.IsNullOrWhiteSpace(identified.CoverArtUrl))
+    {
+      coverArt = identified.CoverArtUrl;
+    }
+    else
+    {
+      coverArt = SourceMetadataPrecedence.IsMissing(recorded.CoverArtUrl, StandardMetadataKeys.DefaultAlbumArtUrl)
+        ? null
+        : recorded.CoverArtUrl;
+    }
+
+    // A field neither side supplied keeps the recorded value (History's fallback), so Title and
+    // Artist are never empty.
+    var title = fields[StandardMetadataKeys.Title].ToString()!;
+    var artist = fields.TryGetValue(StandardMetadataKeys.Artist, out var artistValue)
+      ? artistValue.ToString()!
+      : recorded.Artist;
+    var album = fields.TryGetValue(StandardMetadataKeys.Album, out var albumValue)
+        && !SourceMetadataPrecedence.IsMissing(albumValue, StandardMetadataKeys.DefaultAlbum)
+      ? albumValue.ToString()
+      : null;
+
+    if (filled.Title && filled.Artist
+        && string.Equals(album, identified.Album, StringComparison.Ordinal)
+        && string.Equals(coverArt, identified.CoverArtUrl, StringComparison.Ordinal))
+    {
+      // Nothing the source supplied survived: record the identification as it is.
+      return (identified, true);
+    }
+
+    var now = DateTime.UtcNow;
+    var merged = new TrackMetadata
+    {
+      Id = Guid.NewGuid().ToString(),
+      FingerprintId = identified.FingerprintId ?? recorded.FingerprintId,
+      Title = title,
+      Artist = artist,
+      Album = album,
+      AlbumArtist = recorded.AlbumArtist ?? identified.AlbumArtist,
+      TrackNumber = recorded.TrackNumber ?? identified.TrackNumber,
+      DiscNumber = recorded.DiscNumber ?? identified.DiscNumber,
+      ReleaseYear = recorded.ReleaseYear ?? identified.ReleaseYear,
+      Genre = recorded.Genre ?? identified.Genre,
+      MusicBrainzArtistId = recorded.MusicBrainzArtistId ?? identified.MusicBrainzArtistId,
+      MusicBrainzReleaseId = recorded.MusicBrainzReleaseId ?? identified.MusicBrainzReleaseId,
+      MusicBrainzRecordingId = recorded.MusicBrainzRecordingId ?? identified.MusicBrainzRecordingId,
+      CoverArtUrl = coverArt,
+      // TrackMetadata.Source records the TITLE's provenance (AUD-17).
+      Source = filled.Title ? identified.Source : SourceProvenance(playSource),
+      CreatedAt = now,
+      UpdatedAt = now
+    };
+    return (merged, filled.Title);
   }
+
+  /// <summary>The connected phone's name, when the source is Bluetooth and reports one.</summary>
+  private static string? DeviceName(IAudioSource source) =>
+    source is IPrimaryAudioSource primary && primary.Metadata?.TryGetValue("Device", out var device) == true
+      ? device?.ToString()
+      : null;
+
+  /// <summary>The current file's name without extension, when the source is the file player.</summary>
+  private static string? FileTitle(IAudioSource source) =>
+    source is FilePlayerAudioSource filePlayer && !string.IsNullOrEmpty(filePlayer.CurrentFile)
+      ? System.IO.Path.GetFileNameWithoutExtension(filePlayer.CurrentFile)
+      : null;
 
   /// <summary>
   /// Gets metadata from the source. Always returns a TrackMetadata with at least
@@ -552,29 +717,37 @@ public class PlayHistoryTracker : IDisposable
 
       if (existingEntry != null)
       {
-        // Persist the identified track metadata so the DB row exists for JOIN queries
+        // AUD-19: the per-field rule — what the source supplied for this row is kept, and the
+        // identification fills only what is missing (BT and file; other sources take it whole).
+        var (track, titleFromIdentification) = ApplyIdentification(
+          existingEntry.Track, e.Track, playSource, activeSource);
+
+        // Persist the recorded track metadata so the DB row exists for JOIN queries
         var metadataRepository = scope.ServiceProvider.GetService<ITrackMetadataRepository>();
         if (metadataRepository != null)
         {
-          await metadataRepository.StoreAsync(e.Track);
+          await metadataRepository.StoreAsync(track);
         }
 
-        // Update the existing entry with fingerprinting data
+        // MetadataSource records the TITLE's provenance; the identification itself is
+        // recorded by FingerprintId, IdentificationConfidence and WasIdentified.
         var updatedEntry = existingEntry with
         {
-          TrackMetadataId = e.Track.Id,
+          TrackMetadataId = track.Id,
           FingerprintId = e.Track.FingerprintId,
-          MetadataSource = MetadataSource.Fingerprinting,
-          SourceDetails = $"{e.Track.Title} - {e.Track.Artist}",
+          MetadataSource = titleFromIdentification
+            ? MetadataSource.Fingerprinting
+            : existingEntry.MetadataSource ?? SourceProvenance(playSource),
+          SourceDetails = $"{track.Title} - {track.Artist}",
           IdentificationConfidence = e.Confidence,
           WasIdentified = true,
-          Track = e.Track
+          Track = track
         };
 
         await playHistoryRepository.UpdateAsync(updatedEntry);
         _logger.LogInformation(
-          "Updated play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
-          existingEntry.Id, e.Track.Title, e.Track.Artist, e.Confidence);
+          "Updated play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (identified as '{IdentifiedTitle}' by '{IdentifiedArtist}', confidence: {Confidence:P0})",
+          existingEntry.Id, track.Title, track.Artist, e.Track.Title, e.Track.Artist, e.Confidence);
       }
       else
       {
@@ -612,69 +785,110 @@ public class PlayHistoryTracker : IDisposable
 
       var playSource = MapSourceTypeToPlaySource(activeSource.Type);
 
-      // Store the new track metadata
-      if (metadataRepository != null)
+      // AUD-19: what the song now playing IS comes from the source where the source says so.
+      // For Bluetooth and the file player the source's live metadata (AVRCP, or the current
+      // file's tags) is the baseline, and the identification fills only what it left missing —
+      // so a fingerprint title that differs from the source's (a remaster suffix, or SongRec
+      // matching residual audio) is not a song change. On a file player auto-advance the live
+      // tags are the NEW file's, so the boundary is still recorded: there is no StateChanged on
+      // an auto-advance, and this handler is what starts the new file's row.
+      var currentEntryId = _currentPlayHistoryEntryId;
+      var currentEntry = string.IsNullOrEmpty(currentEntryId)
+        ? null
+        : await playHistoryRepository.GetByIdAsync(currentEntryId);
+
+      var liveMetadata = FollowsSourcePrecedence(playSource) ? GetSourceMetadata(activeSource) : null;
+
+      // ⚠ A source can hold a title it FILLED from an earlier identification (Bluetooth keeps one
+      // until the next AVRCP event writes the field again). If the live title is the current
+      // row's, and that row's title came from fingerprinting, the source has not named this song:
+      // take the identification whole, as before AUD-19, or a source that never supplies titles
+      // could never record a song change again.
+      if (liveMetadata != null
+          && currentEntry?.Track != null
+          && currentEntry.MetadataSource == MetadataSource.Fingerprinting
+          && string.Equals(liveMetadata.Title, currentEntry.Track.Title, StringComparison.OrdinalIgnoreCase))
       {
-        await metadataRepository.StoreAsync(e.NewTrack);
+        liveMetadata = null;
       }
+
+      var (newTrack, titleFromIdentification) = ApplyIdentification(
+        liveMetadata, e.NewTrack, playSource, activeSource);
 
       // Check if the current entry already matches the new song (AVRCP may have
       // created an entry before SongRec identified it — avoid creating a duplicate).
-      if (!string.IsNullOrEmpty(_currentPlayHistoryEntryId))
+      if (!string.IsNullOrEmpty(currentEntryId))
       {
-        var currentEntry = await playHistoryRepository.GetByIdAsync(_currentPlayHistoryEntryId);
         if (currentEntry?.Track != null &&
-            string.Equals(currentEntry.Track.Title, e.NewTrack.Title, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(currentEntry.Track.Artist, e.NewTrack.Artist, StringComparison.OrdinalIgnoreCase))
+            string.Equals(currentEntry.Track.Title, newTrack.Title, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(currentEntry.Track.Artist, newTrack.Artist, StringComparison.OrdinalIgnoreCase))
         {
-          // Same song — enrich the existing entry with fingerprinting data instead of duplicating
+          // Same song — fill the existing row's gaps from the identification instead of
+          // duplicating. The row's own recorded fields are the baseline here, not the live ones.
+          var (enriched, enrichedTitleFromIdentification) = ApplyIdentification(
+            currentEntry.Track, e.NewTrack, playSource, activeSource);
+          if (metadataRepository != null)
+          {
+            await metadataRepository.StoreAsync(enriched);
+          }
+
           var updatedEntry = currentEntry with
           {
-            TrackMetadataId = e.NewTrack.Id,
+            TrackMetadataId = enriched.Id,
             FingerprintId = e.NewTrack.FingerprintId,
-            MetadataSource = MetadataSource.Fingerprinting,
-            SourceDetails = $"{e.NewTrack.Title} - {e.NewTrack.Artist}",
+            MetadataSource = enrichedTitleFromIdentification
+              ? MetadataSource.Fingerprinting
+              : currentEntry.MetadataSource ?? SourceProvenance(playSource),
+            SourceDetails = $"{enriched.Title} - {enriched.Artist}",
             IdentificationConfidence = e.Confidence,
             WasIdentified = true,
-            Track = e.NewTrack
+            Track = enriched
           };
           await playHistoryRepository.UpdateAsync(updatedEntry);
           _logger.LogInformation(
-            "Enriched existing play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
-            currentEntry.Id, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
+            "Enriched existing play history entry {EntryId} with fingerprinting data: '{Title}' by '{Artist}' (identified as '{IdentifiedTitle}' by '{IdentifiedArtist}', confidence: {Confidence:P0})",
+            currentEntry.Id, enriched.Title, enriched.Artist, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
           return;
         }
 
         // Different song — finalize the previous entry
-        await playHistoryRepository.FinalizeEntryAsync(_currentPlayHistoryEntryId, e.DetectedAt);
+        await playHistoryRepository.FinalizeEntryAsync(currentEntryId, e.DetectedAt);
         _logger.LogInformation(
           "Finalized play history entry {EntryId} (song ended at {EndedAt})",
-          _currentPlayHistoryEntryId, e.DetectedAt);
+          currentEntryId, e.DetectedAt);
       }
 
       // Create a new play history entry for the new song
+      if (metadataRepository != null)
+      {
+        await metadataRepository.StoreAsync(newTrack);
+      }
+
       var entryId = Guid.NewGuid().ToString();
       var entry = new PlayHistoryEntry
       {
         Id = entryId,
-        TrackMetadataId = e.NewTrack.Id,
+        TrackMetadataId = newTrack.Id,
         FingerprintId = e.NewTrack.FingerprintId,
         PlayedAt = e.DetectedAt,
         Source = playSource,
-        MetadataSource = MetadataSource.Fingerprinting,
-        SourceDetails = $"{e.NewTrack.Title} - {e.NewTrack.Artist}",
+        // ⚠ "Not from the identification" is read as "from the source" here. The live title is
+        // the source's own unless the source itself filled it from an EARLIER identification
+        // (Bluetooth without AVRCP titles keeps a filled title until AVRCP next changes).
+        MetadataSource = titleFromIdentification ? MetadataSource.Fingerprinting : SourceProvenance(playSource),
+        SourceDetails = $"{newTrack.Title} - {newTrack.Artist}",
         DurationSeconds = null, // Will be set when this entry is finalized
         IdentificationConfidence = e.Confidence,
         WasIdentified = true,
-        Track = e.NewTrack
+        Track = newTrack
       };
 
       await playHistoryRepository.RecordPlayAsync(entry);
       _currentPlayHistoryEntryId = entryId;
 
       _logger.LogInformation(
-        "Created new play history entry {EntryId} for song change: '{Title}' by '{Artist}' (confidence: {Confidence:P0})",
-        entryId, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
+        "Created new play history entry {EntryId} for song change: '{Title}' by '{Artist}' (identified as '{IdentifiedTitle}' by '{IdentifiedArtist}', confidence: {Confidence:P0})",
+        entryId, newTrack.Title, newTrack.Artist, e.NewTrack.Title, e.NewTrack.Artist, e.Confidence);
 
       _metricsCollector?.Increment("fingerprint.song_change_detected");
     }

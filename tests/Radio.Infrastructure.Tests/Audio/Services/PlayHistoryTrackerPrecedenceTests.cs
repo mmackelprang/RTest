@@ -214,6 +214,35 @@ public class PlayHistoryTrackerPrecedenceTests
     Assert.Equal(ArtUrl, entry.Track.CoverArtUrl);
   }
 
+  [Fact]
+  public void Bluetooth_WithoutAvrcpTitles_ATitleTheSourceFilledEarlier_DoesNotBlockTheNextSongChange()
+  {
+    // A phone that publishes no track names: Bluetooth fills its title from the identification
+    // and keeps it until AVRCP writes the field again. That filled title is not the source naming
+    // the song, so it must not hold History on the first song forever.
+    using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.Bluetooth);
+    _sourceMetadata[StandardMetadataKeys.Title] = "";
+    _sourceMetadata[StandardMetadataKeys.Artist] = "";
+    _sourceMetadata["Device"] = "Pixel 10 Pro XL";
+
+    TrackMetadata first = Identified("Africa", "Toto", "Toto IV", ArtUrl);
+    RaiseSongChanged(first);
+    PlayHistoryEntry firstEntry = Assert.Single(_entries);
+    Assert.Equal(first.Id, firstEntry.TrackMetadataId); // nothing from the source: taken whole
+    Assert.Equal(MetadataSource.Fingerprinting, firstEntry.MetadataSource);
+
+    // What BluetoothAudioSource.OnTrackIdentified does with that identification.
+    _sourceMetadata[StandardMetadataKeys.Title] = "Africa";
+    _sourceMetadata[StandardMetadataKeys.Artist] = "Toto";
+
+    RaiseSongChanged(Identified("Rosanna", "Toto", "Toto IV", ArtUrl));
+
+    Assert.Equal([firstEntry.Id], _finalized);
+    Assert.Equal(2, _entries.Count);
+    Assert.Equal("Rosanna", _entries[1].Track!.Title);
+    Assert.Equal(MetadataSource.Fingerprinting, _entries[1].MetadataSource);
+  }
+
   // --- File player -----------------------------------------------------------------------------
 
   [Fact]
