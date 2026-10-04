@@ -80,6 +80,32 @@ public class ActiveSourceAccessorRegistrationTests
   }
 
   [Fact]
+  public void RadioFactory_ResolvedFromContainer_ReceivesTheScanStationMap()
+  {
+    // AUD-100: optional too — unregistered, every Scan would seek live and record nothing,
+    // with no error anywhere.
+    var services = BuildMinimalContainer();
+    IScanStationMap map = new Mock<IScanStationMap>().Object;
+    services.AddSingleton(map);
+    services.AddSingleton<RadioFactory>();
+
+    var factory = services.BuildServiceProvider().GetRequiredService<RadioFactory>();
+
+    Assert.Same(map, factory.ScanStationMap);
+  }
+
+  [Fact]
+  public void AddSoundFlowAudio_RegistersScanStationMapAsSingleton()
+  {
+    var services = new ServiceCollection();
+
+    services.AddSoundFlowAudio(new ConfigurationBuilder().Build());
+
+    ServiceDescriptor map = Assert.Single(services, d => d.ServiceType == typeof(IScanStationMap));
+    Assert.Equal(ServiceLifetime.Singleton, map.Lifetime);
+  }
+
+  [Fact]
   public void AddSoundFlowAudio_RegistersSdrDeviceGateAsSingleton()
   {
     var services = new ServiceCollection();

@@ -31,4 +31,18 @@ public sealed class BandMapOptions
   /// with a warning.
   /// </summary>
   public int SamplesPerMeasurement { get; set; } = 16384;
+
+  /// <summary>
+  /// Oldest a band's swept map may be, in minutes, for Scan Up/Down to hop between its stations
+  /// instead of seeking live (AUD-100). Default 1440 (one day). 0 or less: Scan always seeks live.
+  /// </summary>
+  /// <remarks>
+  /// A day, because the timer re-sweeps the radio's band every <see cref="RescanIntervalMinutes"/>
+  /// whenever the dongle is idle or the console is asleep, so on a box in normal use the map is
+  /// rarely more than a few hours old, and broadcast transmitters do not move within a day. What a
+  /// stale map costs is a station that came on air since the sweep being hopped over, and a
+  /// station gone off air costing one scan pause. A map older than a day means the sweeps have
+  /// stopped happening, and live seek is the safer answer.
+  /// </remarks>
+  public int ScanMapMaxAgeMinutes { get; set; } = 1440;
 }

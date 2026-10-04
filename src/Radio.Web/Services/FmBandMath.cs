@@ -54,8 +54,10 @@ public static class FmBandMath
   /// How far above the map's noise estimate (its median level) a local maximum must stand to count
   /// as a peak, in dB. The levels are relative, not calibrated, so only differences within one map
   /// mean anything; 6 dB is a factor of four in power, well clear of channel-to-channel noise.
+  /// Since AUD-100 this is <see cref="Radio.Core.Models.BandMapStations.PeakProminenceDb"/>, the value
+  /// Scan Up/Down picks a map's stations with, so a tap and a scan agree on what is a station.
   /// </summary>
-  public const double PeakProminenceDb = 6.0;
+  public const double PeakProminenceDb = Radio.Core.Models.BandMapStations.PeakProminenceDb;
 
   /// <summary>
   /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Fair"/>

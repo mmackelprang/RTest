@@ -6,6 +6,87 @@ namespace Radio.Core.Models;
 public sealed record BandMapChannel(long FrequencyHz, float LevelDbfs);
 
 /// <summary>
+/// A station a live seek stopped on (AUD-100): proof that something was there, at that time. Kept
+/// apart from a <see cref="BandMap"/>'s swept channels, never mixed into them.
+/// </summary>
+/// <param name="FrequencyHz">Where the seek stopped, in Hz.</param>
+/// <param name="SeekStrength">
+/// The seek's own signal reading when it stopped: the RMS magnitude of the receiver's wideband
+/// capture, 0 to about 1.2. Not a dB level and not comparable with <see cref="BandMapChannel.LevelDbfs"/>.
+/// </param>
+/// <param name="ObservedAtUtc">When the seek stopped there, UTC.</param>
+public sealed record BandMapSeekStation(long FrequencyHz, float SeekStrength, DateTimeOffset ObservedAtUtc);
+
+/// <summary>The seek-observed stations of one band, as stored (AUD-100).</summary>
+public sealed record BandMapSeekStations
+{
+  /// <summary>Band code, e.g. <c>"FM"</c>.</summary>
+  public string Band { get; init; } = "FM";
+
+  /// <summary>Stations in ascending frequency order, at most one per frequency.</summary>
+  public IReadOnlyList<BandMapSeekStation> Stations { get; init; } = Array.Empty<BandMapSeekStation>();
+}
+
+/// <summary>
+/// Which swept channels of a <see cref="BandMap"/> are stations: the peak rule the BAND view's tap
+/// has used since AUD-76, shared since AUD-100 so Scan stops where a tap would snap.
+/// </summary>
+public static class BandMapStations
+{
+  /// <summary>
+  /// How far above the map's median level (its noise estimate) a channel must stand to be a peak,
+  /// in dB. The levels are relative, not calibrated, so only differences within one map mean
+  /// anything; 6 dB is a factor of four in power, well clear of channel-to-channel noise.
+  /// </summary>
+  public const double PeakProminenceDb = 6.0;
+
+  /// <summary>
+  /// The frequencies of <paramref name="channels"/>' peaks, ascending. A channel is a peak when its
+  /// level is at least that of both neighbours in frequency order (a missing neighbour at the band
+  /// edge counts as lower) and at least <see cref="PeakProminenceDb"/> above the median level of all
+  /// of <paramref name="channels"/>. The neighbour rule drops a strong station's adjacent-channel
+  /// shadow, which is lower than the station.
+  /// </summary>
+  public static IReadOnlyList<long> Peaks(IReadOnlyList<BandMapChannel> channels)
+  {
+    ArgumentNullException.ThrowIfNull(channels);
+    if (channels.Count == 0)
+    {
+      return Array.Empty<long>();
+    }
+
+    BandMapChannel[] sorted = channels.OrderBy(c => c.FrequencyHz).ToArray();
+    double threshold = Median(sorted.Select(c => (double)c.LevelDbfs)) + PeakProminenceDb;
+    List<long> peaks = new();
+    for (int i = 0; i < sorted.Length; i++)
+    {
+      double level = sorted[i].LevelDbfs;
+      double left = i > 0 ? sorted[i - 1].LevelDbfs : double.NegativeInfinity;
+      double right = i < sorted.Length - 1 ? sorted[i + 1].LevelDbfs : double.NegativeInfinity;
+      if (level >= left && level >= right && level >= threshold)
+      {
+        peaks.Add(sorted[i].FrequencyHz);
+      }
+    }
+
+    return peaks;
+  }
+
+  /// <summary>Median of <paramref name="values"/> (mean of the middle two for an even count); 0 when empty.</summary>
+  public static double Median(IEnumerable<double> values)
+  {
+    double[] sorted = values.OrderBy(v => v).ToArray();
+    if (sorted.Length == 0)
+    {
+      return 0;
+    }
+
+    int mid = sorted.Length / 2;
+    return sorted.Length % 2 == 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2.0;
+  }
+}
+
+/// <summary>
 /// A stored per-channel signal map of one radio band, produced by a band sweep (AUD-76; per band
 /// since AUD-91).
 /// </summary>

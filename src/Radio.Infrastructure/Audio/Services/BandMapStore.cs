@@ -95,4 +95,67 @@ public sealed class BandMapStore
     }
     File.Move(tempPath, filePath, overwrite: true);
   }
+
+  /// <summary>
+  /// Full path of <paramref name="band"/>'s seek-observed stations file (AUD-100):
+  /// <c>bandmap/&lt;band code, lower case&gt;-seek.json</c>, beside its map file and never the map file.
+  /// </summary>
+  /// <param name="band">Band code: ASCII letters only, e.g. <c>"FM"</c>.</param>
+  /// <exception cref="ArgumentException"><paramref name="band"/> is empty or not ASCII letters only.</exception>
+  public string GetSeekFilePath(string band)
+  {
+    string mapPath = GetFilePath(band);
+    return Path.Combine(DirectoryPath, Path.GetFileNameWithoutExtension(mapPath) + "-seek.json");
+  }
+
+  /// <summary>
+  /// Reads <paramref name="band"/>'s stored seek-observed stations. Returns null when the file is
+  /// missing; returns null and logs a warning when it cannot be read or parsed.
+  /// </summary>
+  /// <param name="band">Band code, e.g. <c>"FM"</c>.</param>
+  public BandMapSeekStations? LoadSeekStations(string band)
+  {
+    string filePath = GetSeekFilePath(band);
+    if (!File.Exists(filePath))
+    {
+      return null;
+    }
+
+    try
+    {
+      using FileStream stream = File.OpenRead(filePath);
+      BandMapSeekStations? stations = JsonSerializer.Deserialize<BandMapSeekStations>(stream, JsonOptions);
+      if (stations?.Stations == null)
+      {
+        _logger.LogWarning("Seek station file {Path} has no station list; ignoring it", filePath);
+        return null;
+      }
+      return stations;
+    }
+    catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+    {
+      _logger.LogWarning(ex, "Seek station file {Path} could not be read; starting with none", filePath);
+      return null;
+    }
+  }
+
+  /// <summary>
+  /// Writes <paramref name="stations"/> to <see cref="GetSeekFilePath"/> of its band, through a
+  /// temporary file as <see cref="Save"/> does.
+  /// </summary>
+  /// <exception cref="IOException">The file could not be written.</exception>
+  /// <exception cref="ArgumentException">The band code is not ASCII letters only.</exception>
+  public void SaveSeekStations(BandMapSeekStations stations)
+  {
+    ArgumentNullException.ThrowIfNull(stations);
+    string filePath = GetSeekFilePath(stations.Band);
+    Directory.CreateDirectory(DirectoryPath);
+
+    string tempPath = filePath + ".tmp";
+    using (FileStream stream = File.Create(tempPath))
+    {
+      JsonSerializer.Serialize(stream, stations, JsonOptions);
+    }
+    File.Move(tempPath, filePath, overwrite: true);
+  }
 }

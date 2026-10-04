@@ -142,6 +142,9 @@ public static class AudioServiceExtensions
           ? new BandMapTuning(radio.CurrentBand.ToString(), radio.CurrentFrequency.Hertz)
           : null));
     services.AddHostedService(sp => sp.GetRequiredService<BandMapService>());
+    // AUD-100: Scan Up/Down reads and writes the same maps. RadioFactory's optional
+    // IScanStationMap parameter is filled from this registration.
+    services.AddSingleton<IScanStationMap>(sp => sp.GetRequiredService<BandMapService>());
 
     // Register radio factory (singleton for device management). Plain AddSingleton<T>: the
     // container picks the constructor and fills the optional SdrDeviceGate parameter from

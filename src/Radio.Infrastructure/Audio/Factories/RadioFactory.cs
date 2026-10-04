@@ -34,6 +34,7 @@ public class RadioFactory : IRadioFactory
   private readonly Radio.Configuration.Abstractions.IConfigurationManager? _configurationManager;
   private readonly Func<IAudioSource?>? _getActiveSource;
   private readonly SdrDeviceGate? _deviceGate;
+  private readonly IScanStationMap? _scanStationMap;
 
   // Device enumeration cache
   private IReadOnlyList<DeviceInfo>? _cachedDevices;
@@ -63,6 +64,7 @@ public class RadioFactory : IRadioFactory
   /// <param name="configurationManager">Optional configuration manager for preference restoration.</param>
   /// <param name="getActiveSource">Optional accessor for the audio manager's active source, handed to every created source.</param>
   /// <param name="deviceGate">Optional SDR device gate handed to every created RTL-SDR source (AUD-76).</param>
+  /// <param name="scanStationMap">Optional band maps handed to every created RTL-SDR source for Scan Up/Down (AUD-100).</param>
   public RadioFactory(
     ILogger<RadioFactory> logger,
     ILoggerFactory loggerFactory,
@@ -73,8 +75,10 @@ public class RadioFactory : IRadioFactory
     IMetricsCollector? metricsCollector = null,
     Radio.Configuration.Abstractions.IConfigurationManager? configurationManager = null,
     Func<IAudioSource?>? getActiveSource = null,
-    SdrDeviceGate? deviceGate = null)
+    SdrDeviceGate? deviceGate = null,
+    IScanStationMap? scanStationMap = null)
   {
+    _scanStationMap = scanStationMap;
     _logger = logger;
     _loggerFactory = loggerFactory;
     _radioOptions = radioOptions;
@@ -100,6 +104,13 @@ public class RadioFactory : IRadioFactory
   /// service uses.
   /// </summary>
   internal SdrDeviceGate? DeviceGate => _deviceGate;
+
+  /// <summary>
+  /// The band maps handed to each created RTL-SDR source (AUD-100); exposed for the test that
+  /// verifies DI supplies them, since the parameter is optional and a missing registration would
+  /// silently leave every scan seeking live.
+  /// </summary>
+  internal IScanStationMap? ScanStationMap => _scanStationMap;
 
   /// <inheritdoc/>
   public IPrimaryAudioSource CreateRadioSource(string deviceType)
@@ -193,7 +204,8 @@ public class RadioFactory : IRadioFactory
         _playbackService,
         _configurationManager,
         _getActiveSource,
-        _deviceGate);
+        _deviceGate,
+        _scanStationMap);
 
       _logger.LogInformation("Successfully created RTL-SDR radio source");
       return source;

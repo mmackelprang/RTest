@@ -553,15 +553,18 @@ namespace RTLSDRCore;
           break; // Cancelled during dwell
         }
 
-        if (_lastSignalStrength >= signalThreshold)
+        float strength = _lastSignalStrength;
+        if (strength >= signalThreshold)
                   {
-                      Logger.Information("Signal found at {Frequency} (strength: {Strength:F3}, threshold: {Threshold:F2}), pausing 2s",
-                          RadioBand.FormatFrequency(_currentFrequencyHz), _lastSignalStrength, signalThreshold);
+                      Logger.Information("Signal found at {Frequency} (strength: {Strength:F3}, threshold: {Threshold:F2}), pausing {PauseMs}ms",
+                          RadioBand.FormatFrequency(_currentFrequencyHz), strength, signalThreshold, ScanPauseMs);
 
-                      // Pause on signal for 2s so user can listen.
+                      RaiseSeekStationFound(_currentFrequencyHz, strength);
+
+                      // Pause on signal so user can listen.
                       // WaitHandle.WaitOne returns true if signaled (cancelled),
                       // false on timeout — so scan resumes after the pause.
-                      if (_scanCts.Token.WaitHandle.WaitOne(2000))
+                      if (_scanCts.Token.WaitHandle.WaitOne(ScanPauseMs))
           {
             break; // User hit STOP during pause
           }
@@ -584,6 +587,126 @@ namespace RTLSDRCore;
           {
               _scanCts?.Dispose();
               _scanCts = null;
+          }
+      }
+
+      /// <summary>
+      /// Hops between <paramref name="stationsHz"/> in one direction, pausing
+      /// <see cref="ScanPauseMs"/> on each so the listener can hear it, until
+      /// <see cref="CancelScan"/> or until the next hop would reach the
+      /// frequency the scan started on (AUD-100). The station-list twin of
+      /// <see cref="ScanFrequencyUp"/> / <see cref="ScanFrequencyDown"/>: it
+      /// tunes straight from station to station, with no stepping through
+      /// the frequencies between, and it measures nothing — every listed
+      /// station gets its pause. <see cref="SeekStationFound"/> is not raised.
+      /// Blocks the calling thread.
+      /// </summary>
+      /// <param name="stationsHz">
+      /// Station frequencies, in any order. Those outside the current band are ignored.
+      /// </param>
+      /// <param name="ascending">True for Scan Up.</param>
+      /// <param name="minGapHz">See <see cref="StationListScan.Next"/>.</param>
+      /// <returns>Always false, as the live seek: the scan ends by cancellation or by going round.</returns>
+      /// <exception cref="InvalidOperationException">The receiver is not started.</exception>
+      public bool ScanStations(IReadOnlyList<long> stationsHz, bool ascending, long minGapHz)
+      {
+          ArgumentNullException.ThrowIfNull(stationsHz);
+          if (_state != ReceiverState.Running && _state != ReceiverState.Scanning)
+          {
+              throw new InvalidOperationException("Receiver must be started before scanning");
+          }
+
+          RadioBand band = _currentBand;
+          long[] stations = stationsHz
+              .Where(band.ContainsFrequency)
+              .Distinct()
+              .OrderBy(hz => hz)
+              .ToArray();
+
+          Logger.Information("Starting station scan {Direction} from {Frequency} over {Count} stations",
+              ascending ? "up" : "down", RadioBand.FormatFrequency(_currentFrequencyHz), stations.Length);
+
+          _scanCts = new CancellationTokenSource();
+          _isScanning = true;
+          SetState(ReceiverState.Scanning);
+
+          // As in ScanInternal: cancel a live band sweep after _isScanning is
+          // set, so a new sweep cannot slip in behind this cancel.
+          CancelSweep();
+
+          try
+          {
+              long startFrequency = _currentFrequencyHz;
+              while (!_scanCts.Token.IsCancellationRequested)
+              {
+                  long? next = StationListScan.Next(stations, _currentFrequencyHz, ascending, minGapHz);
+                  if (next == null)
+                  {
+                      Logger.Information("Station scan has no other station to go to");
+                      break;
+                  }
+
+                  if (StationListScan.CompletesCircle(startFrequency, _currentFrequencyHz, next.Value, ascending, minGapHz))
+                  {
+                      Logger.Information("Station scan went all the way round from {Frequency}",
+                          RadioBand.FormatFrequency(startFrequency));
+                      break;
+                  }
+
+                  SetFrequencyInternal(next.Value);
+                  Logger.Information("Station scan stopped at {Frequency}, pausing {PauseMs}ms",
+                      RadioBand.FormatFrequency(next.Value), ScanPauseMs);
+
+                  if (_scanCts.Token.WaitHandle.WaitOne(ScanPauseMs))
+                  {
+                      break; // User hit STOP during the pause
+                  }
+              }
+
+              Logger.Information("Scan stopped at {Frequency}", RadioBand.FormatFrequency(_currentFrequencyHz));
+              SetState(ReceiverState.Running);
+              _isScanning = false;
+              return false;
+          }
+          catch (Exception ex)
+          {
+              Logger.Error(ex, "Error during station scan");
+              SetState(ReceiverState.Running);
+              _isScanning = false;
+              throw;
+          }
+          finally
+          {
+              _scanCts?.Dispose();
+              _scanCts = null;
+          }
+      }
+
+      /// <summary>
+      /// How long a scan rests on each station it stops on, in milliseconds,
+      /// before moving on. Default 2000. Applies to the live seek and to
+      /// <see cref="ScanStations"/>.
+      /// </summary>
+      public int ScanPauseMs { get; set; } = 2000;
+
+      /// <summary>
+      /// Raised by a live seek (<see cref="ScanFrequencyUp"/>,
+      /// <see cref="ScanFrequencyDown"/>) each time it stops on a signal, on
+      /// the scan's thread, before its pause (AUD-100). Not raised by
+      /// <see cref="ScanStations"/>. An exception thrown by a handler is
+      /// logged and does not end the scan.
+      /// </summary>
+      public event EventHandler<SeekStationFoundEventArgs>? SeekStationFound;
+
+      private void RaiseSeekStationFound(long frequencyHz, float strength)
+      {
+          try
+          {
+              SeekStationFound?.Invoke(this, new SeekStationFoundEventArgs(frequencyHz, strength));
+          }
+          catch (Exception ex)
+          {
+              Logger.Warning(ex, "A SeekStationFound handler threw; the scan continues");
           }
       }
 
@@ -1823,6 +1946,27 @@ namespace RTLSDRCore;
           Samples = samples;
           SampleCount = sampleCount;
           Format = format;
+      }
+  }
+
+  /// <summary>
+  /// Event arguments for <see cref="RadioReceiver.SeekStationFound"/> (AUD-100).
+  /// </summary>
+  public class SeekStationFoundEventArgs : EventArgs
+  {
+      /// <summary>Gets the frequency the seek stopped on, in Hz.</summary>
+      public long FrequencyHz { get; }
+
+      /// <summary>Gets the seek's signal reading there: the same value as <see cref="RadioReceiver.SignalStrength"/>.</summary>
+      public float Strength { get; }
+
+      /// <summary>Creates new seek-station event args.</summary>
+      /// <param name="frequencyHz">Frequency, in Hz.</param>
+      /// <param name="strength">Signal strength.</param>
+      public SeekStationFoundEventArgs(long frequencyHz, float strength)
+      {
+          FrequencyHz = frequencyHz;
+          Strength = strength;
       }
   }
 
