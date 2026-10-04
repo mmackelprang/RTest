@@ -309,8 +309,13 @@ public class PlayHistoryTrackerPrecedenceTests
   public void Radio_TrackIdentified_StillReplacesThePlaceholderRow()
   {
     using PlayHistoryTracker tracker = BuildTracker(AudioSourceType.Radio);
+    // History titles a radio row with the frequency. Under the per-field rule that would read
+    // as a source-supplied title and survive; radio is outside the rule, so it must not.
+    _sourceMetadata["Frequency"] = "101.5 MHz";
     RaisePlaying();
-    Assert.False(Assert.Single(_entries).WasIdentified);
+    PlayHistoryEntry recorded = Assert.Single(_entries);
+    Assert.Equal("101.5 MHz", recorded.Track!.Title);
+    Assert.False(recorded.WasIdentified);
     TrackMetadata shazam = Identified("Africa", "Toto", "Toto IV", ArtUrl);
 
     RaiseIdentified(shazam);
