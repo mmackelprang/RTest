@@ -6,37 +6,50 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
-## The incoming-call banner's **Ignore** button — built, disabled until RotaryPhone can decline a call (`PHN-11`)
+## The incoming-call banner's **Ignore** — built and wired; switched off until the owner's real-call test (`PHN-11`, `PHN-13`)
 
-**What exists.** The banner (`Radio.Web/Components/Shared/IncomingCallBanner.razor`) shows an Ignore button;
-`IncomingCallBannerService.DeclineAsync` and `PhoneApiService.DeclineCallAsync` post
-`POST /api/phone/decline?phoneId=…` to RotaryPhone and treat only a 2xx JSON `{"declined": true}` as success;
-the in-flight (**ENDING CALL**), failure (*"Couldn't end the call. Try again."*) and 5 s no-`Idle` deadline
-states are built and tested. Ignore is enabled only when Radio.Web's `RotaryPhone:DeclineSupported` is
-`true`; it ships `false`, so the button renders disabled with *"Not available yet. Answer and hang up on the
-phone, or let it ring."*
+**Status (2026-10-03, `PHN-13`).** RotaryPhone shipped the route (`POST /api/phone/decline?phoneId=`, its
+`PhoneController.Decline`; reply `RotaryPhone/docs/handoffs/radioconsole-decline-endpoint-reply.md` on their
+`main`). Both Ignores are wired to it — the banner's and the Phone page hero's (the hero's disabled **Reject** is
+now **Ignore**, owner 2026-10-02: *"d - yes - ignore is the label I want"*). What is left is a switch, not code:
+`RotaryPhone:DeclineSupported` ships `false`, and RotaryPhone asked that it stay off until the owner's real-call
+test passes.
 
-**What's needed.** RotaryPhone has no decline route (read-only check 2026-10-02: not on `PhoneController`, not
-a `RotaryHub` method, not on `GVBridgeController`). The request, with the contract — `200 {"declined": true}`
-from `Ringing` only, decided atomically against a handset lift; `409 {"declined": false, "state": …}` from any
-other state; `404` for an unknown phone — is at
-`D:\prj\RotaryPhone\docs\prompts\2026-10-02-radioconsole-decline-ringing-call-request.md`. When it ships:
-set `"RotaryPhone": { "DeclineSupported": true }` in Radio.Web's `appsettings.Production.json` (or the config
-store), and run the owner check in `docs/queue/PHN-11.md`. In the same change, rename the Phone page hero's
-disabled **Reject** button to **Ignore** and wire it to the same decline. Owner, 2026-10-02: *"d - yes - ignore
-is the label I want."*
+**How the answers are read** (`PhoneApiService.DeclineCallAsync` → `DeclineCallOutcome`):
+- `200 {"declined": true}` — the banner shows **ENDING CALL** until the `Idle` that follows (or reports a failure
+  if the call is still ringing 5 s later); the hero shows *Ending call…* the same way.
+- `409 {"declined": false, "state": …}` — **benign**. `InCall`: the handset was lifted first and the call goes on;
+  `Idle`: the caller gave up. The banner closes as it would on the hub's own `InCall`/`Idle` (ANSWERED or CALL
+  ENDED), the hero resets, and neither shows an error. Any `409` counts, whatever its body.
+- Anything else — transport failure, 5xx, `404` (unknown phone id), a 2xx without `"declined": true` — shows
+  *"Couldn't end the call. Try again."* and Ignore works again.
+
+**To switch it on** (the coordinator, with the owner's go-ahead, at UAT time):
+
+```bash
+curl -s -X POST http://radio:5000/api/configuration/RotaryPhone \
+  -H 'Content-Type: application/json' -d '{"DeclineSupported": true}'
+```
+
+That writes `rotaryphone:DeclineSupported = true` to the shared config store, which radio-web reads through its
+bridge over the shipped `false`; the API's `ConfigChanged` push makes radio-web reload, and both Ignores read the
+flag on every use, so the next call has it. If the push is missed, `sudo systemctl restart radio-web` (or reload
+the kiosk page) picks it up. The same POST with `false` switches it off. Pinned end to end by
+`RotaryPhoneDeclineEnableStepTests`.
 
 **Gotchas.**
-- ⛔ Do not "unblock" this with `POST /api/phone/simulate/hook?offHook=false`. It reaches the same
-  `CallManager.HangUp()` and would work today, but it is unconditional: a tap a moment after the handset is
-  lifted would hang up the answered call. It also logs a hook change that never happened.
-- A current RotaryPhone answers a route it lacks with a JSON `404` (its `Program.cs` API fallback); an older
-  build's SPA fallback answered `200` with `index.html`. The client requires the JSON body
-  `{"declined": true}`, so neither reads as a decline. Do not relax that to a status-code test.
-- What the caller experiences differs by path (Bluetooth/HFP: rejected, normally to voicemail; Google Voice:
-  the leg was already answered, so the call drops). RotaryPhone was asked to confirm both.
+- ⛔ Do not substitute `POST /api/phone/simulate/hook?offHook=false`. It reaches the same `CallManager.HangUp()`
+  but is unconditional: a tap a moment after the handset is lifted would hang up the answered call. The decline
+  route is decided atomically against the lift (RotaryPhone raced it 200×).
+- An older RotaryPhone build's SPA fallback answered an unknown route `200` with `index.html`. The client requires
+  the JSON body `{"declined": true}`, so that never reads as a decline. Do not relax that to a status-code test.
+- What the caller experiences, per RotaryPhone (from code, untested): **Bluetooth/HFP** — the cell rejects the
+  call; the carrier usually sends the caller to voicemail. **Google Voice** — the GV leg is answered at INVITE, so
+  the caller hears the call drop, with no voicemail (making that voicemail needs RotaryPhone to hold `200 OK`
+  until a lift; owner-deferred on their side). **SIP trunk** — probably keeps ringing on the caller's end until
+  the provider's no-answer timeout; RotaryPhone recorded it as a follow-up.
 
-**Priority.** P2 — owner-requested, but the console works without it (answer and hang up, or let it ring).
+**Priority.** P2 — owner-requested; the console works without it (answer and hang up, or let it ring).
 
 ---
 
@@ -1595,9 +1608,11 @@ are the retired guess — see the banner above for the measured format)**
 - Server method: `CallStateChanged(string state, string phoneNumber)` — may also send caller name as 3rd param
 - State values: `"Ringing"`, `"InCall"`, `"Ended"`, `"Idle"` — lenient parser handles variants
 
-**Contacts REST API** (assumed):
-- Endpoint: `GET {baseUrl}/api/contacts/lookup?phone={number}`
-- Response: `{ "Name": "...", "PhoneNumber": "..." }`
+**Contacts REST API** (assumed — ⚠ **the assumption was wrong**, found by `PHN-14`, 2026-10-03):
+- ~~Endpoint: `GET {baseUrl}/api/contacts/lookup?phone={number}`~~ — RotaryPhone never had it. Its
+  `ContactsController` maps `GET /api/contacts/{id}`, so `lookup` was read as an id and every lookup 404'd: the
+  announcement's RotaryPhone fallback never answered. `PhoneContactLookupService` now reads the list,
+  `GET {baseUrl}/api/contacts` (`[{ "id", "name", "phoneNumber", … }]`), and matches it locally.
 
 **On first integration:**
 1. Start RotaryPhone server, check actual hub URL path

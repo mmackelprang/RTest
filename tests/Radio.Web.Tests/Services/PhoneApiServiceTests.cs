@@ -132,6 +132,58 @@ public class PhoneApiServiceTests
     Assert.True(result);
   }
 
+  // ── PHN-13: how RotaryPhone's POST /api/phone/decline answers are read ──
+
+  [Theory]
+  [InlineData(HttpStatusCode.OK, "{\"declined\":true}", "application/json", DeclineCallResult.Declined, null)]
+  [InlineData(HttpStatusCode.Conflict, "{\"declined\":false,\"state\":\"InCall\"}", "application/json", DeclineCallResult.NotRinging, "InCall")]
+  [InlineData(HttpStatusCode.Conflict, "{\"declined\":false,\"state\":\"Idle\"}", "application/json", DeclineCallResult.NotRinging, "Idle")]
+  [InlineData(HttpStatusCode.Conflict, "{\"declined\":false,\"state\":\"Dialing\"}", "application/json", DeclineCallResult.NotRinging, "Dialing")]
+  [InlineData(HttpStatusCode.Conflict, "not json", "text/plain", DeclineCallResult.NotRinging, null)]   // any 409 is benign
+  [InlineData(HttpStatusCode.InternalServerError, "{\"declined\":false}", "application/json", DeclineCallResult.Failed, null)]
+  [InlineData(HttpStatusCode.ServiceUnavailable, "", "text/plain", DeclineCallResult.Failed, null)]
+  [InlineData(HttpStatusCode.NotFound, "", "text/plain", DeclineCallResult.Failed, null)]                 // unknown phone id
+  [InlineData(HttpStatusCode.OK, "{\"declined\":false}", "application/json", DeclineCallResult.Failed, null)]
+  [InlineData(HttpStatusCode.OK, "<!doctype html><html></html>", "text/html", DeclineCallResult.Failed, null)]
+  public async Task DeclineCallAsync_ReadsEachAnswer(
+    HttpStatusCode status, string body, string contentType, DeclineCallResult expected, string? expectedState)
+  {
+    var handler = new ScriptedPhoneHandler { DeclineResponse = (status, body, contentType) };
+    var service = CreateService(new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) });
+
+    var outcome = await service.DeclineCallAsync("hall");
+
+    Assert.Equal(expected, outcome.Result);
+    Assert.Equal(expectedState, outcome.State);
+    Assert.Equal(expected == DeclineCallResult.NotRinging && expectedState == "InCall", outcome.WasAnswered);
+    Assert.Equal(["POST /api/phone/decline?phoneId=hall"], handler.Requests);
+  }
+
+  [Fact]
+  public async Task DeclineCallAsync_WithNoPhoneId_LetsRotaryPhoneUseItsDefault()
+  {
+    var handler = new ScriptedPhoneHandler();
+    var service = CreateService(new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) });
+
+    await service.DeclineCallAsync(phoneId: null);
+
+    Assert.Equal(["POST /api/phone/decline"], handler.Requests);
+  }
+
+  [Fact]
+  public async Task DeclineCallAsync_ATransportFailure_IsFailed()
+  {
+    var service = CreateService(new HttpClient(new ThrowingHandler()) { BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl) });
+
+    Assert.Equal(DeclineCallResult.Failed, (await service.DeclineCallAsync("default")).Result);
+  }
+
+  private sealed class ThrowingHandler : HttpMessageHandler
+  {
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct) =>
+      throw new HttpRequestException("connection refused");
+  }
+
   [Fact]
   public async Task IsAvailableAsync_ReturnsFalse_WhenApiUnreachable()
   {

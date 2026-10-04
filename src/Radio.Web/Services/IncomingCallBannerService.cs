@@ -176,7 +176,7 @@ public sealed class IncomingCallBannerService : IDisposable
   private readonly ContactResolutionService? _contacts;
   private readonly TimeProvider _time;
   private readonly ILogger<IncomingCallBannerService> _logger;
-  private readonly bool _canDecline;
+  private readonly IConfiguration _configuration;
 
   private readonly object _gate = new();
   private bool _started;
@@ -221,8 +221,16 @@ public sealed class IncomingCallBannerService : IDisposable
     _contacts = contacts;
     _logger = logger;
     _time = timeProvider ?? TimeProvider.System;
-    _canDecline = configuration.GetValue(DeclineSupportedKey, false);
+    _configuration = configuration;
   }
+
+  /// <summary>
+  /// <c>RotaryPhone:DeclineSupported</c>, read on every use rather than once per circuit (PHN-13), so turning it
+  /// on through the config store (<c>POST /api/configuration/RotaryPhone</c>, which radio-web reloads on the
+  /// API's <c>ConfigChanged</c> push) reaches a kiosk circuit that is already open — the next snapshot reads it,
+  /// so even a banner already up gains a working Ignore.
+  /// </summary>
+  private bool CanDecline => _configuration.GetValue(DeclineSupportedKey, false);
 
   /// <summary>The banner as it should be drawn now.</summary>
   public IncomingCallBannerSnapshot Current
@@ -346,7 +354,7 @@ public sealed class IncomingCallBannerService : IDisposable
     lock (_gate)
     {
       var shown = ShownLocked();
-      if (!_canDecline || shown is null || shown.Decline == IncomingCallDeclineState.Declining)
+      if (!CanDecline || shown is null || shown.Decline == IncomingCallDeclineState.Declining)
       {
         return;
       }
@@ -359,25 +367,44 @@ public sealed class IncomingCallBannerService : IDisposable
     }
     RaiseChanged();
 
-    bool ok;
+    DeclineCallOutcome outcome;
     try
     {
-      ok = await _phoneApi.DeclineCallAsync(call.PhoneId);
+      outcome = await _phoneApi.DeclineCallAsync(call.PhoneId);
     }
     catch (Exception ex)
     {
-      // DeclineCallAsync maps its own failures to false; this guards the unexpected.
+      // DeclineCallAsync maps its own failures to Failed; this guards the unexpected.
       _logger.LogWarning(ex, "Declining the incoming call failed");
-      ok = false;
+      outcome = DeclineCallOutcome.Failed;
     }
 
-    if (ok)
+    if (outcome.Result == DeclineCallResult.Declined)
     {
       // Accepted: the banner keeps "ENDING CALL" and waits for the call to leave Ringing, or the deadline.
       return;
     }
 
     bool changed;
+    if (outcome.Result == DeclineCallResult.NotRinging)
+    {
+      // PHN-13: a 409 — the call stopped ringing before the decline landed. "InCall": the handset was lifted
+      // first and the call goes on; "Idle": the caller gave up. Not a failure: the banner closes as it would on
+      // the hub's own InCall / Idle (ANSWERED or CALL ENDED, then the fade), with no error. If the hub event
+      // already closed it, the call is no longer tracked and this changes nothing.
+      lock (_gate)
+      {
+        // No attempt check: a 409 is a fact about the phone (not ringing), true whichever press it answers.
+        changed = EndCallsLocked(c => ReferenceEquals(c, call),
+            outcome.WasAnswered ? IncomingCallCloseReason.Answered : IncomingCallCloseReason.Ended);
+      }
+      if (changed)
+      {
+        RaiseChanged();
+      }
+      return;
+    }
+
     lock (_gate)
     {
       changed = FailDeclineLocked(call, attempt);
@@ -646,22 +673,28 @@ public sealed class IncomingCallBannerService : IDisposable
   // ── caller name ───────────────────────────────────────────────────
 
   /// <summary>
-  /// Resolves a contact name the way the API's announcement does (<c>PhoneContactLookupService</c>): the
-  /// phone's synced PBAP contacts first, then RotaryPhone's own contacts list.
+  /// Resolves a contact name the way the API's announcement does (<c>PhoneContactLookupService</c>), PHN-14:
+  /// the stored synced phone books — the API's <c>/api/bluetooth/pbap/lookup</c>, which searches every phone ever
+  /// synced, connected or not — and RotaryPhone's own contacts list, ranked <b>match quality first, then source</b>
+  /// (owner ruling, 2026-10-03): synced-exact, RotaryPhone-exact, synced local-entry, RotaryPhone local-entry.
   /// </summary>
   private async Task ResolveNameAsync(TrackedCall call, string number)
   {
     string? name = null;
     try
     {
-      if (_contacts is not null)
+      // A fresh lookup, not the circuit's local index or cache (see LookupForCallAsync), so the banner names the
+      // caller as the API's announcement does (pre-merge review M1).
+      var (synced, syncedExact) = _contacts is null ? (null, false) : await _contacts.LookupForCallAsync(number);
+      if (synced is not null && syncedExact)
       {
-        name = _contacts.TryResolve(number) ?? await _contacts.ResolveAsync(number);
+        name = synced;   // the top tier: RotaryPhone is not asked
       }
-
-      if (string.IsNullOrWhiteSpace(name))
+      else
       {
-        name = FindInContacts(await _phoneApi.GetContactsAsync(), number);
+        var rotary = FindInContactsWithTier(await _phoneApi.GetContactsAsync(), number);
+        name = rotary.Name is not null && rotary.IsExact ? rotary.Name   // RotaryPhone-exact beats a synced local entry
+          : synced ?? rotary.Name;                                        // then synced, then RotaryPhone, local entries
       }
     }
     catch (Exception ex)
@@ -683,16 +716,16 @@ public sealed class IncomingCallBannerService : IDisposable
     RaiseChanged();
   }
 
-  internal static string? FindInContacts(IEnumerable<ContactDto>? contacts, string number)
-  {
-    string key = PhoneNumberNormalizer.Normalize(number);
-    if (contacts is null || key.Length == 0)
-    {
-      return null;
-    }
-    return contacts.FirstOrDefault(c =>
-      !string.IsNullOrWhiteSpace(c.Name) && PhoneNumberNormalizer.Normalize(c.PhoneNumber) == key)?.Name;
-  }
+  // The same matching rule as the API's PBAP lookup and its announcement (PhoneNumberNormalizer.FindMatch).
+  internal static string? FindInContacts(IEnumerable<ContactDto>? contacts, string number) =>
+    FindInContactsWithTier(contacts, number).Name;
+
+  private static (string? Name, bool IsExact) FindInContactsWithTier(IEnumerable<ContactDto>? contacts, string number) =>
+    PhoneNumberNormalizer.TryFindMatch(
+      contacts?.Where(c => !string.IsNullOrWhiteSpace(c.Name)), c => c.PhoneNumber, number,
+      out var contact, out bool isExact)
+      ? (contact!.Name, isExact)
+      : (null, false);
 
   // ── ending and the exit beat ──────────────────────────────────────
 
@@ -826,7 +859,7 @@ public sealed class IncomingCallBannerService : IDisposable
     {
       return Draw(_exit.Call, _exit.Phase, _exit.Leaving);
     }
-    return IncomingCallBannerSnapshot.Hidden with { CanDecline = _canDecline, LastCloseReason = _lastCloseReason };
+    return IncomingCallBannerSnapshot.Hidden with { CanDecline = CanDecline, LastCloseReason = _lastCloseReason };
   }
 
   private IncomingCallBannerSnapshot Draw(TrackedCall call, IncomingCallPhase phase, bool leaving)
@@ -860,7 +893,7 @@ public sealed class IncomingCallBannerService : IDisposable
       IsResolvingName = call.ResolvingName,
       IsAwaitingCallerId = awaiting,
       DeclineState = call.Decline,
-      CanDecline = _canDecline,
+      CanDecline = CanDecline,
       LastCloseReason = _lastCloseReason,
     };
   }

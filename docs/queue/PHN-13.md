@@ -2,7 +2,10 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🟡 **P2, owner request.** Filed 2026-10-03 by the coordinator (prep only; nothing built).
+🚧 **BUILT 2026-10-03, HELD for the owner's real-call UAT** — branch `feat/phn-13-14-ignore-and-lookup`, one PR with
+[`PHN-14`](PHN-14.md). **Not deployed, not merged. `RotaryPhone:DeclineSupported` stays `false`.**
+
+🟡 **P2, owner request.** Filed 2026-10-03 by the coordinator.
 
 Owner, 2026-10-03: *"The 'Ignore' API is done and you have a handoff for it. … if you could do any prep or start working on it, that would be great."* Earlier ruling (2026-10-02, `PHN-11`): *"d - yes - ignore is the label I want."*
 
@@ -33,3 +36,62 @@ Owner, 2026-10-03: *"The 'Ignore' API is done and you have a handoff for it. …
 - A real call → tap **Ignore** → ringing stops, the banner closes, the announcement stops; note what the caller heard (path).
 - Lift the handset, then tap Ignore quickly → the call continues and the banner closes with no error.
 - Phone page: **Ignore** is shown in place of Reject and behaves the same.
+
+## What was built (2026-10-03)
+
+- **`409` is benign.** `PhoneApiService.DeclineCallAsync` now returns `Declined` / `NotRinging` (any `409`, with its
+  `state`) / `Failed`. The banner closes on a `409` as it would on the hub's own event — `InCall` → the **ANSWERED**
+  beat, `Idle` or anything else → **CALL ENDED** — with no error, and no late deadline error either. The error
+  stays only for transport failure, 5xx, `404` and a 2xx without `"declined": true`.
+- **The Phone page hero's Reject is Ignore**, wired to the same decline (`PhonePage` →
+  `PhoneApi.DeclineCallAsync(phoneId: null)`, i.e. RotaryPhone's `default` phone — the one the page shows), with the
+  banner's states: *Ending call…* after a `200` until the call leaves Ringing, the error if it is still ringing 5 s
+  later or on a failure, and a quiet reset on a `409`. Disabled with *"Not available yet…"* while the flag is off.
+- **The flag is read on every use** (it was read once per circuit), so the coordinator's config-store flip reaches
+  the kiosk's open circuit from its next call. Shipped default unchanged: `false`.
+
+## The enable step (owner check #1; the coordinator runs it with the owner's go-ahead)
+
+```bash
+curl -s -X POST http://radio:5000/api/configuration/RotaryPhone \
+  -H 'Content-Type: application/json' -d '{"DeclineSupported": true}'
+```
+
+Writes `rotaryphone:DeclineSupported = true` to the shared config store, which radio-web reads over the shipped
+`false`; radio-web reloads on the API's `ConfigChanged` push (if missed: `sudo systemctl restart radio-web`). The
+same POST with `false` switches it off. `RotaryPhoneDeclineEnableStepTests` pins the round trip.
+
+## Tests
+
+`PhoneApiServiceTests.DeclineCallAsync_*` (every answer shape), `IncomingCallBannerServiceTests`
+(`A409_ClosesTheBannerQuietly_WithNoError` ×4, a `409` after the hub already closed the banner, the live flag, and
+the failure theory — 5xx, 502, both `404`s, a 2xx without `declined:true`, a non-JSON 2xx), `PhoneStatusHeroIgnoreTests`
+(the hero's states, double tap, deadline, reset), `PhonePageTests.Dashboard_Ringing_*` (the page sends the decline;
+a `409` shows no error; a 5xx shows it; disabled while the flag is off).
+
+## Pre-merge review (session model) and what was done
+
+No HIGH. **M1** (the banner consulted the circuit's local contact index first — one phone book's first numbers plus
+every RotaryPhone contact — so it could show a RotaryPhone name where the announcement spoke the synced one): fixed,
+the banner asks the API's lookup directly (`ResolveAsync(skipLocalIndex: true)`), pinned by
+`ThePhonePagesLocalIndex_DoesNotOutrankTheApisSyncedPhoneBookAnswer`. **M2** (the hero's 5 s deadline started at
+the `200`, the banner's at the tap): fixed, armed at the tap; pinned. **M3** (precedence is source first, then
+match tier, so a last-seven synced match beats an exact RotaryPhone match): **not changed — owner question**; it
+meets the stated "synced phone contacts first", and the alternative (synced-exact → RotaryPhone-exact →
+synced-last-7 → RotaryPhone-last-7) changes that rule. LOWs fixed: `DeclineCallResult.Failed` is 0 (a default
+outcome fails closed); no timer after the hero is disposed; the `409` close drops an attempt check that guarded
+nothing; the stale `Program.cs` cross-process reload comment and the hero's phone-id comment corrected; a remark
+narrowed ("does not parse"); a PhonePage test now waits for the `200` to be handled. Left: the Debug line naming the
+device MAC (acceptable — MACs are already logged at Information by `PbapSyncService`).
+
+## Mutation checks
+
+**51 mutants over two rounds, 51 killed** (literal edits in a separate worktree outside the repo, targeted tests
+run, file restored from git). Round 1, 30: every ranking step in the repository, the controller's old no-device
+404 and connected-phone argument, the lookup service's PBAP skip / connected phone / old `/lookup` route, both
+`FindMatch` tiers and the country-code strip, the `409` read as failure / its state dropped / InCall closing as
+Ended, the cached miss, the RotaryPhone source, the flag read once, PBAP-first priming, `retryCachedMiss`, and the
+hero's 409 / failure / deadline / reset / double-tap / enable, the page and panel wiring. Round 2, after review, 21:
+the two new mutants (local index consulted; `skipLocalIndex` ignored) and the Web round re-run against the
+refactored code (M24 re-formed: its anchor moved with the tap-armed timer). Not covered by a test: the
+`Dispose` attempt bump in the hero, and the enum order.

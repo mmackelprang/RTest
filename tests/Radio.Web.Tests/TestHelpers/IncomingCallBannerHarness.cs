@@ -25,6 +25,12 @@ public sealed class IncomingCallBannerHarness
   /// <summary>An HttpClient over <see cref="Phone"/>, for other clients a test wants scripted too.</summary>
   public HttpClient Client { get; }
 
+  /// <summary>The configuration the service reads; a test may change it mid-run (PHN-13's live flag).</summary>
+  public IConfigurationRoot Config { get; }
+
+  /// <summary>The circuit's contact resolver, shared with the Phone page in production (its local index).</summary>
+  public ContactResolutionService Contacts { get; }
+
   public IncomingCallBannerHarness(bool declineSupported = false, ILoggerFactory? sink = null)
   {
     ILoggerFactory logs = sink ?? NullLoggerFactory.Instance;
@@ -34,11 +40,13 @@ public sealed class IncomingCallBannerHarness
         [IncomingCallBannerService.DeclineSupportedKey] = declineSupported ? "true" : "false",
       })
       .Build();
+    Config = config;
     Hub = new PhoneHubService(logs.CreateLogger<PhoneHubService>(), config);
     Client = new HttpClient(Phone) { BaseAddress = new Uri("http://phone.test.invalid") };
     var phoneApi = new PhoneApiService(Client, logs.CreateLogger<PhoneApiService>());
     var pbap = new PbapApiService(Client, logs.CreateLogger<PbapApiService>());
     var contacts = new ContactResolutionService(pbap, logs.CreateLogger<ContactResolutionService>());
+    Contacts = contacts;
     Service = new IncomingCallBannerService(
       Hub, phoneApi, config, logs.CreateLogger<IncomingCallBannerService>(), contacts, Time);
   }
@@ -68,6 +76,9 @@ public sealed class ScriptedPhoneHandler : HttpMessageHandler
   public Task? StatusGate { get; set; }
   public string ContactsJson { get; set; } = "[]";
   public string? PbapName { get; set; }
+
+  /// <summary>The lookup's <c>isExactMatch</c>; false plays a stored 7-digit local entry (PHN-14).</summary>
+  public bool PbapExact { get; set; } = true;
   public Task? PbapGate { get; set; }
   public bool LookupThrowsOnce { get; set; }
   public (HttpStatusCode Status, string Body, string ContentType) DeclineResponse { get; set; } =
@@ -112,6 +123,7 @@ public sealed class ScriptedPhoneHandler : HttpMessageHandler
       // The answer is decided when the request ARRIVES, so a test can change the script for the next
       // call while this one is held at the gate.
       string? name = PbapName;
+      bool exact = PbapExact;
       bool throws = LookupThrowsOnce;
       LookupThrowsOnce = false;
       var gate = PbapGate;
@@ -126,7 +138,7 @@ public sealed class ScriptedPhoneHandler : HttpMessageHandler
       }
       return name is null
         ? new HttpResponseMessage(HttpStatusCode.NotFound)
-        : Json($"{{\"displayName\":\"{name}\"}}");
+        : Json($"{{\"displayName\":\"{name}\",\"isExactMatch\":{(exact ? "true" : "false")}}}");
     }
     if (path.StartsWith("/api/phone/decline", StringComparison.Ordinal))
     {

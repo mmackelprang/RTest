@@ -794,23 +794,42 @@ cancellation token, and the hang-up cancels that token, so a doorbell or other n
 alongside the caller's name keeps playing. A new Ringing also cancels the previous call's announcement.
 Before `AUD-87` the hang-up called `IAnnouncementService.StopAsync`, which stops every announcement.
 
-### Contacts REST API Protocol
+### Caller names: two sources, one rule (`PHN-14`)
 
-The optional contacts API is called when a caller name isn't provided in the SignalR event:
+Every caller-name consumer — the API's spoken announcement (`PhoneContactLookupService`, called by
+`PhoneCallIntegrationService` when the event carries no name) and the Web's incoming-call banner
+(`IncomingCallBannerService`) — asks the same two sources in the same order (the banner asks the API's lookup
+directly, not the Phone page's local contact index, so it names the caller as the announcement does):
 
-```
-GET {ContactsApiBaseUrl}/api/contacts/lookup?phone={phoneNumber}
-```
+1. **The stored synced phone books (PBAP)** — every phone ever synced, **whether or not one is connected**:
+   the connected phone first, then the most recently synced, then the rest. The Web asks through
+   `GET /api/bluetooth/pbap/lookup`; the API reads the repository directly.
+2. **RotaryPhone's contacts** — `GET {ContactsApiBaseUrl}/api/contacts` (a list,
+   `[{ "id", "name", "phoneNumber", … }]`), matched locally.
 
-Expected response (200 OK):
-```json
-{
-  "Name": "John Smith",
-  "PhoneNumber": "+15551234567"
-}
-```
+Matching is one rule everywhere (`PhoneNumberNormalizer.TryFindMatch`, and the same tiers in the PBAP
+repository's SQL), in two tiers:
 
-If the API is unavailable or returns no match, the raw phone number is used in the announcement.
+- **Exact** — the digits, with the North American country code dropped, so `+19193718044`, `19193718044` and
+  `9193718044` are one number.
+- **Local entry** — a stored number of exactly **seven** digits (no area code) equal to the caller's last seven.
+  A stored 10- or 11-digit number matches **only** on the full number, never on its last seven, so a stranger in
+  another area code who shares a contact's last seven digits is not named.
+
+Ranking is **match quality first, then source**: synced-exact, then RotaryPhone-exact, then synced local entry,
+then RotaryPhone local entry. Within the synced tiers, the connected phone first, then the most recently synced.
+`pbap/lookup` reports `isExactMatch` so the banner can rank the same way. If nothing matches, the announcement
+uses the raw number and the banner shows it formatted. (Owner rulings, 2026-10-03: *"You're suggestions are fine
+for both"*.)
+
+⚠ **Before `PHN-14` (2026-10-03) neither fallback worked as documented.** `pbap/lookup` answered
+`404 "No device currently connected"` whenever no phone was connected — measured on the box for a number that was
+in the stored phone books — and the API asked RotaryPhone for `/api/contacts/lookup?phone=`, a route it has
+never had (`GET /api/contacts/{id}` read `lookup` as an id, so every request 404'd). The Web banner's RotaryPhone
+fallback did work: it has always read the list.
+
+Until those rulings the last-seven tier matched any stored number ending in the same seven digits, and the
+synced phone book won on any match, so a lookalike in one phone book could outrank an exact RotaryPhone contact.
 
 ### PBAP Contact Sync
 
@@ -820,7 +839,7 @@ Radio.API can download contacts from the connected phone's phonebook via Bluetoo
 1. A Python helper script (`pbap_download.py`) manages the D-Bus session bus connection to BlueZ's obexd
 2. It creates an OBEX PBAP session, selects the internal phonebook, and downloads all contacts as a VCF file
 3. The VCF is parsed (vCard 2.1/3.0 with quoted-printable decoding) and stored in SQLite
-4. Phone number lookup uses exact match first, then last-7-digit suffix matching for fuzzy resolution
+4. Phone number lookup uses an exact match first, then a stored 7-digit local entry against the caller's last seven digits — across every stored phone book, not only the connected phone's (`PHN-14`; see *Caller names* above)
 5. After sync, the BT connection is automatically restored (OBEX teardown causes a temporary disconnect)
 
 **Prerequisites:**
@@ -843,7 +862,7 @@ Radio.API can download contacts from the connected phone's phonebook via Bluetoo
 |--------|------|-------------|
 | `POST` | `/sync?deviceAddress=XX:XX:XX:XX:XX:XX` | Trigger manual sync (uses connected device if omitted) |
 | `GET` | `/contacts?deviceAddress=XX:XX:XX:XX:XX:XX` | List synced contacts for a device |
-| `GET` | `/lookup?phoneNumber=5551234567` | Look up a contact by phone number |
+| `GET` | `/lookup?phoneNumber=5551234567` | Look up a contact by phone number in every stored phone book (connected phone first, then most recently synced); `404 "No contact found"` when none has it. Works with no phone connected (`PHN-14`) |
 | `GET` | `/status` | Sync status for all devices |
 
 **Operational notes:**
@@ -857,8 +876,8 @@ Radio.API can download contacts from the connected phone's phonebook via Bluetoo
 When an incoming call is detected (`Ringing` state):
 
 1. The `PhoneCallIntegrationService` looks up the caller name:
-   - First checks PBAP contacts (local SQLite, synced from phone's phonebook)
-   - Falls back to the RotaryPhone contacts REST API
+   - First checks the stored PBAP phone books (local SQLite) — every synced phone, connected or not
+   - Falls back to RotaryPhone's contacts list (`GET /api/contacts`), matched locally
 2. If a ring sound file exists at `RingSoundPath`, it plays the sound followed by a TTS announcement (e.g., "Incoming call from John Smith")
 3. If no ring sound, just the TTS announcement plays
 4. Audio ducking lowers the main audio during the announcement
@@ -875,39 +894,53 @@ silence it. Design: [`docs/design-handoffs/2026-10-02-incoming-call-banner.md`](
 | | |
 |---|---|
 | **Where the state lives** | `Radio.Web/Services/IncomingCallBannerService.cs`, one per browser circuit, fed by `PhoneHubService`'s `CallStateChanged` and `IncomingCall`. Hosts: `MainLayout` and `/sleep` (`Components/Shared/IncomingCallBanner.razor`). |
-| **Caller line** | Contact name (from the API's PBAP lookup, then RotaryPhone's `/api/contacts`) with the number under it; the formatted number alone; or **Unknown caller / No caller ID**. A monogram for a contact, a glyph otherwise — no photo exists in any contract. A caller-ID update upgrades the line in place. |
+| **Caller line** | Contact name (from the API's PBAP lookup across every stored phone book, then RotaryPhone's `/api/contacts`; see *Caller names*) with the number under it; the formatted number alone; or **Unknown caller / No caller ID**. A monogram for a contact, a glyph otherwise — no photo exists in any contract. A caller-ID update upgrades the line in place. |
 | **Closes on** | A touch anywhere outside the Ignore column (the call keeps ringing; the announcement is untouched). The call being **answered** (`InCall`: a 600 ms **ANSWERED** beat, then a fade). The call **ending** (`Idle`: the caller hung up, the ring timed out, or Ignore worked — **CALL ENDED**, same beat). |
 | **Safety net** | While a call is tracked, each ringing phone's `GET /api/phone/status?phoneId=` is re-read every 3 s, one read at a time: a hang-up lost to a hub reconnect still closes the banner, and RotaryPhone's `CallId` in that answer splits a new call off an old one whose `Idle` was lost. If nothing confirms the ring for 90 s (RotaryPhone unreachable), the banner closes on its own. |
 | **Sleep** | On `/sleep` the banner covers the sleep screen and the page reports the screen hidden, which **lights a dark panel** (`ENC-22` off-timer or `ENC-23` deep sleep) **without waking the console** — parked music stays parked. When it closes the screen is reported visible again, and `ENC-22`'s timer restarts from its full period. ⚠ With `PanelOffAfterMinutes = 0` (the box), a call during deep sleep therefore leaves the panel lit on the sleep clock until someone sleeps it again; the Web cannot restore deep-dark without an API change (design Q3). A touch on the banner never wakes the console, and neither does a key on the covered sleep screen (Escape closes the banner). ⚠ In **Ambient** (the 30-minute idle clock, music playing) the server counts the console as Awake while the banner covers the screen, so a knob acts as on the awake console instead of waking it; Standby is unaffected. While covered, `/sleep` also hosts the fixed-position knob readout, above the banner. On normal pages a ring lifts the 5-minute idle dim and restarts the 30-minute idle-to-sleep timer. |
 | **More than one call** | RotaryPhone refuses a second inbound call on a ringing phone, so a second `IncomingCall` is the same call with a better number. A ring on another phone id shows the newest; when it ends the banner falls back to the other. A touch-closed banner stays closed for that call; the next call shows again. |
 | **Logging** | Nothing at Information (`Radio.Web`'s console sink is unrestricted — `PHN-5`). Numbers only through `LogSafeText.ForPhone`; names never. |
 
-**Ignore** asks RotaryPhone to decline the ringing call: `POST /api/phone/decline?phoneId=…`, counted as
-success only on 2xx with a JSON `{"declined": true}` (a current RotaryPhone answers a route it lacks with a JSON
-`404`; an older build's SPA fallback answered `200` with `index.html`, which the body check rejects). The banner
-then shows **ENDING CALL** and
-closes on the `Idle` that follows; if the request fails, or the call is still ringing 5 s later, it shows
-*"Couldn't end the call. Try again."* and stays up.
+**Ignore** — on the banner, and on the Phone page hero (which said **Reject**, disabled, until `PHN-13`) —
+asks RotaryPhone to decline the ringing call: `POST /api/phone/decline?phoneId=…` (RotaryPhone's
+`PhoneController.Decline`, shipped 2026-10-03; it defaults to the phone id `default`). The answers
+(`PhoneApiService.DeclineCallAsync`):
 
-⛔ **That route does not exist in RotaryPhone yet** (verified read-only 2026-10-02: `PhoneController` has
-status, bell-failure ack, three `simulate/*` routes, system-status and HT801 validate; the hub and the GV
-bridge have nothing either). It was requested in
-`D:\prj\RotaryPhone\docs\prompts\2026-10-02-radioconsole-decline-ringing-call-request.md`. Until it ships,
-**Ignore is shown disabled** with *"Not available yet. Answer and hang up on the phone, or let it ring."* —
-enable it with `"RotaryPhone": { "DeclineSupported": true }` in Radio.Web's configuration once it does.
-`simulate/hook?offHook=false` would reach the same `CallManager.HangUp()` today and is deliberately not used:
-it is unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+| RotaryPhone answers | Meaning | Banner / hero |
+|---|---|---|
+| `200 {"declined": true}` | Declined; the `Idle` broadcast follows synchronously | **ENDING CALL** / *Ending call…* until the call leaves Ringing; still ringing (or unanswered) 5 s after the tap → the error |
+| `409 {"declined": false, "state": "InCall"}` | The handset was lifted first; the call goes on (the route never hangs up an answered call) | Closes quietly with the **ANSWERED** beat / resets. **No error** |
+| `409 {"declined": false, "state": "Idle"}` (or any other `409`) | The caller gave up, or the ring timed out | Closes quietly with **CALL ENDED** / resets. **No error** |
+| `404`, 5xx, transport failure, a 2xx without `"declined": true` | Failed | *"Couldn't end the call. Try again."*; Ignore works again |
 
-What the caller hears when a call is declined depends on the path (from reading RotaryPhone, not yet
-observed): on the **Bluetooth/HFP** path the cell rejects the call and the carrier normally sends the caller
-to voicemail; on the **Google Voice** path the GV leg was already answered before the rotary rang, so the
-caller hears the call drop. The RotaryPhone request asks them to confirm both.
+**Both Ignores are switched off** — `RotaryPhone:DeclineSupported` ships `false`, and RotaryPhone asked that it
+stay off until the owner's real-call test passes. Until then Ignore is shown disabled with *"Not available yet.
+Answer and hang up on the phone, or let it ring."* To switch it on (the same with `false` switches it off):
+
+```bash
+curl -s -X POST http://radio:5000/api/configuration/RotaryPhone \
+  -H 'Content-Type: application/json' -d '{"DeclineSupported": true}'
+```
+
+That writes `rotaryphone:DeclineSupported = true` to the shared config store; radio-web reads the store through
+its bridge on top of the shipped `false`, reloads it on the API's `ConfigChanged` push, and both Ignores read the
+flag on every use — so the next call has it (if the push was missed: `sudo systemctl restart radio-web`). Pinned
+end to end by `RotaryPhoneDeclineEnableStepTests`.
+
+`simulate/hook?offHook=false` reaches the same `CallManager.HangUp()` and is deliberately not used: it is
+unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+
+What the caller experiences, per RotaryPhone's reply (`RotaryPhone/docs/handoffs/radioconsole-decline-endpoint-reply.md`,
+read from code, not yet observed): **Bluetooth/HFP** — the cell rejects the call; the carrier usually sends the
+caller to voicemail (some play busy). **Google Voice** — the GV leg is answered at INVITE, so the caller hears the
+call drop, with no voicemail. **SIP trunk** — probably keeps ringing on the caller's end until the provider's
+no-answer timeout.
 
 ### Troubleshooting
 
 - **"Disconnected" but server is running:** Check firewall rules, verify the hub URL is reachable from the Radio Console host with `curl http://<phone-server>:5555/hubs/phone/negotiate`
 - **No announcement on ring:** Check TTS engine availability in **System Config → Event Sources**. Ensure a TTS engine (Google or Azure) is configured, with its API key present. Both engines are cloud services and there is no offline fallback, so announcements also go silent whenever the network is down - see the `TTS-9` note in [SYSTEMCONFIGURATION.md](SYSTEMCONFIGURATION.md#text-to-speech-tts-setup)
-- **Wrong caller name:** Verify the contacts API response shape matches the expected schema above
+- **Wrong caller name:** See *Caller names* above — an exact match beats a local-entry match, and the synced phone books beat RotaryPhone's contacts within a tier; a 7-digit local entry still matches any area code. `GET /api/bluetooth/pbap/lookup?phoneNumber=…` shows what the phone books answer (and `isExactMatch`)
 - **Ring sound doesn't play:** Verify the file exists at the configured path and is a valid WAV or MP3
 
 ### Google Voice (gvbridge) Messages

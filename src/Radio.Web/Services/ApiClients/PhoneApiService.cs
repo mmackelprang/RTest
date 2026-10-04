@@ -5,6 +5,35 @@ using Radio.Web.Models;
 
 namespace Radio.Web.Services.ApiClients;
 
+/// <summary>How RotaryPhone answered a decline (PHN-13). See <see cref="PhoneApiService.DeclineCallAsync"/>.</summary>
+public enum DeclineCallResult
+{
+  /// <summary>
+  /// Transport failure, 5xx, 404, or a 2xx without <c>"declined": true</c>. The only error case. Value 0, so a
+  /// <c>default</c> outcome fails closed rather than reading as a decline.
+  /// </summary>
+  Failed = 0,
+
+  /// <summary><c>200 {"declined": true}</c>: the ringing call is being torn down.</summary>
+  Declined,
+
+  /// <summary><c>409</c>: the call was not ringing any more (answered, or the caller gave up). Benign.</summary>
+  NotRinging,
+}
+
+/// <summary>The result of a decline, with the phone's state when RotaryPhone reported one on a <c>409</c>.</summary>
+/// <param name="Result">What happened.</param>
+/// <param name="State">The <c>409</c> body's <c>"state"</c> (<c>InCall</c>, <c>Idle</c>, <c>Dialing</c>); null otherwise.</param>
+public readonly record struct DeclineCallOutcome(DeclineCallResult Result, string? State = null)
+{
+  public static DeclineCallOutcome Declined => new(DeclineCallResult.Declined);
+  public static DeclineCallOutcome Failed => new(DeclineCallResult.Failed);
+
+  /// <summary>True for a <c>409</c> reporting <c>InCall</c>: the handset was lifted before the decline.</summary>
+  public bool WasAnswered => Result == DeclineCallResult.NotRinging
+    && string.Equals(State, "InCall", StringComparison.OrdinalIgnoreCase);
+}
+
 /// <summary>
 /// HTTP client for RotaryPhone.API at http://localhost:5004.
 /// Provides access to phone status, contacts, and call history.
@@ -76,21 +105,39 @@ public class PhoneApiService
   }
 
   /// <summary>
-  /// PHN-11: asks RotaryPhone to decline the RINGING call — the banner's Ignore button. True only when the
-  /// service answers 2xx with a JSON body carrying <c>"declined": true</c>.
+  /// PHN-11/PHN-13: asks RotaryPhone to decline the RINGING call — Ignore, on the banner and on the Phone
+  /// page's hero. RotaryPhone's <c>POST /api/phone/decline?phoneId=</c> (its <c>PhoneController.Decline</c>,
+  /// default phone id <c>"default"</c>) answers:
+  /// <list type="bullet">
+  ///   <item><c>200 {"declined": true}</c> — declined; the <c>Idle</c> broadcast follows synchronously.
+  ///   → <see cref="DeclineCallResult.Declined"/>.</item>
+  ///   <item><c>409 {"declined": false, "state": "Idle|Dialing|InCall"}</c> — the call was no longer ringing:
+  ///   <c>InCall</c>, the handset was lifted first (the call continues — the route never hangs up an answered
+  ///   call); <c>Idle</c>, the caller gave up or the ring timed out. Benign, not a failure.
+  ///   → <see cref="DeclineCallResult.NotRinging"/>, with the state.</item>
+  ///   <item><c>404</c> — an unknown phone id. → <see cref="DeclineCallResult.Failed"/>.</item>
+  /// </list>
+  /// Anything else — a transport failure, a 5xx, a 2xx without <c>"declined": true</c> — is
+  /// <see cref="DeclineCallResult.Failed"/>, and only that shows "Couldn't end the call".
   /// </summary>
   /// <remarks>
-  /// ⚠ <b>The route does not exist in RotaryPhone yet.</b> It was requested on 2026-10-02
-  /// (<c>RotaryPhone/docs/prompts/2026-10-02-radioconsole-decline-ringing-call-request.md</c>), and the
-  /// banner calls this only when <c>RotaryPhone:DeclineSupported</c> is true. A current RotaryPhone answers
-  /// an unknown <c>/api/*</c> route with a JSON <c>404</c> (its <c>Program.cs</c> API fallback, added after
-  /// <c>UI-11</c>), which fails the status check. The body check is what still holds against an older
-  /// RotaryPhone build, whose SPA fallback answered such a route <c>200</c> with <c>index.html</c>: that
-  /// body is not JSON, so it counts as a failure rather than a decline that never happened.
-  /// <c>simulate/hook?offHook=false</c> would reach the same hang-up today and is deliberately not used:
-  /// it is unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+  /// <para>
+  /// The body check on a 2xx still holds against an older RotaryPhone build, whose SPA fallback answered an
+  /// unknown route <c>200</c> with <c>index.html</c>: not JSON, so a failure rather than a decline that never
+  /// happened.
+  /// </para>
+  /// <para>
+  /// <b>Every <c>409</c> is benign, whatever its body says.</b> RotaryPhone returns <c>409</c> from this route
+  /// only when the phone is not ringing, so the call on screen is over or answered either way; the state is
+  /// read for the banner's exit beat and for the debug line, and a <c>409</c> whose body does not parse is still
+  /// <see cref="DeclineCallResult.NotRinging"/> (state <c>null</c>).
+  /// </para>
+  /// <para>
+  /// <c>simulate/hook?offHook=false</c> would reach the same hang-up and is deliberately not used: it is
+  /// unconditional, so a tap landing just after the handset is lifted would cut off the answered call.
+  /// </para>
   /// </remarks>
-  public async Task<bool> DeclineCallAsync(string? phoneId, CancellationToken ct = default)
+  public async Task<DeclineCallOutcome> DeclineCallAsync(string? phoneId, CancellationToken ct = default)
   {
     try
     {
@@ -98,27 +145,59 @@ public class PhoneApiService
         ? "/api/phone/decline"
         : $"/api/phone/decline?phoneId={Uri.EscapeDataString(phoneId)}";
       using var response = await _httpClient.PostAsync(url, null, ct);
+
+      if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+      {
+        string? state = await TryReadStateAsync(response, ct);
+        _logger.LogDebug("The call was no longer ringing when it was declined ({State})", state ?? "unknown");
+        return new DeclineCallOutcome(DeclineCallResult.NotRinging, state);
+      }
+
       if (!response.IsSuccessStatusCode)
       {
         _logger.LogWarning("The phone service did not accept the decline ({StatusCode})", (int)response.StatusCode);
-        return false;
+        return DeclineCallOutcome.Failed;
       }
 
       using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
-      return body.RootElement.ValueKind == JsonValueKind.Object
-        && body.RootElement.TryGetProperty("declined", out var declined)
-        && declined.ValueKind == JsonValueKind.True;
+      bool declined = body.RootElement.ValueKind == JsonValueKind.Object
+        && body.RootElement.TryGetProperty("declined", out var declinedProperty)
+        && declinedProperty.ValueKind == JsonValueKind.True;
+      if (!declined)
+      {
+        _logger.LogWarning("The phone service answered the decline without \"declined\": true");
+        return DeclineCallOutcome.Failed;
+      }
+      return DeclineCallOutcome.Declined;
     }
     catch (JsonException)
     {
       // A 2xx that is not JSON: an older RotaryPhone's SPA fallback answering a route it does not have.
       _logger.LogWarning("The phone service answered the decline with something other than JSON; is the route deployed?");
-      return false;
+      return DeclineCallOutcome.Failed;
     }
     catch (Exception ex)
     {
       _logger.LogError(ex, "Failed to decline the incoming call");
-      return false;
+      return DeclineCallOutcome.Failed;
+    }
+  }
+
+  // The 409 body's "state"; null when the body is not the documented JSON.
+  private static async Task<string?> TryReadStateAsync(HttpResponseMessage response, CancellationToken ct)
+  {
+    try
+    {
+      using var body = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(ct), cancellationToken: ct);
+      return body.RootElement.ValueKind == JsonValueKind.Object
+        && body.RootElement.TryGetProperty("state", out var state)
+        && state.ValueKind == JsonValueKind.String
+          ? state.GetString()
+          : null;
+    }
+    catch (JsonException)
+    {
+      return null;
     }
   }
 

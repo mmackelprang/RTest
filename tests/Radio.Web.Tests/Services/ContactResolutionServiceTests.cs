@@ -117,6 +117,60 @@ public class ContactResolutionServiceTests
     Assert.Equal("Jane", await svc.ResolveAsync("9193718044"));
   }
 
+  // ── PHN-14 ────────────────────────────────────────────────────────
+
+  [Theory]
+  [InlineData(false)]
+  [InlineData(true)]
+  public void PrimeFromContacts_TheSyncedPhoneBookWinsOverARotaryPhoneContact_WhicheverSortsFirst(bool manualFirst)
+  {
+    var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
+    var manual = new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-371-8044", null, "Manual");
+    var pbap = new MergedContact(null, "Zelda (synced)", "9193718044", null, "PBAP");
+
+    svc.PrimeFromContacts(manualFirst ? new[] { manual, pbap } : new[] { pbap, manual });
+
+    Assert.Equal("Zelda (synced)", svc.TryResolve("19193718044"));
+  }
+
+  [Fact]
+  public void PrimeFromContacts_ARotaryPhoneContactStillAnswers_WhenNoSyncedOneHasTheNumber()
+  {
+    var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
+    svc.PrimeFromContacts(new[]
+    {
+      new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-371-8044", null, "Manual"),
+      new MergedContact(null, "Someone else", "5550001111", null, "PBAP"),
+    });
+
+    Assert.Equal("Aaron (RotaryPhone)", svc.TryResolve("9193718044"));
+  }
+
+  [Fact]
+  public async Task LookupForCallAsync_IgnoresTheIndexAndTheCache_AndReportsTheTier()
+  {
+    var handler = new ScriptedPhoneHandler();   // PbapName null → 404, which ResolveAsync caches as a miss
+    var svc = Create(handler);
+    svc.PrimeFromContacts(new[] { new MergedContact("1", "Index name", "9193718044", null, "Manual") });
+    await svc.ResolveAsync("5550001111");
+
+    handler.PbapName = "Synced local entry";
+    handler.PbapExact = false;
+    var forIndexed = await svc.LookupForCallAsync("9193718044");
+    var forCachedMiss = await svc.LookupForCallAsync("5550001111");
+
+    Assert.Equal(("Synced local entry", false), forIndexed);
+    Assert.Equal(("Synced local entry", false), forCachedMiss);
+  }
+
+  [Fact]
+  public async Task LookupForCallAsync_NoMatch_IsNull()
+  {
+    var svc = Create(new ScriptedPhoneHandler());
+
+    Assert.Equal(((string?)null, false), await svc.LookupForCallAsync("9193718044"));
+  }
+
   [Fact]
   public async Task ResolveAsync_ConcurrentSameNumber_IssuesSingleRequest()
   {

@@ -22,6 +22,13 @@ public class PhonePageTests : TestContext
   /// </summary>
   private bool? _ht801Reachable = true;
 
+  // PHN-13: what /api/phone/status reports, and every decline the page sends, with RotaryPhone's answer.
+  private string _callStateJson = """{"callState":"Idle"}""";
+  private readonly List<string> _declines = [];
+  private (System.Net.HttpStatusCode Status, string Body) _declineResponse =
+    (System.Net.HttpStatusCode.OK, """{"declined":true}""");
+  private IConfigurationRoot _config = null!;
+
   public PhonePageTests()
   {
     // Hermetic rig: fails every outbound HTTP request and every SignalR
@@ -36,7 +43,7 @@ public class PhonePageTests : TestContext
     Services.AddHttpClient<PhoneApiService>(client =>
     {
       client.BaseAddress = new Uri(HermeticTestRig.PhoneApiBaseUrl);
-    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler(() => _ht801Reachable));
+    }).ConfigurePrimaryHttpMessageHandler(() => new EmptyResponseHandler(() => _ht801Reachable, this));
 
     // Register PbapApiService with mock handler
     Services.AddHttpClient<PbapApiService>(client =>
@@ -75,6 +82,7 @@ public class PhonePageTests : TestContext
         ["RotaryPhone:ApiBaseUrl"] = HermeticTestRig.PhoneApiBaseUrl
       })
       .Build();
+    _config = config;
     Services.AddSingleton<IConfiguration>(config);
     Services.AddSingleton(new PhoneHubService(
       NullLogger<PhoneHubService>.Instance, config, new OfflineHubTransport()));
@@ -279,6 +287,69 @@ public class PhonePageTests : TestContext
     Assert.DoesNotContain("Handset", cut.Markup); // body not rendered when collapsed
   }
 
+  // ── PHN-13: the hero's Ignore ─────────────────────────────────────
+
+  [Fact]
+  public void Dashboard_Ringing_IgnoreDeclinesTheDefaultPhonesCall()
+  {
+    _config[IncomingCallBannerService.DeclineSupportedKey] = "true";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    var ignore = cut.WaitForElement(".phone-hero-ignore");
+    Assert.Contains("Ignore", ignore.TextContent);
+    Assert.DoesNotContain("Reject", cut.Markup);
+    ignore.Click();
+
+    cut.WaitForAssertion(() => Assert.Equal(["POST /api/phone/decline"], _declines));
+    // The 200 has been handled once the button says "Ending call…" (it stays there until the call leaves Ringing).
+    cut.WaitForAssertion(() => Assert.Contains("Ending call", cut.Find(".phone-hero-ignore").TextContent));
+    Assert.Empty(cut.FindAll(".phone-hero-ignore-error"));
+  }
+
+  [Fact]
+  public void Dashboard_Ringing_A409InCall_ShowsNoError()
+  {
+    _config[IncomingCallBannerService.DeclineSupportedKey] = "true";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    _declineResponse = (System.Net.HttpStatusCode.Conflict, """{"declined":false,"state":"InCall"}""");
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    cut.WaitForElement(".phone-hero-ignore").Click();
+
+    cut.WaitForAssertion(() => Assert.Single(_declines));
+    cut.WaitForAssertion(() => Assert.DoesNotContain("Ending call", cut.Find(".phone-hero-ignore").TextContent));
+    Assert.Empty(cut.FindAll(".phone-hero-ignore-error"));
+  }
+
+  [Fact]
+  public void Dashboard_Ringing_A5xx_ShowsTheError()
+  {
+    _config[IncomingCallBannerService.DeclineSupportedKey] = "true";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    _declineResponse = (System.Net.HttpStatusCode.InternalServerError, "{}");
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    cut.WaitForElement(".phone-hero-ignore").Click();
+
+    cut.WaitForAssertion(() =>
+      Assert.Equal("Couldn't end the call. Try again.", cut.Find(".phone-hero-ignore-error").TextContent));
+  }
+
+  [Fact]
+  public void Dashboard_Ringing_WithDeclineNotSupported_IgnoreIsDisabled()
+  {
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    var cut = RenderComponent<PhonePage>();
+    OpenDashboard(cut);
+
+    Assert.True(cut.WaitForElement(".phone-hero-ignore").HasAttribute("disabled"));
+    Assert.Empty(_declines);
+  }
+
   // Expand the "More ▸" rail so the legacy tab buttons render.
   private static void ExpandMore(IRenderedComponent<PhonePage> cut)
   {
@@ -301,16 +372,30 @@ public class PhonePageTests : TestContext
     // Resolved per request so a test can change the reported reachability after the
     // handler has already been constructed by the HttpClient factory.
     private readonly Func<bool?>? _ht801Reachable;
+    private readonly PhonePageTests? _owner;
 
-    public EmptyResponseHandler(Func<bool?>? ht801Reachable = null)
+    public EmptyResponseHandler(Func<bool?>? ht801Reachable = null, PhonePageTests? owner = null)
     {
       _ht801Reachable = ht801Reachable;
+      _owner = owner;
     }
 
     protected override Task<HttpResponseMessage> SendAsync(
       HttpRequestMessage request, CancellationToken cancellationToken)
     {
       var path = request.RequestUri?.PathAndQuery ?? "";
+      if (_owner is not null && path.StartsWith("/api/phone/decline", StringComparison.Ordinal))
+      {
+        lock (_owner._declines)
+        {
+          _owner._declines.Add($"{request.Method} {path}");
+        }
+        var (status, body) = _owner._declineResponse;
+        return Task.FromResult(new HttpResponseMessage(status)
+        {
+          Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json")
+        });
+      }
       // null must serialize as a JSON null (not be omitted) so the "not yet probed"
       // case is exercised exactly as RotaryPhone would send it.
       var reachable = (_ht801Reachable?.Invoke()) switch
@@ -324,7 +409,7 @@ public class PhonePageTests : TestContext
         var p when p.Contains("system-status") =>
           $$"""{"platform":"Linux","sipListening":false,"ht801IpAddress":"192.168.1.57","ht801Reachable":{{reachable}}}""",
         var p when p.Contains("/api/phone/status") =>
-          """{"callState":"Idle"}""",
+          _owner?._callStateJson ?? """{"callState":"Idle"}""",
         var p when p.Contains("/api/contacts") => "[]",
         var p when p.Contains("/api/callhistory") => "[]",
         var p when p.Contains("/api/bluetooth/pbap/status") =>

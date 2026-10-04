@@ -515,10 +515,13 @@ builder.Services.AddSingleton<Radio.Web.Services.VisualizerTelemetryService>();
 // /opt/radio-console/{api,web}/ with appsettings.json overrides that point at
 // the shared ../data/config/configuration.db.
 //
-// Cross-process caveat: ConfigStoreChangeNotifier.NotifyReload() only fires
-// IOptionsMonitor change tokens within the SAME process. Saves originate in
-// radio-api, so radio-web sees them on the next circuit init (page reload) —
-// not live. Cross-process hot-reload is a deferred follow-up.
+// Cross-process reload: ConfigStoreChangeNotifier.NotifyReload() only fires
+// within the SAME process, and saves originate in radio-api. radio-api therefore
+// pushes ConfigChanged over /hubs/audio after a section save
+// (ConfigurationController.BroadcastConfigChangedAsync), and AudioStateHubService
+// calls this process's NotifyReload on receipt, which re-reads the store. If that
+// push is missed (hub disconnected), radio-web keeps the old values until restart.
+// PHN-13's RotaryPhone:DeclineSupported switch relies on this path.
 var dbSection = builder.Configuration.GetSection("Database");
 var rootPath = dbSection["RootPath"] ?? "./data";
 var configSubdir = dbSection["ConfigurationSubdirectory"] ?? "config";

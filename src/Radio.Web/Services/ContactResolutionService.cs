@@ -52,15 +52,26 @@ public class ContactResolutionService
     var index = new Dictionary<string, string>(StringComparer.Ordinal);
     if (contacts != null)
     {
-      foreach (var c in contacts)
+      // PHN-14: the synced phone book (PBAP) wins over a RotaryPhone ("Manual") contact for the same number —
+      // the precedence the API's announcement and the incoming-call banner use. Two passes, PBAP first; within
+      // a source the first contact wins (contacts arrive name-sorted).
+      var list = contacts as IReadOnlyList<MergedContact> ?? contacts.ToList();
+      foreach (bool pbapPass in new[] { true, false })
       {
-        var key = PhoneNumberNormalizer.Normalize(c.Phone);
-        if (key.Length == 0 || string.IsNullOrWhiteSpace(c.Name))
+        foreach (var c in list)
         {
-          continue;
+          bool isPbap = string.Equals(c.Source, "PBAP", StringComparison.OrdinalIgnoreCase);
+          if (isPbap != pbapPass)
+          {
+            continue;
+          }
+          var key = PhoneNumberNormalizer.Normalize(c.Phone);
+          if (key.Length == 0 || string.IsNullOrWhiteSpace(c.Name))
+          {
+            continue;
+          }
+          index.TryAdd(key, c.Name);
         }
-        // First contact wins for a given number (contacts arrive name-sorted).
-        index.TryAdd(key, c.Name);
       }
     }
     _index = index;
@@ -139,6 +150,27 @@ public class ContactResolutionService
     }
     _ = RunLookupAsync(key, number!, tcs, ct);
     return tcs.Task;
+  }
+
+  /// <summary>
+  /// PHN-14: a fresh lookup for an incoming call — no local index, no cache, no dedupe — with the match tier. The
+  /// banner uses it: the local index (primed by the Phone page) holds one phone book's first numbers plus every
+  /// RotaryPhone contact, and the circuit's cache can hold a "no such contact" for days (through a later phone
+  /// sync, or from before PHN-14, when every lookup with no phone connected was a 404). Never throws.
+  /// </summary>
+  /// <returns>The synced contact's name and whether it matched exactly; <c>(null, false)</c> when none did.</returns>
+  public async Task<(string? Name, bool IsExact)> LookupForCallAsync(string number, CancellationToken ct = default)
+  {
+    try
+    {
+      var (outcome, name, isExact) = await _pbap.LookupNumberWithTierAsync(number, ct);
+      return outcome == ContactLookupOutcome.Found ? (name, isExact) : (null, false);
+    }
+    catch (Exception ex)
+    {
+      _logger.LogDebug(ex, "Contact lookup for a call failed for {Number}", LogSafeText.ForPhone(number));
+      return (null, false);
+    }
   }
 
   private async Task RunLookupAsync(string key, string number,

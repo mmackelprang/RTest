@@ -88,6 +88,121 @@ public class IncomingCallBannerServiceTests
     Assert.Equal(IncomingCallCallerKind.Contact, rig.Service.Current.CallerKind);
   }
 
+  // ── PHN-14: both contact sources ──────────────────────────────────
+
+  [Fact]
+  public async Task WhenBothSourcesHaveTheNumber_TheSyncedPhoneBookWins()
+  {
+    var rig = new Rig();
+    rig.Phone.PbapName = "Synced name";
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"RotaryPhone name\",\"phoneNumber\":\"{Number}\"}}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("Synced name", rig.Service.Current.PrimaryText);
+    Assert.Equal(0, rig.Phone.Count("/api/contacts"));   // the second source is not even asked
+  }
+
+  [Fact]
+  public async Task ThePhonePagesLocalIndex_DoesNotOutrankTheApisSyncedPhoneBookAnswer()
+  {
+    // Pre-merge review M1: the circuit's index (primed by the Phone page) holds only one phone book's first numbers
+    // plus every RotaryPhone contact. A RotaryPhone name there must not beat the synced name the API returns —
+    // the name the spoken announcement uses.
+    var rig = new Rig();
+    rig.Contacts.PrimeFromContacts([new Radio.Web.Models.MergedContact("1", "RotaryPhone name", Number, null, "Manual")]);
+    rig.Phone.PbapName = "Synced name";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("Synced name", rig.Service.Current.PrimaryText);
+  }
+
+  [Fact]
+  public async Task ARotaryPhoneExactMatch_BeatsASyncedLocalEntry()
+  {
+    // Owner ruling 2026-10-03: match quality first, then source.
+    var rig = new Rig();
+    rig.Phone.PbapName = "Synced local entry";
+    rig.Phone.PbapExact = false;
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"RotaryPhone exact\",\"phoneNumber\":\"{Number}\"}}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("RotaryPhone exact", rig.Service.Current.PrimaryText);
+  }
+
+  [Fact]
+  public async Task ASyncedLocalEntry_BeatsARotaryPhoneLocalEntry()
+  {
+    var rig = new Rig();
+    rig.Phone.PbapName = "Synced local entry";
+    rig.Phone.PbapExact = false;
+    rig.Phone.ContactsJson = "[{\"id\":\"1\",\"name\":\"RotaryPhone local entry\",\"phoneNumber\":\"013-7424\"}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("Synced local entry", rig.Service.Current.PrimaryText);
+  }
+
+  [Fact]
+  public async Task AStrangerWhoSharesTheLastSeven_IsNotNamedFromRotaryPhonesFullNumber()
+  {
+    var rig = new Rig();
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"Uncle Bob\",\"phoneNumber\":\"{Number}\"}}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", "9190137424");
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal(IncomingCallCallerKind.Number, rig.Service.Current.CallerKind);
+  }
+
+  [Theory]
+  [InlineData("+15550137424", "5550137424")]
+  [InlineData("15550137424", "+1 (555) 013-7424")]
+  [InlineData("5550137424", "1-555-013-7424")]
+  public async Task RotaryPhonesContacts_MatchWithOrWithoutACountryCode(string incoming, string stored)
+  {
+    var rig = new Rig();
+    rig.Phone.ContactsJson = $"[{{\"id\":\"1\",\"name\":\"Uncle Bob\",\"phoneNumber\":\"{stored}\"}}]";
+    rig.Start();
+
+    rig.Hub.RaiseIncomingCallForTest("default", incoming);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal("Uncle Bob", rig.Service.Current.PrimaryText);
+  }
+
+  [Fact]
+  public async Task ASyncedPhoneBookMissCachedOnAnEarlierCall_IsAskedAgainOnTheNext()
+  {
+    // The kiosk circuit lives for days. Before PHN-14 every lookup with no phone connected was a 404, cached
+    // as "no such contact" for the circuit; a call must not be held to that answer.
+    var rig = new Rig();
+    rig.Start();
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+    var first = rig.Service.Current.PrimaryText;
+    rig.Hub.RaiseCallStateChangedForTest("default", "Idle");
+
+    rig.Phone.PbapName = "Grandma Anderson";
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    await rig.Service.LastNameLookup;
+
+    Assert.Equal(Formatted, first);
+    Assert.Equal("Grandma Anderson", rig.Service.Current.PrimaryText);
+    Assert.Equal(2, rig.Phone.Count("/api/bluetooth/pbap/lookup"));
+  }
+
   [Theory]
   [InlineData("Unknown")]
   [InlineData("")]
@@ -621,9 +736,10 @@ public class IncomingCallBannerServiceTests
 
   [Theory]
   [InlineData(HttpStatusCode.InternalServerError, "{\"declined\":false}", "application/json")]
-  [InlineData(HttpStatusCode.Conflict, "{\"declined\":false,\"state\":\"InCall\"}", "application/json")]
+  [InlineData(HttpStatusCode.BadGateway, "", "text/plain")]
   [InlineData(HttpStatusCode.OK, "<!doctype html><html></html>", "text/html")]   // an older RotaryPhone's SPA fallback
-  [InlineData(HttpStatusCode.NotFound, "{\"error\":\"No API route matches POST /api/phone/decline\"}", "application/json")]   // today's
+  [InlineData(HttpStatusCode.NotFound, "{\"error\":\"No API route matches POST /api/phone/decline\"}", "application/json")]   // a RotaryPhone without the route
+  [InlineData(HttpStatusCode.NotFound, "", "text/plain")]   // the route's own 404: an unknown phone id
   [InlineData(HttpStatusCode.OK, "{\"declined\":false}", "application/json")]
   public async Task AFailedDecline_ShowsTheError_LeavesTheBannerUp_AndIgnoreWorksAgain(
     HttpStatusCode status, string body, string contentType)
@@ -643,6 +759,81 @@ public class IncomingCallBannerServiceTests
     Assert.Equal(IncomingCallDeclineState.Failed, failed.DeclineState);
     Assert.Equal(2, rig.Phone.Count("/api/phone/decline"));
     Assert.Equal(IncomingCallDeclineState.Declining, rig.Service.Current.DeclineState);
+  }
+
+  // ── PHN-13: a 409 is benign ───────────────────────────────────────
+
+  [Theory]
+  [InlineData("{\"declined\":false,\"state\":\"InCall\"}", IncomingCallPhase.Answered, IncomingCallCloseReason.Answered)]   // handset lifted first
+  [InlineData("{\"declined\":false,\"state\":\"Idle\"}", IncomingCallPhase.Ended, IncomingCallCloseReason.Ended)]           // the caller gave up
+  [InlineData("{\"declined\":false,\"state\":\"Dialing\"}", IncomingCallPhase.Ended, IncomingCallCloseReason.Ended)]
+  [InlineData("not json", IncomingCallPhase.Ended, IncomingCallCloseReason.Ended)]
+  public async Task A409_ClosesTheBannerQuietly_WithNoError(
+    string body, IncomingCallPhase expectedPhase, IncomingCallCloseReason expectedReason)
+  {
+    var rig = new Rig(declineSupported: true);
+    rig.Phone.DeclineResponse = (HttpStatusCode.Conflict, body, "application/json");
+    // The hub's InCall / Idle never arrives in this test: the 409 alone must close the banner.
+    rig.Phone.StatusJson = $"{{\"callState\":\"Ringing\",\"incomingNumber\":\"{Number}\"}}";
+    rig.Start();
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+
+    await rig.Service.DeclineAsync();
+    var closing = rig.Service.Current;
+    // Past the decline deadline: no late "Couldn't end the call" for a call that is already gone.
+    // (Two advances: the fade's timer is created by the beat's, and a fake clock fires only what is due.)
+    rig.Time.Advance(IncomingCallBannerService.DeclineDeadline);
+    rig.Time.Advance(IncomingCallBannerService.ExitFade);
+    var afterDeadline = rig.Service.Current;
+
+    Assert.True(closing.IsVisible);   // the beat
+    Assert.Equal(expectedPhase, closing.Phase);
+    Assert.Equal(expectedReason, closing.LastCloseReason);
+    Assert.NotEqual(IncomingCallDeclineState.Failed, closing.DeclineState);
+    Assert.False(afterDeadline.IsVisible);
+    Assert.NotEqual(IncomingCallDeclineState.Failed, afterDeadline.DeclineState);
+    Assert.Equal(1, rig.Phone.Count("/api/phone/decline"));
+  }
+
+  [Fact]
+  public async Task A409_ArrivingAfterTheHubAlreadyClosedTheBanner_ChangesNothing()
+  {
+    var rig = new Rig(declineSupported: true);
+    var gate = new TaskCompletionSource();
+    rig.Phone.DeclineGate = gate.Task;
+    rig.Phone.DeclineResponse = (HttpStatusCode.Conflict, "{\"declined\":false,\"state\":\"InCall\"}", "application/json");
+    rig.Start();
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+
+    var pending = rig.Service.DeclineAsync();
+    rig.Hub.RaiseCallStateChangedForTest("default", "InCall");   // the lift reaches the hub first
+    var answered = rig.Service.Current;
+    int changes = 0;
+    rig.Service.Changed += () => Interlocked.Increment(ref changes);
+    gate.SetResult();
+    await pending;
+
+    Assert.Equal(IncomingCallPhase.Answered, answered.Phase);
+    Assert.Equal(answered, rig.Service.Current);
+    Assert.Equal(0, changes);
+  }
+
+  [Fact]
+  public async Task TurningDeclineSupportedOn_ReachesAnOpenCircuit()
+  {
+    // PHN-13: the coordinator flips the flag through the config store at UAT time; radio-web reloads its
+    // configuration on the API's ConfigChanged push. A kiosk circuit opened before the flip must not need a reload.
+    var rig = new Rig(declineSupported: false);
+    rig.Start();
+    rig.Hub.RaiseIncomingCallForTest("default", Number);
+    var before = rig.Service.Current.CanDecline;
+
+    rig.Config[IncomingCallBannerService.DeclineSupportedKey] = "true";
+    await rig.Service.DeclineAsync();
+
+    Assert.False(before);
+    Assert.True(rig.Service.Current.CanDecline);
+    Assert.Equal(1, rig.Phone.Count("/api/phone/decline"));
   }
 
   [Fact]

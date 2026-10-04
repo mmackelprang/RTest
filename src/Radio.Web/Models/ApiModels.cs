@@ -1262,6 +1262,9 @@ public class PbapLookupDto
 {
   public string? DisplayName { get; set; }
   public string? PhoneNumber { get; set; }
+
+  /// <summary>PHN-14: false for a stored 7-digit local-entry match; absent (older API) reads as exact.</summary>
+  public bool? IsExactMatch { get; set; }
 }
 
 /// <summary>

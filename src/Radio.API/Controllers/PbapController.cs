@@ -44,20 +44,32 @@ public class PbapController : ControllerBase
     return Ok(contacts);
   }
 
+  /// <summary>
+  /// Resolves a caller's number to a name from the stored synced phone books — every phone ever synced, not
+  /// only the connected one (PHN-14). Until 2026-10-03 this answered <c>404 "No device currently
+  /// connected"</c> whenever no phone was connected, though the box held three synced phone books.
+  /// </summary>
+  /// <remarks>
+  /// Order: an exact digits match on any phone beats a local-entry match (a stored 7-digit number equal to the
+  /// caller's last seven) on any phone; within each, the connected phone first, then the most recently synced.
+  /// <c>IsExactMatch</c> says which, so the Web can rank across sources (owner ruling, 2026-10-03). A <c>404</c> means no stored contact has the
+  /// number, and nothing else: the Web caches it as a definitive miss. The <c>404</c> body does not echo the
+  /// number (PHN-5).
+  /// </remarks>
   [HttpGet("lookup")]
   public async Task<IActionResult> LookupNumber([FromQuery] string phoneNumber, CancellationToken ct)
   {
-    var deviceAddress = _bluetoothService.ConnectedDevice?.Address;
-    if (string.IsNullOrEmpty(deviceAddress))
-      return NotFound("No device currently connected");
+    var normalized = PhoneNumberNormalizer.Normalize(phoneNumber ?? "");
+    if (normalized.Length == 0)
+      return NotFound("No contact found");
 
-    var normalized = PhoneNumberNormalizer.Normalize(phoneNumber);
-    var contact = await _contactRepo.FindByPhoneNumberAsync(deviceAddress, normalized, ct);
+    var match = await _contactRepo.FindByPhoneNumberAnyDeviceAsync(
+      normalized, _bluetoothService.ConnectedDevice?.Address, ct);
 
-    if (contact == null)
-      return NotFound($"No contact found for {phoneNumber}");
+    if (match == null)
+      return NotFound("No contact found");
 
-    return Ok(new { contact.DisplayName, PhoneNumber = phoneNumber });
+    return Ok(new { match.DisplayName, PhoneNumber = phoneNumber, match.IsExactMatch });
   }
 
   [HttpGet("status")]

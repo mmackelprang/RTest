@@ -6516,6 +6516,14 @@ body {
   flex-wrap: wrap;
 }
 
+/* PHN-13 — the hero's Ignore failed (transport, 5xx, 404). Same copy and colour as the banner's
+   .icb-ignore-error; a 409 (answered first, or the caller gave up) never shows it. */
+.phone-hero-ignore-error {
+  margin-top: 8px;
+  color: var(--signal-red);
+  font-size: 14px;
+}
+
 .phone-hero-empty {
   display: flex;
   align-items: center;

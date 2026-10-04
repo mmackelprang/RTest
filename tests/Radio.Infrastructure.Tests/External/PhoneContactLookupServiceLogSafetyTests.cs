@@ -97,8 +97,9 @@ public class PhoneContactLookupServiceLogSafetyTests
   public void Harness_ObservesTheExceptionChannel()
   {
     // ⚠ This test pins the HARNESS, not the component, and it runs first for that reason. Three of
-    // this row's sites log an exception, and the request URL embeds the number
-    // (…/api/contacts/lookup?phone=…). If CapturingLoggerProvider recorded only the formatted
+    // this row's sites log an exception, and until PHN-14 the request URL embedded the number
+    // (…/api/contacts/lookup?phone=…; the list route carries none, but an exception can still
+    // quote whatever it was handed). If CapturingLoggerProvider recorded only the formatted
     // message, every exception-arm test below would report green while the number leaked through
     // exception.ToString(). Falsifying mutation: drop the `sink.Add(exception.ToString())` branch
     // in CapturingLoggerProvider → this fails and the P5 arm silently stops proving anything.
@@ -117,9 +118,9 @@ public class PhoneContactLookupServiceLogSafetyTests
 
     var repo = new Mock<IPbapContactRepository>();
     repo
-      .Setup(r => r.FindByPhoneNumberAsync(
-        It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-      .ReturnsAsync(new PbapContact { DisplayName = ContactName });
+      .Setup(r => r.FindByPhoneNumberAnyDeviceAsync(
+        It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+      .ReturnsAsync(new PbapContactMatch("78:20:51:F5:FB:A7", ContactName, Sentinel, IsExactMatch: true));
 
     var bluetooth = new Mock<IBluetoothService>();
     bluetooth
@@ -161,9 +162,10 @@ public class PhoneContactLookupServiceLogSafetyTests
     // contact.Name went to the log in clear. The name assertion inside AssertNoPii is what fails
     // when :90's raw argument is restored.
     var capture = new CapturingLoggerProvider();
+    // PHN-14: RotaryPhone's contacts LIST (GET /api/contacts) — the /lookup route this used to call never existed.
     var service = Build(capture, new StubHandler(_ => new HttpResponseMessage(HttpStatusCode.OK)
     {
-      Content = new StringContent($"{{\"name\":\"{ContactName}\",\"phoneNumber\":\"{Sentinel}\"}}",
+      Content = new StringContent($"[{{\"id\":\"1\",\"name\":\"{ContactName}\",\"phoneNumber\":\"{Sentinel}\"}}]",
         System.Text.Encoding.UTF8, "application/json")
     }));
 
@@ -198,8 +200,8 @@ public class PhoneContactLookupServiceLogSafetyTests
 
     var repo = new Mock<IPbapContactRepository>();
     repo
-      .Setup(r => r.FindByPhoneNumberAsync(
-        It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+      .Setup(r => r.FindByPhoneNumberAnyDeviceAsync(
+        It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
       .ThrowsAsync(new InvalidOperationException("pbap store offline"));
 
     var bluetooth = new Mock<IBluetoothService>();

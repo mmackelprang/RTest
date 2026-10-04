@@ -9,10 +9,25 @@ using Radio.Core.Utilities;
 namespace Radio.Infrastructure.External;
 
 /// <summary>
-/// REST client for looking up contact names from the RotaryPhone contacts API.
-/// Falls back to the raw phone number if the API is unavailable or no match is found.
-/// Now checks PBAP-synced contacts first (local, fast) before hitting the REST API.
+/// Resolves a caller's number to a name for the spoken incoming-call announcement
+/// (<c>PhoneCallIntegrationService</c>). Two sources, in order (PHN-14):
+/// <list type="number">
+///   <item>The stored synced phone books (PBAP), on every phone ever synced — the connected phone first,
+///   then the most recently synced. A name resolves with no phone connected.</item>
+///   <item>RotaryPhone's own contacts list, <c>GET {ContactsApiBaseUrl}/api/contacts</c>, matched here.</item>
+/// </list>
+/// Ranking (owner ruling, 2026-10-03): <b>match quality first, then source</b> — synced-exact, then
+/// RotaryPhone-exact, then synced local-entry, then RotaryPhone local-entry. An exact match on either source beats
+/// a local-entry match on either. Returns the raw number when nothing matches.
+/// The Web's incoming-call banner (<c>IncomingCallBannerService</c>) uses the same two sources, the same order
+/// and the same matching rule (<see cref="PhoneNumberNormalizer.FindMatch{T}"/>).
 /// </summary>
+/// <remarks>
+/// ⚠ <b>Until PHN-14 the second source never answered.</b> This class asked for
+/// <c>/api/contacts/lookup?phone=</c>, a route RotaryPhone has never had: its <c>ContactsController</c> routes
+/// <c>GET /api/contacts/{id}</c>, so <c>lookup</c> was read as a contact id and every request returned 404
+/// (read from RotaryPhone's <c>main</c>, 2026-10-03). The list route is the one the Web has always read.
+/// </remarks>
 public class PhoneContactLookupService
 {
   private readonly ILogger<PhoneContactLookupService> _logger;
@@ -36,8 +51,7 @@ public class PhoneContactLookupService
   }
 
   /// <summary>
-  /// Look up a contact name by phone number.
-  /// Checks PBAP contacts first, then falls back to RotaryPhone REST API.
+  /// Look up a contact name by phone number: the stored synced phone books first, then RotaryPhone's contacts.
   /// Returns the contact name if found, otherwise the raw phone number.
   /// </summary>
   public async Task<string> FindCallerNameAsync(string phoneNumber, CancellationToken cancellationToken = default)
@@ -47,22 +61,29 @@ public class PhoneContactLookupService
       return "Unknown caller";
     }
 
-    // Try PBAP contacts first (local, fast)
-    if (_pbapRepo != null && _bluetoothService != null)
+    // 1. The stored synced phone books — every phone, not only a connected one (PHN-14). An exact hit returns at
+    // once; a local-entry hit waits until RotaryPhone has had the chance to match exactly.
+    string? pbapLocalEntry = null;
+    if (_pbapRepo != null)
     {
       try
       {
-        var connectedDevice = _bluetoothService.ConnectedDevice;
-        if (connectedDevice != null)
+        var normalized = PhoneNumberNormalizer.Normalize(phoneNumber);
+        var match = normalized.Length == 0
+          ? null
+          : await _pbapRepo.FindByPhoneNumberAnyDeviceAsync(
+            normalized, _bluetoothService?.ConnectedDevice?.Address, cancellationToken);
+        if (match != null)
         {
-          var normalized = PhoneNumberNormalizer.Normalize(phoneNumber);
-          var contact = await _pbapRepo.FindByPhoneNumberAsync(connectedDevice.Address, normalized, cancellationToken);
-          if (contact != null)
+          // Debug, not Information: the file sink is the only place this would land, and the device it came
+          // from is the useful part. The number is masked and the name never logged (PHN-5).
+          _logger.LogDebug("PBAP contact resolved for {Number} from {Device} ({Kind} match)",
+            LogSafeText.ForPhone(phoneNumber), match.DeviceAddress, match.IsExactMatch ? "exact" : "local-entry");
+          if (match.IsExactMatch)
           {
-            _logger.LogInformation("PBAP contact resolved for {Number}",
-              LogSafeText.ForPhone(phoneNumber));
-            return contact.DisplayName;
+            return match.DisplayName;
           }
+          pbapLocalEntry = match.DisplayName;
         }
       }
       catch (Exception ex)
@@ -71,10 +92,11 @@ public class PhoneContactLookupService
       }
     }
 
+    // 2. RotaryPhone's contacts list, matched by the same rule.
     try
     {
       var baseUrl = _options.CurrentValue.ContactsApiBaseUrl.TrimEnd('/');
-      var url = $"{baseUrl}/api/contacts/lookup?phone={Uri.EscapeDataString(phoneNumber)}";
+      var url = $"{baseUrl}/api/contacts";
 
       _logger.LogDebug("Looking up contact for {PhoneNumber}", LogSafeText.ForPhone(phoneNumber));
 
@@ -82,16 +104,26 @@ public class PhoneContactLookupService
 
       if (response.IsSuccessStatusCode)
       {
-        var contact = await response.Content.ReadFromJsonAsync<ContactLookupResponse>(cancellationToken: cancellationToken);
-        if (!string.IsNullOrWhiteSpace(contact?.Name))
+        var contacts = await response.Content.ReadFromJsonAsync<List<ContactListEntry>>(cancellationToken: cancellationToken);
+        bool found = PhoneNumberNormalizer.TryFindMatch(
+          contacts?.Where(c => !string.IsNullOrWhiteSpace(c.Name)), c => c.PhoneNumber, phoneNumber,
+          out var contact, out bool rotaryExact);
+        if (pbapLocalEntry is not null && !(found && rotaryExact))
+        {
+          // 3. A synced local entry beats RotaryPhone's local entry, but not RotaryPhone's exact match.
+          return pbapLocalEntry;
+        }
+        if (found && contact is not null)
         {
           // ⚠ The inline "***{last4}" mask that used to be computed here is GONE, and its removal
           // is the point of PHN-5 rather than a side effect. It was the file's own local idiom,
           // applied on exactly one of six lines, and it left contact.Name in clear on the one line
           // it masked. One mask, one shape, every line — see plan PHN-5 §1.2.
           _logger.LogDebug("Contact lookup resolved {PhoneNumber}", LogSafeText.ForPhone(phoneNumber));
-          return contact.Name;
+          return contact.Name!.Trim();
         }
+        _logger.LogDebug("Contact lookup found no RotaryPhone contact for {PhoneNumber}",
+          LogSafeText.ForPhone(phoneNumber));
       }
       else
       {
@@ -105,15 +137,12 @@ public class PhoneContactLookupService
         LogSafeText.ForPhone(phoneNumber));
     }
 
-    // Fall back to the raw phone number
-    return phoneNumber;
+    // A synced local entry still stands when RotaryPhone could not be read.
+    return pbapLocalEntry ?? phoneNumber;
   }
 
-  /// <summary>
-  /// Expected response shape from the RotaryPhone contacts API.
-  /// Schema is assumed and may need adjustment during integration.
-  /// </summary>
-  private class ContactLookupResponse
+  /// <summary>One entry of RotaryPhone's <c>GET /api/contacts</c> (its <c>Contact</c>; other fields ignored).</summary>
+  private sealed class ContactListEntry
   {
     public string? Name { get; set; }
     public string? PhoneNumber { get; set; }

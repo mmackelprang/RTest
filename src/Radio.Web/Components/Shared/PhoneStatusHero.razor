@@ -1,4 +1,5 @@
 @using Radio.Web.Models
+@using Radio.Web.Services.ApiClients
 @implements IDisposable
 
 <div class="phone-hero"
@@ -105,9 +106,15 @@
           <button type="button" class="phone-btn btn-answer" @onclick="OnAnswer">
             <RadzenIcon Icon="phone" /> Answer
           </button>
-          <button type="button" class="phone-btn btn-hangup" disabled
-                  title="Physical handset only">
-            <RadzenIcon Icon="call_end" /> Reject
+          @* PHN-13: Ignore declines the ringing call, the same decline as the banner's Ignore
+             (owner, 2026-10-02: "ignore is the label I want"). Enabled only with
+             RotaryPhone:DeclineSupported. *@
+          <button type="button" class="phone-btn btn-hangup phone-hero-ignore"
+                  disabled="@(!IgnoreEnabled)"
+                  title="@IgnoreTitle"
+                  aria-label="@IgnoreAriaLabel"
+                  @onclick="HandleIgnoreAsync">
+            <RadzenIcon Icon="call_end" /> @(_ignore == IgnoreState.Declining ? "Ending call…" : "Ignore")
           </button>
           <button type="button" class="phone-btn btn-ghost" disabled
                   title="Not yet implemented">
@@ -155,6 +162,10 @@
           break;
       }
     </div>
+    @if (_ignore == IgnoreState.Failed && CallState.CallState == "Ringing")
+    {
+      <div class="phone-hero-ignore-error" role="alert">Couldn't end the call. Try again.</div>
+    }
 
   </div>
 </div>
@@ -165,6 +176,104 @@
   [Parameter] public EventCallback OnAnswer { get; set; }
   [Parameter] public EventCallback OnHangup { get; set; }
   [Parameter] public List<MergedContact>? Contacts { get; set; }
+
+  /// <summary>PHN-13: whether Ignore can decline the call (<c>RotaryPhone:DeclineSupported</c>).</summary>
+  [Parameter] public bool CanIgnore { get; set; }
+
+  /// <summary>PHN-13: declines the ringing call (<see cref="PhoneApiService.DeclineCallAsync"/>).</summary>
+  [Parameter] public Func<Task<DeclineCallOutcome>>? OnIgnore { get; set; }
+
+  /// <summary>The clock behind Ignore's deadline; a test substitutes a fake one.</summary>
+  [Parameter] public TimeProvider Time { get; set; } = TimeProvider.System;
+
+  /// <summary>
+  /// How long after the tap a call may keep ringing (or the request stay unanswered) before Ignore reports a
+  /// failure. Measured from the tap, like the banner's <c>DeclineDeadline</c>.
+  /// </summary>
+  public static readonly TimeSpan IgnoreDeadline = TimeSpan.FromSeconds(5);
+
+  private enum IgnoreState { None, Declining, Failed }
+
+  private IgnoreState _ignore;
+  private int _ignoreAttempt;
+  private ITimer? _ignoreTimer;
+
+  private bool IgnoreEnabled => CanIgnore && OnIgnore is not null && _ignore != IgnoreState.Declining;
+
+  private string IgnoreTitle => !CanIgnore || OnIgnore is null
+    ? "Not available yet. Answer and hang up on the phone, or let it ring."
+    : "Ends the call";
+
+  private string IgnoreAriaLabel => !CanIgnore || OnIgnore is null ? "Ignore call, not available yet"
+    : _ignore == IgnoreState.Declining ? "Ending call"
+    : "Ignore call";
+
+  /// <summary>
+  /// Ignore. A 200 keeps "Ending call…" until the call leaves Ringing (the page's next state), or reports a
+  /// failure if it is still ringing <see cref="IgnoreDeadline"/> later. A 409 means the call stopped ringing on
+  /// its own — answered, or the caller gave up — so it resets quietly. Only a real failure shows the error.
+  /// </summary>
+  private async Task HandleIgnoreAsync()
+  {
+    if (!IgnoreEnabled)
+    {
+      return;   // re-entrancy guard: a double tap must not send two declines
+    }
+    int attempt = ++_ignoreAttempt;
+    _ignore = IgnoreState.Declining;
+    DisposeIgnoreTimer();
+    // Armed at the tap, not at the 200: a hung RotaryPhone (the client's 10 s timeout) must not leave
+    // "Ending call…" up longer than the banner's 5 s.
+    _ignoreTimer = Time.CreateTimer(_ => InvokeAsync(() => OnIgnoreDeadline(attempt)), null,
+      IgnoreDeadline, Timeout.InfiniteTimeSpan);
+
+    DeclineCallOutcome outcome;
+    try
+    {
+      outcome = await OnIgnore!();
+    }
+    catch
+    {
+      outcome = DeclineCallOutcome.Failed;
+    }
+
+    if (attempt != _ignoreAttempt || _ignore != IgnoreState.Declining)
+    {
+      // The call left Ringing (which reset Ignore), the deadline already reported a failure, or the component
+      // was disposed (Dispose bumps the attempt).
+      return;
+    }
+    switch (outcome.Result)
+    {
+      case DeclineCallResult.Declined:
+        break;   // keep "Ending call…"; the deadline armed at the tap still stands
+      case DeclineCallResult.NotRinging:
+        _ignore = IgnoreState.None;
+        DisposeIgnoreTimer();
+        break;
+      default:
+        _ignore = IgnoreState.Failed;
+        DisposeIgnoreTimer();
+        break;
+    }
+  }
+
+  private void OnIgnoreDeadline(int attempt)
+  {
+    if (attempt != _ignoreAttempt || _ignore != IgnoreState.Declining || CallState.CallState != "Ringing")
+    {
+      return;
+    }
+    _ignore = IgnoreState.Failed;
+    DisposeIgnoreTimer();
+    StateHasChanged();
+  }
+
+  private void DisposeIgnoreTimer()
+  {
+    _ignoreTimer?.Dispose();
+    _ignoreTimer = null;
+  }
 
   /// <summary>
   /// Client-derived health of the physical bell (bell-failure handoff §2, Axis B).
@@ -281,6 +390,14 @@
 
   protected override void OnParametersSet()
   {
+    if (CallState.CallState != "Ringing" && _ignore != IgnoreState.None)
+    {
+      // The call stopped ringing: whatever Ignore was doing is over.
+      _ignore = IgnoreState.None;
+      _ignoreAttempt++;
+      DisposeIgnoreTimer();
+    }
+
     if (CallState.CallState == "InCall" && _inCallStartUtc == null)
     {
       var capturedStart = DateTime.UtcNow;
@@ -311,5 +428,7 @@
   public void Dispose()
   {
     _durationTimer?.Dispose();
+    _ignoreAttempt++;   // an Ignore still in flight finds a stale attempt and creates nothing
+    DisposeIgnoreTimer();
   }
 }
