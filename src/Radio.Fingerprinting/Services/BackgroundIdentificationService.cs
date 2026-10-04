@@ -169,6 +169,16 @@ public class BackgroundIdentificationService : BackgroundService
   }
 
   /// <summary>
+  /// Internal test hook: raises the <see cref="SongChanged"/> event without running an
+  /// identification cycle. Used by Infrastructure.Tests to drive PlayHistoryTracker's
+  /// song-change handler (AUD-19).
+  /// </summary>
+  internal void RaiseSongChangedForTesting(SongChangedEventArgs e)
+  {
+    SongChanged?.Invoke(this, e);
+  }
+
+  /// <summary>
   /// Internal test hook: runs exactly one identification cycle, without <c>ExecuteAsync</c>'s start-up delay
   /// or its idle wait. Returns what the cycle returns (true when audio was captured).
   /// </summary>
