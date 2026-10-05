@@ -107,3 +107,15 @@ task_plan.md
 # Python bytecode from tools/encoder-harness
 __pycache__/
 *.py[cod]
+
+# Local publish output at the repo root (ad-hoc `dotnet publish -o` and deploy staging,
+# e.g. publish/, prjRTestRTestpublish-api-linux/). publish/ above already covers the first.
+/publish*/
+/*publish-*/
+
+# Runtime JSON configuration store: Radio.API's ConfigurationStore BasePath is ./config, so a
+# `dotnet run` from the repo root writes ./config/config.json. Runtime state, not source.
+/config/
+
+# Per-user Claude Code settings (permission allow lists); .claude/settings.json is the shared file.
+.claude/settings.local.json
