@@ -279,7 +279,7 @@ public class FmAudioDropoutDiagnosticTests
 
     // Assert: The missed callback was observed by the pipeline (metric).
     //
-    // Pre-Path-C (docs/plans/2026-05-22-bt-drift-compensation-refinement.md)
+    // Pre-Path-C (archive/plans/2026-05-22-bt-drift-compensation-refinement.md)
     // the dropout symptom was directly visible as a zero-run in the output,
     // because the cooldown-gated compensation could only fill a small slice
     // of the 68 ms gap.

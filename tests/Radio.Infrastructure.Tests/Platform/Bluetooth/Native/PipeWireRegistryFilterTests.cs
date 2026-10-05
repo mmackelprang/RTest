@@ -13,7 +13,7 @@ namespace Radio.Infrastructure.Tests.Platform.Bluetooth.Native;
 /// below is a node name measured on real hardware:
 /// <list type="bullet">
 ///   <item><c>bluez_input.B0_D5_FB_D2_0D_68.2</c> — the owner's phone on <c>radio</c>,
-///   2026-09-10 and 2026-09-25 (docs/queue/AUD-10.md, AUD-11.md).</item>
+///   2026-09-10 and 2026-09-25 (archive/queue/AUD-10.md, AUD-11.md).</item>
 ///   <item><c>bluez_input.D4_3A_2C_64_87_9E.0</c> — from PipeWireNodeParsingTests, the scrape
 ///   that has always worked.</item>
 /// </list>

@@ -111,7 +111,7 @@ public sealed record IncomingCallBannerSnapshot
 
 /// <summary>
 /// PHN-11: the state behind the incoming-call banner. One per Blazor circuit, so a touch on the kiosk
-/// closes the kiosk's banner and nobody else's. Design: <c>docs/design-handoffs/2026-10-02-incoming-call-banner.md</c>.
+/// closes the kiosk's banner and nobody else's. Design: <c>archive/design-handoffs/2026-10-02-incoming-call-banner.md</c>.
 /// </summary>
 /// <remarks>
 /// <para>

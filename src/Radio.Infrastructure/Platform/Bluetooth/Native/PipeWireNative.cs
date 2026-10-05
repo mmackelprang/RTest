@@ -347,8 +347,8 @@ internal static class PipeWireNative
   //
   // Variable-rate sample-rate converter used by the BT input path to compensate
   // for clock skew between the BT phone clock and the local speaker clock
-  // (see docs/research/2026-05-22-bt-clock-skew-measurement.md and
-  //  docs/plans/2026-05-22-bt-input-resampler.md — Path D).
+  // (see archive/research/2026-05-22-bt-clock-skew-measurement.md and
+  //  archive/plans/2026-05-22-bt-input-resampler.md — Path D).
   //
   // Native dependency: libsamplerate0 (apt install libsamplerate0). LGPL.
   // Header: <samplerate.h>. Documentation: http://libsndfile.github.io/libsamplerate/

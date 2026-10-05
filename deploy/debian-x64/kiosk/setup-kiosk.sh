@@ -227,7 +227,7 @@ echo "  Installed: $GTK_DIR/gtk-4.0/gtk.css"
 echo ""
 echo "[5/11] Removing superseded desktop entries..."
 
-# `onboard` is dropped: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md measured Chrome 151
+# `onboard` is dropped: archive/uat/2026-08-03-osk-wayland-viability/REPORT.md measured Chrome 151
 # on Wayland issuing ZERO zwp_text_input_v3.enable() calls, so the OS keyboard cannot type into
 # a web page here at all. The Web UI's built-in virtual keyboard is the only working text input.
 # The package is dropped from deploy/provision/packages.sh; this disables the autostart entry a
@@ -248,7 +248,7 @@ pkill -x onboard 2>/dev/null || true
 # lives inside radio-console-open, which calls the canonical ensure script
 # (~/bin/gv-bridge-ensure.sh: google-chrome + ~/.config/gv-bridge-chrome +
 # /opt/rotary-phone/ChromeExtension). Removing it also closes the ambiguity flagged in
-# design/plans/IAC-PRISTINE-INSTALL-AUDIT.md §7.
+# archive/design/plans/IAC-PRISTINE-INSTALL-AUDIT.md §7.
 #
 # This removes a DESKTOP ENTRY and nothing else. The bridge itself — the script, its watchdog
 # and nightly timers, its profile and its extension — is RotaryPhone-owned and is not touched

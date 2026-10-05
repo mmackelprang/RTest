@@ -13,7 +13,7 @@ namespace Radio.Web.Tests.Components.Shared;
 /// <summary>
 /// bUnit tests for <see cref="CastDeviceDropdown"/> — specifically the new
 /// explicit "Stop Casting" action row added per
-/// <c>docs/design-handoffs/HANDOFF-stop-casting-menu-item.md</c>.
+/// <c>archive/design-handoffs/HANDOFF-stop-casting-menu-item.md</c>.
 ///
 /// The component is mostly presentational + drives DevicesApiService for
 /// scan/connect/disconnect. We give it a real DevicesApiService backed by a

@@ -1539,7 +1539,7 @@ public class BluetoothAudioSource : USBAudioSourceBase
   /// C-170 states it unqualified; that is the plan being loose, not this code.
   ///
   /// ⚠ private, and it stays private. Three of its four arms are reachable from a
-  /// unit test through IBluetoothService alone — see design/TESTING.md § Test Seams
+  /// unit test through IBluetoothService alone — see docs/testing.md § Test Seams
   /// rule 1 and plan AUD-12 C-184. The fourth (_playbackId) is not, and that gap is
   /// recorded in the plan's §4.8 rather than closed with a seam.
   /// </remarks>

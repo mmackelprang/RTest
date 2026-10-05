@@ -99,11 +99,23 @@ task_plan.md
 .playwright-mcp/
 
 # Stray UAT screenshots dropped in the repo root by browser-driving agents.
-# Root-anchored on purpose: curated UAT evidence under docs/uat/ and
-# docs/design-handoffs/ IS tracked and must stay tracked.
+# Root-anchored on purpose: curated UAT evidence under archive/uat/ and
+# archive/design-handoffs/ IS tracked and must stay tracked.
 /uat-*.png
 /uat-*.jpg
 
 # Python bytecode from tools/encoder-harness
 __pycache__/
 *.py[cod]
+
+# Local publish output at the repo root (ad-hoc `dotnet publish -o` and deploy staging,
+# e.g. publish/, prjRTestRTestpublish-api-linux/). publish/ above already covers the first.
+/publish*/
+/*publish-*/
+
+# Runtime JSON configuration store: Radio.API's ConfigurationStore BasePath is ./config, so a
+# `dotnet run` from the repo root writes ./config/config.json. Runtime state, not source.
+/config/
+
+# Per-user Claude Code settings (permission allow lists); .claude/settings.json is the shared file.
+.claude/settings.local.json

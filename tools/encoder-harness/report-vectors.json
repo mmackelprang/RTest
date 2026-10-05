@@ -8,7 +8,7 @@
     "      (decodes these frames with the shipped RotaryEncoderDecoder)",
     "",
     "If the harness's byte layout ever drifts from the decoder's, one of those two fails.",
-    "That matters here specifically: design/INTEGRATIONS.md documented a wrong 8-byte",
+    "That matters here specifically: docs/integrations.md documented a wrong 8-byte",
     "encoder format for months, and nothing mechanical caught it.",
     "",
     "'hex' is the full 37-byte Input Report 0x01 including the leading report ID.",

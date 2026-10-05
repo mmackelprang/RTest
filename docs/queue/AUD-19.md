@@ -2,7 +2,7 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-🟡 **P2.** Filed 2026-09-09. ⚠ **This row was referenced before it existed.** `docs/queue/AUD-1.md:113`
+🟡 **P2.** Filed 2026-09-09. ⚠ **This row was referenced before it existed.** `archive/queue/AUD-1.md:113`
 has said *"filed as `AUD-19`, documented in…"* since 2026-09-08 — **it was neither**, and `AUD-1`'s
 Builder is told to cite it in its PR body before merge. Caught by `UI-12`'s Builder while enumerating
 adjacent rows; the citation was a coordinator error, corrected here and in `AUD-1`.
@@ -69,7 +69,7 @@ it first.**
 
 ## ✅ OWNER RULING 2026-09-10 — **PRE-GA**, together with `AUD-1`
 
-The owner ruled both this row and [`AUD-1`](AUD-1.md) **pre-GA**, resolving a contradiction in which
+The owner ruled both this row and [`AUD-1`](../../archive/queue/AUD-1.md) **pre-GA**, resolving a contradiction in which
 `HANDOFF-GA-PUNCH-LIST.md` §5 listed `AUD-1` as *"P2 — Post-GA"* while this queue scheduled **this row
 behind it** — treating it as buildable now. ⛔ **The two positions could not both be acted on.**
 

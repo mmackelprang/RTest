@@ -1300,7 +1300,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   // (:370) -> the real `capture is ...` arms at :486 / :497 — rather than by
   // calling ApplyDeferredCaptureState directly. That distinction is the point of
   // the row: entering at the method executes the state decision without executing
-  // the dispatch, which reads as coverage and is not. design/TESTING.md § Test Seams.
+  // the dispatch, which reads as coverage and is not. docs/testing.md § Test Seams.
   //
   // RouteCaptureThroughMixerAsync (:524) is reached and no-ops because
   // _playbackService is null (an optional ctor parameter this fixture does not
@@ -1783,7 +1783,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   /// left Playing either way, and <c>IsActive</c> only reads that state. The assertion here
   /// is the downstream INVARIANT. Pinning which arm ran is
   /// <c>DeviceConnectedEvent_*</c>'s job — and those do fail when an arm is disabled. This
-  /// distinction is <c>design/TESTING.md</c> § <i>Test Seams</i> rule 4 applied to a test
+  /// distinction is <c>docs/testing.md</c> § <i>Test Seams</i> rule 4 applied to a test
   /// that uses no seam at all: entering by the real path is necessary for dispatch coverage
   /// and is not sufficient for it.
   /// </para>
@@ -1863,7 +1863,7 @@ public class BluetoothAudioSourceTests : IAsyncDisposable
   // Mock<IBluetoothService> whose GetAudioCaptureDeviceAsync hands back a mocked
   // capture, exactly as TEST-2's DeviceConnectedEvent_* tests do. They reuse
   // TEST-2's harness above rather than building a second one
-  // (design/TESTING.md § Test Seams rules 1 and 5).
+  // (docs/testing.md § Test Seams rules 1 and 5).
   //
   // ⚠ Two background tasks exist on these paths and NEITHER can affect an
   // assertion — recorded so a later reader does not add a wait "to be safe":

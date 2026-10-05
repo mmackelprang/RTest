@@ -22,7 +22,7 @@ Outputs to stdout, tab-separated:
   event_ts<TAB>metric_value<TAB>cpu_5s_median<TAB>io_5s_total_mb<TAB>
     log_rate_5s_median<TAB>ssh_5s_max<TAB>classification
 
-See docs/research/2026-05-22-bt-audio-stabilization.md §7 Idea #1.
+See archive/research/2026-05-22-bt-audio-stabilization.md §7 Idea #1.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # radio-console-open — the "Radio Console" desktop icon: repair what's down, then open the kiosk.
 #
-# Design: docs/design-handoffs/HANDOFF-kiosk-desktop-launcher.md
-# Plan:   docs/superpowers/plans/2026-08-18-kiosk-desktop-launcher.md (Task B2)
-# Probes: docs/uat/2026-08-18-kiosk-launcher/PROBES.md + PROBES-B.md
+# Design: archive/design-handoffs/HANDOFF-kiosk-desktop-launcher.md
+# Plan:   archive/superpowers/plans/2026-08-18-kiosk-desktop-launcher.md (Task B2)
+# Probes: archive/uat/2026-08-18-kiosk-launcher/PROBES.md + PROBES-B.md
 #
 # TWO RULES THAT INVERT THE WHOLE DESIGN IF THEY ARE GOT WRONG:
 #

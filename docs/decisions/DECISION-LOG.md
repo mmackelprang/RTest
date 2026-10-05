@@ -1,0 +1,1206 @@
+# Decision Log
+
+Architectural and engineering decisions made during development, with context, rationale, and alternatives considered. Updated by Claude Code as significant decisions are made.
+
+---
+
+## ADR-001: Audio Engine — SoundFlow over NAudio/PortAudio
+
+**Date:** 2025-11-26
+**Status:** Accepted
+**Context:** Need a cross-platform audio engine for Raspberry Pi (Linux ARM64) and Windows development.
+
+**Decision:** Use SoundFlow library (MiniAudio backend) with component-based audio graph.
+
+**Alternatives considered:**
+- **NAudio** — Windows-only, no Linux/ARM64 support
+- **PortAudio** — C interop complexity, no built-in audio graph
+- **SDL2 audio** — Low-level, would need custom mixer/effects pipeline
+
+**Rationale:** SoundFlow provides cross-platform support, modern .NET API with `SoundComponent` base class, built-in device hot-plug detection, and component-based mixing. The `SoundComponent.Process()` chain (inputs → generate → modifiers → volume → output) enables clean tap points for streaming and visualization.
+
+**Consequences:** Locked into SoundFlow's processing model. Required decompiling DLL to confirm modifier ordering (ADR-012).
+
+---
+
+## ADR-002: Dual Configuration Stores (SQLite + JSON)
+
+**Date:** 2025-11-25
+**Status:** Accepted
+**Context:** Need a configuration system that's human-editable during development but robust in production.
+
+**Decision:** `IConfigurationStore` abstraction with `JsonConfigurationStore` and `SqliteConfigurationStore`, switchable via `appsettings.json`.
+
+**Alternatives considered:**
+- **JSON-only** — Adequate for dev, poor concurrency and no ACID guarantees
+- **SQLite-only** — Not human-editable, harder to bootstrap
+- **Environment variables** — Insufficient for complex hierarchical config
+
+**Rationale:** JSON for development (edit with any text editor), SQLite for production (ACID, backup consistency, concurrent access). Hot-swap without code changes.
+
+---
+
+## ADR-003: Encrypted Secrets with Tag Substitution
+
+**Date:** 2025-11-25
+**Status:** Accepted
+**Context:** API keys (Spotify, Google TTS, AcoustID) must not appear in version control or plaintext config files.
+
+**Decision:** `${secret:identifier}` tags in config files, resolved at runtime by `ISecretsProvider`. Encryption via ASP.NET Data Protection (machine-key based).
+
+**Rationale:** UI can display and edit tags without exposing plaintext values. Familiar pattern from UserSecrets. Tags survive config backups safely.
+
+---
+
+## ADR-004: Layered Architecture (Core/Infrastructure/API/Web)
+
+**Date:** 2025-11-25
+**Status:** Accepted
+**Context:** Need clean separation of concerns for a complex audio system with multiple I/O backends.
+
+**Decision:** Four-layer architecture:
+- **Core** — Pure interfaces, models, events (zero dependencies)
+- **Infrastructure** — SoundFlow, BlueZ, WinRT, external API integrations
+- **API** — REST controllers, SignalR hubs, middleware
+- **Web** — Blazor Server UI
+
+**Rationale:** Core interfaces enable mocking for tests. Infrastructure swappable (could replace SoundFlow). API and Web independently deployable (see ADR-017).
+
+---
+
+## ADR-005: Blazor Server over SPA Framework
+
+**Date:** 2025-12-09
+**Status:** Accepted
+**Context:** Need a responsive UI for the radio console, running on Raspberry Pi in kiosk mode.
+
+**Decision:** Blazor Server with MudBlazor Material 3 component library.
+
+> ⚠ **Superseded on the component library only — the Blazor Server half of this ADR still stands.**
+> **There is no MudBlazor in this repository.** `Radio.Web.csproj` references `Radzen.Blazor` and
+> nothing else UI-wise, and a search for `MudBlazor` across `src/` returns zero files. When the swap
+> happened was not recorded, which is why the claim outlived it. `CLAUDE.md` carried the same error
+> until PR #518; this note exists so the second copy does not send another session to the wrong
+> component library. Noted while shipping `ENC-8` (2026-09-02).
+
+**Alternatives considered:**
+- **React/Vue SPA** — Separate frontend codebase, additional build tooling, need API serialization
+- **Blazor WASM** — Heavy download, poor ARM performance
+- **.NET MAUI** — Overkill for kiosk display, less community support
+
+**Rationale:** Single .NET codebase. SignalR built-in for real-time audio state updates. Server-side rendering works well on Pi (minimal client-side JS). MudBlazor provides Material 3 design system out of the box.
+
+**Trade-off:** Requires persistent WebSocket connection — acceptable for kiosk mode (always-on, local network).
+
+---
+
+## ADR-006: Ring Buffer for Multi-Consumer Audio Streaming
+
+**Date:** 2025-12-03
+**Status:** Accepted
+**Context:** Multiple consumers need the same audio data simultaneously: HTTP stream, Google Cast, visualization, fingerprinting.
+
+**Decision:** Custom `TappedOutputStream` with circular ring buffer and independent per-reader cursors.
+
+**Alternatives considered:**
+- **Copy per consumer** — Memory wasteful, latency from copying
+- **Pub/sub with queues** — Complex, variable memory usage
+- **OS pipes** — Platform-specific, limited consumer count
+
+**Rationale:** Single write, multiple reads without copying. Lock-free reads for real-time performance. Fixed 5-second buffer provides predictable memory usage. Per-reader cursors prevent slow consumers from blocking fast ones.
+
+**Key detail:** Reader lag parameter (`CreateReader(id, lagBytes)`) provides historical audio burst for Cast startup (ADR-010).
+
+---
+
+## ADR-007: Native fpcalc over AcoustID.NET
+
+**Date:** 2026-02-06
+**Status:** Accepted
+**Context:** Need audio fingerprinting for track identification (auto-skip, play history metadata).
+
+**Decision:** Invoke native `fpcalc` binary via `Process`, parse JSON output. Replaced AcoustID.NET NuGet package.
+
+**Alternatives considered:**
+- **AcoustID.NET** — Initially used, but produces **incompatible fingerprints** that fail all AcoustID API lookups
+- **Port Chromaprint C++** — Too much effort for a utility function
+
+**Rationale:** Native Chromaprint library guarantees correct fingerprints compatible with AcoustID web service. Supports streamed audio via stdin (no temp files). Duration accuracy critical — AcoustID requires duration within ~3 seconds of actual track length.
+
+---
+
+## ADR-008: Platform-Specific Bluetooth Implementations
+
+**Date:** 2026-02-10
+**Status:** Accepted
+**Context:** Need Bluetooth A2DP audio input. No cross-platform .NET BT A2DP library exists.
+
+**Decision:** Two independent implementations behind `IBluetoothService`:
+- **Linux:** BlueZ D-Bus (`Tmds.DBus`) + PipeWire/PulseAudio capture via `arecord`
+- **Windows:** WinRT `AudioPlaybackConnection` + WASAPI loopback (NAudio)
+
+**Rationale:** Linux (Pi target) gets full audio pipeline integration. Windows provides development-only BT audio.
+
+**Key details:**
+- `arecord` subprocess confirmed via `strace` to capture real non-zero audio data
+- WASAPI loopback captures audio pre-mute — muting default endpoint silences speakers while loopback still captures
+- Windows `AudioPlaybackConnection` requires MSIX sparse package identity
+
+---
+
+## ADR-009: Multi-Target Framework for Windows/Linux
+
+**Date:** 2026-02-10
+**Status:** Accepted
+**Context:** `Radio.Infrastructure` needs WinRT APIs (Windows BT) and BlueZ D-Bus (Linux BT).
+
+**Decision:** Multi-target `Radio.Infrastructure`:
+- `net8.0` — Linux + cross-platform code
+- `net8.0-windows10.0.19041.0` — WinRT APIs
+
+Downstream projects (API, Web) use conditional single-target:
+```xml
+<TargetFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net8.0-windows10.0.19041.0</TargetFramework>
+<TargetFramework Condition="!$([MSBuild]::IsOSPlatform('Windows'))">net8.0</TargetFramework>
+```
+
+**Rationale:** Avoids runtime platform checks. Compile-time exclusion of platform-specific code via `<Compile Remove>`. `WINDOWS_TARGET` define constant for `#if` guards.
+
+**Critical gotcha:** Cross-compilation for Pi requires `-f net8.0` to override Windows TFM.
+
+---
+
+## ADR-010: Google Cast — StreamType.Live for Infinite Streams
+
+**Date:** 2026-02-13
+**Status:** Accepted
+**Context:** Cast audio disconnects after ~64KB when using `StreamType.Buffered`.
+
+**Decision:** Use `StreamType.Live` for all Cast media loads. Required headers: `Accept-Ranges: none`, `Cache-Control: no-cache`.
+
+**Alternatives considered:**
+- **StreamType.Buffered** — Chrome downloads ~64KB then goes FINISHED (disconnects)
+- **StreamType.None** — Undocumented behavior, unreliable
+
+**Rationale:** Live tells Cast receiver "this stream never ends." Chrome keeps the HTTP connection open indefinitely. Combined with chunked transfer encoding, provides continuous audio.
+
+---
+
+## ADR-011: Never Flush LAME Encoder for Cast Streams
+
+**Date:** 2026-02-13
+**Status:** Accepted
+**Context:** Cast audio disconnects after first buffer fill. Root cause: `mp3Writer.Flush()` calls `lame_encode_flush()`.
+
+**Decision:** Only flush the HTTP output stream (`context.Response.OutputStream.Flush()`), never call `mp3Writer.Flush()`.
+
+**Rationale:** LAME's flush writes end-of-stream markers (VBR header, padding). Chrome interprets these as "download complete" and disconnects. Flushing only the HTTP stream pushes buffered MP3 frames to the network without end markers.
+
+**Trade-off:** Cannot cleanly finalize MP3 on stream close. Acceptable — Cast streams are infinite by design.
+
+---
+
+## ADR-012: Local Output Muting via MasterMixer.Volume
+
+**Date:** 2026-02-15
+**Status:** Accepted
+**Context:** When casting to Google Cast, local speakers should be silent but audio taps (Cast HTTP, visualization, fingerprinting) must continue receiving data.
+
+**Decision:** Set `_playbackDevice.MasterMixer.Volume = 0` to silence local output. Taps continue receiving full-volume audio.
+
+**Verification:** Decompiled `SoundFlow.dll` (`SoundComponent.Process()`) to confirm processing order:
+1. Process inputs
+2. GenerateAudio
+3. **Apply modifiers** (taps capture audio here)
+4. **ApplyVolumeAndPanning** (volume applied AFTER modifiers)
+5. MixBuffers to output
+
+**Alternatives considered:**
+- **GainModifier at end of chain** — Would affect taps too (wrong)
+- **Device-level muting** — OS-specific, wouldn't work on all platforms
+- **Separate mixer for taps** — Over-engineered, duplicates audio path
+
+**Rationale:** Simplest correct approach. Volume=0 silences speakers; modifiers (including `FingerprintTapModifier` and visualization tap) still get full audio because they run before volume is applied.
+
+---
+
+## ADR-013: BufferedSoundGenerator for BT Audio Bridge
+
+**Date:** 2026-02-12
+**Status:** Accepted
+**Context:** BlueZ audio capture (via `arecord` or PipeWire monitor) produces raw PCM in a push model. SoundFlow mixer needs a `SoundComponent` (pull model).
+
+**Decision:** Generic `BufferedSoundGenerator<T>` bridges push→pull. Audio pushed into thread-safe queue, pulled during `GenerateAudio()`.
+
+**Rationale:** Same pattern used for SDR audio (float path) and file player (short path). Handles sample rate/format differences via generic type parameter.
+
+---
+
+## ADR-014: AddHostedService Factory Pattern
+
+**Date:** 2026-02-10
+**Status:** Accepted
+**Context:** `AddHostedService<T>()` does NOT register the concrete type in DI — other services can't inject `T`.
+
+**Decision:** Register singleton explicitly, then use factory:
+```csharp
+services.AddSingleton<MyService>();
+services.AddHostedService(sp => sp.GetRequiredService<MyService>());
+```
+
+**Rationale:** Services that need to be both `IHostedService` (for lifecycle) and injectable (for other services) must be registered as singletons first. The factory pattern avoids creating two separate instances.
+
+---
+
+## ADR-015: Audio Ducking Priority System
+
+**Date:** 2025-11-26
+**Status:** Accepted
+**Context:** Event audio (TTS announcements, doorbell) must be heard over music.
+
+**Decision:** Priority scale 1-10. Primary sources (music, radio) at priority 5. Event sources (TTS, audio events) at 8-10. Configurable fade policies: smooth (500ms), quick (200ms), instant (0ms).
+
+**Rationale:** Volume ducking (lower music volume) is less jarring than hard pause. Priority ensures announcements always win. Fade policies configurable per source type.
+
+---
+
+## ADR-016: Device Filtering via Regex Patterns
+
+**Date:** 2026-02-15
+**Status:** Accepted
+**Context:** Device enumeration returns internal/virtual devices (PulseAudio monitors, loopback) that confuse users.
+
+**Decision:** `DeviceDisplayOptions` config section with:
+- `HiddenDevicePatterns` — Regex list (default: `^Monitor of `) for devices to hide
+- `FriendlyNames` — Substring→display name mapping
+
+Applied during enumeration in `SoundFlowDeviceManager`, not at API or UI layer.
+
+**Rationale:** Filtering at enumeration time means all consumers (API, Web, SignalR) see consistent device lists. Regex provides flexible matching. Default pattern hides PulseAudio monitor devices which are never valid output targets.
+
+---
+
+## ADR-017: Dual-Service Systemd Deployment
+
+**Date:** 2026-02-13
+**Status:** Accepted
+**Context:** Pi needs both API (port 5000) and Web UI (port 5002). Single service with both is fragile.
+
+**Decision:** Two systemd services:
+- `radio-api.service` — Radio.API, port 5000, audio/BT capabilities
+- `radio-web.service` — Radio.Web, port 5002, depends on radio-api
+
+Shared directory: `/opt/radio-console/{api,web,data,logs}`
+
+**Rationale:** Independent restart (API can restart without killing UI session). Different security profiles (API needs audio/BT groups, Web doesn't). Clear separation of concerns.
+
+---
+
+## ADR-018: SharpCaster v3.0.0 API Surface
+
+**Date:** 2026-02-10
+**Status:** Accepted
+**Context:** Google Cast integration needed. SharpCaster v3 has breaking API changes from v2.
+
+**Decision:** Use SharpCaster v3.0.0 with corrected namespace/class names:
+- `Sharpcaster.Channels` (not `Interfaces`)
+- `ChromecastLocator` (not `MdnsChromecastLocator`)
+- `MediaChannel`/`ReceiverChannel` (not I-prefixed)
+- Set both `ContentId` AND `ContentUrl` on Media object
+
+**Rationale:** Only maintained .NET Cast library. v3 changes are documented here to prevent rediscovery.
+
+---
+
+## ADR-019: Cast Receiver Initialization Delay
+
+**Date:** 2026-02-13
+**Status:** Accepted
+**Context:** `LoadAsync` right after `LaunchApplicationAsync` silently fails on CC1AD845 receiver.
+
+**Decision:** Wait 2-3 seconds after launching the Cast application before loading media. Alternative: rely on metadata-triggered reload.
+
+**Rationale:** CC1AD845 default media receiver needs initialization time. No error thrown — just silent failure. 2s delay is reliable across tested devices.
+
+---
+
+## ADR-020: Silence Injection for Paused Cast Streams
+
+**Date:** 2026-02-15
+**Status:** Accepted
+**Context:** When audio source pauses, `TappedOutputStream.ReadForReader()` returns 0 bytes, causing Cast HTTP stream to stall and eventually timeout.
+
+**Decision:** Return PCM silence (zeroed byte arrays) when ring buffer is empty. Reader position is NOT advanced — when real audio resumes, it plays immediately without gaps.
+
+**Rationale:** Keeps HTTP connection alive. Cast receiver continues playing (inaudible silence). Smooth resume when source unpauses. Alternative (close/reopen stream) causes audible gaps and metadata loss.
+
+---
+
+## ADR-021: PlayAsync vs ResumeAsync for Source State
+
+**Date:** 2026-02-15
+**Status:** Accepted
+**Context:** `AudioController` called `PlayAsync()` for all play requests, including resuming paused sources. For `FilePlayerAudioSource`, `PlayCoreAsync()` stops current player and creates new one from scratch.
+
+**Decision:** Check source state before calling play. If `Paused`, call `ResumeAsync()` instead of `PlayAsync()`.
+
+**Rationale:** `PlayAsync()` is destructive — it stops and recreates the audio player. `ResumeAsync()` continues from the paused position. Cast streams, visualization, and fingerprinting all benefit from uninterrupted resume.
+
+---
+
+## ADR-022: GV Voicemail + SMS Integration (gvbridge consumer)
+
+**Date:** 2026-06-20
+**Status:** Proposed (Architect)
+**Summary:** `Radio.Web` consumes RotaryPhone's `gvbridge` voicemail + GV-SMS contract directly at `radio:5004` (no Radio.API proxy), extends the existing `GvBridgeApiService` + `PhoneHubService` (`/hub`), plays voicemail audio via a native `<audio>` element pointed at an absolute `radio:5004` Range-capable URL (NOT the no-Range album-art proxy), polls `/api/gvbridge/status` via a new `GvBridgeStatusService` singleton, and gates SMS send behind `RotaryPhone:Gv:SendEnabled` (default off). Future `X-RotaryPhone-Auth` header wired as an off-by-default seam.
+
+**Full ADR:** [`docs/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md`](2026-06-20-gvbridge-voicemail-sms-integration.md)
+
+---
+
+## ADR-023: Pin SQLitePCLRaw 3.0.x to clear NU1903 (GHSA-2m69-gcr7-jv3q)
+
+**Date:** 2026-06-20
+**Status:** Accepted
+**Context:** `dotnet build -c Release` (and `deploy/Deploy-ToLinux.ps1`) failed solution-wide on **NU1903** / **GHSA-2m69-gcr7-jv3q** (CVE-2025-6965): `SQLitePCLRaw.lib.e_sqlite3` 2.1.11 ships SQLite < 3.50.2 (aggregate-term memory-corruption bug). With `NuGetAudit` (default on in .NET 10) + `TreatWarningsAsErrors`, the advisory is a build error across all ~16 SQLite-referencing projects. The advisory has **no patched 2.1.x release** — the 2.x `lib.e_sqlite3` line is deprecated. `Microsoft.Data.Sqlite` (even 10.0.9) only declares `bundle_e_sqlite3 (>= 2.1.11)`, which NuGet resolves to the vulnerable 2.1.11 floor, so a `Microsoft.Data.Sqlite` bump alone does **not** fix it.
+
+**Decision:** Add an explicit direct `PackageReference` to `SQLitePCLRaw.bundle_e_sqlite3` **3.0.3** and `SQLitePCLRaw.core` **3.0.3** in the four projects that directly reference `Microsoft.Data.Sqlite` (Radio.Configuration, Radio.Metrics, Radio.Fingerprinting, Radio.Infrastructure). The 3.0.x line replaces the deprecated `lib.e_sqlite3` with `SourceGear.sqlite3` (>= 3.50.4.5, i.e. SQLite past the 3.50.2 fix) and carries no advisory.
+
+**Alternatives considered:**
+- **Bump `Microsoft.Data.Sqlite` only** — rejected; its `>= 2.1.11` floor still resolves the vulnerable native lib.
+- **Targeted `NuGetAuditSuppress` for NU1903** — rejected; a real patched version exists (3.0.x), so suppression would have masked a genuinely fixable CVE. Reserved as fallback only if no patched version had existed.
+- **Global `NuGetAudit=false`** — rejected; disables auditing wholesale and hides future advisories.
+
+**Verification:** Full-solution `dotnet build -c Release` (NuGetAudit enabled, no override flags) → 0 errors, no NU1903. Resolved native dependency is `SourceGear.sqlite3` 3.50.4.5; `lib.e_sqlite3` no longer appears in any restore graph. Test suite green except pre-existing Windows-only (`libsamplerate.so.0`) and `Category=Integration` (live NWS API) failures, both unrelated and handled by CI.
+
+---
+
+## ADR-024: GV Mark-Read / Durable Read-State — GV write-through (supersedes ADR-022 D4)
+
+**Date:** 2026-06-20
+**Status:** Accepted (Architect)
+**Supersedes:** ADR-022's UI-local read-state stance (`VoicemailItemDto.IsRead` note, §10 mark-read stub, §12 open question #3).
+**Summary:** RotaryPhone ratified the durable mark-read contract. Read-state is now **GV write-through — Google is the single source of truth, no local read-state store on either side.** Two idempotent routes (`POST /api/gvbridge/voicemail/{id}/read`, `POST /api/gvbridge/sms/threads/{threadId}/read`), body `{ "isRead": bool }`, each returning the updated frozen DTO (`200` applied-or-no-op, `404` unknown, `502` upstream-GV — keep optimistic flip and reconcile). A unified `ReadStateChanged` event rides the existing `/hub` (broadcast unconditionally incl. originator → consumer de-dupes by `(id/threadId + isRead)`). Consumer delta (GV-4, behind `RotaryPhone:Gv:MarkReadEnabled` default-off, builds now): wire existing `MarkVoicemailReadAsync` + add `MarkSmsThreadReadAsync` on `GvBridgeApiService`, add `ReadStateChangedDto` + handler on `PhoneHubService`, drop UI-local read-state. Unread best-effort (v1 sends `isRead:true` only, toggle hidden). Auth: no new posture — covered by the existing `/api/gvbridge/*` prefix gate.
+
+**Full ADR:** [`docs/decisions/2026-06-20-gv-mark-read-durable-readstate.md`](2026-06-20-gv-mark-read-durable-readstate.md)
+
+---
+
+## ADR-025: RDS ticker — JS/WAAPI offset-preserving engine + decoder complete-before-partial RT policy
+
+**Date:** 2026-07-19
+**Status:** Accepted
+**Context:** The kiosk RDS marquee (RdsCard → RdsScrollMarquee, HANDOFF-rds-accumulating-scroll + HANDOFF-rds-inline-scroll-revision) showed four production bugs: (1) large position "jerks" on every RT append — the pure-CSS keyframes animated `translateX(100%→-100%)` (percent of the track's own width) with a per-render `--scroll-duration`, so any text change reinterpreted the elapsed fraction against new geometry; (2) truncated/garbled text — the decoder's `RtConfirmThreshold=2` counted consecutive identical assemblies (~0.5 s apart) and published stalled partial prefixes ("Simo") and CRC-aliased corruption ("GivJ It Away", "MaIonna" — verified in radio-20260717.txt), the buffer front-trimmed mid-chunk at its cap, and the static-fit branch used a 7 px/char × 420 px approximation against real in-card 14 px/0.18em typography (measured 10.2 px/char, 418 px container); (3) leak concerns over a long kiosk session; (4) effective scroll speed varied with buffer length (percent keyframes travel 2×trackWidth over a duration computed for container+trackWidth).
+
+**Decision:** Three coordinated changes. (a) **Decoder:** extract RT assembly into `RadioTextAssembler` with per-character double-receive (a slot's value must be decoded twice — one-off CRC-aliased corruption cannot land) and complete-before-partial confirmation (complete = 64 chars via full reception or 0x0D fill confirms at threshold 2; incomplete prefixes need 32 stable assemblies ≈ two full segment cycles, so reception gaps repair before publishing while broken-encoder stations still display in ~10-30 s). (b) **Buffer:** chunk-aware `RdsAccumulatingScrollBuffer` — whole-chunk front eviction (head always a chunk boundary), prefix-extension and same-length minor-correction chunks replace the last chunk in place. (c) **Marquee:** replace the CSS keyframes with `wwwroot/js/rds-marquee.js` driving the same transform via the Web Animations API (still compositor-thread — the HANDOFF §4 N100 rationale holds); the engine owns the offset explicitly, `MarqueeTextDiff` classifies each text change (Continuation/InPlaceSwap/Reset) and the engine restarts its leg from the preserved offset with trimmedChars × measured-char-width compensation; static-fit and speed are driven from real measurements; pause/reduced-motion/SR-mirror behaviours preserved; instances keyed by C#-generated id so dispose survives DOM detach. Plus `RdsScrollSpeedPolicy`: 1.5× catch-up above 75 % buffer fill.
+
+**Alternatives considered:**
+- **Keep CSS animation, suppress more re-renders** — already done (PR-era ShouldRender guards); cannot help because any REAL append must change track width, which is itself the restart/snap trigger.
+- **rAF-driven transform** — works but runs per-frame on the main thread; WAAPI keeps per-frame work on the compositor and JS only runs at text changes / leg boundaries.
+- **Raise RtConfirmThreshold only** — rejected; consecutive-assembly counting confirms any stable state (including corrupt chars that sit in the buffer) regardless of threshold, and higher thresholds punish legitimate complete messages.
+
+**Verification:** 12 `RadioTextAssemblerTests` (direct group 2A/2B frames: loss, corruption, A/B rotation, unterminated), 32 buffer tests incl. a 5 000-append leak bound, 13 `MarqueeTextDiffTests`, bUnit interop-contract tests (init-once / append-with-trim / swap / reset / dispose-on-unmount / zero calls on telemetry ticks), and a Playwright harness against the real engine in Chromium: measured 40.1 px/s at configured 40, append offset 48.8→48.8 (no snap), front-trim glyph position 84.7→84.7 px (invariant), hover pause drift 0.00 px, clean dispose (archive/uat/rds-marquee-harness-results.png). Final confirmation needs the live kiosk + real RDS station (owner UAT).
+
+**Consequences:** New-message display latency rises from ~2-5 s to ~5-15 s (two segment cycles) — the price of never publishing partial/corrupt text. HANDOFF-rds-accumulating-scroll §6.f ("accept the restart jump for v1") is superseded — the JS engine is that anticipated follow-up. Handoff §6.e's drop-oldest-CHARS is refined to drop-oldest-CHUNKS.
+
+---
+
+## ADR-026: Suppress GHSA-pgww-w46g-26qg (AngleSharp, NU1902) in Radio.Web.Tests
+
+**Date:** 2026-07-19
+**Status:** Accepted
+**Context:** A newly published advisory against AngleSharp 1.2.0 (transitive via `bunit.web` 1.40.0) turns NU1902 into a restore **failure** on any fresh restore under `TreatWarningsAsErrors` (main only kept building via cached restore assets; CI and new worktrees break). Per ADR-023's hierarchy, upgrading to a patched version is preferred — but AngleSharp 1.3+ changes the `IHtmlCollection` ABI and bunit 1.40 throws `MissingMethodException` at runtime (verified with 1.5.2), and no bunit release carrying a patched AngleSharp exists yet.
+
+**Decision:** Targeted `<NuGetAuditSuppress Include="https://github.com/advisories/GHSA-pgww-w46g-26qg" />` in `Radio.Web.Tests.csproj` only — the ADR-023 sanctioned fallback for exactly this case (patched version exists but cannot be adopted). Risk is nil in practice: AngleSharp only parses our own bUnit render output in tests; it never sees untrusted input and ships in no production artifact. Revisit when bunit publishes a release on AngleSharp ≥ patched.
+
+---
+
+## ADR-027: Clear NU1903 (System.Security.Cryptography.Xml) by direct-pinning 10.0.10
+
+**Date:** 2026-07-29
+**Status:** Accepted
+**Context:** Five high-severity advisories landed against `System.Security.Cryptography.Xml` 10.0.8 — GHSA-23rf-6693-g89p, GHSA-8q5v-6pqq-x66h, GHSA-cvvh-rhrc-wg4q, GHSA-g8r8-53c2-pm3f, GHSA-mmjf-rqrv-855v. The package is **transitive**: `Microsoft.AspNetCore.DataProtection` 10.0.8 declares it. With `NuGetAudit` on by default in .NET 10 plus `TreatWarningsAsErrors`, each advisory becomes an NU1903 **restore error** — 10 errors on a `Radio.Web` build, surfacing via `Radio.Configuration` (direct `DataProtection` reference) and `Radio.Infrastructure` (inherits it by ProjectReference). As with ADR-026 this breaks only a **fresh** restore; `main` reproduced it identically, and CI stayed green because the Linux runner restores only the `net10.0` TFM against cached assets.
+
+**Decision:** ADR-023's **preferred** branch — upgrade, not suppress. All five advisories are first patched in 10.0.10. A `NuGetAuditSuppress` was rejected outright: ADR-023 reserves it for when a patched version exists but cannot be adopted (ADR-026's AngleSharp/bunit ABI break), which does not apply here.
+
+Two upgrade routes were implemented independently and in parallel, which is worth recording because the losing one is the more obvious:
+
+- **Shipped (PR #459, `d64b6d5`):** direct-pin `System.Security.Cryptography.Xml` 10.0.10 in `Radio.Configuration.csproj`. A direct reference overrides the transitive resolution, and the pin propagates to every downstream project through the existing ProjectReference graph. This follows the **SQLitePCLRaw pin precedent already in that same csproj**, so the file now has one consistent idiom for "hold a transitive dependency at a known-good version."
+- **Rejected (implemented on `feat/bell-failure-surfacing`, then dropped):** bump the parent `Microsoft.AspNetCore.DataProtection` 10.0.8 → 10.0.10 in `Radio.Configuration` and `Radio.Tools.ConfigurationManager`, plus `DataProtection.Extensions` in two test projects. Equally correct and arguably tidier in principle — it avoids naming a package we do not consume directly — but it touches four files, needs the four to be kept in lockstep, and duplicates a fix already on `main`. Carrying both would have left two competing mechanisms for one advisory.
+
+The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw precedent, unless the parent bump also brings something we independently want.
+
+**Verification:** `dotnet build RadioConsole.sln -c Release` with NuGet auditing **enabled** and no override flags → `0 Error(s)` (was 10 NU1903 errors). `Radio.Web.Tests` 835/835, `Radio.Configuration.Tests` 115/115.
+
+---
+
+## ADR-028: GV SMS Send — real contract, error taxonomy, and outbound echo de-dupe (supersedes ADR-022 D7)
+
+**Date:** 2026-07-30
+**Status:** Accepted (provenance verified 2026-07-31) — ready for Builder as GV-5; ships behind `RotaryPhone:Gv:SendEnabled`, default OFF.
+**Supersedes:** ADR-022 D7 in full (request shape, response shape, error model, and the "confirm `SendSmsResponse` before wiring" item). ADR-022 §8 config surface unaffected.
+**Summary:** Derived from RotaryPhone's as-built `GvSmsController.cs` rather than their docs, which are stale. Four defects found in GV-3's send path, the first fatal: our `SendSmsRequest(ThreadId, Text)` omits **`ToNumber`**, so their normalizer sees `null` and **every send returns `400 invalid_number`** — send was never functional, only silent. Decisions: send the real four-field request `{ toNumber, text, threadId, clientCorrelationId }` and never route a thread id into `toNumber`; wire `ClientCorrelationId` (their handler uses it verbatim as the echo's `Id`, so tier-1 id matching works and the bubble id never re-keys — optimistic ids become `rc:{guid}` not `temp-{guid}`); map the full **nine-code** taxonomy (`invalid_text` was missing from the previously logged eight) to typed exceptions and bubble treatments, with `send_disabled` (409) treated as an **availability state, not a failed send**; subscribe to the **`SmsSent`** echo channel (we never did — GV-3's de-dupe was unreachable dead code); and de-dupe idempotently keyed by exact `Id` then `(Outbound, normalized counterparty, ordinal-equal text, |ΔSentAt| ≤ 120s)`, replaced **in place**. §8 (added 2026-07-31) adds thread **reply-ability**: ~1/3 of inbound threads are short codes or opaque sender IDs that cannot be replied to; classify client-side via a pure `GvCounterparty` static (no DTO change), gate compose before the POST, never render an impossible send as a failed one.
+
+**Full ADR:** [`docs/decisions/2026-07-30-gv-sms-send-contract.md`](2026-07-30-gv-sms-send-contract.md)
+
+---
+
+## ADR-029: GV media as ducked event playback — one seam for voicemail audio and TTS (supersedes ADR-022 D4)
+
+**Date:** 2026-08-03 (**Amendment 1** applied same day; **Amendment 2** applied 2026-09-04)
+**Status:** Proposed — Amendment 1 applied (owner answers + Designer round); **Amendment 2 applied — D7 §7.3 and §7.5 falsified on the appliance, see the entry below and ADR §16. One blocking owner decision is open (§16.3).** Ready for Planner.
+**Supersedes:** ADR-022 **D4** in full (voicemail via a native `<audio>` pointed at `radio:5004`); narrowly amends **D1** (its boundary rule still governs the GV *read* path, not the *audio* path).
+**Context:** The owner asked for three `/phone` changes: **A** voicemail through the console's real output chain with ducking, **B** a play button on a text that speaks it via TTS, **C** canned responses replacing freeform compose (Designer-led). A and B are one architectural problem — *hand a GV media item to the audio engine as a ducked, user-attended event* — and get one mechanism. D4 was correct on its own terms (native `<audio>` bought free HTTP Range seeking); what changed is its stated premise, that voicemail has "no audio-engine involvement." A browser `<audio>` is a second audio path the mixer, ducking service and output chain know nothing about, and may be inaudible on Cast or exclusive-mode outputs.
+
+**Decision:** A new Core seam **`IEventPlaybackService`** beside (not inside) `IAnnouncementService` — the latter stays fire-and-forget for *unattended* announcements; the new one serves *attended* playback needing a handle, transport and state. Exposed as `POST /api/audio/events` + seek/pause/stop; `Radio.Web` calls **Radio.API**, not gvbridge, for anything audible. The request is a closed discriminated set with **deliberately asymmetric arms** — speech carries **literal text** (already in Web's hands, small), voicemail carries a **`(kind, id, durationSeconds)` reference** (large, remote, and a caller-supplied URL would be an SSRF primitive). Radio.API resolves the URL from its own config and fetches via a new `GvMediaClient` in `Radio.Infrastructure/External/`, modelled on the existing `PhoneContactLookupService`, into a bounded LRU cache at `./data/gvmedia/` — **the cache is blackout mitigation, not an optimization**: GV auth is dead ~9 min in every 20, so a replay has ~45% odds of 502ing if it went back to the network. Materializing to a local file makes voicemail an ordinary `AudioFileEvent` and makes **HTTP Range irrelevant** — seeking is local, so D4's whole rationale is satisfied on the correct side of the wire. `IEventAudioSource` gains `Position`/`IsSeekable`/`SeekAsync`/`PauseAsync`/`ResumeAsync` **copied verbatim from `IPrimaryAudioSource`**, which already declares them all. State is global (one engine, one set of speakers), broadcast on the existing `/hubs/audio` via `AudioStateUpdateService` → `AudioStateHubService` → `AudioStateStore` — the pattern already working for the radio and simply unwired from the phone surface — with **no position tick**: the snapshot carries an anchor and the client interpolates, because steady-state churn is audible on the N100.
+
+**Two findings that changed the design.** (1) **Priority currently arbitrates nothing.** `DuckingService` is binary and reference-counted — the first event fades the primary to a fixed global 20%, every subsequent concurrent event changes nothing, and `GetActiveEventsByPriority`/`StopAllDuckingAsync` have zero non-test callers. `INTEGRATIONS.md`'s "higher priority announcements can interrupt lower priority ones" is false today and every `SetPriority` call is decorative. So attended playback at **priority 6** is the first load-bearing use of priority: attended-replaces-attended, **preempted (stopped, not paused) by ≥ 8**, sub-8 keeps mixing (a recorded pre-existing wart). Mechanism: `DuckingService.StartDuckingAsync` must raise `DuckingStateChanged` on *every* call rather than only on transition — safe, since its lone subscriber acts only on `!IsDucking`. (2) **Lifecycle is the sharpest cost of going server-side**: playback no longer dies with the `<audio>` element, so three defenses — a hard `MaxPlaybackSeconds` cap (the only real guarantee, and poll-free), an explicit stop, and a net-new `CircuitHandler` backstop (weakest; Blazor holds circuits ~3 min past tab close). ⚠ **The parenthetical is false and was corrected by Amendment 2 (2026-09-04): Blazor releases a circuit *immediately* on a graceful close — the retention window covers non-graceful drops only. See the Amendment 2 entry below.**
+
+**Auth:** routing server-side **closes carried risk #3's audio clause** — but only because Radio.API is given the credential and a handler; it would *not* close under the rejected opaque-URL design. RotaryPhone can now auth-gate the audio endpoint and the standing cross-repo ask should be **withdrawn**. Cost: Radio.API has no `AddHttpClient`/`DelegatingHandler` infrastructure today, and the auth key is duplicated across two services' config.
+
+**Amendment 1 (2026-08-03) — five decisions moved; see the ADR's §0 for the full log.**
+
+- **Speech engine REVERSED, and further than a config flip (new D10).** The original §9 pinned message speech to local `espeak-ng` for privacy. The owner reversed it: *"make sure the text messaging uses the currently selected TTS engine."* Resolved against the code, **"currently selected" is `TTS:DefaultEngine`** — read at the tree's only engine-resolution site, `TTSFactory.cs:71` — **not** `TTSPreferences.LastEngine`, which has zero readers (selecting an engine from it would have re-pinned espeak-ng by accident). ⚠ **Corrected 2026-09-03 by `TTS-9`.** This parenthetical originally read *"zero readers, zero writers, and binds a section with no such key (so it is permanently `ESpeak`)"*, and two thirds of that was wrong. `LastEngine` **is** written — `PreferencesPersistenceService.cs:102` serialises the whole `TTSPreferences` object into the `TTS` section — and the section **does** carry the key: the live appliance store holds `TTS:LastEngine|ESpeak` and `TTS:LastVoice|en`, read directly off the box on 2026-09-03. The value round-trips rather than being absent. **The load-bearing half was right and still is: it has no readers, nothing parses it into a `TTSEngine`, and it is not the engine-resolution site** — which is also why removing eSpeak needed no config-store migration. Its *default* is now `string.Empty`; the stored value survives until overwritten. **`GvMedia:SpeechEngine` is deleted, not redefined**; the only override is per-request. Azure is a third fully-implemented engine the draft never mentioned; an unavailable engine **fails with a stated reason and never silently substitutes another**, because a fallback in the ESpeak→cloud direction would ship a private SMS body to a party the owner did not select. The privacy analysis is **kept as an accepted, owner-made trade** — it did its job by forcing an explicit choice. Practical upshot: message speech now sounds **identical** to announcements, removing the tonal-mismatch concern, and gaining a cloud round trip per play (there is no cache on the speech path).
+- **Navigate-away rule FLIPPED — playback survives navigation (D7 rewritten).** The Designer supplied the persistent transport chip the rule was waiting for, in `.topbar-primary` — **not** `NowPlayingDock`, which `MainLayout.razor:878` hides on Home. The flip forced three further changes: the circuit backstop is re-scoped from *owner circuit* to **last circuit** (the original would have stopped audio ~3 min after any kiosk refresh) — ⚠ **and the replacement stops it in under half a second after any kiosk refresh, measured — the parenthetical's "~3 min" is wrong in both halves. Amendment 2 corrects the reasoning and owner decision `D30` KEEPS the rule; see below** — **`OwnerToken` is deleted** along with the ownership model it served, and **`/sleep` needs its own rule** — it runs under `EmptyLayout` with no topbar and the console navigates itself there on an idle timer, so entering it stops playback unless that surface grows a control. **The max-duration cap is unweakened**: it is armed server-side and depends on no client, so it still guarantees the console cannot get stuck.
+- **Priority re-anchored (§6.1).** A live check falsified the anchor: `PhoneIntegration:Enabled` is **"never enabled"** — `false` in the only appsettings that declares it, no Production override, no systemd `Environment=` override, introduced by `8d2a2ab` and never flipped. `PreemptAtPriority` stays **8**, now anchored on the two *live* occupants of 8 (`DuckingService.DefaultEventPriority`, `NotificationsController`'s `?? 8`) rather than on the dormant ring. Live consequence, newly stated: an external announcement at its default priority 8 **stops** a voicemail.
+- **Voicemail cache ENABLED** — voicemail audio at rest under `./data/gvmedia/` is owner-accepted; `CacheMaxMegabytes = 0` is an escape hatch, not the default.
+- **Initial-sender OUT of scope — the console is reply-only.** New-recipient compose is removed. Non-obvious consequence: **`toNumber` stays** in ADR-028's request (reply mode needs it too, or their server 400s), but it now has a **single source**, which promotes `GvCounterparty` from a composer gate to the send path's sole addressing dependency — a classification bug becomes a send bug. ADR-028's latent duplicate-thread-row fix demotes from *required* to *defensive*, since we can no longer create a conversation.
+
+**Consequence for C:** the send contract, `SmsSent` echo and reply-ability gating are **unaffected** — but canned responses **invalidate a probability assumption** inside ADR-028 §4.4's accepted risk: drawing `text` from a fixed set of five or six strings makes "two identical sends to the same counterparty inside 120s" ordinary rather than rare, and the poller's re-surfaced copy always falls through to the fuzzy tier. GV-5's reconciler must therefore match **one-to-one** (a poller copy consumes at most one un-reconciled bubble), with a regression test.
+
+**Full ADR:** [`docs/decisions/2026-08-03-gv-audio-through-engine.md`](2026-08-03-gv-audio-through-engine.md)
+
+---
+
+## ADR-029 arc: two decisions the `PHN-1b` plan closed for every PR in the arc
+
+**Date:** 2026-09-02
+**Status:** Accepted — binds ADR-029 PRs 3-7
+**Amends:** [ADR-029](2026-08-03-gv-audio-through-engine.md) §4.2 and §10.2 (the first item overrides them)
+**Context:** `PHN-1a` (PR 1) shipped behaviour that contradicted the ADR in one place and left an "open question for PR 3" in a doc comment in another. Both were arc-level questions rather than PR-local ones, so `PHN-1b` (PR 2) settled them for the whole arc rather than letting each PR re-decide.
+
+**Decision 1 — `MaxSpeechChars` is a REJECTION, not a truncation. ADR-029 §4.2 is overridden.**
+§4.2 says over-length speech is *"truncated with a spoken tail"* and §10.2's config table repeats it; PR 1 shipped `EventPlaybackRejection.TextTooLong` instead, and that is what stands. Three reasons, in order of weight: (1) §4.2's own governing rule is that **utterance composition belongs to `Radio.Web`**, and truncating with a spoken tail *is* composition — it changes what is said and adds words the caller did not write, so doing it in Radio.API contradicts the section it is written in. (2) A truncating server that returns `200` is the same untruth PR 1 already refused when it made a non-seekable `SeekAsync` **throw** rather than no-op per the ADR: a caller that posts 8 000 characters, gets `200`, and hears 1 000 has been misled in exactly the same way. (3) `EventPlaybackRequest.Validate` is a pure method on a `sealed record` and would have to become a mutator; truncation cannot be expressed as a rejection reason.
+**Consequences:** PR 3 maps `TextTooLong` → `400` with the named reason, like every other rejection. **`PHN-3` owns truncation** — client-side and visible, before the post, in `GvSpeechText.ForMessage`, which is also the only place a spoken tail can be composed in the same voice as the rest of the utterance. The word "truncation" does not appear in this arc's server code. ⚠ A reviewer citing ADR §4.2 to re-add it should be pointed here.
+
+**Decision 2 — `IEventAudioSource.SeekAsync` stays `Task`. Closed as "no", not deferred again.**
+PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `Task<bool>` as *"an open question for PR 3"*. It is closed. Widening breaks D4's only justification — that the five signatures are copied **verbatim** from `IPrimaryAudioSource` — leaving either two seek shapes in the codebase or a change to `IPrimaryAudioSource`, which drags in `FilePlayerAudioSource`: a live primary-source path with a persisted resume position hanging off the same field, out of scope, and logged with its own UAT requirement in `docs/known-issues-and-future-work.md` §14a. The information is not lost, it arrives by a different route: `Position` reads through to the player, so a refused seek shows up as **an anchor that did not move** in the next snapshot and the scrubber snaps back — the correct user-visible behaviour, delivered over the broadcast mechanism that already exists.
+**Consequences:** `PHN-1b` corrected that comment in the same PR (doc-only, no behaviour) rather than leaving `main` carrying a statement this decision already knew to be untrue — the `CLAUDE.md` § Pre-Merge Review failure class this repo has now shipped five times.
+
+**Plan of record:** [`archive/design/plans/PHN-1b-gvmedia-client-cache-and-auth.md`](../../archive/design/plans/PHN-1b-gvmedia-client-cache-and-auth.md) §0.3
+
+---
+
+## ADR-029 Amendment 2: two D7 rules the appliance falsified, and owner decision `D30`
+
+**Date:** 2026-09-04
+**Status:** Accepted. **Falsification 1's replacement is owner decision `D30`; Falsification 2's is §16.5's two-edge rule.** Two non-blocking questions added (§14 Q11, Q12).
+**Amends:** [ADR-029](2026-08-03-gv-audio-through-engine.md) **D7 §7.3 and §7.5** — §7.3 loses its *reasoning* and keeps its *behaviour*; §7.5 keeps its *rule* and changes its *trigger*. D1-D6 and D8-D10 are untouched and nothing in §§1-6 or §8-§13 changes. *(The ADR's own front matter, §0b, §14, §15 and its Handoff block are edited to point at §16 — "nothing else changes" would be too strong.)*
+**Context:** `PHN-1e` ([#561](https://github.com/mmackelprang/RTest/pull/561)) implemented D7's three stop conditions and measured them on `radio`. Two work. Two ADR claims do not, and the Builder blocked the row rather than merging — which is what the plan's own open assumption U3 instructed. ⚠ **Nothing described here is merged**: `main` has no `CircuitHandler`, no duration-cap enforcement and no `/sleep` stop rule.
+
+**Falsification 1 — §7.3's circuit-lifetime premise is inverted.**
+§7.3 asserts *"Blazor Server does not tear a circuit down at tab close but after the disconnect retention window (default ~3 minutes)."* The opposite is documented: a **graceful** termination — reload, tab close, navigating away — releases the circuit **immediately**; `DisconnectedCircuitRetentionPeriod` (10 minutes here) covers **non-graceful** drops only, and the client-side trigger is the `unload` event. So the rule's story — circuit B already open when circuit A times out three minutes later — is backwards: the old document must unload before the new one loads. **Measured on the box at `dd8e85ec`, the refresh run twice: a single-browser reload is `1 → 0 → 1`, close before open**, and the rule stopped a 49-second recording **7 seconds in**, ~0.4 s before the replacement circuit arrived. Two browsers measure `2 → 1 → 2` and nothing stops — so the defect is invisible whenever a second client happens to be open and destructive the rest of the time, which is why only the box could find it.
+
+**⭐ OWNER DECISION `D30` (2026-09-04) — and it endorses the behaviour rather than the reasoning.**
+> *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."*
+
+**So §7.3's rule stands as built, and the Architect recommendation to delete it is withdrawn.** That recommendation rested on *"every reachable firing is a false positive"*, which was correct **against §7.3's stated goal** (*"audio is playing and no client is watching"* — under which a reload is a false positive because the user is watching and is coming straight back). `D30` changes the goal; the same firing is now a true positive. **No grace period, no circuit-identity matching, no survival mechanism**, and none to be proposed later. Nothing measured or documented changes — only the verdict, because the objective moved. *(`D30` is verified free: `D28` is the wait-then-play queue, `D29` the knob geometry renumbered out of the `D26` collision the same day. **The punch-list §7 register entry is still owed and is not written by this ADR.**)*
+
+**The corrected model, which survives `D30` intact and is the durable half.** A circuit is server-side state for one *document*, not a viewer: it outlives the viewer by up to ten minutes on a drop and predeceases it on every reload. `OnCircuitClosedAsync` is therefore **bimodal — immediate or ten minutes — and carries no indication of which**. `OnConnectionUpAsync`/`OnConnectionDownAsync` track the SignalR connection and are prompt in both cases, but do not escape the underlying fact: **"no client is attached" is not instantaneously observable — only observable over an interval**, because at the instant the last client leaves, a reload and a departure are identical. Two implementation properties are correct and must survive: the handler is **singleton** (framework-documented, so the count is process-wide) and it fires on the **transition** to zero, never an observed zero. ⚠ The ten minutes is a config value plus documented framework behaviour — **it has never been watched on this box**, and the ADR marks it as a derivation rather than a measurement.
+
+**Two firing paths examined and deliberately not escalated.** A reload while a **second browser** is open is `2 → 1 → 2` and stops nothing — so the rule delivers `D30` only in the single-browser case; the only mechanism that would close that is the ownership model ⟨A1·4⟩ deleted, and the divergence is benign (a client still holds the transport). A **network drop** that never reconnects fires at eviction, ~10 minutes in, by which time the 300 s cap has already stopped the audio — unreachable, and needing no ruling. ⚠ Unreachable **only while the cap stays below the retention period**; the cap has no maximum and the two numbers know nothing about each other.
+
+**Falsification 2 — §7.5's `/sleep` rule never reaches the idle timer, which is the case it was written for.**
+§7.5 claims *"`idle-dimmer.js` drives the same path through `OnJsSleepRequested`."* It does not. The idle timer calls `navigateToSleep('idle')`, which clears its timers and sets `window.location.href = '/sleep'` and calls nothing else, carrying its own comment that it deliberately does **not** call `SetSleepAsync` because idle navigation must not pause playback. `OnJsSleepRequested` is reached only from `enterSleep()`, whose comment says *"not from idle"* — and **`enterSleep` has zero callers in the tracked tree**, because both the Sleep pill and the server push use `NavigationManager.NavigateTo("/sleep")`. So `SleepService.IsSleeping` is **false** on the idle path (already recorded as `archive/handoffs/HANDOFF-NEXT-SESSION.md` gotcha 9), and a rule hooked to `EnterSleepAsync` cannot fire there. ⚠ **The claim propagated through four documents** — ADR §7.5 → plan constraint C-51 → the branch's `SleepService` comment → the PR body — and not one of them checked `idle-dimmer.js`, which contradicts it in a comment written for this exact reason.
+
+**Decision — how `/sleep` must be detected: two edges, and neither is `IsSleeping`.** The seam already existed: `ENC-6`'s **`ISleepService.IsSleepScreenVisible`**, reported by `Sleep.razor` from `OnAfterRenderAsync(firstRender)`; the contract doc on that property says all three ways of reaching the route produce the same server-side fact. **`SetSleepScreenVisible(true)`** expresses *"a client has the no-transport surface on screen"* and covers the pill, the idle timer, the server push and a direct navigation; **`EnterSleepAsync`** expresses *"the room is being parked"* and is the only one reachable with **no browser at all** (encoder long-press, API). Both stop attended playback; they are not redundant. In the repo's own vocabulary: **stop when `ConsoleWakeState` leaves `Awake`** — as an **edge at the two write sites, never as a polled predicate**, because `WakeState` deliberately reads `Awake` while a wake claim is outstanding. C-51's other half stands and is why this must be a **stop, not a mute**: `WakeAsync` restores the pre-sleep mute state, so a muted-but-playing voicemail becomes audible **mid-word** when someone touches the panel.
+
+**Consequences for `PHN-1e`: unblocked, no re-plan, and `D30` shortened the work.** ⭐ **One code change, not two.** The `CircuitHandler` **ships as built** — the instruction to remove its stop is cancelled. What remains is adding the `SetSleepScreenVisible(true)` edge beside the existing `EnterSleepAsync` hook, confined to `SleepService`, `SystemController` and their tests. Everything else is documentation correcting *reasoning* rather than behaviour, including `docs/integrations.md`'s circuit-backstop item, which the branch marks *"Known broken"* and which `D30` now makes wrong in the other direction. Verified on the box and not re-litigated: the hub broadcast with string enums (C-47/U1), the store cache and one-shot seed (U2/C-52), and the max-duration cap as a dispatching `TimeProvider` timer (C-49). **Nothing moves to `PHN-1f`** (a `Radio.Core` ducking change; burying an unrelated edit there inverts the argument that split PR 5) **or to PR 6**, though PR 6 is the true deadline because it is what makes the defect reachable by a user.
+
+**⭐ The process lesson, which is the most reusable thing here.** **This defect was caught only because the plan declared the assertion unverifiable in a test host and pinned it to an on-box check.** A green test host would have shipped it — nothing in a bUnit or xUnit host has a browser, an `unload` event or a real circuit. And note where the value was: U3's *prediction* was **wrong** (it guessed `1 → 2 → 1`). The value was in declaring the assumption unverifiable and naming the observation that would settle it, not in guessing right. Both falsified rules are statements about **client lifetime**, both were written from reasoning rather than measurement, and both times the box disagreed — so anything further in D7 gets measured first.
+
+**Full ADR section:** [`docs/decisions/2026-08-03-gv-audio-through-engine.md`](2026-08-03-gv-audio-through-engine.md) §16
+
+---
+
+## Owner decision `D28` is implemented as of `PHN-1f`: the mirror case waits, it does not mix
+
+**Date:** 2026-09-04
+**Status:** Accepted — implements, does not amend, ADR-029 D5 §6.2 rule 2
+**Context:** ADR-029 D5 §6.2 rule 2 is symmetric, but `PHN-1d` implemented only the direction the ADR states in words — a *starting* source at or above `GvMedia:PreemptAtPriority` stops an in-flight attended playback. The mirror case, a playback *starting* while such a source is already sounding, **mixed**, and `APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY` pinned that so the fix would arrive as an edited assertion.
+
+**Decision (owner, `archive/handoffs/HANDOFF-GA-PUNCH-LIST.md:1303`):** it **waits and then plays**. Not mix (the behaviour before this row), and not refuse — refusal was put to the owner and rejected as *"press play, get an error, nothing happens"*.
+
+**Shape:** a waiting playback **IS** `_current`, in a new state; there is no pending slot. `EventPlaybackState.Waiting` is appended at the end of the enum, and replace semantics, `StopAsync` resolution, `Current` reporting and the transport 409s all come free from that framing. Audio is acquired **before** the wait, so it is ready the instant the room goes quiet and an acquisition failure surfaces at once rather than after thirty seconds; the wait sits **before** `_gate`, so it cannot block the user's own Stop button. `GvMedia:MaxQueuedWaitSeconds` (30 s, no "off") bounds it, and expiry is `Failed` with reason `"WaitExpired"`.
+
+**⭐ What the row had to build first, and it is the durable half.** The wake needs to hear *"a source left the ducking set"*, and **that raise did not exist**: `DuckingService.StopDuckingAsync` raised only when the set **emptied**, so a priority-8 blocker ending while a priority-5 announcement continued produced **no raise at all** — `D28`'s rejected option delivered thirty seconds late. It now raises for every source that leaves, which needed `DuckingStateChangedEventArgs` to be able to say *"a source ended"* without saying *"ducking ended"*: `IsDucking` is the **aggregate** and `AudioManager` keys `ClearDuckingMultiplier` off its false edge, so raising `false` while others remain would restore the radio to full volume **mid-announcement**. Hence `DuckingSourceTransition`, and hence the rule that `AudioManager`'s outer branch stays literally `if (e.IsDucking)` — `Started = 0` is the default of an `init` property, so a branch keyed on `Transition` would skip the clear and leave the radio **stuck ducked**.
+
+The args also now carry `TriggeringSourcePriority`, **captured inside the lock that mutates the set** and therefore before the attack fade. That **closes** the fade-window race `PHN-1d` could only narrow with an `ActiveEventCount == 0` guard whose own residual it documented; both the guard and the subscriber's `GetPriority` call are deleted rather than supplemented.
+
+**Two things the planning pass found that the design input did not.**
+- **The `/sleep` stop is an ALLOW-LIST** (`SleepService`) while `EventPlaybackSnapshotDto.IsLive` is a **DENY-LIST** (`Radio.Web`), so the new member was picked up free by the circuit backstop and **silently dropped** by ADR-029 §7.5's rule. A queued playback would then have started audio up to 30 s after the panel went dark, on `EmptyLayout`, with no stop control on screen. `Waiting` was added to the allow-list, and `TheSleepRuleCoversEveryNonTerminalState` enumerates the enum by **reflection** so the *next* member reds too. ⚠ That was exercised during the row — a member was added temporarily and the test, and only it, went red — but the member was **not committed**, so the claim is not reproducible from this repo. Anyone re-checking it has to add one again.
+- **The wait adds two throwing exits between acquisition and adoption**, and neither `TearDownAsync` nor `FailAsync` can release an *unadopted* source — both reach `ClaimSourceForRelease`, which answers null. Without an explicit guard the `RemoteMedia` arm leaks an open `FileStream` over the cached recording.
+
+**⭐ And one the implementation found, which the plan's literal code would have shipped.** Task 6e put `catch (TimeoutException) → FailAsync("WaitExpired")` in `AcquireAndPlayAsync`'s outer catch chain. **`AcquireSpeechAsync` also throws `TimeoutException`** — for `TTS:GenerationTimeoutSeconds` — from inside that same `try`, so every hung synthesis was reported as `"WaitExpired"` instead of `"SpeechSynthesisFailed"`. `SynthesisIsBoundedByGenerationTimeoutSeconds` caught it. The handling moved to the wait's **own call site**, where the acquisition switch has already returned and `waiter.Task.WaitAsync` is the only thing that can throw one.
+
+**Consequences:** ⛔ **No `Radio.Web` change and no broadcast change.** The hub sends `snapshot.State.ToString()` and MVC uses `JsonStringEnumConverter`, so `"Waiting"` reaches the browser as a string, and `IsLive`'s deny-list gives the chip *"something is happening, offer Stop"* for free. A **quiet room produces no new traffic at all** — the predicate is evaluated before anything is published. PR 6 (`PHN-2`) builds the chip; it must render `Waiting` as live with a Stop, **must not** run the progress bar, and must say *why* rather than showing a bare spinner.
+
+**Declined and filed rather than left implied:** a playback *started* while the console is already on `/sleep` (`docs/known-issues-and-future-work.md` §22 — a layering question, ADR-029 §14 Q12), and the blocker's identity on the wire (§23 — a request path, not a gap). A merged `SleepService` comment promised this row would take the first; it was rewritten to say the case is unowned rather than left standing.
+
+**Plan of record:** [`archive/design/plans/PHN-1f-the-wait-then-play-queue.md`](../../archive/design/plans/PHN-1f-the-wait-then-play-queue.md)
+
+---
+
+## ADR-030: Test seams are classified and labelled, not banned
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+**Three** `internal` + `InternalsVisibleTo` seams were shipped, across **two** PRs, because a native or
+network dependency was believed to make the real path unreachable: `ApplyDeferredCaptureState` (#469),
+and `ConnectRaceHookForTests` + `ConnectTransportOverrideForTests` (#468). A fourth,
+`CastStatusReadOverrideForTests`, is **planned by `AUD-5` and does not exist in `src/`** — it has
+bought nothing yet, and is named here only because it will need the same treatment when it ships.
+`AUD-3` recorded #468's two as design debt and folded them into `TEST-2` "as a pattern rather than an
+incident".
+
+⚠ _The count is spelled out because `TEST-2`'s own row asserted **four seams** and that was wrong — the
+fourth was only ever in a plan. An argument from a recurrence count is worth exactly as much as the
+count, so this one is stated as three-shipped-plus-one-planned rather than rounded up._
+
+`TEST-2` asked whether a native SoundFlow `AudioEngine` could be constructed in a unit test so the
+seams could be retired. **It cannot** — `MiniAudioEngine`'s constructor enters native code, CI is a
+headless container with no audio device, and the repo separately forbids raw `MiniAudioEngine`
+construction in `src/` (`NoRawMiniAudioEngineConstructionTests`).
+
+**Planning the row established that the native engine was never the requirement.** `SoundComponent`
+and `AudioCaptureDevice` are abstract types whose constructors store the engine reference without
+dereferencing it, so Moq subclasses either with a null engine — which the suite had already been doing
+for `SoundComponent` in CI since before the row was filed. The seam at `ApplyDeferredCaptureState` was
+therefore never necessary, and its doc comment — cited by the row as its authority — asserted a
+constraint that did not exist.
+
+That surfaced the sharper problem: the seams are **not one thing**. Most are harmless visibility
+widenings. Two put a live branch in shipped code. One was a real production method entered directly by
+tests, **bypassing the branch dispatch that selects it**, and such a test is indistinguishable from
+real coverage in any coverage report. The gap left at `BluetoothAudioSource.cs:483`/`:494` (those
+line numbers as they stood when this ADR was written; the same two arms are `:486`/`:497` after the
+seam retirement below lengthened the doc comment above them) went
+unnoticed for exactly that reason.
+
+### Decision
+
+Seams are **classified into four kinds by what they displace**. Kind C (substitution) and Kind D
+(entry point) must carry a label naming the mechanism that makes the real path unreachable **and what
+the seam consequently does not cover**. Kinds A (visibility) and B (injection) need only a line. The
+convention lives in `docs/testing.md` § *Test Seams* and is enforced by `TestSeamLabelLintTests`.
+
+Its first rule is **prefer no seam, and check reachability before assuming** — because the failure this
+ADR is written from was not a bad seam, it was an unchecked sentence.
+
+### Alternatives considered
+
+- **Ban the seams.** Rejected: `ConnectTransportOverrideForTests` reaches a path genuinely unreachable
+  offline; removing it would delete real coverage.
+- **Build a native test harness.** Rejected: infeasible on this CI, and — the more useful finding —
+  unnecessary, since the types under test are mockable without an engine.
+- **A single "avoid `InternalsVisibleTo`" guideline.** Rejected: `TestSeamLabelLintTests`' own scan
+  finds **23** seam members in `src/`, of which **21** are ordinary visibility widenings and test-only
+  writers, and a rule ignored in the common case is unavailable in the rare one. (Counted, not
+  estimated — an earlier draft of this line said "~13".)
+- **A naming convention (`*ForTests`) plus a name-based lint.** Rejected, and this is the load-bearing
+  rejection: all nine suffixed members are Kinds A–C. `ApplyDeferredCaptureState` carried no suffix, so
+  a name-keyed lint would have missed **the exact seam that motivated the decision**. The lint keys on
+  the label.
+
+### Consequences
+
+- Two shipped Cast seams retrofitted; `AUD-5` applies the label to its own when it ships.
+- The Kind-D seam is **retired**, not labelled: `ApplyDeferredCaptureState` returns to `private`. Of the
+  three tests that entered through it, **two are superseded and deleted**
+  (`DeferredCaptureAcquisition_AfterPlay_LeavesSourcePlaying` and
+  `ApplyDeferredCaptureState_WhenNotPlaying_SetsReady`) and **one is rewritten**
+  to reach the same state through the real dispatch, keeping its `SoundFlowAudioTap`
+  assertion — the only one of the three whose assertion was irreplaceable.
+- **Two of the three `capture is …` dispatch sites** gain end-to-end coverage with no seam and no
+  hardware: `InitializeAsync`'s pair (`:159`/`:166`) and `TryAcquireAudioCaptureAsync`'s
+  (`:486`/`:497`). All three `ApplyDeferredCaptureState` call sites (`:472`, `:489`, `:500`) are
+  covered.
+- ⚠ **The third dispatch pair, `TryReacquireCaptureAsync` (`:687`/`:692`), is NOT covered and is
+  recorded rather than closed.** Its only caller sits behind a 10 s delay in the background retry
+  loop, and neither arm has an observable consequence to assert with `_playbackService` null — a test
+  that executed it and asserted nothing would be the coverage theatre this ADR exists to name.
+  ⚠ **There are two different "threes" in this row and they must not be merged:** three
+  `ApplyDeferredCaptureState` call sites (all covered) and three `capture is …` dispatch pairs (two
+  covered). An earlier draft of this bullet said "all three dispatch sites", which was false — on a
+  row whose entire subject is claims that outrun the code.
+- The over-claiming comment at `BluetoothAudioSource.cs:447-452` (its span *before* this change; the
+  replacement runs `:447-455`) is corrected, and is added to
+  `CLAUDE.md` § *Pre-Merge Review* as a fourth worked example — the first whose victim was a queue row
+  rather than a code change.
+
+**Plan of record:** [`archive/design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](../../archive/design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md)
+
+---
+
+## ADR-031: A component's subscription to a singleton service event is proved by teardown, not by growth
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+`SystemConfigPage.razor` subscribed to three `AudioStateHubService` events with anonymous lambdas.
+An anonymous delegate has no stable reference, so no `-=` can remove it, and the page never tried.
+`AudioStateHubService` is `AddSingleton` (`Program.cs:411`), so **every visit to `/system`
+permanently added three handlers to a process-lifetime object** — each retaining the component and
+its whole render tree, on an appliance that runs for weeks between restarts.
+
+⚠ **The route is `/system`.** The row said `/system-config` five times and `UI-7`'s plan inherits the
+same wrong string in two places. `@page "/system"` is the file's only `@page`; there is no alias and
+no redirect, so `/system-config` is not a route this application serves. Nothing in the fix depends
+on it — it matters because every prose description of the defect named a URL nobody could visit.
+
+### Decision
+
+Named instance methods, and a matching `-=` for every `+=` in the disposal method the page already
+had. **The naming is a means; the symmetry is the property.** No new interface, field, flag or
+lifecycle — the page has declared `@implements IDisposable` with a live `Dispose()` throughout.
+
+⭐ **This closes the class in `Radio.Web`.** A repo-wide sweep found `SystemConfigPage` was the only
+component subscribing to a singleton service event without a matching `-=`. This was a one-off
+outlier, not the first instance of a pattern.
+
+⚠ **The row and the plan both said "the other 22 all unsubscribe correctly"; that number does not
+reproduce and has been dropped rather than restated.** An independent pre-merge sweep counted
+**16 other components** subscribing to service events, plus 3 subscribing services
+(`AudioStateStore`, `EncoderHudService`, `ConsolePlaybackState`) — which are not components and do
+not carry a component disposal interface. **The substantive claim survived falsification**: every
+other subscription site has a matching `-=` in the same file, the only two exceptions being
+`MainLayout._timer.Elapsed` and `PhonePage._pollTimer.Elapsed`, both component-owned timers that
+are stopped and disposed, so the delegate dies with the component. ⭐ **A specific count that does
+not reproduce is what teaches the next reader to distrust the claim that does** — this repo has now
+been burned by that four times, so the claim is kept and the number is not.
+
+### ⛔ The instrument, which is the part worth keeping
+
+**The verification the row originally specified could not tell the fixed state from the broken one.**
+It said: *render the page twice against a shared service, assert the invocation list does not grow.*
+**That is RED against correct code.** Two simultaneously-live components legitimately hold two sets
+of handlers — ordinary multicast behaviour, not a leak. Implemented as written, a row about a
+resource leak would have shipped a test that was worthless in the direction that mattered.
+
+**The leak is that disposal does not SHRINK the list.** The discriminating assertion is therefore
+*render → dispose → the count returns to its pre-render baseline*, plus *five render/dispose cycles
+leave the singleton in the same state as one*.
+
+Measured before the fix, and the numbers are the record: **1 handler per event per visit; five
+visits leaving five.** Linear, unbounded, and exactly 3 per visit — so no child component subscribes
+to these events as well, which the plan had flagged as an open question rather than a fact.
+
+Two supporting rules, both of which earned their place here:
+
+- **An instrument check is not optional.** Both tests first require the counts to *move* off
+  baseline. Without that, a page that subscribes nothing — an early throw in `OnInitializedAsync`,
+  a renamed event — satisfies every assertion vacuously. It is the same "prove the instrument can
+  see the unfixed state" discipline recorded against `TEST-2`, `UX-1`, `OPS-3` and `UI-7`, and this
+  is its sixth outing in three days.
+- **Reflection goes through the shared seam.** The test counts handlers via
+  `HubEventFire.InvocationListOf<TDelegate>`, which `UI-7` (`C-213`) extracted hours earlier
+  precisely so tests stop hand-rolling `GetField`. A private copy here would have been the
+  thirteenth such site and a worse one: the helper throws on a missing backing field instead of
+  counting zero, and on a wrong payload type instead of silently widening to `Delegate`.
+
+### Alternatives considered
+
+- **`IAsyncDisposable`** — rejected. Unsubscribing is synchronous; a second disposal interface would
+  be strictly more code for no behaviour.
+- **Routing these events through `AudioStateStore`** so the store is the hub's sole subscriber —
+  not available. The store re-exposes 11 of the hub's 14 events and `PhoneCallStateChanged` is one
+  of the three it omits, which is *why* this page reaches past it to the hub directly.
+
+### Consequences
+
+The test joins the set that depends on these events remaining **field-like**. `UI-7`'s `C-207`
+examined converting them to explicit `add`/`remove` accessors, which would delete the compiler-
+generated backing fields; it rejected that route, so the seam survives. If it is ever revisited,
+this test changes with it — `HubEventFire` already throws a message saying so.
+
+**Plan of record:** [`archive/design/plans/UI-9-the-config-page-that-never-unsubscribes.md`](../../archive/design/plans/UI-9-the-config-page-that-never-unsubscribes.md)
+
+---
+
+## ADR-032: A recovery predicate and a status banner want opposite failure directions, and must never share one predicate
+
+**Date:** 2026-09-08
+**Status:** Accepted
+
+### Context
+
+`GV-12`: RotaryPhone's GV bridge was dead 14:08–15:31 EDT. After it recovered, `radio-web` made zero
+further GV calls and the phone surface sat on *"Couldn't load…"* against a healthy backend until the
+owner tapped Retry.
+
+The reason that is not a mount-path bug is the part worth keeping: **a Blazor Server circuit that
+drops and reconnects does not re-mount.** It resumes the same component instances with the same
+fields; `OnInitializedAsync` runs once per *circuit*, not per *connection* — which is the entire
+purpose of `DisconnectedCircuitRetentionPeriod` (`Radio.Web/Program.cs:69`, 10 minutes here,
+commented "without losing circuit state"). So reconnection never re-fetches, however clean it is.
+Only a full page load does. That is why the 16:07 restart cleared every stuck panel and the
+preceding 83 minutes cleared none — same code, both times.
+
+### Decision
+
+Refetch on the **unhealthy→healthy edge** of the existing shared status poll, plus an error-gated
+backstop on the existing 5 s page timer. No new clock.
+
+**The rule this row exists to record: a predicate that gates a RECOVERY EDGE and a predicate that
+gates a STATUS BANNER want opposite failure directions on unknown data, and merging them silently
+breaks one of them.**
+
+- A **banner** fails *visible*: if we do not know, say something is wrong. Unknown reads as ill.
+- A **recovery edge** fails *silent*: it must be able to REACH healthy, because the whole mechanism
+  is a transition. Any term that is permanently true-unhealthy pins the state, the edge never fires,
+  and the fix ships green doing nothing.
+
+So `GvBridgeHealth.IsHealthy` is deliberately asymmetric: a field that is **present and says bad**
+makes it false; a field that is **absent contributes nothing**. `GvBridgeStatusService.IsAvailable`
+(the banner) is left alone and is allowed to be false while `IsHealthy` is true. Two predicates, two
+directions. ⛔ A future banner row must derive its own rather than tightening this one.
+
+### ⛔ The failure mode this nearly shipped with, twice
+
+**First, through absence.** `CookiesValid` was a non-nullable `bool` defaulting to `false`, so any
+response omitting it made `!CookiesValid` permanently true. All four health terms are now nullable,
+and that nullability is load-bearing rather than tidiness.
+
+**Second, through presence — and this one the plan got wrong.** The plan asserted that whether
+RotaryPhone serves `degraded` / `authBlackout` / `lastApiSuccessAt` *"could not be verified from this
+tree"*, and reassured the reader that absent fields would degrade the predicate to `!Available`.
+**Both halves were false, and the evidence was in-repo the whole time**
+(`docs/queue/inbound/2026-09-08-rotaryphone-reply.md:87-91`). Because the fields *are* served, the
+live predicate includes the 2-minute staleness gate — so `LastApiSuccessAt` can pin the state
+unhealthy with no outage at all if RotaryPhone's cadence ever exceeds it. §0.4 had reasoned only
+about absence; presence-and-stale reaches the same silent no-op by a different door.
+
+⭐ **The correction is that an assumption which decides whether the fix does anything must be
+measured, not reasoned about.** Measured on the box: `lastApiSuccessAt` advances on a **60-second**
+cadence against a 120 s threshold — a 2× margin, now pinned by
+`MeasuredSixtySecondCadence_StaysHealthy` so a cadence change fails a test instead of silently
+disabling the row.
+
+### Two supporting rules that earned their place
+
+- **Derive the edge from its own field.** `_gvBridgeAvailable` has four assignments across three
+  methods, because `PhonePage` runs its own 30 s status poll beside the singleton's 10 s one. An
+  edge compared against it is swallowed whenever the page-local poll lands the recovery first —
+  intermittently, on a timer alignment nobody can reproduce. `_gvHealthyLast` is written by
+  `OnGvStatusChanged` and by nothing else.
+- **An unattended refresh must not perform a durable write.** The first implementation reused
+  `RetryOpenThreadAsync`, which marks a thread read on Google — clearing unread across the owner's
+  devices for a conversation nobody had looked at. Its comment justified this with *"the user is
+  finally looking at the conversation"*, which is true of the Retry **button** and false of a
+  background refresh, and which directly inverts the rule `OpenThreadAsync` states twenty lines
+  away. **The reason a comment gives is the claim to check, not the conclusion** — this is the
+  fourth time that has been recorded here.
+
+### Verification
+
+RED measured first, as its own commit: both regression tests failed against the unfixed page
+(*"expected a refetch after recovery; thread-list calls = 1"*). Then the edge was proven **in a real
+browser with a real circuit** — which the bUnit tests structurally cannot do, since they have no
+circuit — against a stub serving the outage's verbatim status body, with RotaryPhone untouched.
+
+⚠ **The isolation matters more than the pass.** The first browser run did not discriminate: the
+refetch landed 7.4 s after restore and a backstop tick was due 1 s later. The second run exploited
+the fix's own gate — a populated list keeps `_threadsError` false, so the backstop is disarmed and
+only the edge can fire — and showed thread calls frozen for 46 s with the bridge down, then moving
+exactly once, ~6.2 s after restore, with nobody touching the browser.
+
+⛔ **What is still not proven, and should not be claimed:** that RotaryPhone's real recovery path
+reports the edge the way the stub does. The next real outage is that test. Do not manufacture one —
+their uptime is unsettled and a restart risks causing the incident this fixes.
+
+**Plan of record:** [`archive/design/plans/GV-12-refetch-on-the-recovery-edge.md`](../../archive/design/plans/GV-12-refetch-on-the-recovery-edge.md)
+
+---
+
+## ADR-033: A delegate's declared nullability decides whether null is a contract violation or data, and the check must live where that is still known
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`UI-12`. `AudioStateHubService` raises fourteen events from SignalR `On<T>` lambdas. Four are
+declared `Func<T, Task>` with a **non-nullable** payload; three are declared `Func<T?, Task>` where
+null is **meaningful data**. Three of the four non-nullable ones carried an inline `dto != null`
+guard; `RadioStateChanged` did not, and the asymmetry was invisible without reading all fifteen raise
+sites together.
+
+⛔ **The guards were not evidence of intent.** `git log -S` on their original text traces every copy
+to `2cc41567` (`ENC-9a`, #491), which wrote one on `VisualizationModeChanged` — **an event
+`01220d0c` has since deleted.** `ENC-0`, `ENC-4` and `ENC-12` copied it verbatim. No commit message
+states a reason, and PR #491's thread never mentions null. Decisively, `db132192` performed the
+*identical* parameterless→typed-DTO transformation on `RadioStateChanged`, in the same file, and
+added no guard. **Same problem shape, opposite outcome, no incident either way — neither shape was
+reasoned about.** Boilerplate origin makes a guard unjustified by history; it does not make it wrong.
+
+### Decision
+
+**The declaration is the specification.**
+
+> An event declared `Func<T, Task>` cannot represent null, so a null payload is a contract violation
+> and must be **rejected at the boundary and logged**. An event declared `Func<T?, Task>` treats null
+> as **data** and must **pass it through**.
+
+All four non-nullable events now route through one shared `AcceptPayload<T>` helper that rejects and
+logs at Warning; the `_hubConnection.On<T>` type arguments became nullable, because the payload
+arrives from a **JSON deserializer across a process boundary where C# nullable annotations are
+erased.** A JSON `null` binds to `default(T)` whatever the file annotates. Declaring it non-nullable
+never prevented a null — it only hid that one was representable.
+
+⭐ **What makes the null unreachable today is a property of `radio-api`'s current source, not a
+property the type system enforces.** That distinction is the whole reason to guard a null that
+provably cannot arrive.
+
+### ⛔ The unification that would have caused the defect it was preventing
+
+`NotifyAsync<T>` already fans out all **eight** payload-carrying events — **seven** of them with a
+reference-type payload, `SleepStateChanged` being `Func<bool, Task>`, which this rule does not reach.
+(⚠ This read *"all seven payload-carrying events"* until `UI-14`, the **third** counting slip in this
+file's history; `AudioStateHubServiceEventDeclarationCensusTests` is what now stops a fourth.) Putting
+`if (arg is null) return;` there unifies four guards in one line and deletes three copies. **It would also silently
+drop every `NowPlayingChanged(null)` — which means "nothing is playing" — stranding the now-playing
+dock on the previous track forever.**
+
+`NotifyAsync<T>`'s `T` is erased to a type parameter; it **cannot tell a contract violation from
+data, and must not try.** So the guard belongs **above the fan-out**, in the per-event handler, where
+the declared nullability is still visible. The obvious deduplication is the defect.
+
+### Why the row's own stated reason was false, and why the conclusion survived anyway
+
+The row refused a guard because one *"would silently drop a broadcast the panel receives today … the
+UI handles it."* **The UI does not handle it.** `RadioControlPanel.razor:1053` (`if
+(dto.RdsRelevantChanged)`) throws a `NullReferenceException`, which since `UI-7` is swallowed
+per-subscriber, while `NowPlayingPanel`, `RadioPage` and `AudioStateStore` each wipe their cached
+radio state and repaint. **A swallowed exception plus a three-surface state wipe is precisely the
+"failure wearing the costume of correct handling" the row invoked that principle against.**
+
+⭐ **The conclusion — "do not just add the guard" — was right; the reason was not.** A plan that
+inherited the reasoning would have reached the right shape by luck and defended it with an argument
+that collapses on first contact with one line of a subscriber.
+
+### Verification, and the honest limit of it
+
+The guard lives inside an `On<T>` lambda that needs a **started** `HubConnection`; every fixture runs
+on `OfflineHubTransport`. And `HubEventFire` fires the **event**, which is downstream of the guard —
+**a test through it passes whether the guard is present, absent or inverted.** So the `internal
+On…MessageAsync` seam is the substance of this row, not scaffolding; it mirrors `AudioStateStore`'s
+own extraction at `:230-243`.
+
+Because the tests could not exist before the seam, RED was shown by mutation. Recorded results:
+deleting the guard fails 2; downgrading the rejection log fails 4; inverting the helper fails 8/8.
+
+⚠ **The plan's control mutation was mis-specified and this is worth carrying.** It said restoring the
+old inline guard while dropping the shared helper must stay **green** — it cannot, because this row
+deliberately *adds* audible rejection and the tests pin that too. The corrected control — inline
+guard **plus** inline log — is green, which is what actually proves the tests pin **behaviour rather
+than the refactor's shape.** A control that cannot pass is not a control; it is a second mutation.
+
+📌 **Unobservable in production, and the PR says so.** A null cannot arrive, so no UAT can
+demonstrate this guard. The unit tests are its only evidence, and a UAT report claiming otherwise
+would be wrong.
+
+**Plan of record:** [`archive/design/plans/UI-12-the-null-that-cannot-arrive.md`](../../archive/design/plans/UI-12-the-null-that-cannot-arrive.md)
+
+### ⭐ Amendment 2026-09-09 (`UI-14`, [#633](https://github.com/mmackelprang/RTest/pull/633)) — the other half of the rule is now gated, and the reason we gave for prioritising it was wrong
+
+This ADR states the rule in two halves. **Only the first was enforced.** The pass-through half — *an
+event declared `Func<T?, Task>` treats null as data and must pass it through* — had no test anywhere
+in the repository until `UI-14` built the three `internal On…MessageAsync` seams for
+`NowPlayingChanged`, `VolumeChanged` and `EventPlaybackChanged` and gated them with
+`AudioStateHubServicePassThroughTests`.
+
+⛔ **The comment fencing this rule was not a gate, and the realistic form of the forbidden refactor
+defeated it. Measured, not argued.** Applied to the tree *before* `UI-14`, keeping `AcceptPayload`
+**and** adding a "defensive" `if (arg is null) return;` to `NotifyAsync<T>` was **green across the
+entire solution** — `Radio.Web.Tests` 1,172/1,172, every other project unchanged, nothing failing but
+the five known-failing Windows tests — while silently dropping every `NowPlayingChanged(null)`. The
+identical mutation after `UI-14` goes **red on exactly the three new tests**. The *naive* form
+(deleting `AcceptPayload`) failed only four, **so the pre-existing gate looked real and was not.**
+
+⚠ **Two corrections to what this ADR and `UI-14`'s row implied.**
+
+1. ⛔ **There is no producer asymmetry between the two families.** The row contrasted the four guarded
+   events (*"unobservable — no producer can send null"*) with the three ungated ones (*"user-visible"*),
+   which implies a producer can send null on the three. **None can.** Each has exactly one server-side
+   sender (`AudioStateUpdateService.cs:281`, `:504`, `:1087`), all provably non-null, and
+   `AudioStateHub.cs` contains no `SendAsync` and no `Clients.` reference at all. **Both families are
+   identical in reachability**, and this ADR's own justification — *"a property of `radio-api`'s
+   current source, not a property the type system enforces"* — is symmetric. It justifies the
+   pass-through gate exactly as much as it justified the rejection gate.
+2. ⛔ **What distinguishes them is how a wrong state self-corrects — and the mechanism first written
+   down for it was refuted by the function it cited.** `UI-14`'s row and plan both said *"once
+   `_lastNowPlaying` records the silence, the intervening 'nothing is playing' is gone for good"*.
+   That is backwards twice over: `_lastNowPlaying` is assigned from `BuildNowPlayingDto`, which cannot
+   return null, and if it ever held one, `HasNowPlayingChanged` returns true **unconditionally**
+   whenever either side is null (`AudioStateUpdateService.cs:537-540`), so the server would
+   re-broadcast on its next 500 ms poll. **A cached null is the one thing that would not be
+   permanent.** The real mechanism only exists in the scenario that makes a null reachable at all —
+   one off the untyped wire: the **server** caches the non-null "nothing is playing" DTO it just sent,
+   the **client** is what dropped a null, and every later comparison finds no change. ⚠ And *"the
+   service only broadcasts on a change"* is **not** true of `AudioStateUpdateService` as a whole —
+   `EventPlaybackChanged` carries no change comparison anywhere in its path.
+
+⭐ **The pattern is now three rows deep and worth naming: `UI-12`, `UI-14` and this amendment each
+reached the right conclusion through a reason that did not survive contact with the code.** In every
+case the conclusion was defensible on other grounds and the stated reason was not checked. That is
+the failure `CLAUDE.md` § *Pre-Merge Review* item 4 describes, and it is why `UI-14` gates the rule
+rather than restating it.
+
+📌 **Still unobservable in production, and the PR says so.** No producer can send a null on any of the
+seven reference-payload events, so before and after are byte-for-byte identical on every reachable
+path. A UAT report claiming it demonstrated pass-through would be wrong.
+
+**Plan of record:** [`archive/design/plans/UI-14-the-null-that-must-arrive.md`](../../archive/design/plans/UI-14-the-null-that-must-arrive.md)
+
+---
+
+## ADR-034: A SignalR broadcast in this API cannot fault, so cache-advance ordering is precautionary — and a backplane is what would make it load-bearing
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`UI-13`. Six change-detection caches in `AudioStateUpdateService` were assigned **before** the
+`await SendAsync` that broadcast them. The row was filed on the premise that a failed broadcast
+strands the cache, so the delta is never re-sent.
+
+⛔ **The premise is false, and establishing that took more work than the fix.** `SendAsync` does not
+throw on a failed broadcast. Verified two independent ways: by reading `dotnet/aspnetcore`
+`release/10.0`, and by running a real Kestrel host with real WebSocket clients against
+`Microsoft.AspNetCore.App` 10.0.11.
+
+- With no connection matching the send, `DefaultHubLifetimeManager` returns `Task.CompletedTask`
+  **without inspecting the token at all**.
+- Every other failure is charged to the **connection**, not the caller: `HubConnectionContext`
+  catches it, logs `Failed writing message`, aborts the connection, and hands back a **successful**
+  `FlushResult`. Measured: **129 consecutive sends to a hard-killed socket faulted none**; an
+  unserializable payload dropped the client while the caller saw success in 8–10 ms.
+- The single escape is an `OperationCanceledException` raised while the **caller's** token is
+  cancelled — the filter at `HubConnectionContext.cs:361` deliberately does not catch that one, and
+  both `WriteSlowAsync` overloads additionally await `_writeLock.WaitAsync(cancellationToken)`
+  *outside* their `try`, where a cancelled token escapes unfiltered.
+
+⭐ **And the only exception `SendAsync` can produce is the one `ExecuteAsync` treats as "stop and
+exit."** That token is always `ExecuteAsync`'s `stoppingToken`, which `BackgroundService` cancels only
+at host shutdown, and `ExecuteAsync`'s own `OperationCanceledException` filter catches exactly that and
+breaks. `Program.cs:134` registers the service `AddHostedService` only, so nothing else holds the
+instance. **The stranded cache dies with the process.**
+
+### Decision
+
+**Advance a change-detection cache only after the send that broadcasts it — and record why that is
+currently unobservable, as a precondition rather than as a guarantee.**
+
+The ordering is **precautionary today**. What makes it safe is not a property of this file; it is a
+property of the default in-process lifetime manager plus the fact that one token reaches these call
+sites. **Both can change silently.** A Redis or Azure SignalR backplane swaps in a lifetime manager
+whose send genuinely faults on a backplane outage; passing any token other than `stoppingToken` makes
+cancellation reachable *while the service keeps running*. Neither would raise an error at the call
+site — both would produce panels that quietly stop updating, the `AUD-12` / `GV-12` failure family.
+
+### ⚠ What a completed send does not prove, and why the obvious justification is wrong
+
+The natural way to justify this ordering is *"don't record that the clients have it until they do."*
+**That reason is false and the evidence against it is the same evidence above:** a completed
+`SendAsync` means only that the call did not fault. It has never meant delivery. The honest statement
+is narrower — the cache holds *the last state whose broadcast returned without faulting*, which is the
+strongest fact this path can hold. Advancing it before the `await` weakens even that, to *the last
+state we intended to send*.
+
+This distinction matters beyond the comment: a future reader who believes the send confirms delivery
+will design retry or acknowledgement on a foundation that does not exist.
+
+### The trade this buys, stated rather than implied
+
+On a **transient** fault the new ordering is strictly better and is the only version that recovers.
+On a **persistent** one it retries every ~500 ms, logs every tick, and **starves every check ordered
+behind the failing one** — `CheckSourceChangedAsync` runs first, so a permanent fault there means the
+other five never run again. On `main` the service instead went completely silent after one pass and
+never recovered even after the fault cleared. The trade is accepted; bounded retry/backoff is out of
+scope and was deliberately not filed, because the fault is unreachable today.
+
+### Consequences
+
+- The ordering is uniform across all six sites. Repairing one and leaving five would make the class
+  look handled, which is worse than leaving it alone.
+- Six per-site tests pin the ordering, and **five per-site guards** pin that the caches are still
+  advanced at all — a distinction that was measured, not assumed: with one guard, mutating a
+  different site's assignment to `null` left the whole suite green.
+- No `TimeProvider` seam was added. The service is timer-driven; the **defect is not**. The
+  `Check*Async` bodies read no clock, and the tests drive them directly.
+- No lock and no `volatile`. There is one writer per field, and adding synchronisation would imply a
+  concurrency that does not exist.
+
+**Plan of record:** [`archive/design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](../../archive/design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md)
+
+---
+
+## ADR-035: The asymmetry that lets a predicate survive a deleted field is PER-FIELD, and the anchor must be a field that is always sent
+
+**Date:** 2026-09-09
+**Status:** Accepted
+
+### Context
+
+`KIOSK-3`. The desktop launcher (`deploy/debian-x64/kiosk/bin/radio-console-open`, installed to
+`/usr/local/bin/`) derived its `VOICE` row from `psidtsAgeSeconds` on RotaryPhone's
+`/api/gvbridge/status`. Their PR #79 **removes** that field. With it absent, the launcher's
+empty-value guard fired on every launch and `VOICE` would have read *"Needs sign-in"* permanently,
+whatever Google Voice was doing.
+
+⭐ **The field was dishonest in BOTH directions, which is why keeping it was never an option.**
+RotaryPhone proved it is an age-of-last-**load** clock rather than a credential clock: it read
+**608** — inside the band the launcher called healthy — while their bridge had been dead for 83
+minutes on 2026-09-08. Reproduced independently in our lane on 2026-09-09T14:39Z, where the live box
+served `psidtsAgeSeconds: 34` alongside `cookiesValid: false` and `degraded: true` in the same
+payload. Present, it reported a dead session as `Online`; absent, it pinned the row amber forever.
+
+⛔ **How it was found is the part that outlives the row.** We told RotaryPhone three times that
+`psidtsAgeSeconds` had zero consumers, once citing a positive control as proof of method. **The grep
+was scoped to `src/`. The consumer is a shell script.** ⭐ *A positive control validates the
+INSTRUMENT, never the SEARCH SPACE.* Every future cross-repo consumer claim must search `deploy/`,
+`tools/`, `docs/` and all shell scripts, and **state the scope searched alongside the claim.**
+
+### Decision
+
+Port `GvBridgeHealth.IsHealthy` (`GV-12`, ADR-032) into `classify_voice()` term for term rather than
+invent a second predicate, and **share one threshold**: `GV_STALE_AFTER=120` is identical by intent
+to `LastSuccessStaleAfter`. Two consumers of one field disagreeing about what "healthy" means can
+contradict each other about the same box at the same instant, on a panel whose entire job is to be
+believed.
+
+### The three rules that earned their place
+
+**1. ⛔ THE ASYMMETRY IS PER-FIELD, NOT A PROPERTY OF THE PAYLOAD.** ADR-032's rule — *present-and-bad
+is unhealthy, ABSENT contributes nothing* — holds for `cookiesValid`, `degraded`, `authBlackout` and
+`lastApiSuccessAt`. It does **not** generalise:
+
+- `available` is the **anchor** and the inverse case: it must be **present and true**.
+- `psidtsMintedAtUtc`, which RotaryPhone add in the same release, goes the other way again — their
+  contract states its `null` means **UNKNOWN, which is not healthy** (CDP-extracted cookies carry no
+  readable issue time), and it has no upper bound. Absent there is *"I cannot tell you"*, not an
+  absence of bad news. This file does not read it; anything that later does must treat null as
+  "cannot assert healthy".
+
+⚠ **The first draft of the launcher's comments stated the asymmetry as a general rule about the
+payload and named `available` as "the single exception".** That was caught mid-build, not by review.
+Applying the rule uniformly would have reimported the exact defect the row exists to remove — and a
+comment claiming a uniform invariant the payload does not have is `CLAUDE.md` § *Pre-Merge Review*'s
+named failure mode verbatim.
+
+**2. A safety property has to MOVE when its input is deleted — preserving the code is not preserving
+the property.** The old guard existed so an unreadable value could not report a dead session as
+`Online`, and it hung off the field being removed. It now hangs off `available`: RotaryPhone always
+send it, and it read `available:false` for all 83 minutes of the outage. That single move is what
+keeps an empty, truncated or non-JSON body unhealthy — **and it closed a hole the old guard never
+covered**, since `available:false` previously read as `Online`.
+
+**3. A timestamp without a zone is REFUSED, not guessed.** Measured on the box: `date -d
+"2026-09-09T14:30:50"` → 1788978650 and the same instant with a `Z` → 1788964250 — **four hours
+apart**, because GNU date reads an unzoned value as *local* and the box runs EDT. Either guess is
+permanently past a 120 s gate, which would pin the row. So an uninterpretable timestamp is treated as
+**no signal**, the same answer as a value we did not receive, for ADR-032's reason: a term that can
+never clear pins the state. Nothing is lost, because the safety property is carried by the anchor
+rather than by this term.
+
+### ⛔ Two things pre-merge review caught that the build had got wrong
+
+**1. A comment's stated reason was false, and it had been INHERITED rather than invented.** The
+120 s gate was justified with *"pinned on the C# side by `MeasuredSixtySecondCadence_StaysHealthy`
+so a cadence change fails a test instead of silently turning this row amber."* That test
+(`GvBridgeStatusServiceTests.cs:99`) is a `FakeTimeProvider` plus a literal `AddSeconds(-60)`: it
+never contacts the box and never observes RotaryPhone, so it **cannot fail when the cadence
+changes.** It pins the THRESHOLD against being lowered. ⭐ **The false claim was copied from that
+test's own `<remarks>`, which said the same thing** — so the fix was made in both places. The honest
+statement is that **nothing detects a cadence slip**, and if RotaryPhone's cadence ever exceeds
+120 s the launcher goes amber on every tap with a green suite: the `KIOSK-3` defect through a
+different field. A known, unmonitored assumption, now labelled as one.
+
+**2. A pre-1970 timestamp read as "no signal", i.e. healthy.** `date -d` prints a NEGATIVE epoch for
+a pre-1970 instant, and the digits-only guard treated the leading `-` as a parse failure — routing
+the *most stale reading obtainable* onto the no-signal arm. `date -d "0001-01-01T00:00:00Z" +%s`
+gives `-62135596800`, and `0001-01-01T00:00:00Z` is exactly what .NET's `DateTime.MinValue`
+serialises to: **what a bridge that has never had a successful API call would report.**
+`GvBridgeHealth.IsHealthy` calls that same body unhealthy, so the two consumers disagreed on it and
+the "identical by intent" comment was untrue across that input class. Signed values are now accepted
+so the subtraction yields the huge positive age it is.
+
+⭐ **Both are the same lesson as rule 1 above, one level down: the reason a comment offers is the
+claim to check, and a reason inherited from another file is not thereby verified.** This is the
+fifth entry in this log to record that shape.
+
+### Verification
+
+**RED measured first, as its own commit: 12 passed / 9 failed**, the headline case being a post-#79
+payload with `psidtsAgeSeconds` deleted reading `needsignin`. **GREEN 32/32** after the review fixes,
+both on Windows and on the box under its own `bash` 5.2.21, `grep`, `sed` and coreutils 9.4.
+
+The harness pins the sourcing seam in the **executed** direction too, which nothing did before — its
+failure mode is the desktop icon silently becoming a no-op — and it now refuses to run without GNU
+`date`, because without that check eight of its nine `expect online` cases would have passed for the
+wrong reason on a BSD `date`.
+
+⚠ **Two divergences from `System.Text.Json` are accepted rather than fixed, and pinned by tests so a
+change to them is deliberate:** duplicate keys (this parser takes the first, JSON the last) and
+nested objects (read here as top-level, ignored there). Closing either needs a real JSON parser, and
+`:106-108` is why this file does not take that dependency. Neither shape occurs in any observed
+payload — but RotaryPhone are adding four `browserSession*` fields, so a nested object would want a
+re-check.
+
+Two of the nine RED failures were **not predicted by the queue row** and were pre-existing with the
+field still present: `available:false` and `available` absent both read **`Online`**. The old
+predicate had a silent-`Online` hole of its own — it simply reached it through a different field than
+the one the guard was written to cover.
+
+`date -d` parses the **real** wire format including its 7-digit fractional seconds
+(`2026-09-09T14:30:50.7537656Z` → 1788964250). ⚠ The queue row and its dossier both quoted the field
+as a bare `...T14:12:40Z`; the served value carries the fraction, and the fixture is a verbatim
+capture rather than a retyped one precisely so that cannot drift.
+
+Live on the box, both scripts' `--print-status` seconds apart agreed (`VOICE=online`, `TIER=silent`),
+and **160 consecutive samples** of the new predicate against the live bridge — 8 s apart,
+14:44:30–15:05:50Z, **21 minutes, spanning one of RotaryPhone's ~20-minute cookie cycles** — returned
+**159 online / 1 amber**, max `lastApiSuccessAt` age **59 s**. That is an independent re-measurement
+of the 60 s cadence rather than an inherited one, and it is the cry-wolf check §5.3 requires.
+
+**The cry-wolf rate is therefore measured, not unknown: 1/160 ≈ 0.6% of taps**, against the ~45% the
+retired psidts doctrine feared. The single amber was `cookiesValid:false` + `degraded:true` at
+15:00:04Z and was **one sample wide** — healthy at 14:59:56Z, healthy again at 15:00:12Z, so under
+16 s. ⚠ Measured on the **pre-#78** box, whose churn RotaryPhone say stops when they deploy, so 0.6%
+is an **upper** bound.
+
+⭐ **That one sample is also the sharpest evidence in the whole cycle that the old field had to go.**
+At the exact instant the honest terms reported an impaired session, **`psidtsAgeSeconds` read `2`** —
+its healthiest possible value, scored by the retired rule as deep inside the *"< 660 healthy
+window"*. The mechanism is now plain rather than argued: psidts timed the last credential **reload**,
+and a reload is precisely what happens when a session breaks and is re-established. **The field read
+healthiest exactly when the session was worst.** RotaryPhone's `608`-while-dead capture and our `34`
+sighting were the same phenomenon caught less cleanly.
+
+⛔ **What is NOT proven, and must not be claimed:** that the post-#79 payload has the shape assumed
+here. #79 is merged and parked, not deployed, and our copy of RotaryPhone's wire-changes contract was
+a superseded draft all day. The minimal claim — *deleting `psidtsAgeSeconds` from a verbatim live
+capture must not turn the row amber* — does not depend on the rest of that shape being right, which
+is why it is the case the harness leads with.
+
+**Dossier:** [`archive/queue/KIOSK-3.md`](../../archive/queue/KIOSK-3.md)
+
+---
+
+<!-- NEW ENTRIES GO ABOVE THIS LINE -->

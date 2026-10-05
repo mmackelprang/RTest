@@ -2,7 +2,7 @@
 # radio-shutdown-confirm — the confirmation behind the "Shutdown System" desktop icon.
 # Replaces `gnome-session-quit --power-off`.
 #
-# Design: docs/design-handoffs/HANDOFF-kiosk-desktop-launcher.md §8, approved as §11 Q2.
+# Design: archive/design-handoffs/HANDOFF-kiosk-desktop-launcher.md §8, approved as §11 Q2.
 #
 # GNOME's own confirmation carries a 60-SECOND COUNTDOWN AND THEN POWERS OFF BY ITSELF. On a
 # wall panel that means an accidental tap, followed by the owner walking away, powers the box off

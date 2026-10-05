@@ -10,7 +10,7 @@ namespace Radio.Core.Interfaces;
 /// <b>knob-only</b> design, but as a separate layer rather than a state here:
 /// <see cref="IPanelPowerService"/> is asked first by the router, consumes any input that lights a
 /// dark panel, and leaves the console in whichever of these three states it was already in. See
-/// <c>docs/queue/ENC-22.md</c> and <c>design/INTEGRATIONS.md</c> §1.
+/// <c>archive/queue/ENC-22.md</c> and <c>docs/integrations.md</c> §1.
 /// </para>
 ///
 /// <para>

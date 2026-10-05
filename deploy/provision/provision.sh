@@ -3,7 +3,7 @@
 # deploy/debian-x64/setup.sh, deploy/debian-x64/kiosk/setup-kiosk.sh, and
 # deploy/Deploy-ToLinux.ps1 do NOT capture.
 #
-# This is the "save" half of the IAC audit (design/plans/IAC-PRISTINE-INSTALL-AUDIT.md).
+# This is the "save" half of the IAC audit (archive/design/plans/IAC-PRISTINE-INSTALL-AUDIT.md).
 # It captures the ~20 hand-applied artifacts that make Bluetooth/A2DP audio work,
 # tune the OS, and run the ops automation — so a bare-Ubuntu box can be rebuilt
 # to a working state instead of drifting.

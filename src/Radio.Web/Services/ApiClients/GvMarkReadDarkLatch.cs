@@ -20,10 +20,10 @@ namespace Radio.Web.Services.ApiClients;
 /// notifier — but clearing the latch is deliberately NOT wired to it: the latch records what
 /// RotaryPhone ANSWERED, not what we asked for, and our flag says nothing about theirs.
 /// If RotaryPhone enables mark-read while this is latched, <c>radio-web</c> must be restarted to
-/// pick it up — see design/INTEGRATIONS.md § "Two-flag distinction".
+/// pick it up — see docs/integrations.md § "Two-flag distinction".
 /// ADR-024's recommended rollout order (theirs first, then ours) avoids that state — but GV-6
 /// exists precisely for when it is not followed, which is the only way this latch is ever set.
-/// Treat the restart as a real operational step; design/INTEGRATIONS.md records it as one.
+/// Treat the restart as a real operational step; docs/integrations.md records it as one.
 /// </para>
 /// </summary>
 public sealed class GvMarkReadDarkLatch

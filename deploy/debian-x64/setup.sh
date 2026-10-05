@@ -338,7 +338,7 @@ fi
 # (e.g. the soundbar sink) keyed by media.name and re-writes target.node metadata
 # on every BT reconnect — which policy-node.lua then honours, producing a rogue
 # parallel audio path that bypasses Radio.API entirely. See
-# docs/research/2026-05-22-bt-dual-routing-investigation.md.
+# archive/research/2026-05-22-bt-dual-routing-investigation.md.
 # Bluetooth-monitor rules. 85/87/89 are BT/audio-boundary-owned (adapter
 # isolation, HFP-HF handoff to RotaryPhone, A2DP auto-connect); 90 prevents
 # BT-input auto-link. radio-bt-setup.sh (verify_wp_configs) checks all four, and

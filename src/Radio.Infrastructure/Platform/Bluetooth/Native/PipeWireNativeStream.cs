@@ -37,7 +37,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   private readonly bool _useRealtime;
   private readonly int _rtPriority;
 
-  // Variable-rate resampler (Path D — docs/plans/2026-05-22-bt-input-resampler.md).
+  // Variable-rate resampler (Path D — archive/plans/2026-05-22-bt-input-resampler.md).
   // When non-null, OnProcess routes the input samples through libsamplerate
   // before forwarding to _onAudioData, eliminating the time-domain duplication
   // that BufferedSoundGenerator.CompensateClockDrift would otherwise apply.
@@ -149,7 +149,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   /// When true, captured samples are routed through a libsamplerate
   /// variable-rate resampler before delivery, eliminating BT-vs-speaker
   /// clock-skew time-domain duplication. See Path D in
-  /// <c>docs/plans/2026-05-22-bt-input-resampler.md</c>. Feature-flagged via
+  /// <c>archive/plans/2026-05-22-bt-input-resampler.md</c>. Feature-flagged via
   /// <c>BluetoothOptions.UseInputResampler</c>.
   /// </param>
   /// <param name="initialResamplerRatio">
@@ -339,7 +339,7 @@ internal sealed class PipeWireNativeStream : IBtCaptureStream
   /// sink/source." Without it, node.autoconnect = true is an instruction with no failure mode: when
   /// target.object cannot be resolved the session manager satisfies it with the DEFAULT source, which
   /// on the appliance is alsa_input.pci-0000_00_1f.3.analog-stereo — the unplugged line-in. Measured
-  /// live 2026-09-06 and again, at 1 Hz, 2026-09-25 (docs/queue/AUD-10.md).
+  /// live 2026-09-06 and again, at 1 Hz, 2026-09-25 (archive/queue/AUD-10.md).
   ///
   /// ⚠ AUD-10: dont-reconnect does NOT stop us following the node across a pause. The A2DP node is
   /// destroyed on pause and recreated on resume under a NEW object.serial, which this stream's

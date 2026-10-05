@@ -6,15 +6,15 @@
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](../../archive/queue/BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | 📋 |
-| Plan | [`design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md`](../../design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md) · **2 d** minimal / **3 d** split · **not auto-mergeable — Task 4 changes engine-stop behaviour on the live audio path** |
+| Plan | [`archive/design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md`](../../archive/design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md) · **2 d** minimal / **3 d** split · **not auto-mergeable — Task 4 changes engine-stop behaviour on the live audio path** |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ · commit `03a6fea` is the provenance for the "one layer too high" trap · **PR #468 (`8b1ce0a`) is the provenance for the third layer** |
-| Depends on | — _(**no dependency. ⚠ The "prefer `AUD-2` first" note that stood here was FALSIFIED 2026-09-06 and is removed, not softened.** [`ORDERING-NOTES.md`](ORDERING-NOTES.md)'s claim that `AUD-2` and `AUD-4` are "two symptoms of ONE root cause" and that `AUD-2` "decides the key" is **false**: per-source teardown is key-symmetric — `SDRRadioAudioSource.cs:915` mints `_playbackId` and `:1027`/`:1059` stop with the same field — and this row's roster is keyed by **object reference**, not by string, so there is no key here to decide. The row's prescribed "sweep `_activeComponents` instead" is unnecessary and also points at dead code: `SoundFlowPlaybackService.StopAll()` has **zero callers in the tree**. Plan: `design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md` §0.4, `C-148`, `C-150`. **Still rebase past #468.**)_ |
+| Depends on | — _(**no dependency. ⚠ The "prefer `AUD-2` first" note that stood here was FALSIFIED 2026-09-06 and is removed, not softened.** [`ORDERING-NOTES.md`](ORDERING-NOTES.md)'s claim that `AUD-2` and `AUD-4` are "two symptoms of ONE root cause" and that `AUD-2` "decides the key" is **false**: per-source teardown is key-symmetric — `SDRRadioAudioSource.cs:915` mints `_playbackId` and `:1027`/`:1059` stop with the same field — and this row's roster is keyed by **object reference**, not by string, so there is no key here to decide. The row's prescribed "sweep `_activeComponents` instead" is unnecessary and also points at dead code: `SoundFlowPlaybackService.StopAll()` has **zero callers in the tree**. Plan: `archive/design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md` §0.4, `C-148`, `C-150`. **Still rebase past #468.**)_ |
 | Branch | `refactor/unify-source-removal-and-rename-mixer` |
 
 ## Detail
@@ -55,7 +55,7 @@ as filed. **⚠ The row's claim that "the rename is the durable half — it is w
 recurring" did not survive planning (`C-147`): the rename would not have prevented `03a6fea`, and
 the actual recurrence-preventer shipped in #468. The rename is justified as log honesty and
 detection latency. Re-price the row if that was what bought its priority.**
-_plan: `design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md` · **2 d** minimal / **3 d**
+_plan: `archive/design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md` · **2 d** minimal / **3 d**
 split · **not auto-mergeable — Task 4 changes engine-stop behaviour on the live audio path**_
 
 **Budget note:** renaming the interface touches DI wiring and any test doubles, so this is a larger diff than the behaviour change suggests. _**Anchors re-verified 2026-08-11 against `main` @ `8b1ce0a`** and all are byte-exact and unchanged: `SoundFlowMasterMixer.cs:10`/`:13`/`:109-121`/`:118`, `SoundFlowPlaybackService.cs:25`/`:494`/`:526`/`:548`, `AudioManager.cs:214-217`, `SDRRadioAudioSource.cs:908`, and `AudioSourceBase.cs:28` — that last one checked specifically because #468 **did** touch the file, but its hunk starts at `:97`, well below the `Id` derivation._

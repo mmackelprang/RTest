@@ -63,7 +63,7 @@ public static class FmBandMath
   /// How far above the map's median a channel must stand to be drawn <see cref="BandSignalTier.Fair"/>
   /// (cyan) rather than <see cref="BandSignalTier.Weak"/> (blue), in dB (UI-22). Provisional when the
   /// owner chose the ramp (spec Q5). Kept unchanged after the tier split of the box's four stored maps was
-  /// counted on 2026-10-01 (recorded in <c>docs/queue/UI-22.md</c>); the owner's look at the panel is
+  /// counted on 2026-10-01 (recorded in <c>archive/queue/UI-22.md</c>); the owner's look at the panel is
   /// the check that fixes it.
   /// </summary>
   public const double FairSignalDb = 12.0;

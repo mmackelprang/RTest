@@ -1363,7 +1363,7 @@ public class RadioControlPanelTests : TestContext
   public void BandPills_SitOnOneRow()
   {
     // UI-20 (spec §2.2, §4.3): six equal pills on one row. Layout cannot be measured in
-    // bUnit — the box measurement in docs/queue/UI-20.md is the real evidence — so this
+    // bUnit — the box measurement in archive/queue/UI-20.md is the real evidence — so this
     // pins the two rules that produce it: the group never wraps, and each pill shares the
     // row equally.
     var state = BuildState();

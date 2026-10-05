@@ -54,7 +54,7 @@ public enum RotaryEncoderFlashState
 /// the kernel reported every write as a success. Flashing an older build reinstates that silently:
 /// <c>ENC-11</c>'s configuration push does nothing and the device runs whatever is in its flash,
 /// which on a factory-default Pico is volume acceleration at ×50. See
-/// <c>design/research/ENC-11-firmware-drops-output-reports.md</c>.
+/// <c>archive/design/research/ENC-11-firmware-drops-output-reports.md</c>.
 /// </para>
 ///
 /// <para>

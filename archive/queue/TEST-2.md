@@ -1,0 +1,95 @@
+# TEST-2 — Close the deferred-capture branch-dispatch coverage gap left by PR #469 — if a native test harness ever becomes feasible.
+
+> Queue dossier for row **`TEST-2`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
+> The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
+> whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
+>
+> ⚠ **Directional words in the prose were written when every row shared one file.**
+> *above*, *below* and *this file* may now point across files — most often at
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> directory. They were left verbatim rather than reworded, which would be a content edit.
+
+---
+
+## ⚠⚠ CORRECTION 2026-09-08 — THIS ROW'S CENTRAL PREMISE WAS FALSE. Read this before the Detail below.
+
+**Shipped by `TEST-2` (ADR-030). The prose in § Detail is preserved as filed and is WRONG in three
+specific places**, each corrected here rather than edited in place, so the reasoning that produced the
+error stays legible:
+
+⚠ _Line numbers below are as this file stands NOW. They were first written as `:26`/`:30`/`:42` — the positions in the file as filed — and inserting this block moved every one of them down 40 lines, so the citations pointed at the correction rather than at what it corrects. Caught in pre-merge review. **A block that renumbers the thing it cites has to be numbered last**, which is the same lesson as the Cast anchors this row re-derived before its own diff moved them again._
+
+
+1. ⛔ **`:66`'s "constructing either type needs a native SoundFlow `AudioEngine`" is FALSE.** Neither
+   `SoundComponent` nor `AudioCaptureDevice` needs one. Both are **abstract**, and their constructors
+   *store* the engine reference without ever dereferencing it, so Moq subclasses either with `null!`.
+   The row cited the method's own doc comment as its authority — and **that comment was itself
+   asserting something untrue**, which is the failure mode `CLAUDE.md` § *Pre-Merge Review* exists to
+   catch, here with a queue row as the victim rather than a code change. Only the **engine** is native.
+2. ⛔ **`:70`'s "Three places make the same `capture is …` decision and none is covered end-to-end" was
+   untrue when written.** `:159`/`:166` was **already covered** by
+   `WasapiLoopbackTests.InitializeAsync_WithSoundComponent_SetsReadyState`, which has mocked
+   `SoundComponent` with a null engine and run in CI on every push since before this row was filed.
+   Confirmed by mutation: disabling that arm turns that test red.
+3. ⛔ **`:82`'s "Four seams" is THREE.** `GoogleCastOutput.CastStatusReadOverrideForTests` exists only
+   inside `AUD-5`'s *plan*, not in `src/`. The row's conclusion survives the recount; the count does not.
+
+**What the row asked and what it got.** The literal feasibility question — *can a native `AudioEngine`
+be stood up in a unit test?* — is answered **NO** (native constructor, headless CI, and
+`NoRawMiniAudioEngineConstructionTests` forbids it in `src/` anyway). But the engine was never the
+requirement, so the row closed by **building** the coverage rather than recording its absence: **two of
+the three `capture is …` dispatch pairs** (`:159`/`:166` and `:486`/`:497`) and **all three
+`ApplyDeferredCaptureState` call sites** (`:472`, `:489`, `:500`) now covered through the real path, the
+Kind-D seam at `ApplyDeferredCaptureState` **retired** (`internal` → `private`) rather than labelled,
+and the convention written as `design/TESTING.md` § *Test Seams* + `ADR-030`.
+
+⚠ **The third dispatch pair — `TryReacquireCaptureAsync` (`:687`/`:692`) — is NOT covered**, per the
+plan's §6.1: it is reachable only from a 10 s background retry loop, and with `_playbackService` null
+neither arm has an observable consequence to assert, so a test would execute a branch and assert
+nothing. **Recorded, not closed.** ⚠ Watch for the two different "threes" here — three
+`ApplyDeferredCaptureState` call sites (all covered) and three `capture is …` pairs (two covered); an
+earlier draft of this block merged them and claimed all three.
+
+⚠ **The row sat open FOUR WEEKS, not thirteen months** — filed 2026-08-10, shipped 2026-09-08. The
+"thirteen months" figure came from the planning report and was repeated three times before anyone
+subtracted the two dates. `design/plans/TEST-2-*.md` still carries it (Planner's artifact, not
+corrected here).
+
+✅ **`AUD-3` residue (c) is DISCHARGED** by this row. ⚠ **(a) and (b) are NOT** — (a) is the
+never-performed hardware UAT of the Cast race, (b) the untested service-level epoch commit. Both live.
+
+---
+
+| Field | Value |
+|---|---|
+| Status | ✅ |
+| Plan | _plan TBD — **feasibility check first**: if a native SoundFlow test harness is not practical, close the row and say so — **and if so, prefer closing it with the seam convention described above rather than with nothing**_ |
+| Spec / handoff | _no spec doc — the diagnosis is in this row_ · PR #469 (merged) is where the seam and its tests landed · **PR #468 (`8b1ce0a`) is where the second and third seams landed** |
+| Depends on | — _(no dependency. **Touches the same file as AUD-1** (`BluetoothAudioSource.cs`); if both are in flight, expect line anchors to move.)_ |
+| Branch | `test/bt-capture-branch-dispatch-coverage` |
+
+## Detail
+
+**Close the deferred-capture branch-dispatch coverage gap left by PR #469 — if a native test harness ever becomes feasible.**
+
+**This row records a known limit so it is not mistaken for coverage. It may legitimately close as "still infeasible," and that is an acceptable outcome.** PR #469's deferred-capture test reaches the acquisition through the **internal `ApplyDeferredCaptureState()` seam** (`src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs:454`, driven from `tests/Radio.Infrastructure.Tests/Audio/BluetoothAudioSourceTests.cs:917`, `:930`, `:954`) rather than by driving the real `capture is AudioCaptureDevice` / `capture is SoundComponent` branches end-to-end.
+
+**Why, and it is already recorded in the code:** constructing either type needs a **native SoundFlow `AudioEngine`**, which the method's own doc comment states at `BluetoothAudioSource.cs:449-452` — that constraint is exactly why the seam is `internal` + `InternalsVisibleTo` in the first place.
+
+**What IS pinned by #469:** the state decision (a source already `Playing` stays `Playing`; only a not-yet-playing source lands in `Ready`) and its tap consequence — demoting to `Ready` would silently kill fingerprinting while audio keeps flowing.
+
+**What is NOT pinned:** the branch dispatch around it — `TryAcquireAudioCaptureAsync` (`:462`) at `:483` / `:494`, plus the two sibling dispatch sites at `:159` / `:166` and `:684` / `:689`. Three places make the same `capture is …` decision and none is covered end-to-end.
+
+**⚠ Do not "close" this with a mock that asserts the seam again from a different angle** — that adds a test without adding coverage, and would make the gap harder to see than leaving it open. The only real close is a harness that can produce a native `AudioEngine` (or a genuine integration test on the box).
+
+**Lowest priority in the 2026-08-10 tranche** — nothing is broken; the risk is that a future refactor of the dispatch goes unnoticed.
+
+**⚠ ADDED 2026-08-11 — this stopped being a one-off, which raises the row's value without widening its scope.** PR #468 (`8b1ce0a`) closed *its* test gap the same way, and needed **two** `internal` seams to do it: `GoogleCastOutput.ConnectRaceHookForTests` (`:54`) to interleave a teardown at the exact point between receiver resolution and the network connect, and then `ConnectTransportOverrideForTests` (`:64`) because the first could not reach the succeeded-then-lost branch offline — a fake socket cannot complete a Cast handshake, so every connect diverted into the error handler instead.
+
+**So the codebase now has three `internal`+`InternalsVisibleTo` seams that exist solely because a native/hardware dependency makes the real path untestable** (`ApplyDeferredCaptureState` here, plus #468's two).
+
+**What this changes about this row: the feasibility check should ask the general question, not just the Bluetooth one.** If the honest answer is *"native `AudioEngine` construction in tests is not practical,"* then the durable output of this row is **a stated, written convention for when a seam is acceptable and how it must be labelled** — which would also retire `AUD-3`'s residue (c) — rather than a Bluetooth-specific test. That is a legitimate close for this row and a better one than another mock.
+
+_**⚠ ADDED by `AUD-5`'s plan, 2026-09-05 — a FOURTH seam.** `GoogleCastOutput.CastStatusReadOverrideForTests` substitutes the Cast status read inside `SyncInitialVolumeAsync`, for the same reason `ConnectTransportOverrideForTests` exists: no fake socket can answer a Cast `GET_STATUS`, so the read always throws and the method diverts into its catch before the generation check is ever evaluated. It is not a mock re-asserting a seam — the test drives the real `ConnectAsync`, the real `_connectionGeneration`, the real `DisconnectAsync` and the real re-check, and only the network read is substituted. **Four seams now exist solely because a native/hardware dependency makes the real path untestable**, which strengthens this row's own conclusion: the durable deliverable is the written convention, not a Bluetooth-specific test._
+
+**Still forbidden, unchanged:** do not close this with a mock that re-asserts the seam from a different angle. _Anchors re-verified 2026-08-11 against `main` @ `8b1ce0a` — all byte-exact and unchanged (#468 did not touch `BluetoothAudioSource.cs`): `:159`/`:166`, `:449-452`, `:454`, `:462`, `:483`/`:494`, `:684`/`:689`, and `BluetoothAudioSourceTests.cs:917`/`:930`/`:954`._

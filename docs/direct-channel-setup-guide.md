@@ -333,7 +333,7 @@ curl http://<host>:5000/api/devices/cast/volume
 ```
 
 While Cast is the active output, the console's volume and mute drive the speaker (`AUD-81`; design
-in `docs/queue/AUD-81.md` § As built).
+in `archive/queue/AUD-81.md` § As built).
 
 ### 6e. Start Playing Audio
 
@@ -438,7 +438,7 @@ displays, keep using the custom receiver.
 
 ```
 Receiver HTML:     docs/receiver-direct-channel.html
-Architecture doc:  design/direct-cast-channel.md
+Architecture doc:  docs/direct-cast-channel.md
 Config file:       src/Radio.API/appsettings.json → AudioOutput.GoogleCast
 Cast Dev Console:  https://cast.google.com/publish/
 Diagnostics API:   GET /api/devices/cast/diagnostics

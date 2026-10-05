@@ -484,7 +484,7 @@ public static class AudioServiceExtensions
     // picker mutates VisualizerPanel's own private enum and its saved preference, and never went
     // through this service. Visualiser mode is now single-surface and local-only BY DECISION - a
     // mode change on the kiosk does not reach a phone browsing the same console. If a second surface
-    // is ever wanted, design/FUTURE-WORK.md §17 records exactly what was removed and why.
+    // is ever wanted, docs/known-issues-and-future-work.md §17 records exactly what was removed and why.
 
     // HUD feedback channel. Singleton because the coalescer is per-encoder state that must outlive
     // any single event, and because AudioStateUpdateService subscribes to it once for the process.
@@ -520,7 +520,7 @@ public static class AudioServiceExtensions
     // That buys lifetime legality and nothing else. FingerprintDbContext, which the preset
     // repository reads through, is registered SINGLETON and hands every caller the same
     // SqliteConnection, so a repository built in a fresh scope still works over the same connection
-    // as every HTTP request. No isolation is claimed here; see design/FUTURE-WORK.md.
+    // as every HTTP request. No isolation is claimed here; see docs/known-issues-and-future-work.md.
     services.AddSingleton<PresetSelectorService>(sp => new PresetSelectorService(
       sp.GetRequiredService<ILogger<PresetSelectorService>>(),
       sp.GetRequiredService<IServiceScopeFactory>(),

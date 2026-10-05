@@ -81,7 +81,7 @@ BUILD_PKGS=(build-essential pkg-config)
 
 # Feature + ops packages.
 #
-# `onboard` was removed 2026-08-18. docs/uat/2026-08-03-osk-wayland-viability/REPORT.md measured
+# `onboard` was removed 2026-08-18. archive/uat/2026-08-03-osk-wayland-viability/REPORT.md measured
 # Google Chrome 151 on Wayland issuing ZERO zwp_text_input_v3.enable() calls when a web-page
 # input takes focus, so the OS keyboard cannot type into the kiosk at all. Text entry is the Web
 # UI's own virtual keyboard. setup-kiosk.sh disables a leftover autostart entry on already-

@@ -272,9 +272,9 @@ every failed launch); we will update the Change Log row if that changes.
 The tempting conclusion is *"the protocol's reply half was never used."* **That is not what happened.**
 We wrote both replies, on time:
 
-- `docs/handoffs/radioconsole-gv-threadid-decode-b1-reply.md` — committed `d4c3b5e`, **2026-07-31**,
+- `archive/handoffs/radioconsole-gv-threadid-decode-b1-reply.md` — committed `d4c3b5e`, **2026-07-31**,
   the same day as the fix.
-- `docs/handoffs/radioconsole-gv-auth-blackout-reply.md` — committed `dc01037`, **2026-08-01**.
+- `archive/handoffs/radioconsole-gv-auth-blackout-reply.md` — committed `dc01037`, **2026-08-01**.
 
 Neither is referenced anywhere in your repo. **The replies were written and never delivered.** The
 protocol in the boundary doc has a well-defined *inbound* lane — you create a file under our

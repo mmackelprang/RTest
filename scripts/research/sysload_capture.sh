@@ -17,7 +17,7 @@
 #
 # Used by Phase 1+2 plans (BT capture watchdog, BT codec observability, Cast HM
 # DC parity, CPU affinity for FM-BT-11/FM-CAST-7). See
-# docs/research/2026-05-22-bt-audio-stabilization.md §7 Idea #1 (PROBE-SYS-LOAD).
+# archive/research/2026-05-22-bt-audio-stabilization.md §7 Idea #1 (PROBE-SYS-LOAD).
 
 set -eu
 

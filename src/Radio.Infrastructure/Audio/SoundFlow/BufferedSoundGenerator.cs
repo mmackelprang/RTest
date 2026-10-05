@@ -142,7 +142,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// <summary>
     /// When true, the per-callback <see cref="CompensateClockDrift"/> entry is
     /// short-circuited. Set by the BT capture path when the libsamplerate
-    /// input resampler is active (Path D — docs/plans/2026-05-22-bt-input-resampler.md),
+    /// input resampler is active (Path D — archive/plans/2026-05-22-bt-input-resampler.md),
     /// to avoid double-correcting the clock skew (the resampler smoothly
     /// stretches the input stream, so the legacy time-domain duplication would
     /// over-correct and introduce its own artifacts).
@@ -849,7 +849,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
         // which is inaudible at the sub-millisecond scale but prevents the buffer
         // from draining to zero and causing full underruns (silence gaps).
         //
-        // Path D (docs/plans/2026-05-22-bt-input-resampler.md): when the BT
+        // Path D (archive/plans/2026-05-22-bt-input-resampler.md): when the BT
         // input is going through libsamplerate, the resampler smoothly stretches
         // the producer stream to match the consumer rate — there's no per-call
         // drift to compensate, and running the legacy duplication on top would
@@ -917,7 +917,7 @@ public class BufferedSoundGenerator<T> : SoundComponent where T : struct
     /// across ~5× more events that are each individually sub-perceptual. A cosine-ramp
     /// crossfade is applied across the rewind boundary on the float ring buffer to
     /// eliminate the boundary discontinuity click. See
-    /// docs/plans/2026-05-22-bt-drift-compensation-refinement.md.
+    /// archive/plans/2026-05-22-bt-drift-compensation-refinement.md.
     /// </summary>
     private void CompensateClockDrift(int channels)
     {

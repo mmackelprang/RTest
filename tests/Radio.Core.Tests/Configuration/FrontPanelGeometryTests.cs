@@ -4,7 +4,7 @@ namespace Radio.Core.Tests.Configuration;
 
 /// <summary>
 /// Pins the one definition of the front panel against the drawing it derives from,
-/// <c>design/hardware/front-panel-layout_4.svg</c>.
+/// <c>docs/hardware/front-panel-layout_4.svg</c>.
 ///
 /// <para>
 /// These are deliberately not tautologies over the constants. Each one re-derives a value from an

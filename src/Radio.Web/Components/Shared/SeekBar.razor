@@ -4,7 +4,7 @@
 @* SeekBar — drag-to-seek with SEEK ON RELEASE (AUD-28 owner ruling 2026-09-25; UI-16 by analogy).
 
    ⛔ OnSeek fires ONCE per gesture, when the pointer is released. Nothing during the drag reaches it,
-   and there is no debounce or throttle — option (2) in docs/queue/AUD-28.md was declined by the owner.
+   and there is no debounce or throttle — option (2) in archive/queue/AUD-28.md was declined by the owner.
    The accepted cost is silence-then-jump: no audible response while dragging, and no scrub preview.
 
    OnScrub is the readout channel: it carries the fraction under the finger while the drag is live, so a

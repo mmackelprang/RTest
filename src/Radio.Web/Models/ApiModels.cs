@@ -1350,7 +1350,7 @@ public class GvBridgeStatusDto
   /// </summary>
   /// <remarks>
   /// ⚠ NULL IS NOT TREATED AS UNHEALTHY, which deliberately departs from the wording in
-  /// docs/queue/GV-12.md:46. That wording is correct for a banner (fail visible) and would
+  /// archive/queue/GV-12.md:46. That wording is correct for a banner (fail visible) and would
   /// be fatal here (fail silent) — see the block comment above and plan GV-12 §0.4.
   /// </remarks>
   public DateTime? LastApiSuccessAt { get; set; }

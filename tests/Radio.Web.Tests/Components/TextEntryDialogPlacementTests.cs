@@ -19,7 +19,7 @@ namespace Radio.Web.Tests.Components;
 ///
 /// <para>
 /// The kiosk types with <c>js/virtual-keyboard.js</c>: GNOME's own on-screen keyboard never opens for
-/// Chrome on this box (<c>docs/uat/2026-08-03-osk-wayland-viability/REPORT.md</c>). That keyboard is
+/// Chrome on this box (<c>archive/uat/2026-08-03-osk-wayland-viability/REPORT.md</c>). That keyboard is
 /// fixed to the bottom of the screen and does not resize the page; measured in Chromium at 1920×720 its
 /// top edge is at y = 348 (QWERTY) or y = 360 (numpad), and everything below is hidden while it is up. Centred
 /// dialogs put their field and buttons there; the owner found it on the Rename dialog.
@@ -29,7 +29,7 @@ namespace Radio.Web.Tests.Components;
 /// bUnit computes no styles, so the placement itself is pinned here as stylesheet rules, and the
 /// hand-built overlays are checked for the shared classes (the panel's three in
 /// <c>RadioControlPanelTests</c>, the Radio page's two below). The rendered geometry was measured in
-/// Chromium at 1920×720 (see <c>docs/queue/UI-24.md</c>).
+/// Chromium at 1920×720 (see <c>archive/queue/UI-24.md</c>).
 /// </para>
 ///
 /// <para>

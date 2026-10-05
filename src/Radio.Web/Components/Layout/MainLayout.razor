@@ -1647,7 +1647,7 @@
       // Handoff §7.6 gives each of these an action: "-> Open encoder settings". Clicking the toast
       // body is how this codebase already does toast actions (RadioControlPanel.razor:1372).
       // It lands on /system, not on the Integrations sub-tab: SystemConfigPage's RadzenTabs has no
-      // route parameter, so this is one tap short of the card. Recorded in design/FUTURE-WORK.md;
+      // route parameter, so this is one tap short of the card. Recorded in docs/known-issues-and-future-work.md;
       // the copy does not promise more than it delivers.
       Click = _ => NavigationManager.NavigateTo("/system"),
     });

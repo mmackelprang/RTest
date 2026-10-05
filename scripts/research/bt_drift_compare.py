@@ -28,7 +28,7 @@ Success criteria (objective only — subjective UAT is operator-run):
 Exit 0 on PASS, 1 on FAIL. The subjective "underwater" UAT is reported as
 informational only — the operator is the authority on that criterion.
 
-Plan reference: docs/plans/2026-05-22-bt-drift-compensation-refinement.md §5.
+Plan reference: archive/plans/2026-05-22-bt-drift-compensation-refinement.md §5.
 """
 
 from __future__ import annotations

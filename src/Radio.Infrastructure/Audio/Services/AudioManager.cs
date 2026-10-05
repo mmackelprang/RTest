@@ -702,7 +702,7 @@ public class AudioManager : IAudioManager, IAsyncDisposable
     // ⚠ "volumeRestored" is REPORTED, not ASSERTED. The wording this replaces — "Ducking ended:
     // volume restored, activeEvents={EventCount}" — was printed unconditionally: with a null
     // _activeSource (nothing to restore) and with a missed key (nothing restored) it said exactly
-    // what it says on success. docs/HANDOFF-GA-PUNCH-LIST.md cites this family of lines as evidence
+    // what it says on success. archive/handoffs/HANDOFF-GA-PUNCH-LIST.md cites this family of lines as evidence
     // that ducking works end to end; it never was such evidence, and AUD-2 corrects that entry.
     _logger.LogInformation(
       "Ducking ended: activeEvents={EventCount}, volumeRestored={Restored}, otherEntriesCleared={OtherEntries}",

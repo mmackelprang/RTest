@@ -11,7 +11,7 @@ test stopped the rotary ringer, **but the cell kept ringing**. That is open in R
 
 Owner, 2026-10-03: *"The 'Ignore' API is done and you have a handoff for it. … if you could do any prep or start working on it, that would be great."* Earlier ruling (2026-10-02, `PHN-11`): *"d - yes - ignore is the label I want."*
 
-## The route (RotaryPhone reply, `docs/handoffs/radioconsole-decline-endpoint-reply.md` on their `main`)
+## The route (RotaryPhone reply, `archive/handoffs/radioconsole-decline-endpoint-reply.md` on their `main`)
 
 - `POST /api/phone/decline?phoneId=default` → `200 {"declined": true}` only from `Ringing`; `409 {"declined": false, "state": "<Idle|Dialing|InCall>"}` otherwise; `404` for an unknown phone id.
 - Atomic against a handset lift (same lock; raced 200× in their tests). After a `200` the `Idle` broadcast follows synchronously.
@@ -22,8 +22,8 @@ Owner, 2026-10-03: *"The 'Ignore' API is done and you have a handoff for it. …
 
 1. **`409` is benign, not a failure.** `PHN-11` treats anything but `200 {"declined":true}` as "Couldn't end the call. Try again." Per the reply: `409` + `"state":"InCall"` = the handset was lifted first → close quietly (or show ANSWERED); `409` + `"state":"Idle"` = the caller gave up → close quietly. Keep the error only for transport failures, 5xx, 404, or a `200` without `declined:true`.
 2. **Enable it:** set `"RotaryPhone": { "DeclineSupported": true }` (Radio.Web `appsettings.Production.json` seed or the config store) once the real-call test passes; then run `PHN-11`'s Ignore owner check.
-3. **Phone page:** rename the hero's disabled **Reject** to **Ignore** and wire it to the same decline (`design/FUTURE-WORK.md`, `PHN-11` entry).
-4. **Update `design/FUTURE-WORK.md`** (the `PHN-11` Ignore entry becomes done) and `design/INTEGRATIONS.md`.
+3. **Phone page:** rename the hero's disabled **Reject** to **Ignore** and wire it to the same decline (`docs/known-issues-and-future-work.md`, `PHN-11` entry).
+4. **Update `docs/known-issues-and-future-work.md`** (the `PHN-11` Ignore entry becomes done) and `docs/integrations.md`.
 
 ## What the caller experiences (RotaryPhone, from code — untested)
 

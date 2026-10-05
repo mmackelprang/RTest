@@ -10,7 +10,7 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
 /// Unit tests for <see cref="SrcVariableResampler"/> — the libsamplerate
 /// wrapper used by the BT input path to compensate for clock skew between
 /// the BT phone and the local speaker (Path D —
-/// docs/plans/2026-05-22-bt-input-resampler.md).
+/// archive/plans/2026-05-22-bt-input-resampler.md).
 ///
 /// Trait gates these tests behind <c>RequiresLibSampleRate</c> so they
 /// can be filtered out on test runners that don't have <c>libsamplerate0</c>

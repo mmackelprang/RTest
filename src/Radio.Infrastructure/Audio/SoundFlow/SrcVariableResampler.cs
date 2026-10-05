@@ -11,7 +11,7 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 /// Managed wrapper around libsamplerate's variable-rate sample-rate converter.
 /// Used by the BT input path to compensate for the ~250 ppm clock skew between
 /// the BT phone clock and the local speaker clock — see Path D in
-/// <c>docs/plans/2026-05-22-bt-input-resampler.md</c>.
+/// <c>archive/plans/2026-05-22-bt-input-resampler.md</c>.
 ///
 /// <para>
 /// Single-threaded: the wrapper assumes only one producer (the PipeWire thread

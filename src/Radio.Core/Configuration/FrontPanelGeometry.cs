@@ -47,7 +47,7 @@ public sealed record EncoderPanelPosition
 /// The as-built front panel, expressed once.
 ///
 /// <para>
-/// <b>Source of truth: <c>design/hardware/front-panel-layout_4.svg</c></b> (dated 2026-09-01,
+/// <b>Source of truth: <c>docs/hardware/front-panel-layout_4.svg</c></b> (dated 2026-09-01,
 /// committed to this repo). Every value here is derived from that drawing at
 /// <see cref="DrawingPxPerMm"/>, and the drawing wins over this file if they ever disagree. If the
 /// panel is recut, the drawing changes first and these numbers are re-derived from it.
@@ -72,7 +72,7 @@ public sealed record EncoderPanelPosition
 public static class FrontPanelGeometry
 {
   /// <summary>Repo-relative path of the drawing every value here derives from.</summary>
-  public const string DrawingPath = "design/hardware/front-panel-layout_4.svg";
+  public const string DrawingPath = "docs/hardware/front-panel-layout_4.svg";
 
   /// <summary>
   /// The drawing's scale: user units per millimetre. Established from its VESA-75 reference

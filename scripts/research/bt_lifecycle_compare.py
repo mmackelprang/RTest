@@ -5,7 +5,7 @@ Inputs:
   argv[1]  baseline classified artifact (output of bt_lifecycle_summarize.py)
   argv[2]  after classified artifact (same format)
 
-Success criterion (Plan E §7, docs/plans/2026-05-22-pw-event-subscription.md):
+Success criterion (Plan E §7, archive/plans/2026-05-22-pw-event-subscription.md):
   - detection_latency_ms_p95 ≤ 200 ms (after)
   - teardown_latency_ms_p95 ≤ 500 ms (after)
   - failed_detections == 0 (after)

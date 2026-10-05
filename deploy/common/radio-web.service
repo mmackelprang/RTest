@@ -75,7 +75,7 @@ Environment=ApiBaseUrl=http://localhost:5000
 # key ring explicitly (src/Radio.Web/Configuration/DataProtectionSetup.cs, path from
 # appsettings.json's DataProtection:KeysPath), so this line is defense in depth for
 # any OTHER consumer of $HOME rather than the fix itself. See
-# design/plans/SECRET-KEYRING-INVESTIGATION.md.
+# archive/design/plans/SECRET-KEYRING-INVESTIGATION.md.
 #
 # MUST be /opt/radio-console/data, NOT /opt/radio-console: ProtectSystem=strict
 # makes the whole filesystem read-only apart from ReadWritePaths, and only logs/,

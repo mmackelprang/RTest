@@ -17,7 +17,7 @@ namespace Radio.Infrastructure.Tests.Platform.Input;
 /// </para>
 ///
 /// <para>
-/// Why bother: <c>design/INTEGRATIONS.md</c> documented a wrong 8-byte encoder report format for
+/// Why bother: <c>docs/integrations.md</c> documented a wrong 8-byte encoder report format for
 /// months and nothing mechanical caught it. A harness that encoded its frames its own way could
 /// reproduce that failure silently — it would inject bytes that are not what the hardware sends,
 /// and every UAT driven by it would be measuring fiction, confidently. A harness that only agrees

@@ -2,7 +2,7 @@
 
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
-⛔ **ON HOLD 2026-10-02 BY OWNER RULING.** Owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."* So: **AM and SW stay exactly as they are** — option 1 (dim the pills, `UNAVAILABLE`, a toast instead of switching band; the preset-bar spec's PR 4) is **declined for now** and is not to be built. Options 2–4 become the roadmap's *All-band reception* item ([`docs/ROADMAP.md`](../ROADMAP.md) § Queued; hardware spec in [`design/FUTURE-WORK.md`](../../design/FUTURE-WORK.md) § All-band reception), executed once the owner has the hardware. Revisit the PR 4 UI then, if any band is still unreceivable. The two "still open" notes below were true until this ruling.
+⛔ **ON HOLD 2026-10-02 BY OWNER RULING.** Owner: *"#4 - keep as it is. Once I have the new hardware, we'll execute the roadmap item."* So: **AM and SW stay exactly as they are** — option 1 (dim the pills, `UNAVAILABLE`, a toast instead of switching band; the preset-bar spec's PR 4) is **declined for now** and is not to be built. Options 2–4 become the roadmap's *All-band reception* item ([`archive/roadmaps/ROADMAP.md`](../../archive/roadmaps/ROADMAP.md) § Queued; hardware spec in [`docs/known-issues-and-future-work.md`](../known-issues-and-future-work.md) § All-band reception), executed once the owner has the hardware. Revisit the PR 4 UI then, if any band is still unreceivable. The two "still open" notes below were true until this ruling.
 
 🟢 **P3, decision row.** Filed 2026-10-01 by the `AUD-91` Builder, from that row's box feasibility
 measurements. **The reception results below are MEASURED on `radio`; the hardware options are from
@@ -45,7 +45,7 @@ and is worth doing whatever is decided about the others.
 ## 2026-10-01 — option 1's UI is designed and ready to build once this is decided
 
 The Designer's preset-bar spec
-([`design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md`](../design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md)
+([`design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md`](../../archive/design-handoffs/2026-10-01-radio-presets-bar-and-band-colour.md)
 §6, §7, and its PR 4 in §10) recommends option 1 as **"shown disabled with the reason"**:
 
 - **Band pill:** dimmed to 0.4 opacity (the project's disabled convention), with the range sub-label
@@ -73,10 +73,10 @@ the band-map endpoint, or a shared source both read — is a Planner / Architect
 whether the current hardware and software would capture or play decent AM/SW stations, the answer
 (measured, see above) is no: the R820T cannot lock below ~24 MHz, so no AM or SW station is receivable at
 any strength. **Owner:** *"Spec out what HW I would need to make all the bands work, and add that to the
-roadmap."* → the spec is [`design/FUTURE-WORK.md` § All-band reception](../../design/FUTURE-WORK.md)
+roadmap."* → the spec is [`docs/known-issues-and-future-work.md` § All-band reception](../known-issues-and-future-work.md)
 (options A: one HF-capable RTL-SDR Blog dongle — V4 discontinued, V4 Lite expected to keep HF, verify at
 purchase; B: a second dongle permanently behind an HF upconverter; plus an HF/MW antenna) and the roadmap
-entry is [`docs/ROADMAP.md`](../ROADMAP.md) § Queued → *All-band reception*. Options 2–4 above are
+entry is [`archive/roadmaps/ROADMAP.md`](../../archive/roadmaps/ROADMAP.md) § Queued → *All-band reception*. Options 2–4 above are
 therefore deferred until the owner buys hardware. **Still open:** option 1 (show AM/SW as unavailable in
 the panel) — the owner has not ruled on it.
 
@@ -90,4 +90,4 @@ view's AM map shows it as a peak (that view would then need an AM channel plan, 
 
 - `AUD-91` — the band-aware sweep and BAND view, whose feasibility pass measured this.
 - `AUD-76` — the FM band map (*"AM/shortwave: no direct-sampling support, so FM is the target"*).
-- [`UI-20`](UI-20.md) — the preset bar and one-row bands; leaves AM/SW as they are until this is decided.
+- [`UI-20`](../../archive/queue/UI-20.md) — the preset bar and one-row bands; leaves AM/SW as they are until this is decided.

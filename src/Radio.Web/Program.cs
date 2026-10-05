@@ -549,7 +549,7 @@ builder.Services.AddSingleton(configStoreNotifier);
 // ProtectHome=true, which mounts a read-only empty tmpfs over /home while HOME still
 // points at /home/mmack. Minting a key then fails with EROFS and every page render
 // throws (production outage, 2026-08-16 — see
-// design/plans/SECRET-KEYRING-INVESTIGATION.md).
+// archive/design/plans/SECRET-KEYRING-INVESTIGATION.md).
 //
 // The configured path is relative, and it is resolved against the process WORKING
 // DIRECTORY rather than the content root — in production those differ, because
@@ -667,7 +667,7 @@ app.MapRazorComponents<Radio.Web.Components.App>()
 // endpoint per @page template and no catch-all, so an unmatched path already 404'd - it just did so
 // with zero bytes and no Content-Type, which is what sent a caller off to file a defect against the
 // wrong service. See ApiNotFound's remarks, and the plan at
-// design/plans/UI-11-the-404-that-was-already-a-404.md.
+// archive/design/plans/UI-11-the-404-that-was-already-a-404.md.
 //
 // MapFallback stamps Order = int.MaxValue, so every endpoint above wins on order as well as on
 // precedence. The line's POSITION in this file is readability only - moving it changes nothing.

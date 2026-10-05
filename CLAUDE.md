@@ -184,7 +184,7 @@ RadioConsole.sln
 ├── src/RTLSDRCore              # Standalone NuGet: RTL-SDR software-defined radio library
 ├── src/Radio.API               # REST controllers, SignalR hubs, middleware
 ├── src/Radio.Web               # Blazor Server UI (Radzen.Blazor)
-├── tests/                      # 10 xUnit test projects (~1,416 tests)
+├── tests/                      # 11 xUnit test projects (5,907 tests at v1.0.0, incl. Playwright E2E)
 │   ├── Radio.Metrics.Tests         # Metrics package tests
 │   ├── Radio.Configuration.Tests   # Configuration package tests
 │   ├── Radio.Fingerprinting.Tests  # Fingerprinting package tests
@@ -197,7 +197,8 @@ RadioConsole.sln
 │   └── Radio.IntegrationTests      # Cross-cutting integration tests
 ├── tools/                      # AudioUAT, ConfigurationManager CLIs
 ├── deploy/                     # Pi deployment scripts, systemd services
-└── design/                     # Architecture docs, decision log, work log
+├── docs/                       # Current docs (index: docs/README.md), decisions, live work queue
+└── archive/                    # Historical plans, handoffs, UAT records (not maintained)
 ```
 
 ## Architecture
@@ -363,7 +364,7 @@ so the bridge survives.
 
 **The real fix is PAM auto-unlock or an empty-password login keyring** (needs physical access) — that
 resolves every browser at once and costs no session. Full write-up:
-`docs/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
+`archive/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
 
 ### Remote UI driving: CDP is back, AT-SPI works, screen capture is not
 

@@ -12,7 +12,7 @@ using Radio.Web.Configuration;
 /// <c>radio-web.service</c>'s <c>ProtectHome=true</c> masks as a read-only tmpfs.
 /// Minting a key threw <c>IOException: Read-only file system</c>, and because Blazor
 /// Server protects the marker it emits for every interactive component, every page
-/// returned HTTP 500. See design/plans/SECRET-KEYRING-INVESTIGATION.md.
+/// returned HTTP 500. See archive/design/plans/SECRET-KEYRING-INVESTIGATION.md.
 ///
 /// The property these tests defend is that the resolved path depends only on
 /// configuration and the caller-supplied base directory — never on <c>HOME</c>.

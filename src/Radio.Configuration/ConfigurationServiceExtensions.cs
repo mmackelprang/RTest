@@ -46,7 +46,7 @@ public static class ConfigurationServiceExtensions
     // dual-service split): the key that had encrypted the 2026-02-12 secrets was
     // written to the pre-change location and orphaned, so every stored secret
     // became undecryptable ("key {…} was not found in the key ring"). See
-    // design/plans/SECRET-KEYRING-INVESTIGATION.md.
+    // archive/design/plans/SECRET-KEYRING-INVESTIGATION.md.
     //
     // Resolution order for the key-ring directory:
     //   1. DataProtection:KeysPath (explicit override), else

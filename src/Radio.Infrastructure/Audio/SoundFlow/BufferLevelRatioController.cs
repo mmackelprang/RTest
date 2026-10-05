@@ -7,7 +7,7 @@ namespace Radio.Infrastructure.Audio.SoundFlow;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Path D (<c>docs/plans/2026-05-22-bt-input-resampler.md</c>) shipped a <b>static</b> ratio and
+/// Path D (<c>archive/plans/2026-05-22-bt-input-resampler.md</c>) shipped a <b>static</b> ratio and
 /// deferred this controller ("Phase 2"). A static ratio is right for only one phone on one day: a
 /// residual error of ~100 ppm drains 100 ms of buffer in ~17 minutes, and with drift compensation
 /// switched off for the resampler path nothing refills it. Measured on the box 2026-09-29: the buffer

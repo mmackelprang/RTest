@@ -20,7 +20,7 @@ namespace Radio.Infrastructure.Tests.Platform.Bluetooth;
 /// The box has two adapters and <c>hci1</c> belongs to RotaryPhone. On 2026-09-25 RotaryPhone
 /// refusing the owner's Pixel on <c>hci1</c> was followed, 318 and 347 ms later, by our
 /// <c>Bluetooth device disconnected … reason="Unknown"</c> and a torn-down A2DP stream on <c>hci0</c>
-/// (docs/queue/AUD-30.md, "CONFIRMED"). The cause: device enumeration, InterfacesAdded and
+/// (archive/queue/AUD-30.md, "CONFIRMED"). The cause: device enumeration, InterfacesAdded and
 /// InterfacesRemoved accepted a <c>Device1</c> under any adapter.
 /// </para>
 /// <para>

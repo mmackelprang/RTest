@@ -6,7 +6,7 @@
 
 ## Provenance
 
-Found during the agent pre-pass of 2026-09-29 ~22:47–22:57 EDT while verifying `UI-17`'s centre panel against the box (`7dd34b5`): [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §A, "Centre panel (`UI-17`)", minor findings. No `HANDOFF-GA-PUNCH-LIST.md` counterpart.
+Found during the agent pre-pass of 2026-09-29 ~22:47–22:57 EDT while verifying `UI-17`'s centre panel against the box (`7dd34b5`): [`RETURN-CHECKLIST.md`](../../archive/uat/RETURN-CHECKLIST.md) evening batch §A, "Centre panel (`UI-17`)", minor findings. No `HANDOFF-GA-PUNCH-LIST.md` counterpart.
 
 ## What was observed
 

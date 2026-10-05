@@ -25,7 +25,7 @@ public class PanelPowerOptions
   /// <para>
   /// ⚠ Shipped disabled on purpose. The one check that cannot be made from a shell — a real knob,
   /// turned by a hand, delivered while the panel is dark — has not been made yet. See
-  /// <c>docs/uat/OWNER-REVIEW.md</c> ("Phase 2g") for the check and the enable step.
+  /// <c>archive/uat/OWNER-REVIEW.md</c> ("Phase 2g") for the check and the enable step.
   /// </para>
   /// </summary>
   public double PanelOffAfterMinutes { get; set; }

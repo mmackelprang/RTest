@@ -562,7 +562,7 @@ public class DuckingReachesTheActiveSourceTests
   /// <c>CallBase = true</c> so the property behaves as SoundFlow implements it rather than being
   /// intercepted by Moq and swallowed. Constructing it with a null engine is safe and is the idiom
   /// already used by <c>BluetoothAudioSourceTests</c>: <c>SoundComponent</c> stores the engine
-  /// reference without dereferencing it (design/TESTING.md § Test Seams, rule 1).
+  /// reference without dereferencing it (docs/testing.md § Test Seams, rule 1).
   ///
   /// ⚠ Every test that reads this back opens with an assertion that the probe holds the value it was
   /// registered with. If Moq ever starts intercepting the property, that guard fails loudly instead

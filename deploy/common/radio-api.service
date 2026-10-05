@@ -88,7 +88,7 @@ ExecStart=/opt/radio-console/api/Radio.API
 # radio-api) - and radio-api also powers it on unconditionally at start-up.
 # Leading '-' so a failure here (no graphical session yet, compositor gone) never marks the unit
 # failed. The env prefix makes the line self-contained; it matches DBUS_SESSION_BUS_ADDRESS below.
-# The command is the same as the recovery line in design/INTEGRATIONS.md section 1 and as
+# The command is the same as the recovery line in docs/integrations.md section 1 and as
 # MutterPanelPowerControl.BuildArguments(on: true); PanelPowerCommandParityTests pins this line,
 # the fallback drop-in and the code together.
 # VERIFY after installing - systemd silently drops an Exec line it cannot parse (OPS-10):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """bt_resampler_compare.py — PASS/FAIL gate for Path D input-resampler.
 
-Path D (docs/plans/2026-05-22-bt-input-resampler.md) routes the BT input
+Path D (archive/plans/2026-05-22-bt-input-resampler.md) routes the BT input
 through libsamplerate's variable-rate SRC before BufferedSoundGenerator
 sees it. The objective acceptance criteria are much stricter than Path C
 because the resampler eliminates rate mismatch at the source — the
@@ -24,7 +24,7 @@ Inputs (positional):
 
 Exit 0 on PASS (all D1-D3 pass), 1 on FAIL.
 
-Plan reference: docs/plans/2026-05-22-bt-input-resampler.md §Task 6, §Task 8.
+Plan reference: archive/plans/2026-05-22-bt-input-resampler.md §Task 6, §Task 8.
 Mirrors the bt_drift_compare.py pattern (Path C acceptance gate).
 """
 

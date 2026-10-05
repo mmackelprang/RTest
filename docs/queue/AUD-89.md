@@ -33,7 +33,7 @@ on the first-jack fallback (`AUD-13`).
 
 - Make the resolver prefer the key the UI writes (lowercase), or have the controller normalise section
   keys to one casing. Merge the box's existing pair once.
-- Default both DTOs to `""`, and correct the `/dev/ttyUSB1` default in `design/SYSTEMCONFIGURATION.md`.
+- Default both DTOs to `""`, and correct the `/dev/ttyUSB1` default in `docs/configuration.md`.
 - Delete the unused API-side `DeviceOptionsDto` / `VinylDeviceOptionsDto`: nothing in `src` references them.
 
 ⚠ Touches the deployed store. Back up `configuration.db` before merging keys.

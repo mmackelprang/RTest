@@ -1,712 +1,123 @@
 # Radio Console
 
-Grandpa Anderson's Console Radio Remade - A modern audio command center hosted on a Raspberry Pi 5, encased in a vintage console radio cabinet.
-
-## Overview
-
-This project restores the original function (Radio/Vinyl) while adding modern capabilities (Bluetooth A2DP, Streaming, Smart Home Events, and Chromecast Audio).
-
-## Current Status
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| 0 - Project Setup | ✅ Completed | Solution structure, CI/CD pipeline |
-| 1 - Configuration | ✅ Completed | JSON/SQLite stores, secrets management, backup/restore |
-| 2 - Core Audio | ✅ Completed | SoundFlow integration, audio engine, device manager, master mixer |
-| 3 - Audio Sources | ✅ Completed | Radio (RTL-SDR), Vinyl, File Player, Bluetooth A2DP, Generic USB |
-| 4 - Event Sources | ✅ Completed | TTS (Google/Azure), Audio File Events |
-| 5 - Ducking | ✅ Completed | Priority-based audio ducking with configurable fade policies |
-| 6 - Outputs | ✅ Completed | Local audio, Google Cast (SharpCaster), HTTP MP3 streaming |
-| 7 - Visualization | ✅ Completed | Spectrum analyzer (FFT), VU meters, waveform display |
-| 8 - API | ✅ Completed | 16 REST controllers, 126+ endpoints, 2 SignalR hubs, OpenAPI + Scalar docs |
-| 9 - UI | ✅ Completed | 12-page Blazor Server UI, Radzen.Blazor, shared components |
-| 10 - Testing | ✅ Substantially Complete | ~1,416 tests across 10 projects (unit, integration, E2E) |
-| 11 - Documentation | 🔄 In Progress | Design docs, decision log, work log (user manual pending) |
-| 12 - Deployment | ✅ Substantially Complete | Dual-service systemd, Pi deploy scripts, tested on hardware |
-
-### Post-Plan Features
-
-These major features were developed after the original plan and represent significant additions:
-
-| Feature | Description |
-|---------|-------------|
-| RTL-SDR Software-Defined Radio | Full SDR source with frequency tuning, band switching, scanning, AGC, presets |
-| Audio Fingerprinting | Native fpcalc, AcoustID lookup, auto-skip duplicate tracks, MusicBrainz metadata |
-| Bluetooth A2DP Audio Input | Linux BlueZ D-Bus + Windows WinRT, AVRCP metadata/volume/controls, album art cache |
-| Google Cast Improvements | StreamType.Live for infinite streams, LAME flush fix, pause/resume, idle recovery |
-| Play History & Analytics | Track play history, search, MusicBrainz enrichment |
-| Device Filtering & Friendly Names | Regex-based hidden patterns, ordered friendly name mappings |
-| Local Output Muting for Cast | Mute local speakers while casting (SoundFlow modifier-based) |
-| Dual-Service Deployment | Separate radio-api + radio-web systemd services, Pi deployment scripts |
-
-### Extracted NuGet Packages
-
-Five standalone libraries have been extracted from the monorepo for independent reuse:
-
-| Package | Description |
-|---------|-------------|
-| **RTLSDRCore** | RTL-SDR software-defined radio: device control, IQ sampling, FM/AM demodulation |
-| **Radio.AudioAnalysis** | Waveform comparison, THD measurement, silence detection, signal analysis |
-| **Radio.Metrics** | Time-series metrics collection with SQLite storage and retention policies |
-| **Radio.Configuration** | JSON/SQLite config stores, encrypted secrets, backup/restore, IConfiguration bridge |
-| **Radio.Fingerprinting** | Audio fingerprinting (SongRec/fpcalc), AcoustID/MusicBrainz lookup, background identification |
-
-Each package has a dedicated test project. Pack locally with `./pack-local.ps1` (outputs to `./nupkg/`).
-
-## Technical Architecture
-
-| Component | Technology |
-|-----------|------------|
-| Hardware | Raspberry Pi 5 (Raspberry Pi OS / Linux) |
-| Framework | .NET 10 (C#) |
-| Audio Engine | [SoundFlow](https://github.com/lsxprime/SoundFlow) |
-| UI | Blazor Server |
-| API | ASP.NET Core Web API |
-| Real-time | SignalR |
-| Database | Repository Pattern (SQLite / JSON) |
-| Logging | Serilog |
-| Testing | xUnit |
-
-## Project Structure
-
-```
-RadioConsole/
-├── src/
-│   ├── Radio.Core/              # Core interfaces, models, events (no dependencies)
-│   ├── Radio.Configuration/     # ★ NuGet: JSON/SQLite config stores, secrets, backup, bridge
-│   ├── Radio.Fingerprinting/    # ★ NuGet: SongRec, MusicBrainz, background ID, SQLite repos
-│   ├── Radio.Metrics/           # ★ NuGet: Time-series metrics collection + SQLite storage
-│   ├── Radio.AudioAnalysis/     # ★ NuGet: Waveform comparison, THD, silence detection
-│   ├── RTLSDRCore/              # ★ NuGet: RTL-SDR software-defined radio library
-│   ├── Radio.Infrastructure/    # Audio engine, DI wiring, platform integrations
-│   │   ├── Audio/
-│   │   │   ├── SoundFlow/       # Audio engine, mixer, device manager, tapped output
-│   │   │   ├── Sources/         # Primary (Radio, File, Vinyl, BT, USB) + Event (TTS, AudioFile)
-│   │   │   ├── Services/        # FileBrowser, TTSFactory, DuckingService, AudioManager
-│   │   │   ├── Outputs/         # Local, GoogleCast, HttpStream
-│   │   │   ├── Visualization/   # Spectrum, LevelMeter, Waveform
-│   │   │   └── Fingerprinting/  # SoundFlowAudioTap, FingerprintDbContext
-│   │   ├── Platform/Bluetooth/  # Linux (BlueZ D-Bus) + Windows (WinRT)
-│   │   ├── Configuration/       # DeviceOptionsResolver, PreferencesPersistence
-│   │   └── DependencyInjection/ # Service registration extensions
-│   ├── Radio.API/               # 16 REST controllers, 2 SignalR hubs, middleware
-│   └── Radio.Web/               # 12-page Blazor Server UI (Radzen.Blazor)
-├── tests/
-│   ├── Radio.Metrics.Tests/        # ★ 17 tests (metrics package)
-│   ├── Radio.Configuration.Tests/  # ★ 115 tests (configuration package)
-│   ├── Radio.Fingerprinting.Tests/ # ★ 95 tests (fingerprinting package)
-│   ├── RTLSDRCore.Tests/           # ★ 155 tests (SDR package)
-│   ├── Radio.AudioAnalysis.Tests/  # ★ 35 tests (audio analysis package)
-│   ├── Radio.Core.Tests/           # 23 tests
-│   ├── Radio.Infrastructure.Tests/ # 840 tests
-│   ├── Radio.API.Tests/            # 223 tests
-│   ├── Radio.Web.Tests/            # 116 tests
-│   ├── Radio.IntegrationTests/     # 50 tests
-│   └── Radio.Web.E2ETests/         # 28 tests (Playwright)
-├── tools/
-│   ├── Radio.Tools.AudioUAT/              # Audio UAT testing tool
-│   └── Radio.Tools.ConfigurationManager/  # Configuration management CLI
-├── design/                  # Architecture docs, decision log, work log
-├── deploy/                  # Deployment scripts and systemd service files
-│   ├── common/              # Shared service files (radio-api, radio-web)
-│   ├── raspberry-pi/        # Pi-specific setup scripts
-│   └── debian-x64/          # x64 Linux setup scripts
-```
-
-## Configuration System
-
-The configuration infrastructure (Phase 1) provides:
-
-- **Dual backing stores**: JSON files and SQLite database
-- **Secrets management**: Tag-based substitution (`${secret:identifier}`)
-- **Encrypted storage**: Secrets encrypted at rest using Data Protection API
-- **Backup/restore**: Full configuration backup and restore capabilities
-- **Unified database paths**: Centralized path management for all SQLite databases
-- **Unified backup system**: Single-operation backup of all databases
-- **DI integration**: Easy registration via `AddManagedConfiguration()`
-
-### Database Configuration
-
-All SQLite databases (configuration, metrics, fingerprinting) can now be configured through a unified `Database` section:
-
-```json
-{
-  "Database": {
-    "RootPath": "./data",
-    "ConfigurationSubdirectory": "config",
-    "MetricsSubdirectory": "metrics",
-    "FingerprintingSubdirectory": "fingerprints",
-    "BackupSubdirectory": "backups",
-    "BackupRetentionDays": 30
-  }
-}
-```
-
-This places all databases under a consistent directory structure:
-- Configuration: `./data/config/configuration.db`
-- Metrics: `./data/metrics/metrics.db`
-- Fingerprinting: `./data/fingerprints/fingerprints.db`
-- Backups: `./data/backups/`
-
-### Unified Database Backup
-
-The unified backup system backs up all SQLite databases in a single operation:
-
-```csharp
-// Create backup of all databases
-var backupService = serviceProvider.GetRequiredService<IUnifiedDatabaseBackupService>();
-var backup = await backupService.CreateFullBackupAsync("Daily backup");
-
-// Backup file: ./data/backups/unified_20231204_143022_a1b2c3.dbbackup
-Console.WriteLine($"Created backup: {backup.BackupId}");
-Console.WriteLine($"Included databases: {string.Join(", ", backup.IncludedDatabases)}");
-
-// Restore from backup
-await backupService.RestoreBackupAsync(backup.BackupId, overwrite: true);
-
-// Automatic cleanup of old backups
-var deleted = await backupService.CleanupOldBackupsAsync();
-```
-
-For detailed information, see [Database Configuration](design/DATABASE_CONFIGURATION.md).
-
-### Configuration Usage Example
-
-```csharp
-// Register services
-services.AddManagedConfiguration(configuration);
-
-// Use the configuration manager
-var configManager = serviceProvider.GetRequiredService<IConfigurationManager>();
-
-// Create and use a store
-var store = await configManager.CreateStoreAsync("my-settings");
-await store.SetEntryAsync("AppName", "My App");
-
-// Create a secret
-var secretTag = await configManager.CreateSecretAsync("my-settings", "ApiKey", "secret-value");
-// Store now contains: ApiKey = ${secret:abc123}
-
-// Read with secret resolution
-var value = await configManager.GetValueAsync<string>("my-settings", "ApiKey");
-// Returns: "secret-value"
-```
-
-## Audio System
-
-The audio system (Phase 2) provides:
-
-- **SoundFlow Integration**: Cross-platform audio engine using MiniAudio backend
-- **Device Management**: Enumeration of ALSA/USB audio devices with hot-plug detection
-- **Master Mixer**: Volume, balance, and mute controls with source management
-- **Tapped Output Stream**: Ring buffer for streaming audio to Chromecast/HTTP clients
-- **USB Port Management**: Conflict detection and reservation system for USB audio sources
-
-### Primary Audio Sources
-
-- **Radio**: RTL-SDR software-defined radio (`RTLSDRCore`, created by `IRadioFactory`) with full frequency control, band switching, scanning, gain control, and power management via an RTL-SDR USB dongle
-- **Vinyl**: USB turntable input
-- **File Player**: MP3, FLAC, WAV, OGG, AAC, M4A, WMA playback with playlist support and audio fingerprinting
-- **Bluetooth A2DP**: Receive audio from phones/tablets via A2DP with AVRCP metadata, volume sync, and album art
-- **Generic USB**: Capture audio from any USB audio device
-
-### Radio Device Factory
-
-**Device Types:**
-- `RTLSDRCore`: Software-defined radio (full software control via USB dongle) — the only supported radio device. The Raddy RF320 USB radio was removed (`AUD-16`); any other device type is reported unavailable.
-
-**Radio Capabilities (RTLSDRCore):**
-
-| Feature | RTLSDRCore (SDR) |
-|---------|------------------|
-| Software Frequency Control | ✅ Full range |
-| Band Switching | ✅ Software |
-| Scanning | ✅ Automated |
-| Gain Control | ✅ AGC/Manual |
-| Power Management | ✅ Software |
-| Equalizer | ❌ No hardware EQ |
-| Device Volume | ✅ Software (no hardware volume) |
-
-**RTL-SDR Audio Integration:**
-- Real-time PCM audio at 48kHz F32 format via `SDRAudioDataProvider`
-- Thread-safe buffering with overflow protection
-- Audio pipeline: IQ → Demodulation → PCM → SoundFlow → Output
-
-### REST API Endpoints
-
-**Radio Control Endpoints (23 total):**
-- Core Control: GET /api/radio/state, POST /api/radio/frequency, frequency/up, frequency/down, band, step, scan/start, scan/stop, eq, volume
-- Gain Control (SDR): POST /api/radio/gain, /api/radio/gain/auto
-- Power (SDR): GET /api/radio/power, POST /api/radio/power/toggle
-- Lifecycle (SDR): POST /api/radio/startup, /api/radio/shutdown
-- Presets: GET/POST/DELETE /api/radio/presets
-- Device Factory: GET /api/radio/devices, devices/default, devices/current, POST devices/select
-
-For complete API documentation, see [API Reference](design/API_REFERENCE.md).
-
-### Usage Example
-
-```csharp
-// Register services
-services.AddSoundFlowAudio(configuration);
-
-// Get the audio engine
-var audioEngine = serviceProvider.GetRequiredService<IAudioEngine>();
-
-// Initialize and start
-await audioEngine.InitializeAsync();
-await audioEngine.StartAsync();
-
-// Get the master mixer
-var mixer = audioEngine.GetMasterMixer();
-mixer.MasterVolume = 0.75f;
-mixer.Balance = 0f; // Center
-
-// Get the device manager
-var deviceManager = serviceProvider.GetRequiredService<IAudioDeviceManager>();
-var devices = await deviceManager.GetOutputDevicesAsync();
-
-// Get the tapped output stream for streaming
-var outputStream = audioEngine.GetMixedOutputStream();
-```
-
-## Event Audio Sources (Phase 4)
-
-The event audio system provides ephemeral audio sources for notifications, announcements, and chimes:
-
-- **IEventAudioSource**: Interface for one-shot audio playback with auto-disposal
-- **ITTSFactory**: Factory for creating TTS audio with multiple engine support
-- **TTSEventSource**: Text-to-Speech audio from Google or Azure engines
-- **AudioFileEventSource**: Play notification sounds and audio file events
-
-### TTS Engines Supported
-
-| Engine | Type | Requirements |
-|--------|------|--------------|
-| Google Cloud TTS | Cloud | API key in secrets |
-| Azure Speech | Cloud | API key and region in secrets |
-
-Both engines are cloud services, so **TTS requires network access** - there is no offline engine. The offline eSpeak-ng engine was removed on 2026-09-03 (`TTS-9`) after it was found to interpolate a caller-supplied voice identifier into a command line reachable from the events API (`SEC-4`). Losing offline announcements is an accepted trade-off (decision `D26`): announcements are triggered by smart-home events, which do not arrive when the network is down either.
-
-`TTS:DefaultEngine` and `TTS:DefaultVoice` have no built-in default; an unset or unrecognised value fails with an explicit error naming the valid engines. `appsettings.json` ships `Google` / `en-US-Standard-A`.
-
-### Usage Example
-
-```csharp
-// Register services
-services.AddEventAudioSources(configuration);
-
-// Create TTS audio
-var ttsFactory = serviceProvider.GetRequiredService<ITTSFactory>();
-var ttsSource = await ttsFactory.CreateAsync("Hello, this is a test announcement");
-await ttsSource.PlayAsync();
-// Auto-disposes when playback completes
-
-// Create audio file event
-var audioFactory = serviceProvider.GetRequiredService<AudioFileEventSourceFactory>();
-var eventSource = await audioFactory.CreateFromFileAsync("notifications/doorbell.wav");
-eventSource.PlaybackCompleted += (_, _) => Console.WriteLine("Doorbell played!");
-await eventSource.PlayAsync();
-```
-
-## Ducking & Priority System (Phase 5)
-
-The ducking system automatically reduces the volume of background audio when higher-priority event audio plays:
-
-- **IDuckingService**: Service for managing audio ducking with configurable policies
-- **Priority-based mixing**: Sources assigned priorities 1-10 (higher = more important)
-- **Configurable fade policies**: FadeSmooth, FadeQuick, or Instant transitions
-- **Nested event handling**: Proper volume restoration when multiple events overlap
-
-### Ducking Configuration
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| DuckingPercentage | 20 | Volume % when ducked (20 = -14dB) |
-| DuckingAttackMs | 100 | Fade-down time in milliseconds |
-| DuckingReleaseMs | 500 | Fade-up time in milliseconds |
-| DuckingPolicy | FadeSmooth | Transition type |
-
-### Usage Example
-
-```csharp
-// Register services (included in AddSoundFlowAudio)
-services.AddSoundFlowAudio(configuration);
-
-// Get the ducking service
-var duckingService = serviceProvider.GetRequiredService<IDuckingService>();
-
-// Set priority for a source
-duckingService.SetPriority(ttsSource, 9);  // High priority
-
-// Start ducking when event plays
-await duckingService.StartDuckingAsync(eventSource);
-
-// Stop ducking when event completes
-await duckingService.StopDuckingAsync(eventSource);
-
-// Check ducking state
-Console.WriteLine($"Is ducking: {duckingService.IsDucking}");
-Console.WriteLine($"Duck level: {duckingService.CurrentDuckLevel}%");
-```
-
-## Audio Outputs (Phase 6)
-
-The audio outputs system provides multi-device output support with local speakers and network streaming:
-
-- **IAudioOutput**: Common interface for all audio output types
-- **LocalAudioOutput**: Routes audio to local ALSA/default speakers with device selection
-- **GoogleCastOutput**: Streams audio to Chromecast devices via SharpCaster
-- **HttpStreamOutput**: HTTP server for streaming audio to web clients
-
-### Supported Output Types
-
-| Output Type | Description | Use Case |
-|-------------|-------------|----------|
-| Local | ALSA/default device output | Built-in speakers, USB DACs |
-| GoogleCast | Chromecast streaming | Living room speakers, multi-room |
-| HttpStream | HTTP audio server | Custom clients, Chromecast source |
-
-### Configuration
-
-```json
-{
-  "AudioOutput": {
-    "Local": {
-      "Enabled": true,
-      "PreferredDeviceId": "",
-      "DefaultVolume": 0.8
-    },
-    "GoogleCast": {
-      "Enabled": false,
-      "DiscoveryTimeoutSeconds": 10,
-      "DefaultVolume": 0.7
-    },
-    "HttpStream": {
-      "Enabled": true,
-      "Port": 8080,
-      "EndpointPath": "/stream/audio",
-      "SampleRate": 48000,
-      "Channels": 2
-    }
-  }
-}
-```
-
-### Usage Example
-
-```csharp
-// Register services (included in AddSoundFlowAudio)
-services.AddSoundFlowAudio(configuration);
-
-// Get the local output
-var localOutput = serviceProvider.GetRequiredService<LocalAudioOutput>();
-await localOutput.InitializeAsync();
-await localOutput.StartAsync();
-
-// Get the Chromecast output
-var castOutput = serviceProvider.GetRequiredService<GoogleCastOutput>();
-await castOutput.InitializeAsync();
-var devices = await castOutput.DiscoverDevicesAsync();
-if (devices.Any())
-{
-  await castOutput.ConnectAsync(devices.First());
-  castOutput.SetStreamUrl("http://192.168.1.50:8080/stream/audio");
-  await castOutput.StartAsync();
-}
-
-// Get the HTTP stream output
-var httpOutput = serviceProvider.GetRequiredService<HttpStreamOutput>();
-await httpOutput.InitializeAsync();
-await httpOutput.StartAsync();
-Console.WriteLine($"Stream URL: {httpOutput.StreamUrl}");
-```
-
-## Audio Visualization (Phase 7)
-
-The visualization system provides real-time audio analysis for UI displays:
-
-- **IVisualizerService**: Unified service for all visualization types
-- **SpectrumAnalyzer**: FFT-based frequency analysis for spectrum displays
-- **LevelMeter**: Peak and RMS level metering for VU meters
-- **WaveformAnalyzer**: Time-domain sample buffering for waveform displays
-
-### Visualization Types
-
-| Type | Description | Use Case |
-|------|-------------|----------|
-| Spectrum | FFT frequency bins (magnitude per frequency) | Spectrum analyzer display |
-| Level | Peak/RMS measurements with decay | VU meters, level bars |
-| Waveform | Time-domain sample buffer | Oscilloscope display |
-
-### Configuration
-
-```json
-{
-  "Visualizer": {
-    "FFTSize": 2048,
-    "WaveformSampleCount": 512,
-    "PeakHoldTimeMs": 1000,
-    "PeakDecayRate": 0.95,
-    "RmsSmoothing": 0.3,
-    "ApplyWindowFunction": true,
-    "SpectrumSmoothing": 0.5
-  }
-}
-```
-
-### Usage Example
-
-```csharp
-// Register services (included in AddSoundFlowAudio)
-services.AddSoundFlowAudio(configuration);
-
-// Get the visualizer service
-var visualizer = serviceProvider.GetRequiredService<IVisualizerService>();
-
-// Process audio samples (called from audio callback)
-visualizer.ProcessSamples(samples);
-
-// Get spectrum data for display
-var spectrum = visualizer.GetSpectrumData();
-Console.WriteLine($"Spectrum bins: {spectrum.BinCount}");
-Console.WriteLine($"Max frequency: {spectrum.MaxFrequency} Hz");
-// spectrum.Magnitudes contains values 0.0-1.0 for each frequency bin
-
-// Get level data for VU meters
-var levels = visualizer.GetLevelData();
-Console.WriteLine($"Left peak: {levels.LeftPeakDb:F1} dB");
-Console.WriteLine($"Right peak: {levels.RightPeakDb:F1} dB");
-Console.WriteLine($"Clipping: {levels.IsClipping}");
-
-// Get waveform data for display
-var waveform = visualizer.GetWaveformData();
-Console.WriteLine($"Sample count: {waveform.SampleCount}");
-Console.WriteLine($"Duration: {waveform.Duration.TotalMilliseconds:F0} ms");
-// waveform.LeftSamples/RightSamples contain values -1.0 to 1.0
-
-// Reset visualization when changing sources
-visualizer.Reset();
-```
-
-### Data Models
-
-**SpectrumData**: FFT frequency analysis results
-- `Magnitudes`: Array of magnitude values (0.0-1.0) per frequency bin
-- `Frequencies`: Array of frequency values (Hz) per bin
-- `BinCount`: Number of frequency bins (FFTSize / 2)
-- `FrequencyResolution`: Hz per bin (SampleRate / FFTSize)
-
-**LevelData**: Audio level measurements
-- `LeftPeak`/`RightPeak`: Peak levels (0.0-1.0)
-- `LeftRms`/`RightRms`: RMS levels (0.0-1.0)
-- `LeftPeakDb`/`RightPeakDb`: Peak levels in dBFS
-- `IsClipping`: True if audio is at or near maximum level
-
-**WaveformData**: Time-domain sample buffer
-- `LeftSamples`/`RightSamples`: Sample arrays (-1.0 to 1.0)
-- `SampleCount`: Number of samples per channel
-- `Duration`: Time span represented by the buffer
-
-## API & SignalR Integration (Phase 8)
-
-The API layer provides REST endpoints and real-time communication for external clients:
-
-- **REST Controllers**: Complete CRUD operations for audio, sources, devices, and configuration
-- **SignalR Hub**: Real-time visualization data broadcasting at 30fps
-- **Audio Streaming**: HTTP PCM audio stream for Chromecast and web clients
-- **API Documentation**: interactive Scalar UI at `/scalar/v1` and the OpenAPI document at `/openapi/v1.json` (generated from the live controllers; served in every environment, including on the box)
-
-### REST API Endpoints
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/audio` | GET | Get current playback state |
-| `/api/audio` | POST | Update playback (play/pause/stop/volume) |
-| `/api/audio/volume/{value}` | POST | Set volume (0.0-1.0) |
-| `/api/audio/mute` | POST | Toggle mute |
-| `/api/sources` | GET | List available audio sources |
-| `/api/sources/active` | GET | Get active sources |
-| `/api/sources` | POST | Switch audio source |
-| `/api/devices/output` | GET | List output devices |
-| `/api/devices/input` | GET | List input devices |
-| `/api/configuration` | GET | Get all settings |
-| `/api/configuration/audio` | GET | Get audio settings |
-| `/api/configuration/visualizer` | GET | Get visualizer settings |
-
-### SignalR Hub
-
-The `AudioVisualizationHub` at `/hubs/visualization` provides real-time audio data:
-
-```javascript
-// Connect to the hub
-const connection = new signalR.HubConnectionBuilder()
-    .withUrl("/hubs/visualization")
-    .build();
-
-// Subscribe to visualization data
-await connection.invoke("SubscribeToAll");
-
-// Receive spectrum updates
-connection.on("ReceiveSpectrum", (data) => {
-    // data.magnitudes - array of frequency bin values
-    // data.frequencies - array of frequency values in Hz
-    // data.binCount - number of frequency bins
-    updateSpectrumDisplay(data);
-});
-
-// Receive level updates
-connection.on("ReceiveLevels", (data) => {
-    // data.leftPeak, data.rightPeak - peak levels
-    // data.leftRms, data.rightRms - RMS levels
-    // data.isClipping - clipping indicator
-    updateVUMeter(data);
-});
-
-// Receive waveform updates
-connection.on("ReceiveWaveform", (data) => {
-    // data.leftSamples, data.rightSamples - sample arrays
-    // data.sampleCount - number of samples
-    updateWaveformDisplay(data);
-});
-```
-
-### Audio Stream Endpoint
-
-The audio stream middleware provides PCM audio at `/stream/audio`:
-
-- **Format**: 16-bit PCM, stereo, 48kHz
-- **Content-Type**: `audio/L16;rate=48000;channels=2`
-- **Use Case**: Chromecast streaming, web audio players
-
-```javascript
-// Connect to audio stream
-const audio = new Audio('/stream/audio');
-audio.play();
-```
-
-## Getting Started
-
-### Prerequisites
-
-- .NET 10.0 SDK
-- For Raspberry Pi deployment: Raspberry Pi OS with .NET runtime
-- LAME MP3 encoder (for Google Cast audio streaming):
-  - **Windows**: Included automatically via NAudio.Lame NuGet package
-  - **Linux (Raspberry Pi)**: `sudo apt install libmp3lame-dev`
-
-### Building
+**Grandpa Anderson's Console Radio, remade.** A vintage console radio cabinet restored as a modern audio
+command center. The original functions (radio and vinyl) still work. Bluetooth audio, a file player, Google
+Cast output, smart-home announcements, song recognition and a rotary-phone integration have been added. The
+console is driven from a 1920x720 touch panel and four rotary knobs in the cabinet's front panel.
+
+## Features
+
+**Audio sources**
+- **Radio.** An RTL-SDR software-defined radio (`RTLSDRCore`) covering FM and NOAA weather band. It supports
+  tuning, seek and scan, presets, RDS station names and text, and a swept band map that scan shares. AM and
+  shortwave wait on tuner hardware (see [known issues](docs/known-issues-and-future-work.md)).
+- **Bluetooth A2DP.** The console is a Bluetooth speaker for a phone. AVRCP supplies track metadata and
+  transport controls and keeps the volume in sync. BlueZ over D-Bus runs on Linux, WinRT on Windows.
+- **File player.** Plays local or NAS music folders. It has a persistent queue, shuffle and repeat, saved
+  playlists, and adds whole folders.
+- **Vinyl and generic USB capture.** A USB phono preamp or any USB audio input.
+
+**Events and announcements**
+- Text-to-speech (Google Cloud or Azure) and audio-file events, from a REST announcement API for smart-home
+  triggers.
+- Priority-based ducking (1–10): background audio fades under an announcement and comes back afterwards.
+
+**Outputs**
+- Local speakers through SoundFlow (MiniAudio, PipeWire on Linux).
+- Google Cast: an HTTP MP3 stream, or a direct Cast-channel receiver
+  ([`docs/receiver-direct-channel.html`](docs/receiver-direct-channel.html)). A dropped speaker reconnects
+  automatically.
+- A raw PCM and MP3 HTTP stream at `/stream/audio`.
+
+**Recognition and history**
+- Song recognition with SongRec (the Shazam algorithm), plus album art from MusicBrainz and the Cover Art
+  Archive.
+- Play history with search.
+
+**Console UI** (Blazor Server, Radzen)
+- Home, Radio, Bluetooth, Devices, Phone, History, Diagnostics and System pages, laid out for a 1920x720 panel
+  running a kiosk browser.
+- Real-time visualizers (spectrum, levels, waveform and the radio band map) over SignalR.
+- Sleep mode shows a clock with current conditions and a forecast (US National Weather Service), and can power the panel down.
+
+**Cabinet hardware**
+- Four HID rotary encoders for Volume, Source, Presets and Tuning. They are detected on plug-in and drive an
+  on-screen HUD.
+- Rotary-phone integration with the companion RotaryPhone service: an incoming-call banner with the caller's
+  name, call announcements, and Google Voice voicemail and texts.
+
+**Operations**
+- Configuration in JSON or SQLite stores, with encrypted secrets (`${secret:id}`) and backup and restore.
+- Metrics with SQLite rollups, and a diagnostics dashboard.
+- Log levels change at runtime without a restart (`/api/system/logging/levels`).
+- OpenAPI with a Scalar UI at `/scalar/v1`.
+
+## Hardware
+
+The deployed appliance is an **Intel N100 mini-PC (x86_64) running Ubuntu with GNOME on Wayland**. It is built
+into the cabinet with a 1920x720 touch panel, an RTL-SDR dongle, a USB Bluetooth adapter, a USB phono input and
+the four encoders. **Raspberry Pi 5 (linux-arm64) is a supported deployment target** as well. Development works
+on Windows or Linux.
+
+## Architecture
+
+The solution is layered. `Radio.Core` holds the domain interfaces and models. `Radio.Infrastructure` wraps the
+SoundFlow audio engine and supplies the sources, outputs, Bluetooth, Cast and platform integrations. `Radio.API`
+is the REST and SignalR service that owns all audio hardware. `Radio.Web` is the Blazor Server UI, which talks to
+the API over HTTP and SignalR. Five reusable libraries are packable as NuGet packages: `RTLSDRCore`,
+`Radio.AudioAnalysis`, `Radio.Metrics`, `Radio.Configuration` and `Radio.Fingerprinting`. Every source feeds one
+master mixer, and its output is tapped for local playback, the Cast stream and the visualizers. See
+[docs/architecture.md](docs/architecture.md).
+
+## Quick start
+
+Prerequisites: the .NET 10 SDK (pinned in `global.json`). For Cast MP3 streaming on Linux, also install
+`libmp3lame` (`sudo apt install libmp3lame-dev`).
 
 ```bash
-dotnet restore
-dotnet build --configuration Release
-```
+# Build (Release; warnings are counted against a baseline, see CONTRIBUTING.md)
+dotnet build RadioConsole.sln -c Release
 
-### Running Tests
+# Test: redirect to a file and read the exit code; do not pipe into tail
+dotnet test RadioConsole.sln -c Release > test.log 2>&1; echo "exit=$?"
 
-```bash
-dotnet test --configuration Release
-```
-
-### Running the Applications
-
-```bash
-# Run the API
+# Run the API (http://localhost:5000, API docs at /scalar/v1)
 dotnet run --project src/Radio.API
 
-# Run the Web UI
+# Run the web UI (http://localhost:5002)
 dotnet run --project src/Radio.Web
 ```
 
-### Network Setup (Required for Google Cast)
+## Deployment
 
-The HTTP stream server and API require network port permissions. These commands must be run once in an **elevated / Administrator** shell before first use.
-
-#### Windows
+Two systemd services (`radio-api` on port 5000, `radio-web` on port 5002) are deployed from a dev host with
+PowerShell 7:
 
 ```powershell
-# Allow the HTTP stream server to bind to port 8080 on all interfaces
-netsh http add urlacl url=http://+:8080/stream/audio/ user=Everyone
-
-# Allow the API/Web server to bind to port 5000
-netsh http add urlacl url=http://+:5000/ user=Everyone
-
-# Open firewall for Cast devices to reach the HTTP audio stream
-netsh advfirewall firewall add rule name="Radio Console Stream" dir=in action=allow protocol=TCP localport=8080
-
-# Open firewall for the API (needed if accessing Web UI from other devices)
-netsh advfirewall firewall add rule name="Radio Console API" dir=in action=allow protocol=TCP localport=5000
+./deploy/Deploy-ToLinux.ps1              # the x64 appliance (defaults: -TargetHost radio -Runtime linux-x64)
+./deploy/Deploy-ToPi.ps1                 # Raspberry Pi (linux-arm64)
+./deploy/Deploy-ToLinux.ps1 -VerifyOnly  # check that the deployed build matches, without deploying
 ```
 
-#### Linux (Raspberry Pi)
+See [docs/deployment.md](docs/deployment.md).
 
-```bash
-# Allow non-root binding to low ports (if using port < 1024)
-# Not needed for port 5000/8080
+## Documentation
 
-# Open firewall (if ufw is enabled)
-sudo ufw allow 8080/tcp comment "Radio Console audio stream"
-sudo ufw allow 5000/tcp comment "Radio Console API"
-
-# Install LAME for MP3 Cast streaming
-sudo apt install libmp3lame-dev
-```
-
-## Deployment Architecture
-
-The project deploys as two separate systemd services on Raspberry Pi:
-
-```
-/opt/radio-console/
-├── api/                    ← Radio.API binaries (port 5000)
-├── web/                    ← Radio.Web binaries (port 5002)
-├── data/                   ← Shared data (config, metrics, fingerprints, albumart)
-├── logs/                   ← Shared log files
-└── appsettings.Production.json
-```
-
-| Service | Port | Role |
-|---------|------|------|
-| `radio-api.service` | 5000 | REST API, SignalR hubs, audio engine, all hardware I/O |
-| `radio-web.service` | 5002 | Blazor Server UI, proxies to API |
-
-Deploy from a Windows or Linux dev host (needs PowerShell 7, `pwsh`):
-```powershell
-./deploy/Deploy-ToPi.ps1 -PiHost piradio -PiUser pi
-```
-
-## Testing
-
-~1,416 automated tests across 10 projects:
-
-```bash
-# Run all tests
-dotnet test --configuration Release --verbosity normal
-
-# Run a specific test project
-dotnet test tests/Radio.Infrastructure.Tests --configuration Release
-
-# Run a single test
-dotnet test --filter "FullyQualifiedName~TestClassName.TestMethodName"
-```
-
-## Design Documents
-
-- [Audio Data Flow](design/AUDIO-DATAFLOW.md) - Audio pipeline architecture
-- [Configuration](design/CONFIGURATION.md) - Configuration infrastructure
-- [Database Configuration](design/DATABASE_CONFIGURATION.md) - Unified database paths and backup system
-- [Sound Fingerprinting](design/SOUNDFINGERPRINTING.md) - Audio fingerprinting system design
-- [Metrics](design/METRICS.md) - Time-series metrics collection
-- [System Configuration](design/SYSTEMCONFIGURATION.md) - System-level configuration reference
-- [API Reference](design/API_REFERENCE.md) - Complete REST API documentation
-- [Integrations](design/INTEGRATIONS.md) - External integrations guide
-- [RTL-SDR Debugging](design/RTL_SDR_DEBUGGING_GUIDE.md) - SDR troubleshooting guide
-- [Decision Log](design/DECISION-LOG.md) - Architectural decision records
-- [Work Log](design/WORK-LOG.md) - Development session history
-- [Future Work](design/FUTURE-WORK.md) - Deferred features and stubs
-- [Testing](design/TESTING.md) - Test strategy and coverage
+| Doc | What it covers |
+|---|---|
+| [docs/README.md](docs/README.md) | Index of all current docs |
+| [docs/architecture.md](docs/architecture.md) | Layers, the audio pipeline and data flow |
+| [docs/configuration.md](docs/configuration.md) | Configuration, preferences and secrets reference |
+| [docs/api.md](docs/api.md) | REST and SignalR reference (Scalar at `/scalar/v1` is the live source) |
+| [docs/deployment.md](docs/deployment.md) | The appliance, services, kiosk, deploy and verification |
+| [docs/integrations.md](docs/integrations.md) | Rotary encoders, the phone and the announcement API |
+| [docs/testing.md](docs/testing.md) | Test projects and conventions |
+| [docs/known-issues-and-future-work.md](docs/known-issues-and-future-work.md) | Open items and stubbed features |
+| [docs/decisions/](docs/decisions/) | ADRs and the decision log |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to build, test and submit changes |
+| [CHANGELOG.md](CHANGELOG.md) | Release notes |
+| [archive/](archive/) | Historical plans, handoffs and UAT records (not maintained) |
 
 ## License
 
-See [LICENSE](LICENSE) file for details.
-
+[Apache License 2.0](LICENSE).
