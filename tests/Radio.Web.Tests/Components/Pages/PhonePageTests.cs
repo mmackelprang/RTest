@@ -293,7 +293,7 @@ public class PhonePageTests : TestContext
   public void Dashboard_Ringing_IgnoreDeclinesTheDefaultPhonesCall()
   {
     _config[IncomingCallBannerService.DeclineSupportedKey] = "true";
-    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9195550142"}""";
     var cut = RenderComponent<PhonePage>();
     OpenDashboard(cut);
 
@@ -312,7 +312,7 @@ public class PhonePageTests : TestContext
   public void Dashboard_Ringing_A409InCall_ShowsNoError()
   {
     _config[IncomingCallBannerService.DeclineSupportedKey] = "true";
-    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9195550142"}""";
     _declineResponse = (System.Net.HttpStatusCode.Conflict, """{"declined":false,"state":"InCall"}""");
     var cut = RenderComponent<PhonePage>();
     OpenDashboard(cut);
@@ -328,7 +328,7 @@ public class PhonePageTests : TestContext
   public void Dashboard_Ringing_A5xx_ShowsTheError()
   {
     _config[IncomingCallBannerService.DeclineSupportedKey] = "true";
-    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9195550142"}""";
     _declineResponse = (System.Net.HttpStatusCode.InternalServerError, "{}");
     var cut = RenderComponent<PhonePage>();
     OpenDashboard(cut);
@@ -342,7 +342,7 @@ public class PhonePageTests : TestContext
   [Fact]
   public void Dashboard_Ringing_WithDeclineNotSupported_IgnoreIsDisabled()
   {
-    _callStateJson = """{"callState":"Ringing","incomingNumber":"9193718044"}""";
+    _callStateJson = """{"callState":"Ringing","incomingNumber":"9195550142"}""";
     var cut = RenderComponent<PhonePage>();
     OpenDashboard(cut);
 

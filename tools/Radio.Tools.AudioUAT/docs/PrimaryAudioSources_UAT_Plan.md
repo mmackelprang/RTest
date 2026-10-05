@@ -79,9 +79,9 @@ Validate the FilePlayer audio source with a specific set of test files, ensuring
 
 ### 3.1 Test Prerequisites
 - [ ] Verify test files exist:
-  - [ ] `src/Radio.API/media/audio/testdata/SheriYoureMyHoneyBunchSugarPlumRingtone.mp3`
-  - [ ] `src/Radio.API/media/audio/music/02 We're Ready.mp3`
-  - [ ] `src/Radio.API/media/audio/music/Hear What They Say.mp3`
+  - [ ] `src/Radio.API/media/audio/alarm/PD - Alarm Clock.mp3`
+  - [ ] `src/Radio.API/media/audio/alerts/PD - Pager Beeps.mp3`
+  - [ ] `src/Radio.API/media/audio/alerts/PD - Ship Brass Bell.mp3`
 - [ ] Verify API endpoints are available:
   - [ ] `GET /api/audio/sources` - List available sources
   - [ ] `POST /api/audio/sources/switch` - Switch active source
@@ -129,9 +129,9 @@ Validate the FilePlayer audio source with a specific set of test files, ensuring
   ```json
   {
     "files": [
-      "testdata/SheriYoureMyHoneyBunchSugarPlumRingtone.mp3",
-      "music/02 We're Ready.mp3",
-      "music/Hear What They Say.mp3"
+      "alarm/PD - Alarm Clock.mp3",
+      "alerts/PD - Pager Beeps.mp3",
+      "alerts/PD - Ship Brass Bell.mp3"
     ]
   }
   ```
@@ -297,14 +297,14 @@ Validate the FilePlayer audio source with a specific set of test files, ensuring
 
 **Steps**:
 - [ ] Start playback (should be on first track)
-- [ ] Call `GET /api/audio/nowplaying` to verify current track (should be "SheriYoureMyHoneyBunchSugarPlumRingtone.mp3")
+- [ ] Call `GET /api/audio/nowplaying` to verify current track (should be "PD - Alarm Clock.mp3")
 - [ ] Call `POST /api/audio/playback/next`
 - [ ] Wait 1 second for track change
-- [ ] Call `GET /api/audio/nowplaying` to verify new track (should be "02 We're Ready.mp3")
+- [ ] Call `GET /api/audio/nowplaying` to verify new track (should be "PD - Pager Beeps.mp3")
 - [ ] Verify playback continues on new track
 - [ ] Call `POST /api/audio/playback/next` again
 - [ ] Wait 1 second
-- [ ] Call `GET /api/audio/nowplaying` to verify track (should be "Hear What They Say.mp3")
+- [ ] Call `GET /api/audio/nowplaying` to verify track (should be "PD - Ship Brass Bell.mp3")
 
 **Expected Result**:
 - [ ] Next command successfully advances to next track
@@ -323,13 +323,13 @@ Validate the FilePlayer audio source with a specific set of test files, ensuring
 
 **Steps**:
 - [ ] Ensure playback is on third track (from P1-009)
-- [ ] Call `GET /api/audio/nowplaying` to confirm (should be "Hear What They Say.mp3")
+- [ ] Call `GET /api/audio/nowplaying` to confirm (should be "PD - Ship Brass Bell.mp3")
 - [ ] Call `POST /api/audio/playback/previous`
 - [ ] Wait 1 second
-- [ ] Call `GET /api/audio/nowplaying` to verify track (should be "02 We're Ready.mp3")
+- [ ] Call `GET /api/audio/nowplaying` to verify track (should be "PD - Pager Beeps.mp3")
 - [ ] Call `POST /api/audio/playback/previous` again
 - [ ] Wait 1 second
-- [ ] Call `GET /api/audio/nowplaying` to verify track (should be "SheriYoureMyHoneyBunchSugarPlumRingtone.mp3")
+- [ ] Call `GET /api/audio/nowplaying` to verify track (should be "PD - Alarm Clock.mp3")
 
 **Expected Result**:
 - [ ] Previous command successfully goes back to previous track
@@ -1079,9 +1079,9 @@ Add test-specific configuration to `appsettings.json`:
     "InteractiveMode": true,
     "TestFiles": {
       "FilePlayer": [
-        "testdata/SheriYoureMyHoneyBunchSugarPlumRingtone.mp3",
-        "music/02 We're Ready.mp3",
-        "music/Hear What They Say.mp3"
+        "alarm/PD - Alarm Clock.mp3",
+        "alerts/PD - Pager Beeps.mp3",
+        "alerts/PD - Ship Brass Bell.mp3"
       ]
     },
     "Spotify": {
@@ -1168,7 +1168,7 @@ Example:
 ## 10. References
 
 - `/tools/AUDIO_UAT.md` - Overall Audio UAT Tool documentation
-- `/design/AUDIO.md` - Audio architecture and design specifications
+- `docs/architecture.md` - Audio architecture and design specifications
 - `/archive/PROJECTPLAN.md` - Project context and overview
 - Radio.Tools.AudioUAT implementation in `tools/Radio.Tools.AudioUAT/`
 

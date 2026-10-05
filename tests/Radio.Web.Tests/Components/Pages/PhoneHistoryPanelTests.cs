@@ -68,14 +68,14 @@ public class PhoneHistoryPanelTests : TestContext
   [Fact]
   public void Name_ResolvesFromContacts_AcrossNumberFormats()
   {
-    // Contact stored as "+1 (919) 371-8044"; call logged as "9193718044" — must
+    // Contact stored as "+1 (919) 555-0142"; call logged as "9195550142" — must
     // still match via PhoneNumberNormalizer.
-    var contacts = new List<MergedContact> { new(null, "Mom", "+1 (919) 371-8044", null, "PBAP") };
+    var contacts = new List<MergedContact> { new(null, "Mom", "+1 (919) 555-0142", null, "PBAP") };
 
-    var cut = RenderWith(Entry(phoneNumber: "9193718044"), contacts);
+    var cut = RenderWith(Entry(phoneNumber: "9195550142"), contacts);
 
     cut.Find(".phone-number").TextContent.Trim().Should().Be("Mom");
-    cut.Find(".history-subnumber").TextContent.Trim().Should().Be("9193718044");
+    cut.Find(".history-subnumber").TextContent.Trim().Should().Be("9195550142");
   }
 
   [Fact]
@@ -90,9 +90,9 @@ public class PhoneHistoryPanelTests : TestContext
   [Fact]
   public void Name_PrefersServerCallerName_OverContactLookup()
   {
-    var contacts = new List<MergedContact> { new(null, "Mom", "9193718044", null, "PBAP") };
+    var contacts = new List<MergedContact> { new(null, "Mom", "9195550142", null, "PBAP") };
 
-    var cut = RenderWith(Entry(phoneNumber: "9193718044", callerName: "Dad"), contacts);
+    var cut = RenderWith(Entry(phoneNumber: "9195550142", callerName: "Dad"), contacts);
 
     cut.Find(".phone-number").TextContent.Trim().Should().Be("Dad");
   }

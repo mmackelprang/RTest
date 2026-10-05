@@ -15,11 +15,11 @@ under 1 second.
 1. [Overview — What You're Setting Up](#1-overview)
 2. [Host the Custom Receiver HTML](#2-host-the-custom-receiver-html)
 3. [Register the Receiver on Google Cast Developer Console](#3-register-the-receiver)
-4. [Register Your Cast Devices for Development](#4-register-your-cast-devices)
+4. [Register Your Cast Devices for Development](#4-register-your-cast-devices-for-development)
 5. [Configure Radio Console](#5-configure-radio-console)
 6. [Deploy and Verify](#6-deploy-and-verify)
 7. [Troubleshooting](#7-troubleshooting)
-8. [Switching Back to HTTP Mode](#8-switching-back)
+8. [Switching Back to HTTP Mode](#8-switching-back-to-http-mode)
 
 ---
 

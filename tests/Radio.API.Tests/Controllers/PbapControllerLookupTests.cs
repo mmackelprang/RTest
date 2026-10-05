@@ -38,14 +38,14 @@ public sealed class PbapControllerLookupTests : IDisposable
     new(new Mock<IPbapSyncService>().Object, _repo, _bluetooth.Object);
 
   [Theory]
-  [InlineData("+19193718044")]
-  [InlineData("19193718044")]
-  [InlineData("9193718044")]
-  [InlineData("(919) 371-8044")]
+  [InlineData("+19195550142")]
+  [InlineData("19195550142")]
+  [InlineData("9195550142")]
+  [InlineData("(919) 555-0142")]
   public async Task WithNoPhoneConnected_EveryFormatOfAStoredNumberResolves(string phoneNumber)
   {
     await _repo.UpsertContactsAsync("78:20:51:F5:FB:A7",
-      [new PbapContact { DisplayName = "Owner", PhoneNumbers = ["9193718044"] }]);
+      [new PbapContact { DisplayName = "Owner", PhoneNumbers = ["9195550142"] }]);
     _bluetooth.SetupGet(b => b.ConnectedDevice).Returns((BluetoothDeviceInfo?)null);
 
     var result = await Controller().LookupNumber(phoneNumber, CancellationToken.None);
@@ -61,13 +61,13 @@ public sealed class PbapControllerLookupTests : IDisposable
     // The connected phone is synced first AND sorts last by address, so recency (if the two stamps differ)
     // and the address tie-break (if they are equal) both pick the other phone: only connected-first picks it.
     await _repo.UpsertContactsAsync("CC:CC:CC:CC:CC:03",
-      [new PbapContact { DisplayName = "Connected phone's name", PhoneNumbers = ["9193718044"] }]);
+      [new PbapContact { DisplayName = "Connected phone's name", PhoneNumbers = ["9195550142"] }]);
     await _repo.UpsertContactsAsync("AA:AA:AA:AA:AA:01",
-      [new PbapContact { DisplayName = "Other phone's name", PhoneNumbers = ["9193718044"] }]);
+      [new PbapContact { DisplayName = "Other phone's name", PhoneNumbers = ["9195550142"] }]);
     _bluetooth.SetupGet(b => b.ConnectedDevice)
       .Returns(new BluetoothDeviceInfo { Address = "CC:CC:CC:CC:CC:03", Name = "Handset" });
 
-    var ok = Assert.IsType<OkObjectResult>(await Controller().LookupNumber("9193718044", CancellationToken.None));
+    var ok = Assert.IsType<OkObjectResult>(await Controller().LookupNumber("9195550142", CancellationToken.None));
 
     Assert.Equal("Connected phone's name", DisplayNameOf(ok));
   }
@@ -75,9 +75,9 @@ public sealed class PbapControllerLookupTests : IDisposable
   [Fact]
   public async Task ALocalEntryMatch_ReportsIsExactMatchFalse()
   {
-    await _repo.UpsertContactsAsync("78:20:51:F5:FB:A7", [new PbapContact { DisplayName = "Local", PhoneNumbers = ["3718044"] }]);
+    await _repo.UpsertContactsAsync("78:20:51:F5:FB:A7", [new PbapContact { DisplayName = "Local", PhoneNumbers = ["5550142"] }]);
 
-    var ok = Assert.IsType<OkObjectResult>(await Controller().LookupNumber("9193718044", CancellationToken.None));
+    var ok = Assert.IsType<OkObjectResult>(await Controller().LookupNumber("9195550142", CancellationToken.None));
 
     Assert.Equal("Local", DisplayNameOf(ok));
     Assert.Equal(false, ok.Value!.GetType().GetProperty("IsExactMatch")!.GetValue(ok.Value));
@@ -85,12 +85,12 @@ public sealed class PbapControllerLookupTests : IDisposable
 
   [Theory]
   [InlineData("5550001111")]
-  [InlineData("5553718044")]   // a stranger sharing the stored number's last seven (owner ruling 2026-10-03)
+  [InlineData("5555550142")]   // a stranger sharing the stored number's last seven (owner ruling 2026-10-03)
   [InlineData("")]
   public async Task NoStoredContact_Is404_WithoutEchoingTheNumber(string phoneNumber)
   {
     await _repo.UpsertContactsAsync("78:20:51:F5:FB:A7",
-      [new PbapContact { DisplayName = "Owner", PhoneNumbers = ["9193718044"] }]);
+      [new PbapContact { DisplayName = "Owner", PhoneNumbers = ["9195550142"] }]);
 
     var result = await Controller().LookupNumber(phoneNumber, CancellationToken.None);
 

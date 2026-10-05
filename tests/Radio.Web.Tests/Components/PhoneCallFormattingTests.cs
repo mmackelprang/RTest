@@ -77,10 +77,10 @@ public class PhoneCallFormattingTests
   }
 
   [Theory]
-  [InlineData("9193718044", "(919) 371-8044")]
-  [InlineData("+19193718044", "(919) 371-8044")]     // 11-digit with leading country "1"
-  [InlineData("(919) 371-8044", "(919) 371-8044")]   // already grouped → re-normalized
-  [InlineData("919-371-8044", "(919) 371-8044")]
+  [InlineData("9195550142", "(919) 555-0142")]
+  [InlineData("+19195550142", "(919) 555-0142")]     // 11-digit with leading country "1"
+  [InlineData("(919) 555-0142", "(919) 555-0142")]   // already grouped → re-normalized
+  [InlineData("919-555-0142", "(919) 555-0142")]
   public void FormatPhoneNumber_TenDigitUs_GroupsNicely(string raw, string expected)
   {
     PhoneCallFormatting.FormatPhoneNumber(raw).Should().Be(expected);

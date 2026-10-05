@@ -74,8 +74,8 @@ opened and marked read.
 
 | Kind | Count | Literal values |
 |---|---|---|
-| Resolved contact name | 6 | Mark Mackelprang, Carol Everett, Van Mackelprang, Mary Carmen Wiser, Lynne Marley, Darlann Romney |
-| E.164, unresolved | 9 | `+1801***8129`, `+1336***9432`, `+1855***0400`, `+1662***0199`, `+1772***7803`, `+1478***2306`, `+1213***7467`, `+1209***7467`, `+1919***8923` |
+| Resolved contact name | 6 | [redacted] ×6 |
+| E.164, unresolved | 9 | `+1555***0112`, `+1555***0113`, `+1555***0114`, `+1555***0115`, `+1555***0116`, `+1555***0117`, `+1555***0118`, `+1555***0119`, `+1555***0120` |
 | Short code | 5 | `51789`, `39041`, `47864`, `837402`, `32665` (reported in full — not personal) |
 | Opaque 36-char sender ID | **0** | **none observed** |
 
@@ -168,8 +168,8 @@ a `.feed-chip--text` `chat_bubble` icon, a right-aligned date, and a `chevron_ri
 
 Two threads show a preview in the form `+1XXXXXXXXXX - <text>`:
 
-- Mary Carmen Wiser → `+1919***7670 - MMS Received`
-- Darlann Romney → `+1919***5840 - ❤️Love you too! ❤️`
+- [redacted contact A] → `+1555***0111 - MMS Received`
+- [redacted contact B] → `+1555***0121 - ❤️See you soon! ❤️`
 
 The literal string `MMS Received` appears as preview text in one case. GV-7 may want to
 account for this prefix format, since it renders a *second* phone number inside a row that
@@ -214,12 +214,12 @@ SignalR and its failure never surfaces to the browser.
 | Attempt | Thread | Body |
 |---|---|---|
 | Early sweep | 18 of 20 threads | rendered content ✅ |
-| Early sweep | Mary Carmen Wiser, Darlann Romney | empty ❌ |
+| Early sweep | [redacted contact A], [redacted contact B] | empty ❌ |
 | After `Retry` | `32665` (rendered content earlier) | empty ❌ |
 | After 75s cooldown | `51789` | rendered content ✅ |
-| Immediately after | Darlann Romney | empty ❌ |
+| Immediately after | [redacted contact B] | empty ❌ |
 | Immediately after | `39041` (control) | empty ❌ |
-| After 90s cooldown | Lynne Marley | empty ❌ |
+| After 90s cooldown | [redacted contact C] | empty ❌ |
 
 **Candidate explanation (not diagnosed):** the pattern — works after a cooldown, degrades
 within 1–2 subsequent opens, recovers partially with time — is consistent with upstream
@@ -235,7 +235,7 @@ Google Voice throttling or quota exhaustion on the per-thread message fetch. The
 
 **Sub-observation (weaker, worth a look):** across every attempt, 18 of 20 threads rendered
 a body at least once. The only 2 that **never** did are exactly the 2 MMS-preview threads
-from G-8 (Mary Carmen Wiser, Darlann Romney). That correlation may indicate a *separate*
+from G-8 ([redacted contact A], [redacted contact B]). That correlation may indicate a *separate*
 MMS-specific rendering defect layered on top of the general flakiness. Not confirmed —
 the general flakiness makes it impossible to distinguish from bad luck without a clean
 upstream.
@@ -319,14 +319,14 @@ The unread indicator is an inline `<span class="unread-dot">` placed as a siblin
 - Read rows — name line starts at **x = 231px**
 
 Every row shifts horizontally the moment it is marked read. Visible in
-`texts-threadlist-1920x720.png` (compare `+1801***8129` / `Mark Mackelprang` against
-`51789` / `+1336***9432`). A reserved-width gutter would hold the text steady.
+`texts-threadlist-1920x720.png` (compare `+1555***0112` / `[redacted]` against
+`51789` / `+1555***0113`). A reserved-width gutter would hold the text steady.
 
 ---
 
 ### F-8 · Not reproducible · Header/body desync under a degraded circuit
 
-At one point the conversation pane showed **Darlann Romney**'s header above **Lynne Marley**'s
+At one point the conversation pane showed **[redacted contact B]**'s header above **[redacted contact C]**'s
 messages while Lynne's row was selected — a wrong-conversation render with obvious privacy
 implications. Only one `.texts-conversation` pane existed in the DOM, so this was a genuine
 content desync, not a duplicate-node artifact.
@@ -360,9 +360,9 @@ recorded, not re-verified today** — except where noted.
 
 Incidentally re-confirmed today from the **All** tab: real transcripts are flowing
 (CVS Pharmacy, Allstate, AAA travel, Window Genie, plus personal messages), with a mix of
-resolved contact names (Mark Mackelprang, Joe Lete) and raw E.164 numbers
-(`+1937***6039`, `+1615***1164`, `+1801***8129`, `+1313***6471`, `+1919***1494`,
-`+1919***7327`). Rows with no transcript render **"No transcript available."** — a proper
+resolved contact names ([redacted], [redacted]) and raw E.164 numbers
+(`+1555***0122`, `+1555***0123`, `+1555***0112`, `+1555***0124`, `+1555***0125`,
+`+1555***0126`). Rows with no transcript render **"No transcript available."** — a proper
 placeholder, not a blank.
 
 The `Voicemail 6` badge behaves like the Texts badge (G-1): it is an unread count, not a

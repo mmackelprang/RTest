@@ -31,39 +31,16 @@ This document provides a comprehensive reference for all Configuration, Preferen
    # Run API (default: http://localhost:5000)
    dotnet run --project src/Radio.API
 
-   # Run Web UI (default: http://localhost:5001)
+   # Run Web UI (default: http://localhost:5002)
    dotnet run --project src/Radio.Web
    ```
 
-### For Production (Raspberry Pi / Linux)
+### For Production
 
-1. **System Prerequisites**
-   ```bash
-   sudo apt update
-   sudo apt install -y dotnet-sdk-8.0 sqlite3
-   ```
-
-2. **Clone and Build**
-   ```bash
-   git clone <repository-url>
-   cd RadioConsole
-   dotnet restore
-   dotnet publish -c Release -o /opt/radio-console
-   ```
-
-3. **Create Data Directories**
-   ```bash
-   sudo mkdir -p /opt/radio-console/data/{config,metrics,fingerprints,backups}
-   sudo mkdir -p /opt/radio-console/logs
-   sudo chown -R radio:radio /opt/radio-console
-   ```
-
-4. **Configure Production Settings**
-   - Copy `appsettings.json` to `/opt/radio-console/`
-   - Set `DefaultStoreType` to `Sqlite` for better performance
-   - Configure paths to use absolute paths (e.g., `/opt/radio-console/data`)
-
-5. **Setup Systemd Service** (see [Service Setup](#systemd-service-setup))
+Production runs on an Intel N100 (`x86_64`) Ubuntu box as two systemd services, `radio-api` (port 5000) and
+`radio-web` (port 5002), installed under `/opt/radio-console` and deployed with `deploy/Deploy-ToLinux.ps1`.
+See [`deployment.md`](deployment.md) for the overview and [`deploy/DEPLOYMENT.md`](../deploy/DEPLOYMENT.md)
+for the step-by-step guide. Per-machine settings go in `appsettings.Production.json`.
 
 ---
 
@@ -331,146 +308,33 @@ dotnet run
 
 ## Fingerprinting Setup
 
-Audio fingerprinting identifies songs playing on Radio or Vinyl sources using AcoustID and MusicBrainz.
+Song identification uses SongRec (a Shazam-compatible recognizer) for every source, then MusicBrainz and the
+Cover Art Archive for metadata and album art. No API key is required.
 
 ### Prerequisites
 
-1. AcoustID account and API key (see [Getting API Keys](#getting-api-keys))
+1. `songrec` installed on the host (`sudo add-apt-repository ppa:marin-m/songrec && sudo apt install songrec`)
 2. Internet connection for lookups
 
 ### Configuration
 
-```json
-{
-  "Fingerprinting": {
-    "Enabled": true,
-    "SampleDurationSeconds": 15,
-    "MinimumConfidenceThreshold": 0.5,
-    "DuplicateSuppressionMinutes": 5,
-    "DatabasePath": "./data/fingerprints/fingerprints.db",
-    "AcoustId": {
-      "ApiKey": "${secret:acoustid_apikey}",
-      "BaseUrl": "https://api.acoustid.org/v2",
-      "MaxRequestsPerSecond": 3,
-      "TimeoutSeconds": 10
-    },
-    "MusicBrainz": {
-      "BaseUrl": "https://musicbrainz.org/ws/2",
-      "ApplicationName": "RadioConsole",
-      "ApplicationVersion": "1.0.0",
-      "ContactEmail": "your-email@example.com",
-      "MaxRequestsPerSecond": 1,
-      "TimeoutSeconds": 10
-    }
-  }
-}
-```
-
-### Create Secret
-
-```bash
-cd tools/Radio.Tools.ConfigurationManager
-dotnet run
-# Create secret: acoustid_apikey = <your-api-key>
-```
+The keys live under `Fingerprinting` in `src/Radio.API/appsettings.json`; `Fingerprinting:SongRec:SongRecPath`
+names the binary when it is not on `PATH`, and `Fingerprinting:MusicBrainz:ContactEmail` identifies the
+application to MusicBrainz. See [Fingerprinting](#fingerprinting) below for the full option list.
 
 ### Rate Limiting
 
-- **AcoustID**: 3 requests/second (free tier limit)
 - **MusicBrainz**: 1 request/second (anonymous limit)
 
-The system automatically respects these limits.
+The system automatically respects this limit.
 
 ---
 
 ## Systemd Service Setup
 
-For production Linux deployments, create a systemd service:
-
-### Create Service File
-
-Create `/etc/systemd/system/radio-console-api.service`:
-
-```ini
-[Unit]
-Description=Radio Console API
-After=network.target
-
-[Service]
-Type=notify
-User=radio
-Group=radio
-WorkingDirectory=/opt/radio-console
-ExecStart=/usr/bin/dotnet /opt/radio-console/Radio.API.dll
-Restart=always
-RestartSec=10
-Environment="ASPNETCORE_ENVIRONMENT=Production"
-Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Create `/etc/systemd/system/radio-console-web.service`:
-
-```ini
-[Unit]
-Description=Radio Console Web UI
-After=network.target radio-console-api.service
-
-[Service]
-Type=notify
-User=radio
-Group=radio
-WorkingDirectory=/opt/radio-console
-ExecStart=/usr/bin/dotnet /opt/radio-console/Radio.Web.dll
-Restart=always
-RestartSec=10
-Environment="ASPNETCORE_ENVIRONMENT=Production"
-Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Enable and Start Services
-
-```bash
-# Create user
-sudo useradd -r -s /bin/false radio
-
-# Set permissions
-sudo chown -R radio:radio /opt/radio-console
-
-# Reload systemd
-sudo systemctl daemon-reload
-
-# Enable services
-sudo systemctl enable radio-console-api
-sudo systemctl enable radio-console-web
-
-# Start services
-sudo systemctl start radio-console-api
-sudo systemctl start radio-console-web
-
-# Check status
-sudo systemctl status radio-console-api
-sudo systemctl status radio-console-web
-```
-
-### Manage Services
-
-```bash
-# View logs
-sudo journalctl -u radio-console-api -f
-sudo journalctl -u radio-console-web -f
-
-# Stop services
-sudo systemctl stop radio-console-api radio-console-web
-
-# Restart services
-sudo systemctl restart radio-console-api radio-console-web
-```
+The unit files are tracked in `deploy/common/` (`radio-api.service`, `radio-web.service`) and installed by the
+setup scripts. See [`deployment.md`](deployment.md) and [`deploy/DEPLOYMENT.md`](../deploy/DEPLOYMENT.md) §
+Service Management rather than writing units by hand.
 
 ---
 

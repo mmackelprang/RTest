@@ -20,7 +20,7 @@ namespace Radio.Infrastructure.Tests.External;
 /// </summary>
 public sealed class PhoneContactLookupServiceTests : IDisposable
 {
-  private const string Number = "9193718044";
+  private const string Number = "9195550142";
   private readonly SqliteConnection _connection;
   private readonly FakeTimeProvider _time = new(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
   private readonly PbapContactRepository _repo;
@@ -62,7 +62,7 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
     await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Owner (synced)", PhoneNumbers = [Number] }]);
     var service = Build("[]", connectedAddress: null);
 
-    Assert.Equal("Owner (synced)", await service.FindCallerNameAsync("+1 919-371-8044"));
+    Assert.Equal("Owner (synced)", await service.FindCallerNameAsync("+1 919-555-0142"));
     Assert.Empty(_requests);   // resolved locally; RotaryPhone not asked
   }
 
@@ -76,12 +76,12 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   }
 
   [Theory]
-  [InlineData("+19193718044")]
-  [InlineData("19193718044")]
-  [InlineData("9193718044")]
+  [InlineData("+19195550142")]
+  [InlineData("19195550142")]
+  [InlineData("9195550142")]
   public async Task APhoneBookMiss_FallsBackToRotaryPhonesList_ToleratingACountryCode(string incoming)
   {
-    var service = Build(Rotary("RotaryPhone name", "+1 (919) 371-8044"));
+    var service = Build(Rotary("RotaryPhone name", "+1 (919) 555-0142"));
 
     Assert.Equal("RotaryPhone name", await service.FindCallerNameAsync(incoming));
     // The list route, the one RotaryPhone actually has — never the /lookup it never had.
@@ -89,12 +89,12 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   }
 
   [Theory]
-  [InlineData("+19193718044")]
-  [InlineData("19193718044")]
-  [InlineData("9193718044")]
+  [InlineData("+19195550142")]
+  [InlineData("19195550142")]
+  [InlineData("9195550142")]
   public async Task TheStoredPhoneBook_ToleratesACountryCode(string incoming)
   {
-    // VCardParser stores numbers normalized; "+1 919…" in a vCard is stored as 9193718044.
+    // VCardParser stores numbers normalized; "+1 919…" in a vCard is stored as 9195550142.
     await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Owner", PhoneNumbers = [Number] }]);
     var service = Build("[]");
 
@@ -118,8 +118,8 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   [Fact]
   public async Task ARotaryPhoneExactMatch_BeatsASyncedLocalEntry()
   {
-    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
-    var service = Build(Rotary("RotaryPhone exact", "+1 919 371 8044"));
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["5550142"] }]);
+    var service = Build(Rotary("RotaryPhone exact", "+1 919 555 0142"));
 
     Assert.Equal("RotaryPhone exact", await service.FindCallerNameAsync(Number));
   }
@@ -127,8 +127,8 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   [Fact]
   public async Task ASyncedLocalEntry_BeatsARotaryPhoneLocalEntry()
   {
-    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
-    var service = Build(Rotary("RotaryPhone local entry", "371-8044"));
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["5550142"] }]);
+    var service = Build(Rotary("RotaryPhone local entry", "555-0142"));
 
     Assert.Equal("Synced local entry", await service.FindCallerNameAsync(Number));
   }
@@ -136,7 +136,7 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   [Fact]
   public async Task ASyncedLocalEntry_StandsWhenRotaryPhoneHasNothing()
   {
-    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["5550142"] }]);
     var service = Build(Rotary("Someone else", "5550001111"));
 
     Assert.Equal("Synced local entry", await service.FindCallerNameAsync(Number));
@@ -145,7 +145,7 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   [Fact]
   public async Task ASyncedLocalEntry_StandsWhenRotaryPhoneIsUnreachable()
   {
-    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["3718044"] }]);
+    await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced local entry", PhoneNumbers = ["5550142"] }]);
     var service = Build(rotaryContactsJson: null);
 
     Assert.Equal("Synced local entry", await service.FindCallerNameAsync(Number));
@@ -155,9 +155,9 @@ public sealed class PhoneContactLookupServiceTests : IDisposable
   public async Task AStrangerWhoSharesTheLastSeven_IsNotNamedFromEitherSource()
   {
     await _repo.UpsertContactsAsync("BB:BB:BB:BB:BB:02", [new() { DisplayName = "Synced owner", PhoneNumbers = [Number] }]);
-    var service = Build(Rotary("RotaryPhone owner", "+1 919 371 8044"));
+    var service = Build(Rotary("RotaryPhone owner", "+1 919 555 0142"));
 
-    Assert.Equal("5553718044", await service.FindCallerNameAsync("5553718044"));
+    Assert.Equal("5555550142", await service.FindCallerNameAsync("5555550142"));
   }
 
   [Fact]

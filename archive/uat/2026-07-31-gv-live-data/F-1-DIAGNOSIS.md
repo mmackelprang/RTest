@@ -74,14 +74,14 @@ Config discrepancy worth their attention: `/opt/rotary-phone/appsettings*.json` 
 
 | Time | Thread | Dead window |
 |---|---|---|
-| 12:13:00 | `t.+19192308923` | 12:11–12:20 ✓ |
+| 12:13:00 | `t.+15555550105` | 12:11–12:20 ✓ |
 | 12:54:01 | (thread *list*) | 12:52–13:00 ✓ |
 | 13:13:12 | `g.Group Message.yL8g8…` | 13:11–13:20 ✓ |
 | 13:17:33 | `t.32665` | 13:11–13:20 ✓ |
 | 13:32:32 | `g.Group Message.d5Mri…` | 13:31–13:40 ✓ |
 | 13:34:42 | `t.39041` | 13:31–13:40 ✓ |
-| 13:39:17 | `t.+19199304719` | 13:31–13:40 ✓ |
-| 14:32:12–14:32:32 | `t.51789`, `t.+13362039432` ×2, `t.+16627480199` | 14:31–14:40 ✓ |
+| 13:39:17 | `t.+15555550104` | 13:31–13:40 ✓ |
+| 14:32:12–14:32:32 | `t.51789`, `t.+15555550102` ×2, `t.+15555550106` | 14:31–14:40 ✓ |
 
 This also explains the UAT's confusing timing: the "75s cooldown" that worked simply crossed a
 20-minute boundary, and "the very next two failed" were still inside the same dead window.
@@ -107,7 +107,7 @@ with the *exact* escaping our client produces:
 
 ```
 t.32665                                       HTTP 200  messages=2
-t.%2B18019208129                              HTTP 200  messages=4
+t.%2B15555550103                              HTTP 200  messages=4
 g.Group%20Message.d5Mri%2FNrDUQgXNXNQehOfw    HTTP 200  messages=0   <-- silent empty
 g.Group%20Message.yL8g8JjuyR7Z57d9BxRW%2FQ    HTTP 200  messages=0   <-- silent empty
 ```
@@ -139,8 +139,8 @@ catch it because the fetch and parse both genuinely succeeded — only the **fil
 
 GV group threads are `g.Group Message.<base64url>`, and the base64url alphabet includes `/`. Group
 threads are the MMS threads. Both MMS threads in the live top-20 are group threads
-(`g.Group Message.d5Mri/NrDUQgXNXNQehOfw` = Mary Carmen Wiser,
-`g.Group Message.yL8g8JjuyR7Z57d9BxRW/Q` = Darlann Romney). Confirmed against the live list.
+(`g.Group Message.d5Mri/NrDUQgXNXNQehOfw` = [redacted contact A],
+`g.Group Message.yL8g8JjuyR7Z57d9BxRW/Q` = [redacted contact B]). Confirmed against the live list.
 
 Because Defect A and Defect B were both active, these two threads were hit by *both* — every other
 thread only had to dodge a 9-minute window, while these two were structurally unreadable **100% of

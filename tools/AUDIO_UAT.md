@@ -437,7 +437,7 @@ The following prompts are designed for GitHub Copilot to implement each phase of
 Create the foundation for the Radio.Tools.AudioUAT console application in the `tools/` directory. This phase focuses on testing the Core Audio Engine functionality.
 
 ### Context
-- Reference `/design/AUDIO_ARCHITECTURE.md` for audio engine specifications
+- Reference `docs/architecture.md` for audio engine specifications
 - Reference `/PLAN.md` Phase 2 for Core Audio Engine details
 - The tool should use the existing `Radio.Core` and `Radio.Infrastructure` projects
 
@@ -574,7 +574,7 @@ Extend the Radio.Tools.AudioUAT application to include Phase 3 testing for Prima
 ### Context
 - Reference `/PLAN.md` Phase 3 for Primary Audio Sources details
 - Build upon the Phase 2 foundation already implemented
-- Reference `/design/AUDIO.md` for source implementation specifications
+- Reference `docs/architecture.md` for source implementation specifications
 
 ### Requirements
 

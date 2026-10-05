@@ -18,6 +18,13 @@ open. Live work items are tracked in [BUILDER_QUEUE.md](BUILDER_QUEUE.md).
 - **`AUD-37` part (b):** the HttpMp3 Cast path has a stalled-write gap. Auto-reconnect shipped, and the box runs
   DirectChannel, so this is not the production path. It has no queue row.
 - **`TTS-8`:** a fresh install ships the robotic `en-US-Standard-A` voice. The fix is box configuration.
+- **Raspberry Pi is an untested build target.** `Deploy-ToPi.ps1` / `deploy-to-pi.sh` build `linux-arm64`, but
+  no Pi has run this release. `deploy-to-pi.sh` is also known to destroy both `appsettings.Production.json`
+  overlays on every run (§ 25 below, priority high, unexercised on hardware).
+- **Bundled alarm and alert sounds have unverified provenance.** The `PD - *` files in
+  `src/Radio.API/media/audio/alarm/` and `src/Radio.API/media/audio/alerts/` are labelled public domain, but
+  their source and licence have not been verified. Replace them with CC0 sounds of known origin. (Music is not
+  bundled; see `src/Radio.API/media/audio/music/README.md`.)
 
 **Install-path work (P1):** `OPS-3` (`BindsTo=` for `radio-web`; the owner reviews the merge), plus `LOG-3` and
 `AUD-37` (b) above.
@@ -44,14 +51,17 @@ This document catalogs features that have been designed at the interface level b
 
 ---
 
-## The incoming-call banner's **Ignore** — built and wired; switched off until the owner's real-call test (`PHN-11`, `PHN-13`)
+## ✅ CLOSED — The incoming-call banner's **Ignore** is switched on (`PHN-11`, `PHN-13`, #780)
+
+**Closed 2026-10-04 by #780.** `RotaryPhone:DeclineSupported` now ships `true` in `src/Radio.Web/appsettings.json`,
+so both Ignores call RotaryPhone's decline route on a stock install. The one remaining gap — the cell keeps
+ringing after Ignore — is listed under *Open items at v1.0.0* above. The history below is kept for reference.
 
 **Status (2026-10-03, `PHN-13`).** RotaryPhone shipped the route (`POST /api/phone/decline?phoneId=`, its
 `PhoneController.Decline`; reply `RotaryPhone/docs/handoffs/radioconsole-decline-endpoint-reply.md` on their
 `main`). Both Ignores are wired to it — the banner's and the Phone page hero's (the hero's disabled **Reject** is
-now **Ignore**, owner 2026-10-02: *"d - yes - ignore is the label I want"*). What is left is a switch, not code:
-`RotaryPhone:DeclineSupported` ships `false`, and RotaryPhone asked that it stay off until the owner's real-call
-test passes.
+now **Ignore**, owner 2026-10-02: *"d - yes - ignore is the label I want"*). What was left was a switch, not code:
+`RotaryPhone:DeclineSupported` shipped `false` until #780 turned it on.
 
 **How the answers are read** (`PhoneApiService.DeclineCallAsync` → `DeclineCallOutcome`):
 - `200 {"declined": true}` — the banner shows **ENDING CALL** until the `Idle` that follows (or reports a failure
@@ -62,7 +72,7 @@ test passes.
 - Anything else — transport failure, 5xx, `404` (unknown phone id), a 2xx without `"declined": true` — shows
   *"Couldn't end the call. Try again."* and Ignore works again.
 
-**To switch it on** (the coordinator, with the owner's go-ahead, at UAT time):
+**To switch it off or on again** at runtime:
 
 ```bash
 curl -s -X POST http://radio:5000/api/configuration/RotaryPhone \
@@ -70,7 +80,7 @@ curl -s -X POST http://radio:5000/api/configuration/RotaryPhone \
 ```
 
 That writes `rotaryphone:DeclineSupported = true` to the shared config store, which radio-web reads through its
-bridge over the shipped `false`; the API's `ConfigChanged` push makes radio-web reload, and both Ignores read the
+bridge over the shipped default; the API's `ConfigChanged` push makes radio-web reload, and both Ignores read the
 flag on every use, so the next call has it. If the push is missed, `sudo systemctl restart radio-web` (or reload
 the kiosk page) picks it up. The same POST with `false` switches it off. Pinned end to end by
 `RotaryPhoneDeclineEnableStepTests`.
@@ -1242,73 +1252,14 @@ is no RF320 stub left in the code. The section number is kept so references to l
 
 ## 5. Kiosk Mode (Fullscreen Browser)
 
-**Status:** COMPLETE — running on Ubuntu x64 touchscreen (1920x720)
+**Status:** COMPLETE — running on the Ubuntu x64 appliance's 1920x720 touch panel
 **Added:** 2026-02-13
-**Priority:** Medium — needed for the final console radio experience, but deferred until all testing/debugging/validation is complete on the Pi
 
-### What Exists
-
-The Radio.Web Blazor Server UI runs as a separate systemd service (`radio-web.service`) on port 5002. The Pi's touchscreen display (1920x576) can access it via any browser.
-
-### What's Needed
-
-A kiosk mode setup that launches Chromium in fullscreen `--app` mode pointing at the local Web UI, auto-starting on boot.
-
-#### Implementation Steps
-
-1. **Auto-login for the display user** (e.g., `pi` or a dedicated `kiosk` user):
-
-```bash
-# /etc/systemd/system/getty@tty1.service.d/autologin.conf
-[Service]
-ExecStart=
-ExecStart=-/sbin/agetty --autologin pi --noclear %I $TERM
-```
-
-2. **Chromium kiosk systemd user service** (`~/.config/systemd/user/radio-kiosk.service`):
-
-```ini
-[Unit]
-Description=Radio Console Kiosk Browser
-After=graphical-session.target
-Wants=graphical-session.target
-
-[Service]
-Type=simple
-Environment=DISPLAY=:0
-ExecStartPre=/bin/sleep 5
-ExecStart=/usr/bin/chromium-browser --kiosk --app=http://localhost:5002 --noerrdialogs --disable-infobars --disable-session-crashed-bubble --check-for-update-interval=31536000
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=graphical-session.target
-```
-
-3. **Disable screen blanking / power management:**
-
-```bash
-# /etc/xdg/lxsession/LXDE-pi/autostart (add these lines)
-@xset s off
-@xset -dpms
-@xset s noblank
-```
-
-4. **Hide mouse cursor** (for touchscreen):
-
-```bash
-apt install unclutter
-# Add to autostart: @unclutter -idle 0.1 -root
-```
-
-#### Gotchas
-
-- Chromium `--kiosk` vs `--app`: `--kiosk` is true fullscreen (no window chrome, no way to exit without keyboard). `--app` shows minimal chrome but allows window management. For a console radio, `--kiosk` is preferred.
-- The `ExecStartPre=/bin/sleep 5` ensures the X server and radio-web service are fully up before Chromium launches. May need adjustment.
-- On Raspberry Pi OS Bookworm with Wayland (labwc), the approach differs — use `wlr-randr` for display config and ensure Chromium runs under Wayland.
-- If using X11 (default on Pi OS Bookworm desktop), ensure LightDM auto-login is configured in `/etc/lightdm/lightdm.conf` under `[Seat:*]`.
-- The 1920x576 ultrawide touchscreen may need custom display configuration via `xrandr` or `/boot/config.txt` HDMI settings.
-- Consider adding a health-check loop that restarts Chromium if it crashes or if the Web UI becomes unresponsive.
+The kiosk is a Chrome window on a dedicated profile, launched by the single definition in
+`deploy/debian-x64/kiosk/bin/radio-kiosk-launch` and installed by `deploy/debian-x64/kiosk/setup-kiosk.sh`.
+See [deployment.md](deployment.md) and `CLAUDE.md` § Deployment for how it runs, how the deploy relaunches
+it, and its gotchas (`--password-store=basic`, never `pkill -f chrome`). The original Raspberry Pi /
+Chromium / 1920x576 plan that stood here is obsolete and was removed.
 
 ---
 

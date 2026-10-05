@@ -637,7 +637,7 @@ public static class GvSpeechText
     // Rule 4 — a URL is unspeakable; the words are more useful than the characters.
     text = Url.Replace(text, "a link");
 
-    // Rule 6 — emoji go. "❤️Love you too! ❤️" must not become "red heart Love you too".
+    // Rule 6 — emoji go. "❤️See you soon! ❤️" must not become "red heart See you soon".
     text = StripEmoji(text);
 
     // Tidy up after 3/4/6, which can leave doubled or leading spaces. Rule 2 needs no code: the
@@ -1215,7 +1215,7 @@ verbatim so a reviewer can diff the test against `:376-402`.
 | `ForMessage_StripsTheMmsSenderPrefix` | `"+15551234567 - Dinner at 7?"` → `"Dinner at 7?"` | delete the `Replace` |
 | `ForMessage_LeavesABodyWithNoPrefixAlone` | `"555 - is not a prefix"` (too short) → unchanged | widen the digit floor below 7 |
 | `ForMessage_ReplacesUrlsWithTheWordsALink` | `"See https://ex.com/a?b=1 now"` → `"See a link now"` | delete the URL rule |
-| `ForMessage_StripsEmojiAndTheSpacesTheyLeave` | `"❤️Love you too! ❤️"` → `"Love you too!"` | delete `StripEmoji`; **and** change `EnumerateRunes` to a `char` loop |
+| `ForMessage_StripsEmojiAndTheSpacesTheyLeave` | `"❤️See you soon! ❤️"` → `"See you soon!"` | delete `StripEmoji`; **and** change `EnumerateRunes` to a `char` loop |
 | `ForMessage_AddsTheLeadInOnlyWhenANameResolved` | `(body, "Jane")` → `"Message from Jane. …"`; `(body, null)` → body alone | make the lead-in unconditional |
 | `ForMessage_NeverIncludesATimestamp` | any fixture → contains no `":"`-shaped time | — (a guard, not a transformation) |
 | `ForMessage_CapsAtMaxChars` | 1500 `'a'` → length exactly 1000 | remove the cap |

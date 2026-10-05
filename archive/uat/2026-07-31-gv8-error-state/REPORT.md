@@ -91,8 +91,8 @@ Healthy `age < ~660`; blackout `~660–1200`; refresh at `~1200`. Every observat
 ### C1 — Baseline open, healthy window · PASS
 
 `01:06:17Z`, age **375**. Opened feed row 2 = `t.51789` (non-group, real preview).
-Observed **1 bubble**, 1 day separator (`DEC 17, 2025`), body `19199010112 deleted from Microsoft
-account je**a@ma**.com. Not you? aka.ms/alca`. `emptyState: null` — no `cloud_off`, no
+Observed **1 bubble**, 1 day separator (`DEC 17, 2025`), body `[redacted message]`.
+`emptyState: null` — no `cloud_off`, no
 "Couldn't load messages.", no "Start the conversation below." Viewport asserted in-page: `1920×720`.
 
 Screenshot: `screenshots/01-c1-baseline-thread-51789.png`
@@ -146,13 +146,13 @@ Screenshots: `screenshots/02-c2-skeleton-visible.png`, `screenshots/03-c2-frame-
 Added because the plan names this, not the skeleton's brevity, as the real C2 failure:
 *"What IS a failure: seeing the previous thread's bubbles while a different thread is loading."*
 
-`01:28:19Z`, age **497**. Thread A = `t.+19193718044` (**15 bubbles, 11 day separators**) fully
-loaded, then Back, then thread B = `t.+13362039432`. At the instant B's skeleton appeared:
+`01:28:19Z`, age **497**. Thread A = `t.+15555550101` (**15 bubbles, 11 day separators**) fully
+loaded, then Back, then thread B = `t.+15555550102`. At the instant B's skeleton appeared:
 
 ```json
 { "skeletonRows": 5, "shimmerNodes": 15,
   "bubblesStillShown": 0, "daySeps": 0,
-  "headerName": "+13362039432", "text": "" }
+  "headerName": "+15555550102", "text": "" }
 ```
 
 Zero stale bubbles; the header had already switched. This confirms `LoadOpenThreadMessagesAsync`
@@ -166,8 +166,8 @@ Screenshot: `screenshots/12-c2b-cross-thread-no-stale-bubbles.png`
 
 | Feed row | Thread id | Display |
 |---|---|---|
-| 0 | `t.+18019208129` | "Don't worry about the sealing for Andrews…" |
-| **1** | **`t.+19193718044`** | **Mark Mackelprang — "teest"** ← carried into C5 |
+| 0 | `t.+15555550103` | "[redacted message]" |
+| **1** | **`t.+15555550101`** | **[redacted] — "[redacted message]"** ← carried into C5 |
 
 Row 1 was not opened until C4/C5, per the plan.
 
@@ -176,7 +176,7 @@ Row 1 was not opened until C4/C5, per the plan.
 Executed during the **natural blackout**, not by stopping `rotary-phone` (owner declined). So C4 and
 C8 are one observation, and it is a genuine upstream failure rather than a synthesised one.
 
-**`01:11:48.723Z`, `psidtsAgeSeconds` = 707 → BLACKOUT.** Opened row 1 (`t.+19193718044`):
+**`01:11:48.723Z`, `psidtsAgeSeconds` = 707 → BLACKOUT.** Opened row 1 (`t.+15555550101`):
 
 ```
 cloud_off
@@ -186,7 +186,7 @@ Couldn't load messages.
 
 DOM: `emptyState.icons = ["cloud_off"]`, `emptyState.text = "Couldn't load messages."`,
 `emptyState.buttons = ["Retry"]`, `bubbles = 0`, `skeletonRows = 0`. Header still correctly
-identified the thread: `Mark Mackelprang / +19193718044`.
+identified the thread: `[redacted] / +15555550101`.
 
 **"Start the conversation below." did not appear.** That string *was* F-1; its absence here under a
 confirmed 502 is the whole point of the PR.
@@ -203,7 +203,7 @@ Same blackout, `01:11:48Z` → `01:11:54Z` (age 707 → 713):
 | After the failed open + Back | **`true`** | **2** |
 
 We did not mark read a conversation the user was never shown. Visible in
-`screenshots/07-c4-error-state-blackout.png` — the dot is still on the "Mark Mackelprang" row
+`screenshots/07-c4-error-state-blackout.png` — the dot is still on the "[redacted]" row
 *behind* the error pane.
 
 Screenshot: `screenshots/08-c5-unread-survives-failed-open.png`
@@ -233,7 +233,7 @@ Screenshots: `screenshots/09-c6-error-before-retry.png`, `screenshots/10-c6-reco
 
 The boundary with RotaryPhone's Defect B, where over-reporting errors would itself be a new defect.
 `01:05:54.8Z`, age **353**. Opened feed row 11 = `g.Group Message.d5Mri/NrDUQgXNXNQehOfw`, resolved
-as **"Mary Carmen Wiser"**.
+as **"[redacted contact A]"**.
 
 Rendered: `forum` + **"Start the conversation below."**, `buttons: []` — the **empty** state.
 **No `cloud_off`. No `Retry`.** Correct: the server said zero messages.
@@ -262,7 +262,7 @@ The one piece of monitoring this surface has did fire, in the same second as the
 
 ```
 [21:11:48 ERR] Radio.Web.Services.ApiClients.GvBridgeApiService:
-    Failed to get GV SMS thread t.+19193718044: HTTP 502 Failed to fetch SMS messages from Google
+    Failed to get GV SMS thread t.+15555550101: HTTP 502 Failed to fetch SMS messages from Google
 ```
 
 Upstream, same second:

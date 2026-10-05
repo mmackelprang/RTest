@@ -4,7 +4,7 @@ public static class PhoneNumberNormalizer
 {
   /// <summary>
   /// Digits only, with the North American country code dropped from an 11-digit number, so
-  /// <c>+1 (919) 371-8044</c>, <c>19193718044</c> and <c>9193718044</c> all become <c>9193718044</c>.
+  /// <c>+1 (919) 555-0142</c>, <c>19195550142</c> and <c>9195550142</c> all become <c>9195550142</c>.
   /// Other country codes are kept (<c>+44 20 7946 0958</c> → <c>442079460958</c>); the last-7 tier of
   /// <see cref="FindMatch{T}"/> is what lets those match a number stored without one.
   /// </summary>

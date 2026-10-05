@@ -21,7 +21,7 @@ To request changes from the RotaryPhone session, update the boundary doc's Chang
 
 **Grandpa Anderson's Console Radio Remade** - A modern audio command center restoring vintage console radio functionality with modern capabilities (Bluetooth A2DP, streaming, smart home events, Chromecast audio).
 
-**Target Platform:** Raspberry Pi 5 (Linux) with Windows development support
+**Target Platform:** Intel N100 mini-PC (`x86_64`, Ubuntu); Raspberry Pi 5 (`linux-arm64`) is an untested ARM64 build. Windows and Linux development supported
 **Stack:** .NET 10, ASP.NET Core, Blazor Server, SoundFlow audio engine, SQLite/JSON config
 
 ## Build & Test Commands
@@ -194,9 +194,10 @@ RadioConsole.sln
 │   ├── Radio.Infrastructure.Tests  # Infrastructure integration tests
 │   ├── Radio.API.Tests             # API controller tests
 │   ├── Radio.Web.Tests             # Web UI component tests
+│   ├── Radio.Web.E2ETests          # Playwright end-to-end tests (needs browsers + a running app)
 │   └── Radio.IntegrationTests      # Cross-cutting integration tests
 ├── tools/                      # AudioUAT, ConfigurationManager CLIs
-├── deploy/                     # Pi deployment scripts, systemd services
+├── deploy/                     # Linux deployment scripts, systemd services, kiosk
 ├── docs/                       # Current docs (index: docs/README.md), decisions, live work queue
 └── archive/                    # Historical plans, handoffs, UAT records (not maintained)
 ```

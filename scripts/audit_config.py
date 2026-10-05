@@ -3,7 +3,7 @@ import re
 
 # Configuration
 ROOT_DIR = "."
-DOC_FILE = "SYSTEMCONFIGURATION.md"
+DOC_FILE = "docs/configuration.md"
 # Regex to find classes like 'public class AudioOptions'
 CLASS_PATTERN = re.compile(r"public\s+(?:sealed\s+)?class\s+(\w+Options)")
 # Regex to find 'public const string SectionName = "Audio";'

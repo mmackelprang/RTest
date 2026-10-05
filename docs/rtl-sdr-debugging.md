@@ -13,11 +13,6 @@ This guide covers IQ data flow verification, gain settings, and software integra
 1. [Understanding RTL-SDR Architecture](#understanding-rtl-sdr-architecture)
 2. [IQ Data Flow Verification](#iq-data-flow-verification)
 3. [Gain Settings and AGC](#gain-settings-and-agc)
-4. [Common Hardware Issues](#common-hardware-issues)
-5. [Software Integration in .NET](#software-integration-in-net)
-6. [Debugging Tools and Techniques](#debugging-tools-and-techniques)
-7. [Performance Optimization](#performance-optimization)
-8. [Authoritative Resources](#authoritative-resources)
 
 ---
 

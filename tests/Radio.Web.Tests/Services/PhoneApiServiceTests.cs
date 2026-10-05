@@ -95,8 +95,8 @@ public class PhoneApiServiceTests
     // entire list so the Call History tab silently showed "No calls recorded".
     const string liveJson = """
       [
-        {"id":"473e6334-2514-4d3e-9ab3-f9eca4c3b2de","phoneNumber":"9193718044","callerName":null,"direction":1,"answeredOn":0,"startTime":"2026-06-13T14:09:48.33-04:00","endTime":"2026-06-13T14:10:26.30-04:00","duration":"00:00:37.97","phoneId":"default"},
-        {"id":"b9e4962b-9e99-400f-83c9-fa01bcf83d67","phoneNumber":"+19193718044","callerName":null,"direction":0,"answeredOn":1,"startTime":"2026-06-13T14:08:58.68-04:00","endTime":"2026-06-13T14:09:22.48-04:00","duration":"00:00:23.80","phoneId":"default"}
+        {"id":"473e6334-2514-4d3e-9ab3-f9eca4c3b2de","phoneNumber":"9195550142","callerName":null,"direction":1,"answeredOn":0,"startTime":"2026-06-13T14:09:48.33-04:00","endTime":"2026-06-13T14:10:26.30-04:00","duration":"00:00:37.97","phoneId":"default"},
+        {"id":"b9e4962b-9e99-400f-83c9-fa01bcf83d67","phoneNumber":"+19195550142","callerName":null,"direction":0,"answeredOn":1,"startTime":"2026-06-13T14:08:58.68-04:00","endTime":"2026-06-13T14:09:22.48-04:00","duration":"00:00:23.80","phoneId":"default"}
       ]
       """;
     var handler = new MockHttpHandler(liveJson);
@@ -112,7 +112,7 @@ public class PhoneApiServiceTests
     // First entry: outgoing, not answered.
     Assert.Equal(CallDirection.Outgoing, result[0].Direction);
     Assert.Equal(CallAnsweredOn.NotAnswered, result[0].AnsweredOn);
-    Assert.Equal("9193718044", result[0].PhoneNumber);
+    Assert.Equal("9195550142", result[0].PhoneNumber);
 
     // Second entry: incoming, answered on the rotary phone.
     Assert.Equal(CallDirection.Incoming, result[1].Direction);

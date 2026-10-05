@@ -46,9 +46,7 @@ The `Radio.IntegrationTests` project provides comprehensive end-to-end testing f
 
 ### Test Results Summary
 
-- **Total Tests:** 50
-- **Passed:** 48
-- **Skipped:** 2 (require external APIs / audio device)
+- **Total Tests:** 22, in the two files tabled below
 
 Note: Secrets, fingerprinting, and play history integration tests have been moved to their respective package test projects (`Radio.Configuration.Tests`, `Radio.Fingerprinting.Tests`).
 
