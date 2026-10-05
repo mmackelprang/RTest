@@ -63,9 +63,11 @@ window.radioSetApiBaseUrl = function (url) {
   function resetTimers() {
     clearTimeout(dimTimer);
     clearTimeout(sleepTimer);
-    // No timers fire while we're on /sleep — the route owns its own lifecycle
-    // and the next user tap navigates home (which triggers a fresh resetTimers
-    // on mount of MainLayout).
+    // No timers fire while we're on /sleep — the route owns its own lifecycle.
+    // The way home is a client-side navigation, not a reload, so this script
+    // does not re-run; MainLayout calls wake('mount') on its first render to
+    // re-arm the timers (before it did, nothing re-armed them until the next
+    // touch or knob turn).
     if (isOnSleepRoute()) return;
     dimTimer = setTimeout(dim, IDLE_TIMEOUT);
     sleepTimer = setTimeout(function () { navigateToSleep('idle'); }, SLEEP_TIMEOUT);
