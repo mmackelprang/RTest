@@ -133,6 +133,21 @@ public class MainLayoutNavTests : TestContext
     Assert.DoesNotContain("is-open", cut.Find(".dev-tray").GetAttribute("class") ?? string.Empty);
   }
 
+  /// <summary>
+  /// Every return from /sleep is a client-side navigation onto a fresh MainLayout, so idle-dimmer.js
+  /// does not reload and its timers are only re-armed if the layout asks. Without this call a console
+  /// woken from /sleep and left alone never dimmed or slept again.
+  /// </summary>
+  [Fact]
+  public void FirstRender_ArmsTheIdleDimTimers()
+  {
+    RenderLayout();
+
+    Assert.Contains(
+      JSInterop.Invocations,
+      i => i.Identifier == "radioSleepManager.wake" && Equals(i.Arguments[0], "mount"));
+  }
+
   private sealed class StubOptionsMonitor<T> : IOptionsMonitor<T>
   {
     public StubOptionsMonitor(T value) => CurrentValue = value;

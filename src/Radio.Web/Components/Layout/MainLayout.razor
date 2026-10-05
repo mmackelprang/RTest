@@ -548,6 +548,15 @@
       // leaves the flag false instead of licensing a call that would throw.
       _sleepManagerReady = true;
 
+      // Arm the idle dim/sleep timers for this mount. idle-dimmer.js only arms them on script load and
+      // on activity, and a document that loaded on /sleep arms nothing (resetTimers early-returns
+      // there). Every wake from /sleep is a client-side NavigateTo("/") — no reload — and /sleep uses
+      // EmptyLayout, so this firstRender is the one moment that reliably marks "back on the main UI".
+      // Without it the timers stayed unarmed until the next touch or knob turn, and a console woken
+      // and left alone never dimmed or slept again (measured on the box 2026-10-05: on / for 26 h,
+      // document loaded at /sleep, no dim filter).
+      await JSRuntime.InvokeVoidAsync("radioSleepManager.wake", "mount");
+
       // Wire the dev-tray triple-tap gesture (handoff §P2·2, PR 6). The JS
       // module listens on the invisible .dev-gesture-hit element and calls
       // ToggleDevTray when it detects 3 taps within 1.5s.
