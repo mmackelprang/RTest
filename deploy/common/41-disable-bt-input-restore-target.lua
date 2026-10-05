@@ -14,7 +14,7 @@
 -- designed `phone -> bluez_input -> Radio.API -> output(s)` flow, producing
 -- dual playback + a comb-filter "underwater" artifact (the two paths have
 -- different latencies). See
--- docs/research/2026-05-22-bt-dual-routing-investigation.md for the
+-- archive/research/2026-05-22-bt-dual-routing-investigation.md for the
 -- diagnostic that motivated this rule.
 --
 -- The companion rule at bluetooth.lua.d/90-disable-bt-input-autolink.lua sets

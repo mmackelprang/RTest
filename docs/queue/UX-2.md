@@ -46,7 +46,7 @@ skeletons ARE visible and the shimmer is doing its job there.
 ## ⛔ What this row decides for `UX-1`
 
 `UX-1` shipped `#38383F` (56), then **reversed to `#24242B` (36)** after the owner saw the values
-rendered rather than described. ⚠ **`docs/queue/UX-1.md` records a contradictory earlier judgement —
+rendered rather than described. ⚠ **`archive/queue/UX-1.md` records a contradictory earlier judgement —
 "36 is below the owner's dark-room visibility threshold"** — and the ambient conditions of the two
 sittings that chose 36 were never recorded.
 
@@ -67,4 +67,4 @@ API call on a resource-constrained box; measure it on the box, warm and cold.
 
 - **`UX-1`** — shipped twice; this row is its unanswered question.
 - Both `UX-1` sittings that chose 36 are recorded at
-  `docs/uat/2026-09-09-ux1-third-and-fourth-sittings/`.
+  `archive/uat/2026-09-09-ux1-third-and-fourth-sittings/`.

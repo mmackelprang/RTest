@@ -1,12 +1,12 @@
 # UX-1 — Skeleton shimmer amplitude — is a 6/255 gradient delta enough on the dark theme?
 
-> Queue dossier for row **`UX-1`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`UX-1`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 > ## ⛔ SUPERSEDED IN PART, 2026-09-09 — **this row's landing value is REOPENED and the two owner sittings disagree.** Read this before believing any "56" or "DECIDED" below.
@@ -80,7 +80,7 @@
 | Field | Value |
 |---|---|
 | Status | ⚠ **REOPENED 2026-09-09** — [#641](https://github.com/mmackelprang/RTest/pull/641) shipped `56`/`#38383F` and is merged and deployed; a follow-up PR changing it to `36`/`#24242B` is **open and deliberately unmerged**, gated on the owner's dark-room re-check. See the banner above and the two new sections at the foot of this file. _Original cell: "✅ [#641](https://github.com/mmackelprang/RTest/pull/641) — shipped 2026-09-09; see the note at the foot of this file"_ |
-| Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and carries banners saying so**. _Original cell: "plan TBD — do not write one until the Designer has answered; scope depends entirely on whether the answer is 'new token,' 'retune the existing pair,' or 'leave it'"_ |
+| Plan | [`UX-1-the-shimmer-nobody-can-see.md`](../design/plans/UX-1-the-shimmer-nobody-can-see.md) — ⚠ **its geometry half is SUPERSEDED and carries banners saying so**. _Original cell: "plan TBD — do not write one until the Designer has answered; scope depends entirely on whether the answer is 'new token,' 'retune the existing pair,' or 'leave it'"_ |
 | Spec / handoff | [GV-8 UAT `L-1`](../uat/2026-07-31-gv8-error-state/REPORT.md) · evidence: `uat/2026-07-31-gv8-error-state/screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · [night sitting](../uat/2026-09-08-ux1-shimmer-variants/NIGHT-SITTING.md) · [daylight sitting](../uat/2026-09-08-ux1-shimmer-variants/DAYLIGHT-SITTING.md) · ⭐ [**third + fourth sittings, with the harness**](../uat/2026-09-09-ux1-third-and-fourth-sittings/REPORT.md) |
 | Depends on | — _(no code dependency; it is gated on a design answer, not on a row)_ |
 | Branch | `fix/ux-1-shimmer-amplitude` _(this row named `feat/ux-skeleton-shimmer-amplitude`; the coordinator's name was used)_ |

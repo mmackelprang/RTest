@@ -1,6 +1,6 @@
 # ADR: GV Mark-Read / Durable Read-State — GV write-through (supersedes ADR-022 D4)
 
-- **ID:** ADR-024 (see `design/DECISION-LOG.md` for the one-line pointer)
+- **ID:** ADR-024 (see `docs/decisions/DECISION-LOG.md` for the one-line pointer)
 - **Status:** Accepted (Architect — ready for Planner; GV-4 builds now against stable shapes behind our flag)
 - **Date:** 2026-06-20
 - **Author:** Architect

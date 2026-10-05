@@ -364,7 +364,7 @@ git push -u origin feat/audio-thread-isolation
 gh pr create --title "feat(deploy): isolate audio-pipeline threads via CPU affinity + scheduling priority" --body "$(cat <<'EOF'
 ## Summary
 
-Implements [Plan D from the Cast/BT research arc](../docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md). Applies standard Linux embedded-audio isolation practice — `radio-api` pinned to cores 2,3 with `Nice=-5` + `LimitRTPRIO=99` + IO best-effort near-realtime; `radio-web` pinned to cores 0,1.
+Implements [Plan D from the Cast/BT research arc](../../docs/docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md). Applies standard Linux embedded-audio isolation practice — `radio-api` pinned to cores 2,3 with `Nice=-5` + `LimitRTPRIO=99` + IO best-effort near-realtime; `radio-web` pinned to cores 0,1.
 
 Closes the MEMORY-documented load gap ("audio distortion correlates with SSH activity") by structurally separating audio-critical scheduling from journald + sshd + web traffic.
 

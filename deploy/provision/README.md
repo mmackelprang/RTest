@@ -8,7 +8,7 @@ Without it, a rebuild produces an app that boots but has **no working BT music
 audio** and drifts on OS tuning.
 
 **Read first:** the audit that motivated this tree —
-[`design/plans/IAC-PRISTINE-INSTALL-AUDIT.md`](../../design/plans/IAC-PRISTINE-INSTALL-AUDIT.md).
+[`archive/design/plans/IAC-PRISTINE-INSTALL-AUDIT.md`](../../archive/design/plans/IAC-PRISTINE-INSTALL-AUDIT.md).
 Every file here maps to a section (§3.x) of that audit; the ordered bare-Ubuntu
 runbook is §5.
 
@@ -183,7 +183,7 @@ it in this tree. Documented here only so a rebuild knows the dependency exists.
   (`radio-console-open`) when the bridge is not running. That is still
   invoke-and-probe only: the contract is a path and an exit code, and nothing in
   this tree writes, installs, edits or kills bridge startup. See
-  `design/INTEGRATIONS.md` § Second consumer.
+  `docs/integrations.md` § Second consumer.
 
 ---
 
@@ -224,7 +224,7 @@ The live box additionally has (audit §3.8/§3.9) — apply manually or fold int
   `X-GNOME-Autostart-enabled=false` (suppress update popups in kiosk).
 - ~~`onboard` on-screen keyboard~~ — **removed 2026-08-18.** The contradiction is resolved in
   favour of `setup-kiosk.sh`'s note: onboard cannot type into Chrome on Wayland
-  (`docs/uat/2026-08-03-osk-wayland-viability/REPORT.md` measured **zero**
+  (`archive/uat/2026-08-03-osk-wayland-viability/REPORT.md` measured **zero**
   `zwp_text_input_v3.enable()` calls from Chrome 151). Dropped from `packages.sh`; the autostart
   entry is renamed to `.disabled` by `setup-kiosk.sh`. Text entry is the Web UI's virtual
   keyboard.

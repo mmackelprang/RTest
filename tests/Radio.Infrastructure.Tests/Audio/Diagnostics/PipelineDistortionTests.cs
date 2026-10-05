@@ -134,7 +134,7 @@ public class PipelineDistortionTests
     // compensation behaviour; compensation has its own dedicated tests in
     // BufferedSoundGeneratorTests.cs.
     //
-    // Path C (docs/plans/2026-05-22-bt-drift-compensation-refinement.md)
+    // Path C (archive/plans/2026-05-22-bt-drift-compensation-refinement.md)
     // removed the 2-second cooldown that previously kept compensation
     // dormant during this tight push/pull simulation; without the prefill,
     // the buffer drains to a level below the 15 % threshold on every cycle

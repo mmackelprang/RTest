@@ -1,7 +1,7 @@
 # `AUD-24` — the seek that only moved the readout
 
-**Row:** [`docs/queue/AUD-24.md`](../../docs/queue/AUD-24.md) · 🟠 P1
-**UAT that found it:** [`docs/uat/2026-09-09-phn2-sound-uat/RESULT.md`](../../docs/uat/2026-09-09-phn2-sound-uat/RESULT.md) check #1 / §3 U5
+**Row:** [`docs/queue/AUD-24.md`](../../queue/AUD-24.md) · 🟠 P1
+**UAT that found it:** [`docs/uat/2026-09-09-phn2-sound-uat/RESULT.md`](../../uat/2026-09-09-phn2-sound-uat/RESULT.md) check #1 / §3 U5
 **Branch:** `fix/aud-24-seek-does-not-reposition`
 **Planned:** 2026-09-10, against `main` at `c1b9972c`
 
@@ -234,7 +234,7 @@ a failure**."*
 > `Information` log line that claimed *"(seek to {Ms}ms)"* was corrected in the same PR, as the
 > ruling required. ⭐ **Both restore arms now agree** — neither resumes, matching today's behaviour
 > exactly, which is the inconsistency point 1 below warned about. Full record:
-> [`docs/queue/AUD-24.md`](../../docs/queue/AUD-24.md) § *OWNER RULING*.
+> [`docs/queue/AUD-24.md`](../../queue/AUD-24.md) § *OWNER RULING*.
 >
 > ⚠ **Consequence not spelled out below:** a restored queue still sets `_position` to the saved
 > offset while audio starts at zero, so `MonitorPlaybackAsync` still ends such a track early.

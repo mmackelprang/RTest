@@ -1,11 +1,11 @@
 # PLAN — `GV-6` · A dark mark-read feature stops looking like a broken one
 
-> **Row:** `GV-6`, [`docs/queue/GV-6.md`](../../docs/queue/GV-6.md). 📋 queued, `_plan TBD (small)_`.
+> **Row:** `GV-6`, [`docs/queue/GV-6.md`](../../queue/GV-6.md). 📋 queued, `_plan TBD (small)_`.
 > **Branch:** `fix/gv-markread-dark-409` (the row names it).
 > **Depends on:** `GV-4` ✅ merged (#441). The preferred predecessor `GV-8` ✅ merged (#461) and
 > left behind the exact idiom this row was told to adopt.
 > **Estimate:** **0.5 d.** §0.5 says what would push it to 1 d.
-> **Spec:** [ADR-024 §3.3](../design/decisions/2026-06-20-gv-mark-read-durable-readstate.md),
+> **Spec:** [ADR-024 §3.3](../../../design/design/decisions/2026-06-20-gv-mark-read-durable-readstate.md),
 > amended 2026-07-31 — the amendment names this row by number as the thing that closes it.
 > **Planned against** `main` at **`35e4ed5a`**. Every line number below was read out of the tree at
 > that commit. Where a line is likely to move it is quoted as well as numbered.
@@ -269,7 +269,7 @@ all, so it cannot trip the lint and cannot be argued about later.
 - ⛔ **Do not latch on a bare `409`** without the `markread_disabled` discriminator (`C-138`).
 - ⛔ **Do not downgrade or throttle the existing `LogError` failure lines.** A repeated genuine
   failure is a repeated genuine failure.
-- ⛔ **Do not merge this with `GV-8`.** `GV-8` is merged; the queue's [`ORDERING-NOTES.md`](../../docs/queue/ORDERING-NOTES.md)
+- ⛔ **Do not merge this with `GV-8`.** `GV-8` is merged; the queue's [`ORDERING-NOTES.md`](../../../docs/queue/ORDERING-NOTES.md)
   records the judgement that the two rows share the **idiom**, not the PR. This plan adopts
   `GvResult`'s discrimination rule rather than inventing a second mechanism, which is the whole of
   what that note asked for.
@@ -1055,7 +1055,7 @@ Apply by hand.
 **Plan column** (currently `_plan TBD (small)_`) →
 
 ```
-[`design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md`](../design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md)
+[`design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md`](../../../design/design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md)
 ```
 
 **Item column** — append to the existing text, leaving the `D31` assessment and the ⛔ warning

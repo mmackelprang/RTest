@@ -10,7 +10,7 @@
 > > does NOT vindicate the plan's Task 5a** — the night sitting that rejected 36 and the afternoon
 > > sitting that chose it contradict each other, and neither is being called wrong. ⛔ **It says
 > > nothing at all about Task 5b's geometry**, which remains unvalidated and unshipped. Full
-> > argument: [`../../docs/queue/UX-1.md`](../../docs/queue/UX-1.md).
+> > argument: [`../../docs/queue/UX-1.md`](../../queue/UX-1.md).
 >
 > **Phase A is complete and its outcome contradicted this plan's central premise.** What shipped is
 > the **token change only**, at the **owner's** value of **`56` / `#38383F`** (delta 36), under the
@@ -39,7 +39,7 @@
 > band sits out entirely.
 >
 > ⚠ **Whether a steeper ramp would allow a *lower* amplitude is genuinely unknown** and is filed in
-> [`design/FUTURE-WORK.md`](../FUTURE-WORK.md) § *Skeleton shimmer (`UX-1`)*, together with the
+> [`design/FUTURE-WORK.md`](../../../docs/known-issues-and-future-work.md) § *Skeleton shimmer (`UX-1`)*, together with the
 > **Task 0 dwell-time pre-check, which was never run.**
 >
 > ⚠ **Every line anchor in §0.2–§0.3 is stale** on `main` @ `143d678e`: `.skeleton-loading` is
@@ -61,16 +61,16 @@
 > census is right for the stylesheet and incomplete for the app** — `PlayHistoryPage.razor:207,272,296`
 > consume the token inline, so the true blast radius was **22** other consumers, not 19.
 
-> **Row:** `UX-1`, [`docs/queue/UX-1.md`](../../docs/queue/UX-1.md). 📋 queued, `_plan TBD — do not write
+> **Row:** `UX-1`, [`docs/queue/UX-1.md`](../../queue/UX-1.md). 📋 queued, `_plan TBD — do not write
 > one until the Designer has answered_`.
 > **Branch:** `feat/ux-skeleton-shimmer-amplitude` (the row names it).
 > **Depends on:** — no code dependency. The row was gated on a design answer; **that gate is
 > DISCHARGED** (Designer, 2026-09-07, recorded in the row).
 > **Estimate:** **0.5 d of Builder time across two sittings, plus one ~30-minute owner session on the
 > panel, in the dark room.** §0.6. The calendar dependency is the real cost, not the code.
-> **Spec:** [GV-8 UAT `L-1`](../../docs/uat/2026-07-31-gv8-error-state/REPORT.md) (`:282-297`) ·
+> **Spec:** [GV-8 UAT `L-1`](../../uat/2026-07-31-gv8-error-state/REPORT.md) (`:282-297`) ·
 > evidence `screenshots/03-c2-frame-a-108ms.png` vs `04-c2-frame-b-224ms.png` · the Designer answer in
-> [`docs/queue/UX-1.md`](../../docs/queue/UX-1.md) `:42-169`.
+> [`docs/queue/UX-1.md`](../../queue/UX-1.md) `:42-169`.
 > **Planned against** `main` at **`a529ccf7`**. ⚠ Read at working-tree `c5a2ff7d`
 > (`fix/gv-texts-polish-overflow-unread-align`), but **every anchor in this plan is byte-identical on
 > both** — that branch's only edits to this stylesheet are at `:5962+`, ~4,200 lines below the lowest
@@ -961,7 +961,7 @@ in this tree and queue files are edited concurrently. Wording for whoever applie
 
 **`docs/BUILDER_QUEUE.md` § Queue, `UX-1` row — Plan cell**, replacing the `_plan TBD_` text:
 
-> [`design/plans/UX-1-the-shimmer-nobody-can-see.md`](../design/plans/UX-1-the-shimmer-nobody-can-see.md) — 0.5 d + owner session
+> [`design/plans/UX-1-the-shimmer-nobody-can-see.md`](../../../design/design/plans/UX-1-the-shimmer-nobody-can-see.md) — 0.5 d + owner session
 
 **`docs/queue/UX-1.md`, appended as a dated note** (do not rewrite the verbatim Detail):
 

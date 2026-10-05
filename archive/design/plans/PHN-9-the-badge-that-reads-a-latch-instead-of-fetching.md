@@ -1,7 +1,7 @@
 # PLAN — `PHN-9` · The badge that reads a latch instead of fetching
 
-**Row:** [`docs/queue/PHN-9.md`](../../docs/queue/PHN-9.md) · **Branch:** `fix/phn-9-unread-badge-hydration`
-**Precedent:** `BellHealthService` (`src/Radio.Web/Services/BellHealthService.cs`), ADR-024, [`PHN-7`](../../docs/queue/PHN-7.md)
+**Row:** [`docs/queue/PHN-9.md`](../../../docs/queue/PHN-9.md) · **Branch:** `fix/phn-9-unread-badge-hydration`
+**Precedent:** `BellHealthService` (`src/Radio.Web/Services/BellHealthService.cs`), ADR-024, [`PHN-7`](../../../docs/queue/PHN-7.md)
 **Written:** 2026-09-09 (Planner) · **Scope:** `src/Radio.Web` + `tests/Radio.Web.Tests` + docs. No hardware, no audio path, no `Radio.API` change.
 
 ---

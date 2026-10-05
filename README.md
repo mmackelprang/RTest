@@ -168,7 +168,7 @@ await backupService.RestoreBackupAsync(backup.BackupId, overwrite: true);
 var deleted = await backupService.CleanupOldBackupsAsync();
 ```
 
-For detailed information, see [Database Configuration](design/DATABASE_CONFIGURATION.md).
+For detailed information, see [Database Configuration](docs/configuration-databases.md).
 
 ### Configuration Usage Example
 
@@ -242,7 +242,7 @@ The audio system (Phase 2) provides:
 - Presets: GET/POST/DELETE /api/radio/presets
 - Device Factory: GET /api/radio/devices, devices/default, devices/current, POST devices/select
 
-For complete API documentation, see [API Reference](design/API_REFERENCE.md).
+For complete API documentation, see [API Reference](docs/api.md).
 
 ### Usage Example
 
@@ -692,19 +692,19 @@ dotnet test --filter "FullyQualifiedName~TestClassName.TestMethodName"
 
 ## Design Documents
 
-- [Audio Data Flow](design/AUDIO-DATAFLOW.md) - Audio pipeline architecture
-- [Configuration](design/CONFIGURATION.md) - Configuration infrastructure
-- [Database Configuration](design/DATABASE_CONFIGURATION.md) - Unified database paths and backup system
-- [Sound Fingerprinting](design/SOUNDFINGERPRINTING.md) - Audio fingerprinting system design
-- [Metrics](design/METRICS.md) - Time-series metrics collection
-- [System Configuration](design/SYSTEMCONFIGURATION.md) - System-level configuration reference
-- [API Reference](design/API_REFERENCE.md) - Complete REST API documentation
-- [Integrations](design/INTEGRATIONS.md) - External integrations guide
-- [RTL-SDR Debugging](design/RTL_SDR_DEBUGGING_GUIDE.md) - SDR troubleshooting guide
-- [Decision Log](design/DECISION-LOG.md) - Architectural decision records
-- [Work Log](design/WORK-LOG.md) - Development session history
-- [Future Work](design/FUTURE-WORK.md) - Deferred features and stubs
-- [Testing](design/TESTING.md) - Test strategy and coverage
+- [Audio Data Flow](docs/architecture.md) - Audio pipeline architecture
+- [Configuration](archive/design/CONFIGURATION.md) - Configuration infrastructure
+- [Database Configuration](docs/configuration-databases.md) - Unified database paths and backup system
+- [Sound Fingerprinting](docs/fingerprinting.md) - Audio fingerprinting system design
+- [Metrics](docs/metrics.md) - Time-series metrics collection
+- [System Configuration](docs/configuration.md) - System-level configuration reference
+- [API Reference](docs/api.md) - Complete REST API documentation
+- [Integrations](docs/integrations.md) - External integrations guide
+- [RTL-SDR Debugging](docs/rtl-sdr-debugging.md) - SDR troubleshooting guide
+- [Decision Log](docs/decisions/DECISION-LOG.md) - Architectural decision records
+- [Work Log](archive/design/WORK-LOG.md) - Development session history
+- [Future Work](docs/known-issues-and-future-work.md) - Deferred features and stubs
+- [Testing](docs/testing.md) - Test strategy and coverage
 
 ## License
 

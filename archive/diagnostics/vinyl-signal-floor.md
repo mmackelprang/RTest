@@ -56,7 +56,7 @@ capture input.** The giveaway is that it is **stereo (2ch)** — a real micropho
 
 `/api/sources` lists a **Bluetooth device named "Turntable"** as `isPaired: true, isConnected: true`
 **with an empty address**, while BlueZ reports nothing connected and PipeWire has no `bluez` node at
-all. ⛔ **That entry is phantom state and must not be followed** — see [`AUD-25`](../queue/AUD-25.md).
+all. ⛔ **That entry is phantom state and must not be followed** — see [`AUD-25`](../../docs/queue/AUD-25.md).
 `pw-link -l` confirms the real path: `alsa_input.usb-Generic_USB_Microphone…:capture_FL/FR →
 Radio.API:input_FL/FR`.
 

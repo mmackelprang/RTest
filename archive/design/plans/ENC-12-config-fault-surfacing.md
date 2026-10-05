@@ -1,10 +1,10 @@
 # PLAN — `ENC-12` · Tiered config-fault surfacing: giving `ENC-11`'s safety response a voice
 
 > **Status:** ready for Builder **after `ENC-8` merges**. Written 2026-09-02 against `194b16b`.
-> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../docs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `ENC-12` (P0).
-> **Design:** [`HANDOFF-rotary-encoder-mapping.md`](../../docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md)
+> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `ENC-12` (P0).
+> **Design:** [`HANDOFF-rotary-encoder-mapping.md`](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md)
 > Rev 3 §7.2, §7.3, §7.4, §7.6 · pattern reused from
-> [`HANDOFF-bell-failure-surfacing.md`](../../docs/design-handoffs/HANDOFF-bell-failure-surfacing.md) §3.7, §8.3.
+> [`HANDOFF-bell-failure-surfacing.md`](../../design-handoffs/HANDOFF-bell-failure-surfacing.md) §3.7, §8.3.
 > **Depends on:** `ENC-11` (O10) — shipped · **`ENC-4`** (the topbar/`MainLayout` edits) · **`ENC-8`**
 > (this row consumes its status contract and links to its page).
 > **Follows the handoff**, with one declared narrowing (§0.4 C-3) and five contradictions resolved in §0.4.

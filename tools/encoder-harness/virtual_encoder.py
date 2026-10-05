@@ -103,7 +103,7 @@ every report originates from a command typed into this process.
 --------------------------------------------------------------------------------
 WIRE PROTOCOL
 --------------------------------------------------------------------------------
-Read from the shipped implementation, not from a document -- design/INTEGRATIONS.md
+Read from the shipped implementation, not from a document -- docs/integrations.md
 carried a wrong 8-byte format for months. Sources of truth:
 
   src/Radio.Infrastructure/Platform/Input/RotaryEncoderDecoder.cs

@@ -11,7 +11,7 @@ Before a live band sweep (`POST /api/radio/bandmap/scan` while the SDR radio pla
 `GET /api/radio/state` reported `autoGain: true`, `gain: 0`. After the sweep it reported
 `autoGain: true`, `gain: 28`.
 
-The live sweep path (`RadioReceiver.SweepChannels`, [`AUD-76`](AUD-76.md) PR 1) sets a fixed **28 dB
+The live sweep path (`RadioReceiver.SweepChannels`, [`AUD-76`](../../archive/queue/AUD-76.md) PR 1) sets a fixed **28 dB
 manual** gain for the measurement and restores the gain *mode* in its `finally`. So 28 is the sweep's
 own value. What the state is reporting now is the open question.
 

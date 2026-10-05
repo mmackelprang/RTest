@@ -2,8 +2,8 @@
 
 > **Row:** `PHN-2` — the last open **P0** on the GA punch list, and PR 6 of the eight-PR ADR-029 arc.
 > **Branch:** `feat/phn-2-retire-audio-element`
-> **ADR:** [`design/decisions/2026-08-03-gv-audio-through-engine.md`](../decisions/2026-08-03-gv-audio-through-engine.md) — Feature A, D1–D8, Amendment 2 (§16).
-> **Design handoff (authoritative on presentation):** [`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`](../../docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) — §Cross-1…Cross-5, §A1–§A6, §Gaps G-1/G-2/G-3.
+> **ADR:** [`design/decisions/2026-08-03-gv-audio-through-engine.md`](../../../docs/decisions/2026-08-03-gv-audio-through-engine.md) — Feature A, D1–D8, Amendment 2 (§16).
+> **Design handoff (authoritative on presentation):** [`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`](../../design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) — §Cross-1…Cross-5, §A1–§A6, §Gaps G-1/G-2/G-3.
 > **Sequencing:** [`design/plans/PHN-arc-pr-breakdown.md`](PHN-arc-pr-breakdown.md) row 6 and its § *Verification shape*.
 > **Planned against:** `main` at **`ba1ae4a6`** (`PHN-1f` merged, [#564](https://github.com/mmackelprang/RTest/pull/564)).
 > **follows / extends / deviates:** **follows** the handoff for every visual and every string it
@@ -202,7 +202,7 @@ stoppable**, **not** run the progress bar, and **say why** rather than showing a
 obligation that is ALREADY DISCHARGED. Do not redo it.**
 
 `PHN-1b` §5 and `PHN-1c` §5 both instruct PR 6 to *"withdraw the cross-repo ask in
-[`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same PR."* **Read that item before acting:
+[`CROSS-REPO-HANDOFFS.md`](../../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same PR."* **Read that item before acting:
 its audio-endpoint clause is already struck through and marked** *"✅ **DISSOLVED, not resolved, by
 `PHN-1b` ([#534](https://github.com/mmackelprang/RTest/pull/534))**"*, with the mechanism recorded
 (`GvMediaAuthHandler.cs:26` attaches the header server-side). **Nothing is owed.** Task 12 verifies
@@ -1751,7 +1751,7 @@ where they stand, and add one paragraph:
   wants it, ask."* **It does not ask**: *"Waiting for the announcement to finish…"* is accurate
   without it, because one-voice-at-a-time means there is only one thing it could be waiting for.
 
-**12c. ⚠ [`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 — VERIFY, do not edit (C-73).** `PHN-1b` §5
+**12c. ⚠ [`CROSS-REPO-HANDOFFS.md`](../../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 — VERIFY, do not edit (C-73).** `PHN-1b` §5
 and `PHN-1c` §5 both told PR 6 to withdraw the audio-endpoint ask. **Read the item first:** at
 `ba1ae4a6` that clause is already struck through and marked ✅ *"DISSOLVED, not resolved, by `PHN-1b`
 (#534)"*, with the mechanism named (`GvMediaAuthHandler.cs:26`). **If it still reads that way, change
@@ -2418,8 +2418,8 @@ Verified at `ba1ae4a6`: the § Queue table runs `GV-1` … `UI-6` and contains `
 |---|---|
 | **#** | `PHN-2` |
 | **Status** | `📋` |
-| **Plan** | `` [`design/plans/PHN-2-retire-the-audio-element.md`](../design/plans/PHN-2-retire-the-audio-element.md) `` |
-| **Spec / handoff** | `` [ADR-029 Feature A](../design/decisions/2026-08-03-gv-audio-through-engine.md) · [handoff §Cross-1…5, §A](design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) · [arc breakdown row 6](../design/plans/PHN-arc-pr-breakdown.md) `` |
+| **Plan** | `` [`design/plans/PHN-2-retire-the-audio-element.md`](../../../design/design/plans/PHN-2-retire-the-audio-element.md) `` |
+| **Spec / handoff** | `` [ADR-029 Feature A](../../../design/design/decisions/2026-08-03-gv-audio-through-engine.md) · [handoff §Cross-1…5, §A](../../../design/plans/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) · [arc breakdown row 6](../../../design/design/plans/PHN-arc-pr-breakdown.md) `` |
 | **Depends on** | `` ✅ **MET — `PHN-1f` merged 2026-09-04** as [#564](https://github.com/mmackelprang/RTest/pull/564), merge commit `ba1ae4a6`. **This row is CLAIMABLE NOW**, and it is the LAST OPEN P0. `` |
 | **Branch** | `feat/phn-2-retire-audio-element` |
 
@@ -2466,7 +2466,7 @@ Verified at `ba1ae4a6`: the § Queue table runs `GV-1` … `UI-6` and contains `
 | **#** | `OPS-7` |
 | **Status** | `📋` |
 | **Plan** | *to be written — small enough for a plan-in-the-row if the owner prefers* |
-| **Spec / handoff** | `` [`PHN-2` plan §0.4 C-81](../design/plans/PHN-2-retire-the-audio-element.md) `` |
+| **Spec / handoff** | `` [`PHN-2` plan §0.4 C-81](../../../design/design/plans/PHN-2-retire-the-audio-element.md) `` |
 | **Depends on** | `—` |
 | **Branch** | `fix/deploy-production-config-seed-guard` |
 

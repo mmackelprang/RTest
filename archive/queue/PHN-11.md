@@ -1,6 +1,6 @@
 # `PHN-11` — an incoming call shows a large banner overlay with the caller
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* on `6efb4df` (a real call to the rotary phone, checks 1–7). Owner rulings recorded in the dossier: Ambient knobs while the banner is up and the lit panel after a deep-sleep call accepted; **no console Answer control, ever**; the Phone page's Reject becomes **Ignore** when RotaryPhone ships the decline route (`design/FUTURE-WORK.md`). Ignore is built and disabled behind `RotaryPhone:DeclineSupported` until then; the request is in RotaryPhone's lane with a boundary-doc Change Log row. Merged via [#777](https://github.com/mmackelprang/RTest/pull/777). The status lines below were true until then.
 

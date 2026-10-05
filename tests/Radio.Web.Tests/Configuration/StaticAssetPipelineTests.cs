@@ -96,9 +96,9 @@ public class StaticAssetPipelineTests : IClassFixture<RadioWebFactory>
   /// ⚠ This asserts the CSS SOURCE TEXT. Neither this factory nor bUnit rasterises anything, so no
   /// test in this repository can show that the shimmer is visible — the only evidence for that is
   /// the owner's eye at the panel. There have now been THREE sittings, and they do not agree: two
-  /// under docs/uat/2026-09-08-ux1-shimmer-variants/ (dark room, then daylight) chose 56/#38383F,
+  /// under archive/uat/2026-09-08-ux1-shimmer-variants/ (dark room, then daylight) chose 56/#38383F,
   /// and a third on 2026-09-09 in afternoon light chose 36/#24242B, which is what this now pins. A
-  /// dark-room re-check is outstanding and the change is gated on it; see docs/queue/UX-1.md. ⛔ A
+  /// dark-room re-check is outstanding and the change is gated on it; see archive/queue/UX-1.md. ⛔ A
   /// green run of this class is therefore not evidence that the shipped value is the right one — it
   /// only proves the stylesheet says what the last sitting said.
   /// What it does do is fail on the pre-UX-1 stylesheet (whose middle stop was

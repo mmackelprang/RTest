@@ -1,8 +1,8 @@
 # PLAN — `ENC-8` · The encoder Settings surface, and the stale docs behind it
 
 > **Status:** ready for Builder. Written 2026-09-02 against `194b16b`.
-> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../docs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `ENC-8` (P0).
-> **Design:** [`HANDOFF-rotary-encoder-mapping.md`](../../docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md)
+> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `ENC-8` (P0).
+> **Design:** [`HANDOFF-rotary-encoder-mapping.md`](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md)
 > Rev 3 §7.2, §7.5–§7.8, §9.1.
 > **Depends on:** `ENC-1`, `ENC-2`, `ENC-11` — all shipped (O10). **Pairs with:** `ENC-12`, which
 > ships second and consumes this row's contract.
@@ -627,7 +627,7 @@ and in `OnEncoderTurned`, replacing the switch:
 ```csharp
       if (e.EncoderIndex >= 0 && e.EncoderIndex < _turnHandlers.Length)
       {
-        _turnHandlers[e.EncoderIndex](e.Delta);
+        _turnHandlers[e.EncoderIndex](../../../design/plans/e.Delta);
       }
 ```
 

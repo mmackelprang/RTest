@@ -1,6 +1,6 @@
 # `AUD-76` — a touchable FM band map replaces the "Fall" visualizer; "VU" goes
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2 (after 2f; not GA-blocking unless the owner promotes it).** Filed 2026-09-29. Design settled in conversation the same day.
 
@@ -61,7 +61,7 @@ Recorded by the PR 1 Builder after the deploy; copied here by the PR 2 Builder.
 - **Switching to Radio mid idle sweep:** `POST /api/sources {Radio}` returned 200 in **0.75 s**; gate claim at 20:51:53.916; sweep `cancelled (radio-claimed)` at 20:51:53.980; the radio played 92.3, signal 100, RDS WKRR; the previous map was kept.
 - **M3 aliasing, measured:** channels 0.2 MHz from a strong station read ~20–30 dB below it but up to ~9 dB above the floor — visible as shoulders on the map, and absorbed for tuning by the ±0.4 MHz snap and its neighbour rule.
 - **Sleep-triggered sweep:** unit-tested only; not exercised on the box.
-- **Found:** after a sweep `/api/radio/state` reports `gain: 28` with `autoGain: true` (it was 0 before). Believed cosmetic — `rtlsdr_get_tuner_gain` returning the last manual value — but **not measured**. Filed as [`AUD-90`](AUD-90.md).
+- **Found:** after a sweep `/api/radio/state` reports `gain: 28` with `autoGain: true` (it was 0 before). Believed cosmetic — `rtlsdr_get_tuner_gain` returning the last manual value — but **not measured**. Filed as [`AUD-90`](../../docs/queue/AUD-90.md).
 
 ## PR 2 — the BAND view, touch-to-tune, Fall/VU removal (Builder, 2026-09-30)
 
@@ -135,4 +135,4 @@ Recorded, not changed: the 64 px reserve duplicated in CSS and JS; long API erro
 
 Reported by the coordinator on 2026-10-04: `AUD-76` passes owner UAT. This closes the "Owner checks left" line above.
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

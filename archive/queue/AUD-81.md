@@ -1,6 +1,6 @@
 # `AUD-81` — the console cannot change a Cast speaker's volume
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-29 by the `AUD-80` builder while tracing Cast volume.
 
@@ -178,7 +178,7 @@ Times are EDT.
    - ⭐ **This settles the #749 run's open question.** This Google Home Mini **clears its own mute when our receiver application ends**. The fresh-connection read confirms that rather than assuming it.
 7. **No echo reached the console.** There were zero `Synced volume/mute` lines from deploy to the end of the run.
 8. **`AudioPreferences:CastDeviceVolumes`** holds `"https://192.168.86.25/":0.3`, last written 09:10:29.56Z, which is the final level of the run. The other devices are unchanged (Kids room 0.5, AudioCast1 0.2916609).
-9. Also seen: `Stop requested but output is not streaming (state: "Ready")` at 05:10:36.805. That is [`AUD-93`](AUD-93.md), unchanged by this row.
+9. Also seen: `Stop requested but output is not streaming (state: "Ready")` at 05:10:36.805. That is [`AUD-93`](../../docs/queue/AUD-93.md), unchanged by this row.
 
 **Restored afterwards:** SDR Radio 92.3 FM playing, volume 0.3, muted, output Soundbar, no default Cast device (the connect had saved one, and `DELETE /api/devices/cast/default` cleared it), and log levels reset.
 
@@ -188,4 +188,4 @@ Times are EDT.
 
 Reported by the coordinator on 2026-10-04: the owner confirms the console's volume knob changes the Cast speaker's volume. Owner UAT passed. This closes the "Owner check outstanding" line above.
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

@@ -1,6 +1,6 @@
 # `AUD-80` — reconnecting to a Cast device does not keep the volume; it comes back loud
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-29 from the owner: *"whenever the console reconnects to a cast device, the volume doesn't persist from before. It's always set pretty loud. Let's queue a fix for this."*
 

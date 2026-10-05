@@ -1,6 +1,6 @@
 # `AUD-13` — `USBPort: ""` matches every device, so three sources bind to whatever enumerates first
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Found 2026-09-06 while planning `AUD-11`, **confirmed by reading the code**, and it is
 arguably worse than the row that found it: `AUD-11` at least leaves a wrong link visible in the

@@ -27,7 +27,7 @@
 >
 > One unrelated point survives, and it is **not** a caveat on this ADR: *source parity is not binary provenance* — nothing yet proves which commit the running binary was built from. That is a general deployment-observability gap owned by **OPS-1** (build stamp), applies equally to every contract we consume, and blocks nothing here.
 
-- **ID:** ADR-028 (see `design/DECISION-LOG.md` for the one-line pointer)
+- **ID:** ADR-028 (see `docs/decisions/DECISION-LOG.md` for the one-line pointer)
 - **Status:** **Accepted** — provenance verified 2026-07-31 (see banner). Ready for Builder as GV-5; ships behind our existing flag, default OFF.
 - **Date:** 2026-07-30
 - **Author:** Planner

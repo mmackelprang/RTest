@@ -1,6 +1,6 @@
 # PLAN — `GV-12` · The panels fetch once per circuit and never again. Refetch on the recovery edge.
 
-> **Row:** `GV-12`, [`docs/queue/GV-12.md`](../../docs/queue/GV-12.md). 🟠 **P1.** Filed 2026-09-08,
+> **Row:** `GV-12`, [`docs/queue/GV-12.md`](../../queue/GV-12.md). 🟠 **P1.** Filed 2026-09-08,
 > narrowed the same day by RotaryPhone.
 > **Branch:** `fix/gv-12-refetch-on-recovery-edge`.
 > **Estimate:** **1.0 d.** Five tasks, four of them small; Task 5 (the RED-first test) is the half-day.
@@ -18,7 +18,7 @@
 
 ### 0.1 ⚠⚠ `C-401` — THE `UI-10` VERDICT: NOT UPSTREAM. THE 30-SECOND TIMEOUTS ARE NOT THE CIRCUIT.
 
-The row ([`GV-12.md:53-59`](../../docs/queue/GV-12.md), and again at `:93-95`) makes `UI-10` the first
+The row ([`GV-12.md:53-59`](../../queue/GV-12.md), and again at `:93-95`) makes `UI-10` the first
 question, on the theory that a half-dead Blazor circuit cannot refetch. **Establishing that was the
 assignment. It is answered, and the answer is no.**
 
@@ -32,11 +32,11 @@ because the Blazor circuit is the one connection in this system that is NOT on t
 
 | # | Check | Result |
 |---|---|---|
-| 1 | The circuit's configured client timeout — [`App.razor:76`](../../src/Radio.Web/Components/App.razor) | `builder.withServerTimeout(120000)` — **120 s, not 30 s.** A circuit on this config cannot emit a `30000.00ms` message |
+| 1 | The circuit's configured client timeout — [`App.razor:76`](../../../src/Radio.Web/Components/App.razor) | `builder.withServerTimeout(120000)` — **120 s, not 30 s.** A circuit on this config cannot emit a `30000.00ms` message |
 | 2 | Who emits that string | `Microsoft.AspNetCore.SignalR.Client.HubConnection` — a **SignalR client**. For it to appear in `radio-web`'s log, `radio-web` must be the client |
 | 3 | `HubConnectionBuilder` sites in `src/Radio.Web` | Exactly **four**: `AudioStateHubService.cs:155`, `AudioVisualizationHubService.cs:83`, `GvTrunkHubService.cs:54`, `PhoneHubService.cs:69` |
 | 4 | How many of the four set `ServerTimeout` | **Zero.** Grep for `ServerTimeout` in `src/Radio.Web` returns two hits, both in `App.razor`. All four clients run the **30 s default** |
-| 5 | The server they talk to — [`Radio.API/Program.cs:87`](../../src/Radio.API/Program.cs) | `options.KeepAliveInterval = TimeSpan.FromSeconds(30)` |
+| 5 | The server they talk to — [`Radio.API/Program.cs:87`](../../../src/Radio.API/Program.cs) | `options.KeepAliveInterval = TimeSpan.FromSeconds(30)` |
 | 6 | `UI-10`'s own scope question #2 (`ServerTimeout ≥ 2 × KeepAliveInterval`) | **Violated exactly.** 30 s against 30 s — the server pings at the same instant the client gives up. Textbook, and cheap to rule out, as that row predicted |
 
 So the ~30 s timeouts are **`radio-web`'s four outbound hub clients**, two of them pointed at our own
@@ -56,7 +56,7 @@ this repo overrode the default in the one place a reader would not look for it: 
 ### 0.2 ⚠⚠ `C-402` — "A CLEAN RECONNECT PRODUCES A RE-MOUNT AND THEREFORE A FETCH" IS FALSE
 
 This is the sharper of the two corrections, because it is the premise the row calls sharp
-([`GV-12.md:93-95`](../../docs/queue/GV-12.md)):
+([`GV-12.md:93-95`](../../queue/GV-12.md)):
 
 > A circuit that drops and re-establishes cleanly produces a re-mount and therefore a fetch; a circuit
 > that hangs half-dead produces neither.
@@ -64,7 +64,7 @@ This is the sharper of the two corrections, because it is the premise the row ca
 **Neither branch produces a fetch in Blazor Server.** A circuit that drops and successfully reconnects
 resumes **the same circuit with the same component instances and the same field values**.
 `OnInitializedAsync` runs once per *circuit*, not once per *connection*. That is the entire purpose of
-`DisconnectedCircuitRetentionPeriod` — [`Program.cs:69`](../../src/Radio.Web/Program.cs) sets it to 10
+`DisconnectedCircuitRetentionPeriod` — [`Program.cs:69`](../../../src/Radio.Web/Program.cs) sets it to 10
 minutes here, explicitly so that "brief network blips or deploy restarts can reconnect **without
 losing circuit state**". State preserved means `_threads`, `_threadsError` and `_voicemailError`
 preserved, which means the error branch renders again, unchanged.
@@ -84,14 +84,14 @@ which a long-lived circuit can ever recover, because reconnection — however cl
 
 ### 0.3 ⚠ `C-403` — THREE OF THE FIVE TERMS IN THE STATUS CONTRACT HAVE NO FIELD ON OUR DTO
 
-The row gives the predicate as ready to use ([`GV-12.md:44-47`](../../docs/queue/GV-12.md)):
+The row gives the predicate as ready to use ([`GV-12.md:44-47`](../../queue/GV-12.md)):
 
 ```
 unhealthy = !cookiesValid || !available || degraded || authBlackout
             || lastApiSuccessAt is null or older than ~2 min
 ```
 
-[`ApiModels.cs:1100-1109`](../../src/Radio.Web/Models/ApiModels.cs) is the whole type:
+[`ApiModels.cs:1100-1109`](../../../src/Radio.Web/Models/ApiModels.cs) is the whole type:
 
 ```csharp
 public class GvBridgeStatusDto
@@ -127,7 +127,7 @@ instrument, never the search space."* The grep worked perfectly every time; it w
 half of the repo.
 
 **Caught by RotaryPhone refusing to accept an answer we had given three times**, and fixed by
-[`KIOSK-3`](../../docs/queue/KIOSK-3.md) (#635, #636). ⚠ **Any future claim of "zero consumers" must
+[`KIOSK-3`](../../queue/KIOSK-3.md) (#635, #636). ⚠ **Any future claim of "zero consumers" must
 state the scope searched** — `src/`, `deploy/`, `tools/`, `docs/` and shell scripts — alongside the
 claim.
 
@@ -166,9 +166,9 @@ opposite failure directions and must not be merged.
 The row offers the recovery edge and a backoff loop as alternatives ("one trigger beats two clocks",
 `GV-12.md:24-25`). **The edge alone leaves a reachable hole**, and it is the row's own failure shape:
 
-[`PhonePage.razor:603-624`](../../src/Radio.Web/Components/Pages/PhonePage.razor) sets
+[`PhonePage.razor:603-624`](../../../src/Radio.Web/Components/Pages/PhonePage.razor) sets
 `_threadsError = true` whenever `GetSmsThreadsAsync()` returns `null`, and
-[`GvBridgeApiService.cs:196+`](../../src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs) returns
+[`GvBridgeApiService.cs:196+`](../../../src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs) returns
 `null` on **any** exception — a one-off timeout, a reset connection, a 500 on that route alone. None
 of those necessarily moves `/api/gvbridge/status`. So: list fetch fails, bridge health never leaves
 healthy, **no edge ever occurs**, panel is stuck until a human taps Retry. That is the row, reproduced
@@ -183,13 +183,13 @@ clock, and not an unconditional retry loop. §0.6 says why the shapes differ.
 already exists.** RotaryPhone's suggestion is right, and it is even cheaper than they knew — the seam
 is already wired:
 
-- [`PhonePage.razor:253`](../../src/Radio.Web/Components/Pages/PhonePage.razor) already subscribes:
+- [`PhonePage.razor:253`](../../../src/Radio.Web/Components/Pages/PhonePage.razor) already subscribes:
   `GvBridgeStatus.StatusChanged += OnGvStatusChanged;`
 - `OnGvStatusChanged` at `:453-459` already runs on every status delivery, already updates
   `_gvBridgeAvailable`, and already re-renders. **It just never refetches.**
 - `:1065` already unsubscribes in `Dispose`.
 - `_gvBridgeAvailable` is what feeds `GvAvailable`, which is what gates the banner at
-  [`PhoneMessagesPanel.razor:14-20`](../../src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor).
+  [`PhoneMessagesPanel.razor:14-20`](../../../src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor).
   **"When the banner clears" and "when this handler sees the healthy edge" are the same instant.**
 
 Why the edge beats a plain backoff loop, on this system specifically:
@@ -277,7 +277,7 @@ job is §0.7 (the edge field) and §0.4 (nullability), not general correctness.
 **File:** `src/Radio.Web/Models/ApiModels.cs`. Replace lines 1100-1109 in full.
 
 `GvBridgeApiService.JsonOptions` sets `PropertyNameCaseInsensitive = true`
-([`GvBridgeApiService.cs:22-25`](../../src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs)), so
+([`GvBridgeApiService.cs:22-25`](../../../src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs)), so
 `lastApiSuccessAt` → `LastApiSuccessAt` with no attributes.
 
 ```csharp
@@ -486,7 +486,7 @@ this row must not move either.
 ```
 
 ⚠ `timeProvider` is added **last and optional**, so the two existing three-argument construction
-sites — [`Program.cs:432-436`](../../src/Radio.Web/Program.cs) and
+sites — [`Program.cs:432-436`](../../../src/Radio.Web/Program.cs) and
 `PhonePageThreadLoadErrorTests.cs:93-95` — keep compiling unchanged. Do not reorder the parameters.
 
 **(ii)** Set it in `ApplyStatus`. Replace lines 125-130:

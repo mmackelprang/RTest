@@ -15,7 +15,7 @@ using Microsoft.AspNetCore.DataProtection;
 /// prerendering does not suppress the marker — so a key ring the process cannot
 /// write makes every page render throw, not just pages carrying protected payloads.
 /// This is what took the kiosk UI down on 2026-08-16; see
-/// design/plans/SECRET-KEYRING-INVESTIGATION.md.
+/// archive/design/plans/SECRET-KEYRING-INVESTIGATION.md.
 /// </remarks>
 internal static class DataProtectionSetup
 {

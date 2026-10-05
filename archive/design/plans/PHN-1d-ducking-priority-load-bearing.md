@@ -3,8 +3,8 @@
 > **Status:** ready for Builder **once `PHN-1c` has merged** — §0.3 is the list of things to re-check
 > first. Written 2026-09-04 against `6b3dcc2e`; revised the same day for owner decision **C-46**, which
 > removed the mirror-direction work from this row and sent it to PR 5 as a queue.
-> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../docs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
-> **Decision of record:** [ADR-029](../decisions/2026-08-03-gv-audio-through-engine.md) — **D5**, §6.1, §6.2, §6.3.
+> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
+> **Decision of record:** [ADR-029](../../../docs/decisions/2026-08-03-gv-audio-through-engine.md) — **D5**, §6.1, §6.2, §6.3.
 > **Sequencing:** [`design/plans/PHN-arc-pr-breakdown.md`](PHN-arc-pr-breakdown.md) — **this plan is PR 4 of 7.**
 > The order is unchanged; nothing here re-sequences the arc.
 > **Depends on:** `PHN-1a` ✅ ([#528](https://github.com/mmackelprang/RTest/pull/528)),
@@ -2425,7 +2425,7 @@ it used to.
 because a Builder cycle owned `docs/BUILDER_QUEUE.md` while this plan was written (`PHN-1c` on
 `feat/phn-1c-event-playback-service`) and a concurrent edit would have conflicted.
 
-✅ **That is discharged. The row was appended to [`docs/BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md)
+✅ **That is discharged. The row was appended to [`docs/BUILDER_QUEUE.md`](../../../docs/BUILDER_QUEUE.md)
 § Queue on 2026-09-04, after `PHN-1c` merged as [#556](https://github.com/mmackelprang/RTest/pull/556),
 and the copy that lived here is deleted rather than kept in sync.** The queue is the single copy on
 purpose: a row that exists in two files is a row that will disagree with itself, and the *Depends on*

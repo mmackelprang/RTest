@@ -13,7 +13,7 @@ using Radio.Web.Tests.TestHelpers;
 /// shell. It does not, and never did — this app is a Blazor Web App
 /// (<c>MapRazorComponents</c>), which routes by real per-page endpoints and has no fallback; the
 /// reported symptom came from the other repo's service. See
-/// <c>design/plans/UI-11-the-404-that-was-already-a-404.md</c> §0.1-0.2.
+/// <c>archive/design/plans/UI-11-the-404-that-was-already-a-404.md</c> §0.1-0.2.
 /// </para>
 /// <para>
 /// ⚠ <b>The pair is the point, and neither half is sufficient alone.</b> A change that 404s

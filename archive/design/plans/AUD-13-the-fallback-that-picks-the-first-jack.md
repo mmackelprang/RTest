@@ -1,6 +1,6 @@
 # PLAN — `AUD-13` · The empty port is already refused three times over. The fallback that picks the first jack is not refused at all.
 
-> **Row:** `AUD-13`, [`docs/queue/AUD-13.md`](../../docs/queue/AUD-13.md). 🟠 **P1** as filed.
+> **Row:** `AUD-13`, [`docs/queue/AUD-13.md`](../../queue/AUD-13.md). 🟠 **P1** as filed.
 > **Branch:** `fix/aud-13-usb-capture-refuses-instead-of-substituting`
 > **Estimate:** **0.5 d** of build, **plus one box session** to confirm the Vinyl port on the appliance. §0.9 derives both.
 > **⛔ NOT auto-mergeable on green gates.** §0.10 gives two reasons; neither is "the tests might be flaky".
@@ -1140,7 +1140,7 @@ material and should land with the plan.
 **`docs/BUILDER_QUEUE.md`, the `AUD-13` row** — the *plan* cell, replacing `_plan TBD — ⚠ needs an owner
 decision first…_`:
 
-> [`AUD-13-the-fallback-that-picks-the-first-jack.md`](../design/plans/AUD-13-the-fallback-that-picks-the-first-jack.md)
+> [`AUD-13-the-fallback-that-picks-the-first-jack.md`](../../../design/design/plans/AUD-13-the-fallback-that-picks-the-first-jack.md)
 > · **0.5 d + two `curl`s against the box** · ⛔ **NOT auto-mergeable** — converts a working state into a
 > failing one on a live appliance, deliberately · ⚠ **the plan FALSIFIED this row's headline**: an empty
 > `USBPort` is refused three times over before `Contains("")` is reached (`SoundFlowDeviceManager.cs:250`

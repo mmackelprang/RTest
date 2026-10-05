@@ -1,6 +1,6 @@
 # `AUD-10` — pausing on the phone destroys the A2DP transport, and resume never restores it
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** **Observed live on `radio` 2026-09-06**, reproduced twice in one session.
 
@@ -148,7 +148,7 @@ A repeat run is cheap now that the method exists.
 The reconnection loop starts and **aborts in the same millisecond**, because BlueZ still reports the
 device connected while the audio path is already gone.
 
-⭐ **This is the same family as [`AUD-25`](AUD-25.md)'s phantom `isConnected` — but here it is
+⭐ **This is the same family as [`AUD-25`](../../docs/queue/AUD-25.md)'s phantom `isConnected` — but here it is
 LOAD-BEARING: the stale reading switches the repair OFF.** `AUD-25` was filed as a cosmetic lie in a
 status response; this shows the same class of untruth **disabling a recovery path**. ⚠ **Whoever plans
 either row should read the other.**
@@ -213,7 +213,7 @@ Resume cannot recover because the capture is **running-but-empty**, not stopped.
 
 ⭐⭐ **THAT SIGNATURE IS ALREADY A KNOWN UNSOLVED BUG IN THIS PROJECT**, recorded as *"after days of
 uptime + source switches, SoundFlow capture stops delivering audio. Generator in mixer but output=0."*
-— and [`AUD-18`](AUD-18.md), *"the fingerprint tap returned ZERO bytes for 11½ hours."* ⭐ **Same shape,
+— and [`AUD-18`](../../docs/queue/AUD-18.md), *"the fingerprint tap returned ZERO bytes for 11½ hours."* ⭐ **Same shape,
 and it is now REPRODUCIBLE ON DEMAND WITH A PAUSE BUTTON.** ⛔ **That is the single most valuable thing
 in this row: a months-old intermittent has a deterministic trigger.**
 

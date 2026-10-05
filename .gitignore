@@ -99,8 +99,8 @@ task_plan.md
 .playwright-mcp/
 
 # Stray UAT screenshots dropped in the repo root by browser-driving agents.
-# Root-anchored on purpose: curated UAT evidence under docs/uat/ and
-# docs/design-handoffs/ IS tracked and must stay tracked.
+# Root-anchored on purpose: curated UAT evidence under archive/uat/ and
+# archive/design-handoffs/ IS tracked and must stay tracked.
 /uat-*.png
 /uat-*.jpg
 

@@ -601,7 +601,7 @@ git push -u origin feat/pw-event-subscription
 gh pr create --title "feat(bt): PipeWire event subscription replaces pw-cli scraping for BT node lifecycle" --body "$(cat <<'EOF'
 ## Summary
 
-Implements [Plan E from the Cast/BT research arc](../docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md). Replaces the `pw-cli ls Node` text scraping pattern used by `LinuxBluetoothService.GetAudioCaptureDeviceAsync` + Plan B's periodic re-scan with a real PipeWire registry-event subscription (`pw_registry_add_listener`).
+Implements [Plan E from the Cast/BT research arc](../../docs/docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md). Replaces the `pw-cli ls Node` text scraping pattern used by `LinuxBluetoothService.GetAudioCaptureDeviceAsync` + Plan B's periodic re-scan with a real PipeWire registry-event subscription (`pw_registry_add_listener`).
 
 §6 Pattern 1 from the research doc: RTest was the only system among the four reference systems still using text-scrape; this PR aligns with the reference cluster's event-driven approach.
 

@@ -708,7 +708,7 @@ public sealed class EventPlaybackService : IEventPlaybackService, IDisposable
     // rather than to configuration. Engine and Voice are nullable since TTS-9 and their ?? DOES
     // fire, so filling them here is belt-and-braces rather than load-bearing — but passing null
     // instead would be correct only until VoiceId is set, which is the trap re-armed, so it is never
-    // passed. See design/FUTURE-WORK.md § "TTS seam" item 1.
+    // passed. See docs/known-issues-and-future-work.md § "TTS seam" item 1.
     var parameters = new TTSParameters
     {
       Engine = ResolveEngine(request.Engine, tts.DefaultEngine),

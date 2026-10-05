@@ -1,7 +1,7 @@
 # ROADMAP — what is actually left before GA
 
 > ⛔ **2026-10-04: THIS IS A 2026-09-09 SNAPSHOT. For what is left, read
-> [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) § *Status 2026-10-04*.** Most rows in §A.3 below have
+> [`HANDOFF-GA-PUNCH-LIST.md`](../handoffs/HANDOFF-GA-PUNCH-LIST.md) § *Status 2026-10-04*.** Most rows in §A.3 below have
 > shipped and been archived since. This file was not re-derived, with one exception: **`AUD-1` and `AUD-19` are
 > re-tiered from P2 to pre-GA in §A.3 and §A.4**, per the owner ruling of 2026-09-10 recorded in the punch list
 > (§5's head note). That ruling outranks the P2 this file gave them. `AUD-1` has since shipped (#667); `AUD-19` is
@@ -10,10 +10,10 @@
 **Written:** 2026-09-09 (Planner) · **Read-only pass.** Nothing was claimed, reordered, or edited; this
 file is the only thing it added.
 
-**Derived from**, in this order: [`BUILDER_QUEUE.md`](BUILDER_QUEUE.md) (26 live rows) ·
-[`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) · the per-row dossiers in [`queue/`](queue/) ·
-the plans in [`../design/plans/`](../design/plans/) · [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md)
-(55 shipped rows — ⚠ figure re-derived from the instrument 2026-09-09; the previous **52** was stale and was flagged by `AUD-2`'s Builder) · [`queue/inbound/`](queue/inbound/).
+**Derived from**, in this order: [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md) (26 live rows) ·
+[`HANDOFF-GA-PUNCH-LIST.md`](../handoffs/HANDOFF-GA-PUNCH-LIST.md) · the per-row dossiers in [`queue/`](../../docs/queue/) ·
+the plans in [`../design/plans/`](../design/plans/) · [`BUILDER_QUEUE_ARCHIVE.md`](../queue/BUILDER_QUEUE_ARCHIVE.md)
+(55 shipped rows — ⚠ figure re-derived from the instrument 2026-09-09; the previous **52** was stale and was flagged by `AUD-2`'s Builder) · [`queue/inbound/`](../../docs/queue/inbound/).
 
 > ⚠ **This is a decision aid, not an inventory.** It answers three questions and nothing else:
 > **what is left before GA · what can proceed without you · what is waiting on you specifically.**
@@ -39,7 +39,7 @@ the plans in [`../design/plans/`](../design/plans/) · [`BUILDER_QUEUE_ARCHIVE.m
 > | Item below | Says | Actually |
 > |---|---|---|
 > | §C.2 #6 **"Deploy the Radio side"** | 8 rows merged-but-undeployed | ✅ **DONE** — deployed twice 2026-09-09, verified at `f4d71b28` on both services |
-> | §C.2 #4 **"Run `PHN-2`'s owner UAT"** | 9 `SOUND` items unverified | ✅ **DONE** — 6 pass / 2 fail / 1 deferred, [record](uat/2026-09-09-phn2-sound-uat/RESULT.md) |
+> | §C.2 #4 **"Run `PHN-2`'s owner UAT"** | 9 `SOUND` items unverified | ✅ **DONE** — 6 pass / 2 fail / 1 deferred, [record](../uat/2026-09-09-phn2-sound-uat/RESULT.md) |
 > | §F #1 **"Merge `UI-8` and `UI-15`"** | both open | ⚠ **HALF** — `UI-8` shipped (#640); `UI-15` still live |
 > | §F #5 **"let a Builder take `UX-1`, `AUD-5`, `AUD-2`, `PHN-9`"** | all four open | ⚠ **`UX-1` shipped TWICE** (#641 at 56, then #644 reversing to 36) and **`AUD-2` shipped** (#642) and is **confirmed by ear**. `AUD-5` and `PHN-9` still open |
 > | §A.3 **"the tier map — all 26 live rows"** | 26 rows | ⚠ **30 rows** — `OPS-12`, `TEST-10`, `AUD-24`, `AUD-25`, `AUD-26`, `UX-2` filed since; `UI-8`, `UX-1`, `AUD-2` archived |
@@ -288,7 +288,7 @@ below is a **row-level** question, not an arc-level gate.
 
 | # | Action | Why it matters | Time |
 |---|---|---|---|
-| 1 | **Run the `rotary-phone` deploy you were assigned.** Four RotaryPhone PRs (#78–#81) are merged and undeployed; `radio:5004` still runs the pre-#78 build. | ⚠ **Their top hazard lands on your audio, not theirs.** The tar-pipe fallback path in `Deploy-ToLinux.ps1` clobbers `appsettings.Production.json`, which carries `BluetoothAdapter: hci1`. If it fires, **their** config silently reverts and **your** A2DP breaks, with the cause in their file and no error pointing at it. Back the file up **off-box** first; confirm the rsync path actually ran; verify `hci1` after. Details: [`queue/inbound/2026-09-09-rotaryphone-deploy-handoff.md`](queue/inbound/2026-09-09-rotaryphone-deploy-handoff.md) | ~30 min + verification |
+| 1 | **Run the `rotary-phone` deploy you were assigned.** Four RotaryPhone PRs (#78–#81) are merged and undeployed; `radio:5004` still runs the pre-#78 build. | ⚠ **Their top hazard lands on your audio, not theirs.** The tar-pipe fallback path in `Deploy-ToLinux.ps1` clobbers `appsettings.Production.json`, which carries `BluetoothAdapter: hci1`. If it fires, **their** config silently reverts and **your** A2DP breaks, with the cause in their file and no error pointing at it. Back the file up **off-box** first; confirm the rsync path actually ran; verify `hci1` after. Details: [`queue/inbound/2026-09-09-rotaryphone-deploy-handoff.md`](../../docs/queue/inbound/2026-09-09-rotaryphone-deploy-handoff.md) | ~30 min + verification |
 | 2 | **Install `radio-console-open` on the box before #79 deploys.** `KIOSK-3` shipped (#635) but **does not reach the box on a deploy** — `setup-kiosk.sh` installs it and `Deploy-ToLinux.ps1` never runs it; the live copy was still dated Aug 18. **The box has no checkout**, so the kiosk directory must be copied over first. | #79 removes `psidtsAgeSeconds`. Without the fix, the launcher's VOICE row reports **"needs sign-in" permanently, on every launch, regardless of GV's actual state** | ~10 min |
 | 3 | **Answer RotaryPhone's two pre-deploy questions.** They asked and said *"tell us before we deploy"*; neither has been answered, and you now control the deploy. | ⚠ **Our first answer to Q1 was wrong and has been retracted.** We told them *"zero consumers"* of `psidtsAgeSeconds` three times; there was one — a **shell script**, invisible to a `src/`-scoped grep. That is exactly the shape of Q2 (*does anything key off `acknowledged == false`?*). A grep of `BellHealthService.cs`, `ApiModels.cs` and `PhoneDashboardPanel.razor` finds no consumer — **but that is the same instrument that was wrong last week.** Re-derive rather than re-assert | 15 min |
 | 4 | **Run `PHN-2`'s owner UAT.** Nine `SOUND`-class items — a human confirming the room changed — are still unverified on the last P0 to ship. | Script is standalone at [`design/plans/PHN-2-retire-the-audio-element.md` §3](../design/plans/PHN-2-retire-the-audio-element.md) | **15 min at the cabinet** |

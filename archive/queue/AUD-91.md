@@ -1,6 +1,6 @@
 # `AUD-91` — the band sweep and the BAND view follow the band selected in the radio control panel, not just FM
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2 (owner request, GA-nice; not GA-blocking unless the owner promotes it).** Filed 2026-10-01 by the
 coordinator from the owner's request on the evening of 2026-09-30 (EDT), after `AUD-76` shipped.
@@ -146,7 +146,7 @@ through `/api/radio/band` and `/api/radio/frequency` and reading `/api/radio/sta
 - Side finding: tuning with `POST /api/radio/frequency` into another band leaves the **previous band's
   step** in place (`step` read 25000 on FM after a WB to FM tune). `SetBandAsync` updates the step;
   `SetFrequencyAsync` does not. The BAND view's non-FM tap goes through the new band-explicit tune,
-  which updates it. **Confirmed a real bug by reading the code, filed as [`AUD-95`](AUD-95.md):**
+  which updates it. **Confirmed a real bug by reading the code, filed as [`AUD-95`](../../docs/queue/AUD-95.md):**
   `SDRRadioAudioSource.SetFrequencyAsync` calls `RadioReceiver.SetFrequency`, which switches the
   receiver's band through `FindBandForFrequency` → `SetBand`, but the source's `_frequencyStep` is only
   reset by `SetBandAsync` and `TuneInBandAsync`. So the step buttons then move by the old band's step.
@@ -165,7 +165,7 @@ through `/api/radio/band` and `/api/radio/frequency` and reading `/api/radio/sta
 
 Direct sampling was judged **not small**: it needs P/Invoke for `rtlsdr_set_direct_sampling`, a
 different capture rate and DC handling, and, above all, hardware this dongle does not have. It is
-deferred to [`AUD-94`](AUD-94.md) as an owner decision, not built here.
+deferred to [`AUD-94`](../../docs/queue/AUD-94.md) as an owner decision, not built here.
 
 ## Design (Builder, 2026-10-01)
 
@@ -304,4 +304,4 @@ interleaved switching. None appeared in the quiet re-run.
 
 Reported by the coordinator on 2026-10-04: `AUD-91` passes owner UAT. This closes the "Owner checks outstanding" list above. AM and SW stay with `AUD-94`, on hold for the all-band hardware.
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

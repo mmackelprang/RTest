@@ -65,7 +65,7 @@ authoritative** (`docs/HT801-ADDRESS.md`); the repo's template is not.
 
 ## ⛔ Two answers we asked for *before* deploy, and never got
 
-In `docs/handoffs/2026-09-09-radioconsole-gv-auth-wire-changes.md` we asked you two questions and said
+In `archive/handoffs/2026-09-09-radioconsole-gv-auth-wire-changes.md` we asked you two questions and said
 explicitly **"tell us before we deploy."** Neither has been answered. **You now control the deploy, so
 you are answering your own gate** — please actually answer them rather than letting the deploy stand
 in for a reply:

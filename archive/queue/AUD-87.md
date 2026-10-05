@@ -1,6 +1,6 @@
 # `AUD-87` — owner ruling: what should overlapping announcements do?
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **RULED AND BUILT 2026-10-02.** Filed 2026-09-30 by the `AUD-73` Builder, on the second pre-merge reviewer's recommendation, as a decision row.
 

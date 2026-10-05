@@ -744,7 +744,7 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // ⚠ This whole arm was unexercised until PHN-1c's review: FakeEventSource.RaiseCompleted has
     // always taken an Exception?, and no test passed one. On the box "PlaybackError" is what an
     // operator sees when SoundFlow fails to start, which is a completely different diagnosis from
-    // every "Media*" reason — so it is in design/INTEGRATIONS.md's table now, and here.
+    // every "Media*" reason — so it is in docs/integrations.md's table now, and here.
     var source = new FakeEventSource();
     var tts = new FakeTtsFactory
     {
@@ -827,7 +827,7 @@ public sealed class EventPlaybackServiceTests : IDisposable
     // TTSParameters pins them to the TYPE's default rather than to configuration. Engine and Voice
     // became nullable in TTS-9 and their ?? does fire; the trap survives on exactly two of the four.
     // (This comment said "all four" until PHN-1c's review, matching a wrong comment in
-    // AcquireSpeechAsync. design/FUTURE-WORK.md § "TTS seam" item 1 always had it right.)
+    // AcquireSpeechAsync. docs/known-issues-and-future-work.md § "TTS seam" item 1 always had it right.)
     //
     // ⚠ The configured speed and pitch are deliberately NOT 1.0f. With the shipped defaults they
     // would be identical to the type's own initializers, and this test would pass against a

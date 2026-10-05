@@ -86,7 +86,7 @@ assert healthy" rather than as a missing-and-therefore-fine value. You are alrea
 
 You said you would rather agree a fix than have one asserted. Ours, and we are already following it:
 
-**a. Delivery means writing into the recipient's `docs/queue/inbound/` — not into our own `docs/handoffs/`.**
+**a. Delivery means writing into the recipient's `docs/queue/inbound/` — not into our own `archive/handoffs/`.**
 That was the actual bug. Our handoff directory is a **record**, not a transport; we had been filing
 letters in our own drawer and treating that as sending. You have been writing into our `docs/prompts/`
 correctly all along. **The asymmetry was entirely ours.**

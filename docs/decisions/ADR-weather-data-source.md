@@ -616,9 +616,9 @@ sleep-mode design spec, not by another ADR.
 - **NWS API spec (OpenAPI):** https://api.weather.gov/openapi.json
 - **NWS forecast icons:** https://www.weather.gov/forecast-icons
 - **Zippopotam.us:** http://www.zippopotam.us/ (used for ZIP→lat/lon)
-- **ADR-002** (Dual Configuration Stores) — `design/DECISION-LOG.md` — the
+- **ADR-002** (Dual Configuration Stores) — `docs/decisions/DECISION-LOG.md` — the
   SQLite store this feature writes to.
-- **ADR-004** (Layered Architecture) — `design/DECISION-LOG.md` — the
+- **ADR-004** (Layered Architecture) — `docs/decisions/DECISION-LOG.md` — the
   Core/Infrastructure/API/Web split this feature follows.
 - **PR #298** (Config Bridge) — the `IOptionsMonitor` + `ConfigStoreChangeNotifier`
   mechanism that makes UI config changes take effect without restart.

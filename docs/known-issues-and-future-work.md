@@ -61,7 +61,7 @@ the roadmap."* No code or hardware change is planned until the owner schedules i
 keep AM/SW selectable as they are in the meantime (*"#4 - keep as it is. Once I have the new hardware,
 we'll execute the roadmap item."*), and asked for the Nooelec NESDR SMArt v5 to be added — it is now
 **option C, recommended for this owner's use**. Roadmap entry:
-[`docs/ROADMAP.md`](../docs/ROADMAP.md) § Queued → *All-band reception*.
+[`archive/roadmaps/ROADMAP.md`](../archive/roadmaps/ROADMAP.md) § Queued → *All-band reception*.
 
 ### Why today's radio can't do it (measured, not inferred)
 
@@ -207,7 +207,7 @@ the plan called for did **not** ship, and both are recorded here so they are not
 > is being called wrong and it is not a 2-to-1 verdict**: the ambient conditions of both recent
 > sittings are unrecorded, and the dark-room one used the v1 harness later found broken.
 > **Unresolved, not settled** — both confounds are set out in
-> [`docs/queue/UX-1.md`](../docs/queue/UX-1.md).
+> [`archive/queue/UX-1.md`](../archive/queue/UX-1.md).
 >
 > ⛔ **This makes item 2 below load-bearing in a way it was not before.** The disagreement is
 > tolerable only because the shimmer is not on screen on the panels measured — so if dwell is ever
@@ -225,7 +225,7 @@ the plan called for did **not** ship, and both are recorded here so they are not
 
 ### 1. The narrowed gradient geometry — proposed, never validated, not shipped
 
-`design/plans/UX-1-the-shimmer-nobody-can-see.md` Task 5b specifies narrowing the ramp from 50% of
+`archive/design/plans/UX-1-the-shimmer-nobody-can-see.md` Task 5b specifies narrowing the ramp from 50% of
 the tile to 15% (stops at `35% / 50% / 65%` instead of `0% / 50% / 100%`), and the Designer rated it
 **the larger half of the fix** — 3.3× steeper for free.
 
@@ -385,7 +385,7 @@ the mechanism by which `PhoneCallStateChanged` — a one-subscriber event by cen
 N-subscriber event after N navigations. But it is a **lifecycle** defect, not a fan-out one.
 
 ✅ **SHIPPED 2026-09-08 as `UI-9` ([#628](https://github.com/mmackelprang/RTest/pull/628)); see
-[ADR-031](DECISION-LOG.md).** Two claims in the paragraph above were wrong and are left standing
+[ADR-031](decisions/DECISION-LOG.md).** Two claims in the paragraph above were wrong and are left standing
 only so the correction is visible:
 
 - *"the fix is three named handlers and an `IDisposable` on a 2,000-line page"* — **the page already
@@ -493,12 +493,12 @@ glow was ever wanted." The owner decided, at the panel, in daylight, against a b
 (`none · 16 · 20 · 24 · 32`): **no glow.** `UI-8` therefore deleted the three dead references —
 `--signal-green-glow` had two, `--signal-red-glow` one — and **declared neither token.** Both now
 have **zero consumers in `design-system.css`** and must not be reintroduced. (The non-shipped mockup
-under `docs/design-handoffs/design_handoff_phone_page/` still references them; that is the source the
+under `archive/design-handoffs/design_handoff_phone_page/` still references them; that is the source the
 port came from and is deliberately left alone.) **Pre-existing and untouched by `ENC-8`**, which was
 forbidden from adding design tokens, and neither `ENC-8` nor `ENC-12` ever referenced it — which is
 why the entry is filed here. The edit was a literal zero-visual-change cleanup:
 an undefined `var()` is invalid at computed-value time, so every one of those `box-shadow`s already
-computed to `none`. See `docs/queue/UI-8.md` § *OWNER DECISION 2026-09-09*.
+computed to `none`. See `archive/queue/UI-8.md` § *OWNER DECISION 2026-09-09*.
 
 **2. `Restore designed defaults` is not on the Settings page, and the reason is not oversight.** The
 punch list's `ENC-12` row listed it; handoff Rev 3's action table does not. In Rev 2 the page held 24
@@ -683,8 +683,8 @@ the speech chain. Items 1-4 are as filed on 2026-09-03.
 **Verified against the tree at `5e571b88`, i.e. after `TTS-9` (#548) removed eSpeak** — which closed
 half of item 1 and left the rest standing. Line numbers below are post-`TTS-9`.
 
-> ⚠ **Why this section exists.** `design/plans/PHN-1c-event-playback-service-and-route.md` §4 item 5
-> stated that items **1** and **2** below were already *"recorded in `design/FUTURE-WORK.md` with
+> ⚠ **Why this section exists.** `archive/design/plans/PHN-1c-event-playback-service-and-route.md` §4 item 5
+> stated that items **1** and **2** below were already *"recorded in `docs/known-issues-and-future-work.md` with
 > reproductions."* They were not — `git show --stat 34f73c7` touched only that plan and
 > `docs/BUILDER_QUEUE.md`. That single sentence is what made two untracked deferrals look tracked. The
 > plan has been corrected; this section is what makes the sentence true.
@@ -951,7 +951,7 @@ row at **seven sites across five files**, not the four across two that `TTS-11` 
    `LogSafeText`"*. Folding it in would have put two competing masking schemes in one PR.
 3. **Different exposure profile**, because of the Warning-level line.
 
-**Tier argument, against `docs/HANDOFF-GA-PUNCH-LIST.md` §1:**
+**Tier argument, against `archive/handoffs/HANDOFF-GA-PUNCH-LIST.md` §1:**
 
 - **Not P0.** None of (a) wrong or dangerous on day one, (b) embarrassing in front of people,
   (c) unrecoverable without a laptop, (d) the substrate other verification rests on, (e) permanent at
@@ -1637,15 +1637,15 @@ are the retired guess — see the banner above for the measured format)**
 > place of the missing second path (never dark without a connected encoder; power on when the encoder is
 > lost, at start-up, and in `ExecStopPost=`). It drives Mutter `PowerSaveMode` from a separate
 > `PanelPowerService`, not the ScreenSaver-route `SetDisplayPowerAsync` the sections below refer to —
-> that method was removed. Current behaviour: `design/INTEGRATIONS.md` §1, *Panel power-off in sleep*.
+> that method was removed. Current behaviour: `docs/integrations.md` §1, *Panel power-off in sleep*.
 > The rest of this section is the historical record.
 
 **Status:** ⚠ **CORRECTED 2026-09-02 by the `ENC-15` gate result — the previous status overclaimed in two
 ways.** (1) It said *"Display DPMS control implemented … in `SleepService`"*; the display-power calls at
 `SleepService.cs:164-168` and `:198-199` are **commented out**, so nothing in the running service turns the
 panel off today. (2) It named `org.gnome.ScreenSaver SetActive` as the DPMS control; that route **does not
-reach DPMS-off** — see the recovery section in `design/INTEGRATIONS.md` §1 and the full write-up at
-[`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
+reach DPMS-off** — see the recovery section in `docs/integrations.md` §1 and the full write-up at
+[`archive/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../archive/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
 Sleep/wake as a *UI state* works; **panel blanking does not ship** and this section is the record of why.
 **Added:** 2026-03-16
 **Priority:** Medium for the encoder wake integration. ⛔ **Blanking itself: do not implement** — see the
@@ -1696,7 +1696,7 @@ When rotary encoders are integrated via `RotaryEncoderActionRouter`:
 ### Gotchas
 
 - GNOME ScreenSaver D-Bus requires the desktop session user (`mmack`) and session bus address — Radio.API runs `sudo -u mmack DBUS_SESSION_BUS_ADDRESS=... gdbus call`
-- ⚠ **`org.gnome.ScreenSaver SetActive false` is a no-op when the panel is held down by DPMS rather than by the screensaver** — a state observed on this box, with `GetActive=(false,)` while `dpms=Off`. The control that works in both states is `org.gnome.Mutter.DisplayConfig PowerSaveMode`, set to `0`. The recovery commands, in the order to try them, are in `design/INTEGRATIONS.md` §1.
+- ⚠ **`org.gnome.ScreenSaver SetActive false` is a no-op when the panel is held down by DPMS rather than by the screensaver** — a state observed on this box, with `GetActive=(false,)` while `dpms=Off`. The control that works in both states is `org.gnome.Mutter.DisplayConfig PowerSaveMode`, set to `0`. The recovery commands, in the order to try them, are in `docs/integrations.md` §1.
 - An earlier revision of this section warned that *"`SetActive(true)` may not reliably wake the display"*. `SetActive(true)` **blanks**; `SetActive(false)` wakes. The real unreliability is the DPMS/screensaver split above.
 
 ⚠ **There are two sections numbered 7 in this file** — *Google Cast — WebSocket + Web Audio API* and
@@ -1786,18 +1786,18 @@ specifically so that such a heartbeat can be added without wiping an in-flight w
    - **Behavior while our flag is off:** the optimistic flip is no longer replayed onto refetched lists (the GV-2/GV-3 `_locallyHeard`/`_locallyReadThreads` seeding is gone by design — ADR-024 §2). So hearing a voicemail and then pressing **Refresh** in the same session restores the unread marker, because we never wrote the read through. Lists reload only on initial load, the explicit Refresh button, and error-retry — no background poll refetches them — so this is the full extent of the difference. It resolves the moment both flags are on.
    - **Deferred (informational, not blocking) — unread support:** their `GVBridge:AllowMarkUnread` is `false`, so `isRead:false` returns `400 unread_unsupported`; our UI never sends `false` and the toggle stays hidden (ADR-024 §6). One UI change if unread is ever wanted, no contract change.
    - **Deferred (informational, not blocking) — path (b), phone→kiosk LIVE push:** RotaryPhone's poller-flip fast-follow. Until it ships, externally-originated reads (phone/GV-web) reconcile on our **next list refresh / poll**, not as an instant push. The SAME `ReadStateChanged` handler covers both — no GV-4-side change when it lands.
-   - ~~**Constraint to hold:** keep the voicemail audio endpoint **unauthenticated** (ADR-022 §8.1) — the native `<audio src>` cannot send the auth header.~~ ✅ **DISSOLVED by `PHN-1b`, and finished by `PHN-2`.** The constraint existed only because the BROWSER fetched the recording. Radio.API fetches it server-side through `GvMediaClient`, which attaches `X-RotaryPhone-Auth` itself, and `PHN-2` removed the `<audio>` element entirely — so the endpoint is free to require the header and there is nothing to ask RotaryPhone for ([`CROSS-REPO-HANDOFFS.md`](../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3).
+   - ~~**Constraint to hold:** keep the voicemail audio endpoint **unauthenticated** (ADR-022 §8.1) — the native `<audio src>` cannot send the auth header.~~ ✅ **DISSOLVED by `PHN-1b`, and finished by `PHN-2`.** The constraint existed only because the BROWSER fetched the recording. Radio.API fetches it server-side through `GvMediaClient`, which attaches `X-RotaryPhone-Auth` itself, and `PHN-2` removed the `<audio>` element entirely — so the endpoint is free to require the header and there is nothing to ask RotaryPhone for ([`CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3).
 2. **GV SMS send** — **built in PR3, flagged off** via `RotaryPhone:Gv:SendEnabled=false`. The whole compose/reply + new-recipient write path (optimistic → sending → sent → failed-with-preserved-text, 429/in-flight/degraded guardrails) is implemented behind `GvBridgeSendService` (`src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs`); `SendAsync` throws `SendNotAvailableException` until the flag flips. **`POST /api/gvbridge/sms/send` has now SHIPPED on RotaryPhone** (dark behind their `GVBridge:EnableSmsSend=false`), so the endpoint is no longer the blocker — but **do not flip `RotaryPhone:Gv:SendEnabled` until the response shape is reconciled.** The shapes have diverged: ours is `SendSmsResponse(SmsMessageDto? Message, string? Error)` (still marked **provisional**); theirs is `SendSmsResponse(bool Queued, string Code, string? ThreadId, string? Error, SmsMessageDto? Message)`. `Message`/`Error` still bind by name, so this fails *quietly* rather than loudly — we silently drop **`Queued`** and the **`Code`** taxonomy (`queued` | `invalid_number` | `rate_limited` | `auth_unavailable` | `upstream_error` | `timeout` | `send_disabled` | `error`) that `GvBridgeSendService`'s 429/degraded guardrails need to distinguish a retryable rate-limit from a hard failure. Their dark response is `409` + `Code:"send_disabled"`. Needs its own queue row.
 3. ~~**On-screen text entry — reuses the EXISTING global virtual keyboard.**~~ **OBSOLETE — `PHN-4` deleted both fields.** The compose message field and the new-recipient field were ordinary `<input>`s that the app-wide keyboard (`wwwroot/js/virtual-keyboard.js`, loaded in `App.razor`) auto-showed on focus, with the recipient field opting into the numeric layout via `data-keyboard="numeric"`. **`/phone` now has no text input at all, so the keyboard never appears there.** It still serves its other surfaces, and `window.virtualKeyboardInterop.show(element)` / `.hide()` is unchanged.
    ⚠ **The `data-keyboard` attribute has zero consumers in `src/` as of `PHN-4`, and `virtual-keyboard.js` was deliberately NOT changed.** `detectInputMode` (`:326-347`) reaches the numeric layout by **four** routes, and `data-keyboard` is only the first: `type="number"`, `inputmode="numeric"`, `inputmode="decimal"`, and a RadzenNumeric `.rz-spinner` wrapper all still resolve to it, with ~60 live call sites in `SystemConfigPage.razor` alone plus `RadioPage.razor` and `RadioControlPanel.razor`. **So the numeric layout is NOT orphaned — only the two-line `data-keyboard` opt-in branch is currently uncalled**, and it is a generic seam of a shared component rather than phone-specific machinery. Earlier notes (including [ADR-029's §11.5 aside](decisions/2026-08-03-gv-audio-through-engine.md)) say the numeric layout's *caller count* drops to zero; that is true only of the attribute, not of the layout.
 4. **`RotaryPhoneAuthHandler`** — header (`X-RotaryPhone-Auth`) injected only when `RotaryPhone:Gv:AuthKey` is non-empty; empty today (LAN-only no-auth posture). One place to flip on when the inter-service auth gate ships (ADR-022 §8.1). The `GvBridgeSendService` typed client carries this handler too, so send authenticates the moment the gate flips. **GV-4 mark-read routes ride the same `RotaryPhone:Gv:AuthKey` seam** — the `/api/gvbridge/*` prefix gate auto-covers the two POST routes; no new auth key (ADR-024 §7).
-   - ~~**Gotcha:** a native `<audio>` element CANNOT send the auth header…~~ ✅ **Moot since `PHN-2`: there is no `<audio>` element.** The remaining live concern is the opposite one and it is an operational hazard rather than a design constraint — `GvMedia:AuthKey` and RotaryPhone's `InterServiceAuthKey` are two halves of one secret in two `appsettings.Production.json` files the deploy does not re-seed, and a divergence surfaces only as `MediaUnauthorized` on the panel. Runbook in `design/INTEGRATIONS.md`.
+   - ~~**Gotcha:** a native `<audio>` element CANNOT send the auth header…~~ ✅ **Moot since `PHN-2`: there is no `<audio>` element.** The remaining live concern is the opposite one and it is an operational hazard rather than a design constraint — `GvMedia:AuthKey` and RotaryPhone's `InterServiceAuthKey` are two halves of one secret in two `appsettings.Production.json` files the deploy does not re-seed, and a divergence surfaces only as `MediaUnauthorized` on the panel. Runbook in `docs/integrations.md`.
 5. **Voicemail player Call back / Text back quick actions** — deferred (owner decision 3). The `VoicemailPlayer` carries a `@* fast-follow … *@` marker where these belong. Call back routes through the existing phone dial path; Text back opens/creates the GV text thread for the caller (the PR3 texts surface is now in place to host it). No UI shipped yet.
 
 ### Code Pointers
 
 - `src/Radio.Web/Services/ApiClients/GvBridgeApiService.cs` — read methods + audio-URL builder + **PR4 durable mark-read** (`MarkVoicemailReadAsync` / `MarkSmsThreadReadAsync` → the two `POST .../read` routes; 200→DTO, 404→null, 502→null-keep-optimistic, no retry; flag-gated). **GV-8:** `GetSmsThreadMessagesAsync` is the one read method that returns `GvResult<T>` rather than `T?`; the others still return `T?` because their callers already handle `null` correctly (the thread list keeps its last good list and toasts).
-- `src/Radio.Web/Services/ApiClients/GvResult.cs` — **GV-8** outcome type (`Success` / `HttpError` / `Timeout` / `Transport` / `Malformed`, plus `StatusCode` and RotaryPhone's `error`/`code` discriminator). Exists because collapsing every failure to `null` let a 502 render as an empty conversation (UAT F-1). **GV-6 adopts this same type** for the two mark-read methods — the two rows share the idiom, not the PR (see [`ORDERING-NOTES.md`](../docs/queue/ORDERING-NOTES.md) § Dependency / ordering notes).
+- `src/Radio.Web/Services/ApiClients/GvResult.cs` — **GV-8** outcome type (`Success` / `HttpError` / `Timeout` / `Transport` / `Malformed`, plus `StatusCode` and RotaryPhone's `error`/`code` discriminator). Exists because collapsing every failure to `null` let a 502 render as an empty conversation (UAT F-1). **GV-6 adopts this same type** for the two mark-read methods — the two rows share the idiom, not the PR (see [`ORDERING-NOTES.md`](queue/ORDERING-NOTES.md) § Dependency / ordering notes).
 - `src/Radio.Web/Services/ReadStateReconciler.cs` — **PR4** idempotent `(id-or-threadId + isRead)` reconciler (the ADR-024 §9 invariant; plain unit-tested class, no Blazor dep).
 - `src/Radio.Web/Services/Hub/PhoneHubService.cs` — **PR4** `ReadStateChanged` event on the existing `/hub` (defensive Kind guard), alongside `GvVoicemailReceived` / `GvSmsReceived`.
 - `src/Radio.Web/Services/ApiClients/GvBridgeSendService.cs` — **PR3 flagged send seam** (the only write path; 4 typed exceptions + in-flight/429/degraded guardrails).
@@ -1808,8 +1808,8 @@ specifically so that such a heartbeat can be added without wiping an in-flight w
 - `src/Radio.Web/wwwroot/js/voicemail-player.js` — **reduced by `PHN-2` to `fractionFromEvent` alone.** The HTML5 `<audio>` attach/play/pause/seek/event bridge is gone; what survives converts a tap's `clientX` to a fraction of the scrubber's box, which is the one thing on this path with no server-side equivalent.
 - `src/Radio.Web/Services/Http/RotaryPhoneAuthHandler.cs` — the auth seam.
 - `src/Radio.Web/Components/Pages/PhoneMessagesPanel.razor` — unified feed with the `FeedItem`/`FeedKind` projection: **PR2 added `Call`/`Voicemail`, PR3 added the `Text` case** + renders text thread rows interleaved newest-first + hosts the conversation in the detail pane.
-- `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` — ADR-022 (decisions + risks).
-- `design/decisions/2026-06-20-gv-mark-read-durable-readstate.md` — ADR-024 (durable read-state contract + the de-dupe invariant).
+- `docs/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md` — ADR-022 (decisions + risks).
+- `docs/decisions/2026-06-20-gv-mark-read-durable-readstate.md` — ADR-024 (durable read-state contract + the de-dupe invariant).
 - Config: `RotaryPhone:Gv:{SendEnabled,MarkReadEnabled,StatusPollSeconds,AuthKey}` in `appsettings.json` (+ `appsettings.Production.json` for per-machine `AuthKey`). `MarkReadEnabled` is the **consumer** flag (gates whether our seam calls the route); distinct from RotaryPhone's server-side `GVBridge:EnableMarkRead` config flag (gates whether their already-shipped route acts or returns the dark rejection). Flip theirs first.
 
 ---
@@ -1827,7 +1827,7 @@ rotary phone stayed silent for the full 60-second timeout. Nothing on screen ind
 problem — the screen was not merely unhelpful, it was confidently wrong. Root cause was a
 stale ring-INVITE target inside RotaryPhone (fixed there). Full spec, including the ASCII
 mockups, copy deck and edge-case table, is in
-`docs/design-handoffs/HANDOFF-bell-failure-surfacing.md`.
+`archive/design-handoffs/HANDOFF-bell-failure-surfacing.md`.
 
 ### What Exists
 
@@ -2861,7 +2861,7 @@ positions, not backlog.
 ### What exists
 
 **(a) No progress affordance on a spoken message.** The design handoff makes a 3px hairline bar under
-the bubble explicitly **optional** (`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md:311`,
+the bubble explicitly **optional** (`archive/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md:311`,
 Q2) and recommends skipping it unless the owner wants maximum fidelity with the voicemail transport.
 `PHN-3` skipped it. So a spoken message shows a spinner while `Preparing`/`Waiting`, then a cyan
 `stop` button, and nothing about how far through it is.

@@ -1,6 +1,6 @@
 # `AUD-12` — the BT source stalls at `Ready` while audio is playing
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 > ⛔ **PLAN COLLISION — added 2026-09-08 by `TEST-2` ([#614](https://github.com/mmackelprang/RTest/pull/614)), which invalidated part of this row's plan. READ BEFORE CLAIMING.**
 >
@@ -100,7 +100,7 @@ currently required to restore audio at all, which can mask this row's transition
 
 ## Plan
 
-[`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](../../design/plans/AUD-12-the-source-that-stalled-at-ready.md),
+[`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](../design/plans/AUD-12-the-source-that-stalled-at-ready.md),
 written 2026-09-06 against `main` at `066a0d5c`, **repaired 2026-09-08 against `c9ebd824`**.
 **0.5 d.** ⛔ **Not auto-mergeable.**
 

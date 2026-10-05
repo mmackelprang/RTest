@@ -1,6 +1,6 @@
 # `PHN-12` — the API's phone client misread RotaryPhone's hub contract, so the call announcement never ran
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"For 777 all pased."* — the same call now produced the console's first-ever call announcement. `PhoneCallClient` binds `CallStateChanged(phoneId, state)` and `IncomingCall(phoneId, number)` in RotaryPhone's order, pinned by a contract test over real SignalR. Merged via [#777](https://github.com/mmackelprang/RTest/pull/777). The status lines below were true until then.
 

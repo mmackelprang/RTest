@@ -1,6 +1,6 @@
 # PLAN — `AUD-15` · The buffer stops draining, and the instrument that could have said so stops being switched off
 
-> **Row:** `AUD-15`, [`docs/queue/AUD-15.md`](../../docs/queue/AUD-15.md). 🟠 **P1.** Filed 2026-09-07 from the
+> **Row:** `AUD-15`, [`docs/queue/AUD-15.md`](../../queue/AUD-15.md). 🟠 **P1.** Filed 2026-09-07 from the
 > `radio-api` file sink during ordinary BT playback.
 > **Branch:** `fix/aud-15-bt-buffer-runs-empty`
 > **Estimate:** **2 d** of build, **plus one box session of ≥30 minutes of sustained BT playback**. §0.10 derives both.

@@ -11,7 +11,7 @@ namespace Radio.Web.Tests.TestHelpers;
 /// synchronize on the component having <em>observed</em> something, never on a <c>Task.Delay</c>
 /// racing the component's own timer. For a Blazor panel the only dependency inside a debounce
 /// callback is HTTP, so the handler is where the rendezvous belongs.
-/// See TEST-7 in <c>docs/queue/TEST-7.md</c>.
+/// See TEST-7 in <c>archive/queue/TEST-7.md</c>.
 /// </para>
 ///
 /// <para>

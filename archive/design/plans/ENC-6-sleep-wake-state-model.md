@@ -14,8 +14,8 @@ every input that arrives during the wake.
 
 **Tech Stack:** .NET 10, ASP.NET Core, Blazor Server, SignalR, xUnit + bUnit + FluentAssertions + Moq.
 
-**Row:** `ENC-6` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.5](../../docs/HANDOFF-GA-PUNCH-LIST.md)
-**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md)
+**Row:** `ENC-6` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.5](../../handoffs/HANDOFF-GA-PUNCH-LIST.md)
+**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md)
 (**Rev 5**) — **§8 in full**, plus §2.3, §3 principles 1–2, §6.10, §8.6, §15's *Sleep, wake, blanking* block.
 **Relationship to the handoff:** **extends** — §8's five-state model is reduced to three by `ENC-15`
 (§0.1), with **two declared deviations** and **three mechanism decisions the handoff does not make**
@@ -59,7 +59,7 @@ Every task's requirements implicitly include this section.
 ### 0.1 ⚠ The blanking half of `ENC-6` DOES NOT SHIP. Do not reinstate it.
 
 `ENC-15` was the hard predecessor of `ENC-6`'s blanking half and **its gate FAILED** on 2026-09-02
-([report](../../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md)). The mechanism is worse than the
+([report](../../uat/2026-09-02-enc15-touch-wake-gate/REPORT.md)). The mechanism is worse than the
 row anticipated:
 
 - **The touchscreen is powered by the panel and leaves the USB bus when the panel blanks** —
@@ -1601,7 +1601,7 @@ Replace the Task 5 stub with:
 
     try
     {
-      _currentValuePublishers[index](index);
+      _currentValuePublishers[index](../../../design/plans/index);
     }
     catch (Exception ex)
     {

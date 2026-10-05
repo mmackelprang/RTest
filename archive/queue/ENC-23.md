@@ -1,6 +1,6 @@
 # `ENC-23` — long-press SLEEP for deep sleep (sleep + panel off); a VOLUME press wakes it
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED 2026-10-02.** Owner panel UAT passed (*"UAT - these all pass"*) on the combined test build `552396d`; merged via [#772](https://github.com/mmackelprang/RTest/pull/772). The status lines below were true until then.
 

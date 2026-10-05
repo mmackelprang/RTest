@@ -1,6 +1,6 @@
 # `OPS-13` — a failed SHA verification exits the deploy before the kiosk relaunch, so a dev-host DNS miss turns a SUCCESSFUL deploy into a dark panel
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-28 from the first deploy run from a Linux dev host (`appserver`), the
 one that shipped [PR #677](https://github.com/mmackelprang/RTest/pull/677) → `f409bb9`. Recovery
@@ -132,4 +132,4 @@ branches were not driven live; they are read-verified and the row should say so 
 Merged to `main` as `4adfbe95`. Deploys since verify from the box, and `-VerifyOnly` is the documented pre-UAT
 gate (`CLAUDE.md` § Deployment). The `Verified` verdict has since occurred, e.g. on the 2026-10-02 deploy of
 `8df918b`. The `Unreachable` and `Mismatch` branches are still read-verified only, as stated above.
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md). The live row had still read 🚧 BUILT.
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md). The live row had still read 🚧 BUILT.

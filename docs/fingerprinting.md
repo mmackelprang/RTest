@@ -1431,4 +1431,4 @@ For unidentified tracks:
 - [MusicBrainz API Documentation](https://musicbrainz.org/doc/MusicBrainz_API)
 - [Chromaprint](https://acoustid.org/chromaprint)
 - [Cover Art Archive](https://coverartarchive.org/)
-- [Existing SQLite patterns in RTest](src/Radio.Infrastructure/Configuration/Stores/SqliteConfigurationStore.cs)
+- [Existing SQLite patterns in RTest](../src/Radio.Configuration/Stores/SqliteConfigurationStore.cs)

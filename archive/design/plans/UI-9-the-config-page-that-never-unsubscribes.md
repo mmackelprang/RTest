@@ -1,6 +1,6 @@
 # `UI-9` — the config page that never unsubscribes
 
-**Row:** [`docs/queue/UI-9.md`](../../docs/queue/UI-9.md) · **Index:** [`docs/BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md)
+**Row:** [`docs/queue/UI-9.md`](../../queue/UI-9.md) · **Index:** [`docs/BUILDER_QUEUE.md`](../../../docs/BUILDER_QUEUE.md)
 **Planned:** 2026-09-08 · **Estimate:** S (one PR, ~1.5–2 h including the fail-first run)
 **Files touched:** 2 (`SystemConfigPage.razor`, `SystemConfigPageTests.cs`)
 

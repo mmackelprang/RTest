@@ -546,7 +546,7 @@ git push -u origin feat/bt-capture-watchdog
 gh pr create --title "feat(bt): capture watchdog for FM-BT-3 long-uptime quiescence" --body "$(cat <<'EOF'
 ## Summary
 
-Implements [Plan A from the Cast/BT research arc](../docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md) — a periodic watchdog that detects FM-BT-3 (silent PipeWire OnProcess callback cessation on a long-running BT capture stream), addressing the production bug documented in MEMORY ("Long-running capture device lifecycle bug").
+Implements [Plan A from the Cast/BT research arc](../../docs/docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md) — a periodic watchdog that detects FM-BT-3 (silent PipeWire OnProcess callback cessation on a long-running BT capture stream), addressing the production bug documented in MEMORY ("Long-running capture device lifecycle bug").
 
 Reuses the existing `_recoveryInProgress` interlock in BluetoothAudioSource so watchdog-driven recovery and downstream-stall recovery share the same dedup path.
 

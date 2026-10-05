@@ -515,7 +515,7 @@ git push -u origin feat/bt-autoswitch-gate
 gh pr create --title "feat(bt): gate autoSwitchOnConnect on PW capture-node availability" --body "$(cat <<'EOF'
 ## Summary
 
-Implements [Plan B from the Cast/BT research arc](../docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md) — stops `BluetoothAutoSwitchService` from forcing source-switch + retry-loop when the BlueZ `Connected` event fires before the PipeWire capture node has materialized (FM-BT-1).
+Implements [Plan B from the Cast/BT research arc](../../docs/docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md) — stops `BluetoothAutoSwitchService` from forcing source-switch + retry-loop when the BlueZ `Connected` event fires before the PipeWire capture node has materialized (FM-BT-1).
 
 Two-phase wait: short-bounded probe (5 s) → event-driven subscription (60 s timeout). Contributes to reducing FM-BT-3 long-uptime degradation by eliminating the hours-of-retry-loop pathology documented in MEMORY.
 

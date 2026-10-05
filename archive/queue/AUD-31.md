@@ -1,6 +1,6 @@
 # `AUD-31` — a phantom "removed from BlueZ" evicts the connected phone from our cache
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2** until its consequence is measured — see *What is not known*. Filed 2026-09-25 from the same
 cabinet sitting as `AUD-30`.

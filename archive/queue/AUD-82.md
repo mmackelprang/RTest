@@ -1,6 +1,6 @@
 # `AUD-82` — `/api/metrics/snapshots` counts rolled-up data more than once
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟢 **P3.** Filed 2026-09-29 by the `UI-2` builder, found while replacing the Metrics page's fan-out. **Found, not fixed.**
 

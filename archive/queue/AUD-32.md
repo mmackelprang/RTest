@@ -1,6 +1,6 @@
 # `AUD-32` — some MP3s' tags silently fail to load, so tagged fields are filled by fingerprinting
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1-ish for the file player.** Filed 2026-09-26 from `AUD-1`'s box UAT. Pre-dates AUD-1 (the old
 overwrite replaced every field anyway), but it defeats AUD-1's per-field rule for the affected files.

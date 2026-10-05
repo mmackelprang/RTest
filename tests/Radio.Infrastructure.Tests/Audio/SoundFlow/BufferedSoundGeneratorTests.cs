@@ -335,7 +335,7 @@ namespace Radio.Infrastructure.Tests.Audio.SoundFlow;
 
       // ---------------------------------------------------------------------
       // Path C refinement coverage
-      // (docs/plans/2026-05-22-bt-drift-compensation-refinement.md)
+      // (archive/plans/2026-05-22-bt-drift-compensation-refinement.md)
       // ---------------------------------------------------------------------
 
       [Fact]

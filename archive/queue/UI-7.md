@@ -1,6 +1,6 @@
 # `UI-7` — the multicast-await shape survives in ~17 more places, and `AudioStateHubService` is the one that matters
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-07 by the `UI-6` Builder, which fixed three instances of this shape and
 **deliberately left the rest alone** rather than let a 0.5 d row grow into a sweep. The count and the

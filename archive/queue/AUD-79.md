@@ -1,6 +1,6 @@
 # `AUD-79` — Cast audio alternated 21 ms of music with 21 ms of silence ("underwater")
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed and fixed 2026-09-29 from an owner report: *"I'm playing BT cast to my Office Speaker and I'm hearing occasional distortion ('underwater' sounding audio)."* Only while casting; the radio casts cleanly; the phone was next to the box; long-standing.
 

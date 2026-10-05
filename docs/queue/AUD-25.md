@@ -68,7 +68,7 @@ mechanism that produced it. Establish question 1 first.
 - ⚠ **Not `AUD-13`** — that row is about an empty device config matching every device. This is a
   phantom entry in a status response. They may share a cause; **check, do not assume.**
 - Found during the vinyl investigation recorded at
-  [`docs/diagnostics/vinyl-signal-floor.md`](../diagnostics/vinyl-signal-floor.md).
+  [`archive/diagnostics/vinyl-signal-floor.md`](../../archive/diagnostics/vinyl-signal-floor.md).
 
 ---
 

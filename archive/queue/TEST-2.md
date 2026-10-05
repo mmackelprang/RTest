@@ -1,12 +1,12 @@
 # TEST-2 — Close the deferred-capture branch-dispatch coverage gap left by PR #469 — if a native test harness ever becomes feasible.
 
-> Queue dossier for row **`TEST-2`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`TEST-2`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 ---

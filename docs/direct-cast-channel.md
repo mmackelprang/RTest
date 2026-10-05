@@ -208,7 +208,7 @@ In `appsettings.json` under `AudioOutput.GoogleCast`:
 
 ### Setting Up the Custom Receiver
 
-See **[docs/direct-channel-setup-guide.md](../docs/direct-channel-setup-guide.md)**
+See **[docs/direct-channel-setup-guide.md](direct-channel-setup-guide.md)**
 for complete step-by-step instructions including:
 - Hosting the receiver HTML over HTTPS
 - Registering the app on the Google Cast Developer Console

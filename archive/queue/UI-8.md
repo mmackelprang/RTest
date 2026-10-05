@@ -1,6 +1,6 @@
 # `UI-8` — two glow tokens are consumed and never declared, so three shipped glows render as nothing
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-08. Surfaced by the `UX-1` Planner, then measured directly — the row below
 is verification, not relay, and it found **more than was reported to me**.

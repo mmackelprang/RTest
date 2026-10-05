@@ -6,14 +6,14 @@
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](../../archive/queue/BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | 📋 |
 | Plan | _plan TBD (design-led; consult the Designer handoff first)_ |
-| Spec / handoff | [ADR-028 §8](../../design/decisions/2026-07-30-gv-sms-send-contract.md) · [handoff Screen C/D](../design-handoffs/HANDOFF-phone-messages-voicemail-sms.md) · [**UAT § Findings for GV-7**](../uat/2026-07-31-gv-live-data/REPORT.md) |
+| Spec / handoff | [ADR-028 §8](../decisions/2026-07-30-gv-sms-send-contract.md) · [handoff Screen C/D](../../archive/design-handoffs/HANDOFF-phone-messages-voicemail-sms.md) · [**UAT § Findings for GV-7**](../../archive/uat/2026-07-31-gv-live-data/REPORT.md) |
 | Depends on | **GV-3** (texts surface). _The "wait for observations" caveat is **discharged** — they exist and are linked in the row. Coordinate with GV-5 if both are in flight: GV-5 adds `GvCounterparty` to `ApiModels.cs` and this row consumes it. **Coordinate with GV-8 too, and prefer GV-8 first:** GV-8 rewrites the conversation pane's state branches (`PhoneTextsPanel.razor:36-68`), which this row also touches — and designing the header/empty treatment on top of a pane that **cannot express "failed"** would bake the F-1 confusion into the new design._ |
 | Branch | `feat/gv-messages-pr7-nondialable-senders` |
 
@@ -37,7 +37,7 @@
 
 **Critical constraint Builder confirmed: there is NO `fromName` anywhere in the GV payload** — only counterparty identifiers — so display names can come **only** from local contact resolution, which structurally cannot resolve these senders. Design for "identifier is all we will ever have." Reuse GV-5's `GvCounterparty.Classify` (do not write a second classifier). Composer behavior is **GV-5's** — this row must not re-decide it.
 
-**Live observations now EXIST — design against them, not assumptions.** The prior "⚠ LIVE OBSERVATIONS INCOMING — do not design blind" warning is **retired**: the [2026-07-31 UAT](../uat/2026-07-31-gv-live-data/REPORT.md) observed this surface against real GV data, and its § "Findings for GV-7" (**G-1 … G-9**) is the input.
+**Live observations now EXIST — design against them, not assumptions.** The prior "⚠ LIVE OBSERVATIONS INCOMING — do not design blind" warning is **retired**: the [2026-07-31 UAT](../../archive/uat/2026-07-31-gv-live-data/REPORT.md) observed this surface against real GV data, and its § "Findings for GV-7" (**G-1 … G-9**) is the input.
 
 **Read it before starting.** The findings that actually change the design: **G-1 — the "2" in `Texts 2` is an UNREAD COUNT, not a thread count. There are 20 threads.** Design against a 20-row list, not the 2-row list an earlier session assumed.
 

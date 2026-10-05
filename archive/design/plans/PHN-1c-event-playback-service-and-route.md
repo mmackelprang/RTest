@@ -1,8 +1,8 @@
 # PLAN — `PHN-1c` · ADR-029 PR 3: `EventPlaybackService` and the `/api/audio/events` route family
 
 > **Status:** ready for Builder. Written 2026-09-02/03 against `d1226da`.
-> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../docs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
-> **Decision of record:** [ADR-029](../decisions/2026-08-03-gv-audio-through-engine.md) — D1, D2, D3, and §14 Q10.
+> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
+> **Decision of record:** [ADR-029](../../../docs/decisions/2026-08-03-gv-audio-through-engine.md) — D1, D2, D3, and §14 Q10.
 > **Sequencing:** [`design/plans/PHN-arc-pr-breakdown.md`](PHN-arc-pr-breakdown.md) — **this plan is PR 3 of 7.** The
 > order is unchanged; nothing here re-sequences the arc.
 > **Depends on:** `PHN-1a` ✅ ([#528](https://github.com/mmackelprang/RTest/pull/528)) and
@@ -3577,7 +3577,7 @@ C-30 clarifies a boundary the breakdown left implicit; it moves nothing between 
 - Remove `VoicemailPlayer.razor`'s `<audio>` element, `wwwroot/js/voicemail-player.js` and
   `GvBridgeApiService.GetVoicemailAudioUrl` **together** — removing the builder first would break voicemail
   playback.
-- **Withdraw the cross-repo ask** in [`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same PR. ADR
+- **Withdraw the cross-repo ask** in [`CROSS-REPO-HANDOFFS.md`](../../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same PR. ADR
   §10.1 makes it a deliverable; PR 6 is the first moment it is true.
 - ⚠ **Pre-flight before flipping `GvMedia:Enabled` on the box:** check whether RotaryPhone's
   `InterServiceAuthKey` is set. It ships default-off, but if it has been set then **every** fetch returns

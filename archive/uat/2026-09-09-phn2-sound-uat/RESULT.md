@@ -3,7 +3,7 @@
 **Result: 5 pass, 3 FAIL, 1 deferred. ⛔ `PHN-2` does not close.**
 
 Run by the owner at the cabinet, ~15 minutes, against the script in
-[`design/plans/PHN-2-retire-the-audio-element.md`](../../../design/plans/PHN-2-retire-the-audio-element.md) §3.
+[`design/plans/PHN-2-retire-the-audio-element.md`](../../design/plans/PHN-2-retire-the-audio-element.md) §3.
 `PHN-2` merged 2026-09-05 as the last open P0 with these nine deferred; this is that debt discharged.
 
 ⚠ **Pre-condition worth recording: the console was `isMuted: true` when the sitting began**, volume
@@ -116,7 +116,7 @@ simultaneity was still there. **The trap was named in advance and the check walk
 ## ⭐ `PHN-10` DIAGNOSED AND FIXED — what check #11 was actually detecting, and what it means for #10
 
 Check #11's `FAIL` was one guard in `AudioFileEventSource`, and the fix is on
-`fix/phn-10-two-voices-at-once`. Plan: [`PHN-10-nothing-can-stop-a-voicemail.md`](../../../design/plans/PHN-10-nothing-can-stop-a-voicemail.md).
+`fix/phn-10-two-voices-at-once`. Plan: [`PHN-10-nothing-can-stop-a-voicemail.md`](../../design/plans/PHN-10-nothing-can-stop-a-voicemail.md).
 
 ### Check #11 — the mechanism
 

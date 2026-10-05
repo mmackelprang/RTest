@@ -3,7 +3,7 @@
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
 🔵 **P3.** Split out of `OPS-3` by owner decision 2026-09-08, when the premise that made it urgent
-turned out to be false. **The analysis already exists** — see `design/plans/OPS-3-bindsto-for-radio-web.md`,
+turned out to be false. **The analysis already exists** — see `archive/design/plans/OPS-3-bindsto-for-radio-web.md`,
 whose readiness sections are this row's inheritance and should be moved here when it is planned.
 
 ## The gap

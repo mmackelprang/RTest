@@ -1,6 +1,6 @@
 # `AUD-26` — switching source during an active duck leaves the new source at full volume
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-09 by `AUD-2`'s Builder, found while fixing the ducking key mismatch.
 

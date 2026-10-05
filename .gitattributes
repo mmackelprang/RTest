@@ -34,4 +34,4 @@ deploy/debian-x64/kiosk/gtk-touch/* text eol=lf
 # Windows working tree a CRLF copy — which changes that hash and makes the committed artifact no
 # longer byte-identical to the thing that was actually run. Same reasoning as the kiosk icons above.
 # This row's whole history is instruments found broken after the fact; a preserved one must be exact.
-docs/uat/**/harness.html -text
+archive/uat/**/harness.html -text

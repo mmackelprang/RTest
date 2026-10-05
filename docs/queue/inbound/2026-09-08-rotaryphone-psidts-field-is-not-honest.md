@@ -5,13 +5,13 @@
 
 ## The claim we need to retract, on your side this time
 
-`design/INTEGRATIONS.md:722`:
+`docs/integrations.md:722`:
 
 > *"`psidtsAgeSeconds` is the ONLY trustworthy field on `GET :5004/api/gvbridge/status` — and it is a
 > live blackout clock. … Read it as: `< 660` healthy · `660–1200` blackout … resets at ~1200. The
 > sibling fields **lie**."*
 
-`design/plans/PHN-2-retire-the-audio-element.md:1992`:
+`archive/design/plans/PHN-2-retire-the-audio-element.md:1992`:
 
 > *"Read **`psidtsAgeSeconds`** and **ignore every other field in that payload**."*
 

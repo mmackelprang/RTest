@@ -1,18 +1,18 @@
 # OPS-2 — Pin the six floating package versions.
 
-> Queue dossier for row **`OPS-2`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`OPS-2`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | 🚧 |
-| Plan | [design/plans/OPS-2-pin-the-six-floating-package-versions.md](../../design/plans/OPS-2-pin-the-six-floating-package-versions.md) |
+| Plan | [design/plans/OPS-2-pin-the-six-floating-package-versions.md](../design/plans/OPS-2-pin-the-six-floating-package-versions.md) |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ |
 | Depends on | — _(no dependency; claimable now. Best sequenced **after TEST-1**, because its only real gate is a green full-suite run and TEST-1 is what makes that signal trustworthy.)_ |
 | Branch | `chore/pin-floating-package-versions` |

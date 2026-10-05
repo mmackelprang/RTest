@@ -7,7 +7,7 @@ Computes:
   - Cross-scenario gap (heavy minus light) before and after — verifies the
     Plan-D acceptance criterion that the gap shrinks
   - PASS/FAIL against the §7 Idea #9 success criterion in
-    docs/research/2026-05-21-cast-stutter-comparison.md
+    archive/research/2026-05-21-cast-stutter-comparison.md
 
 Inputs (positional):
   argv[1]  baseline_light artifact   — PROBE-CAST-AUDIO summary

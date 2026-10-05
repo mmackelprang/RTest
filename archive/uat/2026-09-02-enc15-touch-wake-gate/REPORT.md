@@ -3,7 +3,7 @@
 **Date:** 2026-09-02
 **Box:** `radio` (`radio.lan` -> `192.168.86.50`), Intel N100, x86_64, Ubuntu + GNOME 46, GDM3 auto-login
 **Session:** Wayland (`loginctl` session 1, seat0)
-**Row:** `ENC-15` (P0) in [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../HANDOFF-GA-PUNCH-LIST.md) §3.5;
+**Row:** `ENC-15` (P0) in [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5;
 Designer [Rev 3 §8.5](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md)
 **Question:** can touch independently wake a blanked panel? If not, blanking (`ENC-6`'s second half) must
 not ship, because losing the encoder USB while dark would leave a screen that cannot be turned on from

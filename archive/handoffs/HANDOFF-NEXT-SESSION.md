@@ -1,8 +1,8 @@
 # HANDOFF — Start here
 
-> ⏩⏩ **2026-09-29 EVENING — START WITH [`HANDOFF-2026-09-29.md`](HANDOFF-2026-09-29.md).** `main` at `d97ddb0`; the box runs `main` + the unmerged `AUD-14` fix (#726, held for the owner's phone UAT — **do not deploy `main` until #726 merges**). 2f is done apart from owner-dependent rows; 2h (`UI-2`) shipped. The owner's test list is the "Evening batch" section of [`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md). The banners below are history.
+> ⏩⏩ **2026-09-29 EVENING — START WITH [`HANDOFF-2026-09-29.md`](HANDOFF-2026-09-29.md).** `main` at `d97ddb0`; the box runs `main` + the unmerged `AUD-14` fix (#726, held for the owner's phone UAT — **do not deploy `main` until #726 merges**). 2f is done apart from owner-dependent rows; 2h (`UI-2`) shipped. The owner's test list is the "Evening batch" section of [`uat/RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md). The banners below are history.
 
-> ⏸⏸ **PAUSED 2026-09-28 ~17:00 EDT for owner testing. Start with [`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md)** — box and `main` at `30e69df`; phases 0, 1, 2a, 2b, 2d, 2e, 2g done; **2f is next** per [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md). Linux build baseline is now **32/0**.
+> ⏸⏸ **PAUSED 2026-09-28 ~17:00 EDT for owner testing. Start with [`uat/RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md)** — box and `main` at `30e69df`; phases 0, 1, 2a, 2b, 2d, 2e, 2g done; **2f is next** per [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md). Linux build baseline is now **32/0**.
 >
 > ⭐⭐ **2026-09-28 — THE SEQUENCING AUTHORITY IS NOW [`HANDOFF-GA-CLOSEOUT.md`](HANDOFF-GA-CLOSEOUT.md), owner-approved.**
 > P0 is closed (every `PHN` PR archived; §9 re-tallied). It orders what is left — Phase 0 record fixes (this
@@ -32,7 +32,7 @@ Grandpa Anderson's console radio: a .NET 10 audio command center (Blazor Server 
 BT/Cast/SDR/vinyl/phone) on an Intel N100 Ubuntu box in kiosk Chrome at 1920x720. **The cabinet is
 nearly built and this is going into it** — recoverable only by SSH once the back is closed. The full
 prioritised punch list is [`docs/HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md); the encoder
-design is [`HANDOFF-rotary-encoder-mapping.md`](design-handoffs/HANDOFF-rotary-encoder-mapping.md)
+design is [`HANDOFF-rotary-encoder-mapping.md`](../design-handoffs/HANDOFF-rotary-encoder-mapping.md)
 (**Rev 7** as of 2026-09-03 — ⚠ that document's own `Status:` line still says `REV 5`; the revision list at
 its `:12` is the accurate one). **Read the punch list section 2 ordering constraints before claiming anything.**
 
@@ -154,7 +154,7 @@ It creates a **real USB HID device** with the RotaryUsb identity and descriptor,
 `HidRotaryEncoderService` reads it exactly as it reads the physical knobs. Commands: `turn`,
 `offline-turn`, `press`, `release`, `tap`, `hold`, `idle`, `detach`, `attach`. Encoders are
 `0 = VOLUME, 1 = SOURCE, 2 = PRESETS, 3 = TUNING`. **Read
-[`tools/encoder-harness/README.md`](../tools/encoder-harness/README.md) before using it** — it
+[`tools/encoder-harness/README.md`](../../tools/encoder-harness/README.md) before using it** — it
 carries the recovery procedure and the two design decisions.
 
 Three things to know before you reach for it:

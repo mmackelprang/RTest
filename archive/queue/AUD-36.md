@@ -1,6 +1,6 @@
 # `AUD-36` — `IdentificationIntervalSeconds` is a dead setting that the UI still offers
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟢 **P3.** Filed 2026-09-26 from `AUD-35`'s adversarial review.
 

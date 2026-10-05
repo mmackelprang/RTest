@@ -1,19 +1,19 @@
 # GV-6 — ASSESSED AGAINST `D31` 2026-09-05 AND UNAFFECTED — claim it as written.
 
-> Queue dossier for row **`GV-6`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`GV-6`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
-| Status | ✅ [#594](https://github.com/mmackelprang/RTest/pull/594) — shipped 2026-09-07, archived in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) |
-| Plan | [`design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md`](../../design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md) |
-| Spec / handoff | [ADR-024 §3.3](../../design/decisions/2026-06-20-gv-mark-read-durable-readstate.md) |
+| Status | ✅ [#594](https://github.com/mmackelprang/RTest/pull/594) — shipped 2026-09-07, archived in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) |
+| Plan | [`design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md`](../design/plans/GV-6-distinguish-markread-disabled-from-a-real-failure.md) |
+| Spec / handoff | [ADR-024 §3.3](../../docs/decisions/2026-06-20-gv-mark-read-durable-readstate.md) |
 | Depends on | **GV-4** |
 | Branch | `fix/gv-markread-dark-409` |
 

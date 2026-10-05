@@ -1,6 +1,6 @@
 # PLAN — `UI-7` · Close the multicast-await class, and stop calling a live defect dormant
 
-> **Row:** `UI-7`, [`docs/queue/UI-7.md`](../../docs/queue/UI-7.md). 🟡 **P2.** Filed 2026-09-07 by the
+> **Row:** `UI-7`, [`docs/queue/UI-7.md`](../../queue/UI-7.md). 🟡 **P2.** Filed 2026-09-07 by the
 > `UI-6` Builder.
 > **Branch:** `fix/ui-7-close-the-multicast-await-class`
 > **Estimate:** **1.5 d**, and **an owner decision before Task 1**. §0.7 derives both.
@@ -1453,7 +1453,7 @@ queue files concurrently. The wording below is for whoever does.
 Same column shape as the rows around it; only the **Plan** and **Notes** cells change.
 
 ```
-| UI-7 | ⚠ **PREMISE CORRECTED 2026-09-08 — the row calls this defect dormant and it is LIVE.** `AudioStateHubService` has TEN production subscribers, not one; 12 of its 14 events have a subscriber that is not `AudioStateStore`, and it is a singleton whose component subscribers register PER CIRCUIT. — [detail](queue/UI-7.md) | 📋 | [`UI-7-close-the-multicast-await-class.md`](../design/plans/UI-7-close-the-multicast-await-class.md) · **1.5 d** · ✅ auto-mergeable on green gates **for the plan's mechanism only** · ⛔ **the row's own scope-question-1 mechanism (a single-subscriber guard) would throw in `MainLayout.OnInitializedAsync` and leave the kiosk on an error boundary with every deploy gate green** — plan §0.8. 📌 **Owner decision needed before Task 1**: §1.1 substitutes "one mandatory fan-out seam + the lint" for "enforce the single subscriber", which does not exist to be enforced. | _`C-203`–`C-212`. Site count is **15**, not 14 (`SourceChanged` is raised twice — `:196` and `:432`). `PhoneUnreadState.cs:23` is `event Action<int>` and is **NOT this bug** — excluded, and `ConsolePlaybackState.cs:44-46` already said so. `DeviceDisplayStateService` and `RadioPanelToggleService` are `AddScoped`, not singletons._ | — _(no row dependency. Copies `UI-6`'s shipped implementation. ⚠ Touches `LogSafetyLintTests` for a mechanical extraction — plan Task 3a, `C-211`.)_ | `fix/ui-7-close-the-multicast-await-class` |
+| UI-7 | ⚠ **PREMISE CORRECTED 2026-09-08 — the row calls this defect dormant and it is LIVE.** `AudioStateHubService` has TEN production subscribers, not one; 12 of its 14 events have a subscriber that is not `AudioStateStore`, and it is a singleton whose component subscribers register PER CIRCUIT. — [detail](../../../design/plans/queue/UI-7.md) | 📋 | [`UI-7-close-the-multicast-await-class.md`](../../../design/design/plans/UI-7-close-the-multicast-await-class.md) · **1.5 d** · ✅ auto-mergeable on green gates **for the plan's mechanism only** · ⛔ **the row's own scope-question-1 mechanism (a single-subscriber guard) would throw in `MainLayout.OnInitializedAsync` and leave the kiosk on an error boundary with every deploy gate green** — plan §0.8. 📌 **Owner decision needed before Task 1**: §1.1 substitutes "one mandatory fan-out seam + the lint" for "enforce the single subscriber", which does not exist to be enforced. | _`C-203`–`C-212`. Site count is **15**, not 14 (`SourceChanged` is raised twice — `:196` and `:432`). `PhoneUnreadState.cs:23` is `event Action<int>` and is **NOT this bug** — excluded, and `ConsolePlaybackState.cs:44-46` already said so. `DeviceDisplayStateService` and `RadioPanelToggleService` are `AddScoped`, not singletons._ | — _(no row dependency. Copies `UI-6`'s shipped implementation. ⚠ Touches `LogSafetyLintTests` for a mechanical extraction — plan Task 3a, `C-211`.)_ | `fix/ui-7-close-the-multicast-await-class` |
 ```
 
 ### 8.2 Addition to `docs/queue/UI-7.md`
@@ -1464,7 +1464,7 @@ beside it rather than over it.
 ```markdown
 ## Planned — 2026-09-08
 
-**Plan:** [`design/plans/UI-7-close-the-multicast-await-class.md`](../../design/plans/UI-7-close-the-multicast-await-class.md).
+**Plan:** [`design/plans/UI-7-close-the-multicast-await-class.md`](UI-7-close-the-multicast-await-class.md).
 **1.5 d.** ✅ Auto-mergeable on green gates — for the plan's mechanism, not this row's. Plan §0.8.
 
 ⚠⚠ **The premise of the section "Why `AudioStateHubService` is the one worth a row" does not survive

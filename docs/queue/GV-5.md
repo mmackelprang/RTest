@@ -6,14 +6,14 @@
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](../../archive/queue/BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | 🚫 |
-| Plan | [`plans/.../pr5-send-contract.md`](../superpowers/plans/2026-07-30-gv-messages-pr5-send-contract.md) _(kept for reconstruction; do not execute)_ |
-| Spec / handoff | [ADR-028](../../design/decisions/2026-07-30-gv-sms-send-contract.md) · [handoff §send/bubble states](../design-handoffs/HANDOFF-phone-messages-voicemail-sms.md) |
+| Plan | [`plans/.../pr5-send-contract.md`](../../archive/superpowers/plans/2026-07-30-gv-messages-pr5-send-contract.md) _(kept for reconstruction; do not execute)_ |
+| Spec / handoff | [ADR-028](../decisions/2026-07-30-gv-sms-send-contract.md) · [handoff §send/bubble states](../../archive/design-handoffs/HANDOFF-phone-messages-voicemail-sms.md) |
 | Depends on | **GV-3** (`GvBridgeSendService`, compose/reply, `MessageBubble`, optimistic-append seam). _No external blocker: `POST /api/gvbridge/sms/send` is **shipped**. Their `GVBridge:EnableSmsSend=false` does **not** block — a dark server returns `409 send_disabled`, which this PR handles as a first-class state. **Merges as a user-visible no-op** (our flag off → compose unreachable, no new calls); the only always-on delta is the inert `SmsSent` subscription._ |
 | Branch | `feat/gv-messages-pr5-send-contract` |
 
@@ -21,7 +21,7 @@
 
 🚫 **PARKED 2026-09-05 BY OWNER DECISION `D31` — NEVER CLAIM.** The owner was asked whether SMS sending is ever meant to be enabled and answered **no — replies stay off**.
 
-**The reason lives in [punch list §6](../HANDOFF-GA-PUNCH-LIST.md); the decision is `D31` in §7.** This row's own value statement is what retires it — the punch list called it *"the row that unblocks ever turning send on"*, and nothing else.
+**The reason lives in [punch list §6](../../archive/handoffs/HANDOFF-GA-PUNCH-LIST.md); the decision is `D31` in §7.** This row's own value statement is what retires it — the punch list called it *"the row that unblocks ever turning send on"*, and nothing else.
 
 **Nothing here is a defect on the read surface**, which is the test that separates it from `GV-9` / `GV-10`.
 

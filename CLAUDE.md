@@ -363,7 +363,7 @@ so the bridge survives.
 
 **The real fix is PAM auto-unlock or an empty-password login keyring** (needs physical access) — that
 resolves every browser at once and costs no session. Full write-up:
-`docs/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
+`archive/uat/2026-08-03-osk-wayland-viability/REPORT.md`.
 
 ### Remote UI driving: CDP is back, AT-SPI works, screen capture is not
 

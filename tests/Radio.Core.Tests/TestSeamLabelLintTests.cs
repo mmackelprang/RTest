@@ -4,7 +4,7 @@ namespace Radio.Core.Tests;
 
 /// <summary>
 /// A regression lint over <c>src/**/*.cs</c> asserting that every Kind-C and Kind-D test seam
-/// carries the complete label required by <c>design/TESTING.md</c> § <i>Test Seams</i> (ADR-030):
+/// carries the complete label required by <c>docs/testing.md</c> § <i>Test Seams</i> (ADR-030):
 /// the kind, the mechanism that makes the real path unreachable, and — the clause the convention
 /// exists for — what the seam consequently does not cover.
 /// </summary>
@@ -245,7 +245,7 @@ public class TestSeamLabelLintTests
       var hit = matches.FirstOrDefault();
       Assert.True(hit is not null,
         $"Positive control '{member}' was not found under '{src}'. Either it was renamed or removed "
-        + "(update this control and design/TESTING.md), or the scanner no longer recognises "
+        + "(update this control and docs/testing.md), or the scanner no longer recognises "
         + "it — in which case every green run of this lint since the change was meaningless. "
         + $"Members matched: {(found.Count == 0 ? "(none)" : string.Join(", ", found.Select(f => f.Member)))}");
       Assert.Equal(kind, hit!.Kind);
@@ -257,7 +257,7 @@ public class TestSeamLabelLintTests
     Assert.True(
       violations.Count == 0,
       "ADR-030: a kind-C or kind-D test seam must say what it displaces. Add the missing clause(s) "
-      + "to the member's XML doc, verbatim in shape — see design/TESTING.md § Test Seams. "
+      + "to the member's XML doc, verbatim in shape — see docs/testing.md § Test Seams. "
       + $"Scanned '{src}'.\n  " + string.Join("\n  ", violations));
   }
 

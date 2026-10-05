@@ -1,6 +1,6 @@
 # PLAN — `AUD-2` · One key per source
 
-> **Row:** `AUD-2`, [`docs/queue/AUD-2.md`](../../docs/queue/AUD-2.md). 📋 queued, no dependency.
+> **Row:** `AUD-2`, [`docs/queue/AUD-2.md`](../../queue/AUD-2.md). 📋 queued, no dependency.
 > **Branch:** `fix/sdr-playback-id-ducking-gain` (the row names it). ⚠ The branch name says `sdr`;
 > the scope is **four source types across three files**. §0.5.
 > **Estimate:** **1 day.** §7 says how it splits and what would push it out.
@@ -1187,7 +1187,7 @@ cells; the **Spec / handoff**, **Depends on** and **Branch** cells are unchanged
 
 **Plan cell** (replaces `_plan TBD (**investigate first**; scope depends entirely on the answer)_`):
 
-> [`design/plans/AUD-2-one-key-per-source.md`](../design/plans/AUD-2-one-key-per-source.md)
+> [`design/plans/AUD-2-one-key-per-source.md`](../../../design/design/plans/AUD-2-one-key-per-source.md)
 
 **Item cell** — replace the row's opening framing and its closing anchor paragraph. Keep the body's
 mechanism analysis; it is correct. The three edits:

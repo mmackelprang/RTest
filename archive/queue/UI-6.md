@@ -1,19 +1,19 @@
 # UI-6 — `AudioStateStore` notifies N subscribers and awaits one.
 
-> Queue dossier for row **`UI-6`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`UI-6`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
-| Status | ✅ [#596](https://github.com/mmackelprang/RTest/pull/596) — shipped 2026-09-07, archived in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) |
+| Status | ✅ [#596](https://github.com/mmackelprang/RTest/pull/596) — shipped 2026-09-07, archived in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) |
 | Plan | *plan-in-the-row — the § Detail below was the handoff, which is the option this row offered* |
-| Spec / handoff | [`PHN-1f` plan §6.2](../../design/plans/PHN-1f-the-wait-then-play-queue.md), and § *What the two reviewers found* below |
+| Spec / handoff | [`PHN-1f` plan §6.2](../design/plans/PHN-1f-the-wait-then-play-queue.md), and § *What the two reviewers found* below |
 | Depends on | — |
 | Branch | `fix/audio-state-store-multicast-notify` |
 

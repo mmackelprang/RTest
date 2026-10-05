@@ -423,7 +423,7 @@
   /// <c>internal</c> rather than <c>private</c> so <c>Radio.Web.Tests</c> can substitute a
   /// <c>FakeTimeProvider</c> through the <c>InternalsVisibleTo</c> the csproj already declares for
   /// exactly this purpose — and so the seam is greppable rather than reachable only by reflection.
-  /// See TEST-7 in <c>docs/queue/TEST-7.md</c>.
+  /// See TEST-7 in <c>archive/queue/TEST-7.md</c>.
   /// </para>
   /// </summary>
   internal TimeProvider Clock { get; set; } = TimeProvider.System;

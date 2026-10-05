@@ -1,6 +1,6 @@
 # PLAN — `UI-13` · The cache-advance is real, reproducible, and only host shutdown can reach it
 
-> **Row:** `UI-13`, [`docs/queue/UI-13.md`](../../docs/queue/UI-13.md). 🟡 **P2** as filed.
+> **Row:** `UI-13`, [`docs/queue/UI-13.md`](../../queue/UI-13.md). 🟡 **P2** as filed.
 > **Branch:** `fix/ui-13-cache-advance-before-send` (unchanged — still accurate).
 > **Estimate:** **0.5 d.**
 > **Planned against** `main` at **`15772b58`**. Every line number below was read out of the tree at that commit.
@@ -19,7 +19,7 @@
 
 ### 0.1 ⚠⚠ `C-501` — "MAY THROW" IS FALSE. ONLY CANCELLATION ESCAPES
 
-[`docs/queue/UI-13.md:14-16`](../../docs/queue/UI-13.md) says:
+[`docs/queue/UI-13.md:14-16`](../../queue/UI-13.md) says:
 
 > ```csharp
 > _lastRadioState = dto;          // :477 — cache advanced
@@ -235,7 +235,7 @@ unreachable. They are correctly excluded from this row.
 
 ### 0.6 ⚠⚠ `C-506` — THE ROW'S `TimeProvider` INSTRUCTION IS A CATEGORY ERROR. DO NOT ADD THE SEAM
 
-Both [`docs/queue/UI-13.md:62-64`](../../docs/queue/UI-13.md) and the `BUILDER_QUEUE.md:53` row say
+Both [`docs/queue/UI-13.md:62-64`](../../queue/UI-13.md) and the `BUILDER_QUEUE.md:53` row say
 *"this service is timer-driven … use the injectable `TimeProvider` idiom (`EncoderHudService` is the
 worked example)."*
 
@@ -315,7 +315,7 @@ assertions for evidence of a live defect.
 **The case for closing instead, stated fairly:** the change is unobservable on every reachable path
 today, and this repo's stated pathology is rows filed on premises nobody checked. Spending a Builder
 cycle on a non-defect is a real cost. **If you prefer that, close `UI-13` and append §0.1–§0.3 to
-[`docs/queue/UI-13.md`](../../docs/queue/UI-13.md) as a dated correction** — the falsification is the
+[`docs/queue/UI-13.md`](../../queue/UI-13.md) as a dated correction** — the falsification is the
 valuable part and it survives either decision. I would not argue hard against it.
 
 ⛔ **What must NOT happen is shipping this at 🟡 P2 as filed**, which would tell the next reader that a

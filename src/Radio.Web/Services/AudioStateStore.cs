@@ -362,7 +362,7 @@ public class AudioStateStore : IAsyncDisposable
   /// go looking for a caller that does not exist.
   ///
   /// ⚠ KNOWN LIMITATIONS — three, all accepted rather than overlooked, all filed in
-  /// design/FUTURE-WORK.md §19 and §21.
+  /// docs/known-issues-and-future-work.md §19 and §21.
   ///
   /// 1. A hub connection that drops and reconnects can miss transitions, and nothing re-seeds. This
   ///    is shared with every other cached broadcast in this store. What bounds the damage is that the

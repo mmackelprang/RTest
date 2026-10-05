@@ -532,13 +532,13 @@ BT audio pipeline debugging on physical Pi:
 
 Research arc producing two comparison docs that contrast RTest's Cast and BT audio paths against known-good reference implementations. **No code changes** — explicit non-goal is implementation work. Output is consumed later by a separate plan.
 
-### Cast doc — [`docs/research/2026-05-21-cast-stutter-comparison.md`](../docs/research/2026-05-21-cast-stutter-comparison.md)
+### Cast doc — [`docs/research/2026-05-21-cast-stutter-comparison.md`](../research/2026-05-21-cast-stutter-comparison.md)
 - RTest HttpMp3 + DirectChannel vs SoundCloud (Shaka HLS-MSE) + Plex (HTTP MP3 byte-stream)
 - 8 failure modes × 4 systems matrix; 10 pipeline rows × 4 systems
 - §6 synthesis identified 5 patterns (DC's buffer depth 30× smaller than reference cluster; Web Audio scheduling on JS main thread unique to DC; shared transport for audio + metadata + control unique to DC; push-and-pace pacing model unique to DC; ABR only in SoundCloud)
 - §7 had 8 speculative ideas; retrofitted with full 5-block measurement methodology in commit e3db645
 
-### BT doc — [`docs/research/2026-05-22-bt-audio-stabilization.md`](../docs/research/2026-05-22-bt-audio-stabilization.md)
+### BT doc — [`docs/research/2026-05-22-bt-audio-stabilization.md`](../research/2026-05-22-bt-audio-stabilization.md)
 - RTest vs PW-stock (no RTest layer) + bluez-alsa + AOSP-BT (Bluedroid/Fluoride)
 - 11 failure modes × 4 systems matrix; 11 pipeline rows × 4 systems
 - §6 synthesis identified 6 patterns (RTest alone scrapes `pw-cli`; alone runs PW thread in-process with everything else; alone has codec invisibility; missing silent-quiesce watchdog; frame-alignment guard reveals API-surface mismatch; reference isolation is structural)
@@ -553,7 +553,7 @@ MEMORY documents that audio distortion correlates with SSH activity, journald lo
 - Add 3 system-isolation ideas (CPU affinity + SCHED_FIFO, synchronous-logging audit, gating background SQLite + fingerprint operations on audio-active state) in the cast doc, cross-referenced from the BT doc
 
 ### Roadmap addition
-[`docs/ROADMAP.md`](../docs/ROADMAP.md) — new top-level roadmap, with this research arc as inaugural entry. Established the convention: research arcs do not produce implementation work; a separate plan in `docs/plans/` would scope any chosen ideas with the research's measurement blocks as acceptance criteria.
+[`docs/ROADMAP.md`](../roadmaps/ROADMAP.md) — new top-level roadmap, with this research arc as inaugural entry. Established the convention: research arcs do not produce implementation work; a separate plan in `docs/plans/` would scope any chosen ideas with the research's measurement blocks as acceptance criteria.
 
 **Key files:** `docs/research/2026-05-21-cast-stutter-comparison.md`, `docs/research/2026-05-22-bt-audio-stabilization.md`, `docs/ROADMAP.md`
 

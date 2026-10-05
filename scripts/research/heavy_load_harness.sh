@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # heavy_load_harness.sh — synthesize the "heavy load" scenario for the
 # two-scenario probe protocol defined in
-# docs/plans/2026-05-22-audio-thread-isolation.md Task 8.
+# archive/plans/2026-05-22-audio-thread-isolation.md Task 8.
 #
 # Runs three concurrent load sources for the requested duration and cleanly
 # terminates them all on SIGINT/SIGTERM. The harness deliberately mirrors the

@@ -1222,7 +1222,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   /// <remarks>
   /// <b>AUD-24.</b> This method used to assign <c>_position</c> and return, which moved the readout
   /// and the API's reported position while the audio carried on from where it was — the defect
-  /// <c>design/FUTURE-WORK.md</c> § 14a recorded on 2026-09-02 and the owner observed at the cabinet
+  /// <c>docs/known-issues-and-future-work.md</c> § 14a recorded on 2026-09-02 and the owner observed at the cabinet
   /// on 2026-09-09. Two rules hold it closed:
   /// <list type="number">
   ///   <item>the engine is asked to reposition, through the same registration this class already
@@ -1233,7 +1233,7 @@ public class FilePlayerAudioSource : PrimaryAudioSourceBase, IPlayQueue
   ///     defect in a smaller shape.</item>
   /// </list>
   /// Leaving the anchor where it was makes the scrubber snap back on the panel's next state read,
-  /// which <c>design/DECISION-LOG.md</c> (ADR-029 amendments, Decision 2) names as the correct
+  /// which <c>docs/decisions/DECISION-LOG.md</c> (ADR-029 amendments, Decision 2) names as the correct
   /// user-visible answer to a refused seek. ⚠ That entry reaches the same conclusion by a mechanism
   /// this class does NOT have — it says <c>Position</c> "reads through to the player", which is true
   /// of <c>AudioFileEventSource</c> and not of this one, whose <c>Position</c> is still the

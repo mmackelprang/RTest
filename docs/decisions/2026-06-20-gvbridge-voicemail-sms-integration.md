@@ -1,6 +1,6 @@
 # ADR: Google Voice Voicemail + SMS Integration on RadioConsole (gvbridge consumer)
 
-- **ID:** ADR-022 (see `design/DECISION-LOG.md` for the one-line pointer)
+- **ID:** ADR-022 (see `docs/decisions/DECISION-LOG.md` for the one-line pointer)
 - **Status:** Proposed (Architect — ready for Designer + Planner)
 - **⚠ Partially superseded by [ADR-024](2026-06-20-gv-mark-read-durable-readstate.md) (2026-06-20):** read-state is now **durable via GV write-through**, not UI-local. ADR-024 supersedes this ADR's **read-state stance** — specifically the `// UI-LOCAL only — GV mark-read not in v1` note on `VoicemailItemDto.IsRead` (§4.2), the **§10 "Voicemail mark-read / delete — UI-local state only"** stub, and the **§12 open question #3**. **Note:** the "D4" in the §2 summary table is the *voicemail-audio-URL* decision and is **unaffected** — it still stands. Everything else in ADR-022 (boundary, audio URL, hub, status poll, send flag, config, auth seam) is unchanged. Read ADR-024 for the mark-read routes/event/de-dupe.
 - **Date:** 2026-06-20

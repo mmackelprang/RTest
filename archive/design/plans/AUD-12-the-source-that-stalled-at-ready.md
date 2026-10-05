@@ -1,6 +1,6 @@
 # PLAN — `AUD-12` · The Bluetooth source that stalled at `Ready` while the audio kept playing
 
-> **Row:** `AUD-12`, [`docs/queue/AUD-12.md`](../../docs/queue/AUD-12.md). 🟠 **P1.** Observed live on
+> **Row:** `AUD-12`, [`docs/queue/AUD-12.md`](../../queue/AUD-12.md). 🟠 **P1.** Observed live on
 > `radio` 2026-09-06; ranked first of the three BT rows filed that day.
 > **Branch:** `fix/aud-12-bt-source-stalled-at-ready`
 > **Estimate:** **0.5 d.** §0.6 says why half a day survives, and what would push it to one.
@@ -1587,7 +1587,7 @@ Replace the existing `AUD-12` line with this one. It keeps the row's shape, stat
 empty-dependency cell; only the **Plan** and **Branch** cells change substantively.
 
 ```
-| AUD-12 | ⭐ **NEW 2026-09-06, observed live — the BT source stalls at `Ready` while audio is playing, so fingerprinting is gated off and album art never resolves.** ✅ **INVESTIGATION CLOSED 2026-09-06: sibling path, NOT a recurrence of #469** — `git log -L` puts the handler's last edit five months before that PR. — [detail](queue/AUD-12.md) | 📋 | [`AUD-12-the-source-that-stalled-at-ready.md`](../design/plans/AUD-12-the-source-that-stalled-at-ready.md) · **0.5 d** · ✅ **PLAN REPAIRED 2026-09-08 after `TEST-2` (#614) — re-anchored to `c9ebd824`, `C-177` re-pointed, Task 4 DELETED; the collision note on the dossier is DISCHARGED** · **both predicates** (the `Ready` catch-up **and** the guarded `Stopped` arm) · ⚠ **the investigation is DONE — do not re-run it** · ⛔ **NOT auto-mergeable: user-facing audio behaviour and UAT is BLOCKED on the owner's phone; §5 is written and deferred** | _no spec doc — measured on `radio` 2026-09-06; log evidence in the dossier_ · #469 (`9bfb7cbe`) is the adjacent merged fix and is **not** the cause | — _(no row dependency; claimable now. **⚠ FOUR conditions can make this row's UAT vacuous — the plan's §5 opens with the table: `AUD-10` (`C-178`, a reconnect makes a BROKEN build pass), `AUD-18` (`C-182`, a dead fingerprint tap makes a CORRECT build fail — run the pre-UAT check), `AUD-1` (`C-183`, album art is not a clean criterion), and pressing the transport button (`C-181`, it CLEARS the stall).** Touches **`BluetoothAudioSource.cs` only** — `TEST-2` has now merged, and `AUD-1` also claims that file but at disjoint regions (`:840`, `:870-894`, `:896-908` vs. this row's `:41`, `:184-194`, `:435-463`, `:1126-1154`). **Prefer `AUD-12` first**: `AUD-1`'s own plan says so, because this row is what makes `AUD-1`'s UAT possible at all.)_ | `fix/aud-12-bt-source-stalled-at-ready` |
+| AUD-12 | ⭐ **NEW 2026-09-06, observed live — the BT source stalls at `Ready` while audio is playing, so fingerprinting is gated off and album art never resolves.** ✅ **INVESTIGATION CLOSED 2026-09-06: sibling path, NOT a recurrence of #469** — `git log -L` puts the handler's last edit five months before that PR. — [detail](../../../design/plans/queue/AUD-12.md) | 📋 | [`AUD-12-the-source-that-stalled-at-ready.md`](../../../design/design/plans/AUD-12-the-source-that-stalled-at-ready.md) · **0.5 d** · ✅ **PLAN REPAIRED 2026-09-08 after `TEST-2` (#614) — re-anchored to `c9ebd824`, `C-177` re-pointed, Task 4 DELETED; the collision note on the dossier is DISCHARGED** · **both predicates** (the `Ready` catch-up **and** the guarded `Stopped` arm) · ⚠ **the investigation is DONE — do not re-run it** · ⛔ **NOT auto-mergeable: user-facing audio behaviour and UAT is BLOCKED on the owner's phone; §5 is written and deferred** | _no spec doc — measured on `radio` 2026-09-06; log evidence in the dossier_ · #469 (`9bfb7cbe`) is the adjacent merged fix and is **not** the cause | — _(no row dependency; claimable now. **⚠ FOUR conditions can make this row's UAT vacuous — the plan's §5 opens with the table: `AUD-10` (`C-178`, a reconnect makes a BROKEN build pass), `AUD-18` (`C-182`, a dead fingerprint tap makes a CORRECT build fail — run the pre-UAT check), `AUD-1` (`C-183`, album art is not a clean criterion), and pressing the transport button (`C-181`, it CLEARS the stall).** Touches **`BluetoothAudioSource.cs` only** — `TEST-2` has now merged, and `AUD-1` also claims that file but at disjoint regions (`:840`, `:870-894`, `:896-908` vs. this row's `:41`, `:184-194`, `:435-463`, `:1126-1154`). **Prefer `AUD-12` first**: `AUD-1`'s own plan says so, because this row is what makes `AUD-1`'s UAT possible at all.)_ | `fix/aud-12-bt-source-stalled-at-ready` |
 ```
 
 ⚠ **`MockBluetoothService.cs` is deliberately gone from that cell.** The pre-repair row said *"Also
@@ -1597,7 +1597,7 @@ touches exactly one production file.
 ### 9.2 Banner line for the file's `Last updated`
 
 > **Last updated:** 2026-09-08 (Planner) — `AUD-12`'s plan
-> ([`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](../design/plans/AUD-12-the-source-that-stalled-at-ready.md), **0.5 d**)
+> ([`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](../../../design/design/plans/AUD-12-the-source-that-stalled-at-ready.md), **0.5 d**)
 > was **repaired after `TEST-2` (#614)**: re-anchored to `main` at `c9ebd824`, `C-177` re-pointed at
 > the tests that replaced the deleted one, and Task 4 dropped — `TEST-2` refuted the premise it rested
 > on, so the row no longer touches `MockBluetoothService.cs`. Its investigation remains closed:
@@ -1611,7 +1611,7 @@ questions the dossier itself asked:
 
 > ## Plan
 >
-> [`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](../../design/plans/AUD-12-the-source-that-stalled-at-ready.md),
+> [`design/plans/AUD-12-the-source-that-stalled-at-ready.md`](AUD-12-the-source-that-stalled-at-ready.md),
 > written 2026-09-06 against `main` at `066a0d5c`, **repaired 2026-09-08 against `c9ebd824`**.
 > **0.5 d** (unchanged). ⛔ **Not auto-mergeable.**
 >

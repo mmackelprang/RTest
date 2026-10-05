@@ -203,7 +203,7 @@ function Get-KioskLiveness([int]$Polls = 10) {
 # is still REQUIRED, not cosmetic: without it Chrome asks gnome-keyring for the login keyring, which
 # GDM auto-login never unlocks, and gnome-shell raises a modal "Authentication required" prompt that
 # grabs input and sits on top of the kiosk. On 2026-08-02 that blocked the panel for ~33 hours and
-# Chrome never even reached navigation. See docs/uat/2026-08-03-osk-wayland-viability/.
+# Chrome never even reached navigation. See archive/uat/2026-08-03-osk-wayland-viability/.
 function Invoke-KioskRelaunch {
   Write-Host "  Relaunching kiosk browser..." -ForegroundColor DarkGray
   ssh $SshTarget "if [ -x /usr/local/bin/radio-kiosk-launch ]; then /usr/local/bin/radio-kiosk-launch; else echo 'WARNING: /usr/local/bin/radio-kiosk-launch is missing - run deploy/debian-x64/kiosk/setup-kiosk.sh on this box'; fi"
@@ -440,7 +440,7 @@ Write-Host "[3/4] Syncing files..." -ForegroundColor Yellow
 # chained with `;`, so that command's exit code is `rm -rf`'s no matter how the moves
 # went. A move that relocated nothing still reports 0. Narrowing that needs the fallback
 # driven against a real target, which OPS-9 did not do; it is recorded as
-# design/FUTURE-WORK.md section 27 rather than guessed at here.
+# docs/known-issues-and-future-work.md section 27 rather than guessed at here.
 Write-Host "  Syncing API..." -ForegroundColor DarkGray
 if ($useRsync) {
   rsync -avz --delete "${ApiPublishDir}/" "${SshTarget}:/tmp/radio-deploy-api/"

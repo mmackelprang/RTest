@@ -2,7 +2,7 @@
 
 **Status:** `[PLAN — 2026-09-04]` · **Row:** `PHN-1e` · **Arc:** ADR-029, PR 5 of seven
 **Written against:** `main` at **`a8656c71`** (`PHN-1d`, #558), clean.
-**Source of truth:** [`design/decisions/2026-08-03-gv-audio-through-engine.md`](../decisions/2026-08-03-gv-audio-through-engine.md)
+**Source of truth:** [`design/decisions/2026-08-03-gv-audio-through-engine.md`](../../../docs/decisions/2026-08-03-gv-audio-through-engine.md)
 (ADR-029) **D6**, **D7**, §6.2, §8.1, §8.2, §14 Q8 · owner decision **`D28`** (punch list §7).
 **Predecessors:** [`PHN-1c`](PHN-1c-event-playback-service-and-route.md) §5 · [`PHN-1d`](PHN-1d-ducking-priority-load-bearing.md) §0.4 **C-46**, §5.
 **Contradiction numbering continues from `PHN-1d`'s C-46: this plan opens at C-47.**
@@ -2467,7 +2467,7 @@ so the raising thread holding the gate is one refactor away, and this is the sam
 ## 6. Proposed `BUILDER_QUEUE` rows
 
 ✅ **FILED 2026-09-04 — and the copies that were here are deleted, with this pointer left in their
-place.** Both rows are now in [`docs/BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md) § *Queue*, and both
+place.** Both rows are now in [`docs/BUILDER_QUEUE.md`](../../../docs/BUILDER_QUEUE.md) § *Queue*, and both
 ordering notes are in that file's § *Dependency / ordering notes*. **`PHN-1e` is 📋 claimable; `PHN-1f`
 is 🔒 and has no plan** — this document's §5 is its design input, not its plan.
 

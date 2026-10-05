@@ -1714,8 +1714,8 @@ row's own text sets the flip condition — *"Flip 🔒 → 📋 only when a plan
 links it"* — and it now does.
 
 - **Status:** `🔒` → `📋`
-- **Plan:** `*to be written — design is [PHN-1e plan §5](…)*` →
-  `` [`design/plans/PHN-1f-the-wait-then-play-queue.md`](../design/plans/PHN-1f-the-wait-then-play-queue.md) ``
+- **Plan:** `*to be written — design is [PHN-1e plan §5](../../../design/plans/…)*` →
+  `` [`design/plans/PHN-1f-the-wait-then-play-queue.md`](../../../design/design/plans/PHN-1f-the-wait-then-play-queue.md) ``
 - **Depends on:** `PHN-1e` → `✅ **MET — PHN-1e merged 2026-09-04** as [#561](https://github.com/mmackelprang/RTest/pull/561), merge commit `4ec0fb85`. **This row is CLAIMABLE NOW.**`
 - **Append to Item**, because these change the work and are not in the row today:
 
@@ -1752,7 +1752,7 @@ uses `OPS-`, `LOG-`, `AUD-`.)*
   await each, catch per subscriber; apply the same shape to the two hand-rolled sites. **Est. 0.5 d.**
 - **Status:** `📋`
 - **Plan:** *to be written — small enough for a plan-in-the-row if the owner prefers*
-- **Spec / handoff:** [`BUILDER_QUEUE_ARCHIVE.md`](../../docs/BUILDER_QUEUE_ARCHIVE.md) § *What the two reviewers found*
+- **Spec / handoff:** [`BUILDER_QUEUE_ARCHIVE.md`](../../queue/BUILDER_QUEUE_ARCHIVE.md) § *What the two reviewers found*
 - **Depends on:** `—`
 - **Branch:** `fix/audio-state-store-multicast-notify`
 

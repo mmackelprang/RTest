@@ -1,6 +1,6 @@
 # `AUD-34` — a stale identification that crosses a source switch or BT reconnect is still applied
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-26 from `AUD-33`'s adversarial review (finding M2). Pre-dates AUD-33.
 
@@ -54,4 +54,4 @@ result dropped.
 
 Reported by the coordinator on 2026-10-04: `AUD-34` (a stale identification across a source switch) passes owner UAT. 
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

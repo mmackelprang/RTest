@@ -9,7 +9,7 @@
 > left.
 > **Planned against** `main` at **`6c220461`**; ⭐ **REPAIRED against `main` at `656f58e6`** after
 > `PHN-4` merged — read §0.0 before anything else.
-> **Design input:** [`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`](../../docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md)
+> **Design input:** [`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`](../../design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md)
 > §B (`:297-430`) and §Cross-1…5 (`:79-181`). **Relationship: `follows`, with three recorded
 > deviations and one section of the handoff that is factually stale** — §0.3.
 
@@ -1541,7 +1541,7 @@ The row is `PHN-3` in § Queue. Three cells carry claims `PHN-4` falsified.
 > sequencing instruction that used to sit here is **retired** — no other row is queued against
 > `PhoneTextsPanel.razor`, and this row can be claimed whenever it reaches the front. ⚠ **The file
 > is now 258 lines, not 442, and `PHN-4` moved essentially every line in it.** The plan was repaired
-> against `656f58e6` — **read [§0.0](../design/plans/PHN-3-the-sms-speak-button.md) before editing
+> against `656f58e6` — **read [§0.0](../../../design/design/plans/PHN-3-the-sms-speak-button.md) before editing
 > that file**, because three of the plan's original edits referenced members `PHN-4` deleted
 > (`StatusFor`, `RetrySend`, and a zero-arg `ResolveThreadName`) and would not have compiled.
 

@@ -17,7 +17,7 @@
 >
 > Recorded in three places on purpose:
 > [`HANDOFF-rotary-encoder-mapping.md`](HANDOFF-rotary-encoder-mapping.md) Rev 3 (its header and
-> §4.4 Knob 3), [`docs/HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §6's
+> §4.4 Knob 3), [`docs/HANDOFF-GA-PUNCH-LIST.md`](../handoffs/HANDOFF-GA-PUNCH-LIST.md) §6's
 > "deliberately parked" table, and here.
 >
 > **Do not "fix" this on a later consistency pass.** Everything else in this document — field

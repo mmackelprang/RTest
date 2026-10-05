@@ -220,7 +220,7 @@ public class GvBridgeApiService
   /// empty result. Do NOT special-case it and do NOT change the escaping below:
   /// double-escaping (%252F) still yields 0 messages, and a raw '/' misses their API
   /// route entirely and falls through to their SPA fallback, returning index.html with
-  /// HTTP 200. Both were tested. See docs/uat/2026-07-31-gv-live-data/F-1-DIAGNOSIS.md.
+  /// HTTP 200. Both were tested. See archive/uat/2026-07-31-gv-live-data/F-1-DIAGNOSIS.md.
   /// </para>
   /// </summary>
   public async Task<GvResult<SmsThreadMessagesDto>> GetSmsThreadMessagesAsync(

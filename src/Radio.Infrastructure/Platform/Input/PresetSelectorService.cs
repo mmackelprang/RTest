@@ -37,7 +37,7 @@ namespace Radio.Infrastructure.Platform.Input;
 /// <c>FingerprintDbContext</c>, which is registered <b>singleton</b> and hands every caller the same
 /// <c>SqliteConnection</c>, so a fresh repository from a fresh scope still works over the same
 /// connection the API's request-scoped consumers use. No isolation is claimed or obtained here; the
-/// hazard that leaves is recorded in <c>design/FUTURE-WORK.md</c>.
+/// hazard that leaves is recorded in <c>docs/known-issues-and-future-work.md</c>.
 /// </para>
 ///
 /// <para>
@@ -562,7 +562,7 @@ public sealed class PresetSelectorService : IDisposable
       // ⚠ This matches on a message string because that is the contract RadioPresetService offers
       // today — it signals "full" and "duplicate" through InvalidOperationException text and nothing
       // else. RadioController.cs already matches the same two strings. It is debt, recorded in
-      // design/FUTURE-WORK.md as a typed-exception candidate, and not a pattern to copy.
+      // docs/known-issues-and-future-work.md as a typed-exception candidate, and not a pattern to copy.
       PublishNotice(
         "PRESETS FULL", "replace a slot on screen", EncoderInteractionTimings.SelectorNoticeMs);
     }

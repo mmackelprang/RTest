@@ -204,7 +204,7 @@ firmware has not changed it.
   which decodes them with the shipped `RotaryEncoderDecoder`.
 
 One artifact, two readers: if the harness's byte layout drifts from the decoder's, one of them
-fails. That matters here specifically — `design/INTEGRATIONS.md` documented a **wrong 8-byte**
+fails. That matters here specifically — `docs/integrations.md` documented a **wrong 8-byte**
 encoder report format for months and nothing mechanical caught it.
 
 ---

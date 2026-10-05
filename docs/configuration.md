@@ -78,7 +78,7 @@ The Radio Console application uses a **consolidated configuration approach** whe
 - **Easier Maintenance**: Configuration changes are made in a single, well-organized file
 - **Environment Overrides**: Standard ASP.NET Core configuration layering allows for `appsettings.Development.json`, `appsettings.Production.json`, and environment variables to override settings as needed
 
-**Reference Example:** See `design/appsettings.example.json` for a complete template with all available configuration options.
+**Reference Example:** See `docs/appsettings.example.json` for a complete template with all available configuration options.
 
 ---
 
@@ -1257,7 +1257,7 @@ The `RadioPresets` table includes the following fields:
 - `POST /api/radio/presets`: Create a new preset
 - `DELETE /api/radio/presets/{id}`: Delete a preset by ID
 
-See [API Reference](design/API_REFERENCE.md) for detailed API documentation.
+See [API Reference](api.md) for detailed API documentation.
 
 ---
 

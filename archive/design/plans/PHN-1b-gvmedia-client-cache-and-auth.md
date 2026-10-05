@@ -1,8 +1,8 @@
 # PLAN — `PHN-1b` · ADR-029 PR 2: `GvMediaClient`, the bounded cache, and API-side auth
 
 > **Status:** ready for Builder. Written 2026-09-02 against `c830fb8`.
-> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../docs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
-> **Decision of record:** [ADR-029](../decisions/2026-08-03-gv-audio-through-engine.md) — D3, D8.
+> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
+> **Decision of record:** [ADR-029](../../../docs/decisions/2026-08-03-gv-audio-through-engine.md) — D3, D8.
 > **Sequencing:** [`design/plans/PHN-arc-pr-breakdown.md`](PHN-arc-pr-breakdown.md) — **this plan is PR 2 of 7.**
 > **Depends on:** `PHN-1a` ✅ ([#528](https://github.com/mmackelprang/RTest/pull/528)), merged. Nothing else.
 > **Predecessor plan:** [`PHN-1a`](PHN-1a-event-playback-seam-contracts.md) — **its §0.4 contradiction list and
@@ -2357,7 +2357,7 @@ from `IOptionsMonitor<GvMediaOptions>`, do not add a second key.
 
 - Remove `VoicemailPlayer.razor:8`'s `<audio>` element **and**
   `GvBridgeApiService.GetVoicemailAudioUrl` together (§4 item 3).
-- **Withdraw the cross-repo ask** in [`CROSS-REPO-HANDOFFS.md`](../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same
+- **Withdraw the cross-repo ask** in [`CROSS-REPO-HANDOFFS.md`](../../../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #3 in the same
   PR (§4 item 4). ADR §10.1 makes it a deliverable; PR 6 is the first moment it is true.
 - Carry PR 1's three device-only checks into the UAT: seek actually repositions; `Time` actually
   advances; pausing a TTS source does not report completion. Add PR 2's two: the gvbridge route's

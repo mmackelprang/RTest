@@ -4,7 +4,7 @@
 > supplied an art URL. It read MPRIS names that `org.bluez.MediaPlayer1` does not publish, and that
 > read has now been removed. `CacheAvrcpArtAsync` is now `CacheSourceSuppliedArtAsync`, and its log
 > lines say "source-supplied" rather than "AVRCP". The `journalctl` grep recipes below match nothing
-> on a current build. See [`docs/queue/AUD-17.md`](../../docs/queue/AUD-17.md).
+> on a current build. See [`docs/queue/AUD-17.md`](../../queue/AUD-17.md).
 
 > **For Claude:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` to implement this plan task-by-task.
 
@@ -24,7 +24,7 @@ Two independent failure paths, confirmed by parallel debug investigation (file:l
 
 ### Bug A — AVRCP fast path bypasses the album-art cache (HIGH confidence)
 
-[`BluetoothAudioSource.OnMetadataChanged` at lines 736–743](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
+[`BluetoothAudioSource.OnMetadataChanged` at lines 736–743](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
 
 ```csharp
 // Propagate album art URL from AVRCP if available.
@@ -34,13 +34,13 @@ if (!string.IsNullOrEmpty(e.AlbumArtUrl))
 }
 ```
 
-`e.AlbumArtUrl` originates from BlueZ MPRIS `Track.ArtUrl` ([LinuxBluetoothService.cs:2611](../../src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs)), which is typically a `file:///data/data/com.android.<player>/cache/art.jpg` URI pointing into the **phone's** local filesystem. The URL is stored raw in the metadata bag and broadcast verbatim through SignalR to the browser. The browser cannot fetch `file://` URLs over the network — `img.onerror` fires and the UI swaps to the default-art icon.
+`e.AlbumArtUrl` originates from BlueZ MPRIS `Track.ArtUrl` ([LinuxBluetoothService.cs:2611](../../../src/Radio.Infrastructure/Platform/Bluetooth/LinuxBluetoothService.cs)), which is typically a `file:///data/data/com.android.<player>/cache/art.jpg` URI pointing into the **phone's** local filesystem. The URL is stored raw in the metadata bag and broadcast verbatim through SignalR to the browser. The browser cannot fetch `file://` URLs over the network — `img.onerror` fires and the UI swaps to the default-art icon.
 
-The MusicBrainz path ([:925–936](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and the SongRec / fingerprint path ([:803](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) both correctly route through `_albumArtCache.SaveFromUrlAsync` — which downloads the bytes, content-addresses them on disk, and returns the relative `/api/albumart/{hash}.{ext}` URL the browser can fetch. The AVRCP fast path is the only divergent code.
+The MusicBrainz path ([:925–936](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and the SongRec / fingerprint path ([:803](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) both correctly route through `_albumArtCache.SaveFromUrlAsync` — which downloads the bytes, content-addresses them on disk, and returns the relative `/api/albumart/{hash}.{ext}` URL the browser can fetch. The AVRCP fast path is the only divergent code.
 
 ### Bug B — MusicBrainz fallback path is the deprecated approach (MEDIUM confidence)
 
-[`BluetoothAudioSource.OnMetadataChanged` at lines 760–769](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
+[`BluetoothAudioSource.OnMetadataChanged` at lines 760–769](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
 
 ```csharp
 else if (string.IsNullOrEmpty(e.AlbumArtUrl) && _serviceScopeFactory != null)
@@ -55,12 +55,12 @@ else if (string.IsNullOrEmpty(e.AlbumArtUrl) && _serviceScopeFactory != null)
 }
 ```
 
-`LookupCoverArtAsync` ([:841–880](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) calls `IMetadataLookupService.SearchCoverArtByTextAsync` ([IMetadataLookupService.cs:19–21](../../src/Radio.Core/Interfaces/Audio/IMetadataLookupService.cs)) — the MusicBrainz Cover Art Archive text search. Per user policy, **MusicBrainz has been effectively deprecated in this project and replaced with SongRec**. The remaining MB-path failure modes (empty `ContactEmail` blocking the User-Agent, sticky `_failedArtLookups` cache without TTL, title-only retry that loses album disambiguation) are documented elsewhere but become moot once the path is removed.
+`LookupCoverArtAsync` ([:841–880](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) calls `IMetadataLookupService.SearchCoverArtByTextAsync` ([IMetadataLookupService.cs:19–21](../../../src/Radio.Core/Interfaces/Audio/IMetadataLookupService.cs)) — the MusicBrainz Cover Art Archive text search. Per user policy, **MusicBrainz has been effectively deprecated in this project and replaced with SongRec**. The remaining MB-path failure modes (empty `ContactEmail` blocking the User-Agent, sticky `_failedArtLookups` cache without TTL, title-only retry that loses album disambiguation) are documented elsewhere but become moot once the path is removed.
 
 The replacement strategy for the "AVRCP has no art" case is:
 
 1. **AVRCP fast path** (with Bug A fixed — cache the URL through `_albumArtCache.SaveFromUrlAsync`).
-2. **SongRec identification** via `SoundFlowAudioTap` → `BackgroundIdentificationService.TrackIdentified` → `OnTrackIdentified` ([BluetoothAudioSource.cs:801–803, 818–826](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) — already wired, already routes through `CacheAndSetCoverArtAsync`.
+2. **SongRec identification** via `SoundFlowAudioTap` → `BackgroundIdentificationService.TrackIdentified` → `OnTrackIdentified` ([BluetoothAudioSource.cs:801–803, 818–826](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) — already wired, already routes through `CacheAndSetCoverArtAsync`.
 3. **If neither produces art: "no album art" is the accepted UX.** Per user, explicitly confirmed.
 
 ---
@@ -69,7 +69,7 @@ The replacement strategy for the "AVRCP has no art" case is:
 
 ### Decision 1: Cache the AVRCP URL even if it's `file://` (let `SaveFromUrlAsync` fail)
 
-`AlbumArtCacheService.SaveFromUrlAsync` ([AlbumArtCacheService.cs:109–137](../../src/Radio.Infrastructure/Audio/AlbumArtCacheService.cs)) uses `HttpClient.GetAsync(url)`. For a `file://` URL this throws `NotSupportedException` (no `file://` handler on `HttpClient`), which the existing `catch` block swallows and returns `null`. We propagate that: when `SaveFromUrlAsync` returns `null`, we **remove** `StandardMetadataKeys.AlbumArtUrl` from the metadata bag (do NOT store the raw `file://` URL). The UI then falls back gracefully and SongRec, if it identifies the track, will later populate the art via `OnTrackIdentified`.
+`AlbumArtCacheService.SaveFromUrlAsync` ([AlbumArtCacheService.cs:109–137](../../../src/Radio.Infrastructure/Audio/AlbumArtCacheService.cs)) uses `HttpClient.GetAsync(url)`. For a `file://` URL this throws `NotSupportedException` (no `file://` handler on `HttpClient`), which the existing `catch` block swallows and returns `null`. We propagate that: when `SaveFromUrlAsync` returns `null`, we **remove** `StandardMetadataKeys.AlbumArtUrl` from the metadata bag (do NOT store the raw `file://` URL). The UI then falls back gracefully and SongRec, if it identifies the track, will later populate the art via `OnTrackIdentified`.
 
 Rationale for routing `file://` through the cache rather than filtering it out earlier: future-proofing. Some BlueZ MPRIS players (and the iOS BT stack on some firmwares) embed art as `http://localhost:<port>/...` or embedded `data:` URIs; the cache already handles those correctly. A scheme-based filter would have to enumerate every supported scheme. Letting the cache decide via its existing HTTP-fetch behavior is simpler and self-contained.
 
@@ -79,21 +79,21 @@ The user authorized in-place MB cleanup "if trivial". The MB removal in `Bluetoo
 
 - Delete the `else if (string.IsNullOrEmpty(e.AlbumArtUrl) && _serviceScopeFactory != null)` branch in `OnMetadataChanged` (lines 760–769).
 - Delete the `else if (!string.IsNullOrEmpty(e.Track.MusicBrainzReleaseId))` branch in `OnTrackIdentified` (lines 823–827) and the `else if (!string.IsNullOrEmpty(e.Track.Title) && !string.IsNullOrEmpty(e.Track.Artist))` text-search retry branch (lines 828–836). What remains in `OnTrackIdentified` is the `CacheAndSetCoverArtAsync` call for the SongRec `e.Track.CoverArtUrl` (the only path we want to keep).
-- Delete the now-orphaned helper methods `LookupCoverArtAsync` ([:841–880](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and `LookupCoverArtByReleaseIdAsync` ([:894–923](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
-- Delete the now-dead state fields `_failedArtLookups` ([:36](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and `_lastCoverArtLookupKey` ([:38](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), and the two reset sites that touch them ([:663, :747](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
+- Delete the now-orphaned helper methods `LookupCoverArtAsync` ([:841–880](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and `LookupCoverArtByReleaseIdAsync` ([:894–923](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
+- Delete the now-dead state fields `_failedArtLookups` ([:36](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and `_lastCoverArtLookupKey` ([:38](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), and the two reset sites that touch them ([:663, :747](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
 
 **What stays:**
 
-- `CacheAndSetCoverArtAsync` and `CacheAndSetCoverArtUrlAsync` ([:882–941](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) — these are the SongRec path's cache plumbing, also used by the new AVRCP cache call.
-- `UpdateRecentPlayHistoryCoverArtAsync` ([:947–989](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) — back-fills the play history row with the resolved art URL; still needed for both the AVRCP and SongRec paths.
+- `CacheAndSetCoverArtAsync` and `CacheAndSetCoverArtUrlAsync` ([:882–941](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) — these are the SongRec path's cache plumbing, also used by the new AVRCP cache call.
+- `UpdateRecentPlayHistoryCoverArtAsync` ([:947–989](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) — back-fills the play history row with the resolved art URL; still needed for both the AVRCP and SongRec paths.
 
 **What's out of scope for THIS PR:**
 
-- `IMetadataLookupService` interface itself + `MetadataLookupService` implementation in `Radio.Fingerprinting`. Still used by DI registration ([FingerprintingServiceExtensions.cs](../../src/Radio.Infrastructure/DependencyInjection/FingerprintingServiceExtensions.cs)) and potentially by other sources we have not audited in scope. Deleting the interface is a wider blast-radius cleanup that deserves its own PR.
+- `IMetadataLookupService` interface itself + `MetadataLookupService` implementation in `Radio.Fingerprinting`. Still used by DI registration ([FingerprintingServiceExtensions.cs](../../../src/Radio.Infrastructure/DependencyInjection/FingerprintingServiceExtensions.cs)) and potentially by other sources we have not audited in scope. Deleting the interface is a wider blast-radius cleanup that deserves its own PR.
 
 ### Decision 3: Verify SongRec wiring is intact (read-only audit; no code change expected)
 
-The Coordinator's H-A investigation confirmed that `_identificationService.TrackIdentified += OnTrackIdentified` is wired in the constructor ([:94](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), `NeedsFingerprintingLookup` is set when AVRCP metadata is incomplete ([:753–754](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), `RequestImmediateIdentification` is invoked ([:758](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), and `OnTrackIdentified` routes through `CacheAndSetCoverArtAsync` for `e.Track.CoverArtUrl` ([:801–803](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). Task 4 is a read-only audit + manual UAT verification; only if a wiring gap is found does it become a code change (in which case Builder pauses for Planner re-scoping).
+The Coordinator's H-A investigation confirmed that `_identificationService.TrackIdentified += OnTrackIdentified` is wired in the constructor ([:94](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), `NeedsFingerprintingLookup` is set when AVRCP metadata is incomplete ([:753–754](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), `RequestImmediateIdentification` is invoked ([:758](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)), and `OnTrackIdentified` routes through `CacheAndSetCoverArtAsync` for `e.Track.CoverArtUrl` ([:801–803](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). Task 4 is a read-only audit + manual UAT verification; only if a wiring gap is found does it become a code change (in which case Builder pauses for Planner re-scoping).
 
 ---
 
@@ -124,7 +124,7 @@ No commit on this task — branch creation only.
 **Files:**
 - Modify: `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs`
 
-**Step 1:** Replace the AVRCP fast path in `OnMetadataChanged` ([lines 736–748](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
+**Step 1:** Replace the AVRCP fast path in `OnMetadataChanged` ([lines 736–748](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
 
 **Before:**
 ```csharp
@@ -164,7 +164,7 @@ if (!string.IsNullOrEmpty(e.AlbumArtUrl) && _albumArtCache != null && _serviceSc
 }
 ```
 
-**Step 2:** Add a small helper next to `CacheAndSetCoverArtAsync` ([lines 882–892](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). It's a focused wrapper around `CacheAndSetCoverArtUrlAsync` that logs the AVRCP-specific context and tolerates failure (cache returns null):
+**Step 2:** Add a small helper next to `CacheAndSetCoverArtAsync` ([lines 882–892](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). It's a focused wrapper around `CacheAndSetCoverArtUrlAsync` that logs the AVRCP-specific context and tolerates failure (cache returns null):
 
 ```csharp
 /// <summary>
@@ -238,7 +238,7 @@ EOF
 **Files:**
 - Modify: `src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs`
 
-**Step 1:** Delete the MB text-search fallback branch in `OnMetadataChanged` ([lines 755–769](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
+**Step 1:** Delete the MB text-search fallback branch in `OnMetadataChanged` ([lines 755–769](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
 
 **Before** (the `if (NeedsFingerprintingLookup) ... else if (... MB fallback ...)` block):
 ```csharp
@@ -270,7 +270,7 @@ if (NeedsFingerprintingLookup)
 }
 ```
 
-**Step 2:** Delete the MB branches in `OnTrackIdentified` ([lines 823–837](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
+**Step 2:** Delete the MB branches in `OnTrackIdentified` ([lines 823–837](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)).
 
 **Before** (the three-branch `if/else if/else if` for art resolution after fingerprinting):
 ```csharp
@@ -312,13 +312,13 @@ if (!hasArt && !string.IsNullOrEmpty(e.Track.CoverArtUrl) && _serviceScopeFactor
 }
 ```
 
-**Step 3:** Delete the now-orphaned helper methods `LookupCoverArtAsync` ([lines 841–880](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and `LookupCoverArtByReleaseIdAsync` ([lines 894–923](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). Confirm with grep that nothing else in `BluetoothAudioSource.cs` references either name — both are private, so grep within the file is sufficient.
+**Step 3:** Delete the now-orphaned helper methods `LookupCoverArtAsync` ([lines 841–880](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)) and `LookupCoverArtByReleaseIdAsync` ([lines 894–923](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). Confirm with grep that nothing else in `BluetoothAudioSource.cs` references either name — both are private, so grep within the file is sufficient.
 
 **Step 4:** Delete the now-dead state fields and the two reset sites that touch them.
 
-- Field `_failedArtLookups` at [line 36](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs): `private readonly HashSet<string> _failedArtLookups = new();`
-- Field `_lastCoverArtLookupKey` at [line 38](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs): `private string? _lastCoverArtLookupKey;`
-- Reset in `OnDeviceDisconnected` at [line 663](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs): `_lastCoverArtLookupKey = null;`
+- Field `_failedArtLookups` at [line 36](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs): `private readonly HashSet<string> _failedArtLookups = new();`
+- Field `_lastCoverArtLookupKey` at [line 38](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs): `private string? _lastCoverArtLookupKey;`
+- Reset in `OnDeviceDisconnected` at [line 663](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs): `_lastCoverArtLookupKey = null;`
 - Reset in `OnMetadataChanged` (already removed in Task 2 along with the surrounding `else` block — verify no stragglers).
 
 **Step 5:** Audit `using` directives at the top of the file. The MB removal does NOT eliminate the `using Microsoft.Extensions.DependencyInjection;` directive (still needed for `IServiceScopeFactory` and `CreateScope`), but verify there are no now-unused namespace imports.
@@ -361,7 +361,7 @@ EOF
 
 **Files:** none changed — this task is a read-only audit checklist. If a gap is found, Builder pauses and reports back to Planner.
 
-**Step 1:** Verify the event subscription is intact. Confirm at [`BluetoothAudioSource.cs:94`](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
+**Step 1:** Verify the event subscription is intact. Confirm at [`BluetoothAudioSource.cs:94`](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
 
 ```csharp
 if (_identificationService != null)
@@ -370,7 +370,7 @@ if (_identificationService != null)
 }
 ```
 
-**Step 2:** Verify `NeedsFingerprintingLookup` is set and `RequestImmediateIdentification` is called when AVRCP metadata is incomplete OR Shazam-for-all is enabled. Confirm at [`BluetoothAudioSource.cs:753–759`](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
+**Step 2:** Verify `NeedsFingerprintingLookup` is set and `RequestImmediateIdentification` is called when AVRCP metadata is incomplete OR Shazam-for-all is enabled. Confirm at [`BluetoothAudioSource.cs:753–759`](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs):
 
 ```csharp
 var hasIncompleteMetadata = string.IsNullOrEmpty(e.Title) || string.IsNullOrEmpty(e.Artist);
@@ -400,7 +400,7 @@ grep -rn "AddSingleton.*BackgroundIdentificationService\|AddHostedService.*Backg
 
 Confirm at least one DI registration AND that `BluetoothAudioSource`'s ctor parameter `BackgroundIdentificationService? identificationService = null` is not actually null in production (a `null` here would silently disable the SongRec path).
 
-**Step 5:** Verify `SoundFlowAudioTap` (the modifier that produces the fingerprint window) is added to the master mixer when BT is active. The audit only needs to confirm the modifier is present somewhere in the pipeline (per [project memory](../../CLAUDE.md): "FingerprintTap" is part of the chain `Sources → MasterMixer → Modifiers (Balance → Limiter → FingerprintTap → VisualizationTap)`).
+**Step 5:** Verify `SoundFlowAudioTap` (the modifier that produces the fingerprint window) is added to the master mixer when BT is active. The audit only needs to confirm the modifier is present somewhere in the pipeline (per [project memory](../../../CLAUDE.md): "FingerprintTap" is part of the chain `Sources → MasterMixer → Modifiers (Balance → Limiter → FingerprintTap → VisualizationTap)`).
 
 ```bash
 grep -rn "SoundFlowAudioTap\|AddModifier" src/Radio.Infrastructure/Audio/SoundFlow/ src/Radio.Infrastructure/Audio/Fingerprinting/
@@ -416,7 +416,7 @@ grep -rn "SoundFlowAudioTap\|AddModifier" src/Radio.Infrastructure/Audio/SoundFl
 - Modify: `tests/Radio.Infrastructure.Tests/Audio/BluetoothAudioSourceTests.cs`
 - Modify: `src/Radio.Infrastructure/Platform/Bluetooth/MockBluetoothService.cs` (extend `SimulateMetadataChange` to accept an optional `albumArtUrl`)
 
-**Step 1:** Extend the mock to forward `AlbumArtUrl` so tests can simulate it. In `MockBluetoothService.cs`, replace the existing `SimulateMetadataChange` ([lines 143–151](../../src/Radio.Infrastructure/Platform/Bluetooth/MockBluetoothService.cs)):
+**Step 1:** Extend the mock to forward `AlbumArtUrl` so tests can simulate it. In `MockBluetoothService.cs`, replace the existing `SimulateMetadataChange` ([lines 143–151](../../../src/Radio.Infrastructure/Platform/Bluetooth/MockBluetoothService.cs)):
 
 **Before:**
 ```csharp
@@ -445,9 +445,9 @@ public void SimulateMetadataChange(string title, string artist, string? albumArt
 }
 ```
 
-The default `null` preserves every existing caller. `BluetoothPlaybackMetadata.AlbumArtUrl` exists at [IBluetoothService.cs:27](../../src/Radio.Core/Interfaces/Audio/IBluetoothService.cs).
+The default `null` preserves every existing caller. `BluetoothPlaybackMetadata.AlbumArtUrl` exists at [IBluetoothService.cs:27](../../../src/Radio.Core/Interfaces/Audio/IBluetoothService.cs).
 
-**Step 2:** The new tests need a real `AlbumArtCacheService` instance (concrete type, not interface — see [`BluetoothAudioSource.cs:31`](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). The cache writes under `./data/albumart`, which is fine for tests as long as each test uses a fresh directory. Add a small per-test temp-dir helper. Place the new tests at the bottom of `BluetoothAudioSourceTests.cs`:
+**Step 2:** The new tests need a real `AlbumArtCacheService` instance (concrete type, not interface — see [`BluetoothAudioSource.cs:31`](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs)). The cache writes under `./data/albumart`, which is fine for tests as long as each test uses a fresh directory. Add a small per-test temp-dir helper. Place the new tests at the bottom of `BluetoothAudioSourceTests.cs`:
 
 ```csharp
 [Fact]
@@ -530,7 +530,7 @@ using Radio.Infrastructure.Audio;
 > [Collection("BluetoothAudioSourceSerial")]
 > public class BluetoothAudioSourceTests : IAsyncDisposable { /* ... existing ... */ }
 > ```
-> Builder may instead refactor `BluetoothAudioSource` to take `IAlbumArtCacheService` (interface) so the cache can be mocked without touching the filesystem. That's a strictly better refactor (the field is already declared on the ctor; only the interface change ripples to DI). If Builder chooses that route, the field type at [`BluetoothAudioSource.cs:31`](../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs) becomes `IAlbumArtCacheService?` and the ctor param becomes the interface — the DI registration at [`AudioServiceExtensions.cs:188–189`](../../src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs) already exposes both. **Builder is empowered to make that switch** and skip the `TempCacheDir` helper.
+> Builder may instead refactor `BluetoothAudioSource` to take `IAlbumArtCacheService` (interface) so the cache can be mocked without touching the filesystem. That's a strictly better refactor (the field is already declared on the ctor; only the interface change ripples to DI). If Builder chooses that route, the field type at [`BluetoothAudioSource.cs:31`](../../../src/Radio.Infrastructure/Audio/Sources/Primary/BluetoothAudioSource.cs) becomes `IAlbumArtCacheService?` and the ctor param becomes the interface — the DI registration at [`AudioServiceExtensions.cs:188–189`](../../../src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs) already exposes both. **Builder is empowered to make that switch** and skip the `TempCacheDir` helper.
 
 **Step 4: Run the test.**
 
@@ -620,7 +620,7 @@ git commit -m "test(bt): https:// AVRCP URL goes through cache and stores relati
 
 **Step 1:** This test does NOT need a real `BackgroundIdentificationService`. It directly invokes the `OnTrackIdentified` handler by raising the `TrackIdentified` event on a `BackgroundIdentificationService`-stand-in. The simplest path: make `OnTrackIdentified` callable from the test via the event-args type.
 
-Inspect [`BackgroundIdentificationService`](../../src/Radio.Fingerprinting/Services/BackgroundIdentificationService.cs) to confirm `TrackIdentified` is `event EventHandler<TrackIdentifiedEventArgs>?` and that `TrackIdentifiedEventArgs.Track` is a constructable model.
+Inspect [`BackgroundIdentificationService`](../../../src/Radio.Fingerprinting/Services/BackgroundIdentificationService.cs) to confirm `TrackIdentified` is `event EventHandler<TrackIdentifiedEventArgs>?` and that `TrackIdentifiedEventArgs.Track` is a constructable model.
 
 ```csharp
 [Fact]
@@ -883,7 +883,7 @@ After Builder runs `Deploy-ToLinux.ps1 -TargetHost radio -Runtime linux-x64`:
 
 ### Scenario A — Phone player that does NOT ship AVRCP art (Spotify / YouTube Music / Apple Music)
 
-1. Make sure the phone is paired to the Radio Console via Bluetooth (the TP-Link UB500 adapter — see [project memory](../../CLAUDE.md) BT boundary section).
+1. Make sure the phone is paired to the Radio Console via Bluetooth (the TP-Link UB500 adapter — see [project memory](../../../CLAUDE.md) BT boundary section).
 2. Open Spotify (or YouTube Music) on the phone. Start playing a popular, easily-identifiable track (e.g., a Top-40 single — SongRec needs ~5 s of audio to identify).
 3. Activate the Bluetooth source in the Radio Console UI at `http://radio:5002`.
 4. **Within ~10 s after playback starts**, confirm one of two acceptable outcomes:

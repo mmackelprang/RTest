@@ -65,7 +65,7 @@ public class PipeWireRegistryListenerTests
 
   // --- AUD-10 T2: the serial published is object.serial, never the registry id ---------------
   //
-  // The id/serial pairs are the ones measured on the appliance (docs/queue/AUD-10.md 2026-09-25):
+  // The id/serial pairs are the ones measured on the appliance (archive/queue/AUD-10.md 2026-09-25):
   // id=76 / serial=58968 and id=71 / serial=58921. The native OnGlobal reads node.name and
   // object.serial from the spa_dict and hands both to ClassifyNodeGlobal; what OnGlobal does with
   // the result (log a Warning and skip the raise on BtCaptureNodeWithoutSerial) is two lines that

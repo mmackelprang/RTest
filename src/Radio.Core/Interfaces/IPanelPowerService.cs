@@ -69,7 +69,7 @@ public enum PanelPowerOffResult
 /// ⚠ <b>The knobs are the only wake source for a dark panel.</b> The touchscreen is powered by the
 /// panel and leaves the USB bus when it goes dark (<c>ENC-15</c>, re-measured for <c>ENC-22</c>), so
 /// an implementation must never leave the panel off while the encoder is not connected. See
-/// <c>docs/queue/ENC-22.md</c> for the safety rules this contract carries.
+/// <c>archive/queue/ENC-22.md</c> for the safety rules this contract carries.
 /// </para>
 /// </summary>
 public interface IPanelPowerService

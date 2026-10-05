@@ -1,7 +1,7 @@
 # PLAN — `ENC-4` · `EncoderHud`: every knob visible within 100 ms, on every route
 
-**Row:** `ENC-4` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.0](../../docs/HANDOFF-GA-PUNCH-LIST.md)
-**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md) (Rev 3) — **§6 in full**, plus §4.4, §5.1, §5.4, §6.9, §8.6, §12.2, §15
+**Row:** `ENC-4` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.0](../../handoffs/HANDOFF-GA-PUNCH-LIST.md)
+**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md) (Rev 3) — **§6 in full**, plus §4.4, §5.1, §5.4, §6.9, §8.6, §12.2, §15
 **Relationship to the handoff:** **follows**, with three declared deviations and one scope narrowing — all recorded in §0.3 below with the evidence that forced them.
 **Depends on:** `ENC-1` ✅, `ENC-3` ✅ (#511) — both shipped. **Dependencies are met.**
 **Blocks:** `ENC-5` (SOURCE overlay), `ENC-7` (PRESETS overlay), `ENC-12` (config-fault notification).
@@ -52,7 +52,7 @@ machine has.
 1. ⛔ **Do NOT remap `RotaryEncoderActionRouter`'s encoder-index → handler table.**
    The router maps `0=Volume · 1=Tuning · 2=Source · 3=Visualization`. The handoff's physical order
    is `VOLUME · SOURCE · PRESETS · TUNING`. **This mismatch is deliberate and documented**
-   ([`docs/HANDOFF-NEXT-SESSION.md`](../../docs/HANDOFF-NEXT-SESSION.md), "Known mismatch,
+   ([`docs/HANDOFF-NEXT-SESSION.md`](../../handoffs/HANDOFF-NEXT-SESSION.md), "Known mismatch,
    deliberate"). Index 0 is VOLUME in both, so the dangerous knob is already correct. **The remap
    belongs with `ENC-5` and `ENC-7`**, which introduce the SOURCE and PRESETS handlers the remap
    would point at. Remapping here would leave encoder 2 driving a PRESETS handler that does not

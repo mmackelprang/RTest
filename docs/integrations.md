@@ -120,7 +120,7 @@ subscription. **Visualiser mode is single-surface and local-only by decision.**
 the kiosk and a phone browsing the same console will not follow. But *the picker never produced that sync
 either*: the knob was the only writer, so no user ever had it from the picker. What is gone is the
 **mechanism**, not a behaviour anyone was using, and rebuilding it means writing a **writer** rather than
-re-adding a listener. `design/FUTURE-WORK.md` § 17 lists exactly what was removed.
+re-adding a listener. `docs/known-issues-and-future-work.md` § 17 lists exactly what was removed.
 
 **The device-side configuration table has always been in cabinet order** (`RotaryEncoderConfigDefaults.Create()`),
 so acceleration-disabled lands on the two selector knobs and the tuning tiers `(150 ×2 / 80 ×4 / 40 ×8)` land on
@@ -146,7 +146,7 @@ the knob is, so nobody has to be told which knob is which) is unchanged.
 
 **The bands are facts about the panel, and they have one definition:** `Radio.Core.Configuration.FrontPanelGeometry`,
 which also carries the engraved names, the index→knob mapping and the drawing's px→mm scale, citing
-`design/hardware/front-panel-layout_4.svg`. Four surfaces need them — this HUD, the diagnostics card, the encoder
+`docs/hardware/front-panel-layout_4.svg`. Four surfaces need them — this HUD, the diagnostics card, the encoder
 Settings table and the two selector overlays — so **a recut moves one line, not five.** The component's inline style
 carries only `--encoder-band-y`; the left offset, the vertical centring on the band and the ≥ 8 px viewport clamp
 are all in the `.encoder-hud` rule. `90 / 270 / 450 / 630` are the measured projections (93.05 / 271.02 / 448.98 /
@@ -268,7 +268,7 @@ toast, once, as soon as a browser is there to receive it.
 encoder.** Before it, the C++ firmware dropped every report arriving on its interrupt OUT endpoint: config
 pushes, read-config requests, all accepted by the kernel and ignored by the device. Flashing an older build
 reinstates that silently, and the device runs whatever is in its flash — on a factory-default Pico, volume
-acceleration at ×50. Record: [`design/research/ENC-11-firmware-drops-output-reports.md`](research/ENC-11-firmware-drops-output-reports.md).
+acceleration at ×50. Record: [`archive/design/research/ENC-11-firmware-drops-output-reports.md`](../archive/design/research/ENC-11-firmware-drops-output-reports.md).
 
 **The console checks this at every connection**, before the configuration push: it sends command `0x04`
 (read config) and waits for a full **107-byte Input Report `0x02`**. Up to three attempts (the push's own
@@ -442,7 +442,7 @@ hint line (`tap anywhere, or press any knob, to turn on`) does not mention the t
   circuit before its dispose can report. ⚠ **That correction happens on the next `MainLayout`
   render, not immediately, and it does not cover an API restart** — the flag lives in memory on
   `radio-api`, so a restart while the kiosk sits on `/sleep` leaves the server reading `Awake` until
-  something re-reports. See `design/FUTURE-WORK.md` §7 for the open follow-up.
+  something re-reports. See `docs/known-issues-and-future-work.md` §7 for the open follow-up.
 - **A wake spends exactly one input.** `ISleepService.TryClaimWake()` is a synchronous latch, and
   `WakeState` reads `Awake` from the instant a claim is taken — earlier than either `IsSleeping`
   flipping or the browser leaving the route. Without it a fast spin would lose every detent for the
@@ -496,7 +496,7 @@ again whenever the service stops.
 > hidraw and calling the unblank itself — which is exactly what `ENC-22` does, with the safety rules below
 > standing in for the second wake path that does not exist. GNOME's idle blanking stays off at all three
 > layers regardless: it would dark the panel with no knob wake behind it.
-> Full write-up: [`docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../docs/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
+> Full write-up: [`archive/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md`](../archive/uat/2026-09-02-enc15-touch-wake-gate/REPORT.md).
 
 ### Panel power-off in sleep — `ENC-22`
 
@@ -589,7 +589,7 @@ a hard navigation — `IsSleepScreenVisible` stays `true` on an ordinary page, a
 panel powers off mid-use, because touch input never reaches `radio-api` to restart the countdown.
 Before `ENC-22` the same stale flag cost one consumed knob input. It is still knob-wakeable, so it is
 an annoyance rather than a lock-out; closing it needs a periodic re-report from the page, which is the
-same open follow-up `design/FUTURE-WORK.md` §7 records for the flag not surviving an API restart.
+same open follow-up `docs/known-issues-and-future-work.md` §7 records for the flag not surviving an API restart.
 
 ---
 
@@ -889,7 +889,7 @@ When an incoming call is detected (`Ringing` state):
 
 A ringing call puts a large banner over the console: **"INCOMING CALL"**, the caller, and an **Ignore**
 button. It shows on every page and on the sleep screen, alongside the announcement — it does not replace or
-silence it. Design: [`docs/design-handoffs/2026-10-02-incoming-call-banner.md`](../docs/design-handoffs/2026-10-02-incoming-call-banner.md).
+silence it. Design: [`archive/design-handoffs/2026-10-02-incoming-call-banner.md`](../archive/design-handoffs/2026-10-02-incoming-call-banner.md).
 
 | | |
 |---|---|
@@ -939,7 +939,7 @@ no-answer timeout.
 ### Troubleshooting
 
 - **"Disconnected" but server is running:** Check firewall rules, verify the hub URL is reachable from the Radio Console host with `curl http://<phone-server>:5555/hubs/phone/negotiate`
-- **No announcement on ring:** Check TTS engine availability in **System Config → Event Sources**. Ensure a TTS engine (Google or Azure) is configured, with its API key present. Both engines are cloud services and there is no offline fallback, so announcements also go silent whenever the network is down - see the `TTS-9` note in [SYSTEMCONFIGURATION.md](SYSTEMCONFIGURATION.md#text-to-speech-tts-setup)
+- **No announcement on ring:** Check TTS engine availability in **System Config → Event Sources**. Ensure a TTS engine (Google or Azure) is configured, with its API key present. Both engines are cloud services and there is no offline fallback, so announcements also go silent whenever the network is down - see the `TTS-9` note in [SYSTEMCONFIGURATION.md](configuration.md#text-to-speech-tts-setup)
 - **Wrong caller name:** See *Caller names* above — an exact match beats a local-entry match, and the synced phone books beat RotaryPhone's contacts within a tier; a 7-digit local entry still matches any area code. `GET /api/bluetooth/pbap/lookup?phoneNumber=…` shows what the phone books answer (and `isExactMatch`)
 - **Ring sound doesn't play:** Verify the file exists at the configured path and is a valid WAV or MP3
 
@@ -998,7 +998,7 @@ The same RotaryPhone service exposes a Google Voice bridge that the Web UI consu
   ✅ **Use instead:** `unhealthy = !cookiesValid || !available || degraded || authBlackout || lastApiSuccessAt is null or older than ~2 min`. **`lastApiSuccessAt` is the field this doctrine should have named** — it cannot be faked by a reload, because it moves only when a real authenticated call actually succeeded. It was `null` throughout the outage. `cookiesValid` also held correctly in both failure states and is cheaper to read.
   ⚠ **Also retracted: "the sibling fields lie" is only half true.** They lie in one failure state (adapter active, auth failing) and are **honest** in the other (adapter inactive — everything reads `false`). That is why no single boolean works and the predicate above is a shape.
   ⚠ **RotaryPhone is fixing the field in place** to report true, persisted age. Two consequences: a restarted process may report a genuinely **large** value where it once reported a small one, and **unknown mint time becomes `null`**, which was previously impossible. We hold **zero code references** to this field, so nothing needs a parser change — but do not reintroduce one against the old semantics.
-  _Superseded text, kept because the reasoning below about the ~11-minute lifetime is still correct and only the field choice was wrong:_ **`psidtsAgeSeconds` is the ONLY trustworthy field on `GET :5004/api/gvbridge/status` — and it is a live blackout clock.** Twice-confirmed (2026-07-31 root-cause pass and the GV-8 UAT). Google's PSIDTS cookie is good for ~11 minutes; RotaryPhone's CDP refresh only fires every ~20, with no reactive refresh on 401 — so GV auth is dead for roughly **9 minutes out of every 20**, on a wall clock that is independent of anything we do. Read it as: **`< 660` healthy · `660–1200` blackout (expect HTTP 502 on every GV read) · resets at ~1200.** The sibling fields **lie** — `{"available": true, "degraded": false, "cookiesValid": true, "psidtsAgeSeconds": 707}` was captured while both SMS endpoints were returning hard 502s, which is exactly why our "Google Voice is reconnecting" banner (`PhoneMessagesPanel.razor:14-20`) never fires in the window it exists for. **Practical consequence: any test of this surface that does not record `psidtsAgeSeconds` (or wall-clock time) produces results that look random.** That is how a previous pass came to hypothesise throttling — a hypothesis the logs then falsified three ways (401 never 429; failure tracks wall-clock not request volume; recovery lands on fixed boundaries). Prefer this one-shot probe over reading journals; the box is an Intel N100 and heavy journald reads compete with the audio pipeline. _Both the refresh interval and the dishonest health fields are RotaryPhone-side items, tracked in [`CROSS-REPO-HANDOFFS.md`](../docs/queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #6._
+  _Superseded text, kept because the reasoning below about the ~11-minute lifetime is still correct and only the field choice was wrong:_ **`psidtsAgeSeconds` is the ONLY trustworthy field on `GET :5004/api/gvbridge/status` — and it is a live blackout clock.** Twice-confirmed (2026-07-31 root-cause pass and the GV-8 UAT). Google's PSIDTS cookie is good for ~11 minutes; RotaryPhone's CDP refresh only fires every ~20, with no reactive refresh on 401 — so GV auth is dead for roughly **9 minutes out of every 20**, on a wall clock that is independent of anything we do. Read it as: **`< 660` healthy · `660–1200` blackout (expect HTTP 502 on every GV read) · resets at ~1200.** The sibling fields **lie** — `{"available": true, "degraded": false, "cookiesValid": true, "psidtsAgeSeconds": 707}` was captured while both SMS endpoints were returning hard 502s, which is exactly why our "Google Voice is reconnecting" banner (`PhoneMessagesPanel.razor:14-20`) never fires in the window it exists for. **Practical consequence: any test of this surface that does not record `psidtsAgeSeconds` (or wall-clock time) produces results that look random.** That is how a previous pass came to hypothesise throttling — a hypothesis the logs then falsified three ways (401 never 429; failure tracks wall-clock not request volume; recovery lands on fixed boundaries). Prefer this one-shot probe over reading journals; the box is an Intel N100 and heavy journald reads compete with the audio pipeline. _Both the refresh interval and the dishonest health fields are RotaryPhone-side items, tracked in [`CROSS-REPO-HANDOFFS.md`](queue/CROSS-REPO-HANDOFFS.md) § Cross-repo handoffs #6._
 
   ```bash
   curl -s http://192.168.86.50:5004/api/gvbridge/status
@@ -1307,7 +1307,7 @@ Speech playback runs with the flag off — unlike voicemail playback.
 per-feature override.** `EventPlaybackService.AcquireSpeechAsync` calls
 `ResolveEngine(request.Engine, tts.DefaultEngine)`, and `Radio.Web` deliberately sends **no engine and
 no voice**. This follows ADR-029 §9's **amendment**
-([`design/decisions/2026-08-03-gv-audio-through-engine.md:491-511`](decisions/2026-08-03-gv-audio-through-engine.md)),
+([`docs/decisions/2026-08-03-gv-audio-through-engine.md:491-511`](decisions/2026-08-03-gv-audio-through-engine.md)),
 which reversed the original pin to local `espeak-ng` on the owner's instruction: *"the TTS engine in
 the radio console supports both Google and Azure TTS, so make sure the text messaging uses the
 currently selected TTS engine."* `GvMedia:SpeechEngine` was **deleted, not redefined**, and `TTS-9`
@@ -1446,7 +1446,7 @@ When an announcement is triggered:
 1. The current audio (music, radio, etc.) is smoothly lowered in volume
 2. The TTS announcement plays at the specified priority level
 3. Once the announcement finishes, the original audio volume is restored
-4. **Higher-priority events interrupt attended GV playback — and nothing else.** ⚠ Be precise about the scope, because the claim here was wrong in both directions before. Since `PHN-1d` (ADR-029 D5), an event source that starts at or above `GvMedia:PreemptAtPriority` (**8**) **stops** an in-flight voicemail or spoken message outright — it does not pause it, and the recording is replayable at zero cost. That is `EventPlaybackService.OnDuckingStateChanged`, and it is the first load-bearing read of `DuckingService.GetPriority` in this system's life. ⚠ **Only that direction.** Pressing play while such a source is *already* sounding still **mixes** today; the owner's decision of 2026-09-04 (punch list `D28`) is that it should **wait and then play**, and that queue ships with the console-playback chip that can show it is waiting. **Announcement-versus-announcement is arbitrated since `AUD-73` (2026-09-30)**, by `AnnouncementService` itself (`BecomeActive`): a **higher** priority replaces a lower one; of two **equal** priorities the one *requested* later replaces the earlier (so a long message that is slow to synthesise cannot cut off a shorter one sent after it); a **lower** priority never cuts off a higher one — it plays **alongside** it, which is what every overlap did before `AUD-73`. The replaced request returns `outcome: "interrupted"`. *(Before `AUD-73` the single-slot cancel was dead code and every overlap mixed — measured on the box: two announcements 1.5 s apart both returned `completed`. The Web UI's **Send Test** button hid this, because it stays disabled until its own request returns.)* ⚠ Ducking itself remains **binary and reference-counted**, not priority-weighted: the first event fades the primary source to the fixed global `Audio:DuckingPercentage` (20), every subsequent concurrent event leaves the *level* alone, and full volume returns only when the last event leaves; a replacing announcement ducks before the one it replaces lets go, so the duck is held across the handover. ⚠ Nothing **queues**: a lower priority mixes rather than waiting its turn, and ADR-029 §6.2 rule 3's queue remains separate work. **Owner ruling `AUD-87` (2026-10-02): keep the mixing.** The phone's `AnnouncementPriority` now defaults to **9**, above a notification's 8, so a doorbell posted after an incoming call plays alongside the caller's name rather than cutting it off (⚠ `radio`'s SQLite config store still holds `8`, read 2026-10-02, and outranks the default). The phone integration's hang-up now cancels **only its own call's announcement** — including one still being synthesised — by cancelling the token it passed to the announcement; `IAnnouncementService.StopAsync`, which stops every announcement, has no production caller left. `StopAllDuckingAsync` also still has **zero non-test callers**. ⚠ **The live consequence, which is intended (ADR-029 §6.1):** with `PhoneIntegration:Enabled` false *(⚠ read-only on 2026-10-02, `radio`'s SQLite config store sets it **true**, so a caller-name announcement — 8 there, 9 by default — would preempt too; but the box's logs show no `Ringing` call state ever arriving, see `docs/queue/AUD-87.md`)*, the only thing on this box that can preempt attended playback is a notification posted to `/api/notifications/announce` at its default priority 8 — **a doorbell will stop a voicemail mid-play.** Outside that one rule the `Priority` field below is still accepted, validated, stored and used for nothing else, so the guidance table remains intent rather than behavior.
+4. **Higher-priority events interrupt attended GV playback — and nothing else.** ⚠ Be precise about the scope, because the claim here was wrong in both directions before. Since `PHN-1d` (ADR-029 D5), an event source that starts at or above `GvMedia:PreemptAtPriority` (**8**) **stops** an in-flight voicemail or spoken message outright — it does not pause it, and the recording is replayable at zero cost. That is `EventPlaybackService.OnDuckingStateChanged`, and it is the first load-bearing read of `DuckingService.GetPriority` in this system's life. ⚠ **Only that direction.** Pressing play while such a source is *already* sounding still **mixes** today; the owner's decision of 2026-09-04 (punch list `D28`) is that it should **wait and then play**, and that queue ships with the console-playback chip that can show it is waiting. **Announcement-versus-announcement is arbitrated since `AUD-73` (2026-09-30)**, by `AnnouncementService` itself (`BecomeActive`): a **higher** priority replaces a lower one; of two **equal** priorities the one *requested* later replaces the earlier (so a long message that is slow to synthesise cannot cut off a shorter one sent after it); a **lower** priority never cuts off a higher one — it plays **alongside** it, which is what every overlap did before `AUD-73`. The replaced request returns `outcome: "interrupted"`. *(Before `AUD-73` the single-slot cancel was dead code and every overlap mixed — measured on the box: two announcements 1.5 s apart both returned `completed`. The Web UI's **Send Test** button hid this, because it stays disabled until its own request returns.)* ⚠ Ducking itself remains **binary and reference-counted**, not priority-weighted: the first event fades the primary source to the fixed global `Audio:DuckingPercentage` (20), every subsequent concurrent event leaves the *level* alone, and full volume returns only when the last event leaves; a replacing announcement ducks before the one it replaces lets go, so the duck is held across the handover. ⚠ Nothing **queues**: a lower priority mixes rather than waiting its turn, and ADR-029 §6.2 rule 3's queue remains separate work. **Owner ruling `AUD-87` (2026-10-02): keep the mixing.** The phone's `AnnouncementPriority` now defaults to **9**, above a notification's 8, so a doorbell posted after an incoming call plays alongside the caller's name rather than cutting it off (⚠ `radio`'s SQLite config store still holds `8`, read 2026-10-02, and outranks the default). The phone integration's hang-up now cancels **only its own call's announcement** — including one still being synthesised — by cancelling the token it passed to the announcement; `IAnnouncementService.StopAsync`, which stops every announcement, has no production caller left. `StopAllDuckingAsync` also still has **zero non-test callers**. ⚠ **The live consequence, which is intended (ADR-029 §6.1):** with `PhoneIntegration:Enabled` false *(⚠ read-only on 2026-10-02, `radio`'s SQLite config store sets it **true**, so a caller-name announcement — 8 there, 9 by default — would preempt too; but the box's logs show no `Ringing` call state ever arriving, see `archive/queue/AUD-87.md`)*, the only thing on this box that can preempt attended playback is a notification posted to `/api/notifications/announce` at its default priority 8 — **a doorbell will stop a voicemail mid-play.** Outside that one rule the `Priority` field below is still accepted, validated, stored and used for nothing else, so the guidance table remains intent rather than behavior.
 
 Priority guidelines:
 | Priority | Use Case |

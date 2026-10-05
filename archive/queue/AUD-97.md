@@ -1,6 +1,6 @@
 # `AUD-97` — after a restart the panel showed the Soundbar as the output while the saved Cast device played
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅🔬 **SHIPPED 2026-10-02, owner check outstanding.**
 

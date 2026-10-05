@@ -6,7 +6,7 @@ Inputs:
   argv[2]  after classified-event artifact (same format)
 
 Computes per-class counts and PASS/FAIL against the success criterion from
-docs/plans/2026-05-22-bt-capture-watchdog.md Task 9:
+archive/plans/2026-05-22-bt-capture-watchdog.md Task 9:
 
   - quiet_host events drop to <= 1 over the soak window
   - load_correlated events do not regress (delta <= 0 OR within tolerance)

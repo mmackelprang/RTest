@@ -1,13 +1,13 @@
 # Cast garbled audio investigation (2026-05-23)
 
 **Investigator:** Claude (logs + code, no live repro with user)
-**Reference docs:** [`docs/research/2026-05-21-cast-stutter-comparison.md`](../../docs/research/2026-05-21-cast-stutter-comparison.md) — substantially overlapping prior work; this report builds on it with fresh log data.
+**Reference docs:** [`docs/research/2026-05-21-cast-stutter-comparison.md`](../../research/2026-05-21-cast-stutter-comparison.md) — substantially overlapping prior work; this report builds on it with fresh log data.
 
 ---
 
 ## 1. Executive summary
 
-The persistent intermittent garbling on Cast (but not BT/local) is consistent with **multiple compounding factors**, not a single root cause. The deployed configuration is **DirectChannel mode with default tunings** (`StreamingMode=DirectChannel`, `ApplicationId=567E3DBA`, 100 ms chunks, `bufferBeforePlay=3`, `maxBufferAhead=3 s`, sender `lagSeconds=1 s`), confirmed both by [`deploy/raspberry-pi/appsettings.Production.json`](../../deploy/raspberry-pi/appsettings.Production.json) and live `radio:appsettings.Production.json`. Local soundbar output never traverses the DirectChannel path, which is why only Cast is affected.
+The persistent intermittent garbling on Cast (but not BT/local) is consistent with **multiple compounding factors**, not a single root cause. The deployed configuration is **DirectChannel mode with default tunings** (`StreamingMode=DirectChannel`, `ApplicationId=567E3DBA`, 100 ms chunks, `bufferBeforePlay=3`, `maxBufferAhead=3 s`, sender `lagSeconds=1 s`), confirmed both by [`deploy/raspberry-pi/appsettings.Production.json`](../../../deploy/raspberry-pi/appsettings.Production.json) and live `radio:appsettings.Production.json`. Local soundbar output never traverses the DirectChannel path, which is why only Cast is affected.
 
 The single most load-pointing piece of evidence I found is **simultaneous Cast-lifecycle churn during BT recovery**: 2026-05-23 20:05 shows a Cast `Streaming -> Stopping -> Streaming -> Stopping` cycle (3 starts in 18 s) coinciding with a `BT pipeline recovery successful - capture stream re-established` event and a `Failed to stop Google Cast output / MediaSessionID is not available` error. Each cycle re-launches the DC receiver app, resets `nextPlayTime` on the receiver side, and re-burst-buffers - exactly the conditions for audible glitches. BT recovery events occurred at 19:36, 19:57, 20:05, 20:22, 20:45 (i.e., every ~20-30 minutes), and the user noted this is "persistent." That is too high a recovery cadence not to be a substantial contributor.
 

@@ -1,6 +1,6 @@
 # `AUD-77` — BT album art is lost when the recognition sample straddles a track change
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **CLOSED BY OWNER VALIDATION 2026-10-02, NO CODE.** Owner: *"#3 - I validated this yesterday - it passes."* Nothing was built for this row; the investigation below is the whole of the work. ⚠ **INFERENCE, not established:** the likely reason it passes now is `AUD-14` ([#726](https://github.com/mmackelprang/RTest/pull/726), squash `b64c8cd`, merged and deployed 2026-09-30). It fixed a stale AVRCP watcher that survived a player re-attach, which can leave the BT source stuck in `Ready` with no `Playing` edge — the mechanism this row's investigation found (the source sat in `Ready` for the whole of "APT."). Supporting, not proving: the 2026-09-29 observation ran on `24b6ce7`, an `AUD-15` branch build that does not have `b64c8cd` in its history. No phone session, `dbus-monitor` capture or Debug-level log read was done to confirm it, so which of the dossier's causes (a)/(b)/(c) it was is still unknown. The owner script below was not run and is kept for the record; it is the place to start if the symptom returns.
 

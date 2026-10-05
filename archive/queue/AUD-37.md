@@ -1,6 +1,6 @@
 # `AUD-37` — a Cast speaker that drops mid-stream is reconnected when it returns
 
-[← Builder Queue index](../BUILDER_QUEUE.md) · punch-list row: [`HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §4.2
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md) · punch-list row: [`HANDOFF-GA-PUNCH-LIST.md`](../handoffs/HANDOFF-GA-PUNCH-LIST.md) §4.2
 
 ✅ **MERGED 2026-10-02 on the owner's validation — PR [#751](https://github.com/mmackelprang/RTest/pull/751).** Owner, 2026-10-02, on the owner script below: *"#1 - I validated this yestarday. This passes."* ⚠ That validation **could not have exercised this code**: the box ran `6ab5b74` from 2026-10-01 13:05 EDT, which does not contain `AUD-37`, so the row was merged without a test of the merged code. The coordinator then deployed `main` `75c9a39` (which contains `d5ea6ed`; both services SHA-verified, kiosk live) and the owner re-ran the unplug / replug test on it — ✅ **owner, 2026-10-02: *"AUD-37 passed."*** That is the validation of record. Before the merge, `origin/main` `3f97d19` was merged into the branch and the full gates were re-run (see § Reviews and gates). The HttpMp3 stalled-write gap stays open on the punch-list row.
 

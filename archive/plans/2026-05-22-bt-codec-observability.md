@@ -573,7 +573,7 @@ git push -u origin feat/bt-codec-observability
 gh pr create --title "feat(bt): surface negotiated A2DP codec + bitpool as observable metric" --body "$(cat <<'EOF'
 ## Summary
 
-Implements [Plan C from the Cast/BT research arc](../docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md) — closes the FM-BT-6 visibility gap. Reads `Codec` + `Configuration` properties from BlueZ `MediaTransport1` D-Bus, parses per BlueZ's `a2dp-codecs.h` layout, emits as metrics + log + UI badge.
+Implements [Plan C from the Cast/BT research arc](../../docs/docs/plans/2026-05-22-cast-bt-phase-1-2-arc.md) — closes the FM-BT-6 visibility gap. Reads `Codec` + `Configuration` properties from BlueZ `MediaTransport1` D-Bus, parses per BlueZ's `a2dp-codecs.h` layout, emits as metrics + log + UI badge.
 
 Read-only addition — no behavior change. Establishes the diagnostic foundation needed before acting on any other FM-BT issue (e.g. "audio sounds bad" → "ah, fell to SBC bitpool 35" instead of "no data, restart").
 

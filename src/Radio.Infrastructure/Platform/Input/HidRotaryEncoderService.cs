@@ -113,7 +113,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// milliseconds against a 2 s timeout that is not reachable in practice, and it self-corrects on
   /// the next operation, so it is recorded rather than fixed: closing it properly needs a nonce in
   /// the request echoed back in report <c>0x02</c>, which is a firmware protocol change. Logged in
-  /// <c>design/FUTURE-WORK.md</c>.
+  /// <c>docs/known-issues-and-future-work.md</c>.
   /// </para>
   /// </summary>
   private TaskCompletionSource<RotaryEncoderDeviceConfig>? _pendingConfigRead;
@@ -776,7 +776,7 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
       "with report 0x02 after {Attempts} attempts. This is the pre-RotaryUsb #11 defect - the firmware " +
       "accepts host writes and ignores them, so the knob configuration cannot be applied and the device " +
       "runs whatever is in its flash. Re-flash the encoder with a RotaryUsb build that includes #11 " +
-      "(design/research/ENC-11-firmware-drops-output-reports.md).",
+      "(archive/design/research/ENC-11-firmware-drops-output-reports.md).",
       RotaryEncoderConfigVerifier.TransientAttempts);
 
     // Drain before the push starts. The wire carries no correlation id, so a slow device's late answer

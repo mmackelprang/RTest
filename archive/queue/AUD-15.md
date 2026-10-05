@@ -1,6 +1,6 @@
 # `AUD-15` — the BT audio buffer runs empty, 55 underruns and climbing
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Found 2026-09-07 while investigating a Bluetooth *disconnect* (which turned out to be a
 RotaryPhone HFP boundary violation — see below). **This is a different defect and must not be

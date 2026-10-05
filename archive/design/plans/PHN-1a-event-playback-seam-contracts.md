@@ -1,8 +1,8 @@
 # PLAN — `PHN-1a` · ADR-029 PR 1: the event-playback contracts
 
 > **Status:** ready for Builder. Written 2026-09-02 against `4f84b4d`.
-> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../docs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
-> **Decision of record:** [ADR-029](../decisions/2026-08-03-gv-audio-through-engine.md) — D1, D2, D4.
+> **Punch list:** [`docs/HANDOFF-GA-PUNCH-LIST.md`](../../handoffs/HANDOFF-GA-PUNCH-LIST.md) §3.5 `PHN-1` (P0), §2 `O6`.
+> **Decision of record:** [ADR-029](../../../docs/decisions/2026-08-03-gv-audio-through-engine.md) — D1, D2, D4.
 > **Sequencing:** [`design/plans/PHN-arc-pr-breakdown.md`](PHN-arc-pr-breakdown.md) — **this plan is PR 1 of 7.**
 > **Depends on:** nothing. It is the head of the arc.
 > **Follows the ADR**, with one declared extension (§0.4 C-1/C-2 — PR 1 must *build* the seek

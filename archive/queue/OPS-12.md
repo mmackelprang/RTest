@@ -1,6 +1,6 @@
 # `OPS-12` — the rsync branch of `Deploy-ToLinux.ps1` has never executed, and the first attempt took the appliance down
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🔴 **P0.** Filed 2026-09-09 after the first-ever execution of the rsync path failed and left
 `radio-api` and `radio-web` stopped.
@@ -179,4 +179,4 @@ measurements, not re-measured on a Windows host today.
 
 Merged to `main` as `4adfbe95`. Deploys since have used the step-1.5 pre-flight. For example, the 2026-10-02 deploy
 of `8df918b` reported `Verified` on both services and a live kiosk (queue banner, 2026-10-02).
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md). The live row had still read 🚧 BUILT.
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md). The live row had still read 🚧 BUILT.

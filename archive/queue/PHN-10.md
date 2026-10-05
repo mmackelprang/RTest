@@ -1,6 +1,6 @@
 # `PHN-10` — two voicemails can play at once, and `PHN-1f` shipped the queue that was supposed to prevent it
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🔴 **P0 — RE-TIERED 2026-09-09 by the owner**, up from P1, once the plan established the scope. ⛔ **Every voicemail played leaks a `SoundPlayer` plus a mixer component PERMANENTLY**; the Stop button, doorbell preemption, ADR §7.1's `MaxPlaybackSeconds` "THE guarantee", the `/sleep` edges and the last-circuit backstop all funnel through one disarmed guard. **"Two voicemails at once" was only the cheapest way to hear it.** Originally filed P1 from the owner's `PHN-2` UAT at the cabinet
 ([record](../uat/2026-09-09-phn2-sound-uat/RESULT.md), check #11 / §3 U8).
@@ -105,7 +105,7 @@ what remains here is *how many voicemails play at once*, and nothing else.
 ## ✅ DIAGNOSIS 2026-09-09 (Builder) — **three of this row's own premises were wrong, and the severity was understated**
 
 Shipped on `fix/phn-10-two-voices-at-once`. Plan:
-[`PHN-10-nothing-can-stop-a-voicemail.md`](../../design/plans/PHN-10-nothing-can-stop-a-voicemail.md).
+[`PHN-10-nothing-can-stop-a-voicemail.md`](../design/plans/PHN-10-nothing-can-stop-a-voicemail.md).
 
 ⛔ **The wrong framing below is CORRECTED, not deleted.** The `PHN-1f` premise sent the investigation
 at the wrong file, and the record of that is worth more than a tidy page.

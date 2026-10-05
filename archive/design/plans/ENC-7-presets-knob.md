@@ -1,7 +1,7 @@
 # PLAN — `ENC-7` · The PRESETS knob: recall and save on the existing bank, and the last remap
 
-**Row:** `ENC-7` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.0](../../docs/HANDOFF-GA-PUNCH-LIST.md)
-**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md) (Rev 3) — **§4.3, §4.4 Knob 3, §6.6** are the spec; also §4.2, §4.5, §5.3, §6.9, §8.3, §12.1, §12.2, §15.
+**Row:** `ENC-7` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.0](../../handoffs/HANDOFF-GA-PUNCH-LIST.md)
+**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md) (Rev 3) — **§4.3, §4.4 Knob 3, §6.6** are the spec; also §4.2, §4.5, §5.3, §6.9, §8.3, §12.1, §12.2, §15.
 **Relationship to the handoff:** **follows**, **with one declared deviation it inherits and must carry forward** (`MEMORY` → `PRESETS`, §0.5) and **four declared deviations of its own** (§0.4) — all forced by the preset bank being a different shape from the one the handoff describes.
 **Depends on:** [`ENC-5`](ENC-5-source-overlay.md) — **hard.** This row consumes five artefacts `ENC-5` builds and remaps the index `ENC-5` leaves on the visualiser. It cannot start until `ENC-5` is merged.
 **Author:** Planner, 2026-09-02.
@@ -105,7 +105,7 @@ This row calls `IRadioPresetService` directly and must **not** reword those mess
 is engraved **PRESETS** (D10), so the bank becomes **`PRESETS · n saved`**.
 
 **This is a deliberate, one-word deviation from
-[`HANDOFF-saved-station-display.md`](../../docs/design-handoffs/HANDOFF-saved-station-display.md)**,
+[`HANDOFF-saved-station-display.md`](../../design-handoffs/HANDOFF-saved-station-display.md)**,
 whose §3 titles that bank `MEMORY · n saved`. It is recorded in three places on purpose:
 
 1. Designer Rev 3's own header — *"Deviates (small, deliberate) from `HANDOFF-saved-station-display.md`"*

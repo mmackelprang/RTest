@@ -8,7 +8,7 @@
 > serial; and `BluetoothAutoSwitchService` ignores an already-active BT source. Built alone, this plan fixes
 > the line-in fallback and parks BT forever on the first pause.
 
-> **Row:** `AUD-11`, [`docs/queue/AUD-11.md`](../../docs/queue/AUD-11.md). 🟠 **P1.** Filed 2026-09-06 from a live
+> **Row:** `AUD-11`, [`docs/queue/AUD-11.md`](../../queue/AUD-11.md). 🟠 **P1.** Filed 2026-09-06 from a live
 > observation on `radio`.
 > **Branch:** `fix/aud-11-bt-capture-refuses-the-wrong-node`
 > **Estimate:** **1.5 d** of build, **plus one box session with the owner's handset**. §0.7 derives both.
@@ -1654,7 +1654,7 @@ whoever does.
 Same seven-column shape as the rows around it; only the **Plan** and **Depends on** cells change.
 
 ```
-| AUD-11 | ⭐ **NEW 2026-09-06, observed live — the BT capture stream silently re-links to the built-in line-in when its target disappears, and every indicator stays green.** — [detail](queue/AUD-11.md) | 📋 | [`AUD-11-the-capture-that-recorded-the-wrong-jack.md`](../design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md) · **1.5 d + a box session** · ⛔ **NOT auto-mergeable — the central fix is a request to WirePlumber that no gate in this repo can observe, and the repro means interrupting the owner's music.** ✅ The `PW_ID_ANY` question is **SETTLED — do not re-investigate it**: it stays exactly as it is, the fix is additive (`node.dont-reconnect`), and there is no trade-off (plan §0.3, `C-161`). | _no spec doc — measured on `radio` 2026-09-06_ · rationale traced to commit `5353f020a` (PR #262) · ⚠ **`MEMORY.md` is Claude project auto-memory (`~/.claude/projects/D--prj-rtest-rtest/memory/MEMORY.md`), NOT a repo file** — this cell used to imply otherwise | — _(no row dependency. Makes `AUD-10` silent rather than loud; neither blocks the other. ⚠ **Expect to meet `AUD-10` during this row's UAT** — the repro is `AUD-10`'s own trigger, so a failure to resume at §4.5 step 5 is `AUD-10`, not a regression here. **No file overlap with `AUD-12`**, which touches `BluetoothAudioSource` state; this row touches the PipeWire interop, `LinuxBluetoothService`'s capture path, and one Core enum.)_ | `fix/aud-11-bt-capture-refuses-the-wrong-node` |
+| AUD-11 | ⭐ **NEW 2026-09-06, observed live — the BT capture stream silently re-links to the built-in line-in when its target disappears, and every indicator stays green.** — [detail](../../../design/plans/queue/AUD-11.md) | 📋 | [`AUD-11-the-capture-that-recorded-the-wrong-jack.md`](../../../design/design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md) · **1.5 d + a box session** · ⛔ **NOT auto-mergeable — the central fix is a request to WirePlumber that no gate in this repo can observe, and the repro means interrupting the owner's music.** ✅ The `PW_ID_ANY` question is **SETTLED — do not re-investigate it**: it stays exactly as it is, the fix is additive (`node.dont-reconnect`), and there is no trade-off (plan §0.3, `C-161`). | _no spec doc — measured on `radio` 2026-09-06_ · rationale traced to commit `5353f020a` (PR #262) · ⚠ **`MEMORY.md` is Claude project auto-memory (`~/.claude/projects/D--prj-rtest-rtest/memory/MEMORY.md`), NOT a repo file** — this cell used to imply otherwise | — _(no row dependency. Makes `AUD-10` silent rather than loud; neither blocks the other. ⚠ **Expect to meet `AUD-10` during this row's UAT** — the repro is `AUD-10`'s own trigger, so a failure to resume at §4.5 step 5 is `AUD-10`, not a regression here. **No file overlap with `AUD-12`**, which touches `BluetoothAudioSource` state; this row touches the PipeWire interop, `LinuxBluetoothService`'s capture path, and one Core enum.)_ | `fix/aud-11-bt-capture-refuses-the-wrong-node` |
 ```
 
 ### 8.2 Addition to `docs/queue/AUD-11.md`
@@ -1664,7 +1664,7 @@ Append a section; **change nothing above it** — the measured evidence is the r
 ```markdown
 ## Planned — 2026-09-06
 
-**Plan:** [`design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md`](../../design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md).
+**Plan:** [`design/plans/AUD-11-the-capture-that-recorded-the-wrong-jack.md`](AUD-11-the-capture-that-recorded-the-wrong-jack.md).
 **1.5 d + a box session.** ⛔ **Not auto-mergeable** — plan §0.8.
 
 The three scope questions above are answered:

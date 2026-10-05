@@ -1,6 +1,6 @@
 # `AUD-98` — a File Player list must never lose the tracks it has played
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED 2026-10-02.** Owner: *"Remaining items all pass."* (wrap, Save as playlist, ✕) and *"All of these items pass."* on `7583e06`. Restart measured on the box: 25 tracks before and after, same order and states, the 4 played tracks restored as played (Shuffle on, Repeat All). Merged via [#773](https://github.com/mmackelprang/RTest/pull/773). The status lines below were true until then.
 

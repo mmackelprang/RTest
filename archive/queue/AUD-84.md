@@ -1,6 +1,6 @@
 # `AUD-84` — a Cast speaker that drops mid-stream crashes `radio-api`, restarting the whole console
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🔴 **P0 — GA-blocking.** Filed 2026-09-30 from the owner's casting baseline run. **MEASURED on the box, not code-read.**
 
@@ -10,7 +10,7 @@
 
 The owner ran a casting baseline at the console on 2026-09-30, box on `b64c8cd` (= `main`, both services SHA-verified that day). Record: [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) § Casting baseline. Evidence below is from `journalctl -u radio-api` and `systemctl show` on `radio`, read the same afternoon.
 
-Related punch-list row: **`AUD-37`** ([`HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §4.2), filed 2026-09-27 from a code review, which predicted that a Cast device dropping mid-stream would be *"never noticed"*. ⛔ **The measurement shows the prediction was wrong in the worse direction: the process dies instead.** `AUD-37`'s "notice and fall back" half remains open and is this row's natural sibling.
+Related punch-list row: **`AUD-37`** ([`HANDOFF-GA-PUNCH-LIST.md`](../handoffs/HANDOFF-GA-PUNCH-LIST.md) §4.2), filed 2026-09-27 from a code review, which predicted that a Cast device dropping mid-stream would be *"never noticed"*. ⛔ **The measurement shows the prediction was wrong in the worse direction: the process dies instead.** `AUD-37`'s "notice and fall back" half remains open and is this row's natural sibling.
 
 ## What the owner saw
 

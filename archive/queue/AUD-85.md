@@ -1,6 +1,6 @@
 # `AUD-85` — picking Cast erases the saved default Cast speaker: the UI's connect races the API's own auto-connect, gets a 500, and clears the default
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED AND OWNER-VERIFIED 2026-10-02** — [#764](https://github.com/mmackelprang/RTest/pull/764), squash `8df918b`, deployed and SHA-verified; owner: *"AUD-85 passed."* The agent box UAT was not run. See [§ Deploy and owner check](#deploy-and-owner-check-2026-10-02). Archived.
 
@@ -10,7 +10,7 @@
 
 Found while verifying [`AUD-84`](AUD-84.md) at the console on 2026-09-30 (box on the branch build `079d46c`). After the fallback to local, the owner re-picked Cast: *"Re-picked Cast, it's playing on the office speaker again"*. Cast played — but reading the file sink for that re-pick showed the pick had erased the saved default Cast speaker. Record: [`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) § Casting baseline.
 
-Related punch-list row: **`AUD-54`** ([`HANDOFF-GA-PUNCH-LIST.md`](../HANDOFF-GA-PUNCH-LIST.md) §5), whose 2026-09-30 evidence ① is the **same race** at 16:39:12 (500 on connect, `Cannot connect in state Connecting`). `AUD-54` recorded the 500; this row is what the 500 does next.
+Related punch-list row: **`AUD-54`** ([`HANDOFF-GA-PUNCH-LIST.md`](../handoffs/HANDOFF-GA-PUNCH-LIST.md) §5), whose 2026-09-30 evidence ① is the **same race** at 16:39:12 (500 on connect, `Cannot connect in state Connecting`). `AUD-54` recorded the 500; this row is what the 500 does next.
 
 ## What happened (MEASURED, 2026-09-30, times EDT)
 

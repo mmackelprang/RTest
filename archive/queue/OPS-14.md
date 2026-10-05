@@ -1,6 +1,6 @@
 # `OPS-14` — the API docs (OpenAPI + Scalar) are served on the box, and the DevTray says where
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED 2026-10-02.**
 

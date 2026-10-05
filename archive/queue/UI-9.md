@@ -1,6 +1,6 @@
 # `UI-9` — every visit to the config page leaks three event handlers, permanently
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-08 by the `UI-7` Planner, which found it while enumerating subscribers to
 `AudioStateHubService` and correctly declined to fold an unrelated defect into that row.
@@ -108,7 +108,7 @@ event rename one step earlier still, from a runtime throw to a compile error.
 
 ⭐ **Note what happened here**: a row about a resource leak specified an instrument that could not
 tell the fixed state from the broken one. That is the same failure recorded three other times this
-session — see the banner in [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md). **Prove the instrument can
+session — see the banner in [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md). **Prove the instrument can
 see the unfixed state before trusting it on the fixed one.**
 
 `CLAUDE.md` § *Test Timing* applies if the handlers are `async`: synchronize on the observation,

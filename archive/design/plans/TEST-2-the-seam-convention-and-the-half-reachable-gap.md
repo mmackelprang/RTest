@@ -1,6 +1,6 @@
 # PLAN — `TEST-2` · The native harness was never needed — the row's premise is false, and the gap closes for real
 
-> **Row:** `TEST-2`, [`docs/queue/TEST-2.md`](../../docs/queue/TEST-2.md). Lowest priority of the
+> **Row:** `TEST-2`, [`docs/queue/TEST-2.md`](../../queue/TEST-2.md). Lowest priority of the
 > 2026-08-10 tranche. Anchors last re-verified by the row itself 2026-08-11 against `8b1ce0a`.
 > **Branch:** `test/bt-capture-branch-dispatch-coverage`
 > **Estimate:** **1.0 d**. §0.10 derives it.
@@ -1022,7 +1022,7 @@ wrong about the reason.
 
 ⛔ **Not applied by this plan** (§5.6). For whoever updates `docs/BUILDER_QUEUE.md` § Queue:
 
-| TEST-2 | **Feasibility answered: NO to a native engine — but the row's premise was false and none was ever needed.** Closes by covering all three dispatch sites through the real path, retiring the Kind-D seam, and writing the seam convention (`ADR-030`). — [detail](queue/TEST-2.md) | 📋 | [`design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](../design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md) — 1.0 d | _no spec doc_ · #469, #468 (`8b1ce0a`) | — _(none. **Creates one obligation on `AUD-5`:** its seam must carry the kind-C label and join the lint's control list — plan §5.3.)_ | `test/bt-capture-branch-dispatch-coverage` |
+| TEST-2 | **Feasibility answered: NO to a native engine — but the row's premise was false and none was ever needed.** Closes by covering all three dispatch sites through the real path, retiring the Kind-D seam, and writing the seam convention (`ADR-030`). — [detail](../../../design/plans/queue/TEST-2.md) | 📋 | [`design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](../../../design/design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md) — 1.0 d | _no spec doc_ · #469, #468 (`8b1ce0a`) | — _(none. **Creates one obligation on `AUD-5`:** its seam must carry the kind-C label and join the lint's control list — plan §5.3.)_ | `test/bt-capture-branch-dispatch-coverage` |
 
 ---
 

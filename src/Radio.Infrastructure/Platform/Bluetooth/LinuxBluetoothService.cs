@@ -155,7 +155,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   private Task _registryWorkTail = Task.CompletedTask;
 
   // How long a re-bind waits for _captureDeviceLock. The recreated node lived ~4 s before the phone
-  // gave up (docs/queue/AUD-10.md, 2026-09-25), so waiting longer than this cannot succeed; if the
+  // gave up (archive/queue/AUD-10.md, 2026-09-25), so waiting longer than this cannot succeed; if the
   // lock is held that long it is held by SearchForCaptureDeviceAsync, which binds the node itself.
   private static readonly TimeSpan RebindLockWait = TimeSpan.FromSeconds(4);
 
@@ -2365,7 +2365,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
       _logger,
       _options.UseRealtimeCaptureThread,
       _options.RealtimeCaptureThreadPriority,
-      // Path D (docs/plans/2026-05-22-bt-input-resampler.md): variable-rate
+      // Path D (archive/plans/2026-05-22-bt-input-resampler.md): variable-rate
       // libsamplerate resampler eliminates the BT-vs-speaker clock-skew
       // duplication. Default true; flip via BluetoothOptions.UseInputResampler.
       useResampler: _options.UseInputResampler,
@@ -3056,7 +3056,7 @@ internal sealed class LinuxBluetoothService : IBluetoothService, ICaptureStreamS
   /// (DisconnectAllLinksToPort) read the indented form:
   ///     radio-bt-stream:input_FL
   ///       |&lt;- bluez_input.B0_D5_FB_D2_0D_68.2:output_FL
-  /// while the evidence recorded for AUD-11 (docs/queue/AUD-11.md) is the single-line form:
+  /// while the evidence recorded for AUD-11 (archive/queue/AUD-11.md) is the single-line form:
   ///     radio-bt-stream:input_FL  &lt;- bluez_input.B0_D5_FB_D2_0D_68.2:output_FL   [active]
   /// Which one the appliance's pw-link prints has not been settled here; accepting both removes a
   /// class of "the audit silently found nothing".

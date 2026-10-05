@@ -35,7 +35,7 @@ public sealed class GvMediaOptions
   /// 2026-09-02 at 1057 B (mtime 2026-03-05) and 75 B (mtime 2026-07-31), with different content —
   /// because Deploy-ToLinux.ps1 excludes that file from rsync and seeds it only when it is absent.
   /// Setting the secret is therefore two hand edits on two files, and a mismatch surfaces only as a
-  /// 401 on voicemail playback. See design/INTEGRATIONS.md for the runbook.
+  /// 401 on voicemail playback. See docs/integrations.md for the runbook.
   /// </para>
   ///
   /// <para>

@@ -1,6 +1,6 @@
 # `AUD-73` — a second announcement does not stop the first
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2 pending a by-ear check.** Filed 2026-09-28 from the Phase 2b Builder's out-of-scope findings (code read, not observed).
 
@@ -124,4 +124,4 @@ Also rule on [`AUD-87`](AUD-87.md).
 
 Reported by the coordinator on 2026-10-04: `AUD-73` passes owner UAT. 
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

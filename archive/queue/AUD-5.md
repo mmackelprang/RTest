@@ -1,18 +1,18 @@
 # AUD-5 — A Cast connection that is no longer current can persist its volume as the system master volume.
 
-> Queue dossier for row **`AUD-5`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`AUD-5`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | 📋 |
-| Plan | [`AUD-5-stale-cast-volume-persists-as-master.md`](../../design/plans/AUD-5-stale-cast-volume-persists-as-master.md) · **both halves, and the plan says which is load-bearing:** a generation re-check before the fire (closes the race, narrows but does not empty the window) **and** the subscriber ignoring `IsInitialSync` (removes the harm, no timing dependence). **0.5 d.** ⚠ Task 1 — the forensic log read — must run **before** the code lands: Task 3 retires the `"Synced volume from Cast device … initial: True"` message the row tells you to grep for. |
+| Plan | [`AUD-5-stale-cast-volume-persists-as-master.md`](../design/plans/AUD-5-stale-cast-volume-persists-as-master.md) · **both halves, and the plan says which is load-bearing:** a generation re-check before the fire (closes the race, narrows but does not empty the window) **and** the subscriber ignoring `IsInitialSync` (removes the harm, no timing dependence). **0.5 d.** ⚠ Task 1 — the forensic log read — must run **before** the code lands: Task 3 retires the `"Synced volume from Cast device … initial: True"` message the row tells you to grep for. |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ · **provenance: PR #473's pre-merge review**, which found it while checking whether #473's own comment was true · the mechanism is now documented in-tree at [`GoogleCastOutput.cs:95-104`](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs) · origin commit `b420edc` (2026-02-11) |
 | Depends on | — _(no row dependency; claimable now. **⚠ Touches `GoogleCastOutput.cs`, which PR #473 (`0870410`) reflowed: its header comment grew by exactly +66 lines, so EVERY anchor below `:32` in that file moved +66.** The citations in **this** row are already post-#473 and verified; any citation copied from the **`AUD-3`** row is pre-#473 and is not. Also touches `AudioStateUpdateService.cs`, which no other row claims. **No file overlap with `AUD-1`, `AUD-2` or `AUD-4`**, so it can run alongside any of them.)_ |
 | Branch | `fix/cast-initial-volume-sync-generation-check` |

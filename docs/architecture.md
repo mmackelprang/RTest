@@ -315,7 +315,7 @@ For Cast (one-way, app → device):
 
 **Bluetooth ↔ App:**
 - Linux: PipeWire's bluez5 module manages AVRCP→node volume natively with cubic (perceptual) mapping. No manual pw-cli override needed — PipeWire handles AVRCP volume sync automatically.
-- Windows: AVRCP absolute volume via WinRT (stubbed, see `design/FUTURE-WORK.md`)
+- Windows: AVRCP absolute volume via WinRT (stubbed, see `docs/known-issues-and-future-work.md`)
 
 ### Volume Persistence (not implemented)
 - No volume persistence — resets to defaults on restart

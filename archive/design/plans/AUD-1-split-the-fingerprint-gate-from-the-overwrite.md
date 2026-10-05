@@ -1,6 +1,6 @@
 # PLAN — `AUD-1` · Per-field precedence: the source's metadata wins where it exists, fingerprinting fills only what is missing
 
-> **Row:** `AUD-1`, [`docs/queue/AUD-1.md`](../../docs/queue/AUD-1.md). Index row `docs/BUILDER_QUEUE.md:33`.
+> **Row:** `AUD-1`, [`docs/queue/AUD-1.md`](../../queue/AUD-1.md). Index row `docs/BUILDER_QUEUE.md:33`.
 > **Branch:** `fix/split-shazam-fingerprint-vs-overwrite`
 > **Estimate:** **1.25 d**. §0.11 derives it. ⚠ **Up from the pre-amendment 0.75 d**, and §0.11 says why.
 > ⛔ **NOT auto-mergeable.** §0.12. Live audio path, user-visible metadata, UAT needs a phone.
@@ -26,7 +26,7 @@
 
 ### 0.0 ⛔⛔ THE OWNER DECISION, and what it replaced
 
-**Recorded 2026-09-08 in [`docs/queue/AUD-1.md`](../../docs/queue/AUD-1.md) and in the index row at
+**Recorded 2026-09-08 in [`docs/queue/AUD-1.md`](../../queue/AUD-1.md) and in the index row at
 `docs/BUILDER_QUEUE.md:33`:**
 
 > *"When metadata is available from the audio source, use the source metadata (song name, album
@@ -212,7 +212,7 @@ for this box is `deploy/debian-x64/appsettings.Production.json:43`; the *deploye
 
 **The previous revision of this plan claimed AVRCP had supplied album art 66 times between
 2026-03-05 and 2026-07-19, and that something broke on ~2026-07-19. Both claims are false and were
-withdrawn the same night in [`docs/queue/AUD-17.md`](../../docs/queue/AUD-17.md) and PR #610.** Read
+withdrawn the same night in [`docs/queue/AUD-17.md`](../../queue/AUD-17.md) and PR #610.** Read
 that dossier before touching anything in this area; the short form:
 
 - **`TrackMetadata.Source` records the TITLE's provenance, not the art's.**

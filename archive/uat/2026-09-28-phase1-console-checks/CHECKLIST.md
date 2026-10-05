@@ -1,6 +1,6 @@
 # Phase 1 — console checks at the cabinet
 
-**Source:** [`HANDOFF-GA-CLOSEOUT.md`](../../HANDOFF-GA-CLOSEOUT.md) §2. One sitting, no code.
+**Source:** [`HANDOFF-GA-CLOSEOUT.md`](../../handoffs/HANDOFF-GA-CLOSEOUT.md) §2. One sitting, no code.
 Fill in the **Result** column (✅ / ⛔ / ⚠ + a few words) and the time. Anything you can't
 decide, write what you saw — that is still a result.
 

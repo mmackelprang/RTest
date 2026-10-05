@@ -1,6 +1,6 @@
 # `AUD-16` — retire the deprecated USB radio path now that RTL-SDR is the only supported tuner
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🔵 **P3.** Filed 2026-09-08 by the `AUD-13` Planner, which found that the owner's deprecation is
 **already implemented in behaviour** and that what remains is dead surface area, not a defect.
@@ -61,7 +61,7 @@ throws on an existing deployed store. ⚠ Needs a box session; the tuner is hard
 
 ## Owner ruling 2026-09-28 — remove it all (D-D)
 
-Recorded in [`HANDOFF-GA-CLOSEOUT.md`](../HANDOFF-GA-CLOSEOUT.md) §4: **remove all support for the
+Recorded in [`HANDOFF-GA-CLOSEOUT.md`](../handoffs/HANDOFF-GA-CLOSEOUT.md) §4: **remove all support for the
 RaddyRF320BT device, including the `external/RaddyRF320BT` submodule. The RTL-SDR supersedes it.**
 The row's "keep it, documented" close is withdrawn. Scope for the removal PR, sized 2026-09-28:
 ~25 files under `src/`, `tools/` and `tests/` reference it, the core ones being `RadioFactory.cs`, `RadioAudioSource.cs`, `USBAudioSourceBase.cs`,
@@ -129,7 +129,7 @@ deploy, scripts, `.github` or `pack-local.ps1`. **LOW, all fixed in the PR:** th
 PlayHistory stores this enum (it stores `PlaySource`); `SYSTEMCONFIGURATION.md` said orphan rows are
 never read (they are loaded, but match nothing); a stale `:268` line reference; README's RTL-SDR
 device-volume cell; and two stale doc strings (Bridge example, AudioUAT P3-001). **Pre-existing, filed
-as [`AUD-89`](AUD-89.md):** the Vinyl key-casing shadow, and the `/dev/ttyUSB1` DTO default.
+as [`AUD-89`](../../docs/queue/AUD-89.md):** the Vinyl key-casing shadow, and the `/dev/ttyUSB1` DTO default.
 
 ## ✅ 2026-10-01 — shipped, deployed and agent-verified on the box (coordinator)
 

@@ -1995,7 +1995,7 @@ GV-3 shipped send against an anticipated contract. RotaryPhone's as-built endpoi
 In `design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md`, directly below the existing ADR-024 banner near the top:
 
 ```markdown
-- **⚠ Partially superseded by [ADR-028](2026-07-30-gv-sms-send-contract.md) (2026-07-30):** **Decision D7 (§7 — SMS send behind a feature flag) is superseded in full.** The request shape, the response shape, the "non-2xx = generic failure" error model, and the §7 open contract item ("confirm `SendSmsResponse` before wiring") are all replaced by the as-built contract in ADR-028. **§8 (config surface) is unaffected** — `RotaryPhone:Gv:SendEnabled` keeps its name, meaning, and `false` default. The *policy* parts of D7 still stand and are carried forward by ADR-028: never auto-retry, always preserve the composed text, single-flight per target, and the degraded gate.
+- **⚠ Partially superseded by [ADR-028](../../../docs/superpowers/plans/2026-07-30-gv-sms-send-contract.md) (2026-07-30):** **Decision D7 (§7 — SMS send behind a feature flag) is superseded in full.** The request shape, the response shape, the "non-2xx = generic failure" error model, and the §7 open contract item ("confirm `SendSmsResponse` before wiring") are all replaced by the as-built contract in ADR-028. **§8 (config surface) is unaffected** — `RotaryPhone:Gv:SendEnabled` keeps its name, meaning, and `false` default. The *policy* parts of D7 still stand and are carried forward by ADR-028: never auto-retry, always preserve the composed text, single-flight per target, and the degraded gate.
 ```
 
 - [ ] **Step 4: Update `design/FUTURE-WORK.md` and `design/INTEGRATIONS.md`**

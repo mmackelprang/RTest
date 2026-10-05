@@ -1,6 +1,6 @@
 # `UI-2` / `UI-4` / `UI-5` — Metrics leaves the nav; Settings → Diagnostics, without the fan-out
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 GA close-out §2h. Decisions **D11** (fold a trimmed diagnostics surface under Settings, kill the
 fan-out) and **D13** (delete `/diagnostic`; the route name goes to the consolidated diagnostics).

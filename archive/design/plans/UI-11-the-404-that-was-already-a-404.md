@@ -1,6 +1,6 @@
 # PLAN — `UI-11` · The unmatched `/api/*` path already returns 404. The defect is the missing contract, not a SPA fallback.
 
-> **Row:** `UI-11`, [`docs/queue/UI-11.md`](../../docs/queue/UI-11.md). 🟡 **P2.** Filed 2026-09-08.
+> **Row:** `UI-11`, [`docs/queue/UI-11.md`](../../queue/UI-11.md). 🟡 **P2.** Filed 2026-09-08.
 > **Branch:** `fix/ui-11-api-404-not-spa-fallback` (unchanged — the row's branch name is still accurate).
 > **Estimate:** **0.5 d**, and **an owner decision before Task 1**. §0.8 and §1 derive both.
 > **Auto-mergeable on green gates — the code is. The *scope* is not.** §0.9.
@@ -15,7 +15,7 @@
 
 ### 0.1 ⚠⚠ `C-301` — THE ROW'S CENTRAL PREMISE IS FALSE
 
-[`docs/queue/UI-11.md:10-16`](../../docs/queue/UI-11.md) says:
+[`docs/queue/UI-11.md:10-16`](../../queue/UI-11.md) says:
 
 > `Radio.Web`'s SPA fallback catches **everything** that does not match a route, including paths under
 > `/api/`. So a caller that asks for JSON at a mistyped or renamed API path gets:
@@ -63,7 +63,7 @@ emitted by RotaryPhone**.
 
 **Incident 1 — the `XR-2` workaround.** The row (`UI-11.md:24-26`) calls this "**Ours**". Our own
 primary record says otherwise —
-[`docs/BUILDER_QUEUE_ARCHIVE.md:99`](../../docs/BUILDER_QUEUE_ARCHIVE.md):
+[`docs/BUILDER_QUEUE_ARCHIVE.md:99`](../../queue/BUILDER_QUEUE_ARCHIVE.md):
 
 > both double-escaping (`%252F`) and a raw `/` were tested and both fail, the latter falling through to
 > **their** SPA fallback and returning `index.html` with HTTP 200.
@@ -74,7 +74,7 @@ test was `/api/gvbridge/sms/threads/…`, which lives on **RotaryPhone.API at `r
 route to miss.
 
 **Incident 2 — the wasted probe.** The verbatim source is
-[`docs/queue/inbound/2026-09-08-rotaryphone-incident-and-corrections.md:113-114`](../../docs/queue/inbound/2026-09-08-rotaryphone-incident-and-corrections.md):
+[`docs/queue/inbound/2026-09-08-rotaryphone-incident-and-corrections.md:113-114`](../../../docs/queue/inbound/2026-09-08-rotaryphone-incident-and-corrections.md):
 
 > Note the route prefix is `/api/gvbridge/sms/` — we wasted a probe on `/api/gvsms/` and got HTTP 200
 > with `index.html` back, your SPA-fallback trap biting us **in our own house**.
@@ -82,7 +82,7 @@ route to miss.
 Same host. They were retesting `XR-2` against **their own** `/api/gvbridge/sms/…` on `:5004`,
 mistyped the prefix, and their own fallback answered. "In our own house" is the phrase that settles it,
 and their next message concedes the ownership directly —
-[`2026-09-08-rotaryphone-bell-persistence-and-404.md:37`](../../docs/queue/inbound/2026-09-08-rotaryphone-bell-persistence-and-404.md):
+[`2026-09-08-rotaryphone-bell-persistence-and-404.md:37`](../../../docs/queue/inbound/2026-09-08-rotaryphone-bell-persistence-and-404.md):
 
 > **Ours has the same hole** and we are filing it on our side too.
 
@@ -898,12 +898,12 @@ case-insensitive, so `/API/…` is too — both asserted in Task 2.
 
 Replace the `UI-11` row's plan cell in `docs/BUILDER_QUEUE.md`:
 
-> `plan` [`UI-11-the-404-that-was-already-a-404.md`](../design/plans/UI-11-the-404-that-was-already-a-404.md)
+> `plan` [`UI-11-the-404-that-was-already-a-404.md`](../../../design/design/plans/UI-11-the-404-that-was-already-a-404.md)
 > · ⚠⚠ **THE ROW'S PREMISE IS FALSE — read §0.1 before claiming.** `Radio.Web` has **no SPA fallback**
 > and never has (`git log -S MapFallback -- src/` is empty; there is no `index.html` in the project).
 > An unmatched `/api/*` path **already returns 404** — measured live: `Content-Length: 0`, no
 > `Content-Type`. Both cited incidents emitted from **RotaryPhone's `:5004`**, not from us — our own
-> [archive line 99](BUILDER_QUEUE_ARCHIVE.md) says *"falling through to **their** SPA fallback"*, and
+> [archive line 99](../../../design/plans/BUILDER_QUEUE_ARCHIVE.md) says *"falling through to **their** SPA fallback"*, and
 > their message says *"in our own house"*. · **Re-scoped:** the defect is the **missing contract**, not
 > a wrong status code — a bodyless 404 on a two-service box is what cost RotaryPhone a probe.
 > **§1 is an owner decision before Task 1** (tests-only vs. tests + JSON problem body). ·

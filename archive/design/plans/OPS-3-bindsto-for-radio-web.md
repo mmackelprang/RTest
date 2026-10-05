@@ -1,6 +1,6 @@
 # PLAN — `OPS-3` · `BindsTo=` **+ `Upholds=`** for `radio-web` — two lines of unit file, and the rollout that earns it
 
-> **Row:** `OPS-3`, [`docs/queue/OPS-3.md`](../../docs/queue/OPS-3.md). Filed 2026-08-10 out of PR
+> **Row:** `OPS-3`, [`docs/queue/OPS-3.md`](../../../docs/queue/OPS-3.md). Filed 2026-08-10 out of PR
 > [#467](https://github.com/mmackelprang/RTest/pull/467)'s own pre-merge review.
 > **Branch:** `fix/systemd-bindsto-radio-web`
 > **Estimate:** **0.75 d** of build — of which **~2 h is a systemd rehearsal that is not optional** — **plus
@@ -16,7 +16,7 @@
 > ## ⭐ AMENDED 2026-09-08 — the plan's open question was measured, and the answer disproved the row
 >
 > §0.4.4 named one unmeasured behaviour as merge-gating. It was rehearsed on 2026-09-08 (full measurements:
-> [`docs/queue/OPS-3.md`](../../docs/queue/OPS-3.md) § *Rehearsal result*) and **both halves of the concern
+> [`docs/queue/OPS-3.md`](../../../docs/queue/OPS-3.md) § *Rehearsal result*) and **both halves of the concern
 > were confirmed**: `BindsTo=` propagation fires during `radio-api`'s ordinary 10 s `RestartSec` back-off,
 > and the console never returns. **`BindsTo=` alone must not ship** — it makes the appliance worse in its
 > most common failure mode.
@@ -3010,7 +3010,7 @@ done.** §10.6 carries `:1519`.
 
 ### 10.1 `docs/BUILDER_QUEUE.md` § Queue — replacement for the `OPS-3` Plan cell
 
-> [`OPS-3-bindsto-for-radio-web.md`](../design/plans/OPS-3-bindsto-for-radio-web.md) · **1.25 d + a ~45 min
+> [`OPS-3-bindsto-for-radio-web.md`](../../../design/design/plans/OPS-3-bindsto-for-radio-web.md) · **1.25 d + a ~45 min
 > supervised box session** *(re-priced twice on 2026-09-08: first to 0.75 d for two unit files, four
 > heredocs and the touch-icon task; then to 1.25 d for the readiness work — a third directive, a seventh
 > task, four new rehearsal scenarios and a rebuilt fixture)* · ⭐ **READINESS: the mechanism is
@@ -3040,7 +3040,7 @@ done.** §10.6 carries `:1519`.
 
 ### 10.2 `docs/queue/OPS-3.md` — replacement for the Plan row of the field table
 
-> | Plan | [`design/plans/OPS-3-bindsto-for-radio-web.md`](../../design/plans/OPS-3-bindsto-for-radio-web.md) — **0.75 d + a ~30 min supervised box session**, re-priced 2026-09-08 for the `Upholds=` re-scope. ✅ **Merge approved by the owner 2026-09-07; the "must NOT auto-merge" line in the Detail below is discharged and is kept for the record.** ⚠ **That approval was given for `BindsTo=` alone, which the rehearsal then disproved** — the plan's §0.9 argues it transfers to the re-scoped shape because that shape is strictly better on the axis the owner weighed, and states the three new costs it does *not* cover. |
+> | Plan | [`design/plans/OPS-3-bindsto-for-radio-web.md`](OPS-3-bindsto-for-radio-web.md) — **0.75 d + a ~30 min supervised box session**, re-priced 2026-09-08 for the `Upholds=` re-scope. ✅ **Merge approved by the owner 2026-09-07; the "must NOT auto-merge" line in the Detail below is discharged and is kept for the record.** ⚠ **That approval was given for `BindsTo=` alone, which the rehearsal then disproved** — the plan's §0.9 argues it transfers to the re-scoped shape because that shape is strictly better on the axis the owner weighed, and states the three new costs it does *not* cover. |
 
 And append to § Detail, **after** the existing *Rehearsal result, 2026-09-08* section:
 
@@ -3070,7 +3070,7 @@ And append to § Detail, **after** the existing *Rehearsal result, 2026-09-08* s
 >   disproved**; the row is re-scoped to `BindsTo=` + `Upholds=` and the plan's §0.9 argues why the approval
 >   transfers and what it does not cover. ⚠ **The reason the exemption existed has not gone away and is now
 >   a plan section rather than a blocker:** green gates cannot observe unit-file propagation, so the merge
->   gate is [the plan](../../design/plans/OPS-3-bindsto-for-radio-web.md) §4's systemd rehearsal
+>   gate is [the plan](OPS-3-bindsto-for-radio-web.md) §4's systemd rehearsal
 >   (`S1`+`S6`+`S7`+`S8`+`S9`), not the suite. ⭐ **What makes merging genuinely low-risk is that it changes
 >   nothing on the box** — `Deploy-ToLinux.ps1` does not install unit files, so `radio` keeps `Requires=`
 >   until a human runs the plan's §5.
@@ -3164,7 +3164,7 @@ each was caught by going to the source that the thing was a summary of.**
 
 **This row now ships `BindsTo=` on web + `Upholds=` on api, and nothing else.** Every readiness task
 in this plan — `ExecStartPost=`, the `S12`/`S12a`/`S13`/`S14` rehearsals, the 20 s ceiling derivation
-— **moves to `OPS-10`** ([`queue/OPS-10.md`](../../docs/queue/OPS-10.md)). The analysis is deliberately
+— **moves to `OPS-10`** ([`queue/OPS-10.md`](../../../docs/queue/OPS-10.md)). The analysis is deliberately
 left in place here rather than deleted, because it is the reasoning `OPS-10` inherits.
 
 ## Why the scope changed: `C-202`'s harm was false

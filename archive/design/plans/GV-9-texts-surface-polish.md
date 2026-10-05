@@ -1,13 +1,13 @@
 # PLAN — `GV-9` · Texts-surface polish: an overflow, a 20px jump, and a guard the dead copy never got
 
-> **Row:** `GV-9`, [`docs/queue/GV-9.md`](../../docs/queue/GV-9.md). 📋 queued, `_plan TBD (small; **no longer CSS-only**)_`.
+> **Row:** `GV-9`, [`docs/queue/GV-9.md`](../../queue/GV-9.md). 📋 queued, `_plan TBD (small; **no longer CSS-only**)_`.
 > **Branch:** `fix/gv-texts-polish-overflow-unread-align` (the row names it).
 > **Depends on:** `GV-3` ✅ merged. `GV-8` ✅ merged (#461) — the guard idiom to copy. `GV-4` ✅ merged
 > (#441) — wired the mark-read that made `F-7` visible.
 > **Estimate:** **0.5 d.** §0.6 says what would push it to 1 d.
-> **Spec:** [UAT F-4 / F-7](../../docs/uat/2026-07-31-gv-live-data/REPORT.md) ·
-> [GV-8 UAT (guard provenance)](../../docs/uat/2026-07-31-gv8-error-state/REPORT.md) ·
-> [handoff](../../docs/design-handoffs/HANDOFF-phone-dark-theme-and-scrollbars.md).
+> **Spec:** [UAT F-4 / F-7](../../uat/2026-07-31-gv-live-data/REPORT.md) ·
+> [GV-8 UAT (guard provenance)](../../uat/2026-07-31-gv8-error-state/REPORT.md) ·
+> [handoff](../../design-handoffs/HANDOFF-phone-dark-theme-and-scrollbars.md).
 > **Planned against** `main` at **`084a6bbd`**. ⚠ **Every line number in the row itself was
 > re-derived against that commit and MOST OF THEM HAD MOVED** — see §0.3, which is the most
 > important section in this plan. Where a line is likely to move again it is quoted as well as
@@ -784,7 +784,7 @@ editing queue files concurrently. The wording below is for whoever applies it.
 **`docs/BUILDER_QUEUE.md` § Queue, `GV-9` row — Plan cell**, replacing `_plan TBD (small; **no longer
 CSS-only** — two CSS fixes plus one `.razor` guard and its missing test)_`:
 
-> [`design/plans/GV-9-texts-surface-polish.md`](../design/plans/GV-9-texts-surface-polish.md) — 0.5 d
+> [`design/plans/GV-9-texts-surface-polish.md`](../../../design/design/plans/GV-9-texts-surface-polish.md) — 0.5 d
 
 **`docs/queue/GV-9.md`, suggested additions** (as a dated note; do not rewrite the verbatim Detail):
 

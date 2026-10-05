@@ -1,20 +1,20 @@
 # AUD-2 — One key per source: four primary sources register under a minted key and are addressed by `IAudioSource.Id`, so gain and ducking miss silently.
 
-> Queue dossier for row **`AUD-2`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`AUD-2`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | 📋 |
-| Plan | [`design/plans/AUD-2-one-key-per-source.md`](../../design/plans/AUD-2-one-key-per-source.md) |
+| Plan | [`design/plans/AUD-2-one-key-per-source.md`](../design/plans/AUD-2-one-key-per-source.md) |
 | Spec / handoff | _no spec doc — the diagnosis is in this row_ · `CLAUDE.md` § Architecture (ducking as a core pattern) |
-| Depends on | — _(no row dependency; claimable now. **⚠ The "same root as `AUD-4` — prefer claiming `AUD-2` FIRST" note that stood here was FALSIFIED 2026-09-06 while planning `AUD-4`, and is removed rather than softened.** They are unrelated bugs: this row is a key-identity defect in a *third party* (`AudioManager` addressing a source by `Id` when the source registered under a key it minted), while `AUD-4`'s roster is keyed by **object reference** and involves no string key at all — so there is no key here for `AUD-4` to wait on, and per-source teardown is key-symmetric. **Either may be claimed first.** See [`AUD-4`'s plan](../../design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md) §0.4, `C-148`, `C-150`.)_ |
+| Depends on | — _(no row dependency; claimable now. **⚠ The "same root as `AUD-4` — prefer claiming `AUD-2` FIRST" note that stood here was FALSIFIED 2026-09-06 while planning `AUD-4`, and is removed rather than softened.** They are unrelated bugs: this row is a key-identity defect in a *third party* (`AudioManager` addressing a source by `Id` when the source registered under a key it minted), while `AUD-4`'s roster is keyed by **object reference** and involves no string key at all — so there is no key here for `AUD-4` to wait on, and per-source teardown is key-symmetric. **Either may be claimed first.** See [`AUD-4`'s plan](../design/plans/AUD-4-unify-source-removal-and-rename-the-mixer.md) §0.4, `C-148`, `C-150`.)_ |
 | Branch | `fix/sdr-playback-id-ducking-gain` |
 
 ## Detail

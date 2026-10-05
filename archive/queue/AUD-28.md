@@ -1,6 +1,6 @@
 # `AUD-28` — the seek bar seeks on every drag frame, so scrubbing stutters
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-10 from the owner's `AUD-24` UAT, on `9ca42590`.
 

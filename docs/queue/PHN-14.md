@@ -25,7 +25,7 @@ phone connected. *(Was: built 2026-10-03, held for the owner's real-call UAT, no
 ⚠ **The API announcement's RotaryPhone fallback has never answered.** `PhoneContactLookupService` asked for
 `GET {ContactsApiBaseUrl}/api/contacts/lookup?phone=`, a route RotaryPhone has never had: its `ContactsController`
 maps `GET /api/contacts/{id}`, so `lookup` was read as a contact id and every request 404'd. The design notes had
-recorded that contract as "assumed" (`design/FUTURE-WORK.md`). The Web banner's fallback worked because it has
+recorded that contract as "assumed" (`docs/known-issues-and-future-work.md`). The Web banner's fallback worked because it has
 always read the list, `GET /api/contacts`. So until this row the spoken announcement used **neither** source with
 no phone connected.
 

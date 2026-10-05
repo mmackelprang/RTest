@@ -1,6 +1,6 @@
 # `AUD-96` — queue rows are re-read from the NAS on every request, and the 500 ms poller does it continuously
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 ✅ **SHIPPED 2026-10-02.** Owner panel UAT passed (*"UAT - these all pass"*) on the combined test build `552396d`; merged via [#771](https://github.com/mmackelprang/RTest/pull/771). The status lines below were true until then.
 

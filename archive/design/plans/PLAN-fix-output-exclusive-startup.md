@@ -14,10 +14,10 @@ After restarting `radio-api.service` with persisted `AudioPreferences:CurrentOut
 
 ## 2. Root cause
 
-The "exactly one active output" invariant is enforced as a **convention** — every site that activates a virtual output (Cast or HTTP stream) must remember to also call `_audioEngine.SetLocalOutputMuted(true)` (and the local-device path must remember the `false` counterpart). Four runtime sites in [`DevicesController.cs`](../../src/Radio.API/Controllers/DevicesController.cs) honor the convention (lines 205, 214, 226, 691, 736, 744, 1341), but the startup path in [`AudioEngineInitializationService.ActivateVirtualOutputsForCastAsync`](../../src/Radio.API/Services/AudioEngineInitializationService.cs) (lines 365–442) does not. On restart:
+The "exactly one active output" invariant is enforced as a **convention** — every site that activates a virtual output (Cast or HTTP stream) must remember to also call `_audioEngine.SetLocalOutputMuted(true)` (and the local-device path must remember the `false` counterpart). Four runtime sites in [`DevicesController.cs`](../../../src/Radio.API/Controllers/DevicesController.cs) honor the convention (lines 205, 214, 226, 691, 736, 744, 1341), but the startup path in [`AudioEngineInitializationService.ActivateVirtualOutputsForCastAsync`](../../../src/Radio.API/Services/AudioEngineInitializationService.cs) (lines 365–442) does not. On restart:
 
-1. `_audioEngine.StartAsync()` at [`AudioEngineInitializationService.cs:84`](../../src/Radio.API/Services/AudioEngineInitializationService.cs) starts the local PipeWire device unmuted (default state of `_localOutputMuted` is `false` — [`SoundFlowAudioEngine.cs:46`](../../src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs), in-memory only, not persisted).
-2. [`ActivateVirtualOutputsForCastAsync`](../../src/Radio.API/Services/AudioEngineInitializationService.cs) (lines 365–442) activates Cast + HTTP stream and auto-connects in the background, but never calls `_audioEngine.SetLocalOutputMuted(true)`.
+1. `_audioEngine.StartAsync()` at [`AudioEngineInitializationService.cs:84`](../../../src/Radio.API/Services/AudioEngineInitializationService.cs) starts the local PipeWire device unmuted (default state of `_localOutputMuted` is `false` — [`SoundFlowAudioEngine.cs:46`](../../../src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs), in-memory only, not persisted).
+2. [`ActivateVirtualOutputsForCastAsync`](../../../src/Radio.API/Services/AudioEngineInitializationService.cs) (lines 365–442) activates Cast + HTTP stream and auto-connects in the background, but never calls `_audioEngine.SetLocalOutputMuted(true)`.
 3. Both outputs play.
 
 A convention-based invariant guarded by four scattered call sites is the architectural divergence root cause: any new activation path will inherit the same bug unless the author remembers to write the partner call. Centralization eliminates that footgun for all future paths.
@@ -30,7 +30,7 @@ A convention-based invariant guarded by four scattered call sites is the archite
 
 **Why not a new `ActiveOutputCoordinator` service:**
 
-- The existing codebase already has `IAudioEngine.SetLocalOutputMuted` + `IAudioEngine.IsLocalOutputMuted` ([IAudioEngine.cs:77–85](../../src/Radio.Core/Interfaces/Audio/IAudioEngine.cs)). The "active output" concept is already an engine-level concern that just hasn't been named.
+- The existing codebase already has `IAudioEngine.SetLocalOutputMuted` + `IAudioEngine.IsLocalOutputMuted` ([IAudioEngine.cs:77–85](../../../src/Radio.Core/Interfaces/Audio/IAudioEngine.cs)). The "active output" concept is already an engine-level concern that just hasn't been named.
 - A new coordinator service would need to be injected at five sites (DevicesController + AudioEngineInitializationService); extending `IAudioEngine` is one new method on an interface every caller already holds.
 - The plan to introduce a coordinator was rejected in the Coordinator's own scope note as "pick whichever is more idiomatic for this codebase" — the prevailing pattern is to put audio-graph state on `IAudioEngine` (volume, mute, balance via master mixer; local-output-mute already on the engine). A new singleton would diverge from that pattern with no payoff.
 
@@ -68,7 +68,7 @@ Each task is one commit. Tasks are ordered so the gate is in place and tested be
 **Files:**
 - Modify: `src/Radio.Core/Interfaces/Audio/IAudioEngine.cs`
 
-**Step 1:** After the existing `SetLocalOutputMuted` declaration at [IAudioEngine.cs:85](../../src/Radio.Core/Interfaces/Audio/IAudioEngine.cs), add:
+**Step 1:** After the existing `SetLocalOutputMuted` declaration at [IAudioEngine.cs:85](../../../src/Radio.Core/Interfaces/Audio/IAudioEngine.cs), add:
 
 ```csharp
 /// <summary>
@@ -108,7 +108,7 @@ git commit -m "feat(audio): add IAudioEngine.SetActiveOutputAsync + ActiveOutput
 - Modify: `src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs`
 - Modify: `src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs`
 
-**Step 1: Add optional Cast/HTTP output + config-manager fields to `SoundFlowAudioEngine`.** Near the existing fields at [SoundFlowAudioEngine.cs:33–48](../../src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs):
+**Step 1: Add optional Cast/HTTP output + config-manager fields to `SoundFlowAudioEngine`.** Near the existing fields at [SoundFlowAudioEngine.cs:33–48](../../../src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs):
 
 ```csharp
 // Optional virtual-output references for SetActiveOutputAsync. Injected
@@ -147,7 +147,7 @@ internal void AttachOutputCoordination(
 public string? ActiveOutputId => _activeOutputId;
 ```
 
-**Step 4: Implement `SetActiveOutputAsync`.** Place after `SetLocalOutputMuted` at [SoundFlowAudioEngine.cs:137–142](../../src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs):
+**Step 4: Implement `SetActiveOutputAsync`.** Place after `SetLocalOutputMuted` at [SoundFlowAudioEngine.cs:137–142](../../../src/Radio.Infrastructure/Audio/SoundFlow/SoundFlowAudioEngine.cs):
 
 ```csharp
 /// <inheritdoc/>
@@ -253,9 +253,9 @@ private async Task PersistActiveOutputAsync(string outputId, CancellationToken c
 }
 ```
 
-**Step 5: Wire `AttachOutputCoordination` from DI.** In `AudioServiceExtensions.AddSoundFlowAudio` at [AudioServiceExtensions.cs:84–94](../../src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs), the engine is already a singleton. Add a hosted-service-style wire-up so the engine gets its output refs once all singletons exist. Simplest path: extend the existing engine factory to resolve the outputs lazily through a callback after construction:
+**Step 5: Wire `AttachOutputCoordination` from DI.** In `AudioServiceExtensions.AddSoundFlowAudio` at [AudioServiceExtensions.cs:84–94](../../../src/Radio.Infrastructure/DependencyInjection/AudioServiceExtensions.cs), the engine is already a singleton. Add a hosted-service-style wire-up so the engine gets its output refs once all singletons exist. Simplest path: extend the existing engine factory to resolve the outputs lazily through a callback after construction:
 
-The cleanest wiring is to do the attach from `AudioEngineInitializationService.StartAsync` *before* `_audioEngine.InitializeAsync` runs. That service already has refs to `_castOutput`, `_httpOutput`, and `_configManager` (lines 60–64). Add at the top of `StartAsync` (right after the orphan-cleanup call, before `InitializeAsync` at [AudioEngineInitializationService.cs:81](../../src/Radio.API/Services/AudioEngineInitializationService.cs)):
+The cleanest wiring is to do the attach from `AudioEngineInitializationService.StartAsync` *before* `_audioEngine.InitializeAsync` runs. That service already has refs to `_castOutput`, `_httpOutput`, and `_configManager` (lines 60–64). Add at the top of `StartAsync` (right after the orphan-cleanup call, before `InitializeAsync` at [AudioEngineInitializationService.cs:81](../../../src/Radio.API/Services/AudioEngineInitializationService.cs)):
 
 ```csharp
 // Wire the virtual outputs into the engine so SetActiveOutputAsync can
@@ -290,7 +290,7 @@ git commit -m "feat(audio): implement SetActiveOutputAsync gate on SoundFlowAudi
 **Files:**
 - Create: `tests/Radio.Infrastructure.Tests/Audio/SoundFlowAudioEngineActiveOutputTests.cs`
 
-**Step 1:** Write tests covering the four gate behaviors. Use the existing `SoundFlowAudioEngineTests.cs` as a template for engine construction + mocked outputs. The tests do not need a real audio device — `_castOutput` and `_httpOutput` are mocked via `Moq` (already used in the project per [BluetoothAutoSwitchServiceTests.cs](../../tests/Radio.Infrastructure.Tests/Audio/Services/BluetoothAutoSwitchServiceTests.cs)).
+**Step 1:** Write tests covering the four gate behaviors. Use the existing `SoundFlowAudioEngineTests.cs` as a template for engine construction + mocked outputs. The tests do not need a real audio device — `_castOutput` and `_httpOutput` are mocked via `Moq` (already used in the project per [BluetoothAutoSwitchServiceTests.cs](../../../tests/Radio.Infrastructure.Tests/Audio/Services/BluetoothAutoSwitchServiceTests.cs)).
 
 ```csharp
 using Moq;
@@ -429,7 +429,7 @@ git commit -m "test(audio): unit tests for SetActiveOutputAsync output gate"
 **Files:**
 - Modify: `src/Radio.API/Services/AudioEngineInitializationService.cs`
 
-**Step 1:** Replace the startup activation in [`ApplyStartupPreferencesAsync`](../../src/Radio.API/Services/AudioEngineInitializationService.cs) at lines 180–189:
+**Step 1:** Replace the startup activation in [`ApplyStartupPreferencesAsync`](../../../src/Radio.API/Services/AudioEngineInitializationService.cs) at lines 180–189:
 
 **Before:**
 ```csharp
@@ -583,7 +583,7 @@ git commit -m "fix(audio): use SetActiveOutputAsync gate in startup path (fixes 
 **Files:**
 - Modify: `src/Radio.API/Controllers/DevicesController.cs`
 
-**Step 1:** Replace [`SetOutputDevice` lines 197–226](../../src/Radio.API/Controllers/DevicesController.cs):
+**Step 1:** Replace [`SetOutputDevice` lines 197–226](../../../src/Radio.API/Controllers/DevicesController.cs):
 
 **Before** (the three-branch convention block at lines 197–226):
 ```csharp
@@ -918,7 +918,7 @@ git commit -m "test(api): integration test for startup-path output gate dispatch
 **Files:**
 - Modify: `src/Radio.API/Services/AudioEngineInitializationService.cs`
 
-**Step 1:** Before `_audioEngine.StopAsync` at [`StopAsync` lines 600–607](../../src/Radio.API/Services/AudioEngineInitializationService.cs), send the existing graceful-stop sequence to the Chromecast (the existing `GoogleCastOutput.StopAsync` at [GoogleCastOutput.cs:751](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs) already does media stop + DirectChannel teardown; we just need to invoke it before the engine shuts down).
+**Step 1:** Before `_audioEngine.StopAsync` at [`StopAsync` lines 600–607](../../../src/Radio.API/Services/AudioEngineInitializationService.cs), send the existing graceful-stop sequence to the Chromecast (the existing `GoogleCastOutput.StopAsync` at [GoogleCastOutput.cs:751](../../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs) already does media stop + DirectChannel teardown; we just need to invoke it before the engine shuts down).
 
 **Before:**
 ```csharp
@@ -988,7 +988,7 @@ public async Task StopAsync(CancellationToken cancellationToken)
 }
 ```
 
-**Step 2: Verify the GoogleCastOutput.StopAsync signature accepts a CancellationToken** — confirmed at [GoogleCastOutput.cs:751](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs). The MediaChannel.StopAsync internal timeout is also 5s ([GoogleCastOutput.cs:781](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs)); our outer 5s CTS is the upper bound for both the media stop and the disconnect combined.
+**Step 2: Verify the GoogleCastOutput.StopAsync signature accepts a CancellationToken** — confirmed at [GoogleCastOutput.cs:751](../../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs). The MediaChannel.StopAsync internal timeout is also 5s ([GoogleCastOutput.cs:781](../../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs)); our outer 5s CTS is the upper bound for both the media stop and the disconnect combined.
 
 **Step 3: Build + run**
 
@@ -1141,9 +1141,9 @@ If any scenario fails, capture journalctl + pactl output and feed back to Planne
 
 1. **PipeWire device startup race.** `_audioEngine.StartAsync` at line 84 starts the local device before the gate is called (line 116 → 183). For ~30–100 ms between those two points, the local device is unmuted. If audio is already in the mixer (it isn't, because source activation happens later at line 125), it would briefly leak. Mitigation: this window is post-init/pre-source, so no audio is flowing through the mixer yet. Verified by tracing the startup sequence; no fix needed but worth noting.
 2. **Cast auto-connect timing.** The Cast auto-connect runs in a background `Task.Run` with a hard-coded 3 s delay (line 408) to let mDNS populate the cache. The gate completes before that delay starts, so the local output is correctly muted during the wait — but if the Cast device never connects (offline / mDNS fails), the user gets silence. This is the existing behavior; the gate doesn't make it worse. A follow-up could add a watchdog that falls back to local after N seconds of failed Cast connect, but that's out of scope.
-3. **`GoogleCastOutput.StopAsync` timeout under network partition.** If the Chromecast is unreachable when `radio-api` stops, the 5 s CTS in Task 10 caps the wait. The exception is logged and swallowed; engine shutdown continues. Verified against existing exception-handling at [GoogleCastOutput.cs:784–805](../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs) which already handles `TimeoutException` and `INVALID_MEDIA_SESSION_ID` gracefully.
+3. **`GoogleCastOutput.StopAsync` timeout under network partition.** If the Chromecast is unreachable when `radio-api` stops, the 5 s CTS in Task 10 caps the wait. The exception is logged and swallowed; engine shutdown continues. Verified against existing exception-handling at [GoogleCastOutput.cs:784–805](../../../src/Radio.Infrastructure/Audio/Outputs/GoogleCastOutput.cs) which already handles `TimeoutException` and `INVALID_MEDIA_SESSION_ID` gracefully.
 4. **`SetActiveOutputAsync` SemaphoreSlim deadlock risk.** The gate uses a `SemaphoreSlim(1,1)` and may be called from controller handlers + startup + the disconnect catch block. None of these call sites hold the lock and re-enter, but if a future caller does (e.g. a callback inside `_castOutput.StartAsync` that re-invokes the gate), it will deadlock. Documented in the method's XML doc. Builder should also add a debug-log of the caller's stack depth via `Activity.Current` if observability becomes an issue.
-5. **DI wiring via `AttachOutputCoordination` is order-sensitive.** If `AudioEngineInitializationService.StartAsync` runs before all output singletons are constructed (e.g. a future hosted service runs ordered before it), the engine's `_castOutput`/`_httpOutput` fields stay null and the gate silently no-ops on Cast/HTTP activation. Mitigation: the existing constructor at [AudioEngineInitializationService.cs:60–64](../../src/Radio.API/Services/AudioEngineInitializationService.cs) eagerly resolves all three from the service provider, so they ARE constructed by the time `StartAsync` runs. Confirmed by reading the existing service constructor.
+5. **DI wiring via `AttachOutputCoordination` is order-sensitive.** If `AudioEngineInitializationService.StartAsync` runs before all output singletons are constructed (e.g. a future hosted service runs ordered before it), the engine's `_castOutput`/`_httpOutput` fields stay null and the gate silently no-ops on Cast/HTTP activation. Mitigation: the existing constructor at [AudioEngineInitializationService.cs:60–64](../../../src/Radio.API/Services/AudioEngineInitializationService.cs) eagerly resolves all three from the service provider, so they ARE constructed by the time `StartAsync` runs. Confirmed by reading the existing service constructor.
 6. **Test brittleness around Moq construction of `GoogleCastOutput`.** Task 3 notes that `GoogleCastOutput`'s constructor has many dependencies. If `Mock<GoogleCastOutput>` proves too painful, the Builder is empowered to refactor the engine's private fields from concrete to `IAudioOutput?` — that change does not affect any production caller and makes the tests cleaner.
 
 ---
@@ -1153,6 +1153,6 @@ If any scenario fails, capture journalctl + pactl output and feed back to Planne
 - Persisting `_localOutputMuted` to config — made redundant by centralizing the activation through the gate. `_activeOutputId` is the authoritative state; mute is a derived consequence.
 - HTTP stream endpoint gating (separate concern; not the source of this bug).
 - BT, phone, RotaryPhone, or any non-output-routing changes.
-- Output picker UI work — covered by [docs/plans/2026-05-22-output-picker-ui.md](../../docs/plans/2026-05-22-output-picker-ui.md).
+- Output picker UI work — covered by [docs/plans/2026-05-22-output-picker-ui.md](../../plans/2026-05-22-output-picker-ui.md).
 - DirectChannel vs HttpMp3 mode-switching logic — preserved as-is in the gate (both paths activate HTTP; DirectChannel callers can pre-stop HTTP if they want, but no current caller does).
 - Concurrent-output (multi-output) future work — the gate intentionally enforces "exactly one"; multi-output requires a separate design.

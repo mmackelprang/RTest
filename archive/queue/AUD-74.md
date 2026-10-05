@@ -1,6 +1,6 @@
 # `AUD-74` — ducking "ends" during a new attack
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-28; found by the `AUD-26` reviewer (code read). Predates `AUD-26`.
 

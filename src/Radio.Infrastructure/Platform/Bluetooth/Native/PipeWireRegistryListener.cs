@@ -22,7 +22,7 @@ internal sealed class BtNodeRegistryEventArgs : EventArgs
   /// target.object as &lt;node.name|object.serial&gt;, and says the DEPRECATED node.target is the one
   /// that took an object.id. A global id is reused after its object is destroyed; a serial is not.
   /// Measured on the appliance, from our own log: id=71 / serial=58921 and id=76 / serial=58968
-  /// (docs/queue/AUD-10.md, 2026-09-25). The serial is <see cref="ObjectSerial"/>. This id is only
+  /// (archive/queue/AUD-10.md, 2026-09-25). The serial is <see cref="ObjectSerial"/>. This id is only
   /// good for things that genuinely take a global id — <c>wpctl set-volume</c>, and matching the
   /// later <c>global_remove</c>.
   /// </remarks>

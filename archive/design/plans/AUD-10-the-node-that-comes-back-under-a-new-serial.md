@@ -1,7 +1,7 @@
 # PLAN — `AUD-10` + `AUD-11` · The capture stream follows the BT node across pause/resume, and refuses everything else
 
-**Rows:** [`AUD-10`](../../docs/queue/AUD-10.md) (resume never restores audio) and
-[`AUD-11`](../../docs/queue/AUD-11.md) (the stream falls back to the line-in). **One event, seen from two
+**Rows:** [`AUD-10`](../../queue/AUD-10.md) (resume never restores audio) and
+[`AUD-11`](../../queue/AUD-11.md) (the stream falls back to the line-in). **One event, seen from two
 sides — planned together.** This plan **amends**
 [`AUD-11-the-capture-that-recorded-the-wrong-jack.md`](AUD-11-the-capture-that-recorded-the-wrong-jack.md)
 rather than replacing it: that plan's Tasks 1–7 stand, except where §2 below says otherwise.

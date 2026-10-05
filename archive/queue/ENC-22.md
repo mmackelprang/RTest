@@ -1,6 +1,6 @@
 # `ENC-22` — power the panel off after a period in sleep; any knob wakes it
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1 — owner request 2026-09-28, GA scope.** *"After some period of time in sleep mode, the LCD should
 go into 'low/no' power mode and wake up with any knob touch. We should test whether this is possible

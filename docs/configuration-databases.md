@@ -431,6 +431,6 @@ Information about a backup.
 
 ## See Also
 
-- [CONFIGURATION.md](./CONFIGURATION.md) - General configuration infrastructure
-- [METRICS.md](./METRICS.md) - Metrics system documentation
-- [SOUNDFINGERPRINTING.md](./SOUNDFINGERPRINTING.md) - Audio fingerprinting documentation
+- [CONFIGURATION.md](../archive/design/CONFIGURATION.md) - General configuration infrastructure
+- [METRICS.md](metrics.md) - Metrics system documentation
+- [SOUNDFINGERPRINTING.md](fingerprinting.md) - Audio fingerprinting documentation

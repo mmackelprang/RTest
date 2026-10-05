@@ -1,6 +1,6 @@
 # `AUD-35` — the identification loop busy-spins a CPU core whenever there is nothing to identify
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🔴 **P1.** Filed 2026-09-26. Suspected by `AUD-33`'s adversarial reviewer from the code; **measured on the
 box the same hour.**

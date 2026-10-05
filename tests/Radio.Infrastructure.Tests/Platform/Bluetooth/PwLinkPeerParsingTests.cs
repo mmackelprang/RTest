@@ -7,7 +7,7 @@ namespace Radio.Infrastructure.Tests.Platform.Bluetooth;
 /// </summary>
 /// <remarks>
 /// ⭐ The two single-line fixtures are real: they are the <c>pw-link -l</c> lines recorded on the
-/// appliance during the AUD-11 incident, verbatim from docs/queue/AUD-11.md (the healthy binding and
+/// appliance during the AUD-11 incident, verbatim from archive/queue/AUD-11.md (the healthy binding and
 /// the line-in it fell back to). The indented fixtures are the shape the existing in-tree pw-link
 /// parsers (DisconnectAllLinksToPort) read; which shape the box's pw-link prints was not settled, so
 /// both are pinned.
@@ -16,7 +16,7 @@ public class PwLinkPeerParsingTests
 {
   private const string Stream = "radio-bt-stream";
 
-  // Verbatim from docs/queue/AUD-11.md:18 and :21.
+  // Verbatim from archive/queue/AUD-11.md:18 and :21.
   private const string HealthyLine =
     "radio-bt-stream:input_FL  <- bluez_input.B0_D5_FB_D2_0D_68.2:output_FL   [active]";
   private const string DefectiveLine =

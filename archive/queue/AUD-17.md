@@ -1,6 +1,6 @@
 # `AUD-17` — AVRCP album art has never worked: we read the wrong attribute from the wrong interface
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-08, then **substantially rewritten the same night after both of its original
 claims were measured and found false.** The retraction is kept in full at the bottom, because the way
@@ -184,7 +184,7 @@ Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening ba
 
 Owner 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §D): *"AUD-17 recommendation is fine."* That is **option A**: close the dead AVRCP cover-art code path. BT album art continues to come from song recognition (SongRec), which the owner passed the same day. Option B (BlueZ experimental cover art) is declined; nothing goes to the boundary doc.
 
-**The row is now buildable as a small removal PR, sequenced with Phase 2i (confirm-or-close) in [`HANDOFF-GA-CLOSEOUT.md`](../HANDOFF-GA-CLOSEOUT.md).** Scope, from option A above:
+**The row is now buildable as a small removal PR, sequenced with Phase 2i (confirm-or-close) in [`HANDOFF-GA-CLOSEOUT.md`](../handoffs/HANDOFF-GA-CLOSEOUT.md).** Scope, from option A above:
 
 1. Remove the never-firing `ArtUrl` / `mpris:artUrl` read off the `org.bluez.MediaPlayer1` proxy (`LinuxBluetoothService.cs:2761-2765` as of 2026-09-08 — re-anchor by symbol before editing) and `CacheAvrcpArtAsync`'s unreachable branch.
 2. Fix the comments and the `:339` / `:358` log strings that say "MPRIS" about a BlueZ interface.
@@ -218,7 +218,7 @@ code with no tests. So it is **kept, renamed `CacheSourceSuppliedArtAsync`**, an
 lines now say it never runs on the appliance. The fill path (`OnTrackIdentified`,
 `CacheAndSetCoverArtUrlAsync`) received comment edits only.
 
-**Found along the way → [`AUD-88`](AUD-88.md):** on Windows the consumer silently drops the SMTC art. The
+**Found along the way → [`AUD-88`](../../docs/queue/AUD-88.md):** on Windows the consumer silently drops the SMTC art. The
 watcher hands on an already-local `/api/albumart/...` path, and `SaveFromUrlAsync` (whose `HttpClient`
 has no `BaseAddress`) returns null for it. This is dev-host only.
 
@@ -254,4 +254,4 @@ still appear about 15 s in, through song recognition.
 
 Reported by the coordinator on 2026-10-04: `AUD-17` (Bluetooth album art) passes owner UAT. This closes the "Owner check left" line above.
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

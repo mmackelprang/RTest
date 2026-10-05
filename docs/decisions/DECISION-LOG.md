@@ -354,7 +354,7 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 **Status:** Proposed (Architect)
 **Summary:** `Radio.Web` consumes RotaryPhone's `gvbridge` voicemail + GV-SMS contract directly at `radio:5004` (no Radio.API proxy), extends the existing `GvBridgeApiService` + `PhoneHubService` (`/hub`), plays voicemail audio via a native `<audio>` element pointed at an absolute `radio:5004` Range-capable URL (NOT the no-Range album-art proxy), polls `/api/gvbridge/status` via a new `GvBridgeStatusService` singleton, and gates SMS send behind `RotaryPhone:Gv:SendEnabled` (default off). Future `X-RotaryPhone-Auth` header wired as an off-by-default seam.
 
-**Full ADR:** [`design/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md`](decisions/2026-06-20-gvbridge-voicemail-sms-integration.md)
+**Full ADR:** [`docs/decisions/2026-06-20-gvbridge-voicemail-sms-integration.md`](2026-06-20-gvbridge-voicemail-sms-integration.md)
 
 ---
 
@@ -382,7 +382,7 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 **Supersedes:** ADR-022's UI-local read-state stance (`VoicemailItemDto.IsRead` note, §10 mark-read stub, §12 open question #3).
 **Summary:** RotaryPhone ratified the durable mark-read contract. Read-state is now **GV write-through — Google is the single source of truth, no local read-state store on either side.** Two idempotent routes (`POST /api/gvbridge/voicemail/{id}/read`, `POST /api/gvbridge/sms/threads/{threadId}/read`), body `{ "isRead": bool }`, each returning the updated frozen DTO (`200` applied-or-no-op, `404` unknown, `502` upstream-GV — keep optimistic flip and reconcile). A unified `ReadStateChanged` event rides the existing `/hub` (broadcast unconditionally incl. originator → consumer de-dupes by `(id/threadId + isRead)`). Consumer delta (GV-4, behind `RotaryPhone:Gv:MarkReadEnabled` default-off, builds now): wire existing `MarkVoicemailReadAsync` + add `MarkSmsThreadReadAsync` on `GvBridgeApiService`, add `ReadStateChangedDto` + handler on `PhoneHubService`, drop UI-local read-state. Unread best-effort (v1 sends `isRead:true` only, toggle hidden). Auth: no new posture — covered by the existing `/api/gvbridge/*` prefix gate.
 
-**Full ADR:** [`design/decisions/2026-06-20-gv-mark-read-durable-readstate.md`](decisions/2026-06-20-gv-mark-read-durable-readstate.md)
+**Full ADR:** [`docs/decisions/2026-06-20-gv-mark-read-durable-readstate.md`](2026-06-20-gv-mark-read-durable-readstate.md)
 
 ---
 
@@ -399,7 +399,7 @@ Shared directory: `/opt/radio-console/{api,web,data,logs}`
 - **rAF-driven transform** — works but runs per-frame on the main thread; WAAPI keeps per-frame work on the compositor and JS only runs at text changes / leg boundaries.
 - **Raise RtConfirmThreshold only** — rejected; consecutive-assembly counting confirms any stable state (including corrupt chars that sit in the buffer) regardless of threshold, and higher thresholds punish legitimate complete messages.
 
-**Verification:** 12 `RadioTextAssemblerTests` (direct group 2A/2B frames: loss, corruption, A/B rotation, unterminated), 32 buffer tests incl. a 5 000-append leak bound, 13 `MarqueeTextDiffTests`, bUnit interop-contract tests (init-once / append-with-trim / swap / reset / dispose-on-unmount / zero calls on telemetry ticks), and a Playwright harness against the real engine in Chromium: measured 40.1 px/s at configured 40, append offset 48.8→48.8 (no snap), front-trim glyph position 84.7→84.7 px (invariant), hover pause drift 0.00 px, clean dispose (docs/uat/rds-marquee-harness-results.png). Final confirmation needs the live kiosk + real RDS station (owner UAT).
+**Verification:** 12 `RadioTextAssemblerTests` (direct group 2A/2B frames: loss, corruption, A/B rotation, unterminated), 32 buffer tests incl. a 5 000-append leak bound, 13 `MarqueeTextDiffTests`, bUnit interop-contract tests (init-once / append-with-trim / swap / reset / dispose-on-unmount / zero calls on telemetry ticks), and a Playwright harness against the real engine in Chromium: measured 40.1 px/s at configured 40, append offset 48.8→48.8 (no snap), front-trim glyph position 84.7→84.7 px (invariant), hover pause drift 0.00 px, clean dispose (archive/uat/rds-marquee-harness-results.png). Final confirmation needs the live kiosk + real RDS station (owner UAT).
 
 **Consequences:** New-message display latency rises from ~2-5 s to ~5-15 s (two segment cycles) — the price of never publishing partial/corrupt text. HANDOFF-rds-accumulating-scroll §6.f ("accept the restart jump for v1") is superseded — the JS engine is that anticipated follow-up. Handoff §6.e's drop-oldest-CHARS is refined to drop-oldest-CHUNKS.
 
@@ -441,7 +441,7 @@ The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw pre
 **Supersedes:** ADR-022 D7 in full (request shape, response shape, error model, and the "confirm `SendSmsResponse` before wiring" item). ADR-022 §8 config surface unaffected.
 **Summary:** Derived from RotaryPhone's as-built `GvSmsController.cs` rather than their docs, which are stale. Four defects found in GV-3's send path, the first fatal: our `SendSmsRequest(ThreadId, Text)` omits **`ToNumber`**, so their normalizer sees `null` and **every send returns `400 invalid_number`** — send was never functional, only silent. Decisions: send the real four-field request `{ toNumber, text, threadId, clientCorrelationId }` and never route a thread id into `toNumber`; wire `ClientCorrelationId` (their handler uses it verbatim as the echo's `Id`, so tier-1 id matching works and the bubble id never re-keys — optimistic ids become `rc:{guid}` not `temp-{guid}`); map the full **nine-code** taxonomy (`invalid_text` was missing from the previously logged eight) to typed exceptions and bubble treatments, with `send_disabled` (409) treated as an **availability state, not a failed send**; subscribe to the **`SmsSent`** echo channel (we never did — GV-3's de-dupe was unreachable dead code); and de-dupe idempotently keyed by exact `Id` then `(Outbound, normalized counterparty, ordinal-equal text, |ΔSentAt| ≤ 120s)`, replaced **in place**. §8 (added 2026-07-31) adds thread **reply-ability**: ~1/3 of inbound threads are short codes or opaque sender IDs that cannot be replied to; classify client-side via a pure `GvCounterparty` static (no DTO change), gate compose before the POST, never render an impossible send as a failed one.
 
-**Full ADR:** [`design/decisions/2026-07-30-gv-sms-send-contract.md`](decisions/2026-07-30-gv-sms-send-contract.md)
+**Full ADR:** [`docs/decisions/2026-07-30-gv-sms-send-contract.md`](2026-07-30-gv-sms-send-contract.md)
 
 ---
 
@@ -468,7 +468,7 @@ The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw pre
 
 **Consequence for C:** the send contract, `SmsSent` echo and reply-ability gating are **unaffected** — but canned responses **invalidate a probability assumption** inside ADR-028 §4.4's accepted risk: drawing `text` from a fixed set of five or six strings makes "two identical sends to the same counterparty inside 120s" ordinary rather than rare, and the poller's re-surfaced copy always falls through to the fuzzy tier. GV-5's reconciler must therefore match **one-to-one** (a poller copy consumes at most one un-reconciled bubble), with a regression test.
 
-**Full ADR:** [`design/decisions/2026-08-03-gv-audio-through-engine.md`](decisions/2026-08-03-gv-audio-through-engine.md)
+**Full ADR:** [`docs/decisions/2026-08-03-gv-audio-through-engine.md`](2026-08-03-gv-audio-through-engine.md)
 
 ---
 
@@ -476,7 +476,7 @@ The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw pre
 
 **Date:** 2026-09-02
 **Status:** Accepted — binds ADR-029 PRs 3-7
-**Amends:** [ADR-029](decisions/2026-08-03-gv-audio-through-engine.md) §4.2 and §10.2 (the first item overrides them)
+**Amends:** [ADR-029](2026-08-03-gv-audio-through-engine.md) §4.2 and §10.2 (the first item overrides them)
 **Context:** `PHN-1a` (PR 1) shipped behaviour that contradicted the ADR in one place and left an "open question for PR 3" in a doc comment in another. Both were arc-level questions rather than PR-local ones, so `PHN-1b` (PR 2) settled them for the whole arc rather than letting each PR re-decide.
 
 **Decision 1 — `MaxSpeechChars` is a REJECTION, not a truncation. ADR-029 §4.2 is overridden.**
@@ -484,10 +484,10 @@ The rule for next time: **prefer the direct pin**, matching the SQLitePCLRaw pre
 **Consequences:** PR 3 maps `TextTooLong` → `400` with the named reason, like every other rejection. **`PHN-3` owns truncation** — client-side and visible, before the post, in `GvSpeechText.ForMessage`, which is also the only place a spoken tail can be composed in the same voice as the rest of the utterance. The word "truncation" does not appear in this arc's server code. ⚠ A reviewer citing ADR §4.2 to re-add it should be pointed here.
 
 **Decision 2 — `IEventAudioSource.SeekAsync` stays `Task`. Closed as "no", not deferred again.**
-PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `Task<bool>` as *"an open question for PR 3"*. It is closed. Widening breaks D4's only justification — that the five signatures are copied **verbatim** from `IPrimaryAudioSource` — leaving either two seek shapes in the codebase or a change to `IPrimaryAudioSource`, which drags in `FilePlayerAudioSource`: a live primary-source path with a persisted resume position hanging off the same field, out of scope, and logged with its own UAT requirement in `design/FUTURE-WORK.md` §14a. The information is not lost, it arrives by a different route: `Position` reads through to the player, so a refused seek shows up as **an anchor that did not move** in the next snapshot and the scrubber snaps back — the correct user-visible behaviour, delivered over the broadcast mechanism that already exists.
+PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `Task<bool>` as *"an open question for PR 3"*. It is closed. Widening breaks D4's only justification — that the five signatures are copied **verbatim** from `IPrimaryAudioSource` — leaving either two seek shapes in the codebase or a change to `IPrimaryAudioSource`, which drags in `FilePlayerAudioSource`: a live primary-source path with a persisted resume position hanging off the same field, out of scope, and logged with its own UAT requirement in `docs/known-issues-and-future-work.md` §14a. The information is not lost, it arrives by a different route: `Position` reads through to the player, so a refused seek shows up as **an anchor that did not move** in the next snapshot and the scrubber snaps back — the correct user-visible behaviour, delivered over the broadcast mechanism that already exists.
 **Consequences:** `PHN-1b` corrected that comment in the same PR (doc-only, no behaviour) rather than leaving `main` carrying a statement this decision already knew to be untrue — the `CLAUDE.md` § Pre-Merge Review failure class this repo has now shipped five times.
 
-**Plan of record:** [`design/plans/PHN-1b-gvmedia-client-cache-and-auth.md`](plans/PHN-1b-gvmedia-client-cache-and-auth.md) §0.3
+**Plan of record:** [`archive/design/plans/PHN-1b-gvmedia-client-cache-and-auth.md`](../../archive/design/plans/PHN-1b-gvmedia-client-cache-and-auth.md) §0.3
 
 ---
 
@@ -495,7 +495,7 @@ PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `T
 
 **Date:** 2026-09-04
 **Status:** Accepted. **Falsification 1's replacement is owner decision `D30`; Falsification 2's is §16.5's two-edge rule.** Two non-blocking questions added (§14 Q11, Q12).
-**Amends:** [ADR-029](decisions/2026-08-03-gv-audio-through-engine.md) **D7 §7.3 and §7.5** — §7.3 loses its *reasoning* and keeps its *behaviour*; §7.5 keeps its *rule* and changes its *trigger*. D1-D6 and D8-D10 are untouched and nothing in §§1-6 or §8-§13 changes. *(The ADR's own front matter, §0b, §14, §15 and its Handoff block are edited to point at §16 — "nothing else changes" would be too strong.)*
+**Amends:** [ADR-029](2026-08-03-gv-audio-through-engine.md) **D7 §7.3 and §7.5** — §7.3 loses its *reasoning* and keeps its *behaviour*; §7.5 keeps its *rule* and changes its *trigger*. D1-D6 and D8-D10 are untouched and nothing in §§1-6 or §8-§13 changes. *(The ADR's own front matter, §0b, §14, §15 and its Handoff block are edited to point at §16 — "nothing else changes" would be too strong.)*
 **Context:** `PHN-1e` ([#561](https://github.com/mmackelprang/RTest/pull/561)) implemented D7's three stop conditions and measured them on `radio`. Two work. Two ADR claims do not, and the Builder blocked the row rather than merging — which is what the plan's own open assumption U3 instructed. ⚠ **Nothing described here is merged**: `main` has no `CircuitHandler`, no duration-cap enforcement and no `/sleep` stop rule.
 
 **Falsification 1 — §7.3's circuit-lifetime premise is inverted.**
@@ -511,15 +511,15 @@ PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `T
 **Two firing paths examined and deliberately not escalated.** A reload while a **second browser** is open is `2 → 1 → 2` and stops nothing — so the rule delivers `D30` only in the single-browser case; the only mechanism that would close that is the ownership model ⟨A1·4⟩ deleted, and the divergence is benign (a client still holds the transport). A **network drop** that never reconnects fires at eviction, ~10 minutes in, by which time the 300 s cap has already stopped the audio — unreachable, and needing no ruling. ⚠ Unreachable **only while the cap stays below the retention period**; the cap has no maximum and the two numbers know nothing about each other.
 
 **Falsification 2 — §7.5's `/sleep` rule never reaches the idle timer, which is the case it was written for.**
-§7.5 claims *"`idle-dimmer.js` drives the same path through `OnJsSleepRequested`."* It does not. The idle timer calls `navigateToSleep('idle')`, which clears its timers and sets `window.location.href = '/sleep'` and calls nothing else, carrying its own comment that it deliberately does **not** call `SetSleepAsync` because idle navigation must not pause playback. `OnJsSleepRequested` is reached only from `enterSleep()`, whose comment says *"not from idle"* — and **`enterSleep` has zero callers in the tracked tree**, because both the Sleep pill and the server push use `NavigationManager.NavigateTo("/sleep")`. So `SleepService.IsSleeping` is **false** on the idle path (already recorded as `docs/HANDOFF-NEXT-SESSION.md` gotcha 9), and a rule hooked to `EnterSleepAsync` cannot fire there. ⚠ **The claim propagated through four documents** — ADR §7.5 → plan constraint C-51 → the branch's `SleepService` comment → the PR body — and not one of them checked `idle-dimmer.js`, which contradicts it in a comment written for this exact reason.
+§7.5 claims *"`idle-dimmer.js` drives the same path through `OnJsSleepRequested`."* It does not. The idle timer calls `navigateToSleep('idle')`, which clears its timers and sets `window.location.href = '/sleep'` and calls nothing else, carrying its own comment that it deliberately does **not** call `SetSleepAsync` because idle navigation must not pause playback. `OnJsSleepRequested` is reached only from `enterSleep()`, whose comment says *"not from idle"* — and **`enterSleep` has zero callers in the tracked tree**, because both the Sleep pill and the server push use `NavigationManager.NavigateTo("/sleep")`. So `SleepService.IsSleeping` is **false** on the idle path (already recorded as `archive/handoffs/HANDOFF-NEXT-SESSION.md` gotcha 9), and a rule hooked to `EnterSleepAsync` cannot fire there. ⚠ **The claim propagated through four documents** — ADR §7.5 → plan constraint C-51 → the branch's `SleepService` comment → the PR body — and not one of them checked `idle-dimmer.js`, which contradicts it in a comment written for this exact reason.
 
 **Decision — how `/sleep` must be detected: two edges, and neither is `IsSleeping`.** The seam already existed: `ENC-6`'s **`ISleepService.IsSleepScreenVisible`**, reported by `Sleep.razor` from `OnAfterRenderAsync(firstRender)`; the contract doc on that property says all three ways of reaching the route produce the same server-side fact. **`SetSleepScreenVisible(true)`** expresses *"a client has the no-transport surface on screen"* and covers the pill, the idle timer, the server push and a direct navigation; **`EnterSleepAsync`** expresses *"the room is being parked"* and is the only one reachable with **no browser at all** (encoder long-press, API). Both stop attended playback; they are not redundant. In the repo's own vocabulary: **stop when `ConsoleWakeState` leaves `Awake`** — as an **edge at the two write sites, never as a polled predicate**, because `WakeState` deliberately reads `Awake` while a wake claim is outstanding. C-51's other half stands and is why this must be a **stop, not a mute**: `WakeAsync` restores the pre-sleep mute state, so a muted-but-playing voicemail becomes audible **mid-word** when someone touches the panel.
 
-**Consequences for `PHN-1e`: unblocked, no re-plan, and `D30` shortened the work.** ⭐ **One code change, not two.** The `CircuitHandler` **ships as built** — the instruction to remove its stop is cancelled. What remains is adding the `SetSleepScreenVisible(true)` edge beside the existing `EnterSleepAsync` hook, confined to `SleepService`, `SystemController` and their tests. Everything else is documentation correcting *reasoning* rather than behaviour, including `design/INTEGRATIONS.md`'s circuit-backstop item, which the branch marks *"Known broken"* and which `D30` now makes wrong in the other direction. Verified on the box and not re-litigated: the hub broadcast with string enums (C-47/U1), the store cache and one-shot seed (U2/C-52), and the max-duration cap as a dispatching `TimeProvider` timer (C-49). **Nothing moves to `PHN-1f`** (a `Radio.Core` ducking change; burying an unrelated edit there inverts the argument that split PR 5) **or to PR 6**, though PR 6 is the true deadline because it is what makes the defect reachable by a user.
+**Consequences for `PHN-1e`: unblocked, no re-plan, and `D30` shortened the work.** ⭐ **One code change, not two.** The `CircuitHandler` **ships as built** — the instruction to remove its stop is cancelled. What remains is adding the `SetSleepScreenVisible(true)` edge beside the existing `EnterSleepAsync` hook, confined to `SleepService`, `SystemController` and their tests. Everything else is documentation correcting *reasoning* rather than behaviour, including `docs/integrations.md`'s circuit-backstop item, which the branch marks *"Known broken"* and which `D30` now makes wrong in the other direction. Verified on the box and not re-litigated: the hub broadcast with string enums (C-47/U1), the store cache and one-shot seed (U2/C-52), and the max-duration cap as a dispatching `TimeProvider` timer (C-49). **Nothing moves to `PHN-1f`** (a `Radio.Core` ducking change; burying an unrelated edit there inverts the argument that split PR 5) **or to PR 6**, though PR 6 is the true deadline because it is what makes the defect reachable by a user.
 
 **⭐ The process lesson, which is the most reusable thing here.** **This defect was caught only because the plan declared the assertion unverifiable in a test host and pinned it to an on-box check.** A green test host would have shipped it — nothing in a bUnit or xUnit host has a browser, an `unload` event or a real circuit. And note where the value was: U3's *prediction* was **wrong** (it guessed `1 → 2 → 1`). The value was in declaring the assumption unverifiable and naming the observation that would settle it, not in guessing right. Both falsified rules are statements about **client lifetime**, both were written from reasoning rather than measurement, and both times the box disagreed — so anything further in D7 gets measured first.
 
-**Full ADR section:** [`design/decisions/2026-08-03-gv-audio-through-engine.md`](decisions/2026-08-03-gv-audio-through-engine.md) §16
+**Full ADR section:** [`docs/decisions/2026-08-03-gv-audio-through-engine.md`](2026-08-03-gv-audio-through-engine.md) §16
 
 ---
 
@@ -529,7 +529,7 @@ PR 1's doc comment on `IEventPlaybackService.SeekAsync` described widening to `T
 **Status:** Accepted — implements, does not amend, ADR-029 D5 §6.2 rule 2
 **Context:** ADR-029 D5 §6.2 rule 2 is symmetric, but `PHN-1d` implemented only the direction the ADR states in words — a *starting* source at or above `GvMedia:PreemptAtPriority` stops an in-flight attended playback. The mirror case, a playback *starting* while such a source is already sounding, **mixed**, and `APlaybackStartedUnderAHigherPrioritySourceStillMixes_TODAY` pinned that so the fix would arrive as an edited assertion.
 
-**Decision (owner, `docs/HANDOFF-GA-PUNCH-LIST.md:1303`):** it **waits and then plays**. Not mix (the behaviour before this row), and not refuse — refusal was put to the owner and rejected as *"press play, get an error, nothing happens"*.
+**Decision (owner, `archive/handoffs/HANDOFF-GA-PUNCH-LIST.md:1303`):** it **waits and then plays**. Not mix (the behaviour before this row), and not refuse — refusal was put to the owner and rejected as *"press play, get an error, nothing happens"*.
 
 **Shape:** a waiting playback **IS** `_current`, in a new state; there is no pending slot. `EventPlaybackState.Waiting` is appended at the end of the enum, and replace semantics, `StopAsync` resolution, `Current` reporting and the transport 409s all come free from that framing. Audio is acquired **before** the wait, so it is ready the instant the room goes quiet and an acquisition failure surfaces at once rather than after thirty seconds; the wait sits **before** `_gate`, so it cannot block the user's own Stop button. `GvMedia:MaxQueuedWaitSeconds` (30 s, no "off") bounds it, and expiry is `Failed` with reason `"WaitExpired"`.
 
@@ -545,9 +545,9 @@ The args also now carry `TriggeringSourcePriority`, **captured inside the lock t
 
 **Consequences:** ⛔ **No `Radio.Web` change and no broadcast change.** The hub sends `snapshot.State.ToString()` and MVC uses `JsonStringEnumConverter`, so `"Waiting"` reaches the browser as a string, and `IsLive`'s deny-list gives the chip *"something is happening, offer Stop"* for free. A **quiet room produces no new traffic at all** — the predicate is evaluated before anything is published. PR 6 (`PHN-2`) builds the chip; it must render `Waiting` as live with a Stop, **must not** run the progress bar, and must say *why* rather than showing a bare spinner.
 
-**Declined and filed rather than left implied:** a playback *started* while the console is already on `/sleep` (`design/FUTURE-WORK.md` §22 — a layering question, ADR-029 §14 Q12), and the blocker's identity on the wire (§23 — a request path, not a gap). A merged `SleepService` comment promised this row would take the first; it was rewritten to say the case is unowned rather than left standing.
+**Declined and filed rather than left implied:** a playback *started* while the console is already on `/sleep` (`docs/known-issues-and-future-work.md` §22 — a layering question, ADR-029 §14 Q12), and the blocker's identity on the wire (§23 — a request path, not a gap). A merged `SleepService` comment promised this row would take the first; it was rewritten to say the case is unowned rather than left standing.
 
-**Plan of record:** [`design/plans/PHN-1f-the-wait-then-play-queue.md`](plans/PHN-1f-the-wait-then-play-queue.md)
+**Plan of record:** [`archive/design/plans/PHN-1f-the-wait-then-play-queue.md`](../../archive/design/plans/PHN-1f-the-wait-then-play-queue.md)
 
 ---
 
@@ -595,7 +595,7 @@ unnoticed for exactly that reason.
 Seams are **classified into four kinds by what they displace**. Kind C (substitution) and Kind D
 (entry point) must carry a label naming the mechanism that makes the real path unreachable **and what
 the seam consequently does not cover**. Kinds A (visibility) and B (injection) need only a line. The
-convention lives in `design/TESTING.md` § *Test Seams* and is enforced by `TestSeamLabelLintTests`.
+convention lives in `docs/testing.md` § *Test Seams* and is enforced by `TestSeamLabelLintTests`.
 
 Its first rule is **prefer no seam, and check reachability before assuming** — because the failure this
 ADR is written from was not a bad seam, it was an unchecked sentence.
@@ -641,7 +641,7 @@ ADR is written from was not a bad seam, it was an unchecked sentence.
   `CLAUDE.md` § *Pre-Merge Review* as a fourth worked example — the first whose victim was a queue row
   rather than a code change.
 
-**Plan of record:** [`design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md)
+**Plan of record:** [`archive/design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md`](../../archive/design/plans/TEST-2-the-seam-convention-and-the-half-reachable-gap.md)
 
 ---
 
@@ -728,7 +728,7 @@ examined converting them to explicit `add`/`remove` accessors, which would delet
 generated backing fields; it rejected that route, so the seam survives. If it is ever revisited,
 this test changes with it — `HubEventFire` already throws a message saying so.
 
-**Plan of record:** [`design/plans/UI-9-the-config-page-that-never-unsubscribes.md`](plans/UI-9-the-config-page-that-never-unsubscribes.md)
+**Plan of record:** [`archive/design/plans/UI-9-the-config-page-that-never-unsubscribes.md`](../../archive/design/plans/UI-9-the-config-page-that-never-unsubscribes.md)
 
 ---
 
@@ -823,7 +823,7 @@ exactly once, ~6.2 s after restore, with nobody touching the browser.
 reports the edge the way the stub does. The next real outage is that test. Do not manufacture one —
 their uptime is unsettled and a restart risks causing the incident this fixes.
 
-**Plan of record:** [`design/plans/GV-12-refetch-on-the-recovery-edge.md`](plans/GV-12-refetch-on-the-recovery-edge.md)
+**Plan of record:** [`archive/design/plans/GV-12-refetch-on-the-recovery-edge.md`](../../archive/design/plans/GV-12-refetch-on-the-recovery-edge.md)
 
 ---
 
@@ -914,7 +914,7 @@ than the refactor's shape.** A control that cannot pass is not a control; it is 
 demonstrate this guard. The unit tests are its only evidence, and a UAT report claiming otherwise
 would be wrong.
 
-**Plan of record:** [`design/plans/UI-12-the-null-that-cannot-arrive.md`](plans/UI-12-the-null-that-cannot-arrive.md)
+**Plan of record:** [`archive/design/plans/UI-12-the-null-that-cannot-arrive.md`](../../archive/design/plans/UI-12-the-null-that-cannot-arrive.md)
 
 ### ⭐ Amendment 2026-09-09 (`UI-14`, [#633](https://github.com/mmackelprang/RTest/pull/633)) — the other half of the rule is now gated, and the reason we gave for prioritising it was wrong
 
@@ -965,7 +965,7 @@ rather than restating it.
 seven reference-payload events, so before and after are byte-for-byte identical on every reachable
 path. A UAT report claiming it demonstrated pass-through would be wrong.
 
-**Plan of record:** [`design/plans/UI-14-the-null-that-must-arrive.md`](plans/UI-14-the-null-that-must-arrive.md)
+**Plan of record:** [`archive/design/plans/UI-14-the-null-that-must-arrive.md`](../../archive/design/plans/UI-14-the-null-that-must-arrive.md)
 
 ---
 
@@ -1047,7 +1047,7 @@ scope and was deliberately not filed, because the fault is unreachable today.
 - No lock and no `volatile`. There is one writer per field, and adding synchronisation would imply a
   concurrency that does not exist.
 
-**Plan of record:** [`design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md)
+**Plan of record:** [`archive/design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md`](../../archive/design/plans/UI-13-the-cache-advance-that-only-shutdown-can-reach.md)
 
 ---
 
@@ -1199,7 +1199,7 @@ a superseded draft all day. The minimal claim — *deleting `psidtsAgeSeconds` f
 capture must not turn the row amber* — does not depend on the rest of that shape being right, which
 is why it is the case the harness leads with.
 
-**Dossier:** [`docs/queue/KIOSK-3.md`](../docs/queue/KIOSK-3.md)
+**Dossier:** [`archive/queue/KIOSK-3.md`](../../archive/queue/KIOSK-3.md)
 
 ---
 

@@ -1,6 +1,6 @@
 # `AUD-33` — a fingerprint result that arrives after a track change is applied to the new track
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟡 **P2.** Filed 2026-09-26 from `AUD-1`'s box UAT. Pre-dates AUD-1 — the old overwrite applied it too.
 

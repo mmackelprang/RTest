@@ -21,7 +21,7 @@ public class GvBridgeHealthTests
   [Fact]
   public void TheOutageCapture_IsUnhealthy()
   {
-    // The live capture from docs/queue/GV-12.md:33-36, verbatim. degraded and authBlackout
+    // The live capture from archive/queue/GV-12.md:33-36, verbatim. degraded and authBlackout
     // both false through a TOTAL outage — this is the case the retracted morning guidance
     // would have missed, and the reason Available is a term at all.
     // ⚠ `Available = false` alone already satisfies this, and that is the POINT rather than a
@@ -79,7 +79,7 @@ public class GvBridgeHealthTests
     };
     Assert.True(GvBridgeHealth.IsHealthy(fresh, Now));
 
-    // Absent — deliberately healthy, departing from docs/queue/GV-12.md:46. Plan §0.4.
+    // Absent — deliberately healthy, departing from archive/queue/GV-12.md:46. Plan §0.4.
     var absent = new GvBridgeStatusDto { Available = true, LastApiSuccessAt = null };
     Assert.True(GvBridgeHealth.IsHealthy(absent, Now));
   }

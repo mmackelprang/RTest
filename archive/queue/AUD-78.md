@@ -1,6 +1,6 @@
 # `AUD-78` — play history cannot finalise its in-flight entry at shutdown
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟢 **P3.** Filed 2026-09-29 from the `radio-api` file sink while shipping `AUD-15`.
 
@@ -48,4 +48,4 @@ A deploy leaves no `Failed to finalize play history entry` line, and the in-flig
 
 Reported by the coordinator on 2026-10-04: `AUD-78` passes owner UAT. 
 
-**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md).
+**Archived 2026-10-04** in [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md).

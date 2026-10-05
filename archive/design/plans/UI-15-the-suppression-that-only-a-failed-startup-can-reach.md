@@ -1,6 +1,6 @@
 # PLAN — `UI-15` · `isFirstRun` really does conflate two states, and only a failed startup can reach it
 
-Row: [`docs/queue/UI-15.md`](../../docs/queue/UI-15.md) · Branch: `fix/ui-15-first-run-conflates-no-source`
+Row: [`docs/queue/UI-15.md`](../../queue/UI-15.md) · Branch: `fix/ui-15-first-run-conflates-no-source`
 Planned 2026-09-09. Anchors measured against `main` at `ab72bef3`; `git diff main` for
 `src/Radio.API/Services/AudioStateUpdateService.cs` and `tests/Radio.API.Tests/Services/` is **empty**,
 so every line number below is a `main` line number.

@@ -137,7 +137,7 @@ public class BluetoothOptions
   /// variable-rate sample-rate converter before reaching
   /// <c>BufferedSoundGenerator</c>, eliminating the time-domain duplication
   /// applied by <c>CompensateClockDrift</c> to mask BT-vs-speaker clock skew.
-  /// See <c>docs/plans/2026-05-22-bt-input-resampler.md</c> (Path D). Linux
+  /// See <c>archive/plans/2026-05-22-bt-input-resampler.md</c> (Path D). Linux
   /// only — ignored on Windows where the BT capture path is WASAPI loopback.
   /// Default true so the resampler is the production path; flip to false to
   /// fall back to the legacy CompensateClockDrift behaviour.
@@ -148,7 +148,7 @@ public class BluetoothOptions
   /// Initial conversion ratio (output_rate / input_rate) used by the BT input
   /// resampler. Measured ~1.00025 (250 ppm consumer-faster) on the Ubuntu N100
   /// + Pixel-class phone combo — see
-  /// <c>docs/research/2026-05-22-bt-clock-skew-measurement.md</c>. Set to 1.0
+  /// <c>archive/research/2026-05-22-bt-clock-skew-measurement.md</c>. Set to 1.0
   /// to disable the initial offset (will still resample, just with no a-priori
   /// skew assumption). Future closed-loop control (Phase 2) will replace this
   /// static seed with buffer-level-trend feedback.

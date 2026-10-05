@@ -1,7 +1,7 @@
 # PLAN — `ENC-5` · The SOURCE overlay, the shared selector component, and the router remap
 
-**Row:** `ENC-5` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.0](../../docs/HANDOFF-GA-PUNCH-LIST.md)
-**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md) (Rev 3) — **§4.4 Knob 2, §6.6, §6.2** are the spec; also §5.2, §5.3, §6.9, §8.3, §12.1, §12.2, §15.
+**Row:** `ENC-5` (P0, Encoders workstream) — [`docs/HANDOFF-GA-PUNCH-LIST.md` §3.0](../../handoffs/HANDOFF-GA-PUNCH-LIST.md)
+**Spec:** [`docs/design-handoffs/HANDOFF-rotary-encoder-mapping.md`](../../design-handoffs/HANDOFF-rotary-encoder-mapping.md) (Rev 3) — **§4.4 Knob 2, §6.6, §6.2** are the spec; also §5.2, §5.3, §6.9, §8.3, §12.1, §12.2, §15.
 **Relationship to the handoff:** **follows**, with **five declared deviations** — all in §0.4, each forced by something in the tree that the handoff assumed existed and does not.
 **Depends on:** `ENC-1` ✅ (#498), `ENC-3` ✅ (#511), **`ENC-4`** — whose implementation landed on `main` at `29acc01` while this plan was being written. This plan mounts into its seam and edits four of its files, so it is written against that tree, not against the `ENC-4` plan document alone. **Re-read `RotaryEncoderActionRouter.cs`, `EncoderFeedbackService.cs`, `EncoderHudService.cs` and `EncoderHud.razor` as merged before Task 1** — where this plan and the shipped code differ, the code wins and the PR should say where.
 **Pairs with:** [`ENC-7`](ENC-7-presets-knob.md) — **one component, two lists.** This PR builds the component; `ENC-7` consumes it. Build them back to back.

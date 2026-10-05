@@ -90,7 +90,7 @@
      beside it ("Shimmer 36 looks good"). The owner judged rendered pixels.
 
      ⛔ The DARK-ROOM sitting of 2026-09-08 concluded the OPPOSITE about this
-     rung — docs/queue/UX-1.md recorded "36 is below the owner's dark-room
+     rung — archive/queue/UX-1.md recorded "36 is below the owner's dark-room
      visibility threshold", and #38383F shipped as #641 on that basis. Both
      judgements are the owner's; neither is retracted here, and this is NOT a
      2-to-1 verdict. Two confounds, only one of which is answered:
@@ -102,7 +102,7 @@
        2. ✅ ANSWERED. Side-by-side viewing can bias toward the dimmest
           acceptable value; the one-at-a-time harness removed the reference and
           36 still read as good.
-     Unresolved, not settled. Full argument: docs/queue/UX-1.md.
+     Unresolved, not settled. Full argument: archive/queue/UX-1.md.
 
      ⭐ WHY THAT DISAGREEMENT DOES NOT BLOCK THIS — the stakes, not the evidence.
      Per the dwell note below, no sweep is painted at any value ON THE TWO PANELS
@@ -116,7 +116,7 @@
 
      ⚠ Close to the Designer's seed but NOT identical with it. The seed of record
      is #242429 = rgb(36,36,41) — see the Designer answer's "The change" block in
-     docs/queue/UX-1.md, and the v2 ladder in NIGHT-SITTING.md. (Cited by section.
+     archive/queue/UX-1.md, and the v2 ladder in NIGHT-SITTING.md. (Cited by section.
      It was :87 on main @ f4d71b28; the supersede banner moved it, and no current
      line is quoted because that number moved three times in one change.)
      This value is +2 on BLUE, so B−R is +7
@@ -137,7 +137,7 @@
      Radio and the phone thread are UNMEASURED, and a cold start or a genuinely
      slow query dwells longer — there a sweep IS painted and this value matters.
      Cosmetically real; operationally moot on what was measured. Dwell is filed in
-     design/FUTURE-WORK.md and is NOT touched here.
+     docs/known-issues-and-future-work.md and is NOT touched here.
 
      ⛔ Do not add this token to the prefers-reduced-motion block below: that
      rule replaces `background` wholesale with a flat rgba(255,255,255,0.05), so
@@ -163,7 +163,7 @@
   /* ⛔ Amber is the ONLY glow token, deliberately. --signal-green-glow / --signal-red-glow do not
      exist and must not be added here: the owner sighted both call buttons on a blur ladder in
      daylight on 2026-09-09 and chose NO GLOW, so UI-8 deleted their three dead references rather
-     than declaring them (docs/queue/UI-8.md § "OWNER DECISION 2026-09-09"). If the Answer/Hang-Up
+     than declaring them (archive/queue/UI-8.md § "OWNER DECISION 2026-09-09"). If the Answer/Hang-Up
      pair ever does prove hard to separate at Ringing, change fill or border — not this block. */
   --signal-amber:           #F0A830;
   --signal-amber-glow:      rgba(240, 168, 48, 0.25);
@@ -1276,7 +1276,7 @@ html, body {
    found unable to measure it, so the amplitude below was chosen against THIS
    geometry, in both lighting conditions. Shipping the narrowed ramp would ship
    an unvalidated change underneath a validated one; whether it would allow a
-   lower amplitude is recorded as unknown in design/FUTURE-WORK.md.
+   lower amplitude is recorded as unknown in docs/known-issues-and-future-work.md.
 
    ⚠ Why that harness failed is NOT what the night-sitting record says, and the
    corrected version matters because it is the reason this deviation is safe.
@@ -1611,7 +1611,7 @@ body::-webkit-scrollbar,
 /* ─── §20a  Text-entry dialogs sit at the top (UI-24) ─────────────────────── *
  *
  * The kiosk types with the in-app keyboard (js/virtual-keyboard.js — GNOME's own OSK never opens for
- * Chrome on this box: docs/uat/2026-08-03-osk-wayland-viability/REPORT.md). That keyboard is fixed to
+ * Chrome on this box: archive/uat/2026-08-03-osk-wayland-viability/REPORT.md). That keyboard is fixed to
  * the bottom of the screen and does not resize the page. Measured in Chromium at 1920×720, its top
  * edge is at y = 348 for the QWERTY layout and y = 360 for the numpad; everything below is covered
  * while it is up. A centred dialog put its text field and its buttons exactly there.
@@ -2620,7 +2620,7 @@ body {
 }
 
 /* ── RADIO (band map) view — UI-31 (was BAND; AUD-76 / AUD-91 / UI-22) ──────────
-   Spec: docs/design-handoffs/2026-10-02-band-view-strip.md. The plot fills the
+   Spec: archive/design-handoffs/2026-10-02-band-view-strip.md. The plot fills the
    canvas down to a 32 px axis zone that visualizer.js draws in (axis line, tick
    marks, preset and station carets; bandAxisZone there). The tick labels are
    markup laid over that zone, and the band's name, status, colour key, help text
@@ -6660,7 +6660,7 @@ body {
    every reference to them was invalid at computed-value time and rendered as nothing while looking
    correct in the source. UI-8 DELETED the last three such references in this file rather than
    declaring the tokens, on an owner decision taken at the panel in daylight against a blur ladder —
-   see docs/queue/UI-8.md § "OWNER DECISION 2026-09-09".
+   see archive/queue/UI-8.md § "OWNER DECISION 2026-09-09".
 
    ⛔ Do not declare either token to "make this work" — no-glow is the chosen appearance, not an
    oversight. There is a matching note beside --signal-amber-glow in :root, which is where someone
@@ -8076,7 +8076,7 @@ body {
 
 
 /* ─── §PHN-11  Incoming-call banner ───────────────────────────────────────── *
-   docs/design-handoffs/2026-10-02-incoming-call-banner.md. A full-panel overlay on every route and on
+   archive/design-handoffs/2026-10-02-incoming-call-banner.md. A full-panel overlay on every route and on
    /sleep: a 1760×600 card inset 80/60 px, three columns (caller disc 240, text, Ignore zone 400).
    z 10002: above the 9999 tier (the sleep screen, kiosk dialogs), the 10000 tier (gain popover anchor,
    encoder HUD) and the virtual keyboard (10001) — except the fixed-position encoder HUD and its selector,

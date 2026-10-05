@@ -1,6 +1,6 @@
 # `AUD-27` — album art appears on identification, then vanishes the instant you press pause
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-10 from the owner's phone-sitting UAT, items #5/#6.
 

@@ -627,7 +627,7 @@ transport errors as exit 255, which a bare `test -f` cannot tell apart from "fil
 > `PRESENT:<dir>` or `ABSENT:<dir>` verdict per destination and aborts when it gets neither.
 > Not theoretical: the bash script's own omission-form probe was measured destroying a live
 > overlay before `OPS-8` replaced it. Porting the verdict form back to the PowerShell is filed
-> as `design/FUTURE-WORK.md` §28, not yet queued.
+> as `docs/known-issues-and-future-work.md` §28, not yet queued.
 
 > ⚠ **One seed file serves both directories.** `deploy/debian-x64/appsettings.Production.json`
 > holds API-shaped keys (`AudioOutput`, `Devices`, `FilePlayer`, `Diagnostics`,

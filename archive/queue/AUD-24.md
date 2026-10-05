@@ -1,6 +1,6 @@
 # `AUD-24` — the seek bar does not move the audio, and the clock reports a position the player is not at
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-09 from the owner's `PHN-2` UAT at the cabinet
 ([record](../uat/2026-09-09-phn2-sound-uat/RESULT.md), check #1 / §3 U5).
@@ -77,7 +77,7 @@ same sitting.**
 
 ## ✅ DIAGNOSED AND PLANNED 2026-09-10 — the layer is `FilePlayerAudioSource.SeekCoreAsync`
 
-Plan: [`design/plans/AUD-24-the-seek-that-only-moved-the-readout.md`](../../design/plans/AUD-24-the-seek-that-only-moved-the-readout.md).
+Plan: [`design/plans/AUD-24-the-seek-that-only-moved-the-readout.md`](../design/plans/AUD-24-the-seek-that-only-moved-the-readout.md).
 
 **The mechanism, in one paragraph.** `FilePlayerAudioSource.SeekCoreAsync` range-checks its argument,
 executes `_position = position;`, logs *"Seeked to {Position}"* and returns. **It never calls the audio

@@ -1,6 +1,6 @@
 # ADR: GV media as ducked event playback — one seam for voicemail audio and text-to-speech (supersedes ADR-022 D4)
 
-- **ID:** ADR-029 (see `design/DECISION-LOG.md` for the one-line pointer)
+- **ID:** ADR-029 (see `docs/decisions/DECISION-LOG.md` for the one-line pointer)
 - **Status:** Proposed — **Amendment 1 applied 2026-08-03** (owner answers + Designer round); **Amendment 2 applied 2026-09-04** (D7 §7.3 and §7.5 falsified on the appliance, and owner decision **`D30`** answers the first — see §16). Ready for Planner; **`PHN-1e` is unblocked with one required code change** (§16.8).
 - **Date:** 2026-08-03 (amended same day; **amended again 2026-09-04**)
 - **Author:** Architect
@@ -82,8 +82,8 @@ So D4 is superseded not because it was wrong, but because the thing it optimised
 1. **`gvbridge` genuinely appears nowhere in `src/Radio.API/` — confirmed, zero matches.** So does `AuthKey`/`X-RotaryPhone` — zero matches. **But `radio:5004` does appear**, twice, in `appsettings.json`, and `PhoneContactLookupService` already makes REST calls to that host through an injected `HttpClient`. **Radio.API talking to `radio:5004` is an established topology, not a new one.** That materially lowers the cost of D3.
 
 2. **Priority currently arbitrates *nothing*. Ducking is binary and reference-counted.** This is the single most consequential finding here, and it is stronger than "the ducking service mixes." Read `DuckingService.StartDuckingAsync` (:96-144): the first event to arrive fades the primary to the fixed global `DuckingPercentage` (20); **every subsequent concurrent event changes nothing at all** (:138-143 is a debug log). Volume is restored only when the last event leaves (:170). `GetPriority` is read in exactly one place — inside `GetActiveEventsByPriority` (:267) — and **`GetActiveEventsByPriority` and `StopAllDuckingAsync` have zero non-test callers.** They are dead code. Only the single *primary* source is ducked (`AudioManager.cs:478`, keyed on `_activeSource.Id`); concurrent event sources are never ducked against each other.
-   **Therefore `design/INTEGRATIONS.md`'s claim that "higher priority announcements can interrupt lower priority ones" is false today**, and every `SetPriority` call in `AnnouncementService` is currently decorative. **D5 introduces the first load-bearing use of priority in this system.**
-   > **⟨A1·6⟩ Independently confirmed, and the doc is now corrected.** `design/INTEGRATIONS.md:464` strikes the old claim in place and records the mechanism, the two dead members, and the fact that the `Priority` field is *"accepted, validated, stored, and then ignored"* — pointing here for the fix. **This ADR's §6 framing and the corrected doc now agree**, so a reader arriving from either lands in the same place. No design change follows from the confirmation; the finding was already load-bearing.
+   **Therefore `docs/integrations.md`'s claim that "higher priority announcements can interrupt lower priority ones" is false today**, and every `SetPriority` call in `AnnouncementService` is currently decorative. **D5 introduces the first load-bearing use of priority in this system.**
+   > **⟨A1·6⟩ Independently confirmed, and the doc is now corrected.** `docs/integrations.md:464` strikes the old claim in place and records the mechanism, the two dead members, and the fact that the `Priority` field is *"accepted, validated, stored, and then ignored"* — pointing here for the fix. **This ADR's §6 framing and the corrected doc now agree**, so a reader arriving from either lands in the same place. No design change follows from the confirmation; the finding was already load-bearing.
 
 3. **There are already two non-unified event paths, and one of them leaks.** `POST /api/notifications/announce` (ducked, awaits completion, cleans up) and `POST /api/sources/events/{tts,file}` (`SourcesController.cs:601,685`) — the latter injects `IDuckingService` at :44 and **never uses it**, so those events do not duck at all, and the sources added at :651/:716 are never removed, never disposed and never un-ducked. `PlayFileEvent` also double-plays (`:719` calls `PlayFileAsync`, then `:732` calls `PlayAsync` which re-enters it). **A third ad-hoc path would make this worse**; §3.2's one-seam argument is partly an argument against that.
 
@@ -91,7 +91,7 @@ So D4 is superseded not because it was wrong, but because the thing it optimised
 
 ### 1.3 The environment constrains the design
 
-- The box is an **Intel N100** and is resource-constrained; heavy journald/CPU churn correlates with audible audio distortion (recorded repeatedly in `docs/BUILDER_QUEUE.md` and `design/INTEGRATIONS.md`). **Any design that adds a periodic tick, a poll, or a per-client timer is disqualified.** This is the hardest constraint here and it drives D6 and D7.
+- The box is an **Intel N100** and is resource-constrained; heavy journald/CPU churn correlates with audible audio distortion (recorded repeatedly in `docs/BUILDER_QUEUE.md` and `docs/integrations.md`). **Any design that adds a periodic tick, a poll, or a per-client timer is disqualified.** This is the hardest constraint here and it drives D6 and D7.
 - **GV auth dies for ~9 minutes out of every 20.** `psidtsAgeSeconds` is the only honest field on `/api/gvbridge/status`; `available`/`cookiesValid`/`degraded` have been observed reporting healthy while both SMS endpoints returned hard 502s. A voicemail fetch has **roughly a 45% chance of landing in a blackout window**. That is not an edge case, and it is the strongest argument for D3's cache (§5.3).
 
 ---
@@ -263,7 +263,7 @@ Sizing: GV voicemails are MP3 and typically under 3 minutes; at ~64 kbps that is
 
 The reason this matters is not disk economy:
 
-> **Google Voice auth is dead ~9 minutes out of every 20.** A user who plays a voicemail and replays it 30 seconds later has a ~45% chance the second fetch would 502 if it went back to the network. With the cache, replay is a local file read and **always works**. Without it, playback would appear to fail at random on a wall clock the user cannot see — the exact symptom `design/INTEGRATIONS.md` warns makes test results "look random."
+> **Google Voice auth is dead ~9 minutes out of every 20.** A user who plays a voicemail and replays it 30 seconds later has a ~45% chance the second fetch would 502 if it went back to the network. With the cache, replay is a local file read and **always works**. Without it, playback would appear to fail at random on a wall clock the user cannot see — the exact symptom `docs/integrations.md` warns makes test results "look random."
 
 **Cost, stated plainly:** private voicemail audio now sits at rest on the box's disk, where previously it only ever streamed through a browser. The cache must be size-bounded, must live under the existing `./data/` tree, and eviction must actually delete.
 
@@ -285,7 +285,7 @@ So the table has to distinguish what is *configured* from what can actually make
 |---|---|---|---|
 | 9 | incoming-call ring | **dormant** — `PhoneIntegration:Enabled = false` | `PhoneIntegrationOptions.cs:28`, `appsettings.json:261` |
 | 8 | caller-ID announcement | **dormant** — same flag | `PhoneIntegrationOptions.cs:31` |
-| 8 | **`/api/notifications/announce` default** — `Math.Clamp(request.Priority ?? 8, 1, 10)` | **LIVE** — the external-event endpoint (Home Assistant, doorbell, laundry), documented in `design/INTEGRATIONS.md:385-456` and reachable from System Config's test form | `NotificationsController.cs:46` |
+| 8 | **`/api/notifications/announce` default** — `Math.Clamp(request.Priority ?? 8, 1, 10)` | **LIVE** — the external-event endpoint (Home Assistant, doorbell, laundry), documented in `docs/integrations.md:385-456` and reachable from System Config's test form | `NotificationsController.cs:46` |
 | 8 | **`DuckingService.DefaultEventPriority`** — the priority of any event that never called `SetPriority`, which is *every* event from `/api/sources/events/{tts,file}` | **LIVE (structural)** | `DuckingService.cs:30` |
 | 5 | `IAnnouncementService.AnnounceAsync` default parameter | live only if a caller omits the argument; neither of the two callers does | `IAnnouncementService.cs:15` |
 | 3 | `DuckingService.DefaultPrimaryPriority` | live | `DuckingService.cs:35` |
@@ -476,7 +476,7 @@ The contract cost is real but **much smaller than it first appears, because the 
 > `SoundFlowPlaybackService`"* was false on both halves when written, and stayed false for five
 > weeks.** `FilePlayerAudioSource.SeekCoreAsync` assigned `_position` and called nothing, and
 > `SoundFlowPlaybackService` had no seek method at all until `PHN-1a` added one.
-> `design/FUTURE-WORK.md` § 14a recorded the first half on 2026-09-02; the owner observed it at the
+> `docs/known-issues-and-future-work.md` § 14a recorded the first half on 2026-09-02; the owner observed it at the
 > cabinet on 2026-09-09 (`PHN-2` check #1). Fixed by `AUD-24`.
 >
 > ⭐ **The argument § 8.3 makes is unaffected, and that is the point of annotating rather than
@@ -728,7 +728,7 @@ FUTURE-WORK §12 item 3 records that compose uses the app-wide virtual keyboard,
 
 ## 12. CROSS-AGENT HANDOFF — Designer ⟨A1 — CONSUMED; kept as the record of the exchange⟩
 
-> **Status: this section has been read and answered.** The Designer's handoff is **`docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`**; its `§Answers to ADR-029 §12` responds item by item, and **that handoff is authoritative on presentation.** The items below are preserved as the record of what was asked, with the answers folded in. Three items moved:
+> **Status: this section has been read and answered.** The Designer's handoff is **`archive/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`**; its `§Answers to ADR-029 §12` responds item by item, and **that handoff is authoritative on presentation.** The items below are preserved as the record of what was asked, with the answers folded in. Three items moved:
 >
 > - **Item 6 — accepted, and it flipped D7.** The Designer designed the persistent transport (the chip in `.topbar-primary`) and asked for the navigate-away rule to be overridden. Done — §7 is rewritten ⟨A1·4⟩. **Their correction on placement is accepted and encoded:** the chip must **not** live in `NowPlayingDock`, because `MainLayout.razor:878` gates it on `IsDockVisible => !_isOnHome` — absent on Home, the worst place to lose a stop control. My original suggestion of the dock was wrong. **One thing their premise missed, added by §7.5:** `.topbar-primary` is on every route *under `MainLayout`*, and `/sleep` runs under `EmptyLayout` (`Sleep.razor:2`) — the console navigates itself there on an idle timer, so that route needs its own rule.
 > - **Item 8 — obsolete.** §9 no longer pins the local engine ⟨A1·1⟩. Message speech follows the selection and therefore sounds **identical** to announcements; the tonal mismatch the Designer weighed no longer exists, and neither does the argument that it was doing useful work. §9.6 lists the three downstream corrections, including one factual assumption in §B4 that is now false.
@@ -749,7 +749,7 @@ Designer was working the transport UI, the play-button affordance and the canned
 
 **2. Both play buttons need a `Preparing` state, and it is not instant.** Voicemail's first play does a network fetch; speech does a TTS synthesis step. Neither produces sound immediately. There is a real spinner moment between tap and audio — design it. **Replays of a cached voicemail are effectively instant** (§5.3), so the same button has two very different latencies.
 
-**3. Playback can fail *before* any sound, and during a blackout it frequently will.** GV auth is dead ~9 minutes in every 20; a first-time voicemail fetch has roughly a 45% chance of hitting that window and returning 502. This needs calm, honest error copy and a retry affordance — and note this is the same window in which the *"Google Voice is reconnecting"* banner is known **not** to fire, because the status endpoint lies (`design/INTEGRATIONS.md`; `PhoneMessagesPanel.razor:14-20`). **Do not rely on that banner to explain a failed voicemail fetch; the player needs its own error state.**
+**3. Playback can fail *before* any sound, and during a blackout it frequently will.** GV auth is dead ~9 minutes in every 20; a first-time voicemail fetch has roughly a 45% chance of hitting that window and returning 502. This needs calm, honest error copy and a retry affordance — and note this is the same window in which the *"Google Voice is reconnecting"* banner is known **not** to fire, because the status endpoint lies (`docs/integrations.md`; `PhoneMessagesPanel.razor:14-20`). **Do not rely on that banner to explain a failed voicemail fetch; the player needs its own error state.**
 
 **4. An incoming call or caller announcement STOPS playback — it does not pause it** (§6.2 rule 2). The UI must return to a clean idle/replayable state, not a paused-mid-track one. Users replay; that is expected and fine.
 
@@ -797,7 +797,7 @@ Designer was working the transport UI, the play-button affordance and the canned
 3. **Does `SeekAsync` on a small local MP3 behave through SoundFlow?** `FilePlayerAudioSource.IsSeekable => true` establishes the pattern exists for local files, but the exact `SoundFlowPlaybackService` call path has not been exercised for a short MP3 in an *event* source. If it misbehaves, seek degrades to stop-and-restart-at-offset — still workable for a ~1 MB local file, slightly worse latency. — **Planner to verify before sequencing; it changes nothing in this ADR's shape.**
 4. **`AudioFileEventSource` completion is a wall-clock timer, not an end-of-stream event** (`:205`, with an in-code acknowledgement that a real implementation would listen for SoundFlow playback-end events). With `DurationSeconds` from the DTO this is accurate enough for the progress bar, but a seek mid-playback must **re-arm** that timer or completion will fire early. Worth fixing properly (subscribe to SoundFlow's end event) while the file is open. — **Planner.**
 6. **Should `IAnnouncementService` eventually route through `IEventPlaybackService`, and should `/api/sources/events/*` be retired?** Unifying them would also fix §6.2 rule 3's mixing wart and the leak/no-duck/double-play defects in §1.2 correction 3, for every caller. Explicitly **not** in this arc. — **future; worth a queue row on its own.**
-7. **The new-text chime** ([`FAST-FOLLOWS.md`](../../docs/queue/FAST-FOLLOWS.md) § Documented fast-follows: *"Audible new-text chime — belongs in the Radio.API audio layer (ducking-aware), not Blazor"*) is a natural neighbour, at priority ~4 and **unattended** — so it uses `IAnnouncementService`, **not** this seam. Noted so the next reader sees it was considered and correctly excluded. — **future.**
+7. **The new-text chime** ([`FAST-FOLLOWS.md`](../queue/FAST-FOLLOWS.md) § Documented fast-follows: *"Audible new-text chime — belongs in the Radio.API audio layer (ducking-aware), not Blazor"*) is a natural neighbour, at priority ~4 and **unattended** — so it uses `IAnnouncementService`, **not** this seam. Noted so the next reader sees it was considered and correctly excluded. — **future.**
 
 **Added by Amendment 1:**
 
@@ -848,10 +848,10 @@ Designer was working the transport UI, the play-button affordance and the canned
 
 ### Handoff ⟨A1 — updated⟩
 
-- **Designer** — §12 is **consumed**; the authoritative presentation spec is now `docs/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`. Three things come back the other way and should be folded into it: **§7.5** (`/sleep` has no topbar and therefore no chip — playback stops there unless the sleep surface gains a control), **§8.1** (`GET /api/audio/events/current` is the re-attach path; `AudioStateStore` must be seeded from it so the chip is right on first paint), and **§9.6** (the engine reversal — the tonal-mismatch reasoning in §Answers item 8 is withdrawn, and §B4's "synthesis is on-box, no network round trip" is now factually wrong).
+- **Designer** — §12 is **consumed**; the authoritative presentation spec is now `archive/design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md`. Three things come back the other way and should be folded into it: **§7.5** (`/sleep` has no topbar and therefore no chip — playback stops there unless the sleep surface gains a control), **§8.1** (`GET /api/audio/events/current` is the re-attach path; `AudioStateStore` must be seeded from it so the chip is right on first paint), and **§9.6** (the engine reversal — the tonal-mismatch reasoning in §Answers item 8 is withdrawn, and §B4's "synthesis is on-box, no network round trip" is now factually wrong).
 - **Planner** consumes: §3-§8 for the component list and API shape, §4.1 (`DurationSeconds` passthrough — a correctness fix, not decoration), §3.3 (the two-id hazard in `AudioFileEventSource`), §6.3 (the one required `DuckingService` change), §10.2 for config, §11.3 for the one-to-one reconciler constraint and its regression test — **which lands inside GV-5, since `OutboundSmsReconciler` and `GvCounterparty` do not exist yet** — and §14 Q3/Q4 as **verification tasks to run before sequencing**. **Added by Amendment 1:** **§9.2-§9.4** (resolve the engine explicitly from `TTS:DefaultEngine`; the `TTSParameters.Engine` non-nullable trap at `ITTSFactory.cs:87` will silently pin ESpeak if you pass a partially-filled `TTSParameters`; engine-unavailable is a `Failed` snapshot, never a fallback), **§7.3** ⚠ **SUPERSEDED BY §16.1-§16.3 — do not implement the last-circuit stop; §16.3 is an open owner decision** *(original: "the backstop is a circuit **count**, not a circuit identity — getting this wrong stops audio minutes after a refresh")*, **§7.5** (the `/sleep` rule — ⚠ **trigger corrected by §16.5**: hook the `SetSleepScreenVisible(true)` edge as well as `EnterSleepAsync`, or the idle timer is never covered), **§8.1** (seed the store from `/current`), **§11.5** (reply-only: `toNumber` **stays**, `GvCounterparty` becomes its sole source, and ADR-028's thread-identity fix demotes to defensive), and **§14 Q10** (pick a pre-flight gate).
 - **Owner** — §14 Q1, Q2 and Q5 are **closed**. One new decision is routed back: **§14 Q8**, sleep semantics, jointly with the sleep arc's Designer.
-- **Owner ⟨A2 — 2026-09-04⟩ — ANSWERED, and `PHN-1e` is unblocked.** **`D30`:** *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."* §7.3's rule therefore **stands as built** and the Architect recommendation to delete it is **withdrawn** (§16.3). ⚠ Two things still route back, neither blocking: **§14 Q11** (a physical stop, which would dissolve **§14 Q8** at the root) and **§14 Q12** (the multi-client hole in `IsSleepScreenVisible`; recommended default is *stop*). ⚠ And **`docs/HANDOFF-GA-PUNCH-LIST.md` §7 still needs the `D30` register entry — this ADR does not write it** (§16.8).
+- **Owner ⟨A2 — 2026-09-04⟩ — ANSWERED, and `PHN-1e` is unblocked.** **`D30`:** *"If the page reloads mid-voicemail, the audio should fail. If the user wants to hear it they can replay."* §7.3's rule therefore **stands as built** and the Architect recommendation to delete it is **withdrawn** (§16.3). ⚠ Two things still route back, neither blocking: **§14 Q11** (a physical stop, which would dissolve **§14 Q8** at the root) and **§14 Q12** (the multi-client hole in `IsSleepScreenVisible`; recommended default is *stop*). ⚠ And **`archive/handoffs/HANDOFF-GA-PUNCH-LIST.md` §7 still needs the `D30` register entry — this ADR does not write it** (§16.8).
 
 ---
 
@@ -1232,7 +1232,7 @@ on.** `idle-dimmer.js` does not drive `OnJsSleepRequested` on the idle path:
 **Consequence.** `PHN-1e` implemented the rule in `SleepService.EnterSleepAsync`, which is the correct
 single server-side funnel for the paths that *park audio* — and the idle path is not one of them.
 `SleepService.IsSleeping` is **false** on the idle path, so the obvious predicate is the wrong one.
-This is already written down: `docs/HANDOFF-NEXT-SESSION.md` gotcha 9 — *"`/sleep` reached by idle and
+This is already written down: `archive/handoffs/HANDOFF-NEXT-SESSION.md` gotcha 9 — *"`/sleep` reached by idle and
 `/sleep` reached by the Sleep pill are different states"* — and confirmed in the code today.
 
 **⚠ The error propagated through four documents, which is why it survived.** §7.5 → plan constraint
@@ -1368,7 +1368,7 @@ relaxation (a physical stop) that would close it more thoroughly.
 - **`D30` is a product decision that a future reader will meet as a surprise.** *"Reload the page, lose
   the audio"* is not what a web UI usually does, and without `D30` recorded next to the rule, the next
   engineer will read the behaviour as the bug this amendment originally took it for. It is filed in
-  §16.3, in `design/DECISION-LOG.md`, and needs a punch-list §7 register entry (§16.8).
+  §16.3, in `docs/decisions/DECISION-LOG.md`, and needs a punch-list §7 register entry (§16.8).
 - **The rule implements `D30` only in the single-browser case** (§16.3, P4), and the mechanism that
   would close the gap is the ownership model ⟨A1·4⟩ deleted.
 - **§7 must now be read with §16.** Two of its subsections are preserved with their errors intact, on
@@ -1432,14 +1432,14 @@ rather than of behaviour. ⚠ Note which branch each lives on:
 - `docs/BUILDER_QUEUE.md`'s `PHN-1e` row — and its `🚫` status, which `D30` and this amendment clear.
 - The `PHN-1e` plan's **U3** (its prediction was wrong; its existence was right — say both), **C-51**
   (the "three client paths" claim), and **C-52** (correct, and worth keeping verbatim).
-- `docs/HANDOFF-NEXT-SESSION.md` gotcha 9 — substance right, its `idle-dimmer.js:73-81` cite has moved;
+- `archive/handoffs/HANDOFF-NEXT-SESSION.md` gotcha 9 — substance right, its `idle-dimmer.js:73-81` cite has moved;
   the function is `navigateToSleep`.
-- ⭐ **`docs/HANDOFF-GA-PUNCH-LIST.md` §7 needs the `D30` register entry.** **This ADR does not write
+- ⭐ **`archive/handoffs/HANDOFF-GA-PUNCH-LIST.md` §7 needs the `D30` register entry.** **This ADR does not write
   it** — that file is owned by another pass. `D30` is verified free: `D28` is the wait-then-play queue,
   `D29` the knob geometry renumbered out of the `D26` collision on 2026-09-04.
 
 *On `feat/phn-1e-server-owned-state` only:*
-- `design/INTEGRATIONS.md`'s three-stop-conditions paragraph. ⚠ **Half of it is already corrected** —
+- `docs/integrations.md`'s three-stop-conditions paragraph. ⚠ **Half of it is already corrected** —
   the circuit-backstop item is marked *"Known broken — do not rely on this"*, **which `D30` now makes
   wrong in the other direction** and which must be rewritten as *intended behaviour, with `D30` cited*.
   The `/sleep` item is the one still asserting the falsified "all three client entry points" claim.

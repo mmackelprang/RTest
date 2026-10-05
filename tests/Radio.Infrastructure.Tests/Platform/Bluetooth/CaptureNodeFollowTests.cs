@@ -20,7 +20,7 @@ namespace Radio.Infrastructure.Tests.Platform.Bluetooth;
 /// the same methods <c>PipeWireRegistryListener</c> invokes — with two seams: a fake capture stream
 /// (a real <c>PipeWireNativeStream</c> calls pw_init) and a no-op post-bind maintenance (it shells
 /// out to pw-link/wpctl 1.5 s later). The ids and serials are the ones measured on the appliance on
-/// 2026-09-25 (docs/queue/AUD-10.md): node <c>bluez_input.B0_D5_FB_D2_0D_68.2</c>, registry id 76,
+/// 2026-09-25 (archive/queue/AUD-10.md): node <c>bluez_input.B0_D5_FB_D2_0D_68.2</c>, registry id 76,
 /// serial 58968 before the pause and 59112 after.
 /// </para>
 /// <para>

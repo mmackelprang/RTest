@@ -1,6 +1,6 @@
 # `AUD-29` — in Bluetooth mode the console's position bar never moves, and disagrees with the phone
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-10 from the owner's timestamped pause/resume sitting.
 
@@ -90,4 +90,4 @@ Tests (`BluetoothAudioSourceTests`, `FakeTimeProvider`): advances from the last 
 
 Merged as [#724](https://github.com/mmackelprang/RTest/pull/724), squash `524b4f3`. Owner UAT 2026-09-30 ([`RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) evening batch §B): *"BT position bar updates as expected."* Archived.
 
-**Follow-up filed: [`AUD-83`](AUD-83.md).** In the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear), with no phone connected the Bluetooth source reported `Playing` (`bluetoothDevices: []`) and the panel's position counter ran (0:04) — possibly this row's extrapolation ticking with no device.
+**Follow-up filed: [`AUD-83`](../../docs/queue/AUD-83.md).** In the agent pre-pass 2026-09-29 ~22:47–22:57 EDT against the box (`7dd34b5`, both services SHA-verified; console muted, so nothing judged by ear), with no phone connected the Bluetooth source reported `Playing` (`bluetoothDevices: []`) and the panel's position counter ran (0:04) — possibly this row's extrapolation ticking with no device.

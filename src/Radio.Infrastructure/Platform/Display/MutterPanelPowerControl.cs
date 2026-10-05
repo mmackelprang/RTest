@@ -20,7 +20,7 @@ namespace Radio.Infrastructure.Platform.Display;
 /// <para>
 /// <b>Why <c>gdbus</c> and not a D-Bus library.</b> It is the exact command that was measured, it is
 /// the same command <c>radio-api.service</c>'s <c>ExecStopPost=</c> runs and the recovery line in
-/// <c>design/INTEGRATIONS.md</c> gives, so all three cannot drift apart; and it is called a handful of
+/// <c>docs/integrations.md</c> gives, so all three cannot drift apart; and it is called a handful of
 /// times a day. No shell is involved — arguments go through <see cref="ProcessStartInfo.ArgumentList"/>.
 /// <c>radio-api</c> runs as the session user, so no <c>sudo -u</c> is needed either (the retired
 /// ScreenSaver route used one).

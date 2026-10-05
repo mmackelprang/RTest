@@ -1,12 +1,12 @@
 # AUD-1 — Split `UseShazamForAllSources` into the two independent decisions it currently conflates.
 
-> Queue dossier for row **`AUD-1`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`AUD-1`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
@@ -110,7 +110,7 @@ the mirror image: it guards its tag reads with `!IsNullOrEmpty` (`:1951`), so th
 ever the sentinel. **One shared predicate must cover null, empty, whitespace, sentinel and absent key**,
 or it serves one source and not the other.
 
-**2. The History panel divergence is a SEPARATE row** — [`AUD-19`](AUD-19.md), to be named in this
+**2. The History panel divergence is a SEPARATE row** — [`AUD-19`](../../docs/queue/AUD-19.md), to be named in this
 row's PR body **before** merge. `PlayHistoryTracker` re-points its rows at the fingerprint record
 regardless of which branch the source took, so after this row ships, now-playing obeys the rule and
 history does not. **Left undocumented, that reads as a failed fix.**
@@ -157,7 +157,7 @@ identification is wrong or when AVRCP carried a better title (*"Enter Sandman (R
 
 This resolves a standing contradiction between two documents that **could not both be acted on**:
 `HANDOFF-GA-PUNCH-LIST.md` §5 (*"P2 — Post-GA"*) listed `AUD-1` as post-GA, while the queue scheduled
-[`AUD-19`](AUD-19.md) **behind** it — i.e. treated it as buildable now. **Both are now pre-GA.**
+[`AUD-19`](../../docs/queue/AUD-19.md) **behind** it — i.e. treated it as buildable now. **Both are now pre-GA.**
 
 ⛔ **THE TRAP THAT MUST SURVIVE THIS RULING — DO NOT RENAME THE FLAG WHEN SPLITTING IT.** The SQLite
 config store outranks both JSON layers and already holds `fingerprinting:useShazamForAllSources|true`.

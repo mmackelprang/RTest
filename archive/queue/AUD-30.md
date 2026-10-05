@@ -1,6 +1,6 @@
 # `AUD-30` — a phantom "disconnected" tears down a healthy BT stream while the phone stays connected
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1.** Filed 2026-09-25 from the owner's cabinet sitting that measured `AUD-10`'s root cause. Seen
 twice in 90 seconds on a Pixel 10 Pro XL, box on `9ca4259`.

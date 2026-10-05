@@ -11,7 +11,7 @@ public static class GvBridgeHealth
 {
   /// <summary>
   /// How stale <see cref="GvBridgeStatusDto.LastApiSuccessAt"/> may be before the bridge is
-  /// considered unhealthy. ~2 min per docs/queue/GV-12.md:46.
+  /// considered unhealthy. ~2 min per archive/queue/GV-12.md:46.
   /// </summary>
   public static readonly TimeSpan LastSuccessStaleAfter = TimeSpan.FromMinutes(2);
 

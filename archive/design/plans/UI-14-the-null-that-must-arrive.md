@@ -1,6 +1,6 @@
 # PLAN — `UI-14` · The null that must arrive, and the gate that only looks like one
 
-**Row:** [`docs/queue/UI-14.md`](../../docs/queue/UI-14.md) · **Precedent:** [`UI-12`](UI-12-the-null-that-cannot-arrive.md), [ADR-033](../DECISION-LOG.md)
+**Row:** [`docs/queue/UI-14.md`](../../queue/UI-14.md) · **Precedent:** [`UI-12`](UI-12-the-null-that-cannot-arrive.md), [ADR-033](../../../docs/decisions/DECISION-LOG.md)
 **Written:** 2026-09-09 (Planner) · **Scope:** `src/Radio.Web` + `tests/Radio.Web.Tests` + docs. No hardware, no audio path.
 
 ---

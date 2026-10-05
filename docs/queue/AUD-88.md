@@ -3,7 +3,7 @@
 [← Builder Queue index](../BUILDER_QUEUE.md)
 
 🔵 **P3.** Filed 2026-09-30 by the `AUD-17` Builder, from a code read. **Windows dev host only — the
-appliance is unaffected** (its Bluetooth service supplies no art at all; see [`AUD-17`](AUD-17.md)).
+appliance is unaffected** (its Bluetooth service supplies no art at all; see [`AUD-17`](../../archive/queue/AUD-17.md)).
 
 ## The defect
 

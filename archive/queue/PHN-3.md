@@ -1,27 +1,27 @@
 # PHN-3 — NEW ROW 2026-09-05 — Feature B, the eighth and last PR of the ADR-029 arc, and it never had a row in this file.
 
-> Queue dossier for row **`PHN-3`** of [`BUILDER_QUEUE.md`](../BUILDER_QUEUE.md).
+> Queue dossier for row **`PHN-3`** of [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md).
 > The detail below was moved verbatim out of that row's Item cell on 2026-09-06; only
 > whitespace, the table's `\|` escapes and docs-relative link prefixes changed.
 >
 > ⚠ **Directional words in the prose were written when every row shared one file.**
 > *above*, *below* and *this file* may now point across files — most often at
-> [`BUILDER_QUEUE_ARCHIVE.md`](../BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
+> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md) or a sibling in this
 > directory. They were left verbatim rather than reworded, which would be a content edit.
 
 | Field | Value |
 |---|---|
 | Status | ✅ [#598](https://github.com/mmackelprang/RTest/pull/598) — shipped 2026-09-07 |
-| Plan | [`PHN-3-the-sms-speak-button.md`](../../design/plans/PHN-3-the-sms-speak-button.md) |
-| Spec / handoff | [handoff §B `:297-430` + §Cross-1…5 `:79-181`](../design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) · [ADR-029](../../design/decisions/2026-08-03-gv-audio-through-engine.md) §4.2 / §9 (the amendment) · [`PHN-2` plan](../../design/plans/PHN-2-retire-the-audio-element.md) §0.5 · punch list [§4.4](../HANDOFF-GA-PUNCH-LIST.md) |
-| Depends on | ✅ **MET.** `O6` (*`PHN-1` before or with `PHN-2` / `PHN-3`*) is satisfied: `PHN-1a`…`PHN-1f` ✅ and `PHN-2` ✅ [#566](https://github.com/mmackelprang/RTest/pull/566) have all merged. ✅ **`PHN-4` has MERGED** ([#578](https://github.com/mmackelprang/RTest/pull/578)), so the sequencing instruction that used to sit here is **retired** — no other row is queued against `PhoneTextsPanel.razor`, and this row can be claimed whenever it reaches the front. ⚠ **The file is now 258 lines, not 442, and `PHN-4` moved essentially every line in it.** The plan was repaired against `656f58e6` — **read [§0.0](../../design/plans/PHN-3-the-sms-speak-button.md) before editing that file**, because three of the plan's original edits referenced members `PHN-4` deleted (`StatusFor`, `RetrySend`, and a zero-arg `ResolveThreadName`) and would not have compiled. ✅ **The `GV-10` ordering preference is DISCHARGED 2026-09-06 — `GV-10` was FALSIFIED** ([`F-5-DIAGNOSIS.md`](../uat/2026-07-31-gv-live-data/F-5-DIAGNOSIS.md)): conversation bubbles bind `SmsMessageDto.Text` and render it verbatim, and this row reads that **same field**, so it speaks exactly what is displayed and there is no ellipsis to sequence around. ⛔ **The instruction that clause carried still stands, unchanged: do not strip a trailing ellipsis, and do not otherwise work around one here** — if Google ever does hand us snippets, this feature must expose that upstream defect audibly rather than conceal it (plan `:377`). |
+| Plan | [`PHN-3-the-sms-speak-button.md`](../design/plans/PHN-3-the-sms-speak-button.md) |
+| Spec / handoff | [handoff §B `:297-430` + §Cross-1…5 `:79-181`](../design-handoffs/HANDOFF-phone-console-audio-and-canned-replies.md) · [ADR-029](../../docs/decisions/2026-08-03-gv-audio-through-engine.md) §4.2 / §9 (the amendment) · [`PHN-2` plan](../design/plans/PHN-2-retire-the-audio-element.md) §0.5 · punch list [§4.4](../handoffs/HANDOFF-GA-PUNCH-LIST.md) |
+| Depends on | ✅ **MET.** `O6` (*`PHN-1` before or with `PHN-2` / `PHN-3`*) is satisfied: `PHN-1a`…`PHN-1f` ✅ and `PHN-2` ✅ [#566](https://github.com/mmackelprang/RTest/pull/566) have all merged. ✅ **`PHN-4` has MERGED** ([#578](https://github.com/mmackelprang/RTest/pull/578)), so the sequencing instruction that used to sit here is **retired** — no other row is queued against `PhoneTextsPanel.razor`, and this row can be claimed whenever it reaches the front. ⚠ **The file is now 258 lines, not 442, and `PHN-4` moved essentially every line in it.** The plan was repaired against `656f58e6` — **read [§0.0](../design/plans/PHN-3-the-sms-speak-button.md) before editing that file**, because three of the plan's original edits referenced members `PHN-4` deleted (`StatusFor`, `RetrySend`, and a zero-arg `ResolveThreadName`) and would not have compiled. ✅ **The `GV-10` ordering preference is DISCHARGED 2026-09-06 — `GV-10` was FALSIFIED** ([`F-5-DIAGNOSIS.md`](../uat/2026-07-31-gv-live-data/F-5-DIAGNOSIS.md)): conversation bubbles bind `SmsMessageDto.Text` and render it verbatim, and this row reads that **same field**, so it speaks exactly what is displayed and there is no ellipsis to sequence around. ⛔ **The instruction that clause carried still stands, unchanged: do not strip a trailing ellipsis, and do not otherwise work around one here** — if Google ever does hand us snippets, this feature must expose that upstream defect audibly rather than conceal it (plan `:377`). |
 | Branch | `feat/phn-3-speak-a-text` |
 
 ## Detail
 
 ⭐ **NEW ROW 2026-09-05 — Feature B, the eighth and last PR of the ADR-029 arc, and it never had a row in this file.**
 
-🟠 **P1, `O6`, punch list [§4.4 `:1066`](../HANDOFF-GA-PUNCH-LIST.md)**, where it has always been listed with **`Queued? No`** — corrected to `Yes` by this pass.
+🟠 **P1, `O6`, punch list [§4.4 `:1066`](../handoffs/HANDOFF-GA-PUNCH-LIST.md)**, where it has always been listed with **`Queued? No`** — corrected to `Yes` by this pass.
 
 **An inbound SMS bubble gets a 44px gutter button that speaks the message through the console**: same `IEventPlaybackService` seam, same ducking, same topbar chip as `PHN-2`'s voicemail, on the Speech arm instead of the RemoteMedia one.
 

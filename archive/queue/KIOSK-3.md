@@ -1,6 +1,6 @@
 # `KIOSK-3` — the launcher's VOICE row reads a field RotaryPhone is about to delete, and it was ours to catch
 
-[← Builder Queue index](../BUILDER_QUEUE.md)
+[← Builder Queue index](../../docs/BUILDER_QUEUE.md)
 
 🟠 **P1 — deploy-gating.** Filed 2026-09-09. ⛔ **Blocks the `rotary-phone` deploy the owner assigned
 to us** (`RotaryPhone/docs/handoffs/2026-09-09-radioconsole-deploy-handoff.md`).

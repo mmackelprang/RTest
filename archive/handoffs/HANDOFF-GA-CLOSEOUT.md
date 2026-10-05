@@ -4,11 +4,11 @@
 appliance at `f409bb9` (both services, SHA-verified by IP). Supersedes the "Start here" section of
 [`HANDOFF-NEXT-SESSION.md`](HANDOFF-NEXT-SESSION.md) for sequencing; the punch list
 ([`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md)) remains the authority on *what each row
-is*, and [`BUILDER_QUEUE.md`](BUILDER_QUEUE.md) on *what is claimable*. This file is the order.
+is*, and [`BUILDER_QUEUE.md`](../../docs/BUILDER_QUEUE.md) on *what is claimable*. This file is the order.
 
 > ⛔ **2026-10-04: most of the work sequenced below is DONE. What is left is in
 > [`HANDOFF-GA-PUNCH-LIST.md`](HANDOFF-GA-PUNCH-LIST.md) § *Status 2026-10-04*.** Each item below was checked against
-> [`BUILDER_QUEUE_ARCHIVE.md`](BUILDER_QUEUE_ARCHIVE.md), the punch list's struck rows, or `git log origin/main`.
+> [`BUILDER_QUEUE_ARCHIVE.md`](../queue/BUILDER_QUEUE_ARCHIVE.md), the punch list's struck rows, or `git log origin/main`.
 > **Shipped or closed:**
 > - **2b:** `AUD-26`, `TTS-6`, `TTS-5`, `TTS-2` and `TEST-8`.
 > - **2c:** `AUD-84`, `AUD-85`, `AUD-5`, `AUD-38` (superseded), `AUD-81`, `AUD-54` and `AUD-37`'s auto-reconnect half
@@ -135,7 +135,7 @@ push lives. `AUD-58`'s transport half belongs here too.
 an unhandled exception in SharpCaster's heartbeat timer, restarting the whole console. `AUD-37`'s
 "notice and fall back" follows it. `AUD-5` has shipped (#725), and `AUD-38` is superseded by
 `AUD-80` (#725) + `AUD-81` (console volume drives the speaker, owner-ruled 2026-09-30). Record:
-[`uat/RETURN-CHECKLIST.md`](uat/RETURN-CHECKLIST.md) § Casting baseline.
+[`uat/RETURN-CHECKLIST.md`](../uat/RETURN-CHECKLIST.md) § Casting baseline.
 
 ### 2d. Logging & distortion, in `O4`/`O7` order (≈ 2–3 days)
 
@@ -186,7 +186,7 @@ PR per D-D**: delete the RaddyRF320BT USB radio source, its protocol/config/docs
 nothing in `Radio.Tools.AudioUAT` or the `SourceSelector` list still enumerates it. · **`AUD-17` as a removal PR** (owner ruling 2026-09-30, option A:
 *"AUD-17 recommendation is fine."*): delete the never-firing AVRCP cover-art read and
 `CacheAvrcpArtAsync`'s unreachable branch, fix the "MPRIS" comment and log strings; BT art keeps
-coming from song recognition. Scope in [`queue/AUD-17.md`](queue/AUD-17.md).
+coming from song recognition. Scope in [`queue/AUD-17.md`](../queue/AUD-17.md).
 
 **Status 2026-09-30 (batch B; `AUD-16` updated 2026-10-01):**
 - ✅ `AUD-36` archived ([#741](https://github.com/mmackelprang/RTest/pull/741)).
@@ -197,7 +197,7 @@ coming from song recognition. Scope in [`queue/AUD-17.md`](queue/AUD-17.md).
   *"merge and deploy AUD-16"*. It was deployed 2026-09-30 ~21:51 EDT and SHA-verified on both services,
   with the kiosk live. **It was agent-verified on the box, not owner-run.** `/api/radio/devices` lists
   only `RTLSDRCore`, the RF320 field and dropdown option are gone, the sources switch, and the SDR
-  came back on 92.3 FM. Evidence is in [`queue/AUD-16.md`](queue/AUD-16.md); nothing is left for the
+  came back on 92.3 FM. Evidence is in [`queue/AUD-16.md`](../queue/AUD-16.md); nothing is left for the
   owner.
 
 ### 2j. Test & ops hygiene

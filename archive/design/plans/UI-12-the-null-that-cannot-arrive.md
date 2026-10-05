@@ -1,6 +1,6 @@
 # PLAN — `UI-12` · The null cannot arrive, the guards were copied from a deleted event, and the row's reason for not adding one is false
 
-> **Row:** `UI-12`, [`docs/queue/UI-12.md`](../../docs/queue/UI-12.md). 🔵 **P3.** Filed 2026-09-08 by the `UI-7` Builder as its `L-8`.
+> **Row:** `UI-12`, [`docs/queue/UI-12.md`](../../queue/UI-12.md). 🔵 **P3.** Filed 2026-09-08 by the `UI-7` Builder as its `L-8`.
 > **Branch:** `fix/ui-12-radiostatechanged-guard-shape` (unchanged — still accurate).
 > **Estimate:** **0.5 d.**
 > **Auto-mergeable on green gates.** §0.9 confirms the row's guess and narrows what UAT can mean here.
@@ -13,7 +13,7 @@
 
 ### 0.1 ⚠⚠ `C-401` — THE ROW'S STATED REASON FOR NOT ADDING A GUARD IS FALSE
 
-[`docs/queue/UI-12.md:19-24`](../../docs/queue/UI-12.md) says:
+[`docs/queue/UI-12.md:19-24`](../../queue/UI-12.md) says:
 
 > **Adding `if (dto is null) return;` would silently drop a broadcast the panel receives today.**
 > […] the current behaviour *delivers* that event and the UI *handles* it. A guard would convert a
