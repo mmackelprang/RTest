@@ -2,14 +2,20 @@ namespace Radio.Core.Models.Audio;
 
 /// <summary>
 /// The definition of "the audio source did not supply this field" used by the now-playing
-/// sources (Bluetooth and FilePlayer), and the rule for merging a fingerprint result into a
-/// source's own metadata.
+/// sources (Bluetooth and FilePlayer) and by play history, and the rule for merging a
+/// fingerprint result into a source's own metadata.
 /// </summary>
 /// <remarks>
 /// <para>
-/// ⚠ Not yet the ONLY definition: <c>PlayHistoryTracker.IsPlaceholderMetadata</c> is a second,
-/// divergent one (it also treats "Bluetooth Audio" and an artist of "Bluetooth" as placeholders).
-/// Unifying History with this rule is <c>AUD-19</c>.
+/// Since <c>AUD-19</c>, <c>PlayHistoryTracker</c> uses this type too. Its row-level placeholder
+/// test calls <see cref="IsMissing"/> for every source, and for Bluetooth and the file player it
+/// records an identification through <see cref="FillMissingFrom"/> and
+/// <see cref="ShouldFillAlbumArt"/>. It passes the fallback titles History itself writes when a
+/// source supplied nothing ("Bluetooth Audio", "File Player", …) as extra title placeholders, the
+/// way Bluetooth passes its device name; its fallback artist is left out of the merge so that it
+/// reads as missing. ⚠ Not the only definition in that class: <c>GetSourceMetadata</c> still
+/// strips the <see cref="StandardMetadataKeys"/> defaults by exact, case-sensitive match before
+/// any of this runs.
 /// </para>
 /// <para>
 /// <b>The rule (AUD-1, owner decision 2026-09-08):</b> when metadata is available from the

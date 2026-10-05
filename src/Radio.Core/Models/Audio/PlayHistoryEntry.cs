@@ -26,7 +26,27 @@ public sealed record PlayHistoryEntry
   /// <summary>Gets the audio source type.</summary>
   public required PlaySource Source { get; init; }
 
-  /// <summary>Gets the source of track metadata (FileTag, Fingerprinting, AVRCP, etc.).</summary>
+  /// <summary>
+  /// Gets where the entry's TITLE came from, as far as PlayHistoryTracker can tell (FileTag,
+  /// Avrcp, Fingerprinting, etc.).
+  /// </summary>
+  /// <remarks>
+  /// <para>
+  /// Since AUD-19 this describes the title only. An identification whose title lost to the
+  /// source's (the per-field rule) leaves it at the source's value. Whether an identification
+  /// landed is <see cref="IdentificationConfidence"/>, which PlayHistoryTracker sets only from
+  /// one — not <see cref="WasIdentified"/>, which is also true for a row that has real AVRCP or
+  /// tag metadata and was never fingerprinted. Other fields can have a different provenance from
+  /// the title's — an AVRCP title with fingerprint-filled cover art is normal.
+  /// </para>
+  /// <para>
+  /// ⚠ Not exact. A source that filled its own title from an earlier identification and then
+  /// started a History row with it (Bluetooth via a Playing transition, or the file player within
+  /// one file) is labelled with the source's value, because neither source records which fields
+  /// it filled. Rows written before AUD-19 say Fingerprinting for any identification, whatever
+  /// the title's origin, and Manual for a Bluetooth row recorded on a Playing transition.
+  /// </para>
+  /// </remarks>
   public MetadataSource? MetadataSource { get; init; }
 
   /// <summary>Gets additional source details (e.g., station name, file path).</summary>
