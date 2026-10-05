@@ -1,4 +1,42 @@
-# Future Work — Stubbed & Unimplemented Features
+# Known Issues and Future Work
+
+## Open items at v1.0.0
+
+Taken from the GA punch list's status of 2026-10-04
+([archive/handoffs/HANDOFF-GA-PUNCH-LIST.md](../archive/handoffs/HANDOFF-GA-PUNCH-LIST.md)). No P0 items are
+open. Live work items are tracked in [BUILDER_QUEUE.md](BUILDER_QUEUE.md).
+
+**Known issues**
+- **Ignore does not reject the call on the cell.** The incoming-call banner's Ignore stops the rotary phone
+  ringing, but the cell keeps ringing. The fix belongs to the RotaryPhone repo; it is tracked on `PHN-13` and in
+  [queue/CROSS-REPO-HANDOFFS.md](queue/CROSS-REPO-HANDOFFS.md).
+- **AM and shortwave** wait on all-band tuner hardware (`AUD-94`, on hold).
+- **`AUD-18`:** the capture watchdog has shipped, but the root cause of the long-running capture stall is still
+  open.
+- **`LOG-3`:** the log-viewer endpoint reads a whole file with `ReadToEnd()` (`SystemController`). It has no
+  queue row.
+- **`AUD-37` part (b):** the HttpMp3 Cast path has a stalled-write gap. Auto-reconnect shipped, and the box runs
+  DirectChannel, so this is not the production path. It has no queue row.
+- **`TTS-8`:** a fresh install ships the robotic `en-US-Standard-A` voice. The fix is box configuration.
+
+**Install-path work (P1):** `OPS-3` (`BindsTo=` for `radio-web`; the owner reviews the merge), plus `LOG-3` and
+`AUD-37` (b) above.
+
+**Queued rows:** `AUD-19` (pre-GA by owner ruling; built and held for UAT), `PHN-7`, `PHN-8`, `PHN-9`,
+`AUD-18`, `AUD-20`, `AUD-25`, `AUD-83`, `AUD-86`, `AUD-88`, `AUD-89`, `AUD-90`, `AUD-92`, `AUD-93`, `AUD-95`,
+`UI-18`, `UI-19`, `UI-33`, `TEST-10`, `OPS-10`, `AUD-4` and `GV-7`. Each has a dossier in `queue/<ID>.md`.
+
+**Waiting on owner decisions:** `TEST-11` part 2 (map `pipewire-0.3` to `.so.0` in production), `UX-2` (what
+the skeleton shimmer is for), `AUD-75` (the file player's media root on the box), and `PHN-13` M3 (caller-name
+precedence).
+
+**Waiting on owner UAT:** `PHN-13` checks 2 and 3, and `PHN-14` (name resolution with no phone connected).
+
+**Not re-checked:** `TTS-1` part (iii), which validates the engine and voice on save.
+
+---
+
+## Stubbed and unimplemented features
 
 This document catalogs features that have been designed at the interface level but not yet fully implemented. Each entry includes the rationale for the stub, the platform APIs needed to complete it, and any known gotchas.
 

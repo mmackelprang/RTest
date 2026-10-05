@@ -810,8 +810,8 @@ directly, not the Phone page's local contact index, so it names the caller as th
 Matching is one rule everywhere (`PhoneNumberNormalizer.TryFindMatch`, and the same tiers in the PBAP
 repository's SQL), in two tiers:
 
-- **Exact** — the digits, with the North American country code dropped, so `+19193718044`, `19193718044` and
-  `9193718044` are one number.
+- **Exact** — the digits, with the North American country code dropped, so `+19195550123`, `19195550123` and
+  `9195550123` are one number.
 - **Local entry** — a stored number of exactly **seven** digits (no area code) equal to the caller's last seven.
   A stored 10- or 11-digit number matches **only** on the full number, never on its last seven, so a stranger in
   another area code who shares a contact's last seven digits is not named.

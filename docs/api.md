@@ -6,6 +6,11 @@
 
 This document provides comprehensive API documentation for the Radio Console REST API and SignalR hubs. All endpoints follow RESTful conventions and return JSON responses.
 
+> **The live source of truth is the generated OpenAPI document**, served by every running API: the interactive
+> Scalar UI is at **`/scalar/v1`** and the JSON at **`/openapi/v1.json`** (on the box,
+> `http://radio:5000/scalar/v1`). Both are generated from the controllers, so they are always current. This page
+> is a hand-written guide; where it and Scalar disagree, Scalar is right.
+
 ---
 
 ## Table of Contents

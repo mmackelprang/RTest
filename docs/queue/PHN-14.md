@@ -36,7 +36,7 @@ no phone connected.
 | **Sources, in order** | 1. The stored synced phone books (PBAP), on **every** phone ever synced. 2. RotaryPhone's contacts list, `GET /api/contacts`, matched locally. |
 | **Precedence when both match** | **Match quality first, then source** (owner ruling below): synced-exact, RotaryPhone-exact, synced local entry, RotaryPhone local entry. |
 | **Which phone books, in which order** | The **connected** phone first (it is the phone in hand, and it was the only one searched before), then the **most recently synced**, then the rest by address. Chosen because the newest sync is the most likely to be current — a contact renamed on the new phone should beat the old phone's spelling — while older phones still fill gaps (the box's three books overlap but are not identical). |
-| **Matching** | One rule everywhere (`PhoneNumberNormalizer.TryFindMatch`; the same tiers in both repository queries): an exact match on the digits, with the North American `1` dropped from an 11-digit number — so `+19193718044`, `19193718044` and `9193718044` are one number — then the **local-entry** tier: a stored 7-digit number (no area code) equal to the caller's last seven. A stored full number never matches on its last seven (owner ruling below). An exact match on any phone beats a local entry on any phone. `pbap/lookup` returns `isExactMatch`. |
+| **Matching** | One rule everywhere (`PhoneNumberNormalizer.TryFindMatch`; the same tiers in both repository queries): an exact match on the digits, with the North American `1` dropped from an 11-digit number — so `+19195550123`, `19195550123` and `9195550123` are one number — then the **local-entry** tier: a stored 7-digit number (no area code) equal to the caller's last seven. A stored full number never matches on its last seven (owner ruling below). An exact match on any phone beats a local entry on any phone. `pbap/lookup` returns `isExactMatch`. |
 | **Consumers** | The banner (Web: `pbap/lookup`, then the list) and the spoken announcement (API: the repository, then the list). Both now use both sources, in the same order, with the same rule. |
 | **Logging** | No number or name at Information. The PBAP hit line moved from Information to Debug (it carried only the masked token) and now names the device and match kind. |
 
@@ -60,7 +60,7 @@ suggestions, now built (`4dfee9b` and the commit after it):
    which pinned the old behaviour (a different area code matching), now asserts the opposite.
 
 Box context from the coordinator: the branch at `e0e78fc` was deployed, and the lookup returned the owner's name
-for `9193718044` and `+19193718044` with no phone connected. RotaryPhone's decline route is not deployed on the box
+for `9195550123` and `+19195550123` with no phone connected. RotaryPhone's decline route is not deployed on the box
 yet (`GET /api/phone/decline` → 404), so `DeclineSupported` stays off.
 
 Mutation checks for the rulings: 11 mutants, 11 killed (R1–R11: the old suffix rule in `FindMatch` and in each

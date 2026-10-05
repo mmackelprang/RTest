@@ -9,7 +9,7 @@ This document provides a comprehensive reference for all Configuration, Preferen
 ### For Development (Windows/Mac/Linux)
 
 1. **Prerequisites**
-   - .NET 8 SDK or later
+   - .NET 10 SDK (pinned in `global.json`)
    - SQLite (optional, can use JSON files)
    - Git
 

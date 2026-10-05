@@ -1,6 +1,50 @@
-# Audio Dataflow & Latency Analysis
+# Architecture
 
-## Overview
+## Layers
+
+```
+Radio.Core            Domain interfaces, models and events. No dependencies.
+  ▲
+Extracted libraries   RTLSDRCore, Radio.AudioAnalysis, Radio.Metrics, Radio.Configuration,
+  ▲                   Radio.Fingerprinting (each packable as NuGet, each with its own test project)
+Radio.Infrastructure  SoundFlow engine wrapper, mixer, device manager; sources (SDR radio, Bluetooth,
+  ▲                   file, vinyl, USB, TTS, audio file); outputs (local, Google Cast, HTTP stream);
+  │                   Bluetooth (BlueZ D-Bus / WinRT), PipeWire interop, encoders, DI wiring
+Radio.API             REST controllers under /api/*, SignalR hubs, /stream/audio; owns all hardware
+  ▲  (HTTP + SignalR)
+Radio.Web             Blazor Server UI (Radzen); never touches hardware directly
+```
+
+- **Two processes.** `Radio.API` (port 5000) owns the audio engine and every device. `Radio.Web` (port 5002)
+  is a client of the API: it calls REST through typed API clients and subscribes to the SignalR hubs
+  (`/hubs/audio`, `/hubs/visualization`). The phone features come from the separate RotaryPhone service, which
+  `Radio.Web` consumes over REST and SignalR and never hosts in-process.
+- **Configuration.** The JSON or SQLite stores are bridged into `IConfiguration`. The SQLite store outranks the
+  JSON files, and writes trigger `IOptionsMonitor` reloads. See [configuration.md](configuration.md).
+- **Multi-targeting.** `Radio.Infrastructure` builds `net10.0` and, on Windows, also
+  `net10.0-windows10.0.19041.0` for WinRT Bluetooth. Windows-only code sits behind `#if WINDOWS_TARGET`.
+
+### Audio pipeline
+
+```
+Sources (SDR radio / Bluetooth / File / Vinyl / USB / TTS / audio file events)
+      │
+      ▼
+Master mixer ──► Modifiers (Balance → Limiter → Fingerprint tap → Visualization tap)
+      │
+      ├──► Playback device (local speakers, through PipeWire on Linux)
+      ├──► TappedOutputStream ──► HTTP stream (PCM / MP3) ──► Google Cast (HttpMp3), or DirectChannel
+      └──► TappedOutputStream ──► Visualization (FFT, levels, waveform) ──► SignalR
+```
+
+Event sources (announcements) mix on top of the active primary source, which is ducked by priority. The rest of
+this document traces samples through those paths in detail.
+
+---
+
+## Audio dataflow and latency
+
+### Overview
 
 This document traces every audio sample from source to output, documenting buffer sizes, latency contributions, encoding overhead, and optimization opportunities. It covers three parallel pipelines: local playback, Google Cast streaming, and the fingerprinting/metadata system.
 

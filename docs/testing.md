@@ -4,20 +4,20 @@ This document describes the testing infrastructure and practices for the Radio C
 
 ## Test Projects
 
-| Project | Tests | Purpose |
+| Project | Tests (v1.0.0) | Purpose |
 |---------|-------|---------|
-| `tests/Radio.Metrics.Tests` | 17 | Unit tests for Radio.Metrics NuGet package |
+| `tests/Radio.Metrics.Tests` | 28 | Unit tests for Radio.Metrics NuGet package |
 | `tests/Radio.Configuration.Tests` | 115 | Unit tests for Radio.Configuration NuGet package |
-| `tests/Radio.Fingerprinting.Tests` | 95 | Unit + integration tests for Radio.Fingerprinting NuGet package |
-| `tests/RTLSDRCore.Tests` | 155 | Unit tests for RTLSDRCore NuGet package |
+| `tests/Radio.Fingerprinting.Tests` | 113 | Unit + integration tests for Radio.Fingerprinting NuGet package |
+| `tests/RTLSDRCore.Tests` | 315 | Unit tests for RTLSDRCore NuGet package |
 | `tests/Radio.AudioAnalysis.Tests` | 35 | Unit tests for Radio.AudioAnalysis NuGet package |
-| `tests/Radio.Core.Tests` | 23 | Unit tests for core domain models and interfaces |
-| `tests/Radio.Infrastructure.Tests` | 840 | Unit tests for infrastructure implementations (audio, BT, platform) |
-| `tests/Radio.API.Tests` | 223 | Unit tests for API controllers, hubs, and middleware |
-| `tests/Radio.Web.Tests` | 116 | Unit tests for Blazor components and Web services |
-| `tests/Radio.IntegrationTests` | 50 | Cross-cutting integration tests (SignalR, audio data flow) |
+| `tests/Radio.Core.Tests` | 221 | Unit tests for core domain models and interfaces |
+| `tests/Radio.Infrastructure.Tests` | 2,443 | Unit tests for infrastructure implementations (audio, BT, platform) |
+| `tests/Radio.API.Tests` | 704 | Unit tests for API controllers, hubs, and middleware |
+| `tests/Radio.Web.Tests` | 1,870 | Unit tests for Blazor components and Web services |
+| `tests/Radio.IntegrationTests` | 35 | Cross-cutting integration tests (SignalR, audio data flow) |
 | `tests/Radio.Web.E2ETests` | 28 | End-to-end Playwright browser tests (excluded from CI) |
-| **Total** | **~1,697** | |
+| **Total** | **5,907** | |
 
 ## Running Tests
 
