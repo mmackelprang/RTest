@@ -145,9 +145,9 @@ public class QueueTestFilesTest : IPhaseTest
 
   private readonly string[] _testFiles =
   [
-    "testdata/SheriYoureMyHoneyBunchSugarPlumRingtone.mp3",
-    "music/02 We're Ready.mp3",
-    "music/Hear What They Say.mp3"
+    "alarm/PD - Alarm Clock.mp3",
+    "alerts/PD - Pager Beeps.mp3",
+    "alerts/PD - Ship Brass Bell.mp3"
   ];
 
   public QueueTestFilesTest(RadioApiClient apiClient)

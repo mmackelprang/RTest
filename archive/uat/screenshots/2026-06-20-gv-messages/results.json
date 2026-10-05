@@ -22,7 +22,7 @@
   },
   "item3": {
     "active": "ALL",
-    "panelExcerpt": "MESSAGES refresh ALL VOICEMAIL TEXTS CALLS call_made Mark Mackelprang Outgoing 6/19/2026 8:49 PM 0:15 chevron_right call_received Mark Mackelprang Incoming 6/19/2026 8:47 PM 0:07 chevron_right call_re",
+    "panelExcerpt": "MESSAGES refresh ALL VOICEMAIL TEXTS CALLS call_made [redacted] Outgoing 6/19/2026 8:49 PM 0:15 chevron_right call_received [redacted] Incoming 6/19/2026 8:47 PM 0:07 chevron_right call_re",
     "skeletonStuck": false,
     "shot": "D:/prj/RTest/RTest/docs/uat/screenshots/2026-06-20-gv-messages/03-filter-all.png"
   },

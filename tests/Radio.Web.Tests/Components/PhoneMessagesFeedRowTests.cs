@@ -62,7 +62,7 @@ public class PhoneMessagesFeedRowTests : TestContext
     new("t1", "+15551234567", "Mom", DateTime.Now, hasUnread, "see you soon");
 
   private static CallHistoryEntryDto Call(
-    string number = "9193718044",
+    string number = "9195550142",
     string? callerName = null,
     CallDirection direction = CallDirection.Incoming,
     CallAnsweredOn answeredOn = CallAnsweredOn.RotaryPhone,
@@ -83,14 +83,14 @@ public class PhoneMessagesFeedRowTests : TestContext
     Register();
     var contacts = new List<MergedContact>
     {
-      new(null, "Jane Doe", "9193718044", null, "PBAP")
+      new(null, "Jane Doe", "9195550142", null, "PBAP")
     };
     var cut = RenderCall(Call(callerName: null), contacts);
 
     Assert.Contains("Jane Doe", cut.Find(".list-item-title").TextContent);
     var subnumber = cut.FindAll(".list-item-subnumber");
     Assert.Single(subnumber);
-    Assert.Contains("(919) 371-8044", subnumber[0].TextContent);
+    Assert.Contains("(919) 555-0142", subnumber[0].TextContent);
   }
 
   [Fact]
@@ -102,7 +102,7 @@ public class PhoneMessagesFeedRowTests : TestContext
     var cut = RenderCall(Call(callerName: "Bob Smith"));
 
     Assert.Contains("Bob Smith", cut.Find(".list-item-title").TextContent);
-    Assert.Contains("(919) 371-8044", cut.Find(".list-item-subnumber").TextContent);
+    Assert.Contains("(919) 555-0142", cut.Find(".list-item-subnumber").TextContent);
   }
 
   [Fact]

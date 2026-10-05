@@ -31,14 +31,14 @@ public class PhoneNumberNormalizerTests
   private sealed record Entry(string Name, string? Phone);
 
   [Theory]
-  [InlineData("+19193718044")]
-  [InlineData("19193718044")]
-  [InlineData("9193718044")]
-  [InlineData("+1 (919) 371-8044")]
+  [InlineData("+19195550142")]
+  [InlineData("19195550142")]
+  [InlineData("9195550142")]
+  [InlineData("+1 (919) 555-0142")]
   public void FindMatch_ToleratesALeadingCountryCode_OnEitherSide(string incoming)
   {
     // Stored three ways, as a phone book or RotaryPhone might hold it; each must match every incoming form.
-    foreach (string stored in new[] { "+19193718044", "19193718044", "9193718044", "(919) 371-8044" })
+    foreach (string stored in new[] { "+19195550142", "19195550142", "9195550142", "(919) 555-0142" })
     {
       var match = PhoneNumberNormalizer.FindMatch(new[] { new Entry("Owner", stored) }, e => e.Phone, incoming);
       Assert.True(match is not null, $"stored '{stored}' did not match incoming '{incoming}'");
@@ -50,46 +50,46 @@ public class PhoneNumberNormalizerTests
   public void FindMatch_AnExactMatchBeatsAnEarlierLast7Match()
   {
     // The last-7 candidate comes FIRST in the list, so only the tiering can pick the exact one.
-    var entries = new[] { new Entry("Local entry", "371-8044"), new Entry("Exact", "9193718044") };
+    var entries = new[] { new Entry("Local entry", "555-0142"), new Entry("Exact", "9195550142") };
 
-    Assert.Equal("Exact", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "+1 919 371 8044")!.Name);
+    Assert.Equal("Exact", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "+1 919 555 0142")!.Name);
   }
 
   [Fact]
   public void FindMatch_FallsBackToTheLastSevenDigits_LikeThePbapRepository()
   {
-    var entries = new[] { new Entry("Local", "371-8044") };
+    var entries = new[] { new Entry("Local", "555-0142") };
 
-    Assert.Equal("Local", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "9193718044")!.Name);
+    Assert.Equal("Local", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "9195550142")!.Name);
   }
 
   [Theory]
-  [InlineData("5553718044")]      // another area code, same last seven
-  [InlineData("+1 555 371 8044")]
-  [InlineData("15553718044")]
+  [InlineData("5555550142")]      // another area code, same last seven
+  [InlineData("+1 555 555 0142")]
+  [InlineData("15555550142")]
   public void FindMatch_AStrangerWhoSharesTheLastSeven_DoesNotMatchAFullStoredNumber(string stranger)
   {
     // Owner ruling 2026-10-03: a stored 10/11-digit number matches only on the full number, never its last seven.
-    var entries = new[] { new Entry("Owner", "+1 (919) 371-8044") };
+    var entries = new[] { new Entry("Owner", "+1 (919) 555-0142") };
 
     Assert.Null(PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, stranger));
   }
 
   [Theory]
-  [InlineData("9193718044")]
-  [InlineData("+19193718044")]
-  [InlineData("3718044")]
+  [InlineData("9195550142")]
+  [InlineData("+19195550142")]
+  [InlineData("5550142")]
   public void FindMatch_ASevenDigitLocalEntry_StillMatches(string incoming)
   {
-    var entries = new[] { new Entry("Local", "371-8044") };
+    var entries = new[] { new Entry("Local", "555-0142") };
 
     Assert.Equal("Local", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, incoming)!.Name);
   }
 
   [Theory]
-  [InlineData("9193718044", "9193718044", true)]
-  [InlineData("371-8044", "9193718044", false)]
-  [InlineData("3718044", "3718044", true)]
+  [InlineData("9195550142", "9195550142", true)]
+  [InlineData("555-0142", "9195550142", false)]
+  [InlineData("5550142", "5550142", true)]
   public void TryFindMatch_ReportsTheTier(string stored, string incoming, bool exact)
   {
     Assert.True(PhoneNumberNormalizer.TryFindMatch(new[] { new Entry("X", stored) }, e => e.Phone, incoming,
@@ -101,9 +101,9 @@ public class PhoneNumberNormalizerTests
   [Fact]
   public void FindMatch_WithinATier_TheFirstItemWins()
   {
-    var entries = new[] { new Entry("First", "9193718044"), new Entry("Second", "+19193718044") };
+    var entries = new[] { new Entry("First", "9195550142"), new Entry("Second", "+19195550142") };
 
-    Assert.Equal("First", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "9193718044")!.Name);
+    Assert.Equal("First", PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, "9195550142")!.Name);
   }
 
   [Theory]
@@ -112,7 +112,7 @@ public class PhoneNumberNormalizerTests
   [InlineData("123")]          // too short for the last-7 tier, and no exact entry
   public void FindMatch_NoDigitsOrNoMatch_ReturnsNull(string incoming)
   {
-    var entries = new[] { new Entry("Owner", "9193718044"), new Entry("Blank", null) };
+    var entries = new[] { new Entry("Owner", "9195550142"), new Entry("Blank", null) };
 
     Assert.Null(PhoneNumberNormalizer.FindMatch(entries, e => e.Phone, incoming));
   }
@@ -120,6 +120,6 @@ public class PhoneNumberNormalizerTests
   [Fact]
   public void FindMatch_ANullList_ReturnsNull()
   {
-    Assert.Null(PhoneNumberNormalizer.FindMatch<Entry>(null, e => e.Phone, "9193718044"));
+    Assert.Null(PhoneNumberNormalizer.FindMatch<Entry>(null, e => e.Phone, "9195550142"));
   }
 }

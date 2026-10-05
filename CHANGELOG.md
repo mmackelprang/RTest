@@ -3,7 +3,7 @@
 This project follows [Semantic Versioning](https://semver.org/). Detailed per-change history is in the git log
 and in [`archive/queue/BUILDER_QUEUE_ARCHIVE.md`](archive/queue/BUILDER_QUEUE_ARCHIVE.md).
 
-## [1.0.0] - 2026-10-04
+## [1.0.0] - 2026-10-05
 
 This is the first release. It is the build installed in the cabinet: an Intel N100 running Ubuntu, with a
 1920x720 touch panel and four rotary encoders.

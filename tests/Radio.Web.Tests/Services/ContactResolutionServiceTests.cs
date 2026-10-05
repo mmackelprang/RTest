@@ -35,7 +35,7 @@ public class ContactResolutionServiceTests
   public void TryResolve_PrefersAttachedName()
   {
     var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
-    Assert.Equal("Grandpa", svc.TryResolve("9193718044", "Grandpa"));
+    Assert.Equal("Grandpa", svc.TryResolve("9195550142", "Grandpa"));
   }
 
   [Fact]
@@ -45,11 +45,11 @@ public class ContactResolutionServiceTests
     var svc = Create(handler);
     svc.PrimeFromContacts(new[]
     {
-      new MergedContact(null, "Jane Doe", "9193718044", null, "PBAP")
+      new MergedContact(null, "Jane Doe", "9195550142", null, "PBAP")
     });
 
-    Assert.Equal("Jane Doe", svc.TryResolve("9193718044"));
-    Assert.True(svc.IsResolved("9193718044"));
+    Assert.Equal("Jane Doe", svc.TryResolve("9195550142"));
+    Assert.True(svc.IsResolved("9195550142"));
     Assert.Equal(0, handler.RequestCount);   // never touched the network
   }
 
@@ -58,9 +58,9 @@ public class ContactResolutionServiceTests
   {
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.NotFound);
     var svc = Create(handler);
-    svc.PrimeFromContacts(new[] { new MergedContact(null, "Jane", "9193718044", null, "Manual") });
+    svc.PrimeFromContacts(new[] { new MergedContact(null, "Jane", "9195550142", null, "Manual") });
 
-    Assert.Equal("Jane", await svc.ResolveAsync("9193718044"));
+    Assert.Equal("Jane", await svc.ResolveAsync("9195550142"));
     Assert.Equal(0, handler.RequestCount);
   }
 
@@ -70,9 +70,9 @@ public class ContactResolutionServiceTests
     var handler = new MockHttpHandler(NameBody("Bob"));
     var svc = Create(handler);
 
-    Assert.Equal("Bob", await svc.ResolveAsync("9193718044"));
-    Assert.Equal("Bob", await svc.ResolveAsync("9193718044"));   // cache hit
-    Assert.Equal("Bob", svc.TryResolve("9193718044"));           // now synchronous
+    Assert.Equal("Bob", await svc.ResolveAsync("9195550142"));
+    Assert.Equal("Bob", await svc.ResolveAsync("9195550142"));   // cache hit
+    Assert.Equal("Bob", svc.TryResolve("9195550142"));           // now synchronous
     Assert.Equal(1, handler.RequestCount);                       // only one request
   }
 
@@ -97,9 +97,9 @@ public class ContactResolutionServiceTests
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.InternalServerError);
     var svc = Create(handler);
 
-    Assert.Null(await svc.ResolveAsync("9193718044"));
-    Assert.False(svc.IsResolved("9193718044"));   // not cached → eligible for retry
-    Assert.Null(await svc.ResolveAsync("9193718044"));
+    Assert.Null(await svc.ResolveAsync("9195550142"));
+    Assert.False(svc.IsResolved("9195550142"));   // not cached → eligible for retry
+    Assert.Null(await svc.ResolveAsync("9195550142"));
     Assert.Equal(2, handler.RequestCount);        // retried, not served from cache
   }
 
@@ -109,12 +109,12 @@ public class ContactResolutionServiceTests
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.NotFound);
     var svc = Create(handler);
 
-    Assert.Null(await svc.ResolveAsync("9193718044"));   // cached negative
+    Assert.Null(await svc.ResolveAsync("9195550142"));   // cached negative
 
     // Contact synced later → the index entry must win over the negative cache.
-    svc.PrimeFromContacts(new[] { new MergedContact(null, "Jane", "9193718044", null, "PBAP") });
-    Assert.Equal("Jane", svc.TryResolve("9193718044"));
-    Assert.Equal("Jane", await svc.ResolveAsync("9193718044"));
+    svc.PrimeFromContacts(new[] { new MergedContact(null, "Jane", "9195550142", null, "PBAP") });
+    Assert.Equal("Jane", svc.TryResolve("9195550142"));
+    Assert.Equal("Jane", await svc.ResolveAsync("9195550142"));
   }
 
   // ── PHN-14 ────────────────────────────────────────────────────────
@@ -125,12 +125,12 @@ public class ContactResolutionServiceTests
   public void PrimeFromContacts_TheSyncedPhoneBookWinsOverARotaryPhoneContact_WhicheverSortsFirst(bool manualFirst)
   {
     var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
-    var manual = new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-371-8044", null, "Manual");
-    var pbap = new MergedContact(null, "Zelda (synced)", "9193718044", null, "PBAP");
+    var manual = new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-555-0142", null, "Manual");
+    var pbap = new MergedContact(null, "Zelda (synced)", "9195550142", null, "PBAP");
 
     svc.PrimeFromContacts(manualFirst ? new[] { manual, pbap } : new[] { pbap, manual });
 
-    Assert.Equal("Zelda (synced)", svc.TryResolve("19193718044"));
+    Assert.Equal("Zelda (synced)", svc.TryResolve("19195550142"));
   }
 
   [Fact]
@@ -139,11 +139,11 @@ public class ContactResolutionServiceTests
     var svc = Create(new MockHttpHandler(statusCode: HttpStatusCode.NotFound));
     svc.PrimeFromContacts(new[]
     {
-      new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-371-8044", null, "Manual"),
+      new MergedContact("1", "Aaron (RotaryPhone)", "+1 919-555-0142", null, "Manual"),
       new MergedContact(null, "Someone else", "5550001111", null, "PBAP"),
     });
 
-    Assert.Equal("Aaron (RotaryPhone)", svc.TryResolve("9193718044"));
+    Assert.Equal("Aaron (RotaryPhone)", svc.TryResolve("9195550142"));
   }
 
   [Fact]
@@ -151,12 +151,12 @@ public class ContactResolutionServiceTests
   {
     var handler = new ScriptedPhoneHandler();   // PbapName null → 404, which ResolveAsync caches as a miss
     var svc = Create(handler);
-    svc.PrimeFromContacts(new[] { new MergedContact("1", "Index name", "9193718044", null, "Manual") });
+    svc.PrimeFromContacts(new[] { new MergedContact("1", "Index name", "9195550142", null, "Manual") });
     await svc.ResolveAsync("5550001111");
 
     handler.PbapName = "Synced local entry";
     handler.PbapExact = false;
-    var forIndexed = await svc.LookupForCallAsync("9193718044");
+    var forIndexed = await svc.LookupForCallAsync("9195550142");
     var forCachedMiss = await svc.LookupForCallAsync("5550001111");
 
     Assert.Equal(("Synced local entry", false), forIndexed);
@@ -168,7 +168,7 @@ public class ContactResolutionServiceTests
   {
     var svc = Create(new ScriptedPhoneHandler());
 
-    Assert.Equal(((string?)null, false), await svc.LookupForCallAsync("9193718044"));
+    Assert.Equal(((string?)null, false), await svc.LookupForCallAsync("9195550142"));
   }
 
   [Fact]
@@ -179,8 +179,8 @@ public class ContactResolutionServiceTests
     var handler = new GatedHttpHandler(NameBody("Bob"));
     var svc = Create(handler);
 
-    var t1 = svc.ResolveAsync("9193718044");
-    var t2 = svc.ResolveAsync("9193718044");   // same circuit thread → shares t1's request
+    var t1 = svc.ResolveAsync("9195550142");
+    var t2 = svc.ResolveAsync("9195550142");   // same circuit thread → shares t1's request
     handler.Release();
     var names = await Task.WhenAll(t1, t2);
 

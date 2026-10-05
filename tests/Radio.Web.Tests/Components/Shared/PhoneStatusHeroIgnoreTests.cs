@@ -33,7 +33,7 @@ public class PhoneStatusHeroIgnoreTests : TestContext
   private IRenderedComponent<PhoneStatusHero> Render(
     Func<Task<DeclineCallOutcome>>? onIgnore, bool canIgnore = true, string callState = "Ringing") =>
     RenderComponent<PhoneStatusHero>(p => p
-      .Add(x => x.CallState, new PhoneCallStateDto { CallState = callState, IncomingNumber = "9193718044" })
+      .Add(x => x.CallState, new PhoneCallStateDto { CallState = callState, IncomingNumber = "9195550142" })
       .Add(x => x.CanIgnore, canIgnore)
       .Add(x => x.OnIgnore, onIgnore is null ? null : () =>
       {
@@ -174,7 +174,7 @@ public class PhoneStatusHeroIgnoreTests : TestContext
     _time.Advance(PhoneStatusHero.IgnoreDeadline);
     // A new ring afterwards starts clean: no error carried over, Ignore available.
     cut.SetParametersAndRender(p => p.Add(x => x.CallState,
-      new PhoneCallStateDto { CallState = "Ringing", IncomingNumber = "9193718044" }));
+      new PhoneCallStateDto { CallState = "Ringing", IncomingNumber = "9195550142" }));
 
     cut.FindAll(".phone-hero-ignore-error").Should().BeEmpty();
     Ignore(cut).TextContent.Trim().Should().EndWith("Ignore");

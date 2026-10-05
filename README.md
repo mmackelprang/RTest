@@ -12,7 +12,8 @@ console is driven from a 1920x720 touch panel and four rotary knobs in the cabin
   tuning, seek and scan, presets, RDS station names and text, and a swept band map that scan shares. AM and
   shortwave wait on tuner hardware (see [known issues](docs/known-issues-and-future-work.md)).
 - **Bluetooth A2DP.** The console is a Bluetooth speaker for a phone. AVRCP supplies track metadata and
-  transport controls and keeps the volume in sync. BlueZ over D-Bus runs on Linux, WinRT on Windows.
+  transport controls, and on Linux keeps the volume in sync (the Windows volume sync is a stub). BlueZ over
+  D-Bus runs on Linux, WinRT on Windows.
 - **File player.** Plays local or NAS music folders. It has a persistent queue, shuffle and repeat, saved
   playlists, and adds whole folders.
 - **Vinyl and generic USB capture.** A USB phono preamp or any USB audio input.
@@ -38,10 +39,10 @@ console is driven from a 1920x720 touch panel and four rotary knobs in the cabin
 - Home, Radio, Bluetooth, Devices, Phone, History, Diagnostics and System pages, laid out for a 1920x720 panel
   running a kiosk browser.
 - Real-time visualizers (spectrum, levels, waveform and the radio band map) over SignalR.
-- Sleep mode shows a clock with current conditions and a forecast (US National Weather Service), and can power the panel down.
+- Sleep mode shows a clock with current conditions and a forecast (US National Weather Service), and can power the panel down (off by default; set `Sleep:PanelOffAfterMinutes`).
 
 **Cabinet hardware**
-- Four HID rotary encoders for Volume, Source, Presets and Tuning. They are detected on plug-in and drive an
+- One Raspberry Pi Pico USB HID device with four knobs for Volume, Source, Presets and Tuning. They are detected on plug-in and drive an
   on-screen HUD.
 - Rotary-phone integration with the companion RotaryPhone service: an incoming-call banner with the caller's
   name, call announcements, and Google Voice voicemail and texts.
@@ -56,7 +57,8 @@ console is driven from a 1920x720 touch panel and four rotary knobs in the cabin
 
 The deployed appliance is an **Intel N100 mini-PC (x86_64) running Ubuntu with GNOME on Wayland**. It is built
 into the cabinet with a 1920x720 touch panel, an RTL-SDR dongle, a USB Bluetooth adapter, a USB phono input and
-the four encoders. **Raspberry Pi 5 (linux-arm64) is a supported deployment target** as well. Development works
+the four encoders. A Raspberry Pi 5 (`linux-arm64`) is a build target that has **not been tested on hardware**; see
+[known issues](docs/known-issues-and-future-work.md). Development works
 on Windows or Linux.
 
 ## Architecture

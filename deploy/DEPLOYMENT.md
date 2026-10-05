@@ -2,12 +2,19 @@
 
 ## Overview
 
-**Grandpa Anderson's Console Radio Remade** — a modern audio command center for Raspberry Pi
-that restores vintage console radio functionality with Bluetooth A2DP audio reception,
-internet radio (RTL-SDR), Spotify, Google Cast, audio fingerprinting, and a Blazor Server UI.
+**Grandpa Anderson's Console Radio Remade** — a modern audio command center that restores
+vintage console radio functionality: FM/AM radio over an RTL-SDR dongle, vinyl (phono) and USB
+line-in capture, a local/NAS file player, Bluetooth A2DP audio reception, text-to-speech
+announcements, Google Cast output, song identification (SongRec), and a Blazor Server UI.
 
-**Target platform:** Raspberry Pi 5 (ARM64, Raspberry Pi OS Bookworm 64-bit)
-**Stack:** .NET 8, ASP.NET Core, Blazor Server, SoundFlow (MiniAudio), PipeWire, BlueZ 5
+**Target platform:** Intel N100 mini-PC (`x86_64`), Ubuntu with GNOME 46 on Wayland, deployed
+with `deploy/Deploy-ToLinux.ps1` (defaults `-TargetHost radio -Runtime linux-x64`). A Raspberry
+Pi 5 (`linux-arm64`, via `Deploy-ToPi.ps1`) is a build target that has not been tested on
+hardware; see `docs/known-issues-and-future-work.md`. The Pi-specific sections below are kept
+for reference and are unverified.
+**Stack:** .NET 10, ASP.NET Core, Blazor Server, SoundFlow (MiniAudio), PipeWire, BlueZ 5
+
+For the condensed, current overview of the appliance see [`docs/deployment.md`](../docs/deployment.md).
 
 ## Architecture
 
@@ -19,7 +26,7 @@ The application runs as two separate systemd services:
   web/              ← Radio.Web binaries (Blazor Server UI)
   data/             ← Shared data (config, metrics, fingerprints, secrets, albumart, backups)
   logs/             ← Shared logs
-  tools/            ← fpcalc, etc.
+  tools/            ← optional helper binaries
 ```
 
 | Service | Port | Purpose |
@@ -75,14 +82,14 @@ Phone (A2DP) ──► BlueZ ──► PipeWire bluez_input
               MiniAudio capture   (SoundFlow AudioCaptureDevice)
                     │
               SoundFlow Mixer ──► Visualization (FFT/Levels)
-                    │             Fingerprinting (fpcalc → AcoustID)
+                    │             Song identification (SongRec → MusicBrainz)
                     │             Volume/Balance control
                     ▼
               ALSA output         (headphones / USB DAC)
               HTTP stream         (for Google Cast)
 ```
 
-Other audio sources (Radio/SDR, Spotify, File Player, TTS) feed directly into the
+Other audio sources (Radio/SDR, vinyl, USB line-in, File Player, TTS) feed directly into the
 SoundFlow mixer without the null sink intermediary.
 
 ## Prerequisites
@@ -91,31 +98,35 @@ SoundFlow mixer without the null sink intermediary.
 
 | Component | Required? | Purpose |
 |---|---|---|
-| Raspberry Pi 5 (4GB+) | Yes | Application host |
+| Intel N100 mini-PC (`x86_64`) | Yes | Application host (a Raspberry Pi 5 is an untested ARM64 build target) |
 | Audio output (3.5mm, USB DAC, or HDMI) | Yes | Audio playback |
-| Network connection (Ethernet or WiFi) | Yes | Google Cast discovery, API access, fingerprinting |
+| Network connection (Ethernet or WiFi) | Yes | Google Cast discovery, API access, song identification |
 | USB RTL-SDR dongle | Optional | FM/AM radio reception via SDR |
 | USB Bluetooth adapter | Recommended | Avoids WiFi/BT coexistence interference on combo chips (see Audio Quality Tuning) |
-| 12.5" x 3.75" touchscreen (1920x576) | Optional | Designed display; any browser works too |
+| 1920x720 touch panel | Optional | Designed display, driven by a kiosk Chrome; any browser works too |
 
 ### Software
 
-- Raspberry Pi OS **Bookworm** (64-bit) — other Debian 12+ distros should work
+- Ubuntu with GNOME on Wayland (the deployed appliance); other Debian-based distros should work
 - Root/sudo access for initial setup
 - Internet access during setup (for package installation)
 
 ## Quick Start
 
-### 1. Run Setup on the Pi
+### 1. Run Setup on the Box
 
 ```bash
 # Clone the repository (or copy the deploy directory)
-git clone https://github.com/youruser/RTest.git ~/RTest
+git clone <this repository> ~/RTest
 cd ~/RTest
 
-# Run the setup script
-sudo deploy/raspberry-pi/setup.sh
+# Run the setup script (x64 appliance)
+sudo deploy/debian-x64/setup.sh
+# Kiosk: deploy/debian-x64/kiosk/setup-kiosk.sh
 ```
+
+A bare box is rebuilt from [`deploy/provision/README.md`](provision/README.md).
+`deploy/raspberry-pi/setup.sh` is the untested Pi equivalent.
 
 The setup script installs all system dependencies, creates the application user,
 configures PipeWire/WirePlumber for Bluetooth A2DP sink, and installs both systemd services.
@@ -129,11 +140,14 @@ separator on Windows and an ordinary filename character on Linux. They now build
 `ssh`/`scp` and (optionally) `rsync` installed.
 
 ```powershell
-# One-command build and deploy from your dev machine
-.\deploy\Deploy-ToPi.ps1 -PiHost piradio -PiUser mmack
+# One-command build and deploy from your dev machine (defaults: -TargetHost radio -Runtime linux-x64)
+./deploy/Deploy-ToLinux.ps1
 
-# Or with log tailing
-.\deploy\Deploy-ToPi.ps1 -PiHost piradio -PiUser mmack -Logs
+# Box-side SHA check only: no build, stop or sync
+./deploy/Deploy-ToLinux.ps1 -VerifyOnly
+
+# Untested Raspberry Pi target (linux-arm64)
+./deploy/Deploy-ToPi.ps1
 ```
 
 Or build manually:
@@ -141,21 +155,21 @@ Or build manually:
 ```bash
 # From the repository root (on dev machine)
 cd deploy/common
-./publish.sh arm64
+./publish.sh x64          # arm64 for the untested Pi target
 
-# Copy to Pi
+# Copy to the box
 # The --exclude is not optional. Without it, --delete removes api/appsettings.Production.json
 # (nothing in the publish output replaces it) and overwrites web/appsettings.Production.json
 # with the tracked stub from src/Radio.Web/. Both deploy scripts pass it; so must you.
-rsync -avz --delete --exclude='appsettings.Production.json' publish/linux-arm64/api/ mmack@piradio:/opt/radio-console/api/
-rsync -avz --delete --exclude='appsettings.Production.json' publish/linux-arm64/web/ mmack@piradio:/opt/radio-console/web/
-ssh mmack@piradio "sudo chown -R radio:radio /opt/radio-console && sudo chmod +x /opt/radio-console/api/Radio.API /opt/radio-console/web/Radio.Web"
+rsync -avz --delete --exclude='appsettings.Production.json' publish/linux-x64/api/ mmack@radio:/opt/radio-console/api/
+rsync -avz --delete --exclude='appsettings.Production.json' publish/linux-x64/web/ mmack@radio:/opt/radio-console/web/
+ssh mmack@radio "sudo chmod +x /opt/radio-console/api/Radio.API /opt/radio-console/web/Radio.Web"
 ```
 
 ⚠ **This manual route has no seed step.** The scripts pair the `--exclude` with a block that
 creates the overlay when a directory has none; the commands above only *preserve* one that
-already exists. On a freshly provisioned Pi, copy
-`deploy/raspberry-pi/appsettings.Production.json` into `api/` and `web/` yourself.
+already exists. On a freshly provisioned box, copy
+`deploy/debian-x64/appsettings.Production.json` into `api/` and `web/` yourself.
 
 #### How files reach the target, and what happens when that fails
 
@@ -215,8 +229,8 @@ sudo systemctl status radio-api radio-web
 
 ### 4. Access
 
-- **API:** `http://piradio:5000` (Swagger at `/swagger`)
-- **Web UI:** `http://piradio:5002`
+- **API:** `http://radio:5000` (Scalar API reference at `/scalar/v1`, OpenAPI JSON at `/openapi/v1.json`)
+- **Web UI:** `http://radio:5002`
 
 ### 5. Verifying the Deployed Commit
 
@@ -228,7 +242,7 @@ deploy if the returned `gitSha` doesn't match what was just built.
 You can also check manually at any time:
 
 ```bash
-curl -s http://piradio:5000/api/health/version | jq
+curl -s http://radio:5000/api/health/version | jq
 # {
 #   "gitSha": "abc123...",
 #   "gitShaShort": "abc123f",
@@ -247,12 +261,12 @@ from a tarball) — rebuild from a clone to get a real SHA.
 
 ## Cross-Compilation Note
 
-Radio.Infrastructure multi-targets (`net8.0` and `net8.0-windows10.0.19041.0`). When
-cross-compiling from Windows for Linux, you **must** pass `-f net8.0` to override the
-conditional Windows TFM:
+On Windows, Radio.Infrastructure multi-targets (`net10.0` and `net10.0-windows10.0.19041.0`),
+and Radio.API/Radio.Web target the Windows TFM. When cross-compiling from Windows for Linux,
+you **must** pass `-f net10.0` to override the conditional Windows TFM:
 
 ```bash
-dotnet publish ... --runtime linux-arm64 -f net8.0
+dotnet publish ... --runtime linux-x64 -f net10.0
 ```
 
 The deploy scripts handle this automatically.
@@ -301,27 +315,31 @@ sudo modprobe -r dvb_usb_rtl28xxu
 
 | Package | Purpose |
 |---|---|
-| `libchromaprint-tools` | `fpcalc` binary for Chromaprint audio fingerprinting |
+| `songrec` | Shazam-compatible song recognition (`ppa:marin-m/songrec`) |
 
-The app shells out to `fpcalc` to generate audio fingerprints, then queries the
-AcoustID API to identify tracks. Path configured in `appsettings.json`:
+SongRec is the only recognizer, for every source. The app shells out to `songrec`, then looks up
+metadata and cover art on MusicBrainz / Cover Art Archive. No API key is needed. Install:
+
+```bash
+sudo add-apt-repository ppa:marin-m/songrec
+sudo apt install songrec
+```
+
+The binary is found on `PATH` unless `Fingerprinting:SongRec:SongRecPath` in `appsettings.json`
+names it:
 
 ```json
 {
   "Fingerprinting": {
-    "FpcalcPath": "/usr/bin/fpcalc"
+    "SongRec": {
+      "SongRecPath": ""
+    }
   }
 }
 ```
 
-An AcoustID API key is required. Register at https://acoustid.org/new-application
-and set the key via the System Config page or API:
-
-```bash
-curl -X POST http://piradio:5000/api/configuration/secrets \
-  -H "Content-Type: application/json" \
-  -d '{"key": "Fingerprinting:AcoustId:ApiKey", "value": "your-api-key"}'
-```
+The earlier fpcalc/AcoustID pipeline was removed. `deploy/debian-x64/setup.sh` still installs
+`fpcalc`; nothing uses it.
 
 ### Network Discovery
 
@@ -334,10 +352,10 @@ curl -X POST http://piradio:5000/api/configuration/secrets \
 
 | Package | Purpose |
 |---|---|
-| `aspnetcore-runtime-8.0` | ASP.NET Core runtime (if not using self-contained publish) |
+| `aspnetcore-runtime-10.0` | ASP.NET Core runtime (if not using self-contained publish) |
 
 Self-contained publishes bundle the runtime, so this is only needed for
-framework-dependent deployments (`Deploy-ToPi.ps1 -Quick`).
+framework-dependent deployments (`Deploy-ToLinux.ps1 -Quick`).
 
 ## Bluetooth A2DP Sink Configuration
 
@@ -679,7 +697,7 @@ transport errors as exit 255, which a bare `test -f` cannot tell apart from "fil
     }
   },
   "Fingerprinting": {
-    "FpcalcPath": "/usr/bin/fpcalc"
+    "SongRec": { "SongRecPath": "" }
   }
 }
 ```
@@ -731,13 +749,10 @@ System Config page or API:
 
 | Secret | Purpose | Registration |
 |---|---|---|
-| `Fingerprinting:AcoustId:ApiKey` | Audio fingerprint identification | https://acoustid.org/new-application |
-| `Spotify:ClientId` | Spotify playback | https://developer.spotify.com |
-| `Spotify:ClientSecret` | Spotify playback | (same) |
 | `TTS:GoogleApiKey` | Google Cloud TTS | https://console.cloud.google.com |
 
 Secrets are encrypted with a machine-specific key. If migrating from another machine,
-re-enter secrets on the Pi — they won't decrypt across machines.
+re-enter secrets on the new box — they won't decrypt across machines.
 
 ## Service Management
 
@@ -953,16 +968,11 @@ sudo iptables -L -n | grep 5353
 ### Audio fingerprinting not working
 
 ```bash
-# Check fpcalc
-fpcalc -version
-# or
-/opt/radio-console/tools/fpcalc/fpcalc -version
+# Check SongRec is installed and on PATH
+songrec --version
 
-# Test with a file
-fpcalc -length 15 /path/to/audio.mp3
-
-# Check AcoustID API key is set
-curl http://piradio:5000/api/configuration/secrets
+# Test recognition against a file
+songrec audio-file-to-recognized-song /path/to/audio.mp3
 ```
 
 ### RTL-SDR radio not working
@@ -1020,9 +1030,9 @@ journalctl -u radio-web -n 20
 | Audio server | PipeWire | `pipewire pipewire-pulse wireplumber` | Audio routing, BT audio |
 | BT codecs | SPA bluez5 | `libspa-0.2-bluetooth` | SBC, LDAC, aptX, opus BT codecs |
 | Bluetooth | BlueZ | `bluez` | BT stack, A2DP, AVRCP |
-| Fingerprinting | fpcalc | `libchromaprint-tools` | Audio fingerprint generation |
+| Song identification | songrec | `songrec` (`ppa:marin-m/songrec`) | Shazam-compatible recognition |
 | SDR radio | librtlsdr | `librtlsdr-dev` | RTL-SDR USB dongle driver |
 | Cast discovery | Avahi | `avahi-daemon avahi-utils` | mDNS for Google Cast |
 | D-Bus | libdbus | (system default) | BlueZ IPC via Tmds.DBus |
 | SQLite | sqlite3 | (bundled in .NET) | Config, metrics, fingerprint DBs |
-| .NET runtime | aspnetcore 8.0 | Self-contained or `aspnetcore-runtime-8.0` | Application runtime |
+| .NET runtime | aspnetcore 10.0 | Self-contained or `aspnetcore-runtime-10.0` | Application runtime |

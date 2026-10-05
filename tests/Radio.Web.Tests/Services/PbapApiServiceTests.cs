@@ -27,10 +27,10 @@ public class PbapApiServiceTests
   public async Task LookupNumberAsync_ReturnsFoundName_OnMatch()
   {
     var handler = new MockHttpHandler(
-      JsonSerializer.Serialize(new { DisplayName = "Jane Doe", PhoneNumber = "9193718044" }, JsonOptions));
+      JsonSerializer.Serialize(new { DisplayName = "Jane Doe", PhoneNumber = "9195550142" }, JsonOptions));
     var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
-    var (outcome, name) = await Create(http).LookupNumberAsync("9193718044");
+    var (outcome, name) = await Create(http).LookupNumberAsync("9195550142");
 
     Assert.Equal(ContactLookupOutcome.Found, outcome);
     Assert.Equal("Jane Doe", name);
@@ -56,7 +56,7 @@ public class PbapApiServiceTests
     var handler = new MockHttpHandler(statusCode: HttpStatusCode.InternalServerError);
     var http = new HttpClient(handler) { BaseAddress = new Uri(HermeticTestRig.ApiBaseUrl) };
 
-    var (outcome, name) = await Create(http).LookupNumberAsync("9193718044");
+    var (outcome, name) = await Create(http).LookupNumberAsync("9195550142");
 
     Assert.Equal(ContactLookupOutcome.Unavailable, outcome);
     Assert.Null(name);

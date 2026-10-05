@@ -12,7 +12,7 @@ history behind each rule, are in [`CLAUDE.md`](../CLAUDE.md) § Deployment. The 
 | Machine | Intel N100 mini-PC, `x86_64`, Ubuntu with GNOME 46 on Wayland (GDM auto-login) |
 | Hostname | `radio` (SSH as `mmack@radio`; the host-specific SSH key is bound to the name, not the IP) |
 | Display | 1920x720 touch panel running a kiosk Chrome |
-| Runtime | `linux-x64` (a Raspberry Pi 5 is supported as `linux-arm64` through `Deploy-ToPi.ps1`) |
+| Runtime | `linux-x64`. A Raspberry Pi 5 (`linux-arm64`, through `Deploy-ToPi.ps1`) is a build target that has not been tested on hardware; see [known issues](known-issues-and-future-work.md) |
 | Audio | PipeWire. Music Bluetooth runs on a TP-Link UB500 (`hci0`); voice Bluetooth on the Intel AX201 (`hci1`) belongs to RotaryPhone |
 
 The box has limited resources, and heavy log reads correlate with audible distortion. Keep `journalctl` queries
@@ -44,7 +44,7 @@ From a dev host with PowerShell 7:
 
 ```powershell
 ./deploy/Deploy-ToLinux.ps1               # defaults: -TargetHost radio -Runtime linux-x64
-./deploy/Deploy-ToPi.ps1                  # Raspberry Pi: -TargetHost piradio, linux-arm64
+./deploy/Deploy-ToPi.ps1                  # untested Raspberry Pi target: -TargetHost piradio, linux-arm64
 ./deploy/Deploy-ToLinux.ps1 -VerifyOnly   # box-side SHA check only; no build, stop or sync
 ```
 

@@ -31,39 +31,16 @@ This document provides a comprehensive reference for all Configuration, Preferen
    # Run API (default: http://localhost:5000)
    dotnet run --project src/Radio.API
 
-   # Run Web UI (default: http://localhost:5001)
+   # Run Web UI (default: http://localhost:5002)
    dotnet run --project src/Radio.Web
    ```
 
-### For Production (Raspberry Pi / Linux)
+### For Production
 
-1. **System Prerequisites**
-   ```bash
-   sudo apt update
-   sudo apt install -y dotnet-sdk-8.0 sqlite3
-   ```
-
-2. **Clone and Build**
-   ```bash
-   git clone <repository-url>
-   cd RadioConsole
-   dotnet restore
-   dotnet publish -c Release -o /opt/radio-console
-   ```
-
-3. **Create Data Directories**
-   ```bash
-   sudo mkdir -p /opt/radio-console/data/{config,metrics,fingerprints,backups}
-   sudo mkdir -p /opt/radio-console/logs
-   sudo chown -R radio:radio /opt/radio-console
-   ```
-
-4. **Configure Production Settings**
-   - Copy `appsettings.json` to `/opt/radio-console/`
-   - Set `DefaultStoreType` to `Sqlite` for better performance
-   - Configure paths to use absolute paths (e.g., `/opt/radio-console/data`)
-
-5. **Setup Systemd Service** (see [Service Setup](#systemd-service-setup))
+Production runs on an Intel N100 (`x86_64`) Ubuntu box as two systemd services, `radio-api` (port 5000) and
+`radio-web` (port 5002), installed under `/opt/radio-console` and deployed with `deploy/Deploy-ToLinux.ps1`.
+See [`deployment.md`](deployment.md) for the overview and [`deploy/DEPLOYMENT.md`](../deploy/DEPLOYMENT.md)
+for the step-by-step guide. Per-machine settings go in `appsettings.Production.json`.
 
 ---
 
@@ -84,107 +61,66 @@ The Radio Console application uses a **consolidated configuration approach** whe
 
 ## Secrets Setup
 
-### Required Secrets for Full Functionality
+Secrets are stored encrypted in the configuration store and referenced from configuration with a tag of the
+form `${secret:identifier}` (`src/Radio.Configuration/Models/SecretTag.cs`). A value that still contains an
+unresolved tag is treated as "not configured".
 
-The following secrets are required for various features:
+### Secrets in use
 
-1. **Spotify Integration** (Required for Spotify audio source)
-   - `spotify_clientid`
-   - `spotify_clientsecret`
-   - `spotify_refreshtoken`
+Only the cloud text-to-speech engines need secrets. Everything else (SongRec fingerprinting, MusicBrainz,
+Cover Art Archive, NWS weather) uses no API key.
 
-2. **Google Cloud Text-to-Speech** (Optional - for cloud TTS)
-   - `google_tts_key`
+| Secret | Setting | Needed for |
+|---|---|---|
+| `tts_google_api_key` | `TTS:GoogleAPIKey` | Google Cloud Text-to-Speech (optional) |
+| `tts_azure_api_key` | `TTS:AzureAPIKey` | Azure Speech (optional) |
 
-3. **Azure Speech Services** (Optional - for cloud TTS)
-   - `azure_tts_key`
-   - `azure_tts_region`
+`TTS:AzureRegion` (default `eastus`) is a plain setting, not a secret. With neither key configured, the
+cloud TTS engines are unavailable and announcements use the local engine.
 
-4. **AcoustID Fingerprinting** (Optional - for music identification)
-   - `acoustid_apikey`
+### How to configure secrets
 
-### How to Configure Secrets
-
-#### Method 1: Using Configuration Manager Tool
+#### Method 1: Configuration Manager tool
 
 ```bash
 cd tools/Radio.Tools.ConfigurationManager
 dotnet run
-
-# Follow prompts to:
-# 1. Select "Manage Secrets"
-# 2. Create new secret with identifier and value
-# 3. The tool will generate a secret tag like ${secret:spotify_clientid_abc123}
+# Choose "Manage Secrets", then create the secret with the identifier from the table above.
 ```
 
-#### Method 2: Direct Configuration File
+#### Method 2: Configuration file
 
-1. Create or edit `src/Radio.API/appsettings.json`
-2. Add secret references in configuration:
+`src/Radio.API/appsettings.json` already references the tags:
 
 ```json
 {
-  "Spotify": {
-    "ClientID": "${secret:spotify_clientid}",
-    "ClientSecret": "${secret:spotify_clientsecret}",
-    "RefreshToken": "${secret:spotify_refreshtoken}"
-  },
   "TTS": {
-    "GoogleAPIKey": "${secret:google_tts_key}",
-    "AzureAPIKey": "${secret:azure_tts_key}",
-    "AzureRegion": "${secret:azure_tts_region}"
-  },
-  "Fingerprinting": {
-    "AcoustId": {
-      "ApiKey": "${secret:acoustid_apikey}"
-    }
+    "GoogleAPIKey": "${secret:tts_google_api_key}",
+    "AzureAPIKey": "${secret:tts_azure_api_key}",
+    "AzureRegion": "eastus"
   }
 }
 ```
 
-3. Create secrets file at `config/secrets.json` (for JSON store) or in SQLite database
+Store the secret values in the active configuration store (SQLite in production). Put per-machine overrides
+in `appsettings.Production.json`, never in `appsettings.json`, which a deploy overwrites.
 
-#### Method 3: Environment Variables (Production)
+#### Method 3: Environment variables
 
-For production deployments, you can use environment variables:
+Standard ASP.NET Core overrides work, for example `TTS__GoogleAPIKey=...` and `TTS__AzureAPIKey=...` in the
+`radio-api` service environment.
 
-```bash
-export SPOTIFY__CLIENTID="your_client_id"
-export SPOTIFY__CLIENTSECRET="your_client_secret"
-export SPOTIFY__REFRESHTOKEN="your_refresh_token"
-```
+### Getting API keys
 
-### Getting API Keys
+#### Google Cloud TTS
 
-#### Spotify Setup
+1. In the [Google Cloud Console](https://console.cloud.google.com/), enable the Cloud Text-to-Speech API.
+2. Create an API key and store it as `tts_google_api_key`.
 
-1. Go to [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-2. Click "Create an App"
-3. Note the **Client ID** and **Client Secret**
-4. Add `http://localhost:5000/callback` to Redirect URIs
-5. Get a refresh token using the Authorization Code Flow:
-   ```bash
-   # Use tools/spotify-auth-helper.sh or follow Spotify OAuth docs
-   ```
+#### Azure Speech
 
-#### Google Cloud TTS Setup
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Enable "Cloud Text-to-Speech API"
-3. Create credentials (API Key)
-4. Copy the API key
-
-#### Azure Speech Setup
-
-1. Go to [Azure Portal](https://portal.azure.com/)
-2. Create a "Speech Service" resource
-3. Note the **Key** and **Region** from the resource
-
-#### AcoustID Setup
-
-1. Go to [AcoustID Applications](https://acoustid.org/new-application)
-2. Register a new application
-3. Copy the API key
+1. In the [Azure Portal](https://portal.azure.com/), create a Speech resource.
+2. Store its key as `tts_azure_api_key` and set `TTS:AzureRegion` to its region.
 
 ---
 
@@ -331,146 +267,33 @@ dotnet run
 
 ## Fingerprinting Setup
 
-Audio fingerprinting identifies songs playing on Radio or Vinyl sources using AcoustID and MusicBrainz.
+Song identification uses SongRec (a Shazam-compatible recognizer) for every source, then MusicBrainz and the
+Cover Art Archive for metadata and album art. No API key is required.
 
 ### Prerequisites
 
-1. AcoustID account and API key (see [Getting API Keys](#getting-api-keys))
+1. `songrec` installed on the host (`sudo add-apt-repository ppa:marin-m/songrec && sudo apt install songrec`)
 2. Internet connection for lookups
 
 ### Configuration
 
-```json
-{
-  "Fingerprinting": {
-    "Enabled": true,
-    "SampleDurationSeconds": 15,
-    "MinimumConfidenceThreshold": 0.5,
-    "DuplicateSuppressionMinutes": 5,
-    "DatabasePath": "./data/fingerprints/fingerprints.db",
-    "AcoustId": {
-      "ApiKey": "${secret:acoustid_apikey}",
-      "BaseUrl": "https://api.acoustid.org/v2",
-      "MaxRequestsPerSecond": 3,
-      "TimeoutSeconds": 10
-    },
-    "MusicBrainz": {
-      "BaseUrl": "https://musicbrainz.org/ws/2",
-      "ApplicationName": "RadioConsole",
-      "ApplicationVersion": "1.0.0",
-      "ContactEmail": "your-email@example.com",
-      "MaxRequestsPerSecond": 1,
-      "TimeoutSeconds": 10
-    }
-  }
-}
-```
-
-### Create Secret
-
-```bash
-cd tools/Radio.Tools.ConfigurationManager
-dotnet run
-# Create secret: acoustid_apikey = <your-api-key>
-```
+The keys live under `Fingerprinting` in `src/Radio.API/appsettings.json`; `Fingerprinting:SongRec:SongRecPath`
+names the binary when it is not on `PATH`, and `Fingerprinting:MusicBrainz:ContactEmail` identifies the
+application to MusicBrainz. See [Fingerprinting](#fingerprinting) below for the full option list.
 
 ### Rate Limiting
 
-- **AcoustID**: 3 requests/second (free tier limit)
 - **MusicBrainz**: 1 request/second (anonymous limit)
 
-The system automatically respects these limits.
+The system automatically respects this limit.
 
 ---
 
 ## Systemd Service Setup
 
-For production Linux deployments, create a systemd service:
-
-### Create Service File
-
-Create `/etc/systemd/system/radio-console-api.service`:
-
-```ini
-[Unit]
-Description=Radio Console API
-After=network.target
-
-[Service]
-Type=notify
-User=radio
-Group=radio
-WorkingDirectory=/opt/radio-console
-ExecStart=/usr/bin/dotnet /opt/radio-console/Radio.API.dll
-Restart=always
-RestartSec=10
-Environment="ASPNETCORE_ENVIRONMENT=Production"
-Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
-
-[Install]
-WantedBy=multi-user.target
-```
-
-Create `/etc/systemd/system/radio-console-web.service`:
-
-```ini
-[Unit]
-Description=Radio Console Web UI
-After=network.target radio-console-api.service
-
-[Service]
-Type=notify
-User=radio
-Group=radio
-WorkingDirectory=/opt/radio-console
-ExecStart=/usr/bin/dotnet /opt/radio-console/Radio.Web.dll
-Restart=always
-RestartSec=10
-Environment="ASPNETCORE_ENVIRONMENT=Production"
-Environment="DOTNET_PRINT_TELEMETRY_MESSAGE=false"
-
-[Install]
-WantedBy=multi-user.target
-```
-
-### Enable and Start Services
-
-```bash
-# Create user
-sudo useradd -r -s /bin/false radio
-
-# Set permissions
-sudo chown -R radio:radio /opt/radio-console
-
-# Reload systemd
-sudo systemctl daemon-reload
-
-# Enable services
-sudo systemctl enable radio-console-api
-sudo systemctl enable radio-console-web
-
-# Start services
-sudo systemctl start radio-console-api
-sudo systemctl start radio-console-web
-
-# Check status
-sudo systemctl status radio-console-api
-sudo systemctl status radio-console-web
-```
-
-### Manage Services
-
-```bash
-# View logs
-sudo journalctl -u radio-console-api -f
-sudo journalctl -u radio-console-web -f
-
-# Stop services
-sudo systemctl stop radio-console-api radio-console-web
-
-# Restart services
-sudo systemctl restart radio-console-api radio-console-web
-```
+The unit files are tracked in `deploy/common/` (`radio-api.service`, `radio-web.service`) and installed by the
+setup scripts. See [`deployment.md`](deployment.md) and [`deploy/DEPLOYMENT.md`](../deploy/DEPLOYMENT.md) §
+Service Management rather than writing units by hand.
 
 ---
 
@@ -620,7 +443,7 @@ Configuration options are static settings that define application behavior. They
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `DefaultSource` | `string` | `Spotify` | Default primary audio source name |
+| `DefaultSource` | `string` | `FilePlayer` | Default primary audio source name |
 | `DuckingPercentage` | `int` | `20` | Volume percentage when primary source is ducked (0-100) |
 | `DuckingPolicy` | `DuckingPolicy` | `FadeSmooth` | Ducking transition policy |
 | `DuckingAttackMs` | `int` | `100` | Ducking attack time in milliseconds |
@@ -787,16 +610,10 @@ When the file sink is configured:
 |----------|------|---------|-------------|
 | `Vinyl.USBPort` | `string` | `/dev/ttyUSB1` | USB port path for the vinyl turntable device |
 | `Cast.DefaultDevice` | `string` | `""` | Default Chromecast device name |
-| `Spotify.Mode` | `SpotifyMode` | `Integrated` | Spotify integration mode (RemoteControl or Integrated) |
-| `Spotify.LibrespotPath` | `string` | `/usr/bin/librespot` | Path to the librespot executable (used when Mode is Integrated) |
 
 A `Devices:Radio` entry (the RF320 USB radio's port, removed by `AUD-16`) may still exist in a
 deployed `appsettings.Production.json` or config store. It is still loaded into configuration (and
 `GET /api/configuration/devices` still returns it), but it matches no property, so it is ignored.
-
-**Spotify Mode Options:**
-- **RemoteControl**: Uses Spotify Connect API (no audio data flows through app)
-- **Integrated**: Manages librespot process and captures audio via pipe
 
 ---
 
@@ -864,11 +681,6 @@ deployed `appsettings.Production.json` or config store. It is still loaded into 
 | `HighConfidenceDuplicateSuppressionMinutes` | `int` | `30` | Minutes to suppress duplicates for high-confidence matches (score > 0.9) |
 | `MinimumSecondsBetweenSongChanges` | `int` | `20` | Minimum seconds between song change events. Prevents rapid-fire entry creation from noisy fingerprints at song boundaries. |
 | `DatabasePath` | `string` | `./data/fingerprints.db` | SQLite database path for fingerprint cache |
-| `FpcalcPath` | `string` | `""` | Path to the fpcalc binary (native Chromaprint fingerprint calculator). If empty, searches PATH and common installation locations. On Linux: `apt install libchromaprint-tools`. |
-| `AcoustId.ApiKey` | `string` | `""` | AcoustID API key (register at https://acoustid.org/new-application) |
-| `AcoustId.BaseUrl` | `string` | `https://api.acoustid.org/v2` | AcoustID API base URL |
-| `AcoustId.MaxRequestsPerSecond` | `int` | `3` | Maximum requests per second (AcoustID limit is 3) |
-| `AcoustId.TimeoutSeconds` | `int` | `10` | Request timeout in seconds |
 | `MusicBrainz.BaseUrl` | `string` | `https://musicbrainz.org/ws/2` | MusicBrainz API base URL |
 | `MusicBrainz.ApplicationName` | `string` | `RadioConsole` | Application name for User-Agent header |
 | `MusicBrainz.ApplicationVersion` | `string` | `1.0.0` | Application version for User-Agent header |
@@ -1000,21 +812,6 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 
 ---
 
-### SpotifyPreferences
-
-**Section Name:** `SpotifyPreferences`  
-**Source File:** `src/Radio.Core/Configuration/AudioPreferences.cs`  
-**Description:** User preferences for Spotify playback.
-
-| Property | Type | Default | Description |
-|----------|------|---------|-------------|
-| `LastSongPlayed` | `string` | `""` | URI of the last song played |
-| `SongPositionMs` | `long` | `0` | Last song position in milliseconds |
-| `Shuffle` | `bool` | `false` | Whether shuffle mode is enabled |
-| `Repeat` | `RepeatMode` | `Off` | Repeat mode |
-
----
-
 ### FilePlayerPreferences
 
 **Section Name:** `FilePlayerPreferences`
@@ -1093,20 +890,6 @@ Preferences are user-modifiable settings that are persisted and auto-saved on ch
 
 Secrets contain sensitive data such as API keys and tokens. They are stored encrypted using the Data Protection API and referenced in configuration via secret tags (`${secret:identifier}`).
 
-### Spotify Secrets
-
-**Section Name:** `Spotify`  
-**Source File:** `src/Radio.Core/Configuration/SpotifySecrets.cs`  
-**Description:** Spotify API credentials (resolved from secret tags).
-
-| Property | Type | Description |
-|----------|------|-------------|
-| `ClientID` | `string` | Spotify Client ID |
-| `ClientSecret` | `string` | Spotify Client Secret |
-| `RefreshToken` | `string` | Spotify Refresh Token for authorization |
-
----
-
 ### TTS Secrets
 
 **Section Name:** `TTSSecrets`  
@@ -1168,9 +951,9 @@ ${secret:identifier}
 Example:
 ```json
 {
-  "Spotify": {
-    "ClientID": "${secret:spotify_clientid_abc123}",
-    "ClientSecret": "${secret:spotify_secret_def456}"
+  "TTS": {
+    "GoogleAPIKey": "${secret:tts_google_api_key}",
+    "AzureAPIKey": "${secret:tts_azure_api_key}"
   }
 }
 ```

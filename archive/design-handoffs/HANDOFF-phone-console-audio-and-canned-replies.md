@@ -389,11 +389,11 @@ Do **not** read the identifier aloud. `"Message from plus one nine one nine five
 
 **3. Strip the MMS sender prefix (UAT finding G-8).** Two live threads carry a preview of the form `+1XXXXXXXXXX - <text>` — a second phone number embedded in the body of a row that already shows a counterparty. Left alone, TTS opens by reading a ten-digit number. **Rule:** if the body begins with an E.164-shaped token followed by ` - `, drop the token and the separator before speaking. (Note: those same two threads are the two that never rendered a body in UAT **F-1** — so this rule may be untestable until F-1 is resolved. Specify it anyway.)
 
-**4. Replace each URL with the words `a link`.** The live corpus is full of `https://www.crunchlabs.com/63415353575/orders/e691521a…`. Read character-by-character this is unbearable and is the single most likely cause of "I hit play and it read gibberish for forty seconds." Exact replacement string per ADR-029 §12 item 7.
+**4. Replace each URL with the words `a link`.** The live corpus is full of `https://www.example.com/[redacted]/orders/[redacted]…`. Read character-by-character this is unbearable and is the single most likely cause of "I hit play and it read gibberish for forty seconds." Exact replacement string per ADR-029 §12 item 7.
 
 **5. Keep digit runs verbatim.** `77971 is your Facebook confirmation code` is the single most useful thing this feature does for a short-code thread. Do not summarise, truncate, or skip numbers.
 
-**6. Strip emoji.** `❤️Love you too! ❤️` should be spoken as `Love you too!`, not `red heart Love you too! red heart`. Required by ADR-029 §12 item 7; per-engine behaviour still worth a live listen (**Q4**).
+**6. Strip emoji.** `❤️See you soon! ❤️` should be spoken as `See you soon!`, not `red heart See you soon! red heart`. Required by ADR-029 §12 item 7; per-engine behaviour still worth a live listen (**Q4**).
 
 **7. Hard cap at 1000 characters** (ADR-029 §12 item 7). Typical SMS is 160, so this is a safety valve rather than a routine truncation, and it needs **no UI indication** — the Stop button is the real control for a long read. Recorded because it is a contract constraint, not a preference.
 
@@ -507,7 +507,7 @@ This is the strongest argument for feature B on this device: **for the 70% of th
 
 - Rows 1–2 are the acknowledgements that close most short exchanges. `Yes`/`No` answer a question; `OK`/`Thanks.` close one.
 - `Call me when you can.` exploits what this device actually *is*: a phone. It converts a text thread into the modality the console is genuinely good at, and it puts the action on the other person, which is the easier ask from a wall panel. Likely the single most-used button here.
-- `Love you.` is not sentiment for its own sake — the live corpus literally contains `❤️Love you too! ❤️` from a family contact. It is data-supported.
+- `Love you.` is not sentiment for its own sake — the live corpus literally contains `❤️See you soon! ❤️` from a family contact. It is data-supported.
 
 **Why six and not more — this is a geometry constraint, not a taste one.** See §C3; the arithmetic only leaves room for three rows. The two strongest runners-up, in order, if a live measurement turns out to allow a fourth row: **`I'll call you back.`** then **`Can't talk right now.`**.
 
@@ -527,12 +527,12 @@ No "edit before sending." No "+ Custom." No long-press-to-modify. The owner's fr
 
 ```
 ┌──────────── conversation pane (520px wide) ───────────────┐
-│ ◂  Lynne Marley                                            │  ~44px
-│    +1919***8129                                            │
+│ ◂  [redacted contact C]                                            │  ~44px
+│    +1555***0110                                            │
 ├────────────────────────────────────────────────────────────┤
 │  ┌──────────────────────────────┐   ( ▶ )                  │  .msg-list
-│  │ Mark may I have the link for │                          │  (shrinks while
-│  │ Alexis. Blessing today       │                          │   the tray is open)
+│  │ [redacted message]           │                          │  (shrinks while
+│  │                              │                          │   the tray is open)
 │  │ 5:01 PM                      │                          │
 │  └──────────────────────────────┘                          │
 ├────────────────────────────────────────────────────────────┤
@@ -909,7 +909,7 @@ arrive as a side effect.
 16. On a **short-code thread** (e.g. `32665`) the play button is present and works even though the reply slot shows `You can't reply to this sender.`
 17. **Listen to one real message end-to-end and judge the voice (Q5).** This is a listening test, not a checkbox: play a real SMS on the box, with music ducked underneath, from across the room. Is the local `espeak-ng` voice acceptable, or is the Google flip worth the privacy trade? Report an opinion, not a pass/fail.
 18. Resolved-name thread → speech opens `Message from {Name}.` Unresolved thread → **speech starts with the body; no number is read aloud.**
-19. An MMS-prefixed body (`+1919***7670 - …`) is spoken **without** the leading number (G-8). A body with a URL says `a link`, not the URL. An emoji body (`❤️Love you too! ❤️`) does not say "red heart."
+19. An MMS-prefixed body (`+1555***0111 - …`) is spoken **without** the leading number (G-8). A body with a URL says `a link`, not the URL. An emoji body (`❤️See you soon! ❤️`) does not say "red heart."
 20. A digit run (`77971 is your Facebook confirmation code`) is spoken **verbatim** — and is *intelligible* at kiosk distance.
 21. The speaking bubble carries the cyan border; **only one bubble is ever marked, anywhere on the surface.** Start a voicemail while a message is speaking: the message stops and its button returns to rest silently (§A4b).
 

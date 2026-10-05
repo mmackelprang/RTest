@@ -19,9 +19,12 @@ simply unmeasured.
 ## Test
 
 ```bash
-dotnet test RadioConsole.sln -c Release > test.log 2>&1; echo "exit=$?"
+dotnet test RadioConsole.sln -c Release --filter "FullyQualifiedName!~Radio.Web.E2ETests" > test.log 2>&1; echo "exit=$?"
 grep -E "Passed!|Failed!" test.log      # one summary line per test project
 ```
+
+The filter leaves out `Radio.Web.E2ETests`, which needs Playwright browsers and a running app; CI runs the same
+filter (plus `Category!=Integration`). Without it, the E2E project fails on a machine that has neither.
 
 **Never pipe `dotnet test` into `tail`, `head` or `grep`.** A pipeline reports the exit status of its last
 command, so `dotnet test ... | tail` exits `0` while tests fail. Redirect to a file, check `$?`, and then read
