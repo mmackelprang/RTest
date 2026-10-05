@@ -1,5 +1,7 @@
 # UAT — Google Voice live data on `/phone` (Voicemail + Texts)
 
+> **Screenshots removed (2026-10-05):** the images named below showed real phone numbers, names and message text and were deleted before the v1.0.0 release. The filenames are kept as a record.
+
 **Date:** 2026-07-31
 **Target:** `http://radio:5002/phone` (Ubuntu box `radio`, Intel N100)
 **Viewport:** 1920x720 (real console resolution) — verified via `window.innerWidth/innerHeight`

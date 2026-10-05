@@ -1,5 +1,7 @@
 # UAT — PR #461 / GV-8: distinguish a failed conversation load from an empty one
 
+> **Screenshots removed (2026-10-05):** the images named below showed real phone numbers, names and message text and were deleted before the v1.0.0 release. The filenames are kept as a record.
+
 **Date:** 2026-07-31 evening EDT (timestamps below in **UTC** = 2026-08-01)
 **Branch:** `fix/gv-texts-load-error-state` @ `4b55dbc12719126f6dbbcf72a175e6ceba92ee1c`
 **Plan:** `docs/superpowers/plans/2026-07-31-gv-texts-load-error-state.md` § Test Plan C1–C9
