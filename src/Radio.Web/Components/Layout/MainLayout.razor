@@ -548,15 +548,6 @@
       // leaves the flag false instead of licensing a call that would throw.
       _sleepManagerReady = true;
 
-      // Arm the idle dim/sleep timers for this mount. idle-dimmer.js only arms them on script load and
-      // on activity, and a document that loaded on /sleep arms nothing (resetTimers early-returns
-      // there). Every wake from /sleep is a client-side NavigateTo("/") — no reload — and /sleep uses
-      // EmptyLayout, so this firstRender is the one moment that reliably marks "back on the main UI".
-      // Without it the timers stayed unarmed until the next touch or knob turn, and a console woken
-      // and left alone never dimmed or slept again (measured on the box 2026-10-05: on / for 26 h,
-      // document loaded at /sleep, no dim filter).
-      await JSRuntime.InvokeVoidAsync("radioSleepManager.wake", "mount");
-
       // Wire the dev-tray triple-tap gesture (handoff §P2·2, PR 6). The JS
       // module listens on the invisible .dev-gesture-hit element and calls
       // ToggleDevTray when it detects 3 taps within 1.5s.
@@ -579,6 +570,27 @@
       // dispose could report. Fire-and-forget on purpose: the layout must render whether or not the
       // API is reachable.
       _ = SystemApi.SetSleepScreenVisibleAsync(false);
+
+      // Arm the idle dim/sleep timers for this mount. idle-dimmer.js arms them only on script load
+      // and on activity, and on /sleep it arms nothing and its timers do nothing — so neither a
+      // document that loaded on /sleep nor the tap that wakes it leaves them armed. Every wake from
+      // /sleep is a client-side NavigateTo("/") (no reload), and /sleep uses EmptyLayout, so this
+      // MainLayout is freshly mounted on the way back. Without this call the timers stayed unarmed
+      // until the next touch or knob turn, so a console woken and left alone never dimmed or slept
+      // (measured on the box 2026-10-05: on / for 26 h, document loaded at /sleep, no dim filter).
+      // Last in the block and caught, so a failed call cannot skip the set-up above.
+      try
+      {
+        await JSRuntime.InvokeVoidAsync("radioSleepManager.wake", "mount");
+      }
+      catch (JSDisconnectedException)
+      {
+        // Circuit is gone; a wake is cosmetic.
+      }
+      catch (JSException ex)
+      {
+        Logger.LogWarning(ex, "Failed to arm the idle dim timers");
+      }
     }
   }
 
