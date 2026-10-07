@@ -613,12 +613,9 @@
     box-shadow:
       0 0 8px rgba(92, 212, 232, 0.15),
       inset 0 0 4px rgba(92, 212, 232, 0.05);
-    animation: rcp-stereo-pulse 2s ease-in-out infinite;
-  }
-
-  @@keyframes rcp-stereo-pulse {
-    0%, 100% { box-shadow: 0 0 8px rgba(92, 212, 232, 0.15); }
-    50% { box-shadow: 0 0 14px rgba(92, 212, 232, 0.25); }
+    /* Static glow. This used to pulse via an infinite box-shadow animation, which cannot run on
+       the compositor: Chrome repainted on the main thread 60 times a second while stereo was
+       locked — ~36% of a core on the kiosk (measured 2026-10-06). */
   }
 
   /* PR 3 of the Radio Controller Polish arc — RDS info block was extracted

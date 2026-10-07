@@ -18,7 +18,10 @@
   <!-- Full-bleed album art background -->
   @if (_hasValidAlbumArt)
   {
-    <div style="position: absolute; inset: 0; background-image: url('@_albumArtUrl'); background-size: cover; background-position: center; filter: blur(20px) brightness(0.3); transform: scale(1.1); @(_isPlaying ? "animation: kenBurns 20s ease-in-out infinite alternate;" : "")"></div>
+    <div style="position: absolute; inset: 0; background-image: url('@_albumArtUrl'); background-size: cover; background-position: center; filter: blur(20px) brightness(0.3); transform: scale(1.1);"></div>
+    @* Static on purpose. This layer used to run an infinite "Ken Burns" zoom while playing, and
+       because it is blurred, every frame re-blurred it: measured on the kiosk 2026-10-06, the zoom
+       alone cost ~41% of a core in Chrome (91% -> 50% with it off). Do not animate a filtered layer. *@
     <img src="@_albumArtUrl" alt="" referrerpolicy="no-referrer"
          style="display: none;" @onerror="OnAlbumArtError" />
   }
