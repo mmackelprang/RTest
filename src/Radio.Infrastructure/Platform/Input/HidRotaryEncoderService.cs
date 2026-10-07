@@ -426,8 +426,8 @@ public class HidRotaryEncoderService : IRotaryEncoderService, IRotaryEncoderProv
   /// True when the device was found but could not be opened for permissions reasons.
   ///
   /// <para>
-  /// ⚠ Matched partly by type <i>name</i>, which is deliberate rather than lazy: HidSharp 2.1.0
-  /// declares <c>DeviceUnauthorizedAccessException</c> as <b>internal</b>, so it cannot be caught by
+  /// ⚠ Matched partly by type <i>name</i>, which is deliberate rather than lazy: HidSharp (2.1.0, and
+  /// still 2.6.4) declares <c>DeviceUnauthorizedAccessException</c> as <b>internal</b>, so it cannot be caught by
   /// type from outside the assembly. The BCL check is tried first and the name check is the fallback,
   /// so this keeps working if a later HidSharp makes the type public or changes its hierarchy.
   /// </para>
