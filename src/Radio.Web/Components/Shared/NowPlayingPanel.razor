@@ -439,12 +439,12 @@
   }
 
   /// <summary>
-  /// True when the source gain reads as anything other than <c>+0.0 dB</c> at the bar's one-decimal
-  /// precision (including −∞), so the bar paints an offset in the accent colour and unity in
-  /// <c>--text-low</c>. Uses the same 0.001 floor as <see cref="GainControlPopover.FormatGainDb"/>.
+  /// True when the bar's readout is anything other than <c>+0.0 dB</c> (including −∞ and
+  /// <c>-0.0 dB</c>), so an offset paints in the accent colour and unity in <c>--text-low</c>. Compared
+  /// against the formatted string so the colour cannot disagree with the text beside it.
   /// </summary>
   private bool IsSourceGainOffset =>
-    _currentSourceGain <= 0.001f || Math.Round(20.0 * Math.Log10(_currentSourceGain), 1) != 0.0;
+    GainControlPopover.FormatGainDb(_currentSourceGain) != GainControlPopover.FormatGainDb(1.0f);
 
   /// <summary>
   /// The recognition match the bar's fingerprint slot reports. For a tuner source this is the row the
@@ -463,7 +463,7 @@
         if (string.IsNullOrEmpty(anchorId)) return null;
         return _fpEventsReversed.FirstOrDefault(e => e.MatchId == anchorId && e.IsMatch);
       }
-      return _fpEventsReversed.FirstOrDefault(e => e.IsMatch);
+      return _fpEventsReversed.FirstOrDefault(e => e.IsMatch && !string.IsNullOrEmpty(e.MatchId));
     }
   }
 
@@ -480,7 +480,9 @@
   ///         in-progress cycle, which runs every few seconds and would otherwise replace the match
   ///         with "Identifying…" on every cycle;</item>
   ///   <item>phase <c>Error</c>: <c>Unavailable</c>; <c>Capturing</c> / <c>Fingerprinting</c> /
-  ///         <c>Querying</c>: <c>Identifying</c>; <c>NoMatch</c>: <c>NoMatch</c>;</item>
+  ///         <c>Querying</c>: <c>Identifying</c>; <c>NoMatch</c>: <c>NoMatch</c>. The service sets
+  ///         <c>Idle</c> straight after <c>Error</c> too, and an error leaves no event to fall back
+  ///         on, so in practice "ID unavailable" shows mostly when the status read itself fails;</item>
   ///   <item>otherwise <c>NoMatch</c> when the most recent event is a failed lookup — the service
   ///         returns to <c>Idle</c> straight after a <c>NoMatch</c>, so the phase alone would
   ///         almost never show it — and <c>Waiting</c> when it is not.</item>

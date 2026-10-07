@@ -693,17 +693,91 @@ public class RadioControlPanelTests : TestContext
   }
 
   [Fact]
-  public void Popup_StaysOpen_OnATelemetryTick()
+  public async Task Popup_StaysOpen_OnATelemetryTick()
   {
     var state = BuildState(autoGain: false, appliedGain: 20.0, gain: 20);
     var (cut, _, clock) = RenderStatusBar(state);
     OpenPopupByHolding(cut, clock);
 
     var hub = Services.GetRequiredService<AudioStateHubService>();
-    cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged),
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged),
       state with { SignalStrength = 35, RssiDbu = -40.0 }));
 
     cut.FindAll(".rcp-agc-popup").Should().ContainSingle();
+  }
+
+  [Fact]
+  public async Task Popup_SurvivesAStaleAgcOnTick_RightAfterTheHoldSwitchedAgcOff()
+  {
+    // A RadioStateChanged tick built before the AGC-off POST can be delivered after the REST reload.
+    // Its AutoGain=true is stale and must not close the popup the hold just opened. Past the grace
+    // window, AutoGain=true is believed again.
+    var state = BuildState(autoGain: true, appliedGain: 27.6, gain: 0);
+    var (cut, _, clock) = RenderStatusBar(state);
+    OpenPopupByHolding(cut, clock);
+    var hub = Services.GetRequiredService<AudioStateHubService>();
+
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged), state));
+    cut.FindAll(".rcp-agc-popup").Should().ContainSingle("a tick from before this client's AGC-off is stale");
+
+    clock.Advance(RadioControlPanel.AgcOffGrace);
+    await cut.InvokeAsync(() => HubEventFire.FireAsync(hub, nameof(AudioStateHubService.RadioStateChanged), state));
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty("after the grace window AGC-on is real");
+  }
+
+  [Fact]
+  public void AgcChip_HoldInAuto_WhenTheManualGainIsRefused_SeedsThePopupFromTheTunersActualGain()
+  {
+    // AGC is already off when SetGainAsync fails; the tuner keeps its previous manual gain (12 here),
+    // so the popup must show that, not the 28 it failed to apply.
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: true, appliedGain: 27.6, gain: 12));
+    handler.FailGain = true;
+
+    OpenPopupByHolding(cut, clock);
+
+    cut.Find(".rcp-agc-popup-slider").GetAttribute("value").Should().Be("12");
+  }
+
+  [Fact]
+  public void Popup_FailedCommit_RevertsTheTarget()
+  {
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+    OpenPopupByHolding(cut, clock);
+    handler.FailGain = true;
+
+    cut.FindAll(".rcp-agc-popup-nudge")[1].Click();
+
+    cut.WaitForAssertion(() => Posts(handler, "/api/radio/gain").Should().Be(1), TimeSpan.FromSeconds(2));
+    cut.WaitForAssertion(() => cut.Find(".rcp-agc-popup-slider").GetAttribute("value").Should().Be("20"),
+      TimeSpan.FromSeconds(2));
+  }
+
+  [Fact]
+  public void AgcChip_ArrowUp_OpensThePopup_AndEscapeClosesIt()
+  {
+    // The keyboard route for a browser without touch: the old inline slider was focusable, so the
+    // popup must be reachable without a pointer hold.
+    var (cut, _, _) = RenderStatusBar(BuildState(autoGain: false, appliedGain: 20.0, gain: 20));
+
+    cut.Find(".rcp-sb-agc").KeyDown(new KeyboardEventArgs { Key = "ArrowUp" });
+    cut.WaitForAssertion(() => cut.FindAll(".rcp-agc-popup").Should().ContainSingle(), TimeSpan.FromSeconds(2));
+
+    cut.Find(".rcp-agc-popup").KeyDown(new KeyboardEventArgs { Key = "Escape" });
+    cut.FindAll(".rcp-agc-popup").Should().BeEmpty();
+  }
+
+  [Fact]
+  public void AgcChip_HoldInterruptedByDisposal_SendsNothing()
+  {
+    // A tab switch within the threshold disposes the panel; a long-press callback must not then
+    // switch AGC off from a dead component.
+    var (cut, handler, clock) = RenderStatusBar(BuildState(autoGain: true, appliedGain: 27.6, gain: 0));
+
+    PressAgc(cut);
+    DisposeComponents();
+    clock.Advance(LongPress);
+
+    handler.RecordedCalls.ToList().Should().NotContain(c => c.Method == "POST");
   }
 
   [Fact]
@@ -1847,6 +1921,9 @@ public class RadioControlPanelTests : TestContext
     /// <summary>When set, <c>GET /api/radio/presets</c> answers 500 (the failed-read state).</summary>
     public bool FailPresets { get; set; }
 
+    /// <summary>When set, <c>POST /api/radio/gain</c> answers 400 and leaves the state alone.</summary>
+    public bool FailGain { get; set; }
+
     public RadioStateStubHandler(
       RadioStateDto state,
       IEnumerable<RadioPresetDto>? presets = null,
@@ -1868,6 +1945,11 @@ public class RadioControlPanelTests : TestContext
         body = await request.Content.ReadAsStringAsync(cancellationToken);
       }
       RecordedCalls.Add((method, path, body));
+
+      if (method == "POST" && path == "/api/radio/gain" && FailGain)
+      {
+        return new HttpResponseMessage(HttpStatusCode.BadRequest);
+      }
 
       if (method == "POST" && body != null && path is "/api/radio/gain/auto" or "/api/radio/gain")
       {

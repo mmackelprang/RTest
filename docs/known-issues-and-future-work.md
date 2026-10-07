@@ -666,7 +666,7 @@ including the two other places that would then want to link straight to a tab.
 `tests/Radio.Web.Tests/Components/Layout/MainLayoutTests.cs` is a documented stub that renders nothing
 — its own XML doc says Radzen plus JSInterop make the layout impractical to render — so **nothing under
 `tests/` asserts `.topbar-mute-chip` (ENC-4a), `.phone-nav-fault` (bell surfacing) or
-`.encoder-nav-fault` (ENC-12) in rendered markup.** Each of those is a fault indicator whose whole job
+`.encoder-nav-fault` (ENC-12) in rendered markup.** *(Since 2026-10-06 the first is covered: `MainLayoutMuteChipTests` renders the layout and asserts `.topbar-mute-chip` per route. `GainPopoverService` was removed the same day.)* Each of those is a fault indicator whose whole job
 is to be correct when nobody is looking at it.
 
 The workaround so far has been to push every decision into a pure, unit-testable class
@@ -678,7 +678,7 @@ Making the layout renderable needs: a bUnit `TestContext` with `Services.AddRadz
 `JSInterop.Mode = JSRuntimeMode.Loose` (the pattern `EncoderHudTests` already uses), and test doubles
 for the ~15 injected services — `SystemApiService`, `SourcesApiService`, `DevicesApiService`,
 `AudioApiService`, `QueueApiService`, `AudioStateHubService`, `AudioStateStore`, `BellHealthService`,
-`PhoneUnreadState`, `GainPopoverService`, `EncoderHudService`, `EncoderFaultAnnouncer`,
+`PhoneUnreadState`, `EncoderHudService`, `EncoderFaultAnnouncer`,
 `DeviceDisplayStateService`, `RadioPanelToggleService`, and two `IOptionsMonitor<>`s. Most are concrete
 classes rather than interfaces, so this needs either extracted interfaces or a real
 `IServiceCollection` wired to stubs. Realistically a day, and it pays for itself the first time one of

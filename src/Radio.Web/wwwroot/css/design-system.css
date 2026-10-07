@@ -4759,7 +4759,9 @@ body {
   z-index: 9999;
 }
 
-.rcp-agc-popup {
+/* Qualified with .gain-popover: the §Z rules come later in this file at equal specificity and would
+   otherwise win (width 340 px, readout 22 px). */
+.gain-popover.rcp-agc-popup {
   position: absolute;
   right: 0;
   bottom: calc(100% + 8px);
@@ -4767,7 +4769,7 @@ body {
   width: 380px;
 }
 
-.rcp-agc-popup-readout {
+.rcp-agc-popup .rcp-agc-popup-readout {
   display: block;
   text-align: center;
   font-size: 32px;
@@ -6009,7 +6011,8 @@ body {
   align-items: stretch;
   height: var(--touch-compact);
   margin-bottom: 6px;
-  border-bottom: 1px solid var(--surface-separator);
+  /* The divider is a shadow, not a border, so the slots get the full 44 px. */
+  box-shadow: inset 0 -1px 0 var(--surface-separator);
 }
 
 .np-bar-slot {
@@ -7533,7 +7536,7 @@ body {
     calc(712px - var(--encoder-band-y) - 100%));
   /* 10000. Above the 9999 tier (the sleep screen, the kiosk dialogs). The Home
      page's popovers also use 10000 — .np-gain-popover-anchor and .rcp-agc-popup,
-     over backdrops at 9999 — but they sit inside .page-transition, whose
+     over backdrops at 9999 — but they sit inside .page-transition's child, whose
      transform makes a stacking context, so this element (mounted at the layout
      root) paints above them regardless of the numbers. pointer-events: none
      below keeps it from taking a touch meant for one of them. */
@@ -7786,7 +7789,7 @@ body {
   width: 440px;
   /* 10000. Above the 9999 tier (the sleep screen, the kiosk dialogs). The Home
      page's popovers also use 10000 — .np-gain-popover-anchor and .rcp-agc-popup,
-     over backdrops at 9999 — but they sit inside .page-transition, whose
+     over backdrops at 9999 — but they sit inside .page-transition's child, whose
      transform makes a stacking context, so this element (mounted at the layout
      root) paints above them regardless of the numbers. pointer-events: none
      below keeps it from taking a touch meant for one of them. */
